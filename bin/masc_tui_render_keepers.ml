@@ -198,7 +198,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       in
       Mark.activation_letter row.kr_activation_mode ^ gap ^ sandbox
 
-let keeper_activity_word ?(ko = false) (activity : Keeper_list_model.activity) =
+let keeper_activity_word ~ko (activity : Keeper_list_model.activity) =
   let text korean english = if ko then korean else english in
   match activity with
   | Held_call -> text "승인 대기" "held call"
@@ -423,7 +423,7 @@ let shift_motion ~prefix = function
 
 (* The NOW cell: the activity's mark and word, or the receipt's operator
    disposition where nothing on the row is newer than the receipt. *)
-let keeper_now_cell ?(ko = false) ?(padded = true) ~frame (row : Keeper_list_model.row) =
+let keeper_now_cell ~ko ?(padded = true) ~frame (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   let runtime = keeper_row_runtime row in
   let operator_disposition =
@@ -470,7 +470,7 @@ let keeper_now_cell ?(ko = false) ?(padded = true) ~frame (row : Keeper_list_mod
         | Idle | Paused | Offline | Unknown) -> Masc_tui_answering.Still in
   { text; motion }
 
-let keeper_row_content ~(columns : Render_schedule.keeper_columns)
+let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
@@ -484,7 +484,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
   in
   let prefix = keeper_row_marker ~selected
     ^ keeper_row_name ~width:columns.kcol_name ~yolo row ^ " " in
-  let now_cell = keeper_now_cell ~frame row in
+  let now_cell = keeper_now_cell ~ko ~frame row in
   let text = String.concat ""
     [ prefix
     ; now_cell.text
@@ -978,7 +978,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = pulse ()
-         ; now_cell = keeper_now_cell ~frame row
+         ; now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) ~frame row
          ; strip = grid_wake_strip state grid ~now verdict ~keeper_name
          ; due = grid_due ~now verdict (Masc_tui_keeper_axis.next_run state ~keeper_name)
          ; right = grid_lag_cell grid ~peak_lag memory
@@ -1351,7 +1351,8 @@ let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
    runs its turns, so keepers that were visibly turning were listed as not
    running (2026-09-16). Executable is the set with a live fiber (Running or
    Failing), which is the fact the label names. *)
-let keeper_fleet_gap_lines (fleet : fleet_safety) =
+let keeper_fleet_gap_lines ~ko (fleet : fleet_safety) =
+  let say korean english = if ko then korean else english in
   let names = Masc.Fleet_stream.Names.to_list in
   let subtract from_names remove_names =
     List.filter (fun name -> not (List.mem name remove_names)) from_names
@@ -1367,18 +1368,18 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        match names with
        | [] -> None
        | _ -> Some (color, label, String.concat ", " names))
-    [ (not_running, "not running", (Theme.bad ()))
-    ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
+    [ (not_running, say "실행 안 됨" "not running", (Theme.bad ()))
+    ; (running_without_turn, say "실행 중이나 턴 못 돎" "running, cannot take a turn", (Theme.warn ()))
     ; (* Failing subsets that need operator action: turn configuration
          errors survive every retry, so the names are listed where the
          failing counter only counts them. Unscoped on purpose -- the
          configuration_blocked_* wire fields are autoboot-scoped and skip a
          blocked keeper booted on request. *)
       ( names fleet.fs_turn_configuration_error_names
-      , "config-blocked"
+      , say "설정 오류" "config-blocked"
       , (Theme.bad ()) )
     ; ( names fleet.fs_official_client_recovery_required_names
-      , "session recovery required"
+      , say "세션 복구 필요" "session recovery required"
       , (Theme.bad ()) )
     ]
 
@@ -1387,19 +1388,20 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
    makes a keeper failing, and a pending launch is one of the ways it is
    offline. Each of the other conditions has a phase of its own, which the
    lifecycle word already says, so naming it again would add nothing. *)
-let keeper_lane_phase_causes (conditions : Tui_decode.keeper_lane_conditions) =
+let keeper_lane_phase_causes ~ko (conditions : Tui_decode.keeper_lane_conditions) =
+  let say korean english = if ko then korean else english in
   List.filter_map
     (fun (holds, words) -> if holds then Some words else None)
-    [ (not conditions.klc_turn_healthy, "last turn failed")
-    ; (not conditions.klc_heartbeat_healthy, "heartbeat failed")
-    ; (conditions.klc_launch_pending, "launch pending")
+    [ (not conditions.klc_turn_healthy, say "마지막 턴 실패" "last turn failed")
+    ; (not conditions.klc_heartbeat_healthy, say "heartbeat 실패" "heartbeat failed")
+    ; (conditions.klc_launch_pending, say "기동 대기" "launch pending")
     ]
 
-let keeper_lane_lifecycle_text (lane : Tui_decode.keeper_lane) =
+let keeper_lane_lifecycle_text ~ko (lane : Tui_decode.keeper_lane) =
   let phase =
     Terminal_text.single_line (Tui_decode.keeper_lane_phase_to_string lane.kl_phase)
   in
-  match Option.fold ~none:[] ~some:keeper_lane_phase_causes lane.kl_conditions with
+  match Option.fold ~none:[] ~some:(keeper_lane_phase_causes ~ko) lane.kl_conditions with
   | [] -> phase
   | causes -> Printf.sprintf "%s (%s)" phase (String.concat ", " causes)
 
@@ -1428,7 +1430,9 @@ let keeper_last_runtime_text (state : state) = function
             | Tui_decode.Last_runtime_cataloged ro ->
                 id_text ^ " \xc2\xb7 " ^ Terminal_text.single_line ro.ro_provider
             | Tui_decode.Last_runtime_uncataloged _ ->
-                id_text ^ " \xc2\xb7 not in the runtime list"))
+                id_text
+                ^ ui_text state ~ko:" \xc2\xb7 런타임 목록에 없음"
+                    ~en:" \xc2\xb7 not in the runtime list"))
   | Some { Tui_decode.klo_selected_runtime_id = None; _ } | None ->
       Masc_tui_theme.Glyph.no_value
 
@@ -1454,34 +1458,40 @@ let keeper_operations_fields (state : state) ~keeper_name =
   let reading = keeper_composite_of state ~keeper_name in
   let error = keeper_composite_error_of state ~keeper_name in
   let reading_now = keeper_composite_reading_now state ~keeper_name in
+  let ko = state.ui_language = Lang_ko in
+  let t korean english = if ko then korean else english in
+  let execution = t "실행:" "Execution:" in
+  (* The phase, the turn phase and the runtime state are the server's wire
+     names and are drawn as sent. *)
   let fields = match reading with
   | Some { kcr_lane = lane; _ } ->
-      [ "Lifecycle:", keeper_lane_lifecycle_text lane
-      ; "Turn:", Terminal_text.single_line
+      [ t "수명 주기:" "Lifecycle:", keeper_lane_lifecycle_text ~ko lane
+      ; t "턴:" "Turn:", Terminal_text.single_line
           (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
-      ; "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
-      ; "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
-      ; "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
+      ; t "쉰 시간:" "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
+      ; t "마지막 턴 결과:" "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
+      ; t "마지막 런타임:" "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
       ]
   | None ->
       (match error with
        | Some detail ->
-           [ "Execution:", Theme.warn () ^ "unavailable · "
+           [ execution, Theme.warn () ^ t "읽지 못함 · " "unavailable · "
              ^ Terminal_text.single_line detail ^ Ansi.reset ]
        | None ->
            if reading_now then []
-           else [ "Execution:", Ansi.dim ^ "not observed" ^ Ansi.reset ])
+           else [ execution, Ansi.dim ^ t "미관측" "not observed" ^ Ansi.reset ])
   in
   let fields = match reading, error with
     | Some _, Some detail ->
-        ("Execution:", Theme.warn () ^ "stale · refresh failed: "
+        (execution, Theme.warn () ^ t "이전 관측 · 갱신 실패: " "stale · refresh failed: "
           ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
     | Some _, None | None, (Some _ | None) -> fields in
   if reading_now then
-    ("Execution:", Ansi.dim
+    (execution, Ansi.dim
       ^ (match reading with
-         | None -> "reading execution snapshot…"
-         | Some _ -> "refreshing execution snapshot · last observation")
+         | None -> t "실행 상태 읽는 중…" "reading execution snapshot…"
+         | Some _ ->
+             t "실행 상태 갱신 중 · 마지막 관측" "refreshing execution snapshot · last observation")
       ^ Ansi.reset) :: fields
   else fields
 
@@ -1512,13 +1522,13 @@ let keeper_entry_selected stop = function
   | Keeper_display_row (position, _) -> stop = Some (Keeper_list_model.Stop_row position)
 
 (* The views [v] walks, one press each (RFC-0515 §2.3). *)
-let keeper_view_tabs ~cols view =
+let keeper_view_tabs ~ko ~cols view =
   let lead = "  " in
   lead
   ^ tab_strip ~width:(tab_strip_width ~cols ~before:lead ~after:"")
       ~press:(fun target text -> pressable (Press_keeper_view target) text)
       (List.map
-         (fun candidate -> Keeper_list_model.view_label candidate, candidate = view, candidate)
+         (fun candidate -> Keeper_list_model.view_title ~ko candidate, candidate = view, candidate)
          Keeper_list_model.views)
 
 let keeper_state_heading_style = function
@@ -1698,7 +1708,8 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   let detail = keeper_detail_text ~now row in
   let now_entries =
     [ keeper_activity_style activity
-      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " " ^ keeper_activity_word activity
+      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
+      ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
       ^ Ansi.reset
       ^ (if String.equal detail "" then "" else dim (" · " ^ detail))
     ; dim (Render_schedule.keeper_flags_header ^ " ")
@@ -1743,10 +1754,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   @ labelled_lines "▹ next" next_entries
 
 (* The Keeper's name and what it is doing, at the left of the window's title. *)
-let keeper_story_lead (row : Keeper_list_model.row) =
+let keeper_story_lead ~ko (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   "  " ^ Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
-  ^ keeper_activity_style activity ^ keeper_activity_word activity ^ Ansi.reset
+  ^ keeper_activity_style activity ^ keeper_activity_word ~ko activity ^ Ansi.reset
 
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
@@ -1762,7 +1773,7 @@ let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
         , [ Ansi.dim ^ "  no Keeper under the cursor" ^ Ansi.reset ] )
     | Masc_tui_keeper_story.(Story | Schedule | Memory), Some row ->
         let keeper_name = row.keeper.Tui_decode.k_name in
-        ( keeper_story_lead row
+        ( keeper_story_lead ~ko:(state.ui_language = Lang_ko) row
         , (match page with
            | Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World ->
                keeper_story_lines state ~now ~inner
@@ -1837,7 +1848,7 @@ let matrix_legend ~inner matrix =
   "✗ failed in last walk · ▹ next head · ◌ resting head · ? unread head"
   :: Message_layout.wrap_words ~max_cells:inner (String.concat " · " (ids @ omitted))
 
-let proactive_outcome_word ?(ko = false) =
+let proactive_outcome_word ~ko =
   let text korean english = if ko then korean else english in
   function
   | Masc.Keeper_meta_contract.Proactive_never_started -> text "아직 시작하지 않음" "never started"
@@ -2055,7 +2066,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
 
 let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_row all_rows =
   let selected = Option.map (fun row -> row.Keeper_list_model.keeper.Tui_decode.k_name) selected_row in
-  let header = Masc_tui_keeper_strip.header ~now ~cells:inner
+  let header = Masc_tui_keeper_strip.header ~ko:(state.ui_language = Lang_ko) ~now ~cells:inner
       ~view:state.keeper_list_view ~selected
       ~age:(fun row -> (Masc_tui_keeper_axis.outside state ~now
           ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name).age) all_rows in
@@ -2095,28 +2106,29 @@ let draw_keeper_selected_summary buf ~cols summary =
 
 let keeper_plain_fleet_lines (state : state) ~now ~inner =
   let text ko en = ui_text state ~ko ~en in
+  let ko = state.ui_language = Lang_ko in
   let warning value = Theme.warn () ^ "  " ^ value ^ Ansi.reset in
   match fleet_stream_view state with
   | Masc_tui_fleet_stream.Awaiting_first_reading ->
       [Theme.recede () ^ text "  운영 상태 미조회" "  fleet status not read" ^ Ansi.reset]
   | Masc_tui_fleet_stream.Unreachable { since } ->
-      [warning (Masc_tui_fleet_line.unreachable_text ~now ~since)]
+      [warning (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since)]
   | Masc_tui_fleet_stream.Cannot_read failure ->
-      [warning (Masc_tui_fleet_line.failure_text failure)]
+      [warning (Masc_tui_fleet_line.failure_text ~ko failure)]
   | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
-      [warning (Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since)]
+      [warning (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since)]
   | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
       let lead = (match trouble with
         | None -> text "운영 관측: " "fleet observation: "
         | Some (Masc_tui_fleet_stream.Scans_failing _ | Masc_tui_fleet_stream.Disconnected _) ->
             text "마지막 운영 관측: " "last fleet observation: ")
-        ^ Masc_tui_fleet_line.status_text fleet.fs_status
+        ^ Masc_tui_fleet_line.status_text ~ko fleet.fs_status
       in
-      let clauses = lead :: Option.to_list (Masc_tui_fleet_line.blocker_text fleet)
+      let clauses = lead :: Option.to_list (Masc_tui_fleet_line.blocker_text ~ko fleet)
         @ [text
              (Printf.sprintf "실행 %d/%d" fleet.fs_running_count fleet.fs_bootable_count)
              (Printf.sprintf "running %d/%d" fleet.fs_running_count fleet.fs_bootable_count)
-           ; Masc_tui_fleet_line.proactive_text fleet ]
+           ; Masc_tui_fleet_line.proactive_text ~ko fleet ]
       in
       let tone = match trouble with
         | Some _ -> Theme.warn ()
@@ -2126,7 +2138,7 @@ let keeper_plain_fleet_lines (state : state) ~now ~inner =
       in
       [tone ^ "  " ^ Message_layout.join_fitting ~sep:" · " ~cells:(max 0 (inner - 2)) clauses ^ Ansi.reset]
       @ Option.to_list (Option.map
-          (fun trouble -> warning (Masc_tui_fleet_line.trouble_text ~now trouble)) trouble)
+          (fun trouble -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now trouble)) trouble)
 
 let keeper_observation_errors (state : state) =
   let text korean english = if state.ui_language = Lang_ko then korean else english in
@@ -2228,7 +2240,7 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
            (keeper_list_reading state).klr_rows) ]
   @ keeper_plain_fleet_lines state ~now ~inner
   @ errors @ roster @ waiting
-  @ [keeper_view_tabs ~cols state.keeper_list_view]
+  @ [keeper_view_tabs ~ko:(state.ui_language = Lang_ko) ~cols state.keeper_list_view]
   @ pulse_headers
   @ Option.to_list (Option.map (warning (text "보기 설정: " "view preferences: ")) state.keeper_list_preference_notice)
   @ Option.to_list (local_source_pending_note state Local_keepers)
@@ -2478,37 +2490,42 @@ let render_keeper_axes (state : state) =
         (match state.keepers, keeper_rows_page state ~error:keepers_error with
          | _ :: _, _ | [], Page_empty -> []
          | [], (Page_unread | Page_failed) ->
-             [ String.trim (title_missing_reading ~error:keepers_error) ])
+             [ here_missing_reading state ~error:keepers_error ])
       ~position:(keeper_list_position ~stop model_rows)
   in
   box_line buf cols heading;
-  box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
+  let ko = state.ui_language = Lang_ko in
+  let text korean english = if ko then korean else english in
+  (* The fleet rows open with the same words the plain list opens with. *)
+  let fleet_lead = text "  운영 관측: " "  fleet: " in
+  box_line buf cols (keeper_view_tabs ~ko ~cols state.keeper_list_view);
   List.iter (box_line buf cols)
     (keeper_pulse_headers state ~now:now_unix ~inner ~grid ~selected_row all_rows);
   Option.iter
     (fun message -> box_line buf cols
-      (Theme.warn () ^ "  preferences: " ^ Terminal_text.single_line message ^ Ansi.reset))
+      (Theme.warn () ^ text "  보기 설정: " "  preferences: "
+       ^ Terminal_text.single_line message ^ Ansi.reset))
     state.keeper_list_preference_notice;
 
   (match fleet_stream_view state with
    | Masc_tui_fleet_stream.Awaiting_first_reading -> ()
    | Masc_tui_fleet_stream.Unreachable { since } ->
        box_line buf cols
-         ((Theme.warn ()) ^ "  fleet: "
-          ^ Masc_tui_fleet_line.unreachable_text ~now:now_unix ~since
+         ((Theme.warn ()) ^ fleet_lead
+          ^ Masc_tui_fleet_line.unreachable_text ~ko ~now:now_unix ~since
           ^ Ansi.reset)
    | Masc_tui_fleet_stream.Cannot_read failure ->
        box_line buf cols
-         ((Theme.bad ()) ^ "  fleet: " ^ Masc_tui_fleet_line.failure_text failure
+         ((Theme.bad ()) ^ fleet_lead ^ Masc_tui_fleet_line.failure_text ~ko failure
           ^ Ansi.reset)
    | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
        box_line buf cols
-         ((Theme.warn ()) ^ "  fleet: "
-          ^ Masc_tui_fleet_line.unavailable_text ~now:now_unix ~degradation ~disconnected_since
+         ((Theme.warn ()) ^ fleet_lead
+          ^ Masc_tui_fleet_line.unavailable_text ~ko ~now:now_unix ~degradation ~disconnected_since
           ^ Ansi.reset)
    | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
        let tone, lead =
-         let status = Masc_tui_fleet_line.status_text fleet.fs_status in
+         let status = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
          match trouble with
          | None ->
              let tone =
@@ -2516,21 +2533,22 @@ let render_keeper_axes (state : state) =
                else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then Theme.ok ()
                else Theme.warn ()
              in
-             tone, Printf.sprintf "  fleet %s" status
+             tone, text ("  운영 관측: " ^ status) ("  fleet " ^ status)
          | Some
              (Masc_tui_fleet_stream.Scans_failing _
              | Masc_tui_fleet_stream.Disconnected _) ->
              (* The grade, counts and blocker below all belong to the retained
                 reading. Qualify that same row before any stale zero or blocker
                 can be read as the fleet's current state. *)
-             Theme.warn (), Printf.sprintf "  fleet last observed: %s" status
+             ( Theme.warn ()
+             , text "  마지막 운영 관측: " "  fleet last observed: " ^ status )
        in
        let running =
-         Printf.sprintf "running %d/%d" fleet.fs_running_count
+         Printf.sprintf "%s %d/%d" (text "실행" "running") fleet.fs_running_count
            fleet.fs_bootable_count
        in
        let turn_capacity =
-         Printf.sprintf "turn capacity %d/%d"
+         Printf.sprintf "%s %d/%d" (text "턴 여력" "turn capacity")
            (fleet.fs_target_reaction_capacity
            - fleet.fs_reaction_capacity_shortfall)
            fleet.fs_target_reaction_capacity
@@ -2543,11 +2561,11 @@ let render_keeper_axes (state : state) =
          [ Masc_tui_fleet_summary.Running, running
          ; Masc_tui_fleet_summary.Turn_capacity, turn_capacity
          ]
-         @ (match Masc_tui_fleet_line.blocker_text fleet with
+         @ (match Masc_tui_fleet_line.blocker_text ~ko fleet with
            | None -> []
            | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
          @ [ ( Masc_tui_fleet_summary.Proactive_interval
-             , Masc_tui_fleet_line.proactive_text fleet ) ]
+             , Masc_tui_fleet_line.proactive_text ~ko fleet ) ]
        in
        let separator = "   " in
        let selected =
@@ -2574,11 +2592,11 @@ let render_keeper_axes (state : state) =
        Option.iter
          (fun trouble ->
             box_line buf cols
-              ((Theme.warn ()) ^ "  fleet reading: "
-               ^ Masc_tui_fleet_line.trouble_text ~now:now_unix trouble ^ Ansi.reset))
+              ((Theme.warn ()) ^ text "  관측 상태: " "  fleet reading: "
+               ^ Masc_tui_fleet_line.trouble_text ~ko ~now:now_unix trouble ^ Ansi.reset))
          trouble;
        let failing_entry =
-         Option.to_list (Masc_tui_fleet_line.failing_text fleet)
+         Option.to_list (Masc_tui_fleet_line.failing_text ~ko fleet)
        in
        let entry label n =
          if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
@@ -2588,9 +2606,9 @@ let render_keeper_axes (state : state) =
           short: an unread Keeper does not move the fleet status. *)
        let counts =
          failing_entry
-         @ entry "paused" fleet.fs_paused_count
-         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text fleet)
-         @ entry "awaiting verdict" fleet.fs_completion_authority_pending_count
+         @ entry (text "일시정지" "paused") fleet.fs_paused_count
+         @ Option.to_list (Masc_tui_fleet_line.owner_scan_text ~ko fleet)
+         @ entry (text "판정 대기" "awaiting verdict") fleet.fs_completion_authority_pending_count
        in
        if counts <> [] then
          box_line buf cols
@@ -2600,7 +2618,7 @@ let render_keeper_axes (state : state) =
             box_line buf cols
               (Printf.sprintf "%s  %s: %s%s" color label
                  (Terminal_text.single_line names) Ansi.reset))
-         (keeper_fleet_gap_lines fleet));
+         (keeper_fleet_gap_lines ~ko fleet));
 
   (* The roster's own failure. The rows below still come from disk so they stay
      on screen; this says the live half of every one of them is missing, which
@@ -2613,8 +2631,12 @@ let render_keeper_axes (state : state) =
   (match Keeper_control.roster_view state.keeper_roster with
    | Keeper_control.Roster_invalid { errors; _ } ->
        box_line buf cols
-         (Printf.sprintf "%s  configuration errors: %d; select a keeper for details%s"
-            (Theme.warn ()) (List.length errors) Ansi.reset);
+         (Theme.warn () ^ "  "
+          ^ text
+              (Printf.sprintf "설정 읽기 오류 %d개 · Keeper 를 고르면 원문 표시" (List.length errors))
+              (Printf.sprintf "configuration errors: %d; select a keeper for details"
+                 (List.length errors))
+          ^ Ansi.reset);
        (match selected_reading with
         | Some { Keeper_control.name; liveness = Keeper_control.Invalid detail; _ } ->
             box_line buf cols ((Theme.warn ()) ^ "  "
@@ -2628,9 +2650,12 @@ let render_keeper_axes (state : state) =
         | None -> ())
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
-         (Printf.sprintf
-            "%s  live status covers %d of %s; the rest read as unknown%s"
-            (Theme.warn ()) (List.length observed) (Masc_tui_message_layout.count_noun total "keeper") Ansi.reset)
+         (Theme.warn () ^ "  "
+          ^ text
+              (Printf.sprintf "실행 관측 %d/%d · 나머지는 미확인" (List.length observed) total)
+              (Printf.sprintf "live status covers %d of %s; the rest read as unknown"
+                 (List.length observed) (Masc_tui_message_layout.count_noun total "keeper"))
+          ^ Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   (* Measured over every reading rather than the rows on screen, so the
@@ -2919,7 +2944,7 @@ let render_keeper_axes (state : state) =
                   ~cols:inner ~now:now_unix
                   ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row))
             | None, Axis_row.List_columns ->
-                keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
+                keeper_row_content ~ko:(state.ui_language = Lang_ko) ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
             | None, Axis_row.Grid grid_columns ->
                 grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag
@@ -3048,38 +3073,43 @@ let render_keeper_list (state : state) =
    read and none before any read are the same absence. *)
 let secret_lines (state : state) (k : keeper) =
   let dim line = Ansi.dim ^ line ^ Ansi.reset in
+  let t korean english = ui_text state ~ko:korean ~en:english in
   match keeper_composite_of state ~keeper_name:k.k_name with
   | None | Some { kcr_secret = None; _ } -> None
   | Some { kcr_secret = Some p; _ } ->
       let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
+      let status_label = t "  상태:    " "  Status:  " in
       let status_line =
         match p.ksp_status with
         | Masc.Tui_decode.Secret_ready ->
-            "  Status:  " ^ (Theme.ok ()) ^ status ^ Ansi.reset
+            status_label ^ (Theme.ok ()) ^ status ^ Ansi.reset
         | Masc.Tui_decode.Secret_error ->
-            "  Status:  " ^ (Theme.bad ()) ^ status ^ Ansi.reset
+            status_label ^ (Theme.bad ()) ^ status ^ Ansi.reset
         | Masc.Tui_decode.Secret_empty | Masc.Tui_decode.Secret_absent
         | Masc.Tui_decode.Secret_status_unknown _ ->
-            "  Status:  " ^ Ansi.dim ^ status ^ Ansi.reset
+            status_label ^ Ansi.dim ^ status ^ Ansi.reset
       in
       let entry_lines label = function
         | [] -> [ dim (Printf.sprintf "  %s  -" label) ]
         | names ->
             List.mapi
               (fun index name ->
-                let lead = if index = 0 then label else String.make (String.length label) ' ' in
+                let lead =
+                  if index = 0 then label
+                  else String.make (Message_layout.display_width label) ' '
+                in
                 Printf.sprintf "  %s  %s" lead (Terminal_text.single_line name))
               names
       in
-      detail_section_lines ~first:true "1. 시크릿 상태 · 루트 경로 (Status & Root)"
+      detail_section_lines ~first:true (t "1. 시크릿 상태 · 루트 경로" "1. Status & Root")
       @ [ status_line
-        ; Printf.sprintf "  Root:    %s" (Terminal_text.single_line p.ksp_root)
+        ; t "  루트:    " "  Root:    " ^ Terminal_text.single_line p.ksp_root
         ]
-      @ detail_section_lines "2. 환경변수 · 시크릿 파일 (Env & Files)"
-      @ entry_lines "Env: " p.ksp_env_names
+      @ detail_section_lines (t "2. 환경변수 · 시크릿 파일" "2. Env & Files")
+      @ entry_lines (t "환경변수:" "Env: ") p.ksp_env_names
       @ (match p.ksp_file_paths with
          | [] -> []
-         | paths -> "" :: entry_lines "Files:" paths)
+         | paths -> "" :: entry_lines (t "파일:    " "Files:") paths)
       @ (match p.ksp_error with
          | None -> []
          | Some detail ->
@@ -3087,8 +3117,11 @@ let secret_lines (state : state) (k : keeper) =
       @ [ ""
         ; dim
             (if p.ksp_values_validated then
-               "  Values were read and validated. They are never sent here."
-             else "  Values were not validated on the last read.")
+               t "  값을 읽고 검증했음. 값은 여기로 보내지지 않음."
+                 "  Values were read and validated. They are never sent here."
+             else
+               t "  마지막 읽기에서 값을 검증하지 못함."
+                 "  Values were not validated on the last read.")
         ]
       |> Option.some
 
@@ -3454,6 +3487,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (* Build all detail lines first, then apply scroll *)
       let lines = ref [] in
       let add_line s = lines := s :: !lines in
+      let ko = state.ui_language = Lang_ko in
+      let t korean english = if ko then korean else english in
 
       (* Helper to add a labeled row *)
       let row_lines ~width label value =
@@ -3474,75 +3509,80 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       in
       let identity =
         let width = header_width in
-        [ section_line "Identity" ]
-        @ row_lines ~width "Name:" (Terminal_text.single_line k.k_name)
-        @ row_lines ~width "Paused:"
+        [ section_line (t "기본 정보" "Identity") ]
+        @ row_lines ~width (t "이름:" "Name:") (Terminal_text.single_line k.k_name)
+        @ row_lines ~width (t "일시정지:" "Paused:")
             (match k.k_origin, (keeper_reading state k).Keeper_control.liveness with
              | Tui_decode.Remote_keeper,
                  (Keeper_control.Invalid _ | Unobserved | Absent) ->
-                 Ansi.dim ^ "not observed" ^ Ansi.reset
+                 Ansi.dim ^ t "미관측" "not observed" ^ Ansi.reset
              | (Tui_decode.Persisted_keeper | Declared_keeper _), _
              | Remote_keeper, Keeper_control.Present _ ->
-                 if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
-                 else Ansi.dim ^ "no" ^ Ansi.reset)
-        @ row_lines ~width "Suggested action:"
-            (keeper_suggested_action (keeper_reading state k))
+                 if k.k_paused then (Theme.warn ()) ^ t "예" "yes" ^ Ansi.reset
+                 else Ansi.dim ^ t "아니오" "no" ^ Ansi.reset)
+        @ row_lines ~width (t "권장 조치:" "Suggested action:")
+            (keeper_suggested_action ~ko (keeper_reading state k))
         @ (match Masc_tui_candle.balance_text ~now:(Unix.gettimeofday ())
                    state.candle_observation ~keeper:k.k_name with
            | None -> []
-           | Some value -> row_lines ~width "Candle balance:" (Terminal_text.single_line value))
+           | Some value -> row_lines ~width (t "Candle 잔액:" "Candle balance:") (Terminal_text.single_line value))
       in
       List.iter add_line identity;
       (match portrait_reading with
        | Tui_decode.Ready _ -> ()
-       | Tui_decode.Unavailable reason -> add_row "Portrait:" ("unavailable: " ^ Terminal_text.single_line reason));
+       | Tui_decode.Unavailable reason -> add_row (t "초상:" "Portrait:") (t "없음: " "unavailable: " ^ Terminal_text.single_line reason));
       add_empty ();
       let add_row label value =
         List.iter add_line (row_lines ~width:header_width label value)
       in
       (* Current work section *)
-      add_section "Current Work";
-      add_row "Task:"
+      add_section (t "현재 작업" "Current Work");
+      add_row (t "작업:" "Task:")
         (match k.k_activity with
-         | None -> "not observed"
+         | None -> t "미관측" "not observed"
          | Some activity -> Terminal_text.single_line_or
              ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
       add_empty ();
 
-      add_section "Live Context";
+      add_section (t "실시간 컨텍스트" "Live Context");
+      let context_label = t "컨텍스트:" "Context:" in
       let add_context observation =
         match Observation_layout.context_summary observation with
         | Observation_layout.Context_measured observation ->
             let ratio = observation.ratio in
             let pct = Float.of_int (Observation_layout.percentage_tenths ratio) /. 10.0 in
             let bar_width = Layout.keeper_context_bar_width ~inner_width:header_width in
-            add_row "Context:"
-              (Printf.sprintf "%s%.1f%%%s  %s  %s / %s tokens"
+            add_row context_label
+              (Printf.sprintf
+                 (if ko then "%s%.1f%%%s  %s  %s / %s 토큰"
+                  else "%s%.1f%%%s  %s  %s / %s tokens")
                  (ctx_color ratio) pct Ansi.reset (ctx_bar ratio bar_width)
                  (Masc_tui_message_layout.compact_count observation.tokens)
                  (Masc_tui_message_layout.compact_count observation.maximum));
-            add_row "Observed:" (Terminal_text.short_timestamp observation.observed_at);
-            add_row "Turn Ref:" (Terminal_text.single_line observation.turn_ref)
+            add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);
+            add_row (t "턴 참조:" "Turn Ref:") (Terminal_text.single_line observation.turn_ref)
         | Observation_layout.Context_partial observation ->
-            add_row "Context:"
-              (Printf.sprintf "%s tokens in context; window not observed"
+            add_row context_label
+              (Printf.sprintf
+                 (if ko then "컨텍스트 %s 토큰 · 창 크기 미관측"
+                  else "%s tokens in context; window not observed")
                  (Masc_tui_message_layout.compact_count observation.tokens));
-            add_row "Observed:" (Terminal_text.short_timestamp observation.observed_at);
-            add_row "Turn Ref:" (Terminal_text.single_line observation.turn_ref)
+            add_row (t "관측 시각:" "Observed:") (Terminal_text.short_timestamp observation.observed_at);
+            add_row (t "턴 참조:" "Turn Ref:") (Terminal_text.single_line observation.turn_ref)
         | Observation_layout.Context_unavailable reason ->
-            add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset)
+            add_row context_label (Ansi.dim ^ reason ^ Ansi.reset)
       in
       (match live_context_view state k with
        | Masc_tui_fetched.Absent ->
-           add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
+           add_row context_label (Ansi.dim ^ t "읽기 전" "not loaded" ^ Ansi.reset)
        | Masc_tui_fetched.Loading ->
-           add_row "Context:" (Ansi.dim ^ "reading" ^ Ansi.reset)
+           add_row context_label (Ansi.dim ^ t "읽는 중" "reading" ^ Ansi.reset)
        | Masc_tui_fetched.Ready observation -> add_context observation
        | Masc_tui_fetched.Stale (observation, detail) ->
-           add_row "Refresh:" ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
+           add_row (t "갱신:" "Refresh:") ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
            add_context observation
        | Masc_tui_fetched.Failed detail ->
-           add_row "Context:" ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset));
+           add_row context_label ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset));
       add_empty ();
 
       let header_lines = List.rev !lines in
@@ -3563,8 +3603,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          drawn dimmed underneath, so the wire a log search keys on stays on
          screen without ever leading the row. *)
       add_numbered_section ~first:true
-        "1. 현재 장애 · 보드 격리 (Current Failure & Board Attention)";
+        (t "1. 현재 장애 · 보드 격리" "1. Current Failure & Board Attention");
       let indent = "  " in
+      let absent_text = t "실시간 목록에 없음" "absent from live roster" in
       let wrap ?(tone = "") text =
         Message_layout.wrap_words
           ~max_cells:(max 1 (inner - Message_layout.display_width indent))
@@ -3595,18 +3636,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 (match runtime.kr_runtime_blocker_signature with
                 | Some signature -> wrap ~tone:Ansi.dim signature
                 | None -> ())
-            | None -> wrap ~tone:Ansi.dim "none")
-        | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "unread"
-        | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+            | None -> wrap ~tone:Ansi.dim (t "없음" "none"))
+        | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim (t "미관측" "unread")
+        | Keeper_control.Absent -> wrap ~tone:Ansi.dim absent_text
         | Keeper_control.Invalid detail ->
-            wrap ~tone:(Theme.bad ()) ("config error: " ^ detail)
+            wrap ~tone:(Theme.bad ()) (t "설정 오류: " "config error: " ^ detail)
       in
 
       (* Blocked Board-attention partitions wait here for an
          operator's requeue, and nothing else on the screens said they existed.
          Beside the current failure because it is one: this Keeper's Board
          judgments for those posts do not move until someone presses Q. *)
-      Masc_tui_board_quarantine.lines ~now:(Unix.gettimeofday ())
+      Masc_tui_board_quarantine.lines ~ko ~now:(Unix.gettimeofday ())
         state.keeper_board_quarantines ~keeper_name:k.k_name
       |> List.iter (fun (tone, text) ->
            let color =
@@ -3625,11 +3666,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          durable and is what an external effect -- a write to a service this
          Keeper is attached to -- is actually decided under. An operator reading
          one for the other is how a call gets made that nobody meant to allow. *)
-      add_numbered_section "2. 권한 게이트 · 승인 정책 (Gate & Tool Policy)";
+      add_numbered_section (t "2. 권한 게이트 · 승인 정책" "2. Gate & Tool Policy");
       (* The same word the chat header wears in capitals and the footer offers
          after g, with what it does beside it. This row said "asked" under a
          header saying AUTO. *)
-      add_row "Tool calls:"
+      add_row (t "도구 호출:" "Tool calls:")
         (let mode =
            if List.mem k.k_name state.keeper_yolo_names then
              Masc.Keeper_tool_approval_mode.Yolo
@@ -3645,7 +3686,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (* "workspace" is where the stance comes from, not what it is. The chat
          header resolves the same inheritance before drawing it; this row left
          the reader to go and look it up. *)
-      add_row "Effects (Gate mode):"
+      add_row (t "효과(Gate 모드):" "Effects (Gate mode):")
         (let inherited =
            Option.map
              (fun (modes : Tui_decode.gate_lane_modes) ->
@@ -3658,19 +3699,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              ^ Terminal_text.single_line (gate_mode_reading_word mode)
              ^ Ansi.reset
          | None ->
-             Ansi.dim ^ "workspace"
+             Ansi.dim ^ t "워크스페이스" "workspace"
              ^ (match inherited with
                 | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
                 | None -> "")
              ^ Ansi.reset);
-      add_row "Lane first:"
+      add_row (t "우선 lane:" "Lane first:")
         (match
            List.filter
              (fun (first : Tui_decode.keeper_exact_lane_first) ->
                String.equal first.Tui_decode.kel_keeper k.k_name)
              state.keeper_exact_lane_firsts
          with
-         | [] -> Ansi.dim ^ "lane order" ^ Ansi.reset
+         | [] -> Ansi.dim ^ t "lane 순서" "lane order" ^ Ansi.reset
          | firsts ->
              (Theme.accent ())
              ^ Terminal_text.single_line
@@ -3680,7 +3721,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                          (* The marker leads: a narrow pane cuts the row's
                             tail, and the slot id is the part it can lose. *)
                          (if first.kel_offered then ""
-                          else "not offered, lane order \xc2\xb7 ")
+                          else t "제안 안 됨, lane 순서 \xc2\xb7 " "not offered, lane order \xc2\xb7 ")
                          ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
                          ^ first.kel_slot_id)
                        firsts))
@@ -3688,12 +3729,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (match state.keeper_gate_settings_unread with
        | None -> ()
        | Some reason ->
-           add_row "Gate settings:"
-             (Theme.bad () ^ "unread \xc2\xb7 "
+           add_row (t "Gate 설정:" "Gate settings:")
+             (Theme.bad () ^ t "못 읽음 \xc2\xb7 " "unread \xc2\xb7 "
               ^ Terminal_text.single_line reason ^ Ansi.reset));
 
       (* Runtime & 24h section *)
-      add_numbered_section "3. 런타임 배정 · 최근 24시간 활동 (Runtime & Last 24h Activity)";
+      add_numbered_section (t "3. 런타임 배정 · 최근 24시간 활동" "3. Runtime & Last 24h Activity");
       List.iter (fun (label, value) -> add_row label value)
         (keeper_operations_fields state ~keeper_name:k.k_name);
       let assignment =
@@ -3710,13 +3751,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
               match state.runtime_surface with
               | Some s ->
                   (match s.rss_resolved.rrs_default_runtime_id with
-                   | Some d -> Printf.sprintf "inherited: %s" d
-                   | None -> "inherited")
-              | None -> "inherited"
+                   | Some d -> t "상속: " "inherited: " ^ d
+                   | None -> t "상속" "inherited")
+              | None -> t "상속" "inherited"
             in
-            Printf.sprintf "default (%s)" def_name
+            Printf.sprintf "%s (%s)" (t "기본" "default") def_name
       in
-      add_row "Runtime Target:" target_str;
+      add_row (t "런타임 대상:" "Runtime Target:") target_str;
       (match assignment with
        | Some { ra_resolution = Runtime_assignment_lane tid; _ } ->
            (match
@@ -3730,9 +3771,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                   String.concat " \xe2\x86\x92 "
                     (List.map runtime_id_model_part lane.rrl_runtime_ids)
                 in
-                add_row "Candidate Chain:" hops;
+                add_row (t "후보 순서:" "Candidate Chain:") hops;
                 (match lane.rrl_runtime_ids with
-                 | first :: _ -> add_row "Head Candidate:" first
+                 | first :: _ -> add_row (t "첫 후보:" "Head Candidate:") first
                  | [] -> ())
             | None -> ())
        | Some
@@ -3752,27 +3793,29 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           snap.rss_resolved.rrs_runtimes
                       with
                       | Some ro ->
-                          add_row "Default Context:"
-                            (Printf.sprintf "%s \xc2\xb7 max output %s"
+                          add_row (t "기본 컨텍스트:" "Default Context:")
+                            (Printf.sprintf
+                               (if ko then "%s \xc2\xb7 최대 출력 %s"
+                                else "%s \xc2\xb7 max output %s")
                                (format_context_tokens ro.ro_effective_max_context)
                                (match ro.ro_max_output_tokens with
                                 | Some t -> format_context_tokens t
-                                | None -> "default"))
+                                | None -> t "기본" "default"))
                       | None -> ())
                  | None -> ())
             | None -> ()));
       (match k.k_origin with
        | Tui_decode.Persisted_keeper -> ()
-       | Remote_keeper -> add_row "Source:" "server roster"
+       | Remote_keeper -> add_row (t "출처:" "Source:") (t "서버 목록" "server roster")
        | Declared_keeper requirements ->
-         add_row "Preparation:" (String.concat " · "
+         add_row (t "준비:" "Preparation:") (String.concat " · "
            (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
-      add_row "Last Outcome:"
+      add_row (t "최근 자율 턴:" "Last Outcome:")
         (match k.k_activity with
-         | None -> "not observed"
+         | None -> t "미관측" "not observed"
          | Some activity ->
            (match activity.k_last_proactive_outcome with
-            | Some outcome -> proactive_outcome_word outcome
+            | Some outcome -> proactive_outcome_word ~ko outcome
             | None -> Masc_tui_theme.Glyph.no_value));
       (* Recent activity, folded from the metrics rows already read for this
          Keeper. The window is bounded by row count, so it can fall short of the
@@ -3781,9 +3824,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          draws no zeros: the same sentence the Logs tab gives for the same
          read. *)
       let log_snapshot = keeper_log_snapshot state in
+      let window_label = t "구간:" "Window:" in
       let log_diagnostics = keeper_log_diagnostics state in
       List.iter (fun (tone, detail) ->
-        add_row "Metrics:" (keeper_log_style tone ^ Terminal_text.single_line detail ^ Ansi.reset))
+        add_row (t "지표:" "Metrics:") (keeper_log_style tone ^ Terminal_text.single_line detail ^ Ansi.reset))
         log_diagnostics;
       (match
          Keeper_activity.read
@@ -3792,32 +3836,32 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            log_snapshot.entries
        with
        | Keeper_activity.No_rows ->
-         if log_diagnostics = [] then add_row "Window:"
+         if log_diagnostics = [] then add_row window_label
            (Ansi.dim ^ Metrics_tail.empty_message log_snapshot.error ^ Ansi.reset)
        | Keeper_activity.Rows activity ->
          if not activity.Keeper_activity.aw_covered then
-           add_row "Window:"
+           add_row window_label
              (match activity.Keeper_activity.aw_oldest_ts with
               | Some oldest ->
-                Printf.sprintf "partial, reaches %s"
-                  (Terminal_text.short_timestamp oldest)
-              | None -> "partial");
-         add_row "Turns / Heartbeats:"
+                (if ko then Terminal_text.short_timestamp oldest ^ " 까지만"
+                 else "partial, reaches " ^ Terminal_text.short_timestamp oldest)
+              | None -> t "일부만" "partial");
+         add_row (t "턴 / heartbeat:" "Turns / Heartbeats:")
            (Printf.sprintf "%d / %d" activity.Keeper_activity.aw_turns
               activity.Keeper_activity.aw_heartbeats);
-         add_row "Tokens In / Out:"
+         add_row (t "토큰 입력 / 출력:" "Tokens In / Out:")
            (Printf.sprintf "%s / %s"
               (Masc_tui_message_layout.compact_count
                  activity.Keeper_activity.aw_input_tokens)
               (Masc_tui_message_layout.compact_count
                  activity.Keeper_activity.aw_output_tokens));
-         add_row "Cost:"
+         add_row (t "비용:" "Cost:")
            (match activity.Keeper_activity.aw_cost_usd with
             | Some cost -> Printf.sprintf "$%.4f" cost
-            | None -> Ansi.dim ^ "not priced by the provider" ^ Ansi.reset);
-         add_row "Tool Calls:"
+            | None -> Ansi.dim ^ t "provider 가 값을 매기지 않음" "not priced by the provider" ^ Ansi.reset);
+         add_row (t "도구 호출:" "Tool Calls:")
            (string_of_int activity.Keeper_activity.aw_tool_calls);
-         add_row "Top Tools:"
+         add_row (t "많이 쓴 도구:" "Top Tools:")
            (match activity.Keeper_activity.aw_top_tools with
             | [] -> Masc_tui_theme.Glyph.no_value
             | tools ->
@@ -3832,9 +3876,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          numbers for every Keeper, read once per month. The month is neither
          the current failure of section 1 nor the 24 hours of section 3, and
          under section 1 it read as part of the failure. *)
-      add_numbered_section "4. 이번 달 효율 (This Month's Efficiency)";
-      (match Masc_tui_keeper_efficiency.lines state.keeper_efficiency ~keeper_name:k.k_name with
-       | [] -> wrap ~tone:Ansi.dim "unread"
+      add_numbered_section (t "4. 이번 달 효율" "4. This Month's Efficiency");
+      (match Masc_tui_keeper_efficiency.lines ~ko state.keeper_efficiency ~keeper_name:k.k_name with
+       | [] -> wrap ~tone:Ansi.dim (t "읽기 전" "unread")
        | lines ->
          List.iter
            (fun (tone, text) ->
@@ -3850,101 +3894,102 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
 
       (* Historical receipt evidence is a separate reading. A successful
          fallback may retain earlier refusals while the live blocker is clear. *)
-      add_numbered_section "5. 최근 후보 모델 폴백 이력 (Recorded Runtime Walk)";
+      add_numbered_section (t "5. 최근 후보 모델 폴백 이력" "5. Recorded Runtime Walk");
       let module Receipt = Masc.Keeper_execution_receipt in
       let module Evidence = Keeper_runtime_walk_evidence in
       let module Fault = Llm_provider.Candidate_fault in
       let history_row label value = add_row label (Terminal_text.single_line value) in
+      let terminal_label = t "마지막 실패 후보:" "Terminal origin:" in
       let source (turn : Receipt.receipt_turn) =
-        history_row "Receipt trace:" turn.receipt_trace_id;
-        history_row "Receipt turn:"
+        history_row (t "영수증 trace:" "Receipt trace:") turn.receipt_trace_id;
+        history_row (t "영수증 턴:" "Receipt turn:")
           (match turn.receipt_turn_count with
            | Some count -> string_of_int count
-           | None -> "not recorded");
-        history_row "Receipt ended:" turn.receipt_ended_at
+           | None -> t "기록 없음" "not recorded");
+        history_row (t "영수증 종료:" "Receipt ended:") turn.receipt_ended_at
       in
       let fault = function
-        | None -> "API classification inapplicable"
-        | Some Fault.Unattributed -> "unattributed API refusal"
-        | Some Fault.Unknown_after_dispatch -> "outcome uncertain"
-        | Some Fault.Local_admission -> "MASC admission wait"
+        | None -> t "API 분류 해당 없음" "API classification inapplicable"
+        | Some Fault.Unattributed -> t "원인 미분류 API 거절" "unattributed API refusal"
+        | Some Fault.Unknown_after_dispatch -> t "결과 불확실" "outcome uncertain"
+        | Some Fault.Local_admission -> t "MASC 입장 대기" "MASC admission wait"
         | Some (Fault.Binding binding) ->
           match binding with
-          | Fault.Credential -> "credential"
-          | Fault.Account_access -> "account access"
-          | Fault.Account -> "account"
-          | Fault.Model_absent -> "model absent"
-          | Fault.Rate_limit -> "rate limit"
-          | Fault.Capacity -> "capacity"
-          | Fault.Server -> "server"
-          | Fault.Window -> "context window"
-          | Fault.Body_limit -> "body limit"
-          | Fault.Admission -> "admission"
-          | Fault.Deadline -> "deadline"
-          | Fault.Output_dialect -> "output dialect"
-          | Fault.Refusal_unread -> "refusal unread"
+          | Fault.Credential -> t "인증 정보" "credential"
+          | Fault.Account_access -> t "계정 접근" "account access"
+          | Fault.Account -> t "계정" "account"
+          | Fault.Model_absent -> t "모델 없음" "model absent"
+          | Fault.Rate_limit -> t "요청 한도" "rate limit"
+          | Fault.Capacity -> t "용량" "capacity"
+          | Fault.Server -> t "서버" "server"
+          | Fault.Window -> t "컨텍스트 창" "context window"
+          | Fault.Body_limit -> t "본문 크기 한도" "body limit"
+          | Fault.Admission -> t "입장" "admission"
+          | Fault.Deadline -> t "기한" "deadline"
+          | Fault.Output_dialect -> t "출력 형식" "output dialect"
+          | Fault.Refusal_unread -> t "거절 본문 못 읽음" "refusal unread"
       in
       (match (keeper_reading state k).Keeper_control.liveness with
        | Keeper_control.Present runtime ->
          (match runtime.kr_runtime_lane_observation with
-          | None -> wrap ~tone:Ansi.dim no_receipt_text
+          | None -> wrap ~tone:Ansi.dim (t "영수증 없음" no_receipt_text)
           | Some (Receipt.Runtime_lane_not_observed turn) ->
             source turn;
-            wrap ~tone:Ansi.dim walk_not_captured_text
+            wrap ~tone:Ansi.dim (t "후보 순회가 기록되지 않음" walk_not_captured_text)
           | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
             Option.iter source turn;
-            wrap ~tone:(Theme.warn ()) (evidence_unreadable_text ^ ": " ^ field)
+            wrap ~tone:(Theme.warn ()) (t "지난 기록을 읽지 못함" evidence_unreadable_text ^ ": " ^ field)
           | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
             source turn;
             (match evidence.failures with
-             | [] -> wrap ~tone:Ansi.dim no_candidate_failure_text
+             | [] -> wrap ~tone:Ansi.dim (t "기록된 후보 실패 없음" no_candidate_failure_text)
              | failures -> List.iter (fun (failure : Evidence.failure) ->
-                 history_row "Candidate:"
+                 history_row (t "후보:" "Candidate:")
                    (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);
-                 history_row "Invocation:"
+                 history_row (t "호출:" "Invocation:")
                    (match failure.dispatch with
-                    | Runtime_attempt_dispatch.Dispatched -> "candidate invoked"
-                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> "rejected before invocation");
-                 history_row "API fact:" (fault failure.api_candidate_fault);
+                    | Runtime_attempt_dispatch.Dispatched -> t "후보 호출함" "candidate invoked"
+                    | Runtime_attempt_dispatch.Rejected_before_dispatch -> t "호출 전 거절" "rejected before invocation");
+                 history_row (t "API 분류:" "API fact:") (fault failure.api_candidate_fault);
                  wrap (Keeper_request_failure.summary failure.failure)) failures);
             (match evidence.terminal with
              | Evidence.Terminal_not_observed ->
-               history_row "Terminal origin:" "not observed"
+               history_row terminal_label (t "미관측" "not observed")
              | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
-               history_row "Terminal origin:" (Printf.sprintf "%d · %s" attempt runtime_id);
+               history_row terminal_label (Printf.sprintf "%d · %s" attempt runtime_id);
                wrap (Keeper_request_failure.summary failure)))
-       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim "live roster unread"
-       | Keeper_control.Absent -> wrap ~tone:Ansi.dim "absent from live roster"
+       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim (t "실시간 목록 미관측" "live roster unread")
+       | Keeper_control.Absent -> wrap ~tone:Ansi.dim absent_text
        | Keeper_control.Invalid detail ->
-         wrap ~tone:(Theme.warn ()) ("roster unavailable: " ^ detail));
+         wrap ~tone:(Theme.warn ()) (t "목록을 읽지 못함: " "roster unavailable: " ^ detail));
 
       (* Lifetime totals & Timestamps section *)
-      add_numbered_section "6. 누적 통계 · 생성 이력 (Lifetime Totals & Timestamps)";
+      add_numbered_section (t "6. 누적 통계 · 생성 이력" "6. Lifetime Totals & Timestamps");
       (match k.k_activity with
-       | None -> add_row "Activity:" "not observed"
+       | None -> add_row (t "활동:" "Activity:") (t "미관측" "not observed")
        | Some activity ->
-         add_row "Total Turns:" (string_of_int activity.k_total_turns);
+         add_row (t "누적 턴:" "Total Turns:") (string_of_int activity.k_total_turns);
          (* Read at a glance, the way the Acting pane's block already reads its
             token figures. A live roster drew "75111274" here: eight digits a
             reader counts rather than reads. Turns and tool calls keep their
             digits -- three or four of them, and a count of things done rather
             than a size. *)
-         add_row "Total Tokens:"
+         add_row (t "누적 토큰:" "Total Tokens:")
            (Masc_tui_message_layout.compact_count activity.k_total_tokens);
-         add_row "Lifetime Cost:" (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
-         add_row "Last Turn:"
+         add_row (t "누적 비용:" "Lifetime Cost:") (Tui_decode.keeper_cost_summary activity.k_total_cost_usd);
+         add_row (t "마지막 턴:" "Last Turn:")
            (match activity.k_last_turn_at with
             | Some at -> Terminal_text.short_timestamp_of_unix at
-            | None -> "(never)"));
+            | None -> t "(없음)" "(never)"));
       (match k.k_identity with
        | Ok identity ->
-         add_row "Created:" (Terminal_text.short_timestamp identity.k_created_at);
-         add_row "Updated:" (Terminal_text.short_timestamp identity.k_updated_at)
+         add_row (t "생성:" "Created:") (Terminal_text.short_timestamp identity.k_created_at);
+         add_row (t "수정:" "Updated:") (Terminal_text.short_timestamp identity.k_updated_at)
        | Error reason ->
            Message_layout.wrap_words ~max_cells:(max 1 (inner - 26))
              (Terminal_text.single_line reason)
            |> List.iteri (fun index line ->
-                add_row (if index = 0 then "Metadata:" else "") line));
+                add_row (if index = 0 then t "메타데이터:" "Metadata:" else "") line));
 
       List.rev !lines
     in
@@ -4002,6 +4047,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            | Some _, (Some _ | None) | None, Some _ -> failure @ progress)
     in
     let channel_lines () =
+      let ko = state.ui_language = Lang_ko in
+      let t korean english = if ko then korean else english in
+      (* The kind column of the learned names: "channel", the widest word. *)
+      let mapping_kind_cells = 7 in
       let rows = match state.connectors_error, state.connectors with
       | Some detail, None ->
           [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
@@ -4009,7 +4058,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | None, None ->
           (match Connector_read.view state.connectors_read with
            | Connector_read.Quiet ->
-               [ Ansi.dim ^ "  Channel transports not observed" ^ Ansi.reset ]
+               [ Ansi.dim ^ t "  채널 커넥터 미관측" "  Channel transports not observed" ^ Ansi.reset ]
            | Reading _ | Waiting_after_write | Failed_to_start ->
                (* The existing typed-source notice below owns pending,
                   held recheck and failed-start guidance; none is a value. *)
@@ -4048,7 +4097,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                         connector.cn_bindings)
                  in
                  let tail =
-                   Printf.sprintf "  %d here / %d total" here_count
+                   Printf.sprintf
+                     (if ko then "  여기 %d / 전체 %d" else "  %d here / %d total")
+                     here_count
                      (List.length connector.cn_bindings)
                  in
                  (* Two cells of indent, two for the cursor mark, two between
@@ -4057,7 +4108,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  let name_cells =
                    Masc_tui_connector_state.list_row_name_cells
                      ~inner:(framed_inner_width cols) ~fixed_cells:6
-                     ~tail_cells:(String.length tail)
+                     ~tail_cells:(Message_layout.display_width tail)
                  in
                  let line =
                    "  " ^ (if index = selected_index then "▸ " else "  ")
@@ -4083,14 +4134,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    | Some id -> Terminal_text.single_line id
                    | None -> Printf.sprintf "connectors[%d]" refusal.cr_row
                  in
-                 (Theme.bad ()) ^ "    " ^ name ^ "  unreadable: "
+                 (Theme.bad ()) ^ "    " ^ name ^ t "  읽지 못함: " "  unreadable: "
                  ^ Terminal_text.single_line refusal.cr_reason ^ Ansi.reset)
               snapshot.cs_refused
           in
           let selected_lines =
             match List.nth_opt connectors selected_index, snapshot.cs_refused with
             | None, [] ->
-                [ Ansi.dim ^ "  (no channel transports registered)" ^ Ansi.reset ]
+                [ Ansi.dim ^ t "  (등록된 채널 커넥터 없음)" "  (no channel transports registered)" ^ Ansi.reset ]
             | None, _ :: _ -> []
             | Some connector, _ ->
                 let field label value =
@@ -4104,7 +4155,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 in
                 let optional_bool_row label value =
                   optional_row label
-                    (Option.map (fun present -> if present then "yes" else "no") value)
+                    (Option.map (fun present -> if present then t "예" "yes" else t "아니오" "no") value)
                 in
                 let optional_int_row label value =
                   optional_row label (Option.map string_of_int value)
@@ -4125,8 +4176,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 in
                 let store_state =
                   match connector.cn_binding_store_read_ok with
-                  | Some true -> Some "readable"
-                  | Some false -> Some "UNREADABLE"
+                  | Some true -> Some (t "읽힘" "readable")
+                  | Some false -> Some (t "읽지 못함" "UNREADABLE")
                   | None -> None
                 in
                 let binding_lines =
@@ -4142,9 +4193,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           (if selected then Masc_tui_theme.Glyph.current_entry else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
-                          (if here then "  (this Keeper)"
+                          (if here then t "  (이 Keeper)" "  (this Keeper)"
                            else if missing_keeper then
-                             "  (MISSING KEEPER · e reassign · u u remove)"
+                             t "  (없는 Keeper · e 다시 배정 · u u 제거)"
+                               "  (MISSING KEEPER · e reassign · u u remove)"
                            else "")
                       in
                       if selected then Ansi.reverse ^ line ^ Ansi.reset
@@ -4153,111 +4205,114 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                       else line)
                     connector.cn_bindings
                   |> function
-                  | [] -> [ Ansi.dim ^ "    (no channel bindings)" ^ Ansi.reset ]
+                  | [] -> [ Ansi.dim ^ t "    (채널 바인딩 없음)" "    (no channel bindings)" ^ Ansi.reset ]
                   | lines -> lines
                 in
                 [ ""
-                ; Ansi.bold ^ "  Selected · "
+                ; Ansi.bold ^ t "  선택 · " "  Selected · "
                   ^ Terminal_text.single_line connector.cn_display_name
                   ^ Ansi.reset
                 ]
-                @ detail_section_lines "1. 연결 상태 · 트리거 및 응답 정책 (Connection & Routing Policy)"
-                @ field "Binding target"
+                @ detail_section_lines (t "1. 연결 상태 · 트리거 및 응답 정책" "1. Connection & Routing Policy")
+                @ field (t "바인딩 대상" "Binding target")
                     (match selected_binding with
-                     | None -> "(no binding selected)"
+                     | None -> t "(고른 바인딩 없음)" "(no binding selected)"
                      | Some binding -> binding_reference binding)
                   (* The badge is read from the status the row would print
                      beside it ([decode_connector_connection] takes status,
                      available and connected), so the word never differs from
                      the badge and the row said the same thing twice. *)
-                @ field "Connection"
+                @ field (t "연결" "Connection")
                     (connection_label connector)
                 @ field "MASC API"
                     (Printf.sprintf "%s:%d"
                        Masc_network_defaults.masc_http_loopback_peer state.port)
-                @ field "Channel type"
+                @ field (t "채널 종류" "Channel type")
                     (Terminal_text.single_line_or
                        ~default:Masc_tui_theme.Glyph.no_value connector.cn_channel)
-                @ optional_row "Runtime state"
+                @ optional_row (t "런타임 상태" "Runtime state")
                     (Masc_tui_connector_state.runtime_state_to_draw connector)
-                @ optional_row "Status source" connector.cn_status_source
-                @ optional_row "Remote endpoint" connector.cn_endpoint
-                @ optional_row "Status file" connector.cn_status_path
-                @ optional_row "Binding store" connector.cn_binding_store_path
-                @ optional_row "Store state" store_state
-                @ optional_row "Binding source" connector.cn_binding_source
-                @ optional_row "Trigger policy" connector.cn_trigger_policy
-                @ optional_row "Reply mode" connector.cn_reply_mode
-                @ optional_row "Chat database" connector.cn_chat_db_path
-                @ detail_section_lines "2. 봇 자격증명 · 프로세스 상태 (Bot Credentials & Process)"
-                @ optional_row "Bot user" connector.cn_bot_user_name
-                @ optional_row "Bot user id" connector.cn_bot_user_id
-                @ optional_bool_row "Bot token ready" connector.cn_bot_token_present
-                @ optional_bool_row "App token ready" connector.cn_app_token_present
-                @ optional_bool_row "Gate healthy" connector.cn_gate_healthy
-                @ optional_int_row "Server pid" connector.cn_pid
-                @ optional_int_row "Guilds" connector.cn_guild_count
-                @ detail_section_lines "3. 디렉토리 동기화 · 이름 매핑 파일 (Directory & Name Mapping)"
-                @ optional_row "Directory state"
+                @ optional_row (t "상태 출처" "Status source") connector.cn_status_source
+                @ optional_row (t "원격 endpoint" "Remote endpoint") connector.cn_endpoint
+                @ optional_row (t "상태 파일" "Status file") connector.cn_status_path
+                @ optional_row (t "바인딩 저장소" "Binding store") connector.cn_binding_store_path
+                @ optional_row (t "저장소 상태" "Store state") store_state
+                @ optional_row (t "바인딩 출처" "Binding source") connector.cn_binding_source
+                @ optional_row (t "트리거 정책" "Trigger policy") connector.cn_trigger_policy
+                @ optional_row (t "응답 방식" "Reply mode") connector.cn_reply_mode
+                @ optional_row (t "채팅 DB" "Chat database") connector.cn_chat_db_path
+                @ detail_section_lines (t "2. 봇 자격증명 · 프로세스 상태" "2. Bot Credentials & Process")
+                @ optional_row (t "봇 사용자" "Bot user") connector.cn_bot_user_name
+                @ optional_row (t "봇 사용자 id" "Bot user id") connector.cn_bot_user_id
+                @ optional_bool_row (t "봇 토큰 준비" "Bot token ready") connector.cn_bot_token_present
+                @ optional_bool_row (t "앱 토큰 준비" "App token ready") connector.cn_app_token_present
+                @ optional_bool_row (t "Gate 정상" "Gate healthy") connector.cn_gate_healthy
+                @ optional_int_row (t "서버 pid" "Server pid") connector.cn_pid
+                @ optional_int_row (t "길드 수" "Guilds") connector.cn_guild_count
+                @ detail_section_lines (t "3. 디렉토리 동기화 · 이름 매핑 파일" "3. Directory & Name Mapping")
+                @ optional_row (t "디렉토리 상태" "Directory state")
                     (Option.map
                        (function
                          | Masc.Tui_decode_connectors.Connector_directory_not_started ->
-                           "not started"
-                         | Connector_directory_refreshing -> "refreshing"
-                         | Connector_directory_complete -> "complete"
-                         | Connector_directory_partial -> "partial")
+                           t "시작 전" "not started"
+                         | Connector_directory_refreshing -> t "갱신 중" "refreshing"
+                         | Connector_directory_complete -> t "완료" "complete"
+                         | Connector_directory_partial -> t "일부만" "partial")
                        connector.cn_directory_state)
-                @ optional_int_row "Servers learned"
+                @ optional_int_row (t "알게 된 서버" "Servers learned")
                     connector.cn_directory_server_count
-                @ optional_int_row "Channels learned"
+                @ optional_int_row (t "알게 된 채널" "Channels learned")
                     connector.cn_directory_channel_count
-                @ optional_int_row "People learned"
+                @ optional_int_row (t "알게 된 사람" "People learned")
                     connector.cn_directory_person_count
                 @ (match connector.cn_directory_authentication_failed with
                    | [] -> []
                    | values ->
-                     field "Authentication"
+                     field (t "인증 실패" "Authentication")
                          (String.concat ", "
                             (List.map Terminal_text.single_line values))
                      )
                 @ (match connector.cn_directory_permission_denied with
                    | [] -> []
                    | values ->
-                     field "Permission limits"
+                     field (t "권한 제한" "Permission limits")
                          (String.concat ", "
                             (List.map Terminal_text.single_line values))
                      )
                 @ (match connector.cn_directory_errors with
                    | [] -> []
                    | values ->
-                     field "Directory errors"
+                     field (t "디렉토리 오류" "Directory errors")
                          (String.concat "; "
                             (List.map Terminal_text.single_line values))
                      )
-                @ optional_row "Directory updated"
+                @ optional_row (t "디렉토리 갱신" "Directory updated")
                     connector.cn_directory_updated_at
-                @ optional_row "Workspace id" connector.cn_workspace_id
-                @ optional_row "Server names" connector.cn_server_names_path
-                @ optional_row "Channel names" connector.cn_channel_names_path
-                @ optional_row "People names" connector.cn_people_names_path
-                @ optional_row "Mapping scope" connector.cn_name_mapping_scope
-                @ optional_row "Names read error" connector.cn_names_error
-                @ optional_row "Updated" connector.cn_updated_at
-                @ optional_row "Connection error" connector.cn_error
-                @ optional_row "Store error" connector.cn_binding_store_error
-                @ detail_section_lines "4. 채널 → 키퍼 바인딩 (Channel → Keeper Bindings)"
+                @ optional_row (t "워크스페이스 id" "Workspace id") connector.cn_workspace_id
+                @ optional_row (t "서버 이름 파일" "Server names") connector.cn_server_names_path
+                @ optional_row (t "채널 이름 파일" "Channel names") connector.cn_channel_names_path
+                @ optional_row (t "사람 이름 파일" "People names") connector.cn_people_names_path
+                @ optional_row (t "매핑 범위" "Mapping scope") connector.cn_name_mapping_scope
+                @ optional_row (t "이름 읽기 오류" "Names read error") connector.cn_names_error
+                @ optional_row (t "갱신" "Updated") connector.cn_updated_at
+                @ optional_row (t "연결 오류" "Connection error") connector.cn_error
+                @ optional_row (t "저장소 오류" "Store error") connector.cn_binding_store_error
+                @ detail_section_lines (t "4. 채널 → 키퍼 바인딩" "4. Channel → Keeper Bindings")
                 @ binding_lines
                 @ (match connector.cn_name_mappings with
                    | [] -> []
                    | mappings ->
-                       [ ""; Ansi.bold ^ "  Known ID ↔ names" ^ Ansi.reset ]
+                       [ ""; Ansi.bold ^ t "  알려진 ID ↔ 이름" "  Known ID ↔ names" ^ Ansi.reset ]
                        @ List.concat_map
                            (fun (mapping : Masc.Tui_decode_connectors.connector_name_mapping) ->
-                              Printf.sprintf "%-7s %s ↔ %s"
-                                (match mapping.cnm_kind with
-                                 | Masc.Tui_decode_connectors.Connector_channel_name -> "channel"
-                                 | Connector_person_name -> "person"
-                                 | Connector_server_name -> "server")
+                              Printf.sprintf "%s %s ↔ %s"
+                                (fit_width
+                                   (match mapping.cnm_kind with
+                                    | Masc.Tui_decode_connectors.Connector_channel_name ->
+                                        t "채널" "channel"
+                                    | Connector_person_name -> t "사람" "person"
+                                    | Connector_server_name -> t "서버" "server")
+                                   mapping_kind_cells)
                                 (Terminal_text.single_line mapping.cnm_id)
                                 (Terminal_text.single_line mapping.cnm_name)
                               |> Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 4))
@@ -4265,23 +4320,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                            mappings)
                 @ [ ""
                   ; Ansi.dim
-                    ^ "  j/k transport · J/K binding · b bind · e reassign · u u remove"
+                    ^ t "  j/k 커넥터 · J/K 바인딩 · b 연결 · e 다시 배정 · u u 제거"
+                        "  j/k transport · J/K binding · b bind · e reassign · u u remove"
                     ^ Ansi.reset
                   ; Ansi.dim
-                    ^ "  These actions change channel routing, not the connector process."
+                    ^ t "  이 동작은 채널 라우팅만 바꾸고 커넥터 프로세스는 건드리지 않음."
+                        "  These actions change channel routing, not the connector process."
                     ^ Ansi.reset
-                  ; Ansi.dim ^ "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
-                  ; Ansi.dim ^ "  r reloads bindings and learned names" ^ Ansi.reset
+                  ; Ansi.dim ^ t "  PgUp/PgDn 으로 이 상세를 넘김" "  PgUp/PgDn scrolls this detail" ^ Ansi.reset
+                  ; Ansi.dim ^ t "  r 로 바인딩과 알게 된 이름을 다시 읽음" "  r reloads bindings and learned names" ^ Ansi.reset
                   ]
           in
-          [ Printf.sprintf "  %d transports · %d available · actions target %s"
+          [ Printf.sprintf
+              (if ko then "  커넥터 %d개 · 사용 가능 %d개 · 동작 대상 %s"
+               else "  %d transports · %d available · actions target %s")
               snapshot.cs_total snapshot.cs_active
               (Terminal_text.single_line k.k_name)
           ]
           @ (match error with
              | None -> []
              | Some detail ->
-                 [ (Theme.bad ()) ^ "  STALE · "
+                 [ (Theme.bad ()) ^ t "  이전 관측 · " "  STALE · "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
           @ transport_rows @ refused_rows @ selected_lines
@@ -4698,20 +4757,34 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        Drawn through [tab_strip] with the row's width: ten tabs are wider
        than the row beside the roster pane, and cut from the right the mark
        on Runs was the part that went. *)
-    let before =
-      Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s%s" Ansi.bold
+    let entries =
+      List.map
+        (fun tab ->
+          ( Masc_tui_types.keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
+          , tab = state.detail_tab
+          , tab ))
+        Masc_tui_types.keeper_detail_tabs
+    in
+    (* The strip keeps the cells its current tab needs; a name longer than
+       what is left folds in the middle. Drawn whole, a long name took the
+       row and the strip drew nothing, so the row no longer said which tab
+       the body below it is. *)
+    let name =
+      Message_layout.truncate_middle
+        (max heading_id_floor
+           (here_steps_room ~cols state ~steps:1
+              ~after:
+                (Message_layout.display_width tab_strip_gap
+                 + tab_strip_min_width entries)))
         (Terminal_text.single_line k.k_name)
-        Ansi.reset tab_strip_gap
+    in
+    let before =
+      here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
     in
     let tabs =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
         ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
-        (List.map
-           (fun tab ->
-             ( Masc_tui_types.keeper_detail_tab_label tab
-             , tab = state.detail_tab
-             , tab ))
-           Masc_tui_types.keeper_detail_tabs)
+        entries
     in
     let title = before ^ tabs in
     box_line buf cols title;
@@ -4808,9 +4881,9 @@ let render_keeper_detail (state : state) =
     surface_chrome ~overflow:Fits state ~terminal_rows ~cols
       ~surface_key:"keeper-detail"
       ~title:
-        (Printf.sprintf "%s  %s"
-           (screen_title " Keepers \xe2\x96\xb8 detail")
-           (connection_badge state))
+        (here_row ~cols state
+           ~path:[ ui_text state ~ko:"상세" ~en:"detail" ]
+           ~readings:[] ~position:None)
       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
@@ -4829,14 +4902,16 @@ let render_keeper_detail (state : state) =
        Sandbox tab, where [s] sets the remote_ssh backend and [o] reads the
        container logs the strip called "actual logs". *)
     let hints =
-      Masc_tui_keys.keeper_detail_tab_hint state.detail_tab
+      Masc_tui_keys.keeper_detail_tab_hint
+        ~ko:(state.ui_language = Lang_ko) state.detail_tab
       ^ "  "
       ^ keeper_control_hints
           ~taken:(Masc_tui_keys.keeper_detail_tab_taken_keys state.detail_tab)
           state (Some (keeper_reading state k))
     in
     let hints =
-      if keeper_roster_pane_shown state ~cols then "h/l:pane  " ^ hints
+      if keeper_roster_pane_shown state ~cols then
+        "h/l:" ^ ui_text state ~ko:"창" ~en:"pane" ^ "  " ^ hints
       else hints
     in
     let footer =
@@ -4886,9 +4961,9 @@ let render_keeper_logs (state : state) =
     surface_chrome ~overflow:Fits state ~terminal_rows ~cols
       ~surface_key:"keeper-logs"
       ~title:
-        (Printf.sprintf "%s  %s"
-           (screen_title " Keepers \xe2\x96\xb8 logs")
-           (connection_badge state))
+        (here_row ~cols state
+           ~path:[ ui_text state ~ko:"로그" ~en:"logs" ]
+           ~readings:[] ~position:None)
       ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
       ~body:(fun ~budget:_ c ->
         c.push_styled ~style:(Theme.recede ()) "  No keeper selected.")
@@ -4901,16 +4976,15 @@ let render_keeper_logs (state : state) =
       | Loading -> "reading metrics"
       | Failed _ -> "unavailable"
       | Ready _ | Stale _ ->
-          Masc_tui_message_layout.count_noun ~plural:"entries" total_entries "entry" in
+          count_reading state Masc_tui_value.Count.Entry total_entries in
 
     (* Header *)
     let header =
-      Printf.sprintf "%s  (%s)  %s"
-        (screen_title
-           (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 logs"
-              (Terminal_text.single_line k.k_name)))
-        reading_label
-        (connection_badge state)
+      here_row ~cols state
+        ~path:
+          [ Terminal_text.single_line k.k_name
+          ; ui_text state ~ko:"로그" ~en:"logs" ]
+        ~readings:[ reading_label ] ~position:None
     in
 
     box_top buf cols;

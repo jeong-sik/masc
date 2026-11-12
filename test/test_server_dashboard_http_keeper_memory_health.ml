@@ -221,7 +221,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v14"
+    "keeper.memory_os.current_health.v15"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -1416,7 +1416,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v14" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v15" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =
@@ -1687,7 +1687,25 @@ let test_attention_retains_originals_and_clears_on_observation () =
     Alcotest.(check bool) "both observations derive one requirement" true
       (Pending.attention_required
         ~durable:(Some (Worker (worker Pending.Missing_after_dispatch)))
-        ~admission:(Some (worker Pending.Outcome_unknown)));
+        ~admission:(Some (Admission_waiting (worker Pending.Outcome_unknown))));
+    Alcotest.(check bool) "a failed admission pass needs attention" true
+      (Pending.attention_required ~durable:None ~admission:(Some (Admission_failed "pass refused")));
+    let refused = "admission pass refused its records" in
+    Queue.For_testing.run_explicit_admission_with ~base_path:base ~keeper_name
+      ~run:(fun () -> Worker.Unavailable refused);
+    let failed = member "librarian" (keeper_obj keeper_name (read ())) in
+    Alcotest.(check bool) "a failed admission pass reaches the Keeper row" true
+      (bool_field "operator_action_required" failed);
+    Alcotest.(check bool) "the failed pass survives the wire with its error" true
+      (Yojson.Safe.equal (Pending.to_json (Local_failure refused)) (member "admission_wait" failed));
+    (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot (read ()) with
+     | Error detail -> Alcotest.fail detail
+     | Ok snapshot ->
+       Alcotest.(check bool) "the TUI decoder reads the failed pass from the server answer" true
+         (List.exists (fun (keeper : Masc.Tui_decode_memory_health.memory_keeper_health) ->
+            String.equal keeper.mkh_keeper_id keeper_name
+            && keeper.mkh_librarian.mlh_admission_wait = Some (Pending.Admission_failed refused))
+            snapshot.Masc.Tui_decode_memory_health.mhs_keepers));
     Alcotest.(check bool) "local recovery failure needs attention" true
       (Pending.attention_required ~durable:(Some (Local_failure "source read failed")) ~admission:None);
     List.iter (fun pending ->

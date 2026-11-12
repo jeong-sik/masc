@@ -1,7 +1,8 @@
-(** Dashboard Attention — Collect actionable items that require operator intervention.
+(** Dashboard Attention — items an operator may want to look at.
 
-    Pure functions. Scans workspace snapshots to produce a sorted list
-    of items the operator should act on. Each item includes a suggested MCP tool. *)
+    Pure functions. Scans workspace snapshots and the operator task list and
+    returns the items sorted by severity. Each item carries a suggested next
+    step: an MCP tool name, or a sentence when no single tool applies. *)
 
 (* ===== Masc_domain ===== *)
 
@@ -166,30 +167,25 @@ let format_items (items : attention_item list) : string list =
         ])
     runs
 
-(** One-line summary for compact mode. *)
+(** One-line summary for compact mode. Every severity that has an item is
+    named, so the counts in parentheses add up to the total. *)
 let compact_summary (items : attention_item list) : string =
-  let critical =
-    List.length
-      (List.filter (fun i -> i.severity = Critical) items)
+  let critical, warning, info =
+    List.fold_left
+      (fun (critical, warning, info) item ->
+        match item.severity with
+        | Critical -> critical + 1, warning, info
+        | Warning -> critical, warning + 1, info
+        | Info -> critical, warning, info + 1)
+      (0, 0, 0) items
   in
-  let warning =
-    List.length
-      (List.filter (fun i -> i.severity = Warning) items)
-  in
-  let total = List.length items in
-  if total = 0 then "No action needed"
-  else
-    let parts = [] in
-    let parts =
-      if critical > 0 then
-        parts @ [ Printf.sprintf "%d critical" critical ]
-      else parts
-    in
-    let parts =
-      if warning > 0 then
-        parts @ [ Printf.sprintf "%d warning" warning ]
-      else parts
+  match critical + warning + info with
+  | 0 -> "No action needed"
+  | total ->
+    let part count label =
+      if count > 0 then [ Printf.sprintf "%d %s" count label ] else []
     in
     Printf.sprintf "%d item%s (%s)" total
       (if total > 1 then "s" else "")
-      (String.concat ", " parts)
+      (String.concat ", "
+         (part critical "critical" @ part warning "warning" @ part info "info"))

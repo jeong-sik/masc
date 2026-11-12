@@ -40,23 +40,32 @@ let odd_dormant row =
        | Decode.Activation_manual | Decode.Activation_on_demand -> false)
   | None -> false
 
-let header ~now ~cells ~view ~selected ~age rows =
+let header ~ko ~now ~cells ~view ~selected ~age rows =
+  let say korean english = if ko then korean else english in
+  let unknown = say "미확인" "unknown" in
+  (* The age words name the bound each bucket is cut at, as [bucket] reads
+     it off [Model.age]. *)
   let groups = match view with
     | Model.By_age ->
-        [Fresh, "█", "fresh", Theme.info (); Today, "▆", "today", Ansi.reset;
-         Cooling, "▃", "cooling", Theme.recede (); Dormant, "▁", "dormant", Theme.recede ();
-         Unknown, "?", "unknown", Theme.recede ()]
+        [Fresh, "█", say "3시간 안" "fresh", Theme.info ();
+         Today, "▆", say "하루 안" "today", Ansi.reset;
+         Cooling, "▃", say "사흘 안" "cooling", Theme.recede ();
+         Dormant, "▁", say "더 오래" "dormant", Theme.recede ();
+         Unknown, "?", unknown, Theme.recede ()]
     | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-        [Failures, "!", "failing", Theme.warn (); Recoveries, "✓", "recovered", Theme.ok ();
-         Sound, "●", "ok", Theme.ok (); Paused, "○", "paused", Theme.recede ();
-         Unknown, "?", "unknown", Theme.recede ()] in
+        [Failures, "!", say "실패" "failing", Theme.warn ();
+         Recoveries, "✓", say "복구" "recovered", Theme.ok ();
+         Sound, "●", say "정상" "ok", Theme.ok ();
+         Paused, "○", say "일시정지" "paused", Theme.recede ();
+         Unknown, "?", unknown, Theme.recede ()] in
   let readings = List.map (fun row -> row, bucket ~now ~age view row) rows in
   let groups = List.filter_map (fun (key, mark, word, style) ->
     let members = List.filter_map (fun (row, at) -> if at = key then Some row else None) readings in
     match members with [] -> None | _ :: _ -> Some (key, mark, word, style, members)) groups in
   let label long (_, mark, word, _, members) =
-    if long then Printf.sprintf "%s %d %s" mark (List.length members) word
-    else mark ^ string_of_int (List.length members) in
+    if not long then mark ^ string_of_int (List.length members)
+    else if ko then Printf.sprintf "%s %s %d" mark word (List.length members)
+    else Printf.sprintf "%s %d %s" mark (List.length members) word in
   let sep_w = 2 * max 0 (List.length groups - 1) in
   let base_w long =
     sep_w + List.fold_left (fun n g -> n + Layout.display_width (label long g)) 0 groups in
@@ -242,9 +251,15 @@ let fleet_cells ~ko ~now ~(grid : Grid.t) ~wakes rows =
   let wake_max = if wake_peak = 0 && List.exists (function
     | Next.Wakes_unknown | Next.Wakes_with_unknown _ -> true
     | Next.Wakes _ -> false) future then "?" else string_of_int wake_peak in
-  Some { name = (if grid.name_cells >= 21 then "fleet fail/30m max " else "fleet max ") ^ pulse_max
+  (* The long name is taken when it fits the name column with its number, so
+     neither language loses the number to the column's edge. *)
+  let name =
+    let long = (if ko then "전체 실패/30분 최대 " else "fleet fail/30m max ") ^ pulse_max in
+    if Layout.display_width long <= grid.name_cells then long
+    else (if ko then "전체 최대 " else "fleet max ") ^ pulse_max in
+  Some { name
   ; pulse; strip
-  ; due = let label = "max " ^ wake_max in
+  ; due = let label = (if ko then "최대" else "max ") ^ wake_max in
       if Layout.display_width label <= Grid.due_cells then label else Layout.compact_count wake_peak }
 
 let selected_summary ~now ~activity_cell ~next_run ~recurrence ~memory row =

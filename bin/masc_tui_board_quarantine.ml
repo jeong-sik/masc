@@ -44,21 +44,23 @@ type tone =
   | Warn
   | Bad
 
-let category_words : Candidate.quarantine_failure_category -> string = function
+let category_words ~ko : Candidate.quarantine_failure_category -> string =
+  let say korean english = if ko then korean else english in
+  function
   | Candidate.Exact_execution_interrupted ->
-    "a restart cut the judgment call (a requeue sends it again)"
+    say "재시작이 판정 호출을 끊음 (다시 넣으면 다시 보냄)" "a restart cut the judgment call (a requeue sends it again)"
   | Candidate.Exact_execution_quarantined ->
-    "the call step could not be recorded (the call may already have gone out)"
-  | Candidate.Exact_lane_exhausted -> "every judgment model failed or is unavailable"
-  | Candidate.Exact_flow_bookkeeping_failed -> "judgment flow could not record its run"
-  | Candidate.Exact_completion_failed -> "judgment arrived but could not be saved"
-  | Candidate.Candidate_membership_conflict -> "candidate belongs to another partition"
-  | Candidate.Durable_partition_invariant -> "partition ledger contradicts itself"
-  | Candidate.Exact_setup_unavailable -> "judgment lane could not be set up"
-  | Candidate.Exact_flow_replayed -> "judgment was replayed"
-  | Candidate.Domain_output_invalid -> "judge answered in a shape it may not"
-  | Candidate.Execution_provenance_mismatch -> "answer came from a different call"
-  | Candidate.Unexpected_worker_failure -> "worker failed unexpectedly"
+    say "호출 단계를 기록하지 못함 (호출은 이미 나갔을 수 있음)" "the call step could not be recorded (the call may already have gone out)"
+  | Candidate.Exact_lane_exhausted -> say "판정 모델이 모두 실패했거나 쓸 수 없음" "every judgment model failed or is unavailable"
+  | Candidate.Exact_flow_bookkeeping_failed -> say "판정 흐름이 실행을 기록하지 못함" "judgment flow could not record its run"
+  | Candidate.Exact_completion_failed -> say "판정은 왔지만 저장하지 못함" "judgment arrived but could not be saved"
+  | Candidate.Candidate_membership_conflict -> say "후보가 다른 partition 에 속함" "candidate belongs to another partition"
+  | Candidate.Durable_partition_invariant -> say "partition ledger 가 스스로 어긋남" "partition ledger contradicts itself"
+  | Candidate.Exact_setup_unavailable -> say "판정 lane 을 준비하지 못함" "judgment lane could not be set up"
+  | Candidate.Exact_flow_replayed -> say "판정이 다시 재생됨" "judgment was replayed"
+  | Candidate.Domain_output_invalid -> say "판정 답의 형식이 허용되지 않음" "judge answered in a shape it may not"
+  | Candidate.Execution_provenance_mismatch -> say "답이 다른 호출에서 옴" "answer came from a different call"
+  | Candidate.Unexpected_worker_failure -> say "worker 가 예기치 않게 실패" "worker failed unexpectedly"
 ;;
 
 (* An unfinished requeue still waits: Q sends the same request, and the server
@@ -211,12 +213,13 @@ let by_category (oldest_first : Command.inventory_item list) =
     oldest_first
 ;;
 
-let lines ~now fetched ~keeper_name =
+let lines ~ko ~now fetched ~keeper_name =
+  let say korean english = if ko then korean else english in
   match Masc_tui_fetched.view_for ~equal:String.equal fetched ~key:keeper_name with
-  | Masc_tui_fetched.Absent -> [ Dim, "not read yet" ]
-  | Masc_tui_fetched.Loading -> [ Dim, "reading\xe2\x80\xa6" ]
+  | Masc_tui_fetched.Absent -> [ Dim, say "읽기 전" "not read yet" ]
+  | Masc_tui_fetched.Loading -> [ Dim, say "읽는 중\xe2\x80\xa6" "reading\xe2\x80\xa6" ]
   | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
-    [ Bad, "could not read: " ^ Terminal_text.single_line detail ]
+    [ Bad, say "읽지 못함: " "could not read: " ^ Terminal_text.single_line detail ]
   | Masc_tui_fetched.Ready quarantines ->
     let waiting_items = waiting quarantines in
     let unreconciled_items =
@@ -227,12 +230,13 @@ let lines ~now fetched ~keeper_name =
     in
     let summary =
       match waiting_items, unreconciled_items with
-      | [], [] -> [ Dim, "nothing blocked" ]
+      | [], [] -> [ Dim, say "막힌 것 없음" "nothing blocked" ]
       | [], _ :: _ -> []
       | _ :: _, _ ->
         [ ( Warn
           , Printf.sprintf
-              "%d blocked, waiting for an operator \xc2\xb7 Q oldest \xc2\xb7 B all"
+              (if ko then "%d건 막힘, 운영자 대기 \xc2\xb7 Q 가장 오래된 것 \xc2\xb7 B 전부"
+               else "%d blocked, waiting for an operator \xc2\xb7 Q oldest \xc2\xb7 B all")
               (List.length waiting_items) )
         ]
     in
@@ -256,12 +260,18 @@ let lines ~now fetched ~keeper_name =
              in
              let asked_words =
                if asked = 0 then ""
-               else Printf.sprintf " \xc2\xb7 %d requeue asked, not finished" asked
+               else
+                 Printf.sprintf
+                   (if ko then " \xc2\xb7 다시 넣기 요청 %d건 미완료"
+                    else " \xc2\xb7 %d requeue asked, not finished")
+                   asked
              in
              ( Plain
-             , Printf.sprintf "%d \xc2\xb7 %s \xc2\xb7 oldest %s ago \xc2\xb7 %s%s"
+             , Printf.sprintf
+                 (if ko then "%d건 \xc2\xb7 %s \xc2\xb7 가장 오래된 것 %s 전 \xc2\xb7 %s%s"
+                  else "%d \xc2\xb7 %s \xc2\xb7 oldest %s ago \xc2\xb7 %s%s")
                  (List.length members)
-                 (category_words oldest.Command.failure_category)
+                 (category_words ~ko oldest.Command.failure_category)
                  age
                  (Terminal_text.single_line oldest.Command.partition_id)
                  asked_words ))
@@ -275,14 +285,16 @@ let lines ~now fetched ~keeper_name =
            (items quarantines))
     in
     let requeued_lines =
-      (if requeued = 0 then [] else [ Dim, Printf.sprintf "%d requeued" requeued ])
+      (if requeued = 0 then []
+       else [ Dim, Printf.sprintf (if ko then "다시 넣음 %d건" else "%d requeued") requeued ])
       @
       match unreconciled_items with
       | [] -> []
       | oldest :: _ ->
         [ ( Bad
           , Printf.sprintf
-              "%d requeue(s) the partition ledger does not confirm \xc2\xb7 oldest %s"
+              (if ko then "partition ledger 가 확인하지 않는 다시 넣기 %d건 \xc2\xb7 가장 오래된 것 %s"
+               else "%d requeue(s) the partition ledger does not confirm \xc2\xb7 oldest %s")
               (List.length unreconciled_items)
               (Terminal_text.single_line oldest.Command.partition_id) )
         ]
@@ -293,7 +305,8 @@ let lines ~now fetched ~keeper_name =
       | [] -> []
       | first :: _ ->
         [ ( Bad
-          , Printf.sprintf "%d row(s) this TUI cannot read: %s"
+          , Printf.sprintf
+              (if ko then "이 TUI 가 못 읽는 줄 %d개: %s" else "%d row(s) this TUI cannot read: %s")
               (List.length unreadable)
               (Terminal_text.single_line first) )
         ]
@@ -304,9 +317,13 @@ let lines ~now fetched ~keeper_name =
            let keeper = Terminal_text.single_line error.Command.keeper_name in
            match error.Command.kind with
            | Command.Inventory_candidate_ledger_unavailable ->
-             Bad, "candidate ledger unreadable for " ^ keeper
+             ( Bad
+             , if ko then keeper ^ " 의 candidate ledger 를 읽지 못함"
+               else "candidate ledger unreadable for " ^ keeper )
            | Command.Inventory_partition_ledger_unavailable ->
-             Bad, "partition ledger unreadable for " ^ keeper)
+             ( Bad
+             , if ko then keeper ^ " 의 partition ledger 를 읽지 못함"
+               else "partition ledger unreadable for " ^ keeper ))
         quarantines.errors
     in
     summary @ group_lines @ requeued_lines @ unreadable_lines @ ledger_lines

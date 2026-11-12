@@ -59,7 +59,7 @@ let glyph proof =
 
 let legend = List.map entry kinds
 
-let legend_rows ?(ko = false) ~max_cells ~max_rows proofs =
+let legend_rows ~ko ~max_cells ~max_rows proofs =
   let label = if ko then "  판정  " else "  JUDGE  " in
   let label_cells = Masc_tui_message_layout.display_width label in
   if max_cells <= label_cells || max_rows <= 0 then []

@@ -4,7 +4,7 @@ type cause =
   | Memory_attention of {
       keeper : string;
       durable : Keeper_librarian_pending.t option;
-      admission : Keeper_librarian_pending.worker option;
+      admission : Keeper_librarian_pending.admission option;
       measured_at : float option;
     }
   | Shutdown_fenced_backlog of {
@@ -20,7 +20,7 @@ val other : component:string -> reason:string -> t
 val diagnostic : t -> string
 val memory_attention :
   keeper:string -> durable:Keeper_librarian_pending.t option ->
-  admission:Keeper_librarian_pending.worker option -> measured_at:float option -> t
+  admission:Keeper_librarian_pending.admission option -> measured_at:float option -> t
 val shutdown_fenced_backlog : count:int -> keepers:(string * int) list option -> complete:bool -> t
 val queue_keepers : count:int -> Yojson.Safe.t -> (string * int) list option
 (** [None] if identities/counts are missing, duplicate or do not add up.

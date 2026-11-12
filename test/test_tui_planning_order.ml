@@ -218,7 +218,7 @@ let test_narrow_planning_rollup_and_clause_packing () =
   in
   let change_rows =
     Masc_tui_render_prim.pack_planning_summary_rows ~cols
-      (Masc_tui_render_prim.planning_change_clauses ~baseline:(Some snapshot) snapshot)
+      (Masc_tui_render_prim.planning_change_clauses ~ko:false ~baseline:(Some snapshot) snapshot)
   in
   let assert_packed_rows label rows =
     check bool (label ^ " produces multiple wrapped rows at 80 cols") true

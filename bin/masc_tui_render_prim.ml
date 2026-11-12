@@ -443,8 +443,12 @@ let voice_meter_text (state : state) =
 
 ;;
 
-let composer_prompt_text ?(voice = "") composer =
-  Printf.sprintf " %s %s%s " "\xe2\x80\xba" voice (Composer.prompt composer)
+(* The fewest cells between what the composer row says and the key at its
+   right end. *)
+let composer_hint_gap_cells = 2
+
+let composer_prompt_text ?(voice = "") ~ko composer =
+  Printf.sprintf " %s %s%s " "\xe2\x80\xba" voice (Composer.prompt ~ko composer)
 
 
 (* Unfocused the row is dim and says which key opens it; focused it is drawn in
@@ -471,14 +475,24 @@ let awaiting_approval_notice (state : state) =
             | Memory | Schedules | Verification | Harness | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs ->
-                "  (2 then m to answer)"
+                (* The keys are read from the key table: this line went on
+                   saying [2 then m] after Keepers moved to [3] and the chat
+                   to [c]. *)
+                let screen = Masc_tui_keys.keepers_jump.Masc_tui_keys.key
+                and chat = Masc_tui_keys.keeper_chat_key in
+                ui_text state
+                  ~ko:(Printf.sprintf "  (%s 다음 %s 에서 답하기)" screen chat)
+                  ~en:(Printf.sprintf "  (%s then %s to answer)" screen chat)
+          in
+          let keeper =
+            Terminal_text.single_line (Masc_tui_types.turn_log_keeper_name live)
+          and tool =
+            Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name
           in
           Some
-            (Printf.sprintf "  %s is holding %s%s"
-               (Terminal_text.single_line
-                  (Masc_tui_types.turn_log_keeper_name live))
-               (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
-               where))
+            (ui_text state
+               ~ko:(Printf.sprintf "  %s · %s 호출이 답을 기다림%s" keeper tool where)
+               ~en:(Printf.sprintf "  %s is holding %s%s" keeper tool where)))
 
 ;;
 
@@ -656,7 +670,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
      is made of. *)
   let door_answers = Option.value help_door
       ~default:(help_key_answers ~compact_viewport:false state) in
-  let help_hint = ui_text state ~ko:"?:도움말" ~en:Masc_tui_footer.help_hint_item in
+  let help_hint = Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko) in
   let hints =
     if not state.hints_visible then
       if door_answers then help_hint else ""
@@ -853,11 +867,16 @@ let slash_hint_text ~restore draft =
 (* One synchronous frame owns the recipient, prompt and fitted draft used by
    both its row and caret. Nothing survives to the next frame or key handler. *)
 let composer_row state ~rows ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let focus_hint word = Composer.focus_key ^ ":" ^ word in
   if state.view = Overview && not state.composer_focused then
-    let note=match Composer.reading_note (Composer_projection.source_reading state) with
-      | None -> "Choose a Keeper before writing"
+    let note=match Composer.reading_note ~ko (Composer_projection.source_reading state) with
+      | None ->
+          ui_text state ~ko:"쓰기 전에 키퍼를 고르세요"
+            ~en:"Choose a Keeper before writing"
       | Some note -> Terminal_text.single_line note in
-    (Theme.recede () ^ fit_width (" " ^ note ^ " · i:choose") cols ^ Ansi.reset,
+    let choose = focus_hint (ui_text state ~ko:"고르기" ~en:"choose") in
+    (Theme.recede () ^ fit_width (" " ^ note ^ " · " ^ choose) cols ^ Ansi.reset,
      Frame_presenter.Hidden)
   else match browser_lane_on_screen state with
   (* The page reader owns the keys here, so there is no composer to draw. The
@@ -867,7 +886,7 @@ let composer_row state ~rows ~cols =
   | Some _ -> (Theme.recede () ^ fit_width "" cols ^ Ansi.reset, Frame_presenter.Hidden)
   | None ->
   let composer = Composer_projection.of_state state in
-  let prompt = composer_prompt_text ~voice:(voice_meter_text state) composer in
+  let prompt = composer_prompt_text ~voice:(voice_meter_text state) ~ko composer in
   (* The caret uses exactly the prompt the row draws, including the voice
      meter, and exactly the escaped, grapheme-aligned draft window below. *)
   let prompt_cells = Message_layout.display_width prompt in
@@ -895,7 +914,7 @@ let composer_row state ~rows ~cols =
        sheet ([Masc_tui_keys], "…?"). *)
     | Composer.Focused, _ -> ""
     | Composer.Unfocused, Composer.Ready _ ->
-        Printf.sprintf "  (%s to write)" Composer.focus_key
+        focus_hint (ui_text state ~ko:"쓰기" ~en:"write")
     | Composer.Unfocused, (Composer.No_target | Composer.Unreachable _) -> ""
   in
   (* A slash command sent from this row runs as it does from the chat pane,
@@ -910,13 +929,27 @@ let composer_row state ~rows ~cols =
   in
   let body =
     match String.equal draft "", slash_hint with
-    | true, _ -> prompt ^ hint
+    | true, _ -> prompt
     | false, None -> prompt ^ draft
     | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
-  let body=match Composer.reading_note composer.Composer.reading with
+  let body=match Composer.reading_note ~ko composer.Composer.reading with
     | None -> body
     | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
+  (* The key that opens the row sits at the right end, one cell in from the
+     edge as the prompt is one cell in from the left. After the recipient it
+     moved with the length of every name the cursor passed. It is drawn only
+     beside an empty draft, and gives way whole when the row is too narrow
+     for the recipient, its note and the key. *)
+  let body =
+    let hint_cells = Message_layout.display_width hint in
+    let edge_cells = 1 in
+    let body_cells = cols - hint_cells - edge_cells in
+    if String.equal hint "" || not (String.equal draft "")
+       || Message_layout.display_width body + composer_hint_gap_cells > body_cells
+    then fit_width body cols
+    else fit_width body body_cells ^ hint ^ String.make edge_cells ' '
+  in
   (* A held tool call is drawn on whatever surface the operator is looking at.
      Its prompt lives in the chat pane, and a turn holding a call is denied
      when the wait runs out -- so an operator reading the Board would lose the
@@ -1573,6 +1606,7 @@ let acting_pane_input (state : state) =
   ; changes
   ; call_order = state.acting_pane_call_order
   ; expanded = state.acting_pane_expanded
+  ; ko = state.ui_language = Lang_ko
   }, source)
 
 
@@ -2148,15 +2182,58 @@ let here_path (state : state) ~path =
   screen_title (" " ^ here_screen_name state)
   ^ String.concat "" (List.map step path)
 
-let here_row ~cols (state : state) ~path ~readings ~position =
-  let lead, id =
-    match List.rev path with
-    | [] -> here_path state ~path:[], ""
-    | last :: before ->
-        ( here_path state ~path:(List.rev before)
-          ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
-          last )
+(* The steps ahead of the last one, in the cells the row has for them. A
+   step the row cannot hold whole is folded in the middle, the longest first
+   and none below [heading_id_floor], so a long keeper name or lane label
+   keeps both its ends and the step after it stays on the row. Without this
+   the lead was cut at its end: the name lost its tail and the last step --
+   which view of that keeper this is -- went with it. A step that carries a
+   style of its own is left as given. *)
+let fit_here_steps ~cells:room steps =
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  let foldable step =
+    (not (String.contains step '\027')) && cells step > heading_id_floor
   in
+  let rec shrink steps over =
+    let longest =
+      List.fold_left
+        (fun widest step -> if foldable step then max widest (cells step) else widest)
+        0 steps
+    in
+    if over <= 0 || longest = 0 then steps
+    else
+      let cut = min over (longest - heading_id_floor) in
+      let rec fold_first = function
+        | [] -> []
+        | step :: rest when foldable step && cells step = longest ->
+            Message_layout.truncate_middle (longest - cut) step :: rest
+        | step :: rest -> step :: fold_first rest
+      in
+      shrink (fold_first steps) (over - cut)
+  in
+  shrink steps (List.fold_left (fun sum step -> sum + cells step) 0 steps - room)
+
+(* A count and what it counts, in the screen's language. *)
+let count_reading (state : state) noun count =
+  Masc_tui_value.Count.reading ~ko:(state.ui_language = Lang_ko) noun count
+
+(* The cells the steps of a path share on a row [cols] wide: what the screen
+   name, one separator a step, and the [after] cells the row must keep leave. *)
+let here_steps_room ~cols (state : state) ~steps ~after =
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  framed_inner_width cols
+  - cells (here_path state ~path:[])
+  - (steps * cells here_step_separator)
+  - after
+
+let here_row ~cols (state : state) ~path ~readings ~position =
+  (* Every step is text to read, and a step may be a string the server sent:
+     a keeper name, a run id, a lane label. The last one becomes the title's
+     id, which the title makes printable; the steps ahead of it reach the row
+     as given. Left to each caller, the keeper calls row forgot one. A step
+     that needs a style of its own is drawn with [here_path], by a caller
+     that lays out its own row. *)
+  let path = List.map Terminal_text.single_line path in
   let position =
     Option.map
       (fun position ->
@@ -2176,6 +2253,36 @@ let here_row ~cols (state : state) ~path ~readings ~position =
     | None -> 0
   in
   let left_cols = cols - position_cells in
+  (* Reads come and go with every refresh, and a row that changed with them
+     would never sit still. Each screen says what it is still reading in its
+     own body; the row speaks up only for what went wrong. *)
+  let tail =
+    match reading_connection_notice state with
+    | None -> ""
+    | Some _ ->
+        surface_connection_badge state
+          ~width:(max 0 (framed_inner_width left_cols - 2))
+  in
+  let lead, id =
+    match List.rev path with
+    | [] -> here_path state ~path:[], ""
+    | last :: before ->
+        let before = List.rev before in
+        (* The last step keeps its floor and the tail its cells, gap
+           included; the steps ahead of them share the rest. Counted without
+           the tail's gap, the steps took two cells too many and the last
+           step was cut to its mark: "logs" drew as an ellipsis. *)
+        let room =
+          here_steps_room ~cols:left_cols state
+            ~steps:(List.length before + 1)
+            ~after:
+              (min (cells last) heading_id_floor
+               + cells (heading_tail_gap ^ tail))
+        in
+        ( here_path state ~path:(fit_here_steps ~cells:room before)
+          ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
+          last )
+  in
   let left =
     detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
       ~after:
@@ -2184,16 +2291,7 @@ let here_row ~cols (state : state) ~path ~readings ~position =
         (List.filter (fun reading -> reading <> "") readings
          |> List.mapi (fun index reading ->
                 (if index = 0 then "  " else reading_separator) ^ reading))
-      ~tail:
-        (* Reads come and go with every refresh, and a row that changed with
-           them would never sit still. Each screen says what it is still
-           reading in its own body; the row speaks up only for what went
-           wrong. *)
-        (match reading_connection_notice state with
-         | None -> ""
-         | Some _ ->
-             surface_connection_badge state
-               ~width:(max 0 (framed_inner_width left_cols - 2)))
+      ~tail
   in
   match position with
   | None -> left
@@ -2205,13 +2303,9 @@ let here_row ~cols (state : state) ~path ~readings ~position =
           ' '
       ^ position
 
-(* What the headings laid out by [detail_heading] draw before the id: a lane
-   run, a measurement artifact named by its sha256, a Fusion run (whose list
-   and launch form carry the same title), one runtime's detail, and one
-   keeper's calls. *)
-(* The step the Runtime screens take from System. *)
+(* The step the Runtime screens take from System, and a keeper's runtime
+   takes from that keeper. *)
 let runtime_step (state : state) = ui_text state ~ko:"런타임" ~en:"runtime"
-let keeper_calls_lead = " Keepers \xe2\x96\xb8 "
 
 (* The coordinator's badge beside a reading of the surface's own. The badge
    brings its colour and its reset, so a style laid over the whole row painted
@@ -2282,17 +2376,18 @@ let keeper_action_color
 
 (* Preserve what was actually observed: a runtime that names no action is not
    evidence that nothing needs doing, and an unread roster is not absence. *)
-let keeper_suggested_action reading =
+let keeper_suggested_action ~ko reading =
+  let say korean english = if ko then korean else english in
   match reading.Keeper_control.liveness with
-  | Keeper_control.Unobserved -> "not observed"
-  | Keeper_control.Invalid _ -> "read error"
-  | Keeper_control.Absent -> "unavailable"
+  | Keeper_control.Unobserved -> say "미관측" "not observed"
+  | Keeper_control.Invalid _ -> say "읽기 오류" "read error"
+  | Keeper_control.Absent -> say "해당 없음" "unavailable"
   | Keeper_control.Present runtime ->
       match runtime.kr_next_action with
-      | None -> "not reported"
-      | Some Status.Recover -> "recover"
-      | Some Status.Probe -> "probe"
-      | Some Status.Direct_message -> "direct message"
+      | None -> say "보고 없음" "not reported"
+      | Some Status.Recover -> say "복구" "recover"
+      | Some Status.Probe -> say "점검" "probe"
+      | Some Status.Direct_message -> say "직접 메시지" "direct message"
 
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
@@ -2341,7 +2436,9 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
       (fun keeper ->
         let indent = if inner >= 3 then "  " else "" in
         Message_layout.wrap_words ~max_cells:(max 1 (inner - String.length indent))
-          ("Selected next: " ^ keeper_suggested_action (keeper_reading state keeper))
+          (ui_text state ~ko:"고른 Keeper 의 다음: " ~en:"Selected next: "
+           ^ keeper_suggested_action ~ko:(state.ui_language = Lang_ko)
+               (keeper_reading state keeper))
         |> List.map (fun line -> "", indent ^ line))
       selected
   in
@@ -2827,7 +2924,7 @@ let question_hints (state : state) =
              | Some _ -> Ask_selected
              | None -> Asks_unselected)
       in
-      footer_hints_approvals
+      footer_hints_approvals ~lang:state.ui_language
         (Approval_browsing
            { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
            ; asks
@@ -2836,10 +2933,10 @@ let question_hints (state : state) =
            })
   | Ask_answering _ ->
       (match state.ask_text_entry with
-       | Some _ -> footer_hints_approvals Approval_writing
+       | Some _ -> footer_hints_approvals ~lang:state.ui_language Approval_writing
        | None ->
            if Masc_tui_types.ask_submit_is_armed state then
-             footer_hints_approvals Approval_armed
+             footer_hints_approvals ~lang:state.ui_language Approval_armed
            else
              let question = selected_ask_question state in
              let has_choices =
@@ -2849,7 +2946,7 @@ let question_hints (state : state) =
                | None -> false
              in
              let takes_text = Option.is_some question in
-             footer_hints_approvals
+             footer_hints_approvals ~lang:state.ui_language
                (Approval_answering { has_choices; takes_text }))
 
 let draw_ask_origin buf cols (state : state) =
@@ -3200,7 +3297,7 @@ let planning_backlog_clauses (backlog : planning_backlog) =
        else item)
     (List.combine items bands)
 
-let planning_change_clauses ?(ko = false) ~(baseline : planning_snapshot option)
+let planning_change_clauses ~ko ~(baseline : planning_snapshot option)
     (current : planning_snapshot) =
   match baseline with
   | None -> [ if ko then "첫 성공 스냅샷 대기" else "Change: waiting for the first successful snapshot" ]
@@ -3379,6 +3476,19 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   let available =
     match reading with None -> [] | Some r -> Keeper_control.available r
   in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  (* The English word is the one the notices about the action use. *)
+  let action_word action =
+    let english = Keeper_control.action_label action in
+    match action with
+    | Keeper_control.Pause -> say "일시 정지" english
+    | Keeper_control.Resume -> say "재개" english
+    | Keeper_control.Boot -> say "올리기" english
+    | Keeper_control.Shutdown -> say "내리기" english
+    | Keeper_control.Wakeup -> say "깨우기" english
+    | Keeper_control.Delete -> say "삭제" english
+  in
   (* An action that ends a fiber is toned apart from the reversible ones, so the
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =
@@ -3394,8 +3504,10 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   in
   let toggle =
     match Option.bind reading Keeper_control.primary with
-    | Some action -> hint action (Keeper_control.action_label action)
-    | None -> Printf.sprintf "%sp:pause%s" Ansi.dim Ansi.reset
+    | Some action -> hint action (action_word action)
+    | None ->
+        Printf.sprintf "%sp:%s%s" Ansi.dim (action_word Keeper_control.Pause)
+          Ansi.reset
   in
   let gate_hint =
     match reading with
@@ -3422,8 +3534,8 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      remote_ssh backend, and the row beside it still said "s:shutdown". *)
   let view_and_order =
     if state.view = Keepers Keeper_list then
-      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":view"
-      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":order"
+      [ "v", (Theme.accent ()) ^ "v" ^ Ansi.reset ^ ":" ^ say "보기" "view"
+      ; "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":" ^ say "정렬" "order"
       ]
     else []
   in
@@ -3438,77 +3550,98 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
   let way =
     if offers_back then
-      [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset ]
+      [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ say "뒤로" "back" ^ Ansi.reset ]
     else
       let esc =
         "Esc",
-        "Esc:" ^ Ansi.dim ^ (match story with None -> "dashboard" | Some _ -> "close") ^ Ansi.reset
+        "Esc:" ^ Ansi.dim
+        ^ (match story with
+           | None -> say "뒤로" "dashboard"
+           | Some _ -> say "닫기" "close")
+        ^ Ansi.reset
       in
       (* A heading opens no Keeper; its arrows fold the group under it. On a
          Keeper, Enter and Right are one item so that the pinned Enter keeps
          Right on the row too: they were one item while both opened the
          detail, and Right alone would be the first key a narrow row loses
          after [r]. The labels follow the keys in order. *)
-      if keeper_list_on_heading state then [ "Left / Right", accent "Left / Right" ^ ":fold"; esc ]
+      if keeper_list_on_heading state then
+        [ "Left / Right", accent "Left / Right" ^ ":" ^ say "접기 / 펴기" "fold"; esc ]
       else if state.view = Keepers Keeper_list
               && keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
-        ["Enter", accent "Enter" ^ (match story with None -> ":world" | Some _ -> ":close"); esc]
+        [ "Enter",
+          accent "Enter" ^ ":"
+          ^ (match story with None -> say "World" "world" | Some _ -> say "닫기" "close")
+        ; esc
+        ]
       else
         let enter =
           match story with
-          | None -> "story"
-          | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) -> "close"
-          | Some Masc_tui_keeper_story.Schedule -> "story"
-          | Some Masc_tui_keeper_story.Memory -> "browse"
+          | None -> say "Story" "story"
+          | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) ->
+              say "닫기" "close"
+          | Some Masc_tui_keeper_story.Schedule -> say "Story" "story"
+          | Some Masc_tui_keeper_story.Memory -> say "기억 열기" "browse"
         in
-        [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
+        [ "Enter / Right",
+          accent "Enter / Right" ^ ":" ^ enter ^ " / " ^ say "상세" "detail"
+        ; esc
+        ]
   in
   let story_hints =
     match story with
     | None -> []
     | Some Masc_tui_keeper_story.World -> []
     | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) ->
-        [ accent "Tab" ^ ":page"; accent "s" ^ ":schedules"; accent "m" ^ ":memory" ]
+        [ accent "Tab" ^ ":" ^ say "쪽" "page"
+        ; accent "s" ^ ":" ^ say "일정" "schedules"
+        ; accent "m" ^ ":" ^ say "기억" "memory"
+        ]
   in
   (* [s] shuts a Keeper down only while the window is closed. *)
   let taken = match story with None -> taken | Some _ -> "s" :: taken in
   let items =
       view_and_order
-      @ [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
+      @ [ "j/k", Ansi.dim ^ "j/k:" ^ say "선택" "move" ^ Ansi.reset
           ; toggle_key, toggle
-          ; Keeper_control.action_key Keeper_control.Wakeup, hint Keeper_control.Wakeup "wake"
+          ; Keeper_control.action_key Keeper_control.Wakeup,
+            hint Keeper_control.Wakeup (action_word Keeper_control.Wakeup)
           (* RFC tui-server-lifecycle: with no server up, "s" starts one
              rather than shutting a keeper down, so the hint follows suit. *)
           ; "s", (match state.connection_status with
-             | Disconnected -> (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":start server"
+             | Disconnected ->
+                 (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":"
+                 ^ say "서버 시작" "start server"
              | Connecting | Booting | Degraded | Connected ->
-                 hint Keeper_control.Shutdown "shutdown")
+                 hint Keeper_control.Shutdown (action_word Keeper_control.Shutdown))
             (* Delete is the only action a keeper whose configuration failed to
                read still offers, and [primary] deliberately withholds it from
                the toggle. Without its own hint the footer showed that keeper a
                dimmed "p pause" and nothing else, so the one key that worked was
                the one key nothing named. *)
-          ; Keeper_control.action_key Keeper_control.Delete, hint Keeper_control.Delete "delete"
-          ; "e", (Theme.accent ()) ^ "e" ^ Ansi.reset ^ ":settings"
-          ; "a", (Theme.accent ()) ^ "a" ^ Ansi.reset ^ ":new"
+          ; Keeper_control.action_key Keeper_control.Delete,
+            hint Keeper_control.Delete (action_word Keeper_control.Delete)
+          ; "e", (Theme.accent ()) ^ "e" ^ Ansi.reset ^ ":" ^ say "설정" "settings"
+          ; "a", (Theme.accent ()) ^ "a" ^ Ansi.reset ^ ":" ^ say "새 키퍼" "new"
           ; (if state.view = Keepers Keeper_detail then
-               "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":logs"
-             else "l", (Theme.accent ()) ^ "l" ^ Ansi.reset ^ ":logs")
-          ; "t", (Theme.accent ()) ^ "t" ^ Ansi.reset ^ ":calls"
+               "o", (Theme.accent ()) ^ "o" ^ Ansi.reset ^ ":" ^ say "로그" "logs"
+             else "l", (Theme.accent ()) ^ "l" ^ Ansi.reset ^ ":" ^ say "로그" "logs")
+          ; "t", (Theme.accent ()) ^ "t" ^ Ansi.reset ^ ":" ^ say "호출" "calls"
           ; "g", gate_hint
           ; (if state.view = Keepers Keeper_detail then "U" else "u"),
             (Theme.accent ())
             ^ (if state.view = Keepers Keeper_detail then "U" else "u")
-            ^ Ansi.reset ^ ":runtime"
+            ^ Ansi.reset ^ ":" ^ say "런타임" "runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
-          ; "c", (if offers_chat then (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":chat"
-             else Ansi.dim ^ "c:chat" ^ Ansi.reset)
+          ; "c", (if offers_chat then
+                    (Theme.accent ()) ^ "c" ^ Ansi.reset ^ ":" ^ say "채팅" "chat"
+                  else Ansi.dim ^ "c:" ^ say "채팅" "chat" ^ Ansi.reset)
           ]
       @ way
-      @ [ "r", Ansi.dim ^ "r:refresh" ^ Ansi.reset
-        ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
+      @ [ "r", Ansi.dim ^ "r:" ^ say "새로 조회" "refresh" ^ Ansi.reset
+        ; "q", "q:" ^ Ansi.dim ^ say "종료" "quit" ^ Ansi.reset
         ]
   in
   story_hints
@@ -4003,7 +4136,7 @@ let render_repository_changes_diff (state : state) ~path =
     ; ds_hscroll = state.repository_changes_diff_hscroll
     ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
     ; ds_esc_hint = "esc back to files"
-    ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff
+    ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff ~lang:state.ui_language
     ; ds_surface_key = "repository-changes-diff"
     ; ds_clamped = (fun scroll -> Repository_changes_diff_scroll scroll)
     }
@@ -4015,9 +4148,9 @@ let render_repository_changes_diff (state : state) ~path =
    provider-stated deadline; its absence means a hard-quota rejection that
    claimed no reset -- it rests until the fallback cap after it was noted,
    and the next success on the scope clears it sooner. *)
-let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
+let runtime_quota_badge ~ko (runtime : Masc.Tui_decode.runtime_option) =
   Option.map (fun label -> Theme.warn () ^ label ^ Ansi.reset)
-    (runtime_quota_label runtime)
+    (runtime_quota_label ~ko runtime)
 
 (* The other half of "alive on paper": this process saw a 429 on the runtime
    whose provider wait has not ended and no successful answer has cleared.

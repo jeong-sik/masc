@@ -1,9 +1,8 @@
-(** Dashboard Attention — Collect actionable items that require
-    operator intervention.
+(** Dashboard Attention — items an operator may want to look at.
 
     Pure functions. Scans {!Dashboard_labels.workspace_snapshot} values
-    to produce a sorted list of attention items. Each item carries a suggested
-    next step, often an MCP tool name.
+    and the operator task list to produce a sorted list of attention items.
+    Each item carries a suggested next step, often an MCP tool name.
 
     Keeper route observations arrive already projected in [operator_tasks].
     The projection uses the same registry and meta store as rejection delivery;
@@ -44,6 +43,8 @@ val detect_operator_tasks :
     once, with the number of items above it when the run has more than one. *)
 val format_items : attention_item list -> string list
 
-(** Compact single-line summary, e.g. ["[!] 2 critical, [~] 1 warning"].
-    Empty items list returns the empty string. *)
+(** Compact single-line summary, e.g.
+    ["4 items (2 critical, 1 warning, 1 info)"]. Every severity that has an
+    item is named, so the counts add up to the total. An empty list returns
+    ["No action needed"]. *)
 val compact_summary : attention_item list -> string

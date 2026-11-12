@@ -424,7 +424,7 @@ let memory_no_values =
   ; mrow_delta = ""
   }
 
-let memory_cells ?(ko = false) ?(state_style = "") ?(size_style = "") ?(delta_style = "")
+let memory_cells ~ko ?(state_style = "") ?(size_style = "") ?(delta_style = "")
     columns values =
   let revision =
     if columns.mcol_show_updated then
@@ -455,8 +455,14 @@ let memory_cells ?(ko = false) ?(state_style = "") ?(size_style = "") ?(delta_st
         ~width:memory_delta_width values.mrow_delta
     ]
 
+(* A row and a width sum build the same cells as the header row and read each
+   cell's width and value. Neither reads a header name, and no name changes a
+   width, so they build the cells in one fixed language. *)
+let memory_unnamed_cells ?state_style ?size_style ?delta_style columns values =
+  memory_cells ~ko:false ?state_style ?size_style ?delta_style columns values
+
 let memory_columns_used_width columns =
-  Table.used_width (memory_cells columns memory_no_values)
+  Table.used_width (memory_unnamed_cells columns memory_no_values)
 
 (* The source-bound reading answers "is anything pinned to a file", and the
    revision answers "how far has the snapshot moved". Neither is the question
@@ -502,12 +508,12 @@ let allocate_memory_columns ~inner_width =
     in
     { base with mcol_name = base.mcol_name + growth }
 
-let memory_header_row ?(ko = false) columns =
+let memory_header_row ~ko columns =
   Table.header_row (memory_cells ~ko columns memory_no_values)
 
 let memory_row ?state_style ?size_style ?delta_style ?close columns values =
   Table.row ?close
-    (memory_cells ?state_style ?size_style ?delta_style columns values)
+    (memory_unnamed_cells ?state_style ?size_style ?delta_style columns values)
 
 (* Workspace repository columns.
 
@@ -1918,7 +1924,7 @@ let planning_cell ~ko ~phase_style ~priority_style ~open_style ~phase_width
   | Planning_due ->
       Table.cell ~header:(if ko then "기한" else "DUE") ~width:planning_due_width values.prow_due
 
-let planning_cells ?(ko = false) ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
+let planning_cells ~ko ?(phase_style = "") ?(priority_style = "") ?(open_style = "")
     ~phase_width ~(layout : planning_column Table.layout) values =
   List.map
     (planning_cell ~ko ~phase_style ~priority_style ~open_style ~phase_width
@@ -1926,7 +1932,7 @@ let planning_cells ?(ko = false) ?(phase_style = "") ?(priority_style = "") ?(op
     layout.Table.shown
 
 let planning_header_row ~phase_width ~layout =
-  Table.header_row (planning_cells ~phase_width ~layout planning_no_values)
+  Table.header_row (planning_cells ~ko:false ~phase_width ~layout planning_no_values)
 
 let planning_header_row_korean ~phase_width ~layout =
   Table.header_row (planning_cells ~ko:true ~phase_width ~layout planning_no_values)
@@ -1934,7 +1940,7 @@ let planning_header_row_korean ~phase_width ~layout =
 let planning_row ?(priority_style = "") ?(open_style = "") ~phase_style
     ~phase_width ~layout values =
   Table.row
-    (planning_cells ~phase_style ~priority_style ~open_style ~phase_width
+    (planning_cells ~ko:false ~phase_style ~priority_style ~open_style ~phase_width
        ~layout values)
 
 (* Board post columns.
@@ -2251,16 +2257,19 @@ let classify_wake_reading ~history_error ~history =
 (* A schedule the runner holds back (#38205). Its status stays [due] and its
    last wake is still the previous occurrence's, so without this reading a
    held heartbeat looks like a late one. *)
-let schedule_hold_tag ~due = "held since " ^ due
+let schedule_hold_tag ~ko ~due = if ko then due ^ " 부터 보류" else "held since " ^ due
 
-let schedule_hold_reading ~due =
-  schedule_hold_tag ~due ^ ": the keeper has not taken the previous wake yet"
+let schedule_hold_reading ~ko ~due =
+  schedule_hold_tag ~ko ~due
+  ^ (if ko then ": Keeper 가 앞선 실행을 아직 받지 않음"
+     else ": the keeper has not taken the previous wake yet")
 
 (* #34642: a schedule held on its target's shutdown fence. *)
-let schedule_fence_hold_reading ~due ~target ~fence_owner =
+let schedule_fence_hold_reading ~ko ~due ~target ~fence_owner =
   Printf.sprintf
-    "%s: %s is shutting down (%s) and takes no wakes until that finishes"
-    (schedule_hold_tag ~due)
+    (if ko then "%s: %s 가 종료 중(%s)이라 끝날 때까지 실행을 받지 않음"
+     else "%s: %s is shutting down (%s) and takes no wakes until that finishes")
+    (schedule_hold_tag ~ko ~due)
     target
     fence_owner
 
@@ -2268,17 +2277,20 @@ let schedule_fence_hold_reading ~due ~target ~fence_owner =
    A tick that fails keeps the list without looking, so the hold is drawn at
    the time it was [checked], not as the present. The due column beside the
    row still says when the held occurrence came due. *)
-let schedule_hold_as_of_tag ~checked = "held as of " ^ checked
+let schedule_hold_as_of_tag ~ko ~checked =
+  if ko then checked ^ " 기준 보류" else "held as of " ^ checked
 
-let schedule_hold_as_of_reading ~checked =
-  schedule_hold_as_of_tag ~checked
-  ^ ": the keeper had not taken the previous wake by then"
+let schedule_hold_as_of_reading ~ko ~checked =
+  schedule_hold_as_of_tag ~ko ~checked
+  ^ (if ko then ": 그때까지 Keeper 가 앞선 실행을 받지 않았음"
+     else ": the keeper had not taken the previous wake by then")
 
 (* The fence hold drawn the same way, at the time it was [checked]: a failed
    tick does not re-read why it held either (#38411, #34642). *)
-let schedule_fence_hold_as_of_reading ~checked ~target ~fence_owner =
+let schedule_fence_hold_as_of_reading ~ko ~checked ~target ~fence_owner =
   Printf.sprintf
-    "%s: %s was shutting down (%s) and took no wakes until that finished"
-    (schedule_hold_as_of_tag ~checked)
+    (if ko then "%s: %s 가 종료 중(%s)이었고 끝날 때까지 실행을 받지 않았음"
+     else "%s: %s was shutting down (%s) and took no wakes until that finished")
+    (schedule_hold_as_of_tag ~ko ~checked)
     target
     fence_owner

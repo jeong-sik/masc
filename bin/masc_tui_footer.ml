@@ -398,6 +398,10 @@ let item_is_pinned item =
    and a wide row is the one that spells it out. *)
 let help_hint_item = "?:help"
 
+(* The same door in the screen's language. One spelling, so the chat rows,
+   the Overview's own line and the stamped item cannot name it two ways. *)
+let help_hint ~ko = if ko then "?:도움말" else help_hint_item
+
 let ensure_help_item hints =
   let already_names_help =
     split_on_double_space hints
@@ -897,20 +901,27 @@ let voice_bar_width = 16
    compact rows are drawn in both states. The caller, which can see the
    draft, decides; the minimal rows below always carry the item because the
    empty-draft state they are drawn for is the state where it answers. *)
-let chat_hints ~enter_hint ~scroll_hint ~switch_hint ~escape_hint ~leave_hint
-    ~help_hint =
+let chat_hints ~ko ~enter_hint ~scroll_hint ~switch_hint ~escape_hint
+    ~leave_hint ~help_hint =
+  let say korean english = if ko then korean else english in
   Printf.sprintf
-    "%s  Ctrl-J:newline  /:commands  %s%s  %s%s  Ctrl-R:reasoning  \
-     Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Ctrl-O:image/diagram  Ctrl-U:clear  Ctrl-W:word%s"
-    enter_hint escape_hint leave_hint scroll_hint switch_hint help_hint
+    "%s  Ctrl-J:%s  /:%s  %s%s  %s%s  Ctrl-R:%s  Ctrl-D:%s  Ctrl-N:%s  \
+     Ctrl-F:%s  Ctrl-O:%s  Ctrl-U:%s  Ctrl-W:%s%s"
+    enter_hint (say "줄바꿈" "newline") (say "명령" "commands") escape_hint
+    leave_hint scroll_hint switch_hint (say "추론" "reasoning")
+    (say "도구" "tools") (say "기록" "journal") (say "정보" "metadata")
+    (say "이미지/다이어그램" "image/diagram") (say "지우기" "clear")
+    (say "낱말" "word") help_hint
 
 (** Below 120 columns the fixed set drops to what leaves room for the message
     itself; {!line}'s fitting machinery trims from the tail beyond that. *)
-let compact_chat_hints ~enter_hint ~scroll_hint ~escape_hint ~help_hint =
+let compact_chat_hints ~ko ~enter_hint ~scroll_hint ~escape_hint ~help_hint =
+  let say korean english = if ko then korean else english in
   Printf.sprintf
-    "%s  Ctrl-J:NL  /:commands  %s  %s  Ctrl-R:reasoning  Ctrl-D:tools  \
-     Ctrl-N:journal  Ctrl-F:metadata%s"
-    enter_hint escape_hint scroll_hint help_hint
+    "%s  Ctrl-J:%s  /:%s  %s  %s  Ctrl-R:%s  Ctrl-D:%s  Ctrl-N:%s  Ctrl-F:%s%s"
+    enter_hint (say "줄바꿈" "NL") (say "명령" "commands") escape_hint
+    scroll_hint (say "추론" "reasoning") (say "도구" "tools")
+    (say "기록" "journal") (say "정보" "metadata") help_hint
 
 (* Keep discoverability whole before optional editing hints. This projection
    fits the framed inner row, so box_line never cuts a key label in half. *)
@@ -920,12 +931,16 @@ let fit_minimal_hints ~max_cells hints =
     if Masc_tui_message_layout.display_width candidate <= max_cells
     then candidate else shown) "" hints
 
-let minimal_chat_hints ~max_cells ~enter_hint ~escape_hint =
-  fit_minimal_hints ~max_cells
-    [ "/:commands"; help_hint_item; enter_hint; escape_hint
-    ; "Ctrl-J:newline" ]
+let chat_commands_hint ~ko = if ko then "/:명령" else "/:commands"
+let chat_newline_hint ~ko = if ko then "Ctrl-J:줄바꿈" else "Ctrl-J:newline"
 
-let minimal_context_chat_hints ~max_cells ~context_hints ~escape_hint =
+let minimal_chat_hints ~ko ~max_cells ~enter_hint ~escape_hint =
+  fit_minimal_hints ~max_cells
+    [ chat_commands_hint ~ko; help_hint ~ko; enter_hint; escape_hint
+    ; chat_newline_hint ~ko ]
+
+let minimal_context_chat_hints ~ko ~max_cells ~context_hints ~escape_hint =
   fit_minimal_hints ~max_cells
     (context_hints
-     @ [ "/:commands"; help_hint_item; escape_hint; "Ctrl-J:newline" ])
+     @ [ chat_commands_hint ~ko; help_hint ~ko; escape_hint
+       ; chat_newline_hint ~ko ])

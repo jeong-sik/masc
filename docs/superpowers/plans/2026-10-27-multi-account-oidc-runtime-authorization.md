@@ -253,7 +253,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - B3d 층(2026-11-05). 호스트 로컬 bootstrap은 `Fresh_bootstrap`(B2)을 부르는 CLI 하위 명령이다. 서버를 멈추고 돌리고 BasePath lease를 쥔다(2026-11-05 사용자 결정). 그래서 서버와도, 다른 bootstrap과도 동시에 돌지 않는다(B2d의 한계 참고). loopback 엔드포인트는 쓰지 않는다. 터널이 localhost로 들어와서 원격 요청과 구분할 수 없다. 외부 저장소의 위치(§6의 결정 2)는 B2 전에 정해지므로 이 층이 열릴 때 이미 있다. 서버에는 열어 줄 bootstrap 경로가 없다. 그래서 활성화 전 요청(§5.1 표 5행)에서 부팅은 계속 멈추고, 멈춤 문구가 CLI 명령을 가리킨다. 원격 경로와 실행을 열지 않는다는 5행과 맞는다.
   - B3d-0 시계(#48716). 구역이 두 잠금 안에서 시계를 읽어 레코드의 `at_ms`를 정한다. draft에는 `at_ms`가 없다. 시계는 구역을 열 때(`open_at_start ~now_ms`, `install ~now_ms`) 함수로 받는다. 잠금을 기다리기 전에 읽은 시각이 레코드에 들어가지 않는다. `Authz_state`는 읽은 레코드의 가장 늦은 `at_ms`를 들고, 그보다 이른 입장 레코드를 `Admission_behind_log`로 거절한다. 그래서 되감긴 시계는 로그의 마지막 기록 앞으로 시각을 돌려 그때 이미 만료된 초대를 쓰지 못한다. replay도 같은 접기라 같은 검사를 한다. 다른 종류는 시각으로 판정하지 않으므로 이 검사에 걸지 않는다. 앞서 간 시계가 쓴 레코드가 있어도 회수·비활성·`off`는 시계가 따라잡기를 기다리지 않는다. 입장은 기다린다. 실제 시계가 그 시각을 지날 때까지 모든 입장이 거절되고, 운영자가 풀 길은 없다. 마지막 기록 뒤의 되감김(만료 뒤 기록이 없는 동안)은 막지 못한다. 그 경우는 시계를 믿는 수밖에 없다. `Authz_bootstrap`의 요청도 시각 대신 시계를 받는다.
   - B3d-1 `masc auth bootstrap --external-store PATH`. BasePath lease를 쥔다(`Server_startup_takeover.acquire_base_path_lock`, 선례 `Released_workspace_upgrade.apply`). 서버가 떠 있으면 lease를 얻지 못해 아무것도 쓰지 않고 끝난다. 로직은 `Authz_activation`(lib)에 두고 시험한다. lease와 출력만 `bin/masc_cli_auth`가 한다. 쓰기 전에 부팅과 같은 판정(`Authz_boot_mode_read.input`·`decide`)을 돌리고, 5행일 때만 쓴다. 설정이 `Single_user`인 채로 `Fresh_bootstrap`을 쓰면 다음 부팅이 3행으로 멈추고, 이미 멈추는 줄에 쓰면 멈춤만 늘기 때문이다. 5행이 아니면 아무것도 쓰지 않고 이유를 나눠 말한다. 설정이 다계정을 묻지 않으면 `Not_asked`, `config.json`을 못 읽으면 그 이유를 단 `Config_unreadable`, 이미 켜진 설치(7행)면 `Already_active`, 나머지는 부팅이 찍는 문구 그대로인 `Boot_stops`다. 판정에 넣는 익명 쓰기 설정은 이 명령을 부른 셸의 환경 변수다. 서버는 자기 환경을 읽으므로, 다른 환경에서 띄운 서버와는 다를 수 있다. workspace id·invite id·token은 `Authz_activation`이 OS `getrandom`으로 뽑는다(`Random_id.hex`, §8.4 "새 workspace_id"). token은 32바이트의 hex 64자이고, 디스크에는 SHA-256 digest만 남는다(§5.1-4). token은 추상 타입 안에 있고 `Authz_activation.link`로만 꺼낸다. 외부 저장소 경로는 운영자가 정한다. 백업 범위를 masc가 알 수 없기 때문이다. `Fresh_bootstrap` 다음 같은 lease 안에서 구역을 열고 첫 Admin 초대를 `Local_operator`로 쓴다. 초대 만료는 24시간이다(§5.1-4가 계획에 맡긴 값). 링크 모양은 `<base url>/accounts/invite#<token>`이고, 화면(C6 ②)과 소비(C2a)가 이 경로(`Authz_activation.invitation_path`)를 쓴다. 링크는 한 번만 화면에 찍는다. base url은 `MASC_HTTP_BASE_URL`만 쓴다. Play 초대와 같은 검사(`Play_invite.is_http_public_base_url`)를 통과해야 한다. 셸의 `MASC_HOST`·`MASC_HTTP_PORT`로 만든 주소는 서버가 실제로 듣는 주소와 다를 수 있어서 쓰지 않는다. 이 값은 쓰기 전에 읽어서, 없거나 틀리면 아무것도 쓰지 않는다. 검사 자체는 `test_play_invite`가 본다. 거절 문구는 값을 찍지 않는다. 비밀번호가 든 URL일 수 있기 때문이다. 링크가 표준 출력에 닿지 못하면(flush 실패) 종료 코드 1로 알린다. bootstrap 뒤 초대 커밋이 실패하면 로그에는 bootstrap만 남고 초대는 B3d-2로 다시 쓴다. 이 명령이 성공한 설치를 서버는 다계정 설치로 띄운다(7행, S1a-1). 도움말과 성공 문구가 이 사실과 끄는 명령(`masc auth off`, F3a)을 말한다. §11의 readiness는 원격 다계정을 여는 부팅(S1)이 본다. 이 명령은 기록만 쓰고 서버를 열지 않는다. F5가 readiness를 만들면 §11-3에 따라 이 명령도 오래된 readiness에서 거부한다(F5 범위).
-  - B3d-2 `masc auth invite`. 서버가 멈춘 상태에서 `Local_operator`가 Admin 초대를 하나 더 쓴다. 첫 초대가 쓰이기 전에 만료되거나 링크를 잃었을 때 쓴다. 초대를 하나 더할 뿐 취소하지 않으므로, 잃어버린 링크도 쓰이거나 만료될 때까지 열려 있다. 초대 취소와 Member 초대는 C6 ③에서 Admin이 서버로 한다. 이 빌드에는 둘 다 없다. 부팅 판정이 `Multi_account`이고 외부 저장소가 로그와 맞을 때만 쓴다(§5.1 표 7행). 저장소 경로는 설치 기록에서 읽는다. lease, base url(`MASC_HTTP_BASE_URL`), 링크 출력은 B3d-1과 같다(`Authz_activation.invite`, `masc auth invite`).
+  - B3d-2 `masc auth invite`. 서버가 멈춘 상태에서 `Local_operator`가 Admin 초대를 하나 더 쓴다. 첫 초대가 쓰이기 전에 만료되거나 링크를 잃었을 때 쓴다. 초대를 하나 더할 뿐 취소하지 않으므로, 잃어버린 링크도 쓰이거나 만료될 때까지 열려 있다. 초대 취소와 Member 초대는 Admin이 서버로 한다(`Login_invite_routes`, 아래 S1a-3b 범위). 부팅 판정이 `Multi_account`이고 외부 저장소가 로그와 맞을 때만 쓴다(§5.1 표 7행). 저장소 경로는 설치 기록에서 읽는다. lease, base url(`MASC_HTTP_BASE_URL`), 링크 출력은 B3d-1과 같다(`Authz_activation.invite`, `masc auth invite`).
   - B3d-3 부팅 문구. 5행 거부의 이름은 판정이 내는 모드와 같은 `Activation_requested`다. 문구는 두 가지를 말한다. 서버를 멈춘 채 `masc auth bootstrap --external-store PATH`를 돌리면 활성화되고, 그 뒤 서버는 이 설치를 다계정 설치로 띄운다. `config.json`에서 `account_mode`를 빼면 단일 사용자로 뜬다. CLI도 이 문구를 찍는다. 거부는 S1 뒤에도 남는다. 5행에서 서버가 열 경로가 없기 때문이다.
   - B3d-3 지우고 설치(2026-11-08 사용자 결정, §6 결정 10). masc 프로세스를 모두 멈추고 세 가지를 지운다. `authz.jsonl`, 외부 저장소, 이 base path를 적은 설치 기록이다. 그리고 `config.json`에서 `account_mode`를 뺀다. 그러면 부팅은 이 base path를 활성화한 적 없는 설치와 가르지 못하고 1행대로 단일 사용자로 뜬다. 로그만 지우면 복원으로 보고 거부한다(2행). 로그와 외부 저장소만 지워도 1행이 되지만, 설치 기록까지 지워야 찌꺼기가 남지 않는다. 로그의 잠금 파일은 부팅이 다시 만드니 남아도 된다. 시험은 실제 `Fresh_bootstrap` 뒤 세 가지를 지우고 1행을 확인한다(`everything deleted`). 문구는 이 길을 안내하지 않는다. 로그를 지우면 계정이 가진 Runtime·Keeper 기록과 로그인 기록이 같이 지워지기 때문이다. 문구가 안내하는 끄는 길은 `masc auth off`다(F3a).
 - 삭제 사건(§4.1): `(iss, sub)`는 `authz.jsonl`의 사건에만 싣고 ledger의 `Delete` 기록에는 ID만 둔다.
@@ -747,6 +747,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 | S1b-1c | MCP 도구에 내 Keeper의 한 턴을 더한다. | §5.3 | S1b-1b |
 | S1b-1d | 실제 MCP client로 붙여 본 기록과 사용 안내를 남긴다. | §11.1 | S1b-1c |
 | S1b-2 | 사람에게 Board·WebSocket 경로를 연다. 누가 읽고 쓰는지는 설계 절을 먼저 써서 정한다. | §11.1 | S1b-1d, C4-11, C4-12, C6 |
+| S1b-3 | 사람의 Keeper 턴이 앞 대화를 이어받고, 묻고 답한 기록을 그 사람의 폴더에 남긴다. S1b-2보다 먼저 한다(2026-11-12 사용자). 세부는 표 아래 S1b-3 범위다. | §3-11, §4.3 | S1b-1c |
 
 - S1이 D4 뒤인 까닭: 계정 층 없이 다계정 설치를 서빙하면 여러 사람이 소유한 기록을 한 사용자처럼 서빙한다. 그 계정 층의 마지막이 D4다. D1이 소유권을, D2~D4가 실행 진입마다 인가를 검사하고, D3이 lane마다 다른 owner의 account-home을 읽지 못하는 증거를 남긴다. 그 전에 다계정 설치를 서빙하면 C4를 통과한 사용자가 다른 사람의 Runtime과 Keeper를 쓴다.
 - S1이 F3a 뒤인 까닭: S1부터 다계정 설치는 계정이 가진 Runtime·Keeper 기록을 쌓는다. 그때 "지우고 설치"는 그 기록을 지운다. 끄는 길 없이 켜는 길만 열면 실제 설치가 되돌릴 수 없이 다계정으로 넘어간다(§6 결정 10).
@@ -1126,14 +1127,17 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 화면은 GitHub 로그인만 시작한다. 서버에 GitHub client가 없으면 버튼이 눌리지 않고 화면이 그 사실을 말한다. 전에는 눌러서 404를 받았다.
   - Google 로그인은 경로만 있고 화면에 버튼이 없다. 화면의 CSP `form-action`에 Google 인가 주소의 origin이 들어가야 하는데, 그 주소는 discovery가 준다.
   - Admin 세션이면 화면에 allowlist 등록·삭제 칸이 보인다(`whoami`의 `role`이 `admin`일 때만. 판정은 서버가 한다). C6의 Admin 화면이 생기기 전에 일반 Member를 들이는 길이다(#51483). allowlist를 읽는 경로가 없어서 방금 등록한 id만 보이고, C6가 서면 이 칸을 지운다.
-  - 로그인 전에는 로그인 칸만, 로그인 뒤에는 구독·Keeper·PAT 칸만 보이고 목록 조회는 로그인 뒤에만 보낸다. 칸은 `<section>`과 제목으로 이어지고 동작 결과는 `role="status"`로 낭독된다. `Account`와 `Runtime`은 서버가 준 목록에서 고르고, PAT 만료는 날짜·시간 선택이다. 스타일은 CSP에 `style-src`가 없어서 없다.
-  - 제목은 `MASC accounts`다.
+  - Admin이 초대를 발급하고 취소하는 경로(C6 ③ 가운데 서버 쪽, #51483). `POST /api/v1/auth/invites`의 본문은 `{"role":"member"}`나 `{"role":"admin"}`이다. 답은 `{"invite_id","role","expires_at_ms","link"}`이다. `link`는 `/accounts/invite#<token>`이고 서버 주소가 없다. 부른 화면이 자기 origin을 앞에 붙인다. 서버는 자기 공개 주소를 추측하지 않는다. token은 이 답에만 있고 로그에는 digest만 남는다. 링크를 잃으면 취소하고 다시 발급한다. `DELETE /api/v1/auth/invites/<id>`는 열린 초대를 취소한다(204, 없는 id는 404, 취소됐거나 쓰인 초대는 409). 둘 다 브라우저 세션과 CSRF token으로 부르고, Admin인지는 상태가 판정한다(Admin이 아니면 403). 수명은 운영자의 초대와 같은 24시간이다. 기록 층(`Authz_invite_state`)은 처음부터 Admin의 두 역할 발급과 취소를 받았고, 이 층은 그 기록을 쓰는 서버 함수(`Authz_invite`)와 경로를 더한다. 열린 초대를 읽는 경로와 화면은 이 층에 없다.
+  - 로그인 전에는 로그인 칸만, 로그인 뒤에는 구독·Keeper·PAT 칸만 보이고 목록 조회는 로그인 뒤에만 보낸다. 칸은 `<section>`과 제목으로 이어지고 동작 결과는 `role="status"`로 낭독된다. `Account`와 `Runtime`은 서버가 준 목록에서 고르고, PAT 만료는 날짜·시간 선택이다. 화면은 stylesheet 하나를 답 안에 싣고, CSP는 그 답의 nonce만 `style-src`로 받는다(`Account_page`). nonce는 `style` 속성을 덮지 않으므로 화면은 `style` 속성을 쓰지 않는다.
+  - 로그인 전 화면(로그인, 초대)은 한국어다. 문서 제목은 `MASC 계정`과 `MASC 초대`다. 로그인 뒤 묶음은 영어로 남고 `lang="en"`을 단다. 세션을 읽은 결과 줄은 그 묶음 안에 있어서, 세션이 없는 브라우저에는 경로의 답이 보이지 않는다.
+  - 초대 화면은 주소에 token이 없으면 로그인 칸 대신 초대 링크를 다시 여는 방법을 보인다.
+  - 로그인 실패 화면과 완료 화면(`Login_routes`)도 같은 틀과 stylesheet를 쓴다. 실패 화면의 문장은 여전히 무엇이 거절됐는지 말하지 않고, 모든 실패에 같은 다음 행동 둘을 보인다.
 - 프로세스 준비. 사람의 경로가 읽는 전역은 `Eio_context`의 env와 switch이고 S1a-3a가 이미 채운다. 턴은 official client를 서버의 프로세스로 띄운다(`Server_preview_keeper_turn`). net 전역을 읽는 경로는 없다(읽어서 확인).
 - 다른 사람의 Runtime. 턴은 `Runtime_account_access.authorize`가 허락한 계정에서만 시작한다. 다계정 프로세스에서 native 도구를 쓰는 자세는 `authorize_native`가 거절한다(D3c). 이 층은 그 판정을 바꾸지 않는다.
 - 안내문. `masc auth bootstrap`과 `masc auth invite`의 도움말이 "계정 서버는 아직 로그인 경로를 열지 않는다"고 적었다. 계정 서버가 여는 것으로 고친다.
 - 시험.
   - `test_server_accounts`: 띄운 계정 서버에서 화면 둘이 200이고 답마다 script nonce가 있으며 GitHub 버튼이 눌린다. who-am-I, 구독 목록, Keeper 목록은 credential 없이 401이다. 단일 사용자 경로(`/api/v1/keepers` 등)는 404다.
-  - `test_server_login_http`: GitHub client 없는 표의 화면 둘은 버튼이 막혀 있고 그 사실을 말한다.
+  - `test_server_login_http`: GitHub client 없는 표의 화면 둘은 버튼이 막혀 있고 그 사실을 말한다. 화면의 stylesheet는 그 답의 CSP가 받는 nonce 아래에 있다.
   - `test_auth_gate`: `mat_` bearer는 `Read_auth`·`Manage_own_provider`·`Manage_own_keeper`에서 `Mcp_oauth_token_not_bound`다. 세션과 PAT이 같이 오면 `Manage_own_*`에서도 `Several_credentials`다.
   - `test_authz_boot_mode_read`: `config.json`이 `enabled:false`이거나 `require_token:false`인 다계정 부팅은 파일에서 읽어 거절한다.
 - 설계 §11.1 증거(2026-11-11 조사, 코드와 시험을 읽음). 일곱 항목 가운데 문구 그대로 다 모인 것은 없다.
@@ -1195,6 +1199,54 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 범위에 `Manage_own_keeper`가 없는 PAT, 아무도 만들지 않은 Keeper, 다른 사람의 Keeper, 빈 메시지가 경로와 같은 말로 거절된다. 모두 client가 시작하기 전이다.
   - 실제 client가 답하는 턴은 시험에 없다. S1b-1d에서 실제 구독으로 본다.
 - 하지 않는 것: Board, WebSocket, Dashboard 화면(C6), MCP OAuth(C5), SSE와 `subscriptions/listen`, resources와 prompts, 단일 사용자 MCP의 동작 바꾸기, dispatch 전용 MCP credential(설계 §7.3). 401 답에 `WWW-Authenticate`와 protected resource metadata를 싣는 일은 C5가 한다.
+
+**S1b-3 범위** (사람의 Keeper가 대화를 이어 간다, 2026-11-12)
+
+- 사용자 결정(2026-11-12): S1b-1 다음 조각은 Board(S1b-2)가 아니라 이것이다. 지금 턴은 앞 대화도 기록도 없는 한 번 묻기다. 그래서 "자기 Keeper를 쓴다"가 되지 않는다.
+- 확인한 사실(main `90276cab16c1`, Claude Code 문서는 2026-11-12에 읽음).
+  - 지금 턴(`Server_preview_keeper_turn.call_claude`)은 임시 폴더를 만들고, 그 안에서 CLI를 한 번 띄우고, 폴더를 지운다. `session_mode`를 넘기지 않아서 턴마다 새 session이다. masc는 로그에도 디스크에도 아무것도 남기지 않는다.
+  - Claude Code client(`Runtime_claude_code.run_turn`)는 `?session_mode:(Resume {session_id})`를 받으면 `--resume=<id>`로 띄운다. 답(`turn_result`)에 `session_id`와 `resumed`가 있다. Keeper lane이 이미 쓰는 길이다.
+  - Claude Code는 대화를 `<config dir>/projects/<작업 폴더에서 만든 이름>/<session id>.jsonl`에 쓴다(<https://code.claude.com/docs/en/sessions>, "Where transcripts are stored"). config dir은 `CLAUDE_CONFIG_DIR`이고, 사람의 턴에서는 그 사람의 계정 홈이다. 그래서 session은 계정 홈마다 따로 있다. 다른 사람의 홈에서 뜬 CLI는 그 id를 찾지 못한다.
+  - `--resume <id>`는 지금 작업 폴더의 project를 먼저 찾는다. v2.1.223부터는 다른 project도 찾는다(<https://code.claude.com/docs/en/cli-reference>, `--resume` 행).
+  - CLI는 저장한 대화를 기본 30일 뒤에 지운다(`cleanupPeriodDays`, 같은 sessions 문서). vendor의 값이라서 masc는 날짜를 세지 않는다.
+  - 없는 session을 이어가려다 난 실패를 client가 따로 가르지 않는다. `Runtime_claude_code.error`에 그 갈래가 없다.
+  - Codex 턴은 다계정에서 시작하기 전에 거절된다(D3c). 이 층의 대상이 아니다.
+  - 로그의 Keeper는 (owner, 이름)으로 찾는다(D1-5, 이슈 #51073). 한 사람 안에서는 이름이 Keeper를 가린다.
+- 정한 것.
+  1. 모델이 읽는 앞 대화는 vendor session이 든다. masc는 앞 대화를 prompt에 다시 싣지 않는다. 다시 실으면 길이를 자르는 규칙이 필요한데, 그 규칙은 Keeper lane의 것이고 이 경로에는 없다.
+  2. masc는 묻고 답한 것을 따로 기록한다. 사람이 읽는 것은 이 기록이다. vendor의 파일은 읽지 않는다. 형식이 vendor 것이기 때문이다.
+  3. Keeper마다 "지금 대화"가 하나다. 그 Keeper의 마지막 `started` 줄이 지금 대화다. 따로 저장하지 않는다.
+  4. 대화는 시작한 구독(ProviderAccount)에 묶인다. session이 그 계정 홈에 있기 때문이다. Keeper의 Runtime이 같은 구독의 다른 모델로 바뀌면 이어 간다. 다른 구독으로 바뀌면 이어가는 턴을 409로 거절하고, 새 대화를 시작하라고 답한다. 말없이 새로 시작하지 않는다.
+  5. 새 대화는 사람이 시작한다. 이어가는 턴이 실패해도 masc가 스스로 새 session으로 바꾸지 않는다. session이 지워져서 난 실패인지 가를 수 없기 때문이다.
+  6. 기록의 주인은 Keeper의 owner다. 1단계에서는 owner만 자기 Keeper에게 묻는다(설계 §4.3). 그래서 줄마다 initiator를 적지 않는다. 다른 사람이 묻는 길을 여는 층이 D6과 함께 initiator를 더한다(설계 §3-11).
+  7. PAT로 기록을 읽으려면 범위에 `manage_own_keeper`와 `read_state`가 다 있어야 한다. 목록만 읽는 PAT가 대화 내용까지 읽지 않게 한다.
+- 저장.
+  - 위치는 `<.masc>/accounts/<namespace>/keeper-conversations/`다. 사람의 runtime root 아래라서 계정 홈과 같은 경계에 있다. Off 뒤에도 남고, 단일 사용자는 읽지 않는다.
+  - `record.jsonl`은 덧붙이기만 한다. 줄은 네 가지다.
+    - `started {conversation_id, keeper_id, provider_account_id, at_ms}`
+    - `asked {conversation_id, turn_id, message, at_ms}`. CLI를 띄우기 전에 쓴다. 못 쓰면 CLI를 띄우지 않는다.
+    - `answered {turn_id, text, model, session_id, at_ms}`
+    - `failed {turn_id, kind, at_ms}`. `kind`는 사람에게 답한 실패의 종류다(로그인 없음, 한도, 시간 초과, 시작 못 함, 답 없음). 서버의 파일 경로가 들어갈 수 있는 상세는 싣지 않는다(#50018).
+  - `asked`만 있고 끝 줄이 없는 턴은 서버가 턴 도중에 멈춘 것이다. 읽는 쪽은 "답이 기록되지 않았다"로 답한다.
+  - 이어갈 session id는 지금 대화의 마지막 `answered` 줄에서 읽는다. `answered`가 없으면 새 session으로 시작한다.
+  - 작업 폴더는 `keeper-conversations/cwd/<conversation_id>/`다. 이름은 masc가 뽑은 id다. Keeper 이름으로 경로를 만들지 않는다. 대소문자를 가리지 않는 볼륨에서는 두 이름이 한 폴더가 된다. 한 대화의 턴은 늘 같은 폴더에서 뜬다. 그래서 CLI가 session을 지금 project에서 찾는다. 내장 도구가 없는 자세(`Native_none`)라서 폴더는 비어 있다.
+  - 쓰기는 `Fs_compat`의 durable append를 쓴다. 한 사람의 기록에 쓰는 순서는 서버 프로세스 안의 잠금 하나가 정한다. 계정 서버는 구역을 쥔 한 프로세스다.
+  - 해석되지 않는 줄이 있으면 그 사람의 대화 읽기와 턴을 거절한다. 고쳐서 읽지 않는다.
+- 경로와 도구.
+  - `POST /api/v1/auth/keepers/turn`. 본문은 그대로다. 지금 대화가 없으면 시작한다. 답에 `conversation_id`와 `continued`(이번 턴이 session을 이어받았는지)를 더한다.
+  - `POST /api/v1/auth/keepers/conversation`. 본문은 `{"keeper_id"}`다. 새 대화를 시작한다. 앞 대화의 기록은 남는다.
+  - `GET /api/v1/auth/keepers/conversation?keeper_id=<이름>`. 지금 대화의 턴을 순서대로 답한다.
+  - MCP 도구 `masc_my_keeper_conversation`(읽기)과 `masc_my_keeper_conversation_new`. 경로와 같은 함수를 부른다.
+- 시험으로 볼 것(구현 층).
+  - 둘째 턴이 `--resume=<첫 턴의 session id>`로 뜬다. 가짜 CLI가 받은 인자로 본다.
+  - 두 사람이 같은 이름의 Keeper로 각자 대화한다. 서로의 기록을 읽지 못하고, 서로의 session id로 뜨지 않는다.
+  - 다른 구독으로 바꾼 Keeper의 턴은 CLI가 뜨기 전에 409다.
+  - `asked`를 쓰지 못하면 CLI가 뜨지 않는다.
+  - 턴 도중에 멈춘 기록(`asked`뿐)을 읽으면 그 턴이 답 없이 보인다.
+- 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 앞 대화들의 목록. vendor의 대화 파일과 masc의 기록을 지우는 일도 하지 않는다. 사람의 기록을 지우는 것은 purge(F1)이고, F1이 이 폴더를 대상에 넣는다.
+- 층.
+  - S1b-3a 기록과 이어가기. 턴 경로와 `masc_my_keeper_turn`의 답에 `conversation_id`와 `continued`가 붙는다.
+  - S1b-3b 새 대화와 읽기. 경로 둘, MCP 도구 둘, 사람의 화면.
 
 ### E. official client 격리
 

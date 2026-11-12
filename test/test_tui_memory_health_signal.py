@@ -40,7 +40,7 @@ NO_MEMORY_CHANGES: dict[str, dict[str, int]] = {
 
 # An empty fleet the TUI decodes: every total is zero because there is no row.
 EMPTY_FLEET: dict[str, object] = {
-    "schema": "keeper.memory_os.current_health.v14",
+    "schema": "keeper.memory_os.current_health.v15",
     "generated_at": 1.0,
     "execution": {},
     "keepers": [],
@@ -157,7 +157,7 @@ class HealthHandler(owed.ChatHandler):
                 key = HEALTH_PATH + "?keeper=" + keeper[0]
                 phase = server.record(key)
                 body = {
-                    "schema": "keeper.memory_os.current_health.v14",
+                    "schema": "keeper.memory_os.current_health.v15",
                     "generated_at": 2.0,
                     "keeper": server.row,
                 }

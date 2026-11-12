@@ -297,7 +297,8 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
   in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(overflow_hint ^ Masc_tui_keys.footer_hints_approval_detail ~value_hint));
+       ~hints:(overflow_hint ^ Masc_tui_keys.footer_hints_approval_detail ~lang:state.ui_language
+              ~value_hint));
   finish_surface state ~clamped:(Approval_detail_scroll (!scroll, !viewport))
     ~surface_key:"approval-detail" ~rows:terminal_rows ~cols buf
 

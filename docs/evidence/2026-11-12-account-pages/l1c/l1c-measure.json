@@ -1,0 +1,399 @@
+[
+  {
+    "label": "l1c",
+    "state": "home_signed_out",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "firstTabStop": "button#go outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "home_no_client",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        55
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "invite_token",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 초대",
+    "firstTabStop": "button#go outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "invite_no_token",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "이 주소에는 초대 정보가 없어요",
+    "firstTabStop": "a outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "invite_no_client",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        true
+      ],
+      "describedVisibleChars": [
+        55
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 초대",
+    "firstTabStop": "body",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "member_new",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 19,
+    "freeTextFields": 7,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 1,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "member_full",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 19,
+    "freeTextFields": 7,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 2,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "admin_full",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 24,
+    "freeTextFields": 9,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 2,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": {
+      "rendered": false,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "firstTabStop": "button#signout outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "refused_401",
+    "httpStatus": 401,
+    "policy": "default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 로그인 실패",
+    "firstTabStop": "a outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "refused_404_no_client",
+    "httpStatus": 404,
+    "policy": "default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 로그인 실패",
+    "firstTabStop": "a outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "done_held",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 0,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 0,
+    "smallestControlHeight": 44,
+    "rawServerTextBlocks": 0,
+    "styleRules": 34,
+    "styleAttributes": 0,
+    "bodyBackground": "rgb(8, 9, 13)",
+    "policyViolations": [
+      "script-src-elem inline"
+    ],
+    "login": null,
+    "lang": "ko",
+    "title": "MASC 로그인 완료",
+    "firstTabStop": "a#next outline=solid 2px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  },
+  {
+    "label": "l1c",
+    "state": "control_other_style_nonce",
+    "httpStatus": 200,
+    "policy": "default-src 'none'; script-src 'nonce-N'; style-src 'nonce-N'; connect-src 'self'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'",
+    "axeViolations": 0,
+    "axeRules": [],
+    "axeIncomplete": [],
+    "landmarks": 2,
+    "liveRegions": 8,
+    "visibleControls": 1,
+    "freeTextFields": 0,
+    "targetsUnder24px": 1,
+    "smallestControlHeight": 22,
+    "rawServerTextBlocks": 0,
+    "styleRules": 0,
+    "styleAttributes": 0,
+    "bodyBackground": "rgba(0, 0, 0, 0)",
+    "policyViolations": [
+      "style-src-elem inline"
+    ],
+    "login": {
+      "rendered": true,
+      "submitButtons": 1,
+      "disabled": [
+        false
+      ],
+      "describedVisibleChars": [
+        0
+      ]
+    },
+    "lang": "ko",
+    "title": "MASC 계정",
+    "firstTabStop": "button#go outline=auto 1px",
+    "horizontalScrollAt320": "none",
+    "attempts": 1
+  }
+]

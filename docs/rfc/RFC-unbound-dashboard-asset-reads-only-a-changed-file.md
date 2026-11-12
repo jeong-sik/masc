@@ -1,7 +1,7 @@
 ---
 rfc: "unbound-dashboard-asset-reads-only-a-changed-file"
 title: "manifest 없는 대시보드 asset 은 파일이 바뀌었을 때만 다시 읽는다"
-status: Draft
+status: Implemented
 created: 2026-11-12
 updated: 2026-11-12
 author: claude
@@ -222,7 +222,7 @@ manifest 없는 경로에 SHA-256 을 더하면 표 비교는 64자가 되지만
 | 층 | 내용 | 파일 |
 |---|---|---|
 | L1 | `Fs_compat` 의 load·reload, `Web_dashboard` 의 `asset_version` 과 reload, 표 항목의 `version`, `serve_dashboard_static` 의 순서, 시험. PR #51545 | `lib/fs_compat/fs_compat_owned_reader.ml/.mli`, `lib/fs_compat/fs_compat.mli`, `lib/web_dashboard.ml/.mli`, `lib/server/server_routes_http_pages.ml`, `test/test_http_pages_asset_read.ml` |
-| L2 | 설치 뒤 측정 결과 | `docs/evidence/research/2026-11-09-h2-sse-tls/` |
+| L2 | 설치 뒤 측정 결과. PR #51602 | `docs/evidence/research/2026-11-09-h2-sse-tls/` |
 
 `Fs_compat` 의 reload 는 표가 부르기 전에는 쓰는 곳이 없다. 그래서 일곱 파일을 한 PR 로 낸다.
 
@@ -233,3 +233,30 @@ manifest 없는 경로에 SHA-256 을 더하면 표 비교는 64자가 되지만
 | 1 | §4 의 한계를 받아들이는가 | 받아들인다 | 두 장비에서 20,000번 중 0건이다. 같은 필드를 5번 검사와 `File_version_cache` 가 이미 믿는다. 이 경로에는 내용 보증 계약이 없다 | 시각 눈금이 굵은 파일 시스템에서 개발자가 같은 크기로 제자리 수정하면 예전 asset 이 보일 수 있다 |
 | 2 | 범위를 manifest 없는 경로로 한정하는가 | 한정한다 | 잰 장면이 이 경로다. 나머지 두 경로는 계약이 있고 잰 값이 없다 | 설치 release 의 요청당 읽기·해시는 남는다 |
 | 3 | #51488 의 `manifest_sha256 : string option` 을 `asset_version` 합타입으로 바꾸는가 | 바꾼다 | "None 이면 본문 비교"가 타입 밖에 있다. 바꾸면 본문 비교 갈래가 사라진다 | #51488 이 바꾼 세 파일을 다시 고친다 |
+
+## 9. 구현과 결과 (Implementation summary, 2026-11-12)
+
+L1 은 #51545 로, L2 는 #51602 로 main 에 들어갔다.
+
+이 RFC 가 없애려던 일(요청마다 본문 읽기, 본문 비교)은 없어졌다. 이 RFC 를 쓴 이유였던 CPU 차이(#51400)는 줄지 않았다.
+
+§5 의 기준을 #51545 가 든 설치 build 로 확인했다. 원값은 `docs/evidence/research/2026-11-09-h2-sse-tls/` 의 run14 에 있다.
+
+**측정**
+
+| 값 | 기준 | 결과 |
+|---|---|---|
+| `sample` 의 `caml_string_equal` 샘플, `read_exact_file_descriptor` 아래 샘플 | 0 | 세 프로파일 모두 0 이다. 고치기 전에는 94·114·83, 15·17·16 이었다 |
+| 평문 연결 하나의 서버 CPU | 스택 전 build 와 같은 쌍에서 견준다. 높으면 남은 차이를 `writev` 와 GC 로 나눠 적는다 | 다섯 쌍 모두 높다(중앙값 2.38 → 3.25 ms/MB, +36.6%). 차이는 줄지 않았다. `writev` 와 GC 로 나누지 못했다 |
+| 도메인별 GC 일감 ÷ 보낸 MB | 전·후를 적는다 | 재지 않았다 |
+| 평문 연결 넷, TLS 연결 하나·넷의 서버 CPU | run13 보다 높지 않다 | 판정하지 못했다. load average 가 101~393 이라 run13(64~142)의 값과 견줄 수 없다. 같은 회차 안에서 TLS 여섯 줄은 다섯 쌍 모두 스택 전보다 낮고(23.3~44.2%), 평문 연결 넷은 다섯 쌍 중 넷에서 높다 |
+
+- 본문 비교와 asset 읽기는 없어졌다. 그런데 평문 연결 하나의 차이는 그대로다. 그 둘은 차이의 주된 몫이 아니었다.
+- §1.3 의 가설은 이 결과와 맞지 않는다. 866 KB 할당이 없어졌는데 차이가 남았다. GC 일감을 직접 재지 않았으므로 가설이 틀렸다고 확정하지는 않는다.
+- 남은 차이를 `writev` 와 GC 로 나누지 못한 이유는 부하다. `sample` 은 CPU 를 받지 못하고 밀려난 스레드도 센다. load average 110~150 에서 같은 실행 파일의 추정이 1.92, 8.02, 11.61 ms/MB 로 흩어졌다.
+- 스택 전 build 와 설치 build 사이에는 RFC-0518 스택 말고도 하루 동안 main 에 들어간 다른 변경이 있다. 이 비교로는 차이가 어느 변경 것인지 가리지 못한다. 가리려면 같은 커밋에서 한 곳만 바꾼 실행 파일끼리 견줘야 한다(#51400).
+
+**시험**
+
+- `Fs_compat` 의 시험 넷은 떼어 낸 모듈로 만든 별도 빌드에서 통과했다.
+- HTTP/1.1·HTTP/2 응답 시험(`test_dashboard_static_serves_a_replaced_asset`)은 type-check 만 통과했다. 실행한 기록이 없다.

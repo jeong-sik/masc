@@ -79,7 +79,7 @@ let test_each_surface_scopes_a_key_to_a_row () =
 let test_an_empty_list_names_no_key_that_needs_a_row () =
   List.iter
     (fun (name, surface, needing, _) ->
-      let empty = Keys.footer_hints ~detail_open:false ~has_rows:false surface in
+      let empty = Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false ~has_rows:false surface in
       List.iter
         (fun key ->
           check bool
@@ -91,7 +91,7 @@ let test_an_empty_list_names_no_key_that_needs_a_row () =
 let test_a_list_with_a_row_names_every_key () =
   List.iter
     (fun (name, surface, needing, answering) ->
-      let full = Keys.footer_hints ~detail_open:false ~has_rows:true surface in
+      let full = Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false ~has_rows:true surface in
       List.iter
         (fun key ->
           check bool (name ^ " list with a row names " ^ key) true
@@ -105,7 +105,7 @@ let test_a_list_with_a_row_names_every_key () =
 let test_a_caller_that_names_no_rows_keeps_every_key () =
   List.iter
     (fun (name, surface, needing, answering) ->
-      let unsaid = Keys.footer_hints ~detail_open:false surface in
+      let unsaid = Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false surface in
       List.iter
         (fun key ->
           check bool (name ^ " naming no rows still names " ^ key) true
@@ -118,7 +118,7 @@ let test_a_caller_that_names_no_rows_keeps_every_key () =
 let test_an_empty_list_keeps_the_keys_that_answer () =
   List.iter
     (fun (name, surface, _, answering) ->
-      let empty = Keys.footer_hints ~detail_open:false ~has_rows:false surface in
+      let empty = Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false ~has_rows:false surface in
       List.iter
         (fun key ->
           check bool (name ^ " empty list still names " ^ key) true
@@ -132,7 +132,7 @@ let test_an_empty_list_keeps_the_keys_that_answer () =
    keys stay out. *)
 let test_workspace_v_follows_the_reading_and_not_the_row () =
   let hints ~has_rows ~has_reading =
-    Keys.footer_hints ~detail_open:false ~has_rows ~has_reading T.Repositories
+    Keys.footer_hints ~lang:Masc_tui_types.Lang_en ~detail_open:false ~has_rows ~has_reading T.Repositories
   in
   check bool "v with a row" true
     (names_item (hints ~has_rows:true ~has_reading:true) "v");
@@ -183,7 +183,7 @@ let test_a_goal_list_with_a_row_names_every_key () =
    [w] and [e] open a palette, so they act on an empty queue too. *)
 let approvals_footer ?(approvals = false) ?(asks = Keys.No_asks)
     ?(source = false) () =
-  Keys.footer_hints_approvals
+  Keys.footer_hints_approvals ~lang:Masc_tui_types.Lang_en
     (Keys.Approval_browsing { approvals; asks; source; last_answer = false })
 
 let approvals_always = [ "w"; "e"; "r"; "Tab"; "Esc"; "q" ]

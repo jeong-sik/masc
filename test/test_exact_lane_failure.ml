@@ -19,6 +19,17 @@ let failure =
        | F.Output_limit -> Format.pp_print_string fmt "output_limit")
     ( = )
 
+let input_refusal =
+  testable
+    (fun fmt kind ->
+       Format.pp_print_string fmt
+         (match kind with
+          | F.Request_body -> "request_body"
+          | F.Invalid_request -> "invalid_request"
+          | F.Context_overflow -> "context_overflow"
+          | F.Input_capacity -> "input_capacity"))
+    ( = )
+
 let refused refusal = Exact.Provider_response_refused { http_status = 400; refusal; retry_after_s = None }
 let completion kind =
   Exact.Completion_failed
@@ -112,12 +123,36 @@ let test_antigravity_refusal_is_not_transient () =
   check failure "refused run is unusable" F.Output_unusable classified;
   check bool "the same rules refuse a replay" false (F.is_transient classified)
 
+let test_a_refusal_that_names_the_size_ends_the_walk () =
+  let ending = check (option input_refusal) in
+  let unnamed = F.Input_refused F.Invalid_request in
+  List.iter
+    (fun size ->
+       let named = F.Input_refused size in
+       ending "the slot that names the size walked second" (Some size) (F.ending_input_refusal [ unnamed; named ]);
+       ending "the slot that names the size walked first" (Some size) (F.ending_input_refusal [ named; unnamed ]))
+    [ F.Request_body; F.Context_overflow; F.Input_capacity ];
+  let sizes = [ F.Input_refused F.Request_body; F.Input_refused F.Input_capacity; F.Input_refused F.Context_overflow ] in
+  ending "among refusals that name the size the kind does not follow walk order" (Some F.Context_overflow)
+    (F.ending_input_refusal (unnamed :: sizes));
+  ending "the same slots walked in reverse end the same way" (Some F.Context_overflow)
+    (F.ending_input_refusal (List.rev (unnamed :: sizes)));
+  ending "input capacity comes before the request body" (Some F.Input_capacity)
+    (F.ending_input_refusal [ F.Input_refused F.Request_body; F.Input_refused F.Input_capacity ]);
+  ending "a refusal without a named cause ends the walk when no slot names the size"
+    (Some F.Invalid_request)
+    (F.ending_input_refusal [ F.Output_unusable; unnamed ]);
+  ending "a walk without an input refusal has none" None
+    (F.ending_input_refusal [ F.Output_unusable; F.Output_limit ])
+
 let () =
   run "exact lane failure"
     [ ( "classes"
       , [ test_case "provider refusals" `Quick test_provider_refusals
         ; test_case "answers that cannot be used" `Quick test_answers_that_cannot_be_used
         ; test_case "completion failures" `Quick test_completion_failures
+        ; test_case "a refusal that names the size ends the walk" `Quick
+            test_a_refusal_that_names_the_size_ends_the_walk
         ; test_case "cli failures" `Quick test_cli_failures
         ; test_case "Antigravity noncompletion is not transient" `Quick
             test_antigravity_noncompletion_is_not_transient

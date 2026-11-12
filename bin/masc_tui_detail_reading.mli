@@ -8,7 +8,7 @@ type row = Heading of string | Content of string | Note of string
 type search_mark = No_match | Match | Current_match
 type movement = First | Last | By of int | Page_down | Page_up
 
-val create : ?ko:bool -> title:string -> section list -> t
+val create : ko:bool -> title:string -> section list -> t
 val create_observation : title:string -> section list -> t
 (** Source-owned observation documents use their own refresh controls and
     lifecycle notes; they do not show the captured-document reopen hint. *)

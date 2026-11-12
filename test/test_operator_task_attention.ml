@@ -118,16 +118,12 @@ let test_a_submission_awaiting_a_verdict_is_a_row () =
            ; verification_id = "vrf-completion"
            });
     match project config with
-    | [ Attention.Awaiting_verdict { task_id; title; producer; since; verification_id }
-        as item
-      ] ->
+    | [ Attention.Awaiting_verdict { task_id; title; producer; since } as item ] ->
       Alcotest.(check string) "the submitted task is the row" "task-001" task_id;
       Alcotest.(check string) "carries the task title" "work submitted as finished" title;
       Alcotest.(check string) "named by who submitted it" live_keeper producer;
       Alcotest.(check string) "waiting since the submission, not since the work started"
         "2026-09-02T00:00:00Z" since;
-      Alcotest.(check string) "names the verification request" "vrf-completion"
-        verification_id;
       Alcotest.(check string) "summary names id, title, and producer"
         "task-001 · work submitted as finished: submitted as complete by edgar.a.poe, \
          awaiting a verdict"
@@ -138,7 +134,7 @@ let test_a_submission_awaiting_a_verdict_is_a_row () =
 
 (* The route is the same one rejection delivery computes: a name with a
    registry entry or Keeper meta can receive delivery through a Keeper. *)
-let test_only_tasks_without_a_keeper_route_are_listed () =
+let test_a_held_task_is_listed_only_without_a_keeper_route () =
   with_workspace (fun config ->
     persist_keeper config live_keeper;
     add_task config ~title:"held by a Keeper that is still there";
@@ -244,8 +240,8 @@ let () =
             test_a_holders_cancel_is_not_an_operator_row
         ; Alcotest.test_case "a submission awaiting a verdict is a row" `Quick
             test_a_submission_awaiting_a_verdict_is_a_row
-        ; Alcotest.test_case "only tasks without a Keeper route are listed" `Quick
-            test_only_tasks_without_a_keeper_route_are_listed
+        ; Alcotest.test_case "a held task is listed only without a Keeper route" `Quick
+            test_a_held_task_is_listed_only_without_a_keeper_route
         ; Alcotest.test_case "an active external session can lack a Keeper route" `Quick
             test_an_active_session_without_a_keeper_queue_is_only_a_route_observation
         ; Alcotest.test_case "an undecodable keeper record is its own row" `Quick

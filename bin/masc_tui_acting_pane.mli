@@ -66,7 +66,7 @@ val next_layout : layout:layout -> cols:int -> layout option
     {!threshold_cols} leaves the choice untouched, so a key with no visible
     effect cannot surprise the reader after a later resize. *)
 
-val layout_label : layout -> string
+val layout_label : ko:bool -> layout -> string
 
 val content_cols : layout:layout -> cols:int -> int
 (** What the surface beside the pane lays out against. *)
@@ -76,7 +76,7 @@ type tab =
   | Tab_fleet
   | Tab_changes
 
-val tab_label : tab -> string
+val tab_label : ko:bool -> tab -> string
 val next_tab : tab -> tab
 
 (** The feed's state as the header states it. *)
@@ -178,7 +178,7 @@ type call_order =
   | Longest_first
   | By_tool
 
-val call_order_label : call_order -> string
+val call_order_label : ko:bool -> call_order -> string
 val next_call_order : call_order -> call_order
 
 type task_source = Task_source_unread | Task_source_read | Task_source_failed
@@ -252,6 +252,10 @@ type input = {
           call draws three rows under its own: its disposition, receipt age
           and schedule in words, then the input and output previews the
           producer sent, one row each. *)
+  ko : bool;
+      (** Whether the screen the pane is drawn on reads in Korean. Every word
+          the pane writes itself follows it; names and reasons a keeper or the
+          server sent are drawn as sent. *)
 }
 
 type span = {
@@ -375,6 +379,7 @@ val lines : rows:int -> cols:int -> scroll:int -> input -> rendering
     file, windowed the same way. *)
 
 val keeper_state_text :
+  ko:bool ->
   cols:int ->
   health:Masc.Tui_decode.keeper_health_reading option ->
   approval:string option ->
@@ -402,13 +407,13 @@ val tokens_sum_text : Masc_tui_acting.turn_input option * int option -> string
 (** The same tokens summed, cache reads included ([74.2k tok]), for a row
     that cannot afford the parts. *)
 
-val legend : cols:int -> string
+val legend : ko:bool -> cols:int -> string
 (** The legend row, as drawn at that width: the column names sit over the
     fleet row's columns, which start after the name column the width gives. *)
 
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)
 
-val trace_unavailable_summary : (string * string) list -> string option
+val trace_unavailable_summary : ko:bool -> (string * string) list -> string option
 (** One summary row; complete reasons remain in each Keeper's scrollable
     Info / Metadata reading and in the pane's scrollable failure rows. *)

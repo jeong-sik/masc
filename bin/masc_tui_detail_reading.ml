@@ -9,7 +9,7 @@ type t = { title : string; sections : section list; position : Position.t;
   kind : document_kind; prepared : (int * row list) option; hints : string option; search : search option }
 type movement = First | Last | By of int | Page_down | Page_up
 
-let create ?(ko = false) ~title sections = { title; sections; position = Position.first; kind = Captured ko; prepared=None; hints=None;search=None }
+let create ~ko ~title sections = { title; sections; position = Position.first; kind = Captured ko; prepared=None; hints=None;search=None }
 let create_observation ~title sections = { title; sections; position = Position.first; kind = Observation; prepared=None; hints=None;search=None }
 let forget_landing = Option.map (fun search -> {search with landing=None})
 let replace ~title sections reading = {reading with title;sections;prepared=None;hints=None;

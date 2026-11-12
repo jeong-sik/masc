@@ -1053,12 +1053,17 @@ let heading_id_floor = 12
    reading and pane name give way in an order of their own before its file
    path does, and the Overview's, whose workspace name every PTY scenario
    waits to see whole when it starts. *)
+(* The gap a heading keeps ahead of its tail, drawn whether or not the tail
+   says anything. A row that shares its cells out before it calls
+   [detail_heading] counts this gap with the tail. *)
+let heading_tail_gap = "  "
+
 let detail_heading ~cols ~lead ~id ~after ~tail =
   let cells text =
     Masc_tui_message_layout.display_width (Masc_tui_theme.strip_sgr text)
   in
   let styled text = String.contains text '\027' in
-  let tail = "  " ^ tail in
+  let tail = heading_tail_gap ^ tail in
   let id = Terminal_text.single_line id in
   let id_cells = cells id in
   let after_whole = String.concat "" after in

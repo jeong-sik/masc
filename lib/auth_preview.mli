@@ -17,11 +17,14 @@
     that starts a GitHub login with the token of the link. [nonce] is the
     nonce of its script. [github] is whether the server has a GitHub login
     client: without one the button cannot be pressed and the page says that
-    the server has no GitHub login. The pages start no Google login. *)
+    the server has no GitHub login. An address with no token shows how to open
+    the invitation again in place of the form. The pages start no Google
+    login. *)
 val invite_page : nonce:string -> github:bool -> Login_routes.answer
 
-(** [GET /]: the session of the browser and who the server takes it for, a
-    form that starts a GitHub login, and a sign-out button. Below them, the
+(** [GET /]: for a browser with no session, a form that starts a GitHub
+    login and no answer of a route. For a signed-in browser, the session and
+    who the server takes it for, and a sign-out button. Below them, the
     subscriptions the person owns, a form that connects one through
     {!connect_path} and answers its login, and a form that calls one through
     {!verify_path}. Last, the person's Runtimes and Keepers, a form that

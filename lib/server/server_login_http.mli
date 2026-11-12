@@ -4,7 +4,8 @@
 
 (** The server side of the login routes (plan C3-8c): the transport of a login
     to its provider over {!Masc_http_client}, and the HTTP/1 handlers of
-    {!Login_routes}, {!Login_allowlist_routes} and {!Login_pat_routes}.
+    {!Login_routes}, {!Login_allowlist_routes}, {!Login_invite_routes} and
+    {!Login_pat_routes}.
 
     A handler reads the request into the values those modules take and writes
     their answer as it is: its status, its headers (each [set-cookie] among
@@ -30,6 +31,7 @@ val max_request_bytes : int
     - [POST /auth/github/start] and [GET /auth/github/callback]
     - [POST /auth/logout] and [GET /auth/session]
     - [POST /api/v1/auth/allowlist] and [DELETE /api/v1/auth/allowlist/<id>]
+    - [POST /api/v1/auth/invites] and [DELETE /api/v1/auth/invites/<id>]
     - [POST] and [GET /api/v1/auth/pats], and [DELETE /api/v1/auth/pats/<id>]
 
     A form or a query is read as pairs in order, so a field that comes twice

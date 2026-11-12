@@ -67,6 +67,40 @@ let source_to_string = function
   | Muse_subscription_usage -> "muse.subscription_usage"
 ;;
 
+(* The inverses of the two word functions above, for a reader of rows those
+   functions wrote. A word neither wrote is [None]. *)
+let window_role_of_string = function
+  | "gates_model_calls" -> Some Gates_model_calls
+  | "counts_other_use" -> Some Counts_other_use
+  | "unclassified_limit" -> Some Unclassified_limit
+  | _ -> None
+;;
+
+let source_of_string = function
+  | "claude_code.rate_limit_event" -> Some Claude_code_rate_limit_event
+  | "codex.account_rate_limits_updated" -> Some Codex_account_rate_limits_updated
+  | "codex.account_rate_limits_read" -> Some Codex_account_rate_limits_read
+  | "openrouter.key" -> Some Openrouter_key_read
+  | "zai.quota_limit" -> Some Zai_quota_limit_read
+  | "kimi_coding.usages" -> Some Kimi_coding_usages_read
+  | "ollama.balance" -> Some Ollama_balance_read
+  | "antigravity.usage" -> Some Antigravity_usage_read
+  | "muse.subscription_usage" -> Some Muse_subscription_usage
+  | _ -> None
+;;
+
+(* The fields a utilization is written with, in the stored history rows and
+   in the windows of [/api/v1/runtime/resolved] alike. *)
+let utilization_fields : utilization -> (string * Yojson.Safe.t) list = function
+  | Fraction value -> [ "unit", `String "fraction"; "value", `Float value ]
+  | Percent value -> [ "unit", `String "percent"; "value", `Int value ]
+  | Usd { used; limit } ->
+    [ "unit", `String "usd"
+    ; "value", `Float used
+    ; "limit", Option.fold ~none:`Null ~some:(fun limit -> `Float limit) limit
+    ]
+;;
+
 open Result.Syntax
 
 let fields_at ~path = function
@@ -987,6 +1021,58 @@ let record ~scope ~observed_at (report : report) =
               mark_record_observer_failure observed_at;
               Log.Runtime.warn "provider usage history sink failed: %s"
                 (Printexc.to_string exn)) accepted
+;;
+
+(* Reports read back from the durable history after a restart. They enter
+   the table at the time each was first observed and are not handed to the
+   sink, which already holds them. The rest they imply is read at [now], not
+   at those earlier times: a reset that has passed since rests nothing. A
+   spent window without a stated reset rests nothing either, because that
+   rest runs from the moment of observation and the moment was before the
+   restart. *)
+let restore ~scope ~now (reports : (float * report) list) =
+  match reports with
+  | [] -> ()
+  | _ :: _ ->
+    let observations =
+      Stdlib.Mutex.protect mu (fun () ->
+        let held =
+          match Hashtbl.find_opt table scope with
+          | Some observations -> observations
+          | None -> Observations.empty
+        in
+        let next =
+          List.fold_left
+            (fun held (observed_at, report) ->
+               fst (Observations.apply_report ~observed_at report held))
+            held
+            reports
+        in
+        Hashtbl.replace table scope next;
+        next)
+    in
+    let recorded = Observations.recorded_windows observations in
+    let sources =
+      List.fold_left
+        (fun sources (_, (report : report)) ->
+           if List.mem report.source sources then sources else report.source :: sources)
+        []
+        reports
+    in
+    List.iter
+      (fun source ->
+         match gate_coverage source with
+         | None -> ()
+         | Some coverage ->
+           (match
+              scope_room
+                ~coverage
+                ~now
+                (List.filter (fun (r : recorded) -> r.source = source) recorded)
+            with
+            | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+            | Spent_without_reset | No_gating_window | Room_left -> ()))
+      sources
 ;;
 
 let state ~scope =

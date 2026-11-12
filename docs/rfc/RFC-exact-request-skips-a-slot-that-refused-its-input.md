@@ -34,7 +34,7 @@ Lane Add-on exact 요청 하나가 끝나지 않고 242번 실행됐다. 실행�
 
 L1 은 이 문서에서 구현할 수 있을 만큼 정한다. L2·L3 은 방향과 풀어야 할 것만 정한다(§3.3, §3.4). 구현 전에 그 절을 채워 다시 리뷰받는다.
 
-측정한 240번 가운데 219번은 다른 slot 이 기다리는 중이었다. L1 은 그 경우의 되풀이를 멈춘다. 기다리는 slot 없이 열려 있는 요청의 되풀이는 덮지 않는다(§3.5, §9 D4). L2·L3 은 남는 쓰기를 요청 크기와 무관하게 만든다. attempt 목록이 trigger 마다 늘어나는 것은 #50762 가 다룬다. 이 RFC 는 그 목록의 길이를 줄이지 않는다.
+측정한 240번 가운데 219번은 다른 slot 이 기다리는 중이었다. L1 은 그 경우의 되풀이를 멈춘다. 기다리는 slot 없이 열려 있는 요청의 되풀이는 덮지 않는다(§3.5, §9 D4). L1 뒤에도 실행마다 요청 기록과 증거를 읽고 `Deferred` 한 줄을 쓴다. L2·L3 은 그 읽기와 쓰기를 요청 크기와 무관하게 만든다. attempt 목록이 trigger 마다 늘어나는 것은 #50762 가 다룬다. 이 RFC 는 그 목록의 길이를 줄이지 않는다.
 
 ## 1. 측정 (2026-11-12, 라이브 저장소를 읽기만 함)
 
@@ -123,7 +123,16 @@ cycle 은 열린 요청마다 `Lane_addon_exact.run` 을 부른다. `run` 은 �
 - slot 의 실패(`failed`)는 `Rejected { visit; disposition; detail }`(로컬 거절)이거나 `Execution_failed { visit; cause; raw_sha }` 다.
 - `cause` 는 `api_observation`(`keeper_exact_walk_failure.ml:107`)이다. provider 의 거절은 `Provider_refused { http_status; refusal }` 이고 `refusal` 은 닫힌 타입이다.
 
-receipt 쪽에는 관측 하나를 가르는 함수가 이미 있다. `of_api_observation`(`keeper_exact_walk_failure.ml:165-176`)은 `Context_overflow`, `Input_capacity`, `Request_body_refused` 셋을 "provider 가 입력 크기를 거절함"으로 가른다. 보낸 뒤의 context overflow 실패도 같은 갈래다. `Invalid_request` 와 `Timeout` 은 그 갈래가 아니다. Librarian 의 `check_size` 가 쓰는 갈래와 같다(`keeper_librarian_admission_parts.ml:246-259`).
+receipt 쪽에는 관측 하나를 가르는 함수가 이미 있다. `of_api_observation`(`keeper_exact_walk_failure.ml:165-176`)은 provider 의 거절 `Context_overflow`, `Input_capacity`, `Request_body_refused` 셋을 "provider 가 입력 크기를 거절함"으로 가른다. 보낸 뒤의 실패 둘(`Context_overflow_failure`, window 에서 멈춘 빈 답 `Empty_completion Context_window_exceeded`)도 같은 갈래다(`:153-156`). `Invalid_request` 와 `Timeout` 은 그 갈래가 아니다.
+
+그 갈래의 출처는 이렇다.
+
+- `Context_overflow` 는 provider 의 오류 코드나 window 에서 멈춘 빈 답에서 온다. receipt 는 둘을 가르지 않는다.
+- `Request_body_refused` 는 HTTP 413 이다. 상태 코드만으로 정한다(`retry.ml:372-380`). base url 앞의 gateway 도 낼 수 있다.
+- provider 의 `Input_capacity` 는 `Retry.InputCapacity` 에서 온다(`exact_output.ml:863`). 응답을 가르는 `classify_error`(`retry.ml:355-390`)는 그 값을 만들지 않는다.
+- window 에서 멈춘 빈 답은 걷기 쪽에서는 `Output_unusable` 이다(`exact_lane_failure.ml:63-67`). 두 쪽의 갈래가 이 한 경우에 다르다.
+
+Librarian 의 `check_size` 는 합친 값의 `refuses_input_capacity` 를 본다(`keeper_librarian_admission_parts.ml:252`). 로컬 거절도 그 조건을 채운다.
 
 receipt 가 담지 못하는 것도 있다. 로컬 거절의 `disposition` 은 `Input_capacity _` 의 네 경우를 `Local_input_capacity` 하나로 합친다(`keeper_exact_walk_failure.ml:204-205`). 입력 거절인 둘과 `Transient` 인 둘을 receipt 에서 타입으로 가를 수 없다.
 
@@ -146,13 +155,13 @@ receipt 가 담지 못하는 것도 있다. 로컬 거절의 `disposition` 은 `
 - **C2.** slot 이 같은지는 slot id, target fingerprint, 보내는 schema 로 본다. 셋 중 하나가 바뀌면 다시 부른다.
 - **C3.** 거절의 근거는 그 요청의 보관된 실행 증거다. 그 slot 을 부른 가장 최근 증거가 정한다. 메모리의 표나 글에서 읽어 내지 않는다.
 - **C4.** 어느 slot 도 lane 목록에서 지우지 않는다. C1 은 요청 하나와 slot 하나 사이의 사실이다. 다른 요청은 그 slot 을 그대로 부른다.
-- **C5.** L1 은 요청의 끝을 바꾸지 않는다. 요청을 끝내는 걷기는 지금과 같은 slot 을 부르고 같은 receipt 를 남긴다.
+- **C5.** L1 은 답 없이 끝나는 걷기를 바꾸지 않는다. `Input_refused` 로 끝나는 걷기는 지금과 같은 slot 을 부르고 같은 receipt 를 남긴다. 답으로 끝나는 걷기의 receipt 에는 건너뛴 slot 이 `excluded_http` 로 남을 수 있다.
 - **C6.** 실행 증거를 하나 보태는 비용은 지난 실행 수와 요청 크기에 비례하지 않는다.
 - **C7.** 요청 본문은 한 번 저장한다.
 
 C1 은 시간으로 상태를 죽이지 않는다(헌법 `no_wall_clock_death`). 근거는 일어난 거절이다.
 
-C1 이 맞는 이유는 `ending` 이다. 기다리는 slot 이 있으면 걷기는 입력 거절로 끝나지 않는다(§2.1). 그동안 거절한 slot 을 다시 불러서 달라질 수 있는 결과는 "이번에는 답한다" 하나다. 본문은 digest 로 고정이고, target 과 schema 가 같으면 입력 크기 거절은 같은 답이다.
+C1 이 맞는 이유는 `ending` 이다. 기다리는 slot 이 있으면 걷기는 입력 거절로 끝나지 않는다(§2.1). 그동안 거절한 slot 을 다시 불러서 달라질 수 있는 결과는 "이번에는 답한다" 하나다. 본문은 digest 로 고정이다. target 과 schema 가 같으면 보내는 요청에서 달라질 수 있는 것은 lane 의 `max_output_tokens` 와 `thinking` 이다. 이 둘은 fingerprint 뒤에 lane 이 덧씌운다(`lib/runtime/runtime_exact_output_registry.ml:683-696`, `exact_output_resolver.ml:968-976`). 증거에도 receipt 에도 값이 없어서 견줄 수 없다. 운영자가 그 둘을 바꿔도 기다림이 끝날 때까지 그 slot 은 건너뛰어진다(§9 D1 의 대가).
 
 C5 는 §2.6 에서 나온다. 기다리는 slot 이 없으면 아무것도 건너뛰지 않는다. 그래서 `Input_refused` 로 끝나는 걷기의 receipt 는 지금처럼 모든 slot 의 거절을 담는다.
 
@@ -163,23 +172,34 @@ C5 는 §2.6 에서 나온다. 기다리는 slot 이 없으면 아무것도 건�
 | 거절 | 건너뛰나 | 이유 |
 |---|---|---|
 | provider 의 `Context_overflow`, `Input_capacity`, `Request_body_refused` | 건너뛴다 | 본문 크기와 target 으로 정해진다 |
-| 보낸 뒤의 context overflow 실패 | 건너뛴다 | 같은 갈래다 |
+| 보낸 뒤의 `Context_overflow_failure`, window 에서 멈춘 빈 답 | 건너뛴다 | 같은 갈래다 |
 | provider 의 `Invalid_request` | 다시 부른다 | 408·409·425 같은 상태 코드가 섞여 있다 |
-| 로컬 거절(`Rejected`) | 다시 부른다 | receipt 가 종류를 합쳐 담는다. 생성 요청을 보내지 않는 거절이다 |
+| 로컬 거절(`Rejected`), 보내지 않은 실패(`sent=false`) | 다시 부른다 | provider 의 답이 아니다. 로컬 거절은 receipt 가 종류를 합쳐 담는다 |
 | 그 밖의 실패 | 다시 부른다 | 지금과 같다 |
+
+**증거 하나에서 slot 하나를 읽는 법.** 결과는 셋 중 하나다.
+
+| 결과 | receipt 의 모양 |
+|---|---|
+| 입력 크기 거절 | slot 의 binding 이 있고, 보낸 요청의 실패가 위 갈래다 |
+| 다른 답 | 보낸 요청이 답했거나 다른 실패로 끝났다 |
+| 알 수 없음 | slot 이 `excluded_http` 에 있다. slot 이 receipt 에 없다. `declared_http` 에는 있는데 binding 이 없다(HTTP 흐름이 시작되지 않음). 걷기가 그 slot 앞에서 멈췄다. 방문했는데 결과가 없다. 로컬 거절이다. 보내지 않은 실패다 |
+
+"알 수 없음"이면 그 앞 증거를 본다. provider 가 이 본문에 한 가장 최근 답이 정한다. 읽는 함수는 `advances` 와 `terminal` 의 실패를 모두 본다. `terminal_failure` 가 빼는 `Locally_stopped (Before_advance _)` 안의 실패도 본다(`keeper_exact_walk_receipt.ml:148-150`).
 
 **순서.**
 
-1. `Keeper_exact_walk_receipt` 에 읽는 함수를 하나 더한다. receipt 하나에서 slot 별로 `(binding, 불렀는지, 입력 크기 거절인지)` 를 낸다. 가르는 일은 `of_api_observation` 이 한다.
-2. `run` 은 이미 읽은 증거(`bound_proofs`)를 최근 것부터 본다. slot 마다 그 slot 을 부른 첫 증거가 정한다. 그 증거가 입력 크기 거절이고 증거의 `schema` 가 이번에 보낼 schema 와 같으면 그 slot 을 목록에 넣는다. 목록을 runner 에 넘긴다. `runner` 타입에 인자가 하나 는다.
-3. runner 는 기다리는 HTTP slot 이 하나라도 있을 때만 목록을 쓴다. 걸을 slot 에서 `candidate_id` 와 `target` 이 같은 slot 을 뺀다. 기다리는 slot 이 없으면 목록을 쓰지 않는다.
-4. 기다리면서 목록에도 있는 slot 은 기다리는 slot 으로만 다룬다.
-5. 뺀 slot 은 receipt 의 `excluded_http` 에 들어간다. 기다리는 slot 과 같은 자리다. 실패 목록에는 보관된 종류의 입력 거절로 적는다. 기다리는 slot 의 `Transient` 가 같이 있으니 `ending` 의 판단은 달라지지 않는다.
-6. 걸을 HTTP slot 도 CLI slot 도 없으면 runner 는 `Every_slot_held { until }` 을 돌려준다. 호출도 시작 표시도 증거도 없다. `until` 은 기다리는 slot 의 가장 이른 시각이다.
+1. `Keeper_exact_walk_receipt` 에 위 표대로 읽는 함수를 하나 더한다. 가르는 일은 `of_api_observation` 이 한다.
+2. `run` 은 이미 읽은 증거(`bound_proofs`)를 최근 것부터 본다. slot 마다 "알 수 없음"이 아닌 첫 증거가 정한다. 그 증거가 입력 크기 거절이고 증거의 `schema` 가 이번에 보낼 schema 와 같으면 `(candidate_id, target)` 을 목록에 넣는다. schema 는 runner 를 부르기 전에 있다(`lane_addon_exact.ml:1054-1056`). 증거의 schema 는 canonical 이니 이번 것도 `Lane_addon_action.canonical` 을 거쳐 견준다. canonical 로 만들지 못하면 목록에 넣지 않는다. 목록을 runner 에 넘긴다. `runner` 타입에 인자가 하나 는다.
+3. 빼는 자리는 `runner_with` 의 `order` 와 `every_slot_held` 사이다(`server_lane_addon_exact.ml:294-295`). `ordered.held_http` 가 비어 있지 않을 때만 `lane.selected_slots` 에서 `candidate_id` 와 `target` 이 같은 slot 을 뺀다. 뺀 `ordered` 를 `every_slot_held` 와 `call` 에 같이 넘긴다. `call` 안에서 빼면 `every_slot_held` 가 그 slot 을 걸을 slot 으로 세어, 실행마다 시작 표시와 증거가 남는다.
+4. 기다리는 slot 은 `selected_slots` 에 없으니 목록에 있어도 빠지지 않는다. 기다리는 slot 으로만 다뤄진다.
+5. `call` 은 실제로 뺀 slot 의 id 를 받아 receipt 의 `declared_http` 와 `excluded_http` 끝에 붙인다. 기다리는 slot 과 같은 자리다. 빼지 않은 slot 을 붙이면 `make_v2` 가 거절한다(`keeper_exact_walk_receipt.ml:188-199`). 실패 목록에는 적지 않는다. 기다리는 slot 의 `Transient` 가 요청을 열어 둔다.
+6. 걸을 HTTP slot 도 CLI slot 도 없으면 `every_slot_held` 가 지금 코드 그대로 `Some until` 을 돌려준다. runner 는 `Every_slot_held { until }` 이다. 시작 표시도 증거도 없다. `run` 은 `Deferred` 한 줄을 보태 요청 기록을 다시 쓴다(`lane_addon_exact.ml:1103-1106`).
+7. 걸을 HTTP slot 이 없고 CLI slot 이 있으면 `execute_http` 는 `Http_exhausted` 를 돌려주고(`server_lane_addon_exact.ml:79-80`) CLI slot 을 걷는다.
 
 `run` 이 증거를 읽지 못하면 지금처럼 runner 를 부르지 않는다.
 
-`Every_slot_held` 의 뜻이 "부를 slot 이 없고 기다리는 slot 이 있다"로 넓어진다. `.mli` 의 설명, TUI 글, dashboard 글(`dashboard/src/components/lane-addon-host-requests.ts:18`)을 고친다. variant 는 더하지 않는다(§9 D2).
+`Every_slot_held` 의 뜻이 "부를 slot 이 없고 기다리는 slot 이 있다"로 넓어진다. 그 뜻을 적은 곳을 고친다: `lane_addon_exact.mli`, `server_lane_addon_exact.mli:26`, `keeper_memory_execution_availability.ml:125-127` 의 주석, TUI 글, dashboard 글(`dashboard/src/components/lane-addon-host-requests.ts:18`). variant 는 더하지 않는다(§9 D2).
 
 L1 은 저장 모양을 바꾸지 않는다. receipt 의 version 과 칸이 그대로다.
 
@@ -221,7 +241,7 @@ attempt 목록은 그대로 한 파일이다. 항목 하나는 수백 바이트�
 - attempt 를 지우거나 합치지 않는다.
 - receipt 에 칸을 더하지 않는다. 로컬 거절을 가르려면 칸이 필요하고, 그것은 저장 모양을 바꾸는 일이다.
 - 기다리는 slot 없이 열려 있는 요청은 건너뛰지 않는다. 다른 slot 이 시각 없는 429, 5xx, 인증 거절로 실패하는 경우다. 그 slot 의 결과는 걷기 전에 알 수 없다. 덮으려면 걷기가 "지나갈 수 있는 실패가 나오면 거절한 slot 앞에서 멈춘다"를 알아야 한다(§9 D4).
-- CLI slot 은 건너뛰지 않는다. 기다리는 CLI slot 도 "기다리는 slot" 으로 세지 않는다. `call` 이 `Transient` 로 적는 것은 기다리는 HTTP slot 뿐이다(`server_lane_addon_exact.ml:190-195`).
+- CLI slot 은 건너뛰지 않는다. 기다리는 CLI slot 도 "기다리는 slot" 으로 세지 않는다. 기다리는 HTTP slot 은 걷기 전에 `Transient` 로 적힌다(`server_lane_addon_exact.ml:190-195`). 기다리는 CLI slot 은 CLI 걷기에 닿아야 적힌다(`keeper_lane_cli_oneshot.ml:479-484`). HTTP 걷기가 `Http_stopped` 로 끝나면 CLI 걷기에 닿지 않는다(`server_lane_addon_exact.ml:224`). 그래서 A 가 거절하고 CLI slot 만 기다리는 lane 의 되풀이는 덮지 않는다.
 
 ## 4. 순서
 
@@ -231,7 +251,7 @@ slot A 는 요청보다 context window 가 작다. slot B 는 계정 한도로 �
 |---|---|---|
 | N | A 를 부른다. 입력 크기 거절. B 는 기다린다. 요청은 열려 있다. 증거 1 | 같다 |
 | N+1 | host event. A 를 다시 부른다. 같은 거절. 증거 2 | B 가 기다리니 A 를 건너뛴다. 부를 slot 이 없어 `Every_slot_held`. 호출도 증거도 없다 |
-| N+M | B 의 시각까지 같다. 실행마다 증거 파일이 요청 크기만큼 는다 | 같다. 실행마다 요청 기록에 `Deferred` 한 줄이 는다 |
+| N+M | B 의 시각까지 같다. 실행마다 증거 파일이 요청 크기만큼 는다 | 같다. 실행마다 요청 기록과 증거를 읽고, `Deferred` 한 줄을 보태 요청 기록을 다시 쓴다 |
 | B 의 시각 뒤 | A 와 B 를 부른다 | 같다. 기다리는 slot 이 없으니 건너뛰지 않는다 |
 | …B 가 답한다 | 끝 | 같다 |
 | …B 도 입력을 거절한다 | `Input_refused` 로 끝. receipt 에 A, B 의 거절 | 같다 |
@@ -243,11 +263,12 @@ slot A 는 요청보다 context window 가 작다. slot B 는 계정 한도로 �
 기다림 한 번마다 A 를 부르는 횟수가 "host event 수"에서 "한 번"으로 준다.
 
 - **context window 가 다른 failover.** A 가 거절하고 B 가 시각 없는 `rate_limited` 면 B 는 기다리는 slot 이 아니다. 다음 실행은 지금처럼 A 와 B 를 부른다. L1 이 덮지 않는 경우다(§3.5).
-- **CLI Official Client → API Client → Official Client.** HTTP slot 을 다 걸은 뒤 CLI slot 을 걷는 순서는 그대로다. HTTP slot 하나가 기다리고 다른 HTTP slot 이 입력을 거절했으면, 다음 실행은 CLI slot 만 걷는다.
+- **CLI Official Client → API Client → Official Client.** HTTP slot 을 다 걸은 뒤 CLI slot 을 걷는 순서는 그대로다. HTTP slot 하나가 기다리고 다른 HTTP slot 이 입력을 거절했으면, 다음 실행은 CLI slot 만 걷는다. CLI slot 이 답하면 요청이 끝나고, 그 receipt 에 건너뛴 slot 이 `excluded_http` 로 남는다.
+- **운영자가 lane 의 `max_output_tokens` 나 `thinking` 을 바꿀 때.** slot id, fingerprint, schema 가 그대로라 L1 은 같은 slot 으로 본다. 기다림이 끝날 때까지 그 slot 을 건너뛴다. 바로 다시 부르게 하려면 기다리는 slot 을 lane 에서 빼거나 그 slot 의 target 을 바꾼다.
 - **계정이 다른 같은 model.** slot 이 다르면 각자 답한다. 미루어 판단하지 않는다.
 - **다계정에서 계정을 바꿀 때.** fingerprint 는 credential 의 종류만 담고 값은 담지 않는다. 같은 slot id 에서 키만 바꾸면 L1 은 같은 slot 으로 본다. 그 요청은 기다림이 끝날 때 그 slot 을 다시 부른다.
-- **여러 Keeper 가 한 설치를 쓸 때.** 끝나지 않는 요청이 실행 자리를 쓰는 시간이 호출 없는 한 번의 읽기로 준다. 다른 Keeper 의 요청이 기다리는 시간이 준다(#51199).
-- **입력을 나누는 쪽.** `Input_refused` 는 기다리는 slot 이 없을 때만 나온다. 그때는 건너뛰지 않으니 workspace-curator 와 Librarian 이 읽는 receipt 가 지금과 같다(C5).
+- **여러 Keeper 가 한 설치를 쓸 때.** 끝나지 않는 요청이 실행 자리를 쓰는 시간에서 provider 호출과 증거 쓰기가 빠진다. 요청 기록과 증거를 읽는 시간, 요청 기록을 쓰는 시간은 남는다. 다른 Keeper 의 요청이 기다리는 시간이 그만큼 준다(#51199).
+- **입력을 나누는 쪽.** `Input_refused` 는 기다리는 HTTP slot 이 없을 때만 나온다. 그때는 건너뛰지 않으니 workspace-curator 와 Librarian 이 읽는 receipt 가 지금과 같다(C5).
 - **건너뛴 slot 이 이제는 답할 수 있을 때.** provider 가 같은 target 의 한도를 올린 경우다. 그 답은 기다림이 끝날 때까지 늦는다. 틀린 끝은 생기지 않는다.
 
 ## 5. hard cut (L2·L3)
@@ -274,6 +295,8 @@ L1 은 hard cut 이 없다.
 | L1 | A 를 부른 가장 최근 증거가 `rate_limited` 면 A 를 부른다 | 같다 |
 | L1 | A 가 `Invalid_request` 로 거절한 요청은 B 가 기다려도 A 를 다시 부른다 | 같다 |
 | L1 | A 가 기다리면서 입력 거절 증거도 있으면 기다리는 slot 으로만 적는다. 예외가 나지 않는다 | 해당 없음 |
+| L1 | A 를 부른 증거 뒤에 A 가 로컬 거절된 증거가 있으면 앞 증거가 정한다 | 해당 없음 |
+| L1 | B 가 기다리고 A 를 건너뛴 걷기에서 CLI slot 이 답하면 요청이 끝나고 receipt 의 `excluded_http` 에 A, B 가 있다 | A 를 부른다 |
 | L2 | 증거를 n개 남긴 뒤 하나를 더 남길 때 쓰는 바이트가 n 과 요청 크기에 따라 늘지 않는다 | 는다 |
 | L2 | 다른 요청의 digest 를 든 증거는 거절한다 | 본문 비교로 거절 |
 | L3 | attempt 를 보탤 때 요청 본문 파일을 다시 쓰지 않는다 | 다시 쓴다 |
@@ -307,18 +330,18 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 
 | | 결정 | 추천 | 계약 | 대가 |
 |---|---|---|---|---|
-| D1 | slot 이 같은지 무엇으로 보나 | slot id, target fingerprint, 보내는 schema | C2 | fingerprint 가 덮지 않는 것이 바뀌면 그 slot 은 기다림이 끝날 때 다시 불린다. credential 값, provider 가 같은 target 에서 올린 한도가 그렇다. 그때까지 답이 늦는다 |
-| D2 | L1 에서 `Every_slot_held` 의 뜻을 넓히나, variant 를 더하나 | 뜻을 넓힌다 | §3.2 6번 | TUI·dashboard 의 "모든 slot 이 기다림" 글을 "부를 slot 이 없고 기다리는 slot 이 있음"으로 고친다. 기다리는 slot 과 건너뛴 slot 을 화면에서 가르지 않는다 |
+| D1 | slot 이 같은지 무엇으로 보나 | slot id, target fingerprint, 보내는 schema | C2 | 셋이 덮지 않는 것이 바뀌어도 그 slot 은 기다림이 끝날 때에야 다시 불린다. lane 의 `max_output_tokens`·`thinking`, credential 값, provider 가 같은 target 에서 올린 한도, gateway 의 본문 한도가 그렇다. 측정한 경우 그 기다림은 나흘이다. 바로 부르게 하려면 운영자가 기다리는 slot 을 lane 에서 빼거나 target 을 바꾼다. lane 의 두 값까지 견주려면 증거에 칸을 더해야 한다(저장 모양 변경) |
+| D2 | L1 에서 `Every_slot_held` 의 뜻을 넓히나, variant 를 더하나 | 뜻을 넓힌다 | §3.2 6번 | TUI·dashboard 의 "모든 slot 이 기다림" 글을 "부를 slot 이 없고 기다리는 slot 이 있음"으로 고친다. 기다리는 slot 과 건너뛴 slot 을 화면에서 가르지 않는다. 건너뛴 slot 은 그 요청의 지난 증거에서만 보인다 |
 | D3 | L2·L3 의 hard cut 을 하나, 언제 하나 | L1 을 먼저 넣고 잰 뒤, §3.3·§3.4 를 채워 L2·L3 을 한 번의 hard cut 으로 | §5 | 설치할 때 열린 exact 요청과 그 소비자 쪽 기록을 지운다 |
 | D4 | 기다리는 slot 없이 열려 있는 요청도 건너뛰게 넓히나 | 지금은 넓히지 않는다. L1 뒤에 남은 되풀이를 재고 정한다 | §3.5 | 다른 slot 이 시각 없는 429, 5xx, 인증 거절로 실패하는 동안에는 큰 본문이 host event 마다 다시 나간다 |
 
 ## 10. 확인하지 않은 것
 
-- provider 의 `Input_capacity` 거절이 어떤 응답에서 나오는지. `Retry.InputCapacity` 에서 온다는 것만 읽었다(`exact_output.ml:863`). L1a 전에 읽는다.
 - 서버가 다시 뜬 뒤 기다림 표가 남는지. 비는 쪽으로 §4 를 적었다.
-- 기다리는 CLI slot 을 걷기가 어떻게 적는지. 그래서 L1 은 기다리는 HTTP slot 만 센다.
-- 걸을 HTTP slot 이 없을 때 `execute_http` 가 CLI slot 으로 넘어가는지. L1b 에서 읽는다.
-- `host-results` 를 읽는 저장소 밖의 도구가 있는지. 찾은 것은 tinker 스크립트 하나다.
+- 운영자가 고친 lane 이 재시작 없이 `resolve` 에 닿는지.
+- `Retry.InputCapacity` 를 만드는 곳. `classify_error` 가 만들지 않는다는 것만 읽었다.
+- operator quiz 가 열린 요청의 증거를 읽는지. 파일 이름 검색으로만 봤다.
+- `host-results` 를 읽는 저장소 밖의 도구가 있는지. 찾은 것은 tinker 스크립트 하나다. 그 스크립트는 끝나지 않은 실행의 receipt 도 읽는다. L1 뒤에는 그 실행이 줄어든다.
 - L1 뒤에도 `run` 은 시작할 때 증거 파일을 읽는다. 이미 커진 요청은 L2 전까지 실행마다 그 파일을 읽는다.
 
-확인한 것: `Exact_output.target_identity_fingerprint`(`packages/agent_core/lib/llm_provider/exact_output.ml:865-897`)는 target ref, provider id 와 종류, model id, base url, 요청 경로, credential 의 종류, thinking, reasoning effort, timeout 둘, `max_concurrent_requests`, codec, 선언한 header, capability projection 을 덮는다. credential 의 값은 덮지 않는다.
+확인한 것: `target_identity_fingerprint`(`packages/agent_core/lib/llm_provider/exact_output_resolver.ml:865-897`)는 target ref, provider id 와 종류, model id, base url, 요청 경로, credential 의 종류, thinking, reasoning effort, timeout 둘, `max_concurrent_requests`, codec, 선언한 header, capability projection 을 덮는다. credential 의 값과 lane 이 덧씌우는 `max_output_tokens`·`thinking` 은 덮지 않는다.

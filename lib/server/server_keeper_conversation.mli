@@ -104,16 +104,36 @@ type error =
 (** For the log of the server: it can name a path. *)
 val error_to_string : error -> string
 
+(** Why a new conversation was not started. *)
+type start_error =
+  | Account_busy  (** A call of the account of the conversation it follows runs. *)
+  | Record_failed of error
+
 (** Start a conversation of the Keeper on the account. The conversations it
     had stay as they are. [draw] gives the id, and [now_ms] the time of the
-    row. *)
+    row.
+
+    The conversation it follows gets no turn after it, so the start is the
+    last writer of its file. Each turn of that conversation runs inside the
+    call of its account, and so does the start. [one_call_of account ~busy f]
+    runs [f] when no other call of [account] runs and gives [busy] otherwise,
+    as {!Server_setup_account_login.one_call_of} does. Inside the call, a row
+    a stopped server left half written in that conversation is cut, as its
+    next turn would have cut it, and the [started] row of the new one is
+    appended. The first conversation of a Keeper follows none and takes no
+    call. *)
 val start
   :  root
   -> Authz_types.Keeper_id.t
   -> Authz_types.Provider_account_id.t
   -> draw:(unit -> string)
   -> now_ms:(unit -> int)
-  -> (conversation, error) result
+  -> one_call_of:
+       (Authz_types.Provider_account_id.t
+        -> busy:start_error
+        -> (unit -> (conversation, start_error) result)
+        -> (conversation, start_error) result)
+  -> (conversation, start_error) result
 
 (** The conversation of the Keeper. A Keeper that has none starts one on the
     account, as {!start} does. The conversation of a Keeper that has one is
@@ -163,8 +183,7 @@ type recorded =
     that does not close the turn of the [asked] row before it is a row that
     is not understood. It writes nothing. A row a stopped server left half
     written refuses the read ([Not_read]) until the next turn of the
-    conversation cuts it, so a conversation that has no turn after it stays
-    refused. *)
+    conversation, or the {!start} of the one after it, cuts the row. *)
 val turns : root -> conversation -> (recorded list, error) result
 
 (** A conversation opened for one turn. *)

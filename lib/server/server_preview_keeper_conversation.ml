@@ -11,6 +11,7 @@ let error status text = R.json status [ "error", `String text ]
 let start_shape = {|The body is {"keeper_id": "<name>"}.|}
 let read_shape = "The query is keeper_id=<name>, and conversation_id=<id> to read an earlier one."
 let unknown_conversation = "No conversation of this Keeper has this id."
+let current_call_running = "A call of the account of this Keeper's current conversation is running."
 let id_json id = `String (Conversation.Conversation_id.to_string id)
 
 (* The body of a new conversation: exactly the one named field. *)
@@ -34,7 +35,10 @@ let start ~env ~(person : Login.person) ~base_path ~body =
         provider_account_id
         ~draw:Auth.generate_token
         ~now_ms:(fun () -> Int.of_float (Eio.Time.now clock *. ms_per_second))
-      |> Result.map_error (Turn.record_answer ~keeper_id)
+        ~one_call_of:Login.one_call_of
+      |> Result.map_error (function
+        | Conversation.Account_busy -> error R.Conflict_409 current_call_running
+        | Conversation.Record_failed failure -> Turn.record_answer ~keeper_id failure)
     in
     Ok
       (R.json

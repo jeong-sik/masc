@@ -16,8 +16,10 @@
     [{"keeper_id":...,"conversation_id":...}]: the Keeper has a new
     conversation on the account of the Runtime it has now, and its next turn
     starts a session of its own there. The conversations the Keeper had stay
-    as they are, and no turn goes on in them. A turn that runs while the
-    conversation is started ends in the conversation it began in.
+    as they are, and no turn goes on in them. The start runs inside the call
+    of the account of the current conversation, as each turn of it does, so
+    no turn of that conversation writes after the start
+    ({!Server_keeper_conversation.start}).
 
     The person starts a conversation; the server starts none in place of one
     whose turn failed. This is the way on for a Keeper whose conversation
@@ -26,7 +28,8 @@
     The other answers are a JSON [{"error": ...}]:
     - 400: the body is not that, or the name is no Keeper name.
     - 404: the Keeper is not the person's.
-    - 409: the Keeper has no Runtime, so there is no account to start on.
+    - 409: the Keeper has no Runtime, so there is no account to start on, or
+      a call of the account of its current conversation runs.
     - 500 or 503: the record has a row that is not understood, or could not
       be written. *)
 val start
@@ -69,7 +72,9 @@ val start
     - 404: the Keeper is not the person's, or the Keeper has no conversation
       of that id.
     - 500 or 503: the record has a row that is not understood, or could not
-      be read. *)
+      be read. A row a stopped server left half written answers 503 until
+      the next turn of the Keeper, or a new conversation of it, cuts the
+      row. *)
 val read
   :  person:Server_setup_account_login.person
   -> base_path:string

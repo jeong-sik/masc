@@ -48,6 +48,10 @@ type error =
       }
   | Id_not_drawn of Authz_id.error
 
+type start_error =
+  | Account_busy
+  | Record_failed of error
+
 let file_name = function
   | Index -> index_name
   | Turns -> turns_name
@@ -304,9 +308,10 @@ let recovered file decode path =
   |> decoded file decode
 ;;
 
-(* A read that writes nothing. It is not serialized with the writers, so a
-   row a stopped server left half written refuses it, until the next writer
-   of the file cuts the row. *)
+(* A read that writes nothing. Fs_compat orders it with each append of the
+   file, so it never meets a row being written. A row a stopped server left
+   half written refuses it until the next writer of the file cuts the row:
+   the next turn of the conversation, or the start of the one after it. *)
 let observed file decode path =
   Eio_guard.run_in_systhread ~label:"keeper-conversation-read" (fun () ->
     Fs_compat.read_private_jsonl_durable_locked_result path ~after:None)
@@ -377,12 +382,6 @@ let append_started ~index keeper_id provider_account_id ~draw ~now_ms =
   Ok { conversation_id; provider_account_id }
 ;;
 
-let start root keeper_id provider_account_id ~draw ~now_ms =
-  Eio.Mutex.use_ro index_lock (fun () ->
-    let* () = private_directory root in
-    append_started ~index:(Filename.concat root index_name) keeper_id provider_account_id ~draw ~now_ms)
-;;
-
 (* The conversations of the Keeper among the rows of the index, in the order
    they were started. *)
 let of_keeper keeper_id started =
@@ -427,6 +426,40 @@ let turns_path root (conversation : conversation) =
 let turns root conversation =
   let path = turns_path root conversation in
   if Sys.file_exists path then Result.bind (observed Turns turn_row_of path) turns_of else Ok []
+;;
+
+(* The conversation a new one follows gets no turn after it. A row a stopped
+   server left half written there is cut now, as its next turn would have
+   cut it, so a read of it finds whole rows. *)
+let settle root conversation =
+  let path = turns_path root conversation in
+  if Sys.file_exists path
+  then
+    Eio_guard.run_in_systhread ~label:"keeper-conversation-settle" (fun () ->
+      Fs_compat.recover_private_jsonl_durable_locked_result path)
+    |> Result.map (fun (_ : Fs_compat.private_jsonl_snapshot) -> ())
+    |> Result.map_error (fun error ->
+      Not_written (Fs_compat.private_jsonl_transaction_error_to_string error))
+  else Ok ()
+;;
+
+(* The new conversation is the last writer of the one it follows. Each turn
+   of that one runs inside the call of its account, and so does this: the
+   cut and the [started] row of the new one come before the call ends, and
+   no turn of the one it follows writes after them. *)
+let start root keeper_id provider_account_id ~draw ~now_ms ~one_call_of =
+  Eio.Mutex.use_ro index_lock (fun () ->
+    let recorded result = Result.map_error (fun error -> Record_failed error) result in
+    let* () = private_directory root |> recorded in
+    let index = Filename.concat root index_name in
+    let* started = recovered Index started_of index |> recorded in
+    let begin_new () = append_started ~index keeper_id provider_account_id ~draw ~now_ms |> recorded in
+    match last (of_keeper keeper_id started) with
+    | None -> begin_new ()
+    | Some { conversation = followed; started_at_ms = (_ : int) } ->
+      one_call_of followed.provider_account_id ~busy:Account_busy (fun () ->
+        let* () = settle root followed |> recorded in
+        begin_new ()))
 ;;
 
 type turn =

@@ -721,10 +721,12 @@ let test_turn () =
               (get (Provider_account_id.of_string "another-account"))
               ~draw:(fun () -> "conversation-elsewhere")
               ~now_ms:(fun () -> start_ms)
+              ~one_call_of:Login.one_call_of
           with
           | Ok (conversation : Conversation.conversation) ->
             Conversation.Conversation_id.to_string conversation.conversation_id
-          | Error error -> Alcotest.fail (Conversation.error_to_string error)
+          | Error Conversation.Account_busy -> Alcotest.fail "the account was busy"
+          | Error (Conversation.Record_failed error) -> Alcotest.fail (Conversation.error_to_string error)
         in
         Sys.remove (claude ^ ".turn.json");
         check_reply
@@ -1003,6 +1005,55 @@ let test_turn () =
           "and the read after it has that turn, and not the half row"
           [ "anew", "answered"; "after", "answered" ]
           (shown (read_fields "after a half written row" (read alice [ "keeper_id", "keeper-alice" ])));
+        (* A conversation gets no turn after a new one starts, so the start
+           cuts such a row in it, and the conversation reads whole by its
+           id. *)
+        let settled = In_channel.with_open_bin current_turns In_channel.input_all in
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_append; Open_binary ]
+          0o600
+          current_turns
+          (fun out -> output_string out half);
+        Alcotest.(check int)
+          "a new conversation after a half written row"
+          200
+          (fst (renew alice (only_keeper "keeper-alice")));
+        Alcotest.(check string)
+          "cuts the row of the conversation it follows"
+          settled
+          (In_channel.with_open_bin current_turns In_channel.input_all);
+        Alcotest.(check (list (pair string string)))
+          "and that conversation reads whole"
+          [ "anew", "answered"; "after", "answered" ]
+          (shown
+             (read_fields
+                "the conversation a new one follows"
+                (read alice [ "keeper_id", "keeper-alice"; "conversation_id", current ])));
+        (* No new conversation starts while a call of the account of the
+           current one runs: a turn of it could write after the start. *)
+        let followed =
+          text_of
+            (read_fields "a new conversation" (read alice [ "keeper_id", "keeper-alice" ]))
+            "current_conversation_id"
+        in
+        (match
+           Login.one_call_of
+             (get (Provider_account_id.of_string alice.account_id))
+             ~busy:"the call of the test did not start"
+             (fun () -> Ok (renew alice (only_keeper "keeper-alice")))
+         with
+         | Ok answer ->
+           check_reply
+             "a new conversation while a call of the account runs"
+             (409, {|{"error":"A call of the account of this Keeper's current conversation is running."}|})
+             answer
+         | Error busy -> Alcotest.fail busy);
+        Alcotest.(check string)
+          "starts none"
+          followed
+          (text_of
+             (read_fields "after a refused start" (read alice [ "keeper_id", "keeper-alice" ]))
+             "current_conversation_id");
         Sys.remove (claude ^ ".turn.json");
         check_reply
           "a new conversation of another person's Keeper"

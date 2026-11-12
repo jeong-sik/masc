@@ -655,7 +655,30 @@ let attempt_provenance_of_reason = function
   | Partition.Unexpected_worker_failure { progress = None; _ } -> None
 ;;
 
-let quarantine_blocked_partition ~base_path partition =
+(* A Blocked root whose candidate the ledger no longer holds has no row to
+   quarantine and nothing an operator requeue could release, so the root is
+   given up. [Abandoned] records no judgment, and [ensure_roots] reopens the
+   root when the candidate turns out to be alive and still pending.
+
+   A retire moves the whole candidate store aside and leaves no tombstone
+   (#28770), so an absent candidate cannot be told apart from a retired one.
+
+   Process start and the drain give up the same way. The drain used to
+   return the absence as an [Error]: the worker ended with [Durable_drain]
+   and that Keeper's Board judgment stayed stopped until its lane restarted
+   (#48785). *)
+let abandon_blocked_without_candidate ~now ~base_path (partition : Partition.t) =
+  Log.Keeper.error
+    ~keeper_name:partition.keeper_name
+    "Board attention candidate is absent from the ledger; abandoning its blocked partition keeper=%s partition=%s candidate=%s"
+    partition.keeper_name
+    partition.partition_id
+    partition.candidate_id;
+  let* (_ : Partition.t) = Partition.abandon ~now ~base_path ~partition in
+  Ok ()
+;;
+
+let quarantine_or_abandon_blocked ~now ~base_path partition =
   match partition.Partition.state with
   | Partition.Blocked { reason; blocked_at } ->
     let* candidates =
@@ -663,28 +686,18 @@ let quarantine_blocked_partition ~base_path partition =
         ~base_path
         ~keeper_name:partition.keeper_name
     in
-    let* candidate =
-      match
-        List.find_opt
-          (fun candidate ->
-             String.equal candidate.Candidate.candidate_id partition.candidate_id)
-          candidates
-      with
-      | Some candidate -> Ok candidate
-      | None ->
-        Error
-          ("Blocked partition candidate is absent: "
-           ^ partition.candidate_id)
-    in
-    Candidate.quarantine
-      ~base_path
-      ~candidate
-      ~partition_id:partition.partition_id
-      ~partition_generation:partition.generation
-      ~failure_category:(failure_category_of_reason reason)
-      ~attempt_provenance:(attempt_provenance_of_reason reason)
-      ~quarantined_at:blocked_at
-    |> Result.map ignore
+    (match candidate_by_id partition.candidate_id candidates with
+     | None -> abandon_blocked_without_candidate ~now ~base_path partition
+     | Some candidate ->
+       Candidate.quarantine
+         ~base_path
+         ~candidate
+         ~partition_id:partition.partition_id
+         ~partition_generation:partition.generation
+         ~failure_category:(failure_category_of_reason reason)
+         ~attempt_provenance:(attempt_provenance_of_reason reason)
+         ~quarantined_at:blocked_at
+       |> Result.map ignore)
   | Partition.Ready
   | Partition.Running _
   | Partition.Completed _
@@ -703,7 +716,7 @@ let blocked_step ~now ~worker_epoch ~base_path partition reason =
       reason
   in
   let* blocked = confirm_blocked_transition ~base_path transition in
-  let* () = quarantine_blocked_partition ~base_path blocked in
+  let* () = quarantine_or_abandon_blocked ~now ~base_path blocked in
   Ok (Partition_blocked { candidate_id = blocked.candidate_id; reason })
 ;;
 
@@ -1570,17 +1583,12 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
             can never be acknowledged or requeued. Erroring here fataled the
             whole worker at every process start (stage=process_recovery,
             2026-08-16, three fleet keepers), which is exactly the permanent
-            re-encounter the finalizer branch exists to stop. Terminal
-            Blocked settles; every other state passes through the same way a
+            re-encounter the finalizer branch exists to stop. A Blocked root
+            is abandoned; every other state passes through the same way a
             present candidate with a non-quarantine status does below. *)
          (match partition.state with
           | Partition.Blocked _ ->
-            Log.Keeper.error
-              "Board attention candidate permanently absent during quarantine reconciliation; abandoning blocked partition keeper=%s partition=%s candidate=%s"
-              keeper_name
-              partition.partition_id
-              partition.candidate_id;
-            let* (_ : Partition.t) = Partition.abandon ~now ~base_path ~partition in
+            let* () = abandon_blocked_without_candidate ~now ~base_path partition in
             loop rest
           | Partition.Ready | Partition.Running _ | Partition.Completed _
           | Partition.Settled _ | Partition.Abandoned _ -> loop rest)
@@ -1589,7 +1597,7 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
           | Candidate.Direct_resumable _ ->
             (match partition.state with
              | Partition.Blocked _ ->
-               let* () = quarantine_blocked_partition ~base_path partition in
+               let* () = quarantine_or_abandon_blocked ~now ~base_path partition in
                loop rest
              | Partition.Ready
              | Partition.Running _
@@ -1634,7 +1642,7 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
                in
                loop rest
              | Quarantine_pair.Blocked_unrecorded ->
-               let* () = quarantine_blocked_partition ~base_path partition in
+               let* () = quarantine_or_abandon_blocked ~now ~base_path partition in
                loop rest
              | Quarantine_pair.Ready_requeued ->
                (* Authorization survives subsequent execution/deferral cycles.
@@ -1667,8 +1675,8 @@ let reconcile_quarantines ~now ~worker_epoch ~base_path ~keeper_name =
 
 (* A Consumed candidate whose partition is not yet Settled or Abandoned is
    still read when that partition settles or blocks; without its row the
-   drain blocks the partition and then cannot quarantine it, which stopped the
-   worker (#48785). Once its candidate is Consumed a partition only moves
+   drain blocks the partition, finds no candidate to quarantine and gives the
+   root up (#48785). Once its candidate is Consumed a partition only moves
    toward Settled or Abandoned, so reading the partitions before the
    candidate prune can keep a row one wake too long, never drop it too soon.
    A Completed partition whose judgment the candidate refused keeps the row
@@ -1746,10 +1754,11 @@ let prunes_and_read ~base_path ~keeper_name ?hook ?before_receipt_prune () =
      them can still hold a candidate that an owner settlement (which runs
      without this lock) consumed meanwhile; once the prune dropped that
      candidate's settled receipt, [ensure_roots] would mint a fresh [Ready]
-     root that no candidate row backs, and the worker would block on
-     "candidate ledger lacks partition member" forever because only [Settled]
-     receipts are pruned. Receipts are dropped only above this read, so a
-     candidate consumed after it still has its [Settled] receipt. *)
+     root that no candidate row backs, and the worker would block it on
+     "candidate ledger lacks partition member" and abandon it; that row then
+     stays, because only [Settled] receipts are pruned. Receipts are dropped
+     only above this read, so a candidate consumed after it still has its
+     [Settled] receipt. *)
   Candidate.load_candidates ~base_path ~keeper_name
 ;;
 

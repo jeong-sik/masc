@@ -4799,6 +4799,68 @@ let test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_
     (reconcile ~now:11.0 ~base_path)
 ;;
 
+(* #48785: the drain claimed a Ready root whose candidate the ledger did not
+   hold, blocked it, found no candidate to quarantine and returned that as an
+   [Error]. The worker ended with [Durable_drain], and that Keeper's Board
+   judgment stayed stopped until its lane restarted (three hours on
+   2026-11-10). The drain gives such a root up the way process start does
+   and goes on to the candidate behind it. *)
+let test_drain_abandons_a_root_whose_candidate_is_gone_and_judges_the_next () =
+  with_temp_base "board-attention-worker-drain-absent-candidate" @@ fun base_path ->
+  (* A root over a candidate list the ledger does not back: what a list read
+     before the candidate was consumed and pruned leaves behind. *)
+  let unbacked = candidate ~id:"candidate-unbacked" () in
+  ignore
+    (ok
+       "mint a root no candidate row backs"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" [ unbacked ]));
+  let live =
+    record ~base_path (candidate ~id:"candidate-live" ~recorded_at:2.0 ())
+  in
+  let exact = provenance "after-unbacked-root" in
+  let reached_the_lane = ref [] in
+  let outcome =
+    ok
+      "the drain survives the unbacked root"
+      (W.For_testing.drain_available
+         ~yield:(fun () -> ())
+         ~now:(fun () -> 3.0)
+         ~worker_epoch:(P.Worker_epoch.generate ())
+         ~base_path
+         ~keeper_name:"alpha"
+         ~prepare:(fun candidate -> Ok candidate)
+         ~execute:(fun ~before_dispatch ~before_advance:_ (prepared : A.candidate) ->
+           reached_the_lane := prepared.candidate_id :: !reached_the_lane;
+           ok "bind the live candidate's attempt" (before_dispatch exact);
+           Ok (judgment exact J.Not_relevant)))
+  in
+  (match outcome with
+   | W.Drained { judgments = 1; steps = 2 } -> ()
+   | W.Drained _ | W.Retry_later _ | W.Lane_deferred _
+   | W.Awaiting_registry_fence _ ->
+     Alcotest.fail "the drain did not give up one root and judge the other");
+  Alcotest.(check (list string))
+    "only the live candidate reached the lane"
+    [ live.candidate_id ]
+    !reached_the_lane;
+  (* The drain's last wake drops the settled receipt of the judged candidate,
+     so the abandoned root is the one partition left. *)
+  (match load_one_partition ~base_path with
+   | { candidate_id; state = P.Abandoned { abandoned_at }; _ } ->
+     Alcotest.(check string)
+       "the root left is the one without a candidate"
+       unbacked.candidate_id
+       candidate_id;
+     Alcotest.(check (float 0.0)) "give-up time recorded" 3.0 abandoned_at
+   | { state = P.Ready | P.Running _ | P.Completed _ | P.Settled _ | P.Blocked _
+     ; _
+     } -> Alcotest.fail "the root without a candidate was not abandoned");
+  match (load_one_candidate ~base_path).status with
+  | A.Consumed { delivery = A.Not_relevant; _ } -> ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "the candidate behind the abandoned root was not judged"
+;;
+
 let test_settle_completed_snapshot_terminalizes_a_partition_whose_candidate_was_retired
   ()
   =
@@ -5172,6 +5234,10 @@ let () =
             "reconcile_quarantines abandons a blocked partition whose candidate was retired"
             `Quick
             test_reconcile_quarantines_abandons_a_blocked_partition_whose_candidate_was_retired
+        ; Alcotest.test_case
+            "the drain abandons a root whose candidate is gone and judges the next"
+            `Quick
+            test_drain_abandons_a_root_whose_candidate_is_gone_and_judges_the_next
         ] )
     ]
 ;;

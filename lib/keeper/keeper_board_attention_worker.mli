@@ -23,6 +23,11 @@ type step =
       { candidate_id : string
       ; reason : Keeper_board_attention_partition.blocked_reason
       }
+      (** The root went [Blocked] for [reason] and the block was recorded on
+          its candidate as a quarantine. When the candidate ledger no longer
+          holds that candidate there is nothing to quarantine: the root is
+          [Abandoned] right after the block, the way process start abandons
+          it, and the step is still this one. *)
   | Judgment_deferred of
       { candidate_id : string
       ; detail : string
@@ -356,7 +361,9 @@ module For_testing : sig
        result) ->
     (drain_outcome, string) result
   (** Drain every currently claimable root. Terminal failures remain Blocked and
-      completion durability failures return without re-entering AGENT_CORE. Exact claim
+      completion durability failures return without re-entering AGENT_CORE. A
+      Blocked root whose candidate is gone from the ledger is abandoned and
+      the drain goes on to the next root. Exact claim
       contention returns [Retry_later] without recursive same-turn retry. A lane
       whose every slot refused for its account's standing returns [Lane_deferred] with
       the root [Ready] and its candidate Pending. *)

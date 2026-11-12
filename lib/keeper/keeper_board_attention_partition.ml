@@ -805,10 +805,10 @@ let ensure_roots_under_lock ~base_path ~keeper_name ~candidates decide =
                           (* [reopen_abandoned] is true only for a candidate
                              still [Resumable_pending]: the Candidate ledger
                              never recorded any judgment for it, so an
-                             [Abandoned] root can only be the "candidate
-                             permanently absent" give-up in
-                             [reconcile_quarantines], which never writes a
-                             judgment. A [Resumable_judged] or
+                             [Abandoned] root can only be the worker's
+                             give-up on a [Blocked] root whose candidate was
+                             absent, at process start or in the drain, which
+                             never writes a judgment. A [Resumable_judged] or
                              [Requeued_resumable] historical match keeps the
                              no-op: those already carry (or are
                              mid-quarantine toward) a judgment, and reopening

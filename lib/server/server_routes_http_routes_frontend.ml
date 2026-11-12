@@ -67,25 +67,21 @@ let websocket_upgrade_unavailable_reason () =
   then Some "WebSocket transport not ready"
   else None
 
-let websocket_auth_error message =
-  Masc_domain.Auth
-    (Masc_domain.Auth_error.Unauthorized
-       { reason = Masc_domain.Auth_error.Generic; message })
-
+(* HIGH-RISK-UNREVIEWED: decides who may open the MCP transport on /ws.
+   An upgrade passes the two checks a POST to /mcp passes, in the same order.
+   First the Origin: a request that names another site is refused, with or
+   without a credential, as the ingress refuses it on /mcp. A browser opens a
+   WebSocket without a preflight, so another site's page could otherwise drive
+   this transport through the operator's browser. A native client sends no
+   Origin and passes. Then the credential verdict of /mcp: an Origin header is
+   written by the client, so a same-origin one never stands in for a bearer. *)
 let websocket_upgrade_authorized ~base_path ~request_authority request =
-  match verify_mcp_auth_for_authority ~base_path ~request_authority request with
-  | Ok _ -> Ok ()
-  | Error token_error ->
-    (match ensure_same_origin_browser_request ~request_authority request with
-     | Ok () -> Ok ()
-     | Error origin_error ->
-       let message =
-         Printf.sprintf
-           "%s Same-origin WebSocket upgrade rejected: %s"
-           (Masc_domain.masc_error_to_string token_error)
-           (Masc_domain.masc_error_to_string origin_error)
-       in
-       Error (websocket_auth_error message))
+  let ( let* ) = Result.bind in
+  let* () = ensure_same_origin_if_browser_request ~request_authority request in
+  let* (_ : _ option) =
+    verify_mcp_auth_for_authority ~base_path ~request_authority request
+  in
+  Ok ()
 
 let websocket_handler ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then

@@ -194,7 +194,8 @@ await Promise.all([
       throw new Error('WS discovery does not identify a same-origin listener');
     }
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(target, { headers: { Origin: base.origin } });
+      const ws = new WebSocket(target, { headers: { Origin: base.origin,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
       let authenticated = false;
       let pushedFrames = 0;
       const timer = setTimeout(() => finish(new Error('WS hello/ping timed out')), options.timeout);

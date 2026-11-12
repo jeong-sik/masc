@@ -194,7 +194,8 @@ async function wsLane() {
   const expected = new URL(base);
   expected.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
   if (!config.enabled || target.origin !== expected.origin) throw new Error('WS listener is unavailable or cross-origin');
-  socket = new WebSocket(target, { headers: { Origin: base.origin } });
+  socket = new WebSocket(target, { headers: { Origin: base.origin,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
   const fail = message => {
     socketFailure = message;
     if (pending) { const waiting = pending; pending = undefined; waiting.reject(new Error(message)); }

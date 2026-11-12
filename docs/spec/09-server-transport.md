@@ -556,12 +556,12 @@ cloudflared 는 origin 에 HTTP/2 를 TLS 로만 보낸다. `service: https://12
 
 ### 9.1 활성화
 
-기본값은 활성이다. `MASC_WS_ENABLED=0` 또는 `false`일 때만 비활성화된다. `GET /ws`는 두 가지로 동작한다 — `Upgrade: websocket` 헤더가 있으면 same-origin 검사 후 WebSocket 업그레이드를 수행하고(`server_routes_http_routes_frontend.ml`의 `websocket_handler`), 헤더가 없으면 standalone WS 소켓 discovery JSON을 반환한다.
+기본값은 활성이다. `MASC_WS_ENABLED=0` 또는 `false`일 때만 비활성화된다. `GET /ws`는 두 가지로 동작한다 — `Upgrade: websocket` 헤더가 있으면 `POST /mcp` 와 같은 검사 둘을 같은 순서로 지난 뒤 업그레이드하고(`server_routes_http_routes_frontend.ml`의 `websocket_upgrade_authorized`), 헤더가 없으면 standalone WS 소켓 discovery JSON을 반환한다. 먼저 다른 사이트의 `Origin` 을 거절한다. 자격이 있어도 거절하고, `Origin` 이 없는 네이티브 클라이언트는 통과한다. 그다음 `/mcp` 의 자격 판정을 받는다. 같은 출처 `Origin` 은 bearer 를 대신하지 않는다.
 
 ### 9.2 동작 방식
 
 1. `GET /ws`로 `enabled`, `ws_url`, `session_count`를 discovery
-2. 실제 연결은 같은 HTTP 리스너의 `GET /ws`로 same-origin HTTP 101 upgrade
+2. 실제 연결은 같은 HTTP 리스너의 `GET /ws`로 HTTP 101 upgrade. token 이 필요한 workspace 에서는 업그레이드 요청에 `Authorization: Bearer` 를 싣는다
 2. WebSocket 연결 성공 후 `Sse.subscribe_external`로 broadcast 이벤트 수신 등록
 3. 인바운드 메시지: JSON-RPC 요청으로 디스패치 (현재 `on_message` callback, 기본값은 log & ignore)
 4. Ping/Pong 자동 처리

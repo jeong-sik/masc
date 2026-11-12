@@ -140,7 +140,8 @@ let span_values (line : Pane.line) =
     span.text, tone) line
 
 let test_trace_failure_is_readable_without_hiding_roster () =
-  let input = { fixture with trace_unavailable = ["tester", "missing trace identity"] } in
+  let input = { fixture with trace_unavailable =
+      ["tester", Masc.Tui_decode.Identity_unreadable "missing trace identity"] } in
   let drawn = Pane.lines ~rows:20 ~cols:90 ~scroll:0 input in
   check bool "keeper navigation remains available" true
     (List.exists (function Pane.Target_keeper "tester" -> true | _ -> false) drawn.Pane.targets)
@@ -600,7 +601,7 @@ let test_beside_the_roster_only_a_keeper_waiting_on_approval_keeps_a_fleet_row (
 let test_failure_rows_leave_fleet_navigation_reachable () =
   let failures =
     List.init 20 (fun index ->
-        Printf.sprintf "unbooted-%02d" index, Printf.sprintf "reason-%02d" index)
+        Printf.sprintf "unbooted-%02d" index, Masc.Tui_decode.Keeper_not_started)
   in
   let input = { fixture with trace_unavailable = failures } in
   List.iter

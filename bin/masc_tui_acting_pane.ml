@@ -268,7 +268,7 @@ type input = {
   scope : scope;
   feed : feed;
   keepers : keeper list option;
-  trace_unavailable : (string * string) list;
+  trace_unavailable : (string * Reading.keeper_identity_absence) list;
   keepers_error : string option;
   selected : string option;
   keeper_context : keeper_context option;
@@ -493,7 +493,7 @@ type response_place =
   | Closes
 
 type logical_row =
-  | Trace_unavailable of string * string
+  | Trace_unavailable of string * Reading.keeper_identity_absence
   | Trace_unavailable_summary of string
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
@@ -1724,7 +1724,8 @@ let materialize_row ~cols input = function
       fit_line ~cols (with_border [{text = summary; tone = Warn}]), Target_none
   | Trace_unavailable (name, reason) ->
       let notice =
-        say input.ko "추적 불가: " "Trace unavailable: " ^ name ^ " · " ^ reason in
+        say input.ko "추적 불가: " "Trace unavailable: " ^ name ^ " · "
+        ^ Reading.keeper_identity_absence_text ~ko:input.ko reason in
       fit_line ~cols (with_border [{text = Terminal_text.single_line notice; tone = Warn}]), Target_none
   | Fleet_row (keeper, chunk) -> fleet_row ~cols input keeper chunk
   | Focus_header (name, current, health) ->

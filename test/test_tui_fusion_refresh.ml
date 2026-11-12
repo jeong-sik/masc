@@ -302,7 +302,7 @@ let test_superseded_selection () =
     let state = fresh () in
     state.view <- Types.Fusion;
     state.keepers <- [ { Masc.Tui_decode.k_origin = Persisted_keeper; k_name = "analyst"
-                       ; k_paused = false; k_identity = Error "fixture"; k_activity = None } ];
+                       ; k_paused = false; k_identity = Error (Masc.Tui_decode.Identity_unreadable "fixture"); k_activity = None } ];
     let a = run "a" Decode.Fusion_stage_accepted in
     let b = run "b" Decode.Fusion_stage_accepted in
     let c = run "c" Decode.Fusion_stage_accepted in

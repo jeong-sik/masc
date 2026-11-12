@@ -39,11 +39,19 @@ type keeper_activity = {
   k_last_proactive_outcome : Keeper_meta_contract.proactive_cycle_outcome option;
 }
 
+type keeper_identity_absence =
+  | Keeper_not_started
+  | Identity_unreadable of string
+
+let keeper_identity_absence_text ~ko = function
+  | Keeper_not_started -> if ko then "시작 전" else "Keeper has not started"
+  | Identity_unreadable detail -> detail
+
 type keeper = {
   k_origin : keeper_origin;
   k_name : string;
   k_paused : bool;
-  k_identity : (keeper_identity, string) result;
+  k_identity : (keeper_identity, keeper_identity_absence) result;
   k_activity : keeper_activity option;
 }
 
@@ -52,7 +60,7 @@ let keeper_trace_id keeper =
 
 type keeper_trace_projection = {
   bindings : (string * string) list;
-  unavailable : (string * string) list;
+  unavailable : (string * keeper_identity_absence) list;
 }
 
 let keeper_trace_projection keepers =
@@ -618,11 +626,12 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
 let keeper_of_declaration (row : Keeper_declared_roster.t) =
   { k_origin = Declared_keeper row.requirements; k_name = row.name;
     k_paused = false; k_activity = None;
-    k_identity = Error "Keeper has not started" }
+    k_identity = Error Keeper_not_started }
 
 let keeper_of_runtime row =
   { k_origin = Remote_keeper; k_name = row.kr_name; k_paused = row.kr_paused;
-    k_identity = row.kr_identity; k_activity = None }
+    k_identity = Result.map_error (fun detail -> Identity_unreadable detail) row.kr_identity;
+    k_activity = None }
 
 let decode_keeper json =
   let* meta = Keeper_meta_json_parse.meta_of_json json in

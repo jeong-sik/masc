@@ -23,7 +23,7 @@ let parts () =
 let state () = Types.create_state ~workspace:"resource-test" ~port:0 ()
 let keeper_row name : Types.keeper =
   {k_origin=Masc.Tui_decode.Persisted_keeper;k_name=name;k_paused=false;
-   k_identity=Error "not observed";k_activity=None}
+   k_identity=Error (Masc.Tui_decode.Identity_unreadable "not observed");k_activity=None}
 let saved state =
   match state.Types.resource_content with
   | Some (_, parts) -> parts

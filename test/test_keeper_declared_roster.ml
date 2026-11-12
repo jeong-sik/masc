@@ -28,8 +28,9 @@ let test_declared_keeper_is_visible_without_materialization () =
     (match summary.k_origin with
      | Declared_keeper [ Runtime_check_required; Sandbox_check_required ] -> ()
      | _ -> fail "must retain both unverified preparation requirements");
-    check (result string string) "no fabricated trace" (Error "Keeper has not started")
-      (Tui_decode.keeper_trace_id summary);
+    (match Tui_decode.keeper_trace_id summary with
+     | Error Tui_decode.Keeper_not_started -> ()
+     | Error (Tui_decode.Identity_unreadable _) | Ok _ -> fail "no fabricated trace");
     check bool "identity is explicitly unavailable before first boot" true
       (Result.is_error summary.k_identity);
     check bool "no fabricated activity before first boot" true

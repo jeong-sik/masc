@@ -6,7 +6,7 @@ type key = {
   scope : unit ref;
   base_path : string;
   keeper_name : string;
-  identity : (string, string) result;
+  identity : (string, Decode.keeper_identity_absence) result;
 }
 
 type request = key Fetched.request
@@ -40,10 +40,15 @@ let complete state request result = Fetched.complete ~equal:same_key state reque
 let view state ~key = Fetched.view_for ~equal:same_key state ~key
 
 let resolve_with ~project (keeper : Decode.keeper) =
-  Result.bind keeper.k_identity (fun identity ->
+  match keeper.k_identity with
+  | Error absence ->
+      (* The Keeper Info tab draws the absence from the Keeper row in the
+         screen language. This sentence is the read's own failure record. *)
+      Error (Decode.keeper_identity_absence_text ~ko:false absence)
+  | Ok identity ->
       let json = project ~keeper_name:keeper.k_name ~current_trace_id:identity.k_trace_id
         |> fun fields -> `Assoc fields in
-      Decode.decode_context_observation ~expected_trace_id:identity.k_trace_id json)
+      Decode.decode_context_observation ~expected_trace_id:identity.k_trace_id json
 
 let load ~config =
   resolve_with ~project:(fun ~keeper_name ~current_trace_id ->

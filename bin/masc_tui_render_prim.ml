@@ -2148,15 +2148,47 @@ let here_path (state : state) ~path =
   screen_title (" " ^ here_screen_name state)
   ^ String.concat "" (List.map step path)
 
-let here_row ~cols (state : state) ~path ~readings ~position =
-  let lead, id =
-    match List.rev path with
-    | [] -> here_path state ~path:[], ""
-    | last :: before ->
-        ( here_path state ~path:(List.rev before)
-          ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
-          last )
+(* The steps ahead of the last one, in the cells the row has for them. A
+   step the row cannot hold whole is folded in the middle, the longest first
+   and none below [heading_id_floor], so a long keeper name or lane label
+   keeps both its ends and the step after it stays on the row. Without this
+   the lead was cut at its end: the name lost its tail and the last step --
+   which view of that keeper this is -- went with it. A step that carries a
+   style of its own is left as given. *)
+let fit_here_steps ~cells:room steps =
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  let foldable step =
+    (not (String.contains step '\027')) && cells step > heading_id_floor
   in
+  let rec shrink steps over =
+    let longest =
+      List.fold_left
+        (fun widest step -> if foldable step then max widest (cells step) else widest)
+        0 steps
+    in
+    if over <= 0 || longest = 0 then steps
+    else
+      let cut = min over (longest - heading_id_floor) in
+      let rec fold_first = function
+        | [] -> []
+        | step :: rest when foldable step && cells step = longest ->
+            Message_layout.truncate_middle (longest - cut) step :: rest
+        | step :: rest -> step :: fold_first rest
+      in
+      shrink (fold_first steps) (over - cut)
+  in
+  shrink steps (List.fold_left (fun sum step -> sum + cells step) 0 steps - room)
+
+(* The cells the steps of a path share on a row [cols] wide: what the screen
+   name, one separator a step, and the [after] cells the row must keep leave. *)
+let here_steps_room ~cols (state : state) ~steps ~after =
+  let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+  framed_inner_width cols
+  - cells (here_path state ~path:[])
+  - (steps * cells here_step_separator)
+  - after
+
+let here_row ~cols (state : state) ~path ~readings ~position =
   let position =
     Option.map
       (fun position ->
@@ -2176,6 +2208,22 @@ let here_row ~cols (state : state) ~path ~readings ~position =
     | None -> 0
   in
   let left_cols = cols - position_cells in
+  let lead, id =
+    match List.rev path with
+    | [] -> here_path state ~path:[], ""
+    | last :: before ->
+        let before = List.rev before in
+        (* The last step keeps its floor; the steps ahead of it share the
+           rest. *)
+        let room =
+          here_steps_room ~cols:left_cols state
+            ~steps:(List.length before + 1)
+            ~after:(min (cells last) heading_id_floor)
+        in
+        ( here_path state ~path:(fit_here_steps ~cells:room before)
+          ^ Ansi.dim ^ here_step_separator ^ Ansi.reset,
+          last )
+  in
   let left =
     detail_heading ~cols:left_cols ~lead:(Lead_text lead) ~id
       ~after:

@@ -4698,19 +4698,34 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        Drawn through [tab_strip] with the row's width: ten tabs are wider
        than the row beside the roster pane, and cut from the right the mark
        on Runs was the part that went. *)
+    let entries =
+      List.map
+        (fun tab ->
+          ( Masc_tui_types.keeper_detail_tab_label tab
+          , tab = state.detail_tab
+          , tab ))
+        Masc_tui_types.keeper_detail_tabs
+    in
+    (* The strip keeps the cells its current tab needs; a name longer than
+       what is left folds in the middle. Drawn whole, a long name took the
+       row and the strip drew nothing, so the row no longer said which tab
+       the body below it is. *)
+    let name =
+      Message_layout.truncate_middle
+        (max heading_id_floor
+           (here_steps_room ~cols state ~steps:1
+              ~after:
+                (Message_layout.display_width tab_strip_gap
+                 + tab_strip_min_width entries)))
+        (Terminal_text.single_line k.k_name)
+    in
     let before =
-      here_path state ~path:[ Ansi.bold ^ Terminal_text.single_line k.k_name ^ Ansi.reset ]
-      ^ tab_strip_gap
+      here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
     in
     let tabs =
       tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
         ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
-        (List.map
-           (fun tab ->
-             ( Masc_tui_types.keeper_detail_tab_label tab
-             , tab = state.detail_tab
-             , tab ))
-           Masc_tui_types.keeper_detail_tabs)
+        entries
     in
     let title = before ^ tabs in
     box_line buf cols title;

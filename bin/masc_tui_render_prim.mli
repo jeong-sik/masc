@@ -342,7 +342,16 @@ val here_row :
     path by a gap and from each other by {!reading_separator}; an empty one
     is not drawn. The last
     step folds first when the row is narrow, readings give way whole from the
-    end, and the position is never cut. The product name is not drawn. *)
+    end, and the position is never cut. A step ahead of the last that the row
+    cannot hold whole is folded in the middle, the longest first, so the last
+    step stays on the row. The product name is not drawn. *)
+
+val here_steps_room :
+  cols:int -> Masc_tui_types.state -> steps:int -> after:int -> int
+(** The cells [steps] steps of a path share on a row [cols] wide that must
+    also keep [after] cells for what follows the path: what the screen name
+    and one separator a step leave. A row that lays out the path itself
+    ({!here_path}) folds a long step to this. *)
 
 type compact_connection_state =
   | Compact_workspace_mismatch

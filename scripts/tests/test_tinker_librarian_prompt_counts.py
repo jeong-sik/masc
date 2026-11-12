@@ -103,7 +103,9 @@ class CallTest(unittest.TestCase):
     def test_a_row_that_names_no_key_or_no_time_is_refused(self) -> None:
         cases: list[Row] = [{"sent_at": 1.0}, {"call_key": "k"}, {"call_key": "k", "sent_at": None},
                             {"call_key": None, "sent_at": 1.0}, {"call_key": 7, "sent_at": 1.0},
-                            {"call_key": "k", "sent_at": "1.0"}, {"call_key": "k", "sent_at": True}]
+                            {"call_key": "k", "sent_at": "1.0"}, {"call_key": "k", "sent_at": True},
+                            {"call_key": "k", "sent_at": float("nan")}, {"call_key": "k", "sent_at": float("inf")},
+                            {"call_key": "k", "sent_at": -1.0}, {"call_key": "k", "sent_at": 10 ** 400}]
         for row in cases:
             with self.subTest(row=row):
                 with self.assertRaises(SystemExit) as caught:
@@ -156,15 +158,17 @@ class MeasureTest(unittest.TestCase):
                          (first.answered, first.counts, first.real_record))
 
     def test_a_folder_that_holds_another_targets_rows_is_counted_for_the_models_own(self) -> None:
-        # The other target's rows come first in both sets and count other numbers.
+        # The other target's rows come first in both sets, count other numbers and answer an item more.
         targets = {"again": "another-model", "base": "inkling-model"}
         synth = write_run(self.root, "synth", "synth",
                           [synth_row("m1-01", target="again", call_key="key-again", valid=False, candidates=5,
                                      state_correct=1, planted=3, planted_dropped=3, dropped=3, dropped_expected=3),
+                           synth_row("m9-01", target="again", call_key="key-again-more"),
                            synth_row("m1-01", planted=2, planted_dropped=1)], targets=targets)
         real = write_run(self.root, "real", "real",
                          [real_row("e1", target="again", call_key="key-again-e1", agree=2, candidates=5,
                                    dropped_not_in_live=["m9"]),
+                          real_row("e9", target="again", call_key="key-again-e9"),
                           real_row("e1")], targets=targets)
         got = self.measure(C.Run(synth, real, None, None), (1, 1))
         self.assertEqual({metric.value: got.counts[metric] for metric in C.Metric},
@@ -220,6 +224,26 @@ class MeasureTest(unittest.TestCase):
                 with self.assertRaises(SystemExit) as caught:
                     self.measure(self.run_(synth, real), items)
                 self.assertIn(want, str(caught.exception))
+
+    def test_a_run_that_answers_one_item_twice_is_refused(self) -> None:
+        # In place of another item, as many rows as the set has items: counting the rows would pass
+        # it. Beside every item, a row more: counting the items would.
+        for kind in ("synth", "real"):
+            for twice in ("in place of another", "beside every item"):
+                with self.subTest(kind=kind, twice=twice):
+                    self.tearDown()
+                    self.setUp()
+                    again = [synth_row("m1-01", call_key="key-again")] if kind == "synth" else []
+                    again_real = [real_row("e1", call_key="key-again-e")] if kind == "real" else []
+                    others = twice == "beside every item"
+                    synth = write_run(self.root, "synth", "synth",
+                                      [synth_row("m1-01"), *again, *([synth_row("m2-01")] if others or not again else [])])
+                    real = write_run(self.root, "real", "real",
+                                     [real_row("e1"), *again_real, *([real_row("e2")] if others or not again_real else [])])
+                    with self.assertRaises(SystemExit) as caught:
+                        self.measure(C.Run(synth, real, None, None))
+                    self.assertEqual(str(caught.exception),
+                                     f"{self.root / kind} does not hold one row for each of the 2 E-{kind} items")
 
     def one_item_run(self, row: Row) -> C.Run:
         return C.Run(write_run(self.root, "synth", "synth", [row]), write_run(self.root, "real", "real", [real_row("e1")]),
@@ -278,9 +302,22 @@ class JudgedMeasureTest(unittest.TestCase):
                                                         encoding="utf-8")
         return C.Run(synth, real, drops, merges)
 
+    def measure(self, run: C.Run, items: int = 3) -> C.Measured:
+        return C.measure(run, provider="tinker", model="inkling-model", pin=PIN, items=(items, 1))
+
     def counts(self, run: C.Run, items: int = 3) -> dict[str, C.Count]:
-        got = C.measure(run, provider="tinker", model="inkling-model", pin=PIN, items=(items, 1))
+        got = self.measure(run, items)
         return {metric.value: got.counts[metric] for metric in C.Metric}
+
+    def test_the_calls_of_rows_left_out_of_scoring_are_the_runs_all_the_same(self) -> None:
+        # A baseline keeps every call its run answered, so that a later run that counts one of them
+        # again is refused, whether or not the judge left the row out of scoring.
+        every = frozenset({sha("key-eval-k-0 1.0"), sha("key-eval-k-1 1.0"), sha("key-eval-j-0 1.0"), sha("key-e1 2.0")})
+        for m7 in ("drop", "keep"):
+            with self.subTest(m7=m7):
+                self.tearDown()
+                self.setUp()
+                self.assertEqual(self.measure(self.run_(m7)).answered, every)
 
     def test_a_drop_the_judge_takes_out_leaves_its_memory_out_of_scoring(self) -> None:
         # Only eval-j-0 is scored. The drop of m3 on the memory left out still counts against drop

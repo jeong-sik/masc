@@ -319,13 +319,32 @@ class SidesTest(unittest.TestCase):
                  "a call of the other model's baseline": ("inkling", own | calls("g1")),
                  "one call of the other model's baseline, on glm": ("glm", own | one)}
         for case, (name, answered) in cases.items():
-            with self.subTest(case=case):
-                run = measured(DRAFT_T, "d1", answered=answered)
-                drafts = {name: [run] if name == "glm" else [measured(DRAFT_T, "d2", answered=calls("d2")), run]}
-                with self.assertRaises(SystemExit) as caught:
-                    P.sides_of(LINES, drafts)
-                self.assertEqual(str(caught.exception),
-                                 f"a {name} draft run counts an answered call a pinned baseline counted")
+            run, other = measured(DRAFT_T, "d1", answered=answered), measured(DRAFT_T, "d2", answered=calls("d2"))
+            for drafts in ([run],) if name == "glm" else ([run, other], [other, run]):
+                with self.subTest(case=case, first=drafts[0] is run):
+                    with self.assertRaises(SystemExit) as caught:
+                        P.sides_of(LINES, {name: drafts})
+                    self.assertEqual(str(caught.exception),
+                                     f"a {name} draft run counts an answered call a pinned baseline counted")
+
+    def test_a_draft_run_that_holds_the_rows_of_a_pinned_baseline_is_refused(self) -> None:
+        # Though it counts none of the calls the file names for the baseline: a rows file of either
+        # set, of the model's baseline or the other model's.
+        own = measured(DRAFT_T, "d1", answered=calls("d1"))
+        cases = {"both rows files of a run of its baseline": ("inkling", measured(DRAFT_T, "i2", answered=calls("d1"))),
+                 "the E-synth rows of its baseline": ("inkling", replace(own, synth_rows_sha256=sha("i1 synth"))),
+                 "the E-real rows of its baseline": ("inkling", replace(own, real_rows_sha256=sha("i2 real"))),
+                 "the E-real rows of the other model's baseline": ("inkling", replace(own, real_rows_sha256=sha("g1 real"))),
+                 "the E-synth rows of the other model's baseline, on glm": ("glm",
+                                                                             replace(own, synth_rows_sha256=sha("i1 synth")))}
+        for case, (name, run) in cases.items():
+            other = measured(DRAFT_T, "d2", answered=calls("d2"))
+            for drafts in ([run],) if name == "glm" else ([run, other], [other, run]):
+                with self.subTest(case=case, first=drafts[0] is run):
+                    with self.assertRaises(SystemExit) as caught:
+                        P.sides_of(LINES, {name: drafts})
+                    self.assertEqual(str(caught.exception),
+                                     f"a {name} draft run holds the rows a pinned baseline was counted from")
 
     def test_runs_of_a_model_the_lines_do_not_hold_are_not_measured(self) -> None:
         with self.assertRaises(SystemExit) as caught:
@@ -473,6 +492,17 @@ class CommandTest(unittest.TestCase):
                                           *cast(list[str], pinned["real_rows_sha256"])})
         self.assertEqual(self.refused_compare(base), refusal)
 
+    def test_compare_refuses_the_baselines_rows_when_the_file_names_other_calls_for_them(self) -> None:
+        # A file changed by hand names other answered calls for the baseline than its runs counted.
+        # The baseline's folders, their template renamed, hold the rows the file names all the same.
+        base, pinned = self.pin_baseline()
+        self.write_lines(pinned | {"answered_sha256": [[sha("another call 1")], [sha("another call 2")]]})
+        for summary in self.root.glob("base-*/summary.json"):
+            held = cast(Row, json.loads(summary.read_text(encoding="utf-8")))
+            summary.write_text(json.dumps(held | {"template_sha256": DRAFT_T}), encoding="utf-8")
+        self.assertEqual(self.refused_compare(base),
+                         "a inkling draft run holds the rows a pinned baseline was counted from")
+
     def test_compare_refuses_a_draft_run_that_counts_one_answer_of_the_baseline(self) -> None:
         # A draft run made in a copy of a baseline run's folder: the caller answers a request the draft
         # leaves as it was from the folder's log, and the row names the baseline's call.
@@ -539,10 +569,11 @@ class CommandTest(unittest.TestCase):
         self.write_lines(None)
         path, out = self.root / "runs.json", self.root / "compare.json"
         twice = "runs.json writes a key twice in one object"
-        for text, refusal in (('{"inkling": [], "inkling": []}', twice),
-                              ('{"inkling": [{"synth": "s", "real": "r", "real": "another"}]}', twice),
-                              ('{"inkling": [', "runs.json is not JSON: ")):
-            path.write_text(text, encoding="utf-8")
+        for text, refusal in ((b'{"inkling": [], "inkling": []}', twice),
+                              (b'{"inkling": [{"synth": "s", "real": "r", "real": "another"}]}', twice),
+                              (b'{"inkling": [', "runs.json is not JSON: "),
+                              (b'{"inkling": "\xff"}', "runs.json is not JSON: ")):
+            path.write_bytes(text)
             for argv in (("baseline", "--runs", str(path)), ("compare", "--runs", str(path), "--out", str(out))):
                 with self.subTest(text=text, command=argv[0]):
                     with self.assertRaises(SystemExit) as caught:

@@ -242,12 +242,16 @@ class LinesTest(unittest.TestCase):
 
     def test_a_run_that_sent_two_models_stands_in_both_baselines(self) -> None:
         # `prompt_counts.measure` picks a model's rows from a folder that holds another target's too,
-        # so the rows of one run may be named under two models, never twice under one. Each model's
-        # answered calls there are its own.
-        lines = L.lines_of(changed((*GLM, "synth_rows_sha256"), [sha("i1 synth")]))
-        glm = lines.models["glm"].baseline
-        assert glm is not None
-        self.assertEqual((glm.synth_rows_sha256, glm.answered), ((sha("i1 synth"),), (calls("g1"),)))
+        # so the rows of one run may be named under two models of its provider, never twice under
+        # one. Each model's answered calls there are its own.
+        raw = raw_lines()
+        shared: Raw = {"synth_rows_sha256": [sha("i1 synth")], "real_rows_sha256": [sha("i1 real")]}
+        cast(Raw, raw["models"])["again"] = {"provider": "tinker", "model": "another-model", "runs": 1,
+                                              "baseline": raw_baseline("a1", model="another-model") | shared}
+        again = L.lines_of(raw).models["again"].baseline
+        assert again is not None
+        self.assertEqual((again.synth_rows_sha256, again.real_rows_sha256, again.answered),
+                         ((sha("i1 synth"),), (sha("i1 real"),), (calls("a1"),)))
 
     def test_a_stale_baseline_is_refused_when_the_file_pins_something_else(self) -> None:
         for path in (("pass_lines_sha256",), ("baseline_template_sha256",), ("files_sha256", L.COUNTS)):
@@ -261,25 +265,38 @@ class LinesTest(unittest.TestCase):
 
     def test_a_key_written_twice_in_one_object_is_refused(self) -> None:
         text = json.dumps(raw_lines())
-        self.assertEqual(L.as_written(text, "prompt_lines.json"), raw_lines())
+        self.assertEqual(L.as_written(text.encode(), "prompt_lines.json"), raw_lines())
         for once, twice in (('"better_sigmas": 2.0', '"better_sigmas": 2.0, "better_sigmas": 0.0'),
                             ('"runs": 1', '"runs": 1, "runs": 2'),
                             ('"dropped_not_in_live": 0}]', '"dropped_not_in_live": 0, "agree": 0}]')):
             with self.subTest(twice=twice):
                 self.assertIn(once, text)
                 with self.assertRaises(SystemExit) as caught:
-                    L.as_written(text.replace(once, twice), "prompt_lines.json")
+                    L.as_written(text.replace(once, twice).encode(), "prompt_lines.json")
                 self.assertEqual(str(caught.exception), "prompt_lines.json writes a key twice in one object")
 
     def test_text_that_is_not_json_is_refused_under_the_name_of_its_file(self) -> None:
-        for text in ("", "{", '{"inkling": [],}', "[1, 2"):
-            with self.subTest(text=text):
+        for written in (b"", b"{", b'{"inkling": [],}', b"[1, 2"):
+            with self.subTest(written=written):
                 with self.assertRaises(SystemExit) as caught:
-                    L.as_written(text, "runs.json")
+                    L.as_written(written, "runs.json")
+                self.assertEqual(str(caught.exception)[:22], "runs.json is not JSON:")
+        # What Python does not read though it is no error of the JSON grammar ends in the same line.
+        # The file is UTF-8 text: a byte order mark or another encoding is not guessed.
+        unread = {"bytes that are no text": b'{"inkling": "\xff"}',
+                  "a byte order mark": b"\xef\xbb\xbf" + b'{"inkling": []}',
+                  "UTF-16": '{"inkling": []}'.encode("utf-16"),
+                  "an integer of 5,000 digits": b"1" * 5000,
+                  "100,000 lists in each other": b"[" * 100_000 + b"]" * 100_000}
+        for what, written in unread.items():
+            with self.subTest(what=what):
+                with self.assertRaises(SystemExit) as caught:
+                    L.as_written(written, "runs.json")
                 self.assertEqual(str(caught.exception)[:22], "runs.json is not JSON:")
         with self.assertRaises(SystemExit) as caught:
-            L.as_written('{"inkling": [], "inkling": []}', "runs.json")
+            L.as_written(b'{"inkling": [], "inkling": []}', "runs.json")
         self.assertEqual(str(caught.exception), "runs.json writes a key twice in one object")
+        self.assertEqual(L.as_written('{"inkling": ["é"]}'.encode(), "runs.json"), {"inkling": ["é"]})
 
     def test_a_model_the_file_does_not_hold_is_refused(self) -> None:
         lines = L.lines_of(raw_lines())
@@ -301,10 +318,10 @@ class PinnedLinesTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def read(self, text: str) -> L.Lines:
+    def read(self, text: str | bytes) -> L.Lines:
         """`pinned_lines` over a prompt_lines.json that holds `text`."""
         path = Path(self.tmp.name) / "prompt_lines.json"
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(text.encode() if isinstance(text, str) else text)
         with mock.patch.object(L, "PROMPT_LINES", path):
             return L.pinned_lines()
 
@@ -360,9 +377,12 @@ class PinnedLinesTest(unittest.TestCase):
 
     def test_a_file_that_is_not_json_is_refused(self) -> None:
         text = L.PROMPT_LINES.read_text(encoding="utf-8")
-        with self.assertRaises(SystemExit) as caught:
-            self.read(text[:text.rindex("}")])
-        self.assertIn("prompt_lines.json is not JSON: ", str(caught.exception))
+        cut: list[str | bytes] = [text[:text.rindex("}")], text.encode().replace(b"2.5", b"\xff")]
+        for held in cut:
+            with self.subTest(held=held[-12:]):
+                with self.assertRaises(SystemExit) as caught:
+                    self.read(held)
+                self.assertIn("prompt_lines.json is not JSON: ", str(caught.exception))
 
     def test_a_key_written_twice_is_refused(self) -> None:
         text = L.PROMPT_LINES.read_text(encoding="utf-8")

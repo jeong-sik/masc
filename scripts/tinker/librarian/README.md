@@ -332,8 +332,11 @@ An answered call is named by one sha256 of its key and the time it was sent
 (`answered_sha256`). `compare` reads the baseline from the file
 and measures only the draft's runs (`prompt_counts.py`), so a comparison needs
 neither the baseline's run folders nor its judges' decisions, and neither can
-move a pinned count. A model whose baseline is `null` cannot be compared yet.
-A draft run that counts an answered call a pinned baseline counted is refused.
+move a pinned count. Nor can the comparison hold a pinned baseline to the runs
+it was counted from: the file is the record, and a count changed in it is read
+as it stands. A model whose baseline is `null` cannot be compared yet.
+A draft run that counts an answered call a pinned baseline counted is refused,
+and so is one whose rows file has the sha256 of a baseline's rows.
 A run made in a copy of a baseline run's folder answers from that folder's log
 every request the draft leaves as it was, and a row written again with other
 spacing or key order names the same call.
@@ -358,8 +361,8 @@ until it names that template. It also pins `prompt_counts.py`,
 change of `prompt_lines.py` or `prompt_compare.py` only `files_sha256` is
 pinned again and the baselines stand; a change of `prompt_counts.py` leaves
 them stale as above. `prompt_lines.json` and `runs.json` are read as written:
-a key the comparison does not read, a key written twice in one object, or a
-value of another shape is refused.
+a file that is not JSON, a key the comparison does not read, a key written
+twice in one object, or a value of another shape is refused.
 
 Each metric counts hits over
 chances, summed over a side's runs. Its noise σ is the binomial standard error

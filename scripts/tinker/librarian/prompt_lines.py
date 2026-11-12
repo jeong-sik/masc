@@ -17,7 +17,9 @@ A baseline is what the model's runs of the pinned template counted, kept as numb
 hits over chances summed over the runs and, for each run in order, its E-real record, the sha256 of
 its E-synth and E-real rows, and the answered calls it counted (`prompt_counts.call_sha256`). No
 answered call is counted by two pinned runs. `prompt_compare.py baseline` prints a baseline. It is
-null until the model's runs are counted.
+null until the model's runs are counted. The comparison cannot hold a pinned baseline to the runs it
+was counted from: it does not read them. The file is the record: a count or a sha256 changed in it,
+or a model renamed in both of its places, is read as it stands.
 
 A baseline names what it was counted for and under: the provider and the model, the pass lines, the
 template and the prompt_counts.py. When the file names another of them the baseline is stale and the
@@ -285,10 +287,11 @@ def lines_of(raw: object) -> Lines:
                  better_from, models)
 
 
-def as_written(text: str, name: str) -> object:
-    """The JSON that `text`, the contents of the file `name`, holds. SystemExit when it is not JSON, or
-    when it writes a key twice in one object: the later value would be the one read, and the earlier
-    one would stay in the file unread."""
+def as_written(written: bytes, name: str) -> object:
+    """The JSON that `written`, the bytes of the file `name`, holds. SystemExit when Python does not
+    read them as JSON (bytes that are not UTF-8 text, text that is not JSON, an integer of more
+    digits or a nesting deeper than Python takes), or when the file writes a key twice in one object:
+    the later value would be the one read, and the earlier one would stay in the file unread."""
 
     def once(pairs: list[tuple[str, object]]) -> JsonObject:
         held = dict(pairs)
@@ -297,8 +300,8 @@ def as_written(text: str, name: str) -> object:
         return held
 
     try:
-        return cast(object, json.loads(text, object_pairs_hook=once))
-    except json.JSONDecodeError as error:
+        return cast(object, json.loads(written.decode("utf-8"), object_pairs_hook=once))
+    except (ValueError, RecursionError) as error:
         raise SystemExit(f"{name} is not JSON: {error}") from error
 
 
@@ -307,7 +310,7 @@ def pinned_lines() -> Lines:
     present pass lines and names the present config/prompts/librarian.md as the template of the
     baseline. The pass lines pin that template, and `eval_admission.load_pass_lines` holds the file to
     their pin. SystemExit otherwise."""
-    lines = lines_of(as_written(PROMPT_LINES.read_text(encoding="utf-8"), "prompt_lines.json"))
+    lines = lines_of(as_written(PROMPT_LINES.read_bytes(), "prompt_lines.json"))
     changed = [name for name, pinned in lines.files_sha256.items() if pinned != sha256_file(HERE / name)]
     if changed:
         raise SystemExit("prompt_lines.json pins another version of " + ", ".join(changed))

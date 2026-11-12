@@ -29,10 +29,10 @@ Lane Add-on exact 요청 하나가 끝나지 않고 242번 실행됐다. 실행�
 | 층 | 바꾸는 것 | 저장 모양 | hard cut |
 |---|---|---|---|
 | L1 | 기다리는 slot 이 있는 동안, 이 요청의 입력 크기를 거절한 slot 을 이 요청으로 다시 부르지 않는다 | 그대로 | 없음 |
-| L2 | 실행 증거가 요청 본문 대신 digest 를 담는다. 증거는 attempt 마다 파일 하나다 | 바뀜 | 필요 |
-| L3 | 요청 본문을 요청 기록 밖에 한 번만 저장한다 | 바뀜 | 필요 (L2 와 같이) |
+| L2 | 실행 증거가 요청 본문을 담지 않는다. 요청은 `request_id` 와 `digest` 로 가리킨다 | 바뀜 | 필요 |
+| L3 | 요청 본문을 요청 기록 밖에 한 번만 저장한다 | 바뀜 | 필요 |
 
-L1 은 이 문서에서 구현할 수 있을 만큼 정한다. L2·L3 은 방향과 풀어야 할 것만 정한다(§3.3, §3.4). 구현 전에 그 절을 채워 다시 리뷰받는다.
+L1 과 L2 는 이 문서에서 구현할 수 있을 만큼 정한다(§3.2, §3.3). L3 은 방향과 풀어야 할 것만 정한다(§3.4). 구현 전에 그 절을 채워 다시 리뷰받는다.
 
 L1 은 #51649 로 병합됐다. 화면 문구는 #51650 이 고쳤다. §1.1 은 그 직후에 잰 값이다. L1 이 덮지 않는 되풀이 하나를 거기서 찾았다(§3.5, §9 D5).
 
@@ -97,6 +97,16 @@ attempt 240개를 slot 별로 센 결과다. slot 은 runtime 계열로만 적�
 tinker 계열의 400 에는 오류 코드가 없다. 그래서 `Invalid_request` 가 된다. L1 은 `Invalid_request` 를 건너뛰지 않는다(§3.2). 코드대로면 이 여섯은 L1 이 설치된 뒤에도 host event 마다 두 slot 을 다시 부른다. 설치 뒤의 값은 아직 재지 않았다.
 
 tinker 문장의 `max_tokens` 자리에는 283번이 1000000000, 11번이 4096 이다. Librarian lane 은 output 한도를 선언하지 않았다. 그 경우 요청은 그 칸을 싣지 않는다(`backend_openai_request.ml:238-263`). 1000000000 은 provider 의 기본값으로 보인다. wire 본문은 보지 않았다.
+
+### 1.2 L1 설치 뒤에 잰 것 (2026-11-12 10:42~10:52Z)
+
+서버는 10:32:06Z 에 L1 이 든 build `778e441d5df1` 로 다시 떴다. 읽는 방식은 §1.1 과 같다.
+
+- 열린 `classification` 요청의 attempt 292 는 다시 뜬 뒤의 첫 실행이다. 기다림 표가 비어 있어 HTTP slot 둘을 불렀다(429 `Rate_limited`, 400 `Context_overflow`).
+- attempt 293~295 는 `every_slot_held` 다. provider 를 부르지 않았다. 그 요청의 증거 파일은 1,055,315,219 바이트에서 늘지 않았다.
+- 그 요청은 실행마다 그 파일을 통째로 읽는다(§2.3).
+- exact 요청 기록은 134개다. 열린 것이 7개, 끝난 attempt 가 있는 것이 132개다.
+- 소비자 원본(`tool-request-owners`)은 709개다. request id 가 exact 요청 id 와 같은 것은 92개다(`admission` 58, `classification` 17, `durable` 4, 그 밖 13). 나머지 exact 기록 42개의 원본은 세지 못했다.
 
 ## 2. 지금 구조
 
@@ -197,7 +207,7 @@ receipt 가 담지 못하는 것도 있다. 로컬 거절의 `disposition` 은 `
 - **C3.** 거절의 근거는 그 요청의 보관된 실행 증거다. 그 slot 을 부른 가장 최근 증거가 정한다. 메모리의 표나 글에서 읽어 내지 않는다.
 - **C4.** 어느 slot 도 lane 목록에서 지우지 않는다. C1 은 요청 하나와 slot 하나 사이의 사실이다. 다른 요청은 그 slot 을 그대로 부른다.
 - **C5.** L1 은 답 없이 끝나는 걷기를 바꾸지 않는다. `Input_refused` 로 끝나는 걷기는 지금과 같은 slot 을 부르고 같은 receipt 를 남긴다. 답으로 끝나는 걷기의 receipt 에는 건너뛴 slot 이 `excluded_http` 로 남을 수 있다.
-- **C6.** 실행 증거를 하나 보태는 비용은 지난 실행 수와 요청 크기에 비례하지 않는다.
+- **C6.** 실행 증거를 읽고 보태는 비용은 요청 크기에 비례하지 않는다.
 - **C7.** 요청 본문은 한 번 저장한다.
 
 C1 은 시간으로 상태를 죽이지 않는다(헌법 `no_wall_clock_death`). 근거는 일어난 거절이다.
@@ -244,21 +254,48 @@ C5 는 §2.6 에서 나온다. 기다리는 slot 이 없으면 아무것도 건�
 
 L1 은 저장 모양을 바꾸지 않는다. receipt 의 version 과 칸이 그대로다.
 
-### 3.3 L2 — 실행 증거 (방향)
+### 3.3 L2 — 실행 증거
 
-- 증거는 `request` 칸을 갖지 않는다. `digest`, `request_id`, `declaration_id` 가 요청을 가리킨다.
-- 증거는 attempt 마다 파일 하나다. 한 번 쓰고, 같은 key 에 다른 내용을 쓰면 거절한다. slot 관측 companion 이 이미 쓰는 방식이다(`lane_addon_exact_observation.ml`, key 는 `[request_id, attempt_ordinal, proof_sha256]`).
-- `decode_proof` 는 호출자의 요청에서 digest 를 계산해 증거의 `digest` 와 견준다.
-- sweep 의 `proof_request_id` 는 증거의 `request_id` 와 `digest` 칸으로 파일 이름을 확인한다.
-- tinker 스크립트는 `request.output` 으로 증거를 거른다. output 이름은 요청 기록에서 읽게 고친다.
+줄 번호는 main `fe02caf20e0a` 기준이다.
 
-구현 전에 정할 것:
+**규칙.** 증거는 요청 본문을 담지 않는다. 요청은 `request_id` 와 `digest` 로 가리킨다. 한 요청의 증거가 파일 하나에 모이는 것, 그 파일의 자리와 이름은 바꾸지 않는다.
 
-- L1 은 "그 slot 을 부른 가장 최근 증거"를 찾는다. 파일이 나뉘면 최근 증거부터 거슬러 읽는다. 그 slot 이 `excluded_http` 에 있는 증거는 넘어간다. 읽는 파일 수는 그 slot 을 건너뛰고 다른 slot 을 부른 걷기의 수다. 아무도 부르지 않은 걷기는 증거가 없으니 측정한 경우에는 하나다.
-- 지금 `.mli` 는 `bind_proofs` 가 한 요청의 증거 전체를 attempt 목록과 견준다고 약속한다. 증거를 보탤 때 전체를 읽지 않으려면 그 약속을 어디로 옮길지 정한다. ordinal 이 늘기만 하고 앞자리에 끼워 넣지 못한다는 검사도 같이다.
-- preflight 는 요청 기록만 본다. 옛 모양 증거가 남아 있으면 시작 때의 sweep 이 전체를 멈춘다. preflight 가 증거 모양도 보게 한다.
-- 증거 디렉터리는 `.json` 파일만 둔다. sweep 은 다른 종류의 항목이 있으면 전체를 멈춘다(`server_unowned_exact_sweep.ml:54-75`).
-- 본문을 뺀 증거 하나의 크기는 §1.1 에서 쟀다. 실행 1,549개에서 `request` 칸이 98% 다(275.9 MB 대 5.4 MB, 계산값). 본문을 뺀 실행 하나는 평균 약 3.5 KB 다. §1 의 중앙값 6.1 MB 는 본문이 큰 요청 하나의 값이다.
+**근거.** §1.1 의 137파일에서 `request` 칸이 275.9 MB 이고 나머지 칸이 5.4 MB 다. `request` 칸을 빼면 그 파일들의 98% 가 사라진다(계산값). 파일 하나는 평균 약 39 KB 가 된다(5.4 MB ÷ 137, 계산값). 요청 하나의 증거는 평균 11.3개다(1,549 ÷ 137). §1.2 의 큰 파일은 증거별로 세지 않았다. 같은 평균이면 약 1 MB 다(attempt 292 × 3.5 KB, 계산값).
+
+**증거의 `request` 칸을 쓰는 곳.**
+
+- `decode_proof`(`lane_addon_exact.ml:676-710`): 호출자의 요청으로 증거를 다시 만들어 저장된 것과 견준다. 증거마다 요청 본문을 다시 직렬화한다.
+- `proof_request_id`(`:756-769`): 시작 sweep 이 부른다. `executions[0].request` 로 파일 이름을 다시 계산한다.
+- `scripts/tinker/librarian/check_validator_on_store.py:299-315`: `request.output` 을 읽는다.
+
+소비자는 요청을 자기 기록에서 다시 만들어 공개 read 함수에 넘기고 `{outcome; receipt}` 를 받는다(`lane_addon_exact.mli:206-209`). 증거에서 본문을 꺼내 쓰는 곳은 없다.
+
+**증거 하나의 모양(`proof_to_json`, `:668-673`).** `request` 칸을 뺀다. 남는 칸은 `version`, `kind`, `store_root`, `declaration_id`, `request_id`, `digest`, `schema`, `attempt_ordinal`, `outcome`, `receipt` 다. `version` 은 2 다. 실행을 묶는 바깥 모양(`proofs_to_json`, `:715-718`)은 바꾸지 않는다.
+
+**읽기(`decode_proof`).** 호출자의 요청으로 증거를 다시 만들어 저장된 것과 견주는 방식은 같다. 다시 만든 값에 호출자 요청의 `request_id` 와 `digest` 가 들어간다. `digest` 는 요청 전체를 글로 쓴 것의 sha256 이다(`:91`). 다른 요청의 증거는 `digest` 가 달라 거절된다. 요청 본문은 `digest` 를 낼 때 한 번 직렬화한다.
+
+`version` 과 `attempt_ordinal` 은 canonical 로 바꾸기 전의 JSON 에서 정수여야 한다. receipt 의 version 과 무관하다. float 로 적힌 값을 받는 읽기(`:690-704`)와 그 시험(`test/test_lane_addon_exact.ml:578-591`)은 지운다. writer 는 정수만 쓴다.
+
+**쓰기(`retain_proof`, `:826-848`).** 순서는 같다. 파일을 읽어 그 요청의 증거를 모두 decode 하고, 하나를 보태 파일을 쓰고, 다시 읽어 견준다. 쓰는 바이트는 (그 요청의 증거 수) × (본문 없는 증거 하나)다. 요청 크기는 들어가지 않는다(C6).
+
+증거 수에 비례하는 몫은 남는다. 증거 목록은 attempt 목록보다 길 수 없다. attempt 목록이 host event 마다 느는 것은 #50762 가 다룬다. 끝나지 않는 요청이 provider 를 되풀이해 부르는 것은 L1 과 §9 D4·D5 가 다룬다.
+
+**sweep(`proof_request_id`).** 첫 증거의 `request_id` 와 `digest` 칸으로 파일 이름을 다시 계산해 견준다. 파일 이름은 그 둘로 정해진다(`proof_key`, `:630-632`). sweep 의 나머지(`server_unowned_exact_sweep.ml`)는 바꾸지 않는다.
+
+**slot 관측.** 관측 파일의 이름에는 증거의 sha 가 들어간다(`lane_addon_exact_observation.ml:13-16`). 증거의 모양이 바뀌면 그 sha 가 바뀐다. 코드는 바꾸지 않는다. 옛 증거에 묶인 관측 파일은 새 이름으로 찾아지지 않는다(§5).
+
+**preflight.** `Exact_requests` scan(`lane_addon_store_preflight.ml:289-293`)은 기록마다 `check_retained_record`(`lane_addon_exact.ml:572-581`)를 부른다. 이 함수가 그 기록의 증거 파일도 읽는다. 기록에 든 요청과 declaration id 로 증거 파일을 찾고, `run` 이 쓰는 읽기(`bound_proofs`, `:800-803`)로 읽는다. 그래서 함수가 store 를 받는다. 증거가 읽히지 않으면 그 기록을 거절하고 fresh state 줄에 기록 파일과 증거 파일의 경로를 찍는다.
+
+옛 증거의 이름이나 모양을 아는 코드는 두지 않는다. `request` 칸이 든 증거는 `decode_proof` 의 마지막 비교(`:709-710`)가 거절한다. preflight 는 그것을 "지금 reader 가 읽지 못하는 파일"로 본다.
+
+**tinker 스크립트.** `request.output` 은 요청 기록(`exact-requests`)에서 `request_id` 로 읽는다.
+
+**Fresh state 항목.** L2 의 PR 은 `changelog.d` 에 `Fresh state required` 항목을 둔다(`docs/guides/DURABLE-STORE-HARD-CUT.md`). 읽지 않는 것과 지울 것(§5)을 적는다.
+
+구현 전에 잴 것:
+
+- 증거가 수십 개일 때와 수백 개일 때 읽기 한 번의 시간. 길면 최신 증거 하나만 읽는 안을 다시 연다(§8).
+- Librarian 의 preflight validator(`bin/deployment_preflight_helper.ml:826-831`)가 원본의 exact 증거까지 읽는지(§5).
 
 ### 3.4 L3 — 요청 기록 (방향)
 
@@ -266,12 +303,20 @@ L1 은 저장 모양을 바꾸지 않는다. receipt 의 version 과 칸이 그�
 - 요청 기록은 `{digest; attempts; final}` 이다.
 - `run` 은 호출자가 넘긴 요청에서 digest 를 계산해 기록과 견준다. 본문 파일은 요청을 다시 읽어야 하는 곳만 연다.
 
+기록의 `request` 칸을 읽는 곳(main `fe02caf20e0a`):
+
+- `bound_record`(`lane_addon_exact.ml:495-509`)와 `run`(`:1027-1031`): 호출자의 요청, digest 와 견준다.
+- `check_retained_record`(`:572-581`): preflight 가 기록만으로 요청을 다시 만든다. L2 뒤에는 그 요청으로 증거도 decode 한다(§3.3).
+- `scripts/tinker/librarian/exact_store.py`: E-real snapshot 이 기록에서 요청과 답을 읽는다.
+
 구현 전에 정할 것:
 
 - 본문 파일을 두는 디렉터리. sweep 은 `exact-requests` 의 낯선 이름을 지우고, 하위 디렉터리가 있으면 멈춘다.
 - 본문 파일을 지우는 곳과 읽는 곳. 요청 기록이 지워질 때 본문이 남지 않아야 한다.
+- preflight 가 증거를 decode 할 때 쓸 요청. `decode_proof` 는 요청의 schema 와 output 선언을 쓴다(`:683-688`).
+- E-real snapshot 이 요청 본문을 읽을 곳.
 
-attempt 목록은 그대로 한 파일이다. 항목 하나는 수백 바이트다. 목록의 길이는 #50762 에서 다룬다.
+attempt 목록은 한 파일에 둔다. 항목 하나는 수백 바이트다. 목록의 길이는 #50762 에서 다룬다.
 
 ### 3.5 하지 않는 것
 
@@ -315,13 +360,32 @@ slot A 는 요청보다 context window 가 작다. slot B 는 계정 한도로 �
 
 ## 5. hard cut (L2·L3)
 
-L2 와 L3 은 증거와 기록의 모양을 바꾼다. 옛 모양을 읽는 코드는 만들지 않는다(헌법 `legacy_residue`). `check_retained_record` 는 옛 기록을 거절한다(`lane_addon_exact.mli:289-291`).
+L2 는 증거의 모양을 바꾸고 L3 은 기록의 모양을 바꾼다. 옛 모양을 읽는 코드는 만들지 않는다(헌법 `legacy_residue`, `docs/guides/DURABLE-STORE-HARD-CUT.md`). L1 은 hard cut 이 없다.
 
-설치할 때 지우는 것: `lane-addons/exact-requests`, `lane-addons/host-results` 의 exact 증거와 slot 관측, 그리고 그 요청을 원본으로 든 소비자 쪽 기록이다. 소비자는 Librarian(접수 part, durable 원본), workspace-curator, Candle appraiser, operator quiz 다.
+**L2 뒤에 옛 증거 파일이 남아 있으면** 그 요청의 `run` 과 공개 read 함수는 오류로 끝난다. 요청은 끝나지도 다시 보내지지도 않는다. preflight 가 설치 전에 그 기록을 거절한다(§3.3).
 
-2026-11-12T06:39Z 의 요청 기록은 열린 것 6개, 끝난 것 134개였다. 지울 소비자 쪽 기록의 수는 세지 않았다. L2·L3 을 시작하기 전에 센다.
+**L2 를 설치할 때 지우는 것.**
 
-L1 은 hard cut 이 없다.
+| 지울 것 | 찾는 법 | 지운 뒤 |
+|---|---|---|
+| 증거가 있는 exact 요청 기록과 그 증거 파일 | preflight 의 fresh state 줄 | 그 요청의 원본은 `Retained_absent` 를 본다(`lane_addon_exact.ml:950-953`). 끝난 요청의 답도 같이 사라진다 |
+| 그 증거에 묶인 slot 관측 파일 | Librarian·workspace-memory package 의 것은 시작 sweep 이 지운다. 다른 package 의 것은 `changelog.d` 항목이 디렉터리를 적는다 | 관측을 읽는 쪽은 `None` 을 받는다 |
+| 지운 요청을 원본으로 든 Librarian 원본 | `Tool_request_owners` scan 이 거절하면 fresh state 줄 | 확인하지 않았다(§10) |
+
+2026-11-12T10:52Z 에 exact 요청 기록은 134개이고 그중 132개에 끝난 attempt 가 있다(§1.2). 증거가 있는 기록의 수는 그보다 많지 않다.
+
+**소비자별로, 증거만 사라지고 기록이 남으면.**
+
+| 소비자 | 증거를 읽는 곳 | 결과 |
+|---|---|---|
+| Librarian | 최신 증거(`keeper_librarian_admission_parts.ml:245-248`). 나눈 part 는 증거의 사본을 저장하고 검증할 때마다 다시 읽어 견준다(`:595-600`) | 그 원본이 "Original latest execution proof is incomplete" 로 멈춘다 |
+| Candle appraiser | slot 관측(`server_candle_appraiser.ml:222-227`) | 경고를 남기고 `None` 으로 간다. 끝난 요청의 답은 기록에서 나간다(`lane_addon_exact.ml:1097-1098`) |
+| workspace-curator | slot 관측 | 직접 읽지 않았다(§10) |
+| operator quiz | host 쪽에서 증거를 읽는 곳을 찾지 못했다 | |
+
+Librarian 은 기록과 증거를 같이 지워도 멈출 수 있다. 다시 보낸 요청의 receipt 는 새 receipt 다. 이미 나눈 part 가 저장한 사본과 다르면 "Original subdivision proof changed" 다(`:600`). 그래서 그 원본까지 지운다. 그 수와 잃는 것은 구현 전에 센다(§10).
+
+**L3 을 설치할 때**는 exact 요청 기록 전부가 대상이다. 기록의 모양이 바뀌어 `check_retained_record` 가 모두 거절한다.
 
 ## 6. 시험
 
@@ -339,8 +403,12 @@ L1 은 hard cut 이 없다.
 | L1 | A 가 기다리면서 입력 거절 증거도 있으면 기다리는 slot 으로만 적는다. 예외가 나지 않는다 | 해당 없음 |
 | L1 | A 를 부른 증거 뒤에 A 가 로컬 거절된 증거가 있으면 앞 증거가 정한다 | 해당 없음 |
 | L1 | B 가 기다리고 A 를 건너뛴 걷기에서 CLI slot 이 답하면 요청이 끝나고 receipt 의 `excluded_http` 에 A, B 가 있다 | A 를 부른다 |
-| L2 | 증거를 n개 남긴 뒤 하나를 더 남길 때 쓰는 바이트가 n 과 요청 크기에 따라 늘지 않는다 | 는다 |
-| L2 | 다른 요청의 digest 를 든 증거는 거절한다 | 본문 비교로 거절 |
+| L2 | 증거를 남긴 파일에 `request` 칸이 없다. 파일의 크기가 요청 본문의 크기에 따라 늘지 않는다 | 는다 |
+| L2 | 다른 요청으로 읽으면 거절한다. `digest` 가 다르다 | 본문 비교로 거절 |
+| L2 | `request` 칸이 든 증거 파일은 읽기를 거절한다 | 읽는다 |
+| L2 | `version` 이나 `attempt_ordinal` 이 float 인 증거는 거절한다 | receipt version 1 이면 읽는다 |
+| L2 | sweep 은 증거의 `request_id` 와 `digest` 로 파일 이름을 확인한다. 다른 이름 아래에 있으면 멈춘다 | 본문으로 확인 |
+| L2 | preflight 는 증거가 읽히지 않는 요청 기록을 거절하고 기록과 증거 파일의 경로를 찍는다 | 증거를 읽지 않는다 |
 | L3 | attempt 를 보탤 때 요청 본문 파일을 다시 쓰지 않는다 | 다시 쓴다 |
 
 ## 7. 층
@@ -349,10 +417,12 @@ L1 은 hard cut 이 없다.
 |---|---|---|
 | L1a | receipt 하나에서 slot 별로 불렀는지와 입력 크기 거절인지를 읽는 함수와 시험 | `keeper_exact_walk_receipt.ml`·`.mli` |
 | L1b | `run` 이 증거에서 목록을 모아 runner 에 넘긴다. runner 가 기다리는 slot 이 있을 때 건너뛴다 | `lane_addon_exact.ml`·`.mli`, `server_lane_addon_exact.ml`, TUI·dashboard 글 |
-| L2 | attempt 마다 증거 파일 하나, `request` 칸 없음 | `lane_addon_exact.ml`, `lane_addon_exact_observation.ml`, `server_unowned_exact_sweep.ml`, preflight, tinker 스크립트 |
+| L2 | 증거에서 `request` 칸을 뺀다. sweep 의 이름 확인, preflight 의 증거 읽기, tinker 스크립트, Fresh state 항목 | `lane_addon_exact.ml`·`.mli`, `lane_addon_store_preflight.ml`, `scripts/tinker/librarian/check_validator_on_store.py`, `test/test_lane_addon_exact.ml`, `test/test_lane_addon_exact_runner.ml`, `changelog.d` |
 | L3 | 요청 본문을 기록 밖으로 | `lane_addon_exact.ml`, `lane_addon_store.ml`, preflight |
 
 L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
+
+L2 는 PR 하나다. 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양을 봐야 한다.
 
 ## 8. 대안
 
@@ -365,6 +435,10 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 | L2 만 한다 | 증거는 작아지지만 같은 slot 을 계속 부른다. 큰 본문을 provider 로 계속 보낸다 |
 | 거절된 호출의 증거를 남기지 않는다 | 헌법 `failure_keeps_evidence` 에 어긋난다. L1 의 근거도 사라진다 |
 | 기다리는 slot 이 없어도 건너뛰고, 모든 slot 이 거절했으면 아무도 부르지 않고 `Input_refused` 로 끝낸다 | 끝난 요청의 receipt 에 거절이 없다. Librarian 의 `check_size` 가 나누기를 거절하고 그 part 가 멈춘다(§2.6) |
+| 증거를 attempt 마다 파일 하나로 둔다. 요청마다 디렉터리 하나 | 쓰는 바이트가 증거 수에 비례하지 않는다. 대신 상태가 는다. 빈 디렉터리, 쓰다 만 파일만 든 디렉터리가 생긴다. sweep 이 디렉터리를 지우는 일이 그 요청의 첫 쓰기와 겹치면 받은 답을 잃는다. 본문을 뺀 파일은 평균 약 39 KB 다(§3.3). 그 크기에서 얻는 것이 없다 |
+| 증거를 attempt 마다 파일 하나로 둔다. 한 디렉터리에 두고 이름에 ordinal 을 넣는다 | 요청 기록 없이는 어떤 ordinal 이 있는지 알 수 없다. 기록을 잃어도 증거는 숨지 않는다는 성질(`lane_addon_exact.ml:712-714`)을 잃는다. 디렉터리를 통째로 훑으면 읽기 한 번이 그 declaration 의 지난 요청 수에 비례한다 |
+| 증거를 요청마다 append-only 파일로 둔다 | 쓰다 끊긴 꼬리라는 상태가 생긴다. 읽는 쪽과 쓰는 쪽에 그 규칙이 필요하다 |
+| 최신 증거 하나만 읽는다 | `.mli` 의 약속(모든 증거를 견준 뒤 돌려준다)을 바꾼다. 본문을 뺀 뒤의 읽기 시간을 잰 다음에 정한다(§3.3) |
 | 건너뛴 slot 의 지난 거절을 새 receipt 에 옮겨 담는다 | receipt 에 칸이 는다. 저장 모양이 바뀌고 읽는 쪽을 같이 고쳐야 한다. 기다리는 동안만 건너뛰면 필요 없다 |
 | `Invalid_request` 와 로컬 거절도 건너뛴다 | 본문만으로 정해지지 않는 거절이 섞여 있다(§2.1). 로컬 거절은 receipt 에서 타입으로 가를 수 없다(§2.5) |
 | 상태 코드 400 의 `Invalid_request` 만 건너뛴다 | 400 안에도 계정의 상태로 난 거절이 있다(§1.1 의 지출 한도). 그 slot 을 다시 부르는 때가 다른 slot 의 기다림으로 정해지고 상한이 없다(§3.5). 400 을 고를 근거는 잰 표본뿐이다. 같은 분류의 422 를 뺄 이유가 없다(`retry.ml:370-371`). RFC 9110 15.5.1 은 400 을 다시 보내지 말라고 적지 않는다(2026-11-12 확인, https://www.rfc-editor.org/rfc/rfc9110.html, 신뢰도 High) |
@@ -378,7 +452,7 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 |---|---|---|---|---|
 | D1 | slot 이 같은지 무엇으로 보나 | slot id, target fingerprint, 보내는 schema | C2 | 셋이 덮지 않는 것이 바뀌어도 그 slot 은 기다림이 끝날 때에야 다시 불린다. lane 의 `max_output_tokens`·`thinking`, credential 값, provider 가 같은 target 에서 올린 한도, gateway 의 본문 한도가 그렇다. 측정한 경우 그 기다림은 나흘이다. 바로 부르게 하려면 운영자가 기다리는 slot 을 lane 에서 빼거나 target 을 바꾼다. lane 의 두 값까지 견주려면 증거에 칸을 더해야 한다(저장 모양 변경) |
 | D2 | L1 에서 `Every_slot_held` 의 뜻을 넓히나, variant 를 더하나 | 뜻을 넓힌다 | §3.2 6번 | TUI·dashboard 의 "모든 slot 이 기다림" 글을 "부를 slot 이 없고 기다리는 slot 이 있음"으로 고친다. 기다리는 slot 과 건너뛴 slot 을 화면에서 가르지 않는다. 건너뛴 slot 은 그 요청의 지난 증거에서만 보인다 |
-| D3 | L2·L3 의 hard cut 을 하나, 언제 하나 | L1 을 먼저 넣고 잰 뒤, §3.3·§3.4 를 채워 L2·L3 을 한 번의 hard cut 으로 | §5 | 설치할 때 열린 exact 요청과 그 소비자 쪽 기록을 지운다 |
+| D3 | L2 와 L3 을 한 번에 설치하나, 따로 하나 | L2 를 먼저 설치한다. L3 은 §3.4 의 넷을 정한 뒤 따로 한다 | §5 | hard cut 이 두 번이다. 그때마다 exact 요청 기록과 증거, 거기 묶인 Librarian 원본을 지운다. 한 번으로 묶으면 L3 이 정해질 때까지 §1.2 의 읽기(실행마다 1,055,315,219 바이트)가 남는다. 다른 slot 이 기다리는 동안 400 으로 거절되는 요청(§9 D5)은 호출마다 증거 파일이 요청 크기만큼 는다 |
 | D4 | 기다리는 slot 없이 열려 있는 요청도 건너뛰게 넓히나 | 지금은 넓히지 않는다. L1 뒤에 남은 되풀이를 재고 정한다 | §3.5 | 다른 slot 이 시각 없는 429, 5xx, 인증 거절로 실패하는 동안에는 큰 본문이 host event 마다 다시 나간다 |
 | D5 | L1 이 덮지 않는 400 의 되풀이(§1.1)를 어떻게 하나 | 건너뛰기를 넓히지 않는다. 실행당 디스크 비용은 L2 가 없앤다. claude 계열의 지출 한도 400 은 #49686 에서 정한다 | §3.5 | tinker 계열처럼 오류 코드 없이 본문을 거절하는 slot 은, 다른 slot 이 기다리는 동안 host event 마다 같은 본문을 한 번씩 받는다. 잰 경우 요청 여섯에 slot 둘이다 |
 
@@ -391,8 +465,13 @@ L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 - `host-results` 를 읽는 저장소 밖의 도구가 있는지. 찾은 것은 tinker 스크립트 하나다. 그 스크립트는 끝나지 않은 실행의 receipt 도 읽는다. L1 뒤에는 그 실행이 줄어든다.
 - L1 뒤에도 `run` 은 시작할 때 증거 파일을 읽는다. 이미 커진 요청은 L2 전까지 실행마다 그 파일을 읽는다.
 - §1.1 의 1.03 GB 파일은 실행별로 세지 않았다. 통째로 읽어야 해서 뺐다.
-- L1 이 설치된 뒤 열린 `classification` 요청의 attempt 가 멈추는지. 설치 뒤에 잰다.
 - 기다리는 slot 없이 400 으로 끝난 요청이 있는지. claude 계열의 지출 한도 400 은 그 경우 `Input_refused` 로 끝날 수 있다(#49686). 끝난 기록에서 찾지 않았다.
+- operator quiz 와 Candle appraiser 의 exact 요청 기록과 증거를 지우는 곳. 시작 sweep 은 Librarian 과 workspace-memory package 만 본다(`server_unowned_exact_sweep.ml:48-50`). 다른 곳에서 지우는지 찾지 못했다.
+- Librarian 의 preflight validator 가 원본의 exact 증거를 읽는지. 읽지 않으면 증거 없이 남은 Librarian 원본을 preflight 가 잡지 못한다.
+- exact 기록과 증거가 사라진 원본을 소비자가 다시 보내는지. `recover_retained` 가 `Retained_absent` 를 돌려주는 것만 읽었다.
+- Librarian 원본을 지우면 무엇이 다시 만들어지지 않는지. 지울 원본의 수.
+- workspace-curator 가 증거나 slot 관측을 읽는 곳.
+- L1 설치 뒤 §1.1 의 Librarian 요청 여섯의 증거가 느는지.
 - 열린 요청 가운데 한 번 실행되고 멈춘 셋(`lane_unconfigured` 둘, `provider_unavailable` 하나)이 왜 열려 있는지. 열하루 넘게 바뀌지 않았다.
 
 확인한 것: `target_identity_fingerprint`(`packages/agent_core/lib/llm_provider/exact_output_resolver.ml:865-897`)는 target ref, provider id 와 종류, model id, base url, 요청 경로, credential 의 종류, thinking, reasoning effort, timeout 둘, `max_concurrent_requests`, codec, 선언한 header, capability projection 을 덮는다. credential 의 값과 lane 이 덧씌우는 `max_output_tokens`·`thinking` 은 덮지 않는다.

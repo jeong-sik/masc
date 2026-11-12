@@ -95,7 +95,10 @@ end
     revocation is one too: a sign-out, or a new sign-in of the same browser
     that ends the session it held. [Pat] and [Service_credential] are the
     credentials of plan C4, which act as their principal until revoked, so
-    their revocations are intents too. *)
+    their revocations are intents too. [Keeper_conversation] is a
+    conversation of a person with one of their Keepers, named by its owner and
+    its id (plan S1b-3c). The start of its purge takes it out of reads (design
+    8.5-1 and 8.5-2), so that start is an intent too. *)
 module Subject : sig
   type t =
     | Grant of Grant_id.t
@@ -107,6 +110,10 @@ module Subject : sig
     | Service_credential of Service_credential_id.t
     | Invite of Invite_id.t
     | Registration of Registration_id.t
+    | Keeper_conversation of
+        { owner : User_id.t
+        ; conversation_id : Conversation_id.t
+        }
 
   val equal : t -> t -> bool
   val to_string : t -> string

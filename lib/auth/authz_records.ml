@@ -83,6 +83,10 @@ module Subject = struct
     | Service_credential of Service_credential_id.t
     | Invite of Invite_id.t
     | Registration of Registration_id.t
+    | Keeper_conversation of
+        { owner : User_id.t
+        ; conversation_id : Conversation_id.t
+        }
 
   let equal a b =
     match a, b with
@@ -95,6 +99,8 @@ module Subject = struct
     | Service_credential x, Service_credential y -> Service_credential_id.equal x y
     | Invite x, Invite y -> Invite_id.equal x y
     | Registration x, Registration y -> Registration_id.equal x y
+    | Keeper_conversation x, Keeper_conversation y ->
+      User_id.equal x.owner y.owner && Conversation_id.equal x.conversation_id y.conversation_id
     | ( ( Grant _
         | Credential _
         | Principal _
@@ -103,7 +109,8 @@ module Subject = struct
         | Pat _
         | Service_credential _
         | Invite _
-        | Registration _ )
+        | Registration _
+        | Keeper_conversation _ )
       , ( Grant _
         | Credential _
         | Principal _
@@ -112,7 +119,8 @@ module Subject = struct
         | Pat _
         | Service_credential _
         | Invite _
-        | Registration _ ) ) -> false
+        | Registration _
+        | Keeper_conversation _ ) ) -> false
   ;;
 
   let to_string = function
@@ -125,6 +133,8 @@ module Subject = struct
     | Service_credential id -> "service_credential:" ^ Service_credential_id.to_string id
     | Invite id -> "invite:" ^ Invite_id.to_string id
     | Registration id -> "registration:" ^ Registration_id.to_string id
+    | Keeper_conversation { owner; conversation_id } ->
+      "keeper_conversation:" ^ User_id.to_string owner ^ "/" ^ Conversation_id.to_string conversation_id
   ;;
 end
 

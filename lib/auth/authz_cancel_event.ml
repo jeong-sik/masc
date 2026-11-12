@@ -40,6 +40,11 @@ let subject_body = function
     id_object "service_credential" (Service_credential_id.to_string id)
   | Subject.Invite id -> id_object "invite" (Invite_id.to_string id)
   | Subject.Registration id -> id_object "registration" (Registration_id.to_string id)
+  | Subject.Keeper_conversation { owner; conversation_id } ->
+    let* label = Authz_body.string "keeper_conversation" in
+    let* owner = Authz_body.string (User_id.to_string owner) in
+    let* conversation_id = Authz_body.string (Conversation_id.to_string conversation_id) in
+    Authz_body.object_ [ "type", label; "owner", owner; "conversation_id", conversation_id ]
 ;;
 
 let to_body { aborted; subject } =
@@ -90,6 +95,18 @@ let principal_of_body body =
   | Some _ | None -> None
 ;;
 
+let keeper_conversation_of = function
+  | [ ("owner", owner); ("conversation_id", conversation_id) ] ->
+    (match Authz_body.string_value owner, Authz_body.string_value conversation_id with
+     | Some owner, Some conversation_id ->
+       (match User_id.of_string owner, Conversation_id.of_string conversation_id with
+        | Ok owner, Ok conversation_id -> Some (Subject.Keeper_conversation { owner; conversation_id })
+        | Error (_ : Authz_id.error), (Ok (_ : Conversation_id.t) | Error (_ : Authz_id.error))
+        | Ok (_ : User_id.t), Error (_ : Authz_id.error) -> None)
+     | None, (None | Some _) | Some _, None -> None)
+  | _ -> None
+;;
+
 let subject_of_body body =
   match typed body with
   | Some ("grant", members) -> id_of Grant_id.of_string (fun id -> Subject.Grant id) members
@@ -105,6 +122,7 @@ let subject_of_body body =
   | Some ("invite", members) -> id_of Invite_id.of_string (fun id -> Subject.Invite id) members
   | Some ("registration", members) ->
     id_of Registration_id.of_string (fun id -> Subject.Registration id) members
+  | Some ("keeper_conversation", members) -> keeper_conversation_of members
   | Some _ | None -> None
 ;;
 

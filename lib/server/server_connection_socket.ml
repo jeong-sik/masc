@@ -1,6 +1,6 @@
 (** See [server_connection_socket.mli]. *)
 
-let write_piece_bytes = 256 * 1024
+let write_piece_bytes = 4 * 1024 * 1024
 let write_bound_s = Server_mcp_transport_http_headers.sse_stalled_after_s
 let preparation_bound_s = 30.0
 

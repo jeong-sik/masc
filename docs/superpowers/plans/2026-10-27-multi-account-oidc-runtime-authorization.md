@@ -1125,6 +1125,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 화면.
   - 화면은 GitHub 로그인만 시작한다. 서버에 GitHub client가 없으면 버튼이 눌리지 않고 화면이 그 사실을 말한다. 전에는 눌러서 404를 받았다.
   - Google 로그인은 경로만 있고 화면에 버튼이 없다. 화면의 CSP `form-action`에 Google 인가 주소의 origin이 들어가야 하는데, 그 주소는 discovery가 준다.
+  - Admin 세션이면 화면에 allowlist 등록·삭제 칸이 보인다(`whoami`의 `role`이 `admin`일 때만. 판정은 서버가 한다). C6의 Admin 화면이 생기기 전에 일반 Member를 들이는 길이다(#51483). allowlist를 읽는 경로가 없어서 방금 등록한 id만 보이고, C6가 서면 이 칸을 지운다.
   - 제목은 `MASC accounts`다.
 - 프로세스 준비. 사람의 경로가 읽는 전역은 `Eio_context`의 env와 switch이고 S1a-3a가 이미 채운다. 턴은 official client를 서버의 프로세스로 띄운다(`Server_preview_keeper_turn`). net 전역을 읽는 경로는 없다(읽어서 확인).
 - 다른 사람의 Runtime. 턴은 `Runtime_account_access.authorize`가 허락한 계정에서만 시작한다. 다계정 프로세스에서 native 도구를 쓰는 자세는 `authorize_native`가 거절한다(D3c). 이 층은 그 판정을 바꾸지 않는다.

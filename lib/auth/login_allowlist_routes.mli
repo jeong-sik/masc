@@ -23,6 +23,10 @@
     or already has an open entry a 409. *)
 val register : Login_routes.t -> Authz_browser_request.request -> body:string -> Login_routes.answer
 
+(** [/api/v1/auth/allowlist], the path of the collection. An entry is at
+    [<path>/<registration_id>]. *)
+val path : string
+
 (** [registration_id] is the [<id>] of the path; one that is not an id is a
     400. The answer is a 204, a 404 for an id the allowlist never had, and a
     409 for an entry that was removed or spent. *)

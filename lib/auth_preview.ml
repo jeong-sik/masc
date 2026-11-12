@@ -121,6 +121,11 @@ const patExpiry = document.getElementById("pat-expiry");
 const patToken = document.getElementById("pat-token");
 const patId = document.getElementById("pat-id");
 const patVerdict = document.getElementById("pat-verdict");
+const allowSection = document.getElementById("allowlist");
+const allowProvider = document.getElementById("allow-provider");
+const allowIdentity = document.getElementById("allow-identity");
+const allowId = document.getElementById("allow-id");
+const allowVerdict = document.getElementById("allow-verdict");
 let csrf = null;
 let loginId = null;
 async function read(path) {
@@ -133,6 +138,7 @@ async function show() {
   const [who, w] = await read("/api/v1/auth/whoami");
   csrf = session.ok ? s.csrf_token : null;
   signout.hidden = !session.ok;
+  allowSection.hidden = !(session.ok && w.role === "admin");
   out.textContent =
     (session.ok
       ? "session of " + s.user_id + " until " + new Date(s.expires_at_ms).toISOString()
@@ -288,6 +294,47 @@ document.getElementById("revoke-pat").addEventListener("click", async () => {
   patVerdict.textContent = "revoke (" + answer.status + "): " + await answer.text();
   await listPats();
 });
+function allowBody() {
+  const identity = allowIdentity.value.trim();
+  if (allowProvider.value === "github") {
+    const userId = Number(identity);
+    return identity !== "" && Number.isSafeInteger(userId) && userId > 0
+      ? { provider: "github", user_id: userId }
+      : null;
+  }
+  return identity === "" ? null : { provider: "google", sub: identity };
+}
+document.getElementById("allow-add").addEventListener("click", async () => {
+  const body = allowBody();
+  if (body === null) {
+    allowVerdict.textContent = allowProvider.value === "github"
+      ? "A GitHub user id is a whole number above 0: gh api users/LOGIN -q .id"
+      : "A Google sub is not empty.";
+    return;
+  }
+  allowVerdict.textContent = "registering";
+  const answer = await post("%s", body);
+  const text = await answer.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (_) {}
+  if (answer.ok && json !== null) {
+    allowId.value = json.registration_id;
+    allowVerdict.textContent =
+      "Allowed. Registration id " + json.registration_id +
+      (json.previously_deleted ? "\nA deleted account had this identity." : "");
+  } else {
+    allowVerdict.textContent = "allow (" + answer.status + "): " + text;
+  }
+});
+document.getElementById("allow-remove").addEventListener("click", async () => {
+  const answer = await fetch("%s/" + encodeURIComponent(allowId.value), {
+    method: "DELETE",
+    headers: { "%s": csrf }
+  });
+  allowVerdict.textContent = answer.ok
+    ? "Removed."
+    : "remove (" + answer.status + "): " + await answer.text();
+});
 show().then(listAccounts).then(listKeepers).then(listPats);|}
     Authz_browser_request.csrf_header
     provider_accounts_path
@@ -303,6 +350,9 @@ show().then(listAccounts).then(listKeepers).then(listPats);|}
     Login_pat_routes.path
     Login_pat_routes.path
     Authz_browser_request.csrf_header
+    Login_allowlist_routes.path
+    Login_allowlist_routes.path
+    Authz_browser_request.csrf_header
 ;;
 
 let home_page ~nonce ~github =
@@ -315,7 +365,17 @@ let home_page ~nonce ~github =
        ^ "\n<button id=\"signout\" hidden>Sign out</button>\n"
        ^ String.concat
            "\n"
-           [ "<h2>My subscriptions</h2>"
+           [ "<section id=\"allowlist\" hidden>"
+           ; "<h2>Let someone join</h2>"
+           ; "<label>Provider <select id=\"allow-provider\"><option value=\"github\">GitHub</option><option value=\"google\">Google</option></select></label>"
+           ; "<label>GitHub user id, or Google sub <input id=\"allow-identity\" autocomplete=\"off\" aria-describedby=\"allow-hint\"></label>"
+           ; "<p id=\"allow-hint\">A GitHub user id is a number: gh api users/LOGIN -q .id</p>"
+           ; "<button id=\"allow-add\">Allow</button>"
+           ; "<label>Registration id <input id=\"allow-id\"></label>"
+           ; "<button id=\"allow-remove\">Remove</button>"
+           ; "<pre id=\"allow-verdict\" role=\"status\"></pre>"
+           ; "</section>"
+           ; "<h2>My subscriptions</h2>"
            ; "<pre id=\"accounts\">reading</pre>"
            ; "<label>Integration (a provider of runtime.toml) <input id=\"integration\"></label>"
            ; "<button id=\"connect\">Connect</button>"

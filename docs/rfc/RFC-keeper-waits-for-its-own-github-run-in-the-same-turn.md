@@ -139,24 +139,26 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 
 | | (나-1a) 재시작 정리가 일정에 걸린 요청을 건너뛴다 | (나-1b) 대기의 원천을 닫힌 합타입으로 넓힌다 |
 |---|---|---|
-| 모양 | 요청 레코드를 대기 시작 때 만든다. `recover_lost_disk_records` 가 「일정 행이 `Scheduled` 인 요청」은 `Lost` 로 바꾸지 않는다. 틱이 끝나면 영수증을 쓰고 요청을 끝낸다(지금 틱은 영수증을 쓰지 않아요. 아래 [사실]) | 원천이 `Request_record` 또는 `Schedule_row` 다. `waitable` 과 sweep 의 `read_record` 가 같은 합타입을 받고, 일정 행이 `Scheduled` 면 `Worker_may_exist`(`keeper_receipt_wait_sweep.ml:10`), 끝났으면 대기를 풀 영수증이 있어야 한다(아래 [사실]). 일정이 만든 대기의 키는 `schedule_instance_id` 이고 영수증의 `call_id` 로 쓴다. 요청 레코드를 만들지 않는다 |
+| 모양 | 요청 레코드를 대기 시작 때 만든다. `recover_lost_disk_records` 가 「일정 행이 `Scheduled` 인 요청」은 `Lost` 로 바꾸지 않는다. 틱이 끝나면 영수증을 쓰고 요청을 끝낸다(지금 틱은 영수증을 쓰지 않아요. 아래 [사실]) | 원천이 `Request_record` 또는 `Schedule_row` 다. `waitable` 과 sweep 의 `read_record` 가 같은 합타입을 받고, 일정 행이 `Scheduled` 면 `Worker_may_exist`(`keeper_receipt_wait_sweep.ml:10`), 끝났으면 대기를 풀 영수증이 있어야 한다(아래 [사실]). 일정이 만든 대기의 키는 `schedule_id` 이고 영수증의 `call_id` 로 쓴다. 요청 레코드를 만들지 않는다 |
 | 장점 | 대기 쪽 상태 기계와 실행 기록 형식이 그대로다 | 한 사실(일정이 끝났는가)을 한 곳에서만 읽어 어긋남이 없다. 정리 규칙에 예외를 두지 않는다 |
 | 대가 | 정리 규칙이 생산자별 예외가 된다(지금 예외가 없다). 일정 행과 요청 레코드가 같은 사실이 두 곳에 따로 적혀서 일정은 끝났는데 요청이 `Running` 인 틈이 생긴다 | `receipt_obligation` 의 키 의미가 바뀌어서 실행 기록 `v3` 에 닿고 fresh state 가 또 필요할 수 있다. 영수증 대기 TLA+ 모델의 원천(`WaitingHasSource`)도 넓혀야 한다. 변경이 더 크다 |
 
 - **[제안]** (나-1b)를 정석으로 봐요. 근거는 이 저장소의 원칙(닫힌 합타입, 예외가 아니라 타입으로, 한 사실은 한 곳)이에요. 대가는 위 표의 마지막 줄이고, 영수증 대기 스택이 올라간 지 하루도 안 된 지금 `v3` 를 다시 건드리는 일이에요.
 **[사실]** 일정 틱은 영수증을 쓰지 않아요. 끝난 run 을 읽으면 일정 행의 due time 을 지금으로 당기고 payload 의 메시지를 `wake_message` 로 바꿀 뿐이고, 일정 러너가 평소 due 일정처럼 Keeper 를 깨워요(`lib/schedule_run_watch.mli` 의 `tick` 설명, `lib/server/server_schedule_run_watch.ml:119-133`). 대기는 outbox 에 `call_id = request_id` 인 영수증이 도착해야 풀려요(`keeper_receipt_wait_sweep.ml:46`). 그래서 (나-1a)와 (나-1b) 모두 「일정이 끝났다」와 「대기를 풀 영수증」 사이가 비어 있어요.
 
-**[확인 필요]** (나-1b)를 구현하기 전에 정할 것이 둘이에요. 두 가지 모두 읽지 않았고, (나-1b)의 크기는 여기에 달려 있어요.
-- 누가 영수증을 쓰는가. 후보는 일정 러너가 일정을 깨울 때 `call_id = schedule_instance_id` 영수증을 쓰는 것이에요. 새 writer 가 하나 생기고, `response` 는 `wake_message` 와 같은 글이에요.
-- 깨움이 두 번 가지 않게 하는 방법. 일정 러너의 깨움은 Keeper 를 깨우고, 대기 중인 실행은 영수증으로 이어가요. 대기가 걸린 일정의 깨움을 영수증 하나로 합치지 못하면 Keeper 가 같은 결과를 두 번 받아요. 깨움이 대기 중인 실행에 어떻게 닿는지는 읽지 않았어요.
+**[사실]** (나-1b)는 두 층으로 구현했어요. 첫째 층(#51663)이 영수증을 쓰고, 둘째 층(#51673)이 `keeper_receipt_wait` 에서 그 영수증을 기다려요. 구현 전에 정하지 못했던 것은 이렇게 정했어요.
 
-**[사실]** 일정에는 payload kind 가 둘 있어요: `masc.keeper_wake`, `masc.lane_act`(`lib/schedule/schedule_supported_kinds.ml`). kind 를 더하려면 그 파일의 목록, `Tool_schedule.validate_known_payload_request` 의 검증 갈래, `server_schedule_consumers.ml` 의 dispatch 가 모두 필요해요(같은 파일 머리말). 일정 틱은 Keeper wake 본문의 `until_github_run` 만 스캔해요(`watch_of_payload` 는 Keeper wake 가 아닌 payload 에 `Ok None`).
+- **누가 영수증을 쓰나.** 일정 consumer(`Server_schedule_consumers.dispatch_keeper_receipt`)가 due 가 된 일정의 영수증을 `Outbox.retain` 으로 쓰고 `Keeper_client_tool_outbox_wake.notify` 로 Keeper 를 한 번 깨워요. 대기를 푸는 일은 writer 가 하지 않아요. 대기를 건 턴의 끝(`lib/keeper/keeper_turn.ml:1106-1114`)과 maintenance pass 가 `Keeper_receipt_wait_sweep.after_wait` 를 불러서 outbox 를 읽고 풀어요.
+- **깨움이 두 번 가지 않게.** 새 일정 kind 를 더하지 않고 `masc.keeper_wake` 본문에 `delivery`(`queue` 가 기본, `receipt`)를 더했어요. 값은 닫힌 합타입(`Keeper_wake_to_queue | Keeper_wake_to_receipt`)이고 `receipt` 는 큐 메시지를 넣지 않고 영수증만 써요. 새 kind 는 대상 Keeper 확인, Keeper 가 내려갈 때 일정 취소, 참여자, 결과 전달, run 감시 틱이 모두 갈래를 더해야 해서, 같은 일을 본문 필드로 하는 쪽이 변경 범위가 작았어요. `receipt` 는 `urgency` 와 같이 줄 수 없고 `one_shot` 만 받아요.
+- **키는 `schedule_id`.** 처음 이 글은 `schedule_instance_id` 를 키로 적었는데 틀렸어요. run 감시가 끝나면 틱이 일정 행을 새 `schedule_instance_id` 로 다시 써서(`make_due` → `Schedule_service.update`), Keeper 가 `masc_schedule_create` 결과로 받은 id 와 영수증의 id 가 어긋나요. `schedule_id` 는 수정과 감시 정산을 거쳐도 그대로예요.
+- **`tool_name` 은 `masc_schedule_create`, `arguments` 는 `Unknown`.** 감시가 끝나면 일정 payload 에서 감시가 지워지고 메시지가 바뀌어서, 부른 도구의 인자가 남아 있지 않아요.
+- **실행 기록 `v3` 는 바뀌지 않았어요.** 대기 항목의 키가 이미 평범한 문자열(`request_id`)이라 일정 id 가 같은 자리에 들어가요. TLA+ `WaitingHasSource` 는 그대로이고, 영수증 없이 끝난 원천을 나타내는 `EndWithoutReceipt` 동작을 더했어요(`specs/bug-models/KeeperReceiptWait.tla`).
+- **읽는 순서.** sweep 은 일정 행을 영수증(outbox)보다 먼저 읽어요. consumer 가 영수증을 쓴 뒤에 일정을 끝난 것으로 적기 때문에, 끝난 행인데 영수증이 없으면 정말 안 쓰인 거예요. 요청 레코드가 없고 일정 저장소를 읽을 수 없으면 대기는 풀리지 않고 다음 pass 로 가요. 읽지 못한 채 「잃었다」고 쓰면 아직 기다리는 일정에 거짓 영수증이 가요.
+- **Keeper 가 고르는 `schedule_id`.** 요청 id 에는 `[A-Za-z0-9_.-]` 만 쓸 수 있는데 일정 id 는 공백이나 한글도 돼요. 요청 저장소가 그런 id 를 `Invalid_request_id` 로 거절하면 일정의 id 로 읽어요.
 
-**[제안]** 위 두 가지를 한 번에 푸는 후보는 kind 를 하나 더하는 거예요(`masc.keeper_receipt`, 이름은 정하지 않았어요). 이 kind 의 consumer 는 일정이 due 가 되면 Keeper 를 깨우지 않고 outbox 에 `call_id = schedule_instance_id` 영수증을 쓰고 Keeper 를 깨워요(Execute 배경 실행의 `deliver` 와 같은 두 걸음). 깨움이 없으니 같은 결과를 두 번 받지 않고, 영수증을 쓰는 자리가 consumer 한 곳이에요. 대가는 세 가지예요. 일정 틱이 새 kind 도 스캔하게 넓혀야 하고, `keeper_receipt_wait` 의 `waitable` 이 `schedule_instance_id` 를 받아야 하고, 5.2 의 합타입에 일정 행을 읽는 갈래가 들어가요.
-- **[사실]** 쓸 수 있어요. `Outbox.retain ~base_path ~keeper_name receipt` 는 실행 scope 나 producer 없이 평범한 레코드를 받아요. 서버 쪽 writer 인 Execute 배경 실행은 이미 `thread_id = producer_label`, `turn_id = call_id = request_id` 로 채우고(`lib/keeper/keeper_execute_background.ml:66-73`), 영수증을 쓴 뒤 `Keeper_client_tool_outbox_wake.notify` 로 Keeper 를 한 번 깨워요(같은 파일 `deliver`). 새 kind 의 consumer 도 `thread_id = "schedule_run_watch"`, `turn_id = call_id = schedule_instance_id` 로 같은 길을 쓰면 돼요. 깨움은 영수증 길의 한 번뿐이에요.
-- **[사실]** Owner 를 푸는 건 writer 가 아니에요. `deliver` 는 영수증을 쓰고 깨우기만 하고, 대기를 푸는 `Keeper_receipt_wait_sweep.after_wait` 는 대기를 건 턴이 끝날 때(`lib/keeper/keeper_turn.ml:1106-1114`)와 maintenance pass 가 outbox 를 읽어서 불러요. 새 consumer 도 영수증을 쓰고 깨우기만 하면 돼요.
-- **[확인 필요]** 영수증의 `tool_name` 과 `arguments` 를 무엇으로 채울지는 정하지 않았어요. Execute 는 `tool_name = "tool_execute"` 이고 `arguments` 는 요청 레코드의 명령이에요. 일정 쪽은 Keeper 가 부른 `masc_schedule_create` 와 일정 payload 의 감시 대상(`{repo, run_id}`)이 후보예요. 모델이 이 영수증을 어떻게 읽는지는 보지 않았어요.
-- **[확인 필요]** (나-2)에서 읽기를 일정 틱과 나누는 구조의 크기는 읽지 않았어요.
+**[사실]** 이 구현은 아직 배포 전이고 시험은 한 번도 돌리지 않았어요(PR CI 는 `type-check` 만 돌려요). 효과는 6절의 지표로 배포 뒤에 재요.
+
+**[확인 필요]** 일정 행이 지워진 뒤에 남은 대기는 run 용 `Unknown` 영수증을 받아요. 문구가 run 기준이에요. 일정 행을 지우는 경로(`Schedule_service.prune`)가 대기 중인 일정을 건드리는지는 읽지 않았어요.
 
 ## 6. 재는 것
 
@@ -178,7 +180,7 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 ## 7. 사용자가 정한 것과 정할 것
 
 1. **결정(사용자, 2026-11-12): (가)를 건너뛰고 바로 (나)로 가요.** 이 글이 추천한 「(가)를 하루 먼저 본다」는 받아들여지지 않았어요. 11-13 16:47 의 `run_in_background` 비율은 (가)의 판정이 아니라 배포 뒤 기준선으로만 읽어요.
-2. **결정(사용자, 2026-11-12): (나-1)을 정석으로 봐요.** 이 글이 (나-1)을 추천한 근거는 「막는 곳이 한 곳이라 변경 범위가 작다」였는데, 5.2 의 읽기에서 막는 곳이 둘이고 재시작 정리와 부딪친다는 것으로 바뀌었어요. 비용이 추천 때보다 커요. **결정(사용자, 2026-11-12): 추천대로 (나-1b)로 가요.** 대가는 실행 기록 `v3` 를 다시 건드리는 것이에요. 5.2 의 두 가지(누가 영수증을 쓰는가, 깨움 합치기)를 정한 뒤에 구현해요. 구현은 이 RFC 가 병합된 뒤에 시작해요(사용자, 2026-11-12).
+2. **결정(사용자, 2026-11-12): (나-1)을 정석으로 봐요.** 이 글이 (나-1)을 추천한 근거는 「막는 곳이 한 곳이라 변경 범위가 작다」였는데, 5.2 의 읽기에서 막는 곳이 둘이고 재시작 정리와 부딪친다는 것으로 바뀌었어요. 비용이 추천 때보다 커요. **결정(사용자, 2026-11-12): 추천대로 (나-1b)로 가요.** 구현은 이 RFC 가 병합된 뒤에 시작해요(사용자, 2026-11-12). 구현해 보니 실행 기록 `v3` 는 바뀌지 않았어요(5.2).
 3. **결정(사용자, 2026-11-12): 예, 두 Keeper 에게 각자 한 번 물어요.** 2026-11-12 17:42 KST 에 Board 글 두 개로 보냈어요. `masc-productor-owner` 는 1분 뒤 답했어요(3절). 글 번호는 `rondo` 가 `p-e5fe85dd65a9be6aab87462f35410853`, `masc-productor-owner` 가 `p-45dacfc018a91c4ab3a2eff9cd3e8af2` 예요. 답은 글의 댓글에 와요. `rondo` 는 Claude Code 7일 한도가 소진돼서(`retry_after` 약 79시간) 답이 11-15 오후 이후에 와요.
 
 ## 8. 확인하지 못한 것

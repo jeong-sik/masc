@@ -69,10 +69,17 @@ let complete ~base_path ~worker_epoch candidate partition (judged : Jev.judged) 
     Ok ()
   | Keeper_board_attention_judgment.Not_relevant, _
   | Keeper_board_attention_judgment.Relevant, Ok Candidate.Skip_non_discoverable_comment ->
-    let* _ = Candidate.apply_judgment_and_deliver ~base_path
+    let* delivery = Candidate.apply_judgment_and_deliver ~base_path
       ~keeper_name:candidate.keeper_name ~candidate_id:candidate.candidate_id ~judgment in
-    let* _ = Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition:completed in
-    Ok ()
+    (match delivery with
+     | Candidate.Delivered (_ : Candidate.candidate) | Candidate.Candidate_absent ->
+       let* _ = Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition:completed in
+       Ok ()
+     | Candidate.Judgment_conflict
+         { recorded = (_ : Candidate.judgment); offered = (_ : Candidate.judgment) } ->
+       (* Nothing was delivered for this judgment, so the root stays
+          Completed. The caller reports the error and wakes the owner. *)
+       Error (Candidate.judgment_conflict_detail ~candidate_id:candidate.candidate_id))
   | Keeper_board_attention_judgment.Relevant, Error detail ->
     Error ("Board comment parent unavailable: " ^ detail)
 

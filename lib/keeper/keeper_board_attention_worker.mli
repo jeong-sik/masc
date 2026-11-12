@@ -97,6 +97,12 @@ type settlement =
       { candidate_id : string
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
+  | Completed_partitions_held of
+      { held : int
+      ; continuation_wake : Keeper_registry.wakeup_outcome option
+      }
+      (** The walk settled nothing: each of the [held] captured members
+          records a judgment its candidate refused, and stays [Completed]. *)
 
 type wake_skip_reason =
   | Keeper_paused
@@ -159,7 +165,12 @@ val settle_completed_snapshot :
     Stop at the first failed transition and leave later members untouched. A
     delivery failure retains its evidence without consuming the candidate; if
     delivery committed before partition settlement failed, replay preserves
-    that effect. The returned candidate id is the last settled member. A
+    that effect. A member whose candidate already records another judgment
+    ([Keeper_board_attention_candidate.Judgment_conflict]) is not a failed
+    transition: it stays [Completed], the walk logs it as an error and goes on
+    to the next member, and it does not count toward the continuation wake,
+    because the same refusal would answer that wake. The returned candidate
+    id is the last settled member. A
     sync-unconfirmed completion must pass explicit confirmation before
     delivery. This function never invokes AGENT_CORE.
     [?on_captured] fires exactly once, immediately after the capture and

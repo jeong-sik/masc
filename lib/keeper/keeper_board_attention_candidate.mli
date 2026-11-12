@@ -416,6 +416,17 @@ type judgment_delivery_outcome =
           this is indistinguishable from any other cause of absence and is
           treated the same: the delivery cannot succeed on a retry of the
           identical request, because there is no row left to update. *)
+  | Judgment_conflict of
+      { recorded : judgment
+      ; offered : judgment
+      }
+      (** The candidate already records [recorded], and [offered] is another
+          judgment. Nothing was written: the candidate keeps [recorded] and
+          no event was enqueued for [offered]. *)
+
+val judgment_conflict_detail : candidate_id:string -> string
+(** The sentence a caller logs or returns when it reports
+    [Judgment_conflict] as a failure. *)
 
 val apply_judgment_and_deliver :
   base_path:string ->
@@ -427,9 +438,13 @@ val apply_judgment_and_deliver :
     event delivery. [Delivered] means the candidate is [Consumed].
     [Candidate_absent] is explicit rather than folded into [Error] so a caller
     can settle the partition without delivery instead of retrying an update
-    that structurally cannot land. Conflicting prior judgment or a
-    non-terminal delivery result against a candidate that does exist remains
-    an [Error]. *)
+    that structurally cannot land. [Judgment_conflict] is explicit so every
+    caller decides what one refused judgment does to the work behind it; a
+    retry of the identical request returns it again. The comparison also runs
+    under the ledger lock, so a judgment another writer commits between this
+    function's read and its write is reported the same way. A non-terminal
+    delivery result against a candidate that does exist remains an
+    [Error]. *)
 
 val record_and_wake :
   base_path:string -> candidate -> (record_acceptance, string) result

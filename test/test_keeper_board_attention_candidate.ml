@@ -48,6 +48,8 @@ let delivered label = function
   | Ok (A.Delivered candidate) -> candidate
   | Ok A.Candidate_absent ->
     Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Ok (A.Judgment_conflict _) ->
+    Alcotest.failf "%s: the candidate already records another judgment" label
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
@@ -1209,15 +1211,33 @@ let test_not_relevant_delivery_is_idempotent () =
          ~judgment:verdict)
   in
   Alcotest.(check bool) "terminal replay is idempotent" true (replayed = consumed);
-  match
-    A.apply_judgment_and_deliver
-      ~base_path
-      ~keeper_name:persisted.keeper_name
-      ~candidate_id:persisted.candidate_id
-      ~judgment:(judgment J.Relevant)
-  with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "conflicting terminal judgment was accepted"
+  let conflicting = judgment J.Relevant in
+  (match
+     A.apply_judgment_and_deliver
+       ~base_path
+       ~keeper_name:persisted.keeper_name
+       ~candidate_id:persisted.candidate_id
+       ~judgment:conflicting
+   with
+   | Ok (A.Judgment_conflict { recorded; offered }) ->
+     Alcotest.(check bool)
+       "the conflict carries the judgment on record"
+       true
+       (recorded = verdict);
+     Alcotest.(check bool)
+       "the conflict carries the refused judgment"
+       true
+       (offered = conflicting)
+   | Ok (A.Delivered _) ->
+     Alcotest.fail "conflicting terminal judgment was accepted"
+   | Ok A.Candidate_absent ->
+     Alcotest.fail "the consumed candidate was reported absent"
+   | Error detail ->
+     Alcotest.failf "the conflict was not returned as a value: %s" detail);
+  Alcotest.(check bool)
+    "a refused judgment leaves the candidate as it was"
+    true
+    (load_one ~base_path = consumed)
 ;;
 
 let test_relevant_delivery_uses_exact_candidate_identity () =

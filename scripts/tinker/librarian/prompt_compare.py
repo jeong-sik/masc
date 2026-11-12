@@ -19,14 +19,18 @@
 run. A draft runs on GLM only after its Inkling runs pass, so a model may be left out; the result
 then says it is incomplete, and an incomplete draft does not go in. Every model's draft runs draw
 their prompts with one template, and an answered call counts in one listed run only, so a run listed
-twice, or a folder copied from another listed run, is refused. A draft run that holds the rows a
-pinned baseline was counted from is refused too.
+twice, or a folder copied from another listed run, is refused. A draft run that counts an answered
+call a pinned baseline counted is refused too, and so is one whose rows file has the sha256 of a
+baseline's rows. The callers answer a request from the log of the run's folder when it holds a
+reply, so a draft run made in a copy of a baseline run's folder counts the baseline's answers again
+wherever the draft leaves a request as it was.
 
 prompt_lines.json fixes the comparison before a draft runs (`prompt_lines.py`): the pass lines, the
 template of the baseline, how many runs each side takes, the noise widths, and each model's baseline
-as numbers. `compare` reads the baseline from the file and measures only the draft's runs. A
-comparison then needs neither the baseline's run folders nor its judges' decisions, and neither can
-move a pinned count. `baseline` measures runs of the pinned template and prints the baseline to pin.
+as numbers, with the answered calls its runs counted. `compare` reads the baseline from the file and
+measures only the draft's runs. A comparison then needs neither the baseline's run folders nor its
+judges' decisions, and neither can move a pinned count. `baseline` measures runs of the pinned
+template and prints the baseline to pin.
 
 A metric counts hits over chances, summed over a side's runs. The draft's rate minus the baseline's
 is d. Its noise σ is the binomial standard error of that difference at the pooled rate p:
@@ -55,7 +59,16 @@ from typing import cast
 
 import eval_admission as V
 from prompt_counts import Count, Measured, Metric, Run, measure, run_of, summed
-from prompt_lines import COUNTS, Baseline, Lines, ModelLines, baseline_json, model_of, pinned_lines
+from prompt_lines import (
+    COUNTS,
+    Baseline,
+    Lines,
+    ModelLines,
+    as_written,
+    baseline_json,
+    model_of,
+    pinned_lines,
+)
 
 type JsonObject = dict[str, object]
 
@@ -112,7 +125,7 @@ def draft_problem(name: str, model: ModelLines, draft: list[Measured], template:
 
 def shared_call_problem(runs: Mapping[str, list[Measured]]) -> str | None:
     """Why the runs are not each its own sample, or None: no answered call counts in two of them."""
-    seen: dict[tuple[str, float], str] = {}
+    seen: dict[str, str] = {}
     for name, listed in runs.items():
         for m in listed:
             shared = {seen[call] for call in m.answered if call in seen}
@@ -167,7 +180,8 @@ def baselines(lines: Lines, runs: Mapping[str, list[Measured]]) -> dict[str, Bas
             raise SystemExit(problem)
         out[name] = Baseline(model.provider, model.model, lines.pass_lines_sha256, lines.baseline_template_sha256,
                              lines.files_sha256[COUNTS], summed(base), tuple(m.real_record for m in base),
-                             tuple(m.synth_rows_sha256 for m in base), tuple(m.real_rows_sha256 for m in base))
+                             tuple(m.synth_rows_sha256 for m in base), tuple(m.real_rows_sha256 for m in base),
+                             tuple(m.answered for m in base))
     problem = shared_call_problem(runs)
     if problem is not None:
         raise SystemExit(problem)
@@ -176,16 +190,21 @@ def baselines(lines: Lines, runs: Mapping[str, list[Measured]]) -> dict[str, Bas
 
 def sides_of(lines: Lines, drafts: Mapping[str, list[Measured]]) -> dict[str, tuple[Baseline, list[Measured]]]:
     """Each listed model's pinned baseline beside its draft runs. SystemExit when the file pins no
-    baseline for a model yet, a draft run holds the rows a pinned baseline was counted from, or the
-    draft runs cannot be compared (`draft_problem`, `plan_problem`)."""
-    pinned = {rows for m in lines.models.values() if m.baseline is not None
-              for rows in (*m.baseline.synth_rows_sha256, *m.baseline.real_rows_sha256)}
+    baseline for a model yet, a draft run counts an answered call a pinned baseline of any model
+    counted or holds the rows one was counted from, or the draft runs cannot be compared
+    (`draft_problem`, `plan_problem`)."""
+    pinned = frozenset(call for m in lines.models.values() if m.baseline is not None
+                       for run in m.baseline.answered for call in run)
+    pinned_rows = frozenset(rows for m in lines.models.values() if m.baseline is not None
+                            for rows in (*m.baseline.synth_rows_sha256, *m.baseline.real_rows_sha256))
     sides: dict[str, tuple[Baseline, list[Measured]]] = {}
     for name, draft in drafts.items():
         model = model_of(lines, name)
         if model.baseline is None:
             raise SystemExit(f"prompt_lines.json pins no {name} baseline yet")
-        if pinned & {rows for m in draft for rows in (m.synth_rows_sha256, m.real_rows_sha256)}:
+        if any(m.answered & pinned for m in draft):
+            raise SystemExit(f"a {name} draft run counts an answered call a pinned baseline counted")
+        if any({m.synth_rows_sha256, m.real_rows_sha256} & pinned_rows for m in draft):
             raise SystemExit(f"a {name} draft run holds the rows a pinned baseline was counted from")
         problem = draft_problem(name, model, draft, lines.baseline_template_sha256)
         if problem is not None:
@@ -244,7 +263,8 @@ def main() -> int:
     pass_lines = V.load_pass_lines()
     items = (cast(int, cast(JsonObject, pass_lines["e_synth"])["items"]),
              cast(int, cast(JsonObject, pass_lines["e_real"])["items"]))
-    runs = measured_runs(lines, plan_of(json.loads(Path(cast(str, args.runs)).read_text(encoding="utf-8"))), items)
+    plan = plan_of(as_written(Path(cast(str, args.runs)).read_bytes(), "runs.json"))
+    runs = measured_runs(lines, plan, items)
     if args.cmd == "baseline":
         print(json.dumps({name: baseline_json(b) for name, b in baselines(lines, runs).items()}, indent=1))
         return 0

@@ -72,18 +72,24 @@ def counts(hits: dict[str, tuple[int, int]]) -> dict[C.Metric, C.Count]:
     return out
 
 
+def calls(run: str) -> frozenset[str]:
+    """The two answered calls the run named `run` counted, each as `prompt_counts.call_sha256` names one."""
+    return frozenset({sha(f"{run} call 1"), sha(f"{run} call 2")})
+
+
 def measured(template: str, run: str = "run", hits: dict[str, tuple[int, int]] | None = None,
-             answered: frozenset[tuple[str, float]] = frozenset(), record: C.RealRecord = RECORD) -> C.Measured:
+             answered: frozenset[str] = frozenset(), record: C.RealRecord = RECORD) -> C.Measured:
     """What the run named `run` counted: `counts(hits)`, drawn with `template`."""
     return C.Measured(counts(hits or {}), template, sha(f"{run} synth"), sha(f"{run} real"), record, answered)
 
 
 def baseline(*runs: str, provider: str = "tinker", model: str = "inkling-model") -> L.Baseline:
-    """The pinned baseline of the runs named `runs`, each counting every metric at 5 of 10 for `model`."""
+    """The pinned baseline of the runs named `runs`, each counting every metric at 5 of 10 for `model`
+    over its two answered calls (`calls`)."""
     return L.Baseline(provider, model, PIN, BASE_T, FILES[L.COUNTS],
                       {m: C.Count(5 * len(runs), 10 * len(runs)) for m in C.Metric},
                       tuple(RECORD for _ in runs), tuple(sha(f"{r} synth") for r in runs),
-                      tuple(sha(f"{r} real") for r in runs))
+                      tuple(sha(f"{r} real") for r in runs), tuple(calls(r) for r in runs))
 
 
 INKLING = L.ModelLines("tinker", "inkling-model", 2, baseline("i1", "i2"))

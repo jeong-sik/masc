@@ -11,14 +11,16 @@ holds another target's rows too.
 
 A baseline in prompt_lines.json is such counts kept as numbers. It names the sha256 of this file,
 so a change here leaves every pinned baseline stale until its runs are counted again. The sha256 of
-a run's rows that a baseline keeps says which rows files the counts came from. The judges'
-decisions are not kept, so the pinned counts are the record.
+a run's rows that a baseline keeps says which rows files the counts came from, and the answered
+calls it keeps (`call_sha256`) say which answers were counted, so a later run that counts one of
+them again can be refused. The judges' decisions are not kept, so the pinned counts are the record.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -75,19 +77,31 @@ class Run:
 @dataclass(frozen=True, slots=True)
 class Measured:
     """One run's counts for the model's target, the template it drew its prompts with, its rows'
-    sha256, its E-real record, and the answered calls it counts. A call is its key and the time it
-    was sent: two runs of one prompt share keys, never a sent call."""
+    sha256, its E-real record, and the answered calls it counts, each as `call_sha256` names it."""
 
     counts: Mapping[Metric, Count]
     template_sha256: str
     synth_rows_sha256: str
     real_rows_sha256: str
     real_record: RealRecord
-    answered: frozenset[tuple[str, float]]
+    answered: frozenset[str]
 
 
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def call_sha256(row: JsonObject, where: Path) -> str:
+    """The answered call the row of `where` counts, as one sha256 of the call's key and the time it
+    was sent. Two runs of one prompt share keys; the calls they sent differ in the time, which the
+    callers keep to the millisecond. The row is read as parsed, so a row written again with other
+    spacing, key order or number format names the same call. SystemExit when the row names no key,
+    or no time: a finite number of at least zero."""
+    key, sent = row.get("call_key"), row.get("sent_at")
+    if (not isinstance(key, str) or isinstance(sent, bool) or not isinstance(sent, (int, float))
+            or not 0 <= sent <= sys.float_info.max):
+        raise SystemExit(f"{where} holds a row that does not name its call's key and the time it was sent")
+    return hashlib.sha256(f"{key} {float(sent)!r}".encode()).hexdigest()
 
 
 def total(key: str, rows: list[JsonObject]) -> int:
@@ -125,10 +139,16 @@ def target_of(summary: JsonObject, kind: str, pin: str, provider: str, model: st
     return names[0]
 
 
+def own_rows(rows: list[JsonObject], target: str, items: int) -> list[JsonObject] | None:
+    """The rows sent as `target` when they are one row for each of `items` items; None otherwise."""
+    mine = [r for r in rows if r["target"] == target]
+    return mine if len(mine) == items == len({r["item"] for r in mine}) else None
+
+
 def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, int]) -> Measured:
     """`run`'s counts for `model` on `provider`, recomputed from its rows and its judges' folders.
-    `items` are the sizes of E-synth and E-real: a run that does not hold that many rows for the
-    model is refused."""
+    `items` are the sizes of E-synth and E-real: a run that does not hold one row of the model for
+    each item of a set is refused."""
     synth_summary = cast(JsonObject, json.loads((run.synth / "summary.json").read_text(encoding="utf-8")))
     real_summary = cast(JsonObject, json.loads((run.real / "summary.json").read_text(encoding="utf-8")))
     target = target_of(synth_summary, "synth", pin, provider, model, run.synth)
@@ -136,7 +156,8 @@ def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, 
     if synth_summary["template_sha256"] != real_summary["template_sha256"]:
         raise SystemExit(f"{run.synth} and {run.real} drew their prompts with different templates")
     rows = V.read_rows(run.synth)
-    if sum(r["target"] == target for r in rows) != items[0]:
+    sent = own_rows(rows, target, items[0])
+    if sent is None:
         raise SystemExit(f"{run.synth} does not hold one row for each of the {items[0]} E-synth items")
     off = D.off_label(rows)
     if off and run.drops is None:
@@ -148,12 +169,11 @@ def measure(run: Run, *, provider: str, model: str, pin: str, items: tuple[int, 
         raise SystemExit(f"the judge's drops leave none of {run.synth} to score")
     merges = MD.for_run(rows, run.merges, synth_render.TEMPLATE, run.synth).numbers(rows, scored, target)
     counts = synth_counts(mine, judged.wrong_outside(rows).get(target, 0), merges)
-    real_rows = [r for r in V.read_rows(run.real) if r["target"] == real_target]
-    if len(real_rows) != items[1]:
+    real_rows = own_rows(V.read_rows(run.real), real_target, items[1])
+    if real_rows is None:
         raise SystemExit(f"{run.real} does not hold one row for each of the {items[1]} E-real items")
     counts[Metric.REAL_VALID] = Count(sum(bool(r["valid"]) for r in real_rows), len(real_rows))
-    answered = frozenset((cast(str, r["call_key"]), cast(float, r["sent_at"]))
-                         for r in [*(r for r in rows if r["target"] == target), *real_rows])
+    answered = frozenset([*(call_sha256(r, run.synth) for r in sent), *(call_sha256(r, run.real) for r in real_rows)])
     return Measured(counts, cast(str, synth_summary["template_sha256"]), sha256_file(run.synth / "rows.jsonl"),
                     sha256_file(run.real / "rows.jsonl"), real_record(real_rows), answered)
 

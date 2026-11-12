@@ -45,6 +45,7 @@ from tinker_librarian_prompt_fixtures import (
     RECORD,
     Row,
     baseline,
+    calls,
     measured,
     real_row,
     sha,
@@ -233,9 +234,8 @@ class RunsProblemTest(unittest.TestCase):
 
 class PlanProblemTest(unittest.TestCase):
     def test_one_draft_template_and_runs_with_their_own_calls_compare(self) -> None:
-        plan = {"inkling": [measured(DRAFT_T, answered=frozenset({("a", 1.0)})),
-                            measured(DRAFT_T, answered=frozenset({("a", 2.0)}))],
-                "glm": [measured(DRAFT_T, answered=frozenset({("c", 1.0)}))]}
+        plan = {"inkling": [measured(DRAFT_T, answered=calls("d1")), measured(DRAFT_T, answered=calls("d2"))],
+                "glm": [measured(DRAFT_T, answered=calls("d3"))]}
         self.assertIsNone(P.plan_problem(plan))
 
     def test_models_whose_drafts_drew_different_templates_are_refused(self) -> None:
@@ -243,38 +243,41 @@ class PlanProblemTest(unittest.TestCase):
         self.assertIn("different templates", P.plan_problem(plan) or "")
 
     def test_a_run_listed_twice_or_copied_is_refused(self) -> None:
-        run = measured(DRAFT_T, answered=frozenset({("k1", 1.0), ("k2", 1.0)}))
-        copied = measured(DRAFT_T, answered=frozenset({("k1", 1.0), ("k3", 1.0)}))
+        run = measured(DRAFT_T, answered=frozenset({sha("k1"), sha("k2")}))
+        copied = measured(DRAFT_T, answered=frozenset({sha("k1"), sha("k3")}))
         for name, draft in {"twice": [run, run], "copied": [run, copied]}.items():
             with self.subTest(name=name):
                 self.assertIn("runs of inkling count the same answered call", P.plan_problem({"inkling": draft}) or "")
 
     def test_a_call_two_models_runs_share_names_both(self) -> None:
-        plan = {"inkling": [measured(DRAFT_T, answered=frozenset({("k1", 1.0)})),
-                            measured(DRAFT_T, answered=frozenset({("k2", 1.0)}))],
-                "glm": [measured(DRAFT_T, answered=frozenset({("k2", 1.0), ("k3", 1.0)}))]}
+        plan = {"inkling": [measured(DRAFT_T, answered=frozenset({sha("k1")})),
+                            measured(DRAFT_T, answered=frozenset({sha("k2")}))],
+                "glm": [measured(DRAFT_T, answered=frozenset({sha("k2"), sha("k3")}))]}
         self.assertIn("runs of glm and inkling count the same answered call", P.plan_problem(plan) or "")
 
 
 class BaselinesTest(unittest.TestCase):
     def test_a_baseline_sums_its_runs_and_keeps_their_order(self) -> None:
-        first = measured(BASE_T, "i1", {"stale_drop_recall": (1, 3)}, frozenset({("a", 1.0)}), C.RealRecord(3, 4, 5))
-        second = measured(BASE_T, "i2", {"stale_drop_recall": (2, 4)}, frozenset({("a", 2.0)}), C.RealRecord(0, 7, 1))
+        first = measured(BASE_T, "i1", {"stale_drop_recall": (1, 3)}, frozenset({sha("k1")}), C.RealRecord(3, 4, 5))
+        second = measured(BASE_T, "i2", {"stale_drop_recall": (2, 4)}, frozenset({sha("k2"), sha("k3")}),
+                          C.RealRecord(0, 7, 1))
         counts = {m: C.Count(10, 20) for m in C.Metric} | {C.Metric.STALE_RECALL: C.Count(3, 7)}
         self.assertEqual(P.baselines(LINES, {"inkling": [first, second]}),
                          {"inkling": L.Baseline("tinker", "inkling-model", PIN, BASE_T, FILES[L.COUNTS], counts,
                                                 (C.RealRecord(3, 4, 5), C.RealRecord(0, 7, 1)),
-                                                (sha("i1 synth"), sha("i2 synth")), (sha("i1 real"), sha("i2 real")))})
+                                                (sha("i1 synth"), sha("i2 synth")), (sha("i1 real"), sha("i2 real")),
+                                                (frozenset({sha("k1")}), frozenset({sha("k2"), sha("k3")})))})
 
     def test_each_baseline_names_the_model_it_was_counted_for(self) -> None:
-        got = P.baselines(LINES, {"glm": [measured(BASE_T, "g1")], "inkling": [measured(BASE_T, "i1"),
-                                                                              measured(BASE_T, "i2")]})
+        got = P.baselines(LINES, {"glm": [measured(BASE_T, "g1", answered=calls("g1"))],
+                                  "inkling": [measured(BASE_T, "i1", answered=calls("i1")),
+                                              measured(BASE_T, "i2", answered=calls("i2"))]})
         self.assertEqual({name: (b.provider, b.model) for name, b in got.items()},
                          {"glm": ("glm", "glm-model"), "inkling": ("tinker", "inkling-model")})
         self.assertEqual(got, {"glm": GLM.baseline, "inkling": INKLING.baseline})
 
     def test_runs_that_cannot_be_a_baseline_are_refused(self) -> None:
-        run = measured(BASE_T, answered=frozenset({("k", 1.0)}))
+        run = measured(BASE_T, answered=frozenset({sha("k")}))
         cases = {"inkling takes 2 baseline runs, not 1": {"inkling": [measured(BASE_T)]},
                  "a glm baseline run drew its prompts with another template": {"glm": [measured(DRAFT_T)]},
                  "runs of inkling count the same answered call": {"inkling": [run, run]},
@@ -288,12 +291,12 @@ class BaselinesTest(unittest.TestCase):
 
 class SidesTest(unittest.TestCase):
     def test_a_models_draft_runs_stand_beside_its_pinned_baseline(self) -> None:
-        draft = [measured(DRAFT_T, "d1"), measured(DRAFT_T, "d2")]
+        draft = [measured(DRAFT_T, "d1", answered=calls("d1")), measured(DRAFT_T, "d2", answered=calls("d2"))]
         self.assertEqual(P.sides_of(LINES, {"inkling": draft}), {"inkling": (INKLING.baseline, draft)})
 
     def test_draft_runs_that_cannot_be_compared_are_refused(self) -> None:
         unpinned = replace(LINES, models={**LINES.models, "glm": replace(GLM, baseline=None)})
-        run = measured(DRAFT_T, answered=frozenset({("k", 1.0)}))
+        run = measured(DRAFT_T, answered=frozenset({sha("k")}))
         cases: dict[str, tuple[L.Lines, dict[str, list[C.Measured]]]] = {
             "prompt_lines.json pins no glm baseline yet": (unpinned, {"glm": [measured(DRAFT_T)]}),
             "inkling takes 2 draft runs, not 1": (LINES, {"inkling": [measured(DRAFT_T)]}),
@@ -307,21 +310,41 @@ class SidesTest(unittest.TestCase):
                     P.sides_of(lines, drafts)
                 self.assertIn(want, str(caught.exception))
 
+    def test_a_draft_run_that_counts_a_call_a_pinned_baseline_counted_is_refused(self) -> None:
+        # Every call of a baseline run or one of them beside the run's own, of the model's baseline or
+        # the other model's, whatever rows and template the draft run names.
+        own, one = calls("d1"), frozenset(sorted(calls("i2"))[:1])
+        cases = {"every call of a run of its baseline": ("inkling", calls("i1")),
+                 "one call of its baseline": ("inkling", own | one),
+                 "a call of the other model's baseline": ("inkling", own | calls("g1")),
+                 "one call of the other model's baseline, on glm": ("glm", own | one)}
+        for case, (name, answered) in cases.items():
+            run, other = measured(DRAFT_T, "d1", answered=answered), measured(DRAFT_T, "d2", answered=calls("d2"))
+            for drafts in ([run],) if name == "glm" else ([run, other], [other, run]):
+                with self.subTest(case=case, first=drafts[0] is run):
+                    with self.assertRaises(SystemExit) as caught:
+                        P.sides_of(LINES, {name: drafts})
+                    self.assertEqual(str(caught.exception),
+                                     f"a {name} draft run counts an answered call a pinned baseline counted")
+
     def test_a_draft_run_that_holds_the_rows_of_a_pinned_baseline_is_refused(self) -> None:
-        # The rows of a baseline run, whatever template its summary names now and whichever model's
-        # baseline they are of.
-        fresh = measured(DRAFT_T, "d1")
-        cases = {"synth of its own baseline": ("inkling", replace(fresh, synth_rows_sha256=sha("i2 synth"))),
-                 "real of its own baseline": ("inkling", replace(fresh, real_rows_sha256=sha("i1 real"))),
-                 "real of the other model's": ("inkling", replace(fresh, real_rows_sha256=sha("g1 real"))),
-                 "synth of the other model's": ("glm", replace(fresh, synth_rows_sha256=sha("i1 synth")))}
+        # Though it counts none of the calls the file names for the baseline: a rows file of either
+        # set, of the model's baseline or the other model's.
+        own = measured(DRAFT_T, "d1", answered=calls("d1"))
+        cases = {"both rows files of a run of its baseline": ("inkling", measured(DRAFT_T, "i2", answered=calls("d1"))),
+                 "the E-synth rows of its baseline": ("inkling", replace(own, synth_rows_sha256=sha("i1 synth"))),
+                 "the E-real rows of its baseline": ("inkling", replace(own, real_rows_sha256=sha("i2 real"))),
+                 "the E-real rows of the other model's baseline": ("inkling", replace(own, real_rows_sha256=sha("g1 real"))),
+                 "the E-synth rows of the other model's baseline, on glm": ("glm",
+                                                                             replace(own, synth_rows_sha256=sha("i1 synth")))}
         for case, (name, run) in cases.items():
-            with self.subTest(case=case):
-                drafts = {name: [run] if name == "glm" else [measured(DRAFT_T, "d2"), run]}
-                with self.assertRaises(SystemExit) as caught:
-                    P.sides_of(LINES, drafts)
-                self.assertEqual(str(caught.exception),
-                                 f"a {name} draft run holds the rows a pinned baseline was counted from")
+            other = measured(DRAFT_T, "d2", answered=calls("d2"))
+            for drafts in ([run],) if name == "glm" else ([run, other], [other, run]):
+                with self.subTest(case=case, first=drafts[0] is run):
+                    with self.assertRaises(SystemExit) as caught:
+                        P.sides_of(LINES, {name: drafts})
+                    self.assertEqual(str(caught.exception),
+                                     f"a {name} draft run holds the rows a pinned baseline was counted from")
 
     def test_runs_of_a_model_the_lines_do_not_hold_are_not_measured(self) -> None:
         with self.assertRaises(SystemExit) as caught:
@@ -434,18 +457,64 @@ class CommandTest(unittest.TestCase):
             self.command("compare", "--runs", str(self.runs("draft", DRAFT_T, 1)), "--out", str(self.root / "c.json"))
         self.assertIn("prompt_lines.json pins no inkling baseline yet", str(caught.exception))
 
-    def test_compare_refuses_the_baselines_own_runs_under_another_templates_name(self) -> None:
+    def pin_baseline(self) -> tuple[Path, Row]:
+        """runs.json of two baseline runs, and the baseline they count, which the lines now pin."""
         self.write_lines(None)
         base = self.runs("base", self.template, 0)
-        self.write_lines(cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(base))))["inkling"])
+        pinned = cast(dict[str, Row], json.loads(self.command("baseline", "--runs", str(base))))["inkling"]
+        self.write_lines(pinned)
+        return base, pinned
+
+    def refused_compare(self, runs: Path) -> str:
+        """Why `compare` refuses `runs`. It writes no comparison."""
+        out = self.root / "compare.json"
+        with self.assertRaises(SystemExit) as caught:
+            self.command("compare", "--runs", str(runs), "--out", str(out))
+        self.assertFalse(out.exists())
+        return str(caught.exception)
+
+    def test_compare_refuses_the_baselines_own_answers_under_another_templates_name(self) -> None:
+        # The baseline's folders with the template renamed, as they are, and then with every row
+        # written again with other spacing and key order: other rows files, the same answered calls.
+        base, pinned = self.pin_baseline()
         for summary in self.root.glob("base-*/summary.json"):
             held = cast(Row, json.loads(summary.read_text(encoding="utf-8")))
             summary.write_text(json.dumps(held | {"template_sha256": DRAFT_T}), encoding="utf-8")
-        out = self.root / "compare.json"
-        with self.assertRaises(SystemExit) as caught:
-            self.command("compare", "--runs", str(base), "--out", str(out))
-        self.assertEqual(str(caught.exception), "a inkling draft run holds the rows a pinned baseline was counted from")
-        self.assertFalse(out.exists())
+        refusal = "a inkling draft run counts an answered call a pinned baseline counted"
+        self.assertEqual(self.refused_compare(base), refusal)
+        for rows in self.root.glob("base-*/rows.jsonl"):
+            held_rows = [cast(Row, json.loads(line)) for line in rows.read_text(encoding="utf-8").splitlines()]
+            rows.write_text("".join(json.dumps(dict(reversed(row.items())), separators=(",", ":")) + "\n"
+                                    for row in held_rows), encoding="utf-8")
+        written_again = {C.sha256_file(rows) for rows in self.root.glob("base-*/rows.jsonl")}
+        self.assertEqual(len(written_again), 4)
+        self.assertFalse(written_again & {*cast(list[str], pinned["synth_rows_sha256"]),
+                                          *cast(list[str], pinned["real_rows_sha256"])})
+        self.assertEqual(self.refused_compare(base), refusal)
+
+    def test_compare_refuses_the_baselines_rows_when_the_file_names_other_calls_for_them(self) -> None:
+        # A file changed by hand names other answered calls for the baseline than its runs counted.
+        # The baseline's folders, their template renamed, hold the rows the file names all the same.
+        base, pinned = self.pin_baseline()
+        self.write_lines(pinned | {"answered_sha256": [[sha("another call 1")], [sha("another call 2")]]})
+        for summary in self.root.glob("base-*/summary.json"):
+            held = cast(Row, json.loads(summary.read_text(encoding="utf-8")))
+            summary.write_text(json.dumps(held | {"template_sha256": DRAFT_T}), encoding="utf-8")
+        self.assertEqual(self.refused_compare(base),
+                         "a inkling draft run holds the rows a pinned baseline was counted from")
+
+    def test_compare_refuses_a_draft_run_that_counts_one_answer_of_the_baseline(self) -> None:
+        # A draft run made in a copy of a baseline run's folder: the caller answers a request the draft
+        # leaves as it was from the folder's log, and the row names the baseline's call.
+        self.pin_baseline()
+        draft = self.runs("draft", DRAFT_T, 1)
+        rows = self.root / "draft-real-2" / "rows.jsonl"
+        reused = (self.root / "base-real-1" / "rows.jsonl").read_text(encoding="utf-8").splitlines()[0]
+        fresh = rows.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(cast(Row, json.loads(reused))["item"], cast(Row, json.loads(fresh[0]))["item"])
+        rows.write_text("".join(line + "\n" for line in (reused, *fresh[1:])), encoding="utf-8")
+        self.assertEqual(self.refused_compare(draft),
+                         "a inkling draft run counts an answered call a pinned baseline counted")
 
     def test_both_commands_stop_when_the_lines_do_not_name_the_present_files(self) -> None:
         # An earlier version of a pinned file, and an earlier template: the runs were drawn with the
@@ -466,6 +535,26 @@ class CommandTest(unittest.TestCase):
                     self.assertEqual(str(caught.exception), refusal)
         self.assertFalse(out.exists())
 
+    def test_both_commands_stop_when_a_file_the_pass_lines_pin_is_not_the_present_one(self) -> None:
+        # Pass lines that pin an earlier eval_admission.py, lines fixed under those pass lines, and runs
+        # made under them: only `eval_admission.load_pass_lines` tells that the file is another now.
+        held = cast(Row, json.loads(V.PASS_LINES.read_text(encoding="utf-8")))
+        files = cast(dict[str, str], held["files_sha256"])
+        self.assertIn("eval_admission.py", files)
+        earlier = self.root / "pass_lines.json"
+        earlier.write_text(json.dumps(held | {"files_sha256": files | {"eval_admission.py": sha("an earlier version")}}),
+                           encoding="utf-8")
+        self.pin = C.sha256_file(earlier)
+        self.write_lines(None)
+        runs, out = str(self.runs("base", self.template, 0)), self.root / "compare.json"
+        with mock.patch.object(V, "PASS_LINES", earlier):
+            for argv in (("baseline", "--runs", runs), ("compare", "--runs", runs, "--out", str(out))):
+                with self.subTest(command=argv[0]):
+                    with self.assertRaises(SystemExit) as caught:
+                        self.command(*argv)
+                    self.assertEqual(str(caught.exception), "pass_lines.json pins other contents for: eval_admission.py")
+        self.assertFalse(out.exists())
+
     def test_a_runs_json_that_splits_a_model_into_base_and_draft_is_refused(self) -> None:
         self.write_lines(None)
         path = self.root / "runs.json"
@@ -473,6 +562,24 @@ class CommandTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as caught:
             self.command("baseline", "--runs", str(path))
         self.assertEqual(str(caught.exception), "runs.json does not list runs under inkling")
+
+    def test_a_runs_json_that_is_not_json_or_writes_a_key_twice_is_refused(self) -> None:
+        # Read as written, like prompt_lines.json: of a key written twice the later value would be the
+        # one read.
+        self.write_lines(None)
+        path, out = self.root / "runs.json", self.root / "compare.json"
+        twice = "runs.json writes a key twice in one object"
+        for text, refusal in ((b'{"inkling": [], "inkling": []}', twice),
+                              (b'{"inkling": [{"synth": "s", "real": "r", "real": "another"}]}', twice),
+                              (b'{"inkling": [', "runs.json is not JSON: "),
+                              (b'{"inkling": "\xff"}', "runs.json is not JSON: ")):
+            path.write_bytes(text)
+            for argv in (("baseline", "--runs", str(path)), ("compare", "--runs", str(path), "--out", str(out))):
+                with self.subTest(text=text, command=argv[0]):
+                    with self.assertRaises(SystemExit) as caught:
+                        self.command(*argv)
+                    self.assertEqual(str(caught.exception)[:len(refusal)], refusal)
+        self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

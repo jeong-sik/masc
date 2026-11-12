@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librari
 import eval_admission as V
 import prompt_counts as C
 import prompt_lines as L
-from tinker_librarian_prompt_fixtures import BASE_T, FILES, OTHER_T, PIN, sha
+from tinker_librarian_prompt_fixtures import BASE_T, FILES, OTHER_T, PIN, calls, sha
 
 type Raw = dict[str, object]
 
@@ -42,12 +42,13 @@ def raw_baseline(*runs: str, provider: str = "tinker", model: str = "inkling-mod
             "counts": {m.value: [3 * len(runs), 10 * len(runs)] for m in C.Metric},
             "real_record": [dict(RECORD) for _ in runs],
             "synth_rows_sha256": [sha(f"{r} synth") for r in runs],
-            "real_rows_sha256": [sha(f"{r} real") for r in runs]}
+            "real_rows_sha256": [sha(f"{r} real") for r in runs],
+            "answered_sha256": [sorted(calls(r)) for r in runs]}
 
 
 def raw_lines() -> Raw:
     """A prompt_lines.json that pins both models' baselines."""
-    return {"schema": "masc.tinker.librarian.prompt_lines.v2", "pass_lines_sha256": PIN,
+    return {"schema": "masc.tinker.librarian.prompt_lines.v3", "pass_lines_sha256": PIN,
             "baseline_template_sha256": BASE_T, "worse_sigmas": 2.5, "better_sigmas": 2.0, "better_from": ["inkling"],
             "models": {"inkling": {"provider": "tinker", "model": "inkling-model", "runs": 2,
                                    "baseline": raw_baseline("i1", "i2")},
@@ -103,9 +104,11 @@ class LinesTest(unittest.TestCase):
                          L.Baseline("tinker", "inkling-model", PIN, BASE_T, FILES[L.COUNTS],
                                     {m: C.Count(6, 20) for m in C.Metric},
                                     (C.RealRecord(1, 2, 0), C.RealRecord(1, 2, 0)),
-                                    (sha("i1 synth"), sha("i2 synth")), (sha("i1 real"), sha("i2 real"))))
+                                    (sha("i1 synth"), sha("i2 synth")), (sha("i1 real"), sha("i2 real")),
+                                    (calls("i1"), calls("i2"))))
         assert glm.baseline is not None
-        self.assertEqual((glm.baseline.provider, glm.baseline.model), ("glm", "glm-model"))
+        self.assertEqual((glm.baseline.provider, glm.baseline.model, glm.baseline.answered),
+                         ("glm", "glm-model", (calls("g1"),)))
 
     def test_a_model_whose_baseline_is_null_has_none(self) -> None:
         lines = L.lines_of(changed(GLM, None))
@@ -121,9 +124,12 @@ class LinesTest(unittest.TestCase):
         raw["counts"] = {m.value: [n, n + 20] for n, m in enumerate(C.Metric)}
         raw["real_record"] = [{"agree": 3, "candidates": 4, "dropped_not_in_live": 5},
                               {"agree": 0, "candidates": 7, "dropped_not_in_live": 1}]
+        later = [sha(f"k{n}") for n in range(2, 10)]
+        raw["answered_sha256"] = [[sha("k1")], sorted(later)]
         baseline = L.baseline_from("inkling", 2, raw)
         self.assertEqual(baseline.real_record, (C.RealRecord(3, 4, 5), C.RealRecord(0, 7, 1)))
         self.assertEqual(baseline.counts[C.Metric.STALE_RECALL], C.Count(3, 23))
+        self.assertEqual(baseline.answered, (frozenset({sha("k1")}), frozenset(later)))
         written = cast(Raw, json.loads(json.dumps(L.baseline_json(baseline))))
         self.assertEqual(written, raw)
         self.assertEqual(L.baseline_from("inkling", 2, written), baseline)
@@ -139,11 +145,15 @@ class LinesTest(unittest.TestCase):
                                     {sha("i1 synth"): 1, sha("i2 synth"): 2},
                                     [sha("i1 synth"), sha("i2 synth").upper()], [sha("i1 synth"), sha("i2 synth")[:12]],
                                     [sha("i1 synth"), sha("i2 synth") + "0"], [sha("i1 synth"), 7]]
+        i1, i2 = sorted(calls("i1")), sorted(calls("i2"))
+        answered_cases: list[object] = [i1, 7, [i1], [i1, i2, 7], [i1, []], [i1, 7], [i1, i2[0]], [i1, [7]],
+                                        [i1, dict.fromkeys(i2, 1)], [i1, [i2[0].upper(), i2[1]]], [i1, [i2[0][:12]]],
+                                        [i1, [i2[0], i2[0]]]]
         no_names: list[object] = [None, 7, "", ["tinker"]]
         no_models: list[object] = [{}, [], 7, GONE]
         no_objects: list[object] = [[], 7, None]
         cases: dict[str, list[tuple[tuple[str, ...], object]]] = {
-            "is not of schema": [(("schema",), "masc.tinker.librarian.prompt_lines.v1"), (("schema",), GONE)],
+            "is not of schema": [(("schema",), "masc.tinker.librarian.prompt_lines.v2"), (("schema",), GONE)],
             "prompt_lines.json holds a key the comparison does not read: note": [(("note",), "x")],
             "the pass lines and the template of the baseline": [
                 (("pass_lines_sha256",), PIN.upper()), (("baseline_template_sha256",), BASE_T[:12]),
@@ -176,13 +186,17 @@ class LinesTest(unittest.TestCase):
             "does not count stale_drop_recall as hits within chances": [
                 ((*INKLING, "counts", "stale_drop_recall"), value)
                 for value in ([3], [1, 2, 3], [5, 4], [-1, 4], [True, 4], [1.0, 4], "1/4", 7, {"hits": 1, "chances": 4})],
-            "an E-real record and the sha256 of each set's rows for each of its 2 runs": [
+            "an E-real record, the sha256 of each set's rows and the answered calls for each of its 2 runs": [
                 *(((*INKLING, "real_record"), value) for value in record_cases),
                 *(((*INKLING, "synth_rows_sha256"), value) for value in rows_cases),
-                *(((*INKLING, "real_rows_sha256"), value) for value in rows_cases)],
+                *(((*INKLING, "real_rows_sha256"), value) for value in rows_cases),
+                *(((*INKLING, "answered_sha256"), value) for value in answered_cases)],
             "the inkling baseline names the rows of one run twice": [
                 ((*INKLING, "synth_rows_sha256"), [sha("i1 synth")] * 2),
                 ((*INKLING, "real_rows_sha256"), [sha("i1 real"), sha("i2 synth")])],
+            "prompt_lines.json: two pinned runs count the same answered call": [
+                ((*INKLING, "answered_sha256"), [i1, i1]), ((*INKLING, "answered_sha256"), [i1, [i2[0], i1[1]]]),
+                ((*GLM, "answered_sha256"), [[sha("g1 call 1"), i2[1]]]), ((*GLM, "answered_sha256"), [i1])],
             "the inkling baseline was counted under other pass lines": [
                 ((*INKLING, "pass_lines_sha256"), other), ((*INKLING, "template_sha256"), OTHER_T),
                 ((*INKLING, "prompt_counts_sha256"), other)],
@@ -228,11 +242,16 @@ class LinesTest(unittest.TestCase):
 
     def test_a_run_that_sent_two_models_stands_in_both_baselines(self) -> None:
         # `prompt_counts.measure` picks a model's rows from a folder that holds another target's too,
-        # so the rows of one run may be named under two models, never twice under one.
-        lines = L.lines_of(changed((*GLM, "synth_rows_sha256"), [sha("i1 synth")]))
-        glm = lines.models["glm"].baseline
-        assert glm is not None
-        self.assertEqual(glm.synth_rows_sha256, (sha("i1 synth"),))
+        # so the rows of one run may be named under two models of its provider, never twice under
+        # one. Each model's answered calls there are its own.
+        raw = raw_lines()
+        shared: Raw = {"synth_rows_sha256": [sha("i1 synth")], "real_rows_sha256": [sha("i1 real")]}
+        cast(Raw, raw["models"])["again"] = {"provider": "tinker", "model": "another-model", "runs": 1,
+                                              "baseline": raw_baseline("a1", model="another-model") | shared}
+        again = L.lines_of(raw).models["again"].baseline
+        assert again is not None
+        self.assertEqual((again.synth_rows_sha256, again.real_rows_sha256, again.answered),
+                         ((sha("i1 synth"),), (sha("i1 real"),), (calls("a1"),)))
 
     def test_a_stale_baseline_is_refused_when_the_file_pins_something_else(self) -> None:
         for path in (("pass_lines_sha256",), ("baseline_template_sha256",), ("files_sha256", L.COUNTS)):
@@ -246,15 +265,38 @@ class LinesTest(unittest.TestCase):
 
     def test_a_key_written_twice_in_one_object_is_refused(self) -> None:
         text = json.dumps(raw_lines())
-        self.assertEqual(json.loads(text, object_pairs_hook=L.once), raw_lines())
+        self.assertEqual(L.as_written(text.encode(), "prompt_lines.json"), raw_lines())
         for once, twice in (('"better_sigmas": 2.0', '"better_sigmas": 2.0, "better_sigmas": 0.0'),
                             ('"runs": 1', '"runs": 1, "runs": 2'),
                             ('"dropped_not_in_live": 0}]', '"dropped_not_in_live": 0, "agree": 0}]')):
             with self.subTest(twice=twice):
                 self.assertIn(once, text)
                 with self.assertRaises(SystemExit) as caught:
-                    json.loads(text.replace(once, twice), object_pairs_hook=L.once)
-                self.assertIn("writes a key twice in one object", str(caught.exception))
+                    L.as_written(text.replace(once, twice).encode(), "prompt_lines.json")
+                self.assertEqual(str(caught.exception), "prompt_lines.json writes a key twice in one object")
+
+    def test_text_that_is_not_json_is_refused_under_the_name_of_its_file(self) -> None:
+        for written in (b"", b"{", b'{"inkling": [],}', b"[1, 2"):
+            with self.subTest(written=written):
+                with self.assertRaises(SystemExit) as caught:
+                    L.as_written(written, "runs.json")
+                self.assertEqual(str(caught.exception)[:22], "runs.json is not JSON:")
+        # What Python does not read though it is no error of the JSON grammar ends in the same line.
+        # The file is UTF-8 text: a byte order mark or another encoding is not guessed.
+        unread = {"bytes that are no text": b'{"inkling": "\xff"}',
+                  "a byte order mark": b"\xef\xbb\xbf" + b'{"inkling": []}',
+                  "UTF-16": '{"inkling": []}'.encode("utf-16"),
+                  "an integer of 5,000 digits": b"1" * 5000,
+                  "100,000 lists in each other": b"[" * 100_000 + b"]" * 100_000}
+        for what, written in unread.items():
+            with self.subTest(what=what):
+                with self.assertRaises(SystemExit) as caught:
+                    L.as_written(written, "runs.json")
+                self.assertEqual(str(caught.exception)[:22], "runs.json is not JSON:")
+        with self.assertRaises(SystemExit) as caught:
+            L.as_written(b'{"inkling": [], "inkling": []}', "runs.json")
+        self.assertEqual(str(caught.exception), "runs.json writes a key twice in one object")
+        self.assertEqual(L.as_written('{"inkling": ["é"]}'.encode(), "runs.json"), {"inkling": ["é"]})
 
     def test_a_model_the_file_does_not_hold_is_refused(self) -> None:
         lines = L.lines_of(raw_lines())
@@ -276,10 +318,10 @@ class PinnedLinesTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def read(self, text: str) -> L.Lines:
+    def read(self, text: str | bytes) -> L.Lines:
         """`pinned_lines` over a prompt_lines.json that holds `text`."""
         path = Path(self.tmp.name) / "prompt_lines.json"
-        path.write_text(text, encoding="utf-8")
+        path.write_bytes(text.encode() if isinstance(text, str) else text)
         with mock.patch.object(L, "PROMPT_LINES", path):
             return L.pinned_lines()
 
@@ -301,8 +343,8 @@ class PinnedLinesTest(unittest.TestCase):
         for name, model in lines.models.items():
             with self.subTest(name=name):
                 assert model.baseline is not None
-                self.assertEqual((model.baseline.provider, model.baseline.model, len(model.baseline.real_record)),
-                                 (model.provider, model.model, model.runs))
+                self.assertEqual((model.baseline.provider, model.baseline.model, len(model.baseline.real_record),
+                                  len(model.baseline.answered)), (model.provider, model.model, model.runs, model.runs))
 
     def test_a_file_changed_after_the_pin_is_refused_by_name(self) -> None:
         # The pin of a file stands for an earlier version of it. A baseline names the prompt_counts.py
@@ -335,9 +377,12 @@ class PinnedLinesTest(unittest.TestCase):
 
     def test_a_file_that_is_not_json_is_refused(self) -> None:
         text = L.PROMPT_LINES.read_text(encoding="utf-8")
-        with self.assertRaises(SystemExit) as caught:
-            self.read(text[:text.rindex("}")])
-        self.assertIn("prompt_lines.json is not JSON: ", str(caught.exception))
+        cut: list[str | bytes] = [text[:text.rindex("}")], text.encode().replace(b"2.5", b"\xff")]
+        for held in cut:
+            with self.subTest(held=held[-12:]):
+                with self.assertRaises(SystemExit) as caught:
+                    self.read(held)
+                self.assertIn("prompt_lines.json is not JSON: ", str(caught.exception))
 
     def test_a_key_written_twice_is_refused(self) -> None:
         text = L.PROMPT_LINES.read_text(encoding="utf-8")

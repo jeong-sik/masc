@@ -146,9 +146,12 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
            | `Deadline -> ()
            | `Changed -> coalesce_changes ~clock ~config changes)
       in
-      let wait_for_retry_or_change () =
+      let wait_for_retry_or_change observed_deadline =
+        let retry_at = Eio.Time.now clock +. !current_interval in
+        let retry_at = match observed_deadline with
+          | None -> retry_at | Some deadline -> Float.min retry_at deadline in
         match Eio.Fiber.first
-          (fun () -> Eio.Time.sleep clock !current_interval; `Retry)
+          (fun () -> Eio.Time.sleep_until clock retry_at; `Retry)
           (fun () -> Eio.Stream.take changes; `Changed)
         with
         | `Retry -> ()
@@ -166,6 +169,7 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
       in
       let attempt phase =
         let started = Time_compat.now () in
+        let observed_deadline = ref None in
         let outcome =
           match
             (match
@@ -178,6 +182,7 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
              with
              | Ok value ->
                  let deadline = next_deadline value in
+                 observed_deadline := deadline;
                  on_result value;
                  Ok deadline
              | Error failure -> Error failure)
@@ -199,12 +204,12 @@ let start_on_change_or_deadline ~sw ~clock ~changes ~config ~next_deadline
             notify_failure config failure;
             log_refresh_failure ~config ~consecutive_failures ~current_interval
               ~dt:(Time_compat.now () -. started) failure;
-            Error ()
+            Error !observed_deadline
       in
       let rec loop phase =
         (match attempt phase with
          | Ok deadline -> wait_for_observation_deadline deadline
-         | Error () -> wait_for_retry_or_change ());
+         | Error deadline -> wait_for_retry_or_change deadline);
         loop Refresh
       in
       initial ();

@@ -26,13 +26,17 @@ val owner_for_scope :
 
 val cache : owner -> Server_dashboard_http_cache.cached_surface
 val is_current : owner -> bool
+val has_observation : owner -> bool
+(** Complete and partial retained bodies satisfy the cold HTTP read; a failed
+    read with no body does not. GET cannot bypass partial-read retry backoff. *)
 val begin_attempt : owner -> origin:origin -> attempt
-val publish_success : attempt -> Dashboard_projection_cache.digest_observation -> bool
+val publish_observation : attempt -> Dashboard_projection_cache.digest_observation -> bool
 val publish_failure_message : attempt -> string -> bool
 (** Admit only the captured scope and ordered attempt. Source notices during
     a read leave trailing debt without discarding its completed observation.
     Generation fences prepared payloads, not atomic source coherence. The same
-    successful attempt cannot later publish a timeout failure. *)
+    successful attempt cannot later publish a timeout failure. Partial reads
+    install readable rows in [error] state without stamping full success. *)
 
 val invalidate : owner -> unit
 (** Fence already prepared payloads and notify coalesced trailing read debt. *)

@@ -47,8 +47,11 @@ val namespace_truth_snapshot_from_caches :
     no PG I/O.
 
     Returns [None] while execution warms or its scope was replaced during
-    assembly. A read retains one immutable successful cache observation;
-    the canonical publisher additionally revalidates it before fanout.
+    assembly. A read retains one immutable cache source and its typed read
+    completeness together; partial/error observations also publish readable
+    rows with the shared [projection_diagnostics.read_completeness/read_error]
+    fields and do not masquerade as complete readiness.
+    The canonical publisher additionally revalidates it before fanout.
     Otherwise reads the
     proactive execution cache + last-good shell (or bootstrap shell
     when no last-good shell exists yet) + empty command summary and

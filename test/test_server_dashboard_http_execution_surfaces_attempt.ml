@@ -211,11 +211,42 @@ let test_an_attempts_failure_message_follows_its_failure () =
     (surface ()).last_error
 ;;
 
+let test_partial_observation_preserves_rows_and_hard_fences () =
+  with_execution_surface (fun () ->
+    let partial : Dashboard_execution.observation = {
+      json = `Assoc ["marker", `String "readable partial rows"];
+      next_deadline_unix = None;
+      completeness = Dashboard_projection_read.Partial "actual unread Keeper"} in
+    let attempt = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+    Alcotest.(check bool) "the rich actual partial observation is admitted" true
+      (Attempt.publish_execution_observation attempt partial);
+    Alcotest.(check (option string)) "actual partial rows replace the old body"
+      (Some "readable partial rows") (published_marker ());
+    Alcotest.(check (option (float 0.0))) "partial does not stamp a complete success" None
+      (surface ()).last_success_unix;
+    Alcotest.(check (option string)) "partial retains its original storage failure"
+      (Some "actual unread Keeper") (surface ()).last_error;
+    let older = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+    let complete = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+    Alcotest.(check bool) "a later full read recovers" true
+      (Attempt.publish_execution_attempt_success complete (`Assoc ["marker", `String "recovered"]));
+    Alcotest.(check bool) "an old partial cannot replace a newer success" false
+      (Attempt.publish_execution_observation older partial);
+    Alcotest.(check bool) "the same complete result cannot be degraded to partial" false
+      (Attempt.publish_execution_observation complete partial);
+    let retired = Attempt.begin_execution_attempt ~owner:execution_test_owner () in
+    Attempt.invalidate execution_test_owner;
+    Alcotest.(check bool) "explicit invalidation rejects old partial results" false
+      (Attempt.publish_execution_observation retired partial))
+;;
+
 let () =
   Alcotest.run
     "execution publication attempt"
     [ ( "attempt"
-      , [ Alcotest.test_case
+      , [ Alcotest.test_case "partial observation retains rows and hard fences" `Quick
+            test_partial_observation_preserves_rows_and_hard_fences
+        ; Alcotest.test_case
             "a published answer survives the attempt's own failure"
             `Quick
             test_a_published_answer_survives_its_attempts_own_failure

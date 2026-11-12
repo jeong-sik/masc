@@ -108,4 +108,7 @@ val start_on_change_or_deadline :
     [None] waits only for a change. An elapsed deadline is consumed once,
     including when the read crossed it; a successful subsequent observation
     must return its next deadline or [None]. This is not a refresh cadence.
-    Retry deadlines remain owned by the existing typed failure policy. *)
+    Retry deadlines remain owned by the existing typed failure policy. If an
+    observation is retained but [on_result] reports a partial read failure,
+    its already observed semantic deadline can bring that retry forward;
+    it does not postpone that deadline until the retry interval. *)

@@ -213,6 +213,28 @@ let test_deadline_crossed_by_read_stays_owed () =
       check int "there is only the owed follow-up" 2 !reads))
 ;;
 
+let test_partial_result_keeps_its_actual_semantic_deadline () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let changes = Eio.Stream.create 1 and results = Eio.Stream.create 2 in
+    Eio.Switch.run (fun sw ->
+      Refresh.start_on_change_or_deadline ~sw
+        ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t) ~changes
+        ~config:(Refresh.default_config ~label:"partial-policy-expiry" ~interval_s:120.0)
+        ~compute:(fun () -> Eio.Time.now clock)
+        ~next_deadline:(fun observed -> if observed < 30.0 then Some 30.0 else None)
+        ~on_result:(fun observed ->
+          Eio.Stream.add results observed;
+          if observed < 30.0 then raise Exit);
+      check (float 0.) "the partial body is retained at its actual observation" 0.0
+        (Eio.Stream.take results);
+      Eio.Fiber.yield ();
+      check bool "a failed partial read retains a wait" true (Eio_mock.Clock.try_advance clock);
+      check (float 0.) "actual policy expiry precedes the existing 120s failure retry" 30.0
+        (Eio.Stream.take results);
+      assert_settled clock))
+;;
+
 let () =
   run "change-driven refresh"
     [ "read debt",
@@ -225,4 +247,5 @@ let () =
       ; test_case "quiet worker permits normal switch release" `Quick test_quiet_worker_allows_normal_switch_release
       ; test_case "semantic deadline settles after its transition" `Quick test_semantic_deadline_is_consumed_once
       ; test_case "a deadline crossed during a read stays owed" `Quick test_deadline_crossed_by_read_stays_owed
+      ; test_case "partial failure retains its actual earlier deadline" `Quick test_partial_result_keeps_its_actual_semantic_deadline
       ] ]

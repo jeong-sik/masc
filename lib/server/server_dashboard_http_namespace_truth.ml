@@ -110,6 +110,11 @@ let with_observer_instance ~scope = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 ;;
 
+let with_execution_read_diagnostics completeness json = match completeness with
+  | None -> json
+  | Some completeness -> Dashboard_projection_read.json_with_read_diagnostics {
+      json; completeness; next_deadline_unix = None}
+
 let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_scope) ~sw ~clock _request =
   let config = scope.config in
   let execution_cache = Execution_surfaces.execution_cache_for_scope ~state scope in
@@ -150,7 +155,6 @@ let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_sc
         (* Staged fetch: shell may still need a guarded refresh, while execution
            stays on the proactive cache to keep project-snapshot off the cold path. *)
         let shell_ref = ref (`Assoc []) in
-        let execution_ref = ref (`Assoc []) in
         (* Namespace-truth fiber timeouts.  Cold start uses higher defaults to
            allow shell/namespace reads to warm up.  The values are the
            module-level [namespace_truth_*_timeout_s] bindings; see them for the
@@ -203,13 +207,15 @@ let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_sc
           fiber_with_timeout ~timeout_s:shell_timeout_s "shell"
             (fun () -> dashboard_shell_http_json ~clock config)
             shell_fallback;
-        execution_ref := cached_surface_json execution_cache;
+        let execution_source, completeness =
+          Execution_surfaces.execution_cached_observation_for_scope ~state scope in
+        let execution_json = Server_dashboard_http_cache.surface_snapshot_json
+            ~now:(Unix.gettimeofday ()) execution_source in
         let shell_json = !shell_ref in
         (* Update last-known-good shell on success. *)
         if shell_json <> `Assoc [] && shell_json <> shell_fallback
            && not (Dashboard_cache.is_timeout_envelope shell_json) then
           Execution_surfaces.publish_shell_cache_success ~state ~scope ~light:false shell_json;
-        let execution_json = !execution_ref in
         let parallel_ms = (Time_compat.now () -. t0) *. 1000.0 in
         if parallel_ms >= 100.0 then
           Log.Dashboard.info "project-snapshot fetch: %.0fms" parallel_ms
@@ -221,6 +227,7 @@ let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_sc
         in
         Namespace_truth_support.compose_namespace_truth_snapshot ~config
           ~initialized:(Workspace.is_initialized config) ~shell_json ~execution_json
+        |> with_execution_read_diagnostics completeness
         |> Server_dashboard_http_core_cache.with_projection_diagnostics
              ~surface:"namespace_truth" ~started_at
              ~extra:
@@ -234,7 +241,10 @@ let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_sc
         (* NDT-OK: projection diagnostics timestamp only; snapshot content comes
            from cached read models. *)
         let started_at = Unix.gettimeofday () in
-        let execution_json = cached_surface_json execution_cache in
+        let execution_source, completeness =
+          Execution_surfaces.execution_cached_observation_for_scope ~state scope in
+        let execution_json = Server_dashboard_http_cache.surface_snapshot_json
+            ~now:(Unix.gettimeofday ()) execution_source in
       let execution_cache_state =
         json_assoc_field "projection_diagnostics" execution_json
         |> json_string_field_opt "cache_state"
@@ -242,6 +252,7 @@ let dashboard_namespace_truth_for_scope ~state ~(scope : Mcp_server.workspace_sc
       Namespace_truth_support.compose_namespace_truth_snapshot ~config
         ~initialized:(Workspace.is_initialized config)
         ~shell_json ~execution_json
+      |> with_execution_read_diagnostics completeness
       |> Server_dashboard_http_core_cache.with_projection_diagnostics
            ~surface:"namespace_truth" ~started_at
            ~extra:
@@ -263,8 +274,8 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock request =
 
 (** Assemble a lightweight namespace-truth snapshot from cached refs only.
     No PG I/O — reads proactive caches for execution and command, and
-    the TTL-cached shell. Returns None when the execution cache has not
-    produced its first successful result (cold start). *)
+    the TTL-cached shell. Returns None while no execution observation/error
+    has been admitted; partial actual observations retain their readable rows. *)
 type namespace_publication = {
   scope : Mcp_server.workspace_scope;
   cache : Server_dashboard_http_cache.cached_surface;
@@ -277,10 +288,11 @@ type namespace_publication = {
 let namespace_publication_for_scope ~state (scope : Mcp_server.workspace_scope) =
   let cache = Execution_surfaces.execution_cache_for_scope ~state scope in
   let completion_revision = Execution_surfaces.namespace_cache_revision ~state scope in
-  let execution_source = Server_dashboard_http_cache.snapshot cache in
-  match execution_source.last_success_unix with
+  let execution_source, completeness =
+    Execution_surfaces.execution_cached_observation_for_scope ~state scope in
+  match completeness with
   | None -> None
-  | Some _ ->
+  | Some completeness ->
       let shell_source = Execution_surfaces.last_good_shell_for_scope ~state scope in
       let shell_json = match shell_source with
         | Some json when shell_json_matches_config ~config:scope.config json -> json
@@ -288,6 +300,7 @@ let namespace_publication_for_scope ~state (scope : Mcp_server.workspace_scope) 
       let json = Namespace_truth_support.compose_namespace_truth_snapshot
           ~config:scope.config ~initialized:(Workspace.is_initialized scope.config)
           ~shell_json ~execution_json:execution_source.json
+        |> with_execution_read_diagnostics (Some completeness)
         |> with_observer_instance ~scope in
       Some {scope; cache; execution_source; shell_source; completion_revision; json}
 ;;

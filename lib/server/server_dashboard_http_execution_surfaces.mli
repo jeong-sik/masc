@@ -35,6 +35,17 @@ val execution_cache_for_scope :
 (** Retain the cache for an already captured scope. A delayed retired lookup
     receives a private cell and cannot retire the current scope's owner. *)
 
+val execution_cached_observation_for_scope :
+  state:Mcp_server.server_state -> Mcp_server.workspace_scope ->
+  Server_dashboard_http_cache.surface_snapshot * Dashboard_projection_read.completeness option
+(** Capture one immutable cache source and its typed read outcome under the
+    same owner lock. [None] means no admitted observation/error in the current
+    hard generation; it must not become a complete namespace observation.
+    Actual failure with no body is [Partial] for canonical error reporting,
+    while default Execution GET still distinguishes it from retained rows.
+    An explicit canonical cache success marker is also complete; ordinary
+    invalidation clears both success and error markers. *)
+
 val last_good_shell_for_scope :
   state:Mcp_server.server_state -> Mcp_server.workspace_scope -> Yojson.Safe.t option
 
@@ -101,11 +112,20 @@ val install_task_mutation_cache_invalidation :
 
 module For_testing : sig
   type owner
+  type origin = Observation_read | Request_read
+  type completion =
+    | Cache_installed of origin
+    | Cache_failed of origin
+    | Cache_patched
+    | Shell_installed
   val create_owner : unit -> owner
   val owner_for_state : state:Mcp_server.server_state -> owner
   val cache : owner -> cached_surface
   val invalidate : owner -> unit
   (** An isolated publication owner for the cache/attempt boundary fixtures. *)
+  val subscribe_completion : owner:owner -> (completion -> unit) -> (unit -> unit)
+  (** The production after-cache completion subscription. Fixture callbacks
+      follow the same non-I/O contract and may resolve a promise only. *)
 
   val execution_publication_generation : owner:owner -> unit -> int
 
@@ -126,6 +146,11 @@ module For_testing : sig
   val publish_execution_attempt_success : execution_attempt -> Yojson.Safe.t -> bool
   (** [false] when the surface was invalidated since the attempt began, or a
       newer attempt has already published. *)
+
+  val publish_execution_observation : execution_attempt -> Dashboard_execution.observation -> bool
+  (** Actual rich read admission. Partial preserves its readable rows and
+      diagnostics without stamping complete success; hard generation, ordered
+      attempt and workspace retirement fences apply to both outcomes. *)
 
   val publish_execution_attempt_failure : execution_attempt -> exn -> bool
   (** Publishes [exn] unless the surface was invalidated since the attempt

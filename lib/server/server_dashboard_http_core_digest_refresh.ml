@@ -65,8 +65,11 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock ~mono_clock =
             | Ok observation -> observation
             | Error detail -> invalid_arg ("Operator Digest source read: " ^ detail) in
           (* The reusable worker samples the deadline before on_result. *)
-          ignore (Owner.publish_success attempt observation)
+          ignore (Owner.publish_observation attempt observation);
+          observation
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> ignore (Owner.publish_failure_message attempt (Printexc.to_string exn)); raise exn)
-      ~on_result:(fun () -> ()) ~next_deadline:(fun () -> Owner.next_deadline_unix owner))
+      ~on_result:(fun observation -> match observation.Dashboard_projection_read.completeness with
+        | Complete -> () | Partial detail -> raise (Dashboard_projection_read.Incomplete_read detail))
+      ~next_deadline:(fun _ -> Owner.next_deadline_unix owner))

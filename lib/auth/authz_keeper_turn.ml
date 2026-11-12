@@ -124,13 +124,13 @@ let facts (state : Authz_state.t) ~(keeper : Ks.keeper) ~now =
 
 (* One decision on one snapshot: the facts and the gate read the same state,
    so no record separates what they read. *)
-let decide (trusted : Authz_zone.trusted) ~keeper_id ~channel ~pat ~now =
+let decide (trusted : Authz_zone.trusted) ~owner ~keeper_id ~channel ~pat ~now =
   let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
   let* workspace_id =
     Option.to_result ~none:Not_bootstrapped (Authz_mode_state.workspace state.mode)
   in
   let* keeper =
-    Option.to_result ~none:(Keeper_not_made keeper_id) (Ks.find state.keepers keeper_id)
+    Option.to_result ~none:(Keeper_not_made keeper_id) (Ks.find state.keepers ~owner keeper_id)
   in
   let* runtime_id =
     Option.to_result ~none:(No_authorized_runtime keeper_id) keeper.Ks.runtime

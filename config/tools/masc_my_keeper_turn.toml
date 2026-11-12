@@ -2,11 +2,15 @@ name = "masc_my_keeper_turn"
 title = "Ask My Keeper"
 description = """
 Send one of your Keepers a message and get its answer. The turn runs on \
-the Runtime you gave the Keeper, on your own subscription. The answer is \
-JSON: keeper_id, runtime_id, model and text. The request stays open until \
-the Runtime answers. A Keeper without a Runtime, a subscription that is \
-not signed in or has no quota left, and a second call while one of the \
-same subscription runs are refused."""
+the Runtime you gave the Keeper, on your own subscription. A Claude Code \
+Keeper goes on in its conversation: it has read the earlier turns, and \
+the server records the message and the answer. The answer is JSON: \
+keeper_id, runtime_id, model, text, conversation_id and continued, which \
+is whether the turn resumed the conversation. The request stays open \
+until the Runtime answers. A Keeper without a Runtime, a subscription \
+that is not signed in or has no quota left, a second call while one of \
+the same subscription runs, and a Keeper whose conversation began on \
+another subscription are refused."""
 additional_properties = false
 
 [[params]]

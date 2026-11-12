@@ -4,7 +4,8 @@
 
 (** One turn of a person's Keeper in the localhost preview (plan D2-8): the
     person sends their Keeper a message, and the Runtime they gave it answers
-    on the home of their own account.
+    on the home of their own account. A turn of Claude Code goes on in the
+    conversation of the Keeper (plan S1b-3).
 
     {b Records.} The Keeper record names the Runtime, and the Runtime record
     names the account. The runtime is the workspace provider that the login
@@ -30,17 +31,33 @@
       read-only permissions with no shell, no tool of MASC, and the client's
       own instructions. Codex keeps no rollout or history of the thread.
 
-    The turn runs in a private directory that is removed after it, and the
-    client may be silent for 120 seconds. One call of an account runs at a
-    time ({!Server_setup_account_login.one_call_of}). Nothing is written: the
-    log keeps no record of a turn. *)
+    The client may be silent for 120 seconds. One call of an account runs at
+    a time ({!Server_setup_account_login.one_call_of}). The authorization log
+    keeps no record of a turn.
+
+    {b The conversation} (Claude Code). A Keeper has one conversation at a
+    time ({!Server_keeper_conversation}), and its first turn starts one on
+    the account of its Runtime. The model reads the turns before this one
+    from the session of the client: the client starts in the directory of
+    the conversation and resumes the session of the last answered turn, and
+    MASC puts no earlier turn in the prompt. The message is recorded before
+    the client starts, and the answer or the kind of the failure after it,
+    under the namespace of the person. A conversation stays on the account
+    it began on, since the session lies in the home of that account: when
+    the Keeper has a Runtime of another account the turn is refused. A turn
+    that fails is not started again in a new session.
+
+    A Codex turn runs in a private directory that is removed after it and
+    is not recorded. *)
 
 (** The longest message, in bytes: 4096. *)
 val max_message_bytes : int
 
 (** [POST {!Auth_preview_keeper.turn_path}] for [person]. The body is
     [{"keeper_id": <name>, "message": <text>}], and the answer is a 200 JSON
-    [{"keeper_id":...,"runtime_id":...,"model":...,"text":...}].
+    [{"keeper_id":...,"runtime_id":...,"model":...,"text":...,
+    "conversation_id":...,"continued":...}]. [continued] is whether the client
+    resumed the session of an earlier turn of the conversation.
 
     Field order does not matter. Each request field must occur once and hold
     a string; missing, duplicate and additional fields are refused with 400.
@@ -52,11 +69,14 @@ val max_message_bytes : int
     - 403: {!Runtime_account_access.authorize} refused the turn. The scope of
       [pat] not covering the turn is one such refusal.
     - 404: the Keeper is not the person's.
-    - 409: the Keeper has no Runtime, a call of the account runs, or the
-      account is not signed in to a subscription.
+    - 409: the Keeper has no Runtime, a call of the account runs, the
+      account is not signed in to a subscription, or the conversation of the
+      Keeper began on another account.
     - 429: the subscription has no quota left.
     - 504: the client was silent for 120 seconds.
-    - 500, 502 or 503: the client did not start, or ended without an answer.
+    - 500, 502 or 503: the client did not start, or ended without an answer;
+      the record of the conversation has a row that is not understood, or
+      could not be read or written; or the answer could not be recorded.
 
     The detail of a failure goes to the server log, since it can name a path
     of the server (issue #50018). *)

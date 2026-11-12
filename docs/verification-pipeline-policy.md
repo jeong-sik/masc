@@ -86,16 +86,34 @@ string classifier.
 
 Native Task reviewers retain a journal locator and its immutable original digest
 before provider effects. The journal tree belongs to that original and survives
-the caller's cancellation. A pending review observes those exact recorded calls;
-it never starts another model call or allocates a successor on uncertainty.
+the caller's cancellation. A pending review observes those exact recorded calls.
+While one of them is still open or holds an unsettled effect, it starts no other
+model call and allocates no successor.
 Observation does not require reconnecting to the producer's VM or SSH endpoint.
+
+When every recorded call has ended, every admitted tool attempt is settled and
+no call settled a report, the attempt produced no verdict. It is retained as a
+definite refusal. What the review walk left on the attempt names the runtimes
+that may review the same original in a successor attempt:
+
+- a walk result with each failed candidate's typed failure names the candidates
+  whose failure was `Reviews_again`. A result that names none leaves the attempt
+  with the producer or the operator;
+- when the walk retained no result (a cancellation, the end of its process, or
+  a failed save of the result), the runtimes of the recorded calls are named.
+  The successor walks every slot again.
 
 `execution_pending` means a recorded call has no terminal observation and its
 writer is live or contended. The maintenance pulse schedules observation only.
 `execution_repair_required` means
 automatic reconciliation cannot establish an original result; the operator must
 inspect it. TUI and Dashboard distinguish these from a generic review failure.
-Historical originals without a locator remain unresolved, even after upgrade.
+These remain unresolved even after upgrade: an original without a locator
+(a historical one, or an attempt that was cut before its first call was
+recorded), an attempt whose walk result holds no per-candidate failure, and an
+attempt whose walk result does not fit its recorded calls (an unknown-outcome
+candidate that left no recorded call, or a result that is not the refusal an
+unknown outcome leaves).
 
 A judgment is recovered only from one admitted, successfully settled structured
 verdict call. How the execution ended after that call (a success, a failure, a
@@ -117,7 +135,9 @@ empty tool list on that wake does not assert that the model used no tools.
 ## Revision History
 
 - 2026-11-12: a settled verdict call is recovered whatever ended its execution
-  afterwards.
+  afterwards. An attempt whose recorded calls all ended without a settled
+  report is a definite refusal, and what its walk left names the successor's
+  runtimes.
 - 2026-10-17: noted instruction Skill access (`keeper_skill`) for verification
   agents and durable rejection delivery across restarts.
 - 2026-08-02: aligned the policy with the system-LLM authority and typed

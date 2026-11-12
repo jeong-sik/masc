@@ -712,11 +712,11 @@ let render_runtime_reading (state : state) =
     | None ->
         let reading_note =
           match state.runtime_surface_error with
-          | None -> title_missing_reading ~error:None
+          | None -> here_missing_reading state ~error:None
           | Some _ -> ""
         in
         here_row ~cols state ~path:[ runtime_step state ]
-          ~readings:[ String.trim reading_note; timestamp ] ~position:None
+          ~readings:[ reading_note; timestamp ] ~position:None
     | Some snapshot ->
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with

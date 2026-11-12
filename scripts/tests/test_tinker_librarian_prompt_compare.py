@@ -107,6 +107,12 @@ class ChangeTest(unittest.TestCase):
         self.assertAlmostEqual(cast(float, d), 15 / 82)
         self.assertAlmostEqual(cast(float, sigma), math.sqrt(p * (1 - p) * (2 / 82)))
 
+    def test_sigma_takes_each_sides_own_chances(self) -> None:
+        # 10/100 against 20/50: p = 30/150 = 0.2, and 1/100 + 1/50 = 0.03.
+        _, d, sigma = P.change_of(C.Count(10, 100), C.Count(20, 50), 2.5, 2.0)
+        self.assertAlmostEqual(cast(float, d), 0.3)
+        self.assertAlmostEqual(cast(float, sigma), math.sqrt(0.2 * 0.8 * 0.03))
+
     def test_a_side_with_nothing_to_count_is_uncounted(self) -> None:
         self.assertEqual(P.change_of(C.Count(0, 0), C.Count(3, 4), 2.5, 2.0), (P.Change.UNCOUNTED, None, None))
         self.assertEqual(P.change_of(C.Count(3, 4), C.Count(0, 0), 2.5, 2.0), (P.Change.UNCOUNTED, None, None))

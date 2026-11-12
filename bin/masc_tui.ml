@@ -15681,7 +15681,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       (match toggle_acting_pane state with
        | Ok layout ->
            notice ~kind:Notice_reply
-             ("Activity pane " ^ Masc_tui_acting_pane.layout_label layout)
+             (let ko = state.ui_language = Lang_ko in
+              (if ko then "활동 창 " else "Activity pane ")
+              ^ Masc_tui_acting_pane.layout_label ~ko layout)
        | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Show_acting_pane_tab tab ->
       Masc_tui_message_input.clear state.msg_input;
@@ -15696,7 +15698,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
             | Masc_tui_acting_pane.Tab_changes -> refresh_acting_pane_changes state ~mailbox
             | Masc_tui_acting_pane.Tab_fleet -> ());
            notice ~kind:Notice_reply
-             ("Activity pane on " ^ Masc_tui_acting_pane.tab_label tab)
+             (let ko = state.ui_language = Lang_ko in
+              (if ko then "활동 창 탭: " else "Activity pane on ")
+              ^ Masc_tui_acting_pane.tab_label ~ko tab)
        | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
@@ -15720,7 +15724,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            in
            state.acting_pane_call_order <- order;
            notice ~kind:Notice_reply
-             ("Activity calls " ^ Masc_tui_acting_pane.call_order_label order)
+             (let ko = state.ui_language = Lang_ko in
+              (if ko then "활동 창 호출 순서: " else "Activity calls ")
+              ^ Masc_tui_acting_pane.call_order_label ~ko order)
        | Error reason -> notice ~kind:Notice_failure reason)
   | Masc_tui_command.Acting_pane_call_order_unknown word ->
       Masc_tui_message_input.clear state.msg_input;

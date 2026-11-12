@@ -800,7 +800,8 @@ let acting_notices (state : state) ~trace_unavailable =
   in
   List.filter_map Fun.id
     [ feed; dropped; undecodable; unseen; replay
-    ; Masc_tui_acting_pane.trace_unavailable_summary trace_unavailable ]
+    ; Masc_tui_acting_pane.trace_unavailable_summary ~ko:(state.ui_language = Lang_ko)
+        trace_unavailable ]
 
 let acting_content_height ~rows ~notices =
   (* Top/title/divider, column heading, then overflow/bottom/footer. *)

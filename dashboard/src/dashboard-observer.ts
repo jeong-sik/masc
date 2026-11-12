@@ -1,6 +1,6 @@
 import { batch } from '@preact/signals'
 import { authHeaders, fetchControlPlane, subscribeStoredTokenChanges } from './api/core'
-import { devTokenBootstrapNeedsReadinessProbe, ensureDevToken, refreshDevTokenAfterAuthError } from './api/dev-token'
+import { hasPendingDevTokenFailure, pendingDevTokenRetryDelayMs, ensureDevToken, refreshDevTokenAfterAuthError } from './api/dev-token'
 import { DEFAULT_GET_TIMEOUT_MS, TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from './config/constants'
 import { errorToString } from './lib/format-string'
 import { isRecord } from './lib/type-guards'
@@ -82,7 +82,7 @@ function scheduleRetry(attempt: number): void {
   retryTimer = setTimeout(() => {
     retryTimer = null
     if (current(attempt)) startAttempt()
-  }, retryDelay)
+  }, Math.max(retryDelay, pendingDevTokenRetryDelayMs()))
   retryDelay = Math.min(retryDelay * 2, TRANSPORT_RETRY_MAX_MS)
 }
 
@@ -126,7 +126,7 @@ async function observe(attempt: number, abort: AbortController): Promise<void> {
         if (current(attempt)) startAttempt()
         return
       }
-      if (devTokenBootstrapNeedsReadinessProbe()) throw new Error('observer authority is initializing')
+      if (hasPendingDevTokenFailure()) throw new Error('observer credential read remains unavailable')
       throw new ObserverAccessError(response.status)
     }
     if (!response.ok) throw new Error(`observer request failed (${response.status})`)

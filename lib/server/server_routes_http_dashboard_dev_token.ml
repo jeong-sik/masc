@@ -83,9 +83,38 @@ let token_error_to_string = function
     Printf.sprintf "finalize dashboard dev-token rotation %s: %s" path detail
 ;;
 
+let retryable_domain_error = function
+  | Masc_domain.System
+      (Masc_domain.System_error.NotInitialized
+       | Masc_domain.System_error.IoError _
+       | Masc_domain.System_error.LockContention _) -> true
+  | Masc_domain.System (Masc_domain.System_error.ValidationError _)
+  | Masc_domain.Task
+      (Masc_domain.Task_error.NotFound _
+       | Masc_domain.Task_error.AlreadyClaimed _
+       | Masc_domain.Task_error.TransitionRejected _
+       | Masc_domain.Task_error.InvalidState _
+       | Masc_domain.Task_error.InvalidId _
+       | Masc_domain.Task_error.BacklogVersionConflict _
+       | Masc_domain.Task_error.VerificationSuperseded _)
+  | Masc_domain.Agent (Masc_domain.Agent_error.NotFound _ | Masc_domain.Agent_error.InvalidName _)
+  | Masc_domain.Auth
+      (Masc_domain.Auth_error.InvalidToken _
+       | Masc_domain.Auth_error.TokenExpired _
+       | Masc_domain.Auth_error.Unauthorized _
+       | Masc_domain.Auth_error.Forbidden _
+       | Masc_domain.Auth_error.SameOriginBlocked) -> false
+;;
+
 let request_error_status : request_error -> Httpun.Status.t = function
   | Non_loopback_request_host _ -> `Forbidden
-  | Token_operation_failed _ -> `Internal_server_error
+  | Token_operation_failed
+      (Token_file_read_failed _ | Rotation_journal_read_failed _
+       | Rotation_journal_write_failed _ | Credential_revocation_failed _
+       | Token_file_write_failed _ | Rotation_finalize_failed _) -> `Service_unavailable
+  | Token_operation_failed (Credential_lookup_failed error | Credential_rotation_failed error) ->
+      if retryable_domain_error error then `Service_unavailable else `Internal_server_error
+  | Token_operation_failed (Rotation_journal_invalid _) -> `Internal_server_error
 ;;
 
 let request_error_code = function

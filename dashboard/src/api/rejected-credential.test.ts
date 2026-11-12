@@ -10,9 +10,9 @@ import {
   jsonHeaders,
   setStoredToken,
 } from './core'
-import { devTokenBootstrapNeedsReadinessProbe, devTokenBootstrapStatus, ensureDevToken, installRejectedCredentialRecovery, recoverFromRejectedCredential, recoverScopedRejectedCredential, refreshDevTokenAfterAuthError, resetDevTokenBootstrap, retryRejectedDevToken } from './dev-token'
+import { hasPendingDevTokenFailure, devTokenBootstrapStatus, ensureDevToken, installRejectedCredentialRecovery, recoverFromRejectedCredential, recoverScopedRejectedCredential, refreshDevTokenAfterAuthError, resetDevTokenBootstrap, retryRejectedDevToken } from './dev-token'
 import { managedDashboardAuthRevision, managedDashboardRefusal, recordManagedCredentialRefusal, setCanonicalDashboardActor } from '../lib/dashboard-session-actor'
-import { WARM_MAX_RETRIES, warmRetryDelayFor } from '../lib/warm-retry'
+import { warmRetryDelayFor } from '../lib/warm-retry'
 
 /* #44189: a tab holding a pasted token the server had stopped accepting kept
    polling `/api/v1/dashboard/runtime-probe` and `/api/v1/board/reactions` with
@@ -198,12 +198,14 @@ describe('a credential the server refused', () => {
 })
 
 describe('a refusal owned by a Goal request', () => {
-  it.each(['http', 'warming'] as const)('retries a temporary %s dev-token failure under the same workspace', async kind => {
+  it.each(['http', 'throttled', 'network'] as const)('retries a temporary %s dev-token failure under the same workspace', async kind => {
     vi.useFakeTimers()
     setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(kind === 'http' ? new Response('', { status: 503 })
-        : new Response(JSON.stringify({ status: 'initializing' }), { status: 200 }))
+      .mockImplementationOnce(async () => {
+        if (kind === 'network') throw new Error('network unavailable')
+        return new Response('', { status: kind === 'http' ? 503 : 429 })
+      })
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'fresh-dev-token', actor: 'dashboard', role: 'admin' }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       }))
@@ -216,6 +218,27 @@ describe('a refusal owned by a Goal request', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('expected_base_path=%2Fworkspace-a')
     expect(getStoredToken()).toBe('fresh-dev-token')
+  })
+
+  it('aborts an in-flight scoped remint when a manual credential replaces its owner', async () => {
+    vi.useFakeTimers()
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const signals: AbortSignal[] = []
+    const fetchMock = vi.fn((_path: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      if (init?.signal) {
+        signals.push(init.signal)
+        init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
+      }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired', httpStatus: 401 },
+      () => true, undefined, scopedWorkspace)
+    setStoredToken('manual-current', { source: 'manual' })
+    await pending
+    expect(signals[0]?.aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(getStoredToken()).toBe('manual-current')
   })
 
   it('does not retry a transient failure after the requesting scope is retired', async () => {
@@ -263,17 +286,47 @@ describe('a refusal owned by a Goal request', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('stops automatic retries after the shared warm-up limit', async () => {
+  it('retains failed auth read debt beyond ten attempts without replaying the Goal request', async () => {
+    vi.useFakeTimers()
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const fetchMock = vi.fn(async (_path: string) => new Response('', { status: 503 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired', httpStatus: 401 },
+      () => true, undefined, scopedWorkspace)
+    for (let attempt = 1; attempt <= 12; attempt++) await vi.advanceTimersByTimeAsync(warmRetryDelayFor(attempt))
+    expect(fetchMock).toHaveBeenCalledTimes(13)
+    await vi.advanceTimersByTimeAsync(warmRetryDelayFor(12) * 2)
+    expect(fetchMock).toHaveBeenCalledTimes(15)
+    expect(fetchMock.mock.calls.every(([path]) => String(path).startsWith(DEV_TOKEN_PATH))).toBe(true)
+  })
+
+  it('refuses malformed HTTP200 initialization without polling or dropping its credential', async () => {
+    vi.useFakeTimers()
+    setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
+    const fetchMock = vi.fn(async () => new Response('{"status":"initializing"}', { headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired', httpStatus: 401 },
+      () => true, undefined, scopedWorkspace)
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(getStoredToken()).toBe('old-dev-token')
+    expect(devTokenBootstrapStatus.value).toBe('invalid_response')
+  })
+
+  it('retires the last subscriber retry immediately and keeps newer manual credentials', async () => {
     vi.useFakeTimers()
     setStoredToken('old-dev-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     const fetchMock = vi.fn(async () => new Response('', { status: 503 }))
     vi.stubGlobal('fetch', fetchMock)
     await recoverScopedRejectedCredential({ token: 'old-dev-token', authErrorCode: 'token_expired', httpStatus: 401 },
       () => true, undefined, scopedWorkspace)
-    for (let attempt = 1; attempt <= WARM_MAX_RETRIES; attempt++) await vi.advanceTimersByTimeAsync(warmRetryDelayFor(attempt))
-    expect(fetchMock).toHaveBeenCalledTimes(WARM_MAX_RETRIES + 1)
-    await vi.advanceTimersByTimeAsync(warmRetryDelayFor(WARM_MAX_RETRIES) * 2)
-    expect(fetchMock).toHaveBeenCalledTimes(WARM_MAX_RETRIES + 1)
+    expect(vi.getTimerCount()).toBe(1)
+    uninstall()
+    expect(vi.getTimerCount()).toBe(0)
+    setStoredToken('operator', { source: 'manual' })
+    await vi.advanceTimersByTimeAsync(300_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(getStoredToken()).toBe('operator')
   })
 
   it('allows an explicit retry of a refused token without replaying the Goal request', async () => {
@@ -452,7 +505,7 @@ describe('a refusal owned by a Goal request', () => {
     ;(devTokenBootstrapStatus as { value: string }).value = 'warming'
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
-    expect(devTokenBootstrapNeedsReadinessProbe()).toBe(false)
+    expect(hasPendingDevTokenFailure()).toBe(false)
     await ensureDevToken()
     await expect(refreshDevTokenAfterAuthError('token_expired')).resolves.toBe(false)
     expect(fetchMock).not.toHaveBeenCalled()

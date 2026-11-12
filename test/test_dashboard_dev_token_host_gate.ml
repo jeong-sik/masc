@@ -66,6 +66,26 @@ let test_non_loopback_rejection_precedes_token_io () =
       | Ok _ -> fail "non-loopback authority must not reach token I/O")
 ;;
 
+let test_token_failure_recovery_status () =
+  let status error = Httpun.Status.to_code
+      (Dev_token.request_error_status (Dev_token.Token_operation_failed error)) in
+  let transient = [
+    Dev_token.Token_file_read_failed { path = "unused"; detail = "temporary I/O" };
+    Dev_token.Rotation_journal_read_failed { path = "unused"; detail = "temporary I/O" };
+    Dev_token.Rotation_journal_write_failed { path = "unused"; detail = "temporary I/O" };
+    Dev_token.Credential_revocation_failed { agent_name = "dashboard"; detail = "temporary I/O" };
+    Dev_token.Token_file_write_failed { path = "unused"; detail = "temporary I/O" };
+    Dev_token.Rotation_finalize_failed { path = "unused"; detail = "temporary I/O" };
+    Dev_token.Credential_lookup_failed (Masc_domain.System (Masc_domain.System_error.IoError "temporary I/O"));
+    Dev_token.Credential_rotation_failed (Masc_domain.System (Masc_domain.System_error.LockContention { key = "credential"; attempts = 1 }));
+    Dev_token.Credential_lookup_failed (Masc_domain.System Masc_domain.System_error.NotInitialized)] in
+  List.iter (fun error -> check int "failed read or resumable rotation retains HTTP recovery" 503 (status error)) transient;
+  List.iter (fun error -> check int "invalid journal or typed authority failure stays terminal" 500 (status error))
+    [Dev_token.Rotation_journal_invalid { path = "unused" };
+     Dev_token.Credential_lookup_failed (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden { agent = "dashboard"; action = "create credential" }));
+     Dev_token.Credential_rotation_failed (Masc_domain.System (Masc_domain.System_error.ValidationError "invalid"))]
+;;
+
 let test_read_failure_does_not_mint_credential () =
   let base_path = Filename.temp_file "masc-dev-token-read-" ".workspace" in
   Sys.remove base_path;
@@ -80,7 +100,9 @@ let test_read_failure_does_not_mint_credential () =
           ~load:(fun _ -> raise (Sys_error "injected read failure"))
           base_path
       with
-      | Error _ ->
+      | Error error ->
+        check int "temporary read failure retains bootstrap debt" 503
+          (Httpun.Status.to_code (Dev_token.request_error_status (Dev_token.Token_operation_failed error)));
         check
           bool
           "read failure creates no credential store"
@@ -180,13 +202,21 @@ let test_rotation_write_failure_reuses_pending_token () =
         Ok ())
     in
     (match Dev_token.ensure_dashboard_dev_token ~write base_path with
-     | Error (Dev_token.Token_file_write_failed _) -> ()
+     | Error (Dev_token.Token_file_write_failed _ as error) ->
+       check int "partial journal transaction is retryable" 503
+         (Httpun.Status.to_code (Dev_token.request_error_status (Dev_token.Token_operation_failed error)))
      | Error error ->
        failf "unexpected rotation error: %s" (Dev_token.token_error_to_string error)
      | Ok _ -> fail "injected canonical write failure succeeded");
     let pending_path = Dev_token.dashboard_dev_token_pending_path base_path in
     check bool "pending token retained" true (Sys.file_exists pending_path);
     let pending_raw = String.trim (Fs_compat.load_file pending_path) in
+    (match Dev_token.ensure_dashboard_dev_token ~write base_path with
+     | Error (Dev_token.Token_file_write_failed _) ->
+       check string "second failed read resumes the original journal owner"
+         pending_raw (String.trim (Fs_compat.load_file pending_path))
+     | Error error -> fail (Dev_token.token_error_to_string error)
+     | Ok _ -> fail "second injected canonical write failure succeeded");
     (match Auth.find_credential_by_token base_path ~token:stale_raw with
      | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
      | Error err ->
@@ -231,6 +261,7 @@ let () =
     "dashboard-dev-token-host-gate"
     [ ( "validated authority policy"
       , [ test_case "non-loopback error contract" `Quick test_non_loopback_error_contract
+        ; test_case "typed token failure recovery status" `Quick test_token_failure_recovery_status
         ; test_case
             "non-loopback rejected before token I/O"
             `Quick

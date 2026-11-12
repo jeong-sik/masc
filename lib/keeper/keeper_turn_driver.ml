@@ -1112,20 +1112,19 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Rotate_now
             { rotate = Keeper_runtime_failure_route.Authorization_refused } ->
           read_usage_after_account_refusal candidate
-        (* These candidates answered, or the failure says nothing durable
-           about their ability to answer a later turn (RFC-0458 §3.4, §6).
-           A credential denial rotates to the next candidate within this
-           turn only. Held as evidence it would stay until the head itself
-           answered, which it never gets to do while a sibling answers, so
-           every new turn starts again from the head. *)
+        (* A credential denial rotates to the next candidate within this
+           turn only. Held as ordering evidence it would stay until the head
+           itself answered, which it never gets to do while a sibling
+           answers, so every new turn starts again from the head. The moment
+           is kept for the runtime list only, where it stays until a call on
+           the same credential is answered. *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate = Keeper_runtime_failure_route.Auth_failed } ->
-          (* The denial is still no ordering evidence, for the reason below.
-             The moment is kept for the runtime list only, where it stays
-             until a call on the same credential is answered. *)
           observe_standing
             (Runtime_candidate_standing.Credential_refused
                { noted_at = Unix.gettimeofday () })
+        (* These candidates answered, or the failure says nothing durable
+           about their ability to answer a later turn (RFC-0458 §3.4, §6). *)
         | Keeper_runtime_failure_route.Rotate_now
             { rotate =
                 ( Keeper_runtime_failure_route.Model_unavailable

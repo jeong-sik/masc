@@ -1224,6 +1224,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 저장.
   - 위치는 `<.masc>/accounts/<namespace>/keeper-conversations/`다. 사람의 runtime root 아래라서 계정 홈과 같은 경계에 있다. Off 뒤에도 남고, 단일 사용자는 읽지 않는다.
   - 대화마다 폴더가 하나다. 폴더 이름은 masc가 뽑은 `conversation_id`다. Keeper 이름으로 경로를 만들지 않는다. 대소문자를 가리지 않는 볼륨에서는 두 이름이 한 폴더가 된다.
+  - 줄은 JSON 객체 하나다. `kind` 필드가 줄의 종류이고, 나머지는 아래에 적은 필드가 한 번씩이다. 필드가 빠지거나 더 있으면 해석되지 않는 줄이다.
   - `index.jsonl`은 덧붙이기만 하고 본문을 싣지 않는다. 줄은 세 가지다.
     - `started {conversation_id, keeper_id, provider_account_id, at_ms}`
     - `delete_requested {conversation_id, at_ms}`
@@ -1231,11 +1232,13 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - `<conversation_id>/turns.jsonl`은 덧붙이기만 하고 본문을 싣는다. 줄은 세 가지다.
     - `asked {turn_id, message, at_ms}`. CLI를 띄우기 전에 쓴다. 못 쓰면 CLI를 띄우지 않는다.
     - `answered {turn_id, text, model, session_id, at_ms}`
-    - `failed {turn_id, kind, at_ms}`. `kind`는 사람에게 답한 실패의 종류다(로그인 없음, 한도, 시간 초과, 시작 못 함, 답 없음). 서버의 파일 경로가 들어갈 수 있는 상세는 싣지 않는다(#50018).
+    - `failed {turn_id, failure, at_ms}`. `failure`는 사람에게 답한 실패의 종류다(로그인 없음, 한도, 시간 초과, 시작 못 함, 설정 거절, 답 없음). 서버의 파일 경로가 들어갈 수 있는 상세는 싣지 않는다(#50018).
+    - `answered`를 쓰지 못하면 그 답을 대화의 답으로 돌려주지 않는다(503). 다음 턴이 이어갈 session을 이 줄에서 읽기 때문이다.
   - `asked`만 있고 끝 줄이 없는 턴은 서버가 턴 도중에 멈춘 것이다. 읽는 쪽은 "답이 기록되지 않았다"로 답한다.
   - 이어갈 session id는 지금 대화의 마지막 `answered` 줄에서 읽는다. `answered`가 없으면 새 session으로 시작한다. 첫 턴이 실패한 대화가 그렇다. 이것은 "정한 것" 5번과 다르다. masc가 기록한 session이 없어서 바꿀 것이 없다.
   - 실패한 턴의 물음을 vendor session은 갖고 있을 수 있다. 이어가는 턴에서 모델은 그 물음을 읽고, 기록은 그 턴을 `failed`로 보인다. 기록은 masc가 본 것만 말한다. 읽기 답은 `failed` 턴에 "모델이 이 물음을 읽었을 수 있다"는 표시를 단다(#51567 리뷰).
   - 작업 폴더는 `<conversation_id>/cwd/`다. 한 대화의 턴은 늘 같은 폴더에서 뜬다. 그래서 CLI가 session을 지금 project에서 찾는다. 내장 도구가 없는 자세(`Native_none`)라서 폴더는 비어 있다.
+  - 이 폴더는 설치의 base path 아래에 있다. Claude Code는 작업 폴더와 그 위 폴더들의 `CLAUDE.md`를 읽는다(<https://code.claude.com/docs/en/memory>, "How CLAUDE.md files load"). masc는 CLI를 `--setting-sources=`로 띄우고(`Runtime_native_tools.claude_setting_sources_arg`), 그 인자가 디스크의 `CLAUDE.md`를 싣지 않게 한다는 것이 지금 근거다. 운영자의 `CLAUDE.md`가 사람의 턴에 실리지 않는지는 실제 CLI로 재서 §11.1 증거에 넣는다. 실린다면 작업 폴더를 base path 밖으로 옮긴다.
   - 쓰기는 `Fs_compat`의 durable append를 쓴다. 한 사람의 기록에 쓰는 순서는 서버 프로세스 안의 잠금 하나가 정한다. 계정 서버는 구역을 쥔 한 프로세스다.
   - 해석되지 않는 줄이 있으면 그 사람의 대화 읽기와 턴을 거절한다. 고쳐서 읽지 않는다.
 - 지우기(S1b-3c).
@@ -1260,7 +1263,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 하지 않는 것: Keeper 지시문과 system prompt, 기억, MASC 도구, 스스로 시작하는 턴, Board, Codex, 답을 나눠 보내기, 앞 대화들의 목록, 보관 기간을 정해 자동으로 지우기.
 - 층.
   - S1b-3a 기록과 이어가기. 턴 경로와 `masc_my_keeper_turn`의 답에 `conversation_id`와 `continued`가 붙는다.
-  - S1b-3b 새 대화와 읽기. 경로 둘과 MCP 도구 둘.
+  - S1b-3b 새 대화와 읽기. 경로 둘과 MCP 도구 둘. 새 대화를 먼저 넣는다. 다른 구독으로 옮긴 Keeper가 받는 409의 출구가 그것뿐이다.
   - S1b-3c 지우기. 경로 하나와 MCP 도구 하나, 재기동 때 이어서 지우기.
   - 화면은 이 층들에 없다. 계정 콘솔 층이 위 경로를 불러서 대화 목록, "새 대화", "지우기"를 단다.
 

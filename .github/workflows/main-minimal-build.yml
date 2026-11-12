@@ -15,6 +15,8 @@ permissions:
   # The failure step below files or updates the fixed main-health issue.
   # Successful runs never reach it, so this scope is unused on green paths.
   issues: write
+  # The scheduled run deletes the Dune cache entries it has just replaced.
+  actions: write
 
 # Serialize before the receipt lookup. A queued run rechecks the successful
 # receipt after the previous build finishes.
@@ -148,6 +150,30 @@ jobs:
         with:
           path: ${{ runner.temp }}/masc-dune-cache
           key: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
+
+      # One entry is about 1.35 GB and the repository limit is 10 GB. Two
+      # scheduled saves 20 minutes apart put usage at 10.6 GB on 2026-11-12,
+      # and past the limit GitHub evicts whatever was read least recently,
+      # which can be a toolchain cache. A type-check only ever restores the
+      # newest entry, so the older ones are deleted here. A failed delete
+      # leaves an entry behind and shows as a warning; it does not fail the
+      # build.
+      - name: Delete the Dune cache entries this one replaces
+        if: success() && github.event_name == 'schedule' && steps.receipt.outputs.cache-hit != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFIX: ${{ steps.inputs.outputs.dune }}-
+          KEEP: ${{ steps.inputs.outputs.dune }}-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/caches?key=${PREFIX}&ref=refs/heads/main&per_page=100" \
+            --jq '.actions_caches[] | select(.key != env.KEEP) | .id' |
+          while read -r id; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${id}"
+            echo "deleted Dune cache entry ${id}"
+          done
 
       - name: Write the receipt
         if: success() && steps.receipt.outputs.cache-hit != 'true'

@@ -715,9 +715,8 @@ let test_absent_destination_ends_the_original_and_is_judged_again ()=
    | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> ());
   (* The replacement took the candidate over and committed it, so the forest
      that holds the Conflicted original is complete and that pass closed it. *)
-  check bool "the Conflicted original is no longer active" true
-    (Option.is_none (io (fun () -> Owner.load ~store:fixture.store ~scope:first.Owner.scope
-      ~request_id:first.request_id |> owned)));
+  check int "the forest that holds the Conflicted original closes together" 0
+    (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length));
   (* A later candidate starts a root of its own. *)
   io (fun () -> ignore (append fixture.keepers_dir "new-tail" "Durable tail"));
   drive_until fixture settled |> assert_settled;

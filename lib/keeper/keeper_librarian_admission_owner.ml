@@ -392,12 +392,11 @@ let completed_forest ~store ~owner inventory =
         let* parent=Parts.find inventory.parts ~part_id:(Capture.parent_part_id original.capture) in
         Ok (Result.is_ok (Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
           ~parent ~execution_id:original.record.request_id))
-      | Conflicted _ ->
-        (* The conflict of a runnable leaf still waits for a replacement root.
-           Under a superseded root the replacement took its candidates over,
-           and the receipt and ACK check below covers every one of them. *)
-        Ok (not (List.exists (fun leaf ->
-          Parts.part_id leaf=Capture.parent_part_id original.capture) leaves))
+      (* Every runnable leaf is Finished here and a part has one execution,
+         so this conflict is on no runnable leaf: a replacement root took its
+         candidates over. The receipt and ACK check below covers every one of
+         them. *)
+      | Conflicted _ -> Ok true
       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
       | Subdividing _ | Subdivided _ -> Ok false) (Ok true) inventory.executions in
     if not terminal then Ok None else

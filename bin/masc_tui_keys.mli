@@ -77,6 +77,9 @@ val chat_schedules_key : string
 val chat_schedules_label : string
 (** F9 folds/expands the current chat Keeper's upcoming Jobs. *)
 
+val keeper_chat_key : string
+(** [c] on a keeper: the chat with it, where a held tool call is answered. *)
+
 val keeper_calls_key : string
 (** [t] on a keeper: the Keeper Calls view, where a call's served input and
     output are drawn whole. *)

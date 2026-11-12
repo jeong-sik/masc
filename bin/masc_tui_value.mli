@@ -92,6 +92,7 @@ module Count : sig
     | Entry  (** One record of a log. *)
     | Row  (** One row a list draws. *)
     | Event
+    | Image  (** One picture staged on a message. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],

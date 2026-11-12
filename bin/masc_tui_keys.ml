@@ -316,6 +316,7 @@ let chat_schedules_label = Masc_tui_types.chat_schedule_toggle_label
    output are drawn whole. Named for the rows that fold a long payload and
    say where the rest is. *)
 let keeper_calls_key = "t"
+let keeper_chat_key = "c"
 
 (* Ctrl-X opens the context inspector from the chat. It is named on the
    context header, beside the figure it explains, and nowhere else: the
@@ -400,7 +401,7 @@ let keeper_list_view_names =
     (List.map Masc_tui_keeper_list_model.view_label Masc_tui_keeper_list_model.views)
 
 let keeper_actions =
-  [ b ~ko:"채팅" Act "c" "chat" ~help:"chat with the keeper"
+  [ b ~ko:"채팅" Act keeper_chat_key "chat" ~help:"chat with the keeper"
   ; b ~ko:"로그" Act "l" "logs"
   ; b ~ko:"호출" Act keeper_calls_key "calls" ~help:"tool calls"
   ; b ~ko:"런타임" Act "u" "runtime" ~help:"pick a runtime candidate order"

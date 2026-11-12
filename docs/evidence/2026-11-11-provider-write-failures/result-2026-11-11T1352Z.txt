@@ -1,0 +1,50 @@
+run at 2026-11-11T13:52:54Z
+log system_log_2026-11-11.jsonl  failed cycles 380  write failures 49
+window of write failures 2026-11-11 01:08:29Z .. 2026-11-11 10:49:42Z (UTC)
+failed cycles by runtime family and kind:
+  claude_code_ac22c1f2         {'other': 121}
+  ollama_cloud                 {'other': 99, 'write_broken_pipe': 2, 'dns_failure': 2}
+  glm-coding                   {'other': 7, 'dns_failure': 6, 'write_broken_pipe': 47, 'read_reset_by_peer': 3}
+  muse_d242bc1a                {'other': 55, 'dns_failure': 1}
+  claude_code_8d7c2775         {'other': 19}
+  codex_e641909e               {'other': 17}
+  claude_code_b6e72ff9         {'read_reset_by_peer': 1}
+write failures matched to a manifest turn 49, unmatched 0
+runtime family | tool result injected before failure -> turns
+  glm-coding                   | True  -> 45
+  claude_code_b6e72ff9         | True  -> 2
+  outsiders                    | True  -> 1
+  ollama_cloud                 | True  -> 1
+turn ids with a run-level reconnect event before the failure: 2
+  of these, the failing run is the reconnect run (no turn_started after the reconnect): 0
+  last reconnect -> runtime_failed 6146 s, tool-result injections in between 58, new run started after the reconnect True
+  last reconnect -> runtime_failed 9325 s, tool-result injections in between 42, new run started after the reconnect True
+write failures with another keeper's write failure nearby (expected if failures were spread evenly over the window):
+  within  30 s: 10 of 49 (expected 8%)
+  within 120 s: 32 of 49 (expected 28%)
+seconds from last tool-result injection to runtime_failed (n=49, median 112):
+  {'<5s': 3, '5-15s': 2, '15-25s': 2, '25-60s': 6, '>=60s': 36}
+baseline, same keepers, turns that reached a provider attempt:
+  not_failed turns   426  with tool-result injection   190 (45%)
+  failed     turns   210  with tool-result injection    88 (42%)
+
+provider_connection_cache from /health?full=1, read at 2026-11-11T13:52:54Z:
+{
+ "idle_total": 0,
+ "idle_max_per_origin": 0,
+ "reused_total": 608,
+ "created_total": 43,
+ "closed_total": {
+  "request_failed": 3,
+  "not_persistent": 0,
+  "body_not_drained": 3,
+  "transport_ended": 0
+ },
+ "closed_after_reuse": {
+  "request_failed": 3,
+  "not_persistent": 0,
+  "body_not_drained": 0,
+  "transport_ended": 0
+ }
+}
+uptime: "3h 7m"

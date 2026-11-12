@@ -98,44 +98,65 @@ type projected_status =
   ; shorter : string list
   }
 
-let status_item_projection = function
+let status_item_projection ~ko = function
   | Task_creation {keeper;phase} ->
+    let say korean english = if ko then korean else english in
     let stage = match phase with
-      | Task_not_started -> "not started" | Task_reserved -> "waiting to prepare" | Task_preparing -> "preparing"
-      | Task_awaiting_reply -> "awaiting reply" | Task_awaiting_application -> "result awaiting UI" in
-    Some {text=Printf.sprintf "Task for %s: %s" keeper stage;retention=Live_activity;shorter=[]}
+      | Task_not_started -> say "시작 전" "not started"
+      | Task_reserved -> say "준비 대기" "waiting to prepare"
+      | Task_preparing -> say "준비 중" "preparing"
+      | Task_awaiting_reply -> say "응답 대기" "awaiting reply"
+      | Task_awaiting_application -> say "결과 반영 대기" "result awaiting UI" in
+    Some
+      { text = Printf.sprintf (if ko then "%s 작업 만들기: %s" else "Task for %s: %s") keeper stage
+      ; retention = Live_activity
+      ; shorter = []
+      }
   | Workspace_mismatch "" -> None
   | Workspace_mismatch local ->
     Some
-      { text = "MISMATCH local " ^ local ^ " (r:retry)"
+      { text =
+          (if ko then "공간 불일치 \xc2\xb7 로컬 " ^ local ^ " (r:다시 시도)"
+           else "MISMATCH local " ^ local ^ " (r:retry)")
       ; retention = Workspace_conflict
       ; shorter = []
       }
   | Workspace_unconfirmed ->
-    Some { text = "[workspace unconfirmed]"; retention = Workspace_conflict; shorter = [] }
+    Some
+      { text = (if ko then "[공간 확인 대기]" else "[workspace unconfirmed]")
+      ; retention = Workspace_conflict
+      ; shorter = []
+      }
   | Server_worktree_binary ->
     Some
-      { text = "WORKTREE server (not the root build)"
+      { text =
+          (if ko then "worktree 서버 (루트 빌드 아님)"
+           else "WORKTREE server (not the root build)")
       ; retention = Worktree_conflict
       ; shorter = []
       }
   | Tui_build_mismatch { tui; server; older } ->
     let action =
       match older with
-      | `Tui -> "restart masc"
-      | `Server -> "server is older \xe2\x80\x94 redeploy"
-      | `Unknown -> "generations differ"
+      | `Tui -> if ko then "masc 다시 시작" else "restart masc"
+      | `Server ->
+          if ko then "서버가 더 오래됨 \xc2\xb7 다시 배포"
+          else "server is older \xc2\xb7 redeploy"
+      | `Unknown -> if ko then "세대 다름" else "generations differ"
     in
     Some
       { text =
-          Printf.sprintf "TUI %s \xe2\x89\xa0 server %s (%s)"
+          Printf.sprintf
+            (if ko then "TUI %s \xe2\x89\xa0 서버 %s (%s)" else "TUI %s \xe2\x89\xa0 server %s (%s)")
             (short_commit tui) (short_commit server) action
       ; retention = Build_conflict
       ; shorter = []
       }
   | Keeper_action_armed { key; action; keeper } ->
     Some
-      { text = Printf.sprintf "press %s again to %s %s" key action keeper
+      { text =
+          (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key keeper action
+           else Printf.sprintf "press %s again to %s %s" key action keeper)
       ; retention = Armed_action
       ; shorter = []
       }
@@ -147,12 +168,18 @@ let status_item_projection = function
       }
   | Keeper_action_running { gerund; keeper } ->
     Some
-      { text = Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper
+      { text =
+          (if ko then Printf.sprintf "%s %s\xe2\x80\xa6" keeper gerund
+           else Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper)
       ; retention = Armed_action
       ; shorter = []
       }
   | Port port when port > 0 ->
-    Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity; shorter = [] }
+    Some
+      { text = Printf.sprintf (if ko then "포트: %d" else "Port: %d") port
+      ; retention = Endpoint_identity
+      ; shorter = []
+      }
   | Port _ -> None
 
 let with_literal_prefix prefix hints =
@@ -780,16 +807,18 @@ type question_place =
     recover the hidden keys. The caller supplies its current input ownership.
 
     [preferred_action] is the caller's choice for the notice slot once it has
-    resolved priority; {!preferred_action} says what each kind does. *)
+    resolved priority; {!preferred_action} says what each kind does.
+
+    [ko] picks the language of the status facts. The hints arrive written. *)
 let line ?literal_prefix ?action_text ?preferred_action ?position ?(status = []) ?port
-    ?(help_key_answers = true) ~dim ~reset
+    ?(help_key_answers = true) ~ko ~dim ~reset
     ~max_cells ~hints () =
   let max_cells = max 0 max_cells in
   let more_key = if help_key_answers then more_key else "" in
   let cut_marker = cut_marker more_key in
   let hints = prepare_hints hints in
   let statuses =
-    List.filter_map status_item_projection
+    List.filter_map (status_item_projection ~ko)
       (status @ Option.to_list (Option.map (fun port -> Port port) port))
   in
   let conflicts, statuses = List.partition leads_the_row statuses in

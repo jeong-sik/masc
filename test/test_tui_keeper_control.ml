@@ -162,7 +162,7 @@ let identity_absence =
 
 let action_testable =
   Alcotest.testable
-    (fun fmt action -> Format.pp_print_string fmt (Control.action_label action))
+    (fun fmt action -> Format.pp_print_string fmt (Control.action_label ~ko:false action))
     ( = )
 
 let check_actions label expected actual =
@@ -314,7 +314,7 @@ let test_only_shutdown_confirms () =
   List.iter
     (fun (action, expected) ->
        Alcotest.(check bool)
-         (Control.action_label action)
+         (Control.action_label ~ko:false action)
          expected
          (Control.requires_confirmation action))
     [ (Control.Pause, false)
@@ -395,7 +395,7 @@ let test_inflight_blocks_every_action () =
        | Control.Gate_submit | Control.Gate_arm _ ->
            Alcotest.fail
              (Printf.sprintf "%s must not start while one is in flight"
-                (Control.action_label action)))
+                (Control.action_label ~ko:false action)))
     [ Control.Pause
     ; Control.Resume
     ; Control.Boot
@@ -489,7 +489,7 @@ let test_boot_recovers_a_paused_owner () =
   List.iter
     (fun action ->
        Alcotest.(check (option (list step_testable)))
-         (Control.action_label action)
+         (Control.action_label ~ko:false action)
          None
          (Control.recovers_from_conflict action))
     [ Control.Pause; Control.Resume; Control.Shutdown; Control.Wakeup ]

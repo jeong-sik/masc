@@ -183,10 +183,13 @@ type action =
 val action_key : action -> string
 (** The single key that submits the action on the Keepers surface. *)
 
-val action_label : action -> string
+val action_label : ko:bool -> action -> string
+(** The word for an action, Korean when [ko]. The key hints, the footer's
+    armed item and the notices about the action say this word. *)
 
-val action_gerund : action -> string
-(** Present-tense label for an action already in flight ("pausing"). *)
+val action_gerund : ko:bool -> action -> string
+(** Present-tense label for an action already in flight ("pausing",
+    "일시 정지하는 중"). *)
 
 val purge_artifacts : string list
 (** What the server's purge plan removes, in the order it removes it

@@ -57,7 +57,7 @@ let test_build_mismatch_names_the_older_side () =
    | Some item ->
      check_string "an older TUI is told to restart, ahead of the keys"
        "<dim>  TUI aaaaaaa \xe2\x89\xa0 server bbbbbbb (restart masc)  q:quit  | Port: 8935<reset>\n"
-       (Masc_tui_footer.line ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>"
+       (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"<dim>" ~reset:"<reset>"
           ~max_cells:120 ~port:8935 ~hints:"q:quit" ())
    | None -> Alcotest.fail "a differing pair produced no item");
   (match
@@ -68,7 +68,7 @@ let test_build_mismatch_names_the_older_side () =
    | Some item ->
      check_bool "an older server is told to redeploy" true
        (contains ~needle:"server is older"
-          (Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:""
+          (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:""
              ~max_cells:120 ~port:8935 ~hints:"q" ()))
    | None -> Alcotest.fail "a differing pair produced no item");
   match
@@ -79,7 +79,7 @@ let test_build_mismatch_names_the_older_side () =
   | Some item ->
     check_bool "one unknown age blames neither lane" true
       (contains ~needle:"generations differ"
-         (Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:""
+         (Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:""
             ~max_cells:120 ~port:8935 ~hints:"q" ()))
   | None -> Alcotest.fail "a differing pair produced no item"
 
@@ -93,7 +93,7 @@ let test_operator_action_leads_the_row () =
       }
   in
   let line =
-    Masc_tui_footer.line ~status:[ item ] ~dim:"" ~reset:"" ~max_cells:200 ~port:8935
+    Masc_tui_footer.line ~ko:false ~status:[ item ] ~dim:"" ~reset:"" ~max_cells:200 ~port:8935
       ~hints:"q:quit" ()
   in
   check_bool "the keys still follow" true (contains ~needle:"q:quit" line);

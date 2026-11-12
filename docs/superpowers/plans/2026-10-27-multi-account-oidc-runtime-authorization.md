@@ -1179,7 +1179,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - S1b-1a 경로 종류와 뼈대. `Mcp_request_admission`을 단일 사용자의 처리기에서 뽑는다. `POST /mcp`가 위 method를 답한다. 도구는 내 정보(`masc_whoami`) 하나다.
   - S1b-1b Runtime과 Keeper 도구. `masc_my_runtimes`(구독과 Runtime 목록, `Manage_own_provider`), `masc_my_keepers`, `masc_my_keeper_create`, `masc_my_keeper_assign`(`Manage_own_keeper`)이다. Runtime 목록은 배정에 넣을 `runtime_id`를 MCP만으로 알 수 있게 하려고 넣는다. 사람의 화면이 `GET /api/v1/auth/provider-accounts`로 읽는 것과 같다. 도구는 인자를 경로 함수가 읽는 본문으로 다시 써서 넘긴다. 인자의 순서는 답을 바꾸지 않는다.
   - S1b-1c Keeper의 한 턴. `masc_my_keeper_turn`이 `Server_preview_keeper_turn.run`을 부른다. 판정은 경로와 같은 `Auth_preview.keeper_owner_person`이다. 시간 제한, 메시지 길이, 계정마다 한 번에 한 호출은 그 함수의 것이다. 요청은 Runtime이 답할 때까지 열려 있다. 답을 나눠 보내는 일(progress, SSE)은 하지 않는다.
-  - S1b-1d 실제 MCP client로 붙여 본 기록과 사용 안내.
+  - S1b-1d 사용 안내와 실제 MCP client로 붙여 본 기록. 안내는 `docs/guides/account-server-mcp.md`다. 기록은 GitHub 로그인과 구독 로그인이 있는 설치에서만 남길 수 있다. PAT를 받으려면 로그인한 세션이 있어야 하고, 한 턴은 실제 구독으로 돈다. 그래서 안내를 먼저 넣고, 기록은 사람이 로그인한 설치에서 잰 뒤에 더한다. 잴 것은 `initialize`부터 `masc_my_keeper_turn`까지의 답과, client의 요청 timeout이 턴보다 짧을 때의 동작이다.
 - 시험(S1b-1a).
   - credential 없음, 단일 사용자의 bearer, 폐기된 PAT가 각각 who-am-I 경로와 같은 답으로 거절된다.
   - 세션 cookie로 온 요청은 same-origin과 CSRF token이 있어야 한다.

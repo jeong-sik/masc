@@ -429,6 +429,79 @@ let test_retirement_cancels_exact_before_worker_cleanup_finishes () =
       Eio.Promise.resolve release ();
       ignore (Eio.Promise.await detached |> unwrap)))
 
+(* RFC host-cycle-runs-exact-requests-side-by-side 3.3 and 3.4: an installation
+   that declares a count of two runs two exact calls together, and retirement
+   cancels both. *)
+let side_by_side_declaration = "max_exact_in_flight=2\n" ^ declaration
+
+let test_retirement_cancels_every_exact_call_running_side_by_side () =
+  let entered = ref 0 and causes = ref [] in
+  let together, reached = Eio.Promise.create () and both_ended, ended = Eio.Promise.create () in
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    incr state.resolutions;
+    Ok (fun ~validate:_ ->
+      incr entered;
+      if !entered = 2 then Eio.Promise.resolve reached ();
+      (* Only a cancellation can end this provider call. *)
+      try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled cause as cancelled ->
+        causes := cause :: !causes;
+        if List.length !causes = 2 then Eio.Promise.resolve ended ();
+        raise cancelled) in
+  (* The worker's cleanup waits for both calls. The worker's own cancellation
+     comes after cleanup, so it cannot be what ends them. *)
+  let before_stop () = Eio.Promise.await both_ended in
+  with_installation ~make_runner ~before_stop ~declaration:side_by_side_declaration
+    ~listing:[exact "beside-1"; exact "beside-2"; exact "beside-3"]
+    (fun _clock config worker state _root ->
+      Eio.Promise.await together;
+      check int "the third request waits for a free place" 2 !(state.resolutions);
+      let source = Filename.concat (Runtime.configuration_directory config) "quiz.toml" in
+      Sys.remove source;
+      let sw = match Eio_context.get_switch_opt () with
+        | Some sw -> sw | None -> fail "fixture switch is unavailable" in
+      let detached, detach = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve detach
+          (Runtime.reconcile_configuration ~config ~directory:(Filename.dirname source)));
+      Eio.Promise.await both_ended;
+      ignore (Eio.Promise.await detached |> unwrap);
+      (* A call the retirement did not cancel itself would be cancelled by the
+         call beside it stopping the cycle, which is another cause. *)
+      check bool "the retirement cancelled each call itself" true
+        (match !causes with [first; second] -> first == second | [] | [_] | _ :: _ :: _ :: _ -> false);
+      check int "the third request never starts" 2 !(state.resolutions);
+      check int "no result is delivered to a retiring worker" 0 (List.length !(worker.delivered)))
+
+(* RFC 3.2: the count is outside the revision, so an edit of the declaration
+   reaches the worker that is already running. *)
+let test_a_declared_count_reaches_the_running_worker () =
+  let blocking = ref false and entered = ref 0 in
+  let make_runner state ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ =
+    incr state.resolutions;
+    if not !blocking then Error Exact.Lane_off
+    else Ok (fun ~validate:_ -> incr entered; Eio.Fiber.await_cancel ()) in
+  with_installation ~make_runner ~listing:[exact "beside-1"; exact "beside-2"]
+    (fun clock config _worker state root ->
+      await clock (fun () -> cycles config >= 1);
+      check int "each request was asked once" 2 !(state.resolutions);
+      let live_instance () =
+        match
+          Runtime.dispatch ~access:Lane_addon_sources.Operator_configuration ~config ~operation:Runtime.Inspect (`Assoc [])
+          |> Result.map_error Runtime.error_to_string |> unwrap
+          |> member "instances" |> Yojson.Safe.Util.to_list
+          |> List.filter (fun item -> text "runtime_presence" item = "live")
+        with
+        | [instance] -> text "instance_id" instance
+        | [] | _::_::_ -> fail "one live instance" in
+      let worker_before = live_instance () in
+      let directory = Filename.concat root ".masc/config/lane-addons" in
+      write (Filename.concat directory "quiz.toml") side_by_side_declaration;
+      ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
+      check string "the same worker goes on" worker_before (live_instance ());
+      blocking := true;
+      publish_lane_change ();
+      await clock (fun () -> !entered = 2))
+
 let test_a_started_worker_gets_its_final_result_once () =
   with_installation ~listing:[ exact "r1" ] (fun clock config worker state  _root->
     await clock (fun () -> cycles config >= 1);
@@ -1727,6 +1800,9 @@ let () =
         ; test_case "an exported worker error can retain pending host work" `Quick
             (test_an_exported_reply_starts_its_pending_host_work ~is_error:true)
         ; test_case "retirement cancels exact before worker cleanup finishes" `Quick test_retirement_cancels_exact_before_worker_cleanup_finishes
+        ; test_case "retirement cancels every exact call running side by side" `Quick
+            test_retirement_cancels_every_exact_call_running_side_by_side
+        ; test_case "a declared count reaches the running worker" `Quick test_a_declared_count_reaches_the_running_worker
         ; test_case "original tool destination survives replacement and reattachment" `Quick
             test_original_tool_destination_survives_replacement_and_reattachment
         ; test_case "capture uses actual live provenance before RPC" `Quick

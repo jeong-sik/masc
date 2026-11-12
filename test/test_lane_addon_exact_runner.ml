@@ -1370,7 +1370,8 @@ module Sweep = Server_unowned_exact_sweep
 let sweep ~store package =
   let declaration : Lane_addon_config.declaration =
     { id=declaration_id; enabled=true; run_id="sweep"; manifest_path="/nonexistent/lane.toml";
-      package; binding=`Null; revision="1"; source_revision="1"; source_path="/nonexistent/quiz.toml" } in
+      package; binding=`Null; revision="1"; source_revision="1"; source_path="/nonexistent/quiz.toml";
+      max_exact_in_flight=Lane_addon_config.one_exact_at_a_time } in
   Sweep.run ~store ~declarations:[declaration]
 
 let test_a_settled_curator_original_leaves_its_exact_files_to_the_sweep () =

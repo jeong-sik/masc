@@ -200,7 +200,9 @@ type entry = {
   mutable running : bool; mutable started : bool; mutable active_tool_calls : int; persistence_mutex : Eio.Mutex.t;
   mutable coalesced_wakes : int;
   mutable cancel_worker : (unit -> unit) option;
-  mutable cancel_exact : (exn -> unit) option;
+  (* The cancel function of each exact call now running, by request id. *)
+  cancel_exact : (string, exn -> unit) Hashtbl.t;
+  mutable max_exact_in_flight : Lane_addon_config.exact_in_flight;
   mutable configuration : configuration_owner option;
   input_installations : string list;
   action_queue : Lane_addon_action.receipt Queue.t;
@@ -210,7 +212,17 @@ type entry = {
 }
 let retire_admission e =
   e.stopping <- true;
-  Option.iter (fun cancel -> cancel Worker_detached) e.cancel_exact
+  (* Every running exact call is cancelled even when one cancel raises. The
+     first such exception is raised after the last cancel. *)
+  let first =
+    List.fold_left (fun first cancel ->
+        match cancel Worker_detached with
+        | () -> first
+        | exception exn ->
+            let backtrace = Printexc.get_raw_backtrace () in
+            (match first with None -> Some (exn, backtrace) | Some _ -> first))
+      None (List.of_seq (Hashtbl.to_seq_values e.cancel_exact)) in
+  Option.iter (fun (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace) first
 
 type configuration_reading = {
   directory : string;
@@ -1151,13 +1163,34 @@ let host_status_json status =
    no list of pending requests; [host_status] only shows the last cycle. *)
 (* What one try of a request gives: a final result body to deliver, or the
    reason it waits for the next event. *)
-type host_attempt = Deliver of Yojson.Safe.t | Restore of Yojson.Safe.t | Wait of Yojson.Safe.t
+type host_attempt =
+  | Deliver of Yojson.Safe.t
+  | Restore of Yojson.Safe.t
+  | Wait of { reason : Yojson.Safe.t; exact : exact_wait option }
+
+(* How one request of a listing ended. [run_host_cycle] reads these in the
+   order the walk reached the requests, so the status it writes does not
+   depend on which exact call ended first. *)
+type request_end =
+  | Request_delivered
+  | Request_waiting of { request_id : string; reason : Yojson.Safe.t; exact : exact_wait option }
+  | Request_failed of host_issue
+
+(* Results of an ended exact attempt that are not an Exact outcome: the
+   instance retired while the call ran, the host could not keep its record,
+   or the attempt raised. *)
+let exact_attempt_stopped = "stopped"
+let exact_attempt_record_failed = "record_failed"
+let exact_attempt_raised = "raised"
+(* What the line shows for an output the package does not declare. A declared
+   name is a-z, 0-9 and _ (Lane_addon_manifest), so this is never one. *)
+let exact_attempt_undeclared_output = "-"
 
 let run_host_cycle m e (port : host_port) =
   let delivered = Hashtbl.create 8 and tried = Hashtbl.create 8 in
-  let waiting = ref [] in
-  let exact_waiting = ref [] in
-  let request_issue = ref None in
+  (* Each ended request with the position the walk reached it at, counted
+     across the listings of this cycle. *)
+  let ends = ref [] and reached = ref 0 in
   let check_live () = if e.stopping then raise Host_cycle_stopped in
   let current_owner () : Lane_addon_host_delivery.owner = {
     instance_id=e.instance_id;
@@ -1175,8 +1208,8 @@ let run_host_cycle m e (port : host_port) =
     | Lane_addon_records.Page body -> Ok (Deliver body)
     | Lane_addon_records.Not_allowed reason -> Ok (not_allowed reason)
     | Lane_addon_records.Unavailable detail ->
-        Ok (Wait (`Assoc ["reason", `String "source_unavailable"; "detail", `String detail])) in
-  let produce = function
+        Ok (Wait {reason=`Assoc ["reason", `String "source_unavailable"; "detail", `String detail]; exact=None}) in
+  let produce ~running_at_start = function
     | Lane_addon_host_request.Exact_output exact ->
         let attempt = match e.configuration, !exact_runner with
           | None, _ ->
@@ -1184,26 +1217,65 @@ let run_host_cycle m e (port : host_port) =
               Ok (Lane_addon_exact.Not_final (Lane_addon_exact.Lane_unavailable Lane_addon_exact.Lane_unconfigured))
           | Some _, None -> Error No_exact_runner
           | Some owner, Some (runner, authorize_request) ->
+             (* One line per ended attempt (RFC host-cycle-runs-exact-requests-
+                side-by-side 3.6): hourly throughput, time per request and
+                overlap are counted from it. It carries no request body. *)
+             let stopwatch = Monotonic_deadline.start () in
+             (* The output name comes from the worker and can be any text, so
+                the line carries it only when the package declares it. *)
+             let output =
+               match List.find_opt
+                 (fun (declared : Lane_addon_types.exact_output) -> String.equal declared.name exact.output)
+                 e.package.exact_outputs with
+               | Some declared -> declared.name
+               | None -> exact_attempt_undeclared_output in
+             let ended result =
+               Log.Misc.info
+                 "Lane Add-on exact attempt ended installation=%s output=%s result=%s elapsed_ms=%.0f running_at_start=%d"
+                 owner.id output result
+                 (Monotonic_deadline.elapsed_seconds stopwatch *. 1000.) running_at_start in
              let result =
                try Eio.Cancel.sub (fun cancellation ->
-                 e.cancel_exact <- Some (Eio.Cancel.cancel cancellation);
-                 Fun.protect ~finally:(fun () -> e.cancel_exact <- None) (fun () ->
+                 Hashtbl.replace e.cancel_exact exact.request_id (Eio.Cancel.cancel cancellation);
+                 (* The entry leaves the table inside this context: cancelling a
+                    finished context raises. *)
+                 Fun.protect ~finally:(fun () -> Hashtbl.remove e.cancel_exact exact.request_id) (fun () ->
                    check_live ();
                    Lane_addon_exact.run ~store:m.store ~declaration_id:owner.id ~package:e.package
                      ~runner ~authorize_request exact))
-               with Eio.Cancel.Cancelled Worker_detached ->
+               with
+               | Eio.Cancel.Cancelled Worker_detached ->
                  (* Consume only retirement of this exact call. Worker/root
-                    cancellation must still propagate through this boundary. *)
+                    cancellation must still propagate through this boundary,
+                    and so must the cancellation a sibling call's
+                    [Host_cycle_stopped] brings. The line is written first, so
+                    every retired call has one. *)
+                 ended exact_attempt_stopped;
                  Eio.Fiber.check ();
-                 raise Host_cycle_stopped in
+                 raise Host_cycle_stopped
+               | Host_cycle_stopped as stopped ->
+                 (* The instance retired before the call was entered. *)
+                 ended exact_attempt_stopped;
+                 raise stopped
+               | Eio.Cancel.Cancelled _ as cancelled ->
+                 (* The worker or the server is going away. No line is written. *)
+                 raise cancelled
+               | exn ->
+                 let backtrace = Printexc.get_raw_backtrace () in
+                 ended exact_attempt_raised;
+                 Printexc.raise_with_backtrace exn backtrace in
+             ended (match result with
+               | Ok (Lane_addon_exact.Final final) -> Lane_addon_exact.final_status final
+               | Ok (Lane_addon_exact.Not_final reason) -> Lane_addon_exact.not_final_reason reason
+               | Error (_ : string) -> exact_attempt_record_failed);
              result
               |> Result.map_error (fun detail ->
                 Exact_record_failed {request_id = exact.Lane_addon_exact.request_id; detail}) in
         Result.map (function
           | Lane_addon_exact.Final final -> Deliver (Lane_addon_exact.final_to_json final)
           | Lane_addon_exact.Not_final reason ->
-              exact_waiting := {request_id=exact.request_id;output=exact.output;reason} :: !exact_waiting;
-              Wait (Lane_addon_exact.not_final_to_json reason)) attempt
+              Wait {reason=Lane_addon_exact.not_final_to_json reason;
+                exact=Some {request_id=exact.request_id;output=exact.output;reason}}) attempt
     | Lane_addon_host_request.Read_records {request_id; source_id; start} ->
         (match Lane_addon_records.grants ~operator_owned:(operator_owned ~configuration:e.configuration
             ~source_access:e.source_access) e.binding with
@@ -1233,7 +1305,8 @@ let run_host_cycle m e (port : host_port) =
                         the package withdrew (RFC operator-quiz §4.4). *)
                      match List.assoc_opt request_id rows with
                      | None -> Error (failed "the recorded question has no row")
-                     | Some (_, Keeper_ask.Open) -> Ok (Wait (`Assoc ["reason", `String "awaiting_operator"]))
+                     | Some (_, Keeper_ask.Open) ->
+                         Ok (Wait {reason=`Assoc ["reason", `String "awaiting_operator"]; exact=None})
                      | Some (_, Keeper_ask.Answered_by {answers; responder; answered_at}) ->
                          Ok (Deliver (`Assoc ["status", `String "answered";
                            "answers", `List (List.map Keeper_ask.answer_to_json answers);
@@ -1278,14 +1351,14 @@ let run_host_cycle m e (port : host_port) =
                   Ok (Deliver (Lane_addon_search_result.result_to_json envelope))
               | Error detail ->
                   Ok (not_allowed ("host web search failed: " ^ detail)))) in
-  let try_request request =
+  let try_request ~running_at_start request =
     let request_id = Lane_addon_host_request.request_id request in
     let* retained = offload (fun () -> Lane_addon_host_delivery.restore ~store:m.store ~owner ~request
         ~max_bytes:(Lane_addon_types.max_reply_bytes e.package))
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     check_live ();
-    match retained with Some arguments -> Ok (Restore arguments) | None -> produce request in
+    match retained with Some arguments -> Ok (Restore arguments) | None -> produce ~running_at_start request in
   let deliver_arguments request arguments =
     let request_id=Lane_addon_host_request.request_id request in
     let* () = if e.stopping || (current_owner ()).authority <> owner.authority then
@@ -1309,52 +1382,72 @@ let run_host_cycle m e (port : host_port) =
       |> Result.map_error (function
         | Lane_addon_host_delivery.Refused detail | Storage_failed detail -> Result_delivery_failed {request_id; detail}) in
     deliver_arguments request arguments in
+  (* One request from its retained result or its work to its delivery. *)
+  let run_request ~position request ~running_at_start =
+    let request_id = Lane_addon_host_request.request_id request in
+    let settled request_end =
+      (match request_end with
+       | Request_delivered -> Hashtbl.replace delivered request_id ()
+       | Request_waiting _ | Request_failed _ ->
+           (* Tried at most once per cycle, so it cannot keep a cycle running. *)
+           Hashtbl.replace tried request_id ());
+      ends := (position, request_end) :: !ends;
+      Ok () in
+    let attempted =
+      let* attempt = try_request ~running_at_start request in
+      match attempt with
+      | Restore arguments ->
+          Result.map (fun () -> Request_delivered) (deliver_arguments request arguments)
+      | Deliver result ->
+          Result.map (fun () -> Request_delivered) (deliver request result)
+      | Wait {reason; exact} -> Ok (Request_waiting {request_id; reason; exact}) in
+    match attempted with
+    | Ok request_end -> settled request_end
+    | Error ((Exact_record_failed _ | Ask_record_failed _ | Result_delivery_failed _) as issue) ->
+        (* Preserve the failure without delivering a fabricated terminal or
+           retrying it in this cycle. Other original requests remain independent. *)
+        settled (Request_failed issue)
+    | Error ((Listing_failed _ | Listing_refused _ | Relisted_delivered_request _
+            | No_exact_runner | No_web_search_runner) as issue) ->
+        Error issue in
+  let step request =
+    check_live ();
+    let request_id = Lane_addon_host_request.request_id request in
+    let position = !reached in
+    incr reached;
+    if Hashtbl.mem delivered request_id then Lane_addon_host_walk.Halt (Relisted_delivered_request request_id)
+    else if Hashtbl.mem tried request_id then Lane_addon_host_walk.Skip
+    else match request with
+      | Lane_addon_host_request.Exact_output _ ->
+          Lane_addon_host_walk.Beside (run_request ~position request)
+      | Lane_addon_host_request.Read_records _ | Read_file _ | Read_result _ | Ask _
+      | Lane_addon_host_request.Withdraw_ask _ | Lane_addon_host_request.Web_search _ ->
+          Lane_addon_host_walk.Here (run_request ~position request) in
   let rec pass () =
     check_live ();
     let* listing = port.list_requests () |> Result.map_error (fun detail -> Listing_failed detail) in
     let* requests = Lane_addon_host_request.listing_of_json listing
       |> Result.map_error (fun detail -> Listing_refused detail) in
-    let rec each delivered_any = function
-      | [] -> Ok delivered_any
-      | request :: rest ->
-          check_live ();
-          let request_id = Lane_addon_host_request.request_id request in
-          if Hashtbl.mem delivered request_id then Error (Relisted_delivered_request request_id)
-          else if Hashtbl.mem tried request_id then each delivered_any rest
-          else
-            let outcome =
-              let* attempt = try_request request in
-              match attempt with
-              | Restore arguments ->
-                  Result.map (fun () -> true) (deliver_arguments request arguments)
-              | Deliver result ->
-                  Result.map (fun () -> true) (deliver request result)
-              | Wait reason ->
-                  waiting := (request_id, reason) :: !waiting;
-                  Ok false in
-            match outcome with
-            | Ok true ->
-                Hashtbl.replace delivered request_id ();
-                each true rest
-            | Ok false ->
-                (* Tried at most once per cycle, so it cannot keep a cycle running. *)
-                Hashtbl.replace tried request_id ();
-                each delivered_any rest
-            | Error ((Exact_record_failed _ | Ask_record_failed _ | Result_delivery_failed _) as issue) ->
-                (* Preserve the failure without delivering a fabricated terminal or
-                   retrying it in this cycle. Other original requests remain independent. *)
-                Hashtbl.replace tried request_id ();
-                (match !request_issue with None -> request_issue := Some issue | Some _ -> ());
-                each delivered_any rest
-            | Error ((Listing_failed _ | Listing_refused _ | Relisted_delivered_request _
-                    | No_exact_runner | No_web_search_runner) as issue) ->
-                Error issue in
-    let* delivered_any = each false requests in
-    if delivered_any then pass () else Ok () in
+    let delivered_before = Hashtbl.length delivered in
+    (* The pass keeps the count it started with (RFC 3.2). *)
+    match Lane_addon_host_walk.walk ~max_in_flight:e.max_exact_in_flight
+        ~propagates:(function Host_cycle_stopped -> true | _ -> false) ~step requests with
+    | Some issue -> Error issue
+    | None -> if Hashtbl.length delivered > delivered_before then pass () else Ok () in
   let outcome = try pass () with Host_cycle_stopped -> Ok () in
-  e.host_status <- { cycles = e.host_status.cycles + 1; waiting = List.rev !waiting;
-    exact_waiting = List.rev !exact_waiting; observed_at = Some (Time_compat.now ());
-    issue = (match outcome with Ok () -> !request_issue | Error issue -> Some issue) }
+  let in_order = List.sort (fun (left, _) (right, _) -> Int.compare left right) !ends |> List.map snd in
+  let waiting = List.filter_map (function
+    | Request_waiting {request_id; reason; exact = _} -> Some (request_id, reason)
+    | Request_delivered | Request_failed _ -> None) in_order in
+  let exact_waiting = List.filter_map (function
+    | Request_waiting {exact; request_id = _; reason = _} -> exact
+    | Request_delivered | Request_failed _ -> None) in_order in
+  let request_issue = List.find_map (function
+    | Request_failed issue -> Some issue
+    | Request_delivered | Request_waiting _ -> None) in_order in
+  e.host_status <- { cycles = e.host_status.cycles + 1; waiting; exact_waiting;
+    observed_at = Some (Time_compat.now ());
+    issue = (match outcome with Ok () -> request_issue | Error issue -> Some issue) }
 
 let observing m e =
   let recovering = match e.state with Lifecycle.Failed _ -> true
@@ -3359,7 +3452,7 @@ let terminal_fault_records ~id ~source_path faults =
     if owner_concerns ~id ~source_path fault.fault_owner && fault_is_terminal fault
     then Some (`Assoc fault.fault_fields) else None) faults
 
-let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility =
+let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility ~max_exact_in_flight =
   (* An image that is not on the host is not a worker that failed. Creating one
      would fail the same way on every attempt and leave an instance behind each
      time (#37897). Every caller looks first, so a declaration and a direct
@@ -3391,7 +3484,8 @@ let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~
     running = true; started = false; active_tool_calls = 0; persistence_mutex = Eio.Mutex.create (); coalesced_wakes = 0;
     action_queue = Queue.create (); current_action = None;
     host_due = false; host_status = { cycles = 0; waiting = []; exact_waiting = []; observed_at = None; issue = None };
-    cancel_worker = None; cancel_exact = None; configuration; input_installations } in
+    cancel_worker = None; cancel_exact = Hashtbl.create 4; max_exact_in_flight; configuration;
+    input_installations } in
   let* () = validate_live_connections m e in
   (* Construction only validates the registered host boundary. Discard this
      root-switch closure: backend.start constructs the actual callback with
@@ -4117,7 +4211,9 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
         | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
         | Shared | Operator_only -> source_access in
       let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
-      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility))
+      (* A manual Attach has no declaration to name a count. *)
+      runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility
+        ~max_exact_in_flight:Lane_addon_config.one_exact_at_a_time))
   | Observe ->
       let* e = request_result (find m args) in
       if e.stopping then Error (Request_rejected "instance is stopping or detached")
@@ -4521,6 +4617,9 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                let owner = {id=d.id; source_path=d.source_path; revision=d.revision} in
                (match e.configuration with
                 | Some applied when applied.revision = d.revision && e.running && not e.stopping ->
+                    (* The count is outside the revision: the next pass of this
+                       worker reads it. *)
+                    e.max_exact_in_flight <- d.max_exact_in_flight;
                     if applied.source_path <> d.source_path then (
                       e.configuration <- Some owner;
                       match persist m e with Ok () -> ()
@@ -4539,7 +4638,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                      | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
                      | Shared | Operator_only -> Lane_addon_sources.Operator_configuration in
                    attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
-                     ~source_access ~visibility in
+                     ~source_access ~visibility ~max_exact_in_flight:d.max_exact_in_flight in
                  match attached with
                  | Ok _ -> () | Error message -> add_issue ~id:d.id d.source_path message)
            | _ -> add_issue ~id:d.id d.source_path "multiple workers claim this configuration identity") snapshot.declarations

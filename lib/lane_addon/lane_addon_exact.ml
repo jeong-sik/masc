@@ -195,20 +195,29 @@ let refused_before_host = function
 let usage_to_json { input_tokens; output_tokens } =
   `Assoc [ "input_tokens", `Int input_tokens; "output_tokens", `Int output_tokens ]
 
-let final_to_json = function
+let final_status = function
+  | Call_final (Answered _) -> "answered"
+  | Call_final (Invalid_output _) -> "invalid_output"
+  | Call_final (Input_refused _) -> "input_refused"
+  | Call_final (Output_limit_reached _) -> "output_limit_reached"
+  | Outcome_unknown -> "outcome_unknown"
+  | Not_allowed _ -> "not_allowed"
+  | Request_id_reused -> "request_id_reused"
+
+let final_to_json final =
+  let status = "status", `String (final_status final) in
+  match final with
   | Call_final (Answered { output; slot; usage }) ->
     `Assoc
-      ([ "status", `String "answered"; "output", output; "slot", `String slot ]
+      ([ status; "output", output; "slot", `String slot ]
        @ match usage with None -> [] | Some usage -> [ "usage", usage_to_json usage ])
-  | Call_final (Invalid_output { detail }) ->
-    `Assoc [ "status", `String "invalid_output"; "detail", `String detail ]
+  | Call_final (Invalid_output { detail }) -> `Assoc [ status; "detail", `String detail ]
   | Call_final (Input_refused kind) ->
-    `Assoc [ "status", `String "input_refused"; "kind", `String (input_refusal_to_string kind) ]
-  | Call_final (Output_limit_reached { detail }) ->
-    `Assoc [ "status", `String "output_limit_reached"; "detail", `String detail ]
-  | Outcome_unknown -> `Assoc [ "status", `String "outcome_unknown" ]
-  | Not_allowed { reason } -> `Assoc [ "status", `String "not_allowed"; "reason", `String reason ]
-  | Request_id_reused -> `Assoc [ "status", `String "request_id_reused" ]
+    `Assoc [ status; "kind", `String (input_refusal_to_string kind) ]
+  | Call_final (Output_limit_reached { detail }) -> `Assoc [ status; "detail", `String detail ]
+  | Outcome_unknown -> `Assoc [ status ]
+  | Not_allowed { reason } -> `Assoc [ status; "reason", `String reason ]
+  | Request_id_reused -> `Assoc [ status ]
 
 (* The retained record reads back only what this module wrote; anything else is
    an unreadable record, not a guess. *)
@@ -315,21 +324,28 @@ let retained_final_of_json ~schema json =
   | Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Retained_unknown (Interrupted | Cut | Raised) | Retained_not_allowed _ | Retained_request_id_reused -> Ok retained
 
-let not_final_to_json = function
-  | Lane_unavailable Lane_unconfigured -> `Assoc [ "reason", `String "lane_unconfigured" ]
-  | Lane_unavailable Lane_off -> `Assoc [ "reason", `String "lane_off" ]
-  | Lane_unavailable No_admitted_slots -> `Assoc [ "reason", `String "no_admitted_slots" ]
-  | Lane_unavailable (Lane_registry_unavailable { detail }) ->
-    `Assoc [ "reason", `String "lane_registry_unavailable"; "detail", `String detail ]
-  | Lane_unavailable (Every_slot_held { until }) ->
-    `Assoc [ "reason", `String "every_slot_held"; "until", `Float until ]
-  | Provider_refused (Provider_unavailable { detail }) ->
-    `Assoc [ "reason", `String "provider_unavailable"; "detail", `String detail ]
-  | Provider_refused (Provider_auth_refused { detail }) ->
-    `Assoc [ "reason", `String "provider_auth_refused"; "detail", `String detail ]
-  | Provider_refused (Provider_configuration_refused { detail }) ->
-    `Assoc [ "reason", `String "provider_configuration_refused"; "detail", `String detail ]
-  | Attempt_in_progress -> `Assoc [ "reason", `String "attempt_in_progress" ]
+let not_final_reason = function
+  | Lane_unavailable Lane_unconfigured -> "lane_unconfigured"
+  | Lane_unavailable Lane_off -> "lane_off"
+  | Lane_unavailable No_admitted_slots -> "no_admitted_slots"
+  | Lane_unavailable (Lane_registry_unavailable _) -> "lane_registry_unavailable"
+  | Lane_unavailable (Every_slot_held _) -> "every_slot_held"
+  | Provider_refused (Provider_unavailable _) -> "provider_unavailable"
+  | Provider_refused (Provider_auth_refused _) -> "provider_auth_refused"
+  | Provider_refused (Provider_configuration_refused _) -> "provider_configuration_refused"
+  | Attempt_in_progress -> "attempt_in_progress"
+
+let not_final_to_json not_final =
+  let reason = "reason", `String (not_final_reason not_final) in
+  match not_final with
+  | Lane_unavailable (Lane_unconfigured | Lane_off | No_admitted_slots) | Attempt_in_progress ->
+    `Assoc [ reason ]
+  | Lane_unavailable (Every_slot_held { until }) -> `Assoc [ reason; "until", `Float until ]
+  | Lane_unavailable (Lane_registry_unavailable { detail })
+  | Provider_refused
+      ( Provider_unavailable { detail }
+      | Provider_auth_refused { detail }
+      | Provider_configuration_refused { detail } ) -> `Assoc [ reason; "detail", `String detail ]
 
 let not_final_of_json json =
   let fields = match json with `Assoc fields -> fields | _ -> [] in
@@ -1090,15 +1106,23 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                after it returns. *)
             Eio.Fiber.check ();
             let slot_capture=Exact_lane_slot_capture.create ~owner:(Runtime_schema.Addon lane) () in
-            let attempt, recorded, execution =
+            let called =
               match Exact_lane_slot_capture.with_capture slot_capture (fun () -> call ~validate) with
               | execution ->
                   let recorded = match execution.outcome with
                     | Call_ended final -> Completed_call final
                     | Call_refused refusal -> Deferred (Provider_refused refusal) in
-                  attempt_of_outcome execution.outcome, recorded, Some execution
+                  Ok (attempt_of_outcome execution.outcome, recorded, Some execution)
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-              | exception exn -> Final Outcome_unknown, Unknown_raised (Printexc.to_string exn), None in
+              | exception exn ->
+                  let raised = Printexc.to_string exn in
+                  (* The marker is what says a generation request may have
+                     reached a provider. A call that raised before this run
+                     saved it sent none, so there is no outcome to be unsure
+                     of: the run fails and writes no attempt, and the next
+                     run reads the record as it was. *)
+                  if !started then Ok (Final Outcome_unknown, Unknown_raised raised, None)
+                  else Error ("the Exact call raised before its first generation dispatch: " ^ raised) in
             match !marker_failure with
             | Some detail ->
               (* The marker save reported a failure, so the guard stopped the
@@ -1106,6 +1130,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                  failure, not an outcome of the call. *)
               Error detail
             | None ->
+            let* attempt, recorded, execution = called in
             Eio.Cancel.protect (fun () ->
               let* () = match execution with
                 | None -> Ok ()

@@ -232,7 +232,9 @@ let test_a_started_attempt_without_outcome_is_unknown () =
 let test_an_exception_ends_the_request_as_unknown () =
   with_root (fun root ->
     let store = Store.create ~root in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ -> failwith "connection reset after send") in
+    let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+      require (before_dispatch Exact.Generation);
+      failwith "connection reset after send") in
     check bool "an exception is Outcome_unknown" true (run_request store runner (request "r5") = Exact.Final Exact.Outcome_unknown);
     check bool "the host preserves the raised cause" true
       (require (observe store (request "r5"))=Exact.Retained_terminal (Exact.Retained_unknown Exact.Raised));
@@ -241,6 +243,24 @@ let test_an_exception_ends_the_request_as_unknown () =
       check bool "its text stays in the attempt" true
         (Yojson.Safe.Util.(attempt |> member "exception") <> `Null)
     | _ -> fail "one attempt expected")
+
+(* A call that raises before its first generation dispatch sent nothing. The
+   run is an Error, the record keeps no attempt, and the next run sends the
+   request. A measurement dispatch before the exception does not change that. *)
+let test_an_exception_before_the_first_generation_dispatch_is_an_error () =
+  List.iter (fun measures -> with_root (fun root ->
+    let store = Store.create ~root in
+    let original = request "raised-before-dispatch" in
+    let raising ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _ = Ok (fun ~validate:_ ->
+      if measures then require (before_dispatch Exact.Measurement);
+      invalid_arg "two settings of one endpoint disagree") in
+    check bool "the run fails" true
+      (Result.is_error (Exact.run ~authorize_request ~store ~declaration_id ~package ~runner:raising original));
+    check bool "the request stays open" true (require (observe store original) = Exact.Retained_open);
+    check int "with no attempt" 0 (List.length (attempts store original.request_id));
+    let runner, sends, _ = counting_runner store (ref [ Answer question ]) in
+    check bool "the next run sends it" true (answered_with question (run_request store runner original));
+    check int "once" 1 !sends)) [ false; true ]
 
 let test_an_undeclared_output_is_not_allowed () =
   with_root (fun root ->
@@ -1135,7 +1155,9 @@ let test_observe_started_is_open_while_provider_is_running ()=with_root (fun roo
 let test_observe_exception_and_later_denial_preserves_original ()=with_root (fun root ->
   let store=Store.create ~root in
   let original=request "readonly-exception" in
-  let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate:_ -> raise Exit) in
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ _=Ok (fun ~validate:_ ->
+    require (before_dispatch Exact.Generation);
+    raise Exit) in
   ignore (run_request store runner original);
   let hidden={package with exact_outputs=[]} in
   ignore (require (Exact.run ~authorize_request ~store ~declaration_id ~package:hidden ~runner original));
@@ -1408,6 +1430,8 @@ let () =
         ; test_case "a reused request id is refused" `Quick test_a_reused_request_id_is_refused
         ; test_case "a started attempt without outcome is unknown" `Quick test_a_started_attempt_without_outcome_is_unknown
         ; test_case "an exception ends the request as unknown" `Quick test_an_exception_ends_the_request_as_unknown
+        ; test_case "an exception before the first generation dispatch is an error" `Quick
+            test_an_exception_before_the_first_generation_dispatch_is_an_error
         ; test_case "an undeclared output is not allowed" `Quick test_an_undeclared_output_is_not_allowed
         ; test_case "selection hides but preserves a retained answer" `Quick test_selection_hides_but_preserves_a_retained_answer
         ; test_case "a request in flight is not run twice" `Quick test_a_request_in_flight_is_not_run_twice

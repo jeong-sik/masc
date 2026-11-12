@@ -1038,6 +1038,45 @@ class QuotaGetIntegration(unittest.TestCase):
                 if changed == 'review':
                     self.assertGreaterEqual(counts[PREFIX + '/pulls/101/reviews?per_page=100'], 3)
 
+    def run_main(self, client, *arguments):
+        environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                       'DISPATCH_PR': '101', 'GITHUB_STEP_SUMMARY': ''}
+        output = io.StringIO()
+        with patch.dict(os.environ, environment), \
+             patch.object(sys, 'argv', ['auto-merge', *arguments]), \
+             patch.object(MERGE, 'CLIENT', client), patch.object(MERGE, 'WAIT_SECONDS', 600), \
+             patch.dict(MERGE._ADMISSION), patch.dict(MERGE._WAKE), \
+             patch.object(MERGE, 'emit', side_effect=lambda result: print(json.dumps(result))), \
+             redirect_stdout(output), redirect_stderr(io.StringIO()):
+            client.on_quota = lambda failure: MERGE.emit(
+                dict(failure.details, status='rate_limited', retry_at=failure.retry_at))
+            code = MERGE.main()
+            return code, output.getvalue(), MERGE.WAIT_SECONDS
+
+    def test_an_event_run_ends_at_a_quota_instead_of_sleeping(self):
+        for path in (PREFIX + '/pulls/101', PREFIX + '/rules/branches/main'):
+            with self.subTest(path=path), FakeGitHub() as github:
+                client, clock, _ = self.quota_client(github, path, 1)
+                code, output, _ = self.run_main(client)
+                self.assertEqual(code, MERGE.QUOTA_EXIT)
+                self.assertEqual(clock.sleeps, [])
+                self.assertEqual(github.mutations, [])
+                self.assertIn('"status": "rate_limited"', output)
+                self.assertIn('"retry_at": 1030', output)
+                self.assertIsNone(client.deadline)
+
+    def test_a_dry_run_still_waits_out_a_quota(self):
+        with FakeGitHub() as github:
+            client, clock, _ = self.quota_client(github, PREFIX + '/rules/branches/main', 1)
+            code, _, _ = self.run_main(client, '--dry-run')
+        self.assertEqual((code, clock.sleeps), (0, [30]))
+
+    def test_hand_off_now_leaves_no_time_to_follow_in_this_run(self):
+        with FakeGitHub() as github:
+            client, _, _ = self.quota_client(github, PREFIX + '/none', 1)
+            _, _, wait = self.run_main(client, '--dry-run', '--hand-off-now')
+        self.assertEqual(wait, 0)
+
     def test_a_new_head_with_its_own_two_reviews_is_admitted_only_after_fresh_reads(self):
         with FakeGitHub() as github:
             def change():

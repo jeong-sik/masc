@@ -1,0 +1,45 @@
+name: Approval merge sweep
+
+# An event-driven worker run is one chance: when it fails or ends at a quota,
+# the approved pull request stays unmerged until another event arrives. This
+# sweep gives every approved, unmerged scope another worker run. The operator
+# requested this schedule on 2026-11-12 (RFC-merge-worker-fits-the-api-budget
+# D1). It runs no build and no test.
+on:
+  schedule:
+    # The half-hour interval of the main build, 15 minutes apart from it.
+    - cron: '22,52 * * * *'
+  workflow_dispatch: {}
+
+# What the worker needs: it merges, dispatches the main build and its own
+# receipt follow-up, deletes merged branches and closes linked issues.
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+# One sweep at a time. A sweep that is still running is never cancelled: it
+# may be inside a merge request. GitHub keeps only the newest waiting run.
+concurrency:
+  group: approval-merge-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    # The script starts no worker after 20 minutes and one worker run is cut at
+    # 5, so a sweep ends before the next one is due.
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The sweep and the worker always come from the trusted workflow
+          # commit. Pull request content is only ever read as data.
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Run the merge worker on every approved scope still open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/review/approval-merge-sweep.py

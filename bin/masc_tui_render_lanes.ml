@@ -425,7 +425,11 @@ let render_exact_lane_provider_editor (state : state) editor =
         "CLI slots · tried after every HTTP slot"
   in
   box_top buf cols;
-  box_line buf cols (screen_title (" MASC / " ^ lane ^ " / Model order"));
+  box_line buf cols
+    (here_row ~cols state
+       ~path:[ Terminal_text.single_line lane
+             ; ui_text state ~ko:"모델 순서" ~en:"model order" ]
+       ~readings:[] ~position:None);
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
     (Printf.sprintf "  %s · HTTP candidates first, then CLI candidates"
@@ -2118,7 +2122,12 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
     @ field "Type" client.cr_agent_type
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"client-detail"
-    ~frame:Chrome_overlay ~title:(screen_title " MASC Client Detail")
+    ~frame:Chrome_overlay
+    ~title:
+      (here_row ~cols state
+         ~path:[ ui_text state ~ko:"클라이언트" ~en:"clients"
+               ; Terminal_text.single_line client.cr_name ]
+         ~readings:[] ~position:None)
     ~hints:"j/k:scroll  PgUp/PgDn:page  g/G:first/last  Esc:clients"
     ~overflow:(Scrolled {scroll=state.client_detail_scroll;
                         report=(fun scroll -> Client_detail_scroll scroll)})
@@ -2294,7 +2303,7 @@ let render_clients (state : state) =
 ;;
 
 let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~title ~hints styled_lines =
+    ~surface_key ~path ~hints styled_lines =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
   let scroll =
@@ -2304,7 +2313,7 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
   let window = Rows.of_list ~first:scroll ~height styled_lines in
   let buf = Buffer.create 4096 in
   box_top buf cols;
-  box_line buf cols (screen_title title ^ "  " ^ connection_badge state);
+  box_line buf cols (here_row ~cols state ~path ~readings:[] ~position:None);
   box_divider buf cols;
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
@@ -2321,10 +2330,13 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
     ~surface_key ~rows:terminal_rows ~cols buf
 
 let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~title ~hints lines =
+    ~surface_key ~path ~hints lines =
   let max_cells = max 1 (framed_inner_width cols - 2) in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
-    ~surface_key ~title ~hints (Page_reading.rows ~max_cells lines)
+    ~surface_key ~path ~hints (Page_reading.rows ~max_cells lines)
+
+(* The same words as the key that opens the reading ([Space] in the list). *)
+let lane_activity_step state = ui_text state ~ko:"켜고 끄기" ~en:"activity"
 
 let lane_activity_hints =
   "Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back"
@@ -2376,22 +2388,41 @@ let render_lane_inventory_detail (state : state) target =
       @ List.concat_map (wrap (Theme.warn ())) (Masc_tui_types.runtime_lane_stale_lines state)
       @ content
   in
+  (* The path names the row the list named: its label while the reading
+     holds the row, its id when the row is gone from the reading. *)
+  let path =
+    match target with
+    | None -> [ ui_text state ~ko:"문제" ~en:"issues" ]
+    | Some id ->
+        let label =
+          Option.bind state.lane_inventory (fun snapshot ->
+            List.find_opt
+              (fun (row : Masc.Tui_decode_lane_inventory.row) -> String.equal row.id id)
+              snapshot.rows)
+          |> Option.fold ~none:id ~some:(fun (row : Masc.Tui_decode_lane_inventory.row) -> row.label)
+        in
+        [ Terminal_text.single_line label ]
+  in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
-    ~surface_key:"lane-inventory-detail" ~title:" MASC Lane reading"
+    ~surface_key:"lane-inventory-detail" ~path
     ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End:top/bottom  r:refresh  Esc/Left:inventory"
     content
 
 let render_machine_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
   render_lane_scrollable_reading state ~terminal_rows ~cols
-    ~surface_key:"machine-activity" ~title:" MASC Machine activity"
+    ~surface_key:"machine-activity"
+    ~path:[ Masc.Machine_lane.to_wire (Masc_tui_machine_activity.owner session).machine
+          ; lane_activity_step state ]
     ~hints:lane_activity_hints
     (Masc_tui_machine_activity.lines session)
 
 let render_exact_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
   render_lane_scrollable_reading state ~terminal_rows ~cols
-    ~surface_key:"exact-activity" ~title:" MASC Exact activity"
+    ~surface_key:"exact-activity"
+    ~path:[ Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane
+          ; lane_activity_step state ]
     ~hints:lane_activity_hints
     (Masc_tui_exact_activity.lines session)
 

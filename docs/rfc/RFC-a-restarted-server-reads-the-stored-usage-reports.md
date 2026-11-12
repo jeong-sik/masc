@@ -21,7 +21,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 규칙은 하나다. **서버는 시작할 때 저장된 보고에서 계정의 창마다 가장 최근 값을 읽어 표에 올린다.**
 
 - 올린 값은 원래 관측 시각을 그대로 갖는다. 화면은 그 시각을 보여 준다.
-- 보고가 「창이 다 찼고 풀리는 시각이 아직 앞에 있다」고 하면, 살아 있는 보고와 똑같이 그 계정을 그 시각까지 쉬게 한다.
+- 보고가 「창이 다 찼고 풀리는 시각이 아직 앞에 있다」고 하면, 살아 있는 보고와 똑같이 그 계정을 그 시각까지 쉬게 한다. 살아 있는 보고가 쉬게 하지 않는 source(Claude Code, Codex)는 되읽어도 쉬게 하지 않는다. 그 계정들은 화면의 사용량만 돌아온다.
 - 풀리는 시각 없이 찼다는 보고는 쉬게 하지 않는다. 화면에만 올린다.
 - 새 저장소는 없다. 저장 행에 필드 하나(`role`)가 는다(R0).
 
@@ -54,6 +54,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 - `/api/v1/runtime/resolved` 는 `provider_usage_windows_since`(프로세스 시작 시각)와 계정별 `state` 를 낸다. 시작 뒤 보고가 없으면 `not_reported_since_start` 다.
 
 - 저장 행에는 창의 `role` 이 없다. `role`(`gates_model_calls` · `counts_other_use` · `unclassified_limit`)은 provider 응답의 다른 값에서 정해진다: Z.AI 는 `type`, Ollama 는 구매 잔액이 0보다 큰지. source 와 창 종류만으로는 되살릴 수 없다. `rest_scope` 는 `gates_model_calls` 창만 읽는다.
+- `rest_scope` 는 `gate_coverage` 가 있는 source 에만 불린다. Claude Code 이벤트와 Codex 는 `None` 이다(`runtime_provider_usage_window.ml` 의 `gate_coverage`): 말한 창만 갖고 있어서, 찬 창이 거절된 호출의 모델을 덮는지 알 수 없다. 이 계정들의 `quota_exhausted` 는 거절(`Hard_quota`)에서만 온다. 1.1 의 `e664f266` 이 그 경우다.
 
 저장은 이미 하고, 읽기는 14일 추이 화면(`Server_provider_usage_history.read`)만 한다. 시작할 때 표로 되읽는 길이 없다.
 
@@ -62,7 +63,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 - **R0** 저장 행에 `role` 을 적는다(`record_json`). 되읽기는 `role` 이 있는 행만 고른다. `role` 없는 옛 행을 위한 추정이나 변환은 두지 않는다: R0 이 설치되기 전에 저장된 행은 되읽지 않는다. 14일 추이 읽기는 이 필드를 보지 않는다.
 - **R1** `install` 은 관측자를 달기 전에 저장 기록을 읽는다. 지금 설정에 있는 quota scope 마다, `scope_id` 가 같은 행을 source 와 창 종류(`kind`, `limit_id`)별로 나누고 각각 `observed_at` 이 가장 늦은 행을 고른다. 계정 하나에서 가장 늦은 행 하나를 고르지 않는다: 자주 보고되는 창이 오래된 소진 창을 가린다. 더 늦은 `complete_snapshot` 보고가 싣지 않은 창은 고르지 않는다(`read` 가 하루치를 접는 규칙과 같다). 범위는 `read` 가 이미 접는 14일이다.
 - **R2** 고른 행들을 각자의 원래 `observed_at` 으로 메모리 표에 올린다. 이때 관측자는 부르지 않는다(같은 보고를 다시 저장하지 않는다).
-- **R3** 올린 창 전체에 `rest_scope` 를 지금 시각으로 적용한다. `Spent_until t` 이고 `t` 가 앞이면 `note_exhausted` 다. 살아 있는 보고가 타는 것과 같은 함수다.
+- **R3** 올린 창 전체에 `rest_scope` 를 지금 시각으로 적용한다. `Spent_until t` 이고 `t` 가 앞이면 `note_exhausted` 다. 살아 있는 보고가 타는 것과 같은 함수이고, 같은 source 에만 적용한다(`gate_coverage` 가 `None` 인 source 는 건너뛴다).
 - **R4** `Spent_without_reset` 은 `note_read_without_reset` 을 부르지 않는다. 그 쉼은 「관측한 순간부터 상한까지」인데, 관측한 순간이 재시작 전이다. 재시작 뒤에 그 길이를 다시 재면 masc 가 고른 시각으로 계정을 막게 된다.
 - **R5** 풀리는 시각이 이미 지난 창도 표에는 올린다. 쉬게 하지는 않는다. 화면은 관측 시각으로 오래된 값임을 보여 준다.
 - **R6** 계정 `state` 에 「저장 기록에서 읽음」을 더한다(`reported` · `not_reported_since_start` 옆의 세 번째 값). 시작 뒤 첫 보고가 오면 `reported` 가 된다. `provider_usage_windows_since` 의 뜻은 그대로다.
@@ -70,6 +71,7 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 
 ## 3. 이 규칙이 하지 않는 것
 
+- **Claude Code·Codex 계정을 쉬게 하기.** 되읽은 사용량은 화면에 「계정 한도 소진」으로 보이지만 `quota_exhausted` 는 `false` 로 남고 후보 순서도 그대로다. 1.1 의 계정은 재시작 뒤에도 한 번 거절당한 다음에야 쉰다. 운영자가 목록에서 찬 계정을 알아보는 것까지가 이 RFC 가 그 계정에 주는 것이다.
 - **거절만 있고 보고가 없는 한도.** API provider 의 402·HardQuota 가 말한 풀리는 시각은 사용량 보고가 아니라서 저장 기록에 없다. 재시작하면 지금처럼 잊는다. 이것까지 남기려면 거절을 저장하는 새 기록이 필요하고, 이 RFC 범위 밖이다.
 - **한 번도 보고한 적 없는 계정.** 1.1 의 시각에 다섯 계정(`mistral`, `claude`, `claude_vincent`, `opencode_go`, `tinker`)은 저장 기록이 0건이었다. 사용량을 묻는 경로가 없는 provider 다.
 - **인증 거절.** 스택 #51460 이 행에 따로 싣는다. 재시작하면 잊는다.
@@ -95,4 +97,4 @@ related: ["0433", "0370", "provider-path-rest", "exact-lane-waits-for-a-stated-r
 0. `record_json` 이 `role` 을 적는다(R0). 이 층만 먼저 설치돼도 된다.
 1. `Server_provider_usage_history`: 접힌 14일 결과에서 scope 별 최신 보고를 꺼내는 읽기. 시험: 날짜 파일 둘을 쓴 뒤 서버 상태를 새로 만들어 표와 한도 표를 읽는다. 한 계정에 창이 둘이고 더 오래 전에 보고된 창이 소진인 경우를 넣는다.
 2. `Runtime_provider_usage_window`: 관측자를 부르지 않고 올리는 진입점, `state` 의 세 번째 값, `/api/v1/runtime/resolved` 와 TUI·Dashboard 디코더.
-3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽어, 저장 기록에 「찼고 풀리는 시각 앞」이 있던 계정이 `quota_exhausted: true` 인지 본다.
+3. 설치 뒤 실측: 서버를 다시 시작하고 1분 안에 `/api/v1/runtime/resolved` 를 읽어, 저장 기록에 「찼고 풀리는 시각 앞」이 있던 계정을 본다. `gate_coverage` 가 있는 source 의 계정은 `quota_exhausted: true`, Claude Code·Codex 계정은 `provider_usage_windows` 에 그 창이 원래 `observed_at` 으로 있는지다.

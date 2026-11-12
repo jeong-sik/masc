@@ -24,7 +24,9 @@ follows its label, so a label no judge confirmed would become a wrong training
 target. `sample` therefore takes a request only when an --audit folder
 (`e_synth_audit.py cases` and `apply`) holds a case for its item ID and none of
 them took the request or its memory out. An audit records no sha256 of the
-requests it judged, so the item ID is all that ties a request to its case.
+requests it judged, so the item ID is all that ties a request to its case. A
+kept record names its request by item ID too, so requests of which two share
+one are not sampled.
 
 Each request gets up to ATTEMPTS answers, and sampling stops at the first
 answer that passes MASC's checks and leaves the memory its label asks for
@@ -52,6 +54,12 @@ Output: <out>/calls.jsonl (with the teacher's reasoning), <out>/kept.jsonl and
 <out>/pending.jsonl (item, attempt, answer), <out>/summary.json,
 <out>/merges/ (the judge's folder and the key), and from `apply`
 <out>/accepted.jsonl, the training targets, with <out>/accepted-summary.json.
+Training reads the targets from kept.jsonl, pending.jsonl and the judge's
+decisions as `apply` does (`accepted`), not from accepted.jsonl. `cases`,
+`apply` and training take a record only when its answer is the reply the call
+log holds for its request, asked as `sample` asks it now, and the answer is
+still the target its file holds (`target_answer`). They stop at a record that
+is not, and at a request with two records.
 """
 
 from __future__ import annotations
@@ -75,14 +83,14 @@ import merge_cases as MC
 import merge_decisions as MD
 import synth_render
 import synth_spec as S
-from tinker_oai import Caller
+from tinker_oai import Call, Caller, call_from_row, call_key
 
 TEACHER = "thinkingmachines/Inkling-2-Small:peft:262144"
 ATTEMPTS = 4
 WORKERS = 8
 # The target the merge judge's key names for teacher answers.
 TARGET = "teacher"
-KEPT, PENDING, ACCEPTED = "kept.jsonl", "pending.jsonl", "accepted.jsonl"
+CALLS, KEPT, PENDING, ACCEPTED = "calls.jsonl", "kept.jsonl", "pending.jsonl", "accepted.jsonl"
 MERGES = "merges"
 
 type JsonObject = dict[str, object]
@@ -241,11 +249,20 @@ def unconfirmed(item_ids: Iterable[str], audits: Sequence[Audit]) -> list[str]:
                   if i not in judged or i in items_out or D.memory_of(i) in memories_out)
 
 
+def by_item(items: list[M.SynthItem]) -> dict[str, M.SynthItem]:
+    """The requests by item ID. A record names its request by that ID alone, as an audit names the
+    request of a case. SystemExit when two requests share one."""
+    shared = sorted(item_id for item_id, n in Counter(item.item_id for item in items).items() if n > 1)
+    if shared:
+        raise SystemExit(f"{len(shared)} item IDs name more than one request, the first {shared[0]}")
+    return {item.item_id: item for item in items}
+
+
 def sample(args: argparse.Namespace) -> int:
     request = cast(JsonObject, V.load_pass_lines()["request"])
     effort, max_tokens = cast(str, request["reasoning_effort"]), cast(int, request["max_tokens"])
     out, requests = Path(cast(str, args.out)), Path(cast(str, args.requests))
-    items = V.synth_items(requests)
+    items = list(by_item(V.synth_items(requests)).values())
     audits = [audit_of(Path(audit)) for audit in cast(list[str], args.audit)]
     without = unconfirmed((item.item_id for item in items), audits)
     if without:
@@ -253,7 +270,7 @@ def sample(args: argparse.Namespace) -> int:
     out.mkdir(parents=True, exist_ok=True)
     instruction = V.schema_instruction()
     asked = [(item, messages_for(item, instruction)) for item in items]
-    caller = Caller(out / "calls.jsonl", cast(float, args.budget))
+    caller = Caller(out / CALLS, cast(float, args.budget))
 
     # Each worker returns what it saw; the counts are summed here, outside the worker threads.
     def one(job: tuple[M.SynthItem, list[str]]) -> Sampled:
@@ -291,24 +308,79 @@ def sample(args: argparse.Namespace) -> int:
     return 2 if caller.stopped is not None else 0
 
 
-def items_of(requests: Path, out: Path) -> dict[str, M.SynthItem]:
-    """The sampled requests by item. SystemExit when `requests` is not the file `sample` read."""
-    sampled = cast(JsonObject, json.loads((out / "summary.json").read_text(encoding="utf-8")))
-    if sampled["requests_sha256"] != D.file_sha256(requests):
+def read_jsonl(path: Path) -> list[JsonObject]:
+    """The rows `write_jsonl` wrote. A row ends at a line feed only: an answer may hold other
+    characters `str.splitlines` breaks a line at."""
+    return [cast(JsonObject, json.loads(line)) for line in path.read_text(encoding="utf-8").split("\n") if line]
+
+
+@dataclass(frozen=True, slots=True)
+class Sampling:
+    """A folder `sample` left, as `cases`, `apply` and training read it: its summary, the sampled
+    requests by item ID, what a teacher call is keyed by besides its messages, and the replies of
+    the call log by call key."""
+
+    summary: JsonObject
+    items: dict[str, M.SynthItem]
+    effort: str
+    max_tokens: int
+    instruction: str
+    replies: dict[str, Call]
+
+    def reply(self, item: M.SynthItem, attempt: int) -> str | None:
+        """The answer the call log holds for the request on that attempt, asked as `sample` asks it
+        now: the request as the template renders it, its label note and the schema instruction, at
+        the pass lines' reasoning effort and output budget."""
+        call = self.replies.get(call_key(TEACHER, self.effort, self.max_tokens, attempt,
+                                         messages_for(item, self.instruction)))
+        return call.answer() if call is not None else None
+
+
+def sampling_of(requests: Path, out: Path) -> Sampling:
+    """The folder `sample` left in `out` for `requests`. SystemExit when `requests` is not the file
+    `sample` read, or two of its requests share an item ID."""
+    summary = cast(JsonObject, json.loads((out / "summary.json").read_text(encoding="utf-8")))
+    if summary["requests_sha256"] != D.file_sha256(requests):
         raise SystemExit(f"{out} was sampled from other requests than {requests}")
-    return {i.item_id: i for i in V.synth_items(requests)}
+    request = cast(JsonObject, V.load_pass_lines()["request"])
+    calls = (call_from_row(row) for row in read_jsonl(out / CALLS))
+    return Sampling(summary, by_item(V.synth_items(requests)), cast(str, request["reasoning_effort"]),
+                    cast(int, request["max_tokens"]), V.schema_instruction(),
+                    {call.key: call for call in calls if call is not None and call.replied()})
 
 
-def waiting(items: dict[str, M.SynthItem], pending: list[JsonObject]) -> dict[tuple[str, str], AV.AdmissionAnswer]:
-    """Each waiting answer by (TARGET, item), as MASC's checks read it."""
-    out: dict[tuple[str, str], AV.AdmissionAnswer] = {}
-    for record in pending:
-        item = items[cast(str, record["item"])]
-        answer = V.check(item.prompt, cast(str, record["answer"])).answer
-        if answer is None:
-            raise SystemExit(f"{item.item_id}: the waiting answer is no longer accepted")
-        out[(TARGET, item.item_id)] = answer
-    return out
+def records(sampled: Sampling, out: Path) -> tuple[list[JsonObject], list[JsonObject]]:
+    """The records of kept.jsonl and of pending.jsonl. SystemExit when a record names no sampled
+    request or two records name one: `sample` writes at most one record for a request."""
+    kept, pending = read_jsonl(out / KEPT), read_jsonl(out / PENDING)
+    named = Counter(cast(str, record["item"]) for record in (*kept, *pending))
+    odd = sorted(item for item, n in named.items() if n > 1 or item not in sampled.items)
+    if odd:
+        raise SystemExit(f"{len(odd)} items of {KEPT} and {PENDING} have two records or no sampled request, "
+                         f"the first {odd[0]}")
+    return kept, pending
+
+
+def target_answer(sampled: Sampling, record: JsonObject, waits: bool) -> AV.AdmissionAnswer:
+    """The answer of a record of kept.jsonl (`waits` false) or pending.jsonl, as MASC's checks read
+    it. SystemExit unless the answer is the reply the call log holds for the record's request and
+    attempt (`Sampling.reply`), and `screened` still makes it the target that file holds."""
+    item = sampled.items[cast(str, record["item"])]
+    file = PENDING if waits else KEPT
+    reply = sampled.reply(item, cast(int, record["attempt"]))
+    if reply is None or reply != record["answer"]:
+        raise SystemExit(f"{item.item_id}: the answer in {file} is not the teacher's logged reply to the "
+                         "request as it is asked now")
+    check = V.check(item.prompt, reply)
+    got = screened(item, check, record)
+    if check.answer is None or not isinstance(got, Target) or got.waits != waits:
+        raise SystemExit(f"{item.item_id}: the answer in {file} is not a training target of that file any more")
+    return check.answer
+
+
+def waiting(sampled: Sampling, pending: list[JsonObject]) -> dict[tuple[str, str], AV.AdmissionAnswer]:
+    """Each waiting answer by (TARGET, item), as MASC's checks read it. SystemExit as `target_answer` says."""
+    return {(TARGET, cast(str, record["item"])): target_answer(sampled, record, True) for record in pending}
 
 
 def pending_files(out: Path) -> dict[str, str | None]:
@@ -317,9 +389,10 @@ def pending_files(out: Path) -> dict[str, str | None]:
 
 def cases(args: argparse.Namespace) -> int:
     out = Path(cast(str, args.out))
-    items = items_of(Path(cast(str, args.requests)), out)
+    sampled = sampling_of(Path(cast(str, args.requests)), out)
+    _, pending = records(sampled, out)
     slots = MC.guidance(synth_render.TEMPLATE.read_text(encoding="utf-8"))
-    collected = MC.collect(items, waiting(items, D.read_jsonl(out / PENDING)), slots)
+    collected = MC.collect(sampled.items, waiting(sampled, pending), slots)
     case_rows, key_rows = MC.render(collected, f"{pending_files(out)[PENDING]}:teacher-merges")
     folder = out / MERGES
     A.write_cases(folder, case_rows, key_rows, MC.judging(slots))
@@ -343,19 +416,42 @@ def judged_merges(out: Path, absorbs: frozenset[MD.Absorb]) -> MD.MergeAdjudicat
     return MD.MergeAdjudication(judged.judged, tuple(sorted(files.items())))
 
 
-def apply(args: argparse.Namespace) -> int:
-    out = Path(cast(str, args.out))
-    items = items_of(Path(cast(str, args.requests)), out)
-    kept, pending = D.read_jsonl(out / KEPT), D.read_jsonl(out / PENDING)
-    answers = waiting(items, pending)
+@dataclass(frozen=True, slots=True)
+class Accepted:
+    """The training targets of a sampled folder: the answers kept at once (`kept`) and, of the
+    waiting answers (`pending`), those whose every absorb the merge judge classed mergeable (`merged`)."""
+
+    kept: tuple[JsonObject, ...]
+    pending: tuple[JsonObject, ...]
+    merged: tuple[JsonObject, ...]
+    merges: MD.MergeAdjudication
+
+    def records(self) -> list[JsonObject]:
+        return [*self.kept, *self.merged]
+
+
+def accepted(sampled: Sampling, out: Path) -> Accepted:
+    """The training targets in `out`, read from kept.jsonl, pending.jsonl and the judge's decisions.
+    SystemExit as `records`, `target_answer` and `judged_merges` say."""
+    kept, pending = records(sampled, out)
+    for record in kept:
+        target_answer(sampled, record, False)
+    answers = waiting(sampled, pending)
     absorbs = frozenset((item, TARGET, mid) for (_, item), answer in answers.items() for mid, _ in answer.absorbed)
     merges = judged_merges(out, absorbs)
     merged = [r for r in pending
               if all(merges.judged.get((cast(str, r["item"]), TARGET, mid)) == "mergeable"
                      for mid, _ in answers[(TARGET, cast(str, r["item"]))].absorbed)]
-    write_jsonl(out / ACCEPTED, kept + merged)
-    summary = {"kept": len(kept), "pending": len(pending), "merged": len(merged), "accepted": len(kept) + len(merged),
-               "absorbs": dict(Counter(merges.judged.values())), "judge_files": dict(merges.judge_files)}
+    return Accepted(tuple(kept), tuple(pending), tuple(merged), merges)
+
+
+def apply(args: argparse.Namespace) -> int:
+    out = Path(cast(str, args.out))
+    got = accepted(sampling_of(Path(cast(str, args.requests)), out), out)
+    write_jsonl(out / ACCEPTED, got.records())
+    summary = {"kept": len(got.kept), "pending": len(got.pending), "merged": len(got.merged),
+               "accepted": len(got.records()), "absorbs": dict(Counter(got.merges.judged.values())),
+               "judge_files": dict(got.merges.judge_files)}
     (out / "accepted-summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary))
     return 0

@@ -201,8 +201,18 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     published, by the rule of {!authorize}. *)
 val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result
 
-(** Allows a start of a host client in a single-user process, and refuses it
-    in a multi-account process with {!Host_account}. *)
+(** Why the accounts of the host are not allowed. *)
+type host_refusal =
+  | Host_unpublished  (** The process has not published its access. *)
+  | Host_not_shared  (** A multi-account process shares no account of its host. *)
+
+(** Allows the accounts of the host in a single-user process. The decision
+    does not depend on who asks or for which client: phase 1 shares them with
+    nobody in a multi-account process. *)
+val host_access : unit -> (host_account, host_refusal) result
+
+(** {!host_access} for a start of [client]: a refusal is {!Not_published} or
+    {!Host_account} naming [client]. *)
 val authorize_host : host_client -> (host_account, refusal) result
 
 (** {1 API providers}

@@ -260,11 +260,25 @@ let authorize_muse request account =
   |> Result.map (fun () -> account)
 ;;
 
-let authorize_host client =
+type host_refusal =
+  | Host_unpublished
+  | Host_not_shared
+
+(* HIGH-RISK-UNREVIEWED: the one decision on the accounts of the host. Phase 1
+   shares them with nobody in a multi-account process, whoever asks and for
+   whichever client (plans D3b and D4). *)
+let host_access () =
   match Atomic.get state with
-  | Unpublished -> Error Not_published
+  | Unpublished -> Error Host_unpublished
   | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok Shared_by_single_user
-  | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
+  | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error Host_not_shared
+;;
+
+let authorize_host client =
+  host_access ()
+  |> Result.map_error (function
+    | Host_unpublished -> Not_published
+    | Host_not_shared -> Host_account client)
 ;;
 
 (* HIGH-RISK-UNREVIEWED: an API provider of the runtime table sends with the

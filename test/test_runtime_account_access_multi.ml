@@ -437,6 +437,10 @@ let test_multi_account () =
                 (Access.refusal_to_string refusal))
           Access.
             [ Antigravity; Vibe; Api_provider; Model_list; Files_api; Replacement_catalog ];
+        (match Access.host_access () with
+         | Error Access.Host_not_shared -> ()
+         | Error Access.Host_unpublished -> Alcotest.fail "the multi-account access was not published"
+         | Ok (_ : Access.host_account) -> Alcotest.fail "the accounts of the host were shared");
         (* An API runtime of the table is sealed. A sender takes its config
            only through the access, which refuses it here; a reader sees the
            declaration without the credential; and a verification, a real
@@ -567,6 +571,74 @@ let test_multi_account () =
                (Access.refusal_to_string refusal)
            | Ok (_ : Runtime.exact_output_catalog) ->
              Alcotest.fail "the replacement catalog was allowed");
+          (* The TypeSafe AI lane sends with the key each destination names,
+             an account of the host (plan D4c). With the key set, every gate
+             switched on and the local endpoint as the destination, the lane
+             and its gates give no destination, and the readings an operator
+             sees name the reason. *)
+          let jev_key_variable = "MASC_TEST_D4C_JEV_KEY" in
+          let found_policy = Runtime_typesafeai_policy.current () in
+          let lane, gates, health, standing =
+            with_env jev_key_variable "jev-key" (fun () ->
+              Runtime_typesafeai_policy.publish
+                { Runtime_schema.default_typesafeai with
+                  destinations =
+                    ( { Runtime_schema.typesafe_destination with
+                        endpoint = Printf.sprintf "http://127.0.0.1:%d/v1/systemone" port
+                      ; api_key_env = jev_key_variable
+                      }
+                    , [] )
+                ; absorb_gate = true
+                ; memory_recall = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
+                };
+              Fun.protect
+                ~finally:(fun () -> Runtime_typesafeai_policy.publish found_policy)
+                (fun () ->
+                  ( Masc.Typesafeai_config.lane_destinations ()
+                  , [ ( "Board attention"
+                      , Masc.Typesafeai_config.board_attention_destinations ~keeper_id:"reader" )
+                    ; ( "the absorb gate"
+                      , Masc.Typesafeai_config.absorb_gate_destinations ~keeper_id:"reader" )
+                    ; ( "memory recall"
+                      , Masc.Typesafeai_config.memory_recall_destinations ~keeper_id:"reader" )
+                    ]
+                  , Server_typesafeai_health.health_json ()
+                  , Server_memory_recall_standing.read
+                      ~keepers_dir:(Filename.temp_dir ~temp_dir:root "keepers-" "") )))
+          in
+          List.iter
+            (fun (label, destinations) ->
+              match destinations with
+              | Error Masc.Typesafeai_config.Host_account_not_shared -> ()
+              | Error reason ->
+                Alcotest.failf
+                  "%s was refused for another reason: %s"
+                  label
+                  (Masc.Typesafeai_config.unavailable_reason_to_string reason)
+              | Ok (_ : Masc.Typesafeai_config.destinations) ->
+                Alcotest.failf "%s was given a destination with the key of the host" label)
+            (("the lane", lane) :: gates);
+          Alcotest.(check (option string))
+            "the health of the lane names the reason"
+            (Some "host_account_not_shared")
+            (match health with
+             | `Assoc fields ->
+               (match List.assoc_opt "reason" fields with
+                | Some (`String reason) -> Some reason
+                | Some _ | None -> None)
+             | _ -> None);
+          (match standing with
+           | Ok { Server_memory_recall_standing.lane =
+                    Error Masc.Keeper_memory_recall_standing.Host_account_not_shared
+                ; keepers = _
+                } -> ()
+           | Ok { Server_memory_recall_standing.lane = Error reason; keepers = _ } ->
+             Alcotest.failf
+               "the recall reading names another reason: %s"
+               (Masc.Keeper_memory_recall_standing.reason_to_string reason)
+           | Ok { Server_memory_recall_standing.lane = Ok (); keepers = _ } ->
+             Alcotest.fail "the recall reading says the lane has a key"
+           | Error detail -> Alcotest.failf "the recall reading failed: %s" detail);
           Alcotest.(check int) "the endpoint saw no connection" 0 (Atomic.get connections));
         (* A native tool runs as the user of the server process and reaches
            the account homes of other people, so a model turn runs here only

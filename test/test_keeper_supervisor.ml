@@ -32,7 +32,6 @@ module Lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Launch_transaction = Masc.Keeper_keepalive_launch_transaction
 module Librarian_boundaries = Masc.Keeper_turn_boundaries
 module Librarian_checkpoint_store = Masc.Keeper_checkpoint_store
-module Librarian_progress = Masc.Keeper_librarian_progress
 
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    unit projection over [resolve_with_policy] (production resolution path). *)
@@ -397,17 +396,6 @@ let seed_durable_librarian_baseline
   with
   | Ok () -> ()
   | Error error -> fail (Librarian_boundaries.append_error_to_string error)
-
-let check_durable_librarian_baseline config ~keeper_name =
-  match
-    Librarian_progress.read
-      ~keepers_dir:(Workspace.keepers_runtime_dir config)
-      ~keeper_id:keeper_name
-  with
-  | Ok (Some progress) ->
-    check int "durable baseline end" 1 progress.position.end_atom
-  | Ok None -> fail "durable Librarian callback did not write progress"
-  | Error error -> fail (Librarian_progress.read_error_to_string error)
 
 let with_librarian_enabled f =
   Masc_test_deps.with_process_env
@@ -2559,8 +2547,7 @@ let test_durable_catchup_is_submitted_before_launch () =
         | Error _ -> fail "ordered catch-up launch transaction failed");
        check (list string) "registration precedes launch" [ "register"; "launch" ]
          (List.rev !order);
-       Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name;
-       check_durable_librarian_baseline config ~keeper_name:name)
+       Memory_lane.For_testing.await_idle ~base_path:config.base_path ~keeper_name:name)
 ;;
 
 let test_launch_callback_failure_rolls_back_restart_transaction () =

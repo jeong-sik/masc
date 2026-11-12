@@ -153,6 +153,7 @@ MachineSharePolicy {
 
 - `Self`는 `grantee = Runtime.owner`일 때만 유효하며 **Runtime 생성과 같은 append**로 만든다. 실행·조회 경로에서 생성하지는 않지만 인가 판정은 저장된 Self/Delegated를 읽어서만 한다.
 - 1단계에서 Human의 Keeper는 owner 한 명의 것이다. Keeper 턴은 owner의 Self grant로 인가하고(executor = owner), Keeper에 배정할 수 있는 Runtime은 owner가 Self grant를 가진 것뿐이다. 다른 사람의 Board 글이 Keeper를 깨워도 실행하는 쪽과 쓰는 구독은 owner의 것이다.
+- Keeper 이름은 사람마다 따로 센다(2026-11-12 사용자 결정, 이슈 #51073). 로그의 Keeper는 (owner, 이름) 쌍으로 찾는다. 두 사람이 같은 이름으로 각자 Keeper를 만들 수 있고, 서로의 것을 읽거나 돌리지 못한다. 운영자의 Keeper TOML과 이름이 같아도 다른 Keeper다. Off 뒤 단일 사용자가 돌리는 것은 운영자 Keeper뿐이고, 이름이 아니라 Runtime과 홈이 사람의 것인지로 막는다.
 - 2단계에서 Human의 Keeper는 Self가 아니라 owner가 명시한 Delegated를 사용한다. Runtime–Keeper binding/profile 승인 시점에 만들고, Human에게 공유했다는 사실만으로 Keeper에 상속하지 않는다.
 - **MachineShared는 wildcard가 아니라 `MachineSharePolicy + 승인된 사람별 Delegated`다.** 정책 자체는 실행 권한이 아니다. 미래 principal은 grant가 없으므로 자동 포함되지 않는다. 사람 추가는 해당 Delegated 생성, 제거는 그 grant의 회수다.
 - `member_template_effects`는 신규 member grant 생성 시 초기값일 뿐 현재 정책의 권한이 아니다. 정책 수정으로 기존 member grant를 암묵 변경하지 않는다. 실제 효과 변경은 대상 grant를 지정한 `Grant_effect_update`로만 하며, 관련 행을 같은 append로 갱신한다.

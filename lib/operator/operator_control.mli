@@ -4,6 +4,7 @@ include module type of Operator_digest
 val invalidate_snapshot_cache : unit -> unit
 
 val snapshot_json :
+  ?read_policy:Dashboard_projection_read.t ->
   ?actor:string ->
   ?view:string ->
   ?include_messages:bool ->

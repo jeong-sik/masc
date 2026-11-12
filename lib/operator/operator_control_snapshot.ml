@@ -557,6 +557,7 @@ include Operator_control_snapshot_cache
 let namespace_scope_cache_segment (_config : Workspace_utils.config) = "default"
 
 let snapshot_json
+      ?(read_policy = Dashboard_projection_read.Reuse)
       ?actor
       ?view
       ?(include_messages = true)
@@ -657,12 +658,16 @@ let snapshot_json
     timed "board_attention_quarantines" (fun () ->
       if initialized && include_keepers
       then
-        let cache_key = "operator:board-quarantines:" ^ config.base_path in
-        Dashboard_cache.get_or_compute cache_key ~ttl:10.0
-          (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+        let read_inventory () =
              Keeper_board_attention_quarantine_command.inventory_json
                ~base_path:config.base_path
-               ~keeper_names))
+               ~keeper_names in
+        (match read_policy with
+         | Dashboard_projection_read.Current -> read_inventory ()
+         | Reuse ->
+             let cache_key = "operator:board-quarantines:" ^ config.base_path in
+             Dashboard_cache.get_or_compute cache_key ~ttl:10.0
+               (Pool_work.cpu ~name:__FUNCTION__ read_inventory))
       else `Assoc [ "count", `Int 0; "items", `List []; "errors", `List [] ])
   in
   let result =
@@ -755,5 +760,7 @@ let snapshot_json
     result
   in
   let ttl = Env_config_runtime_services.Operator.cache_ttl_sec in
-  get_or_compute cache_key ~ttl compute_snapshot
+  match read_policy with
+  | Dashboard_projection_read.Current -> compute_snapshot ()
+  | Reuse -> get_or_compute cache_key ~ttl compute_snapshot
 ;;

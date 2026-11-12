@@ -24,7 +24,8 @@ let affects Execution_trust = function
   | Telemetry_gap { source = None; _ }
   | Telemetry_gap { source = Some (Keeper_metric | Agent_event | Tool_call_io
       | Trajectory_tool_call | Tool_usage | Agent_core_event | Goal_event | Tool_metric); _ }
-  | Chat_operation _ | Agent_core _ | Board | Execution_invalidated | Telemetry_sample -> false
+  | Chat_operation _ | Agent_core _ | Board | Execution_invalidated | Telemetry_sample
+  | Workspace_agent_signal _ | Workspace_messages _ -> false
 ;;
 
 type 'a generation = {

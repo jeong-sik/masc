@@ -1,3 +1,14 @@
+type observation = { json : Yojson.Safe.t; next_deadline_unix : float option }
+
+val observe_current :
+  ?actor:string -> ?light:bool -> config:Workspace.config ->
+  sw:Eio.Switch.t -> clock:'a Eio.Time.clock ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option -> unit -> observation
+(** Source-triggered current metadata, with policy/window deadlines from the
+    same observation. It bypasses the actor and nested operator metadata TTLs.
+    The caller owns the existing compute timeout and failure retry policy;
+    this function never converts a timeout into a successful JSON envelope. *)
+
 val json :
   ?actor:string ->
   ?fixture:string ->

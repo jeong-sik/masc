@@ -202,6 +202,27 @@ let worker_state_of_agent
         ];
   }
 
+let continuity_liveness_of_keeper keeper =
+  let open Result.Syntax in
+  (* Validate health even for a paused row; unknown wire state stays unread. *)
+  let* health =
+    let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
+    match Keeper_status_runtime.keeper_health_of_string_opt raw with
+    | Some value -> Ok value
+    | None -> Error (Printf.sprintf "unknown health %S" raw)
+  in
+  let* paused =
+    match Json_util.assoc_member_opt "paused" keeper with
+    | None -> Ok false
+    | Some (`Bool value) -> Ok value
+    | Some other -> Error (Printf.sprintf "paused is not a boolean: %s" (Yojson.Safe.to_string other))
+  in
+  Ok (if paused then Cl_paused else match health with
+    | Keeper_types.KH_offline -> Cl_offline
+    | KH_failing -> Cl_failing
+    | KH_healthy | KH_idle -> Cl_live)
+;;
+
 let continuity_row_of_keeper ~(now_ts : float) keeper
   : (continuity_context, string) result =
   let open Result.Syntax in
@@ -240,42 +261,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper
   in
   let int_field_default key json = Option.value ~default:0 (Json_util.assoc_int_opt key json) in
   let turn_count = int_field_default "turn_count" keeper in
-  (* Operator observation publishes a pause override in the same [status] field as
-     the surface status, so this classifies the published vocabulary rather than
-     the surface subset. A paused keeper is neither offline nor running: it is
-     not failing, and it is also not going to make progress, so it carries its
-     own liveness rather than borrowing either verdict. *)
-  (* Two readings, read separately. [paused] is a person's decision and health
-     is an observation; a single status word cannot answer both.
-
-     Health is parsed whether or not the keeper is paused, so a health this
-     build cannot read is rejected either way. Validating it only on the
-     unpaused path would grant producer drift a free pass on every paused
-     keeper - the permissive fallback moved one field over. *)
-  let* health =
-    let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
-    match Keeper_status_runtime.keeper_health_of_string_opt raw with
-    | Some value -> Ok value
-    | None -> Error (Printf.sprintf "unknown health %S" raw)
-  in
-  let* paused =
-    match Json_util.assoc_member_opt "paused" keeper with
-    | None -> Ok false
-    | Some (`Bool value) -> Ok value
-    | Some other ->
-      Error
-        (Printf.sprintf
-           "paused is not a boolean: %s"
-           (Yojson.Safe.to_string other))
-  in
-  let liveness =
-    if paused then Cl_paused
-    else
-      match health with
-      | Keeper_types.KH_offline -> Cl_offline
-      | KH_failing -> Cl_failing
-      | KH_healthy | KH_idle -> Cl_live
-  in
+  let* liveness = continuity_liveness_of_keeper keeper in
   let continuity_offline =
     match liveness with
     | Cl_offline -> true
@@ -503,3 +489,66 @@ let build_continuity_briefs ~(now_ts : float) keepers : continuity_context list 
          let by_tone = Int.compare right.tone_rank left.tone_rank in
          if by_tone <> 0 then by_tone
          else Float.compare right.last_signal_ts left.last_signal_ts)
+
+let earlier_deadline left right =
+  match left, right with
+  | None, deadline | deadline, None -> deadline
+  | Some left, Some right -> Some (Float.min left right)
+;;
+
+let next_policy_change_unix ~now_ts ~agents ~messages ~keepers =
+  let age_deadline ~strict ~since ~threshold =
+    if since <= 0.0 || not (Float.is_finite since && Float.is_finite threshold)
+    then None
+    else
+      let age = Float.max 0.0 (now_ts -. since) in
+      if (if strict then age > threshold else age >= threshold) then None
+      else
+        let at = since +. threshold in
+        let at = if strict then Float.next_after at infinity else at in
+        if Float.is_finite at then Some at else None
+  in
+  let messages_by_agent = last_message_map messages in
+  let next_agent next (agent : Masc_domain.agent) =
+    let seen = Dashboard_utils.parse_iso_opt (String_util.trim_nonempty agent.last_seen)
+      |> Option.value ~default:0.0 in
+    let message = Agent_name_map.find_opt
+        (String.lowercase_ascii (String.trim agent.name)) messages_by_agent
+      |> Option.fold ~none:0.0 ~some:fst in
+    let since = Float.max seen message in
+    let thresholds = match agent.status with
+      | Masc_domain.Inactive -> [signal_live_sec]
+      | Active | Busy | Listening -> [signal_live_sec; signal_quiet_sec; signal_stale_sec] in
+    List.fold_left (fun next threshold ->
+      earlier_deadline next (age_deadline ~strict:true ~since ~threshold)) next thresholds
+  in
+  let next_keeper next keeper =
+    let last_action = Dashboard_utils.parse_iso_opt
+        (String_util.trim_nonempty (string_field "tool_audit_at" keeper)) in
+    let since = match last_action with
+      | Some at when at > 0.0 -> at
+      | Some _ | None ->
+          latest_iso_timestamp
+            [String_util.trim_nonempty (string_field "tool_audit_at" keeper);
+             String_util.trim_nonempty (string_field "updated_at" keeper)]
+          |> Dashboard_utils.parse_iso_opt |> Option.value ~default:0.0 in
+    let next = match continuity_liveness_of_keeper keeper with
+      | Ok Cl_live -> earlier_deadline next
+          (age_deadline ~strict:false ~since ~threshold:keeper_action_stale_sec)
+      | Ok (Cl_offline | Cl_paused | Cl_failing) | Error _ -> next in
+    match Keeper_status_runtime.keeper_quiet_reason_of_string_opt
+        (string_field "quiet_reason" (member_assoc "diagnostic" keeper)) with
+    | Some Starting_up ->
+      (match Dashboard_utils.parse_iso_opt (String_util.trim_nonempty (string_field "created_at" keeper)) with
+       | Some at when at > 0.0 ->
+           (* This row may have been rendered before the other rows. Its
+              published startup state still owes this transition if assembly
+              has already crossed the deadline. *)
+           let at = Float.next_after
+               (at +. Keeper_status_runtime.agent_staleness_threshold_s) infinity in
+           if Float.is_finite at then earlier_deadline next (Some at) else next
+       | Some _ | None -> next)
+    | Some (Proactive_disabled | Keepalive_not_running | Never_started) | None -> next
+  in
+  List.fold_left next_keeper (List.fold_left next_agent None agents) keepers
+;;

@@ -87,6 +87,8 @@ class Sources(unittest.TestCase):
             "masc.opam",
             ".github/actions/pin-ocaml-deps/action.yml",
             ".github/workflows/pr-type-check.yml",
+            "scripts/ci/pr_source_changes.py",
+            "scripts/ci/test_pr_source_changes.py",
         ):
             self.assertTrue(changes.is_source(path), path)
 
@@ -96,7 +98,7 @@ class Sources(unittest.TestCase):
             "docs/dune",
             "dashboard/src/a.ts",
             "changelog.d/1.md",
-            "scripts/ci/pr_source_changes.py",
+            "scripts/ci/apt-refresh.sh",
             ".github/workflows/test.yml",
             "vendor/dune-project",
             "lib/a.ml.orig",

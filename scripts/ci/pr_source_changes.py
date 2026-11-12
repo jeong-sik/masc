@@ -32,7 +32,15 @@ from typing import Iterable, assert_never, cast
 _SHA = re.compile(r"[0-9a-f]{40}")
 _SOURCE_SUFFIXES = (".ml", ".mli", ".inc", ".opam")
 _SOURCE_PREFIXES = (".github/actions/",)
-_SOURCE_PATHS = frozenset({"dune-project", ".github/workflows/pr-type-check.yml"})
+# The workflow, this script and its tests are sources too: the type-check job
+# is the one pull request job with a checkout, so it runs these tests, and a
+# change to any of the three must start it.
+_SOURCE_PATHS = frozenset({
+    "dune-project",
+    ".github/workflows/pr-type-check.yml",
+    "scripts/ci/pr_source_changes.py",
+    "scripts/ci/test_pr_source_changes.py",
+})
 _DUNE = "dune"
 # docs/evidence keeps .ml snapshots as data. No dune file under docs/ builds
 # them, so a docs-only change needs no type-check.
@@ -68,8 +76,8 @@ def is_source(path: str) -> bool:
     """True when a change to `path` can change what `dune build @check` reads.
 
     The root `dune` file builds every tracked directory, so sources are matched
-    repository-wide (#48323). A change to the reusable actions or to the
-    workflow itself must be checked by the workflow.
+    repository-wide (#48323). A change to the reusable actions, to the
+    workflow or to this script must be checked by the workflow.
     """
     if path.startswith(_DATA_PREFIX):
         return False

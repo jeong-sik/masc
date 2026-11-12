@@ -141,6 +141,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # The tests of the script that decided to run this job. They run here
+      # because this is the one pull request job with a checkout; the script
+      # counts itself and these tests as sources, so a change to either
+      # starts this job. About six seconds, before the toolchain is set up.
+      - name: Test the type-check decision script
+        run: python3 -I scripts/ci/test_pr_source_changes.py
+
       # The path and the key prefix are the ones main-minimal-build.yml
       # saves under; a different path would never match its cache entry.
       - name: Dune build cache location

@@ -51,7 +51,7 @@ beforeEach(() => {
   artifactPublicationOutcomes.clear(); shared.finish = null
   vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(getWithResponse).mockReset(); vi.mocked(post).mockReset()
   setStoredToken('fixture-token')
-  shared.workspace.value = { epoch: 'fixture', workspaceRoot: workspace.basePath, connectionGeneration: 1 }
+  shared.workspace.value = { epoch: 'fixture', workspaceRoot: workspace.basePath, connectionGeneration: 1, observerInstanceId: null }
   route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: id }, postId: null }
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1'
     ? { paths: { effective_base_path: workspace.basePath, effective_masc_root: workspace.mascRoot } }
@@ -161,7 +161,7 @@ it.each(['workspace', 'credential'] as const)('retains the publication workspace
   })
   await act(() => {
     if (change === 'credential') clearStoredToken()
-    else shared.workspace.value = { epoch: 'replacement', workspaceRoot: workspace.basePath, connectionGeneration: 2 }
+    else shared.workspace.value = { epoch: 'replacement', workspaceRoot: workspace.basePath, connectionGeneration: 2, observerInstanceId: null }
   })
   await screen.findByText(/게시 당시 작업 공간의 접근 상태를 확인한 뒤/)
   expect(vi.mocked(get).mock.calls.some(([path]) => path.includes(id) && path.includes('revision=3'))).toBe(false)

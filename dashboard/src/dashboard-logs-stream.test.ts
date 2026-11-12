@@ -1,5 +1,6 @@
+import { confirmRuntimeTestWorkspace, RUNTIME_TEST_OBSERVER_INSTANCE } from './lib/runtime-workspace.test-fixture'
 import { Effect } from 'effect'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiRequestError, clearStoredToken, setStoredToken } from './api/core'
 import { decodeLogsStreamFrame, type LogsStreamFrame } from './api/schemas/logs'
 import { logStreamWire } from './test-support/logs-stream-fixture'
@@ -16,6 +17,7 @@ import { publishDashboardObservationRecovery } from './lib/observation-refresh'
 const disposers: Array<() => void> = []
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 const frame = (seqs: readonly number[], reset = true) => Effect.runSync(decodeLogsStreamFrame(logStreamWire(seqs, reset)))
+beforeEach(confirmRuntimeTestWorkspace)
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose()
   read.mockReset(); recoverToken.mockReset().mockResolvedValue(false)
@@ -27,11 +29,12 @@ describe('shared native log stream', () => {
     vi.useFakeTimers()
     let emit!: (frame: LogsStreamFrame) => void
     let signal!: AbortSignal
-    read.mockImplementation((_request, received, apply) => { signal = received; emit = apply; return new Promise(() => {}) })
+    read.mockImplementation((_request, _instance, received, apply) => { signal = received; emit = apply; return new Promise(() => {}) })
     const first = vi.fn(), second = vi.fn()
     const a = subscribeDashboardLogsStream({ limit: 200 }, { onFrame: first, onError: vi.fn(), onReset: vi.fn() })
     disposers.push(a)
     await flush()
+    expect(read.mock.calls[0]![1]).toBe(RUNTIME_TEST_OBSERVER_INSTANCE)
     emit(frame([3, 2])); emit(frame([4], false))
     const b = subscribeDashboardLogsStream({ limit: 200 }, { onFrame: second, onError: vi.fn(), onReset: vi.fn() })
     disposers.push(b)
@@ -48,7 +51,7 @@ describe('shared native log stream', () => {
     let reject!: (error: unknown) => void
     const emits: Array<(frame: LogsStreamFrame) => void> = []
     const signals: AbortSignal[] = []
-    read.mockImplementation((_request, signal, apply) => {
+    read.mockImplementation((_request, _instance, signal, apply) => {
       signals.push(signal); emits.push(apply)
       return new Promise((_resolve, refuse) => { reject = refuse })
     })

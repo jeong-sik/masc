@@ -27,7 +27,7 @@ import { KeeperMetricsPanel } from './keeper-metrics-panel'
 import { clearStoredToken, setStoredToken } from '../api/core'
 
 const keeper = { name: 'selected' } as Keeper
-const authority = (root: string): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1 })
+const authority = (root: string): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1, observerInstanceId: null })
 const windowOf = (value: number): KeeperMetricsWindow => ({
   keeper: keeper.name, series: [{ ts: 1, total_tokens: value }] as KeeperMetricsWindow['series'],
   scannedRows: 1, skippedRows: 0, limit: 120,

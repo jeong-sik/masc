@@ -34,3 +34,5 @@ val is_invalidation : Masc.Sse.external_event -> bool
 val add_routes :
   sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
+(** Requires the original observation's [Sse_wire.instance_header]. Success
+    attests that exact instance; workspace replacement retires the query. *)

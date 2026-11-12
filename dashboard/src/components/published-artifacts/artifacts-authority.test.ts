@@ -35,7 +35,7 @@ function pending<T = unknown>() {
   const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail })
   return { promise, resolve, reject }
 }
-const authority = (root = '/workspace-a'): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1 })
+const authority = (root = '/workspace-a'): ExecutionWorkspaceAuthority => ({ epoch: 'fixture', workspaceRoot: root, connectionGeneration: 1, observerInstanceId: null })
 const firstId = `artifact-${'a'.repeat(32)}`, secondId = `artifact-${'b'.repeat(32)}`
 const first = { id: firstId, revision: 2, title: 'Original report', summary: 'report summary', format: 'markdown', author: 'writer',
   created_at: '2026-10-22T01:00:00Z', task_id: null, goal_id: null, url: '/dashboard', body: { _blob: { sha256: 'a'.repeat(64) } } }

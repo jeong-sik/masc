@@ -814,14 +814,17 @@ let cors_allow_headers_value =
     [ "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, \
        Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name"
     ; Request_workspace_precondition.expected_base_path_header
-    ; Request_workspace_precondition.expected_masc_root_header ]
+    ; Request_workspace_precondition.expected_masc_root_header
+    ; Sse_wire.instance_header ]
 
 let cors_expose_headers_value =
   String.concat ", "
     [ "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining"
     ; fst Workspace.read_precondition_admission_header
     ; fst Server_utils.goal_tree_direct_read_header
-    ; "x-masc-runtime-instance-id, x-masc-execution-publication-epoch" ]
+    ; "x-masc-runtime-instance-id, x-masc-execution-publication-epoch"
+    ; Sse_wire.instance_header
+    ; Server_mcp_transport_http_headers.observer_idle_timeout_header ]
 
 let cors_headers origin =
   let base = [

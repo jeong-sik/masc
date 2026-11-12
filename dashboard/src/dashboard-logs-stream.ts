@@ -19,10 +19,11 @@ function appendSnapshot(previous: LogsData | null, frame: LogsStreamFrame): Logs
 export const subscribeDashboardLogsStream = createQueryObservationStream<LogsRequest, LogsStreamFrame, LogsStreamError>({
   key: request => logsPath(request, true),
   recoveryTopics: ['logs'],
-  read: (request, previous, signal, onFrame, onActivity) => readDashboardLogsStream({
+  read: (request, previous, signal, onFrame, onActivity, observerInstance) => readDashboardLogsStream({
     ...request, sinceSeq: previous && previous.data.ring.total > 0 ? previous.data.ring.total - 1 : undefined,
-  }, signal, onFrame, onActivity),
+  }, observerInstance, signal, onFrame, onActivity),
   merge: (previous, frame) => ({ ...frame, reset: true, data: appendSnapshot(previous?.data ?? null, frame) }),
+  readOutcome: () => 'complete',
   failure: cause => cause instanceof LogsStreamError ? cause
     : new LogsStreamError(cause instanceof Error ? cause.message : String(cause)),
   terminal: cause => cause instanceof LogsSchemaDriftError || cause instanceof LogsStreamError

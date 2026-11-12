@@ -55,7 +55,7 @@ beforeEach(() => {
   artifactPublicationOutcomes.clear()
   vi.mocked(get).mockReset(); vi.mocked(getPublic).mockReset(); vi.mocked(post).mockReset()
   setStoredToken('credential-a')
-  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1 }
+  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace-a', connectionGeneration: 1, observerInstanceId: null }
   route.value = { tab: 'workspace', params: { section: 'artifacts' }, postId: null }
   vi.mocked(get).mockImplementation(async path => path === '/health?full=1' ? health : path === list ? { artifacts: [artifact], diagnostics: [] }
     : path === '/api/v1/published-artifact-checks' ? { checks: [], diagnostics: [] } : original)
@@ -94,7 +94,7 @@ it.each(['same', 'replacement'] as const)('retains unsent file bytes through a s
   expect(navigate).toHaveBeenLastCalledWith('workspace', { section: 'repositories' })
   if (authority === 'replacement') await act(() => {
     setStoredToken('credential-b')
-    workspace.current.value = { epoch: 'replacement', workspaceRoot: '/workspace-b', connectionGeneration: 2 }
+    workspace.current.value = { epoch: 'replacement', workspaceRoot: '/workspace-b', connectionGeneration: 2, observerInstanceId: null }
   })
   await act(() => navigate('workspace', { section: 'artifacts' }))
   await screen.findByRole('button', { name: '파일 가져오기' })
@@ -487,7 +487,7 @@ it.each(['credential', 'workspace', 'withdrawal', 'same-root'] as const)('recove
   await act(() => {
     if (change === 'credential') setStoredToken('credential-b')
     else if (change === 'withdrawal') workspace.current.value = null
-    else workspace.current.value = { epoch: 'replacement', workspaceRoot: change === 'workspace' ? '/workspace-b' : '/workspace-a', connectionGeneration: 2 }
+    else workspace.current.value = { epoch: 'replacement', workspaceRoot: change === 'workspace' ? '/workspace-b' : '/workspace-a', connectionGeneration: 2, observerInstanceId: null }
   })
   const recovery = within(await screen.findByRole('region', { name: '이전 접근 상태의 원고' }))
   expect(recovery.getByText('보존할 제목')).toBeTruthy()

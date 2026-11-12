@@ -1,6 +1,7 @@
 import { readCandleRosterObservation, type CandleReading } from './lib/candle-observation'
 import { acceptedExecutionWorkspace } from './execution-workspace-authority'
 export { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from './execution-workspace-authority'
+import { isObserverInstance } from './lib/observer-protocol'
 import { decodeGoalProof } from './api/goal-proof'
 import { decodeGoalResumePhase } from './api/goal-lifecycle'
 import { fetchKeeperDeletions, type KeeperDeletionInventory } from './api/keeper-lifecycle'
@@ -1135,19 +1136,23 @@ function withdrawExecutionWorkspaceAuthority(): void {
 function acceptExecutionWorkspace(
   epoch: string | null,
   workspaceRoot: unknown,
+  observerInstance: unknown,
 ): void {
   if (epoch === null || typeof workspaceRoot !== 'string' || workspaceRoot.trim() === '') {
     withdrawExecutionWorkspaceAuthority()
     return
   }
   const previous = acceptedExecutionWorkspace.peek()
+  const observerInstanceId = typeof observerInstance === 'string' && isObserverInstance(observerInstance)
+    ? observerInstance : null
   if (
     previous?.epoch === epoch
     && previous.workspaceRoot === workspaceRoot
     && previous.connectionGeneration === executionHydrationRequestGeneration
+    && previous.observerInstanceId === observerInstanceId
   ) return
   acceptedExecutionWorkspace.value = Object.freeze({
-    epoch, workspaceRoot, connectionGeneration: executionHydrationRequestGeneration,
+    epoch, workspaceRoot, connectionGeneration: executionHydrationRequestGeneration, observerInstanceId,
   })
 }
 
@@ -1292,7 +1297,7 @@ export function hydrateExecutionSnapshot(
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   // Read the current response only. mergeServerStatus may retain an old root
   // for presentation; that root cannot admit account reads in this response.
-  acceptExecutionWorkspace(identity?.epoch ?? null, normalizedStatus?.workspace_root)
+  acceptExecutionWorkspace(identity?.epoch ?? null, normalizedStatus?.workspace_root, data.observer_instance_id)
   const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)

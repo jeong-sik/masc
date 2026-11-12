@@ -1309,9 +1309,13 @@ let log_stream_query : Server_logs_query.t =
   }
 
 (* The stream's loop runs in [outside], a switch that outlives the HTTP/2
-   stream, as the router's switch does. A frame is its entries' messages. *)
+   stream, as the router's switch does. A frame is its entries' messages.
+   The workspace of these streams is never replaced. *)
 let log_stream_handler ~clock ~outside ~stream_end _ h2_reqd =
   Log_stream.serve ~sw:(Eio.Promise.await outside) ~clock
+    ~instance:log_stream_module
+    ~current:(fun () -> true)
+    ~replaced:Eio.Fiber.await_cancel
     ~encode:(fun (frame : Log_stream.frame) ->
       Printf.sprintf "data: %s\n\n"
         (String.concat "," (List.map (fun (entry : Log.Ring.entry) -> entry.message) frame.entries)))

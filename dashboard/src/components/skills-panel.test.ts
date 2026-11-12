@@ -58,7 +58,7 @@ import {
 
 beforeEach(() => {
   expect(executionWorkspaceAuthority).toBe(workspace.current)
-  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1 }
+  workspace.current.value = { epoch: 'fixture', workspaceRoot: '/workspace', connectionGeneration: 1, observerInstanceId: null }
   setStoredToken('fixture-token')
 })
 afterEach(() => {

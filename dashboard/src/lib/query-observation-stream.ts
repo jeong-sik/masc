@@ -2,6 +2,8 @@ import { ApiRequestError, currentStoredTokenRevision, subscribeStoredTokenChange
 import { refreshDevTokenAfterAuthError } from '../api/dev-token'
 import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
 import { executionWorkspaceAuthority } from '../store'
+import { QueryStreamScopeError } from '../api/query-observation-stream'
+import { isObserverInstance } from './observer-protocol'
 import { subscribeDashboardObservation, type DashboardObservationTopic } from './observation-refresh'
 
 export type QueryStreamReset = 'initial' | 'authority' | 'recovery'
@@ -21,8 +23,9 @@ interface QueryStreamAdapter<Request, Frame, Failure extends Error> {
   readonly key: (request: Request) => string
   readonly recoveryTopics: readonly DashboardObservationTopic[]
   readonly read: (request: Request, previous: Frame | null, signal: AbortSignal,
-    onFrame: (frame: Frame) => void, onActivity: () => void) => Promise<void>
+    onFrame: (frame: Frame) => void, onActivity: () => void, observerInstance: string) => Promise<void>
   readonly merge: (previous: Frame | null, frame: Frame) => Frame
+  readonly readOutcome: (frame: Frame) => 'complete' | 'partial'
   readonly failure: (cause: unknown) => Failure
   readonly terminal: (cause: unknown) => boolean
 }
@@ -58,24 +61,29 @@ export function createQueryObservationStream<Request, Frame, Failure extends Err
     const connect = async () => {
       if (!active) return
       const owner = generation
+      const originalAuthority = authority
       const readController = new AbortController()
       controller = readController
       const current = () => active && generation === owner && !readController.signal.aborted
-      let hasFrame = false
-      const activity = () => { if (current() && hasFrame) retryDelay = TRANSPORT_RETRY_BASE_MS }
+      let hasSuccessfulRead = false
+      const activity = () => { if (current() && hasSuccessfulRead) retryDelay = TRANSPORT_RETRY_BASE_MS }
       try {
+        if (originalAuthority === null || !isObserverInstance(originalAuthority.observerInstanceId)) {
+          throw new QueryStreamScopeError('Original observation scope is unavailable')
+        }
         await adapter.read(request, snapshot, readController.signal, frame => {
           if (!current()) return
           snapshot = adapter.merge(snapshot, frame)
-          hasFrame = true
+          hasSuccessfulRead = adapter.readOutcome(frame) === 'complete'
           error = null
           activity()
           for (const reader of [...readers]) reader.onFrame(frame)
-        }, activity)
+        }, activity, originalAuthority.observerInstanceId)
         if (current()) throw new Error('Observation stream ended before cancellation')
       } catch (cause) {
         if (!current()) return
-        refused = cause instanceof ApiRequestError && (cause.status === 401 || cause.status === 403)
+        refused = cause instanceof QueryStreamScopeError
+          || cause instanceof ApiRequestError && (cause.status === 401 || cause.status === 403)
         if (cause instanceof ApiRequestError && cause.status === 401
           && recoveredTokenRevision !== currentStoredTokenRevision()) {
           recoveredTokenRevision = currentStoredTokenRevision()

@@ -20,10 +20,10 @@ export function toolSeriesStreamPath(request: ToolMetricsSeriesRequest): string 
 }
 
 export async function readToolSeriesStream(
-  request: ToolMetricsSeriesRequest, signal: AbortSignal,
+  request: ToolMetricsSeriesRequest, observerInstance: string, signal: AbortSignal,
   onFrame: (frame: ToolMetricsSeriesResponse) => void, onActivity?: () => void,
 ): Promise<void> {
-  await readQueryObservationStream(toolSeriesStreamPath(request), signal, wire => {
+  await readQueryObservationStream(toolSeriesStreamPath(request), observerInstance, signal, wire => {
     if (isRecord(wire) && typeof wire.error === 'string') throw new ToolSeriesReadError(wire.error)
     let frame: ToolMetricsSeriesResponse
     try { frame = parseToolMetricsSeriesResponse(wire) }
@@ -39,8 +39,10 @@ export const subscribeToolSeriesStream = createQueryObservationStream<
 >({
   key: toolSeriesStreamPath,
   recoveryTopics: ['tool_metrics', 'tools'],
-  read: (request, _previous, signal, onFrame, onActivity) => readToolSeriesStream(request, signal, onFrame, onActivity),
+  read: (request, _previous, signal, onFrame, onActivity, observerInstance) =>
+    readToolSeriesStream(request, observerInstance, signal, onFrame, onActivity),
   merge: (_previous, frame) => frame,
+  readOutcome: () => 'complete',
   failure: cause => cause instanceof ToolSeriesStreamError ? cause
     : new ToolSeriesStreamError(cause instanceof Error ? cause.message : String(cause)),
   terminal: cause => cause instanceof QueryStreamProtocolError,

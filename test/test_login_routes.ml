@@ -420,6 +420,34 @@ let clears_the_transaction answer =
   Alcotest.(check (option string)) "the transaction cookie is cleared" (Some "") (cookie_set ~name:Q.transaction_cookie answer)
 ;;
 
+(* A refused page applies the one sheet of its frame and runs nothing: its
+   policy names one source, the nonce that the sheet of the page carries. *)
+let applies_only_its_sheet label (answer : R.answer) =
+  match headers "content-security-policy" answer with
+  | [ policy ] ->
+    (match String.split_on_char '\'' policy with
+     | [ "default-src "
+       ; "none"
+       ; "; style-src "
+       ; source
+       ; "; base-uri "
+       ; "none"
+       ; "; form-action "
+       ; "none"
+       ; "; frame-ancestors "
+       ; "none"
+       ; ""
+       ]
+       when String.starts_with ~prefix:"nonce-" source ->
+       let nonce = String.sub source 6 (String.length source - 6) in
+       Alcotest.(check bool)
+         (label ^ ": the sheet is under the nonce of the policy")
+         true
+         (contains ~sub:(Printf.sprintf {|<style nonce="%s">|} nonce) answer.body)
+     | _ -> Alcotest.failf "%s: a refused page under the policy %S" label policy)
+  | [] | _ :: _ :: _ -> Alcotest.failf "%s: no single policy" label
+;;
+
 (* ---- the cases ---- *)
 
 let a_google_sign_in_gives_a_session_until_the_sign_out () =
@@ -451,6 +479,7 @@ let a_google_sign_in_gives_a_session_until_the_sign_out () =
       | [] | _ :: _ :: _ -> Alcotest.fail "no single policy"
     in
     Alcotest.(check bool) "the script carries the nonce" true (contains ~sub:(Printf.sprintf {|<script nonce="%s">|} nonce) back.body);
+    Alcotest.(check bool) "the sheet carries the nonce" true (contains ~sub:(Printf.sprintf {|<style nonce="%s">|} nonce) back.body);
     Alcotest.(check bool) "the page holds no secret" false (contains ~sub:value back.body);
     let read = read_session t b in
     Alcotest.(check int) "the session reads" 200 (code read);
@@ -517,6 +546,7 @@ let a_start_that_is_refused () =
       let answer = R.start routes provider ~origin ~session_cookie:Q.No_cookie ~fields in
       Alcotest.(check int) label expected (code answer);
       Alcotest.(check (list string)) (label ^ ": no cookie") [] (headers "set-cookie" answer);
+      applies_only_its_sheet label answer;
       Alcotest.(check bool) (label ^ ": no token in the page") false (contains ~sub:admin_token answer.body)
     in
     refused "from another origin" ~origin:Q.Other_origin ~fields:invited R.Google 403;
@@ -555,6 +585,7 @@ let a_callback_that_is_refused () =
     let check label answer expected =
       Alcotest.(check int) label expected (code answer);
       clears_the_transaction answer;
+      applies_only_its_sheet label answer;
       List.iter
         (fun secret -> Alcotest.(check bool) (label ^ ": nothing private in the page") false (contains ~sub:secret answer.body))
         [ admin_token; client_secret; github_client_secret ]

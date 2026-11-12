@@ -12,7 +12,9 @@
     call it with a zone on real files and providers that the tests play.
 
     No answer carries a token, a secret, a code or a provider error: a refused
-    login gets a page with a sentence for its status. *)
+    login gets a page with a sentence for its status. That page and the page
+    of a completed login are written in the frame of {!Account_page}, under a
+    policy that lets a browser apply the one sheet of that frame. *)
 
 type status =
   | Ok_200

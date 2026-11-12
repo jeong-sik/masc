@@ -3,7 +3,7 @@ rfc: "tool-results-age-out-of-context"
 title: "도구 결과는 만든 턴에서만 원문이다 — 히스토리에 남은 누적을 닫는다"
 status: Draft
 created: 2026-09-03
-updated: 2026-11-11
+updated: 2026-11-12
 author: claude
 supersedes: []
 superseded_by: null
@@ -156,6 +156,60 @@ PY
 2. 도구가 결과의 수명을 선언해요. `config/tools/<tool>.toml` 에 닫힌 값을 적고, 기준은 "같은 입력의 더 새 결과가 있다"는 사건이에요. 위 측정이 가리키는 곳은 `msx-retro-mania` 의 DOS 도구예요. `context-reviewer` 의 긴 턴에는 닿지 않아요.
 
 정해야 하는 것: (가) 후보 1을 만들지. RFC-0379 §6.6.2 의 결정과 겹쳐요. (나) 후보 2를 만들지. (다) 만든 턴 안의 되읽기율을 재는 typed 기록을 코드로 넣을지.
+
+## 공식 클라이언트의 새 세션 씨앗 (11-12 측정과 제안)
+
+끝난 턴의 결과를 마커로 보내는 규칙은 Agent Core 레인에만 있어요. 공식 클라이언트(Muse, Antigravity, Claude Code, Codex)가 새 세션을 열 때 싣는 씨앗은 결과를 원문으로 실어요.
+
+### 측정 (sangsu, `system_log_2026-11-12.jsonl`)
+
+같은 Keeper 가 같은 Librarian 지점에서 6분 사이에 두 레인으로 보낸 범위예요. `model input carried range` 줄의 값이에요.
+
+| 시각 | 런타임 | 범위 | 보낸 크기 | 결과 |
+|---|---|---|---|---|
+| 07:01:06Z | `glm-coding.glm-5.3-flash` | atom 9581~, 1,051개 | 1,196,225 B | 받아들임(293,218 토큰) |
+| 07:07:22Z | `muse_d242bc1a.muse-spark-1.3_75bc5a82` | atom 9581~, 1,053개 | 4,563,176 B | 거절(1,241,651 토큰, 창 1,048,576) |
+
+- glm 줄에는 `current_turn_results=verbatim finished_turn_results=markers` 가 찍혀요. Muse 줄에는 그 칸이 없어요.
+- 07:55Z 에 같은 일이 다시 났어요. glm 1,034,110 B(07:44Z), Muse 4,653,929 B.
+- 같은 날 Muse 입력 초과 거절은 20건이고, 15건이 새 세션 씨앗(4.6~5.1 MB)이었어요(00:00Z~08:07Z).
+
+한계예요. Keeper 한 명의 두 쌍이에요. 4.56 MB 중 얼마가 끝난 턴의 결과인지는 따로 재지 않았어요. 두 레인의 차이가 그 한 가지라는 것은 로그 칸과 코드에서 읽은 것이에요.
+
+### 원인 (코드)
+
+- `Keeper_official_client_host.plan_arguments` 는 `Keeper_model_input_demotion.plan` 을 `~demote_before:0` 과 `~measure_wire_bytes:(fun _ -> None)` 으로 불러요. 결과 본문은 하나도 고르지 않고, 끝난 턴의 호출 인자만 주소 꼴로 바꿔요.
+- Agent Core 는 `compose_carried_model_input` 이 턴 경계를 `demote_before` 로, 2,048 을 `min_result_bytes` 로 넘겨요.
+
+### 왜 문제인가
+
+- 두 레인이 같은 범위를 다른 크기로 실어요. RFC-librarian-lifecycle §4.10 의 "받아들여진 시작점"은 두 레인이 같이 써요. glm 이 받아들인 범위를 Muse 가 거절하면, glm 의 응답이 가장 새 관측이 되어 Muse 는 같은 범위를 다시 받아요. §4.10 의 거절 표시(#51625, #51626)도 이 경우에는 가려져요.
+- 이 RFC 의 캐시 비용은 새 세션에 없어요. 새 세션에는 provider 가 쥔 앞 접두가 없어서 다시 읽을 것이 없어요.
+
+### 제안
+
+공식 클라이언트의 새 세션 씨앗에서, 끝난 턴(턴 경계 앞)의 결과 중 본문이 2,048 B 이상인 것을 마커로 보내요. Agent Core 와 같은 규칙, 같은 문턱이에요.
+
+- 자리는 `plan_arguments` 예요. `demote_before` 에 `argument_source.completed_before`(끝난 턴의 끝 atom)를, `min_result_bytes` 에 Agent Core 가 쓰는 상수를 넘겨요.
+- 켜는 조건은 인자 주소 꼴과 같아요. `argument_projection` 이 `Keeper_recovery_transmission.require_reader tools` 를 이미 요구하고, 턴 경계를 모르거나 끝난 턴이 없으면 `create_argument_source` 가 `None` 을 줘요. 새 조건을 더하지 않아요.
+- 크기 비교(`measure_wire_bytes`)에는 씨앗의 인코딩(`measure_message_bytes`)을 써요. 공식 클라이언트는 MASC 가 만든 글을 그대로 넘겨받아요.
+- 이어 쓰는 세션은 바뀌지 않아요. 그 요청은 이력을 싣지 않아요.
+- 체크포인트는 원문 그대로예요. 클라이언트로 가는 복사본에서만 바꿔요.
+
+대가예요.
+
+- 모델이 마커를 되읽는 호출이 늘 수 있어요. Agent Core 에서 잰 값은 마커 17,829개 중 236개(1.32%)예요(위 "열린 질문 1"). 공식 클라이언트에서는 재지 않았어요.
+- Claude Code 와 Codex 는 씨앗을 선언된 용량으로 자른 뒤에 실어요. 마커가 되면 같은 용량에 더 많은 atom 이 들어가요. 범위가 넓어지는 쪽이에요.
+
+### 운영자가 정할 것
+
+1. 적용 범위. 권하는 쪽은 공식 클라이언트 넷 모두예요. 넷이 `start_range_projection` 한 경로를 같이 써서, 런타임별로 나누면 그 경로에 런타임 분기가 생겨요. 대가는 Claude Code·Codex 의 씨앗도 같이 바뀌는 것이에요. 좁히려면 Muse·Antigravity(바이트 창이 없는 둘)만 켜요.
+2. 문턱. 권하는 쪽은 Agent Core 와 같은 2,048 B 예요. 두 레인이 같은 범위를 같은 크기로 싣게 하는 것이 목적이라서예요.
+
+### 시험과 배포 뒤 측정
+
+- 시험: 끝난 턴에 2,047 B 와 2,048 B 결과가 있는 이력으로 씨앗을 만들어, 2,048 B 쪽만 마커이고 이번 턴의 결과는 원문인지 봐요. 리더 도구가 없으면 둘 다 원문인지 봐요.
+- 측정: 같은 Keeper 의 연속한 glm 요청과 Muse 씨앗에서 `transmitted_bytes` 를 견줘요. Muse 입력 초과 거절 수를 날짜별로 세요.
 
 ## 구현 방향 (RFC 승인 뒤)
 

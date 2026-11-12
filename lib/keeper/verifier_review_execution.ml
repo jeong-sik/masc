@@ -86,17 +86,25 @@ let references ~original progress =
 type observation =
   | Awaiting
   | Repair_required of string
-  | Cancelled_without_verdict of AR.review_result
+  | No_verdict of
+      { first : string * Verifier_review_ending.t
+      ; later : (string * Verifier_review_ending.t) list
+      }
   | Verdict of AR.review_result
 
-type call_observation =
+type ended_call =
+  { reference : reference
+  ; ending : Verifier_review_ending.t
+  ; reports : Agent.Execution_projection.settled_tool_invocation list
+  ; requested_reports : int
+  }
+
+type call_reading =
   | Call_awaiting
   | Call_repair of string
-  | Call_no_verdict
-  | Call_cancelled
-  | Call_verdict of AR.verdict
+  | Call_ended of ended_call
 
-let observe_call ~base_path ~original reference =
+let read_call ~base_path ~original reference =
   match reference.execution with
   | Types_core.Official_session ->
     Ok (Call_repair "original official-client session requires operator reconciliation")
@@ -106,71 +114,84 @@ let observe_call ~base_path ~original reference =
     ~keeper_name:reference.keeper_name ~call_id in
   let* projection = Keeper_request_execution.projection journal in
   let map_error result = Result.map_error Agent.Execution_projection.error_to_string result in
+  (* How the execution ended and which report calls it holds are read apart:
+     a report the handler settled stays a report whatever ended the run.
+     [Retire] means no admitted Tool attempt is left without a result, so a
+     report call that was requested and holds no result never reached its
+     handler. The requests are counted from the recorded provider responses:
+     an invocation is opened only when its tool is about to run, so a second
+     report of the same response leaves no invocation when the run is cut
+     after the first. *)
+  let ended ~recovery ending =
+    match recovery with
+    | Agent.Operator_repair_required Effect_outcome_unknown ->
+      Ok (Call_repair "original execution has an unsettled effect")
+    | Retire ->
+      let* invocations = Agent.Execution_projection.tool_invocations projection |> map_error in
+      let reports = List.filter
+        (fun (invocation : Agent.Execution_projection.settled_tool_invocation) ->
+           String.equal invocation.tool_name AR.report_tool_name) invocations.settled in
+      let requested_reports = List.length
+        (List.filter (String.equal AR.report_tool_name) invocations.requested_tool_names) in
+      Ok (Call_ended {reference; ending; reports; requested_reports}) in
   let* observation = Agent.observe_execution projection |> map_error in
   match observation with
   | Agent.Execution_awaiting -> Ok Call_awaiting
-  | Execution_owner_lost ->
-    Ok (Call_repair "original execution lost its writer without a terminal settlement; operator reconciliation is required")
+  | Execution_owner_lost recovery -> ended ~recovery Verifier_review_ending.Owner_lost
   | Execution_terminal terminal ->
-    (match terminal.disposition.recovery with
-     | Agent.Operator_repair_required _ -> Ok (Call_repair "original execution has an unsettled effect")
-     | Retire ->
-       let* invocations = Agent.Execution_projection.settled_tool_invocations projection |> map_error in
-       let reports = List.filter (fun (invocation:Agent.Execution_projection.settled_tool_invocation) ->
-         invocation.tool_name="report_review_verdict") invocations in
-       match terminal.disposition.outcome, reports with
-       (* A cancellation after the report handler settled successfully stops
-          the run, not the judgment: the handler already recorded it. *)
-       | (Terminal_succeeded | Terminal_cancelled), [report] ->
-         let successful = report.attempt_admitted && (match report.result with
-           | Llm_provider.Types.ToolResult {outcome=Tool_succeeded;_} -> true
-           | ToolResult {outcome=Tool_failed _;_} | Text _ | Thinking _ | ReasoningDetails _
-           | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _ -> false) in
-         if successful then
-            (match AR.step_verdict_call AR.empty_verdict_call report.input with
-             | _, AR.Verdict_recorded verdict -> Ok (Call_verdict verdict)
-             | _, (Verdict_refused _ | Verdict_already_recorded _) ->
-               Ok (Call_repair "settled report does not satisfy the original verdict protocol"))
-         else Ok (Call_repair "report invocation has no successful handler settlement")
-       | (Terminal_failed | Terminal_succeeded), [] -> Ok Call_no_verdict
-       | Terminal_cancelled, [] -> Ok Call_cancelled
-       | (Terminal_succeeded | Terminal_failed | Terminal_cancelled), _ ->
-         Ok (Call_repair "original report history cannot establish one accepted verdict"))
+    ended ~recovery:terminal.disposition.recovery
+      (match terminal.disposition.outcome with
+       | Agent.Terminal_succeeded -> Verifier_review_ending.Succeeded
+       | Terminal_failed -> Verifier_review_ending.Failed
+       | Terminal_cancelled -> Verifier_review_ending.Cancelled)
+
+let verdict_of_report (report : Agent.Execution_projection.settled_tool_invocation) =
+  let successful = report.attempt_admitted && (match report.result with
+    | Llm_provider.Types.ToolResult {outcome=Tool_succeeded;_} -> true
+    | ToolResult {outcome=Tool_failed _;_} | Text _ | Thinking _ | ReasoningDetails _
+    | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _ -> false) in
+  if not successful then Error "report invocation has no successful handler settlement"
+  else
+    match AR.step_verdict_call AR.empty_verdict_call report.input with
+    | _, AR.Verdict_recorded verdict -> Ok verdict
+    | _, (Verdict_refused _ | Verdict_already_recorded _) ->
+      Error "settled report does not satisfy the original verdict protocol"
 
 let observe ~base_path ~original progress =
   let* () = if V.output_contract original = V.canonical_output_contract () then Ok ()
     else Error "original output contract differs from the review protocol" in
   let* references = references ~original progress in
-  if references=[] then Ok (Repair_required "historical original has no durable execution locator")
-  else
-    let* observations = List.fold_left (fun acc reference ->
-      let* observations = acc in
-      let* observation = observe_call ~base_path ~original reference in
-      Ok ((reference,observation)::observations)) (Ok []) references in
-    if List.exists (fun (_,observation) -> observation=Call_awaiting) observations then Ok Awaiting
-    else match List.find_map (function _,Call_repair detail -> Some detail
-      | _,(Call_awaiting | Call_no_verdict | Call_cancelled | Call_verdict _) -> None) observations with
-    | Some detail -> Ok (Repair_required detail)
-    | None ->
-      match List.filter_map (function reference,Call_verdict verdict -> Some (reference,verdict)
-        | _,(Call_awaiting | Call_no_verdict | Call_cancelled | Call_repair _) -> None) observations with
-      | [reference,verdict] -> Ok (Verdict {
-          AR.verdict=Some verdict;evaluator_runtime=reference.runtime_id;
-          generator_runtime=V.generator_runtime original;evaluator_execution=None;
-          gate=AR.Structured_tool;fallback_reason=None;retryable_runtimes=[];model_absent_runtimes=[]})
-      | [] ->
-        (* [observations] is in reverse reference order. *)
-        let cancelled = List.fold_left (fun runtimes (reference,observation) ->
-          match observation with
-          | Call_cancelled when not (List.mem reference.runtime_id runtimes) -> reference.runtime_id :: runtimes
-          | Call_cancelled | Call_awaiting | Call_no_verdict | Call_repair _ | Call_verdict _ -> runtimes)
-          [] (List.rev observations) |> List.rev in
-        (match cancelled with
-         | [] -> Ok (Repair_required "original executions have no retained verdict")
-         | first :: rest -> Ok (Cancelled_without_verdict {
-             AR.verdict=None;evaluator_runtime=List.fold_left (fun _ runtime -> runtime) first rest;
+  let* readings = List.fold_left (fun acc reference ->
+    let* readings = acc in
+    let* reading = read_call ~base_path ~original reference in
+    Ok (reading::readings)) (Ok []) references in
+  let readings = List.rev readings in
+  if List.exists (function Call_awaiting -> true | Call_repair _ | Call_ended _ -> false) readings
+  then Ok Awaiting
+  else match List.find_map (function Call_repair detail -> Some detail
+    | Call_awaiting | Call_ended _ -> None) readings with
+  | Some detail -> Ok (Repair_required detail)
+  | None ->
+    match List.filter_map (function Call_ended call -> Some call
+      | Call_awaiting | Call_repair _ -> None) readings with
+    | [] -> Ok (Repair_required "historical original has no durable execution locator")
+    | first :: later as ended ->
+      (* Report calls are counted over the whole attempt. A requested report
+         that was never settled recorded nothing: with no settled report it
+         leaves the attempt without a verdict, and beside a settled one it
+         shows the reviewer asked to report more than once. *)
+      let settled = List.concat_map (fun call ->
+        List.map (fun report -> call.reference,report) call.reports) ended in
+      let requested = List.fold_left (fun total call -> total + call.requested_reports) 0 ended in
+      let ending call = call.reference.runtime_id,call.ending in
+      match settled,requested with
+      | [],_ -> Ok (No_verdict {first=ending first;later=List.map ending later})
+      | [reference,report],1 ->
+        (match verdict_of_report report with
+         | Error detail -> Ok (Repair_required detail)
+         | Ok verdict -> Ok (Verdict {
+             AR.verdict=Some verdict;evaluator_runtime=reference.runtime_id;
              generator_runtime=V.generator_runtime original;evaluator_execution=None;
-             gate=AR.Evaluator_unavailable;
-             fallback_reason=Some "original reviewer was cancelled before it reported a verdict";
-             retryable_runtimes=cancelled;model_absent_runtimes=[]}))
-      | _ -> Ok (Repair_required "multiple original executions supplied verdicts")
+             gate=AR.Structured_tool;fallback_reason=None;retryable_runtimes=[];model_absent_runtimes=[]}))
+      | [_],_ | _ :: _ :: _,_ ->
+        Ok (Repair_required "original report history cannot establish one accepted verdict")

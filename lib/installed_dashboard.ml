@@ -18,6 +18,7 @@ type binding =
   { root : string; device : int; inode : int; receipt_sha256 : string
   ; receipt : receipt; binary_snapshot : Fs_compat.owned_regular_file_snapshot }
 type selection = Not_installed | Unavailable of error | Bound of binding
+type loaded = { body : string; body_sha256 : string }
 
 open Result.Syntax
 let sha256 body =
@@ -183,7 +184,7 @@ let load b relative =
     | Some entry -> Ok entry | None -> Error Not_manifested in
   let* body = read_entry b entry in
   let* () = check_binding b in
-  Ok body
+  Ok { body; body_sha256 = (entry : entry).sha256 }
 
 let check_runtime_files root receipt =
   let* () = List.fold_left (fun result (name, expected) ->

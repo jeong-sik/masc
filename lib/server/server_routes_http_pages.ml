@@ -220,7 +220,7 @@ let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 
 let serve_dashboard_index request reqd =
   match Web_dashboard.load_dashboard_asset "index.html" with
-  | Ok body ->
+  | Ok { Web_dashboard.body; manifest_sha256 = _ } ->
       Http.Response.html_cached
         ~etag:(dashboard_etag_of_body body)
         ~request body reqd
@@ -271,6 +271,8 @@ type encoding = encoding_result Eio.Promise.t
 
 type dashboard_asset =
   { identity : Shared_body.t
+  ; manifest_sha256 : string option
+    (** [Web_dashboard.loaded_asset.manifest_sha256] of the read that made the entry. *)
   ; zstd : encoding option
   ; gzip : encoding option
   }
@@ -319,17 +321,34 @@ let dashboard_assets_have_room ~bytes =
   held + bytes <= dashboard_asset_cache_max_bytes
 ;;
 
-(* Called with the lock held: the entry of these bytes, made if the table
-   has none. [None] when the table has no room for them. An entry of other
-   bytes under the name goes first. *)
-let dashboard_asset_of name body =
+(* Whether the entry holds the bytes of this read. Each read computed the
+   SHA-256 of its bytes before it gave the manifest's digest, so two reads
+   with one digest hold the same bytes and the digests stand for them. A
+   read without a manifest is compared byte by byte. *)
+let holds_bytes_of_read asset (read : Web_dashboard.loaded_asset) =
+  match asset.manifest_sha256, read.Web_dashboard.manifest_sha256 with
+  | Some held, Some read_sha256 -> String.equal held read_sha256
+  | None, None | Some _, None | None, Some _ ->
+    String.equal (Shared_body.to_string asset.identity) read.Web_dashboard.body
+;;
+
+(* Called with the lock held: the entry of the bytes of this read, made if
+   the table has none. [None] when the table has no room for them. An entry
+   of other bytes under the name goes first. *)
+let dashboard_asset_of name (read : Web_dashboard.loaded_asset) =
   match Hashtbl.find_opt dashboard_assets name with
-  | Some asset when String.equal (Shared_body.to_string asset.identity) body -> Some asset
+  | Some asset when holds_bytes_of_read asset read -> Some asset
   | Some _ | None ->
     Hashtbl.remove dashboard_assets name;
-    if dashboard_assets_have_room ~bytes:(String.length body)
+    if dashboard_assets_have_room ~bytes:(String.length read.Web_dashboard.body)
     then (
-      let asset = { identity = Shared_body.of_string body; zstd = None; gzip = None } in
+      let asset =
+        { identity = Shared_body.of_string read.Web_dashboard.body
+        ; manifest_sha256 = read.Web_dashboard.manifest_sha256
+        ; zstd = None
+        ; gzip = None
+        }
+      in
       Hashtbl.replace dashboard_assets name asset;
       Some asset)
     else None
@@ -368,10 +387,16 @@ let owned_dashboard_asset ~accept_encoding body =
 (* The compression runs on the CPU pool, as it did when every request
    compressed. The first request to ask runs it; the others wait for that
    one result, so no request holds a compressed copy of its own. *)
-let rec encoded_dashboard_asset name ~accept_encoding body slot =
+let rec encoded_dashboard_asset
+          name
+          ~accept_encoding
+          (read : Web_dashboard.loaded_asset)
+          slot
+  =
+  let body = read.Web_dashboard.body in
   let turn =
     Mutex.protect dashboard_assets_lock (fun () ->
-      match dashboard_asset_of name body with
+      match dashboard_asset_of name read with
       | None -> No_entry
       | Some asset ->
         (match slot.get asset with
@@ -387,7 +412,7 @@ let rec encoded_dashboard_asset name ~accept_encoding body slot =
     (match Eio.Promise.await encoding with
      | Kept (payload, headers) -> Shared payload, headers
      | Not_kept -> owned_dashboard_asset ~accept_encoding body
-     | Abandoned -> encoded_dashboard_asset name ~accept_encoding body slot)
+     | Abandoned -> encoded_dashboard_asset name ~accept_encoding read slot)
   | Encode { source; encoding; resolver } ->
     (match
        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
@@ -431,9 +456,10 @@ let rec encoded_dashboard_asset name ~accept_encoding body slot =
    a format that is compressed already goes out as it is, and an asset under
    the codec's minimum size, or a client that takes no encoding, never waits
    for the CPU pool. *)
-let dashboard_asset_body name ~accept_encoding body =
+let dashboard_asset_body name ~accept_encoding (read : Web_dashboard.loaded_asset) =
+  let body = read.Web_dashboard.body in
   let identity () =
-    match Mutex.protect dashboard_assets_lock (fun () -> dashboard_asset_of name body) with
+    match Mutex.protect dashboard_assets_lock (fun () -> dashboard_asset_of name read) with
     | Some asset -> Shared asset.identity
     | None -> Owned body
   in
@@ -447,14 +473,14 @@ let dashboard_asset_body name ~accept_encoding body =
       match Http_response_payload.negotiate_encoding accept_encoding with
       | Http_response_payload.Identity_only -> identity (), vary
       | Http_response_payload.Prefer_zstd ->
-        encoded_dashboard_asset name ~accept_encoding body zstd_slot
+        encoded_dashboard_asset name ~accept_encoding read zstd_slot
       | Http_response_payload.Prefer_gzip ->
-        encoded_dashboard_asset name ~accept_encoding body gzip_slot))
+        encoded_dashboard_asset name ~accept_encoding read gzip_slot))
 ;;
 
 let serve_dashboard_static name request reqd =
   match Web_dashboard.load_dashboard_asset name with
-  | Ok body ->
+  | Ok read ->
       let content_type = asset_content_type name in
       (* Vite hashed assets are immutable; index.html is not *)
       let cache_control =
@@ -467,7 +493,7 @@ let serve_dashboard_static name request reqd =
         dashboard_asset_body
           name
           ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
-          body
+          read
       in
       let headers = ("cache-control", cache_control) :: encoding_headers in
       (match final_body with

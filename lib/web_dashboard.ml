@@ -98,6 +98,11 @@ type asset_load_error =
   | Asset_not_manifested
   | Asset_exact_read_failed of string
 
+type loaded_asset =
+  { body : string
+  ; manifest_sha256 : string option
+  }
+
 let asset_error_http_status = function
   | Asset_not_manifested -> `Not_found
   | Asset_binding_invalid _
@@ -186,7 +191,13 @@ let load_dashboard_asset_for_selection installed relative_path =
   | Installed_dashboard.Bound binding ->
     Result.map_error (function
       | Installed_dashboard.Not_manifested -> Asset_not_manifested
-      | (Installed_dashboard.Invalid_receipt | Installed_dashboard.Receipt_identity_mismatch | Installed_dashboard.Binary_commit_unavailable | Installed_dashboard.Root_identity_changed | Installed_dashboard.Binary_commit_mismatch _ | Installed_dashboard.Digest_mismatch _ | Installed_dashboard.Size_mismatch _ | Installed_dashboard.Exact_read_failed _) as e -> Asset_installed_invalid e) (Installed_dashboard.load binding relative_path)
+      | (Installed_dashboard.Invalid_receipt | Installed_dashboard.Receipt_identity_mismatch | Installed_dashboard.Binary_commit_unavailable | Installed_dashboard.Root_identity_changed | Installed_dashboard.Binary_commit_mismatch _ | Installed_dashboard.Digest_mismatch _ | Installed_dashboard.Size_mismatch _ | Installed_dashboard.Exact_read_failed _) as e -> Asset_installed_invalid e)
+      (Result.map
+         (fun (loaded : Installed_dashboard.loaded) ->
+            { body = loaded.Installed_dashboard.body
+            ; manifest_sha256 = Some loaded.Installed_dashboard.body_sha256
+            })
+         (Installed_dashboard.load binding relative_path))
   | Installed_dashboard.Not_installed ->
   match Build_identity.resolve_dashboard_asset relative_path with
   | Build_identity.Dashboard_asset_bound
@@ -201,16 +212,18 @@ let load_dashboard_asset_for_selection installed relative_path =
       ; snapshot_inode
       ; _
       } ->
-    load_and_verify_dashboard_blob
-      ~snapshot_root
-      ~expected_snapshot_device:snapshot_device
-      ~expected_snapshot_inode:snapshot_inode
-      ~launch_source_root
-      ~expected_source_device:launch_source_device
-      ~expected_source_inode:launch_source_inode
-      path
-      ~expected_size
-      ~expected_sha256
+    Result.map
+      (fun body -> { body; manifest_sha256 = Some expected_sha256 })
+      (load_and_verify_dashboard_blob
+         ~snapshot_root
+         ~expected_snapshot_device:snapshot_device
+         ~expected_snapshot_inode:snapshot_inode
+         ~launch_source_root
+         ~expected_source_device:launch_source_device
+         ~expected_source_inode:launch_source_inode
+         path
+         ~expected_size
+         ~expected_sha256)
   | Build_identity.Dashboard_assets_unbound ->
     (match assets_root () with
      | None -> Error (Asset_exact_read_failed "dashboard asset root unavailable")
@@ -223,7 +236,7 @@ let load_dashboard_asset_for_selection installed relative_path =
        | Ok relative, Ok excluded_directory ->
          (match Fs_compat.load_single_link_regular_file_beneath
              ~root:(Filename.concat root "dashboard") ~excluded_directory relative with
-          | Ok (Some body) -> Ok body
+          | Ok (Some body) -> Ok { body; manifest_sha256 = None }
           | Ok None -> Error Asset_not_manifested
           | Error error ->
             Error (Asset_exact_read_failed (Fs_compat.owned_regular_file_read_error_to_string error))))
@@ -270,7 +283,7 @@ let source_bundle_freshness ~binary_commit () =
     (match binary_commit,
            load_dashboard_asset_for_selection Installed_dashboard.Not_installed
              ".build-identity.json" with
-     | Some binary_commit, Ok body ->
+     | Some binary_commit, Ok { body; manifest_sha256 = _ } ->
        (try
           match Yojson.Safe.from_string body with
           | `Assoc fields ->
@@ -411,7 +424,11 @@ let surface_status_json_for_selection
       ?(binary_commit = Build_identity.embedded_commit) installed =
   let asset_resolution = Build_identity.resolve_dashboard_asset "index.html" in
   let manifest_identity = Build_identity.dashboard_manifest_identity () in
-  let loaded_index = load_dashboard_asset_for_selection installed "index.html" in
+  let loaded_index =
+    Result.map
+      (fun (asset : loaded_asset) -> asset.body)
+      (load_dashboard_asset_for_selection installed "index.html")
+  in
   let bundle = observe_bundle ~binary_commit installed in
   let freshness = observed_freshness bundle in
   let index_present = Result.is_ok loaded_index in
@@ -591,13 +608,13 @@ let surface_status_json () =
 
 let html () =
   match load_dashboard_asset "index.html" with
-  | Ok body -> body
+  | Ok { body; manifest_sha256 = _ } -> body
   | Error _ ->
     "<html><body>Dashboard assets unavailable. Inspect /health dashboard_surface.recovery.</body></html>"
 
 let etag () =
   match load_dashboard_asset "index.html" with
-  | Ok body ->
+  | Ok { body; manifest_sha256 = _ } ->
     let hash = Digest.string body |> Digest.to_hex in
     String.sub hash 0 12
   | Error _ -> "none"

@@ -611,11 +611,13 @@ let test_run_with_a_worker_is_left_waiting () =
     Eio.Promise.resolve resolve_release ())
 ;;
 
-(* A schedule is waited for under its schedule id. The sweep reads its row,
-   never a clock: a receipt wake that has not ended is left alone, and one that
-   ended without its receipt is settled like a run that left neither worker nor
-   receipt. *)
+(* A schedule is waited for under its receipt key. The sweep reads the row that
+   holds the key, never a clock: a receipt wake that has not ended is left
+   alone, and one that ended without its receipt, or that no row holds any more,
+   is settled like a run that left neither worker nor receipt. *)
 let actor kind id : Schedule_domain.actor = { id; kind; display_name = None }
+
+let receipt_key_of schedule_id = "schedule-receipt:resume:" ^ schedule_id
 
 let create_receipt_schedule config ~schedule_id =
   match
@@ -637,6 +639,7 @@ let create_receipt_schedule config ~schedule_id =
                 ; "title", `String "Run result"
                 ; "message", `String "check the run"
                 ; "delivery", `String "receipt"
+                ; "receipt_key", `String (receipt_key_of schedule_id)
                 ] )
           ])
       ~source:Schedule_domain.Operator_request
@@ -660,13 +663,21 @@ let cancel_schedule config ~schedule_id =
   | Error err -> fail ("cancel failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
-let settles_an_ended_schedule ~schedule_id =
+let prune_schedules config =
+  match Schedule_service.prune config with
+  | Ok _ -> ()
+  | Error err -> fail ("prune failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let settles_an_ended_schedule ~schedule_id ~prune =
   with_workspace (fun ~sw ~clock config ->
+    let receipt_key = receipt_key_of schedule_id in
     create_receipt_schedule config ~schedule_id;
     cancel_schedule config ~schedule_id;
-    let task = start_waiting_task ~sw ~clock config ~request_ids:[ schedule_id ] in
+    if prune then prune_schedules config;
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ receipt_key ] in
     check bool "no receipt before the sweep" false
-      (outbox_has config ~viewer:Outbox.Every_receipt schedule_id);
+      (outbox_has config ~viewer:Outbox.Every_receipt receipt_key);
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     await ~clock task.finished;
     check int "the task resumed" 2 !(task.attempts);
@@ -686,25 +697,25 @@ let settles_an_ended_schedule ~schedule_id =
 ;;
 
 let test_a_schedule_that_ended_without_a_receipt_is_settled () =
-  settles_an_ended_schedule ~schedule_id:"sched-ended-without-receipt"
+  settles_an_ended_schedule ~schedule_id:"sched-ended-without-receipt" ~prune:false
 ;;
 
-(* The Keeper chooses a schedule's id, and a request id cannot hold every
-   character it can. The request store refuses such an id, which can only be a
-   schedule's. *)
-let test_a_schedule_whose_id_is_not_a_request_id_is_settled () =
-  settles_an_ended_schedule ~schedule_id:"배포 결과 #12"
+(* The row that held the key was pruned. Nothing will write the receipt, and the
+   Keeper's schedule id may be any text. *)
+let test_a_key_no_schedule_holds_any_more_is_settled () =
+  settles_an_ended_schedule ~schedule_id:"배포 결과 #12" ~prune:true
 ;;
 
 let test_a_schedule_that_has_not_ended_is_left_waiting () =
   with_workspace (fun ~sw ~clock config ->
     let schedule_id = "sched-still-waiting" in
     create_receipt_schedule config ~schedule_id;
-    let task = start_waiting_task ~sw ~clock config ~request_ids:[ schedule_id ] in
+    let receipt_key = receipt_key_of schedule_id in
+    let task = start_waiting_task ~sw ~clock config ~request_ids:[ receipt_key ] in
     get (Keeper_receipt_wait_sweep.settle_lost ~base_path:config.base_path ~keeper_name);
     check int "the sweep left the wait alone" 1 !(task.attempts);
     check bool "and wrote no receipt" false
-      (outbox_has config ~viewer:Outbox.Every_receipt schedule_id))
+      (outbox_has config ~viewer:Outbox.Every_receipt receipt_key))
 ;;
 
 let () =
@@ -736,8 +747,8 @@ let () =
             test_run_with_a_worker_is_left_waiting
         ; test_case "a schedule that ended without a receipt is settled" `Quick
             test_a_schedule_that_ended_without_a_receipt_is_settled
-        ; test_case "a schedule whose id is not a request id is settled" `Quick
-            test_a_schedule_whose_id_is_not_a_request_id_is_settled
+        ; test_case "a key no schedule holds any more is settled" `Quick
+            test_a_key_no_schedule_holds_any_more_is_settled
         ; test_case "a schedule that has not ended is left waiting" `Quick
             test_a_schedule_that_has_not_ended_is_left_waiting
         ; test_case "a request another conversation waits for is refused" `Quick

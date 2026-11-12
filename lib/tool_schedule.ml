@@ -526,8 +526,8 @@ let validate_watch_recurrence ~payload ~recurrence =
           first occurrence")
 ;;
 
-(* A receipt is keyed by its schedule id. A recurring schedule would write every
-   occurrence's receipt under the same call id. *)
+(* A receipt is keyed by its schedule's receipt key. A recurring schedule would
+   write every occurrence's receipt under the same call id. *)
 let validate_receipt_recurrence ~payload ~recurrence =
   let* delivery = Schedule_payload_projection.delivery_of_payload payload in
   match delivery, recurrence with
@@ -537,7 +537,34 @@ let validate_receipt_recurrence ~payload ~recurrence =
     , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
     Error
       "delivery receipt needs recurrence_kind one_shot: the receipt is keyed by one \
-       schedule id"
+       schedule"
+;;
+
+(* The key a write gives a receipt delivery. A new schedule gets a fresh one.
+   An edit keeps the stored row's key, so a wait recorded under it goes on. The
+   store edits only a row that is [Scheduled] or [Due]
+   ([Schedule_domain.modify_allowed]) and refuses one that has started or
+   ended, so an edit is always of the occurrence the key names. A stored queue
+   delivery holds no key, and an edit that makes it a receipt gets a fresh one.
+   The projection leaves the key out of a queue delivery. *)
+let receipt_key_for_write ~(stored : Schedule_domain.schedule_request option) =
+  match stored with
+  | None -> Ok (Schedule_supported_kinds.fresh_receipt_key ())
+  | Some request ->
+    (match
+       Schedule_payload_projection.route_of_payload
+         (Schedule_domain.payload_to_yojson request.payload)
+     with
+     | Ok (Schedule_payload_projection.Receipt_route key) -> Ok key
+     | Ok Schedule_payload_projection.Queue_route ->
+       Ok (Schedule_supported_kinds.fresh_receipt_key ())
+     | Error detail ->
+       Error
+         (Printf.sprintf
+            "stored schedule %s has a delivery this server cannot read (%s); cancel it \
+             and create it again"
+            request.schedule_id
+            detail))
 ;;
 
 (* A keeper_wake schedule whose target has no durable metadata can never be
@@ -899,6 +926,13 @@ let handle_write ~action ~tool_name ~start_time ctx args =
          | Some _ -> Ok stored
          | None -> Error (Refusal "schedule not found"))
     in
+    (* The validation above ran before the stored row was read, so it could not
+       ask for the key. The key is stamped here and the projection insists on
+       it when the wake is dispatched. *)
+    let* payload =
+      let* key = plain (receipt_key_for_write ~stored) in
+      plain (Schedule_payload_projection.set_keeper_wake_receipt_key ~payload ~key)
+    in
     let* supplied_kind = strict_string args "recurrence_kind" in
     let* recurrence =
       match action with
@@ -920,9 +954,20 @@ let handle_write ~action ~tool_name ~start_time ctx args =
     (* Attaching a watch depends on the recurrence that was just validated.
        A concurrent edit must not replace that row with a recurring schedule
        while Keep_timing/Keep_recurrence keeps its latest timing below. *)
-    let expected_instance_id = match watch, stored with
-      | Some _, Some request -> Some request.schedule_instance_id
-      | None, _ | Some _, None -> None
+    (* A receipt delivery keeps the key it was read with. A concurrent edit
+       that switched the row to another delivery in between would otherwise
+       have its key overwritten under a wait that already names it. *)
+    let* delivery = plain (Schedule_payload_projection.delivery_of_payload payload) in
+    let expected_instance_id = match watch, delivery, stored with
+      | Some _, Schedule_supported_kinds.Keeper_wake_to_queue, Some request
+      | Some _, Schedule_supported_kinds.Keeper_wake_to_receipt, Some request
+      | None, Schedule_supported_kinds.Keeper_wake_to_receipt, Some request ->
+        Some request.schedule_instance_id
+      | None, Schedule_supported_kinds.Keeper_wake_to_queue, Some _
+      | Some _, Schedule_supported_kinds.Keeper_wake_to_queue, None
+      | Some _, Schedule_supported_kinds.Keeper_wake_to_receipt, None
+      | None, Schedule_supported_kinds.Keeper_wake_to_queue, None
+      | None, Schedule_supported_kinds.Keeper_wake_to_receipt, None -> None
     in
     let* requested_at =
       let* given = strict_number args "requested_at_unix" in

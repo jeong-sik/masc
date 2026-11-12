@@ -82,7 +82,7 @@ enum = ["queue", "receipt"]
 description = """
 How the due wake reaches the Keeper. queue, the default, puts a new message in \
 its queue. receipt writes a tool-result receipt instead of a queue message. \
-The receipt's request_id is this schedule's schedule_id. An update keeps it. \
+Wait for it with keeper_receipt_wait schedule_id. An update keeps the wait. \
 Takes no urgency and needs recurrence_kind one_shot."""
 
 [[params]]

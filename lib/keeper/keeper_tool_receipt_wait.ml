@@ -9,14 +9,12 @@ let refusal ~class_ detail =
 ;;
 
 (* What the model named: the id Execute returned for a background run, or the
-   schedule id of a Keeper wake whose delivery is [receipt]. *)
+   schedule id of a Keeper wake whose delivery is [receipt]. The wait itself is
+   recorded under the id the receipt will carry: the request id of the run, and
+   for a schedule its receipt key. *)
 type target =
   | Run of string
   | Schedule of string
-
-let id_of_target = function
-  | Run id | Schedule id -> id
-;;
 
 (* A field the call may leave out. Absent or null is no id. *)
 let optional_id name fields =
@@ -89,7 +87,8 @@ let waitable_run ~base_path ~keeper_name request_id =
 
 (* A schedule whose wake delivers a receipt and has not ended will write one. An
    ended one has either written it, and it waits in the outbox, or ended
-   without, and nothing will arrive. *)
+   without, and nothing will arrive. The answer is the id the wait is recorded
+   under: the schedule's receipt key. *)
 let waitable_schedule ~base_path ~keeper_name schedule_id =
   match Keeper_receipt_wait_source.find_schedule ~base_path ~keeper_name schedule_id with
   | Error detail ->
@@ -105,26 +104,35 @@ let waitable_schedule ~base_path ~keeper_name schedule_id =
       ( Tool_result.Workflow_rejection
       , "This wake delivers a queue message, not a receipt. Create it with delivery \
          receipt." )
-  | Ok Keeper_receipt_wait_source.Row_waiting -> Ok ()
-  | Ok Keeper_receipt_wait_source.Row_ended ->
+  | Ok
+      (Keeper_receipt_wait_source.Row_receipt
+         { receipt_key; state = Keeper_receipt_wait_source.Waiting }) ->
+    Ok (Schedule_supported_kinds.receipt_key_to_string receipt_key)
+  | Ok
+      (Keeper_receipt_wait_source.Row_receipt
+         { receipt_key; state = Keeper_receipt_wait_source.Ended }) ->
+    let wait_id = Schedule_supported_kinds.receipt_key_to_string receipt_key in
     (match Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Every_receipt with
      | Error detail ->
        Error
          ( Tool_result.Dependency_unavailable
          , Printf.sprintf "The receipt outbox cannot be read: %s" detail )
      | Ok snapshot ->
-       if Outbox.contains_call snapshot ~call_id:schedule_id
-       then Ok ()
+       if Outbox.contains_call snapshot ~call_id:wait_id
+       then Ok wait_id
        else
          Error
            ( Tool_result.Workflow_rejection
            , "This wake has ended and its receipt is no longer waiting." ))
 ;;
 
+(* The id the wait is recorded under, when the target can be waited for. *)
 let waitable ~base_path ~keeper_name = function
-  | Run request_id -> waitable_run ~base_path ~keeper_name request_id
-  | Schedule schedule_id ->
-    waitable_schedule ~base_path ~keeper_name schedule_id
+  | Run request_id ->
+    Result.map
+      (fun () -> request_id)
+      (waitable_run ~base_path ~keeper_name request_id)
+  | Schedule schedule_id -> waitable_schedule ~base_path ~keeper_name schedule_id
 ;;
 
 (* An execution that already waits for the request keeps it. Another
@@ -161,24 +169,32 @@ let handle
   match target_of_args args with
   | Error detail -> refusal ~class_:Tool_result.Policy_rejection detail
   | Ok target ->
-    let request_id = id_of_target target in
     let base_path = config.Workspace.base_path in
     let keeper_name = meta.Keeper_meta_contract.name in
     (match
-       Result.bind (waitable ~base_path ~keeper_name target) (fun () ->
-         not_waited_by_another ~base_path ~keeper_name ~execution_scope request_id)
+       Result.bind (waitable ~base_path ~keeper_name target) (fun request_id ->
+         Result.map
+           (fun () -> request_id)
+           (not_waited_by_another ~base_path ~keeper_name ~execution_scope request_id))
      with
      | Error (class_, detail) -> refusal ~class_ detail
-     | Ok () ->
+     | Ok request_id ->
+       let named =
+         match target with
+         | Run _ -> []
+         | Schedule schedule_id -> [ "schedule_id", `String schedule_id ]
+       in
        Keeper_tool_execution.success_data
          (`Assoc
-             [ "ok", `Bool true
-             ; "status", `String "waiting"
-             ; "request_id", `String request_id
-             ; ( "message"
-               , `String
-                   "This turn ends here. A later run of this conversation starts \
-                    with the receipt of this request." )
-             ])
+             ([ "ok", `Bool true
+              ; "status", `String "waiting"
+              ; "request_id", `String request_id
+              ]
+              @ named
+              @ [ ( "message"
+                  , `String
+                      "This turn ends here. A later run of this conversation starts \
+                       with the receipt of this request." )
+                ]))
        |> Keeper_tool_execution.with_receipt_wait_receipt ~request_id)
 ;;

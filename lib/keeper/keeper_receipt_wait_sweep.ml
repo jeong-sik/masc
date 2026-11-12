@@ -7,23 +7,30 @@ module Source = Keeper_receipt_wait_source
 (* What the request record says about a run. The arguments of an ended run are
    what its Unfinished receipt echoes. A record that is absent, or that is not a
    background Execute run's, holds none, and the receipt says [Unknown]. A wait
-   whose request record is absent may name a schedule instead: its row says
-   whether the wake can still write the receipt. A schedule's id is chosen by
-   the Keeper and may hold characters a request id cannot, so an id the request
-   store refuses as a request id can only be a schedule's. *)
+   for a schedule is recorded under the schedule's receipt key, which holds a
+   character a request id cannot. The request store refuses such an id, and that
+   refusal is what sends the wait to the schedule rows: the row that holds the
+   key says whether the wake can still write the receipt. *)
 type record =
   | Worker_may_exist
   | Ended of Outbox.arguments
   | Schedule_ended
 
-(* A schedule that delivers a queue message never writes the receipt a wait
-   asked for, so it ends the wait like one that ended without it. [no_row] is
-   what an id with no schedule row is: a run whose record was pruned, or a
-   schedule that was. *)
-let record_of_schedule_row ~no_row = function
-  | Source.Row_waiting -> Worker_may_exist
-  | Source.Row_ended | Source.Row_delivers_to_queue -> Schedule_ended
-  | Source.No_row -> no_row
+(* A key with no row is a schedule that was pruned, or that an edit made deliver
+   to the queue: it will not write this receipt. *)
+let record_of_receipt_state = function
+  | Some Source.Waiting -> Worker_may_exist
+  | Some Source.Ended | None -> Schedule_ended
+;;
+
+let read_schedule_record ~base_path ~keeper_name request_id =
+  let* receipt_key =
+    Schedule_supported_kinds.receipt_key_of_string request_id
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "wait %s is not a request id or a receipt key: %s" request_id detail)
+  in
+  let* state = Source.find_receipt_state ~base_path ~keeper_name receipt_key in
+  Ok (record_of_receipt_state state)
 ;;
 
 let read_record ~base_path ~keeper_name request_id =
@@ -35,12 +42,9 @@ let read_record ~base_path ~keeper_name request_id =
       (match Background.request_arguments entry with
        | Some arguments -> Ok (Ended (Outbox.Known arguments))
        | None -> Ok (Ended Outbox.Unknown))
-  | Keeper_msg_async.Absent ->
-    let* row = Source.find_schedule ~base_path ~keeper_name request_id in
-    Ok (record_of_schedule_row ~no_row:(Ended Outbox.Unknown) row)
+  | Keeper_msg_async.Absent -> Ok (Ended Outbox.Unknown)
   | Keeper_msg_async.Rejected Keeper_msg_async.Invalid_request_id ->
-    let* row = Source.find_schedule ~base_path ~keeper_name request_id in
-    Ok (record_of_schedule_row ~no_row:Schedule_ended row)
+    read_schedule_record ~base_path ~keeper_name request_id
   | Keeper_msg_async.Unreadable reason ->
     Error (Printf.sprintf "request %s is unreadable: %s" request_id reason)
   | Keeper_msg_async.Rejected
@@ -92,10 +96,10 @@ let settle_one ~base_path ~keeper_name request_id lost =
     | Lost_run arguments ->
       Background.retain_source_lost_receipt ~base_path ~keeper_name ~request_id ~arguments
     | Lost_schedule ->
-      Keeper_schedule_receipt.retain_unfinished
-        ~base_path
-        ~keeper_name
-        ~schedule_id:request_id
+      let* receipt_key =
+        Schedule_supported_kinds.receipt_key_of_string request_id
+      in
+      Keeper_schedule_receipt.retain_unfinished ~base_path ~keeper_name ~receipt_key
   in
   match
     Keeper_owner_registry.settle_lost_receipt ~base_path ~keeper_name ~request_id ~retain

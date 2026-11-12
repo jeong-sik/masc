@@ -38871,6 +38871,25 @@ Use relative paths for resources already held in the package. -->
        | Some ("t" | "T") when state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open ->
            open_tools_async_source_task state ~mailbox:async_messages
        | Some "\x0f" when state.view = Tools && state.tools_pane <> Tools_async -> handle_skill_diagram ()
+       (* The diagnostics heading is not a row the cursor stops on, so the
+          chat's fold key folds it. Back to the top, where the heading is,
+          so the rows that appear or go are in view. *)
+       | Some k
+         when String.equal k Masc_tui_keys.expand_turn_key
+              && state.view = Tools && state.tools_pane = Tools_surface ->
+           state.tools_diagnostics_folded <- not state.tools_diagnostics_folded;
+           tools_task_user_scroll state 0
+       | Some "Y" when state.view = Tools && state.tools_pane = Tools_surface ->
+           (match Masc_tui_render_tools.tools_diagnostics_copy_text state with
+            | None ->
+                report_action state "system"
+                  (ui_text state ~ko:"복사할 진단이 없습니다" ~en:"No diagnostics to copy")
+            | Some text ->
+                let outcome = copy_reference render_schedule text in
+                report_action state "system"
+                  (ui_text state
+                     ~ko:("진단을 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome)
+                     ~en:("Diagnostics " ^ Masc_tui_clipboard.copy_outcome_text outcome)))
        | Some "f" when state.view = Tools && state.tools_pane <> Tools_async ->
            let profiles = tools_skill_profiles state in
            let compositions = List.mapi (fun index profile -> index, profile) profiles

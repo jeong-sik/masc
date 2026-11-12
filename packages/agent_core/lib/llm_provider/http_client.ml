@@ -1053,6 +1053,30 @@ let failure_close_reason wire : Reuse_verdict.close_reason =
   | Request_wire.Possibly_delivered -> Request_failed
 ;;
 
+(* A provider request body is megabytes of JSON. cohttp-eio copies it into the
+   connection's write buffer in one go, and the buffer's flusher then hands
+   everything that accumulated to one write, which TLS encrypts without
+   suspending: one request held its domain for the whole encryption (64-125 ms
+   at a time on a live server). A write is passed down this many bytes at a
+   time, and the flusher yields between slices so the other fibers on the
+   domain run. The bytes on the wire and their order are unchanged.
+
+   The slicing sits in the flusher, not in the body source. cohttp-eio closes
+   the write buffer as soon as it has read the response head, and the fiber
+   copying the body would then write to a closed buffer if it had suspended
+   mid-copy. The flusher drains what is buffered after the close. *)
+let request_slice_bytes = 65_536
+
+(* The leading [limit] bytes of [buffers]; [limit] is positive. *)
+let rec leading_bytes limit = function
+  | [] -> []
+  | buffer :: rest ->
+    let length = Cstruct.length buffer in
+    if length >= limit
+    then [ Cstruct.sub buffer 0 limit ]
+    else buffer :: leading_bytes (limit - length) rest
+;;
+
 let track_connection ~wire connection =
   let eof_seen = Request_wire.eof_seen wire in
   let module Flow = struct
@@ -1086,8 +1110,19 @@ let track_connection ~wire connection =
         Printexc.raise_with_backtrace exn backtrace
     ;;
 
+    (* The previous call left part of its batch unwritten, so this call
+       continues it. The yield comes before the write: a cancellation there
+       leaves this call with nothing written. *)
+    let batch_continues = ref false
+
     let single_write () buffers =
-      observed_write (fun () -> Eio.Flow.single_write connection buffers)
+      if !batch_continues then Eio.Fiber.yield ();
+      let slice = leading_bytes request_slice_bytes buffers in
+      let written =
+        observed_write (fun () -> Eio.Flow.single_write connection slice)
+      in
+      batch_continues := written < Cstruct.lenv buffers;
+      written
     ;;
 
     let copy () ~src = observed_write (fun () -> Eio.Flow.copy src connection)
@@ -1100,6 +1135,67 @@ let track_connection ~wire connection =
        :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Flow)))
   in
   Eio.Resource.T ((), operations)
+;;
+
+(* A fiber that only yields takes one turn each time the fiber beside it
+   yields, so its turn count is the other fiber's yield count. *)
+let turns_beside work =
+  let finished = ref false in
+  let turns = ref 0 in
+  Eio.Fiber.both
+    (fun () ->
+       work ();
+       finished := true)
+    (fun () ->
+       while not !finished do
+         incr turns;
+         Eio.Fiber.yield ()
+       done);
+  !turns
+;;
+
+let%test "a large write reaches the connection in slices with a yield between them" =
+  Eio_main.run
+  @@ fun _env ->
+  let writes = ref [] in
+  let received = Buffer.create 0 in
+  let module Peer = struct
+    type t = unit
+
+    let read_methods = []
+    let single_read () _ = raise End_of_file
+
+    let single_write () buffers =
+      writes := Cstruct.lenv buffers :: !writes;
+      List.iter
+        (fun buffer -> Buffer.add_string received (Cstruct.to_string buffer))
+        buffers;
+      Cstruct.lenv buffers
+    ;;
+
+    let copy () ~src = Eio.Flow.Pi.simple_copy ~single_write () ~src
+    let shutdown () _ = ()
+  end
+  in
+  let connection : connection =
+    Eio.Resource.T
+      ( ()
+      , Eio.Resource.handler
+          (Eio.Resource.H (Eio.Resource.Close, fun () -> ())
+           :: Eio.Resource.bindings (Eio.Flow.Pi.two_way (module Peer))) )
+  in
+  let tracked = track_connection ~wire:(Request_wire.create ()) connection in
+  let slices = 4 in
+  let payload =
+    String.init ((slices * request_slice_bytes) + 5) (fun i -> Char.chr (i mod 251))
+  in
+  let turns =
+    turns_beside (fun () -> Eio.Flow.write tracked [ Cstruct.of_string payload ])
+  in
+  String.equal (Buffer.contents received) payload
+  && List.for_all (fun length -> length <= request_slice_bytes) !writes
+  && List.length !writes = slices + 1
+  && turns >= slices
 ;;
 
 (* The peer closed and something upstream reported it as prose.

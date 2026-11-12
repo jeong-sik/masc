@@ -1,0 +1,86 @@
+[
+  {
+    "label": "before",
+    "case": "session_unread",
+    "scenario": "session_unread",
+    "pressed": false,
+    "viewsShown": [
+      "the sign-in"
+    ],
+    "heading": "로그인",
+    "statusLine": null,
+    "alertsShown": 0,
+    "focus": "body",
+    "idsOfThePersonInTheDocument": 0,
+    "sessionRouteAfterwards": 503
+  },
+  {
+    "label": "before",
+    "case": "signout_ended",
+    "scenario": "member_full",
+    "pressed": true,
+    "beforeThePress": {
+      "viewsShown": [
+        "the tools of a signed-in person"
+      ],
+      "idsOfThePersonInTheDocument": 13
+    },
+    "load": "no document was loaded",
+    "requestsOfThePress": 3,
+    "viewsShown": [
+      "the sign-in"
+    ],
+    "heading": "로그인",
+    "statusLine": null,
+    "alertsShown": 0,
+    "focus": "body",
+    "idsOfThePersonInTheDocument": 11,
+    "sessionRouteAfterwards": 401
+  },
+  {
+    "label": "before",
+    "case": "signout_refused",
+    "scenario": "signout_refused",
+    "pressed": true,
+    "beforeThePress": {
+      "viewsShown": [
+        "the tools of a signed-in person"
+      ],
+      "idsOfThePersonInTheDocument": 13
+    },
+    "load": "no document was loaded",
+    "requestsOfThePress": 3,
+    "viewsShown": [
+      "the tools of a signed-in person"
+    ],
+    "heading": "MASC accounts",
+    "statusLine": "session of usr_01JCM8P0Y4A7M2 until 2026-11-12T17:37:55.849Z",
+    "alertsShown": 0,
+    "focus": "button#signout",
+    "idsOfThePersonInTheDocument": 13,
+    "sessionRouteAfterwards": 200
+  },
+  {
+    "label": "before",
+    "case": "signout_refused_then_unread",
+    "scenario": "zone_stops_at_signout",
+    "pressed": true,
+    "beforeThePress": {
+      "viewsShown": [
+        "the tools of a signed-in person"
+      ],
+      "idsOfThePersonInTheDocument": 13
+    },
+    "load": "no document was loaded",
+    "requestsOfThePress": 3,
+    "viewsShown": [
+      "the sign-in"
+    ],
+    "heading": "로그인",
+    "statusLine": null,
+    "alertsShown": 0,
+    "focus": "body",
+    "idsOfThePersonInTheDocument": 11,
+    "sessionRouteAfterwards": 503
+  }
+]

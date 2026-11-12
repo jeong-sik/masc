@@ -1,0 +1,86 @@
+[
+  {
+    "label": "after",
+    "case": "session_unread",
+    "scenario": "session_unread",
+    "pressed": false,
+    "viewsShown": [
+      "that the session was not read"
+    ],
+    "heading": "로그인 상태를 확인하지 못했어요",
+    "statusLine": null,
+    "alertsShown": 1,
+    "focus": "body",
+    "idsOfThePersonInTheDocument": 0,
+    "sessionRouteAfterwards": 503
+  },
+  {
+    "label": "after",
+    "case": "signout_ended",
+    "scenario": "member_full",
+    "pressed": true,
+    "beforeThePress": {
+      "viewsShown": [
+        "the tools of a signed-in person"
+      ],
+      "idsOfThePersonInTheDocument": 13
+    },
+    "load": "a document was loaded",
+    "requestsOfThePress": null,
+    "viewsShown": [
+      "the sign-in"
+    ],
+    "heading": "로그인",
+    "statusLine": null,
+    "alertsShown": 0,
+    "focus": "body",
+    "idsOfThePersonInTheDocument": 0,
+    "sessionRouteAfterwards": 401
+  },
+  {
+    "label": "after",
+    "case": "signout_refused",
+    "scenario": "signout_refused",
+    "pressed": true,
+    "beforeThePress": {
+      "viewsShown": [
+        "the tools of a signed-in person"
+      ],
+      "idsOfThePersonInTheDocument": 13
+    },
+    "load": "no document was loaded",
+    "requestsOfThePress": 3,
+    "viewsShown": [
+      "the tools of a signed-in person"
+    ],
+    "heading": "MASC accounts",
+    "statusLine": "The sign-out did not happen (503), and the session is still open.",
+    "alertsShown": 0,
+    "focus": "button#signout",
+    "idsOfThePersonInTheDocument": 13,
+    "sessionRouteAfterwards": 200
+  },
+  {
+    "label": "after",
+    "case": "signout_refused_then_unread",
+    "scenario": "zone_stops_at_signout",
+    "pressed": true,
+    "beforeThePress": {
+      "viewsShown": [
+        "the tools of a signed-in person"
+      ],
+      "idsOfThePersonInTheDocument": 13
+    },
+    "load": "no document was loaded",
+    "requestsOfThePress": 3,
+    "viewsShown": [
+      "that the session was not read"
+    ],
+    "heading": "로그인 상태를 확인하지 못했어요",
+    "statusLine": null,
+    "alertsShown": 1,
+    "focus": "a#reopen",
+    "idsOfThePersonInTheDocument": 11,
+    "sessionRouteAfterwards": 503
+  }
+]

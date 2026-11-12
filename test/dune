@@ -8,11 +8,17 @@
  (deps test_auth_preview_invite.js ../lib/auth_preview.ml)
  (action (run node %{dep:test_auth_preview_invite.js} %{dep:../lib/auth_preview.ml})))
 
+(rule
+ (alias runtest-test_auth_preview_session)
+ (deps test_auth_preview_session.js ../lib/auth_preview.ml)
+ (action (run node %{dep:test_auth_preview_session.js} %{dep:../lib/auth_preview.ml})))
+
 (alias
  (name runtest)
  (deps
   (alias runtest-test_auth_preview_pat_expiry)
-  (alias runtest-test_auth_preview_invite)))
+  (alias runtest-test_auth_preview_invite)
+  (alias runtest-test_auth_preview_session)))
 
 ; task-2245: the shared input table the TUI suite and the dashboard vitest
 ; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).

@@ -159,16 +159,35 @@ received a commit after the merge (the delete push is leased on the merged
 head). A failed delete is recorded and does not change the merge verdict.
 
 GitHub also leaves a linked issue open when the merge is made with the Actions
-token, so the worker closes the open issues that each pull request it sees
-merged names as closing references (`Closes #N`) and records the outcome as
+token, so the worker closes the open issues that GitHub lists as closing
+references of each pull request it sees merged, and records the outcome as
 `linked_issues`. A pull request counts when its base is the default branch or
 its merge commit is on that branch, so a layer of a landed native stack counts
-although its base stays the parent branch. One GraphQL query reads every pull
-request of the scope; a comparison of merge commits is asked only for layers
-that still have an open issue. An issue in another repository and any other
-refused close are recorded and do not change the merge verdict. The worker
-closes what the pull request declares: a pull request that leaves work in an
-issue links it with `Relates #N`, the template's other line.
+although its base stays the parent branch.
+
+A merge closes its issues once. An issue that was reopened after the merge
+stays open, whoever reopened it. A recheck of a merged pull request closes
+every other open issue the pull request links: one whose close failed, one a
+run left behind when it died before this step, and one that was never closed
+because the pull request merged before the worker had this step. GitHub's
+record does not tell the last kind from an issue left open on purpose. A
+close that fails is recorded and does not change the merge verdict; the issue
+stays open until the pull request is rechecked or someone closes it.
+
+One GraphQL query reads every pull request of the scope. A second one is sent
+only when a linked issue is still open; it asks whether the layers' merge
+commits are on the default branch, and for each issue its state and when it
+was last reopened. When the second query fails, the run closes no issue and
+records each one.
+
+GitHub decides what a closing reference is. `Closes #N` in a pull request
+whose base is the default branch is one. GitHub documents that it ignores the
+keyword in a pull request whose base is another branch, so a layer above the
+bottom of a stack often lists none and the worker has nothing to close; the
+Development section of the pull request's sidebar shows what GitHub
+registered. The worker closes what the pull request declares: a pull request
+that leaves work in an issue links it with `Relates #N`, the template's other
+line.
 
 The worker's GET transport retries a quota response only when GitHub provides
 an actionable `Retry-After`, or zero `X-RateLimit-Remaining` with a future

@@ -1,4 +1,7 @@
 let tool_search_setting = "ENABLE_TOOL_SEARCH=true"
+let profile_directory_variable = "ANTHROPIC_CONFIG_DIR"
+let profile_directory_name = "anthropic"
+let profile_directory ~account_home = Filename.concat account_home profile_directory_name
 
 let inherited_names ~explicit_account =
   let base_names =
@@ -59,6 +62,15 @@ let of_inherited ~account_home inherited =
    :: "CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
    :: tool_search_setting
    :: (match account_home with None -> inherited
-       | Some home -> ("CLAUDE_CONFIG_DIR=" ^ home) :: inherited))
+       | Some home ->
+         (* Claude Code also reads a credential outside CLAUDE_CONFIG_DIR: the
+            active Anthropic profile, in ANTHROPIC_CONFIG_DIR, else under
+            XDG_CONFIG_HOME, else under HOME. A declared account keeps the
+            HOME of the server, so without this the child read the profile of
+            the server's OS user, and a Console sign-in without an API key
+            made under one declared account was the profile of every other. *)
+         ("CLAUDE_CONFIG_DIR=" ^ home)
+         :: (profile_directory_variable ^ "=" ^ profile_directory ~account_home:home)
+         :: inherited))
   |> Array.of_list
 ;;

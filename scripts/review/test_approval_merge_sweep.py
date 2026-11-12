@@ -86,27 +86,39 @@ class Selection(unittest.TestCase):
         self.assertEqual(SWEEP.select(rows, never), [1])
 
 
-def ref(name, tip=1, *pulls):
+def ref(name, tip=1, *pulls, truncated=False, protected=False, ruled=0):
     return {'name': name, 'target': {'oid': sha(tip)},
-            'associatedPullRequests': {'nodes': [
-                {'state': state, 'headRefOid': sha(head), 'isCrossRepository': fork}
-                for state, head, fork in pulls]}}
+            'branchProtectionRule': {'id': 'r'} if protected else None,
+            'rules': {'totalCount': ruled},
+            'associatedPullRequests': {'pageInfo': {'hasNextPage': truncated}, 'nodes': [
+                {'state': state, 'headRefOid': sha(head), 'isCrossRepository': fork,
+                 'mergedBy': None if merger is None else {'login': merger}}
+                for state, head, fork, merger in pulls]}}
+
+
+WORKER = ('MERGED', 1, False, 'github-actions')
 
 
 class MergedLeftovers(unittest.TestCase):
-    def test_a_branch_whose_merged_pull_request_ended_at_its_tip_goes(self):
-        self.assertEqual(SWEEP.merged_leftovers([ref('b1', 1, ('MERGED', 1, False))], []),
-                         [('b1', sha(1))])
+    def test_a_branch_whose_worker_merge_ended_at_its_tip_goes(self):
+        self.assertEqual(SWEEP.merged_leftovers([ref('b1', 1, WORKER)], []), [('b1', sha(1))])
 
     def test_everything_else_stays(self):
-        refs = [ref('main', 1, ('MERGED', 1, False)),
-                ref('release/v1', 1, ('MERGED', 1, False)),
-                ref('moved', 2, ('MERGED', 1, False)),          # a commit after the merge
-                ref('reused', 1, ('MERGED', 1, False), ('OPEN', 1, False)),
-                ref('base-of-open', 1, ('MERGED', 1, False)),
-                ref('fork', 1, ('MERGED', 1, True)),
+        refs = [ref('main', 1, WORKER),
+                ref('release/v1', 1, WORKER),
+                ref('moved', 2, WORKER),                      # a commit after the merge
+                ref('reused', 1, WORKER, ('OPEN', 1, False, None)),
+                ref('base-of-open', 1, WORKER),
+                ref('head-of-open', 1, WORKER),               # its open pull request was not listed
+                ref('too-many-pull-requests', 1, WORKER, truncated=True),
+                ref('develop', 1, WORKER, protected=True),
+                ref('staging', 1, WORKER, ruled=1),
+                ref('merged-by-a-person', 1, ('MERGED', 1, False, 'someone')),
+                ref('merger-unknown', 1, ('MERGED', 1, False, None)),
+                ref('fork', 1, ('MERGED', 1, True, 'github-actions')),
                 ref('no-pull-request', 1)]
-        self.assertEqual(SWEEP.merged_leftovers(refs, [row(9, 'base-of-open')]), [])
+        rows = [row(9, 'base-of-open'), row(8, headRefName='head-of-open')]
+        self.assertEqual(SWEEP.merged_leftovers(refs, rows), [])
 
     def test_deleting_carries_a_lease_on_the_tip(self):
         done = subprocess.CompletedProcess([], 0, '', '')
@@ -118,19 +130,30 @@ class MergedLeftovers(unittest.TestCase):
 
     def test_a_refusal_and_an_unreadable_listing_are_records(self):
         refused = subprocess.CompletedProcess([], 1, '', 'stale info')
-        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, ('MERGED', 1, False))]), \
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
              patch.object(SWEEP.subprocess, 'run', return_value=refused):
-            record = SWEEP.clean_branches('owner/repo', [], SWEEP.time.monotonic(), False)
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
         self.assertEqual(record, {'found': 1, 'deleted': 0, 'not_reached': 0,
                                   'refused': [{'branch': 'b1', 'reason': 'stale info'}]})
         with patch.object(SWEEP, 'walk', side_effect=ValueError('refused')):
-            self.assertEqual(SWEEP.clean_branches('owner/repo', [], 0, False),
+            self.assertEqual(SWEEP.clean_branches('owner/repo', 0, False),
                              {'error': 'refused'})
 
-    def test_a_dry_run_deletes_nothing(self):
-        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, ('MERGED', 1, False))]), \
+    def test_a_pull_request_opened_during_the_sweep_keeps_its_base(self):
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[row(9, 'b1')]) as listing, \
              patch.object(SWEEP.subprocess, 'run') as run:
-            record = SWEEP.clean_branches('owner/repo', [], SWEEP.time.monotonic(), True)
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
+        listing.assert_called_once()
+        run.assert_not_called()
+        self.assertEqual(record['found'], 0)
+
+    def test_a_dry_run_deletes_nothing(self):
+        with patch.object(SWEEP, 'walk', return_value=[ref('b1', 1, WORKER)]), \
+             patch.object(SWEEP, 'open_pulls', return_value=[]), \
+             patch.object(SWEEP.subprocess, 'run') as run:
+            record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), True)
         run.assert_not_called()
         self.assertEqual((record['found'], record['not_reached']), (1, 1))
 

@@ -58,8 +58,11 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         name
         target { oid }
-        associatedPullRequests(first: 5, states: [OPEN, MERGED]) {
-          nodes { state headRefOid isCrossRepository }
+        branchProtectionRule { id }
+        rules(first: 1) { totalCount }
+        associatedPullRequests(first: 20, states: [OPEN, MERGED]) {
+          pageInfo { hasNextPage }
+          nodes { state headRefOid isCrossRepository mergedBy { login } }
         }
       }
     }
@@ -67,6 +70,7 @@ query($owner: String!, $name: String!, $cursor: String) {
 }
 '''
 PUSH_TIMEOUT_SECONDS = 120
+MERGER = 'github-actions'  # the account the merge worker's token merges as
 
 
 def gh(arguments):
@@ -106,27 +110,32 @@ def open_pulls(repo):
 
 
 def merged_leftovers(refs, rows):
-    """Branches a merge left behind, as (name, tip).
+    """Branches a worker merge left behind, as (name, tip).
 
     The worker deletes a head branch when it sees the merge, and that misses
     the layers of a native stack: each layer is still the base of the open
     layer above it at that moment, and nothing looks again. On 2026-11-12 the
     worker had merged 87 pull requests whose branch was still there.
 
-    A branch goes only when a merged pull request of this repository ended at
-    exactly its tip, so no commit is lost, and when no open pull request has
-    it as head or base.
+    A branch goes only when a pull request of this repository that the worker
+    merged ended at exactly its tip, so no commit is lost. It stays when an
+    open pull request names it as head or base, when a protection rule or a
+    ruleset applies to it, or when its pull requests were not all read.
+    GitHub deletes the branch itself after a merge made by a user account.
     """
-    bases = {row['baseRefName'] for row in rows}
+    in_use = {row[side] for row in rows for side in ('baseRefName', 'headRefName')}
     leftovers = []
     for ref in refs:
         name, tip = ref['name'], ref['target']['oid']
-        pulls = ref['associatedPullRequests']['nodes']
-        if (name == 'main' or name.startswith('release/') or name in bases or
-                any(pull['state'] == 'OPEN' for pull in pulls)):
+        pulls = ref['associatedPullRequests']
+        if (name == 'main' or name.startswith('release/') or name in in_use or
+                ref['branchProtectionRule'] is not None or ref['rules']['totalCount'] or
+                pulls['pageInfo']['hasNextPage'] or
+                any(pull['state'] == 'OPEN' for pull in pulls['nodes'])):
             continue
         if any(pull['state'] == 'MERGED' and pull['headRefOid'] == tip and
-               pull['isCrossRepository'] is False for pull in pulls):
+               pull['isCrossRepository'] is False and
+               (pull['mergedBy'] or {}).get('login') == MERGER for pull in pulls['nodes']):
             leftovers.append((name, tip))
     return leftovers
 
@@ -145,10 +154,15 @@ def delete_branch(repo, name, tip):
     return (operation.stderr or '').strip()[-ERROR_CHARACTERS:] if operation.returncode else None
 
 
-def clean_branches(repo, rows, started, dry_run):
-    """Never part of the sweep's verdict: every failure is a record."""
+def clean_branches(repo, started, dry_run):
+    """Never part of the sweep's verdict: every failure is a record.
+
+    The open pull requests are read again here. The listing the sweep began
+    with can be 20 minutes old by now, and a pull request opened since then
+    on a merged layer's branch would be closed by deleting that branch.
+    """
     try:
-        leftovers = merged_leftovers(walk(repo, BRANCHES, 'refs'), rows)
+        leftovers = merged_leftovers(walk(repo, BRANCHES, 'refs'), open_pulls(repo))
     except (ValueError, KeyError, TypeError) as error:
         return {'error': str(error)}
     record = {'found': len(leftovers), 'deleted': 0, 'refused': [], 'not_reached': 0}
@@ -268,7 +282,7 @@ def main():
         if code == QUOTA_EXIT:
             stop = 'quota reached'
     report['stopped'] = stop
-    report['merged_branches'] = clean_branches(repo, rows, started, dry_run)
+    report['merged_branches'] = clean_branches(repo, started, dry_run)
     report['quota_after'] = quota()
     output = json.dumps(report, ensure_ascii=False, indent=2)
     print(output, flush=True)

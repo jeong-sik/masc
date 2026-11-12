@@ -1790,6 +1790,7 @@ type runtime_option = {
   ro_quota_resets_at : float option;
   ro_quota_scope : string option;
   ro_quota_scope_id : string option;
+  ro_credential_refused_at : float option;
   ro_rate_limited : bool;
   ro_rate_limit_resets_at : float option;
   ro_failed_attempt : runtime_failed_attempt option;
@@ -2059,6 +2060,8 @@ let decode_runtime_option ~usage ~default_id json =
          | [account] -> Some account.pua_scope_id
          | [] | _ :: _ :: _ -> None)
   in
+  (* Absent on a server that does not report it: no refusal is known. *)
+  let* ro_credential_refused_at = optional_float_field json "credential_refused_at" in
   let* ro_rate_limited = required_bool_field json "rate_limited" in
   let* ro_rate_limit_resets_at = optional_float_field json "rate_limit_resets_at" in
   let* ro_failed_attempt =
@@ -2095,6 +2098,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_quota_resets_at
     ; ro_quota_scope
     ; ro_quota_scope_id
+    ; ro_credential_refused_at
     ; ro_rate_limited
     ; ro_rate_limit_resets_at
     ; ro_failed_attempt

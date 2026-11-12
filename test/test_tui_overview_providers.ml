@@ -63,6 +63,7 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_quota_resets_at = resets
   ; ro_quota_scope_id = None
   ; ro_quota_scope = Some scope
+  ; ro_credential_refused_at = None
   ; ro_rate_limited = false
   ; ro_rate_limit_resets_at = None
   ; ro_failed_attempt = None

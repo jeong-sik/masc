@@ -494,7 +494,7 @@ type response_place =
 
 type logical_row =
   | Trace_unavailable of string * Reading.keeper_identity_absence
-  | Trace_unavailable_summary of string
+  | Trace_unavailable_summary of string * tone
   | Fleet_row of keeper * Acting.chunk option
   | Focus_header of string * Acting.chunk option * Reading.keeper_health_reading option
   | Approval_row of string
@@ -1496,6 +1496,18 @@ let trace_summary ~ko count =
      else "Trace unavailable: %d Keepers · details in Keeper Info / Metadata")
     count
 
+(* A Keeper that never started has no trace to lose, so its row is a note.
+   A row whose metadata did not decode lost one, and that is a warning. *)
+let trace_absence_warns = function
+  | Reading.Keeper_not_started -> false
+  | Reading.Identity_unreadable _ -> true
+
+let trace_absence_tone reason = if trace_absence_warns reason then Warn else Dim
+
+(* One summary row stands for several Keepers and warns when any of them does. *)
+let trace_absences_warn unavailable =
+  List.exists (fun (_, reason) -> trace_absence_warns reason) unavailable
+
 let trace_unavailable_summary ~ko unavailable =
   match unavailable with
   | [] -> None
@@ -1547,19 +1559,22 @@ let fleet_body input =
       in
       (body, fun ~below -> overview_rows ~below fleet_rows focus focus_rows)
   in
-  let notices = input.trace_unavailable
+  let unavailable = input.trace_unavailable
     |> List.filter (fun (name, _) -> match input.scope, input.selected with
         | Selected_only, Some selected -> String.equal name selected
         | Selected_only, None -> false
-        | Whole_fleet, _ -> true)
-    |> List.map (fun (name, reason) -> Trace_unavailable (name, reason)) in
+        | Whole_fleet, _ -> true) in
+  let notices =
+    List.map (fun (name, reason) -> Trace_unavailable (name, reason)) unavailable in
   (notices @ body, fun ~below ->
      match notices with
      | [] -> overview ~below
      | _ :: _ when below <= 1 -> overview ~below
      | [notice] -> notice :: overview ~below:(below - 1)
      | _ :: _ :: _ ->
-         Trace_unavailable_summary (trace_summary ~ko:input.ko (List.length notices))
+         Trace_unavailable_summary
+           ( trace_summary ~ko:input.ko (List.length notices)
+           , if trace_absences_warn unavailable then Warn else Dim )
          :: overview ~below:(below - 1))
 
 let fleet_lines ~below ~scroll (body, overview) =
@@ -1720,13 +1735,16 @@ let changes_lines ~cols ~below ~scroll input =
   window ~below ~scroll body ~overview:(fun () -> folded_rows ~below body)
 
 let materialize_row ~cols input = function
-  | Trace_unavailable_summary summary ->
-      fit_line ~cols (with_border [{text = summary; tone = Warn}]), Target_none
+  | Trace_unavailable_summary (summary, tone) ->
+      fit_line ~cols (with_border [{text = summary; tone}]), Target_none
   | Trace_unavailable (name, reason) ->
       let notice =
         say input.ko "추적 불가: " "Trace unavailable: " ^ name ^ " · "
         ^ Reading.keeper_identity_absence_text ~ko:input.ko reason in
-      fit_line ~cols (with_border [{text = Terminal_text.single_line notice; tone = Warn}]), Target_none
+      fit_line ~cols
+        (with_border
+           [{text = Terminal_text.single_line notice; tone = trace_absence_tone reason}]),
+      Target_none
   | Fleet_row (keeper, chunk) -> fleet_row ~cols input keeper chunk
   | Focus_header (name, current, health) ->
       focus_header_line ~ko:input.ko ~cols ~now:input.now ~health name current, Target_none

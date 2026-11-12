@@ -840,6 +840,24 @@ let what_the_server_reads () =
       "a session read with a bearer"
       401
       (send admin t.router ~meth:"GET" ~path:"/auth/session" ~headers:[ "Authorization", "Bearer x" ]);
+    (* A browser sends one session cookie, so these are written by hand. *)
+    let one = Q.session_cookie ^ "=" ^ List.assoc Q.session_cookie admin.cookies in
+    let in_one_field = [ "Cookie", one ^ "; " ^ one ] in
+    let by_hand ~meth ~path headers = send (fresh_browser ()) t.router ~meth ~path ~headers in
+    check "a session read with the cookie twice" 401 (by_hand ~meth:"GET" ~path:"/auth/session" in_one_field);
+    check
+      "a session read with the cookie in two fields"
+      401
+      (by_hand ~meth:"GET" ~path:"/auth/session" [ "Cookie", one; "Cookie", one ]);
+    check
+      "a sign-out with the cookie twice"
+      401
+      (by_hand ~meth:"POST" ~path:"/auth/logout" (in_one_field @ changing ~csrf ()));
+    check
+      "a start with the cookie twice"
+      401
+      (by_hand ~meth:"POST" ~path:"/auth/github/start" (in_one_field @ [ "Origin", same_origin ]));
+    check "the session of the Admin still reads" 200 (send admin t.router ~meth:"GET" ~path:"/auth/session");
     check "a sign-out with no token" 403 (send admin t.router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ()));
     check
       "a sign-out with no origin"

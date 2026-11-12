@@ -366,8 +366,7 @@ let board_hearth_census_line ~cols (state : state) =
          ends on -- was cut to "19". *)
       let cells = Message_layout.display_width in
       let tail =
-        Printf.sprintf "   %s" (if state.ui_language = Lang_ko then Printf.sprintf "글 %d개" total
-          else Masc_tui_message_layout.count_noun total "post")
+        Printf.sprintf "   %s" (count_reading state Masc_tui_value.Count.Post total)
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
       let label_gap = " " in

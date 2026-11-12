@@ -106,19 +106,23 @@ let render_fusion_list (state : state) =
            where the last pair says nothing and reads as a third total. It is
            left out when it is zero, the way the failures beside it already
            are. *)
-        let stats_note =
-          Printf.sprintf "%s · %s%d done%s%s%s"
-            (Masc_tui_message_layout.count_noun (List.length runs) "run")
-            (Theme.ok ()) completed_count Ansi.reset
-            (if running_count > 0 then
-               Printf.sprintf " · %s%d running%s" (Theme.info ()) running_count
-                 Ansi.reset
-             else "")
-            (if failed_count > 0 then Printf.sprintf " · %s%d fail%s" (Theme.bad ()) failed_count Ansi.reset else "")
+        let state_count style ~ko ~en count =
+          style
+          ^ (if state.ui_language = Lang_ko then Printf.sprintf "%s %d" ko count
+             else Printf.sprintf "%d %s" count en)
+          ^ Ansi.reset
         in
         here_row ~cols state ~path:[ fusion_step ]
           ~readings:
-            [ stats_note
+            [ count_reading state Masc_tui_value.Count.Run (List.length runs)
+            ; state_count (Theme.ok ()) ~ko:"완료" ~en:"done" completed_count
+            ; (if running_count > 0 then
+                 state_count (Theme.info ()) ~ko:"진행 중" ~en:"running"
+                   running_count
+               else "")
+            ; (if failed_count > 0 then
+                 state_count (Theme.bad ()) ~ko:"실패" ~en:"failed" failed_count
+               else "")
             ; (if history_count = 0 then ""
                else Printf.sprintf "%d Board evidence" history_count) ]
           ~position:None

@@ -919,8 +919,8 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
              (stored_amount state.memory_unit
                 (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
-         ; (if ko then Printf.sprintf "키퍼 %d명" (List.length snapshot.mhs_keepers)
-            else Masc_tui_message_layout.count_noun (List.length snapshot.mhs_keepers) "keeper")
+         ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Keeper
+             (List.length snapshot.mhs_keepers)
          ; (match state.memory_unit with
             | Memory_usage.Tokens -> text "저장 추정량, 턴 입력 아님" "stored estimate, not turn input"
             | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")

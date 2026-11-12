@@ -13,6 +13,13 @@ from urllib.parse import urlsplit
 
 
 QUOTA_HEADERS = ('retry-after', 'x-ratelimit-remaining', 'x-ratelimit-reset')
+# A wait that ends exactly at the server's reset second can still be answered
+# with the old window: the 403 then carries the same reset time, now elapsed,
+# which reads as no quota at all. After a wait of our own, that answer gets a
+# few short retries before it is reported. Without a prior wait it stays a
+# visible failure.
+BOUNDARY_RETRIES = 3
+BOUNDARY_PAUSE_SECONDS = 2
 
 
 class ApiFailure(ValueError):
@@ -28,6 +35,22 @@ class QuotaLimited(ApiFailure):
     def __init__(self, path, status, headers, message, retry_at):
         super().__init__(path, status, headers, message)
         self.retry_at = retry_at
+
+
+class QuotaBoundaryExhausted(ApiFailure):
+    """The post-wait retries at the reset second all met the old window.
+
+    Its own type and ``quota_state`` mark it, so a measurement can tell this
+    end from an ordinary refusal or a quota wait that was cut short.
+    """
+    STATE = 'boundary_retries_exhausted'
+
+    def __init__(self, failure, retries):
+        super().__init__(failure.path, failure.status, failure.headers,
+                         f'{failure.details["message"]} (quota reset boundary: '
+                         f'{retries} retries exhausted)')
+        self.details = dict(self.details, quota_state=self.STATE, boundary_retries=retries)
+        self.args = (json.dumps(self.details, ensure_ascii=False),)
 
 
 class QuotaWaitCutShort(QuotaLimited):
@@ -97,6 +120,7 @@ class Client:
         self.sleep = sleep or time.sleep
         self.on_quota = on_quota or (lambda failure: None)
         self.pauses = 0
+        self.boundary_retries = 0
         # Latest client-clock time a quota wait may sleep until; None waits
         # out the server time. A caller with its own deadline (follow's wait)
         # sets this so a long quota cannot outlive the handoff.
@@ -125,6 +149,7 @@ class Client:
         return Response(data, status, headers)
 
     def get(self, path):
+        waited, boundary = False, 0
         while True:
             try:
                 return self.once(path)
@@ -132,6 +157,22 @@ class Client:
                 self.pauses += 1
                 self.on_quota(failure)
                 self.wait_for_quota(failure)
+                waited = True
+            except ApiFailure as failure:
+                if not (waited and self.reset_just_elapsed(failure)):
+                    raise
+                if boundary >= BOUNDARY_RETRIES:
+                    raise QuotaBoundaryExhausted(failure, boundary) from failure
+                boundary += 1
+                self.boundary_retries += 1
+                self.sleep(BOUNDARY_PAUSE_SECONDS)
+
+    def reset_just_elapsed(self, failure):
+        """A 403/429 whose primary quota is spent and whose reset time has passed."""
+        headers = failure.headers
+        reset = headers.get('x-ratelimit-reset', '')
+        return (failure.status in (403, 429) and headers.get('x-ratelimit-remaining') == '0'
+                and reset.isascii() and reset.isdecimal() and int(reset) <= self.clock())
 
     def wait_for_quota(self, failure):
         """Honor an observed retry time, including one carried by a receipt."""

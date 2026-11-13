@@ -44,7 +44,8 @@ let record_json ~scope_id ~observed_at (report : Usage.report) =
           (* What the window limits is decided from the provider's answer,
              not from its source and kind, so a row that is to be put back
              in the table after a restart has to carry it. The daily history
-             does not read it. *)
+             does not show it, but a row whose role is not a word this build
+             writes is a row that could not be read. *)
         ; "role", `String (Usage.window_role_to_string window.role)
         ; "observed_at", `Float observed_at
         ; "resets_at", Option.fold ~none:`Null ~some:(fun ts -> `Int ts) window.resets_at
@@ -141,6 +142,15 @@ let decode_point json =
   let* resets_at = optional_int "resets_at" json in
   Ok { scope_id; source; kind; limit_id; role; utilization; observed_at; resets_at }
 
+(* The report a stored item belongs to, read on its own so that an item whose
+   other fields cannot be read still names its report. *)
+let report_of_item json =
+  Result.to_option
+    (let* scope_id = string "scope_id" json in
+     let* source = string "source" json in
+     let* observed_at = number "observed_at" json in
+     Ok (scope_id, source, observed_at))
+
 let point_json point =
   `Assoc
     ([ "scope_id", `String point.scope_id
@@ -217,6 +227,9 @@ module Scope_day_set = Set.Make (Scope_day)
 type source_day = {
   snapshot : snapshot option;
   windows : point Window_map.t;
+  unread_at : float option;
+      (* When the latest report with an item that could not be read was
+         observed. *)
 }
 
 type t = {
@@ -233,7 +246,7 @@ let update_source_day t key update =
   let previous =
     match Source_day_map.find_opt key t.sources with
     | Some held -> held
-    | None -> { snapshot = None; windows = Window_map.empty }
+    | None -> { snapshot = None; windows = Window_map.empty; unread_at = None }
   in
   { t with sources = Source_day_map.add key (update previous) t.sources }
 
@@ -269,6 +282,39 @@ let consume_item t json =
 
 let note_unreadable t = { t with unreadable_reports = t.unreadable_reports + 1 }
 
+let note_unread_report t (scope_id, source, observed_at) =
+  if not (in_window t observed_at) then t
+  else
+    let day = Log.format_utc_date_of observed_at in
+    update_source_day t { Source_day.scope_id; source; day } (fun held ->
+      match held.unread_at with
+      | Some previous when previous >= observed_at -> held
+      | Some _ | None -> { held with unread_at = Some observed_at })
+
+let consume_report t items =
+  let t, unread =
+    List.fold_left
+      (fun (t, unread) item ->
+        match consume_item t item with
+        | Ok next -> next, unread
+        | Error detail -> note_unreadable t, detail :: unread)
+      (t, []) items
+  in
+  match unread with
+  | [] -> t, []
+  | _ :: _ ->
+      (* The items of one line are one report, so the items that were read
+         name the report of the ones that were not. *)
+      let t =
+        List.fold_left
+          (fun t item ->
+            match report_of_item item with
+            | Some report -> note_unread_report t report
+            | None -> t)
+          t items
+      in
+      t, List.rev unread
+
 let unbounded () = create ~since_at:Float.neg_infinity ~now:Float.infinity
 
 (* [kept] holds, per source, day and window, the latest reading of the rows it
@@ -289,6 +335,11 @@ let absorb t kept =
               | Some previous when previous.observed_at >= snapshot.observed_at -> current
               | Some _ | None -> { current with snapshot = Some snapshot })
         | Some _ | None -> t
+      in
+      let t =
+        match held.unread_at with
+        | Some observed_at -> note_unread_report t (key.scope_id, key.source, observed_at)
+        | None -> t
       in
       Window_map.fold
         (fun window_key (point : point) t ->
@@ -331,8 +382,12 @@ end
 
 module Scope_source_map = Map.Make (Scope_source)
 
+type stored =
+  | Report of { observed_at : float; report : Usage.report }
+  | Unreadable_complete_report of { source : Usage.source; observed_at : float }
+
 type stored_reports = {
-  reports : (string * float * Usage.report) list;
+  reports : (string * stored) list;
   unrestorable : int;
 }
 
@@ -357,7 +412,12 @@ let latest_by_source t =
                   Some (if a.observed_at >= b.observed_at then a else b))
                 current.windows held.windows
             in
-            { snapshot; windows }
+            let unread_at =
+              match current.unread_at, held.unread_at with
+              | Some a, Some b -> Some (Float.max a b)
+              | (Some _ as only), None | None, only -> only
+            in
+            { snapshot; windows; unread_at }
       in
       Scope_source_map.add key merged latest)
     t.sources Scope_source_map.empty
@@ -375,6 +435,115 @@ let reports_of_readings source readings =
   |> List.rev_map (fun (observed_at, windows) ->
        observed_at, { Usage.source; windows = List.rev windows })
 
+type reading =
+  | Restorable of float * Usage.window
+  | Without_role
+  | Kind_not_written of float
+
+let reading_of_point (point : point) =
+  match point.role with
+  | None -> Without_role
+  | Some role ->
+      (match kind_of_stored point.kind with
+       | None -> Kind_not_written point.observed_at
+       | Some kind ->
+           Restorable
+             ( point.observed_at
+             , { Usage.limit_id = point.limit_id
+               ; kind
+               ; role
+               ; utilization = point.utilization
+               ; resets_at = point.resets_at
+               } ))
+
+(* The latest reading of each window its source's latest complete snapshot
+   still states. *)
+let stated_points (held : source_day) =
+  Window_map.fold
+    (fun _ (point : point) points ->
+      match held.snapshot with
+      | Some snapshot when point.observed_at < snapshot.observed_at -> points
+      | Some _ | None -> point :: points)
+    held.windows []
+
+let reports_of_stated source (held : source_day) readings =
+  match readings, held.snapshot with
+  | [], Some { observed_at; state = Reported_no_windows } ->
+      [ Report { observed_at; report = { Usage.source; windows = [] } } ]
+  | [], (Some { state = Reported; _ } | None) -> []
+  | _ :: _, _ ->
+      List.map
+        (fun (observed_at, report) -> Report { observed_at; report })
+        (reports_of_readings source readings)
+
+(* A sparse report states some windows, so each reading stands on its own. *)
+let sparse_reports source held =
+  let readings, unrestorable =
+    List.fold_left
+      (fun (readings, unrestorable) point ->
+        match reading_of_point point with
+        | Restorable (observed_at, window) -> (observed_at, window) :: readings, unrestorable
+        | Without_role -> readings, unrestorable
+        | Kind_not_written _ -> readings, unrestorable + 1)
+      ([], 0) (stated_points held)
+  in
+  reports_of_stated source held readings, unrestorable
+
+type complete_readings =
+  | All_restorable of (float * Usage.window) list
+  | Some_without_role
+  | Some_kind_not_written of { observed_at : float; count : int }
+
+(* A complete report says every window its source holds, and a window it
+   leaves out is one the provider no longer states. The rows of one that
+   could be read in part say less than the report did, so they are not a
+   report: nothing of the source is put back, neither those rows nor the
+   earlier reports that report replaced. *)
+let complete_reports source held =
+  let points = stated_points held in
+  let latest =
+    List.fold_left
+      (fun latest (point : point) -> Float.max latest point.observed_at)
+      (match held.snapshot with
+       | Some snapshot -> snapshot.observed_at
+       | None -> Float.neg_infinity)
+      points
+  in
+  match held.unread_at with
+  | Some unread_at when unread_at >= latest ->
+      [ Unreadable_complete_report { source; observed_at = unread_at } ], 0
+  | (Some _ | None) as unread_at ->
+      let points =
+        match unread_at with
+        | None -> points
+        | Some unread_at ->
+            (* A later report was read whole and replaces the unread one. *)
+            List.filter (fun (point : point) -> point.observed_at > unread_at) points
+      in
+      let readings =
+        List.fold_left
+          (fun readings point ->
+            match readings, reading_of_point point with
+            | All_restorable held, Restorable (observed_at, window) ->
+                All_restorable ((observed_at, window) :: held)
+            | (All_restorable _ | Some_without_role), Without_role -> Some_without_role
+            | Some_without_role, Restorable _ -> Some_without_role
+            | (All_restorable _ | Some_without_role), Kind_not_written observed_at ->
+                Some_kind_not_written { observed_at; count = 1 }
+            | Some_kind_not_written unread, Kind_not_written observed_at ->
+                Some_kind_not_written
+                  { observed_at = Float.max unread.observed_at observed_at
+                  ; count = unread.count + 1
+                  }
+            | (Some_kind_not_written _ as unread), (Restorable _ | Without_role) -> unread)
+          (All_restorable []) points
+      in
+      (match readings with
+       | All_restorable readings -> reports_of_stated source held readings, 0
+       | Some_without_role -> [], 0
+       | Some_kind_not_written { observed_at; count } ->
+           [ Unreadable_complete_report { source; observed_at } ], count)
+
 let stored_reports t =
   Scope_source_map.fold
     (fun (scope_id, source_word) (held : source_day) (stored : stored_reports) ->
@@ -382,38 +551,12 @@ let stored_reports t =
       | None ->
           { stored with unrestorable = stored.unrestorable + Window_map.cardinal held.windows }
       | Some source ->
-          let readings, unrestorable =
-            Window_map.fold
-              (fun _ (point : point) (readings, unrestorable) ->
-                match held.snapshot, point.role with
-                | Some snapshot, _ when point.observed_at < snapshot.observed_at ->
-                    readings, unrestorable
-                | _, None -> readings, unrestorable
-                | _, Some role ->
-                    (match kind_of_stored point.kind with
-                     | None -> readings, unrestorable + 1
-                     | Some kind ->
-                         ( ( point.observed_at
-                           , { Usage.limit_id = point.limit_id
-                             ; kind
-                             ; role
-                             ; utilization = point.utilization
-                             ; resets_at = point.resets_at
-                             } )
-                           :: readings
-                         , unrestorable )))
-              held.windows ([], 0)
+          let reports, unrestorable =
+            match Usage.report_shape source with
+            | Usage.Sparse_update -> sparse_reports source held
+            | Usage.Complete_snapshot -> complete_reports source held
           in
-          let reports =
-            match readings, held.snapshot with
-            | [], Some { observed_at; state = Reported_no_windows } ->
-                [ observed_at, { Usage.source; windows = [] } ]
-            | [], (Some { state = Reported; _ } | None) -> []
-            | _ :: _, _ -> reports_of_readings source readings
-          in
-          { reports =
-              stored.reports
-              @ List.map (fun (observed_at, report) -> scope_id, observed_at, report) reports
+          { reports = stored.reports @ List.map (fun report -> scope_id, report) reports
           ; unrestorable = stored.unrestorable + unrestorable
           })
     (latest_by_source t)

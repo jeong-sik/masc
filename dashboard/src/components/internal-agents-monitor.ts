@@ -923,16 +923,13 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
         <div class="flex flex-wrap items-end gap-2">
           <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Lanes</h3>
           <span class="rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-accent)]">READ-ONLY OBSERVATION</span>
-          <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 관측창에 실행이 없는 lane도 표시합니다.</span>
+          <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 보관된 실행이 없는 lane도 표시합니다.</span>
         </div>
         ${laneMatrixError === null ? null : html`<div role="alert" class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">${laneMatrix === null ? '관측 불가' : 'STALE · 마지막 성공 관측을 표시합니다.'} · ${laneMatrixError}</div>`}
         ${laneMatrix === null
           ? html`<div class="ia-empty">Lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
           : html`
             <div class="text-xs text-[var(--color-fg-muted)]">Observed · ${formatDateTimeKo(laneMatrix.observedAtUnix)}</div>
-            ${laneMatrix.exactRunProjectionTruncated
-              ? html`<div class="rounded border border-[var(--status-warn)] p-2 text-xs text-[var(--status-warn)]">Exact run window ${laneMatrix.exactRunProjectionCount} / ${laneMatrix.exactRunSourceTotal} · 표의 exact counts/p50는 최신 bounded window 기준입니다.</div>`
-              : null}
             <div class="ai-tablewrap">
               <table class="ai-table" data-testid="standalone-lane-matrix">
                 <thead>
@@ -940,16 +937,9 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
                 </thead>
                 <tbody>
                   ${laneMatrix.lanes.map(lane => {
-                    const exactWindowExcludesHistory = lane.laneId !== 'verifier_exact'
-                      && laneMatrix.exactRunProjectionTruncated
                     const statusLabel = lane.status === 'no_retained_observation'
-                      ? exactWindowExcludesHistory
-                        ? 'No run in recent window'
-                        : 'No retained observation'
+                      ? 'No retained observation'
                       : lane.status.charAt(0).toUpperCase() + lane.status.slice(1)
-                    const noTerminalLabel = exactWindowExcludesHistory
-                      ? '최근 완료 관측 없음'
-                      : '관측 기록 없음'
                     const statusClass = lane.status === 'degraded' || lane.status === 'unavailable'
                       ? 'text-[var(--color-danger)]'
                       : lane.status === 'running'
@@ -973,7 +963,7 @@ function InternalAgentsMonitorContent({ target }: { target?: Extract<LaneNavigat
                         <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}${lane.cliSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-text-tertiary)]">cli: ${lane.cliSlots.join(', ')}</span>`}${lane.droppedSlots.length === 0 ? null : html`<br /><span class="text-3xs text-[var(--color-danger)]">dropped: ${lane.droppedSlots.join(', ')}</span>`}</td>
                         <td class="r mono">${lane.runningCount}</td>
                         <td class="r mono">${lane.retainedRunCount}</td>
-                        <td class="r mono">${lane.lastTerminalAt === null ? noTerminalLabel : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>
+                        <td class="r mono">${lane.lastTerminalAt === null ? '관측 기록 없음' : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>
                         <td class="r mono">${formatElapsed(lane.p50ElapsedSeconds ?? undefined)}</td>
                         <td class="mono">${lane.selectedSlots.length === 0 ? '—' : lane.selectedSlots.map(slot => `${slot.slotId} ×${slot.count}`).join(', ')}</td>
                       </tr>

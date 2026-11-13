@@ -1843,12 +1843,7 @@ let four_standalone_lanes =
   ]
 
 let standalone_snapshot lanes : Tui_decode.standalone_lanes_snapshot =
-  { Tui_decode.sls_observed_at_unix = 0.
-  ; sls_exact_run_projection_count = 0
-  ; sls_exact_run_source_total = 0
-  ; sls_exact_run_projection_truncated = false
-  ; sls_lanes = lanes
-  }
+  { Tui_decode.sls_observed_at_unix = 0.; sls_lanes = lanes }
 
 let lanes_state () =
   let state = create_state ~workspace:"" ~port:0 () in

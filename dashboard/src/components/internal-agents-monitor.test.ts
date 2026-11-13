@@ -92,9 +92,6 @@ describe('InternalAgentsMonitor', () => {
       generatedAt: 'now',
       observedAtUnix: 1,
       observationOnly: true,
-      exactRunProjectionCount: 0,
-      exactRunSourceTotal: 0,
-      exactRunProjectionTruncated: false,
       lanes: [],
     })
   })
@@ -295,9 +292,6 @@ describe('InternalAgentsMonitor', () => {
       generatedAt: 'now',
       observedAtUnix: 20,
       observationOnly: true,
-      exactRunProjectionCount: 4,
-      exactRunSourceTotal: 4,
-      exactRunProjectionTruncated: false,
       lanes: [
         lane({ status: 'running', runningCount: 1 }),
         lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge' }),
@@ -352,21 +346,6 @@ describe('InternalAgentsMonitor', () => {
       expect(await within(matrix).findByText(label)).toBeTruthy()
       expect(within(matrix).queryByText('JEV CONFIGURED · jev-next')).toBeNull()
     }
-
-    // HITL can have older retained runs even when the global exact window
-    // contains none.
-    api.fetchStandaloneLanes.mockResolvedValue({
-      ...laneSnapshot,
-      exactRunProjectionCount: 4,
-      exactRunSourceTotal: 20,
-      exactRunProjectionTruncated: true,
-      lanes: [
-        lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge', status: 'no_retained_observation', retainedRunCount: 0, lastTerminalAt: null }),
-      ],
-    })
-    sse.refresh?.()
-    expect(await within(matrix).findByText('No run in recent window')).toBeTruthy()
-    expect(within(matrix).getByText('최근 완료 관측 없음')).toBeTruthy()
   })
 
   it('marks retained lanes stale after failure and clears the warning only on recovery', async () => {
@@ -376,8 +355,7 @@ describe('InternalAgentsMonitor', () => {
     const purpose = 'Appraises a confirmed Goal payout.'
     const snapshot = {
       schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
-      observationOnly: true, exactRunProjectionCount: 0, exactRunSourceTotal: 0,
-      exactRunProjectionTruncated: false,
+      observationOnly: true,
       lanes: [{
         laneId: 'candle_appraiser', label: 'Candle Appraiser', purpose,
         required: false, observationOnly: true, configured: false,
@@ -424,8 +402,7 @@ describe('InternalAgentsMonitor', () => {
     })
     const snapshot = (label: string) => ({
       schema: 'masc.standalone_llm_lanes.v2', generatedAt: 'now', observedAtUnix: 20,
-      observationOnly: true, exactRunProjectionCount: 1, exactRunSourceTotal: 1,
-      exactRunProjectionTruncated: false, lanes: [lane(label)],
+      observationOnly: true, lanes: [lane(label)],
     })
     api.fetchStandaloneLanes
       .mockImplementationOnce(() => older)

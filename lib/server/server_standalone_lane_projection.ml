@@ -817,7 +817,6 @@ let snapshot_json_with
       ~now
       ~resolve_lane
       ~jev_readiness
-      ~exact_runs_total
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs
@@ -827,17 +826,11 @@ let snapshot_json_with
     @ List.map observed_verification_run verification_runs
     @ List.map observed_goal_verification_run goal_verification_runs
   in
-  let exact_run_projection_count = List.length exact_runs in
-  let exact_run_source_total = max exact_run_projection_count exact_runs_total in
   `Assoc
     [ "schema", `String "masc.standalone_llm_lanes.v2"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ; "observed_at_unix", `Float now
     ; "observation_only", `Bool true
-    ; "exact_run_projection_count", `Int exact_run_projection_count
-    ; "exact_run_source_total", `Int exact_run_source_total
-    ; ( "exact_run_projection_truncated"
-      , `Bool (exact_run_projection_count < exact_run_source_total) )
     ; ( "lanes"
       , `List
           (List.map
@@ -961,7 +954,6 @@ type observation = {
   resolve_addon : Runtime_schema.addon_lane -> lane_configuration;
   addon_lanes : Runtime_schema.addon_lane list;
   jev_readiness : Typesafeai_config.readiness;
-  exact_runs_total : int;
   exact_runs : Exact_lane_run_registry.run list;
   verification_runs : Verification_run_registry.run list;
   goal_verification_runs : Goal_verification_run_registry.run list;
@@ -990,18 +982,15 @@ let observe () =
     | None -> Registry_unavailable "unknown standalone lane" in
   (* The matrix reads every run the registry retains. The registry's own
      bound is per lane, applied on every register and completion, so a busy
-     lane cannot evict a quiet one (#31480, lane audit W8). This read used to
-     take the newest [max_completed_retained] runs of all lanes, a window
-     sized when retention was one global bound (#31169). Under the per-lane
-     bound it cut across lanes: on 2026-11-12 it read 2,000 of 5,329 retained
-     runs, and candle_appraiser, with 14 retained, showed none. [list_runs] is
-     already newest-first; do not call [recent_runs], which sorts it again. *)
+     lane cannot evict a quiet one (#31480, lane audit W8). A second bound
+     taken here across all lanes would cut a quiet lane's runs behind a busy
+     one. [list_runs] is already newest-first; do not call [recent_runs],
+     which sorts it again. *)
   let exact_runs =
     Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
   in
   { now=Time_compat.now (); resolve_lane; resolve_addon; addon_lanes;
-    jev_readiness=Typesafeai_config.readiness ();
-    exact_runs_total=List.length exact_runs; exact_runs;
+    jev_readiness=Typesafeai_config.readiness (); exact_runs;
     verification_runs=Verification_run_registry.list_runs (Verification_run_registry.global ());
     goal_verification_runs=retained_goal_reviews () }
 ;;
@@ -1027,8 +1016,7 @@ let addon_tables observation ~declaration_id =
     if String.equal addon.declaration_id declaration_id then Some addon.output else None) observation.addon_lanes
 let observation_to_json observation =
   snapshot_json_with ~now:observation.now ~resolve_lane:observation.resolve_lane
-    ~jev_readiness:observation.jev_readiness ~exact_runs_total:observation.exact_runs_total
-    ~exact_runs:observation.exact_runs ~verification_runs:observation.verification_runs
+    ~jev_readiness:observation.jev_readiness ~exact_runs:observation.exact_runs ~verification_runs:observation.verification_runs
     ~goal_verification_runs:observation.goal_verification_runs
 let snapshot_json () = observation_to_json (observe ())
 

@@ -93,7 +93,6 @@ let test_runs_without_a_slot_are_split_by_why () =
           ; admission_error = None
           })
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:(List.length exact_runs)
       ~exact_runs
       ~verification_runs:[]
       ~goal_verification_runs:[]
@@ -188,7 +187,6 @@ let test_snapshot_names_every_lane_and_keeps_observed_truth () =
       ~now:110.
       ~resolve_lane
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:(List.length exact_runs)
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs:[]
@@ -249,7 +247,6 @@ let test_board_lane_projects_credential_free_jev_readiness () =
       ~now:110.
       ~resolve_lane:(fun _ -> configuration)
       ~jev_readiness
-      ~exact_runs_total:0
       ~exact_runs:[]
       ~verification_runs:[]
       ~goal_verification_runs:[]
@@ -393,7 +390,6 @@ let test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50 () =
       ~now:110.
       ~resolve_lane
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:(List.length exact_runs)
       ~exact_runs
       ~verification_runs
       ~goal_verification_runs:[]
@@ -499,22 +495,11 @@ let test_latest_terminal_uses_completion_time () =
       ; admission_error = None
       })
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:10
       ~exact_runs
       ~verification_runs:[]
       ~goal_verification_runs:[]
   in
   let librarian = lane_by_id json "librarian_exact" in
-  check bool
-    "bounded exact projection is explicit"
-    true
-    (json
-     |> Yojson.Safe.Util.member "exact_run_projection_truncated"
-     |> Yojson.Safe.Util.to_bool);
-  check int
-    "source total"
-    10
-    (json |> Yojson.Safe.Util.member "exact_run_source_total" |> Yojson.Safe.Util.to_int);
   check string
     "status follows last completion"
     "idle"
@@ -548,7 +533,7 @@ let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish ()
       output=`Null;selected_slot=None;usage=None}} in
   let project runs = Projection.For_testing.snapshot_json_with ~now:250.
     ~resolve_lane:(fun _ -> Projection.Unconfigured "not configured")
-    ~jev_readiness:Typesafeai.Off ~exact_runs_total:(List.length runs) ~exact_runs:runs
+    ~jev_readiness:Typesafeai.Off ~exact_runs:runs
     ~verification_runs:[] ~goal_verification_runs:[]
     |> fun json -> lane_by_id json "librarian_exact" in
   List.iter (fun runs ->
@@ -727,7 +712,7 @@ let test_goal_judgement_metric_does_not_depend_on_replacement_request () =
     let snapshot = Projection.For_testing.snapshot_json_with ~now:20.
       ~resolve_lane:(fun _ -> Projection.Unconfigured "fixture")
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:0 ~exact_runs:[] ~verification_runs:[] ~goal_verification_runs:[ run ] in
+      ~exact_runs:[] ~verification_runs:[] ~goal_verification_runs:[ run ] in
     let lane = lane_by_id snapshot verifier_lane_id in
     check int "produced judgement succeeds independently of application" 1
       (Yojson.Safe.Util.member "succeeded_count" lane |> Yojson.Safe.Util.to_int);
@@ -1019,7 +1004,6 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
       ~now:110.
       ~resolve_lane
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:0
       ~exact_runs:[]
       ~verification_runs:[]
       ~goal_verification_runs:[]
@@ -1047,7 +1031,6 @@ let test_a_lane_that_could_not_admit_reads_degraded () =
       ~now:110.
       ~resolve_lane:clean_lane
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:0
       ~exact_runs:[]
       ~verification_runs:[]
       ~goal_verification_runs:[]
@@ -1066,7 +1049,6 @@ let test_every_lane_has_one_row_with_its_own_spec () =
       ~now:110.
       ~resolve_lane:(fun lane_id -> Projection.Unconfigured lane_id)
       ~jev_readiness:Typesafeai.Off
-      ~exact_runs_total:0
       ~exact_runs:[]
       ~verification_runs:[]
       ~goal_verification_runs:[]
@@ -1094,7 +1076,7 @@ let test_off_lane_keeps_declarations_and_running_observation () =
   let json = Projection.For_testing.snapshot_json_with ~now:100.
     ~resolve_lane:(fun _ -> Projection.Disabled
       {declared_slots=["first";"second"];declared_cli_slots=["cli"]})
-    ~jev_readiness:Typesafeai.Off ~exact_runs_total:1
+    ~jev_readiness:Typesafeai.Off
     ~exact_runs:[exact_run ~run_id:"accepted-before-off" ~lane:Exact.Librarian
       ~started_at:50. ~status:Exact.Running]
     ~verification_runs:[] ~goal_verification_runs:[] in

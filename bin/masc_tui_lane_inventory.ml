@@ -356,20 +356,12 @@ let reading_notices (snapshot : snapshot) =
   (if snapshot.package_read.complete then [] else ["Package inventory is incomplete; missing entries do not prove removal."])
   @ (if snapshot.package_read.owner_present then [] else ["Package runtime owner has not been observed; declarations and retained bindings remain listed."])
 
-let exact_notices (snapshot : snapshot) =
-  if snapshot.exact_snapshot.sls_exact_run_projection_truncated then
-    [Printf.sprintf "Exact run observations are windowed: %d/%d retained runs. Counts and timings describe this window."
-      snapshot.exact_snapshot.sls_exact_run_projection_count snapshot.exact_snapshot.sls_exact_run_source_total]
-  else []
-
 let overview_notices (snapshot : snapshot) =
-  exact_notices snapshot @
   reading_notices snapshot
   @ (match snapshot.package_read.issues with
      | [] -> []
      | issues -> [Printf.sprintf "%d inventory issues · i: details" (List.length issues)])
 let snapshot_notices (snapshot : snapshot) =
-  exact_notices snapshot @
   reading_notices snapshot
   @ List.map (fun (path,message) -> path ^ ": " ^ message) snapshot.package_read.issues
 

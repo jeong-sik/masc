@@ -8,8 +8,7 @@ import { ExactLaneSlotStates, ExactRunSlotObservations } from './exact-slot-obse
 afterEach(cleanup)
 describe('exact-slot diagnostic views', () => {
   it('separates current and historical endpoints, preserves refusal, and exposes uncertain ordering', () => {
-    const screen = render(html`<${ExactLaneSlotStates} value=${parseSlotMatrix(slotMatrix(), 1, 'board_attention_exact')}
-      scope=${{ exactRunProjectionCount: 10, exactRunSourceTotal: 20, exactRunProjectionTruncated: true }} />`)
+    const screen = render(html`<${ExactLaneSlotStates} value=${parseSlotMatrix(slotMatrix(), 1, 'board_attention_exact')} />`)
     const a = within(screen.getByRole('region', { name: 'A http' }))
     expect(within(a.getByLabelText('현재 설정 주소')).getByText('https://new.invalid/v1/responses')).toBeTruthy()
     const observed = within(a.getByRole('region', { name: '날짜가 확인된 마지막 관측' }))
@@ -18,7 +17,6 @@ describe('exact-slot diagnostic views', () => {
     expect(observed.getByText('original-run')).toBeTruthy()
     expect(a.getByText('순서 미확인 결과 (1)')).toBeTruthy()
     expect(a.getByText(/Runtime_unavailable/)).toBeTruthy()
-    expect(screen.getByText(/일부 기록만 조회/)).toBeTruthy()
     expect(screen.getByRole('status').textContent).toContain('1개 run')
     const unknown = within(screen.getByRole('region', { name: 'C http' }))
     expect(unknown.getByText(/실행 여부 미확인/)).toBeTruthy()

@@ -26,7 +26,6 @@ let exact_lane lane =
     @ (match lane with Standalone_lane.Board_attention -> ["jev",object_ ["state",str "off"]] | _ -> []))
 let exact_snapshot = object_ ["schema",str "masc.standalone_llm_lanes.v2";
   "generated_at",str "2026-10-04T00:00:00Z";"observed_at_unix",`Float 12.;"observation_only",`Bool true;
-  "exact_run_projection_count",`Int 0;"exact_run_source_total",`Int 0;"exact_run_projection_truncated",`Bool false;
   "lanes",`List (List.map exact_lane Standalone_lane.all)]
 let row id selection state = object_ ["id",str id;"label",str id;"purpose",str "fixture purpose";"selection",selection;"state",state]
 let builtin_rows = Lane_id.all_of_builtin |> List.map (fun lane ->

@@ -89,7 +89,6 @@ module For_testing : sig
     :  now:float
     -> resolve_lane:(string -> lane_configuration)
     -> jev_readiness:Typesafeai_config.readiness
-    -> exact_runs_total:int
     -> exact_runs:Exact_lane_run_registry.run list
     -> verification_runs:Verification_run_registry.run list
     -> goal_verification_runs:Goal_verification_run_registry.run list

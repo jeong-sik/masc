@@ -132,10 +132,13 @@ class RecordTest(unittest.TestCase):
         self.assertEqual((swapped["scheduled_ahead_dropped"], swapped["scheduled_past_dropped"],
                           swapped["planted_dropped"], swapped["dropped_off_label"]), (1, 0, 1, ["m7"]))
 
-    def test_records_count_only_where_the_label_asks_for_a_change(self) -> None:
+    def test_records_count_whatever_the_candidates(self) -> None:
+        # RFC-0517 §7.1: MASC takes drops and merges without a supporting candidate.
         req = request(SCHEDULED, candidates_of((K.TRANSIENT,)))
         s = scored(req, label_answer(req))
-        self.assertEqual((s["scheduled_ahead"], s["scheduled_past"], s["planted"]), (0, 0, 0))
+        self.assertEqual((s["scheduled_ahead"], s["scheduled_past"], s["planted"], s["pairs"]), (1, 1, 2, 1))
+        self.assertEqual((s["scheduled_ahead_dropped"], s["scheduled_past_dropped"], s["planted_dropped"],
+                          s["pairs_merged"]), (0, 1, 2, 1))
 
 
 class KindTest(unittest.TestCase):
@@ -274,19 +277,18 @@ class AttributionTest(unittest.TestCase):
 
 
 class SupportTest(unittest.TestCase):
-    def test_a_planted_fact_is_what_its_row_says_though_the_label_cannot_ask_for_it(self) -> None:
-        # MASC takes the change only because the transient is misjudged as already represented.
+    def test_a_request_no_candidate_supports_still_asks_for_its_drops_and_merges(self) -> None:
+        # RFC-0517 §7.1: MASC takes drops and merges without a supporting candidate, so the answer that
+        # leaves memory as it is misses the stale fact and the pair.
         req, c = one(K.TRANSIENT)
-        misjudged: tuple[Judged, ...] = ((c.request_id, "already_represented", M1),)
-        cleaned = scored(req, answer_text(misjudged, claims=(claim_json(M5, absorbs=("m6",)),), dropped=("m4",)))
-        self.assertEqual((cleaned["planted"], cleaned["pairs"], cleaned["merges"], cleaned["expected_removed"]),
-                         (0, 0, 0, 0))
-        self.assertEqual((cleaned["dropped"], cleaned["dropped_expected"], cleaned["dropped_off_label"],
-                          cleaned["absorbs"], cleaned["correct"]), (1, 1, [], {"m6": "duplicate"}, 0))
-        lost = scored(req, answer_text(misjudged, dropped=("m6",)))
-        self.assertEqual((lost["dropped_unmerged"], lost["dropped_off_label"]), (["m6"], []))
-        absorbed = scored(req, answer_text(misjudged, claims=(claim_json(M2, absorbs=("m4",)),)))
-        self.assertEqual((absorbed["planted_absorbed"], absorbed["absorbs"]), (1, {"m4": "stale"}))
+        judged: tuple[Judged, ...] = ((c.request_id, "not_durable", None),)
+        left = scored(req, answer_text(judged))
+        cleaned = scored(req, answer_text(judged, claims=(claim_json(M5, absorbs=("m6",)),), dropped=("m4",)))
+        self.assertEqual([(s["correct"], s["state_correct"]) for s in (left, cleaned)], [(1, 1), (1, 1)])
+        self.assertEqual([(s["planted"], s["pairs"], s["merges"], s["expected_removed"]) for s in (left, cleaned)],
+                         [(1, 1, 1, 2), (1, 1, 1, 2)])
+        self.assertEqual([(s["planted_dropped"], s["pairs_merged"], s["merges_done"], s["removed"])
+                          for s in (left, cleaned)], [(0, 0, 0, 0), (1, 1, 1, 2)])
 
 
 class PairTest(unittest.TestCase):

@@ -237,9 +237,12 @@ let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
     ]
 ;;
 
+(* The title stands in for the row: these cases read where the row leads
+   and what reaches the terminal, not the sentence around the title. *)
 let stuck ?(since_iso = "2026-08-20T00:00:00Z") ?(task_id = "task-348")
-    what : Agenda.stalled =
-  { task_id; what; since_iso }
+    title : Agenda.stalled =
+  Masc.Operator_task_attention.Held_without_keeper_route
+    { task_id; title; assignee = "codex-mcp-client"; since = since_iso }
 ;;
 
 let with_stuck rows =
@@ -291,7 +294,7 @@ let test_the_stuck_section_draws_every_row () =
       (Agenda.target_indexes lines)
   in
   check (list string) "every row, oldest first, takes the cursor"
-    (List.map (fun (row : Agenda.stalled) -> row.Agenda.task_id) rows)
+    (List.map Masc.Operator_task_attention.task_id rows)
     reached
 ;;
 

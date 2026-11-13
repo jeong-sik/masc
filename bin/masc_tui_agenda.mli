@@ -60,18 +60,15 @@ type awaiting =
 (** A keeper blocked until the operator answers. The overlay shows the age
     since registration. *)
 
-type stalled =
-  { task_id : string  (** the task the row is about, so a key can open it *)
-  ; what : string
-        (** The one line {!Operator_task_attention.summary} wrote. The sentence
-            is made there rather than here so the three surfaces that draw this
-            row cannot describe it three ways. *)
-  ; since_iso : string
-        (** when the task was claimed or started, or its completion submitted *)
-  }
+type stalled = Masc.Operator_task_attention.item
 (** A task with no Keeper route, a Keeper record that does not decode, or a
     completion submitted and not yet decided. None of these proves an owner
-    or a review stopped, or that anyone asked a question. *)
+    or a review stopped, or that anyone asked a question.
+
+    The row keeps the item rather than its sentence. The sentence is written
+    at draw time, in the screen's language, by
+    {!Masc.Operator_task_attention.summary}, so every surface that draws the
+    row still says it one way. *)
 
 type goal_to_confirm =
   { goal_id : string  (** the Goal the row is about, so a key can open it *)

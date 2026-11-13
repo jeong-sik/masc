@@ -30,13 +30,10 @@ type awaiting =
   ; timeout_sec : float
   }
 
-(* A Task with an unavailable Keeper route. This does not establish that its
-   owner has stopped or that a question was asked. *)
-type stalled =
-  { task_id : string
-  ; what : string
-  ; since_iso : string
-  }
+(* A Task with an unavailable Keeper route, an unreadable Keeper record or a
+   completion awaiting a verdict. This does not establish that its owner has
+   stopped or that a question was asked. *)
+type stalled = Masc.Operator_task_attention.item
 
 (* A Goal whose stored phase awaits operator confirmation. *)
 type goal_to_confirm =
@@ -124,23 +121,17 @@ let rows_taken t =
   | (Not_read | Read_failed _ | Read _), (Last_read | Refresh_needed) ->
       if rows_of t.coming = [] then 0 else 1
 
-let same_day (a : Unix.tm) (b : Unix.tm) =
-  a.Unix.tm_year = b.Unix.tm_year && a.Unix.tm_yday = b.Unix.tm_yday
-;;
-
-(* [Masc.Tui_terminal_text.clock_timestamp_for_terminal] answers HH:MM:SS and this strip
-   has one line to spend, so the seconds go. A wake the codec cannot read
-   keeps its own text: a row that says nothing readable is still a row that
-   says something is scheduled. *)
+(* The strip has one line to spend, so the clock stops at the minute, in the
+   notation every screen draws a moment in (RFC tui-one-screen-grammar §6.1):
+   [11:45] today, [08-27 11:45] this year. A wake the codec cannot read keeps
+   its own text: a row that says nothing readable is still a row that says
+   something is scheduled. *)
 let hour_and_minute ~now ~localtime row =
   match Time_codec.parse_rfc3339_opt row.at_iso with
   | None -> Masc.Tui_terminal_text.short_timestamp_for_terminal ~localtime row.at_iso
   | Some at ->
-    let tm = localtime at in
-    let clock = Printf.sprintf "%02d:%02d" tm.Unix.tm_hour tm.Unix.tm_min in
-    if same_day tm (localtime now)
-    then clock
-    else Printf.sprintf "%s %02d/%02d" clock (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    Masc_tui_value.Instant.detail_text ~localtime Masc_tui_value.Instant.To_minute
+      ~now at
 ;;
 
 let next_glyph = "\xe2\x96\xb8"
@@ -284,6 +275,22 @@ let waited_since ~ko ~now since =
     else Printf.sprintf (if ko then "%dm째 대기" else "%dm waiting") (whole / 60))
 ;;
 
+(* When the task was claimed, started or submitted, in the zone the panel was
+   handed, in the notation of the wake rows above it (RFC
+   tui-one-screen-grammar §6.1). The backlog's RFC 3339 text is for copying,
+   not for the row. A time that does not read is a value not reported
+   (§6.4). *)
+let since_text ~ko ~now ~localtime since_iso =
+  match Time_codec.parse_rfc3339_opt since_iso with
+  | None -> "?"
+  | Some since ->
+    let at =
+      Masc_tui_value.Instant.detail_text ~localtime Masc_tui_value.Instant.To_minute
+        ~now since
+    in
+    if ko then at ^ " 부터" else "since " ^ at
+;;
+
 (* A Goal's update time is not the time it began awaiting confirmation. *)
 let updated ~ko ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
@@ -401,10 +408,12 @@ let overlay ~ko ~now ~localtime ~cols t =
       List.map
         (fun (row : stalled) ->
            { tone = Quiet
-           ; goes_to = Stuck_task row.task_id
+           ; goes_to = Stuck_task (Masc.Operator_task_attention.task_id row)
            ; text = two_column ~cols
-               (Masc.Tui_terminal_text.preview_line row.what)
-               (if ko then row.since_iso ^ " 부터" else "since " ^ row.since_iso)
+               (Masc.Tui_terminal_text.preview_line
+                  (Masc.Operator_task_attention.summary ~ko row))
+               (since_text ~ko ~now ~localtime
+                  (Masc.Operator_task_attention.waiting_since row))
            })
         rows
   in

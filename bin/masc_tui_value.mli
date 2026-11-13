@@ -36,9 +36,13 @@ module Instant : sig
   (** Cells the widest {!cell_text} occupies, so a column sized by it holds
       every row whole. *)
 
-  val detail_text : precision -> now:float -> float -> string
+  val detail_text :
+    ?localtime:(float -> Unix.tm) -> precision -> now:float -> float -> string
   (** The moment where one value has a line to itself. As {!cell_text}, but
-      another year keeps its clock ([2025-11-10 23:58]). *)
+      another year keeps its clock ([2025-11-10 23:58]). [localtime] breaks
+      both moments down, [Unix.localtime] when it is not given. A screen that
+      is handed its zone as an argument passes that zone, so every moment it
+      draws reads in one zone. *)
 
   val offset_minutes : utc:Unix.tm -> local:Unix.tm -> int
   (** How far the operator's zone runs ahead of UTC, from the two breakdowns

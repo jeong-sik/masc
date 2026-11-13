@@ -118,7 +118,11 @@ line names, for every scope of the original's owner, the owner records, request
 bodies, settled originals, history fences and history resolutions that exist.
 When no record of the original is left, the line also names its proof file. A
 member of a Closing or Closed admission closure and a fenced history original
-are read by no consumer, so neither is refused. A proof file that names another
+are read by no consumer, so neither is refused. A body refusal
+(`Request_body_refused`) passes without a record, except for an admission
+original whose record the exact-request check deletes: admission reads the
+size evidence of that refusal through the record, and without it the part and
+every later candidate of that Keeper wait. A proof file that names another
 store root stops this check as it stops the exact-request check. Delete the
 exact-request lines and these lines together: once both files are gone, a
 Dispatch_pending original that lost its finished record looks like one the host

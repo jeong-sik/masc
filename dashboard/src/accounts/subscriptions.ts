@@ -35,9 +35,9 @@ export interface PanelDeps {
 export interface SubscriptionsModel {
   readonly view: ReadonlySignal<PanelView>
   /** Reads what the person `userId` connected and what the server offers. A
-      call for the person the panel reads or has read joins or does nothing;
-      a call for another person starts over, and what was read for the
-      first is dropped. */
+      call for the person the panel reads or has read does nothing and
+      settles at once; a call for another person starts over, and what was
+      read for the first is dropped. */
   readonly load: (userId: string) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
   readonly retry: () => Promise<void>
@@ -61,7 +61,6 @@ async function readBoth(send: Send): Promise<Found> {
 
 export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsModel {
   const view = signal<PanelView>({ kind: 'waiting' })
-  let reading: { readonly forUser: string; readonly done: Promise<void> } | null = null
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
     const slow = setTimeout(() => {
@@ -85,27 +84,20 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
   }
 
-  const start = (forUser: string, run: () => Promise<void>): Promise<void> => {
-    const done = run().finally(() => { if (reading?.done === done) reading = null })
-    reading = { forUser, done }
-    return done
-  }
-
   // The methods read the state with peek(): a caller inside an effect does
   // not come to depend on the panel's state.
   const load = (userId: string): Promise<void> => {
-    if (reading !== null && reading.forUser === userId) return reading.done
     const now = view.peek()
     if (now.kind !== 'waiting' && now.forUser === userId) return Promise.resolve()
     view.value = { kind: 'reading', forUser: userId, slow: false }
-    return start(userId, () => read(userId, 0))
+    return read(userId, 0)
   }
 
   const retry = (): Promise<void> => {
     const now = view.peek()
     if (now.kind !== 'failed' || now.next !== 'idle') return Promise.resolve()
     view.value = { ...now, next: 'reading' }
-    return start(now.forUser, () => read(now.forUser, now.failure.attempts))
+    return read(now.forUser, now.failure.attempts)
   }
 
   return { view, load, retry }

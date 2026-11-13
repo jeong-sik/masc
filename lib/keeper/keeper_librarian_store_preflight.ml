@@ -138,8 +138,9 @@ let validator () =
 (* The deploy check of a Librarian original's Exact files (RFC
    exact-request-skips-a-slot-that-refused-its-input 3.3, item 5). It refuses
    an original exactly when its consumer stops on the Exact files the Exact
-   check leaves, and reads them as that consumer reads them. The validator
-   above stays as the runtime runs it. *)
+   check leaves, or waits for a size proof that check deletes, and reads them
+   as that consumer reads them. The validator above stays as the runtime runs
+   it. *)
 module Preflight = Lane_addon_store_preflight
 module Exact = Lane_addon_exact
 module Final = Keeper_librarian_original_final
@@ -154,7 +155,8 @@ type consumer_read =
   | Decode_judgment of Yojson.Safe.t
       (* A phase that holds a judgment: decode_final, then confirm_final. *)
   | Confirm_delivered of Exact.final
-      (* An execution refusal: confirm_final of the final its evidence names. *)
+      (* An execution refusal: confirm_final of the final its evidence names,
+         then what the consumer reads after a body refusal. *)
 
 let consumer_read ~schema (record:Owner.retained) =
   match Progress.phase record.progress with
@@ -168,6 +170,28 @@ let consumer_read ~schema (record:Owner.retained) =
     Some (Confirm_delivered (Exact.delivered retained))
   (* The validators of the consumers end these phases before any Exact read. *)
   | Rejected {Progress.stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok None
+
+(* What a consumer reads once it confirms the body refusal the worker gives
+   before the host (Request_body_refused). The host also ends a request with
+   that final when every slot refuses the body, and keeps a record and a proof
+   then. History and floor build the refusal's evidence from the final alone
+   (Final.refusal_evidence). Admission reads the original's latest execution
+   proof as the size evidence of its part (size_refused, frontier). *)
+type body_refusal_read = Final_alone | Size_proof
+
+(* The latest execution proof is read through the original's record
+   (Exact.latest_of_files). Once the Exact check deletes the record at the
+   original's path, admission finds no size evidence for the body refusal:
+   the part waits, and no new root follows it (#49910's wait). An original
+   that never had a record waits so before any deletion, so only a deleted
+   record refuses it. *)
+let size_proof_kept body_refusal (deleted:Preflight.deleted_record option) =
+  match body_refusal,deleted with
+  | Final_alone,_ | Size_proof,None -> Ok ()
+  | Size_proof,Some (Preflight.Deleted_open | Deleted_terminal _ | Deleted_unknown) ->
+    Error "the Exact check deletes the original's record, which the size evidence of \
+           its body refusal is read through, and its part waits for evidence no pass \
+           brings back"
 
 let observe_files (target:Final.target) (files:Preflight.exact_files) =
   Exact.observe_record ~declaration_id:target.declaration_id ~schema:target.schema target.exact
@@ -189,11 +213,13 @@ let confirm_files ~wording (target:Final.target) (files:Preflight.exact_files) f
 (* The host finishes a record before it hands the final to the worker, and
    the worker never offers a finished request again. So a finished record the
    Exact check deletes leaves the consumer a worker final and no record, which
-   it confirms only for a final the worker refuses before the host. *)
-let recover_files ~wording (target:Final.target) (files:Preflight.exact_files) =
+   it confirms only for a final the worker refuses before the host. Admission
+   then reads the size evidence of that refusal through the deleted record. *)
+let recover_files ~wording ~body_refusal (target:Final.target) (files:Preflight.exact_files) =
   let* ()=match files.deleted with
     | None | Some Preflight.Deleted_open -> Ok ()
-    | Some (Deleted_terminal final) when Exact.refused_before_host final -> Ok ()
+    | Some (Deleted_terminal final) when Exact.refused_before_host final ->
+      size_proof_kept body_refusal files.deleted
     | Some (Deleted_terminal _) ->
       Error "the Exact check deletes the original's finished record, and the consumer \
              finds no record for the final the worker returns"
@@ -208,8 +234,8 @@ let recover_files ~wording (target:Final.target) (files:Preflight.exact_files) =
   match observed with
   | Exact.Retained_absent | Retained_open -> Ok ()
   | Retained_terminal retained -> confirm_files ~wording target recovered (Exact.delivered retained)
-let judge_files ~wording (target:Final.target) files = function
-  | Recover_record -> recover_files ~wording target files
+let judge_files ~wording ~body_refusal (target:Final.target) (files:Preflight.exact_files) = function
+  | Recover_record -> recover_files ~wording ~body_refusal target files
   | Decode_judgment judgment ->
     (* Every consumer's decode_final is Final.decode_final, which confirms a
        recovered final in Final's words; the consumer then confirms the final
@@ -217,7 +243,9 @@ let judge_files ~wording (target:Final.target) files = function
     let* final=Final.decode ~schema:target.schema ~observe:(fun () -> observe_files target files)
         ~confirm:(confirm_files ~wording:Final.unconfirmed_detail target files) judgment in
     confirm_files ~wording target files final
-  | Confirm_delivered final -> confirm_files ~wording target files final
+  | Confirm_delivered final ->
+    let* ()=confirm_files ~wording target files final in
+    if Exact.refused_before_host final then size_proof_kept body_refusal files.deleted else Ok ()
 (* A proof link the original's request names while no record of it is left.
    Fresh state deletes it with the owner's scopes. *)
 let recordless_proof (target:Final.target) (files:Preflight.exact_files) =
@@ -228,32 +256,33 @@ let recordless_proof (target:Final.target) (files:Preflight.exact_files) =
   | Some _,_ | None,No_proof -> []
 
 (* One original whose consumer reads its Exact files: its request with the
-   declaration and schema, what the consumer does with the files, and the
-   words the consumer's confirm_final uses. *)
-type exact_original = {target:Final.target;read:consumer_read;wording:Final.unconfirmed -> string}
+   declaration and schema, what the consumer does with the files, the words
+   the consumer's confirm_final uses, and what it reads after a body refusal. *)
+type exact_original = {target:Final.target;read:consumer_read;wording:Final.unconfirmed -> string;
+  body_refusal:body_refusal_read}
 let installation_id (destination:Lane_addon_captured_destination.t) =
   destination.Lane_addon_captured_destination.installation_id
 (* [None] when the consumer reads no Exact file of this original: a manual
    installation names no declaration, and some phases read none. *)
-let exact_original ~wording ~installation_id exact (record:Owner.retained) =
+let exact_original ~wording ~body_refusal ~installation_id exact (record:Owner.retained) =
   let* installation=Owner.installation_of_id installation_id in
   match installation with
   | Owner.Manual _ -> Ok None
   | Owner.Configuration _ ->
     let* target=Final.target ~installation_id exact in
     let+ read=consumer_read ~schema:target.Final.schema record in
-    Option.map (fun read -> {target;read;wording}) read
+    Option.map (fun read -> {target;read;wording;body_refusal}) read
 (* Phase one decodes what the consumer reads, as the consumer decodes it; a
    failure there is a payload the consumer refuses. Phase two reads the Exact
    files. *)
 let original_verdict ~(read_exact:Preflight.exact_reader) = function
   | Error detail -> Preflight.Payload_invalid detail
   | Ok (_,None) -> Preflight.Payload_valid
-  | Ok (scopes,Some {target;read;wording}) ->
+  | Ok (scopes,Some {target;read;wording;body_refusal}) ->
     (match read_exact ~declaration_id:target.Final.declaration_id target.Final.exact with
      | Error detail -> Preflight.Exact_root_differs detail
      | Ok files ->
-       (match judge_files ~wording target files read with
+       (match judge_files ~wording ~body_refusal target files read with
         | Ok () -> Preflight.Payload_valid
         | Error detail ->
           Preflight.Consumer_stops_on_exact {detail;scopes;paths=recordless_proof target files}))
@@ -266,7 +295,7 @@ let floor_scopes owner = [Floor.scope owner;Keeper_librarian_floor_step_gate.sco
 let admission_original ~read ~owner record =
   let* capture=Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
   let* exact=Admission.request capture in
-  exact_original ~wording:Admission.unconfirmed_detail
+  exact_original ~wording:Admission.unconfirmed_detail ~body_refusal:Size_proof
     ~installation_id:(installation_id (Admission.destination capture)) exact record
 (* A history original an operator fenced is left out of resume and
    validation, so its consumer reads no Exact file. *)
@@ -277,12 +306,12 @@ let history_original ~read_fence ~owner (record:Owner.retained) =
   | None ->
     let* capture=History.restore_payload ~owner record in
     let* exact=History.request capture in
-    exact_original ~wording:Final.unconfirmed_detail
+    exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
       ~installation_id:(installation_id (History.destination capture)) exact record
 let floor_original ~owner record =
   let* step=Floor.restore ~owner record in
   let* exact=Floor.request step in
-  exact_original ~wording:Final.unconfirmed_detail
+  exact_original ~wording:Final.unconfirmed_detail ~body_refusal:Final_alone
     ~installation_id:(installation_id (Floor.destination step)) exact record
 
 (* The forest of each owner, read once for the scan by the first record that

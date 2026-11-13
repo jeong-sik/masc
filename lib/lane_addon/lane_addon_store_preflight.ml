@@ -108,7 +108,8 @@ let on_refusal = function
   | Tool_request_owners ->
     "discovering the original requests of that scope fails as a whole, and so \
      does reading that request; an original refused on its consumer's Exact \
-     reads stops that consumer at every pass"
+     reads stops that consumer at every pass, or keeps an admission part waiting \
+     for size evidence and every later candidate behind it"
 
 let fresh_state_step refusal =
   Printf.sprintf "stop the server, delete %s, start the new build"

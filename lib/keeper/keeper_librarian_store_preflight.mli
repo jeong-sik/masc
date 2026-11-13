@@ -36,7 +36,11 @@ val preflight : unit -> Lane_addon_store_preflight.payload_validator
     consumer's own rules decide: a Dispatch_pending original recovers its
     record and confirms the final it finishes with, a phase that holds a
     judgment decodes and confirms it, and an execution refusal confirms the
-    final its evidence names. A gate follows its parent execution. A
+    final its evidence names. Admission then reads the size evidence of a body
+    refusal ([Request_body_refused]) through the original's record, so an
+    admission original whose record the Exact check deletes is refused for
+    that final too; history and floor build its evidence from the final
+    alone. A gate follows its parent execution. A
     partition and a root that replaces an earlier frontier compare the
     evidence they retain with what their executions show. A manual
     installation, a fenced history original and a member of a Closing or

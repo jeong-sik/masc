@@ -1942,7 +1942,7 @@ let test_preflight_reads_a_dispatch_pending_original_as_resume_does ()=with_fixt
   refuses "the worker returns the final of a lost finished record, and no record confirms it";
   rewrite record_path (with_field "final" (Lane_addon_exact.final_to_json
     (Lane_addon_exact.Call_final (Input_refused Lane_addon_exact.Request_body_refused))) finished);
-  passes "the worker's own body refusal needs no record";
+  refuses "admission reads the size evidence of a body refusal through the record the Exact check deletes";
   rewrite record_path (with_field "final" `Null finished);
   passes "a lost open record sends resume to the worker";
   restore ();
@@ -1996,6 +1996,38 @@ let test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match ()=wit
   memory_action fixture (fun () -> ignore (retain_judgment_json fixture record judgment));
   check bool "a judgment its recovered answer does not match stops the consumer" true
     (refuses_owner fixture owner (closure_preflight fixture)))
+
+(* The host ends a request with the body refusal when every slot refuses the
+   body, and keeps its record and proof. Admission reads that proof as the
+   size evidence of the part; with one candidate the part stays a singleton
+   frontier behind an execution refusal. *)
+let test_preflight_refuses_a_body_refusal_whose_size_evidence_goes ()=
+  with_fixture ~initial:["a","Durable A"] (fun ~sw:_ fixture ->
+    fixture.set_response (fun _ -> `Request_entity_too_large,refusal "invalid_request_error");
+    let refused_execution (record,_)=match Progress.phase record.Owner.progress with
+      | Progress.Rejected {stage=Progress.Execution;_} -> true
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+      | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+        false in
+    ignore (drive_until fixture (fun _ -> List.exists refused_execution (observed_originals fixture)));
+    let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+    let capture=match observed_originals fixture with [_,capture] -> capture
+      | [] | _::_::_ -> fail "expected the one original the host refused" in
+    check bool "the host retains the body refusal of its only slot" true
+      (match (latest_execution fixture capture).Lane_addon_exact.outcome with
+       | Call_ended (Input_refused Request_body_refused) -> true
+       | Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _
+           | Input_refused (Input_capacity | Context_overflow | Invalid_request)) | Call_refused _ -> false);
+    let record_path,proof_path=exact_files fixture capture in
+    check int "the refusal passes while its record and proof are kept" 0
+      (List.length (closure_preflight fixture).refusals);
+    (* A proof link that is not JSON: the Exact check deletes the record with it. *)
+    io (fun () -> write proof_path "{");
+    check bool "the size evidence goes with the deleted record, so the owner is refused" true
+      (refuses_owner fixture owner (closure_preflight fixture));
+    io (fun () -> Sys.remove record_path;Sys.remove proof_path);
+    check int "an original with no record waits so before any deletion, and passes" 0
+      (List.length (closure_preflight fixture).refusals))
 
 type root_publication_cut = Before_child | Child_before_ack | Acknowledged_then_missing
 let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ fixture ->
@@ -2299,6 +2331,8 @@ let () =
     test_preflight_takes_a_body_refusal_judgment_without_a_host_record;
   test_case "the deploy check refuses a judgment its recovered answer does not match" `Quick
     test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match;
+  test_case "the deploy check refuses a body refusal whose size evidence goes" `Quick
+    test_preflight_refuses_a_body_refusal_whose_size_evidence_goes;
   test_case "pending first gate intent recovers the same absent child while Off" `Quick (test_original_gate_root_publication_recovery Before_child);
   test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
   test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);

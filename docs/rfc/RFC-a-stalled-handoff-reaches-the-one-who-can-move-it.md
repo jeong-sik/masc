@@ -8,7 +8,7 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["keeper-world-state-shows-open-work", "at-name-resolves-to-declared-recipient", "task-lifecycle-a-verdict-assigns-no-work", "board-attention-asks-jev-once-per-event", "provider-path-rest", "keeper-github-apps", "0361", "0390", "0406"]
-implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613", "#51618"]
+implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613", "#51618", "#51785"]
 ---
 
 # RFC: 멈춘 전달은 그것을 움직일 수 있는 쪽에 닿는다
@@ -563,7 +563,7 @@ L2a 배포 뒤 측정(8절)에서 찾았어요.
 |---|---|---|
 | L1 | `keeper_board_attention_fanout.ml`, `keeper_board_attention_partition.ml(i)`, `keeper_board_attention_candidate.ml`, `keeper_board_attention_worker.ml`, `keeper_board_attention_quarantine_command.ml`, 그 시험 | `ensure_current_roots` 와 `judgment_delivery_outcome` 을 `match` 하는 곳을 모두 고친다. fanout 의 `claim` 마다 후보 원장을 한 번 더 읽는다 |
 | L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것과 보고 도구 이름), `goal_criterion_agent.ml`·`goal_verifier_worker.ml`(패턴 한 줄씩), `verifier_review_worker.ml`, `verifier_review_walk_result.ml(i)`·`verifier_review_ending.ml(i)`(새 파일), `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml(i)`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
-| L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. 지금 20행이고, L2a 뒤에는 돌고 있는 리뷰와 남은 10건이다 |
+| L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. L2a 전에는 20행이었다. L2a 배포 뒤 잰 값은 18건이고(2026-11-12 13:59Z, 8절), L2c 뒤에는 돌고 있는 리뷰와 남은 10건으로 본다 |
 | L2c | `lane_addon_tool_request_owner.ml`(`load_listed` 와 신원 비교), `completion_authority_agent.ml`(실패 상세), 그 시험 | 목록 읽기를 쓰는 17곳(`load_scope` 14, `fold_all` 1, `load_listed` 직접 2)에서 목록 읽기 실패가 줄어든다. 공용 층이라, 그 자리들이 목록에서 본 진행에 기대지 않는지 리뷰가 봐야 한다 |
 | 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |

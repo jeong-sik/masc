@@ -3966,27 +3966,36 @@ let observer_replay_is_complete (handshake : Sse_wire.observer_handshake option)
   | Some { replay = Sse_wire.Fresh | Sse_wire.Resumed_after_gap _ | Sse_wire.Reset _; _ }
   | None -> false
 
-let observer_replay_description ?(source_loss = false) replay =
+let observer_replay_description ~ko ?(source_loss = false) replay =
+  let say korean english = if ko then korean else english in
   let description = match replay with
-  | Observer_replay_unobserved -> "Replay: not negotiated"
-  | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
-  | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
+  | Observer_replay_unobserved -> say "재생: 아직 정해지지 않음" "Replay: not negotiated"
+  | Observer_replay_unavailable detail ->
+      say "재생 불가(실시간만): " "Replay unavailable (live only): " ^ detail
+  | Observer_replay_rejected detail ->
+      say "관찰 연결이 거절됨: " "Observer handshake rejected: " ^ detail
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
-      "Replay: live from connection; earlier history not loaded"
+      say "재생: 연결한 때부터 실시간 · 이전 기록은 읽지 않음"
+        "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->
-      "Replay: resumed; no event expired while disconnected"
+      say "재생: 이어받음 · 끊긴 동안 사라진 이벤트 없음"
+        "Replay: resumed; no event expired while disconnected"
   | Observer_replay_scoped { replay = Sse_wire.Resumed_after_gap { missed_through }; _ } ->
       Printf.sprintf
-        "Replay resumed after a gap: events up to #%d expired while disconnected"
+        (if ko then "재생을 이어받았지만 빈 구간 있음: #%d 까지의 이벤트는 끊긴 동안 사라짐"
+         else "Replay resumed after a gap: events up to #%d expired while disconnected")
         missed_through
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Instance_changed; _ } ->
-      "Replay reset: server or workspace changed; disconnected history not recovered"
+      say "재생 초기화: 서버나 워크스페이스가 바뀜 · 끊긴 동안의 기록은 되찾지 못함"
+        "Replay reset: server or workspace changed; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Unscoped_cursor; _ } ->
-      "Replay reset: previous cursor had no instance; disconnected history not recovered"
+      say "재생 초기화: 이전 위치에 서버 식별자가 없음 · 끊긴 동안의 기록은 되찾지 못함"
+        "Replay reset: previous cursor had no instance; disconnected history not recovered"
   | Observer_replay_scoped { replay = Sse_wire.Reset Sse_wire.Cursor_ahead; _ } ->
-      "Replay reset: cursor ahead of server; disconnected history not recovered"
+      say "재생 초기화: 저장된 위치가 서버보다 앞섬 · 끊긴 동안의 기록은 되찾지 못함"
+        "Replay reset: cursor ahead of server; disconnected history not recovered"
   in
-  if source_loss then "SOURCE EVENTS LOST · " ^ description
+  if source_loss then say "원본 이벤트 유실 · " "SOURCE EVENTS LOST · " ^ description
   else description
 
 (* One word for the transport log: which replay a newly opened observer

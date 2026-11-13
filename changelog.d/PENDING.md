@@ -1,0 +1,5 @@
+### Removed
+
+- The dashboard no longer reads `glm_replay_reasoning` from a runtime
+  declaration; the server stopped sending it in #25581, and the replay policy
+  it stood for is already shown from `reasoning_replay_policy` (#PENDING).

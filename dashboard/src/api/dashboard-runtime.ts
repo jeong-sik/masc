@@ -44,7 +44,6 @@ export interface DashboardRuntimeRequestConfig {
   enable_thinking?: boolean | null
   preserve_thinking?: boolean | null
   resolved_reasoning_effort?: string | null
-  glm_replay_reasoning?: boolean
   tool_stream?: boolean
   tool_choice?: DashboardRuntimeToolChoice | null
   disable_parallel_tool_use?: boolean
@@ -489,7 +488,6 @@ function decodeRuntimeRequestConfig(raw: unknown): DashboardRuntimeRequestConfig
     enable_thinking: asBoolean(raw.enable_thinking) ?? null,
     preserve_thinking: asBoolean(raw.preserve_thinking) ?? null,
     resolved_reasoning_effort: asNullableString(raw.resolved_reasoning_effort),
-    glm_replay_reasoning: asBoolean(raw.glm_replay_reasoning),
     tool_stream: asBoolean(raw.tool_stream),
     tool_choice: decodeRuntimeToolChoice(raw.tool_choice),
     disable_parallel_tool_use: asBoolean(raw.disable_parallel_tool_use),

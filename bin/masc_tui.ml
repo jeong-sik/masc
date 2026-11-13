@@ -16330,8 +16330,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Preset_save { name; description } ->
       if not (server_authority_ready state) then
         notice ~kind:Notice_failure
-          (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
-             ~en:"Confirm the workspace before saving · input retained")
+          (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
       else if (state.preset_busy || workspace_preset_save_pending state <> [])
               && not (preset_save_is_pending state name) then
         notice ~kind:Notice_failure
@@ -16340,8 +16339,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       else if preset_save_is_unconfirmed state name && not (preset_save_is_pending state name) then
         (match workspace_input_identity_of_server state.server_identity with
          | None -> notice ~kind:Notice_failure
-             (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
-                ~en:"Confirm the workspace before saving · input retained")
+             (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
          | Some _ when state.preset_busy || Option.is_some state.preset_save_draft ->
            notice ~kind:Notice_failure
              (ui_text state ~ko:"기존 프리셋 입력을 마친 뒤 다시 제출하세요 · 채팅 입력 유지"
@@ -36158,12 +36156,10 @@ Use relative paths for resources already held in the package. -->
                         ~en:"Wait for the pending preset save · input retained")
                  else if not (server_authority_ready state) then
                    report_action state "error"
-                     (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
-                        ~en:"Confirm the workspace before saving · input retained")
+                     (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
                  else (match workspace_input_identity_of_server state.server_identity with
                    | None -> report_action state "error"
-                       (ui_text state ~ko:"작업 공간 확인 후 저장하세요"
-                          ~en:"Confirm the workspace before saving")
+                       (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
                    | Some workspace ->
                      if state.preset_save_draft_workspace = None
                         && state.preset_armed <> Some (Save_workspace_armed (name, workspace)) then begin
@@ -36172,17 +36168,17 @@ Use relative paths for resources already held in the package. -->
                        state.preset_confirmation_presented <- None;
                        state.config_scroll <- 0;
                        report_action state "system"
-                         (ui_text state ~ko:"저장할 작업 공간을 확인하고 Enter를 다시 누르세요"
+                         (ui_text state ~ko:"저장할 워크스페이스를 확인하고 Enter를 다시 누르세요"
                             ~en:"Check the save workspace and press Enter again")
                      end else if Option.fold ~none:false
                          ~some:(fun origin -> origin <> workspace) state.preset_save_draft_workspace then
                        report_action state "error"
-                         (ui_text state ~ko:"다른 작업 공간의 이름 초안입니다"
+                         (ui_text state ~ko:"다른 워크스페이스의 이름 초안입니다"
                             ~en:"This name draft belongs to a different workspace")
                      else if state.preset_armed = Some (Save_workspace_armed (name, workspace))
                              && not (Masc_tui_render_config.preset_confirmation_ready state) then
                        report_action state "system"
-                         (ui_text state ~ko:"Home 후 PgDn으로 작업 공간을 처음부터 확인하세요"
+                         (ui_text state ~ko:"Home 후 PgDn으로 워크스페이스를 처음부터 확인하세요"
                             ~en:"Use Home then PgDn to review the complete workspace confirmation")
                      else begin
                        if state.preset_save_draft_workspace = None then begin
@@ -40451,7 +40447,7 @@ Use relative paths for resources already held in the package. -->
                        state.preset_save_suspended_drafts <-
                          List.remove_assoc origin state.preset_save_suspended_drafts;
                        report_action state "system"
-                         (ui_text state ~ko:"이 작업 공간의 저장 이름 초안을 복원했습니다"
+                         (ui_text state ~ko:"이 워크스페이스의 저장 이름 초안을 복원했습니다"
                             ~en:"Restored this workspace's preset name draft")
                      | None ->
                        state.preset_save_draft <- Some "";

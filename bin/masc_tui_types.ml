@@ -11629,6 +11629,13 @@ let preset_save_is_pending (state : state) name =
   List.exists (fun pending -> same_preset_save_name pending.psp_name name)
     (workspace_preset_save_pending state)
 
+(* A preset save waits until the server confirms the workspace it lands in.
+   Nothing is sent, and the chat line or the name entry stays as typed. *)
+let preset_save_needs_workspace_text ~ko =
+  let workspace = Masc_tui_words.workspace_name ~ko in
+  if ko then workspace ^ " 확인 후 저장하세요 · 입력은 유지됩니다"
+  else "Confirm the " ^ workspace ^ " before saving · input retained"
+
 let reveal_unconfirmed_preset_save (state : state) name =
   let workspace = workspace_input_identity_of_server state.server_identity in
   state.preset_save_receipts <- List.map (fun receipt ->

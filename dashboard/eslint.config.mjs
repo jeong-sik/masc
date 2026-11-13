@@ -13,7 +13,6 @@ const TARGET_FILES = [
   'src/api/effect-http.ts',
   'src/api/gate.ts',
   'src/api/goal-loop.ts',
-  'src/api/schemas/runtime.ts',
   'src/api/schemas/dashboard-config.ts',
   'src/api/schemas/transport-health.ts',
   'src/api/transport-health.ts',

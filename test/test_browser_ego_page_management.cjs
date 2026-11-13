@@ -6,10 +6,12 @@ const test = require('node:test');
 const source = fs.readFileSync(path.join(__dirname, '../lib/browser_ego_peer.ml'), 'utf8')
   .split('let page_management_script = {js|')[1].split('|js}')[0];
 const run = vm.runInNewContext('(' + source + ')');
-function fixture({label=null, origin='unknown', missing=false, fail=false, wrong=false}={}) {
+// The native inventory gives an unmanaged tab no `label` key at all; only a
+// managed Page carries one. Pass `label` to model a managed Page.
+function fixture({label, origin='unknown', missing=false, fail=false, wrong=false}={}) {
   const calls=[];
   const handle={targetId:'T9',openedBy:origin};
-  const tab={label,targetId:'T9',openedBy:origin,page:handle};
+  const tab={...(label===undefined ? {} : {label}),targetId:'T9',openedBy:origin,page:handle};
   const task={
     tabs:async()=>missing ? [] : [tab],
     adopt:async(page, options)=>{
@@ -31,6 +33,8 @@ function fixture({label=null, origin='unknown', missing=false, fail=false, wrong
 test('adoption passes the actual unmanaged handle and preserves explicit or SDK-generated labels', async()=>{
   for (const pageLabel of [undefined,'login']) {
     const f=fixture();
+    // The tab is unmanaged because it has no label; targetId alone selects it.
+    assert.deepEqual((await f.task.tabs()).map(tab=>Object.keys(tab).sort()),[['openedBy','page','targetId']]);
     const result=await run(f.task,{action:'adopt_tab',targetId:'T9',...(pageLabel ? {pageLabel} : {})});
     assert.equal(result.ok,true);
     assert.equal(result.value.label,pageLabel ?? 'generated');
@@ -60,7 +64,7 @@ test('release preserves the browser tab and its unknown origin', async()=>{
   assert.deepEqual(f.calls,[['release','borrowed']]);
 });
 test('release refuses agent-created, unmanaged and absent Pages', async()=>{
-  for (const config of [{label:'borrowed',origin:'agent'},{label:'borrowed',missing:true},{label:null}]) {
+  for (const config of [{label:'borrowed',origin:'agent'},{label:'borrowed',missing:true},{}]) {
     const f=fixture(config);
     const result=await run(f.task,{action:'release_tab',label:'borrowed'});
     assert.equal(result.before,true);
@@ -69,14 +73,14 @@ test('release refuses agent-created, unmanaged and absent Pages', async()=>{
 });
 test('SDK failure is preserved without replay or compensating calls', async()=>{
   for (const action of ['adopt_tab','release_tab']) {
-    const f=fixture({label:action==='adopt_tab' ? null : 'borrowed',fail:true});
+    const f=fixture({...(action==='adopt_tab' ? {} : {label:'borrowed'}),fail:true});
     await assert.rejects(run(f.task,{action,targetId:'T9',label:'borrowed'}),/SDK response lost/);
     assert.equal(f.calls.length,1);
   }
 });
 test('a response with a different target cannot establish a Page binding', async()=>{
   for (const action of ['adopt_tab','release_tab']) {
-    const f=fixture({label:action==='adopt_tab' ? null : 'borrowed',wrong:true});
+    const f=fixture({...(action==='adopt_tab' ? {} : {label:'borrowed'}),wrong:true});
     await assert.rejects(run(f.task,{action,targetId:'T9',label:'borrowed'}),/changed Page identity or origin/);
     assert.equal(f.calls.length,1);
   }

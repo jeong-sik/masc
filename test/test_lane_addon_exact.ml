@@ -1530,6 +1530,25 @@ let test_preflight_refuses_a_link_no_record_names () =
     check (list string) "no record names it"
       [Preflight.decoder_name Preflight.Exact_proof_link] (readers report))
 
+let test_preflight_names_a_link_written_after_the_listing () =
+  with_workspace (fun ~base store ->
+    let listed = answered store "preflight-listed" in
+    let later = request "preflight-later" in
+    let runner,_,_ = counting_runner store (ref [Answer question]) in
+    let record = record_file store listed in
+    (* The server answers another request after the check listed the records
+       and before it lists the proof links. *)
+    let wrote = ref false in
+    let after_read path =
+      if String.equal path record && not !wrote then (
+        wrote := true;
+        ignore (run_request store runner later)) in
+    let report = preflight ~after_read base in
+    check bool "the server wrote during the check" true !wrote;
+    check bool "the later request has its link" true (Sys.file_exists (link_file store later));
+    check (list (pair string (list string))) "the record listed again names the later link" []
+      (refused report))
+
 let test_preflight_refuses_a_slot_observation_the_sweep_cannot_read () =
   with_workspace (fun ~base store ->
     ignore (answered store "preflight-observed");
@@ -1665,6 +1684,8 @@ let () =
             test_preflight_reads_the_proof_link_with_its_record
         ; test_case "a misfiled record is refused alone" `Quick test_preflight_refuses_a_misfiled_record_alone
         ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
+        ; test_case "a link written after the listing is not refused" `Quick
+            test_preflight_names_a_link_written_after_the_listing
         ; test_case "a slot observation the sweep cannot read is refused" `Quick
             test_preflight_refuses_a_slot_observation_the_sweep_cannot_read
         ; test_case "another store root stops the check" `Quick test_preflight_stops_on_another_store_root

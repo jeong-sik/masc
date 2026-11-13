@@ -110,6 +110,29 @@ not run Memory parts discovery, publication recovery or a provider. Discovery
 reads a scope as a whole and fails it on one record it cannot read, so the
 `fresh state` line names both scope directories.
 
+### Lane Add-on exact requests
+
+Exact request records are
+`.masc/lane-addons/exact-requests/<declaration digest>/<request ID digest>.json`.
+The original execution proofs of a request are one file under
+`.masc/lane-addons/host-results/`, named from the record's declaration ID,
+request ID and request digest. Its slot observations are files in the
+declaration's observation directory under `host-results`. The check reads a
+record, its proof file and the record again, with the decoder the exact lane
+uses when it runs the request. A refused record's `fresh state` line names the
+record, its proof file and the slot observations of its request. A record
+stored at a path its own IDs do not name, a proof file that no record names and
+a slot observation the startup sweep cannot read are each refused alone.
+
+Proof files and slot observations name the store root they were written
+under. When one names another root than the check reads, the scan fails
+(`scan_failed`) with both roots and prints no `fresh state` line: the
+workspace was moved or restored, or the check reads another path than the
+server serves.
+`--base-path` resolves like the server's workspace path, through symlinks, so
+the workspace, its `.masc` directory and a symlink to the workspace read the
+same store.
+
 ### Run registries
 
 The exact-lane, fusion, verification and Goal verification run registries drop

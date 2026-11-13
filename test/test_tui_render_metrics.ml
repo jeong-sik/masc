@@ -458,7 +458,7 @@ let test_approval_source_observations () =
   check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
   let governance () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
   let output = governance () in
-  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not observed");
+  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not loaded");
   check bool "unread queues cannot claim empty" false (contains output "no active pending");
   state.gate_snapshot_observed <- true;
   state.keeper_tool_approvals_observed <- true;
@@ -480,7 +480,7 @@ let test_approval_source_observations () =
   check (option int) "rules failure does not hide ready queue" (Some 1)
     (Render_metrics.calculate_kpis state).gate_pending_count;
   let output = governance () in
-  check bool "partial store error is visible" true (contains output "Standing Rules: unavailable: rules-store-offline");
+  check bool "partial store error is visible" true (contains output "Standing Rules: load failed: rules-store-offline");
   check bool "available tool is charted" true (contains output "bash")
 ;;
 

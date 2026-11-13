@@ -58,15 +58,6 @@ let held_observation (state : state) =
   observe_source ~observed:state.keeper_tool_approvals_observed
     ~error:state.keeper_tool_approvals_error state.keeper_tool_approvals
 
-(* What a state is called in a section row, which has room for the reason
-   after it. The card above the section draws the same observation as a
-   mark ({!observation_count}). *)
-let observation_name = function
-  | Current _ -> ""
-  | Not_observed -> "not observed"
-  | Read_failed _ | Unavailable _ -> "unavailable"
-  | Stale _ -> "stale"
-
 (* A count in a card, or the mark for why there is none (RFC
    tui-one-screen-grammar section 6.4). [Unavailable] is a source the server
    could not read from its own store, so it is no more read than a request
@@ -78,22 +69,22 @@ let observation_count observation =
   | Not_observed -> Unknown.(glyph Unread)
   | Read_failed _ | Unavailable _ | Stale _ -> Unknown.(glyph Read_failed)
 
-(* The name, then the reason the source gave for it; [current] says what a
-   current reading reads as. *)
-let observation_detail_with ~current observation =
+(* A section row's value. Without one, the row names the state of the
+   reading in RFC-0519 section 2's words, then the reason the source gave;
+   [current] says what a current reading reads as. A loader's message already
+   names its subject and its verdict, so it stands alone. The card above the
+   section draws the same observation as a mark ({!observation_count}). *)
+let observation_detail_with ~ko ~current observation =
   match observation with
   | Current value -> current value
-  | Not_observed -> observation_name observation
+  | Not_observed -> field_unread ~ko
   | Read_failed detail -> Terminal_text.single_line detail
-  | Unavailable detail ->
-      observation_name observation ^ ": " ^ Terminal_text.single_line detail
-  | Stale detail ->
-      observation_name observation ^ ": previous reading; "
-      ^ Terminal_text.single_line detail
+  | Unavailable detail -> field_failed ~ko ^ ": " ^ Terminal_text.single_line detail
+  | Stale detail -> field_stale ~ko ^ " \xc2\xb7 " ^ Terminal_text.single_line detail
 
-let observation_detail observation =
-  observation_detail_with
-    ~current:(fun rows -> string_of_int (List.length rows))
+let observation_detail ~ko observation =
+  observation_detail_with ~ko
+    ~current:(fun rows -> Count.grouped (List.length rows))
     observation
 
 let calculate_kpis (state : state) =
@@ -728,9 +719,11 @@ let render_section_tools ~cols (state : state) : string list =
   in
   let bar_w = min 60 (max 20 (inner_width - 8)) in
 
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let title_mem =
-    Printf.sprintf "  %s%sMemory OS Knowledge Base & Fact Store%s"
-      Ansi.bold (Theme.info ()) Ansi.reset
+    Printf.sprintf "  %s%s%s%s" Ansi.bold (Theme.info ())
+      (say "Memory OS 사실 저장소" "Memory OS Knowledge Base & Fact Store") Ansi.reset
   in
   (* The same four states the Gate rows below draw. This read "not loaded --
      visit Memory surface to fetch" whatever had happened: arriving here
@@ -742,33 +735,39 @@ let render_section_tools ~cols (state : state) : string list =
       ~error:state.memory_health_error state.memory_health
   in
   let memory_status =
-    "    Memory health: " ^ observation_detail_with ~current:(fun _ -> "") memory
+    say "    기억 상태: " "    Memory health: "
+    ^ observation_detail_with ~ko ~current:(fun _ -> "") memory
   in
   let memory_rows =
     match state.memory_health with
     | None -> []
     | Some mhs ->
         let total_facts = mhs.mhs_total_facts in
+        (* The ordinary snapshots' size, named as the Memory screen names it. *)
         let header =
-          Printf.sprintf "    Ordinary facts: %d · source facts: %d · ordinary recall: %s tok"
-            total_facts
-            mhs.mhs_total_source_facts
+          Printf.sprintf
+            (if ko then "    일반 사실 %s · 출처 사실 %s · 일반 저장량 %s tok"
+             else "    Ordinary facts %s · source facts %s · ordinary stored %s tok")
+            (Count.grouped total_facts)
+            (Count.grouped mhs.mhs_total_source_facts)
             (Masc_tui_token_scale.format_estimate Masc_tui_token_scale.fleet
                (List.fold_left (fun acc (k : Masc.Tui_decode_memory_health.memory_keeper_health) -> acc + k.mkh_snapshot_bytes) 0 mhs.mhs_keepers))
         in
         let rows =
           if mhs.mhs_keepers = [] then
-            [ "    (no registered keepers with memory partitions)" ]
+            [ say "    (기억 구역이 있는 등록 키퍼 없음)"
+                "    (no registered keepers with memory partitions)" ]
           else
             List.map
               (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
                 let pct = if total_facts = 0 then 0 else (k.mkh_facts * 100) / total_facts in
                 let bar = Chart.gauge ~width:16 ~value:pct ~max_value:100 ~label:"" () in
-                Printf.sprintf "    %-16s  %4d facts  %s  %s tok%s"
+                Printf.sprintf
+                  (if ko then "    %s  사실 %s  %s  %s tok%s" else "    %s  %s facts  %s  %s tok%s")
                   (Layout.fit_width
                      (Terminal_text.single_line k.mkh_keeper_id)
                      16)
-                  k.mkh_facts
+                  (Layout.pad_left (Count.grouped k.mkh_facts) 6)
                   bar
                   (Masc_tui_token_scale.format_estimate
                      Masc_tui_token_scale.fleet k.mkh_snapshot_bytes)
@@ -785,8 +784,8 @@ let render_section_tools ~cols (state : state) : string list =
   in
 
   let title_gate =
-    Printf.sprintf "  %s%sGate Governance & Security Stance%s"
-      Ansi.bold (Theme.bad ()) Ansi.reset
+    Printf.sprintf "  %s%s%s%s" Ansi.bold (Theme.bad ())
+      (say "Gate 승인과 보안 설정" "Gate Governance & Security Stance") Ansi.reset
   in
   let gate = gate_observation state in
   let held = held_observation state in
@@ -823,15 +822,16 @@ let render_section_tools ~cols (state : state) : string list =
   in
 
   let gate_summary =
-    [ "    Pending Gate Calls: " ^ observation_detail gate
-    ; "    Held Tool Approvals: " ^ observation_detail held
-    ; "    Standing Rules: " ^ observation_detail rules
-    ; "    YOLO Keepers: " ^ observation_detail yolo ]
+    [ say "    Gate 승인 대기: " "    Pending Gate Calls: " ^ observation_detail ~ko gate
+    ; say "    보류된 호출: " "    Held Tool Approvals: " ^ observation_detail ~ko held
+    ; say "    항상 허용 규칙: " "    Standing Rules: " ^ observation_detail ~ko rules
+    ; say "    YOLO 키퍼: " "    YOLO Keepers: " ^ observation_detail ~ko yolo ]
   in
   let yolo_line =
     match yolo with
     | Current (_ :: _ as names) ->
-      [ "    YOLO Execution: " ^ String.concat ", " (List.map Terminal_text.single_line names) ]
+      [ say "    YOLO 실행: " "    YOLO Execution: "
+        ^ String.concat " \xc2\xb7 " (List.map Terminal_text.single_line names) ]
     | Current [] | Not_observed | Read_failed _ | Unavailable _ | Stale _ -> []
   in
 
@@ -839,10 +839,13 @@ let render_section_tools ~cols (state : state) : string list =
     if Tool_map.is_empty counts then
       (match gate, held with
        | Current [], Current [] ->
-         [ "    (no active pending gate operations or held approval requests)" ]
+         [ say "    (Gate 승인 대기와 보류된 호출 없음)"
+             "    (no active pending gate operations or held approval requests)" ]
        | (Current [], Current (_::_))
        | (Current [], (Not_observed | (Read_failed _ | (Unavailable _ | Stale _))))
-       | (Current (_::_), _) | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) -> [ "    Pending tool totals unavailable; no empty queue inferred" ])
+       | (Current (_::_), _) | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) ->
+         [ say "    도구별 대기 수를 다 읽지 못해 비었다고 보지 않습니다."
+             "    Pending tool totals unavailable; no empty queue inferred" ])
     else
       let items =
         Tool_map.fold
@@ -856,7 +859,9 @@ let render_section_tools ~cols (state : state) : string list =
       let scope = match gate, held with
         | Current _, Current _ -> []
         | (Current _, (Not_observed | (Read_failed _ | (Unavailable _ | Stale _))))
-        | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) -> [ "    Tool distribution: observed queues only (partial coverage)" ] in
+        | ((Not_observed | (Read_failed _ | (Unavailable _ | Stale _))), _) ->
+          [ say "    도구 분포: 읽은 대기열만 (일부 관측)"
+              "    Tool distribution: observed queues only (partial coverage)" ] in
       scope @ (Chart.distribution_bars ~width:bar_w items
         |> List.map (fun l -> "    " ^ l))
   in

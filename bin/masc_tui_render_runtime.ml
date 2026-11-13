@@ -31,7 +31,7 @@ let runtime_refresh_badge ~ko refresh_state =
     match refresh_state with
     | Runtime_probe_fresh -> (if ko then "최신" else "fresh"), (Theme.ok ())
     | Runtime_probe_recent -> (if ko then "최근" else "recent"), (Theme.info ())
-    | Runtime_probe_served_stale -> (if ko then "이전 관측" else "stale"), (Theme.warn ())
+    | Runtime_probe_served_stale -> field_stale ~ko, (Theme.warn ())
     | Runtime_probe_warming_up -> (if ko then "준비 중" else "warming"), (Theme.warn ())
   in
   style ^ label ^ Ansi.reset

@@ -46,8 +46,8 @@ let report_local ~path ~changed changes =
   then Printf.printf "set %s in %s\n" keys path
   else Printf.printf "%s already as requested in %s\n" keys path
 
-(* With no server answering on the port, the command writes the file itself:
-   then nothing else writes it and no reader is waiting to be told. *)
+(* With no process holding the workspace lease, the command writes the file
+   itself: then nothing else writes it and no reader is waiting to be told. *)
 let write_locally ~refuse ~base_path changes =
   match runtime_config_path ~base_path with
   | Error message -> refuse message

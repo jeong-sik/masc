@@ -11,6 +11,17 @@
     take [p] from pause; the operator takes focus explicitly and the row says
     how. Nothing here performs I/O or reads the terminal. *)
 
+(** Why a named keeper cannot take a message. *)
+type unreachable =
+  | Workspace_unread
+      (** The server's workspace identity is not loaded yet. *)
+  | Workspace_differs
+      (** The workspace this TUI resolved is not the one the server serves;
+          chat needs a matching workspace for attachments and pasted files. *)
+  | Keeper_unavailable of string
+      (** The keeper itself: gone from the roster, observed only on the
+          server, or its metadata not read. Text in the screen's language. *)
+
 (** What the composer can do for the keeper it is pointed at. *)
 type target =
   | No_target
@@ -18,7 +29,7 @@ type target =
           one ever was. *)
   | Unreachable of {
       keeper : string;
-      reason : string;
+      reason : unreachable;
     }
       (** A keeper is named but a message cannot be sent to it, and this is
           why. The name is kept rather than cleared: an operator who typed a
@@ -92,6 +103,11 @@ val reading_note : ko:bool -> reading -> string option
     means locally observed metadata without a pending read. Plain text: terminal
     callers must escape it. It is appended outside the editable prompt so the
     observation does not change the draft window or cursor. *)
+
+val row_note : ko:bool -> t -> string option
+(** The note the row draws after the draft: [reading_note], except for a
+    target the workspace gate withheld. Its prompt already names the
+    workspace state, and the row does not say it twice. *)
 
 val accepts_input : t -> bool
 (** Whether a keystroke should reach the draft. False when the row is

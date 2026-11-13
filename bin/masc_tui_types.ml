@@ -18762,7 +18762,7 @@ let wait_for_created_keeper_metadata (state : state) keeper_name =
     requires the shared workspace for attachments and spilled paste files. *)
 type keeper_message_unavailable =
   | Keeper_missing | Remote_keeper_observation
-  | Message_workspace_unobserved | Message_workspace_unconfirmed | Message_workspace_differs
+  | Message_workspace_unobserved | Message_workspace_differs
   | Keeper_metadata_unobserved | Keeper_metadata_unavailable of string
   | Created_keeper_metadata_pending
 

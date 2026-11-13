@@ -1548,7 +1548,8 @@
  (libraries
   masc_tui_local_read_observation
   masc_tui_render_schedule
-  masc_tui_value))
+  masc_tui_value
+  masc_tui_words))
 
 (library
  (name masc_tui_audio_device)

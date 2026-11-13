@@ -1175,6 +1175,40 @@ let test_auth_status_reaches_a_regular_file () =
     | Error error -> fail (Runtime_claude_code.error_to_string error))
 ;;
 
+(* [purge_project] runs [--version] and then [purge]. A stand-in that warns
+   on [--version] and fails [purge] shows whose stderr the failure carries
+   (#51877). *)
+let test_failed_purge_reports_only_purge_stderr () =
+  let path = Filename.temp_file "masc-claude-purge-" ".sh" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun output ->
+      output_string output "#!/bin/sh\n";
+      output_string output "case \"$*\" in\n";
+      output_string output
+        "  --version) echo '2.1.322 (Claude Code)'; echo version-warning >&2; exit 0 ;;\n";
+      output_string output "  *purge*) echo purge-refused >&2; exit 1 ;;\n";
+      output_string output "esac\n";
+      output_string output "exit 80\n");
+    Unix.chmod path 0o700;
+    let outcome =
+      Eio_main.run (fun env ->
+        Runtime_claude_code.purge_project
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~account:(fixture_account ())
+          ~cli_path:path
+          ~timeout_s:10.0
+          ~project:"/tmp/masc-purge-fixture-project")
+    in
+    match outcome with
+    | Runtime_claude_code.Project_purged -> fail "a purge that exited 1 was reported as done"
+    | Runtime_claude_code.Project_not_purged detail ->
+      let has needle = String_util.contains_substring detail needle in
+      check bool ("purge's stderr is in: " ^ detail) true (has "purge-refused");
+      check bool ("--version's stderr is not: " ^ detail) false (has "version-warning"))
+;;
+
 let rate_limit_rejected =
   {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
 ;;
@@ -4975,6 +5009,10 @@ let () =
             "auth status reaches a regular file"
             `Quick
             test_auth_status_reaches_a_regular_file
+        ; test_case
+            "a failed purge reports only purge's stderr"
+            `Quick
+            test_failed_purge_reports_only_purge_stderr
         ] )
     ; ( "terminal"
       , [ test_case

@@ -187,8 +187,9 @@ class OwnerWithoutModel(unittest.TestCase):
                     self.assertIn('Ready after', printed)
                     self.assertIsNotNone(replacement(), printed)
                     self.assertNotEqual(replacement(), process.pid)
-                    # Ready is said only once the old server let go of the workspace.
-                    self.assertIsNotNone(process.wait(timeout=30))
+                    # Ready is said only once the old server let go of the
+                    # workspace. Its process ends after that, in its own time.
+                    self.assertIsNotNone(process.wait(timeout=120))
                     self.assertFalse(gone(replacement()), 'the replacement is not running')
                     self.assertTrue(ready())
                 finally:
@@ -205,7 +206,8 @@ class OwnerWithoutModel(unittest.TestCase):
                             time.sleep(.1)
                         if not gone(successor):
                             os.kill(successor, signal.SIGKILL)
-                            while not gone(successor):
+                            deadline = time.monotonic()+15
+                            while not gone(successor) and time.monotonic() < deadline:
                                 time.sleep(.1)
 
 if __name__ == '__main__':

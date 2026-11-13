@@ -1,7 +1,10 @@
 (* Holds the owner lease of a workspace and announces one port for it, as a
    server boot does, so a test can put an HTTP stand-in on that port and have
    the kernel name this process as the server of the workspace. It prints
-   [ready <pid>] once it holds both, and holds them until its stdin closes. *)
+   [ready <pid>] once it holds both. A line [withdraw] on its stdin has it
+   withdraw the announcement and keep the lease, as a server does once its
+   listener closes, and it answers [withdrawn]. It holds the lease until its
+   stdin closes. *)
 type kind = Single_user | Account | Announces_nothing
 
 let kind_of_arg = function
@@ -29,15 +32,16 @@ let () =
      | Server_startup_takeover.Base_path_rejected rejection ->
        prerr_endline (Server_startup_takeover.base_path_lock_rejection_to_string rejection); exit 1
      | Server_startup_takeover.Base_path_acquired lease ->
+       let withdrawal = ref None in
        let announced announce =
          match
            Server_startup_takeover.loopback_listener ~address:(Ipaddr.V4 Ipaddr.V4.localhost) ~port
          with
          | Error unreached -> Error (Server_startup_takeover.loopback_unreached_to_string unreached)
          | Ok listener ->
-           (* The lock lasts until this process exits: no listener here would
-              withdraw it. *)
-           announce lease listener ~withdraw_with:ignore
+           (* The lock lasts until this process exits or is asked to withdraw
+              it: no listener here would. *)
+           announce lease listener ~withdraw_with:(fun withdraw -> withdrawal := Some withdraw)
            |> Result.map_error Server_startup_takeover.base_path_lock_rejection_to_string in
        let result =
          match kind with
@@ -48,5 +52,17 @@ let () =
         | Error reason -> prerr_endline reason; exit 1
         | Ok () ->
           Printf.printf "ready %d\n%!" (Unix.getpid ());
-          ignore (In_channel.input_all stdin);
-          exit 0))
+          let rec serve () =
+            match In_channel.input_line stdin with
+            | None -> exit 0
+            | Some "withdraw" ->
+              (match !withdrawal with
+               | Some withdraw ->
+                 withdraw ();
+                 withdrawal := None;
+                 Printf.printf "withdrawn\n%!"
+               | None -> Printf.printf "nothing to withdraw\n%!");
+              serve ()
+            | Some (_ : string) -> serve ()
+          in
+          serve ()))

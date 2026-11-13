@@ -74,6 +74,15 @@ class Announcement:
                                  + line + self.process.stderr.read())
         self.pid = int(line.split()[1])
 
+    def withdraw(self):
+        """Withdraws the announcement and keeps the lease, as a server does
+        once its listener closes on the way to its exit."""
+        self.process.stdin.write("withdraw\n")
+        self.process.stdin.flush()
+        answer = self.process.stdout.readline().strip()
+        if answer != "withdrawn":
+            raise AssertionError("the announcer did not withdraw: " + answer)
+
     def close(self):
         self.process.stdin.close()
         self.process.wait(timeout=30)
@@ -104,6 +113,8 @@ class StandIn:
         self.speaking = speaking
         # Runs once the command asked for runtime.toml, before it is answered.
         self.before_source = before_source
+        # The same for readiness and for the voice setup read, once each.
+        self.before_ready = self.before_voice = None
         self.requests, self.saves, self.save_paths, self.authorizations = [], [], [], []
         stand_in = self
 
@@ -122,6 +133,9 @@ class StandIn:
             def do_GET(self):
                 stand_in.requests.append(("GET", self.path))
                 if self.path == "/health/ready":
+                    hook, stand_in.before_ready = stand_in.before_ready, None
+                    if hook is not None:
+                        hook()
                     self.answer(200 if stand_in.ready else 503, {"ready": stand_in.ready})
                 elif self.path == "/api/v1/runtime/config/raw":
                     stand_in.authorizations.append(self.headers.get("authorization"))
@@ -131,6 +145,9 @@ class StandIn:
                                       "source_revision": REVISION, "path": SERVER_PATH})
                 elif self.path == "/api/v1/voice/setup":
                     stand_in.authorizations.append(self.headers.get("authorization"))
+                    hook, stand_in.before_voice = stand_in.before_voice, None
+                    if hook is not None:
+                        hook()
                     tts = None if stand_in.speaking is None else {"endpoints": stand_in.speaking}
                     self.answer(200, {"revision": VOICE_REVISION, "source": None,
                                       "tts": tts, "stt": None})
@@ -297,9 +314,10 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertEqual(server.requests, [])
         self.assertIn("[autonomous]\nenabled = false", runtime_toml(base).read_text())
 
-    # A process holds the workspace and announces no port: a server still
-    # starting, or one a MASC older than the announcement started. The command
-    # neither writes the file under it nor sends the bearer to the port.
+    # A process holds the workspace and announces no port. Whatever the reason
+    # (starting, shutting down, listening out of loopback reach, started by a
+    # MASC that does not announce), the command neither writes the file under
+    # it nor sends the bearer to the port.
     def test_an_owner_that_announces_nothing_stops_the_command(self):
         root = self.scratch()
         base = workspace(root)
@@ -340,6 +358,97 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("changed after this command checked it", result.stderr)
         self.assertEqual(server.requests, [("GET", "/health/ready"), ("GET", "/api/v1/runtime/config/raw")])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # A server that shuts down keeps the workspace and withdraws its
+    # announcement. Each request that carries the bearer asks the kernel
+    # first, so none of them reaches the port after that: not the read of
+    # runtime.toml, not the read of the voice setup, not the voice save.
+    def test_a_server_that_withdrew_its_announcement_gets_no_read(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(root, base)
+        server.before_ready = server.holder.withdraw
+        result = masc(root, "autonomous.enabled=false", "--base-path", str(base),
+                      "--port", str(server.port))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("(pid %d) withdrew its announcement" % server.holder.pid, result.stderr)
+        self.assertEqual(server.requests, [("GET", "/health/ready")])
+        self.assertEqual(server.authorizations, [])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    def test_voice_local_setup_reads_nothing_from_a_server_that_withdrew_its_announcement(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(root, base)
+        server.before_ready = server.holder.withdraw
+        result = masc_command(root, "voice-local-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--model", str(root / "ggml-base.bin"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("(pid %d) withdrew its announcement" % server.holder.pid, result.stderr)
+        self.assertEqual(server.requests, [("GET", "/health/ready")])
+        self.assertEqual(server.authorizations, [])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    def test_voice_local_setup_saves_nothing_to_a_server_that_withdrew_its_announcement(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(root, base)
+        server.before_voice = server.holder.withdraw
+        result = masc_command(root, "voice-local-setup", "--base-path", str(base),
+                              "--port", str(server.port), "--model", str(root / "ggml-base.bin"))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("(pid %d) withdrew its announcement" % server.holder.pid, result.stderr)
+        self.assertEqual(server.requests, [("GET", "/health/ready"), ("GET", "/api/v1/voice/setup")])
+        self.assertEqual(server.saves, [])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # runtime-setup-batch decides its save against the text the server holds
+    # and publishes it through the server. The server here withdraws its
+    # announcement after it answered that text: the publication is not sent.
+    def test_setup_batch_publishes_nothing_to_a_server_that_withdrew_its_announcement(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(root, base)
+        port = ("--base-path", str(base), "--port", str(server.port))
+        inventory = masc_command(root, "runtime-setup-inventory", *port)
+        self.assertEqual(inventory.returncode, 0, inventory.stderr)
+        request = root / "request.json"
+        request.write_text(json.dumps({
+            "connections": [], "runtime_ids": ["deepseek.chat"], "default_runtime_id": "deepseek.chat",
+            "expected_revision": json.loads(inventory.stdout)["setup_revision"], "verify": False}))
+        os.chmod(request, 0o600)
+        del server.requests[:]
+        server.before_source = server.holder.withdraw
+        result = masc_command(root, "runtime-setup-batch", *port, "--request", str(request))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt["kind"], "commit_refused", receipt)
+        self.assertIn("(pid %d) withdrew its announcement" % server.holder.pid, receipt["detail"])
+        self.assertEqual(server.requests, [("GET", "/health/ready"), ("GET", "/api/v1/runtime/config/raw")])
+        self.assertEqual(server.saves, [])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # Whether a server holds the workspace is not known then, so the command
+    # neither writes the file itself nor asks the port anything.
+    def test_an_owner_that_cannot_be_read_stops_the_command(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(root, base, kind=None)
+        # The lease root of a workspace is this directory; a file in its
+        # place holds no lease that could be read.
+        (base / ".masc-owner").write_text("")
+        result = masc(root, "autonomous.enabled=false", "--base-path", str(base),
+                      "--port", str(server.port))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("could not be checked", result.stderr)
+        self.assertIn("Nothing was saved", result.stderr)
+        self.assertEqual(server.requests, [])
         self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
 
     def test_a_server_on_another_port_stops_the_command(self):

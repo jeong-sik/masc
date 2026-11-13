@@ -7724,6 +7724,12 @@ let goal_detail_on_screen (state : state) =
         snapshot.pl_goals
   | Planning_list, _ | Planning_detail _, None -> None
 
+(* The lifecycle request [key] sends from the open Goal detail, if that Goal
+   accepts one under it. *)
+let goal_detail_action (state : state) key =
+  Option.bind (goal_detail_on_screen state) (fun goal ->
+    planning_action_of_key ~offers:(planning_goal_offers_action goal) key)
+
 let schedule_detail_on_screen (state : state) =
   match state.schedule_detail_id, state.schedules with
   | Some id, Some snapshot ->
@@ -40788,17 +40794,12 @@ Use relative paths for resources already held in the package. -->
                    open_candle ()
                | None | Some _ -> ()))
        | Some key when state.view = Planning
-           && Option.is_some (goal_detail_on_screen state)
-           && Option.exists
-                (fun action ->
-                   let goal = Option.get (goal_detail_on_screen state) in
-                   planning_goal_offers_action goal action)
-                (planning_action_of_key key) ->
-           (* Detail actions take precedence over global refresh/navigation.
+           && Option.is_some (goal_detail_action state key) ->
+           (* Detail actions take precedence over global navigation.
               The displayed keys and parser share one owner. *)
            Option.iter
              (fun action -> handle_goal_action_key state ~mailbox:async_messages ~action)
-             (planning_action_of_key key)
+             (goal_detail_action state key)
        | Some "r" | Some "R" ->
            refresh_shared_sources ();
            (* Also reload logs / Board detail if viewing them. *)

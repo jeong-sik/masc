@@ -3390,7 +3390,7 @@ let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_n
   let url =
     Printf.sprintf
       "http://%s:%d/api/v1/keepers/%s/%s"
-      host
+      Masc_network_defaults.(url_host_to_string (url_host_of_string host))
       port
       (Uri.pct_encode keeper_name)
       (match action with `Up -> "up" | `Boot -> "boot")

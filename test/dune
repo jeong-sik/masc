@@ -1364,7 +1364,7 @@
 (test
  (name test_server_request_authority)
  (modules test_server_request_authority)
- (libraries alcotest masc_test_deps eio_main h2))
+ (libraries alcotest masc_test_deps eio_main h2 ipaddr))
 
 (include stanzas/test_request_workspace_precondition.inc)
 

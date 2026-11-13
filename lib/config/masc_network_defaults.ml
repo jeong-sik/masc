@@ -129,6 +129,39 @@ let is_unspecified_host host =
       | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
       | Error _ -> false)
 
+(* The host of a URL is an IP address or a name, and the two are written
+   differently: RFC 3986 section 3.2.2 puts an IPv6 address in square brackets
+   because its own colons would read as the port separator. The family is
+   read from the parsed address, so no caller looks for a colon in text. *)
+type url_host =
+  | Ip_address of Ipaddr.t
+  | Host_name of string
+
+let url_host_of_string text =
+  match Ipaddr.of_string text with
+  | Ok address -> Ip_address address
+  | Error (`Msg (_ : string)) -> Host_name text
+
+let url_host_to_string = function
+  | Ip_address (Ipaddr.V4 address) -> Ipaddr.V4.to_string address
+  | Ip_address (Ipaddr.V6 address) -> "[" ^ Ipaddr.V6.to_string address ^ "]"
+  | Host_name name -> name
+
+let http_origin ~address ~port =
+  Printf.sprintf "http://%s:%d" (url_host_to_string (Ip_address address)) port
+
+(* A wildcard bind address accepts on every interface and names no peer, so
+   the address a client on this machine dials is the loopback peer. Every
+   other bind address is the one the listener answers on, [::1] included: a
+   listener bound to [::1] does not answer on 127.0.0.1. *)
+let advertised_bind_address address =
+  let loopback_peer = Ipaddr.V4 Ipaddr.V4.localhost in
+  match address with
+  | Ipaddr.V4 v4 ->
+    if Ipaddr.V4.compare v4 Ipaddr.V4.any = 0 then loopback_peer else address
+  | Ipaddr.V6 v6 ->
+    if Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0 then loopback_peer else address
+
 (* Sole owner of URL-shaped trailing-slash trimming. This is the lowest
    layer that needs it ([Env_config_core] depends on this module, not the
    other way round), so callers above reach it here instead of keeping a

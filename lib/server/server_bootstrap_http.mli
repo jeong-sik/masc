@@ -27,6 +27,12 @@ val make_http_config :
     is [address] written out by {!Ipaddr.to_string}. Other config fields
     default via {!Http_server_eio.default_config}. *)
 
+val advertised_base_url : address:Ipaddr.t -> port:int -> string
+(** The base URL {!make_http_config} writes for a listener bound to
+    [address] when none is configured: [http://127.0.0.1:P] for a wildcard,
+    [http://[::1]:P] for [::1]. {!Server_request_authority.make_trust_policy}
+    reads it back as the explicit base URL. *)
+
 val listen_tcp_result :
   sw:Eio.Switch.t ->
   net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->

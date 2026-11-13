@@ -635,9 +635,7 @@ let serialized_origin_of_referer referer =
     with
     | Some ("http" | "https" as scheme), None, Some host, None ->
       let rendered_host =
-        match Ipaddr.V6.of_string host with
-        | Ok _ -> "[" ^ host ^ "]"
-        | Error _ -> host
+        Masc_network_defaults.(url_host_to_string (url_host_of_string host))
       in
       let rendered_port =
         Option.fold ~none:"" ~some:(Printf.sprintf ":%d") (Uri.port uri)

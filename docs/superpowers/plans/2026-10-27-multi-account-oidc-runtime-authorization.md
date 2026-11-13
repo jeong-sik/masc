@@ -898,7 +898,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 알림 파일은 lease 파일의 검사를 받는다. 읽는 쪽은 lease 파일을 열 때의 검사를 그대로 쓰고 파일을 만들지 않는다. 알리는 쪽은 자기가 쥔 lease 파일이 지금도 그 경로의 파일인지 본 뒤, 이 사용자의 이름 하나짜리 보통 파일만 받는다.
 - 타입. `judged`가 lease를 싣는다(`judge ~lease`). `run`은 그 lease를 계정 서버에 넘긴다. 판정받은 부팅의 lease 없이는 알릴 수 없다.
 - `masc restart`.
-  - 관찰(`Server_upgrade_preparation.account_server`). kernel에 먼저 묻는다. lease 주인의 pid를 읽고, 청한 포트의 바이트를 쥔 pid와 맞춘다. 같고 `/health`가 200이면 멈출 계정 서버다. `/health`의 답은 떠 있는지 보고 버전을 읽는 데만 쓴다. 다르면 파일 전체를 물어 lease 주인이 다른 포트를 알리는지 본다. 알리면 거절하고 그 포트를 말해 준다. 청한 포트에서 답이 없으면 거절하고 pid를 말해 준다. lease 주인이 아무것도 알리지 않으면 전과 같은 단일 사용자의 길이다. lease 주인이 아닌 프로세스의 잠금은 어느 바이트에 있든 계정 서버로 읽지 않는다.
+  - 관찰(`Server_upgrade_preparation.owner`). kernel에 먼저 묻는다. lease 주인의 pid를 읽고, 청한 포트의 바이트를 쥔 pid와 맞춘다. 계정 서버 파일에서 같으면 `Account_server_here`다. `/health`가 200이면 멈출 계정 서버다. `/health`의 답은 떠 있는지 보고 버전을 읽는 데만 쓴다. 다르면 파일 전체를 물어 lease 주인이 다른 포트를 알리는지 본다. 알리면(`Account_server_elsewhere`) 거절하고 그 포트를 말해 준다. 청한 포트에서 답이 없으면 거절하고 pid를 말해 준다. lease 주인이 어느 파일에도 알리지 않으면(`Owner_unannounced`) 거절하고 pid를 말해 준다. lease 주인이 아닌 프로세스의 잠금은 어느 바이트에 있든 계정 서버로 읽지 않는다.
     - "이 포트의 계정 서버"라는 답은 포트의 바이트에서만 나온다. 파일 전체를 묻는 읽기는 다른 포트를 말하는 데만 쓴다.
     - kernel이 먼저인 까닭. 어느 정지 경로를 탈지는 lease 주인이 무엇을 알리는지가 정한다. 포트의 답이 정하지 않는다. 포트부터 물으면, 계정 서버가 주인인 설치에서도 그 포트에서 답하는 쪽이 단일 사용자의 로그인과 토큰 경로를 고르게 된다.
     - 대가. lease를 읽으면 private lease 폴더와 빈 lease 파일이 없을 때 생긴다. 그래서 거절로 끝난 명령도 그 파일을 남긴다. `masc start`가 만드는 파일이다. 그 위의 폴더(`.masc-owner`)는 이 층 전에도 이 명령이 만들었다. 잰 값은 아래 확인에 있다.
@@ -978,7 +978,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
     - `masc setup-stop-previous-owner`는 "The selected port did not return a valid workspace identity."로 거절했다(exit 1). 서버는 그대로였다.
   - 까닭. 이 명령들은 `/health`가 싣는 workspace로 서버를 알아보고, config의 `account_mode`도 lease의 주인도 읽지 않는다.
 - 읽는 것은 둘이고 서로 다른 물음에 답한다.
-  - 지금 누가 workspace를 쥐고 있나. kernel에서 읽는다(`Server_upgrade_preparation.holder`). `masc setup-server`, `masc setup-stop-previous-owner`, `masc restart`가 묻는다. config가 무엇을 청하든 같다.
+  - 지금 누가 workspace를 쥐고 있나. kernel에서 읽는다(`Server_upgrade_preparation.owner`, 아무것도 만들지 않고 읽을 때는 `owner_without_making`). `masc setup-server`, `masc setup-stop-previous-owner`, `masc restart`가 묻는다. config가 무엇을 청하든 같다.
   - 다음 부팅이 무엇을 띄우나. config에서 읽는다(`Authz_boot_mode_read.asks_for_multi_account`). `masc doctor`, `masc setup`, 설치 journey의 시작이 묻는다.
     - `config.json`이 `Multi_account`를 청할 때만 `true`다. 부팅 판정 표(`Authz_boot_mode.judge`)는 그 요청에 단일 사용자를 답하지 않는다. 활성화 요청, 계정 서버, 불확실, 거절 가운데 하나다.
     - 활성화됐는지는 읽지 않는다. 로그와 외부 저장소는 lease를 쥔 부팅만 연다(파일을 열며 끝줄을 자르고 lock 파일을 둔다).
@@ -988,11 +988,12 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - lease의 주인을 읽으면(`capture_existing_owner`) run 폴더, private lease 폴더, 빈 lease 파일이 없을 때 생긴다. journey는 아직 아무것도 없는 폴더의 포트부터 살핀다.
   - `Server_startup_takeover.lease_file_present`가 먼저 본다. lease 파일이 한 번도 만들어지지 않은 workspace는 아무도 쥔 적이 없다. 그러면 주인을 읽지 않는다. 파일이 있으면 주인을 읽어도 더 만들 것이 없다.
   - 가는 길에 폴더가 아닌 것이 있으면 `true`를 답한다. 뒤따르는 읽기가 그것을 자기 문장으로 거절하고, 거절은 아무것도 만들지 않는다.
-- `Server_upgrade_preparation.holder`의 답은 셋이다.
-  - `Held_by_nobody`. lease 파일이 없거나, 있어도 쥔 프로세스가 없다.
-  - `Held_without_announcement`. 주인이 포트를 알리지 않는다. 단일 사용자 서버이거나, 알리기 전의 계정 서버다.
-  - `Held_by_account_server { port }`. 주인이 알린 포트다. 물은 포트와 달라도 알린 포트를 답한다.
-  - 그 아래의 `account_server`는 네 갈래를 답한다. 전에는 "주인 없음", "알리지 않음", "다른 프로세스의 lock 뒤에서 놓침"을 `No_account_server` 하나로 답했다.
+- `Server_upgrade_preparation.owner`의 답은 여섯이다. `owner_without_making`도 같은 여섯을 답한다.
+  - `Unowned`. lease 파일이 없거나, 있어도 쥔 프로세스가 없다.
+  - `Single_user_server_here`. 주인이 단일 사용자 서버 파일에서 물은 포트의 바이트를 쥐었다. credential을 받는 서버는 이 답뿐이다.
+  - `Single_user_server_elsewhere { pid; port }`. 주인이 단일 사용자 서버 파일에서 다른 포트를 알린다.
+  - `Account_server_here { pid }`, `Account_server_elsewhere { pid; port }`. 계정 서버 파일에서 물은 포트를, 또는 다른 포트를 알린다.
+  - `Owner_unannounced { pid }`. 주인이 어느 파일에도 포트를 알리지 않는다. kernel은 까닭을 말하지 않는다. 뜨는 중, 끝나는 중, 다른 프로세스의 잠금에 가린 다른 포트, 127.0.0.1이 닿지 않는 주소, 알리지 않는 옛 MASC 가운데 하나다.
 - `masc doctor`(`Onboarding_status`).
   - `opening`에 `account_installation`이 생겼다. 점검은 둘이다. `workspace`와 `multi_account_request`(needs_verification)다.
   - imp의 모델·선언·sandbox·history는 읽지 않는다. 단일 사용자 서버가 쓰는 것이고 그 서버는 여기서 뜨지 않는다.
@@ -1001,11 +1002,11 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 주인이 없거나 알리지 않으면 전과 같이 포트의 답으로 판정한다.
   - 주인을 읽지 못하면 config가 가른다. 다계정을 청하면 상태를 답하지 않는다. `masc.setup_server_unread.v1` 문서에 사유를 싣고 exit 1로 끝난다. 계정 서버가 도는지 모르는 채로 `free`를 답하면 서버가 없는 workspace로 읽힌다. 청하지 않으면 전처럼 포트의 답으로 판정한다. `pidfd_open`이 없는 Linux의 단일 사용자 설치가 전과 같이 돈다.
 - `masc setup-stop-previous-owner`.
-  - 로컬 운영자로 로그인하기 전에 `holder`에 묻는다. 그 명령은 로그인한 bearer를 포트로 보낸다.
-  - `Held_by_nobody`면 거절한다. 포트에서 무엇이 답하든 이 명령이 멈출 주인이 아니다. lease를 다른 곳에 두던 옛 버전 서버(#48858 전)도 여기에 든다. 전에도 그 서버는 멈추지 못했다(주인 확인 실패). 지금은 로그인과 bearer 전송이 없다.
-  - `Held_by_account_server`면 거절하고 `masc restart`를 말한다.
-  - `Held_without_announcement`면 전과 같다.
-  - 남는 틈. 계정 서버가 lease를 쥐고 아직 알리기 전에는 단일 사용자 서버와 구분되지 않는다. 그 구간의 명령은 포트의 답까지 간다. 단일 사용자 서버의 정지가 kernel 확인보다 먼저 bearer를 보내는 순서는 이 층이 바꾸지 않았다(#51321).
+  - 로컬 운영자로 로그인하기 전에 `owner_without_making`에 묻는다. 그 명령은 로그인한 bearer를 포트로 보낸다.
+  - `Unowned`면 거절한다. 포트에서 무엇이 답하든 이 명령이 멈출 주인이 아니다. lease를 다른 곳에 두던 옛 버전 서버(#48858 전)도 여기에 든다. 전에도 그 서버는 멈추지 못했다(주인 확인 실패). 지금은 로그인과 bearer 전송이 없다.
+  - `Account_server_here`와 `Account_server_elsewhere`면 거절하고 `masc restart`를 말한다.
+  - `Owner_unannounced`와 `Single_user_server_elsewhere`면 거절하고 pid를, 알린 포트가 있으면 그 포트도 말한다.
+  - `Single_user_server_here`만 멈춘다. 로그인 전, bearer를 보내기 전마다 kernel에 다시 묻는다(`confirm`).
 - `masc setup`(스크립트 없이 도는 길). config가 다계정을 청하면 초기화 전에 거절한다(exit 1). 파일을 쓰지 않고 서버를 띄우지 않는다.
 - 설치 journey(`scripts/install-runtime-setup.py`).
   - doctor 문서가 `account_installation`이면 묻지 않고 끝난다(exit 0). workspace 경로, 만족되지 않은 점검의 문장, 계정 서버의 상태 한 줄, 다른 workspace를 고르는 명령을 찍는다. `masc init`, 모델 wizard, sandbox 단계, `masc-tui`를 부르지 않고 포트를 저장하지 않는다.
@@ -1026,12 +1027,12 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
   - 단일 사용자 workspace. `free` → `masc restart` → `same_workspace` → 정지(`replacement_can_start`)의 순서를 이 층 전의 바이너리와 줄 단위로 맞춰 봤다. 포트, pid, 시간을 빼면 같다.
 - 시험.
   - `test_server_startup_takeover`: lease 파일은 BasePath, lease root, private lease 폴더가 없을 때와 폴더만 있을 때 없다고 답하고 아무것도 만들지 않는다. 주인이 쥐면 있다고 답한다. lease root 자리에 파일이 있으면 있다고 답하고, 획득은 그것을 거절하며 아무것도 만들지 않는다.
-  - `test_server_upgrade_preparation`: `holder`는 아무도 시작한 적 없는 workspace에서 `Held_by_nobody`를 답하고 lease root를 만들지 않는다. 단일 사용자 주인은 `Held_without_announcement`, 계정 서버는 물은 포트와 무관하게 알린 포트를 답한다. 주인이 끝난 뒤의 lease 파일은 `Held_by_nobody`다. lease root가 파일이면 `Owner_lease_rejected`다. 읽기는 주인에게 신호를 보내지 않는다.
+  - `test_server_upgrade_preparation`: `owner_without_making`은 아무도 시작한 적 없는 workspace에서 `Unowned`를 답하고 lease root를 만들지 않는다. 알리지 않는 주인은 `Owner_unannounced`, 계정 서버는 물은 포트에서 `Account_server_here`, 다른 포트를 물으면 알린 포트를 실은 `Account_server_elsewhere`다. 주인이 끝난 뒤의 lease 파일은 `Unowned`다. lease root가 파일이면 `Owner_lease_rejected`다. 읽기는 주인에게 신호를 보내지 않는다.
   - `test_onboarding_journey.py`(바이너리 없이): 계정 설치에서 `setup-server` 하나만 부르고 포트를 저장하지 않는다. 관찰마다 맞는 상태를 말한다(답한 서버, 버전 없는 답, 답 없는 알림, 남의 포트). 필드가 빠지거나 형이 다른 문서 열아홉 가지는 상태를 말하지 않는다. 친 폴더와 첫 실행의 기본 폴더는 점검·계획보다 먼저 읽는다. 물결표와 `..`이 든 경로는 점검이 푸는 폴더로 읽는다. sandbox 단계는 doctor를 먼저 읽는다. 리뷰 전의 스크립트에 같은 시험을 돌리면 여덟 시험이 실패한다.
   - `test_setup_cli.py`(바이너리, 서버 없음): 아무것도 없는 폴더에서 `setup-server`와 정지 명령이 아무것도 만들지 않는다. lease root를 읽지 못할 때 config가 청하면 `masc.setup_server_unread.v1`과 exit 1, 아니면 `free`다.
   - `test_onboarding_journey.py --binary`: 실제 bootstrap과 `masc restart`로 계정 서버를 띄우고 `setup-server`, journey, 정지 명령을 본다. CI는 이 파일을 바이너리 없이 돌린다. 이 시험은 손으로 돌린다.
 - 독립 리뷰(2026-11-11, 첫 구현). P1은 없었고 P2 셋, P3 열이었다. 모두 코드에서 확인했다.
-  - P2. 정지 명령의 거절이 알림 뒤에만 섰고 `No_account_server`가 세 상태를 합쳤다. `account_server`를 네 갈래로 나누고 `holder`를 뒀다.
+  - P2. 정지 명령의 거절이 알림 뒤에만 섰고 `No_account_server`가 세 상태를 합쳤다. 지금은 `owner`가 여섯 답으로 가르고, 정지 명령은 로그인 전에 묻는다.
   - P2. 읽지 못하는 config에서 `asks_for_multi_account`가 `false`인 것을 적지 않았다. 적었고, `masc setup-server`가 config와 무관하게 kernel을 읽게 했다.
   - P2. 바이너리의 새 갈래에 native 시험이 없었고 스텁 시험 둘은 옛 코드에서도 통과했다. 시험을 다시 썼다.
   - P3. 친 폴더를 점검 뒤에 읽었다(점검은 upgrade와 restore를 권할 수 있다). 앞으로 옮겼다. 경로를 풀지 않고 doctor에 넘기던 것도 고쳤다(`~/x`를 `./~/x`로 읽었다).

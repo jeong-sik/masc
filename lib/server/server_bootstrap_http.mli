@@ -141,6 +141,18 @@ val serve :
     identify which listener emitted the line when a process runs
     multiple HTTP servers. *)
 
+val h1_error_handler :
+  Eio.Net.Sockaddr.stream ->
+  ?request:Httpun.Request.t ->
+  Httpun.Server_connection.error ->
+  (Httpun.Headers.t -> Httpun.Body.Writer.t) ->
+  unit
+(** The error handler of every HTTP/1.1 connection: httpun calls it for a
+    request it could not parse and for a request that failed before its
+    response. The body is one of the fixed sentences of {!Http_error_body}.
+    A server failure is logged at error with the exception's text, which
+    reaches the log only. *)
+
 val h2_config : unit -> H2.Config.t
 (** The settings every H2 connection is created with, cleartext or TLS:
     server push off, and the stream limit and initial window from

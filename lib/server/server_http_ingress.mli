@@ -26,7 +26,10 @@ val serve
     admitted one to the request fiber and runs the admission steps above.
 
     A handler exception is answered by {!Http_reqd.response_state}. With no
-    response yet it becomes a 500, or a 503 for [Auth.Auth_config_error]. An
+    response yet it becomes a 500, or a 503 for [Auth.Auth_config_error].
+    The 500 says {!Http_error_body.internal_server_error} and not the text
+    of the exception, which can name a file of the server. The log has the
+    text. An
     open streaming response is ended with {!Http_reqd.report_exn}: HTTP/2
     resets the stream, HTTP/1.1 stops the body and closes the connection.
     After a complete response the exception is only logged. Outside an open
@@ -49,9 +52,7 @@ val serve_table
     405 or the 404 of the router, [OPTIONS] included. It takes the table and
     {!serve} takes a router, so neither is handed the routes of the other.
 
-    A handler exception is answered as by {!serve}, except that the 500 says
-    ["internal error"] and not the text of the exception, which can name a
-    file of the server. The log has the text. Both entries use the same
+    A handler exception is answered as by {!serve}. Both entries use the same
     request-owner relay when the connection runs on the HTTP serving domain. *)
 
 val respond_request_authority_bad_request

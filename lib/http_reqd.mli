@@ -261,8 +261,9 @@ val report_exn : t -> exn -> unit
     closes the connection after it: a chunked body then lacks its last
     chunk, but a body that ends with the connection (no length, no chunks,
     as masc's HTTP/1.1 SSE) looks to the client like one that finished.
-    [exn] is logged once at error: on HTTP/2 the error handler logs the ones
-    it answers ({!Http_h2_stream.report_failure}).
+    [exn] is logged once at error: the connection's error handler logs the
+    ones it answers (on HTTP/2, {!Http_h2_stream.report_failure}), and the
+    body of that answer is a fixed sentence ({!Http_error_body}).
 
     On HTTP/1.1 httpun also ends the request body, and a {!read_body} still
     waiting for it delivers nothing. *)

@@ -1755,11 +1755,11 @@ let () =
             test_preflight_reads_the_proof_link_with_its_record
         ; test_case "a misfiled record is refused alone" `Quick test_preflight_refuses_a_misfiled_record_alone
         ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
-        ; test_case "a link removed before it is refused is not named" `Quick
+        ; test_case "a link no record names is not refused once removed" `Quick
             test_preflight_skips_an_unnamed_link_removed_before_it_is_refused
         ; test_case "a link written after the listing is not refused" `Quick
             test_preflight_names_a_link_written_after_the_listing
-        ; test_case "a link removed before the refusal is not named" `Quick
+        ; test_case "a refused record names only the files left" `Quick
             test_preflight_names_only_the_files_left_when_it_refuses
         ; test_case "a slot observation the sweep cannot read is refused" `Quick
             test_preflight_refuses_a_slot_observation_the_sweep_cannot_read

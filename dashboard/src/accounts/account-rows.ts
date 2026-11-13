@@ -4,6 +4,7 @@
 // and on an account a Keeper may run on, the person checks a model in its card.
 
 import { html } from 'htm/preact'
+import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
@@ -115,12 +116,13 @@ const operatorWords = '이 서버를 운영하는 사람에게 알려 주세요.
 /** Why a call of a model did not pass, and what the person can do next. */
 function checkFailureWords(failure: CheckFailure): string {
   switch (failure) {
-    case 'rate_limited': return '구독 쪽이 요청이 많다며 잠시 막았어요. 잠시 뒤 다시 확인해 주세요.'
+    case 'rate_limited': return '구독 쪽이 요청 한도나 사용 시간대에 걸렸다며 막았어요. 한도가 풀린 뒤 다시 확인해 주세요.'
     case 'quota_exhausted': return '이 구독의 사용량을 다 썼어요. 사용량이 다시 열린 뒤 확인해 주세요.'
     case 'provider_overloaded': return '구독 쪽 서버가 바쁘거나 오류를 냈어요. 잠시 뒤 다시 확인해 주세요.'
-    case 'provider_auth_refused':
-    case 'provider_rejected':
-      return '구독 쪽이 이 계정의 요청을 받지 않았어요. 이 계정이 이 모델을 쓸 수 있는지 확인해 주세요.'
+    case 'provider_auth_refused': return '구독 쪽이 이 계정의 로그인을 받지 않았어요. 이 계정이 이 모델을 쓸 수 있는지 확인해 주세요.'
+    // The server gives this code for a request the provider refused, and
+    // for a client or a connection of its own that failed on the way.
+    case 'provider_rejected': return `모델을 부르는 요청이 실패했어요. 다시 확인해 보고, 같은 일이 되풀이되면 ${operatorWords}`
     case 'model_not_found': return '구독 쪽에 이 모델이 없어요. 다른 모델을 골라 주세요.'
     case 'timed_out': return '정해진 시간 안에 확인이 끝나지 않았어요. 다시 확인해 주세요.'
     case 'tool_not_called':
@@ -128,11 +130,12 @@ function checkFailureWords(failure: CheckFailure): string {
       return '모델이 답했지만 확인용 도구를 제대로 쓰지 않았어요. Keeper는 도구를 써야 일할 수 있어요. 다시 확인하거나 다른 모델을 골라 주세요.'
     case 'empty_response': return '모델이 빈 답을 보냈어요. 다시 확인해 주세요.'
     case 'provider_unreachable': return `이 서버가 구독 쪽에 닿지 못했어요. ${operatorWords}`
-    case 'model_unreported': return `구독 쪽이 어떤 모델이 답했는지 알려 주지 않았어요. ${operatorWords}`
-    case 'client_not_authenticated': return `로그인 도구가 이 계정의 로그인을 찾지 못했어요. ${operatorWords}`
+    case 'model_unreported': return `로그인 도구가 어떤 모델이 답했는지 알려 주지 않았어요. ${operatorWords}`
+    case 'client_not_authenticated':
+      return `로그인 도구가 이 계정의 로그인을 쓰지 못했어요. 구독을 다시 연결해 새 계정에서 확인해 보고, 같은 일이 되풀이되면 ${operatorWords}`
+    case 'unsupported_runtime': return `이 서버는 이 구독의 모델을 아직 확인하지 못해요. ${operatorWords}`
     case 'missing_credential':
     case 'invalid_credential':
-    case 'unsupported_runtime':
     case 'tools_not_declared':
     case 'invalid_configuration':
     case 'client_not_started':
@@ -154,6 +157,7 @@ function checkWords(check: Check): string {
         : `${check.model} 모델을 다시 확인했어요. 이 모델로 Keeper를 실행할 수 있어요.`
     case 'failed':
     case 'not_done':
+    case 'unknown':
       return ''
     case 'leaving': return sessionEndedWords
   }
@@ -206,17 +210,33 @@ function FailedNote({ check }: { readonly check: Extract<Check, { kind: 'failed'
   `
 }
 
+/** The alert of a check whose answer did not come or could not be read. */
+function UnknownNote({ check }: { readonly check: Extract<Check, { kind: 'unknown' }> }): VNode {
+  return html`
+    <div class="callout" role="alert">
+      <p class="callout-title">${check.model} 모델을 확인했는지 알 수 없어요</p>
+      <p>${check.problem.kind === 'unreachable' ? '서버의 답을 받지 못했어요.' : '서버의 답을 읽지 못했어요.'} 서버가 확인을 했을 수도 있어요.</p>
+      <p>조금 뒤 다시 확인해 주세요. 확인이 끝났다면 위 모델 목록에도 나와요.</p>
+      ${check.attempts > 1 ? html`<p class="hint">${check.attempts}번 시도했어요.</p>` : null}
+    </div>
+  `
+}
+
 /** The models of the subscription of an account, the button that checks the
     one picked, and what the latest check found. The button stays where it is
     while a check runs, marked, so the focus of the person who pressed it
     stays on it. The line a screen reader reads out is there from the start;
     each check that comes to nothing puts a new alert on the page, so a
-    second one for the same reason is read out too. */
-function CheckArea({ accountId, models, check, checks }: {
+    second one for the same reason is read out too. The field and the
+    button are named with the card, so a list of the controls of the page
+    tells the cards apart. */
+function CheckArea({ accountId, models, check, checks, card }: {
   readonly accountId: string
   readonly models: readonly string[]
   readonly check: Check | undefined
   readonly checks: ChecksModel
+  /** The ids of what names the card: its title and its account line. */
+  readonly card: string
 }): VNode {
   if (models.length === 0) return html`<p class="hint">이 서버에는 이 구독으로 확인할 수 있는 모델이 없어요. ${operatorWords}</p>`
   const busy = check?.kind === 'checking' || check?.kind === 'leaving'
@@ -226,29 +246,47 @@ function CheckArea({ accountId, models, check, checks }: {
     if (!busy && typeof picked === 'string') void checks.check(accountId, picked)
   }
   const field = `check-model-${accountId}`
+  const label = `check-label-${accountId}`
+  const button = `check-button-${accountId}`
   return html`
     <form class="check" onSubmit=${onSubmit}>
-      <label for=${field}>확인할 모델</label>
-      <select id=${field} name="model">
+      <label id=${label} for=${field}>확인할 모델</label>
+      <select id=${field} name="model" aria-labelledby=${`${label} ${card}`}>
         ${models.map((model) => html`<option key=${model} value=${model}>${model}</option>`)}
       </select>
-      <button type="submit" aria-disabled=${busy}>모델 확인</button>
+      <button id=${button} type="submit" aria-disabled=${busy} aria-labelledby=${`${button} ${card}`}>모델 확인</button>
     </form>
     <p class="hint" role="status">${check === undefined ? '' : checkWords(check)}</p>
     ${check?.kind === 'failed' ? html`<${FailedNote} key=${check.attempts} check=${check} />` : null}
     ${check?.kind === 'not_done'
       ? html`<${ProblemNote} key=${check.attempts} title=${`${check.model} 모델을 확인하지 못했어요`} failure=${{ problem: check.problem, attempts: check.attempts }} />`
       : null}
+    ${check?.kind === 'unknown' ? html`<${UnknownNote} key=${check.attempts} check=${check} />` : null}
   `
 }
 
 function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly checks: ChecksModel }): VNode {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
+  const title = useRef<HTMLHeadingElement>(null)
+  const checkable = offered !== null && offered.calls.kind === 'allowed' && offered.models.length > 0
+  const couldCheck = useRef(checkable)
+  // A reading after a check can find the subscription no longer one a
+  // Keeper may run on, which takes the pressed button away. The focus then
+  // goes to the title of the card, not to the body of the page; a focus the
+  // person moved elsewhere meanwhile stays.
+  useEffect(() => {
+    const before = couldCheck.current
+    couldCheck.current = checkable
+    const fell = document.activeElement === null || document.activeElement === document.body
+    if (before && !checkable && fell) title.current?.focus()
+  }, [checkable])
+  const titleId = `row-title-${account.id}`
+  const accountLine = `row-account-${account.id}`
   return html`
     <li class="row">
-      <h3 class="row-title">${name}</h3>
-      <p class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
+      <h3 ref=${title} id=${titleId} class="row-title" tabindex="-1">${name}</h3>
+      <p id=${accountLine} class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
       <${Chips} facts=${facts} />
       ${account.integration.read
         ? (offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
@@ -256,7 +294,8 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
       ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
       <${Models} runtimes=${facts.runtimes} />
       ${offered !== null && offered.calls.kind === 'allowed'
-        ? html`<${CheckArea} accountId=${account.id} models=${offered.models} check=${checks.checks.value.get(account.id)} checks=${checks} />`
+        ? html`<${CheckArea} accountId=${account.id} models=${offered.models} check=${checks.checks.value.get(account.id)}
+            checks=${checks} card=${`${titleId} ${accountLine}`} />`
         : null}
     </li>
   `

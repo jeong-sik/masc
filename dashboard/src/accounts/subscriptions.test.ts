@@ -556,6 +556,32 @@ describe('the panel', () => {
     expect([first === null, second === null, second === first]).toEqual([false, false, false])
   })
 
+  it('keeps the focus on the check button through the reading after a check passed', async () => {
+    const call = later()
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedOne(), ownedOne()],
+      [checkPath]: [call.answer],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    const button = container.querySelector<HTMLButtonElement>('.check button')
+    const form = container.querySelector('form.check')
+    if (button === null || form === null) throw new Error('no check in the card')
+    button.focus()
+    const before = panel.view.value
+    await act(() => { fireEvent.submit(form) })
+    await act(async () => {
+      call.give(json(200, {
+        verification: { schema: 'masc.runtime_verification.v1', status: 'verified', failure: null },
+        runtime: { runtime_id: 'acct_1.claude-sonnet-5', record: 'existing' },
+      }))
+      // The panel reads the subscriptions again once the check passed.
+      await vi.waitFor(() => { expect(panel.view.value).not.toBe(before) })
+    })
+    expect([panel.checking.checks.value.get('acct_1')?.kind, container.querySelector('.check button') === button, document.activeElement === button])
+      .toEqual(['passed', true, true])
+  })
+
   it('moves the focus to the heading of the panel when a retry reads', async () => {
     const { panel, container } = live({ [paths.integrations]: [notReady(), offered()], [paths.owned]: [ownedNothing(), ownedOne()] })
     await act(() => panel.load(sessionOf(person)))

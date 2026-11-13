@@ -663,14 +663,16 @@ let render_repositories (state : state) =
    rather than the text it removed: the question a reader has is what the file
    says now. A write shows its size, because the whole body is never one row
    and a truncated first line of a new file says less than its length. *)
-let change_row_summary (change : Masc.Tui_decode.file_change) =
+let change_row_summary ~ko (change : Masc.Tui_decode.file_change) =
   let content =
     match change.Masc.Tui_decode.fc_kind with
     | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.preview_line after
     | Masc.Tui_decode.Fc_inserted { text; _ } -> Terminal_text.preview_line text
     | Masc.Tui_decode.Fc_written { content } ->
-      Printf.sprintf "(wrote %d bytes)" (String.length content)
-    | Masc.Tui_decode.Fc_materialized _ -> "(materialized blob)"
+      Printf.sprintf (if ko then "(%d바이트 씀)" else "(wrote %d bytes)")
+        (String.length content)
+    | Masc.Tui_decode.Fc_materialized _ ->
+      if ko then "(blob 으로 만듦)" else "(materialized blob)"
   in
   match file_change_evidence_label change.fc_line_evidence with
   | None -> content
@@ -678,17 +680,18 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
     Printf.sprintf "%s%s[%s]%s %s" Ansi.bold (Theme.info ()) label Ansi.reset
       content
 
-let change_kind_badge (change : Masc.Tui_decode.file_change) =
+let change_kind_badge ~ko (change : Masc.Tui_decode.file_change) =
+  let say korean english = if ko then korean else english in
   match change.Masc.Tui_decode.fc_kind with
-  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_2, "EDIT"
-  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_2, "MEMO"
-  | Masc.Tui_decode.Fc_written _ -> (Theme.accent ()), "WRITE"
+  | Masc.Tui_decode.Fc_edited _ -> Theme.category Theme.Slot_2, say "수정" "EDIT"
+  | Masc.Tui_decode.Fc_inserted _ -> Theme.category Theme.Slot_2, say "메모" "MEMO"
+  | Masc.Tui_decode.Fc_written _ -> (Theme.accent ()), say "쓰기" "WRITE"
   | Masc.Tui_decode.Fc_materialized _ ->
-    (Theme.accent ()), "WRITE"
+    (Theme.accent ()), say "쓰기" "WRITE"
 
-let change_result_badge (change : Masc.Tui_decode.file_change) =
-  if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), "APPLIED"
-  else Theme.bad (), "FAILED"
+let change_result_badge ~ko (change : Masc.Tui_decode.file_change) =
+  if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), (if ko then "적용됨" else "APPLIED")
+  else Theme.bad (), (if ko then "실패" else "FAILED")
 
 (* A row of the diff, drawn as layers rather than as one styled string.
 
@@ -776,19 +779,26 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   (* Facts about the change the rows themselves cannot carry. *)
   let notes =
     let turn =
-      Printf.sprintf "  turn %s  task %s  %s"
+      Printf.sprintf
+        (if state.ui_language = Lang_ko then "  턴 %s  태스크 %s  %s"
+         else "  turn %s  task %s  %s")
         (Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
            change.Masc.Tui_decode.fc_turn)
         (Terminal_text.single_line
            (Option.value ~default:Masc_tui_theme.Glyph.no_value change.Masc.Tui_decode.fc_task_id))
-        (if change.Masc.Tui_decode.fc_succeeded then "applied"
-         else "the call failed; this is what it tried to write")
+        (if change.Masc.Tui_decode.fc_succeeded then ui_text state ~ko:"적용됨" ~en:"applied"
+         else
+           ui_text state ~ko:"호출 실패 · 아래는 쓰려던 내용"
+             ~en:"the call failed; this is what it tried to write")
     in
     match change.Masc.Tui_decode.fc_kind with
     | Masc.Tui_decode.Fc_edited { replace_all = true; _ } ->
         (* Every occurrence changed, and the log records the text once. Showing
            one pair without saying so would undercount the change. *)
-        [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
+        [ turn
+        ; ui_text state
+            ~ko:"  replace_all: 일치하는 곳을 모두 바꿈 · 기록에는 글이 한 번만 있음"
+            ~en:"  replace_all: every occurrence changed; the log holds the text once" ]
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
     | Masc.Tui_decode.Fc_inserted _
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
@@ -796,12 +806,15 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
         (* The call names the blob, not its bytes, so the log has no text to
            show. Saying so is the difference between an empty diff and a
            change that wrote nothing. *)
-        [ turn; "  the log holds the blob's identity, not its bytes" ]
+        [ turn
+        ; ui_text state ~ko:"  기록에는 blob 의 식별 값만 있고 내용은 없음"
+            ~en:"  the log holds the blob's identity, not its bytes" ]
   in
   let notes =
     match file_change_evidence_label change.fc_line_evidence with
     | None -> notes
-    | Some label -> notes @ [ "  producer lines " ^ label ]
+    | Some label ->
+        notes @ [ ui_text state ~ko:"  도구가 보고한 줄 " ~en:"  producer lines " ^ label ]
   in
   List.iter (fun note -> box_line_styled buf cols ~style:(Theme.recede ()) note) notes;
   box_divider buf cols;
@@ -821,7 +834,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
   if total = 0 then begin
     box_line_styled buf cols ~style:(Theme.recede ())
-      "  (the call recorded no text; there is nothing to compare)";
+      (ui_text state ~ko:"  (호출이 글을 기록하지 않아 비교할 것이 없음)"
+         ~en:"  (the call recorded no text; there is nothing to compare)");
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -836,7 +850,10 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     | None -> ""
     | Some text -> " · " ^ String.trim text in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  col %d%s · esc closes" (state.changes_diff_hscroll + 1) position);
+    (Printf.sprintf
+       (if state.ui_language = Lang_ko then "  열 %d%s · Esc 로 닫기"
+        else "  col %d%s · esc closes")
+       (state.changes_diff_hscroll + 1) position);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -856,7 +873,7 @@ let render_changes_list (state : state) =
   let shown = List.length changes in
   let whose =
     match state.changes_keeper with
-    | None -> "(no keeper selected)"
+    | None -> ui_text state ~ko:"(고른 Keeper 없음)" ~en:"(no keeper selected)"
     | Some name -> name
   in
   let heading ~reading =
@@ -875,10 +892,14 @@ let render_changes_list (state : state) =
            calls in a window are different facts. *)
         heading
           ~reading:
-            (Printf.sprintf "%d in %.0fh of %s" shown
-               s.Masc.Tui_decode.fcs_window_hours
-               (Masc_tui_message_layout.count_noun
-                  s.Masc.Tui_decode.fcs_calls_in_window "call"))
+            (if state.ui_language = Lang_ko then
+               Printf.sprintf "변경 %d건 · 최근 %.0f시간 호출 %d건" shown
+                 s.Masc.Tui_decode.fcs_window_hours s.Masc.Tui_decode.fcs_calls_in_window
+             else
+               Printf.sprintf "%d in %.0fh of %s" shown
+                 s.Masc.Tui_decode.fcs_window_hours
+                 (Masc_tui_message_layout.count_noun
+                    s.Masc.Tui_decode.fcs_calls_in_window "call"))
   in
   box_top buf cols;
   box_line buf cols header;
@@ -907,7 +928,10 @@ let render_changes_list (state : state) =
     | Some s when s.Masc.Tui_decode.fcs_over_budget > 0 ->
         Some
           (Printf.sprintf
-             "  %d change(s) outgrew the tool-call log's inline budget; their text is not on disk"
+             (if state.ui_language = Lang_ko then
+                "  변경 %d건은 도구 호출 기록의 한도를 넘어 글이 디스크에 없음"
+              else
+                "  %d change(s) outgrew the tool-call log's inline budget; their text is not on disk")
              s.Masc.Tui_decode.fcs_over_budget)
     | Some _ | None -> None
   in
@@ -985,8 +1009,8 @@ let render_changes_list (state : state) =
       match Rows.at changes_window idx with
       | None -> box_empty buf cols
       | Some change ->
-          let kind_style, kind = change_kind_badge change in
-          let result_style, result = change_result_badge change in
+          let kind_style, kind = change_kind_badge ~ko:(state.ui_language = Lang_ko) change in
+          let result_style, result = change_result_badge ~ko:(state.ui_language = Lang_ko) change in
           let line =
             "  "
             ^ Render_schedule.change_row ~op_style:kind_style ~result_style
@@ -1002,7 +1026,7 @@ let render_changes_list (state : state) =
                 ; crow_result = result
                 ; crow_file =
                     Terminal_text.single_line (change_row_address change)
-                ; crow_summary = change_row_summary change
+                ; crow_summary = change_row_summary ~ko:(state.ui_language = Lang_ko) change
                 }
           in
           (* A call that failed still changed what the keeper tried to do, and
@@ -1020,7 +1044,9 @@ let render_changes_list (state : state) =
        let removed, added = prepared.removed, prepared.added in
        box_divider buf cols;
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "  preview %s  -%d +%d  (Enter opens, scrolls)"
+         (Printf.sprintf
+            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  (Enter 로 열어 스크롤)"
+             else "  preview %s  -%d +%d  (Enter opens, scrolls)")
             (Terminal_text.single_line (change_row_address change))
             removed added);
        let body_height = preview_height - 2 in
@@ -1034,7 +1060,9 @@ let render_changes_list (state : state) =
    | Some _ -> ());
   if shown > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [changes %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
+      (Printf.sprintf
+         (if state.ui_language = Lang_ko then "  [변경 %s]" else "  [changes %s]")
+         (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   box_bottom buf cols;
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)

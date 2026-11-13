@@ -1047,6 +1047,7 @@ let a_person_calls_mcp () =
       ; "masc_my_keeper_turn"
       ; "masc_my_keeper_conversation_new"
       ; "masc_my_keeper_conversation"
+      ; "masc_my_keeper_conversation_delete"
       ]
       (match at [ "result"; "tools" ] listed with
        | `List tools ->
@@ -1428,6 +1429,20 @@ let a_person_keeps_keepers_over_mcp () =
       "a PAT that manages Keepers is told no conversation of the person has the id"
       (404, route_error ~code:"unknown_conversation" "No conversation of yours has this id.")
       (delete_by_route owner "conversation-1");
+    (* The tool of a deletion stops where the route stops. *)
+    let conversation id = `Assoc [ "conversation_id", `String id ] in
+    check
+      "a PAT without the Keeper effect deletes no conversation by the tool"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keeper_conversation_delete" ~arguments:(conversation "conversation-1"));
+    check
+      "the tool is told no conversation of the person has the id"
+      ("true", route_error ~code:"unknown_conversation" "No conversation of yours has this id.")
+      (result owner "masc_my_keeper_conversation_delete" ~arguments:(conversation "conversation-1"));
+    Alcotest.(check string)
+      "a deletion without a conversation is refused by the definition of the tool"
+      "true"
+      (fst (result owner "masc_my_keeper_conversation_delete"));
     check
       "a Keeper with no turn yet has no conversation"
       ( "false"

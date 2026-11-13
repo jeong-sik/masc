@@ -65,6 +65,22 @@ are `text`, `number`, `boolean`, and `json`. Missing or wrongly typed values are
 shown as unavailable, never zero or success. Original fields and evidence remain
 available in technical detail. Display metadata grants no action authority.
 
+`presentation.actions` declares row actions. Each entry is
+`{"lane_id", "label", "fixed", "from_row"}` and offers one lane action on the
+rows of `lane_id`: `fixed` members carry the package's values, `from_row` maps
+members to paths in the row's fields, and the operator fills the members left.
+The filled action goes through the same `lane_act` validation and authority, so
+a row action is a shorter way to write an action, not a new permission. At load
+a row action must read at least one member from the row, may not name a member
+in both `fixed` and `from_row`, keeps its label unique within its lane, needs
+`world.actions.tool`, and must name a selected output lane unless the package
+emits every lane. Once the worker advertises its action schema, the host judges
+each row action and publishes the verdicts in order as the instance's
+`row_actions`. The action must be one closed object, or an object `oneOf` of
+closed objects of which exactly one declares every fixed and row member and
+accepts every fixed value. A package without row actions keeps its declaration
+revision.
+
 The Dashboard renders declared readings in the observation list and selected
 observation detail, scoped to the exact owning instance. Package descriptions
 appear beside the installation, and the package input/display contracts remain

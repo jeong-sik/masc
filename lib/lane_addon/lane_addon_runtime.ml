@@ -549,7 +549,11 @@ let entry_fields_with ~state ~seq ~(output : output) e =
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
     "resource", (match e.connection with None -> `Null | Some c -> Lifecycle.resource_to_json c.worker.resource)]
+(* Row action verdicts are judged from the advertised schema each time the
+   state is published. [persist] never writes them. *)
 let entry_fields e = entry_fields_with ~state:e.state ~seq:e.seq ~output:e.output e
+  @ Lane_addon_row_action.snapshot_fields ~actions:e.package.presentation.Lane_addon_presentation.actions
+      ~tool_schema:(Option.bind e.connection (fun c -> c.worker.action_schema ()))
 let entry_json e = `Assoc (entry_fields e)
 (* A released worker that never held a resource and never committed an
    observation leaves nothing for Inspect, Slice or Evidence.  When

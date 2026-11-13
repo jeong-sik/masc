@@ -161,7 +161,7 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
   let* () =
     match Change.between
       ~authority:{Change.before=V.authority_binding original;after=current.V.authority_digest}
-      ~output_contract:{Change.before=V.output_contract original;after=V.canonical_output_contract ()} with
+      ~retained_format:(V.output_contract original) ~current_format:(V.canonical_output_contract ()) with
     | Some change ->
       let* _ = save retained (Progress.Refused {stage=Progress.Before_dispatch;evidence=Change.to_json change}) in
       Error (Authority_changed change)

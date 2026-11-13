@@ -11,9 +11,14 @@ type t =
 
 let schema = "verifier_review_authority_change/v1"
 
+let answer_format_digest = Lane_addon_store.digest
+
 let moved pair = not (String.equal pair.before pair.after)
 
-let between ~authority ~output_contract =
+let between ~authority ~retained_format ~current_format =
+  let output_contract =
+    { before = answer_format_digest retained_format; after = answer_format_digest current_format }
+  in
   match moved authority, moved output_contract with
   | true, true -> Some (Both { authority; output_contract })
   | true, false -> Some (Authority authority)
@@ -51,20 +56,22 @@ let field ~what key fields =
   | None -> Error (Printf.sprintf "%s has no %s" what key)
 ;;
 
-(* An absent pair is [None]; a present one must hold two valid values that
-   differ, because an unmoved pair is not evidence of a change. *)
-let pair_of_json ~what ~valid = function
+(* An absent pair is [None]; a present one must hold two digests that differ,
+   because an unmoved pair is not evidence of a change. *)
+let pair_of_json ~what = function
   | `Null -> Ok None
   | `Assoc fields ->
     let* () = exact_keys ~what [ "before"; "after" ] fields in
     let* before = field ~what "before" fields in
     let* after = field ~what "after" fields in
     (match before, after with
-     | `String before, `String after when valid before && valid after ->
+     | `String before, `String after
+       when String_util.is_lowercase_sha256_hex before
+            && String_util.is_lowercase_sha256_hex after ->
        if String.equal before after
        then Error (Printf.sprintf "%s did not move" what)
        else Ok (Some { before; after })
-     | _ -> Error (Printf.sprintf "%s values are invalid" what))
+     | _ -> Error (Printf.sprintf "%s values are not digests" what))
   | _ -> Error (Printf.sprintf "%s must be an object or null" what)
 ;;
 
@@ -79,11 +86,11 @@ let of_json = function
     in
     let* authority =
       let* json = field ~what "authority" fields in
-      pair_of_json ~what:"authority change" ~valid:String_util.is_lowercase_sha256_hex json
+      pair_of_json ~what:"authority change" json
     in
     let* output_contract =
       let* json = field ~what "output_contract" fields in
-      pair_of_json ~what:"answer format change" ~valid:(fun text -> String.trim text <> "") json
+      pair_of_json ~what:"answer format change" json
     in
     (match authority, output_contract with
      | Some authority, Some output_contract -> Ok (Both { authority; output_contract })

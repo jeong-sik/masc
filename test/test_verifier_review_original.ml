@@ -264,14 +264,18 @@ module Change = Masc.Verifier_review_authority_change
 
 let test_authority_change_is_closed_and_strict () =
   let authority = { Change.before = String.make 64 'a'; after = String.make 64 'b' } in
-  let format = { Change.before = "earlier answer format"; after = "current answer format" } in
-  let unmoved pair = { pair with Change.after = pair.Change.before } in
-  assert (Change.between ~authority:(unmoved authority) ~output_contract:(unmoved format) = None);
-  assert (Change.between ~authority ~output_contract:(unmoved format) = Some (Change.Authority authority));
-  assert (Change.between ~authority:(unmoved authority) ~output_contract:format
-    = Some (Change.Output_contract format));
-  assert (Change.between ~authority ~output_contract:format
-    = Some (Change.Both { authority; output_contract = format }));
+  let unmoved = { authority with Change.after = authority.Change.before } in
+  let retained_format = "earlier answer format" and current_format = "current answer format" in
+  let format =
+    { Change.before = Change.answer_format_digest retained_format
+    ; after = Change.answer_format_digest current_format } in
+  let between authority current_format = Change.between ~authority ~retained_format ~current_format in
+  assert (between unmoved retained_format = None);
+  assert (between authority retained_format = Some (Change.Authority authority));
+  assert (between unmoved current_format = Some (Change.Output_contract format));
+  assert (between authority current_format = Some (Change.Both { authority; output_contract = format }));
+  (* The round trip passes only because both pairs hold SHA-256 digests: the
+     evidence keeps the digests of the two answer formats, not their text. *)
   List.iter (fun change -> assert (Change.of_json (Change.to_json change) = Ok change))
     [ Change.Authority authority; Change.Output_contract format
     ; Change.Both { authority; output_contract = format } ];
@@ -284,11 +288,11 @@ let test_authority_change_is_closed_and_strict () =
   assert (rejected (`Assoc [ "schema", `String Change.schema
     ; "authority", pair (String.make 64 'a') (String.make 64 'a'); "output_contract", `Null ]));
   assert (rejected (`Assoc [ "schema", `String Change.schema; "authority", `Null; "output_contract", `Null ]));
-  (* Values keep their kind: a digest for the authority, text for the format. *)
+  (* Both pairs hold digests; answer format text is not evidence. *)
   assert (rejected (`Assoc [ "schema", `String Change.schema
     ; "authority", pair "not-a-digest" (String.make 64 'b'); "output_contract", `Null ]));
   assert (rejected (`Assoc [ "schema", `String Change.schema
-    ; "authority", `Null; "output_contract", pair " " "current answer format" ]));
+    ; "authority", `Null; "output_contract", pair retained_format current_format ]));
   (* The key sets are exact at both levels, and the schema is this one. *)
   assert (rejected (`Assoc (("evaluator_runtime", `String "rt-a") :: fields)));
   assert (rejected (`Assoc (List.remove_assoc "output_contract" fields)));

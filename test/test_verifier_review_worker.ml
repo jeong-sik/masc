@@ -303,7 +303,8 @@ let test_moved_answer_format_takes_the_same_path () =
     let a=authority config in
     let current=V.lookup_of_authority a in
     retain store (stale_original ~authority_moved ~contract:old_contract a);
-    let format={Change.before=old_contract;after=V.canonical_output_contract ()} in
+    let format={Change.before=Change.answer_format_digest old_contract;
+      after=Change.answer_format_digest (V.canonical_output_contract ())} in
     let expected=
       if authority_moved then Change.Both {authority={Change.before=stale_digest;
         after=current.V.authority_digest};output_contract=format}

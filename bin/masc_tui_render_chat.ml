@@ -4518,7 +4518,7 @@ let render_keeper_message (state : state) =
         | Masc_tui_fetched.Stale _ ->
             Some (ui_text state ~ko:"컨텍스트 새로 조회 실패" ~en:"Context refresh failed")
         | Masc_tui_fetched.Failed _ ->
-            Some (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context unavailable")
+            Some (ui_text state ~ko:"컨텍스트 조회 실패" ~en:"Context read failed")
         | Masc_tui_fetched.Loading ->
             Some (ui_text state ~ko:"컨텍스트 조회 중" ~en:"Context reading")
         | Masc_tui_fetched.Absent ->
@@ -4640,7 +4640,9 @@ let render_keeper_message (state : state) =
     if visible_rows = [] then begin
       if history_height > 0 then
         box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-          "  (no messages yet -- type below and press Enter)";
+          (ui_text state
+             ~ko:"  (아직 메시지가 없습니다. 아래에 쓰고 Enter 를 누르세요)"
+             ~en:"  (no messages yet -- type below and press Enter)");
       for _ = 1 to history_height - 1 do
         box_empty chat_buf chat_cols
       done

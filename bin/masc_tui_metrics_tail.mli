@@ -76,4 +76,4 @@ val visible
     so [scroll = 0] is the tail of the file. Stored order stays chronological;
     this is the only place that reverses it, and it walks the list once rather
     than indexing it per row. *)
-val empty_message : load_error option -> string
+val empty_message : ko:bool -> load_error option -> string

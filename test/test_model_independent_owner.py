@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 import subprocess
@@ -127,6 +128,78 @@ class OwnerWithoutModel(unittest.TestCase):
                             try: process.wait(timeout=10)
                             except subprocess.TimeoutExpired:
                                 os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
+
+    # `masc restart` finds the server it stops, and the replacement it waits
+    # for, by what the kernel says: the owner of the workspace lease that
+    # announces the port. A real server announces as it boots, so the old one
+    # is asked to stop and the new one is reported ready.
+    def test_restart_replaces_a_real_server(self):
+        with tempfile.TemporaryDirectory(prefix='masc-owner-restart-') as tmp:
+            base = Path(tmp)
+            env = {'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': tmp,
+                   'MASC_CONFIG_BOOTSTRAP': 'skip', 'MASC_KEEPER_AUTONOMOUS_ENABLED': 'false'}
+            subprocess.run([BINARY, 'init', '--base-path', tmp], env=env, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
+            runtime = base/'.masc/config/runtime.toml'
+            runtime.write_text(runtime_without_exact_output_lanes(runtime.read_text()))
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
+
+            def ready():
+                try:
+                    with urlopen(f'http://127.0.0.1:{port}/health/ready', timeout=2) as response:
+                        return response.status == 200
+                except (HTTPError, URLError, TimeoutError, OSError):
+                    return False
+
+            def gone(pid):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return True
+                return False
+
+            replacement = None
+            with (base/'server.log').open('wb') as log:
+                process = subprocess.Popen([BINARY, 'start', '--base-path', tmp, '--port', str(port)],
+                                           env=env, stdout=log, stderr=log, start_new_session=True)
+                try:
+                    deadline = time.monotonic()+60
+                    while not ready():
+                        self.assertIsNone(process.poll(), 'the server exited before it was ready')
+                        self.assertLess(time.monotonic(), deadline, 'readiness deadline exceeded')
+                        time.sleep(.1)
+                    result = subprocess.run([BINARY, 'restart', '--base-path', tmp, '--port', str(port)],
+                                            env=env, capture_output=True, text=True, timeout=180,
+                                            stdin=subprocess.DEVNULL)
+                    started = re.search(r'Started pid (\d+)', result.stdout)
+                    if started:
+                        replacement = int(started.group(1))
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertIn(f'(pid {process.pid}) on port {port} to stop', result.stdout)
+                    self.assertIn('Ready after', result.stdout)
+                    self.assertIsNotNone(replacement, result.stdout)
+                    self.assertNotEqual(replacement, process.pid)
+                    # Ready is said only once the old server let go of the workspace.
+                    self.assertIsNotNone(process.wait(timeout=30))
+                    self.assertFalse(gone(replacement), 'the replacement is not running')
+                    self.assertTrue(ready())
+                finally:
+                    if process.poll() is None:
+                        os.killpg(process.pid, signal.SIGTERM)
+                        try: process.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
+                    if replacement is not None and not gone(replacement):
+                        # Not a child of this process: it is watched until it is gone.
+                        os.kill(replacement, signal.SIGTERM)
+                        deadline = time.monotonic()+15
+                        while not gone(replacement) and time.monotonic() < deadline:
+                            time.sleep(.1)
+                        if not gone(replacement):
+                            os.kill(replacement, signal.SIGKILL)
+                            while not gone(replacement):
+                                time.sleep(.1)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(); parser.add_argument('--binary', required=True)

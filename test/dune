@@ -6065,12 +6065,20 @@
 
 (include stanzas/test_shipped_skills.inc)
 
+; Holds the lease of a workspace and announces a port for it, so the Python
+; tests can stand an HTTP peer in for the server the kernel names.
+(executable
+ (name hold_workspace_announcement)
+ (modules hold_workspace_announcement)
+ (libraries unix ipaddr masc.server masc.host_config))
+
 (rule
  (alias runtest-test_setup_cli)
- (deps test_setup_cli.py ../bin/main_eio.exe
+ (deps test_setup_cli.py ../bin/main_eio.exe hold_workspace_announcement.exe
        (source_tree ../scripts/fixtures/release-evidence))
  (action
-  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe})))
+  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe}
+   --announcer %{dep:hold_workspace_announcement.exe})))
 
 (alias
  (name runtest)

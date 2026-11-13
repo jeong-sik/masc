@@ -9,8 +9,9 @@
 ; The command as a script runs it: the real executable.
 (rule
  (alias runtest-test_config_set_cli)
- (deps test_config_set_cli.py ../bin/main_eio.exe)
- (action (run python3 %{dep:test_config_set_cli.py} %{dep:../bin/main_eio.exe})))
+ (deps test_config_set_cli.py ../bin/main_eio.exe hold_workspace_announcement.exe)
+ (action (run python3 %{dep:test_config_set_cli.py} %{dep:../bin/main_eio.exe}
+   %{dep:hold_workspace_announcement.exe})))
 
 (alias
  (name runtest)

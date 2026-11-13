@@ -280,7 +280,9 @@ def run(args):
                     require(process.poll() is None, 'owned server exited before readiness')
                     try:
                         health = request('/health?full=1', 'readiness', ready_check=True)
-                        if health is not None:
+                        # Until the server has published its workspace, /health answers
+                        # everyone the public probe, which has no `startup` section: not ready yet.
+                        if health is not None and 'startup' in health:
                             require(health['paths']['effective_base_path'] == str(base)
                                     and health['build']['binary_commit'] == args.source_sha,
                                     'private listener identity differs')

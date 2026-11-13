@@ -15,9 +15,10 @@ val participation_refusal :
   transaction:Auth.credential_transaction -> config:Workspace.config -> who:string ->
   call_refusal option
 (** Admit the caller's own play session before a controller-taking effect.
-    [None] admits; a departed seat is [Refused] and unreadable departure
-    evidence is [Seats_unknown]. Principals without a play session are
-    admitted. Hold [transaction] through the admitted effect. *)
+    [None] admits; a departed seat is [Refused]; unreadable departure
+    evidence and an unreadable auth config are [Seats_unknown]. Principals
+    without a play session are admitted. Hold [transaction] through the
+    admitted effect. *)
 
 val pass_refusal :
   transaction:Auth.credential_transaction -> config:Workspace.config ->

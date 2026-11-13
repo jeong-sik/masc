@@ -106,7 +106,7 @@ let settled_requests judgments =
     | Deferred -> None
     | Incorporated _ | Already_represented _ | Not_durable -> Some judgment.request_id) judgments
 
-let verify_support ~new_claims ~has_changes ~change_support judgments =
+let verify_support ~additions ~change_support judgments =
   let by_id = List.fold_left (fun by_id judgment ->
     String_map.add judgment.request_id judgment by_id) String_map.empty judgments in
   let* supported = List.fold_left (fun result request_id ->
@@ -118,8 +118,6 @@ let verify_support ~new_claims ~has_changes ~change_support judgments =
         Error ("change depends on unsettled or nondurable candidate: " ^ request_id)
       | Some {outcome=(Incorporated _ | Already_represented _); _} ->
         Ok (String_set.add request_id seen)) (Ok String_set.empty) change_support in
-  let* () = if has_changes && String_set.is_empty supported
-    then Error "Memory changes require settled candidate support" else Ok () in
   List.fold_left (fun result (fact : Types.fact) ->
     let* () = result in
     if List.exists (fun judgment ->
@@ -127,7 +125,7 @@ let verify_support ~new_claims ~has_changes ~change_support judgments =
         | Incorporated claim -> String.equal claim fact.claim
         | Already_represented _ | Not_durable | Deferred -> false) judgments
     then Ok () else Error "new Memory claim has no incorporated supporting candidate")
-    (Ok ()) new_claims
+    (Ok ()) additions
 
 let output_schema ~memory_schema =
   let object_schema fields = `Assoc

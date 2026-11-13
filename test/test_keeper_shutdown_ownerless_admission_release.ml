@@ -449,6 +449,192 @@ let test_plain_release_keeps_owner_fenced_on_intake_conflict () =
          (owner_shutdown_operation_id_exn ~config name)))
 ;;
 
+let intake_operation_id ~config name =
+  Keeper_shutdown_intake_fence.shutdown_operation_id
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:name
+;;
+
+let check_admission label ~config name ~owner ~intake =
+  let ids = Option.map Operation_id.to_string in
+  check
+    (option string)
+    (label ^ ": Owner")
+    (ids owner)
+    (ids (owner_shutdown_operation_id_exn ~config name));
+  check
+    (option string)
+    (label ^ ": intake fence")
+    (ids intake)
+    (ids (intake_operation_id ~config name))
+;;
+
+(* Owner and intake fence both reserved by [held_by], then the fence alone
+   handed to [intake_held_by]. *)
+let split_admission_exn ~config name ~held_by ~intake_held_by =
+  create_owner_meta_exn ~config name;
+  (match
+     Keeper_owner_registry.begin_shutdown
+       ~base_path:config.Workspace.base_path
+       ~keeper_name:name
+       ~operation_id:held_by
+   with
+   | Ok (Keeper_owner.Shutdown_reserved _) -> ()
+   | Ok (Keeper_owner.Shutdown_already_reserved _) ->
+     fail "fixture Owner was already reserved"
+   | Error error -> fail (Keeper_owner_registry.command_error_to_string error));
+  (match
+     Keeper_shutdown_intake_fence.rollback_shutdown
+       ~base_path:config.base_path
+       ~keeper_name:name
+       ~operation_id:held_by
+   with
+   | Keeper_shutdown_intake_fence.Rolled_back -> ()
+   | Keeper_shutdown_intake_fence.Not_reserved
+   | Keeper_shutdown_intake_fence.Reserved_by_other _ ->
+     fail "fixture failed to remove the current intake fence");
+  match
+    Keeper_shutdown_intake_fence.restore_shutdown
+      ~base_path:config.base_path
+      ~keeper_name:name
+      ~operation_id:intake_held_by
+  with
+  | Keeper_shutdown_intake_fence.Restored -> ()
+  | Keeper_shutdown_intake_fence.Already_restored
+  | Keeper_shutdown_intake_fence.Restore_conflict _ ->
+    fail "fixture failed to install the split intake fence"
+;;
+
+(* #28637: a finalizer handing admission A -> B while the intake fence names
+   C must leave the Owner on A. The Owner used to move to B first; nothing
+   could then bring Owner=B and intake=C back together, because every retry
+   of A -> B found the Owner no longer on A. *)
+let test_successor_handoff_keeps_owner_on_intake_conflict_and_retry_converges () =
+  with_workspace (fun ~config ->
+    let name = "successor-intake-conflict" in
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Finalized (finalized_retained_evidence name))
+        ~cleanup_intent:
+          { reason = Operator_stop_retain_meta; remove_session = false }
+    in
+    let successor_operation_id = Operation_id.generate () in
+    let conflicting_operation_id = Operation_id.generate () in
+    split_admission_exn
+      ~config
+      name
+      ~held_by:operation.operation_id
+      ~intake_held_by:conflicting_operation_id;
+    (match
+       Keeper_shutdown_finalize.run
+         ~config
+         ~entry:None
+         ~successor_operation_id
+         operation
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "a handoff refused by the intake fence was reported as released");
+    check_admission
+      "refused handoff"
+      ~config
+      name
+      ~owner:(Some operation.operation_id)
+      ~intake:(Some conflicting_operation_id);
+    (match
+       Keeper_shutdown_intake_fence.rollback_shutdown
+         ~base_path:config.base_path
+         ~keeper_name:name
+         ~operation_id:conflicting_operation_id
+     with
+     | Keeper_shutdown_intake_fence.Rolled_back -> ()
+     | Keeper_shutdown_intake_fence.Not_reserved
+     | Keeper_shutdown_intake_fence.Reserved_by_other _ ->
+       fail "conflicting intake fence was not released");
+    (match
+       Keeper_shutdown_finalize.run
+         ~config
+         ~entry:None
+         ~successor_operation_id
+         operation
+     with
+     | Ok _ -> ()
+     | Error error ->
+       failf
+         "retried handoff did not converge: %s"
+         (Keeper_shutdown_finalize.error_to_string error));
+    check_admission
+      "retried handoff"
+      ~config
+      name
+      ~owner:(Some successor_operation_id)
+      ~intake:(Some successor_operation_id))
+;;
+
+(* The fence moves first, so an Owner that names another operation must get
+   the fence back to where it was. Two records that already agree on another
+   operation are that operation's admission, not a conflict. *)
+let test_owner_refusal_puts_the_intake_fence_back () =
+  with_workspace (fun ~config ->
+    let name = "successor-owner-refusal" in
+    let from_operation_id = Operation_id.generate () in
+    let successor_operation_id = Operation_id.generate () in
+    let owner_operation_id = Operation_id.generate () in
+    split_admission_exn
+      ~config
+      name
+      ~held_by:owner_operation_id
+      ~intake_held_by:from_operation_id;
+    let transition () =
+      Keeper_owner_registry.transition_shutdown
+        ~base_path:config.base_path
+        ~keeper_name:name
+        ~from_operation_id
+        ~to_operation_id:(Some successor_operation_id)
+    in
+    (match transition () with
+     | Error _ -> ()
+     | Ok _ -> fail "a handoff the Owner refused was reported");
+    check_admission
+      "Owner refusal"
+      ~config
+      name
+      ~owner:(Some owner_operation_id)
+      ~intake:(Some from_operation_id);
+    (match
+       Keeper_shutdown_intake_fence.transition_shutdown
+         ~base_path:config.base_path
+         ~keeper_name:name
+         ~from_operation_id
+         ~to_operation_id:(Some owner_operation_id)
+     with
+     | Keeper_shutdown_intake_fence.Transition_applied _ -> ()
+     | Keeper_shutdown_intake_fence.Transition_already_applied
+     | Keeper_shutdown_intake_fence.Transition_reserved_by_other _ ->
+       fail "fixture failed to align the intake fence with the Owner");
+    match transition () with
+    | Ok (Keeper_owner.Shutdown_transition_reserved_by_other holder) ->
+      check
+        string
+        "both records name the holder"
+        (Operation_id.to_string owner_operation_id)
+        (Operation_id.to_string holder);
+      check_admission
+        "agreeing holder"
+        ~config
+        name
+        ~owner:(Some owner_operation_id)
+        ~intake:(Some owner_operation_id)
+    | Ok
+        ( Keeper_owner.Shutdown_transition_applied
+        | Keeper_owner.Shutdown_transition_already_applied ) ->
+      fail "a handoff from a non-holder moved admission"
+    | Error error ->
+      failf
+        "agreeing holder was reported as a conflict: %s"
+        (Keeper_owner_registry.command_error_to_string error))
+;;
+
 (* Metadata that outlived its owner is an inconsistent state, not a removal:
    the release must keep failing so the inconsistency surfaces instead of
    being silently absorbed. *)
@@ -1312,6 +1498,14 @@ let () =
             "plain release keeps owner fenced on intake conflict"
             `Quick
             test_plain_release_keeps_owner_fenced_on_intake_conflict
+        ; Alcotest.test_case
+            "successor handoff keeps Owner on intake conflict and retry converges"
+            `Quick
+            test_successor_handoff_keeps_owner_on_intake_conflict_and_retry_converges
+        ; Alcotest.test_case
+            "Owner refusal puts the intake fence back"
+            `Quick
+            test_owner_refusal_puts_the_intake_fence_back
         ; Alcotest.test_case
             "meta without owner still fails"
             `Quick

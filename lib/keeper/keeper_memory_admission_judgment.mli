@@ -36,12 +36,16 @@ val settled_requests : judgment list -> string list
     that a proposed disposition is independent of deferred knowledge. *)
 
 val verify_support :
-  new_claims:Keeper_memory_os_types.fact list -> has_changes:bool ->
+  additions:Keeper_memory_os_types.fact list ->
   change_support:string list -> judgment list -> (unit, string) result
 (** Require unique, known supporting requests with Incorporated or
-    Already_represented outcomes. Mutations require declared support; each new
-    claim must be named by an Incorporated supporting request. This validates
-    declared references, not the model's semantic completeness or truth. *)
+    Already_represented outcomes. Each addition must be named by an
+    Incorporated supporting request: a new claim that absorbs no current
+    memory, or that revises a dropped one through [supersedes]. Drops and
+    merges (new claims that only absorb current memories) need no support:
+    they rest on the current Memory the admission read whole (RFC-0517 §7.1).
+    The caller decides which new claims are additions. This validates declared
+    references, not the model's semantic completeness or truth. *)
 
 val output_schema : memory_schema:Yojson.Safe.t -> Yojson.Safe.t
 (** Strict structured-output envelope around the caller's original Memory

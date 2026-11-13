@@ -1381,6 +1381,71 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
        Eio.Fiber.yield ();
        check int "completed drain was not duplicated" 1 !execution_count)
 
+(* #29485: a keeper the sweep finds retained is in a standing state; the sweep
+   dispatched nothing for it. Two sweeps over one retained keeper leave the
+   lifecycle dispatch rejection count and the keeper's lifecycle timeline as
+   they were. A start that is attempted and refused still counts and
+   publishes [admission_denied]. *)
+let test_sweep_counts_no_rejection_for_a_retained_keeper () =
+  with_config_dir @@ fun config_dir ->
+  Masc_test_deps.with_process_env "MASC_KEEPER_AUTONOMOUS_ENABLED" (Some "false")
+  @@ fun () ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "retained-by-autonomous-switch" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+    Reg.For_testing.clear ();
+    KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let meta = make_meta name in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> fail ("failed to seed retained keeper meta: " ^ detail));
+  install_owner_inventory_exn ~sw config;
+  Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
+  let ctx = keeper_runtime_context env sw config in
+  let rejections () =
+    Masc.Otel_metric_store.metric_total
+      Keeper_metrics.(to_string LifecycleDispatchRejections)
+  in
+  let admission_denied_events () =
+    match Masc.Keeper_lifecycle_audit.recent_json ~keeper_name:name ~limit:50 with
+    | `List events ->
+      List.length
+        (List.filter
+           (fun event ->
+              Option.equal
+                String.equal
+                (Some "admission_denied")
+                Yojson.Safe.Util.(member "event" event |> to_string_option))
+           events)
+    | _ -> fail "lifecycle timeline is not a list"
+  in
+  let load_or_materialize_keeper_meta _ctx _requested = Ok (Some meta) in
+  let before = rejections () in
+  Sup.sweep_and_recover ~load_or_materialize_keeper_meta ctx;
+  Sup.sweep_and_recover ~load_or_materialize_keeper_meta ctx;
+  check bool "the switch keeps the keeper unregistered" false
+    (Reg.is_registered ~base_path:config.base_path name);
+  check (float 0.) "two sweeps over a retained keeper count no rejection"
+    before (rejections ());
+  check int "two sweeps publish no admission_denied" 0 (admission_denied_events ());
+  (match KA.start_keepalive ctx { meta with paused = true } with
+   | KA.Keepalive_lifecycle_denied _ -> ()
+   | outcome ->
+     fail
+       ("paused start was not refused: "
+        ^ KA.start_keepalive_outcome_to_string outcome));
+  check (float 0.) "a refused start counts one rejection"
+    (before +. 1.) (rejections ());
+  check int "a refused start publishes admission_denied" 1
+    (admission_denied_events ())
+
 let registered_entries names =
   Reg.For_testing.clear ();
   List.map
@@ -3007,6 +3072,8 @@ let () =
         test_supervise_recovery_requires_same_offline_generation;
       test_case "supervised readiness wakes queued owner operation" `Quick
         test_supervise_keepalive_wakes_ready_operation_drain;
+      test_case "sweep counts no rejection for a retained keeper" `Quick
+        test_sweep_counts_no_rejection_for_a_retained_keeper;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;

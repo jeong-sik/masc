@@ -17,6 +17,8 @@
         --train A=artifacts/tinker/librarian/train-A
     uv run scripts/tinker/librarian/eval_admission.py synth-numbers --synth <dir> \
         --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out>
+    uv run scripts/tinker/librarian/eval_admission.py rescore --run <dir> --out <new dir> \
+        [--requests <requests.jsonl>] [--base <dir>] [--template <librarian.md>]
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
 the gates. `run` refuses to start when a file it pins has changed. Each item
@@ -44,6 +46,17 @@ warm call, `--max-calls` caps its requests in place of `--budget`, and its rows
 cost nothing per token: the calls draw on the key's usage quota. It waits on one
 request at a time, since the key's rate limit also counts the live Keepers'
 requests. The summary names the provider of the run.
+
+`rescore` scores a finished run again under the current pass lines and sends no
+call. It serves a change of the pass lines that leaves every prompt and the
+request as they were, such as a change of the checker or of the scores. Each row
+is made again from the call the old row names in the run's call log (its key and
+send time): the call's numbers as logged, the answer checked and scored now, and
+the cost the old row recorded. A call whose key is not the one the current pass
+lines give the item's prompt stops it, so a changed request, set or template
+cannot be scored this way: the model runs again. <out> must not exist. It gets
+the run's call log byte for byte, new rows and a summary that names the run it
+was scored from; the run's spending and stop stay as they were.
 
 Definitions:
 - valid: HTTP 200 with no provider error, finish_reason "stop", and
@@ -105,9 +118,8 @@ Definitions:
 - E-synth stale drop recall (G3): planted stale facts dropped, over the planted
   stale facts the labels expect to leave (none when they expect none, which
   fails G3). An absorbed stale fact is not dropped: its text lives on in the
-  new claim. Labels expect merges and stale drops only on requests with a
-  candidate that can support a change; elsewhere a dropped stale fact still
-  counts as a right drop.
+  new claim. Labels expect merges and stale drops on every request, whatever
+  the candidates (RFC-0517 §7.1).
 - Growth: claims an answer adds minus the memory IDs it takes out, per item,
   beside the labels' (E-synth) or the live answers' (E-real).
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
@@ -138,6 +150,7 @@ import argparse
 import hashlib
 import json
 import math
+import shutil
 import statistics
 import sys
 from collections import Counter
@@ -145,7 +158,7 @@ from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import assert_never, cast
+from typing import Literal, assert_never, cast
 
 import admission_request as R
 import admission_validator as AV
@@ -157,7 +170,7 @@ import merge_decisions as MD
 import synth_render
 import synth_rows as RW
 import yojson_wire as Y
-from tinker_oai import HTTP_OK, Call, Caller
+from tinker_oai import HTTP_OK, Call, Caller, call_from_row, call_key
 
 HERE = Path(__file__).resolve().parent
 PASS_LINES = HERE / "pass_lines.json"
@@ -179,6 +192,8 @@ INSTRUCTION = ("Return exactly one JSON value matching this JSON Schema. Do not 
                "code fences or include any explanation. JSON Schema: %s")
 
 type JsonObject = dict[str, object]
+# The providers `run` sends to, as a run's summary names them (`spending`).
+type Provider = Literal["tinker", "glm"]
 
 
 type Item = M.RealItem | M.SynthItem
@@ -363,20 +378,26 @@ def run_item(lane: Lane, targets: list[tuple[str, str]], item: Item) -> list[Jso
         if got is None:
             break
         call, cost = got
-        result = check(item.prompt, call.answer())
-        match item:
-            case M.RealItem():
-                score = M.score_real(item, result.answer)
-            case M.SynthItem():
-                score = M.score_synth(item, result.answer)
-        rows.append({"set": kind, "item": item.item_id, "target": name, "call_key": call.key,
-                     "status": call.status, "error": call.error, "finish": call.finish,
-                     "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
-                     "cached_tokens": call.cached_tokens,
-                     "completion_tokens": call.completion_tokens, "reasoning_chars": len(call.reasoning or ""),
-                     "cost_usd": cost, "valid": result.answer is not None,
-                     "problems": list(result.problems), **score})
+        rows.append(scored_row(item, name, call, cost))
     return rows
+
+
+def scored_row(item: Item, name: str, call: Call, cost: float) -> JsonObject:
+    """The row of the call the target `name` answered `item` with: the call's numbers, what it
+    cost, and the answer checked and scored."""
+    result = check(item.prompt, call.answer())
+    match item:
+        case M.RealItem():
+            kind, score = "real", M.score_real(item, result.answer)
+        case M.SynthItem():
+            kind, score = "synth", M.score_synth(item, result.answer)
+    return {"set": kind, "item": item.item_id, "target": name, "call_key": call.key,
+            "status": call.status, "error": call.error, "finish": call.finish,
+            "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
+            "cached_tokens": call.cached_tokens,
+            "completion_tokens": call.completion_tokens, "reasoning_chars": len(call.reasoning or ""),
+            "cost_usd": cost, "valid": result.answer is not None,
+            "problems": list(result.problems), **score}
 
 
 def warm(row: JsonObject) -> bool:
@@ -465,12 +486,9 @@ def lane_of(args: argparse.Namespace, log: Path, request: JsonObject) -> Lane:
             raise SystemExit("--provider tinker needs --budget alone, --provider glm needs --max-calls alone")
 
 
-def run(args: argparse.Namespace) -> int:
-    lines = load_pass_lines()
-    kind, out = cast(str, args.set), Path(cast(str, args.out))
-    out.mkdir(parents=True, exist_ok=True)
-    lane = lane_of(args, out / "calls.jsonl", cast(JsonObject, lines["request"]))
-    targets = [cast(tuple[str, str], tuple(t.split("=", 1))) for t in cast(list[str], args.target)]
+def set_items(lines: JsonObject, kind: str, args: argparse.Namespace) -> tuple[Path, list[Item]]:
+    """The template file the prompts go out in and the items of the pinned set `kind` drawn with it
+    (`drawn_with`): E-real from --base, E-synth from --requests, which must be the pinned file."""
     items: list[Item]
     if kind == "real":
         manifest, recorded = e_real_files(lines)
@@ -480,7 +498,16 @@ def run(args: argparse.Namespace) -> int:
         if sha256_file(requests) != cast(JsonObject, lines["e_synth"])["requests_sha256"]:
             raise SystemExit("the E-synth requests differ from pass_lines.json")
         items = list(synth_items(requests))
-    template, items = drawn_with(None if args.template is None else Path(cast(str, args.template)), items)
+    return drawn_with(None if args.template is None else Path(cast(str, args.template)), items)
+
+
+def run(args: argparse.Namespace) -> int:
+    lines = load_pass_lines()
+    kind, out = cast(str, args.set), Path(cast(str, args.out))
+    out.mkdir(parents=True, exist_ok=True)
+    lane = lane_of(args, out / "calls.jsonl", cast(JsonObject, lines["request"]))
+    targets = [cast(tuple[str, str], tuple(t.split("=", 1))) for t in cast(list[str], args.target)]
+    template, items = set_items(lines, kind, args)
 
     def one(item: Item) -> list[JsonObject]:
         return run_item(lane, targets, item)
@@ -493,6 +520,84 @@ def run(args: argparse.Namespace) -> int:
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["by_target"]))
     return 2 if lane.caller.stopped is not None else 0
+
+
+def provider_of(summary: JsonObject) -> Provider:
+    match summary["provider"]:
+        case "tinker":
+            return "tinker"
+        case "glm":
+            return "glm"
+        case other:
+            raise SystemExit(f"a run on {other!r} is not one `run` makes")
+
+
+def logged_key(provider: Provider, model: str, request: JsonObject, messages: list[str]) -> str:
+    """The key the provider's caller logs a measured call of `model` under, for these messages and
+    the pass lines' request."""
+    max_tokens = cast(int, request["max_tokens"])
+    match provider:
+        case "tinker":
+            return call_key(model, cast(str, request["reasoning_effort"]), max_tokens, 0, messages)
+        case "glm":
+            return G.call_key(G.request_body(model, messages, max_tokens))
+        case _:
+            assert_never(provider)
+
+
+def logged_spending(provider: Provider, summary: JsonObject) -> JsonObject:
+    """What the run spent, as its summary records it (`spending`)."""
+    match provider:
+        case "tinker":
+            return {"provider": provider, "spent_usd": summary["spent_usd"]}
+        case "glm":
+            return {"provider": provider, "requests_sent": summary["requests_sent"]}
+        case _:
+            assert_never(provider)
+
+
+def rescore(args: argparse.Namespace) -> int:
+    lines = load_pass_lines()
+    source, out = Path(cast(str, args.run)), Path(cast(str, args.out))
+    if out.exists():
+        raise SystemExit(f"{out} exists: rescore writes a new folder")
+    old = cast(JsonObject, json.loads((source / "summary.json").read_text(encoding="utf-8")))
+    kind, provider, targets = cast(str, old["set"]), provider_of(old), cast(dict[str, str], old["targets"])
+    template, items = set_items(lines, kind, args)
+    if sha256_file(template) != old["template_sha256"]:
+        raise SystemExit(f"{source} drew its prompts with another template than {template}")
+    by_item = {item.item_id: item for item in items}
+    log = (source / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    calls = (call_from_row(json.loads(line)) for line in log)
+    # A call logged without its send time cannot be told from the other attempts under its key.
+    logged: dict[tuple[str, float | None], Call] = {(c.key, c.sent_at): c for c in calls
+                                                    if c is not None and c.sent_at is not None}
+    request = cast(JsonObject, lines["request"])
+    rows: list[JsonObject] = []
+    for number, row in enumerate(read_rows(source), start=1):
+        name = cast(str, row["target"])
+        item, model = by_item.get(cast(str, row["item"])), targets.get(name)
+        if item is None or model is None:
+            raise SystemExit(f"{source}/rows.jsonl:{number} names an item or a target the run does not hold")
+        key = logged_key(provider, model, request, [item.text, schema_instruction()])
+        call = logged.get((key, cast(float | None, row["sent_at"])))
+        if row["call_key"] != key or call is None:
+            raise SystemExit(f"{source}/rows.jsonl:{number}: the call log holds no call sent when the row says "
+                             "under the key the current pass lines give the item's prompt")
+        rows.append(scored_row(item, name, call, cast(float, row["cost_usd"])))
+    out.mkdir(parents=True)
+    shutil.copyfile(source / "calls.jsonl", out / "calls.jsonl")
+    with (out / "rows.jsonl").open("w", encoding="utf-8") as fh:
+        fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "template_sha256": old["template_sha256"],
+               "targets": targets, **logged_spending(provider, old), "stopped": old["stopped"],
+               "rescored_from": {"run": str(source), "pass_lines_sha256": old["pass_lines_sha256"],
+                                 "rows_sha256": sha256_file(source / "rows.jsonl"),
+                                 "calls_sha256": sha256_file(source / "calls.jsonl")},
+               "by_target": summarize(kind, rows)}
+    (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
+    print(json.dumps(summary["by_target"]))
+    return 0
 
 
 def read_rows(out: Path) -> list[JsonObject]:
@@ -810,8 +915,14 @@ def main() -> int:
     r.add_argument("--provider", choices=["tinker", "glm"], default="tinker")
     r.add_argument("--budget", type=float, default=None, help="USD, for --provider tinker")
     r.add_argument("--max-calls", type=int, default=None, help="requests under --out, for --provider glm")
-    r.add_argument("--template", default=None,
-                   help="a librarian.md to draw every prompt with (default: the pinned config/prompts/librarian.md)")
+    s = sub.add_parser("rescore", help="score a finished run again under these pass lines, sending no call")
+    s.add_argument("--run", required=True, help="the run's --out")
+    s.add_argument("--out", required=True, help="a new folder")
+    s.add_argument("--requests", help="E-synth requests.jsonl (for an E-synth run)")
+    s.add_argument("--base", default=None, help="MASC base path (default: MASC_BASE_PATH)")
+    for p in (r, s):
+        p.add_argument("--template", default=None,
+                       help="a librarian.md to draw every prompt with (default: the pinned config/prompts/librarian.md)")
     v = sub.add_parser("verdict")
     v.add_argument("--real", required=True)
     v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
@@ -828,6 +939,8 @@ def main() -> int:
     match cast(str, args.command):
         case "run":
             return run(args)
+        case "rescore":
+            return rescore(args)
         case "verdict":
             return verdict(args)
         case "synth-numbers":

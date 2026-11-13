@@ -1,3 +1,6 @@
+import { keeperRuntimeBlockerLabel } from './keeper-runtime-display'
+import { isKeeperRuntimeBlockerClass } from './runtime-blocker-class'
+
 // Shared humanization for the keeper `attention_reason` / `next_human_action`
 // wire vocabularies. Extracted so every surface that shows these codes —
 // the keeper detail alert strip and the overview attention queue — maps them
@@ -120,6 +123,9 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
   if (!canonicalReason) return null
   if (canonicalReason === 'paused' && paused) return null
   if (isAttentionReason(canonicalReason)) return ATTENTION_REASON_LABELS[canonicalReason]
+  // The trust snapshot names a runtime blocker by its class when the status
+  // bridge gives no reason of its own, so the class label is the reason label.
+  if (isKeeperRuntimeBlockerClass(canonicalReason)) return keeperRuntimeBlockerLabel(canonicalReason)
   warnUnknownAttentionToken('attention_reason', canonicalReason)
   return canonicalReason
 }

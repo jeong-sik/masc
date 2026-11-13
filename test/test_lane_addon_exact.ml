@@ -1540,23 +1540,71 @@ let test_preflight_skips_an_unnamed_link_removed_before_it_is_refused () =
   with_workspace (fun ~base store ->
     let orphaned = answered store "preflight-orphan-removed" in
     let kept = answered store "preflight-orphan-kept" in
-    let link = link_file store orphaned in
+    let link = link_file store orphaned and record = record_file store kept in
     Sys.remove (record_file store orphaned);
-    (* A copy of a record under another request's key is refused at its first
-       read and read again after the links are listed. *)
-    let misfiled = Filename.concat (Store.root store)
-        (Store.exact_request_path ~declaration_id ~request_id:"preflight-orphan-elsewhere") in
-    write_bytes misfiled (read_bytes (record_file store kept));
+    (* The kept record is read, read again with its link, and read a third
+       time after the links are listed. *)
     let reads = ref 0 in
     let after_read path =
-      if String.equal path misfiled then (
+      if String.equal path record then (
         incr reads;
         (* The server removes the unnamed link after the check listed it. *)
-        if !reads = 2 then Sys.remove link) in
+        if !reads = 3 then Sys.remove link) in
     let report = preflight ~after_read base in
-    check int "the misfiled record is read before and after the links are listed" 2 !reads;
-    check (list (pair string (list string))) "the removed link is not named"
-      [misfiled, [misfiled]] (refused report))
+    check int "the kept record is read before and after the links are listed" 3 !reads;
+    check (list (pair string (list string))) "the removed link is not named" [] (refused report))
+
+(* One request id answered for two bodies, so two digests and two links. The
+   record and link of the second body are kept as bytes and removed, so the
+   store holds the first body's record and link. *)
+let rewritten store id =
+  let other = request ~message:"Write another question." id in
+  let runner,_,_ = counting_runner store (ref [Answer question]) in
+  ignore (run_request store runner other);
+  let record = record_file store other and other_link = link_file store other in
+  let other_record = read_bytes record and other_link_bytes = read_bytes other_link in
+  Sys.remove record;
+  Sys.remove other_link;
+  let original = answered store id in
+  record, link_file store original, other_record, other_link, other_link_bytes
+
+let test_preflight_reads_a_kept_record_again_for_its_new_link () =
+  with_workspace (fun ~base store ->
+    let record, link, other_record, other_link, other_link_bytes =
+      rewritten store "preflight-rewritten-kept" in
+    (* The check binds the record to its link. Then the startup sweep removes
+       the link and the server writes the request again with another body. *)
+    let reads = ref 0 in
+    let after_read path =
+      if String.equal path record then (
+        incr reads;
+        if !reads = 2 then (
+          Sys.remove link;
+          write_bytes record other_record;
+          write_bytes other_link other_link_bytes)) in
+    let report = preflight ~after_read base in
+    check int "the record is read before and after the links are listed" 3 !reads;
+    check (list (pair string (list string))) "the record read again names its new link" []
+      (refused report))
+
+let test_preflight_lets_no_refused_record_keep_a_link () =
+  with_workspace (fun ~base store ->
+    let record, link, other_record, other_link, other_link_bytes =
+      rewritten store "preflight-rewritten-refused" in
+    (* The startup sweep removes the link and the server writes the request
+       again with another body, after the check first read the record. The
+       second read then holds another request, so the record is refused. *)
+    let rewrote = ref false in
+    let after_read path =
+      if String.equal path record && not !rewrote then (
+        rewrote := true;
+        Sys.remove link;
+        write_bytes record other_record;
+        write_bytes other_link other_link_bytes) in
+    let report = preflight ~after_read base in
+    check bool "the server wrote during the check" true !rewrote;
+    check (list (pair string (list string))) "fresh state deletes the record and the link it leaves"
+      [record, [record]; other_link, [other_link]] (refused report))
 
 let test_preflight_names_a_link_written_after_the_listing () =
   with_workspace (fun ~base store ->
@@ -1757,6 +1805,10 @@ let () =
         ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
         ; test_case "a link no record names is not refused once removed" `Quick
             test_preflight_skips_an_unnamed_link_removed_before_it_is_refused
+        ; test_case "a kept record read again names its new link" `Quick
+            test_preflight_reads_a_kept_record_again_for_its_new_link
+        ; test_case "a refused record keeps no link" `Quick
+            test_preflight_lets_no_refused_record_keep_a_link
         ; test_case "a link written after the listing is not refused" `Quick
             test_preflight_names_a_link_written_after_the_listing
         ; test_case "a refused record names only the files left" `Quick

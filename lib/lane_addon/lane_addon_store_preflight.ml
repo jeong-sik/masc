@@ -414,20 +414,28 @@ let link_name key = Filename.basename (Exact.Retained_key.proof_path key)
 
 (* The proof links of one declaration that no record names. The server writes
    a record before its link, so the records are listed and read again after
-   the links: a record written in between names its link too. Every record is
-   read again, since the startup sweep may have removed a name read before and
-   the same request id may have been written there since, with another digest
-   and so another link. A link removed before it is refused is not refused. *)
+   the links: a record written in between names its link too. A record read
+   before is read again, since the startup sweep may have removed it and the
+   same request id may have been written there since, with another digest and
+   so another link. A record a fresh-state line deletes is not read again: the
+   file at its path goes, so it keeps no link, and the line already names the
+   link the check read with it. A link removed before it is refused is not
+   refused. *)
 let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~named_links =
   let dir = Filename.concat root (Exact.proof_directory ~declaration_id) in
   let* links = entries dir in
   let* again = entries group_dir in
+  let deleted = List.concat_map (fun { delete; _ } -> delete) report.refusals in
   let later =
     List.filter_map
       (fun name ->
-         match read_first ~after_read ~group ~name (Filename.concat group_dir name) with
-         | Read { key; _ } -> Some (link_name key)
-         | Gone | Unreadable _ -> None)
+         let path = Filename.concat group_dir name in
+         if List.mem path deleted
+         then None
+         else
+           match read_first ~after_read ~group ~name path with
+           | Read { key; _ } -> Some (link_name key)
+           | Gone | Unreadable _ -> None)
       (json_names again)
   in
   let named = named_links @ later in

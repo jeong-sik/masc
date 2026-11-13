@@ -60,27 +60,41 @@ let code_pane_content_height (state : state) =
   pane_surface_content_height ~rows
 
 let draft_rows_cache :
-    (Masc_tui_code_draft.t * int * string list) option Domain.DLS.key =
+    (Masc_tui_code_draft.t * int * ui_language * string list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
-let prepare_code_draft_rows ~cols draft =
+let prepare_code_draft_rows ~ko ~cols draft =
   let module Draft = Masc_tui_code_draft in
+  let say korean english = if ko then korean else english in
   let wrap text = Message_layout.wrap_body
     ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text in
   let status, before, comparing = match Draft.phase draft with
-    | Draft.Editable -> "Unsaved draft · this session", (Draft.base draft).text, "original source → draft"
-    | Draft.Saving _ -> "Saving submitted draft; waiting for acknowledgement", (Draft.base draft).text, "original source → submitted draft"
-    | Draft.Rejected detail -> "Save refused: " ^ detail, (Draft.base draft).text, "original source → draft"
+    | Draft.Editable ->
+      say "저장하지 않은 초안 · 이 세션에만 있음" "Unsaved draft · this session",
+      (Draft.base draft).text, say "원본 → 초안" "original source → draft"
+    | Draft.Saving _ ->
+      say "보낸 초안 저장 중 · 서버 확인 대기" "Saving submitted draft; waiting for acknowledgement",
+      (Draft.base draft).text, say "원본 → 보낸 초안" "original source → submitted draft"
+    | Draft.Rejected detail ->
+      say "저장 거절: " "Save refused: " ^ detail, (Draft.base draft).text,
+      say "원본 → 초안" "original source → draft"
     | Draft.Needs_review (reason, current) ->
       let detail = match reason with Draft.Conflict text | Draft.Uncertain text -> text in
-      ("Draft retained: " ^ detail),
+      (say "초안을 남겨 둠: " "Draft retained: " ^ detail),
       (match current with Some source -> source.text | None -> (Draft.base draft).text),
-      (match current with Some _ -> "reread server source → draft · A adopts this revision"
-                        | None -> "original source → draft · r rereads the server before comparison") in
+      (match current with
+       | Some _ ->
+         say "다시 읽은 서버 원본 → 초안 · A 로 서버 판 받기"
+           "reread server source → draft · A adopts this revision"
+       | None ->
+         say "원본 → 초안 · r 로 서버를 다시 읽은 뒤 비교"
+           "original source → draft · r rereads the server before comparison") in
   let ending_text text = match Draft.ending text with
-    | Draft.Empty_source -> "empty" | Draft.Final_lf -> "final LF"
-    | Draft.Final_crlf -> "final CRLF" | Draft.No_final_newline -> "no final newline" in
-  let bytes = Printf.sprintf "Bytes %d → %d · %s → %s"
+    | Draft.Empty_source -> say "빈 내용" "empty"
+    | Draft.Final_lf -> say "끝 LF" "final LF"
+    | Draft.Final_crlf -> say "끝 CRLF" "final CRLF"
+    | Draft.No_final_newline -> say "끝 줄바꿈 없음" "no final newline" in
+  let bytes = Printf.sprintf (if ko then "바이트 %d → %d · %s → %s" else "Bytes %d → %d · %s → %s")
     (String.length before) (String.length (Draft.text draft))
     (ending_text before) (ending_text (Draft.text draft)) in
   let rows = Diff.rows ~before ~after:(Draft.text draft) |> List.concat_map (fun row ->
@@ -93,7 +107,11 @@ let prepare_code_draft_rows ~cols draft =
     |> Message_layout.split_cells
       ~max_cells:(max 1 (framed_inner_width cols - 4))
     |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
-  List.concat_map wrap [status; comparing; bytes; "e edit · S save · r reread · A adopt compared revision · X discard · Esc close"] @ rows
+  List.concat_map wrap
+    [ status; comparing; bytes;
+      say "e 편집 · S 저장 · r 다시 읽기 · A 서버 판 받기 · X 버리기 · Esc 닫기"
+        "e edit · S save · r reread · A adopt compared revision · X discard · Esc close" ]
+  @ rows
 
 (* [same_draft] follows the editing session, including later edits. Only the
    exact immutable value also fixes text, compared source and save phase. *)
@@ -102,10 +120,11 @@ let code_draft_rows state ~cols =
   | None -> Domain.DLS.set draft_rows_cache None; []
   | Some draft ->
       match Domain.DLS.get draft_rows_cache with
-      | Some (seen, width, rows) when seen == draft && width = cols -> rows
+      | Some (seen, width, language, rows)
+        when seen == draft && width = cols && language = state.ui_language -> rows
       | Some _ | None ->
-          let rows = prepare_code_draft_rows ~cols draft in
-          Domain.DLS.set draft_rows_cache (Some (draft, cols, rows));
+          let rows = prepare_code_draft_rows ~ko:(state.ui_language = Lang_ko) ~cols draft in
+          Domain.DLS.set draft_rows_cache (Some (draft, cols, state.ui_language, rows));
           rows
 
 let code_hover_rows state ~cols =
@@ -135,7 +154,10 @@ let code_notes_rows (state : state) ~cols =
       ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text
   in
   match memos with
-  | [] -> wrap "(no memo in this file: a comment on its own row reading masc(name): text)"
+  | [] ->
+      wrap
+        (ui_text state ~ko:"(이 파일에 메모 없음 · 메모는 따로 한 줄에 쓴 주석 masc(이름): 내용)"
+           ~en:"(no memo in this file: a comment on its own row reading masc(name): text)")
   | _ :: _ ->
       List.concat_map
         (function
@@ -147,7 +169,9 @@ let code_notes_rows (state : state) ~cols =
                       (Terminal_text.single_line memo.Ide_memo.author) kind
                       (Terminal_text.single_line memo.Ide_memo.text))
           | Masc_tui_memo.Broken_at (line, why) ->
-              wrap (Printf.sprintf "L%d · memo unreadable: %s" line
+              wrap (Printf.sprintf
+                      (if state.ui_language = Lang_ko then "L%d · 메모를 읽을 수 없음: %s"
+                       else "L%d · memo unreadable: %s") line
                       (Terminal_text.single_line why)))
         memos
 
@@ -162,23 +186,32 @@ let code_notes_viewport (state : state) =
 
 (* These are tool-call bytes, not a reconstruction of today's checkout.
    Repeat the marker on wrapped rows so a narrow pane retains each side. *)
-let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
+let history_change_rows ~ko ~cols (change : Masc.Tui_decode.file_change) =
   let open Masc.Tui_decode in
+  let say korean english = if ko then korean else english in
   let wrap text =
     Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
       ~sanitize:Terminal_text.single_line text
   in
   let status =
-    if change.fc_succeeded then "Recorded change · applied call · d:collapse"
-    else "Recorded attempt · call failed · d:collapse"
+    if change.fc_succeeded then
+      say "기록된 변경 · 적용된 호출 · d:접기" "Recorded change · applied call · d:collapse"
+    else say "기록된 시도 · 실패한 호출 · d:접기" "Recorded attempt · call failed · d:collapse"
   in
   let before, after, note = match change.fc_kind with
     | Fc_edited { before; after; replace_all } ->
         before, after,
-        (if replace_all then ["replace_all: recorded text once; every occurrence was targeted"] else [])
-    | Fc_inserted { text; _ } -> "", text, ["Inserted text; surrounding file is not recorded"]
-    | Fc_written { content } -> "", content, ["Written content; previous file bytes are not recorded"]
-    | Fc_materialized _ -> "", "", ["Blob identity only; no recorded text to compare"]
+        (if replace_all then
+           [ say "replace_all: 일치하는 곳을 모두 바꾸려 함 · 기록에는 글이 한 번만 있음"
+               "replace_all: recorded text once; every occurrence was targeted" ]
+         else [])
+    | Fc_inserted { text; _ } ->
+        "", text, [ say "넣은 글 · 둘레 파일 내용은 기록에 없음" "Inserted text; surrounding file is not recorded" ]
+    | Fc_written { content } ->
+        "", content,
+        [ say "쓴 내용 · 이전 파일 바이트는 기록에 없음" "Written content; previous file bytes are not recorded" ]
+    | Fc_materialized _ ->
+        "", "", [ say "기록에는 blob 의 식별 값만 있음 · 비교할 글 없음" "Blob identity only; no recorded text to compare" ]
   in
   let rows = Diff.rows ~before ~after |> List.concat_map (fun row ->
     let marker, style, text = match row with
@@ -195,6 +228,8 @@ let history_change_rows ~cols (change : Masc.Tui_decode.file_change) =
   List.concat_map wrap (status :: note) @ rows
 
 let prepare_code_history_rows (state : state) ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let wrap owner text =
     Message_layout.wrap_body
       ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text
@@ -209,36 +244,39 @@ let prepare_code_history_rows (state : state) ~cols =
   in
   match Masc_tui_fetched.current state.code_history with
   | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
-      wrap None (field "History unavailable" detail)
-  | Some (_, Masc_tui_fetched.Loading) -> wrap None "(loading history)"
+      wrap None (field (say "이력을 읽지 못함" "History unavailable") detail)
+  | Some (_, Masc_tui_fetched.Loading) -> wrap None (say "(이력 읽는 중…)" "(loading history)")
   | Some (_, Masc_tui_fetched.Absent) | None -> []
   | Some ((scope, path), Masc_tui_fetched.Ready listing) ->
       let git_failure = match listing.chl_git_error with
         | None -> []
-        | Some detail -> wrap None (field "Git history unavailable" detail)
+        | Some detail -> wrap None (field (say "Git 이력을 읽지 못함" "Git history unavailable") detail)
       in
       let entries = List.mapi
         (fun index entry ->
           let lines = match entry with
             | Hist_commit row ->
                 let open Masc.Tui_decode in
-                [field "Commit" row.gl_hash; field "Date" (date (row.gl_at_ms /. 1000.));
-                 field "Author" row.gl_author; field "Subject" row.gl_subject]
+                [field (say "커밋" "Commit") row.gl_hash;
+                 field (say "날짜" "Date") (date (row.gl_at_ms /. 1000.));
+                 field (say "작성자" "Author") row.gl_author;
+                 field (say "제목" "Subject") row.gl_subject]
             | Hist_keeper_change change ->
                 let open Masc.Tui_decode in
                 let kind = match change.fc_kind with
-                  | Fc_edited _ -> "EDIT" | Fc_inserted _ -> "MEMO"
-                  | Fc_written _ | Fc_materialized _ -> "WRITE"
+                  | Fc_edited _ -> say "수정" "EDIT" | Fc_inserted _ -> say "메모" "MEMO"
+                  | Fc_written _ | Fc_materialized _ -> say "쓰기" "WRITE"
                 in
                 let anchor = match file_change_evidence_label change.fc_line_evidence with
                   | Some label -> label | None -> "L?"
                 in
-                [field "Keeper" change.fc_keeper; field "Date" (date change.fc_at);
-                 field "Kind" kind; field "Lines" anchor;
-                 field "Result" (if change.fc_succeeded then "applied" else "failed")]
+                [field "Keeper" change.fc_keeper; field (say "날짜" "Date") (date change.fc_at);
+                 field (say "종류" "Kind") kind; field (say "줄" "Lines") anchor;
+                 field (say "결과" "Result")
+                   (if change.fc_succeeded then say "적용됨" "applied" else say "실패" "failed")]
                 @ List.filter_map Fun.id
                     [Option.map (field "Task") change.fc_task_id;
-                     Option.map (fun turn -> field "Turn" (string_of_int turn)) change.fc_turn;
+                     Option.map (fun turn -> field (say "턴" "Turn") (string_of_int turn)) change.fc_turn;
                      Option.map (field "Execution") change.fc_execution_id]
           in
           let owner = Some (index, entry) in
@@ -246,29 +284,32 @@ let prepare_code_history_rows (state : state) ~cols =
           match entry, state.code_history_expanded with
           | Hist_keeper_change change, Some expanded when index = expanded ->
               metadata @ List.map (fun row -> owner, row)
-                (history_change_rows ~cols change)
+                (history_change_rows ~ko ~cols change)
           | Hist_commit _, _ | Hist_keeper_change _, _ -> metadata)
         listing.chl_entries |> List.concat
       in
       let empty = match listing.chl_entries with
-        | [] -> wrap None "(no history entries returned; see source coverage below)"
+        | [] ->
+            wrap None
+              (say "(돌아온 이력 없음 · 아래 기록 출처 참고)"
+                 "(no history entries returned; see source coverage below)")
         | _ :: _ -> []
       in
       let note = match state.code_lsp_note with
-        | None -> [] | Some text -> wrap None (field "File note" text)
+        | None -> [] | Some text -> wrap None (field (say "알림" "File note") text)
       in
       let scope_text = match scope with
-        | Code_scope_project -> "Project"
+        | Code_scope_project -> say "프로젝트" "Project"
         | Code_scope_keeper keeper -> "Keeper " ^ keeper
-        | Code_scope_repo repo -> "Repository " ^ repo
+        | Code_scope_repo repo -> say "저장소 " "Repository " ^ repo
       in
-      git_failure @ entries @ empty @ wrap None (field "File" path)
-      @ wrap None (field "Scope" scope_text)
-      @ wrap None (field "Coverage" listing.chl_activity_note) @ note
+      git_failure @ entries @ empty @ wrap None (field (say "파일" "File") path)
+      @ wrap None (field (say "범위" "Scope") scope_text)
+      @ wrap None (field (say "기록 출처" "Coverage") listing.chl_activity_note) @ note
 
 let history_rows_cache :
     (((code_workspace_scope * string, code_history_listing) Masc_tui_fetched.t
-      * int option * string option * int)
+      * int option * string option * int * ui_language)
      * ((int * code_history_entry) option * string) list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
@@ -277,11 +318,13 @@ let code_history_rows (state : state) ~cols =
   let expanded = state.code_history_expanded in
   let note = state.code_lsp_note in
   match Domain.DLS.get history_rows_cache with
-  | Some ((seen, seen_expanded, seen_note, width), rows)
-      when seen == source && seen_expanded = expanded && seen_note = note && width = cols -> rows
+  | Some ((seen, seen_expanded, seen_note, width, language), rows)
+      when seen == source && seen_expanded = expanded && seen_note = note && width = cols
+           && language = state.ui_language -> rows
   | Some _ | None ->
       let rows = prepare_code_history_rows state ~cols in
-      Domain.DLS.set history_rows_cache (Some ((source, expanded, note, cols), rows));
+      Domain.DLS.set history_rows_cache
+        (Some ((source, expanded, note, cols, state.ui_language), rows));
       rows
 
 let code_history_pane_cols () =

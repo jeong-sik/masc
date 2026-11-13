@@ -1,0 +1,715 @@
+[
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "PR 단계 필수 type-check(운영자 결정 c1)와 헌법 :330·:340·:396, brief 2절 6 가운데 무엇을 고칠까",
+  "by_the_book": "헌법을 c1 에 맞춰 고친다. 근거는 11-03 에 세 PR 이 main type-check 를 깬 일과, #50746 이 빨간 검사 2분 뒤 병합된 일이다(pr-type-check.yml:3-6, :13-15). :330 에 '스택 꼭대기 type-check 하나' 예외를 결정 좌표와 함께 적는다. 경로 조건 PR 트리거 5개는 dispatch·출시 검증으로 옮긴다.",
+  "cost": "changes job 이 층을 push 할 때마다 돌아 PR push 수에 비례하는 작은 비용이 남는다(08Z·09Z 중앙값 0.1분). 다섯 검사가 잡던 문제는 출시 때 잡힌다. brief 2절 6 문장도 고쳐야 한다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "restack 뒤 승인을 어떻게 다룰까",
+  "by_the_book": "헌법 :392(정확한 head 에 대한 승인)를 지킨다. restack 을 부르는 공유 파일을 PR 마다 파일 하나씩으로 나눠 충돌을 줄인다.",
+  "cost": "깊은 스택은 main 과 충돌할 때마다 승인 2·D개를 다시 받는다(13층에 하루 3번이면 최대 78개). 다른 길인 :392 개정(diff 가 같은 층의 승인 유지)에는 :398 이 막는 위험이 따른다. base 가 바뀌어 같은 diff 의 뜻이 달라져도 다시 읽지 않게 된다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "생성 문서(TUI-KEYS.md, specs/INDEX.md, docs/research/README.md)를 커밋하지 않을까",
+  "by_the_book": "커밋하지 않고 필요할 때 만든다(#35498 과 같은 규칙). test_tui_keys_doc 는 헌법 :358-359 에 따라 지운다.",
+  "cost": "GitHub 웹에서 바로 보던 표가 없어진다. TUI-GUIDE.md:51 링크를 생성 명령으로 바꿔야 한다. 출시 산출물에 렌더본을 실을지는 따로 정한다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "용어를 한 개념에 타입 하나로 맞추도록 이름을 바꿀까",
+  "by_the_book": "코드 이름을 먼저 바꾼다. TOML 키 [runtime.lanes.*] 는 hard cut(지우고 설치)으로 바꾼다.",
+  "cost": "provider_attempt 하나만 바꿔도 .ml 68개를 건드린다. 열린 스택이 같은 파일을 고치고 있으면 충돌한다. 운영 중인 설치는 설정을 다시 깔아야 한다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "RFC 상태를 정해진 값만 받게 할까. Accepted(14개)는 값으로 더할까, 다른 값으로 옮길까",
+  "by_the_book": "README 의 다섯 값만 받고, 빠진 값이나 모르는 값은 렌더할 때 오류로 낸다. Accepted 는 구현 전이면 Draft, 일부 구현됐으면 Active 로 옮긴다.",
+  "cost": "31개 파일을 한 번에 고쳐야 한다. Accepted 14개는 하나씩 읽어 갈라야 한다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "스택이 닫을 이슈를 맨 아래 층 본문에 모을까",
+  "by_the_book": "모은다. GitHub 가 closing reference 를 등록하는 곳은 main 을 base 로 하는 층뿐이다. worker 는 스택의 모든 층을 병합된 PR 로 보고 이슈를 닫는다(approval-auto-merge.py:677-684).",
+  "cost": "위층이 이슈를 더할 때마다 맨 아래 층 본문을 고쳐야 한다. 본문 수정은 head 를 바꾸지 않으니 승인은 남는다. 어느 이슈가 어느 층 것인지는 본문을 읽어야 안다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "question": "문서에서 코드가 가진 사실(CI 트리거 목록, 실행 파일 수, RFC 수, 버전 수치)을 지울까",
+  "by_the_book": "지우고 소스 좌표로 바꾼다. 표가 필요하면 스크립트가 필요할 때 렌더한다.",
+  "cost": "문서만 읽어서는 답이 나오지 않아 workflow·스크립트를 열어야 한다. 사람이 읽을 때 한 단계가 는다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "이식 단위는 폴더 복사인가, export 묶음인가",
+  "by_the_book": "export 묶음만 이식 단위로 정한다. 폴더 복사는 서버를 멈춘 같은 기기 안 이동만 보장한다.",
+  "cost": "store 목록 타입과 store 별 복사 규칙을 먼저 만들어야 한다. 그때까지 요구 20번은 비어 있다. 로그·파생 store 는 새 기기에서 비어 시작한다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "비밀(API 키 파일, 공식 클라이언트 로그인, GitHub credential)을 묶음에 넣는가",
+  "by_the_book": "넣지 않는다. manifest 에 다시 묶을 목록만 적는다.",
+  "cost": "새 기기에서 Keeper × 계정 수만큼 다시 로그인하고 키를 다시 넣는다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "`official-clients` 홈(92.5 GiB)은 원본인가",
+  "by_the_book": "기기 묶임으로 선언하고 묶음에서 뺀다. 이어가기는 MASC 가 가진 턴 기록으로 새 세션을 연다.",
+  "cost": "옮긴 뒤 첫 턴마다 새 세션이다. 공식 클라이언트 세션에만 있던 맥락은 사라진다. 토큰 비용은 재지 않았다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "외부 동기화는 살아 있는 폴더의 양방향 동기화인가, 한 방향 복제인가",
+  "by_the_book": "한 방향 복제다. 쓰는 서버는 하나다. 살아 있는 폴더를 동기화 서비스에 두는 것은 지원하지 않는다고 적는다.",
+  "cost": "두 기기를 번갈아 쓰려면 export → import 를 거친다. 실시간 이중화는 없다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "Keeper 작업 볼륨은 이식 대상인가",
+  "by_the_book": "파생으로 선언한다. repo 는 원격에서 다시 받는다. 볼륨 이름에 workspace 식별자를 넣는다.",
+  "cost": "push 하지 않은 작업 트리는 이식 때 사라진다. 이름을 바꾸면 기존 볼륨은 새로 만든다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "`masc workspace-upgrade`(v0.34 schema 수리와 `.masc/upgrades` 사본)를 유지하는가",
+  "by_the_book": "헌법 legacy_residue 와 hard cut 규칙대로 지운다. scripts/install-runtime-setup.py:2086,2101 의 호출도 같이 지운다.",
+  "cost": "v0.34 에서 올라오는 설치는 `.masc` 를 지우고 새로 시작한다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "백업은 어느 범위까지 복원을 보장하는가",
+  "by_the_book": "같은 build 에서의 복원만 보장한다. 다른 build 는 store 별로 schema 가 같을 때만 들이고 변환기는 두지 않는다.",
+  "cost": "원본 store 가 hard cut 되면 그 전의 백업에서 그 store 를 되살릴 수 없다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "Keeper memory 파일을 `config/keepers/` 에서 옮기는가, 옮긴다면 어떻게",
+  "by_the_book": "옮긴다. 변환 코드를 넣지 않고 서버를 멈춘 운영자가 문서의 명령으로 한 번 옮긴다.",
+  "cost": "운영자 작업 한 번. 이전 build 로 되돌리면 memory 를 못 찾는다. 지우고 설치를 글자 그대로 적용하면 memory 가 사라지므로 이 store 의 손 이동을 허락할지 정해야 한다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "다계정을 켠 workspace 의 백업 복원을 어떻게 다루는가",
+  "by_the_book": "설계대로 복원은 부팅 정지다. 2단계 §10 절차가 나올 때까지 복원 절차가 없다고 문서와 도움말에 적는다.",
+  "cost": "다계정을 켠 운영자는 디스크 사고 때 계정·초대를 다시 발급한다."
+ },
+ {
+  "domain": "basepath-portability",
+  "question": "정리 경로에 없는 store(official-clients, tool_blobs, lane-addons 등)의 보존 창",
+  "by_the_book": "store 마다 보존 규칙을 목록에 선언하고 값은 운영자가 정한다(헌법 runtime_data).",
+  "cost": "창 밖 기록은 사라진다(감사·재현 근거). 값을 정하기 전까지 크기는 계속 는다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "헌법 candle 절을 고쳐 장신구 말고 다른 자산(Stock 포함)을 허용할까?",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "Stock 을 들인다면 그 값이 무엇에 기대는지 정한다",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "'Keeper 는 지급 규칙을 모른다'의 범위를 정한다",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "Candle 원장 장애가 원장 밖 기록에 미치는 범위를 정한다",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "지갑 키를 사람별 Keeper 이름과 맞추는 hard cut 을 할까?",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "세계 프리셋의 재화를 원장에 묶을까, 글로만 둘까?",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "원장 무결성 확인을 어떻게 할지 정한다",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "question": "Candle 정책 값을 무엇을 근거로 다시 정할까?",
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "공유 기억을 log 와 Keeper 별 cursor 로 전달할 것인가(RFC-shared-memory 2~5단계)?",
+  "by_the_book": "한다. 2~5단계를 잇고 briefing 합성을 지운다. 근거는 읽기 호출 0.01%(2026-10-28)와 운영자 방향 #41525 다.",
+  "cost": "안 읽은 변경이 턴 입력에 실려 입력이 는다(RFC 가 21.7KB 를 넘을 수 있다고 적는다). Curator 답에 line 필드가 생겨 addon image 와 프롬프트를 같이 바꾼다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "충돌을 당사자 Keeper 에게 어떻게 보일 것인가?",
+  "by_the_book": "log 소식에 더해 당사자 World State 에 projection 으로만 싣는다. 턴을 만들지 않는다.",
+  "cost": "당사자가 다음에 깨어날 때까지 충돌이 열려 있다. 큐에 일반 메시지를 넣으면 빨라지지만 충돌 하나가 턴 두 개를 만든다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "관계 그래프를 어떤 형태로 둘 것인가?",
+  "by_the_book": "쓰는 시점의 타입 있는 참조와 파생 index 로 둔다. 새 authority 를 만들지 않는다.",
+  "cost": "emit 호출처 12곳쯤과 payload 를 hard cut 으로 바꾼다. 옛 activity 줄(운영 532MB)은 새 형식으로 읽지 못한다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "쓰는 곳 없는 둘째 읽기 API 를 둘 것인가?",
+  "by_the_book": "소비자가 없으면 지우고 관계 질의는 그래프 projection 으로 낸다.",
+  "cost": "바깥 스크립트가 쓰고 있었다면 끊긴다. 소비자 확인이 먼저다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "fleet layer 를 최신 10줄로 둘 것인가, 읽은 자리 뒤부터로 바꿀 것인가?",
+  "by_the_book": "읽은 자리 뒤부터 싣고 일반 broadcast 도 recipient ledger 를 탄다.",
+  "cost": "오래 쉰 Keeper 의 첫 턴에 안 읽은 줄이 몰려 조각 나누기 규칙이 필요하다. broadcast 마다 journal 쓰기가 K번 는다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "wiki lint 를 저장이 바뀔 때 돌릴 것인가, ingest·promote 를 서버 기능과 Skill 중 어디에 둘 것인가(RFC Q2)?",
+  "by_the_book": "lint 는 결정론이므로 wiki commit 때 돌리고 finding 은 projection 으로 보인다. ingest·promote 는 Skill 절차로 둔다.",
+  "cost": "commit 마다 wiki 전체를 읽는다(지금 23 파일). finding 을 보일 자리(World State 행, TUI)가 필요하다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "기억에 내용과 무관한 안정 id 를 줄 것인가?",
+  "by_the_book": "쓰는 시점에 fact_id 를 정하고 원장이 그것을 가리킨다. 근거는 회수 이벤트의 15.5% 만 현재 사실을 가리킨다는 측정이다.",
+  "cost": "Memory OS snapshot 과 원장 fact_ref 를 hard cut 한다. 원장을 새로 만들면 Curator 가 모든 사실을 다시 분류하는 모델 비용이 든다. librarian addon 계약도 바뀐다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "개인 기억 recall 의 기본값과 판정자를 어떻게 둘 것인가?",
+  "by_the_book": "층 0 하네스로 잰 뒤 기본값을 정한다. 판정자는 lane 선언으로 바꿀 수 있게 한다.",
+  "cost": "켜면 턴마다 판정 호출이 한 번 는다. 다른 판정자의 품질을 따로 재야 한다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "Task backlog 을 Task 한 줄씩 저장하는 형태로 바꿀 것인가?",
+  "by_the_book": "바꾼다. 전이는 append 한다. 먼저 부수 효과를 잠금 밖으로 옮긴다.",
+  "cost": "backlog 을 읽는 곳(TUI, 둘째 읽기 API, GC 등)을 다 바꾼다. hard cut 이면 운영 중인 Task 를 옮기지 않고 버린다. 대가가 크면 1단계만 먼저 한다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "question": "Board attention 의 confidence floor 를 지울 것인가?",
+  "by_the_book": "지우고 판정자가 Needs_review 를 내게 한다.",
+  "cost": "바깥 판정자의 답 형식을 못 바꾸면 낮은 confidence 답이 그대로 통과한다. 주석의 측정으로는 0.3 아래 답이 뒤집힌 것의 41% 였다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "여러 사람이 쓰는 설치에서 단일 사용자 부팅을 허용하나",
+  "by_the_book": "허용하지 않는다. 헌법 :139, :507 은 두고 '사람이 여럿이면 Multi_account' 를 적는다. 여러 사람용 경계는 계정 서버에만 둔다.",
+  "cost": "계정 서버가 Keeper 수명·Board·Dashboard 를 갖출 때까지 여러 사람은 지금의 Keeper farm 을 못 쓴다. 혼자 쓰는 원격 접속도 로그인 설정이 필요해진다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "자격 없이 권한을 주는 갈래를 둘지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "원격 bind 의 평문 리스너가 무엇을 받을지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "자격 없는 상태 응답에 무엇을 남길지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "쓰는 곳 없는 둘째 읽기 API 를 지울지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "IDE 의 기준 면을 무엇으로 할 것인가",
+  "by_the_book": "하나를 고르고 RFC 로 적는다. RFC-0429 는 TUI 를, 외부 접근 요구는 브라우저를 가리킨다.",
+  "cost": "고르지 않은 쪽의 기능 추가가 멈춘다. Dashboard IDE 셸은 99파일이다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "question": "읽기만 하는 사람 역할을 단일 사용자 서버에 더할 것인가",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "Keeper sandbox 에 어떤 자격 증명을 줄지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "connector 가 첨부 bytes 를 내려받을 것인가?",
+  "by_the_book": "받는다. 모든 입구가 같은 block 타입을 낸다는 규칙이다. 근거: lib/gate/gate_protocol.mli:15-26, lib/gate_keeper_backend.ml:288-291.",
+  "cost": "첨부 보관과 정리(RFC-0499 범위 확대), 크기·형식 검사, Slack app 에 files:read scope 추가와 재승인(lib/gate/slack_gateway_state.ml:329-331), 외부 파일을 서버가 받는 데 따른 보안 검토."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "운영자가 빌드 없이 MCP 서버를 더하게 할 것인가(stdio, 정적 bearer 포함)?",
+  "by_the_book": "한다. 운영자 설정 폴더의 선언을 같은 parser 로 읽고 자격 증명 출처를 닫힌 variant 로 늘린다. stdio 는 sandbox 안에서만 띄운다. 근거: lib/keeper_identity/keeper_oauth_declarations.ml:14-31.",
+  "cost": "선언 검증과 Identity 화면 작업, stdio process 수명과 stdout backpressure 설계, 승인 digest 변경에 따른 재승인."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "video 를 어떻게 받을 것인가?",
+  "by_the_book": "Agent Core 에 Video block 을 더한다. 읽는 모델에는 그대로 주고, 못 읽는 runtime 에는 프레임 표본과 transcript 로 바꾼다. 이미지·음성·문서와 같은 규칙이다.",
+  "cost": "모든 backend serializer 와 exhaustive match 를 고친다(컴파일러가 빠진 곳을 잡는다). history 저장량이 늘고, 프레임을 뽑는 host 도구가 필요하다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "browser 로그인의 주인을 누구로 볼지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "Slack poll lane 에 reader 를 붙일 것인가 지울 것인가?",
+  "by_the_book": "부르는 곳이 없으면 지운다. 다만 원래 설계가 reader 도구를 전제했으므로 Keeper 가 mention 없는 채널 대화를 읽어야 하는지를 먼저 정한다.",
+  "cost": "지우면 checkpoint 설계 문서와 시험도 같이 지운다. 붙이면 Keeper 도구 하나와 다계정 권한 판정이 늘어난다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "question": "요구 13 의 'Web Renderer' 는 무엇인가?",
+  "by_the_book": "저장소의 부품 하나에 대응시켜 문서 한 곳에 정의한다. 후보: (가) JS 실행 뒤의 page 를 읽는 browser lane 읽기·screenshot, (나) HTML artifact 와 project build 결과를 화면에 그리는 것(lib/artifact_project_build.mli:9-14).",
+  "cost": "정하지 않으면 요구 충족을 판정할 수 없다. (가)로 정하면 web fetch(curl, JS 없음)와 역할을 나누는 문서가 필요하다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "공식 클라이언트 턴 대화를 canonical 이력에 남기는 일(RFC §5.6)을 씨앗·마커·거절 수리(#51657, #51625·#51626)보다 먼저 할까",
+  "by_the_book": "먼저 한다. 헌법 :257 은 '모든 Runtime' 을 말한다. 운영 trace 29개 중 18개는 canonical 이 늦거나, 옛 형식이거나, 없다(수정 시각만 본 관측). 원천이 빈 동안에는 씨앗을 고쳐도 효과가 좁다.",
+  "cost": "stream frame 을 atom 으로 바꾸는 설계가 필요하다(도구 호출 id 짝, 본문 없는 thinking). checkpoint 쓰기가 늘고, 진행 중인 스택의 순서를 다시 잡아야 한다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "vendor 세션을 계속 이어 쓸까, 아니면 RFC §5.7 대로 묶인 이어가기가 없으면 턴마다 새 세션을 열까",
+  "by_the_book": "01 뒤에 §5.7 대로 턴마다 새 세션을 연다. 씨앗이 한 원천에서 나오니 gap 02 도 같이 닫힌다. 근거는 RFC-keeper-context-window-in-tokens §1 의 '컴팩션이 없다'와 압축 뒤 실패(#48214)다.",
+  "cost": "resume 의 cache 를 잃고 턴마다 씨앗을 다시 보낸다(2026-09-15 측정 요청당 입력 중앙값 374,876 토큰, 오래된 수치). thinking 은 이력에 실을 수 없다. resume 을 남기는 쪽을 고르면 #35953 의 import frontier 가 필요하다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "지금 시각을 도구 round 마다 주고, 과거 사건 행에 기록 시각을 실을까",
+  "by_the_book": "둘 다 한다(gap 03 의 규칙).",
+  "cost": "Agent Core 는 round 당 81 B 가 는다. 행마다 시각 필드가 붙어 World State 가 커진다(양은 재야 한다). 공식 클라이언트에서는 vendor 내장 도구만 쓰는 구간을 덮지 못한다. 이력 투영을 바꾸는 시점에 prefix cache 가 한 번 깨진다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "outbox 영수증 형식에 retained_at 을 더할까",
+  "by_the_book": "더한다. 다음 outbox 형식 hard cut 에 묶는다.",
+  "cost": "outbox 는 Fresh state 계약이라, 아직 어떤 run 도 읽지 않은 영수증이 지워진다(docs/rfc/RFC-keeper-turn-ends-while-waiting-for-a-receipt-state-machine.md:322). 영수증 대기 스택(#51663·#51673)과 순서를 맞춰야 한다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "연속성 하네스가 pass/fail 을 내게 할까",
+  "by_the_book": "낸다. 판정은 구조(그 범위가 요청이나 작업 상태에 있는가)로 고정하고, 확률 점수는 참고로만 둔다.",
+  "cost": "구조 판정은 '보였다'까지만 말하고 '알고 답했다'는 말하지 못한다. 시나리오 실행은 유료 호출이다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "direct 턴에도 자기 행동 목록을 줄까",
+  "by_the_book": "준다. 턴 종류와 무관하게 같은 사실이다.",
+  "cost": "direct 프롬프트가 턴당 중앙값 1.6 KB × 10 만큼 늘어난다(lib/keeper/keeper_config.ml:170-172 의 측정). observe_direct_keeper_msg 가 피하던 색인 읽기가 생긴다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "question": "KEEPER-STATE-OWNERSHIP.md 와 Gate 2 를 지금 고칠까, gap 01 을 기다릴까",
+  "by_the_book": "01 을 하기로 하면 기다린다. 미루기로 하면 지금 lane 별 계약으로 고친다.",
+  "cost": "기다리는 동안 Gate 2 는 공식 클라이언트 fleet 에서 통과할 수 없다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "Hook 에 꽂은 판정이 Keeper 의 도구 호출을 막을 수 있어야 하나, 기록과 context 로만 보여야 하나.",
+  "by_the_book": "막지 않는다. 판정은 관측으로 남고 다음 턴의 context 로 보인다(constitution gate 기본값, 다음 행동은 Keeper 가 고른다).",
+  "cost": "위험한 호출을 패키지 판정이 못 막는다. 막아야 하는 호출은 지금 있는 승인 요청(ElicitToolApproval) 길로 가야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "board_attention_confidence_floor 를 지우고 Jev 가 고른 uncertain 만으로 느린 lane 에 넘길까.",
+  "by_the_book": "지운다. constitution magic_number 에 걸리고 도구 설명이 confidence 는 보정된 값이 아니라고 말한다.",
+  "cost": "지금 문턱 아래라 느린 lane 으로 가던 답이 Jev 판정으로 확정된다. 건수는 재지 않았다. 종단 로그의 low_confidence 수를 먼저 세야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "Cross-Verification 에서 생성자와 같은 runtime slot 을 그 요청의 걷기에서 뺄까.",
+  "by_the_book": "뺀다. 교차 검증의 평가자는 생성자가 아니라는 낱말의 뜻에서 나오는 규칙이다.",
+  "cost": "verifier_exact 에 slot 이 하나뿐인 설치는 검증이 기다린다. 운영자가 slot 을 둘 이상 묶어야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "완료 검증·HITL·Board attention 의 판정자를 패키지 lane 으로 고를 수 있게 할까.",
+  "by_the_book": "소비 지점이 lane 주인(exact_lane_owner)을 설정으로 받는다. 내장 lane 은 그대로 서버 안에서 돈다(2026-09-27 운영자 선택과 맞음).",
+  "cost": "소비 지점마다 판정 schema 를 소비자가 내야 한다. 필수 lane 부팅 검사를 lane 주인 기준으로 다시 써야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "hitl-auto-judge 패키지를 운영 경로에 이을까, 지울까.",
+  "by_the_book": "앞 결정이 '고를 수 있게'면 잇고, 아니면 패키지·owner·시험을 지운다. 죽은 개념은 남기지 않는다.",
+  "cost": "지우면 worklist E04 의 작업분을 버린다. 이으면 HITL 소비 코드를 lane 주인을 받도록 고쳐야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "masc_decide 의 local Ollama 기본값을 [typesafeai].destinations 의 한 줄로 옮길까.",
+  "by_the_book": "옮긴다. codec 과 목적지 목록이 하나가 되고 hard cut 으로 옛 상수를 지운다.",
+  "cost": "지금 설정 없이 되는 local nimble 경로가 설정 한 줄을 요구한다. 표 이름 typesafeai 가 Ollama 까지 가리키게 되어 이름을 바꾸는 hard cut 이 따라온다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "question": "패키지 exact lane 의 admission 등급을 운영자가 선언하게 할까.",
+  "by_the_book": "[runtime.addon_exact_lanes.<declaration>.<output>] 에 닫힌 값으로 적는다. 운영 정책은 서버마다 운영자가 정한다.",
+  "cost": "패키지 판정이 Priority 를 받으면 Keeper 턴의 계정 허가 대기가 는다. 양은 재지 않았다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "Keeper 를 하위 library 로 옮기는 일을 지금 시작하나(RFC-0215 승인)?",
+  "by_the_book": "시작한다. facade 둘(Workspace, Otel_metric_store)을 걷고 의존이 닫힌 묶음(지금 204개, 걷으면 257개)부터 RFC-0056 gate 로 옮긴다.",
+  "cost": "codemod PR 이 크다(Workspace 를 부르는 lib/keeper 파일 433개). 열린 스택이 다시 올라가야 하고 옮기는 동안 lib/dune 충돌이 는다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "큰 모듈을 나누는 단위를 include 분리에서 하위 library 로 바꾸나?",
+  "by_the_book": "바꾼다. 같은 library 안 include 분리는 RFC-0056:75 가 금지한 꼴이고 컴파일러가 강제하는 방향을 만들지 못한다.",
+  "cost": "조각마다 dune 이 생긴다. 주 123개꼴 분리 PR 의 방식을 바꾼다. 이미 쪼갠 열 모듈의 facade .mli 6,978줄을 걷어야 한다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "하위 library 를 계속 (wrapped false) 전역 이름으로 두나?",
+  "by_the_book": "dune 기본값대로 library 마다 이름 공간을 둔다(wrapped). 업계 관행이라는 것은 내 지식이고 출처는 이번에 확인하지 않았다.",
+  "cost": "호출자 이름을 전부 바꾼다. RFC-0056 G3·G5 가 막아 Phase 2 RFC 가 먼저다. wrapped 는 alias 모듈 때문에 모듈 추가 때 그 library 가 다시 컴파일된다. 빌드만 보면 지금 방식이 낫다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "ocaml_boundary_audit 를 지우나, main build 에 붙이나?",
+  "by_the_book": "부분 함수는 prelude alert 로 컴파일 에러로 만들고 도구·baseline·문서 문장을 지운다. 타입 검사는 이미 스택 꼭대기에서 돈다.",
+  "cost": "위반 12곳을 먼저 고친다. library 마다 prelude flag 한 줄이 든다. 남기려면 30분 주기 build 에 단계를 더하는 운영자 요청이 필요하다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "식별자 추상 타입 전환을 사람별 Keeper 이름(S1b)보다 먼저 하나?",
+  "by_the_book": "먼저 한다. keeper_name:string 이 추상 타입이어야 (사람, 이름)으로 바꿀 때 컴파일러가 자리를 전부 알려 준다.",
+  "cost": ".mli 421파일을 건드리는 codemod 다. S1b 의 다음 조각이 그만큼 늦는다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "blocking 증거 값과 alert 를 어디까지 넣나?",
+  "by_the_book": "Fs_compat 의 blocking 함수가 증거 값을 받고 Stdlib blocking 함수는 prelude alert 로 막는다. Keeper·서버 library 부터 한다.",
+  "cost": "직접 호출 1,611곳을 고친다. 증거 값은 5.5 에서 closure 로 새어 나갈 수 있어 완전하지 않다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "flambda·OxCaml 평가 RFC 를 내나?",
+  "by_the_book": "병목 하나를 고립 library 로 떼어 5.5.2, 5.5.2+flambda, OxCaml 을 같은 커밋으로 재고 정한다. 설정에 적혀 있고 꺼져 있는 flambda 가 먼저다.",
+  "cost": "switch 가 하나 더 든다(CI 캐시 한 벌 약 1.1 GB). -O3 는 컴파일이 느려 release 실행 파일에만 쓴다. OxCaml 채택은 upstream 과 갈라진다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "question": "서버↔TUI·dashboard read model 을 atd 생성 계약으로 옮기나?",
+  "by_the_book": "옮긴다. 이미 빌드에 있는 atdgen 으로 endpoint 단위 hard cut 한다.",
+  "cost": "lib/tui_decode* 22,009줄을 순서대로 걷는다. 생성 타입과 도메인 타입 사이 변환 한 겹이 남는다. TUI 문법 스택(#51624) 병합 뒤에 해야 충돌이 적다."
+ },
+ {
+  "domain": "provider-protocol",
+  "question": "Keeper 턴이 보내기 전에 scope 의 풀리는 시각을 읽을 것인가? 지금은 거절을 직접 받은 Keeper 만 그 시각까지 쉰다.",
+  "by_the_book": "읽는다. exact walk·verifier 와 같은 규칙 하나를 쓴다. 남은 후보가 모두 말한 시각 안이면 dispatch 없이 Turn_rested 로 끝낸다. provider hard limit 은 헌법 budget_gate 의 예외다(docs/constitution.xml:464-471).",
+  "cost": "provider 가 일찍 풀어도 그 시각까지 못 쓴다. 'Keeper walk 는 순서 선호'라는 지금 결정을 바꾼다. 2,113번의 원인이 이것인지 먼저 재야 한다."
+ },
+ {
+  "domain": "provider-protocol",
+  "question": "공식 클라이언트 provider 의 동시 실행 허용량을 선언으로 둘 것인가?",
+  "by_the_book": "provider 선언에 두고 API lane 과 같은 대기열과 세 등급(Priority, Standard, Background)을 쓴다. Antigravity 의 8 은 그 선언의 기본값이 된다.",
+  "cost": "공식 턴은 도구 단계까지 slot 을 잡아 대기가 길다. 계정별 허용량은 provider 가 밝히지 않아 운영자가 정한다. Claude Code·Codex·Muse 의 fd·메모리를 먼저 재야 한다."
+ },
+ {
+  "domain": "provider-protocol",
+  "question": "fence 로 끝난 실패를 다음 걸음이 어떻게 읽을 것인가? 접수 뒤 turn_failed 도 증거로 남기는지, 기록한 Keeper 도 head 를 내리는지.",
+  "by_the_book": "둘 다 그렇다. '답하지 못한 실패는 후보 칸의 증거'(RFC-0458 §3.4)를 lane 과 무관하게 쓰고, 같은 턴에 회전하지 못한 실패는 기록자도 뒤 후보부터 걷는다.",
+  "cost": "입력 탓 실패도 다른 Keeper 걸음에서 head 를 민다. head 가 살아나도 누가 부를 때까지 뒤 후보에 머문다. #38174 로 없앤 고정이 공식 head 에 한해 돌아온다."
+ },
+ {
+  "domain": "provider-protocol",
+  "question": "sse_event 의 블록 종류를 닫힌 합으로 바꿀 것인가?",
+  "by_the_book": "바꾼다. 헌법 closed_sum_over_string 이 근거다. wire 문자열은 codec 경계에서만 parse 한다.",
+  "cost": "agent_core 공개 타입 변경이라 codec 여섯, 어댑터 넷, 스트림 브리지, 시험이 한 스택에서 같이 바뀐다. 진행 중인 SSE 스택 #51256 과 겹친다."
+ },
+ {
+  "domain": "provider-protocol",
+  "question": "공식 클라이언트 어댑터를 서명 하나로 묶는 일을 언제 할 것인가?",
+  "by_the_book": "Muse 스택 #51628 과 씨앗 마커 #51657 병합 직후, Vibe 의 Keeper lane 을 더하기 전에 한다.",
+  "cost": "2천 줄 안팎 파일 넷을 고친다. 그 파일들은 30일에 91번 바뀌어, 묶는 동안 다른 세션의 변경과 충돌한다."
+ },
+ {
+  "domain": "provider-protocol",
+  "question": "Draft 인 RFC-typed-terminal-reason 과 one-slot-fault-judgment 의 Provider 오류 확장을 받을 것인가?",
+  "by_the_book": "둘 다 받는다. 종료 사유가 먼저다. 운영자 화면에 닿기 때문이다.",
+  "cost": "receipt 저장 형식이 hard cut 이다. terminal_reason_code 를 가리키는 파일이 48개다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "question": "Keeper 가 보낸 메시지를 채팅 줄에 둘까, 대상의 event queue 행으로 옮길까?",
+  "by_the_book": "채팅 줄은 사람의 직접 입력만 쓰고 Keeper 가 보낸 것은 event queue 행으로 hard cut 한다. 근거: 자율 턴을 끊은 채팅 215건 중 207건이 Keeper 메시지였다(#51221 본문).",
+  "cost": "메시지 하나에 답하는 전용 턴이 없어지고, 답할지와 어디에 답할지는 받은 Keeper 가 고른다. 배포 때 대기 중인 Keeper 메시지는 지워진다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "question": "한 턴의 경계를 건수 32 로 둘까, 모델 입력 한도에서 끌어낸 byte 경계로 바꿀까?",
+  "by_the_book": "건수를 지우고 선언된 입력 한도에서 끌어낸 byte 경계 하나를 둔다. 잘린 사실은 저장하지 않고 큐를 읽어 Keeper 에게 보인다.",
+  "cost": "큐가 길면 첫 요청이 커진다. RFC 7절의 durable Admission_blocked 행은 '새 상태는 durable truth 가 손상될 때만'과 맞는지 다시 봐야 한다. 경계가 닿는 큐 길이는 재지 않았다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "question": "큐 행을 지우는 근거를 '한 번 보였다'로 둘까, '이어지는 입력 기록에 남았다'로 바꿀까?",
+  "by_the_book": "받은 행을 턴의 이어지는 입력 기록에 쓰고 그 뒤에 지운다. Schedule_due 와 Ask_answered 가 이미 가는 길이다.",
+  "cost": "대화 기록이 받은 행만큼 커지고 prefix cache 가 덜 맞는다(재지 않음). 오래된 Board 행이 기록에 남는다. 체크포인트 형식이 바뀌는 hard cut 이다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "question": "urgency 를 남길까?",
+  "by_the_book": "전부 받게 된 뒤에는 지우고, 경계에서 잘릴 때의 순서는 도착 순서로 한다. 번갈이 장치도 같이 지운다.",
+  "cost": "큐 형식과 일정 스키마의 hard cut. 사람이 기다리는 행을 앞에 두는 순서를 서버가 주지 않는다. 그 순서를 원하면 payload 종류에서 끌어내야 한다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "question": "자율 tick 턴에 '지난 자율 턴 뒤에 바뀐 것'을 실을까?",
+  "by_the_book": "tick 은 그대로 두고 바뀐 사실을 World State 의 층 하나로 싣는다. 문턱으로 tick 을 막지 않는다.",
+  "cost": "층 하나와 Keeper 별 cursor 가 는다. 하지 않으면 글만 쓰고 끝나는 턴(2026-10-06 측정 17.3%)은 그대로다. 헌법은 비용을 문제 삼지 않는다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "question": "공유 끝점의 신뢰 단위를 무엇으로 강제할지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "question": "root 없는 기기에 붙이는 길을 열지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "question": "끝점 job 층(lib/endpoint_job_*)을 이을 것인가 지울 것인가",
+  "by_the_book": "SSH 한 backend 에서 시작·상태·결과·취소가 도는 가장 얇은 경로를 먼저 잇고 그 경로가 안 쓰는 library 는 지운다. 근거: 이슈 #36941 열림, 호출 0건인 5,781줄.",
+  "cost": "끝점에 오래 사는 프로세스가 생긴다. RFC-0395 가 피하려던 새 daemon 이다. 안 하면 긴 빌드는 계속 연결에 묶인다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "question": "SSH 연결을 Keeper 마다 하나로 다시 쓸 것인가",
+  "by_the_book": "한 연결 위에 shim agent 를 두고 프레임을 여럿 보낸다. 연결을 다시 열 때마다 새로 인증한다. 근거: 캐시 빈 호출 2.5~2.7초 대 0.015초(문서 측정), 이슈 #50023.",
+  "cost": "키나 host key 를 바꿔도 이미 열린 연결은 옛 인증으로 계속 돈다. RFC-0395 가 연결 재사용을 끈 이유다. 연결 수명에 상한을 두면 그 값의 근거가 필요하다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "question": "microsandbox backend 와 Docker_exec 전송을 지울 것인가",
+  "by_the_book": "지운다. 부팅하지 않는 backend 와 시험만 부르는 전송은 죽은 개념이다.",
+  "cost": "msb 가 --cap-drop 과 --read-only 를 지원하면 다시 만들어야 한다. 이슈 #33492 를 같이 닫아야 한다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "question": "SSH 끝점의 망 모드를 무엇까지 열지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "question": "Board append·rewrite 의 전제 조건을 파일 전체 바이트 일치에서 cursor(device, inode, end_offset)로 바꿀까?",
+  "by_the_book": "cursor 로 바꾼다. comment 한 건이 읽는 양이 94.6 MB 에서 붙이는 줄 길이로 준다(계산).",
+  "cost": "누가 원장을 같은 길이로 제자리 편집하면 다음 전체 읽기(부팅)까지 못 잡는다. 지금은 다음 쓰기에서 잡는다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "question": "Tasks·Schedule 문서 store 를 행 단위 원장(한 건 = 한 줄 append, 문서는 메모리 projection)으로 바꿀까?",
+  "by_the_book": "바꾼다. 변경 한 건의 쓰기가 문서 크기와 무관해진다. 형식이 바뀌므로 헌법대로 hard cut(지우고 설치)이다.",
+  "cost": "설치 때 backlog 5.2 MB, schedules 12.3 MB, archive 7.2 MB 를 버린다. PR 이 크다. 형식을 두고 단일 주인과 묶음 쓰기만 하면 데이터는 남지만 통째 쓰기가 남는다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "question": "key 별 TTL lease 를 지우고 프로세스 경계를 시작 때 잡는 kernel lockf lease 하나에 맡길까?",
+  "by_the_book": "지운다. 프로세스 안은 store 주인의 FIFO 큐로 서고, 프로세스 죽음은 kernel 이 안다. 2분 시계와 50회 포기가 없어진다.",
+  "cost": "서버 밖 프로세스(TUI·CLI·오프라인 도구)가 같은 store 를 직접 쓰는 경로가 있으면 서버 API 로 옮겨야 한다. rg 한 패턴으로는 0건이었고 전수 확인은 못 했다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "question": "같은 프로세스 안 잠금 대기의 횟수 상한(50·100·200회)을 없앨까?",
+  "by_the_book": "없앤다. 대기는 FIFO 로 서고 취소로만 끝난다. 헌법 budget_gate 의 '없어도 되는 타임아웃은 제거'와 같은 쪽이다.",
+  "cost": "쥔 쪽이 안 놓으면 기다리는 fiber 가 계속 선다. 기다리는 잠금 이름과 쥔 쪽을 health 에 내야 한다. 상한을 더하는 RFC-0348(Draft)과 반대라 둘 중 하나를 닫아야 한다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "question": "권위 원장·권위 문서의 commit 에 전원 손실 내구성(macOS F_FULLFSYNC)을 요구할까?",
+  "by_the_book": "권위 등급에만 요구하고 파생 캐시·관측 로그에는 요구하지 않는다. 등급은 05번의 표가 정한다.",
+  "cost": "commit 당 지연이 는다. 이 감사는 재지 않았다. RFC 기록상 내구 append 가 45초에 4,104건이라 먼저 한 건의 시간을 재야 한다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "question": "Eio.Path 직접 호출과 직접 run_in_systhread 80곳을 Fs_compat 진입 하나로 모을까(RFC 7.6 S3)?",
+  "by_the_book": "모은다. 다만 06번의 'job 안에서는 syscall 만'을 먼저 한다.",
+  "cost": "순서를 바꾸면 host 도메인 하나의 락에 OCaml 구간이 더 몰린다. 호출 80곳을 진입점 단위로 옮기는 PR 이 여럿 필요하다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "question": "masc_decide(System One)를 Keeper 에게 열까",
+  "by_the_book": "Internal_name·Deferrable·leaves_masc=true 로 연다. Gate 가 호출마다 묻는다. 'Both operations' 주석을 고친다.",
+  "cost": "Ollama 와 nimble·clef:cloud 가 있어야 한다(tool_local_runtime_systemone.ml:48-49). cloud 호출 비용과 실험 계약(masc-decide.md:3-7) 정식화가 든다. 항상 실으면 요청마다 약 1.7 KB(설명 756 B + params 952 B)가 더해진다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "question": "endpoint_job_* 를 연결할까, 지울까",
+  "by_the_book": "연결한다. microVM·RemoteSSH 가 먼저다(§2.13, RFC-keeper-async-fleet-continuity). 연결 계획이 없으면 지운다.",
+  "cost": "연결은 별도 UID supervisor 와 보호 registry 경계가 필요하다(endpoint_job_protocol.mli:6-10). 지우면 .ml 3,718줄과 시험이 빠지고 다시 만들 때 처음부터 한다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "question": "모든 async producer 를 typed 작업 참조 하나와 기다림 도구 한 쌍으로 합칠까",
+  "by_the_book": "합친다. 규칙은 참조 하나, 끝 사실 하나, wait·read 한 쌍이다.",
+  "cost": "완료 레코드·outbox 형식을 hard cut 한다(호환 reader 없음). #51381 TLA spec 을 고친다. 완료 variant 소비처 다섯 곳(prompt fields, reaction ledger, heartbeat intake, world observation, waiting inventory)을 고친다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "question": "Keeper 도구 호출을 무엇으로 허용할지 정한다",
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "question": "같은 이름(tool_read_file 등 넷)이 MCP 와 Keeper 에서 다른 계약을 갖게 둘까",
+  "by_the_book": "이름 하나에 계약 하나로 hard cut 한다. MCP 파일 도구 이름이나 Keeper internal 이름 중 하나를 바꾼다.",
+  "cost": "바깥 MCP client 가 부르는 이름이 바뀐다(호환 별칭 없음). by_tool 카운터 키가 internal 이름이라 telemetry 이력이 끊긴다(mcp_server_eio_call_tool.ml:791-799)."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "취향 도구(음악·퀴즈·MSX·DOS)의 문을 어디에 둘까? 화면 문법 RFC 는 Overview 의 s·g 를 없애지만 갈 곳을 적지 않았다.",
+  "by_the_book": "팔레트 Play 묶음과 Overview 동작 창의 Play 묶음 한 곳에 모은다. 한 글자 문은 두지 않는다. 근거: RFC §3.2 가 b m s t u w z 를 한 글자 동작에서 뺐고 팔레트 Play 묶음이 이미 있다(bin/masc_tui_palette.ml:222-224).",
+  "cost": "첫 화면에서 한 키로 가던 음악·퀴즈가 두 키가 된다."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "음악 도구의 키를 TUI 문법에 맞출까?",
+  "by_the_book": "이동·도움말·끝내기·팔레트 키와 한글 자모 읽기만 TUI 표를 따른다. 편집 키(s 저장, u·y 되돌리기)는 DAW 관례로 둔다.",
+  "cost": "TUI 가 키 표를 내보내는 단계가 하나 생긴다. y·x·p 는 도구 안에서 TUI 와 뜻이 다르게 남는다."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "음악 도구를 release 에 넣을까?",
+  "by_the_book": "넣지 않는다. 개발자 장비용으로 두고 없을 때 s 가 설치 방법을 안내한다. TUI 안 재생만 제품 몫으로 둔다. 근거: Node·Swift·Python 의존, 10월 24일 뒤 커밋 둘.",
+  "cost": "다른 장비와 RemoteSSH 에서는 시퀀서가 없다."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "전체 화면 모드(음악·MSX·편집기)에서 기다리는 Keeper 를 보여 줄까?",
+  "by_the_book": "수만 한 줄로 보여 준다. 막거나 끌어내지 않는다(가시성은 projection).",
+  "cost": "Node 도구에 fd 한 줄 프로토콜, MSX 화면에 한 줄이 든다. 게임 화면이 한 줄 준다."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "alphatex-native.yml 의 PR 자동 실행(헌법 330행과 다름)과 어느 workflow 도 안 돌리는 Python 시험 셋을 어떻게 할까?",
+  "by_the_book": "workflow_dispatch 만 남기고 release 전 검사 목록에 넣는다. Python 시험 셋은 그 job 에 붙이거나 #50273 선례대로 지운다.",
+  "cost": "Swift companion 이 깨져도 병합 뒤에 안다. 10월 24일 뒤 커밋이 둘이라 빈도는 낮다."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "MSX·DOS 구경 화면 같은 곁가지를 다른 실행 파일로 뺄까?",
+  "by_the_book": "빼지 않는다. 같은 실행 파일 안에서 mode variant 와 모듈 경계로 가른다. 근거: 실행 파일을 늘리면 30분 빌드 관측(헌법 331행, 실행 파일 4개)과 release 가 는다.",
+  "cost": "링크 시간과 바이너리 크기는 그대로다(이 장비의 masc-tui 133 MB)."
+ },
+ {
+  "domain": "tui-core-music",
+  "question": "음악 기능의 빈칸(재생 위치 표시, 겹쳐 녹음, tab 편집, Keeper 왕복) 가운데 무엇을 먼저 할까? 열린 이슈 지도 결정 5번은 음악을 곁가지로 묶어 뒤로 민다.",
+  "by_the_book": "Keeper 왕복을 먼저 한다. 헌법 roadmap 에 취향 도구 한 줄(핵심 경로를 막지 않는다, release 필수가 아니다)을 적어 정리 캠페인의 기준으로 삼는다.",
+  "cost": "헌법 개정 한 건. DAW 로서의 완성도(재생 위치, 겹쳐 녹음, tab 편집)는 뒤로 간다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "question": "Keeper 가 자기 사용 통계를 어떻게 받는가: 조회 도구인가 프롬프트 주입인가.",
+  "by_the_book": "조회 도구. 운영자 화면과 같은 projection 을 Keeper 자기 행만 걸러 주고 프롬프트에는 싣지 않는다. 근거: 켠 주입 설정 0개, 운영자 projection 이 이미 있다.",
+  "cost": "Keeper 가 부르지 않으면 되먹임이 생기지 않는다. 도구 schema 하나가 는다(defer_loading 이라 요청마다 실리지는 않는다). fleet 비교는 운영자 화면에만 남는다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "question": "도구 호출의 authority 를 하나로 줄일 때 무엇을 남기는가.",
+  "by_the_book": "tool_calls 행 하나. SQLite 시계열, telemetry 의 Tool_called, registry 카운터는 그 행의 projection 으로 바꾸고 쓰는 경로를 지운다. 근거: 카운터 둘을 큰 쪽으로 맞추는 코드(lib/tool_unified.ml:32-47).",
+  "cost": "hard cut 이라 tool-metrics.sqlite3 의 지난 행을 옮기지 않는다. dashboard Tools 와 TUI 카탈로그를 같은 PR 묶음에서 새 reading 으로 옮겨야 한다. SSE 스택 #51256 병합 뒤로 미뤄진다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "question": "프로세스 메모리 metric 을 어떻게 둘 것인가.",
+  "by_the_book": "선언에 reader 를 적게 하고 reader 가 없는 이름은 Export_only 로 드러낸다. 손실 신호는 원장 행(coverage gap)으로 남긴다. 근거: emit 540곳 대 읽는 호출 23곳, OTel 기본 꺼짐.",
+  "cost": "이름 약 350개를 한 번 분류해야 한다(codemod 가능). 읽는 곳 없는 계측이 다수 드러나고, 지우는 것은 건마다 품질 근거가 필요하다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "question": "telemetry_feedback_* 주입 경로를 지우는가.",
+  "by_the_book": "지운다. 켠 설정이 0개이고 내용이 fleet 값이며 조회 도구가 대신한다.",
+  "cost": "그 키를 쓴 TOML 은 hard cut 뒤 거절된다. 도구보다 먼저 지우면 그 사이 되먹임 수단이 없으니 도구 PR 과 같은 스택에 둔다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "question": "구독 lane 의 cost_usd 를 어떻게 보이는가.",
+  "by_the_book": "가격이 없는 lane 은 USD 합계 대신 가격 없음으로 적고 토큰·요청 수·한도 창 사용률을 주 지표로 쓴다. 근거: 헌법상 provider 는 구독이거나 로컬이다.",
+  "cost": "masc cost 와 TUI 효율 화면의 cost 열이 바뀐다. API 과금 lane 을 나중에 붙이면 Keeper_cost_coverage 의 priced 갈래를 그때 화면에 다시 올려야 한다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "question": "손으로 돌리던 측정 가운데 무엇을 제품 보고서로 옮기는가.",
+  "by_the_book": "설정 선언이 기대는 측정 셋(도구 schema 비용, block 변동률, 같은 도구 되부르기)부터 옮긴다. 근거: 그 숫자들이 9월 측정 한 번에 고정돼 있다.",
+  "cost": "OCaml 보고서마다 type-check 가 든다(PR 수에 비례하지 않는다). 대조가 끝날 때까지 같은 수를 스크립트와 제품 두 방식으로 내는 기간이 생긴다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "요구 15 에 사람이 읽는 화면 글(TUI·dashboard·서버 HTML)이 드는가",
+  "by_the_book": "든다. 화면 글도 닫힌 key 로 찾는 TOML 문구 표로 뺀다.",
+  "cost": "TUI ~ko 2,084곳·한글 literal 4,461개, dashboard 한글 줄 8,037개, 서버 응답 문장을 옮긴다. 스택 #51624 와 같은 파일을 건드린다. TUI 글자 시험은 헌법이 금지하므로 검증은 타입으로만 한다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "세계 묶음에 무엇이 드는가",
+  "by_the_book": "세계의 뜻(worldview, Keeper 지시문·부르는 이름·활성 방식·skill 선택, 헌법 조항, wake prompt, Candle 정책)은 든다. 장비에 묶인 것(sandbox, remote endpoint, runtime 배정)은 Machine_posture 로 가른다.",
+  "cost": "Keeper key 22개를 두 무리로 가르는 타입 변경과 RFC-0442 원장 들이기 개정이 든다. wake prompt 때문에 restore 가 재시작을 요구한다. Candle 정책은 Keeper 가 읽는 곳에 닿지 않아야 한다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "restore 는 덧붙이기인가 바꾸기인가",
+  "by_the_book": "바꾸기. 묶음에 없는 Keeper 는 그 세계에 없다.",
+  "cost": "돌고 있는 Keeper 를 내리는 경로가 restore 에 들어간다. 손으로 만든 Keeper 가 사라질 수 있어 확인 화면이 필요하다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "다른 형식 버전으로 저장한 세계를 읽을 것인가",
+  "by_the_book": "hard cut. 형식 버전이 다르면 typed 이유로 거절하고 호환 reader 를 두지 않는다.",
+  "cost": "버전이 오를 때마다 저장해 둔 세계를 다시 저장해야 한다. 2026-10-24 에 운영 preset 둘이 한때 둘 다 안 읽혔다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "도구 설명을 운영자가 바꿀 수 있어야 하는가",
+  "by_the_book": "success_bar 대로 prompt 와 같은 override 층을 두고 boot 때만 읽는다.",
+  "cost": "도구 스키마가 서버마다 달라져 lane probe·시험 기준이 흔들린다. RFC §6 이 hot-reload 를 빼 두어 바꾸면 재시작이 든다. 반대로 고르면 runtime 사본을 지운다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "환경변수로만 바뀌는 설정을 어디까지 TOML 로 옮기는가",
+  "by_the_book": "비밀값과 boot 경로만 env 에 남긴다. 나머지는 registry 줄과 TOML key 로 옮기고 옛 env 이름은 거절한다.",
+  "cost": "registry 밖 이름 105개 가운데 약 85개와 Env_only 24줄 작업, 설치 스크립트·Docker 수정이 든다. RFC-runtime-settings-have-one-owner 의 D4 와 겹친다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "OCaml 안의 JavaScript·Python·SQL·HTML 본문을 파일로 뺄 것인가",
+  "by_the_book": "config/ 아래 파일로 두고 Embedded_config 로 읽는다.",
+  "cost": "값을 끼우는 본문에는 typed template 이 필요하다. HTML 안의 글은 결정 1 을 따른다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "presets/world-* 18개를 새 형식으로 다시 쓸 것인가 지울 것인가",
+  "by_the_book": "형식이 하나가 되면 다시 쓰되 RFC-0435 선행 조건이 안 풀린 세계는 싣지 않는다. 장비 설정과 금지 문장은 뺀다.",
+  "cost": "파일 90개를 다시 쓰거나 지우고 presets/README.md 와 world-presets 설계 문서를 고친다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "세계를 바꿀 때 Keeper 기억을 이어 가는가",
+  "by_the_book": "Keeper 는 (세계, 자리) 로 부른다. 다른 세계의 같은 자리는 다른 Keeper 이고 기억을 잇지 않는다.",
+  "cost": "기억·session 경로가 세계를 포함하도록 hard cut 한다. 운영 Keeper 29개의 기억을 옮기거나 버린다. 다계정 S1b 의 사람별 이름과 함께 정해야 한다."
+ },
+ {
+  "domain": "world-config-text",
+  "question": "keeper.name key 를 남길 것인가",
+  "by_the_book": "지운다. 파일 이름이 Keeper 이름이다.",
+  "cost": "name 을 적은 TOML 이 모르는 key 로 거절되어 운영자가 한 줄씩 지운다. keeper-create 가 쓰는 줄(lib/keeper/keeper_turn_up_config_persistence.ml:315)도 지운다."
+ }
+]

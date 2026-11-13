@@ -1,0 +1,216 @@
+{
+ "key": "tui-music",
+ "findings": [
+  {
+   "id": "tui-music-01",
+   "claim": "한글을 조합하는 동안에는 kitty keyboard protocol flag 를 다 켜도 누른 키가 오지 않는다. Ghostty 인코더는 조합 중 키를 보내지 않고 조합된 글자를 UTF-8 로만 보낸다(key_encode.zig 줄 151–159, 224–232, test 줄 1518–1535). 명세도 키 정보가 없으면 key number 0 의 text event 라고 적는다.",
+   "src": "Ghostty src/input/key_encode.zig @4892f5013b37, kitty keyboard protocol 명세 @fa1d1b40ab86 | https://github.com/ghostty-org/ghostty/blob/main/src/input/key_encode.zig",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`bin/masc_tui_csi.ml:156` 의 flag 1, `bin/masc_tui_key_ime.mli:20`, RFC §3.1 의 '대문자에만 있는 키를 두지 않는다'를 그대로 둔다. flag 8·16 으로 한글 상태의 키를 되찾는 계획은 세우지 않는다. 헌법·brief 충돌 없음.",
+   "caveat": "읽은 구현은 Ghostty 인코더뿐이다. kitty·iTerm2·WezTerm·Windows Terminal 의 한글 입력기 동작은 확인하지 않았다. 조합된 글자가 넘어오는 시점은 OS 와 터미널이 정한다.",
+   "check": "overstated Ghostty 152–159·225–232·1518–1535, 명세 266행은 원문대로다. 그러나 근거는 Ghostty 하나이고 시험 글자는 'û'(한글 아님), 조합 중에도 modifier 키는 보낸다. 명세는 OS·IME 에 따른다고 적어 모든 터미널로 넓힌 첫 문장은 과하다."
+  },
+  {
+   "id": "tui-music-02",
+   "claim": "누르고 있는 동안만 유지되는 mode 가 걸어 두는 mode 보다 mode error 가 적다. 실험 1(24명): 발판 대 키보드 F(1,11)=20.74, p<.001. 화면 표시도 오류를 줄였지만 설명한 분산은 4.8% 로 전환 방식 15.6% 보다 작다. 실험 2(15명): F(2,28)=25.8, p<.0001.",
+   "src": "Sellen, Kurtenbach, Buxton (1992) The Prevention of Mode Errors Through Sensory Feedback, Human-Computer Interaction 7(2), 저자 게시본 | https://www.billbuxton.com/ModeErrors.html",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "RFC §3.2 '한 글자 한 뜻'과 §3.3 조심 묶음(in_flight)을 받치는 측정이다. RFC §3.4 의 채팅 `Esc`(턴 멈춤 또는 나가기)를 다시 정할 때 근거로 쓴다. 앱 전체에 vim 식 mode 를 얹지 않는다. 지금 바꿀 것은 없다.",
+   "caveat": "1992년, 발판과 키보드, vi 식 편집 과제다. 평균 오류 수는 그림에만 있어 옮기지 않았다. 저자 게시본이라 학술지 쪽 번호가 없다. TUI 겹침 창에서 잰 것이 아니다.",
+   "check": "verified 실험 1 은 전문가 12·초보 12명, liberal F(1,11)=20.74 p<.001, 분산 15.6% 대 4.8%. 실험 2 는 전문가 15명, F(2,28)=25.8 p<.0001. 20.74 는 liberal 기준 값이다(conservative 13.51). Crossref 로 HCI 7(2) 141–164 확인."
+  },
+  {
+   "id": "tui-music-03",
+   "claim": "메뉴 옆에 단축키를 적어 두기만 하면 단축키로 넘어가지 않는다. 42명 실험에서 단축키 사용은 control 28.9%, audio 66.6%, disabled 72.8% 였고(F2,82=47.0, p<.0001, p.1597) control 14명 중 7명은 0% 였다. 단축키를 눈에 띄게 한 표시는 예비 실험에서 50% 대 57.1% 로 낫지 않았다(p.1595).",
+   "src": "Grossman, Dragicevic, Balakrishnan (2007) Strategies for Accelerating On-line Learning of Hotkeys, CHI 2007 pp.1591–1600 | https://www.dgp.toronto.edu/~ravin/papers/chi2007_learninghotkeys.pdf",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "RFC §2 구역 5 의 키 안내와 `?` 만으로 키를 익힌다고 기대하지 않는다. §3.3 동작 창(in_flight)은 처음 쓰는 사람과 익숙한 사람이 같은 키를 눌러 갈아타는 단계가 없다(보고서의 추론). 메뉴를 늦추는 방식은 넣지 않는다.",
+   "caveat": "2007년 마우스 메뉴와 modifier 단축키, 속도에 돈을 건 실험 과제다. 저자도 good-subject effect 가능성을 적었다. 첫 block 은 두 기법이 더 느렸다. TUI 가 아니다.",
+   "check": "verified 42명, 28.9%·66.6%·72.8%, F2,82=47.0, '7 of the 14… 0%' 는 p.1597 에 있다. 예비 실험(5명) visual 50% 대 control 57.1%(유의차 없음)는 p.1595 에 있다. 첫 문장은 초록의 'commonly ignore… go unused' 와 같은 뜻이다."
+  },
+  {
+   "id": "tui-music-04",
+   "claim": "트래커는 범위 × 동사로 편집 키를 짜고 Space 는 재생이다. FT2 는 Shift/Ctrl/Alt 가 track/pattern/block, F3–F5 가 cut/copy/paste 이고 'Space Stop/Edit' 다(FT2.HLP 줄 448–464). MASC 음악 작업대의 Space·p·x·y 는 RFC 와 뜻이 다르고 RFC 는 이 화면을 다루지 않는다.",
+   "src": "FastTracker 2 도움말 자료 (ft2-clone src/helpdata/FT2.HLP @923829b28946), Renoise Advanced Edit 문서 | https://github.com/8bitbubsy/ft2-clone/blob/master/src/helpdata/FT2.HLP",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`tools/alphatex/sequencer-tui.mjs:52,898,945` 의 키가 RFC §3.1·§3.2 와 겹친다. 사용자 결정 하나: 작업대를 `$EDITOR` 같은 예외로 적고 `?`·`Esc`·`:` 만 맞춘다(정석, 대가는 문법 둘). `:61`, `:79` 명령은 범위를 닫힌 값 인자로 받게 한다.",
+   "caveat": "FT2 도움말은 원작을 다시 만든 저장소에 실린 자료이고 Renoise 문서는 일부만 읽었다. 관례가 있다는 것이지 쓰기 편하다고 잰 것이 아니다. 음악 도구는 TUI 핵심보다 뒤 순위다.",
+   "check": "misquoted FT2 448–456 의 Shift/Ctrl/Alt × F3–F5 는 맞다. 그러나 464행은 'Space Stop/Edit' 이고 재생은 Right Ctrl·Right Alt(461–462)다. 'Space 는 재생'은 FT2 와 다르다. 받치는 것은 Orca-c README 'Spacebar Play/Pause' 뿐이다. 저장소·RFC 서술은 HEAD 에서 맞다."
+  },
+  {
+   "id": "tui-music-05",
+   "claim": "Helix 는 키 처리와 키 안내를 map 하나에서 만든다. `KeyTrieNode` 의 `map: IndexMap<KeyEvent, KeyTrie>` 는 키 → 동작 방향이라 한 키에 두 동작을 담을 수 없고, `infobox()` 가 같은 map 에서 안내 상자를 만든다. 결과는 닫힌 enum `KeymapResult` 다(keymap.rs 줄 23–86, 248–258).",
+   "src": "Helix helix-term/src/keymap.rs @59f323140e8a | https://github.com/helix-editor/helix/blob/master/helix-term/src/keymap.rs",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`bin/masc_tui_keys.ml:37` 의 `binding` 은 동작 → 키 목록이라 글자 중복을 적을 수 있다. RFC §3.5(in_flight) 층에서 화면이 '글자 variant → 동작 option' 전함수를 내면 type checker 가 중복을 막는다. CI 검사를 더하지 않는다.",
+   "caveat": "Helix 는 사용자가 키를 바꾸는 편집기다. MASC 에 그 요구가 있는지는 모른다. 전함수 정의는 이 보고서의 제안이고 문법 스택을 맡은 세션과 맞춰야 한다.",
+   "check": "verified keymap.rs 23–31(KeyTrieNode, map: IndexMap<KeyEvent, KeyTrie>), 57–86(infobox), 248–258(KeymapResult 다섯 갈래)이 master 와 같다. 덧붙임: KeyTrie::Sequence 로 한 키에 명령 여럿을 차례로 묶을 수는 있다. 경쟁하는 두 뜻은 담지 못한다."
+  },
+  {
+   "id": "tui-music-06",
+   "claim": "Helix compositor 는 그리는 순서와 키 받는 순서를 층 목록 하나에서 낸다. `layers: Vec<Box<dyn Component>>` 를 `render` 는 앞에서부터, `handle_event` 는 `.rev()` 로 돌며 `EventResult::Consumed` 에서 멈춘다(compositor.rs 줄 79, 156–188).",
+   "src": "Helix helix-term/src/compositor.rs @462c98e03309 | https://github.com/helix-editor/helix/blob/master/helix-term/src/compositor.rs",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "겹침 창 상태가 필드로 흩어져 있고(`bin/masc_tui_types.ml:9395,9418,9429`) `docs/research/2026-10-28-tui-information-layers.md:102–109` 가 About 이 Help 를 가리는 예를 적었다. 열린 창을 닫힌 variant 목록 하나로 두는 RFC 를 따로 쓴다. 화면을 옮기는 층마다 옮긴다.",
+   "caveat": "Helix 의 층은 같은 trait 의 부품이다. MASC 에는 서버 상태가 주인인 창과 터미널을 넘기는 화면이 섞여 있다. 43,627줄 dispatcher 를 한 번에 바꾸지 않는다.",
+   "check": "verified compositor.rs 79 layers, 159 iter_mut().rev() 와 Consumed 에서 break, 184–188 render 는 앞에서부터. master 와 같다. MASC 좌표는 HEAD 8cc7dba8005c 에서 types.ml 9414·9437·9448 로 옮겨졌다(보고서는 9395·9418·9429)."
+  },
+  {
+   "id": "tui-music-07",
+   "claim": "alphaTab 은 Guitar Pro 3–8, MusicXML, Capella 를 읽고 alphaTex 글로 내보낸다. 1.8.4 타입 선언에 `ScoreLoader.loadScoreFromBytes`(줄 15060)와 `AlphaTexExporter.exportToString`(줄 3700)이 있다. exporter 는 1.7.1 에 들어왔고 최신은 1.9.0(2026-10-31)이다.",
+   "src": "alphaTab 문서(Formats), releases, alphaTab.d.ts 1.8.4 | https://alphatab.net/docs/formats/guitar-pro",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`tools/alphatex/engine.mjs:29` 는 `AlphaTexImporter` 만 쓰고 `bin/masc_tui_attachment_action.mli:18` 에서 악보 첨부는 저장만 된다. `masc-alphatex` 에 바이트 → alphaTex 글 변환을 더하면 Guitar Pro 첨부가 열리고 Keeper 가 악보를 글로 읽는다.",
+   "caveat": "변환이 무엇을 잃는지 돌려 보지 않았다. 고정 판은 1.8.4 이고 OCaml 쪽 부분 reader 도 1.8.4 동작을 따른다. exporter 출력이 그 부분집합을 넘는지 직접 만든 fixture 로 봐야 한다.",
+   "check": "verified d.ts 1.8.4 의 15060·3700행, v1.7.1(2025-12-02) 'Add alphaTex exporter', npm 1.9.0(2026-10-31)을 확인했다. 두 API 는 1.9.0 에도 있다. 다만 source_url 은 sitemap 에 없는 경로라 홈 화면을 돌려준다. 같은 형식 목록은 홈 화면과 formats 분류 쪽에 있다."
+  },
+  {
+   "id": "tui-music-08",
+   "claim": "터미널 기능은 질의로 알 수 있다. kitty keyboard 는 `CSI ? u` 뒤에 DA1 을 붙여 묻고(명세 줄 311–318, 440–449) mode 2026 은 DECRQM 으로 묻는다. Windows Terminal(PR 19817, 2026-02-17)과 xterm.js(PR 5600, 2026-01-10)가 구현을 병합했고 tmux 3.7 이 mode 2026 을 통과시킨다.",
+   "src": "kitty keyboard protocol 명세 @fa1d1b40ab86, tmux CHANGES @5a820e63b72f, Synchronized Output gist | https://sw.kovidgoyal.net/kitty/keyboard-protocol/",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`bin/masc_tui_terminal_profile.ml:17–26` 은 `TERM_PROGRAM` 이름과 환경 변수로 가른다. `bin/masc_tui_terminal_probe.mli` 의 시작 probe 에 두 질의를 더하고 답으로 정한다. `bin/masc_tui.ml:30948` 의 터미널 이름 목록은 기능 이름으로 바꾼다.",
+   "caveat": "Windows Terminal 배포판, VS Code 에 실린 xterm.js 판, macOS 26 Terminal.app 은 확인하지 않았다. tmux 의 kitty keyboard 처리는 CHANGES 에 없다. SSH 지연에서 probe deadline 이 넉넉한지 재지 않았다.",
+   "check": "verified 명세 315·319·441–450행, WT PR 19817 병합 2026-02-17, xterm.js PR 5600 병합 2026-01-10, gist 의 DECRQM 은 원문대로다. tmux 3.7 원문은 '앱이 DECSET 2026 을 쓰게 지원'과 'DECRQM 2026 응답'이라 '통과시킨다'는 느슨하다. masc_tui.ml:30948 은 HEAD 에서 30923 이다."
+  },
+  {
+   "id": "tui-music-09",
+   "claim": "MIDI 2.0(UMP)이 Linux 와 Windows 에 OS 수준으로 들어왔다. Linux 는 `/dev/snd/umpC*D*` 와 sequencer 자동 변환을 준다. PipeWire 1.4.0(2025-03-06)은 UMP 를 기본 형식으로 쓰고 1.5.81 이 `pw-midi2play` 를 넣었다(NEWS 줄 422–424, 482–484). Windows MIDI Services 는 2026-02-17 정식이다.",
+   "src": "PipeWire NEWS (master), Linux kernel 문서 MIDI 2.0 on Linux, Windows Experience Blog 2026-02-17 | https://gitlab.freedesktop.org/pipewire/pipewire/-/blob/master/NEWS",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "UMP 수집과 PCM 출력 sidecar 는 Swift 이고 `tools/alphatex/README.md:59` 는 macOS 15 이상을 요구한다. Linux 경로는 문서에 없다. 같은 NDJSON 규약의 Linux sidecar(ALSA UMP, PipeWire)를 뒤 순위 일감으로 둔다. RemoteSSH 기기가 Linux 일 때 필요하다.",
+   "caveat": "MIDI 2.0 명세 본문(JR timestamp, Clip File)은 로그인 뒤에 있어 원문 미직독이다. Linux 에서 돌려 보지 않았다. MASC 가 MIDI Clip File 을 쓰는지는 확인 필요다.",
+   "check": "verified GitLab 은 봇 확인 화면이라 공식 GitHub 거울(오늘 커밋, NEWS 는 2026-02-19 뒤 그대로)로 읽었다. 422–424 는 1.5.81 절, 482–484 는 1.4.0 절이다. kernel 문서의 umpC*D*·자동 변환, Windows 2026-02-17 GA(단계적 배포)도 맞다."
+  },
+  {
+   "id": "tui-music-10",
+   "claim": "오디오 callback 안에서는 걸리는 시간을 모르는 일을 하지 않는다(Bencina: If you don't know how long it will take, don't do it). SuperCollider 는 소리 엔진을 OSC 로 조종하는 별도 프로세스로 두고 timestamp 를 붙인 bundle 을 `s.latency`(기본 0.2초) 앞서 보낸다.",
+   "src": "R. Bencina (2011) Real-time audio programming 101: time waits for nothing, SuperCollider Server Timing 문서 | http://www.rossbencina.com/code/real-time-audio-programming-101-time-waits-for-nothing",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "`tools/alphatex/native/PCM-OUTPUT.md:30` 의 callback 은 합성·IPC·할당·잠금을 하지 않아 같은 규칙이다. 바꿀 것은 없다. Linux sidecar 를 쓸 때 같은 규칙을 지키고, NDJSON + base64 PCM 전송 지연을 먼저 잰다.",
+   "caveat": "경험 글과 제품 문서이고 측정이 아니다. MASC 전송 지연을 잰 기록은 찾지 못했다. SuperCollider 의 0.2초는 그 제품의 기본값이라 MASC 에 옮길 숫자가 아니다.",
+   "check": "verified Bencina 글(2011-07-05 게시)에 문장이 두 번 나온다. SuperCollider 문서는 'latency = 0.2; // 0.2 is the default' 와 timestamp bundle 을 적는다. 같은 문서는 MIDI·GUI 같은 실시간 입력에는 latency 를 두지 말라고도 적는다."
+  },
+  {
+   "id": "tui-music-11",
+   "claim": "Kakoune 저자는 고른 것 먼저, 동사 나중과 바로 보이는 선택을 설계 이유로 든다: object followed by verb, combined with instantaneous feedback. 설계 문서는 only d exists, Limited smartness, self-consistency is more important than Vim compatibility 를 적는다(design.asciidoc 줄 63–65, 109–113, 150–152).",
+   "src": "Kakoune doc/design.asciidoc @40ddd7c67ddc, Why Kakoune(저자 글) | https://github.com/mawww/kakoune/blob/master/doc/design.asciidoc",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "RFC 의 '고른 줄 → `Space` → 동작'과 옛 키 호환을 두지 않는 결정(in_flight)이 같은 방향이다. 더할 것은 없다. 문맥에 따라 뜻이 바뀌는 키를 새로 만들지 않는 근거로만 쓴다.",
+   "caveat": "저자의 설계 이유이고 측정이 아니다. 글 편집기의 문법이라 목록·상세 화면에 그대로 맞는지는 따로 봐야 한다.",
+   "check": "verified design.asciidoc 64–65·109–110·151–152행과 Why Kakoune 의 'object followed by verb, combined with instantaneous feedback' 이 원문 그대로다. 고정 커밋과 master 가 같다. 근거 종류는 저자 의견이다."
+  },
+  {
+   "id": "tui-music-12",
+   "claim": "Mosaic(OCaml, Eio)는 0.2.0(2026-11-04)에서 API 대부분을 바꾸고 Windows 를 뺐다. 이유로 widget 이 갖던 상호작용 상태가 model 과 어긋났다고 적는다(CHANGES 줄 205–219). Bubble Tea v2.0.0(2026-02-24)은 mode 2026 을 기본으로 쓰고 키 기능을 메시지로 알린다.",
+   "src": "Mosaic CHANGES.md @75f374107e7b, Bubble Tea v2.0.0 release notes | https://github.com/invariant-hq/mosaic",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "프레임워크로 옮기지 않는다. MASC renderer 는 alt screen·mode 2026·줄 단위 diff 를 이미 갖고 있다(frame-cost 문서). 상태를 한 값이 갖게 하는 방향은 동작 창 정의(05)와 겹침 창 목록(06) 제안을 받친다.",
+   "caveat": "Mosaic 의 0.4 ms 는 조건 없는 자체 benchmark 라 옮기지 않았다. Minttea 는 Riot 위이고 2024-04 뒤로 멈췄다. Notty 도 2024-04 가 마지막 push 다.",
+   "check": "verified Mosaic 0.2.0(2026-11-04) 205–219행과 Bubble Tea v2.0.0(2026-02-24)의 'Mode 2026… enabled by default'·KeyboardEnhancementsMsg 는 원문대로다. 다만 같은 파일 [Unreleased] 절이 Windows 콘솔 지원을 되살렸다(미출시). 인용한 이유는 API 변경의 이유이고 Windows 제거의 이유는 아니다."
+  },
+  {
+   "id": "tui-music-13",
+   "claim": "VST 3 SDK 는 3.8(2025-10-20)부터 MIT 다. CLAP 1.2.10 은 C header 이고 이벤트가 buffer 안 sample offset 을 싣고 MIDI 2.0 dialect 가 있다(events.h 줄 20, 121). Pedalboard 는 VST3 와 Audio Unit 만 읽고 CLAP 이슈 #270 은 2023-11-08 부터 열려 있다.",
+   "src": "Steinberg VST 3 Developer Portal, CLAP headers 1.2.10, Pedalboard README·issue #270 | https://steinbergmedia.github.io/vst3_dev_portal/pages/VST+3+Licensing/VST3+License.html",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`tools/vst/requirements.txt:1` 의 `pedalboard==0.9.26` 과 자식 프로세스 host 를 그대로 둔다. `tools/vst/README.md:179` 가 GPL-3.0 을 이미 적었다. CLAP host 는 요청과 측정이 생기기 전에는 만들지 않는다.",
+   "caveat": "Pedalboard 가 VST3 note expression 이나 MIDI 2.0 음별 데이터를 내보내는지 확인하지 않았다. 라이선스 해석은 하지 않았다. Pedalboard README 는 묶인 VST3 SDK 를 GPLv3 로 적는다.",
+   "check": "verified VST 3.8.0(2025/10/20) 'released under the MIT license', CLAP main 1.2.10 의 events.h 20·121행과 note-ports.h 29행, Pedalboard README 의 VST3·Audio Unit, issue #270(2023-11-08 생성, 아직 열림)을 확인했다."
+  },
+  {
+   "id": "tui-music-14",
+   "claim": "과제 중심 화면에서 유머가 든 응답은 호감을 올렸고 과제 시간과 들인 노력은 바꾸지 않았다. 안 웃긴 농담을 받은 쪽은 덜 사교적으로 답했다. 실험 넷의 요약이고 수치는 원문 미직독이라 없다.",
+   "src": "Morkes, Kernal, Nass, Effects of Humor in Task-Oriented HCI and CMC (Human-Computer Interaction 14(4)), Stanford 세미나 초록 2000-02-25 | https://hci.stanford.edu/seminar/abstracts/99-00/000225-morkes.html",
+   "depth": "abstract_only",
+   "kind": "measured",
+   "apply": "유머는 결정을 싣지 않는 화면 글(기다림, 빈 목록, MSX 관전 `bin/masc_tui_types.ml:9654`, 음악 작업대)에 두고 끌 수 있게 한다. 조심 묶음 확인과 실패 알림에는 두지 않는다. Keeper 프롬프트 문장과 문구 시험은 만들지 않는다.",
+   "caveat": "초록만 읽었고 논문 본문은 403 이었다. 1999년, 미리 짜 둔 글 응답을 주고받는 과제다. 저장소에서 humor·유머·joke 를 찾지 못해 지금 둘 모듈이 정해져 있지 않다.",
+   "check": "verified 초록에 실험 넷, 호감 상승, 'Task time and the amount of effort… unaffected', 안 웃긴 농담 쪽 'more unsociably' 가 있다. 과제 시간 문장은 CMC 인 실험 1 의 결과이고 HCI 인 실험 2 는 'generally consistent' 다. Crossref 로 HCI 14(4) 395–435 를 확인했다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "kitty keyboard flag 8·16 으로 한글 입력 상태의 키를 되찾기",
+   "why_not": "Ghostty 는 조합 중 키를 보내지 않고 조합된 글자를 flag 와 상관없이 UTF-8 로만 보낸다. 명세도 키 정보가 없으면 text event 라고 적는다."
+  },
+  {
+   "idea": "Mosaic·Minttea·Notty 로 TUI 를 옮기기",
+   "why_not": "Mosaic 는 2026-11-04 에 API 대부분을 바꾸고 Windows 를 뺐다. Minttea 는 Eio 가 아닌 Riot 위이고 2024-04 뒤로 멈췄다. 품질 증거 없이 43,627줄을 옮기는 것은 brief §2.9 와 어긋난다."
+  },
+  {
+   "idea": "FT2 식 modifier + F 키 문법을 그대로 쓰기",
+   "why_not": "macOS 는 기본 설정에서 F1–F12 에 Fn 이 필요하다(Apple Support 102439). 가져올 것은 범위 × 동사 구조뿐이다."
+  },
+  {
+   "idea": "ASCII tab 을 저장·교환 형식으로 쓰기",
+   "why_not": "표준 문법 문서를 찾지 못했다. MASC 는 alphaTex 를 원본으로 두고 fret·줄 번호 투영으로 그린다(`bin/masc_tui_alphatex_score.mli`)."
+  },
+  {
+   "idea": "sixel 을 먼저 지원하기",
+   "why_not": "kitty·Ghostty·Alacritty·Warp 에 없다(2차 자료). 그림 경로는 지금 하나이고 질의로 가른다. Windows Terminal·VS Code 에서 요구가 나오면 다시 본다."
+  },
+  {
+   "idea": "SuperCollider 를 필수 소리 엔진으로 두기",
+   "why_not": "설치할 것이 하나 더 는다. 가져올 것은 timestamp 를 붙여 미리 보내는 규칙이고 MASC sidecar 는 이미 장치 시계로 돈다."
+  },
+  {
+   "idea": "CLAP plugin host 를 지금 만들기",
+   "why_not": "Pedalboard 는 CLAP 을 읽지 않는다. 요청도 측정도 없어 요청하지 않은 기능이 된다."
+  },
+  {
+   "idea": "JS 타이머 lookahead(25 ms/100 ms)로 재생 예약하기",
+   "why_not": "브라우저 타이머가 부정확해서 쓰는 방식이다. 숫자를 그대로 들이면 헌법의 magic number 다."
+  },
+  {
+   "idea": "에뮬레이터 화면 글을 읽는 TUI 시험(snapshot, golden, Mosaic matrix.test)",
+   "why_not": "헌법 execution_protocol 과 brief §2.7 이 화면 문구·배치·줄 순서 시험을 막는다. 시험은 키 → 동작 같은 결정만 본다."
+  },
+  {
+   "idea": "메뉴를 늦추거나 막아서 단축키를 가르치기",
+   "why_not": "단축키 사용은 늘었지만 늦추는 방식은 7점 중 2.2점을 받았고 첫 block 은 더 느렸다(Grossman 2007 p.1596, p.1598)."
+  },
+  {
+   "idea": "앱 전체에 vim 식 normal/insert mode 얹기",
+   "why_not": "걸어 두는 mode 를 늘려 mode error 를 만든다(Sellen 1992). RFC 의 한 글자 한 뜻(in_flight)과 어긋난다."
+  },
+  {
+   "idea": "which-key 식으로 일정 시간 뒤에 뜨는 키 안내",
+   "why_not": "지연 값이 상수다. RFC 동작 창은 `Space` 로 바로 연다."
+  },
+  {
+   "idea": "글자 중복을 세는 CI·lint 검사",
+   "why_not": "PR 수에 비례하는 비용이고(brief §2.6) RFC §12 도 하지 않는다고 적었다. 키 → 동작 전함수 타입으로 막는다."
+  }
+ ],
+ "unknowns": [
+  "kitty, iTerm2, WezTerm, Windows Terminal 에서 한글 입력기와 kitty keyboard flag 가 실제로 어떻게 동작하는지. 읽은 것은 Ghostty 인코더 소스뿐이다.",
+  "MIDI 2.0 명세 본문(UMP, JR timestamp, delta clockstamp, Clip File)과 Apple CoreMIDI MIDI 2.0 문서. midi.org 는 로그인이 필요했고 Apple 문서는 제목만 받았다(원문 미직독).",
+  "kitty keyboard 가 실린 Windows Terminal 배포판과 VS Code 판, tmux 의 kitty keyboard 처리, tmux 3.7 날짜, macOS 26 Terminal.app 의 mode 2026 지원.",
+  "alphaTab 1.9.0 의 alphaTex 문법 변화, `AlphaTexExporter` 출력이 `Masc_tui_alphatex_score` 부분집합 안에 드는지, Guitar Pro 변환이 잃는 것.",
+  "NDJSON + base64 PCM 전송의 지연과 CPU. `docs/reports/` 의 music-* 문서에서 측정 기록을 찾지 못했다.",
+  "TUI 를 RemoteSSH 로 쓸 때 운영자가 소리를 듣는 길. 소리는 TUI 가 도는 기기에서 나고 터미널로 소리를 보내는 표준을 찾지 못했다.",
+  "Morkes 논문 본문의 수치와 효과 크기(tandfonline 403). 유머를 둘 MASC 모듈도 정해진 것이 없다.",
+  "MASC 는 키 사용 기록을 모으지 않아 운영자가 동작 창을 실제로 익히는지 지금은 잴 수 없다.",
+  "운영자가 키를 바꿀 수 있어야 하는지 RFC 에 없다. 요구사항 7 의 취향에 드는지는 사용자 결정이다.",
+  "Pedalboard 가 VST3 note expression 이나 MIDI 2.0 음별 데이터를 내보내는지, `jzz` 와 Pedalboard 경로가 Linux 에서 도는지.",
+  "MASC 가 MIDI Clip File 을 쓰는지(확인 필요). 쓴다면 `pw-midi2play` 로 맞춰 볼 수 있다.",
+  "Renoise 단축키 세부와 trk 같은 작은 터미널 트래커의 성숙도."
+ ],
+ "conflicts_with_brief": [
+  "tui-music-04: brief 2절 4항(결정을 올릴 때는 정석 쪽을 근거·측정·대가와 함께 적는다)과 부분 충돌. 올린 사용자 결정의 정석('Space 는 재생으로 둔다')이 FT2 의 Space 관례를 근거로 삼는다. 그러나 FT2 원문은 Space = Stop/Edit 이고 측정 근거도 없다. 근거를 Orca-c 같은 실제 사례로 바꾸거나 정석을 다시 세워 올려야 한다."
+ ]
+}

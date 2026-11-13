@@ -30,21 +30,15 @@ from dataclasses import dataclass
 from typing import Iterable, assert_never, cast
 
 _SHA = re.compile(r"[0-9a-f]{40}")
-_SOURCE_SUFFIXES = (".ml", ".mli", ".inc", ".opam")
-_SOURCE_PREFIXES = (".github/actions/",)
-# The workflow, this script and its tests are sources too: the type-check job
-# is the one pull request job with a checkout, so it runs these tests, and a
-# change to any of the three must start it.
-_SOURCE_PATHS = frozenset({
-    "dune-project",
-    ".github/workflows/pr-type-check.yml",
-    "scripts/ci/pr_source_changes.py",
-    "scripts/ci/test_pr_source_changes.py",
-})
-_DUNE = "dune"
-# docs/evidence keeps .ml snapshots as data. No dune file under docs/ builds
-# them, so a docs-only change needs no type-check.
-_DATA_PREFIX = "docs/"
+# The directories whose files no build rule reads. Everything outside them is
+# a source: `dune build @check` runs each rule a compiled module depends on,
+# and a rule names its inputs by path, in any directory and with any
+# extension (lib/exec/parser/bash_subset.mly, config/tools/*.toml,
+# scripts/embed-setup.py, masc.opam.locked). A list of source extensions
+# missed those and skipped the check (#51595), so the list is of what is
+# known not to be read. test_pr_source_changes.py holds each entry to that
+# against the tracked dune files.
+NOT_BUILD_INPUTS = ("changelog.d/", "dashboard/", "docs/")
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,18 +69,12 @@ type Plan = Alone | Lower | Top
 def is_source(path: str) -> bool:
     """True when a change to `path` can change what `dune build @check` reads.
 
-    The root `dune` file builds every tracked directory, so sources are matched
-    repository-wide (#48323). A change to the reusable actions, to the
-    workflow or to this script must be checked by the workflow.
+    The root `dune` file builds every tracked directory (#48323), so a path is
+    a source unless it sits in a directory no build rule reads. The workflow,
+    this script, its tests and the reusable actions are sources by the same
+    rule, so a change to any of them starts the job that runs them.
     """
-    if path.startswith(_DATA_PREFIX):
-        return False
-    return (
-        path.endswith(_SOURCE_SUFFIXES)
-        or path.startswith(_SOURCE_PREFIXES)
-        or path in _SOURCE_PATHS
-        or path.rsplit("/", 1)[-1] == _DUNE
-    )
+    return not path.startswith(NOT_BUILD_INPUTS)
 
 
 def needs_type_check(paths: Iterable[str]) -> bool:

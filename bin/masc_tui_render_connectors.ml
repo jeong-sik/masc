@@ -394,11 +394,15 @@ let render_connectors (state : state) =
   let cells ~name ~configured ~reachable ~status ~channel =
     List.map (fun column ->
       let header, value = match column with
-        | Connector_name_column -> "CONNECTOR", name
-        | Connector_configured_column -> "CONFIGURED", configured
-        | Connector_reachable_column -> "REACHABLE", reachable
-        | Connector_status_column -> "STATUS", status
-        | Connector_channel_column -> "CHANNEL", channel
+        | Connector_name_column ->
+            ui_text state ~ko:"커넥터" ~en:"CONNECTOR", name
+        | Connector_configured_column ->
+            ui_text state ~ko:"설정" ~en:"CONFIGURED", configured
+        | Connector_reachable_column ->
+            ui_text state ~ko:"연결" ~en:"REACHABLE", reachable
+        | Connector_status_column -> ui_text state ~ko:"상태" ~en:"STATUS", status
+        | Connector_channel_column ->
+            ui_text state ~ko:"채널" ~en:"CHANNEL", channel
       in
       let width = if column = Connector_name_column then layout.flex_width else column_width column in
       Masc_tui_table.cell ~header ~width value) layout.shown
@@ -450,7 +454,10 @@ let render_connectors (state : state) =
           (* The notice above the list is already saying that a read runs. *)
           | Page_unread when reading -> None
           | Page_unread -> Some (page_unread_note ~ko:(state.ui_language = Lang_ko))
-          | Page_empty -> Some "  (no connectors registered)"
+          | Page_empty ->
+              Some
+                (ui_text state ~ko:"  (등록된 커넥터 없음)"
+                   ~en:"  (no connectors registered)")
         in
         Option.iter (c.push_styled ~style:(Theme.recede ())) empty
       else begin
@@ -462,7 +469,10 @@ let render_connectors (state : state) =
               let open Masc.Tui_decode_connectors in
               let available = connector_available connector in
               let connected = connector_connected connector in
-              let yes_no flag = if flag then "yes" else "no" in
+              let yes_no flag =
+                if flag then ui_text state ~ko:"예" ~en:"yes"
+                else ui_text state ~ko:"아니오" ~en:"no"
+              in
               let line =
                 "  " ^ Masc_tui_table.row (cells
                   ~name:(Terminal_text.single_line connector.cn_display_name)
@@ -486,5 +496,7 @@ let render_connectors (state : state) =
         done;
         if overflowing then
           c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "  [connectors %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
+            (Printf.sprintf
+               (if state.ui_language = Lang_ko then "  [커넥터 %s]" else "  [connectors %s]")
+               (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
       end)

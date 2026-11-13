@@ -31,11 +31,11 @@ let select ~scope ~day entries =
       | (Published_reports | Markdown_reports | Html_reports), Mcp _ -> false in
     included && match day with None -> true | Some day -> on_day day entry) entries
 
-let scope_label = function
-  | All_resources -> "All resources"
-  | Published_reports -> "Artifacts"
-  | Markdown_reports -> "Markdown documents"
-  | Html_reports -> "HTML pages"
+let scope_label ~ko = function
+  | All_resources -> if ko then "전체 리소스" else "All resources"
+  | Published_reports -> if ko then "아티팩트" else "Artifacts"
+  | Markdown_reports -> if ko then "Markdown 문서" else "Markdown documents"
+  | Html_reports -> if ko then "HTML 페이지" else "HTML pages"
 
 let next_scope = function
   | All_resources -> Published_reports

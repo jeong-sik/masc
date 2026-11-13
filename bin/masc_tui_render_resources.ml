@@ -82,7 +82,7 @@ let check_cells =
   Masc_tui_message_layout.display_width
     (Masc_tui_artifact_checks.label (Masc_tui_artifact_checks.Unknown ""))
 
-let day_marker = "today"
+let day_marker ~ko = if ko then "오늘" else "today"
 
 let single_line_cells text =
   Masc_tui_message_layout.display_width (Terminal_text.single_line text)
@@ -91,7 +91,15 @@ let single_line_cells text =
    column names are drawn over the same cells. *)
 let widest_cells ~name texts =
   List.fold_left (fun widest text -> max widest (single_line_cells text))
-    (String.length name) texts
+    (Masc_tui_message_layout.display_width name) texts
+
+let list_head ~ko = function
+  | Col_type -> if ko then "종류" else "TYPE"
+  | Col_name -> if ko then "이름" else "NAME"
+  | Col_check -> if ko then "확인" else "CHECK"
+  | Col_day -> if ko then "날짜" else "DAY"
+  | Col_detail -> if ko then "설명" else "DETAIL"
+  | Col_meta -> if ko then "메타" else "META"
 
 type list_layout =
   { layout : list_column Masc_tui_table.layout
@@ -106,16 +114,21 @@ type list_layout =
    the identifying columns and the marker, and the name takes the room. The
    check and the marker exist only when some resource is a report or was made
    today. *)
-let list_layout resources ~today ~inner_width =
+let list_layout ~ko resources ~today ~inner_width =
+  let head_cells column =
+    Masc_tui_message_layout.display_width (list_head ~ko column) in
   let has_report = List.exists (function Catalog.Report _ -> true | Mcp _ -> false) resources in
   let has_today = List.exists (Catalog.on_day today) resources in
   let inner_width = min inner_width table_cap_cells in
-  let type_cells = widest_cells ~name:"TYPE" (List.map type_text resources) in
+  let type_cells =
+    widest_cells ~name:(list_head ~ko Col_type) (List.map type_text resources) in
   let name_cells = min name_cap_cells
-    (widest_cells ~name:"NAME" (List.map name_text resources)) in
-  let meta_cells = min meta_cap_cells (widest_cells ~name:"META" (List.map meta_text resources)) in
-  let check_cells = max check_cells (String.length "CHECK") in
-  let day_cells = max (String.length day_marker) (String.length "DAY") in
+    (widest_cells ~name:(list_head ~ko Col_name) (List.map name_text resources)) in
+  let meta_cells = min meta_cap_cells
+    (widest_cells ~name:(list_head ~ko Col_meta) (List.map meta_text resources)) in
+  let check_cells = max check_cells (head_cells Col_check) in
+  let day_cells =
+    max (Masc_tui_message_layout.display_width (day_marker ~ko)) (head_cells Col_day) in
   let identifying = [Col_type; Col_name] @ (if has_report then [Col_check] else []) in
   let marker = if has_today then [Col_day] else [] in
   let describing_needs =
@@ -148,15 +161,13 @@ let list_layout resources ~today ~inner_width =
 
 (* One row on the layout: [reading] gives a column's text and style for one
    resource, and [None] draws the column names. *)
-let list_cells ({ layout; flex; width } : list_layout) reading =
+let list_cells ~ko ({ layout; flex; width } : list_layout) reading =
   List.map (fun column ->
-    let header, fold = match column with
-      | Col_type -> "TYPE", Masc_tui_table.Fold_tail
-      | Col_name -> "NAME", Masc_tui_table.Fold_middle
-      | Col_check -> "CHECK", Masc_tui_table.Fold_tail
-      | Col_day -> "DAY", Masc_tui_table.Fold_tail
-      | Col_detail -> "DETAIL", Masc_tui_table.Fold_tail
-      | Col_meta -> "META", Masc_tui_table.Fold_tail in
+    let header = list_head ~ko column in
+    let fold = match column with
+      | Col_name -> Masc_tui_table.Fold_middle
+      | Col_type | Col_check | Col_day | Col_detail | Col_meta ->
+          Masc_tui_table.Fold_tail in
     let value, style = match reading with
       | None -> "", ""
       | Some read -> read column in
@@ -209,7 +220,9 @@ let render_resources (state : state) =
     let left, right = Masc_tui_message_layout.split_at_cells visible cursor in
     box_line buf cols (ui_text state ~ko:"원본 파일 저장 · " ~en:"Save original · "
       ^ Terminal_text.single_line (resource_save_document_title prompt.rsp_document));
-    box_line buf cols ("Path: " ^ left ^ Ansi.reverse ^ " " ^ Ansi.reset ^ right);
+    box_line buf cols
+      (ui_text state ~ko:"경로: " ~en:"Path: "
+       ^ left ^ Ansi.reverse ^ " " ^ Ansi.reset ^ right);
     let notice = match prompt.rsp_error with
       | Some detail -> Theme.warn () ^ Terminal_text.single_line detail ^ Ansi.reset
       | None ->
@@ -242,7 +255,7 @@ let render_resources (state : state) =
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
        ^ (if list_focused then " \xe2\x96\xb8 " else " ")
-       ^ Catalog.scope_label state.resource_scope
+       ^ Catalog.scope_label ~ko:(state.ui_language = Lang_ko) state.resource_scope
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
@@ -261,25 +274,34 @@ let render_resources (state : state) =
                ()
            | None -> ()));
 
+    let ko = state.ui_language = Lang_ko in
     let period = match state.resource_day with
-      | None -> "all dates"
-      | Some day -> Printf.sprintf "%04d-%02d-%02d local" day.year day.month day.day in
+      | None -> if ko then "모든 날짜" else "all dates"
+      | Some day ->
+          Printf.sprintf
+            (if ko then "%04d-%02d-%02d (이 장비 시각)" else "%04d-%02d-%02d local")
+            day.year day.month day.day in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
     let unchecked = match resource_unchecked_today state ~day:today with
-      | None -> Theme.muted () ^ "unknown"
+      | None -> Theme.muted () ^ (if ko then "모름" else "unknown")
       | Some 0 -> Theme.ok () ^ "0"
       | Some count -> Theme.warn () ^ string_of_int count in
     let query = match Masc_tui_fetched.current state.artifact_checks with
       | Some (_, (Ready inventory | Stale (inventory, _))) ->
         let at = Unix.localtime inventory.received_at in
-        Printf.sprintf " · last check query %02d:%02d:%02d" at.tm_hour at.tm_min at.tm_sec
-      | Some (_, (Absent | Loading | Failed _)) | None -> " · checks not read" in
+        Printf.sprintf
+          (if ko then " · 마지막 확인 조회 %02d:%02d:%02d"
+           else " · last check query %02d:%02d:%02d")
+          at.tm_hour at.tm_min at.tm_sec
+      | Some (_, (Absent | Loading | Failed _)) | None ->
+          if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
-      ^ " · today unchecked: " ^ unchecked ^ Ansi.reset
+      ^ (if ko then " · 오늘 미확인: " else " · today unchecked: ")
+      ^ unchecked ^ Ansi.reset
       ^ Theme.recede () ^ query ^ Ansi.reset);
     let budget = list_rows state ~rows in
     let first = max 0 (cursor - max 1 budget + 1) in
-    let table = list_layout rows_list ~today
+    let table = list_layout ~ko rows_list ~today
       ~inner_width:(max 1 (framed_inner_width pane_cols - marker_cells)) in
     (* The column names take a row even with nothing to name, so the rows that
        follow start in the same place for an empty list as for a full one. *)
@@ -287,7 +309,7 @@ let render_resources (state : state) =
     else
       framed_line pane_buf pane_cols
         (Theme.recede () ^ unselected_marker
-         ^ Masc_tui_table.header_row (list_cells table None) ^ Ansi.reset);
+         ^ Masc_tui_table.header_row (list_cells ~ko table None) ^ Ansi.reset);
     let visible = Rows.of_list ~first ~height:budget rows_list in
     for i = 0 to budget - 1 do
       match Rows.at visible (first + i) with
@@ -304,12 +326,12 @@ let render_resources (state : state) =
                  | Some status -> Masc_tui_artifact_checks.label status, check_style status
                  | None -> "", "")
             | Col_day ->
-                (if Catalog.on_day today resource then day_marker else ""), Theme.recede ()
+                (if Catalog.on_day today resource then day_marker ~ko else ""), Theme.recede ()
             | Col_detail -> detail_text resource, Theme.recede ()
             | Col_meta -> meta_text resource, Theme.recede () in
           let line =
             (if selected then selected_marker else unselected_marker)
-            ^ Masc_tui_table.row (list_cells table (Some read)) in
+            ^ Masc_tui_table.row (list_cells ~ko table (Some read)) in
           (* Keep the selected row's foreground paired with its adaptive
              ground. Content colours are for the neighbouring rows; inner
              resets must not punch holes in the selected band. *)

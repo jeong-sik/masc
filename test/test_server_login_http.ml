@@ -470,6 +470,34 @@ let whoami router browser ?(headers = []) () =
 
 (* The localhost preview (plan, preview scope P3) as a browser uses it: the
    pages, a GitHub login from the invitation, who-am-I, and the sign-out. *)
+(* A provider a person may connect and one they may not (plan L2a). *)
+let declared_toml =
+  {|[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[providers.agy]
+display-name = "Antigravity"
+protocol = "antigravity-cli"
+command = "agy"
+is-non-interactive = true
+timeout-s = 180.0
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[claude_code."claude-sonnet-5"]
+|}
+;;
+
 let the_preview_follows_a_login () =
   with_installation (fun t ->
     let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
@@ -650,6 +678,39 @@ let the_preview_follows_a_login () =
       "a session and a bearer"
       ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Several_credentials)
       (whoami router admin ~headers:[ "Authorization", "Bearer " ^ String.make 64 'f' ] ());
+    (* Plan L2a: the integrations are read with the session. This workspace
+       has no runtime.toml, so the server says it cannot read one. *)
+    let integrations () =
+      let reply = send admin router ~meth:"GET" ~path:Server_person_integrations.path in
+      reply.status, reply.body
+    in
+    check_reply
+      "a person reaches the integrations"
+      (503, {|{"error":"The workspace configuration could not be read."}|})
+      (integrations ());
+    (* Once the workspace declares its providers, the route reads them: the
+       Claude Code one, and not the Antigravity one, which the connect route
+       refuses a person by the same rule. *)
+    let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:t.base) "config" in
+    Fs_compat.mkdir_p config;
+    Out_channel.with_open_bin
+      (Filename.concat config Config_dir_resolver.runtime_toml_filename)
+      (fun out -> output_string out declared_toml);
+    check_reply
+      "the integrations of the workspace"
+      ( 200
+      , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"calls":"allowed"}]}|}
+      )
+      (integrations ());
+    let not_connected =
+      match Server_setup_account_login.person_may_connect Runtime_setup_login_client.Antigravity with
+      | Error message -> message
+      | Ok () -> Alcotest.fail "a person may connect Antigravity"
+    in
+    check_reply
+      "a connect of what a person may not connect"
+      (400, Yojson.Safe.to_string (`Assoc [ "error", `String not_connected ]))
+      (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"agy"}|});
     let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
     Alcotest.(check string)
@@ -659,7 +720,11 @@ let the_preview_follows_a_login () =
     Alcotest.(check int)
       "and no subscriptions"
       401
-      (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status)
+      (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status;
+    Alcotest.(check int)
+      "and no integrations"
+      401
+      (send admin router ~meth:"GET" ~path:Server_person_integrations.path).status)
 ;;
 
 (* A PAT through the routes a browser calls (plan C4-10): the person issues

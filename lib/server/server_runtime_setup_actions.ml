@@ -345,8 +345,7 @@ type login_target = {
   spawn_path : string;
 }
 
-let login_target ~base_path ~integration_id =
-  let* config = config ~base_path in
+let login_target_of_config config ~integration_id =
   let rows = match Runtime_wizard_inventory.to_json config with
     | `Assoc row -> (match value "integrations" row with `List rows -> rows | _ -> [])
     | _ -> [] in
@@ -370,6 +369,10 @@ let login_target ~base_path ~integration_id =
     | Runtime_setup_login_client.Muse -> Runtime_official_cli_install.Muse in
   let spawn_path = Runtime_official_cli_install.spawn_path install_client ~command in
   Ok {client; cli_path = command; spawn_path}
+
+let login_target ~base_path ~integration_id =
+  let* config = config ~base_path in
+  login_target_of_config config ~integration_id
 
 let selected_home_args template = match value "account_home" template with
   | `String home -> ["--account-home"; home]

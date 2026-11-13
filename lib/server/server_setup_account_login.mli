@@ -32,6 +32,11 @@ type owner =
     as the single-user server does ({!Server_auth.cors_headers}). *)
 val stream_cors_headers : owner -> Httpun.Request.t -> (string * string) list
 
+(** Whether a person may log in to an account of this client: every client
+    but Antigravity, whose credential copy lives in the setup registry, which
+    has no owner. The error is the sentence {!start} answers a person with. *)
+val person_may_connect : Runtime_setup_login_client.client -> (unit, string) result
+
 val start : owner:owner -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit
 val control : owner:owner -> base_path:string -> body:string ->

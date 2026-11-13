@@ -331,6 +331,11 @@ let provider_accounts t request reqd =
   as_person t request reqd (fun state person -> respond reqd (Auth_preview.provider_accounts state person))
 ;;
 
+let integrations t ~base_path request reqd =
+  as_person t request reqd (fun (_ : Authz_state.t) (_ : Auth_preview.person) ->
+    respond reqd (Server_person_integrations.answer ~base_path))
+;;
+
 let as_keeper_owner t request reqd f = as_gated t ~gate:Auth_preview.keeper_owner request reqd f
 
 let keepers t request reqd =
@@ -433,6 +438,7 @@ let add_person_routes t ~env ~base_path router =
   |> Server_route.get Server_route.Always_public Authz_activation.invitation_path (page Auth_preview.invite_page t)
   |> Server_route.get access whoami_path (whoami t)
   |> Server_route.get access Auth_preview.provider_accounts_path (provider_accounts t)
+  |> Server_route.get access Server_person_integrations.path (integrations t ~base_path)
   |> Server_route.post access Auth_preview.connect_path (connect t ~base_path)
   |> Server_route.post access Auth_preview.verify_path (verify t ~base_path)
   |> Server_route.get access Auth_preview_keeper.keepers_path (keepers t)

@@ -218,7 +218,7 @@ let with_bound_targets ?admission_priority_run_limit
   | Error _ -> fail "bound exact targets should resolve"
 ;;
 
-let with_bound_anthropic ~base_url ~body_timeout_s f =
+let with_bound_anthropic ?headers ~base_url ~body_timeout_s f =
   let serving_constraint =
     match
       Serving_constraint.make
@@ -248,6 +248,7 @@ let with_bound_anthropic ~base_url ~body_timeout_s f =
       ~model_id:"deepseek-v4-pro"
       ~base_url
       ~api_key:"anthropic-test-key"
+      ?headers
       ~request_path:"/v1/messages"
       ~model_capabilities_override:capabilities
       ~max_concurrent_requests:1
@@ -6043,6 +6044,66 @@ let test_bound_measurement_waits_for_shared_provider_permit () =
   check int "one generation POST after measurement" 1 posts.generation_posts
 ;;
 
+(* An Anthropic-wire endpoint reads [anthropic-version] on every route, so the
+   count-tokens request needs the binding's headers as much as the generation
+   request it measures. *)
+let test_bound_measurement_carries_the_binding_headers () =
+  let response =
+    {|{"id":"msg-flow","type":"message","role":"assistant","model":"flow","content":[{"type":"text","text":"{\"name\":\"accepted\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":1}}|}
+  in
+  let binding_headers =
+    [ "anthropic-version", "2023-06-01"; "x-fixture-session", "fleet" ]
+  in
+  (* The two requests carry different bodies, so their entity headers differ. *)
+  let follows_from_body name =
+    match String.lowercase_ascii name with
+    | "content-length" -> true
+    | _ -> false
+  in
+  let seen = Atomic.make [] in
+  let result, posts =
+    with_counted_server
+      ~check_request:(fun request _body ->
+        atomic_prepend
+          seen
+          ( Uri.path (Cohttp.Request.uri request)
+          , Cohttp.Request.headers request
+            |> Cohttp.Header.to_list
+            |> List.filter (fun (name, _) -> not (follows_from_body name)) ))
+      ~measurement_reply:(Measurement_tokens 2)
+      ~response
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_anthropic ~headers:binding_headers ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot _config ->
+    execute_ok ~net ~clock (start_flow (frozen_flow snapshot [ "bound-measured" ]))
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error _ -> fail "bound measured flow with binding headers should succeed");
+  check int "one count-tokens POST" 1 posts.measurement_posts;
+  check int "one generation POST" 1 posts.generation_posts;
+  let headers_of path =
+    match List.filter (fun (seen_path, _) -> String.equal seen_path path) (Atomic.get seen) with
+    | [ _, headers ] -> headers
+    | _ -> failf "fixture server saw %s other than once" path
+  in
+  let measurement = headers_of "/v1/messages/count_tokens" in
+  let generation = headers_of "/v1/messages" in
+  List.iter
+    (fun (name, value) ->
+       check
+         (option string)
+         (name ^ " reaches the count-tokens request")
+         (Some value)
+         (List.assoc_opt name measurement))
+    binding_headers;
+  check
+    (list (pair string string))
+    "count-tokens request carries the generation request's headers"
+    generation
+    measurement
+;;
+
 let test_concurrent_duplicate_flow_does_not_double_dispatch () =
   let (left, right), posts =
     with_server ~response_delay_s:0.1 ~response:(openai_response {|{"name":"accepted"}|})
@@ -6289,6 +6350,10 @@ let () =
             "postdispatch measurement failure advances to successor"
             `Quick
             test_postdispatch_measurement_failures_advance
+        ; test_case
+            "bound count-tokens request carries the binding headers"
+            `Quick
+            test_bound_measurement_carries_the_binding_headers
         ; test_case
             "frozen Anthropic artifact parity"
             `Quick

@@ -80,6 +80,8 @@ let count_tokens_body_of_generation_artifact generation_artifact =
 
 let freeze_exact_completion_artifact
       ~anthropic_thinking_control
+      ~auth_headers
+      ~declared_headers
       (request : Llm_transport.completion_request)
   =
   let config = request.config in
@@ -102,19 +104,16 @@ let freeze_exact_completion_artifact
         (match count_tokens_body_of_generation_artifact generation_artifact with
          | Error _ as error -> error
          | Ok body ->
-           let open Result.Syntax in
-           let* auth_headers = Provider_config.resolve_auth_headers config
-             |> Result.map_error (fun reason -> Invalid_completion_request reason) in
            let measurement_request =
              { protocol
              ; model_id = config.model_id
              ; url = Count_tokens_sync.count_tokens_url config
              ; headers =
-                 config.headers
-                 @ auth_headers
-                 @ [ "Content-Type", "application/json"
-                   ; "Content-Length", string_of_int (String.length body)
-                   ]
+                 Exact_output_declared_headers.request_headers
+                   ~kind:config.kind
+                   ~auth_headers
+                   ~body
+                   declared_headers
              ; body
              ; connect_timeout_s = config.connect_timeout_s
              ; body_timeout_s = request.body_timeout_s

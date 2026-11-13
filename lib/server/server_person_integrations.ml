@@ -51,18 +51,15 @@ let models (config : Runtime_schema.config) provider_id =
 let of_config (config : Runtime_schema.config) =
   List.filter_map
     (fun (provider : Runtime_schema.provider) ->
-      match Server_runtime_setup_actions.login_target_of_config config ~integration_id:provider.id with
-      | Error (_ : Server_runtime_setup_actions.error) -> None
+      match Server_setup_account_login.person_target config ~integration_id:provider.id with
+      | Error (_ : Server_setup_account_login.person_refusal) -> None
       | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
-        (match Server_setup_account_login.person_may_connect client with
-         | Error (_ : string) -> None
-         | Ok () ->
-           Some
-             { integration_id = provider.id
-             ; display_name = provider.display_name
-             ; models = models config provider.id
-             ; calls = calls_of client
-             }))
+        Some
+          { integration_id = provider.id
+          ; display_name = provider.display_name
+          ; models = models config provider.id
+          ; calls = calls_of client
+          })
     config.providers
 ;;
 

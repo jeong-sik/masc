@@ -35,12 +35,8 @@ type integration =
   }
 
 (** The providers of runtime.toml a person may log in to, in declared order:
-    those whose login target resolves
-    ({!Server_runtime_setup_actions.login_target_of_config}) to a client a
-    person may connect ({!Server_setup_account_login.person_may_connect}).
-    The account a person makes is used through such a provider
-    ({!Runtime_account_runtime.of_template}), so an integration that no
-    provider declares is not listed. *)
+    those {!Server_setup_account_login.person_target} allows, the rule the
+    connect route judges a person's login by. *)
 val of_config : Runtime_schema.config -> integration list
 
 (** [/api/v1/auth/integrations]. *)

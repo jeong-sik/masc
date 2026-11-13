@@ -82,13 +82,31 @@ let runtime_root_of ~base_path = function
 
 let person_reference_refused =
   "In multi-account mode a login makes a new account, and account_ref is not read."
-let person_antigravity_refused =
-  "Antigravity is not connected in multi-account mode: its credential is a copy in the \
-   setup registry, which has no owner."
 
-let person_may_connect = function
-  | Client.Antigravity -> Error person_antigravity_refused
-  | Client.Codex | Claude | Muse -> Ok ()
+type person_refusal =
+  | Not_declared
+  | No_login of Server_runtime_setup_actions.error
+  | Copy_without_owner
+
+let person_refusal_message = function
+  | Not_declared ->
+    "In multi-account mode a login is of a provider this workspace declares, and it \
+     declares none of this id."
+  | No_login error -> Server_runtime_setup_actions.error_message error
+  | Copy_without_owner ->
+    "Antigravity is not connected in multi-account mode: its credential is a copy in the \
+     setup registry, which has no owner."
+
+let person_target config ~integration_id =
+  match Runtime_schema.provider_of_id config integration_id with
+  | None -> Error Not_declared
+  | Some (_ : Runtime_schema.provider) ->
+    (match Server_runtime_setup_actions.login_target_of_config config ~integration_id with
+     | Error error -> Error (No_login error)
+     | Ok target ->
+       (match target.Server_runtime_setup_actions.client with
+        | Client.Antigravity -> Error Copy_without_owner
+        | Client.Codex | Client.Claude | Client.Muse -> Ok target))
 
 (* What a confirmed login leaves behind. An operator's account is published to
    the setup registry, from which setup selects it. A person's account is
@@ -113,12 +131,14 @@ let start ~owner ~base_path ~body request reqd =
   let actor = actor_of owner in
   let prepared =
     let* integration_id, reference = parse body in
-    let* target = Server_runtime_setup_actions.login_target ~base_path ~integration_id
+    let* config = Server_runtime_setup_actions.config ~base_path
       |> Result.map_error Server_runtime_setup_actions.error_message in
+    let* target = match owner with
+      | Person _ -> person_target config ~integration_id |> Result.map_error person_refusal_message
+      | Operator _ ->
+        Server_runtime_setup_actions.login_target_of_config config ~integration_id
+        |> Result.map_error Server_runtime_setup_actions.error_message in
     let Server_runtime_setup_actions.{client; cli_path; spawn_path} = target in
-    let* () = match owner with
-      | Person _ -> person_may_connect client
-      | Operator _ -> Ok () in
     let* existing = match owner, reference with
       | (Operator _ | Person _), None -> Ok None
       | Person _, Some _ -> Error person_reference_refused

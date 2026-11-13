@@ -488,6 +488,11 @@ command = "agy"
 is-non-interactive = true
 timeout-s = 180.0
 
+[providers.local]
+display-name = "Local server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
 [models."claude-sonnet-5"]
 api-name = "claude-sonnet-5"
 max-context = 1000000
@@ -702,15 +707,25 @@ let the_preview_follows_a_login () =
       , {|{"integrations":[{"integration_id":"claude_code","display_name":"Claude Code","models":["claude-sonnet-5"],"calls":"allowed"}]}|}
       )
       (integrations ());
-    let not_connected =
-      match Server_setup_account_login.person_may_connect Runtime_setup_login_client.Antigravity with
-      | Error message -> message
-      | Ok () -> Alcotest.fail "a person may connect Antigravity"
-    in
+    let refused sentence = 400, Yojson.Safe.to_string (`Assoc [ "error", `String sentence ]) in
     check_reply
       "a connect of what a person may not connect"
-      (400, Yojson.Safe.to_string (`Assoc [ "error", `String not_connected ]))
+      (refused
+         "Antigravity is not connected in multi-account mode: its credential is a copy in the setup registry, \
+          which has no owner.")
       (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"agy"}|});
+    (* A client the server knows that the workspace does not declare: an
+       account of it could not be used, so its login does not start. *)
+    check_reply
+      "a connect of a client the workspace does not declare"
+      (refused
+         "In multi-account mode a login is of a provider this workspace declares, and it declares none of \
+          this id.")
+      (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"codex"}|});
+    check_reply
+      "a connect of a declared server over HTTP"
+      (refused "This connection needs its native account setup before web discovery.")
+      (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"local"}|});
     let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
     Alcotest.(check string)

@@ -37,21 +37,21 @@ masc restart [--base-path PATH] [--port PORT] [--host HOST] [--agent AGENT] [--l
 
 base path·port·host 는 `masc start` 와 같은 방식으로 정한다. 코드는 `bin/masc_cli_restart.ml` 이다. 앞 서버와 새 서버 둘 다 `127.0.0.1` 로 확인하므로, 그 주소로 닿지 않는 `--host`(127.0.0.1·0.0.0.0 밖)는 아무것도 하기 전에 거절한다. `localhost` 같은 이름도 IP 주소가 아니라서 새 서버가 bind 할 수 없으므로 같은 자리에서 거절한다.
 
-1. **떠 있는 것을 본다.** `127.0.0.1:<port>/health?full=1` 을 읽는다.
+1. **떠 있는 것을 본다.** 커널에 묻는다(`Server_upgrade_preparation.owner`). lease 를 쥔 프로세스가 누구인지, 그 프로세스가 이 포트의 알림 바이트를 쥐고 있는지를 본다. 서버는 listener 를 bind 한 뒤 lease 옆 파일에서 자기 포트 번호 위치의 바이트를 잠근다. 한 사용자 서버는 `<lease>.single-user-server`, 계정 서버는 `<lease>.account-server` 를 쓴다. 포트가 뭐라고 답하는지는 판정에 쓰지 않는다.
 
-   | 관측 | 동작 |
+   | 커널이 말하는 것 | 동작 |
    |---|---|
-   | 이 workspace 의 서버가 답한다 | 2 로 간다 |
-   | 다른 workspace 의 서버가 답한다 | 거절한다. 아무것도 멈추거나 띄우지 않는다 |
-   | 답은 오는데 masc identity 가 아니다 | 거절한다 |
-   | 답이 없고 lease 주인도 없고 포트가 비어 있다 | 멈출 서버가 없다. 3 으로 간다 |
-   | 답이 없는데 lease 주인이 있다 | 거절한다. 인증된 종료 요청을 보낼 길이 없다. 정리 중이면 끝난 뒤 다시 하라고 알린다 |
-   | 답이 없는데 포트를 누가 잡고 있다 | 거절한다 |
+   | lease 주인이 이 포트를 한 사용자 서버로 알린다 | 그 포트의 `/health` 에서 버전만 읽고 2 로 간다. 버전을 못 읽으면 pid 를 알리고 거절한다 |
+   | lease 주인이 이 포트를 계정 서버로 알린다 | 호스트 권한으로 종료를 요청하고 3 으로 간다(`stop_account_server`) |
+   | lease 주인이 다른 포트를 알린다 | 거절한다. 그 포트를 알려 준다 |
+   | lease 주인이 아무 포트도 알리지 않는다 | 거절한다. pid 를 알려 준다. 아직 뜨는 중이거나, 포트를 알리지 않는 옛 MASC 가 띄운 서버다. 다 뜬 뒤 다시 하거나, `kill <pid>` 뒤 `masc start` 를 한다 |
+   | lease 주인이 없고 포트가 비어 있다 | 멈출 서버가 없다. 3 으로 간다 |
+   | lease 주인이 없는데 포트를 누가 잡고 있다 | 거절한다. 아무것도 멈추거나 띄우지 않는다 |
 
-2. **종료를 한 번 요청한다.** setup 의 stop 과 같은 함수(`Masc_cli_owner_upgrade.with_selected_owner`)를 쓴다. 로그인 → 관리자 토큰으로 `/api/v1/runtime/config/raw` 확인 → `capture_existing_owner` 가 F_GETLK 로 lease 주인을 잡음 → identity 를 다시 확인 → `Owner_process_identity.request_termination` 이 SIGTERM 을 한 번 보낸다. SIGKILL 은 없다. 버전 확인 값은 1 에서 읽은 값이다.
+2. **종료를 한 번 요청한다.** setup 의 stop 과 같은 함수(`Masc_cli_owner_upgrade.with_selected_owner`)를 쓴다. 커널에 다시 묻고 `/health` 의 버전이 1 에서 읽은 값과 같은지 본다 → 로그인 → `capture_existing_owner` 가 F_GETLK 로 lease 주인을 잡고, 그 pid 가 1 에서 본 pid 인지 본다 → 커널에 다시 묻는다 → 관리자 토큰으로 `/api/v1/runtime/config/raw` 확인 → 커널에 다시 묻는다 → 토큰을 한 번 더 확인 → `Owner_process_identity.request_termination` 이 SIGTERM 을 한 번 보낸다. 관리자 토큰은 커널이 lease 주인이자 포트 알림 주인이라고 말한 프로세스에만 간다. SIGKILL 은 없다.
 3. **새 서버를 띄운다.** `Posix_spawn_detached.spawn` 으로 `<이 실행 파일> start --wait-for-previous-owner --base-path B --port P --host H` 를 띄운다. 2 에서 아무것도 멈추지 않았으면 플래그 없는 `start` 를 띄운다. 그 사이 누가 lease 를 잡았다면 종료를 요청받지 않은 진짜 주인이라 기다리면 안 된다. 새 서버는 자기 프로세스 그룹에서 돌고, stdin 은 `/dev/null` 이다. stdout·stderr 는 로그 파일에 덧붙인다. 기본 로그는 `<base>/.masc/logs/masc-start-<UTC 시각>.log` 이고, 종료 요청 뒤에 연다. 그래서 거절된 restart 는 빈 로그를 남기지 않는다.
 4. **새 서버는 lease 를 기다린다.** 2.2 에 적었다. 앞 서버가 끝나 descriptor 가 닫히는 순간 커널이 잠금을 넘긴다. 잠금이 비는 틈이 없어서 그 사이에 다른 프로세스가 끼어들 수 없다.
-5. **준비될 때까지 본다.** `/health/ready` 가 200 이고 응답의 `pid` 가 3 에서 띄운 pid 와 같으면 준비된 것이다. 같은 포트에서 정리 중인 앞 서버도 200 을 줄 수 있어서 pid 로 가른다. 응답이 말하는 내용이 바뀔 때마다 한 줄씩 찍는다(`pid A is still answering`, `starting: <phase>`, 거절 사유). 요청마다 HTTP 클라이언트 풀을 새로 쓴다. 공유 풀은 연결이 한 번 실패한 host 를 5초 동안 다시 시도하지 않는데(`lib/masc_http_client/pool.ml` `connect_failure_cooldown_seconds`), 두 listener 사이 틈이 늘 그 실패를 만든다. 새 서버가 먼저 끝나면 종료 상태와 로그 끝 20줄을 보여주고 exit 1 한다.
+5. **준비될 때까지 본다.** `/health/ready` 가 200 이고 3 에서 띄운 pid 가 이 포트의 알림 바이트를 쥐고 있으면 준비된 것이다(2.3). 같은 포트에서 정리 중인 앞 서버도 200 을 줄 수 있어서 알림 바이트의 주인으로 가른다. 상태가 바뀔 때마다 한 줄씩 찍는다(`pid A holds the announcement of port P`, `starting: <phase>`, 거절 사유). 요청마다 HTTP 클라이언트 풀을 새로 쓴다. 공유 풀은 연결이 한 번 실패한 host 를 5초 동안 다시 시도하지 않는데(`lib/masc_http_client/pool.ml` `connect_failure_cooldown_seconds`), 두 listener 사이 틈이 늘 그 실패를 만든다. 새 서버가 먼저 끝나면 종료 상태와 로그 끝 20줄을 보여주고 exit 1 한다.
 6. **기한은 없다.** 종료를 요청받은 앞 서버는 자기 watchdog(`force_timeout_s`) 으로 반드시 끝난다. Ctrl-C 는 지켜보기만 멈춘다. 새 서버는 자기 그룹에 있어서 계속 돈다. 3 에서 이 사실과 로그 경로를 먼저 찍는다.
 
 출력은 이렇다.
@@ -71,9 +71,9 @@ Ready after 14.2 s: masc 0.64.0 (d0c79a5d83a), pid 8821, serving /Users/dancer/m
 - 한 workspace 를 기다리는 프로세스는 하나다. 기다리기 전에 lease 옆 `<lease>.waiter` 를 `F_TLOCK` 으로 잡고 자기 pid 를 적는다. 이미 잡혀 있으면 `Another_replacement_waits` 로 바로 끝난다. 이게 없으면 Ctrl-C 뒤 restart 를 한 번 더 했을 때 두 번째 후임이 첫 번째 후임 뒤에 줄을 서고, 나중에 첫 번째 후임이 멈출 때 아무도 부르지 않은 옛 빌드가 서버가 될 수 있다.
 - 기다리는 도중 `.masc` 를 만들거나 무엇을 쓰지 않는다. lease 를 받은 뒤에야 기존 기동 순서가 시작된다.
 
-### 2.3 `/health/ready` 의 `pid`
+### 2.3 새 서버인지는 포트 알림으로 가른다
 
-`/health/ready` 의 200·503 응답 둘 다 `pid` 를 싣는다. 이 응답을 읽는 곳(`scripts/install-smoke.sh`, `scripts/check-installed-dashboard.py` 등)은 모두 `ready` 필드만 보므로 필드가 늘어도 깨지지 않는다.
+`/health/ready` 는 200 인지만 본다. 본문은 읽지 않는다. 200 이 오면 이 포트의 알림 바이트를 누가 쥐고 있는지 커널에 한 번 묻는다(`Server_upgrade_preparation.replacement_sighting`). 한 사용자 서버 파일을 먼저 보고, 거기 주인이 없으면 계정 서버 파일을 본다. 그 주인이 3 에서 띄운 pid 면 준비된 것이다. 서버는 listener 를 bind 한 뒤, `/health` 에 답하기 전에 알린다. 그래서 새 서버가 200 을 줄 때는 이미 알린 뒤다. 앞 서버는 끝날 때까지 자기 바이트를 쥐고 있으므로, 그동안은 `pid A holds the announcement of port P` 가 찍힌다.
 
 ### 2.4 pg_ctl restart 와 다른 점
 
@@ -103,9 +103,10 @@ RFC-0447 §2.3·§3·§4·§5 를 이 내용으로 고쳤다.
 
 ## 4. 판정 기준
 
-- R1 교체: 이 workspace 의 서버(pid A)가 떠 있을 때 `masc restart` 가 exit 0 이다. 출력에 A 와 새 pid B 가 있다. A 는 SIGTERM 한 번으로 끝나고, B 가 `/health/ready` 200 에 `pid` B 를 준다. B 의 로그에 `Waiting for the previous owner … PID A` 가 한 줄 있다.
+- R1 교체: 이 workspace 의 서버(pid A)가 떠 있을 때 `masc restart` 가 exit 0 이다. 출력에 A 와 새 pid B 가 있다. A 는 SIGTERM 한 번으로 끝나고, `/health/ready` 가 200 이고 B 가 포트 알림 바이트를 쥔다(`test_model_independent_owner.py` 의 `test_restart_replaces_a_real_server`). B 의 로그에 `Waiting for the previous owner … PID A` 가 한 줄 있다.
 - R2 빈 workspace: 서버가 없을 때 종료 요청 없이 띄우고 exit 0 이다.
-- R3 다른 workspace: 포트를 다른 workspace 서버가 잡고 있으면 exit 1 이다. 그 서버는 그대로 돌고, 아무것도 띄우지 않는다.
+- R3 다른 프로세스의 포트: 이 workspace 의 lease 주인이 없는데 포트를 누가 잡고 있으면 exit 1 이다. 그 프로세스는 그대로 돌고, 아무것도 띄우지 않는다.
+- R3a 알리지 않는 주인: lease 주인이 아무 포트도 알리지 않으면 exit 1 이고, 문구에 그 pid 가 있다. 로그인하지 않고, 아무것도 멈추거나 띄우지 않는다.
 - R4 기동 실패: 새 서버가 준비 전에 끝나면(예: RFC-0420 의 저장소 거부) exit 1 이고 로그 끝부분이 나온다.
 - R5 대기 단위 검사: `test_server_startup_takeover` 의 "a waiting start takes the lease when the owner exits". `on_wait` 안에서만 주인에게 끝내라고 알려, 대기가 잠금을 쥔 동안 시작되고 주인이 스스로 끝나는 순간 끝남을 보인다. 주인의 종료 상태가 0 이라 시그널을 받지 않았음도, 받은 lease 를 다른 프로세스가 커널에서 잡지 못함도 보인다.
 - R6 두 번째 대기자: 같은 파일의 "a second waiter is refused while one waits". 첫 대기자가 기다리는 동안 두 번째는 첫 대기자의 pid 를 담은 `Another_replacement_waits` 를 받고, 주인이 끝나면 첫 대기자가 lease 를 받는다. waiter 잠금을 빼면 이 검사가 실패한다.
@@ -116,7 +117,7 @@ RFC-0447 §2.3·§3·§4·§5 를 이 내용으로 고쳤다.
 한 스택이다.
 
 1. 이 RFC 와 RFC-0447 수정.
-2. `masc start --wait-for-previous-owner`, `/health/ready` 의 `pid`, 거절 문구. 판정 R5.
+2. `masc start --wait-for-previous-owner`, 거절 문구. 판정 R5.
 3. `masc restart`. 판정 R1–R4.
 4. deploy.sh·stop-prod.sh 와 `--prepared-file` 정리.
 5. supervisor·start-loopback·LKG 정리.

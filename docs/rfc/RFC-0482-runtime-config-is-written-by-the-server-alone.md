@@ -82,13 +82,14 @@ TUI 는 서버에 붙어서만 돈다. 그러니 화면 설정을 쓸 때 서버
 
 `masc config set`, `masc web-search-setup`, `masc voice-local-setup` 은 이렇게 쓴다.
 
-- 서버 찾기: port 는 다른 CLI 명령과 같은 순서로 정한다(`--port`, `MASC_HTTP_PORT`, 워크스페이스에 저장된 port, 기본값). 그 port 의 `/health` 가 이 워크스페이스를 가리키고 준비됐으면, `masc login` 이 저장한 토큰(`Auth_login.read_persisted_http_token`)으로 서버에 보낸다. `masc runtime-resume` 이 이미 이렇게 한다(`bin/masc_cli_model_resume.ml`).
-- 그 워크스페이스의 서버가 답하면: `GET /api/v1/runtime/config/raw` 로 서버가 읽는 원문과 revision·경로를 받고, 같은 편집을 그 원문에 한다. `expected_source_revision`·`expected_source_path` 와 함께 `POST /api/v1/runtime/config/raw` 를 보낸다. 서버가 저장하고 발행하고 알린다. 저장 route 가 preview 와 같은 검사를 하고 거절 이유를 돌려주므로 preview 는 따로 부르지 않는다. 그사이 파일이 바뀌었으면(409) 저장하지 않고 다시 실행하라고 알린다.
-- 서버가 아직 준비 중이거나, 답하는데 sign-in 토큰이 없으면: 쓰지 않고 멈춘다. 서버 몰래 파일을 쓰게 되기 때문이다.
-- 서버가 답하지 않거나, 그 port 가 다른 워크스페이스나 masc 가 아닌 것이면: 이 워크스페이스의 서버는 없다. 지금처럼 직접 쓴다. 이때는 알림을 받을 reader 가 없다. TUI 는 서버 없이 돌지 않는다.
+- 서버 찾기: port 는 다른 CLI 명령과 같은 순서로 정한다(`--port`, `MASC_HTTP_PORT`, 워크스페이스에 저장된 port, 기본값). 이 워크스페이스의 서버가 누구인지는 커널에 묻는다(`Server_upgrade_preparation.owner_without_making`). 워크스페이스 lease 를 쥔 프로세스가 그 port 의 알림 바이트(`<lease>.single-user-server`)도 쥐고 있으면 그 프로세스가 서버다. port 가 뭐라고 답하는지는 판정에 쓰지 않는다. 그 서버의 `/health/ready` 가 200 이면, `masc login` 이 저장한 토큰(`Auth_login.read_persisted_http_token`)으로 서버에 보낸다. 토큰을 보낼 때마다 직전에 커널에 다시 묻고, 서버가 바뀌었으면 더 보내지 않는다. `masc runtime-resume` 도 같은 방식이다(`bin/masc_cli_model_resume.ml`).
+- 커널이 말한 서버가 준비됐으면: `GET /api/v1/runtime/config/raw` 로 서버가 읽는 원문과 revision·경로를 받고, 같은 편집을 그 원문에 한다. `expected_source_revision`·`expected_source_path` 와 함께 `POST /api/v1/runtime/config/raw` 를 보낸다. 서버가 저장하고 발행하고 알린다. 저장 route 가 preview 와 같은 검사를 하고 거절 이유를 돌려주므로 preview 는 따로 부르지 않는다. 그사이 파일이 바뀌었으면(409) 저장하지 않고 다시 실행하라고 알린다.
+- 서버가 아직 준비 중이거나, 답하지 않거나, sign-in 토큰이 없으면: 쓰지 않고 멈춘다. 서버 몰래 파일을 쓰게 되기 때문이다.
+- lease 를 쥔 프로세스가 있는데 그 port 를 한 사용자 서버로 알리지 않으면: 쓰지 않고 멈춘다. 다른 port 를 알리면 그 port 를 알려 준다. 아무 port 도 알리지 않으면(아직 뜨는 중이거나, 포트를 알리지 않는 옛 MASC 가 띄운 서버) pid 를 알려 준다. 계정 서버면 계정 서버라고 알려 준다. 어느 경우에도 토큰을 보내지 않는다.
+- lease 를 쥔 프로세스가 없으면: 이 워크스페이스의 서버는 없다. 직접 쓴다. 그 port 에 누가 답하든 묻지 않는다. 이때는 알림을 받을 reader 가 없다. TUI 는 서버 없이 돌지 않는다.
 - voice setup 은 runtime.toml 말고 `voice_config.json` 도 본다. 그래서 원문 route 가 아니라 서버의 voice setup route(`POST /api/v1/voice/setup`)로 보낸다. 명령은 먼저 서버의 voice 관측(`GET /api/v1/voice/setup`)을 읽고, 그 revision 과 speaking endpoint 로 바꿀 것을 정한다. 서버는 이 프로세스와 다른 설정 파일을 볼 수 있다(`MASC_CONFIG_DIR`). 그 revision 과 변경 목록을 보낸다(`Voice_wizard.request_json`, TUI voice wizard 와 같은 철자). 서버는 자기 잠금 안에서 revision 이 같을 때만 적용하고, 다르면 409 로 거절한다.
 
-이건 대체 경로가 아니다. 서버가 있으면 서버가 유일한 쓰는 곳이고, 서버가 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
+이건 대체 경로가 아니다. lease 를 쥔 프로세스가 있으면 서버가 유일한 쓰는 곳이고, 없으면 CLI 가 유일한 쓰는 곳이다. 둘이 동시에 쓰지는 않는다.
 
 `runtime-default-set --setup-lanes` 의 편집은 CLI 가 읽은 모델 카탈로그로 정한다(어느 runtime 이 만들어지는지, 판정 lane 에 넣을 수 있는지). CLI 는 서버 시작과 같은 카탈로그 원본을 읽지만, 셸에서 `AGENT_CORE_MODEL_CATALOG` 를 서버와 다르게 내보내면 서버의 저장 검사가 거절하거나(400), 서버였다면 고르지 않았을 판정 slot 이 저장될 수 있다. `runtime-setup-batch` 의 임시 사본 검증과 probe 도 CLI 의 카탈로그로 하고, 저장할 때 서버가 다시 검사한다. 이 차이를 없애려면 서버 route 로 선택만 보내야 한다. 서버의 setup route(`/api/v1/setup/connections`)는 선택을 받지만 credential 파일 경로는 받지 않고 credential 을 서버에서 준비한다. 그래서 `runtime-store-credential` 이 만든 임시 credential 을 참조하는 CLI 의 선택은 그대로 보낼 수 없다.
 

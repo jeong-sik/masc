@@ -26656,7 +26656,7 @@ let keeper_observed_stop_hint (state : state) =
     | Some (started_at_unix, _interrupt_token) ->
       (match keeper_observed_interrupt state keeper_name started_at_unix with
        | Some _ -> None
-       | None -> Some " · Esc stops it · /queue")
+       | None -> Some (ui_text state ~ko:" · Esc:중단 · /queue" ~en:" · Esc stops it · /queue"))
 ;;
 
 (* An interrupt of the observed turn under way, or how it ended: a row of
@@ -26671,11 +26671,16 @@ let keeper_observed_interrupt_rows (state : state) =
     | Some (started_at_unix, _interrupt_token) ->
       (match keeper_observed_interrupt state keeper_name started_at_unix with
        | Some item ->
+         let say korean english = ui_text state ~ko:korean ~en:english in
          [ (match item.oi_status with
-            | Interrupt_sending -> "Sending interrupt for the observed turn; queued messages remain queued"
-            | Interrupt_signalled -> "Interrupt received; waiting for the current turn to settle"
-            | Interrupt_declined detail -> "Turn was not interrupted: " ^ detail
-            | Interrupt_failed detail -> "Interrupt request failed: " ^ detail) ]
+            | Interrupt_sending ->
+                say "관측된 턴에 중단 보내는 중 · 대기 메시지는 그대로"
+                  "Sending interrupt for the observed turn; queued messages remain queued"
+            | Interrupt_signalled ->
+                say "중단 접수됨 · 지금 턴이 끝나기를 기다리는 중"
+                  "Interrupt received; waiting for the current turn to settle"
+            | Interrupt_declined detail -> say "턴을 중단하지 못함: " "Turn was not interrupted: " ^ detail
+            | Interrupt_failed detail -> say "중단 요청 실패: " "Interrupt request failed: " ^ detail) ]
        | None -> [])
 ;;
 
@@ -26706,6 +26711,8 @@ let keeper_message_diagnostic_activity_rows (state : state) =
   match state.msg_target_keeper_name with
   | None -> []
   | Some keeper_name ->
+    let ko = state.ui_language = Lang_ko in
+    let say korean english = if ko then korean else english in
     let working = working_chat_for_keeper state keeper_name in
     (* By execution, the test the in-flight rows above the band apply
        ([render_keeper_message]'s [live_request_id]): a request bound into the
@@ -26721,12 +26728,12 @@ let keeper_message_diagnostic_activity_rows (state : state) =
     let activity = match working with
       | Some entry when live_draws entry -> []
       | Some entry ->
-        [ { Masc_tui_answering.lead = "Current direct conversation"
+        [ { Masc_tui_answering.lead = say "지금 대화" "Current direct conversation"
           ; rest =
               " · "
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
-              ^ " · in progress"
+              ^ say " · 진행 중" " · in progress"
           ; motion = Masc_tui_answering.Still; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
@@ -26758,7 +26765,8 @@ let keeper_message_diagnostic_activity_rows (state : state) =
            session's request. Only local unsent input has an authoritative
            preview here; /queue reads the server's current contents/order. *)
         let count_row count label =
-          if count = 0 then [] else [plain (Printf.sprintf "%d %s" count label)] in
+          if count = 0 then []
+          else [plain (Printf.sprintf (if ko then "%d건 %s" else "%d %s") count label)] in
         let local_rows = match local with
           | [] -> []
           | first :: _ ->
@@ -26770,27 +26778,33 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               | Steer_after_interrupt | Steer_without_priority -> " [steer]"
               | Run_next _ -> " [run-next]"
               | Next | Next_without_auto_priority -> "" in
-            [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
+            [ { Masc_tui_answering.lead = say "다음 대기 줄" "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
               ; motion = Masc_tui_answering.Still; keys = "" } ] in
-        let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
+        let auto_tag =
+          match state.user_input_priority_next, ko with
+          | true, true -> "자동 다음 순서:켬"
+          | false, true -> "자동 다음 순서:끔"
+          | true, false -> "auto-next:on"
+          | false, false -> "auto-next:off" in
         (* The renderer reserves [keys] before fitting [rest]. Keep the
            aggregate, delivery evidence and local preview on separate rows;
            the status budget counts this same projection. *)
-        [ { Masc_tui_answering.lead = Printf.sprintf "Queue (%d pending)" waiting_count
+        [ { Masc_tui_answering.lead =
+              Printf.sprintf (if ko then "내 메시지 %d건 대기" else "Queue (%d pending)") waiting_count
           ; rest = " · " ^ auto_tag
-          ; motion = Masc_tui_answering.Still; keys = " · Ctrl-T:queue" } ]
-        @ count_row keeper_queued "queued at Keeper · /queue"
-        @ count_row awaiting_receipt "awaiting receipt"
-        @ count_row rechecking "rechecking delivery"
+          ; motion = Masc_tui_answering.Still; keys = say " · Ctrl-T:대기열" " · Ctrl-T:queue" } ]
+        @ count_row keeper_queued (say "처리 대기 · /queue" "queued at Keeper · /queue")
+        @ count_row awaiting_receipt (say "전송 중" "awaiting receipt")
+        @ count_row rechecking (say "전송 확인 중" "rechecking delivery")
         @ local_rows
     in
     activity @ (if retained then
-      [{ Masc_tui_answering.lead = "Held"
+      [{ Masc_tui_answering.lead = say "보류" "Held"
        ; rest = (if List.exists (fun (name, _, intervention) ->
            name = keeper_name && intervention = Retained_after_stop)
            state.keeper_interactive_waiting
-         then " · after stop" else " · before sending")
+         then say " · 중단 뒤" " · after stop" else say " · 보내기 전" " · before sending")
        ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
@@ -26811,14 +26825,20 @@ let keeper_message_activity_rows (state : state) =
           let provisional = provisional_requests () in
           List.filter_map (fun (request, result) ->
             if request.Masc_tui_keeper_chat_projection.keeper_name <> name then None
-            else Some { Masc_tui_answering.lead = (if Requests.mem request provisional then "Priority (control pending) "
-                else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
+            else Some { Masc_tui_answering.lead = (if Requests.mem request provisional then
+                  ui_text state ~ko:"다음 순서 (제어 대기) " ~en:"Priority (control pending) "
+                else match result with
+                  | Ok _ -> ui_text state ~ko:"다음 순서 " ~en:"Priority "
+                  | Error _ -> ui_text state ~ko:"다음 순서 확인 불가 " ~en:"Priority confirmation unavailable ")
+                ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
               rest = " · " ^ (match result with Ok detail | Error detail ->
                 Masc_tui_keeper_chat_projection.terminal_safe_text detail); motion = Masc_tui_answering.Still; keys = "" })
             state.keeper_run_next_receipts in
       keeper_message_diagnostic_activity_rows state @ receipts
   | (Tools_compact | Tools_results), None -> []
   | (Tools_compact | Tools_results), Some keeper_name ->
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       let waiting = keeper_message_waiting_requests state ~keeper_name in
       let waiting_requests, rechecking_requests = List.fold_left (fun (all, rechecking) (request, delivery) ->
           Requests.add request all,
@@ -26844,22 +26864,22 @@ let keeper_message_activity_rows (state : state) =
           phase entry.log.tl_transcript) own in
       if any_phase (fun transcript -> match Masc_tui_keeper_chat_transcript.phase transcript with
           | Stream_failed _ -> true | Waiting | Working | Stream_ended -> false) then
-        attention "요청 처리 실패";
+        attention (say "요청 처리 실패" "request failed");
       if List.exists (fun entry -> match entry.phase with
           | Turn_reconciling ->
               not (Requests.mem entry.sent_request rechecking_requests)
           | Turn_preflight _ | Turn_streaming -> false) own then
-        attention "메시지 전송 확인 중";
+        attention (say "메시지 전송 확인 중" "checking message delivery");
       let has_working = any_phase (fun transcript ->
         Masc_tui_keeper_chat_transcript.phase transcript = Working) in
       let unshown_phase phase = List.exists (fun entry ->
           not (shown_by_progress entry) && phase entry.log.tl_transcript) own in
       if unshown_phase (fun transcript ->
           Masc_tui_keeper_chat_transcript.phase transcript = Working) then
-        add "기존 작업 처리 중";
+        add (say "기존 작업 처리 중" "earlier work in progress");
       if unshown_phase (fun transcript ->
           Masc_tui_keeper_chat_transcript.phase transcript = Stream_ended) then
-        add "응답 마무리 중";
+        add (say "응답 마무리 중" "finishing the reply");
       List.iter (fun (admission, text) ->
           if List.exists (fun entry ->
               not (shown_by_progress entry)
@@ -26868,12 +26888,12 @@ let keeper_message_activity_rows (state : state) =
               && not (Masc_tui_keeper_chat_transcript.awaiting_continuation entry.log.tl_transcript)
               && Option.map fst (Masc_tui_keeper_chat_transcript.admission entry.log.tl_transcript) = admission) own
           then add text)
-        [None, "메시지 전송 확인 중";
-         Some Masc_tui_keeper_chat_live.Running, "응답 시작 중";
-         Some Settled, "완료된 응답을 다시 읽는 중"];
+        [None, say "메시지 전송 확인 중" "checking message delivery";
+         Some Masc_tui_keeper_chat_live.Running, say "응답 시작 중" "reply starting";
+         Some Settled, say "완료된 응답을 다시 읽는 중" "rereading a finished reply"];
       if not has_working then
         (match state.keeper_turns_error with
-         | Some _ -> attention "현재 작업 확인 불가"
+         | Some _ -> attention (say "현재 작업 확인 불가" "current work unavailable")
          | None ->
            let transcript = Option.map (fun log -> log.tl_transcript) (keeper_message_status_log state) in
            (match keeper_message_uncovered_preparation state ~keeper_name transcript with
@@ -26887,16 +26907,18 @@ let keeper_message_activity_rows (state : state) =
              if String.equal row.ktr_keeper_name keeper_name then
                match row.ktr_state with
                | Keeper_turn_running _ ->
-                   if not has_progress then add "기존 작업 처리 중"
-               | Keeper_turn_unavailable _ -> attention "현재 작업 확인 불가"
+                   if not has_progress then add (say "기존 작업 처리 중" "earlier work in progress")
+               | Keeper_turn_unavailable _ ->
+                   attention (say "현재 작업 확인 불가" "current work unavailable")
                | Keeper_turn_idle -> ()) state.keeper_turns));
       if waiting <> [] then begin
-        add (Printf.sprintf "내 메시지 %d건 대기" (List.length waiting));
+        add (Printf.sprintf (if ko then "내 메시지 %d건 대기" else "Queue (%d pending)")
+               (List.length waiting));
         let count delivery = List.length (List.filter (fun (_, kind) -> kind = delivery) waiting) in
         List.iter (fun (delivery, text) -> let n = count delivery in
-          if n > 0 then add (Printf.sprintf "%d건 %s" n text))
-          [Local_pending, "전송 대기"; Awaiting_receipt, "전송 중";
-           Rechecking_delivery, "전송 확인 중"];
+          if n > 0 then add (Printf.sprintf (if ko then "%d건 %s" else "%d %s") n text))
+          [Local_pending, say "전송 대기" "not sent yet"; Awaiting_receipt, say "전송 중" "awaiting receipt";
+           Rechecking_delivery, say "전송 확인 중" "rechecking delivery"];
         let holds request = Requests.mem request waiting_requests in
         let provisional = provisional_requests () in
         let pending = List.exists (fun (request, _) -> Requests.mem request provisional) waiting
@@ -26909,12 +26931,12 @@ let keeper_message_activity_rows (state : state) =
               | Ok _ -> failed, true, Requests.add request successful)
             (false, false, Requests.empty) state.keeper_run_next_receipts in
         if failed then
-          attention "다음 순서 확인 불가"
-        else if pending then add "다음 순서 확인 중"
+          attention (say "다음 순서 확인 불가" "priority confirmation unavailable")
+        else if pending then add (say "다음 순서 확인 중" "confirming priority")
         else if List.for_all (fun (request, _) -> Requests.mem request successful) waiting then
-          add "다음 순서로 전달 대기"
-        else if received then add "일부 메시지 다음 순서로 전달 대기"
-        else if count Keeper_queued > 0 then add "처리 대기"
+          add (say "다음 순서로 전달 대기" "waiting to go next")
+        else if received then add (say "일부 메시지 다음 순서로 전달 대기" "some messages waiting to go next")
+        else if count Keeper_queued > 0 then add (say "처리 대기" "queued at Keeper")
       end;
       let retained_after_stop = List.exists (fun (name, _, intervention) ->
           String.equal name keeper_name && intervention = Retained_after_stop)
@@ -26923,11 +26945,12 @@ let keeper_message_activity_rows (state : state) =
           String.equal name keeper_name && intervention = Retained_before_dispatch)
           state.keeper_interactive_waiting in
       let keys =
-        match keeper_observed_stop_hint state with None -> "" | Some _ -> " · Esc:중단" in
+        match keeper_observed_stop_hint state with None -> "" | Some _ -> say " · Esc:중단" " · Esc stops it" in
       let held_rows =
         if retained_after_stop || retained_before_dispatch then
-          [{ Masc_tui_answering.lead = "Held"
-           ; rest = (if retained_after_stop then " · after stop" else " · before sending")
+          [{ Masc_tui_answering.lead = say "보류" "Held"
+           ; rest = (if retained_after_stop then say " · 중단 뒤" " · after stop"
+                     else say " · 보내기 전" " · before sending")
            ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
         else [] in
       let activity_rows = match List.rev !urgent @ List.rev !clauses with

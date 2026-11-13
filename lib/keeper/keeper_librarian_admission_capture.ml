@@ -358,6 +358,16 @@ let decode_final ~store (capture:t) json =
     ~installation_id:capture.destination.installation_id exact in
   Keeper_librarian_original_final.decode_final ~store target json
 
+module Final = Keeper_librarian_original_final
+let unconfirmed_detail = function
+  | Final.Terminal_absent -> "Original admission host terminal is absent"
+  | Terminal_unresolved -> "Original admission host terminal remains unresolved"
+  | Terminal_differs -> "Admission final differs from its original host terminal"
+  | Latest_incomplete -> "Original admission has no completed latest host execution proof"
+  | Latest_ordinal_invalid | Latest_differs ->
+    "Admission final differs from its latest original host execution proof"
+  | Latest_refused -> "Original refused execution cannot confirm a completed admission answer"
+
 let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
   let module Exact = Lane_addon_exact in
   let* actual_owner = observe_owner ~base_path:(base_path capture.owner)
@@ -369,31 +379,11 @@ let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
   let* declaration_id = match installation with
     | Owner.Configuration id -> Ok id
     | Manual _ -> Error "Original admission host proof requires its configured installation" in
-  let* observed = Exact.observe_retained ~store ~declaration_id ~schema original in
-  (* The worker refuses an unlistable request before the host retains it
-     (addons/exact_worker.py [submit]), so the host holds no terminal and no
-     execution proof for it. Keeper_librarian_durable_request.confirm_final
-     answers the same way for the same final. *)
-  let host_never_retained = match observed with
-    | Exact.Retained_absent -> Exact.refused_before_host final
-    | Retained_open | Retained_terminal _ -> false in
-  if host_never_retained then Ok () else
-  let* () = match observed with
-    | Exact.Retained_absent -> Error "Original admission host terminal is absent"
-    | Retained_open -> Error "Original admission host terminal remains unresolved"
-    | Retained_terminal retained ->
-      let* same = same_json (Exact.final_to_json (Exact.delivered retained)) (Exact.final_to_json final) in
-      if same then Ok () else Error "Admission final differs from its original host terminal" in
-  match final with
-  | Exact.Call_final call_final ->
-    let* latest = Exact.read_latest_original_execution ~store ~declaration_id ~schema original in
-    (match latest with
-     | Exact.No_completed_latest -> Error "Original admission has no completed latest host execution proof"
-     | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended actual;_}} ->
-       let* same = same_json (Exact.final_to_json (Exact.Call_final actual))
-         (Exact.final_to_json (Exact.Call_final call_final)) in
-       if attempt_ordinal>0 && same then Ok ()
-       else Error "Admission final differs from its latest original host execution proof"
-     | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
-       Error "Original refused execution cannot confirm a completed admission answer")
-  | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ()
+  (* History and floor originals confirm with the same rule. *)
+  let* verdict = Final.confirm
+      ~observe:(fun () -> Exact.observe_retained ~store ~declaration_id ~schema original)
+      ~latest:(fun () -> Exact.read_latest_original_execution ~store ~declaration_id ~schema original)
+      final in
+  match verdict with
+  | Final.Confirmed -> Ok ()
+  | Unconfirmed reason -> Error (unconfirmed_detail reason)

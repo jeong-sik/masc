@@ -17,6 +17,28 @@ val refusal_evidence : store:Lane_addon_store.t -> target:(unit -> (target, stri
     its receipt supplies the walk's evidence, and only when that evidence is a
     named input refusal with no independent failure mixed in. Anything else,
     including an open host record, shows nothing. *)
+type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
+  | Latest_incomplete | Latest_ordinal_invalid | Latest_differs | Latest_refused
+(** Why the host evidence does not confirm a final. Each consumer words its
+    own error for it. *)
+type verdict = Confirmed | Unconfirmed of unconfirmed
+
+val confirm : observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->
+  latest:(unit -> (Lane_addon_exact.latest_original_execution, string) result) ->
+  Lane_addon_exact.final -> (verdict, string) result
+(** The rule every original consumer confirms a final with, and the deploy
+    check judges an original's Exact files with. [observe] reads the original's
+    Exact record. Without one, only a final where
+    {!Lane_addon_exact.refused_before_host} holds is confirmed. An open record
+    confirms nothing. A terminal must deliver this final, and a [Call_final]
+    then also needs the latest completed execution to have ended in it:
+    [latest] reads that execution and is called for nothing else. [Error] is
+    a read or canonical JSON failure. Reads only through [observe] and
+    [latest]. *)
+
+val unconfirmed_detail : unconfirmed -> string
+(** The error {!confirm_final} returns for each reason. *)
+
 val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final ->
   (unit, string) result
 (** Require the original retained host terminal. Each Call_final additionally
@@ -25,6 +47,14 @@ val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final
     {!Lane_addon_exact.refused_before_host} holds, for a request the host never
     retained: the worker refuses a request no listing reply can carry before the
     host sees it, and that final holds no answer. *)
+
+val answered_final : Lane_addon_exact.retained_observation -> Yojson.Safe.t ->
+  (Lane_addon_exact.final option, string) result
+(** The final a judgment names when the strict decoder refused it: the
+    original's Answered terminal, when the record holds one and it delivers
+    exactly this JSON. [None] when the record holds no Answered terminal, and
+    [Error] when it holds one that delivers other JSON. The caller still
+    confirms the final. Reads nothing. *)
 
 val decode_final : store:Lane_addon_store.t -> target -> Yojson.Safe.t ->
   (Lane_addon_exact.final, string) result

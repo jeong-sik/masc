@@ -3,10 +3,13 @@ module Exact = Lane_addon_exact
 let ( let* ) = Result.bind
 let ( let+ ) result f = Result.map f result
 let require condition detail = if condition then Ok () else Error detail
-let equal left right detail =
+let same left right =
   let* left=Lane_addon_action.canonical left in
-  let* right=Lane_addon_action.canonical right in
-  require (Yojson.Safe.equal left right) detail
+  let+ right=Lane_addon_action.canonical right in
+  Yojson.Safe.equal left right
+let equal left right detail =
+  let* same=same left right in
+  require same detail
 
 type target = {exact:Exact.request;schema:Yojson.Safe.t;declaration_id:string}
 let target ~installation_id exact =
@@ -44,46 +47,76 @@ let refusal_evidence ~store ~target final =
         | No_completed_latest -> Ok Keeper_exact_walk_failure.empty))
   | Exact.Call_final (Answered _ | Invalid_output _ | Output_limit_reached _ | Input_refused Invalid_request)
   | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok Keeper_exact_walk_failure.empty
-let confirm_final ~store {exact;schema;declaration_id} final =
-  let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
+type unconfirmed = Terminal_absent | Terminal_unresolved | Terminal_differs
+  | Latest_incomplete | Latest_ordinal_invalid | Latest_differs | Latest_refused
+type verdict = Confirmed | Unconfirmed of unconfirmed
+
+let confirm ~(observe : unit -> (Exact.retained_observation, string) result)
+    ~(latest : unit -> (Exact.latest_original_execution, string) result) final =
+  let* observed=observe () in
   match observed with
   | Exact.Retained_absent ->
     (* addons/exact_worker.py [submit] writes the refusal before the
        [store.write accepted] line, so the host never retains this request.
        The worker's deployed behavior is what makes this final the only one
        taken without a host terminal. *)
-    if Exact.refused_before_host final then Ok ()
-    else Error "Original history host terminal is absent"
-  | Retained_open -> Error "Original history host terminal is unresolved"
+    Ok (if Exact.refused_before_host final then Confirmed else Unconfirmed Terminal_absent)
+  | Retained_open -> Ok (Unconfirmed Terminal_unresolved)
   | Retained_terminal actual ->
-  let* ()=equal (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final)
-    "Original history final differs from the actual host terminal" in
+  let* delivered=same (Exact.final_to_json (Exact.delivered actual)) (Exact.final_to_json final) in
+  if not delivered then Ok (Unconfirmed Terminal_differs) else
   match final with
   | Exact.Call_final expected ->
-    let* latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema exact in
+    let* latest=latest () in
     (match latest with
-     | Exact.No_completed_latest -> Error "Original history latest host execution proof is incomplete"
+     | Exact.No_completed_latest -> Ok (Unconfirmed Latest_incomplete)
      | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended actual;_}} ->
-       let* ()=require (attempt_ordinal>0) "Original history host attempt ordinal is invalid" in
-       equal (Exact.final_to_json (Exact.Call_final expected)) (Exact.final_to_json (Exact.Call_final actual))
-         "Original history final differs from its latest completed host execution"
+       if attempt_ordinal<=0 then Ok (Unconfirmed Latest_ordinal_invalid) else
+       let+ same=same (Exact.final_to_json (Exact.Call_final expected))
+           (Exact.final_to_json (Exact.Call_final actual)) in
+       if same then Confirmed else Unconfirmed Latest_differs
      | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
-       Error "Original history refused host execution cannot confirm a call result")
-  | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok ()
+       Ok (Unconfirmed Latest_refused))
+  | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok Confirmed
+
+let unconfirmed_detail = function
+  | Terminal_absent -> "Original history host terminal is absent"
+  | Terminal_unresolved -> "Original history host terminal is unresolved"
+  | Terminal_differs -> "Original history final differs from the actual host terminal"
+  | Latest_incomplete -> "Original history latest host execution proof is incomplete"
+  | Latest_ordinal_invalid -> "Original history host attempt ordinal is invalid"
+  | Latest_differs -> "Original history final differs from its latest completed host execution"
+  | Latest_refused -> "Original history refused host execution cannot confirm a call result"
+
+let confirm_final ~store {exact;schema;declaration_id} final =
+  let* verdict=confirm
+      ~observe:(fun () -> Exact.observe_retained ~store ~declaration_id ~schema exact)
+      ~latest:(fun () -> Exact.read_latest_original_execution ~store ~declaration_id ~schema exact)
+      final in
+  match verdict with
+  | Confirmed -> Ok ()
+  | Unconfirmed reason -> Error (unconfirmed_detail reason)
+
+let answered_final (observed : Exact.retained_observation) json =
+  match observed with
+  | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered _) as retained) ->
+    let final=Exact.delivered retained in
+    let+ ()=equal json (Exact.final_to_json final)
+        "Final JSON differs from the original host answer" in
+    Some final
+  | Retained_absent | Retained_open
+  | Retained_terminal (Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+                      | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused) ->
+    Ok None
 
 let decode_final ~store ({exact;schema;declaration_id} as target) json =
   match Exact.final_of_json ~schema json with
   | Ok final -> Ok final
   | Error strict_error ->
     let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
-    match observed with
-    | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered _) as retained) ->
-      let final=Exact.delivered retained in
-      let* ()=equal json (Exact.final_to_json final)
-        "Final JSON differs from the original host answer" in
+    let* answered=answered_final observed json in
+    match answered with
+    | None -> Error strict_error
+    | Some final ->
       let* ()=confirm_final ~store target final in
       Ok final
-    | Retained_absent | Retained_open
-    | Retained_terminal (Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
-                        | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused) ->
-      Error strict_error

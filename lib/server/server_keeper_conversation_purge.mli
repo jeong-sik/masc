@@ -29,12 +29,15 @@
 type standing =
   | Kept  (** No deletion of it began. *)
   | Deletion_failed
-      (** Its last deletion left its directory. A list shows it so. Nothing
-          reads it, and no turn goes on in it. *)
+      (** Its last deletion left its directory, or the zone gave up the record
+          of its start and blocks it (design 8.3). A list shows it so. Nothing
+          reads it, and no turn goes on in it. A deletion by its owner ends
+          it, and closes the block. *)
   | Deleted  (** A deletion of it is pending or went through. Nothing shows it. *)
 
 (** Where the deletion of the conversation of [person] stands, on what the
-    zone last published ({!Authz_zone.snapshot}). The records of a deletion
+    zone last published ({!Authz_zone.snapshot}): the purge record of the
+    conversation and the block of its subject. The records of a deletion
     are written before it removes anything, and it runs inside the call of
     the account of the conversation: a caller inside that call reads a
     standing that holds until the call ends. *)
@@ -52,7 +55,10 @@ type error =
       (** The conversations of the person were not read. Nothing was
           written. *)
   | Not_started of Authz_purge.error
-      (** The [Purge_pending] record was not written. Nothing was deleted. *)
+      (** The [Purge_pending] record is not in the log. Nothing was deleted.
+          When the zone gave the record up, the conversation stands as
+          [Deletion_failed]. A commit that answered an error after its record
+          went in is not this: the deletion goes on from that record. *)
   | Not_ended of Authz_purge.error
       (** The record of the end was not written. The deletion stays pending:
           nothing shows the conversation, and the next deletion of it goes

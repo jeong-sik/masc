@@ -33,11 +33,22 @@ let status_of (person : Login.person) conversation_id =
     (target person conversation_id)
 ;;
 
-let standing person conversation_id =
-  match status_of person conversation_id with
-  | None -> Kept
-  | Some (Purges.Failed { failed_stage = _; vendor_copy = _ }) -> Deletion_failed
-  | Some (Purges.Pending { earlier_vendor_copy = _ } | Purges.Purged { vendor_copy = _ }) -> Deleted
+(* A start whose record the zone gave up blocks the conversation (design 8.3)
+   until its owner asks again, and a blocked conversation is not read
+   (Authz_state): it stands as after a deletion that failed. *)
+let standing (person : Login.person) conversation_id =
+  let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
+  let target = target person conversation_id in
+  match
+    Purges.find state.Authz_state.purges target, Authz_state.revocation state (Event.subject target)
+  with
+  | None, Authz_records.Revocation_state.Not_pending -> Kept
+  | ( (None | Some (Purges.Failed { failed_stage = _; vendor_copy = _ }))
+    , Authz_records.Revocation_state.Pending )
+  | Some (Purges.Failed { failed_stage = _; vendor_copy = _ }), Authz_records.Revocation_state.Not_pending ->
+    Deletion_failed
+  | ( Some (Purges.Pending { earlier_vendor_copy = _ } | Purges.Purged { vendor_copy = _ })
+    , (Authz_records.Revocation_state.Pending | Authz_records.Revocation_state.Not_pending) ) -> Deleted
 ;;
 
 let deletion_began person conversation_id =
@@ -204,8 +215,16 @@ let delete ~env ~(person : Login.person) ~base_path conversation_id =
         match Authz_purge.start person.zone ~user_id:person.user_id (target person conversation_id) with
         | Ok () -> finish since
         | Error error ->
-          logged conversation "it was not started" (Authz_purge.error_detail error);
-          Error (Not_started error)
+          (* The published state tells whether the record went into the log:
+             a commit can answer an error after its record went in, as when
+             the store did not take the end of the commit. *)
+          (match status_of person conversation_id with
+           | Some (Purges.Pending { earlier_vendor_copy = _ }) ->
+             logged conversation "its start was recorded, and the commit answered" (Authz_purge.error_detail error);
+             finish since
+           | Some (Purges.Failed { failed_stage = _; vendor_copy = _ } | Purges.Purged { vendor_copy = _ }) | None ->
+             logged conversation "it was not started" (Authz_purge.error_detail error);
+             Error (Not_started error))
       in
       match status_of person conversation_id with
       | None -> start Fresh

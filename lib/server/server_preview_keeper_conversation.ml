@@ -169,7 +169,7 @@ let deletion_error : Purge.error -> E.t = function
   | Purge.Record_unavailable error -> E.of_record_error error
   | Purge.Not_started (Authz_purge.Refused (Authz_purge_state.User_not_active _)) -> E.Deletion_refused
   | Purge.Not_started (Authz_purge.Commit_failed (_ : Authz_zone.error)) ->
-    E.Server_unavailable "The deletion could not be recorded, and nothing was deleted."
+    E.Server_unavailable "The deletion could not be recorded, and nothing was deleted. Ask again to delete it."
   | Purge.Not_started
       ( Authz_purge.Body_not_built (_ : Authz_body.error)
       | Authz_purge.Refused

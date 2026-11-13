@@ -62,6 +62,7 @@ type t = private
   ; provider_accounts : Authz_provider_account_state.t  (** Plan D1-1. *)
   ; runtimes : Authz_runtime_state.t  (** Plan D1. *)
   ; keepers : Authz_keeper_state.t  (** Plan D1-5. *)
+  ; purges : Authz_purge_state.t  (** Plan S1b-3c. *)
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
@@ -158,7 +159,9 @@ type refusal =
           stays until the layer that reads them. A block of a browser
           session is never cancelled: its owner closes it by signing out
           again, or a new sign-in of the browser by ending the session (plan
-          C3). *)
+          C3). Nor is the block of a Keeper conversation whose purge was given
+          up: its owner closes it by asking for the purge again (plan
+          S1b-3c). *)
   | Registration_unreadable of Authz_registration_event.error
   | Registration of Authz_registration_state.refusal
   | Session_unreadable of Authz_session_event.error
@@ -173,6 +176,8 @@ type refusal =
   | Runtime of Authz_runtime_state.refusal
   | Keeper_unreadable of Authz_keeper_event.error
   | Keeper of Authz_keeper_state.refusal
+  | Purge_unreadable of Authz_purge_event.error
+  | Purge of Authz_purge_state.refusal
 
 val refusal_to_string : refusal -> string
 
@@ -198,7 +203,11 @@ val refusal_to_string : refusal -> string
     no Runtime may spend it (plan D1-1). A Runtime has none either: a log
     restored from before it has no such Runtime and no Self grant on it (plan
     D1). Nor does a Keeper record: a log restored from before it leaves the Keeper
-    with no owner, or with the Runtime it was given before (plan D1-5). *)
+    with no owner, or with the Runtime it was given before (plan D1-5). The
+    start of a purge is a [Purge] on its target, so a log restored from before
+    it does not make the target read again (design 8.5-1, plan S1b-3c). Its
+    end has none: a log restored from before it holds the purge pending, and
+    the maintenance deletes once more. *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

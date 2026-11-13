@@ -264,6 +264,12 @@ let subject_text = function
   | Subject.Invite id -> {|{"type":"invite","id":|} ^ literal (Invite_id.to_string id) ^ "}"
   | Subject.Registration id ->
     {|{"type":"registration","id":|} ^ literal (Registration_id.to_string id) ^ "}"
+  | Subject.Keeper_conversation { owner; conversation_id } ->
+    {|{"type":"keeper_conversation","owner":|}
+    ^ literal (User_id.to_string owner)
+    ^ {|,"conversation_id":|}
+    ^ literal (Conversation_id.to_string conversation_id)
+    ^ "}"
 ;;
 
 let change_text = function
@@ -346,6 +352,15 @@ let subject_of_json = function
     Option.map
       (fun id -> Subject.Registration id)
       (Result.to_option (Registration_id.of_string id))
+  | `Assoc
+      [ ("type", `String "keeper_conversation")
+      ; ("owner", `String owner)
+      ; ("conversation_id", `String conversation_id)
+      ] ->
+    (match User_id.of_string owner, Conversation_id.of_string conversation_id with
+     | Ok owner, Ok conversation_id -> Some (Subject.Keeper_conversation { owner; conversation_id })
+     | Error (_ : Authz_id.error), (Ok (_ : Conversation_id.t) | Error (_ : Authz_id.error))
+     | Ok (_ : User_id.t), Error (_ : Authz_id.error) -> None)
   | _ -> None
 ;;
 

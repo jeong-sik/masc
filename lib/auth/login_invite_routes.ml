@@ -71,7 +71,9 @@ let state_status = function
   | S.Runtime_unreadable _
   | S.Runtime _
   | S.Keeper_unreadable _
-  | S.Keeper _ -> R.Internal_error_500
+  | S.Keeper _
+  | S.Purge_unreadable _
+  | S.Purge _ -> R.Internal_error_500
 ;;
 
 let error_status = function

@@ -103,7 +103,9 @@ let state_answer ~text = function
   | S.Runtime_unreadable _
   | S.Runtime _
   | S.Keeper_unreadable _
-  | S.Keeper _ -> R.Internal_error_500, text
+  | S.Keeper _
+  | S.Purge_unreadable _
+  | S.Purge _ -> R.Internal_error_500, text
 ;;
 
 let error_answer error =

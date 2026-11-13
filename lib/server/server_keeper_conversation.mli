@@ -51,7 +51,9 @@
     one conversation are ordered by the caller, which runs one call of an
     account at a time, and a conversation stays on the account it began on. *)
 
-module Conversation_id : Authz_id.S
+(** The type that a purge record of the authorization log names a
+    conversation by (plan S1b-3c). *)
+module Conversation_id = Authz_types.Conversation_id
 
 (** The directory of the conversations of one person. *)
 type root

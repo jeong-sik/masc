@@ -49,6 +49,7 @@ let writers_of =
     ; Provider_account, authenticated
     ; Runtime, authenticated
     ; Keeper, authenticated
+    ; Purge, authenticated @ [ "system maintenance" ]
     ]
 ;;
 
@@ -87,6 +88,7 @@ let ordinal = function
   | R.Kind.Provider_account -> 18
   | R.Kind.Runtime -> 19
   | R.Kind.Keeper -> 20
+  | R.Kind.Purge -> 21
 ;;
 
 let kinds_are_all_listed () =
@@ -418,6 +420,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "provider_account"
     ; "runtime"
     ; "keeper"
+    ; "purge"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

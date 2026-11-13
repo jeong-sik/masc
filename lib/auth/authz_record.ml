@@ -49,6 +49,7 @@ module Kind = struct
     | Provider_account
     | Runtime
     | Keeper
+    | Purge
 
   let all =
     [ Runtime_grant
@@ -72,6 +73,7 @@ module Kind = struct
     ; Provider_account
     ; Runtime
     ; Keeper
+    ; Purge
     ]
   ;;
 
@@ -97,6 +99,7 @@ module Kind = struct
     | Provider_account -> "provider_account"
     | Runtime -> "runtime"
     | Keeper -> "keeper"
+    | Purge -> "purge"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -124,7 +127,9 @@ let writer_of : Author.t -> writer = function
    mode event is a [Fresh_bootstrap], which design 6.3 gives to the local
    operator, or an [Off] or a [Reactivate], whose writer the design leaves to
    the layer that switches the mode (F3). That layer adds a kind if the writer
-   of those two is not the local operator. *)
+   of those two is not the local operator. A purge is started by the person
+   who owns its target and ended by the system maintenance, which deletes the
+   target (design 8.5, plan S1b-3c). *)
 let writers : Kind.t -> writer list = function
   | Kind.Runtime_grant
   | Kind.Delegate_policy
@@ -144,6 +149,7 @@ let writers : Kind.t -> writer list = function
   | Kind.Migration_diagnostic -> [ Migration ]
   | Kind.Local_recovery | Kind.Mode_event | Kind.Internal_service_credential -> [ Host_operator ]
   | Kind.Invite -> [ Host_operator; Authenticated_principal ]
+  | Kind.Purge -> [ Authenticated_principal; Maintenance ]
 ;;
 
 let admits kind author = List.mem (writer_of author) (writers kind)

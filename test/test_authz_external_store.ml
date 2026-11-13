@@ -39,8 +39,26 @@ let session = Subject.Session (get (Session_id.of_string "session-1"))
 let pat = Subject.Pat (get (Pat_id.of_string "pat-1"))
 let service_credential = Subject.Service_credential (get (Service_credential_id.of_string "cred-1"))
 
+let keeper_conversation =
+  Subject.Keeper_conversation
+    { owner = get (User_id.of_string "alice")
+    ; conversation_id = get (Conversation_id.of_string "conversation-1")
+    }
+;;
+
 let subjects =
-  [ grant; credential; runtime; session; pat; service_credential; human; service; invite; registration ]
+  [ grant
+  ; credential
+  ; runtime
+  ; session
+  ; pat
+  ; service_credential
+  ; human
+  ; service
+  ; invite
+  ; registration
+  ; keeper_conversation
+  ]
 ;;
 let authz event subject = C.Authz { event; subject }
 let mode event workspace_id = C.Mode { event; workspace_id }
@@ -381,8 +399,8 @@ let check_reads_back label state entry =
 
 let every_change_reads_back () =
   Alcotest.(check int)
-    "eight authorization events with ten subjects each, and three mode events"
-    83
+    "eight authorization events with eleven subjects each, and three mode events"
+    91
     (List.length all_changes);
   with_path (fun path ->
     let store, _, _ = open_ok ~path in

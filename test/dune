@@ -6340,7 +6340,7 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio eio.unix eio_main ipaddr masc.server masc.host_config
+ (libraries alcotest unix yojson eio eio.unix eio_main ipaddr masc masc.runtime masc.server masc.host_config
   masc.fs_compat masc.http_client masc.masc_eio_context masc.owner_process_identity))
 
 (include stanzas/test_docker_desktop_install.inc)

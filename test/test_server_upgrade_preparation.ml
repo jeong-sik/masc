@@ -597,6 +597,19 @@ let test_a_server_that_withdrew_its_announcement_is_sent_nothing_more () =
               [Some "Bearer fixture-bearer"] !seen;
             Upgrade.close owner);
           Alcotest.(check bool) "it was not asked to stop" true (still_runs ()))))
+(* The public probe is what a server answers a command line that sends no
+   credential under strict auth, and what every requester gets before the
+   workspace is published. The command line reads its version from it, and
+   the reader of an account server's answer does not take it for one. *)
+let test_the_public_probe_is_a_version_the_command_line_reads () =
+  let body =
+    Yojson.Safe.to_string
+      (Server_health_public.health_json ~ready:false ~phase:Masc.Server_startup_state.Blocking)
+  in
+  Alcotest.(check (option string)) "the command line reads the release version"
+    (Some Runtime_build_version.current) (Upgrade.compact_health_version body);
+  Alcotest.(check (option string)) "it is not an account server's answer" None
+    (Server_accounts.health_version body)
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "initial login waits for the kernel and the version" `Quick
       test_initial_login_waits_for_the_kernel_and_the_version;
@@ -607,7 +620,9 @@ let () = Alcotest.run "upgrade preparation"
     Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
     Alcotest.test_case "request and observation stay distinct" `Quick test_termination_request_survives_observation_failure;
     Alcotest.test_case "refused request never observes" `Quick test_refused_termination_never_observes;
-    Alcotest.test_case "compact health version" `Quick test_compact_health_version_reads_one_version];
+    Alcotest.test_case "compact health version" `Quick test_compact_health_version_reads_one_version;
+    Alcotest.test_case "the public probe is a version the command line reads" `Quick
+      test_the_public_probe_is_a_version_the_command_line_reads];
    "single-user server",[Alcotest.test_case "the owner names a single-user server on its port" `Quick
       test_owner_names_a_single_user_server_on_its_port;
     Alcotest.test_case "the owner names the port a single-user server announces" `Quick

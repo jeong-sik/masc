@@ -10,6 +10,24 @@ type 'a launch =
   deliver:(('a, string) result -> Masc_tui_async_protocol.async_msg) ->
   (unit -> ('a, string) result) -> unit
 
+(* What stays when a write is kept back: a post or a comment keeps its draft,
+   a vote has none to keep. *)
+type kept = Draft_kept | Nothing_kept
+
+(* A write kept back because the workspace is not confirmed says what
+   stopped it, that nothing was sent, and what stayed. *)
+let refuse_unconfirmed state ~report kept =
+  let ko = state.ui_language = Lang_ko in
+  let kept = match kept with
+    | Draft_kept -> [ draft_retained ~ko ]
+    | Nothing_kept -> [] in
+  let detail =
+    String.concat " · "
+      (String.capitalize_ascii (workspace_identity_unconfirmed ~ko) :: not_sent ~ko :: kept)
+  in
+  state.board_post_error <- Some detail;
+  report "error" detail
+
 let start_board_post_refresh state ~host ~port ~post_id ~launch =
   match state.server_identity with
   | Some expected when server_authority_ready state -> begin
@@ -37,12 +55,11 @@ type 'authority post_phase =
 
 let start_board_post state ~host ~results ~admit ~report
     ~(title : string) ~(body : string) ?hearth () =
-  if state.workspace_identity <> Workspace_identity_match then begin
-    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
-    state.board_post_error <- Some detail;
-    report "error" detail
-  end else begin
+  if state.workspace_identity <> Workspace_identity_match then
+    refuse_unconfirmed state ~report Draft_kept
+  else begin
   state.board_post_error <- None;
+  let ko = state.ui_language = Lang_ko in
   let request =
     Publication.capture ~authority:state.workspace_authority
       ~host ~port:state.port ~expected_workspace:state.server_identity
@@ -62,7 +79,7 @@ let start_board_post state ~host ~results ~admit ~report
   let started = ref true in
   let settle_not_run () =
     started := false;
-    let outcome = boundary_error "Board publication did not start" in
+    let outcome = boundary_error (if ko then "실행되지 않음" else "did not run") in
     (match Publication.record state.board_publications outcome with
      | Publication.Already_recorded | Publication.Not_registered -> ()
      | Publication.Recorded history -> state.board_publications <- history);
@@ -71,13 +88,15 @@ let start_board_post state ~host ~results ~admit ~report
        state.board_write <- Board_idle;
        state.board_compose_armed <- false;
        state.board_post_error <-
-         Some "Board publication not confirmed; check the Board before retrying"
+         Some
+           (Publication.outcome_unknown ~ko ^ " · "
+            ^ if ko then "다시 보내기 전에 게시판을 확인하세요" else "check the Board before retrying")
      | Board_posting _ | Board_idle | Board_commenting _ -> ())
   in
   Masc_tui_workspace_result.launch state ~results ~boundary_error
     ~on_not_run:settle_not_run
     ~cancelled_by:(fun () ->
-      Board_msg (Board_publication_done (boundary_error "Board publication interrupted")))
+      Board_msg (Board_publication_done (boundary_error (if ko then "중단됨" else "interrupted"))))
     ~deliver:(function
       | Ok outcome | Error outcome -> Board_msg (Board_publication_done outcome))
     (fun () ->
@@ -86,7 +105,7 @@ let start_board_post state ~host ~results ~admit ~report
       let* () =
         match request.expected_workspace with
         | Some _ -> Ok ()
-        | None -> Error (boundary_error "Board workspace identity is unavailable")
+        | None -> Error (boundary_error (workspace_identity_unread ~ko))
       in
       (* Staged files upload before the post: a failure here means the post
          was not sent, and the draft and staged list stay as they were. The
@@ -103,7 +122,7 @@ let start_board_post state ~host ~results ~admit ~report
             Masc_tui_http.upload_artifact ~host:request.host ~port:request.port ~bytes)
           request.staged
         |> Result.map_error (fun detail ->
-          boundary_error ("not sent, attachment failed: " ^ detail))
+          boundary_error ((if ko then "첨부 실패: " else "attachment failed: ") ^ detail))
       in
       let* prepared =
         Masc_tui_http.prepare_board_new request attachments
@@ -114,18 +133,17 @@ let start_board_post state ~host ~results ~admit ~report
       let outcome = Publication.returned prepared response in
       phase := Observed outcome;
       Ok outcome);
-  if !started then report "system" "posting to Board"
+  if !started then report "system" (if ko then "게시판에 글 올리는 중" else "posting to Board")
   end
 
 
 let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : string)
     ~(content : string) =
-  if state.workspace_identity <> Workspace_identity_match then begin
-    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
-    state.board_post_error <- Some detail;
-    report "error" detail
-  end else begin
+  if state.workspace_identity <> Workspace_identity_match then
+    refuse_unconfirmed state ~report Draft_kept
+  else begin
   state.board_post_error <- None;
+  let ko = state.ui_language = Lang_ko in
   state.board_write <- Board_commenting request_id;
   let sent_draft = Buffer.contents state.board_draft in
   let port = state.port in
@@ -136,13 +154,13 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
-        | None -> Error "Board workspace identity is unavailable" in
+        | None -> Error (workspace_identity_unread ~ko) in
       match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json );
   (match state.board_write with
    | Board_commenting current when current == request_id ->
-     report "system" "commenting on Board"
+     report "system" (if ko then "댓글 보내는 중" else "commenting on Board")
    | Board_idle | Board_posting _ | Board_commenting _ -> ())
   end
 
@@ -150,14 +168,15 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
    so the payload says only which target and which way. The completion
    carries the target back, so it can refresh the reading it lands on. *)
 let start_vote state ~launch ~report ~target ~(up : bool) ~send =
-  if state.workspace_identity <> Workspace_identity_match then begin
-    let detail = "Cannot write to Board: workspace identity is unverified; draft retained" in
-    state.board_post_error <- Some detail;
-    report "error" detail
-  end else begin
+  if state.workspace_identity <> Workspace_identity_match then
+    refuse_unconfirmed state ~report Nothing_kept
+  else begin
+  let ko = state.ui_language = Lang_ko in
+  let direction = Masc_tui_board_vote.direction ~ko ~up in
+  let target_text = Masc_tui_board_vote.describe ~ko target in
   report "system"
-    (Printf.sprintf "voting %s on %s" (if up then "up" else "down")
-       (Masc_tui_board_vote.describe target));
+    (if ko then Printf.sprintf "%s %s 보내는 중" target_text direction
+     else Printf.sprintf "voting %s on %s" direction target_text);
   let port = state.port in
   let expected_workspace = state.server_identity in
   launch
@@ -166,7 +185,7 @@ let start_vote state ~launch ~report ~target ~(up : bool) ~send =
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
-        | None -> Error "Board workspace identity is unavailable" in
+        | None -> Error (workspace_identity_unread ~ko) in
       match send ~expected_workspace ~port with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )

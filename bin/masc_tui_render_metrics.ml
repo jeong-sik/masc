@@ -507,12 +507,7 @@ let render_section_resources ~cols (state : state) =
   let say korean english = if ko then korean else english in
   (* The blocks after the first read the same snapshot. Without one they say
      why in a word; the first block carries the loader's sentence. *)
-  let no_snapshot =
-    "    "
-    ^ (match state.tasks_error with
-       | None -> field_unread ~ko
-       | Some _ -> field_failed ~ko)
-  in
+  let no_snapshot = "    " ^ field_missing_reading ~ko ~error:state.tasks_error in
   let task_lines = match state.task_flow with
     | None ->
       [ "    "

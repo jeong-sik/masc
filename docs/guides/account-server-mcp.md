@@ -19,7 +19,7 @@ request, one JSON answer.
 | `initialize` | The negotiated revision, the server, and the `tools` capability. No `Mcp-Session-Id`. |
 | `server/discover` | The supported revisions, for a client of revision 2026-07-28. |
 | `ping` | An empty result. |
-| `tools/list` | The six tools below, on one page. |
+| `tools/list` | The eight tools below, on one page. |
 | `tools/call` | The result of the tool. |
 | a notification | 202 with no body. |
 

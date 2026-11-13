@@ -16,11 +16,12 @@ signed in. Two other guides go on from there:
   a personal access token themselves. No route of the single-user server is
   there: the TUI and the operator's dashboard do not connect to it, and it
   starts none of the operator's Keepers.
-- A workspace that is activated no longer boots as a single user.
-  `masc auth off` brings back a single-user boot, with the records of the
-  accounts kept read-only, and this build does not activate a workspace a
-  second time. Activate a base path that you keep for the accounts, not the
-  one your single-user server runs on.
+- A workspace that is activated no longer boots as a single user. Turning
+  the accounts off and taking `account_mode` out of `config.json` brings
+  back a single-user boot (see [Turn the accounts off](#turn-the-accounts-off)),
+  and this build does not activate a workspace a second time. Activate a
+  base path that you keep for the accounts, not the one your single-user
+  server runs on.
 
 ## Before you start
 
@@ -33,6 +34,15 @@ signed in. Two other guides go on from there:
     `https://<host>/auth/oidc/callback`.
 - `MASC_ALLOW_ANONYMOUS_MUTATIONS` off in the shell that runs the commands
   below and the server.
+- One user and one home for every command below and the server.
+  `masc auth bootstrap` writes an install record under
+  `$XDG_CONFIG_HOME/masc/`, or `~/.config/masc/` when that is not set, and
+  the record names the external store. The server and the other
+  `masc auth` commands find the store only through that record. Run them
+  with the same `HOME` and `XDG_CONFIG_HOME`, and do not move the base path
+  afterwards. A server that cannot match the store with the authorization
+  log stops (`AuthorizationUncertain`), and this build has no procedure
+  that makes the two agree again.
 
 ## 1. Ask for multi-account use in config.json
 
@@ -57,9 +67,11 @@ there:
   file, and backups copy it.
 - `google` takes the same three members, with the redirect
   `https://<host>/auth/oidc/callback`.
-- The server does not start when a redirect is not an https URL with a host,
-  when its path is not the callback of its provider, or when its origin is
-  not that of `MASC_HTTP_BASE_URL` (when that is set).
+- The server does not start when `client_id` is empty, when the variable
+  that `client_secret_env` names is unset or empty, when a redirect is not
+  an https URL with a host and no query or fragment, when its path is not
+  the callback of its provider, or when its origin is not that of
+  `MASC_HTTP_BASE_URL` (when that is set).
 
 ## 2. Activate the workspace and invite the first Admin
 
@@ -72,17 +84,19 @@ masc auth bootstrap --base-path <base> --external-store <absolute path of a new 
 ```
 
 - The external store is a file that the authorization log writes to before
-  and after each change. Put it outside what the backups of the base path
-  copy: a backup restored over the base path must not take the store back
-  with it.
+  and after each change. Its path must be absolute and outside the base
+  path, and outside the directory of the authorization log when a link puts
+  that directory elsewhere. The command refuses any other. Put it outside
+  what the backups of the base path copy as well: a backup restored over the
+  base path must not take the store back with it.
 - The command prints the link of the first Admin invitation once,
   `https://<host>/accounts/invite#<token>`. The link works once and expires
   after 24 hours. Only a digest of the token is written, so a lost link
   cannot be read again.
 - For a link that expired or was lost, stop the server and run
-  `masc auth invite --base-path <base>`. It writes one more Admin invitation
-  and revokes none. While a server runs on the workspace, the command is
-  refused for the lease.
+  `masc auth invite --base-path <base>` with `MASC_HTTP_BASE_URL` set as
+  above. It writes one more Admin invitation and revokes none. While a
+  server runs on the workspace, the command is refused for the lease.
 
 ## 3. Start the account server
 
@@ -92,11 +106,15 @@ export MASC_GITHUB_CLIENT_SECRET=<client secret>
 masc start --base-path <base> --port <port>
 ```
 
+- Export the secret variable of every login client in `config.json`. A
+  `google` client names its own.
 - The log says that the account server listens on the port and serves the
   routes of its own table, and no route that reads the credentials of a
   single user.
 - `GET /health/ready` answers `{"ready":true}`.
-- `masc restart` replaces it as it replaces a single-user server.
+- `masc restart` replaces it as it replaces a single-user server. The new
+  server takes the environment of the shell that runs `masc restart`, so
+  export `MASC_HTTP_BASE_URL` and the client secrets there too.
 
 ## 4. Sign in as the first Admin
 
@@ -118,12 +136,19 @@ signs in through an Admin invitation becomes an Admin.
   `gh api users/<login> --jq .id`. The answer names a `registration_id`;
   `DELETE /api/v1/auth/allowlist/<registration_id>` removes the entry.
 
-## 6. What a person connects
+## 6. Declare what people connect
 
-- A person connects a subscription of a client that the workspace declares
-  as a provider in its runtime.toml (`<base>/.masc/config/runtime.toml`).
-  The login of a client that runtime.toml does not declare is refused with
-  400 before it starts.
+- Write `<base>/.masc/config/runtime.toml` by hand, with a provider for each
+  client people may connect. Neither bootstrap nor the account server
+  writes it, and `masc setup` refuses a workspace whose `config.json` asks
+  for Multi_account. Without the file, `GET /api/v1/auth/integrations`
+  answers 503 and every connection is refused with 400. The
+  [runtime.toml reference](../RUNTIME-TOML-REFERENCE.md) lists its rows.
+- A person connects a subscription of a client that runtime.toml declares
+  as a provider. The login of a client that it does not declare is refused
+  with 400 before it starts. Antigravity is refused even when it is
+  declared: its credential is a copy in the setup registry, which has no
+  owner.
 - `GET /api/v1/auth/integrations` tells a signed-in person which
   subscriptions and models they may connect. A multi-account process calls
   the models of Claude Code. It refuses those of Codex and Muse for their
@@ -147,11 +172,14 @@ export MASC_GITHUB_CLIENT_SECRET=<client secret>
 masc auth preview --base-path <scratch base> --github-client-id <client ID>
 ```
 
+- The store file follows the rule of step 2: an absolute path outside the
+  scratch base path.
 - The GitHub OAuth App needs the callback URL
   `http://127.0.0.1/auth/github/callback`. GitHub takes a loopback redirect
   on any port.
-- Open the link that bootstrap printed. The preview serves no MCP route and
-  no Board route. It holds the workspace lease until Ctrl-C.
+- Open the link that bootstrap printed. The preview also serves the MCP
+  endpoint of a person, and no Board route. It holds the workspace lease
+  until Ctrl-C.
 
 ## Turn the accounts off
 
@@ -159,7 +187,9 @@ Stop every masc process on the workspace, run
 `masc auth off --base-path <base>`, and take `account_mode` out of
 `config.json`. A server then boots a single user. No turn runs for a Keeper
 or on a Runtime of the accounts, and this build does not turn the accounts
-on again.
+on again. While the homes of people remain under `.masc/accounts`, a
+single-user turn that gives a client its native tools is refused on that
+base path.
 
 ## What is not there yet
 

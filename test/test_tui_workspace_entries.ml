@@ -87,7 +87,7 @@ let test_activity_file_starts_without_old_overlays () =
   state.code_history_open <- true;
   state.code_diff_open <- true;
   state.code_notes_open <- true;
-  state.code_lsp_note <- Some "old hover";
+  state.code_lsp_note <- Some (Code_note_server_words { symbol = "fixture"; words = "old hover" });
   state.code_target_line <- Some 200;
   state.code_file_scroll <- 199;
   let history, old_history =
@@ -299,8 +299,8 @@ let test_file_recovery_preserves_nested_readers () =
        | Some (_, Failed "recovered diff refusal") -> true | _ -> false);
     Alcotest.(check bool) "blame completion retains its owner" true
       (match Fetched.current state.code_blame with Some (_, Ready []) -> true | _ -> false);
-    Alcotest.(check (option string)) "file refresh does not erase a recovered hover"
-      (Some "second: recovered hover") state.code_lsp_note;
+    Alcotest.(check bool) "file refresh does not erase a recovered hover" true
+      (state.code_lsp_note = Some (Code_note_server_words { symbol = "second"; words = "recovered hover" }));
     Alcotest.(check bool) "same file keeps cursor, scroll, horizontal offset and focus" true
       (state.code_file_cursor=1 && state.code_file_scroll=1
        && state.code_file_hscroll=3 && state.code_focus_file=Left_pane);
@@ -395,7 +395,7 @@ let test_lsp_replies_belong_to_their_source_reading () =
   read "source.ml";
   let from_project = ask "definition" in
   let same_scope_file = Option.get (Fetched.current_request state.code_file) in
-  state.code_lsp_note <- Some "current query";
+  state.code_lsp_note <- Some (Code_note_server_words { symbol = "fixture"; words = "current query" });
   state.code_target_line <- Some 7;
   set_code_scope state Code_scope_project;
   Alcotest.(check bool) "same scope preserves the source reading token" true
@@ -404,8 +404,8 @@ let test_lsp_replies_belong_to_their_source_reading () =
      | None -> false);
   Alcotest.(check bool) "same scope preserves the in-flight query" true
     (Fetched.is_current ~equal:code_lsp_query_equal state.code_lsp_query from_project);
-  Alcotest.(check (option string)) "same scope preserves the current note" (Some "current query")
-    state.code_lsp_note;
+  Alcotest.(check bool) "same scope preserves the current note" true
+    (state.code_lsp_note = Some (Code_note_server_words { symbol = "fixture"; words = "current query" }));
   Alcotest.(check (option int)) "same scope preserves the current target" (Some 7)
     state.code_target_line;
   set_code_scope state (Code_scope_keeper "alpha");
@@ -413,15 +413,16 @@ let test_lsp_replies_belong_to_their_source_reading () =
     (Option.is_none (Fetched.current_request state.code_file));
   Alcotest.(check bool) "new query waits for a read belonging to the new scope" true
     (Option.is_none (Code_results.start_lsp_question state ~question:"definition" ~symbol:"first"));
-  Alcotest.(check (option string)) "scope change clears obsolete LSP note" None state.code_lsp_note;
+  Alcotest.(check bool) "scope change clears obsolete LSP note" true
+    (Option.is_none state.code_lsp_note);
   Alcotest.(check (option int)) "scope change clears obsolete jump target" None state.code_target_line;
   rejected from_project (Error "project server failed");
   read "source.ml";
   let new_scope_query = ask "hover" in
   ignore (Code_results.apply_lsp_answer state new_scope_query
             (Ok (Decode.Lsp_hover (Some "keeper reading"))));
-  Alcotest.(check (option string)) "same path newly read in the new scope accepts its own answer"
-    (Some "first: keeper reading") state.code_lsp_note;
+  Alcotest.(check bool) "same path newly read in the new scope accepts its own answer" true
+    (state.code_lsp_note = Some (Code_note_server_words { symbol = "first"; words = "keeper reading" }));
   set_code_scope state Code_scope_project;
   rejected from_project (Ok (Decode.Lsp_locations [location]));
   read "source.ml";
@@ -438,13 +439,13 @@ let test_lsp_replies_belong_to_their_source_reading () =
   Code_results.apply_lsp_answer state latest (Ok (Decode.Lsp_hover (Some "current hover")));
   Alcotest.(check bool) "latest answer settles its own query" false
     (Fetched.in_flight state.code_lsp_query);
-  Alcotest.(check (option string)) "only current hover is shown" (Some "first: current hover")
-    state.code_lsp_note;
+  Alcotest.(check bool) "only current hover is shown" true
+    (state.code_lsp_note = Some (Code_note_server_words { symbol = "first"; words = "current hover" }));
   let repeated = ask "hover" in
   rejected latest (Error "old duplicate answer");
   ignore (Code_results.apply_lsp_answer state repeated (Error "actual current error"));
-  Alcotest.(check (option string)) "current error is shown" (Some "first: actual current error")
-    state.code_lsp_note
+  Alcotest.(check bool) "current error is shown" true
+    (state.code_lsp_note = Some (Code_note_server_words { symbol = "first"; words = "actual current error" }))
 ;;
 
 let test_interrupted_new_file_open_resets_old_readers () =
@@ -1400,7 +1401,7 @@ let start_location_read state path line =
 
 let test_navigation_activity_preserves_settled_observations () =
   let state = return_fixture () in
-  state.code_lsp_note <- Some "last language-server observation";
+  state.code_lsp_note <- Some (Code_note_server_words { symbol = "fixture"; words = "last language-server observation" });
   let observation = state.code_lsp_note in
   let source = state.code_file and history = state.code_jump_back in
   let active owner request =
@@ -1633,7 +1634,7 @@ let test_lsp_pending_status_follows_request_lifetime () =
   List.iter (fun result ->
     let state, _ = finder_fixture () in
     close_code_finder state;
-    state.code_lsp_note <- Some "previous observation";
+    state.code_lsp_note <- Some (Code_note_server_words { symbol = "fixture"; words = "previous observation" });
     let request = ask_pending state "references" in
     Alcotest.(check bool) "accepted question clears the previous settled observation" true
       (Option.is_none state.code_lsp_note);
@@ -1678,7 +1679,7 @@ let test_lsp_pending_status_includes_refresh_and_retry () =
        | Some (_, Fetched.Ready ()) -> Result.is_ok result
        | Some (_, Fetched.Loading) -> Result.is_error result
        | None | Some (_, (Fetched.Absent | Fetched.Failed _ | Fetched.Stale _)) -> false);
-    let note = Some "another observation" in
+    let note = Some (Code_note_server_words { symbol = "fixture"; words = "another observation" }) in
     state.code_lsp_note <- note;
     Alcotest.(check bool) "suppressed duplicate does not mutate an existing note" true
       (Option.is_none (Code_results.start_lsp_question state ~question:"hover" ~symbol:"target")
@@ -1754,7 +1755,7 @@ let test_cancelled_questions_do_not_resume_after_workspace_recovery () =
       | Some query -> query | None -> Alcotest.fail "question did not start" in
     let answer = Ok (Decode.Lsp_locations [location "one.ml" 1; location "two.ml" 2]) in
     if received then Code_results.apply_lsp_answer state query answer;
-    state.code_lsp_note <- Some "retained observation";
+    state.code_lsp_note <- Some (Code_note_server_words { symbol = "fixture"; words = "retained observation" });
     Code_results.retire_lsp_input state;
     Alcotest.(check bool) "input removes both admission and recovery intent" true
       (Option.is_none (Fetched.current_key state.code_lsp_query)
@@ -1766,7 +1767,7 @@ let test_cancelled_questions_do_not_resume_after_workspace_recovery () =
       (Code_results.take_ready_lsp_locations state ~input_pending:false = Code_results.No_followup
        && not state.palette_open && Option.is_none state.code_navigation
        && state.code_jump_back=[] && state.code_file_cursor=2 && state.code_file_scroll=2
-       && state.code_lsp_note=Some "retained observation"))
+       && state.code_lsp_note = Some (Code_note_server_words { symbol = "fixture"; words = "retained observation" })))
     [false; true]
 
 let test_location_picker_keeps_ticket_until_close_without_resuming () =

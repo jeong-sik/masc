@@ -121,7 +121,7 @@ let start_navigation state ~action ~target ~path =
 
 let start_return state =
   if not (server_authority_ready state) then begin
-    state.code_lsp_note <- Some "Cannot return until the workspace is confirmed";
+    state.code_lsp_note <- Some Code_note_return_waits_for_workspace;
     No_return
   end else match state.code_navigation with
   | Some reading when code_navigation_owner_current state reading.cnr_owner
@@ -129,7 +129,7 @@ let start_return state =
   | Some _ | None ->
     state.code_navigation <- None;
     match state.code_jump_back with
-    | [] -> state.code_lsp_note <- Some "No jump to return from"; No_return
+    | [] -> state.code_lsp_note <- Some Code_note_no_jump_back; No_return
     | target :: rest ->
       (* Ordinary opens can still own this source, including same-key refreshes
          that expose Ready. Retire them before capturing the return owner so a
@@ -166,8 +166,8 @@ let apply_navigation_file state owner request result =
       (match result with
        | Error detail ->
            state.code_navigation <- None;
-           state.code_lsp_note <- Some ("Navigation failed: "
-             ^ Masc.Tui_terminal_text.sanitize_terminal_text detail)
+           state.code_lsp_note <- Some (Code_note_navigation_failed
+             (Masc.Tui_terminal_text.sanitize_terminal_text detail))
        | Ok _ ->
            state.code_navigation <- Some { reading with cnr_file =
              Masc_tui_fetched.complete ~equal:String.equal reading.cnr_file request result })
@@ -536,8 +536,8 @@ let follow_lsp_location (state : state) ~symbol (location : Masc.Tui_decode.lsp_
   if location.ll_inside then begin
     state.code_lsp_note <-
       Some
-        (Printf.sprintf "%s: %s:%d" symbol location.ll_path
-           location.ll_line);
+        (Code_note_location
+           { symbol; path = location.ll_path; line = location.ll_line });
     match Masc_tui_fetched.current state.code_file with
     | Some (open_path, Masc_tui_fetched.Ready { cfd_rows = rows; _ })
       when String.equal open_path location.ll_path ->
@@ -581,8 +581,8 @@ let follow_lsp_location (state : state) ~symbol (location : Masc.Tui_decode.lsp_
        than open a path the surface cannot serve. *)
     state.code_lsp_note <-
       Some
-        (Printf.sprintf "%s: outside the workspace at %s:%d" symbol
-           location.ll_path location.ll_line);
+        (Code_note_outside_workspace
+           { symbol; path = location.ll_path; line = location.ll_line });
     No_followup
   end
 ;;
@@ -613,7 +613,7 @@ let apply_lsp_answer (state : state) request result =
   let question, symbol = query.clq_question, query.clq_symbol in
   (match result with
    | Error detail ->
-       state.code_lsp_note <- Some (symbol ^ ": " ^ detail);
+       state.code_lsp_note <- Some (Code_note_server_words { symbol; words = detail });
        ()
    | Ok (Masc.Tui_decode.Lsp_hover text) ->
        state.code_hover <- Option.map (fun text ->
@@ -622,12 +622,13 @@ let apply_lsp_answer (state : state) request result =
          Some
            (match text with
             | Some t ->
-                symbol ^ ": " ^ Masc.Tui_terminal_text.sanitize_terminal_text t
-            | None -> symbol ^ ": the server has nothing to say here");
+                Code_note_server_words
+                  { symbol; words = Masc.Tui_terminal_text.sanitize_terminal_text t }
+            | None -> Code_note_nothing_to_say symbol);
        ()
    | Ok (Masc.Tui_decode.Lsp_locations []) ->
        state.code_lsp_note <-
-         Some (Printf.sprintf "no %s found for %S" question symbol);
+         Some (Code_note_not_found { question; symbol });
        ()
    | Ok (Masc.Tui_decode.Lsp_locations locations) ->
        state.code_file <- Masc_tui_fetched.cancel_pending
@@ -834,7 +835,7 @@ let complete_draft_save state request outcome =
               | Some address -> Draft.equal_address address request.csr_address | None -> false);
         if !refresh then begin
           state.code_draft_open <- false;
-          state.code_lsp_note <- Some (ui_text state ~ko:"파일 저장됨" ~en:"File saved")
+          state.code_lsp_note <- Some Code_note_saved
         end;
         None) state.code_drafts;
   !refresh

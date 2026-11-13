@@ -5805,6 +5805,28 @@ type code_hover_reading = {
   chr_scroll : int;
 }
 
+(* What the Code title says beside the path: a language-server answer or
+   refusal, a jump, a save, or what the history's Enter found for a commit.
+   Held as the fact, so the title words it in the language the screen is in
+   when it draws; a sentence would keep the language of the moment it was
+   written. *)
+type code_note =
+  | Code_note_server_words of { symbol : string; words : string }
+      (** the server's own text about [symbol]: a hover or a refusal *)
+  | Code_note_nothing_to_say of string  (** a hover with no text, for this symbol *)
+  | Code_note_not_found of { question : string; symbol : string }
+  | Code_note_location of { symbol : string; path : string; line : int }
+  | Code_note_outside_workspace of { symbol : string; path : string; line : int }
+  | Code_note_navigation_failed of string
+  | Code_note_no_jump_back
+  | Code_note_return_waits_for_workspace
+  | Code_note_no_name_on_line
+  | Code_note_saved
+  | Code_note_pr_link of string
+  | Code_note_no_pr_number of string  (** the commit's hash *)
+  | Code_note_pr_without_remote of int
+  | Code_note_pr_remote_not_github of int
+
 let code_lsp_query_equal left right =
   left.clq_workspace = right.clq_workspace
   && left.clq_reading == right.clq_reading
@@ -11009,7 +11031,7 @@ type state = {
   mutable code_file_cursor: int;
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
-  mutable code_lsp_note: string option;
+  mutable code_lsp_note: code_note option;
   (* Original admitted hover with its physical source owner and local viewport. *)
   mutable code_hover: code_hover_reading option;
   mutable code_lsp_query: (code_lsp_query, unit) Masc_tui_fetched.t;

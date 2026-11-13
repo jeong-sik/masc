@@ -140,7 +140,7 @@ let machine_activity_and_publication_are_independent () =
         let row = find id (ok (Decode.decode (make id state))) in
         Alcotest.(check bool) "activity does not replace publication" true
           (row.state = Decode.Machine_state (expected,published));
-        Alcotest.(check string) "activity and publication both visible" (label ^ "; " ^ screen) (Display.row_summary row))
+        Alcotest.(check string) "activity and publication both visible" (label ^ "; " ^ screen) (Display.row_summary ~ko:false row))
         ["no_screen",Decode.No_screen,"no screen published";"stable",Decode.Stable,"screen stable";"running",Decode.Running,"machine running";"unavailable",Decode.Publication_unavailable,"worker observation unavailable"])
       ["on",Decode.Machine_enabled,"on";"off",Decode.Machine_disabled,"off; machine state retained";
        "unobserved",Decode.Machine_unobserved,"activity unavailable"];
@@ -236,9 +236,9 @@ let disabled_exact_keeps_candidates_and_finishing_work () =
   let observed = ok (Decode.decode (make off)) in
   let row = find "exact/librarian_exact" observed in
   Alcotest.(check string) "off preserves observation of accepted work"
-    "off · 1 finishing · off; candidates retained" (Display.row_summary_in observed row);
+    "off · 1 finishing · off; candidates retained" (Display.row_summary_in ~ko:false observed row);
   Alcotest.(check bool) "candidate order available in detail" true
-    (List.mem "Declared HTTP slots: first, second" (List.map Masc_tui_page_line.text (Display.detail_lines row)));
+    (List.mem "Declared HTTP slots: first, second" (List.map Masc_tui_page_line.text (Display.detail_lines ~ko:false row)));
   rejects "off must not admit new candidates" (make (off |> set "admitted_slots" (strings ["first"])));
   rejects "off and running status contradict" (make (off |> set "status" (str "running")));
   rejects "off declarations must agree" (make (off |> set "declared_slots" (strings ["other"])))
@@ -391,7 +391,7 @@ let reading_lines_carry_how_much_each_one_matters () =
     presence = Decode.Live; phase; applied_revision = None } in
   let tones_of label row = List.filter_map (function
     | L.Fact { label = name; tone; _ } when String.equal name label -> Some tone
-    | L.Fact _ | L.Title _ | L.Note _ | L.Items _ -> None) (Display.detail_lines row) in
+    | L.Fact _ | L.Title _ | L.Note _ | L.Items _ -> None) (Display.detail_lines ~ko:false row) in
   let check name label expected row = Alcotest.(check (list tone)) name expected (tones_of label row) in
   let with_worker phase = row_of manual_selection (Decode.Package_state { declaration = None; instances = [ worker phase ] }) in
   check "a failed worker is a failure" "Worker" [ L.Failure ] (with_worker (Decode.Failed "cleanup incomplete"));

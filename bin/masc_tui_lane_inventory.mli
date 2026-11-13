@@ -28,9 +28,11 @@ val identity_index : identity -> Masc.Tui_decode_lane_inventory.row list -> int 
     its valid installation ID, and a manual target includes its incarnation.
     A missing or replaced original has no selected target. Category and worker
     status changes alone do not change this identity. *)
-val row_summary : Masc.Tui_decode_lane_inventory.row -> string
+(** The functions that take [ko] write their words in Korean when it is
+    true and in English otherwise. Text the server sent is drawn as it came. *)
+val row_summary : ko:bool -> Masc.Tui_decode_lane_inventory.row -> string
 (** Where a browser source is switched on or off, for a Browser row. *)
-val browser_switch_line : string
+val browser_switch_line : ko:bool -> string
 (** Machine activity is displayed independently of its retained publication. *)
 val row_standing : Masc.Tui_decode_lane_inventory.row -> Masc_tui_lane_standing.t
 (** How the row stands. A package row with a failed worker is [Failing]
@@ -46,15 +48,16 @@ val row_standing_in : Masc.Tui_decode_lane_inventory.snapshot -> Masc.Tui_decode
 val standing_tone : Masc_tui_lane_standing.t -> Masc_tui_page_line.tone
 (** How a standing reads on a page, so the list and the reading colour one
     standing alike. *)
-val detail_lines : Masc.Tui_decode_lane_inventory.row -> Masc_tui_page_line.t list
+val detail_lines : ko:bool -> Masc.Tui_decode_lane_inventory.row -> Masc_tui_page_line.t list
 (** The row's reading below its title (label and purpose). *)
-val overview_notices : Masc.Tui_decode_lane_inventory.snapshot -> string list
+val overview_notices : ko:bool -> Masc.Tui_decode_lane_inventory.snapshot -> string list
 (** Owner/completeness notices and an issue count; full diagnostics stay in
     [snapshot_notices] so they do not displace the selectable overview. *)
-val snapshot_notices : Masc.Tui_decode_lane_inventory.snapshot -> string list
-val family_label : Masc.Tui_decode_lane_inventory.selection -> string
+val snapshot_notices : ko:bool -> Masc.Tui_decode_lane_inventory.snapshot -> string list
+val family_label : ko:bool -> Masc.Tui_decode_lane_inventory.selection -> string
 
-val row_summary_in : Masc.Tui_decode_lane_inventory.snapshot -> Masc.Tui_decode_lane_inventory.row -> string
+val row_summary_in :
+  ko:bool -> Masc.Tui_decode_lane_inventory.snapshot -> Masc.Tui_decode_lane_inventory.row -> string
 (** Exact rows retain their run observation from the same inventory capture. *)
 
 (** A Lane Add-on package row's exact outputs (RFC operator-quiz §4.8). The
@@ -72,4 +75,5 @@ val exact_output_table_path :
   installation_id:string -> Masc.Tui_decode_lane_inventory.exact_output -> (string list, string) result
 (** The [runtime.addon_exact_lanes.<installation id>.<output>] table path, or
     why runtime.toml cannot name it. *)
-val exact_output_lines : selected:string option -> Masc.Tui_decode_lane_inventory.row -> string list
+val exact_output_lines :
+  ko:bool -> selected:string option -> Masc.Tui_decode_lane_inventory.row -> string list

@@ -511,7 +511,6 @@ def main() -> int:
                "memories_with_duplicate": sum(any(f.duplicate_of is not None for f in facts) for _, facts in built),
                "records_by_side": dict(Counter("past" if f.planted_stale else "ahead"
                                                for _, facts in built for f in facts if f.use_at is not None)),
-               "requests_without_support": sum(not S.label_of(r).supports_change for r in done),
                "spent_usd": round(caller.spent, 4), "budget_usd": budget, "stopped": caller.stopped}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print("SUMMARY", json.dumps(summary))

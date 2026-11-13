@@ -3,8 +3,9 @@
     python3 sleep_waits.py share  <since_utc> <end_utc> [base]
     python3 sleep_waits.py shapes <since_utc> <end_utc> [base]
     python3 sleep_waits.py turns  <since_utc> <end_utc> [base]
+    python3 sleep_waits.py kinds  <since_utc> <end_utc> [base]
 
-`base` defaults to `~/me`. All three read the tool-call ledger through `ledger_window.py` of the
+`base` defaults to `~/me`. All four read the tool-call ledger through `ledger_window.py` of the
 `tool-efficiency-1110-2026-11` folder and write nothing. They print JSON.
 
 - `share`: Execute calls, those whose input has `run_in_background` true, and the foreground calls of 60 s or
@@ -17,6 +18,12 @@
   follow a `git push`, `gh workflow run` or `gh pr create|merge|ready` earlier in the same turn, how many sit in
   a turn with two or more of them, and how many `until_github_run` or `until_github_checks` schedules the Keeper
   created in the window.
+- `kinds`: the Execute calls, the `sleep+gh` calls and the loop polls of GitHub by `turn_kind`. A loop poll is a
+  foreground call of 60 s or more with a `sleep` in a loop of unknown count (`for i in ...; do gh ...; sleep 30; done`)
+  that reads GitHub; its literal sleeps are under half of the call, so `sleep+gh` does not count it. `keeper_receipt_wait` is offered to a turn
+  that serves a chat execution (`direct`) and not to an `autonomous` one (`descriptors_for_run` in
+  `lib/keeper/keeper_run_tools_setup.ml`), so the `direct` share of the `sleep+gh` hours is the most the
+  receipt wait can reach.
 
 The classes come from the command text and are for counting. `Execute` does not interpret a command
 (`config/tools/Execute.toml`), and no product rule uses them. A turn that reaches over an edge of the window is
@@ -155,6 +162,74 @@ def share_of(rows: Iterable[Row]) -> dict[str, object]:
     }
 
 
+def is_sleep_gh(row: Row) -> bool:
+    """A foreground call of 60 s or more whose literal sleeps are half of it and that reads GitHub."""
+    return (
+        is_long_foreground(row)
+        and sleep_group(command_of(row), number(row, "duration_ms") / 1000) == "sleep+gh"
+    )
+
+
+def is_loop_sleep_gh(row: Row) -> bool:
+    """A foreground call of 60 s or more with a `sleep` in a loop of unknown count that reads GitHub."""
+    command = command_of(row)
+    return (
+        is_long_foreground(row)
+        and head_group(command) == "sleep"
+        and sleep_group(command, number(row, "duration_ms") / 1000) is None
+        and GH.search(command) is not None
+    )
+
+
+def hours_by_kind(ms: dict[str, float]) -> dict[str, float]:
+    return {kind: round(value / 3.6e6, 2) for kind, value in ms.items()}
+
+
+def percent_by_kind(ms: dict[str, float]) -> dict[str, float]:
+    total = sum(ms.values())
+    return {kind: round(100 * value / total, 1) for kind, value in ms.items()} if total else {}
+
+
+def kinds_of(rows: Iterable[Row]) -> dict[str, object]:
+    execute: collections.Counter[str] = collections.Counter()
+    calls: collections.Counter[str] = collections.Counter()
+    loop_calls: collections.Counter[str] = collections.Counter()
+    ms: collections.defaultdict[str, float] = collections.defaultdict(float)
+    loop_ms: collections.defaultdict[str, float] = collections.defaultdict(float)
+    github_ms: collections.defaultdict[str, float] = collections.defaultdict(float)
+    per_keeper: collections.defaultdict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
+    for row in rows:
+        if row.get("tool") != "Execute":
+            continue
+        kind = str(row.get("turn_kind"))
+        execute[kind] += 1
+        duration = number(row, "duration_ms")
+        if is_sleep_gh(row):
+            calls[kind] += 1
+            ms[kind] += duration
+        elif is_loop_sleep_gh(row):
+            loop_calls[kind] += 1
+            loop_ms[kind] += duration
+        else:
+            continue
+        github_ms[kind] += duration
+        per_keeper[str(row.get("keeper"))][kind] += 1
+    return {
+        "execute_calls_by_turn_kind": dict(execute),
+        "sleep_gh_calls_by_turn_kind": dict(calls),
+        "sleep_gh_hours_by_turn_kind": hours_by_kind(ms),
+        "sleep_gh_hours_percent_by_turn_kind": percent_by_kind(ms),
+        "loop_sleep_gh_calls_by_turn_kind": dict(loop_calls),
+        "loop_sleep_gh_hours_by_turn_kind": hours_by_kind(loop_ms),
+        "github_wait_hours_by_turn_kind": hours_by_kind(github_ms),
+        "github_wait_hours_percent_by_turn_kind": percent_by_kind(github_ms),
+        "github_wait_by_keeper": [
+            {"keeper": keeper, **dict(counts)}
+            for keeper, counts in sorted(per_keeper.items(), key=lambda item: -sum(item[1].values()))[:TOP_KEEPERS]
+        ],
+    }
+
+
 def shapes_of(rows: Iterable[Row]) -> dict[str, object]:
     hours: collections.defaultdict[str, float] = collections.defaultdict(float)
     calls: collections.Counter[str] = collections.Counter()
@@ -253,14 +328,14 @@ def turns_of(rows: Iterable[Row]) -> dict[str, object]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 4 or argv[1] not in ("share", "shapes", "turns"):
+    if len(argv) < 4 or argv[1] not in ("share", "shapes", "turns", "kinds"):
         sys.stderr.write(__doc__ or "")
         return 2
     since, end = ledger.parse_utc(argv[2]), ledger.parse_utc(argv[3])
     base = pathlib.Path(argv[4] if len(argv) > 4 else "~/me").expanduser()
     rows = ledger.read_rows(base, since, end, MARKERS)
     window = {"since": argv[2], "end": argv[3], "hours": round((end - since) / 3600, 2)}
-    result = {"share": share_of, "shapes": shapes_of, "turns": turns_of}[argv[1]](rows)
+    result = {"share": share_of, "shapes": shapes_of, "turns": turns_of, "kinds": kinds_of}[argv[1]](rows)
     sys.stdout.write(json.dumps({"window": window, **result}, ensure_ascii=False, indent=2) + "\n")
     return 0
 

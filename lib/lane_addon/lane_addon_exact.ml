@@ -871,7 +871,7 @@ module Retained_key = struct
       Ok { declaration_id; request_id; digest }
     | _ -> Error "record must be an object"
 
-  let of_request ~declaration_id request =
+  let of_request ~declaration_id (request : request) =
     { declaration_id; request_id = request.request_id; digest = digest request }
 
   let equal left right =

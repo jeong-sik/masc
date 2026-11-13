@@ -11,7 +11,7 @@ let executed outcome =
     | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
     | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
     | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
-  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+  let receipt = match Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli
       ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
       ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
     | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in
@@ -540,70 +540,78 @@ let proof_address original =
   tuple [`String "exact-original-execution";`String declaration_id],
   tuple [`String "original-request";`String original.Exact.request_id;`String (Exact.digest original)]
 
-let test_v1_and_v2_original_proofs_remain_distinct () =
+(* A proof names its request by request_id and digest and holds no request
+   body (RFC exact-request-skips-a-slot-that-refused-its-input, section 3.3).
+   It is read only as version 2, with its integer fields as stored. *)
+let test_a_proof_holds_no_request_body_and_is_read_as_version_2 () =
   with_root (fun root ->
-    let module Receipt=Masc.Keeper_exact_walk_receipt in
     let store=Store.create ~root in
-    let original=request "mixed-version-originals" in
-    let busy=Exact.Provider_unavailable {detail="synthetic first refusal"} in
-    let first,_,_=counting_runner store (ref [Refused busy]) in
-    ignore (run_request store first original);
-    let instance_id,request_id=proof_address original in
-    let read_link ()=Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
-    let prior=match Yojson.Safe.Util.member "executions" (read_link ()) with
-      | `List [one] -> one | _ -> fail "expected one v1 original proof" in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
-      Ok (fun ~validate ->
-        let output=require (validate question) in
-        let cli=Receipt.cli ~visited:["s"] ~dispatched:["s"] ~failures:[] ~result:(Receipt.Answered "s") in
-        let receipt=require (Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:["s"]
-          ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture") ~cli) in
-        {Exact.outcome=Exact.Call_ended (Exact.Answered {output;slot="s";usage=None});receipt}) in
-    check bool "a later v2 fixture publishes the original answer" true
-      (answered_with question (run_request store runner original));
-    (match Yojson.Safe.Util.member "executions" (read_link ()) with
-     | `List [unchanged;newer] ->
-       check bool "earlier v1 proof is preserved exactly" true (Yojson.Safe.equal prior unchanged);
-       check int "earlier receipt remains version 1" 1
-         Yojson.Safe.Util.(unchanged |> member "receipt" |> member "version" |> to_int);
-       check int "later receipt uses version 2" 2
-         Yojson.Safe.Util.(newer |> member "receipt" |> member "version" |> to_int)
-     | _ -> fail "expected both ordered original proofs");
+    let busy=Exact.Provider_unavailable {detail="synthetic refusal"} in
+    let refuse original=
+      let runner,_,_=counting_runner store (ref [Refused busy]) in
+      ignore (run_request store runner original) in
+    let link original=
+      let instance_id,request_id=proof_address original in
+      Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
+    let link_bytes original=
+      let instance_id,request_id=proof_address original in
+      In_channel.with_open_bin
+        (Filename.concat (Store.root store) (Store.host_result_path ~instance_id ~request_id))
+        In_channel.input_all |> String.length in
+    let short=request ~message:"Q" "proof-body-a" in
+    let long=request ~message:(String.make 100_000 'q') "proof-body-b" in
+    refuse short;
+    refuse long;
+    let proofs original=match Yojson.Safe.Util.member "executions" (link original) with
+      | `List proofs -> proofs
+      | _ -> fail "a proof link lists its proofs" in
+    List.iter (fun proof ->
+      check bool "a proof holds no request body" true (Yojson.Safe.Util.member "request" proof=`Null);
+      check int "a proof is version 2" 2 Yojson.Safe.Util.(proof |> member "version" |> to_int))
+      (proofs short @ proofs long);
+    check int "the stored link does not grow with the request body" (link_bytes short) (link_bytes long);
     let reopened=Store.create ~root in
-    (match require (original_execution reopened original),require (original_execution reopened ~attempt_ordinal:2 original) with
-     | Exact.Completed_original {receipt=old;_},Exact.Completed_original {receipt=newer;_} ->
-       check bool "v1 has no invented response observations" true (Receipt.response_observations old=None);
-       check bool "v2 keeps its empty synthetic HTTP walk" true (Receipt.response_observations newer=Some [])
-     | _ -> fail "mixed original proofs did not reopen");
+    check bool "the stored proof reads" true
+      (match original_execution reopened short with
+       | Ok (Exact.Completed_original _) -> true
+       | Ok Exact.No_completed_original | Error _ -> false);
+    let instance_id,request_id=proof_address short in
+    let stored=link short in
+    let unused,sends,_=counting_runner store (ref []) in
+    let refused reason value=
+      require (Store.save_host_result store ~instance_id ~request_id value);
+      check bool reason true (Result.is_error (original_execution reopened short));
+      check bool "and the run stops on it" true
+        (Result.is_error (Exact.run ~authorize_request ~store:reopened ~declaration_id ~package ~runner:unused short)) in
     let replace field transform = function
       | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key=field then transform value else value) fields)
-      | _ -> fail "expected an original proof object" in
-    let original_link=read_link () in
-    let historical_wrapper=original_link |> replace "executions" (function
-      | `List [first;second] -> `List [first
-          |> replace "version" (fun _ -> `Float 1.0)
-          |> replace "attempt_ordinal" (fun _ -> `Float 1.0)
-          |> replace "receipt" (replace "version" (fun _ -> `Float 1.0));second]
-      | _ -> fail "expected mixed original proofs") in
-    require (Store.save_host_result store ~instance_id ~request_id historical_wrapper);
-    check bool "historical v1 wrapper retains its prior canonical reading" true
-      (match original_execution reopened original with Ok (Exact.Completed_original _) -> true
+      | _ -> fail "expected a JSON object" in
+    let first transform=stored |> replace "executions" (function
+      | `List (proof::rest) -> `List (transform proof::rest)
+      | _ -> fail "a proof link lists its proofs") in
+    let other=request ~message:"Another body" short.Exact.request_id in
+    refused "a proof that names another request's digest is refused"
+      (first (replace "digest" (fun _ -> `String (Exact.digest other))));
+    refused "a version 1 proof with its request body is refused" (first (fun proof ->
+      match replace "version" (fun _ -> `Int 1) proof with
+      | `Assoc fields -> `Assoc (("request",Exact.request_to_json short)::fields)
+      | _ -> fail "expected a proof object"));
+    refused "an integral float version is refused" (first (replace "version" (fun _ -> `Float 2.0)));
+    refused "an integral float attempt ordinal is refused"
+      (first (replace "attempt_ordinal" (fun _ -> `Float 1.0)));
+    refused "an integral float receipt version is refused"
+      (first (replace "receipt" (replace "version" (fun _ -> `Float 2.0))));
+    refused "a version 1 receipt is refused" (first (replace "receipt" (function
+      | `Assoc fields -> `Assoc (List.filter_map (fun (key,value) ->
+          if key="response_observations" then None
+          else Some (key,if key="version" then `Int 1 else value)) fields)
+      | _ -> fail "expected a receipt object")));
+    require (Store.save_host_result store ~instance_id ~request_id stored);
+    check bool "the restored proof reads again" true
+      (match original_execution reopened short with
+       | Ok (Exact.Completed_original _) -> true
        | Ok Exact.No_completed_original | Error _ -> false);
-    require (Store.save_host_result store ~instance_id ~request_id original_link);
-    let alter_second transform = original_link |> replace "executions" (function
-      | `List [first;second] -> `List [first;transform second]
-      | _ -> fail "expected mixed original proofs") in
-    let unused,sends,_=counting_runner store (ref []) in
-    List.iter (fun malformed ->
-      require (Store.save_host_result store ~instance_id ~request_id malformed);
-      check bool "stored v2 proof rejects a float before wrapper normalization" true
-        (Result.is_error (original_execution reopened ~attempt_ordinal:2 original));
-      check bool "malformed original proof cannot recover or dispatch" true
-        (Result.is_error (Exact.run ~authorize_request ~store:reopened ~declaration_id ~package ~runner:unused original)))
-      [alter_second (replace "receipt" (replace "version" (fun _ -> `Float 2.0)));
-       alter_second (replace "attempt_ordinal" (fun _ -> `Float 2.0));
-       alter_second (replace "version" (fun _ -> `Float 1.0))];
-    check int "malformed proof caused no new call" 0 !sends)
+    check int "no refused proof sent a call" 0 !sends)
 
 let test_original_execution_is_bound_to_one_attempt () =
   with_root (fun root ->
@@ -1488,6 +1496,40 @@ let test_preflight_deletes_a_refused_record_with_its_link_and_observations () =
     check (list string) "the record reader refuses it"
       [Preflight.decoder_name Preflight.Exact_record] (readers report))
 
+(* A version 1 proof holds its request body. [run] refuses to read it, so
+   the preflight refuses its record with the proof and the request's slot
+   observations (RFC exact-request-skips-a-slot-that-refused-its-input,
+   sections 5 and 6). *)
+let test_preflight_refuses_a_record_with_a_version_1_proof () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-version-1" in
+    let link = link_file store original in
+    let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file link) with
+      | `List [proof] -> proof
+      | _ -> fail "expected one original proof" in
+    require (Observation.retain ~store ~declaration_id ~request_id:original.Exact.request_id
+      ~attempt_ordinal:1 ~proof []);
+    let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+    let observed = Sys.readdir observations |> Array.to_list |> List.map (Filename.concat observations) in
+    let version_1 = function
+      | `Assoc entry ->
+        `Assoc (("request",Exact.request_to_json original)
+                :: List.map (fun (name,value) ->
+                    if String.equal name "version" then name,`Int 1 else name,value) entry)
+      | _ -> fail "original proof object expected" in
+    (match Yojson.Safe.from_file link with
+     | `Assoc fields ->
+       Yojson.Safe.to_file link (`Assoc (List.map (fun (name,value) -> match name,value with
+         | "executions",`List entries -> name,`List (List.map version_1 entries)
+         | _ -> name,value) fields))
+     | _ -> fail "original execution link object expected");
+    let record = record_file store original in
+    let report = preflight base in
+    check (list (pair string (list string))) "fresh state deletes the record with its proof and observation"
+      [record, record :: link :: observed] (refused report);
+    check (list string) "the record reader refuses it"
+      [Preflight.decoder_name Preflight.Exact_record] (readers report))
+
 (* A proof of attempt 2 in a link whose record holds attempt 1 only. *)
 let renumbered link = match Yojson.Safe.from_file link with
   | `Assoc fields ->
@@ -1766,7 +1808,8 @@ let () =
         ; test_case "publication recovery preserves an unproven original" `Quick
             test_publication_recovery_preserves_unproven_original
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
-        ; test_case "v1 and v2 original proofs remain distinct" `Quick test_v1_and_v2_original_proofs_remain_distinct
+        ; test_case "a proof holds no request body and is read as version 2" `Quick
+            test_a_proof_holds_no_request_body_and_is_read_as_version_2
         ; test_case "latest original evidence cannot borrow a previous attempt" `Quick test_latest_execution_never_borrows_an_earlier_proof
         ; test_case "proof failure leaves uncertainty without exposing an answer" `Quick test_proof_publication_failure_never_exposes_an_answer
         ; test_case "malformed proof refuses local recovery without provider replay" `Quick test_malformed_proof_refuses_publication_recovery
@@ -1801,6 +1844,8 @@ let () =
             test_preflight_deletes_a_refused_record_with_its_link_and_observations
         ; test_case "the proof link is read with its record" `Quick
             test_preflight_reads_the_proof_link_with_its_record
+        ; test_case "a record with a version 1 proof is refused" `Quick
+            test_preflight_refuses_a_record_with_a_version_1_proof
         ; test_case "a misfiled record is refused alone" `Quick test_preflight_refuses_a_misfiled_record_alone
         ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
         ; test_case "a link no record names is not refused once removed" `Quick

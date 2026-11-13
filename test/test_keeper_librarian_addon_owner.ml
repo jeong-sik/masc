@@ -2042,6 +2042,90 @@ let test_preflight_refuses_a_body_refusal_whose_size_evidence_goes ()=
     check int "an original with no record loses nothing to the Exact check, and passes" 0
       (List.length (closure_preflight fixture).refusals))
 
+(* A version 1 proof holds the request body. [run] refuses to read it, so
+   the Exact check refuses the record that names it, and the Librarian check
+   reads what that leaves as the original's consumer reads it
+   (RFC exact-request-skips-a-slot-that-refused-its-input, section 6, L2b-3). *)
+let version_1_proof fixture capture=
+  let _,proof_path=exact_files fixture capture in
+  let request=Lane_addon_exact.request_to_json (Capture.request capture |> get) in
+  let proof=Yojson.Safe.from_string (io (fun () -> Fs_compat.load_file proof_path)) in
+  let executions=match member "executions" proof with
+    | `List entries -> entries
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+      fail "a proof link lists its executions" in
+  let version_1 execution=match with_field "version" (`Int 1) execution with
+    | `Assoc fields -> `Assoc (("request",request)::fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "a proof is an object" in
+  io (fun () -> write proof_path
+    (Yojson.Safe.to_string (with_field "executions" (`List (List.map version_1 executions)) proof)))
+
+let test_preflight_refuses_a_finished_original_whose_proof_is_version_1 ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let capture=match observed_originals fixture with [_,capture] -> capture
+    | [] | _::_::_ -> fail "expected one finished original" in
+  check int "a finished original passes on its version 2 proof" 0
+    (List.length (closure_preflight fixture).refusals);
+  version_1_proof fixture capture;
+  let report=closure_preflight fixture in
+  check bool "the Exact check deletes the record, so the owner of the finished original is refused" true
+    (refuses_owner fixture owner report);
+  check bool "with the forest scope of its owner" true
+    (List.mem (scope_directory fixture (Parts.scope owner)) (exact_refusal fixture (Capture.scope owner) report).delete))
+
+let test_preflight_reads_a_dispatch_pending_original_with_a_version_1_proof ()=with_fixture (fun ~sw:_ fixture ->
+  let _,capture,_=retained_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let record_path,_=exact_files fixture capture in
+  let finished=Yojson.Safe.from_string (io (fun () -> Fs_compat.load_file record_path)) in
+  let rewrite value=io (fun () -> write record_path (Yojson.Safe.to_string value)) in
+  version_1_proof fixture capture;
+  check bool "a finished record whose proof is version 1 is lost, and no record confirms the worker's final" true
+    (refuses_owner fixture owner (closure_preflight fixture));
+  rewrite (with_field "final" (Lane_addon_exact.final_to_json
+    (Lane_addon_exact.Call_final (Input_refused Lane_addon_exact.Request_body_refused))) finished);
+  check bool "admission reads the size evidence of a body refusal through that record" true
+    (refuses_owner fixture owner (closure_preflight fixture));
+  rewrite (with_field "final" `Null finished);
+  check int "an open record whose proof is version 1 sends resume to the worker" 0
+    (List.length (closure_preflight fixture).refusals))
+
+(* Each partition compares its evidence with the latest proof of the
+   execution that refused the whole input. One check names every scope of
+   that owner; with those and the Exact check's files deleted, both pass. *)
+let test_preflight_names_a_split_owner_whose_source_proof_is_version_1 ()=with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun capture ->
+    if List.length (Queue.candidates (Capture.batch capture))>1
+    then `Request_entity_too_large,refusal "invalid_request_error"
+    else `OK,F.openai_response (answer (fun _ -> true) capture));
+  ignore (drive_until fixture (fun _ -> io (fun () -> pending_rows fixture.keepers_dir=[])));
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let split=match List.filter (fun (_,capture) -> List.length (Queue.candidates (Capture.batch capture))>1)
+      (observed_originals fixture) with
+    | [_,capture] -> capture
+    | [] | _::_::_ -> fail "expected the one original that refused its whole input" in
+  ignore (closure_manifest fixture);
+  let exact_scan ()=io (fun () -> Lane_addon_store_preflight.scan
+    Lane_addon_store_preflight.Store.Exact_requests ~base_path:fixture.base_path) |> get in
+  let named (report:Lane_addon_store_preflight.report)=
+    List.concat_map (fun (refusal:Lane_addon_store_preflight.refusal) -> refusal.delete) report.refusals
+    |> List.sort_uniq String.compare in
+  check (pair int int) "the split owner passes on its version 2 proofs" (0,0)
+    (List.length (closure_preflight fixture).refusals,List.length (exact_scan ()).refusals);
+  version_1_proof fixture split;
+  let librarian=named (closure_preflight fixture) in
+  List.iter (fun (name,scope) ->
+      check bool ("one check names the owner's " ^ name) true (List.mem (scope_directory fixture scope) librarian))
+    ["execution",Capture.scope owner;"parts",Parts.scope owner;"partitions",Parts.partition_scope owner;
+     "gate",Gate.scope owner;"closure",Closure.scope owner];
+  let _,proof_path=exact_files fixture split in
+  let exact=named (exact_scan ()) in
+  check bool "the Exact check names the version 1 proof" true (List.mem proof_path exact);
+  io (fun () -> List.iter Fs_compat.remove_tree (librarian @ exact));
+  check (pair int int) "with the named files deleted both checks pass" (0,0)
+    (List.length (closure_preflight fixture).refusals,List.length (exact_scan ()).refusals))
+
 type root_publication_cut = Before_child | Child_before_ack | Acknowledged_then_missing
 let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,final=retained_answer_before_gate fixture in
@@ -2346,6 +2430,12 @@ let () =
     test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match;
   test_case "the deploy check refuses a body refusal whose size evidence goes" `Quick
     test_preflight_refuses_a_body_refusal_whose_size_evidence_goes;
+  test_case "the deploy check refuses a finished original whose proof is version 1" `Quick
+    test_preflight_refuses_a_finished_original_whose_proof_is_version_1;
+  test_case "the deploy check reads a Dispatch_pending original with a version 1 proof" `Quick
+    test_preflight_reads_a_dispatch_pending_original_with_a_version_1_proof;
+  test_case "the deploy check names a split owner whose source proof is version 1" `Quick
+    test_preflight_names_a_split_owner_whose_source_proof_is_version_1;
   test_case "pending first gate intent recovers the same absent child while Off" `Quick (test_original_gate_root_publication_recovery Before_child);
   test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
   test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);

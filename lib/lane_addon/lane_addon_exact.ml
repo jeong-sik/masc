@@ -715,17 +715,38 @@ let validate_execution (execution : execution_result) =
   | (Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _), Some _ ->
       Error "original failure cannot retain a successful execution receipt"
 
+(* A proof names its request by [request_id] and [digest] and holds no
+   request body, so its size does not follow the request's
+   (RFC exact-request-skips-a-slot-that-refused-its-input, section 3.3). *)
+let proof_version = 2
+
 let proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution =
   let request = Digested.request bound in
-  `Assoc ["version", `Int 1; "kind", `String "exact-original-execution";
+  `Assoc ["version", `Int proof_version; "kind", `String "exact-original-execution";
     "store_root", `String (Lane_addon_store.root store); "declaration_id", `String declaration_id;
     "request_id", `String request.request_id; "digest", `String (Digested.digest bound);
-    "request", request_to_json request; "schema", schema; "attempt_ordinal", `Int attempt_ordinal;
+    "schema", schema; "attempt_ordinal", `Int attempt_ordinal;
     "outcome", outcome_to_json execution.outcome;
     "receipt", Keeper_exact_walk_receipt.to_json execution.receipt]
 
 let decode_proof ~store ~declaration_id bound ~attempt_ordinal json =
   let request = Digested.request bound in
+  let* stored = match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "original execution proof must be an object" in
+  (* The version is read before any other field, so a proof of another
+     version is refused unread. Canonical turns an integral float into an
+     integer, so the integer fields are read from the JSON as stored. *)
+  let* () = match List.assoc_opt "version" stored with
+    | Some (`Int version) when version = proof_version -> Ok ()
+    | Some _ | None ->
+      Error (Printf.sprintf "original execution proof is not version %d" proof_version) in
+  let* () = match List.assoc_opt "attempt_ordinal" stored with
+    | Some (`Int ordinal) when ordinal = attempt_ordinal -> Ok ()
+    | Some _ | None -> Error "original execution proof lacks its integer attempt ordinal" in
+  let* receipt = match List.assoc_opt "receipt" stored with
+    | Some receipt -> Keeper_exact_walk_receipt.of_json receipt
+    | None -> Error "missing original execution receipt" in
   let* normalized = Lane_addon_action.canonical json in
   let field name = match normalized with
     | `Assoc fields -> Option.to_result ~none:("missing original execution " ^ name) (List.assoc_opt name fields)
@@ -738,22 +759,6 @@ let decode_proof ~store ~declaration_id bound ~attempt_ordinal json =
     | None -> Ok () in
   let* outcome = field "outcome" in
   let* outcome = outcome_of_json ~schema request outcome in
-  let* receipt = field "receipt" in
-  (* Version 1 was historically decoded after wrapper canonicalization. Keep
-     that read behavior, while version 2 checks the original JSON types before
-     canonicalization can turn an integral float into an integer. *)
-  let* receipt = match receipt with
-    | `Assoc fields when List.assoc_opt "version" fields=Some (`Int 2) ->
-      (match json with
-       | `Assoc original ->
-         let* ()=if List.assoc_opt "version" original=Some (`Int 1)
-             && List.assoc_opt "attempt_ordinal" original=Some (`Int attempt_ordinal)
-           then Ok () else Error "version 2 original proof requires integer wrapper identity" in
-         (match List.assoc_opt "receipt" original with
-          | Some raw -> Keeper_exact_walk_receipt.of_json raw
-          | None -> Error "missing original execution receipt")
-       | _ -> Error "original execution proof must be an object")
-    | _ -> Keeper_exact_walk_receipt.of_json receipt in
   let execution = {outcome; receipt} in
   let* () = validate_execution execution in
   let* encoded = Lane_addon_action.canonical
@@ -804,24 +809,6 @@ let decode_proofs ~store ~declaration_id bound = function
 let load_proofs ~store ~declaration_id bound =
   let* wire=load_proof_wire ~store ~declaration_id bound in
   decode_proofs ~store ~declaration_id bound wire
-
-let proof_request_id ~declaration_id ~file_name json =
-  let* request = match json with
-    | `Assoc fields -> (match List.assoc_opt "executions" fields with
-        | Some (`List (`Assoc first :: _)) ->
-          (match List.assoc_opt "request" first with
-           | Some request -> request_of_json request
-           | None -> Error "missing original execution request")
-        | Some _ | None -> Error "original execution link requires nonempty completed attempts")
-    | _ -> Error "original execution link must be an object" in
-  (* The sweep binds this file to no caller's request. It only checks that the
-     file holds the request its name says. *)
-  let request_key = proof_request_key ~request_id:request.request_id ~digest:(digest request) in
-  if String.equal file_name
-      (Filename.basename (Lane_addon_store.host_result_path
-        ~instance_id:(proof_instance_id ~declaration_id) ~request_id:request_key))
-  then Ok request.request_id
-  else Error "original execution link is stored under another request's name"
 
 let selected_proof ~attempt_ordinal proofs =
   List.find_map (fun (ordinal,schema,execution) ->
@@ -884,6 +871,26 @@ module Retained_key = struct
       ~instance_id:(proof_instance_id ~declaration_id:key.declaration_id)
       ~request_id:(proof_request_key ~request_id:key.request_id ~digest:key.digest)
 end
+
+(* The sweep binds this link to no caller's request. It checks only that the
+   link is stored under the name the [request_id] and [digest] of its first
+   proof give, the name [proof_key] gives that request. A version 1 link names
+   its request the same way. *)
+let proof_request_id ~declaration_id ~file_name json =
+  let* first = match json with
+    | `Assoc fields -> (match List.assoc_opt "executions" fields with
+        | Some (`List (`Assoc first :: _)) -> Ok first
+        | Some _ | None -> Error "original execution link requires nonempty completed attempts")
+    | _ -> Error "original execution link must be an object" in
+  let text name = match List.assoc_opt name first with
+    | Some (`String value) -> Ok value
+    | Some _ | None -> Error ("original execution proof lacks its " ^ name) in
+  let* request_id = text "request_id" in
+  let* digest = text "digest" in
+  if String.equal file_name
+      (Filename.basename (Retained_key.proof_path {Retained_key.declaration_id; request_id; digest}))
+  then Ok request_id
+  else Error "original execution link is stored under another request's name"
 
 let retained_final json = Result.map (fun record -> record.final) (record_of_json json)
 

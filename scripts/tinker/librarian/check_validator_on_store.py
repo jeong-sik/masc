@@ -295,22 +295,23 @@ def refusal_label(detail: str) -> str:
     return fixed if fixed is not None else "other: " + reason.split(":")[0]
 
 
-def count_refusals(lane: Path, counts: Counter[str]) -> None:
+def count_refusals(lane: Path, admission_requests: frozenset[str], counts: Counter[str]) -> None:
+    """A proof names its request by request_id and holds no request body, so the
+    request's own record says whether it is an admission request."""
     requests: set[str] = set()
     for path in sorted((lane / "host-results").rglob("*.json")):
         record = read_record(path)
         executions = field(record, "executions") if record is not None else Absent()
         for execution in executions if isinstance(executions, tuple) else ():
-            if text_field(execution, "request", "output") != ADMISSION_OUTPUT:
+            request_id = text_field(execution, "request_id")
+            if request_id is None or request_id not in admission_requests:
                 continue
             semantic = field(execution, "receipt", "http", "semantic")
             for refusal in semantic if isinstance(semantic, tuple) else ():
                 detail = text_field(refusal, "detail")
                 label = refusal_label(detail) if detail is not None else "unreadable"
                 counts["3 refused attempts (text not retained, not re-validated), MASC reason " + label] += 1
-                request_id = text_field(execution, "request_id")
-                if request_id is not None:
-                    requests.add(request_id)
+                requests.add(request_id)
     counts["3 admission requests with a refused attempt"] += len(requests)
 
 
@@ -327,6 +328,7 @@ def main() -> int:
     lane = E.store_dir(base).parent
     answered = {record.digest: record for record in E.answered_admissions(base)}
     read_digests: set[str] = set()
+    admission_requests: set[str] = set()
     file_template = R.template_from_markdown(template_path.read_text(encoding="utf-8"))
     counts: Counter[str] = Counter()
     if isinstance(file_template, R.TemplateError):
@@ -352,6 +354,9 @@ def main() -> int:
             counts["0 unreadable exact-request record"] += 1
             continue
         if text_field(record, "request", "output") == ADMISSION_OUTPUT:
+            admitted = text_field(record, "request_id")
+            if admitted is not None:
+                admission_requests.add(admitted)
             digest = text_field(record, "digest")
             if digest is not None:
                 read_digests.add(digest)
@@ -361,7 +366,7 @@ def main() -> int:
     if unread:
         counts["0 FAIL exact_store lists a record this check did not read"] += unread
 
-    count_refusals(lane, counts)
+    count_refusals(lane, frozenset(admission_requests), counts)
     for label, count in sorted(counts.items()):
         print(f"{count:6d}  {label[2:]}" if label[:1].isdigit() else f"{count:6d}  {label}")
     print(f"elapsed {time.monotonic() - started:.1f}s")

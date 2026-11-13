@@ -352,7 +352,9 @@ val read_original_execution : store:Lane_addon_store.t -> declaration_id:string 
     unproven; malformed, conflicting and unreadable evidence returns [Error].
     Package-only answers use the declared value schema; consumer-schema
     answers use the same partial shape guard as {!validate_answer}. The
-    original request and canonical schema remain bound to the proof. This
+    proof names the original request by its [request_id] and [digest] and
+    keeps the canonical schema; it holds no request body. A proof of another
+    version returns [Error] before any other field is read. This
     read does not establish full consumer-dialect compliance or replace the
     fresh package baseline and consumer authority checks before delivery.
     A complete proof may precede final publication. This read never claims,
@@ -398,8 +400,9 @@ val proof_directory : declaration_id:string -> string
 val proof_request_id : declaration_id:string -> file_name:string -> Yojson.Safe.t ->
   (string, string) result
 (** The original request ID of the link stored as [file_name] in
-    {!proof_directory}. [Error] when the link names no request, or names one
-    whose link has another file name. Checks nothing else in the link. *)
+    {!proof_directory}, read from the [request_id] and [digest] of its first
+    proof. [Error] when that proof names no request, or names one whose link
+    has another file name. Checks nothing else in the link. *)
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (retained_observation, string) result
 (** Read only the original host Exact record under the caller's workspace

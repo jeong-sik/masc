@@ -22790,7 +22790,10 @@ let handle_keeper_action state ~base_path ~mailbox action =
               | Keeper_control.Absent | Keeper_control.Present _ ->
                   (if reading.Keeper_control.paused then "paused, "
                    else "")
-                  ^ Keeper_control.health_label reading
+                  (* The notice is an English sentence as a whole, so its
+                     health word stays English with it until the notice takes
+                     the screen language. *)
+                  ^ Keeper_control.health_label ~ko:false reading
                   ^ " keeper"))
       else
         match

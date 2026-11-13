@@ -2448,16 +2448,22 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
       | None -> []
       | Some keeper ->
           let reading = keeper_reading state keeper in
-          let health = Keeper_control.health_label reading in
-          let status = if reading.paused then "paused · " ^ health else health in
+          let ko = state.ui_language = Lang_ko in
+          let health = Keeper_control.health_label ~ko reading in
+          let status =
+            if reading.paused then (if ko then "일시정지 · " else "paused · ") ^ health
+            else health
+          in
           let runtime = match reading.liveness with
             | Keeper_control.Present runtime -> runtime.kr_runtime_id
-            | Unobserved | Absent | Invalid _ -> "Runtime unavailable"
+            | Unobserved | Absent | Invalid _ ->
+                if ko then "런타임 확인 불가" else "Runtime unavailable"
           in
           let label =
             if state.view = Keepers Keeper_message
-               && state.msg_target_keeper_name = Some keeper.k_name then "현재 대화"
-            else "선택한 Keeper"
+               && state.msg_target_keeper_name = Some keeper.k_name
+            then (if ko then "현재 대화" else "Current conversation")
+            else (if ko then "선택한 키퍼" else "Selected Keeper")
           in
           [ Theme.recede (), rule
           ; Theme.recede (), "  " ^ label

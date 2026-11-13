@@ -38,7 +38,8 @@ val error_code : error -> string
 
 (** The binding of the template that [binding] chooses, moved onto the account
     [provider_id]: the binding {!of_template} makes the runtime of, found
-    without making it. Its [model_id] is the model of that runtime. *)
+    without making it. Its [model_id] is the key of the model's
+    [models.<id>] table; the runtime calls the model's [api_name]. *)
 val binding_of
   :  Runtime_schema.config
   -> template:string

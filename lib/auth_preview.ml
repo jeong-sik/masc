@@ -712,7 +712,11 @@ let integration_of ~base_path user_id account =
 ;;
 
 (* The model of the binding of the account's template that makes the
-   Runtime id, the binding a turn of the Runtime finds. *)
+   Runtime id, the binding a turn of the Runtime finds: the key of its
+   [models.<id>] table, as the integrations list names it and a
+   verification takes it. A turn sends that model's [api-name], which may
+   be another name. A Runtime id names its binding, so only
+   [template_not_declared] and [runtime_not_bound] come back. *)
 let model_of ~config ~integration id (runtime : Authz_runtime_state.runtime) =
   match integration, config with
   | Error (_ : integration_unread), (_ : Runtime_schema.config option) -> Error Account_integration_unread
@@ -734,21 +738,36 @@ let fact name code = function
 ;;
 
 let provider_accounts ~base_path ~config state { user_id; namespace = _ } =
+  (* Each receipt is read once, so an account and the Runtimes on it are
+     answered from the same reading. *)
+  let accounts =
+    List.map
+      (fun account -> account, integration_of ~base_path user_id account)
+      (Authz_provider_account.owned state user_id)
+  in
+  (* A Runtime is made only on an account its maker owns (the log refuses
+     [Account_not_theirs]), so its account is in [accounts]; were it not,
+     its receipt is read as the account's would be. *)
+  let integration_on account =
+    match List.find_opt (fun (owned, _) -> Provider_account_id.equal owned account) accounts with
+    | Some (_, integration) -> integration
+    | None -> integration_of ~base_path user_id account
+  in
   R.json
     R.Ok_200
     [ ( "provider_accounts"
       , `List
           (List.map
-             (fun account ->
+             (fun (account, integration) ->
                `Assoc
                  (("provider_account_id", `String (Provider_account_id.to_string account))
-                  :: fact "integration_id" integration_unread_code (integration_of ~base_path user_id account)))
-             (Authz_provider_account.owned state user_id)) )
+                  :: fact "integration_id" integration_unread_code integration))
+             accounts) )
     ; ( "runtimes"
       , `List
           (List.map
              (fun (id, (runtime : Authz_runtime_state.runtime)) ->
-               let integration = integration_of ~base_path user_id runtime.provider_account_id in
+               let integration = integration_on runtime.provider_account_id in
                `Assoc
                  ([ "runtime_id", `String (Runtime_id.to_string id)
                   ; ( "provider_account_id"

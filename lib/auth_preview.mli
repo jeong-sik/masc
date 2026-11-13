@@ -120,14 +120,18 @@ val keeper_conversation_reader
       [{"runtime_id":...,"provider_account_id":...,"model":...}]: the model
       of the binding of the account's template that makes the Runtime id
       ({!Runtime_account_runtime.binding_of}), the binding a turn of the
-      Runtime finds. [config] is the runtime.toml of the workspace, [None]
-      when it could not be read.
+      Runtime finds. The model is the key of its [models.<id>] table, as
+      the integrations list names it; a turn sends the model's [api-name],
+      which may be another name. [config] is the runtime.toml of the
+      workspace, [None] when it could not be read.
 
-    A fact that is not read is [null], and ["unread"] says why. For an
-    integration: [login_receipt_missing] or [login_receipt_unreadable]. For
-    a model: [account_integration_unread], [configuration_unavailable], or
-    the {!Runtime_account_runtime.error_code} of the binding that was not
-    found. *)
+    Each account's receipt is read once per answer. A fact that is not read
+    is [null], and ["unread"] says why. For an integration:
+    [login_receipt_missing] or [login_receipt_unreadable]. For a model:
+    [account_integration_unread], [configuration_unavailable],
+    [template_not_declared] (runtime.toml no longer declares the account's
+    integration) or [runtime_not_bound] (no binding of it makes the Runtime
+    id). *)
 val provider_accounts
   :  base_path:string
   -> config:Runtime_schema.config option

@@ -36,13 +36,14 @@ type owner =
   | Account_server_elsewhere of { pid : int; port : int }
   | Owner_unannounced of { pid : int }
       (** A process holds the lease, and the kernel shows no announcement of
-          it on either file. The kernel does not say which of these it is: a
-          server still booting before its bind, a server that shuts down (it
-          withdraws the announcement when its listener closes, before it
-          lets go of the lease), a server that listens on an address
-          [127.0.0.1] does not reach and so never announces, a server older
-          than the announcement, or an owner whose whole-file announcement
-          the lock of another process hid. *)
+          it on either file. The kernel does not say which of these five it
+          is: a server still booting before its bind, a server that shuts
+          down (it withdraws the announcement when its listener closes,
+          before it lets go of the lease), an owner that announces another
+          port, hidden from the whole-file read by the lock of another
+          process, a server that listens on an address [127.0.0.1] does not
+          reach and so never announces, or a server older than the
+          announcement. *)
   | Unowned  (** Nothing holds the lease. *)
 
 val owner :
@@ -99,8 +100,8 @@ val owner_sentence : lease_dir:string -> base_path:string -> port:int -> owner -
     [base_path] asked about on [port]. Each command appends what it did not
     do. The sentence for [Unowned] names [lease_dir], the directory the lease
     was read in ({!lease_directory}). The sentence for [Owner_unannounced]
-    lists the four causes the kernel does not tell apart, each with what to
-    do. *)
+    lists the five causes the kernel does not tell apart, the ones the type
+    names, each with what to do. *)
 
 val departure_sentence : single_user_server -> departure -> string
 (** What a command tells the operator when {!confirm} refused the server it

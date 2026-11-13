@@ -2302,11 +2302,13 @@ def answered_version(observed):
 def owner_unannounced_line(observed):
     """What an `owner_unannounced` observation says of the process, and what to do."""
     pid = str(observed['server_pid'])
-    return ('pid ' + pid + ' holds this workspace but announces no port. It may be starting: wait and '
-            'run setup again. It may be shutting down: run setup again once it has exited. It may '
-            'listen on an address that 127.0.0.1 does not reach, which its log says when it starts: '
-            'setup cannot use it until it is started with --host 127.0.0.1 or --host 0.0.0.0. Or a '
-            'MASC that announces no port started it: stop it with kill ' + pid + ' and run masc start.')
+    return ('pid ' + pid + ' holds this workspace but announces no port that setup saw. It may be '
+            'starting: wait and run setup again. It may be shutting down: run setup again once it has '
+            'exited. It may announce another port, which the lock of another process hid from this '
+            'read: run setup again with the --port it was started with. It may listen on an address '
+            'that 127.0.0.1 does not reach, which its log says when it starts: setup cannot use it '
+            'until it is started with --host 127.0.0.1 or --host 0.0.0.0. Or a MASC that announces no '
+            'port started it: stop it with kill ' + pid + ' and run masc start.')
 
 
 def account_server_line(observed):

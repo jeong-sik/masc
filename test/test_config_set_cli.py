@@ -315,8 +315,9 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertIn("[autonomous]\nenabled = false", runtime_toml(base).read_text())
 
     # A process holds the workspace and announces no port. Whatever the reason
-    # (starting, shutting down, listening out of loopback reach, started by a
-    # MASC that does not announce), the command neither writes the file under
+    # (starting, shutting down, announcing another port behind the lock of
+    # another process, listening out of loopback reach, started by a MASC
+    # that does not announce), the command neither writes the file under
     # it nor sends the bearer to the port.
     def test_an_owner_that_announces_nothing_stops_the_command(self):
         root = self.scratch()

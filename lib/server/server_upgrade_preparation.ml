@@ -127,13 +127,16 @@ let owner_sentence ~lease_dir ~base_path ~port = function
       base_path pid announced announced
   | Owner_unannounced { pid } ->
     (* The kernel shows a lease owner and no announcement, and not why. Each
-       cause has its own way on, so all four are said. *)
-    Printf.sprintf "pid %d holds %s but announces no port. It may be starting: wait and run the \
-                    command again. It may be shutting down: run the command again once it has \
-                    exited. It may listen on an address that 127.0.0.1 does not reach, which \
-                    its log says when it starts: commands on this host cannot use it until it \
-                    is started with --host 127.0.0.1 or --host 0.0.0.0. Or a MASC that announces \
-                    no port started it: stop it with kill %d and run masc start."
+       cause has its own way on, so all five are said. *)
+    Printf.sprintf "pid %d holds %s but announces no port that this command saw. It may be \
+                    starting: wait and run the command again. It may be shutting down: run the \
+                    command again once it has exited. It may announce another port, which the \
+                    lock of another process hid from this read: run the command again with the \
+                    --port it was started with. It may listen on an address that 127.0.0.1 does \
+                    not reach, which its log says when it starts: commands on this host cannot \
+                    use it until it is started with --host 127.0.0.1 or --host 0.0.0.0. Or a \
+                    MASC that announces no port started it: stop it with kill %d and run masc \
+                    start."
       pid base_path pid
   | Unowned ->
     (* A server that reads its lease from another directory is not seen here,

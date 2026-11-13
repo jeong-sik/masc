@@ -25,9 +25,11 @@ after `scripts/install-local-build.sh`:
    `/health`, after the kernel named the server. A lease owner that
    announces another port is refused with that port. A lease owner that
    announces nothing is refused with its pid. The kernel does not say why it
-   announces nothing, so the refusal lists the four cases: it is starting
+   announces nothing, so the refusal lists the five cases: it is starting
    (wait), it is shutting down (it withdraws the announcement when its
-   listener closes; run the command again once it has exited), it listens on
+   listener closes; run the command again once it has exited), it announces
+   another port that the lock of another process hid from the read (run the
+   command again with the `--port` it was started with), it listens on
    an address that 127.0.0.1 does not reach (it logs that at startup;
    commands on this host cannot use it), or a MASC that does not announce
    started it (stop it with `kill <pid>` and run `masc start`). A listener

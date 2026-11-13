@@ -511,8 +511,9 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
 
     def test_an_owner_that_announces_nothing_is_named_and_not_signed_in_to(self):
         # A process holds the lease and announces no port: starting, shutting
-        # down, listening out of loopback reach, or started by a MASC that
-        # does not announce. It is named by its pid, and nothing signs in to
+        # down, announcing another port behind the lock of another process,
+        # listening out of loopback reach, or started by a MASC that does not
+        # announce. It is named by its pid, and nothing signs in to
         # it or stops it.
         assert BINARY is not None
         with tempfile.TemporaryDirectory(prefix='masc-setup-silent-') as tmp:

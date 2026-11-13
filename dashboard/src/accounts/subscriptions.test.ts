@@ -200,6 +200,25 @@ describe('reading the subscriptions', () => {
     await done
     expect(kind(panel)).toBe(`read for ${person}`)
   })
+
+  it('says a reading is slow only once it has lasted long enough itself', async () => {
+    vi.useFakeTimers()
+    const first = later()
+    const second = later()
+    const { panel } = start({ [paths.integrations]: [first.answer, second.answer], [paths.owned]: [ownedNothing(), ownedNothing()] })
+    const slow = (): unknown => (panel.view.value.kind === 'reading' ? panel.view.value.slow : panel.view.value.kind)
+    const older = panel.load(person)
+    await vi.advanceTimersByTimeAsync(slowAfterMs - 1)
+    const newer = panel.load(other)
+    await vi.advanceTimersByTimeAsync(1)
+    const whenTheOlderWouldBeSlow = slow()
+    await vi.advanceTimersByTimeAsync(slowAfterMs - 1)
+    expect([whenTheOlderWouldBeSlow, slow()]).toEqual([false, true])
+    first.give(offered())
+    second.give(offered())
+    await Promise.all([older, newer])
+    expect(kind(panel)).toBe(`read for ${other}`)
+  })
 })
 
 describe('following the console', () => {
@@ -393,6 +412,25 @@ describe('the panel', () => {
     button.focus()
     await act(() => panel.retry())
     expect(document.activeElement).toBe(container.querySelector('h2'))
+  })
+
+  it('leaves a focus the person moved elsewhere during a retry where it is', async () => {
+    const { panel, container } = live({ [paths.integrations]: [notReady(), offered()], [paths.owned]: [ownedNothing(), ownedOne()] })
+    const elsewhere = document.body.appendChild(document.createElement('button'))
+    try {
+      await act(() => panel.load(person))
+      elsewhere.focus()
+      await act(() => panel.retry())
+      expect([document.activeElement === elsewhere, container.querySelectorAll('li.row').length]).toEqual([true, 1])
+    } finally {
+      elsewhere.remove()
+    }
+  })
+
+  it('leaves the focus alone when the first reading reads', async () => {
+    const { panel } = live({ [paths.integrations]: [offered()], [paths.owned]: [ownedOne()] })
+    await act(() => panel.load(person))
+    expect(document.activeElement).toBe(document.body)
   })
 
   it('draws what the model reads', async () => {

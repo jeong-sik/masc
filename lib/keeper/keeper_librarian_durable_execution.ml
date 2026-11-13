@@ -360,12 +360,6 @@ let rec consume_one ~config ~keeper_name ~wake =
   match Owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name with
   | Error failure -> error (Owner.error_to_string failure)
   | Ok listed ->
-    match finish_settling ~store listed with
-    | Error detail -> error ("Original history settle did not finish: " ^ detail)
-    | Ok moved when moved>0 ->
-      Log.Keeper.info ~keeper_name "durable Librarian finished an interrupted settle: records=%d" moved;
-      consume_one ~config ~keeper_name ~wake
-    | Ok _ ->
     (* A fenced original is read as its record and index when no known-basis
        link touches it: it holds no replacement intent, and its predecessor,
        if any, is fenced and holds none either. The pass does nothing more
@@ -393,27 +387,42 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Error failure -> error (Owner.error_to_string failure)
     | Ok read ->
     let originals=List.rev read in
+    (* From here an original the pass read is its record as read with the
+       body, so progress means one thing for the rest of the pass and a
+       settle compares the record the pass judged. *)
+    let listed=List.map (fun ((record,index) as original) ->
+      match List.find_opt (fun ((read:Retained.retained),_) -> read.request_id=Record.request_id record) originals with
+      | Some (read,_) -> Retained.listed read,index
+      | None -> original) listed in
+    match finish_settling ~store listed with
+    | Error detail -> error ("Original history settle did not finish: " ^ detail)
+    | Ok moved when moved>0 ->
+      Log.Keeper.info ~keeper_name "durable Librarian finished an interrupted settle: records=%d" moved;
+      consume_one ~config ~keeper_name ~wake
+    | Ok _ ->
     let validated=match listed with
-      | [] -> Ok ([],None)
+      | [] -> Ok ([],[],None)
       | (first,(first_index:Request.index))::_ ->
         (* One complete read-only gate observation for this inventory pass.
            Recovery and dispatch below deliberately retain their fresh reads. *)
         let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
           ~owner:first_index.owner) in
-        let* unfinished,settled=List.fold_left (fun result ((record,request) as original) ->
-          let* unfinished,settled=result in
+        let* unfinished,settled,fenced_read=List.fold_left (fun result (((record:Retained.retained),request) as original) ->
+          let* unfinished,settled,fenced_read=result in
           let* fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request ~original:record) in
           match fence with
-          | Some _ -> Ok (unfinished,settled)
+          | Some _ -> Ok (unfinished,settled,record.request_id::fenced_read)
           | None ->
           let* frontier=io (fun () -> Commit.validate_inventory ~inventory ~store ~request ~record) in
           match frontier with
-          | Commit.Unfinished -> Ok (original::unfinished,settled)
-          | Commit.Settled -> Ok (unfinished,original::settled)) (Ok ([],[])) originals in
-        Ok (unfinished,Some (Record.scope first,first_index.owner,inventory,settled)) in
+          | Commit.Unfinished -> Ok (original::unfinished,settled,fenced_read)
+          | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)) (Ok ([],[],[])) originals in
+        Ok (unfinished,fenced_read,Some (Record.scope first,first_index.owner,inventory,settled)) in
     match validated with
     | Error detail -> error detail
-    | Ok (unfinished,observed) ->
+    | Ok (unfinished,fenced_read,observed) ->
+    (* A fence published after the first observation is one this fold saw. *)
+    let fenced id=fenced id || List.mem id fenced_read in
     let unfinished=List.rev unfinished in
     (* Every pass lists the whole retained inventory and verifies each body
        it reads, so those counts and this time are what the pass costs before

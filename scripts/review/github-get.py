@@ -26,6 +26,10 @@ BOUNDARY_PAUSE_SECONDS = 2
 # announced pause, and the cap keeps a stuck endpoint visible in red.
 TRANSIENT_STATUSES = (502, 503, 504)
 TRANSIENT_RETRIES = 3
+# The retry reads below stay valid because the wait is short. An announced
+# pause longer than this is no blip: it is not waited out and fails red
+# instead of sleeping without a bound or leaving earlier reads looking fresh.
+TRANSIENT_MAX_PAUSE_SECONDS = 30
 
 
 class ApiFailure(ValueError):
@@ -210,9 +214,14 @@ class Client:
     def transient_pause(self, failure):
         """Seconds a transient 5xx's own ``retry-after`` announces; None does not retry.
 
-        Only a parseable pause retries: a 5xx without one, or with a malformed
-        one, stays a visible failure instead of spinning on the same response.
+        Only a parseable pause of at most ``TRANSIENT_MAX_PAUSE_SECONDS``
+        retries: a 5xx without one, with a malformed one, or with a longer one
+        stays a visible failure instead of spinning or sleeping unbounded.
         """
+        pause = self.announced_pause(failure)
+        return pause if pause is not None and pause <= TRANSIENT_MAX_PAUSE_SECONDS else None
+
+    def announced_pause(self, failure):
         if failure.status not in TRANSIENT_STATUSES:
             return None
         retry = failure.headers.get('retry-after')

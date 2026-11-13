@@ -325,6 +325,32 @@ class GitHubGet(unittest.TestCase):
         self.assertNotIsInstance(raised.exception, GET.TransientRetryExhausted)
         self.assertEqual((calls, clock.sleeps), ([1000.0], [5.0]))
 
+    def test_a_retry_after_beyond_the_cap_is_not_waited_out(self):
+        for value in (str(GET.TRANSIENT_MAX_PAUSE_SECONDS + 1), '3600',
+                      formatdate(1000 + 3600, usegmt=True)):
+            with self.subTest(retry_after=value):
+                clock, calls = Clock(), []
+                def run(command, **kwargs):
+                    calls.append(clock.now)
+                    return response(503, {'message': 'unavailable'}, {'Retry-After': value})
+                client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+                with self.assertRaises(GET.ApiFailure) as raised:
+                    client.read('repos/o/r/pulls/1')
+                self.assertNotIsInstance(raised.exception, GET.TransientRetryExhausted)
+                self.assertEqual((len(calls), clock.sleeps, client.pauses,
+                                  client.transient_retries), (1, [], 0, 0))
+
+    def test_a_retry_after_at_the_cap_is_waited_out(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(503, {'message': 'unavailable'},
+                             {'Retry-After': str(GET.TRANSIENT_MAX_PAUSE_SECONDS)})
+                    if len(calls) == 1 else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(clock.sleeps, [GET.TRANSIENT_MAX_PAUSE_SECONDS])
+
     def test_a_later_non_transient_refusal_carries_no_transient_state(self):
         clock, calls = Clock(), []
         def run(command, **kwargs):

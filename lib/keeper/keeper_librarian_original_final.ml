@@ -109,14 +109,19 @@ let answered_final (observed : Exact.retained_observation) json =
                       | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused) ->
     Ok None
 
-let decode_final ~store ({exact;schema;declaration_id} as target) json =
+let decode ~schema ~(observe : unit -> (Exact.retained_observation, string) result)
+    ~(confirm : Exact.final -> (unit, string) result) json =
   match Exact.final_of_json ~schema json with
   | Ok final -> Ok final
   | Error strict_error ->
-    let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
+    let* observed=observe () in
     let* answered=answered_final observed json in
     match answered with
     | None -> Error strict_error
     | Some final ->
-      let* ()=confirm_final ~store target final in
+      let* ()=confirm final in
       Ok final
+
+let decode_final ~store ({exact;schema;declaration_id} as target) json =
+  decode ~schema ~observe:(fun () -> Exact.observe_retained ~store ~declaration_id ~schema exact)
+    ~confirm:(confirm_final ~store target) json

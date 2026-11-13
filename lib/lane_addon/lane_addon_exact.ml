@@ -1136,14 +1136,12 @@ let recover_retained ~store ~declaration_id ~schema request =
 
 let recovery_of_files ~store ~declaration_id ~schema request ~record ~proof =
   let* schema = original_schema ~declaration_id ~schema request in
-  let bound = Digested.make request in
-  let* recovered = recovery ~store ~declaration_id ~schema ~invalid_error:Fun.id bound ~record
-      ~proof:(fun () -> Ok proof) in
+  let+ recovered = recovery ~store ~declaration_id ~schema ~invalid_error:Fun.id
+      (Digested.make request) ~record ~proof:(fun () -> Ok proof) in
   match recovered with
-  | Recovered observed -> Ok observed
+  | Recovered _ -> record
   | Finish_from_proof finished ->
-      observation ~declaration_id ~schema bound
-        (Some (record_to_json ~declaration_id ~request_id:request.request_id finished))
+      Some (record_to_json ~declaration_id ~request_id:request.request_id finished)
 
 (* Created once before the first started marker, shared by all roots and
    domains in this process. The lock guards only this short initialization;

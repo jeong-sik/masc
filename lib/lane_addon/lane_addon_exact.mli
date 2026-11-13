@@ -450,13 +450,14 @@ val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
 
 val recovery_of_files : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
-  proof:Yojson.Safe.t option -> (retained_observation, string) result
-(** What {!recover_retained} answers when it holds the claim and the
-    original's Exact record and proof link hold [record] and [proof] ([None]
-    when a file is absent). An open record it finishes from its proof is
-    answered as the terminal it publishes. Every [Error] is one it returns as
-    [Recovery_invalid]. [store] names only the root each proof must name.
-    Reads nothing and writes nothing. *)
+  proof:Yojson.Safe.t option -> (Yojson.Safe.t option, string) result
+(** The original's Exact record as {!recover_retained} leaves it when it holds
+    the claim and the original's record and proof link hold [record] and
+    [proof] ([None] when a file is absent). An open record it finishes from
+    its proof is the record it saves; any other record stays as it is.
+    {!observe_record} reads the result as {!recover_retained} answers. Every
+    [Error] is one it returns as [Recovery_invalid]. [store] names only the
+    root each proof must name. Reads nothing and writes nothing. *)
 
 val run :
   store:Lane_addon_store.t ->

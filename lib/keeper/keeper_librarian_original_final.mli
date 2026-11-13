@@ -3,7 +3,11 @@
     request and the message-floor step request each build their own request and
     check their own physical owner; what the host retained for that request is
     read here once. Blocking store reads: offload the whole call from Eio. *)
-type target
+type target = private
+  { exact : Lane_addon_exact.request
+  ; schema : Yojson.Safe.t
+  ; declaration_id : string
+  }
 val target : installation_id:string -> Lane_addon_exact.request -> (target, string) result
 (** The request, the schema it carries and the configured declaration that
     retains it. A request without a schema and a manual installation are errors. *)
@@ -48,13 +52,18 @@ val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final
     retained: the worker refuses a request no listing reply can carry before the
     host sees it, and that final holds no answer. *)
 
-val answered_final : Lane_addon_exact.retained_observation -> Yojson.Safe.t ->
-  (Lane_addon_exact.final option, string) result
-(** The final a judgment names when the strict decoder refused it: the
-    original's Answered terminal, when the record holds one and it delivers
-    exactly this JSON. [None] when the record holds no Answered terminal, and
-    [Error] when it holds one that delivers other JSON. The caller still
-    confirms the final. Reads nothing. *)
+val decode : schema:Yojson.Safe.t ->
+  observe:(unit -> (Lane_addon_exact.retained_observation, string) result) ->
+  confirm:(Lane_addon_exact.final -> (unit, string) result) ->
+  Yojson.Safe.t -> (Lane_addon_exact.final, string) result
+(** The final a judgment names, as {!decode_final} finds it and the deploy
+    check finds it in files. The strict decoder answers first. When it refuses,
+    the judgment names the original's Answered terminal if the record holds one
+    that delivers exactly this JSON, and that final must pass [confirm]. A
+    record without an Answered terminal leaves the strict decoder's error, and
+    one that delivers other JSON is an error. [observe] reads the original's
+    Exact record only after the strict decoder refuses. Reads only through
+    [observe] and [confirm]. *)
 
 val decode_final : store:Lane_addon_store.t -> target -> Yojson.Safe.t ->
   (Lane_addon_exact.final, string) result

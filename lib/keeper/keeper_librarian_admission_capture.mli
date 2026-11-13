@@ -97,6 +97,9 @@ val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
     retained that request, so an absent host record confirms it and no proof is
     read. Offload the complete operation in an Eio caller; no provider, write
     or ACK occurs. *)
+val unconfirmed_detail : Keeper_librarian_original_final.unconfirmed -> string
+(** The error {!confirm_final} returns for each reason the host evidence does
+    not confirm a final. *)
 val validate_proposal : t -> Yojson.Safe.t ->
   (Keeper_librarian_runtime.admission_proposal, string) result
 (** Full original admission validation, including every candidate, exact

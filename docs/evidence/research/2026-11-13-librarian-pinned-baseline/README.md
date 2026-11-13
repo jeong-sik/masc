@@ -59,7 +59,7 @@
 
 ## 답이 끝난 모양
 
-| 실행 | 세트 | 유효/요청 | 답한 호출 | HTTP | 답한 호출의 finish | 무효 사유 | 답 토큰 p50 | 초 p50 | 실행 전체 비용 |
+| 실행 | 세트 | 유효/요청 | 200 응답 | HTTP | 200 응답의 finish | 무효 사유 | 답 토큰 p50 | 초 p50 | 실행 전체 비용 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | inkling 1 | E-synth | 86/90 | 90 | 200 90 | stop 90 | memory_claim_absent 1, new_claim_without_support 3 | 2,193 | 22.84 | $0.6892 |
 | inkling 1 | E-real | 44/50 | 49 | 200 49, 400 1 | stop 49 | evidence_not_in_input 1, memory_claim_absent 4, no_answer 1 | 1,902 | 22.89 | $1.1643 |
@@ -69,8 +69,10 @@
 | glm 1 | E-real | 40/50 | 50 | 200 50 | length 5, stop 45 | memory_claim_absent 1, missing_required_key 1, new_claim_without_support 3, no_answer 5 | 13,599 | 234.61 | — |
 
 - 「유효/요청」은 그 모델에 보낸 요청 전부를 센다. `synth_valid_rate` 는 판정자의 지우기 판정으로 채점에서 빠진 기억의 요청을 뺀다. 이번에는 빠진 기억이 없어서 두 값이 같다.
+- 「200 응답」은 HTTP 200 이고 본문에 오류가 없는 호출이다(`eval_admission.summarize` 와 같은 셈). finish, 답 토큰, 초는 이 호출만 센다.
+- `prompt_lines.json` 의 `answered_sha256` 은 행마다 호출 하나를 고정한다. 엔드포인트가 HTTP 400 으로 거절한 호출도 든다. 그래서 Inkling 실행은 200 응답 139건(90 + 49)보다 하나 많은 140건을 고정한다. `counts.json` 의 `answered_calls` 가 이 수다.
 - 「실행 전체 비용」은 그 실행이 쓴 공개 단가 금액 전부다. Tinker 실행은 요청마다 같은 프롬프트를 두 번 보내고, 첫 번째(warm) 호출의 금액도 여기에 든다.
-- Inkling 두 실행의 비용 차이는 입력 캐시에서 온다. E-real 에서 캐시 안 된 입력은 첫 실행이 3,007,558토큰, 둘째 실행이 6,470토큰이다.
+- Inkling 두 실행의 비용 차이는 거의 입력 캐시에서 온다. 캐시 안 된 입력은 E-synth 에서 644,812토큰과 11,596토큰, E-real 에서 3,007,558토큰과 6,470토큰이다. 공개 단가로 E-synth 차이 $0.1844 중 $0.1710, E-real 차이 $0.8115 중 $0.8103 이 캐시 몫이다.
 - E-real 의 한 요청(`7ac0f0a0dd5ae910`)은 Tinker 엔드포인트가 두 번 모두 HTTP 400 으로 거절했다. 후보 A 판정 실행에서도 같은 요청이 거절됐다.
 - GLM 답 12건(E-synth 7건, E-real 5건)은 고정 상한 `max_tokens` 32,768 에서 잘렸다. 모두 `length` 로 끝나 `no_answer` 로 무효다. Tinker 가 거절한 `7ac0f0a0dd5ae910` 도 GLM 은 받았지만 같은 상한에서 잘렸다. 라이브 GLM 슬롯은 아직 `max_tokens` 를 보내지 않는다([README](../../../../scripts/tinker/librarian/README.md)). 라이브에서도 이만큼 잘리는지는 이 실행으로 알 수 없다. GLM 호출은 금액 대신 키의 사용량 한도를 써서 비용 칸은 `—` 다.
 
@@ -123,7 +125,9 @@
 | glm | `absorb_precision` | 26/49 = 0.531 | 13 이하 | — |
 
 - 채택 근거가 되는 좋아짐은 `inkling` 의 `memory_state_accuracy`, `stale_drop_recall`, `judged_merge_recall` 뿐이다(`better_from`). 나머지 줄의 좋아짐은 기록만 되어서 `—` 로 적었다.
-- `drop_precision` 과 `absorb_precision` 의 기회 수는 초안의 답이 정한다. 두 줄은 기회 수가 기준선과 같을 때의 값이다.
+- 초안의 기회 수는 기준선과 다를 수 있다. `drop_precision` 과 `absorb_precision` 은 각각 초안이 지운 수와 흡수한 수가 기회 수다.
+- 판정자가 초안의 라벨 밖 지우기 하나를 `keep` 이 아니라고 보면, 그 기억의 요청은 모두 채점에서 빠진다(`audit_decisions.Adjudication.scored`). 그러면 `synth_valid_rate`, `memory_state_accuracy`, `stale_drop_recall`, `judged_merge_recall` 의 기회 수도 준다.
+- 표는 기회 수가 기준선과 같을 때의 값이다.
 - 차이가 폭과 정확히 같으면 나빠짐도 좋아짐도 아니다.
 
 ## 재지 않은 것과 남는 조건
@@ -145,6 +149,8 @@ python3 docs/evidence/research/2026-11-13-librarian-pinned-baseline/tables.py co
 ```
 
 `baseline_counts.py` 는 두 모델의 실행이 센 숫자가 고정값과 모두 같을 때만 0 으로 끝난다. 이 폴더의 `counts.json` 은 그렇게 끝난 실행의 출력이다.
+
+표 밖의 숫자 가운데 몇 개는 `counts.json` 에 없다. 캐시 안 된 입력 토큰, 거절되거나 잘린 요청의 ID, 판정 사례 수와 판정자 수, `m11` 판정이 그렇다. 이 값들은 실행 폴더와 판정 폴더에서 직접 셌다.
 
 기준선을 처음부터 다시 만드는 순서는 아래와 같다.
 

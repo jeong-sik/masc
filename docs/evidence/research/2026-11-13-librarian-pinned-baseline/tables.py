@@ -91,10 +91,10 @@ def answers(models: list[tuple[str, JsonObject]]) -> str:
         for shown, key in SETS:
             got = cast(JsonObject, run[key])
             spent = got["run_spent_usd"]
-            rows.append([label, shown, f"{got['valid']}/{got['items']}", str(got["answered"]), spread(got["status"]),
+            rows.append([label, shown, f"{got['valid']}/{got['items']}", str(got["ok"]), spread(got["status"]),
                          spread(got["finish"]), spread(got["invalid"]), number(got["completion_tokens_p50"]),
                          number(got["wall_s_p50"]), NONE if spent is None else f"${spent}"])
-    return table(["실행", "세트", "유효/요청", "답한 호출", "HTTP", "답한 호출의 finish", "무효 사유", "답 토큰 p50", "초 p50",
+    return table(["실행", "세트", "유효/요청", "200 응답", "HTTP", "200 응답의 finish", "무효 사유", "답 토큰 p50", "초 p50",
                   "실행 전체 비용"], rows)
 
 

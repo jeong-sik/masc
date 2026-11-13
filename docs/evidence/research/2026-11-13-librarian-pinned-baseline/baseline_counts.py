@@ -23,13 +23,16 @@ prompt_lines.json:
 
 - `runs_are_the_pinned_ones`: whether the baseline its listed runs count is the one the file pins,
   number for number and answered call for answered call.
-- `problem`: why the listed runs cannot be the model's baseline, or null.
+- `problem`: why the listed runs cannot be the model's baseline (their number, their template), or
+  null. Runs that can be its baseline but count other numbers or calls than the file pins leave it
+  null and `runs_are_the_pinned_ones` false; stderr names the model.
 - `pinned`: the baseline the file holds, with how many answered calls each run counted in place of
   their sha256, or null.
 - `runs`: for each listed run its counts as [hits, chances], the sha256 of its rows, the template its
   prompts were drawn with, its E-real record, how many answered calls it counts, how the model's
-  answers ended, and how the judges classed the model's off-label drops and absorbs, with the sha256
-  of the decisions read.
+  calls ended, and how the judges classed the model's off-label drops and absorbs, with the sha256
+  of the decisions read. An answered call is one call per row, as `prompt_counts.measure` names it,
+  so a call the endpoint refused is one too. An ok call is an HTTP 200 with no error in its body.
 - `summed` and `turns`, for a model with listed runs: the counts summed over the runs, and the counts
   at which a draft with the baseline's chances turns worse or better.
 
@@ -80,21 +83,21 @@ def sent_as(folder: Path, kind: str, lines: L.Lines, model: L.ModelLines) -> tup
 
 
 def answers_of(folder: Path, kind: str, lines: L.Lines, model: L.ModelLines) -> JsonObject:
-    """How the model's calls of one run ended: statuses, the finishes of the answered calls, why
-    answers were not valid, and the medians of the answer tokens and the wall seconds over the
-    answered calls, None when no call was answered. A call is answered as `eval_admission.summarize`
-    counts it: an HTTP 200 with no error in its body. `run_spent_usd` is what the whole run spent at
-    public rates, warm calls and every target included; None where the summary holds no spend."""
+    """How the model's calls of one run ended: statuses, the finishes of the ok calls, why answers
+    were not valid, and the medians of the answer tokens and the wall seconds over the ok calls, None
+    when no call was ok. A call is ok as `eval_admission.summarize` counts it: an HTTP 200 with no
+    error in its body. `run_spent_usd` is what the whole run spent at public rates, warm calls and
+    every target included; None where the summary holds no spend."""
     summary, target = sent_as(folder, kind, lines, model)
     rows = [r for r in V.read_rows(folder) if r["target"] == target]
-    answered = [r for r in rows if r["status"] == HTTP_OK and r.get("error") is None]
+    ok = [r for r in rows if r["status"] == HTTP_OK and r.get("error") is None]
     refused = Counter("+".join(cast(list[str], r["problems"])) for r in rows if not r["valid"])
-    tokens = [cast(int, r["completion_tokens"]) for r in answered]
-    seconds = [cast(float, r["wall_s"]) for r in answered]
+    tokens = [cast(int, r["completion_tokens"]) for r in ok]
+    seconds = [cast(float, r["wall_s"]) for r in ok]
     return {
-        "items": len(rows), "valid": sum(bool(r["valid"]) for r in rows), "answered": len(answered),
+        "items": len(rows), "valid": sum(bool(r["valid"]) for r in rows), "ok": len(ok),
         "status": dict(sorted(Counter(str(r["status"]) for r in rows).items())),
-        "finish": dict(sorted(Counter(str(r["finish"]) for r in answered).items())),
+        "finish": dict(sorted(Counter(str(r["finish"]) for r in ok).items())),
         "invalid": dict(sorted(refused.items())),
         "completion_tokens_p50": statistics.median(tokens) if tokens else None,
         "wall_s_p50": round(statistics.median(seconds), 2) if seconds else None,

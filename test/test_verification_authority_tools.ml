@@ -734,6 +734,34 @@ let test_task_review_does_not_require_inventory () =
     check config root)
 ;;
 
+(* The question digest names what the producer submitted; the authority digest
+   names how a reviewer may look. A later attempt keeps the first and takes
+   the second as it is then. *)
+let test_task_review_digests_name_the_question_and_the_authority () =
+  with_surface ~sandbox_profile:"docker" (fun config _surface ->
+    let request : Workspace_verification_store.request_header =
+      {id="vrf-digests";task_id="task-001";worker=producer;created_at=1.} in
+    let review note =
+      match VAT.create_task_review ~config ~verification_id:request.id
+        ~task_id:request.task_id ~producer
+        ~evidence_access:(Workspace_verification_store.Evidence_available
+          {request;items=[Workspace_verification_store.Evidence_note note]}) with
+      | Ok review -> review
+      | Error detail -> Alcotest.failf "task review unavailable: %s" detail
+    in
+    let first = review "merged and checked" in
+    let again = review "merged and checked" in
+    let other = review "merged, not checked" in
+    Alcotest.(check string) "the same submission asks the same question"
+      (VAT.task_review_question_binding first) (VAT.task_review_question_binding again);
+    Alcotest.(check string) "the same submission holds the same authority"
+      (VAT.task_review_authority_binding first) (VAT.task_review_authority_binding again);
+    Alcotest.(check bool) "another note asks another question" false
+      (String.equal (VAT.task_review_question_binding first) (VAT.task_review_question_binding other));
+    Alcotest.(check bool) "the question and the authority are separate digests" false
+      (String.equal (VAT.task_review_question_binding first) (VAT.task_review_authority_binding first)))
+;;
+
 let test_root_layout_reports_entries_and_discovered_checkouts () =
   with_surface ~sandbox_profile:"docker" (fun config surface ->
     let root = producer_playground config producer in
@@ -1649,6 +1677,8 @@ let () =
             test_root_layout_fails_closed_when_checkout_discovery_is_partial
         ; Alcotest.test_case "Task review does not require a complete inventory"
             `Quick test_task_review_does_not_require_inventory
+        ; Alcotest.test_case "Task review digests name the question and the authority"
+            `Quick test_task_review_digests_name_the_question_and_the_authority
         ; Alcotest.test_case
             "a workspace producer without a playground gets a stated absence"
             `Quick

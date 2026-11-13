@@ -18,16 +18,30 @@ let owner = function
   | Error (O.Load_store_unavailable detail | Corrupt_original detail) ->
     Alcotest.fail ("original owner unavailable: " ^ detail)
   | Error O.Not_found -> Alcotest.fail "original owner not found"
+let next_owner = function
+  | Ok value -> value
+  | Error (O.Load (O.Load_store_unavailable detail | O.Corrupt_original detail)) ->
+    Alcotest.fail ("original owner unavailable: " ^ detail)
+  | Error (O.Load O.Not_found) -> Alcotest.fail "original owner not found"
+  | Error (O.Lookup_unavailable detail) -> Alcotest.fail ("lookup authority unavailable: " ^ detail)
+  | Error O.Question_changed -> Alcotest.fail "the fixture question changed"
 let verification_id = "vrf-journal-recovery"
 let installation_id = "fixture.verifier"
 let package_id = "fixture.review"
 let model_id = "review-execution-fixture"
 
+let fixture_lookup : V.lookup =
+  { V.granted_root = AR.Producer_namespace {root="/declared/producer"}
+  ; granted_tools = ["tool_read_file"]
+  ; question_digest = String.make 64 'a'
+  ; authority_digest = String.make 64 'b'
+  }
+let current_lookup () = Ok fixture_lookup
+
 let make_original () =
   V.prepare ~generator_runtime:None ~verification_id ~attempt:0
     ~question:{AR.completion_contract=None;required_evidence=[];evidence_posture=AR.Note_only;few_shot_block=""}
-    ~lookup_root:(AR.Producer_namespace {root="/declared/producer"})
-    ~lookup_binding:(String.make 64 'a') ~lookup_schemas:["tool_read_file"]
+    ~lookup:fixture_lookup
     {AR.task_title="T";task_description="D";completion_notes="N";agent_name="producer";
       task_id="task-001";evidence_refs=[];evidence_images=[]} |> get
 
@@ -256,7 +270,7 @@ let test_cancelled_reviewer_without_report_retries_as_a_successor () = with_fixt
    | Ok _ | Error _ -> Alcotest.fail "cancelled original did not become a retryable refusal");
   Alcotest.(check int) "recovery prepares no producer access" 0 !prepared;
   Alcotest.(check int) "the owner walk opens the next attempt" 1
-    (O.next_attempt ~store ~verification_id ~installation_id ~package_id |> owner))
+    (O.next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup:current_lookup |> next_owner))
 
 (* The reviewer's reply asks for its report and the review is cancelled before
    that call starts: the journal holds a requested report and no settled one. *)
@@ -277,7 +291,7 @@ let test_reviewer_cancelled_before_its_report_starts_is_reviewed_again () = with
      Alcotest.(check (list string)) "the refusal names the cancelled runtime" [model_id] retryable_runtimes
    | Ok _ | Error _ -> Alcotest.fail "the cancelled original did not become a retryable refusal");
   Alcotest.(check int) "the owner walk opens the next attempt" 1
-    (O.next_attempt ~store ~verification_id ~installation_id ~package_id |> owner))
+    (O.next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup:current_lookup |> next_owner))
 
 let test_reviewer_cancelled_inside_its_report_stays_a_repair () = with_fixture (fun env sw base_path store original current ->
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
@@ -423,7 +437,7 @@ let reread ~base_path ~store =
   Alcotest.(check int) "rereading prepares no producer access" 0 !prepared;
   outcome
 
-let next_attempt ~store = O.next_attempt ~store ~verification_id ~installation_id ~package_id |> owner
+let next_attempt ~store = O.next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup:current_lookup |> next_owner
 
 (* The provider refuses the only request, so the run ends as a failure and no
    report call exists. *)
@@ -587,9 +601,9 @@ let test_unreadable_execution_refusal_is_an_error () = with_fixture (fun _ _ _ s
     "observations",`List [`Assoc ["fact",`String "ended_without_verdict";
       "runtime_id",`String model_id;"ending",`String "unheard-of"]];
     "result",O.result_to_json {unknown_outcome_result with AR.retryable_runtimes=[model_id]}]}) |> owner;
-  match O.next_attempt ~store ~verification_id ~installation_id ~package_id with
-  | Error (O.Corrupt_original _) -> ()
-  | Ok _ | Error (O.Load_store_unavailable _ | O.Not_found) ->
+  match O.next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup:current_lookup with
+  | Error (O.Load (O.Corrupt_original _)) -> ()
+  | Ok _ | Error (O.Load (O.Load_store_unavailable _ | O.Not_found) | O.Lookup_unavailable _ | O.Question_changed) ->
     Alcotest.fail "a refusal that cannot be read chose a frontier")
 
 let test_reference_bindings_are_strict () = with_fixture (fun _ _ base_path _ original current ->

@@ -55,14 +55,19 @@ let authority ?(worker=producer) ?(items=[]) config =
   get (A.create_task_review ~config ~verification_id ~task_id ~producer:worker ~evidence_access)
 
 let original ?(question=question) ?lookup_root authority attempt =
-  get (V.prepare ~generator_runtime:None ~verification_id ~attempt ~question
-    ~lookup_root:(match lookup_root with Some root -> root | None -> A.task_review_root authority)
-    ~lookup_binding:(A.task_review_binding authority)
-    ~lookup_schemas:(List.map (fun (s:Types_core.tool_schema) -> s.name)
-      (A.schemas (A.task_review_tools authority))) request)
+  let current = V.lookup_of_authority authority in
+  let lookup = match lookup_root with
+    | Some root -> {current with V.granted_root=root}
+    | None -> current in
+  get (V.prepare ~generator_runtime:None ~verification_id ~attempt ~question ~lookup request)
 
 let retain store original = retained (O.retain ~store ~verification_id
   ~attempt:(V.attempt original) ~installation_id ~package_id original)
+(* Only a new attempt identity prepares lookup authority, so a wake that
+   restores the frontier fails here if it reaches for it. *)
+let no_successor_lookup () = Error "this wake must not prepare lookup authority"
+let next_attempt ?(lookup=no_successor_lookup) store =
+  O.next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup
 let domain_notes result =
   Masc.Completion_authority_agent.For_testing.review_notes
     ~request:{Verification.id=verification_id;task_id;worker=producer;created_at=1.;output=`Null;criteria=[]}
@@ -120,9 +125,7 @@ let test_worker_returns_its_loaded_original () = with_workspace (fun config stor
   retain store first;
   let earlier=loaded (O.load_for_destination ~store ~verification_id ~attempt:0 ~installation_id ~package_id) in
   let second=get (V.prepare ~generator_runtime:None ~verification_id ~attempt:0 ~question
-    ~lookup_root:(A.task_review_root a) ~lookup_binding:(A.task_review_binding a)
-    ~lookup_schemas:(List.map (fun (schema:Types_core.tool_schema) -> schema.name)
-      (A.schemas (A.task_review_tools a))) {request with task_title="replacement original"}) in
+    ~lookup:(V.lookup_of_authority a) {request with task_title="replacement original"}) in
   let replacement_store=Masc.Lane_addon_store.create
     ~root:(Filename.concat (Workspace_core.masc_dir config) "replacement-lane-addons") in
   retain replacement_store second;
@@ -238,9 +241,10 @@ let test_refusals_dispatch_nothing () = with_workspace (fun config store ->
       | Error (W.Grants_mismatch _) -> () | _ -> Alcotest.fail "another workspace accepted");
     Alcotest.(check int) "no refused path dispatches a reviewer" 0 !calls))
 
-let test_known_retry_preserves_frozen_original () = with_workspace (fun config store ->
+let test_known_retry_asks_the_same_question_again () = with_workspace (fun config store ->
   let a=authority config in
-  let next ()=loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id) in
+  let current ()=Ok (V.lookup_of_authority a) in
+  let next ()=loaded (next_attempt ~lookup:current store) in
   let first=original a (next ()) in
   retain store first;
   Alcotest.(check int) "wake without terminal retry keeps original" 0 (next ());
@@ -248,7 +252,7 @@ let test_known_retry_preserves_frozen_original () = with_workspace (fun config s
   with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error () ->
     incr calls;
-    Alcotest.(check string) "retry preserves exact prompt" (V.system_prompt_text first) prompt;
+    Alcotest.(check string) "unchanged authority renders the same prompt" (V.system_prompt_text first) prompt;
     if !calls=1 then (
       let error=Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
         {retry_after=None;message="definite complete HTTP refusal"}) in
@@ -261,8 +265,10 @@ let test_known_retry_preserves_frozen_original () = with_workspace (fun config s
     Alcotest.(check int) "explicit terminal transition produces one linked successor" 1 retry;
     Alcotest.(check int) "another wake reuses the same successor" retry (next ());
     let second=loaded (O.load_for_destination ~store ~verification_id ~attempt:retry ~installation_id ~package_id) in
-    Alcotest.(check bool) "whole successor differs only in identity" true
-      (V.to_json second=V.to_json (get (V.successor first)));
+    let expected=match V.successor ~lookup:(V.lookup_of_authority a) first with
+      | Ok child -> child | Error _ -> Alcotest.fail "successor fixture failed" in
+    Alcotest.(check bool) "the successor asks the first question with the current authority" true
+      (V.to_json second=V.to_json expected);
     (match run store a retry with Ok {AR.verdict=Some (Approve "retry checked");_} -> ()
      | Ok _ | Error _ -> Alcotest.fail "safe linked retry failed");
     ignore (loaded (run store a retry));
@@ -285,7 +291,7 @@ let test_bound_scope_before_dispatch_failure_has_safe_retry () = with_workspace 
     (match run store a 0 with
      | Ok {AR.verdict=None;retryable_runtimes=_::_;_} -> ()
      | Ok _ | Error _ -> Alcotest.fail "confirmed scope plus known no-effect refusal was stranded");
-    let next=loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id) in
+    let next=loaded (next_attempt ~lookup:(fun () -> Ok (V.lookup_of_authority a)) store) in
     Alcotest.(check int) "only a definite typed refusal authorizes the linked successor" 1 next))
 
 let test_unknown_and_cancelled_never_redispatch () = with_workspace (fun config store ->
@@ -304,7 +310,7 @@ let test_unknown_and_cancelled_never_redispatch () = with_workspace (fun config 
           (fun () -> Ok ["fixture-reviewer",Types_core.Catalog_slot;"must-not-run",Types_core.Catalog_slot]);
         (match run store a 0 with Error (W.Execution_repair_required _) -> ()
          | Ok _ | Error _ -> Alcotest.fail "lost response was treated as known completion");
-        let restored=loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id) in
+        let restored=loaded (next_attempt store) in
         Alcotest.(check int) "unknown keeps original identity" 0 restored;
         (match run store a restored with Error (W.Execution_repair_required _) -> ()
          | Ok _ | Error _ -> Alcotest.fail "unknown original replayed");
@@ -552,22 +558,22 @@ let test_pre_admission_configuration_reenters_same_original () = with_workspace 
      | Captured | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Alcotest.fail "pre-admission became execution terminal");
     Alcotest.(check int) "configuration repair cannot allocate a successor" 0
-      (loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id));
+      (loaded (next_attempt store));
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
       (fun () -> Ok ["fixture-reviewer",Types_core.Catalog_slot]);
     (match run store a 0 with Ok {AR.verdict=Some (Approve "admitted");_} -> ()
      | Ok _ | Error _ -> Alcotest.fail "fixed configuration could not re-admit exact original");
     Alcotest.(check int) "one provider after real pre-admission repair" 1 !calls;
     Alcotest.(check int) "same original owns the answer" 0
-      (loaded (O.next_attempt ~store ~verification_id ~installation_id ~package_id))))
+      (loaded (next_attempt store))))
 
 let test_bad_inventory_is_not_partial_authority () = with_workspace (fun _config store ->
   get (Masc.Lane_addon_tool_request_owner.retain ~store ~scope:"verifier-reviews"
     ~request_id:"malformed-inventory" ~installation_id ~package_id ~tool:"verifier_review"
     ~summary:(`Assoc ["unexpected",`Bool true]) ~request:(`Assoc ["body",`String "unrelated"])
     |> Result.map_error Masc.Lane_addon_tool_request_owner.error_to_string);
-  match O.next_attempt ~store ~verification_id ~installation_id ~package_id with
-  | Error (O.Corrupt_original _) -> () | _ -> Alcotest.fail "malformed inventory authorized a fresh attempt")
+  match next_attempt store with
+  | Error (O.Load (O.Corrupt_original _)) -> () | _ -> Alcotest.fail "malformed inventory authorized a fresh attempt")
 
 let with_observed_host f = with_workspace_runtime (fun config store clock ->
   Eio.Switch.run (fun sw ->
@@ -983,10 +989,7 @@ let test_one_unpublishable_original_does_not_starve_boot () = with_observed_host
        It is a negative recovery control, never claimed as actual Task proof. *)
     let bad_id="unpublishable-control-1" in
     let bad=get (V.prepare ~generator_runtime:None ~verification_id:bad_id ~attempt:0 ~question
-      ~lookup_root:(A.task_review_root authority)
-      ~lookup_binding:(A.task_review_binding authority)
-      ~lookup_schemas:(List.map (fun (schema:Types_core.tool_schema) -> schema.name)
-        (A.schemas (A.task_review_tools authority))) request) in
+      ~lookup:(V.lookup_of_authority authority) request) in
     retained (O.retain ~store ~verification_id:bad_id ~attempt:0
       ~installation_id:host_installation ~package_id:host_package bad);
     let record=loaded (O.load_retained ~store ~verification_id:bad_id ~attempt:0
@@ -1107,7 +1110,7 @@ let () =
     Alcotest.test_case "worker returns its loaded original after an owner replacement" `Quick test_worker_returns_its_loaded_original;
     Alcotest.test_case "frozen prompt, media, lookup and verdict" `Quick test_frozen_prompt_media_and_lookup;
     Alcotest.test_case "missing and changed authority refuse before dispatch" `Quick test_refusals_dispatch_nothing;
-    Alcotest.test_case "retry keeps both immutable originals" `Quick test_known_retry_preserves_frozen_original;
+    Alcotest.test_case "retry asks the same question again" `Quick test_known_retry_asks_the_same_question_again;
     Alcotest.test_case "bound scope plus definite pre-dispatch failure can retry safely" `Quick test_bound_scope_before_dispatch_failure_has_safe_retry;
     Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancelled_never_redispatch;
     Alcotest.test_case "actual host commit and restart" `Quick test_actual_host_commit_restart;

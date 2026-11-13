@@ -48,7 +48,10 @@ TRAIN_KEEPER, EVAL_KEEPER = "release-steward", "docs-gardener"
 # A memory with nothing planted, and candidates whose label absorbs no memory there: the answer
 # such a label asks for is kept at once.
 BARE = (fact(1), fact(2), fact(3))
-KEPT_AT_ONCE = ((S.CandidateKind.NEW_DURABLE,), (S.CandidateKind.CORRECTION,), (S.CandidateKind.PARAPHRASE,),
+# A memory whose one plant is the stale m4: the answer drops it and absorbs nothing, so it is kept
+# at once whatever the candidates (RFC-0517 §7.1).
+STALE_ONLY = (*BARE, fact(4, stale=True))
+KEPT_AT_ONCE =((S.CandidateKind.NEW_DURABLE,), (S.CandidateKind.CORRECTION,), (S.CandidateKind.PARAPHRASE,),
                 (S.CandidateKind.NEW_DURABLE, S.CandidateKind.TRANSIENT))
 
 
@@ -178,7 +181,8 @@ def train_folder(folder: Path, last_keeper: str = TRAIN_KEEPER) -> TrainFolder:
     labeled = train_request(
         request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE))), 1)
     off = train_request(request(PLANTED, candidates_of(OFF_KINDS)), 2)
-    plain = train_request(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))), 3)
+    plain = train_request(request(STALE_ONLY, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))),
+                          3)
     more = [train_request(request(BARE, candidates_of(kinds)), index, last_keeper if index == 7 else TRAIN_KEEPER)
             for index, kinds in enumerate(KEPT_AT_ONCE, start=4)]
     kept = (plain, *more)

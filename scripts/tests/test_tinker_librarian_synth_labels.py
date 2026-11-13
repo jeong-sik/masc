@@ -51,6 +51,7 @@ from tinker_librarian_synth_fixtures import (
 )
 from tinker_librarian_teacher_fixtures import (
     OFF_KINDS,
+    STALE_ONLY,
     Reply,
     absorbing_m2,
     log_calls,
@@ -68,12 +69,11 @@ from tinker_librarian_teacher_fixtures import (
 
 
 class LabelTest(unittest.TestCase):
-    def test_a_label_names_the_planted_facts_and_asks_for_them_only_with_support(self) -> None:
+    def test_a_label_names_the_planted_facts_whatever_the_candidates(self) -> None:
         alone = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))))
         supported = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.PARAPHRASE))))
         for label in (alone, supported):
             self.assertEqual((label.planted_stale, label.duplicates), (frozenset({"m4"}), (("m5", "m6"),)))
-        self.assertEqual((alone.supports_change, supported.supports_change), (False, True))
 
     def test_a_label_keeps_a_record_ahead_and_drops_a_past_one(self) -> None:
         label = S.label_of(request(SCHEDULED, candidates_of((S.CandidateKind.PARAPHRASE,))))
@@ -99,11 +99,9 @@ class ContractTest(unittest.TestCase):
                         corrected = {cl.supersedes for cl in label.candidates if cl.supersedes is not None}
                         complemented = {cl.absorbs: merged(by_id[cl.absorbs], by_request[cl.request_id])
                                         for cl in label.candidates if cl.absorbs is not None}
-                        asks = label.supports_change
-                        self.assertEqual(set(got.dropped),
-                                         (label.planted_stale if asks else frozenset[str]()) | corrected)
+                        self.assertEqual(set(got.dropped), label.planted_stale | corrected)
                         self.assertEqual(dict(got.absorbed), complemented | {
-                            gone: by_id[kept].claim for kept, gone in label.duplicates if asks})
+                            gone: by_id[kept].claim for kept, gone in label.duplicates})
                         gone = set(got.dropped) | set(dict(got.absorbed))
                         self.assertEqual(set(got.memory_after) - set(got.added_claims),
                                          {f.claim for f in facts if f.memory_id not in gone})
@@ -152,10 +150,13 @@ class TeacherTest(unittest.TestCase):
 
     def test_an_answer_that_absorbs_a_memory_waits_for_the_merge_judge(self) -> None:
         both = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
-        plain = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT)))
-        for req, answer, waits in ((both, label_answer(both), True), (plain, label_answer(plain), False)):
+        transients = candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))
+        # No candidate supports a change in the last two: the label merges the pair all the same and
+        # drops m4 (RFC-0517 §7.1), so only the answer without a pair to merge is kept at once.
+        unsupported, plain = request(PLANTED, transients), request(STALE_ONLY, transients)
+        for req, waits in ((both, True), (unsupported, True), (plain, False)):
             item = M.SynthItem(req.item_id, prompt_of(req), "", S.label_of(req))
-            self.assertEqual(T.screened(item, V.check(item.prompt, answer), {"item": req.item_id}),
+            self.assertEqual(T.screened(item, V.check(item.prompt, label_answer(req)), {"item": req.item_id}),
                              T.Target({"item": req.item_id}, waits))
         item = M.SynthItem(both.item_id, prompt_of(both), "", S.label_of(both))
         stale = teacher_answer(both, absorbs=("m1", "m4"), pair=True, dropped=())
@@ -386,7 +387,7 @@ class TeacherMergeTest(unittest.TestCase):
             request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE))), 1)
         self.off = train_request(request(PLANTED, candidates_of(OFF_KINDS)), 2)
         self.plain = train_request(
-            request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))), 3)
+            request(STALE_ONLY, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))), 3)
         self.requests, self.out = sampled_folder(self.folder, [
             (self.labeled, (label_answer(self.labeled),)), (self.off, (absorbing_m2(self.off),)),
             (self.plain, (label_answer(self.plain),))])

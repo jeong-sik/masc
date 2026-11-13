@@ -81,19 +81,21 @@ type Judged = tuple[str, S.Outcome, str | None]
 
 def answer_text(judgments: tuple[Judged, ...], *, claims: tuple[dict[str, object], ...] = (),
                 dropped: tuple[str, ...] = ()) -> str:
-    """An admission answer whose support is every candidate that can give it."""
+    """An admission answer whose support is every candidate that can give it: `verify_support` takes
+    incorporated and already_represented candidates."""
     return json.dumps({"memory": {"new_claims": list(claims), "dropped": [drop_json(m, "근거") for m in dropped],
                                   "working_state": None, "working_contexts": []},
                        "candidates": [{"request_id": rid, "outcome": outcome, "memory_claim": claim, "reason": "근거"}
                                       for rid, outcome, claim in judgments],
-                       "change_support": [rid for rid, outcome, _ in judgments if S.can_support(outcome)]},
+                       "change_support": [rid for rid, outcome, _ in judgments
+                                          if outcome in ("incorporated", "already_represented")]},
                       ensure_ascii=False)
 
 
 def label_answer(req: S.SynthRequest) -> str:
     """The answer the label asks for. A complement's claim joins its target and the candidate;
     a duplicate pair keeps its first fact, restated byte for byte with both IDs in `absorbs`.
-    When no candidate can support a change, it drops and merges nothing."""
+    It drops the stale facts and merges the pairs whatever the candidates (RFC-0517 §7.1)."""
     label = S.label_of(req)
     by_id = {f.memory_id: f for f in req.facts}
     by_request = {c.request_id: c for c in req.candidates}
@@ -111,7 +113,7 @@ def label_answer(req: S.SynthRequest) -> str:
                 judgments.append((cl.request_id, cl.outcome, cl.already_claim))
             case "not_durable":
                 judgments.append((cl.request_id, cl.outcome, None))
-    pairs, stale = (label.duplicates, tuple(sorted(label.planted_stale))) if label.supports_change else ((), ())
+    pairs, stale = label.duplicates, tuple(sorted(label.planted_stale))
     claims += [claim_json(by_id[kept].claim, absorbs=(kept, gone)) for kept, gone in pairs]
     corrected = tuple(cl.supersedes for cl in label.candidates if cl.supersedes is not None)
     return answer_text(tuple(judgments), claims=tuple(claims), dropped=corrected + stale)

@@ -65,7 +65,8 @@ val observation_to_yojson : observation -> Yojson.Safe.t
 
 val observation_of_yojson : Yojson.Safe.t -> (observation, string) result
 (** Strict inverse of {!observation_to_yojson}: the state and its exact field
-    set must match, and a reported row passes the checks a stored row does. *)
+    set must match, a reported row passes the checks a stored row does, and
+    the decoded observation must project back to exactly [json]. *)
 
 val projection :
   (t list, string) result -> Goal_store.goal -> Yojson.Safe.t

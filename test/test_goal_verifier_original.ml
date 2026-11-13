@@ -214,7 +214,20 @@ let test_malformed_original_refuses () = with_workspace (fun config _root ->
   let changed_evidence = `List [`Assoc ["kind", `String "note"; "content", `String "changed";
     "untrusted_grant", `Bool true]] in
   reject "unknown nested evidence grant admitted"
-    (`Assoc (("submitted_evidence", changed_evidence)::List.remove_assoc "submitted_evidence" fields)))
+    (`Assoc (("submitted_evidence", changed_evidence)::List.remove_assoc "submitted_evidence" fields));
+  let with_measurement measurement =
+    `Assoc (("measurement", measurement)::List.remove_assoc "measurement" fields) in
+  reject "unknown measurement state admitted" (with_measurement (`Assoc ["state", `String "guessed"]));
+  reject "measurement reason that is not text admitted"
+    (with_measurement (`Assoc ["state", `String "unavailable"; "reason", `Int 1]));
+  reject "unknown measurement field admitted"
+    (with_measurement (`Assoc ["state", `String "not_recorded"; "record", `Null]));
+  reject "noncanonical question digest admitted"
+    (`Assoc (("question_binding", `String "NOT-A-DIGEST")::List.remove_assoc "question_binding" fields));
+  match V.of_json (with_measurement (`Assoc ["state", `String "unavailable"; "reason", `String "store unreadable"])) with
+  | Ok decoded -> Alcotest.(check bool) "an unavailable measurement survives decoding" true
+      (match V.measurement decoded with Error "store unreadable" -> true | Error _ | Ok _ -> false)
+  | Error detail -> Alcotest.fail detail)
 
 let reported config goal_id ~value ~source =
   let goal = match Goal_store.find_goal config ~goal_id with
@@ -348,7 +361,17 @@ let test_successor_asks_the_same_question_with_the_current_authority () =
         (Ok (Some first));
       Alcotest.(check bool) "the child prompt is rendered again" false
         (String.equal (V.prompt child) (V.prompt stale));
-      Alcotest.(check bool) "the current authority admits the child" true (admits child current))
+      Alcotest.(check bool) "the current authority admits the child" true (admits child current);
+      (* A staged child that asks anything else is not this parent's next
+         attempt, whatever authority it holds. *)
+      let differs label key value =
+        let moved = get (V.of_json (V.to_json child |> with_field key value)) in
+        Alcotest.(check bool) label false (V.is_successor_of ~parent:stale moved) in
+      differs "another attempt number" "attempt" (`Int 2);
+      differs "another workspace" "base_path" (`String "/workspace/elsewhere");
+      differs "other submitted evidence" "submitted_evidence" (`List []);
+      differs "another reported measurement" "measurement" (`Assoc ["state", `String "not_recorded"]);
+      differs "another question digest" "question_binding" (`String (String.make 64 'c')))
 
 let test_task_capability_is_submission_bound () = with_workspace (fun config _root ->
   let without_task_id = pending config in

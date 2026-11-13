@@ -164,7 +164,7 @@ let observation_to_yojson (observation : observation) =
 
 let observation_of_yojson json : (observation, string) result =
   let label = "goal_measurement observation" in
-  match Json_util.assoc_member_opt "state" json with
+  let* observation = match Json_util.assoc_member_opt "state" json with
   | Some (`String "not_recorded") ->
       let* _ = fields label [ "state" ] json in
       Ok (Ok None)
@@ -180,7 +180,11 @@ let observation_of_yojson json : (observation, string) result =
       (match Json_util.assoc_member_opt "reason" json with
        | Some (`String reason) -> Ok (Error reason)
        | Some _ | None -> Error (label ^ ": reason must be a string"))
-  | Some _ | None -> Error (label ^ ": unknown state")
+  | Some _ | None -> Error (label ^ ": unknown state") in
+  (* A stored row decodes with its evidence trimmed, so only the round trip
+     shows that these were the exact bytes the observation writes. *)
+  if Yojson.Safe.equal (observation_to_yojson observation) json then Ok observation
+  else Error (label ^ ": not the exact projection of its observation")
 
 let projection records goal =
   observation_to_yojson (latest_for_goal records goal)

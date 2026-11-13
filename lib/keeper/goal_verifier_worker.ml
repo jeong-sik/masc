@@ -493,9 +493,10 @@ let retryable_refusal retained evidence =
   | _::_ -> let* () = decode (Verifier_review_owner.retry_result disposition) in Ok true
 
 (* HIGH-RISK-UNREVIEWED: a new attempt asks the parent's question with the
-   lookup authority prepared now. [authority] is forced only when a new
-   identity is allocated; restoring an intended successor uses its pinned body
-   and never prepares authority again. A changed question allocates nothing. *)
+   lookup authority prepared now. [authority] is forced only on the way to a
+   new attempt, before its identity is allocated; restoring an intended
+   successor uses its pinned body and never prepares authority again. A
+   changed question forces it and allocates nothing. *)
 let successor_of ~authority parent =
   let* current = authority () |> Result.map_error (fun detail -> Authority_changed detail) in
   V.successor ~authority:current parent.original |> Result.map_error (function

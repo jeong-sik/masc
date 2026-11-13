@@ -9,10 +9,13 @@
     @since 0.93.1 *)
 
 (** The built-in HTTP serialization admitted for one request, with the
-    [config], [messages] and [tools] it was built from. *)
+    [config], [messages] and [tools] it was built from. [stream] says whether
+    the bytes carry the streaming fields. The body holds no request identity:
+    the pre-dispatch observation is made when the body is sent, under the
+    [capture_id] of the request that sends it. *)
 type admitted_http_body = private
   { serialized_request : Complete_common.serialized_http_request
-  ; evidence : Request_wire_observer.observation
+  ; stream : bool
   ; config : Provider_config.t
   ; messages : Types.message list
   ; tools : Yojson.Safe.t list
@@ -122,11 +125,11 @@ type t =
       -> stream_result Completion_outcome.t
   }
 
-(** Pair a serialized body with the values it was built from. [config],
-    [messages] and [tools] are the ones the serializer read. *)
+(** Pair a serialized body with the values it was built from. [stream],
+    [config], [messages] and [tools] are the ones the serializer read. *)
 val admit_http_body
   :  serialized_request:Complete_common.serialized_http_request
-  -> evidence:Request_wire_observer.observation
+  -> stream:bool
   -> config:Provider_config.t
   -> messages:Types.message list
   -> tools:Yojson.Safe.t list

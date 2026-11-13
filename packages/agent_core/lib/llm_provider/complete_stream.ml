@@ -391,10 +391,7 @@ let complete_stream_http
          | None ->
            serialize_final_http_request_unadmitted ~stream:true ~config ~messages ~tools
          | Some admitted_body ->
-           let evidence =
-             Prepared_completion_request.admitted_body_evidence admitted_body
-           in
-           if evidence.stream
+           if Prepared_completion_request.admitted_body_stream admitted_body
            then
              Ok (Prepared_completion_request.admitted_body_request admitted_body)
            else
@@ -433,20 +430,11 @@ let complete_stream_http
         | Anthropic | Kimi | OpenAI_compat | Ollama | Glm ->
           config.base_url ^ config.request_path
       in
-      (match admitted_body with
-       | Some admitted_body ->
-         observe_pre_dispatch_serialization
-           ?request_wire_observer
-           (Prepared_completion_request.admitted_body_evidence admitted_body)
-       | None ->
-         observe_request_wire
-           ?request_wire_observer
-           ~capture_id
-           ~config
-           ~http_codec
-           ~stream:true
-           ~body:body_with_stream
-           ());
+      (* An admitted body and a body serialized here are observed the same
+         way: these bytes, under this request's capture_id. *)
+      observe_pre_dispatch_serialization
+        ?request_wire_observer
+        (serialization_observation ~capture_id ~config ~stream:true serialized);
       let requested_at = Unix.gettimeofday () in
       let latency_counter =
         match latency_counter with

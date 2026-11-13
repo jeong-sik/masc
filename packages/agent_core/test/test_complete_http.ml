@@ -4951,14 +4951,21 @@ let test_prepared_wrong_mode_retains_serialization () =
 
 (* A consumer wraps the built-in HTTP transport to observe or rewrite the
    request before forwarding it. The wrapper that forwards the request as it
-   came gets the admitted bytes on the wire and the admitted serialization
-   fact at the observer, the same value and not a rebuilt one. The wrapper
-   that replaces the messages gets a body built from its own messages. *)
+   came gets the admitted bytes on the wire and an observation of those
+   bytes under its capture_id. The wrapper that changes only the capture_id
+   still sends the admitted bytes, and the observation carries the wrapper's
+   capture_id with the same digest. The wrapper that replaces the messages
+   gets a body built from its own messages. *)
+type admitted_body_wrapper =
+  | Forwards_request
+  | Rebinds_capture_id
+  | Replaces_messages
+
 let test_http_transport_sends_the_admitted_body () =
   Eio_main.run @@ fun env ->
   try Eio.Switch.run @@ fun sw ->
     List.iter (fun stream ->
-      List.iter (fun replace_messages ->
+      List.iter (fun wrapper ->
         let captured = ref None in
         let url =
           if stream then
@@ -4970,11 +4977,15 @@ let test_http_transport_sends_the_admitted_body () =
         let http = Complete.make_http_transport ~sw ~net:env#net () in
         let handed = ref None in
         let replacement = "replaced by the wrapper" in
+        let admitted_capture_id = "capture-at-admission" in
+        let wrapper_capture_id = "capture-set-by-the-wrapper" in
         let forwarded (request : Llm_transport.completion_request) =
           handed := request.admitted_http_body;
-          if replace_messages
-          then { request with messages = [ Types.user_msg replacement ] }
-          else request in
+          match wrapper with
+          | Forwards_request -> request
+          | Rebinds_capture_id -> { request with capture_id = Some wrapper_capture_id }
+          | Replaces_messages ->
+            { request with messages = [ Types.user_msg replacement ] } in
         let transport =
           { Llm_transport.invoke_sync = (fun request -> http.invoke_sync (forwarded request))
           ; invoke_stream = (fun ?on_telemetry ~on_event request ->
@@ -4983,7 +4994,8 @@ let test_http_transport_sends_the_admitted_body () =
         let request_wire_observer observation = observed := Some observation; Ok () in
         let serialized =
           match Complete.admit_request_body ~stream
-                  (Complete.prepare_request ~config ~messages ()) with
+                  (Complete.prepare_request ~config ~messages
+                     ~capture_id:admitted_capture_id ()) with
           | Ok serialized -> serialized
           | Error _ -> fail "fixture serialization failed" in
         let outcome =
@@ -5002,20 +5014,26 @@ let test_http_transport_sends_the_admitted_body () =
           | None -> fail "peer did not receive the generation body" in
         let observed = match !observed with Some observation -> observation
           | None -> fail "the serialization was not observed" in
-        if replace_messages then begin
+        let admitted_request = admitted.serialized_request in
+        let check_admitted_bytes_observed_under capture_id =
+          check string "peer received the admitted bytes" admitted_request.body sent;
+          check string "the observation carries the admitted digest"
+            admitted_request.body_sha256 observed.Request_wire_observer.body_sha256;
+          check int "the observation carries the admitted byte count"
+            (String.length admitted_request.body) observed.body_bytes;
+          check (option string) "the observation carries the sending request's capture_id"
+            (Some capture_id) observed.capture_id in
+        match wrapper with
+        | Forwards_request -> check_admitted_bytes_observed_under admitted_capture_id
+        | Rebinds_capture_id -> check_admitted_bytes_observed_under wrapper_capture_id
+        | Replaces_messages ->
           check bool "the wrapper's messages are on the wire" true
             (Agent_core_strings.contains_substring ~needle:replacement ~haystack:sent);
           check bool "the earlier bytes are not sent for a replaced request" false
-            (String.equal admitted.serialized_request.body sent);
+            (String.equal admitted_request.body sent);
           check bool "a replaced request is observed as its own serialization" false
-            (observed == admitted.evidence)
-        end else begin
-          check string "peer received the admitted bytes"
-            admitted.serialized_request.body sent;
-          check bool "the observer received the admitted serialization fact" true
-            (observed == admitted.evidence)
-        end)
-        [false; true])
+            (String.equal admitted_request.body_sha256 observed.body_sha256))
+        [ Forwards_request; Rebinds_capture_id; Replaces_messages ])
       [false; true];
     Eio.Switch.fail sw Exit
   with Exit -> ()

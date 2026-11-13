@@ -1570,6 +1570,79 @@ let test_turn () =
             = Authz_records.Revocation_state.Not_pending
           ; fst (read alice [ "keeper_id", "keeper-alice" ]) = 200
           ];
+        (* The start of a server ends what a stopped one left: a pending
+           deletion, and a deleted conversation a restore brought back. The
+           CLI is asked again for a copy the deletion removed, and not for a
+           conversation no client got a message of. *)
+        let stopped =
+          answered
+            "the turn before a server stops in its deletion"
+            ~keeper:"keeper-alice"
+            ~runtime:alice_runtime
+            ~text:"echo: stopped"
+            ~continued:false
+            (reply alice (body ~keeper:"keeper-alice" ~message:"stopped"))
+        in
+        (match
+           Authz_purge.start
+             zone
+             ~user_id:alice.person.user_id
+             (Authz_purge_event.Keeper_conversation
+                { owner = alice.person.user_id; conversation_id = get (Conversation.Conversation_id.of_string stopped) })
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_purge.error_detail error));
+        let restore id =
+          let directory = Filename.concat alice_records id in
+          Unix.mkdir directory 0o700;
+          Out_channel.with_open_bin (Filename.concat directory "turns.jsonl") (fun out ->
+            output_string out "restored\n");
+          directory
+        in
+        let restored = [ restore conversation; restore followed ] in
+        let left = Filename.concat alice_records stopped :: restored in
+        let resume () = Server_keeper_conversation_purge.resume ~env ~zone ~base_path in
+        let asked_before = purged () in
+        (match
+           Login.one_call_of
+             (get (Provider_account_id.of_string alice.account_id))
+             ~busy:"the call of the test did not start"
+             (fun () -> Ok (resume ()))
+         with
+         | Ok () -> ()
+         | Error busy -> Alcotest.fail busy);
+        Alcotest.(check (list bool))
+          "a start while a call of the account runs leaves them"
+          [ true; true; true ]
+          (List.map Sys.file_exists left);
+        (match status_of alice stopped with
+         | Some (Authz_purge_state.Pending { earlier_vendor_copy = None }) -> ()
+         | Some _ | None -> Alcotest.fail "the deletion is not pending");
+        Alcotest.(check int) "and asks the CLI for none" asked_before (purged ());
+        resume ();
+        Alcotest.(check (list bool)) "the next start ends them" [ false; false; false ] (List.map Sys.file_exists left);
+        (match status_of alice stopped, status_of alice conversation, status_of alice followed with
+         | ( Some (Authz_purge_state.Purged { vendor_copy = Authz_purge_event.Removed })
+           , Some (Authz_purge_state.Purged { vendor_copy = Authz_purge_event.Removed })
+           , Some (Authz_purge_state.Purged { vendor_copy = Authz_purge_event.No_copy }) ) -> ()
+         | _ -> Alcotest.fail "the log does not have the three deletions as gone through");
+        Alcotest.(check (list (list string)))
+          "the CLI purges the project of the pending one and of the one it removed"
+          (List.sort
+             compare
+             (List.map
+                (fun id ->
+                   [ "--setting-sources="; "purge"; "--yes"; List.fold_left Filename.concat alice_records [ id; "cwd" ] ])
+                [ conversation; stopped ]))
+          (List.sort
+             compare
+             (List.map
+                args_of
+                (List.filteri
+                   (fun index (_ : (string * Yojson.Safe.t) list) -> index >= asked_before)
+                   (rows purges))));
+        resume ();
+        Alcotest.(check int) "a start with nothing left asks the CLI for none" (asked_before + 2) (purged ());
         (* Carol's Keeper runs on Codex. Its least posture reads what the
            server process reads, which holds the homes of other people, so
            the turn is refused and Codex runs none. *)

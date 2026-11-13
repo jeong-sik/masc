@@ -44,18 +44,23 @@ val requested_of_json : Yojson.Safe.t -> Authz_boot_mode.requested
     fields. *)
 val read_config : base_path:string -> Authz_boot_mode.requested * Authz_boot_mode.settings
 
-(** Whether [config.json] under [base_path] asks for [Multi_account]: what a
-    command that holds no lease reads of the account mode. To such a request
+(* HIGH-RISK-UNREVIEWED: what a command that holds no lease takes for the
+   account mode. *)
+
+(** What [config.json] under [base_path] asks a boot to run
+    ({!Authz_boot_mode.asked} of {!read_config}): what a command that holds no
+    lease reads of the account mode. [Error] for a value the table does not
+    know, with the refusal a boot gives for it
+    ({!Authz_boot_mode.refusal_to_string}): a command that prepares or opens a
+    server stops there, as the boot does. To [Ok Asks_multi_account]
     {!Authz_boot_mode.judge} answers an activation, the account server, an
     uncertainty or a refusal, and never a single user, so a command that
-    prepares or opens the server of a single user stops on [true]. It says
+    prepares or opens the server of a single user stops on it too. [Ok] says
     nothing of activation: the log and the store are read under the lease, by
-    {!boot}. [false] for a request that is not set, that asks for a single
-    user, or that holds a value the table does not know; a boot refuses the
-    last in its own words. [false] too for a file that is there and cannot be
+    {!boot}. [Ok Asks_single_user] too for a file that is there and cannot be
     read, or is no JSON object: {!read_config} takes no request from it and
     logs a warning, and a boot judges it as a config that asks for nothing. *)
-val asks_for_multi_account : base_path:string -> bool
+val asked : base_path:string -> (Authz_boot_mode.asked, Authz_boot_mode.refusal) result
 
 (** The mode that the last mode event of the log made, and the external
     high-water mark. *)
@@ -101,12 +106,19 @@ val decide : Authz_boot_mode.input -> decision
     [masc auth bootstrap]. *)
 val turn_off_line : string
 
-(** What a boot of a base path that {!asks_for_multi_account} does, the
+(** What a boot of a base path whose config asks for [Multi_account]
+    ({!asked}) does, the
     account server or a stop and never the server of a single user, and the
     two commands that run it. One line, which names the config file, for the
     commands that prepare or open the server of a single user: [masc doctor],
     [masc setup] and the setup journey. *)
 val account_installation_line : base_path:string -> string
+
+(** The refusal of {!asked} in the words of the boot
+    ({!Authz_boot_mode.refusal_to_string}), and the config file to correct.
+    One line, for the commands that hold no lease: [masc doctor],
+    [masc setup], [masc setup-server] and the setup journey. *)
+val refused_line : base_path:string -> Authz_boot_mode.refusal -> string
 
 (** One line per reason, the first apart, so a stop always has a reason. An
     {!Authorization_uncertain} stop also says what the high-water mark

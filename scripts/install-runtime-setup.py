@@ -2193,7 +2193,7 @@ def workspace_check(binary, base_path):
 # The document decides whether imp's persisted conversation opens directly,
 # and whether the workspace is one the journey prepares at all;
 # the journey never re-derives that from check condition strings.
-ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey', 'account_installation')
+ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey', 'account_installation', 'refused_by_boot')
 
 
 def onboarding_status(binary, base_path=None):
@@ -2347,16 +2347,41 @@ def account_installation(binary, state, port):
     return 0
 
 
+def refused_by_boot(state):
+    """Say why no boot runs a server in this workspace, and stop.
+
+    The config holds an account mode the boot does not know. Nothing is asked,
+    initialized or started: the doctor's line is the sentence the boot stops
+    with, and it names the file to correct.
+    """
+    base = state.get('base_path')
+    if not isinstance(base, str):
+        raise SetupError('MASC returned an unsupported setup observation; reinstall the complete release.')
+    print('\n' + terminal_text(base), file=sys.stderr)
+    for check in state['checks']:
+        if check['condition'] != 'satisfied':
+            print(check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
+    print('Nothing was initialized or started.\n'
+          'To set up another workspace: masc setup --base-path DIRECTORY', file=sys.stderr)
+    return 1
+
+
+def journey_ends_at(binary, state, port):
+    """The exit of the journey in a workspace it does not prepare, and None otherwise."""
+    if state['opening'] == 'account_installation':
+        return account_installation(binary, state, port)
+    if state['opening'] == 'refused_by_boot':
+        return refused_by_boot(state)
+    return None
+
+
 def account_installation_at(binary, base, port):
-    """The exit of the journey when `base` asks for accounts, and None otherwise.
+    """The exit of the journey when `base` is not one it prepares, and None otherwise.
 
     For a directory that no doctor document read so far described: it is read
     before anything is offered, checked or initialized in it.
     """
-    described = onboarding_status(binary, base)
-    if described['opening'] == 'account_installation':
-        return account_installation(binary, described, port)
-    return None
+    return journey_ends_at(binary, onboarding_status(binary, base), port)
 
 
 def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
@@ -3383,8 +3408,9 @@ def show_imp_tools(binary, base):
 
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
-    if state['opening'] == 'account_installation':
-        return account_installation(binary, state, port)
+    ended = journey_ends_at(binary, state, port)
+    if ended is not None:
+        return ended
     # `invalid` is not one condition. Saving a selection repairs some of them —
     # configure_locked stages the edit, lets runtime-default-set rewrite it,
     # and publishes that rewrite — while a declaration the parser cannot

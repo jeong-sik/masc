@@ -79,11 +79,12 @@ let read_config ~base_path =
   requested, settings
 ;;
 
-let asks_for_multi_account ~base_path =
-  match read_config ~base_path with
-  | B.Requested Masc_domain.Multi_account, (_ : B.settings) -> true
-  | ( (B.Requested Masc_domain.Single_user | B.Not_set | B.Unknown_value (_ : string))
-    , (_ : B.settings) ) -> false
+(* HIGH-RISK-UNREVIEWED: what a command that holds no lease takes for the
+   account mode. It is the reading of the boot judgment ([B.asked]) and holds
+   no rule of its own. *)
+let asked ~base_path =
+  let requested, (_ : B.settings) = read_config ~base_path in
+  B.asked requested
 ;;
 
 (* The external store that the install record names, as the boot found it. *)
@@ -245,6 +246,13 @@ let account_installation_line ~base_path =
     "%s asks for Multi_account, so a boot of this workspace runs the account server or \
      stops, and never runs the server of a single user: masc auth bootstrap activates the \
      workspace while no server runs, and masc restart starts or replaces the account server"
+    (Auth_credential_base.auth_config_file base_path)
+;;
+
+let refused_line ~base_path refusal =
+  Printf.sprintf
+    "%s. No boot runs a server on this workspace until %s is corrected"
+    (B.refusal_to_string refusal)
     (Auth_credential_base.auth_config_file base_path)
 ;;
 

@@ -1,0 +1,14 @@
+### Fixed
+
+- A workspace whose `config.json` holds an `account_mode` the boot does not
+  know (another case, `null`, a number, the member twice) is refused by every
+  command that reads it, in the words of the boot. `masc doctor` answered
+  `needs_journey` for it, `masc setup-server` answered `free`, and `masc setup`
+  and the setup journey ran `masc init` in a directory no server boots on.
+  The commands read the mode through a bool that folded the unknown value
+  into "single user"; that reader is removed and they take the reading of the
+  boot judgment as a `Result`. `masc doctor` now reports one `invalid`
+  `unknown_account_mode` check with the opening `refused_by_boot`,
+  `masc setup-server` exits 1 with a `masc.setup_server_unread.v1` document,
+  and `masc setup` and the journey stop before anything is initialized
+  (#51320, #PENDING).

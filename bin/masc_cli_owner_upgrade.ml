@@ -67,6 +67,16 @@ let account_health ~clock ~port =
 let inspect ~base_path ~port =
   let base_path = Masc_cli_setup.preflight_base_path base_path in
   let base_path = try Unix.realpath base_path with Unix.Unix_error _ -> base_path in
+  (* A port named free would be taken for a workspace a server can start
+     on. No boot runs one on an account mode it does not know, so nothing is
+     said of the port there. *)
+  match Authz_boot_mode_read.asked ~base_path with
+  | Error refusal ->
+    emit (`Assoc ["schema", `String "masc.setup_server_unread.v1"; "read_only", `Bool true;
+      "error", `String (Authz_boot_mode_read.refused_line ~base_path refusal
+                        ^ ". No server was changed.")]);
+    1
+  | Ok asked ->
   let observed = with_http (fun _ clock ->
     match holder ~base_path ~port with
     | Ok (Upgrade.Held_by_account_server { port }) ->
@@ -78,8 +88,9 @@ let inspect ~base_path ~port =
          the config asks for accounts no status is given: a port named free
          could be taken for a workspace with no server. Where it does not,
          the port answers as it did before accounts, whatever the lease. *)
-      if Authz_boot_mode_read.asks_for_multi_account ~base_path then Error reason
-      else Ok (port_says ~clock ~base_path ~port)) in
+      (match asked with
+       | Authz_boot_mode.Asks_multi_account -> Error reason
+       | Authz_boot_mode.Asks_single_user -> Ok (port_says ~clock ~base_path ~port))) in
   match observed with
   | Error reason ->
     emit (`Assoc ["schema", `String "masc.setup_server_unread.v1"; "read_only", `Bool true;

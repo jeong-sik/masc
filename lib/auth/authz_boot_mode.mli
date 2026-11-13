@@ -106,6 +106,22 @@ type refusal =
   | Anonymous_mutations_in_multi_account
   | Auth_settings_unreadable_in_multi_account of string
 
+(** What a request asks a boot to run. No member and [Single_user] are one
+    answer: the config column of the table (design 5.1). *)
+type asked =
+  | Asks_single_user
+  | Asks_multi_account
+
+(* HIGH-RISK-UNREVIEWED: the one reading of the request. *)
+
+(** The request as {!judge} reads it, for a caller that has the request and
+    neither the log nor the store. {!Unknown_value} is
+    [Error (Unknown_account_mode _)], the refusal {!judge} gives for it, so no
+    caller reads such a config as one that asks for a single user. [Ok] says
+    what is asked and nothing of what a boot answers: the log and the store
+    decide that. *)
+val asked : requested -> (asked, refusal) result
+
 val judge : input -> (mode, refusal * refusal list) result
 val mode_to_string : mode -> string
 val refusal_to_string : refusal -> string

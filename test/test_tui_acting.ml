@@ -134,7 +134,7 @@ let test_turns_fold_the_two_planes_into_one_row_per_turn () =
     ; observation ~keeper:k ~session:151 ~completed:50
     ]
   in
-  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  let rows = Acting.chunk_rows ~ko:false ~traces:[] (entries_of events_oldest_first) in
   check int "seventeen entries fold to three turns" 3 (List.length rows);
   check (list string)
     "newest first: 51 running, 50 and 49 settled with ledger durations"
@@ -160,7 +160,7 @@ let test_a_settle_joins_the_open_turn_it_ends_despite_the_number () =
     ; turn_settled ~keeper:k ~turn:3084 ~input:2000 ~output:40 ~cost:0.0040 ()
     ]
   in
-  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  let rows = Acting.chunk_rows ~ko:false ~traces:[] (entries_of events_oldest_first) in
   check int "one turn, not two" 1 (List.length rows);
   check (list string)
     "the keeper's number, settled, with the ledger call on the same row"
@@ -211,7 +211,7 @@ let test_telemetry_alone_conjures_no_turn () =
   in
   check (list string) "no rows from telemetry alone" []
     (List.map text
-       (Acting.chunk_rows ~traces:[] (entries_of events_oldest_first)))
+       (Acting.chunk_rows ~ko:false ~traces:[] (entries_of events_oldest_first)))
 
 let test_actions_hide_what_says_nothing_a_row_can_act_on () =
   let events =
@@ -256,7 +256,7 @@ let test_the_internal_runs_push_is_not_a_keepers_act () =
   check bool "turns does not draw it" false (Acting.visible Acting.Turns push);
   check bool "actions does not draw it" false (Acting.visible Acting.Actions push);
   check bool "everything does" true (Acting.visible Acting.Everything push);
-  let row = Acting.row_of_event ~at:100. ~duration_ms:None push in
+  let row = Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None push in
   check bool "it is drawn quiet, not with the look-here mark" true
     (row.Acting.glyph = Acting.Quiet);
   check string "and it says which registry changed" "the exact_lane run registry changed"
@@ -291,7 +291,7 @@ let lane_resource ?detail lifecycle =
 let test_a_lane_container_failure_is_drawn_with_its_reason () =
   let failed = lane_resource ~detail:"image not found" Lane_events.Acquire_failed in
   check bool "turns draws a failed start" true (Acting.visible Acting.Turns failed);
-  let row = Acting.row_of_event ~at:100. ~duration_ms:None failed in
+  let row = Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None failed in
   check bool "with the failure mark" true (row.Acting.glyph = Acting.Failure);
   check string "naming the package and the reason"
     "masc-dos \xc2\xb7 image not found" row.Acting.detail;
@@ -329,7 +329,7 @@ let test_a_repeating_container_failure_is_one_row_under_turns () =
     ; lane_resource ~detail:"daemon not running" Lane_events.Acquire_failed
     ]
   in
-  let rows = Acting.chunk_rows ~traces:[] (entries_of events_oldest_first) in
+  let rows = Acting.chunk_rows ~ko:false ~traces:[] (entries_of events_oldest_first) in
   let details = List.map (fun row -> row.Acting.detail) rows in
   check (list string) "one row per package and reason, newest first"
     [ "masc-dos \xc2\xb7 daemon not running"
@@ -369,7 +369,7 @@ let test_one_reply_does_not_bury_the_actions_it_sits_between () =
    the order the screen scrolls through. *)
 let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
   let row =
-    Acting.row_of_event ~at:100. ~duration_ms:None
+    Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None
       (Observer.Keeper_chat_stream_frame
          { keeper = "test-keeper"; operation_id = "op"; seq = None
          ; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
@@ -386,7 +386,7 @@ let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
    what a Ctrl-] jump would look for. *)
 let test_a_fusion_status_row_names_the_owning_keeper () =
   let row =
-    Acting.row_of_event ~at:100. ~duration_ms:None
+    Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None
       (Observer.Fusion_run_status
          { keeper = "polisher"; run_id = "kmsg-f04701e2"; status = "completed" })
   in
@@ -529,14 +529,14 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
   | chunks ->
       failf "alpha drew %d turns: %s" (List.length chunks)
         (String.concat ", "
-           (List.map (fun chunk -> Acting.turn_label chunk.Acting.ck_turn) chunks))
+           (List.map (fun chunk -> Acting.turn_label ~ko:false chunk.Acting.ck_turn) chunks))
 
 let test_trimming_keeps_the_order_it_was_given () =
   let ring = [ settled "a"; heartbeat "b"; settled "c"; heartbeat "d"; settled "e" ] in
   let kept, dropped = Acting.retain ~actions:2 ~quiet:1 ~event_of:Fun.id ring in
   check (list string) "newest of each class, in arrival order"
     [ "a"; "b"; "c" ]
-    (List.map (fun e -> (Acting.row_of_event ~at:100. ~duration_ms:None e).Acting.keeper) kept);
+    (List.map (fun e -> (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None e).Acting.keeper) kept);
   check int "the rest is counted" 2 dropped
 
 (* The screen is a feed: rows are held and drawn in the order they arrived,
@@ -546,7 +546,7 @@ let test_trimming_keeps_the_order_it_was_given () =
    column an operator would have read to check the order. *)
 let test_every_row_wears_the_clock_the_feed_ordered_it_by () =
   let received = 1787507570.5 in
-  let at_of event = (Acting.row_of_event ~at:received ~duration_ms:None event).Acting.at in
+  let at_of event = (Acting.row_of_event ~ko:false ~at:received ~duration_ms:None event).Acting.at in
   List.iter
     (fun (name, event) ->
        check bool (name ^ " wears the arrival clock") true
@@ -589,7 +589,7 @@ let test_a_call_and_its_return_read_as_one_pair () =
      ordinal to the event evidence. *)
   check string "the call names its tool, batch slot, and task"
     "\xe2\x96\xb6 analyst call | read_file [1/2] \xc2\xb7 task-494"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None started));
+    (text (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None started));
   let duration =
     Acting.duration_of_completion ~before:[ heartbeat "x"; started ] completed
   in
@@ -597,7 +597,7 @@ let test_a_call_and_its_return_read_as_one_pair () =
     (Some 32.) duration;
   check string "and the row carries the pairing"
     "\xe2\x9c\x93 analyst returned | read_file \xc2\xb7 32ms [1/2] \xc2\xb7 task-494"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:duration (Observer.Agent_core completed)))
+    (text (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:duration (Observer.Agent_core completed)))
 
 let test_a_return_with_no_start_held_has_no_duration () =
   let completed =
@@ -624,14 +624,14 @@ let test_a_return_with_no_start_held_has_no_duration () =
        completed);
   check string "the row then shows the tool alone"
     "\xe2\x9c\x93 analyst returned | read_file"
-    (text (Acting.row_of_event ~at:100. ~duration_ms:None (Observer.Agent_core completed)));
+    (text (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None (Observer.Agent_core completed)));
   (* A negative duration is a clock that disagreed with itself. The row it
      leaves is the row a missing one leaves, not "read_file \xc2\xb7 0ms" and
      not a dash the missing row does not draw. *)
   check string "a negative duration reads as no duration"
     "\xe2\x9c\x93 analyst returned | read_file"
     (text
-       (Acting.row_of_event ~at:100. ~duration_ms:(Some (-4.))
+       (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:(Some (-4.))
           (Observer.Agent_core completed)))
 
 let test_a_lane_named_event_is_attributed_by_its_trace () =
@@ -1053,16 +1053,16 @@ let test_turns_names_the_keeper_of_a_plain_correlated_event () =
   let keepers rows = List.map (fun (row : Acting.row) -> row.Acting.keeper) rows in
   check (list string) "Turns draws the row under the keeper the trace names"
     [ "keeper-one" ]
-    (keepers (Acting.chunk_rows ~traces (entries_of [ started ])));
+    (keepers (Acting.chunk_rows ~ko:false ~traces (entries_of [ started ])));
   check (list string) "the flat scopes draw the same event under the same keeper"
     [ "keeper-one" ]
     (List.map
        (fun entry ->
-          (Acting.keeper_row_of_entry ~traces ~duration_ms:None entry).Acting.keeper)
+          (Acting.keeper_row_of_entry ~ko:false ~traces ~duration_ms:None entry).Acting.keeper)
        (entries_of [ started ]));
   check (list string) "without a trace for it the agent name stays"
     [ lane ]
-    (keepers (Acting.chunk_rows ~traces:[] (entries_of [ started ])))
+    (keepers (Acting.chunk_rows ~ko:false ~traces:[] (entries_of [ started ])))
 
 let test_measuring_reads_what_the_row_draws () =
   let traces = [ ("keeper-one", "trace-1") ] in
@@ -1074,7 +1074,7 @@ let test_measuring_reads_what_the_row_draws () =
   in
   let drawn event =
     Acting.measured_of_row
-      (Acting.keeper_row_of_entry ~traces ~duration_ms:None
+      (Acting.keeper_row_of_entry ~ko:false ~traces ~duration_ms:None
          { Acting.ae_at = 100.; ae_event = event })
   in
   List.iter
@@ -1102,7 +1102,7 @@ let test_measuring_reads_what_the_row_draws () =
   check string "the drawn row names the keeper" "keeper-one"
     (drawn correlated).Acting.measured_keeper;
   let unrenamed =
-    Acting.row_of_entry ~duration_ms:None
+    Acting.row_of_entry ~ko:false ~duration_ms:None
       { Acting.ae_at = 100.; ae_event = correlated }
   in
   check string "which is not the lane the feed named"

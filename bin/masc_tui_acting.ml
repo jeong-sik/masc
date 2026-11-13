@@ -172,7 +172,8 @@ let milliseconds_in_a_second = 1000.
 let elapsed_text ms =
   Masc_tui_message_layout.elapsed_text (ms /. milliseconds_in_a_second)
 
-let turn_number_text turn = Printf.sprintf "turn %d" turn
+let turn_number_text ~ko turn =
+  Printf.sprintf (if ko then "턴 %d" else "turn %d") turn
 
 (* Two readings of the same value, because the two places it goes want
    different things from a turn nobody numbered.
@@ -188,12 +189,12 @@ let turn_number_text turn = Printf.sprintf "turn %d" turn
    nothing to "in 812 out 96". Neither of them asks [turn ?], a question
    the row cannot answer and the reader cannot act on; the acting pane
    reached the same conclusion about the same value. *)
-let turn_label = function
-  | Some turn -> turn_number_text turn
-  | None -> "turn"
+let turn_label ~ko = function
+  | Some turn -> turn_number_text ~ko turn
+  | None -> if ko then "턴" else "turn"
 
-let turn_detail = function
-  | Some turn -> turn_number_text turn
+let turn_detail ~ko = function
+  | Some turn -> turn_number_text ~ko turn
   | None -> ""
 
 (* A turn's input count holds everything the turn sent, cache reads
@@ -232,24 +233,35 @@ let turn_input_total = function
   | Input_whole n -> n
   | Input_split { fresh; cached } -> fresh + cached
 
-let fresh_input_text fresh = "in " ^ Message_layout.compact_count fresh ^ " new"
-let cached_input_text cached = Message_layout.compact_count cached ^ " cached"
+let fresh_input_text ~ko fresh =
+  let figure = Message_layout.compact_count fresh in
+  if ko then "새 입력 " ^ figure else "in " ^ figure ^ " new"
 
-let turn_input_text = function
-  | Input_whole n -> "in " ^ Message_layout.compact_count n
+let cached_input_text ~ko cached =
+  let figure = Message_layout.compact_count cached in
+  if ko then "캐시 " ^ figure else figure ^ " cached"
+
+let output_text ~ko output =
+  (if ko then "출력 " else "out ") ^ Message_layout.compact_count output
+
+let calls_text ~ko n =
+  if ko then Printf.sprintf "호출 %d건" n
+  else Printf.sprintf "%d call%s" n (if n = 1 then "" else "s")
+
+let turn_input_text ~ko = function
+  | Input_whole n -> (if ko then "입력 " else "in ") ^ Message_layout.compact_count n
   | Input_split { fresh; cached } ->
-      fresh_input_text fresh ^ " \xc2\xb7 " ^ cached_input_text cached
+      fresh_input_text ~ko fresh ^ " \xc2\xb7 " ^ cached_input_text ~ko cached
 
 (* A whole input keeps the row's old "in N out M"; a split one already
    joins its parts with dots, so the output takes one too. *)
-let settle_tokens_text = function
-  | Some (Input_whole i), Some o ->
-      Printf.sprintf "in %s out %s" (Message_layout.compact_count i)
-        (Message_layout.compact_count o)
+let settle_tokens_text ~ko = function
+  | Some (Input_whole _ as input), Some o ->
+      turn_input_text ~ko input ^ " " ^ output_text ~ko o
   | Some (Input_split _ as input), Some o ->
-      turn_input_text input ^ " \xc2\xb7 out " ^ Message_layout.compact_count o
-  | Some input, None -> turn_input_text input
-  | None, Some o -> "out " ^ Message_layout.compact_count o
+      turn_input_text ~ko input ^ " \xc2\xb7 " ^ output_text ~ko o
+  | Some input, None -> turn_input_text ~ko input
+  | None, Some o -> output_text ~ko o
   | None, None -> ""
 
 (* The keeper turn a provider call belongs to, as the keeper's hook reports
@@ -542,7 +554,7 @@ let label_of_event (event : Observer.event) =
   | Observer.Snapshot _ | Observer.Execution_snapshot -> "snapshot"
   | Observer.Other name -> name
 
-let row_of_event ~at ~duration_ms (event : Observer.event) =
+let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   let label = label_of_event event in
   match event with
   | Observer.Agent_core e -> agent_core_row ~at ~duration_ms e
@@ -576,7 +588,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
          ahead of them is always there to hang it off, and the turn is the
          one part that can be missing. *)
       let tokens =
-        settle_tokens_text (turn_input_of_settle t, t.Observer.tc_output_tokens)
+        settle_tokens_text ~ko (turn_input_of_settle t, t.Observer.tc_output_tokens)
       in
       let cost =
         match t.Observer.tc_cost_usd with
@@ -585,7 +597,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       in
       let calls =
         match t.Observer.tc_tool_calls with
-        | Some n -> Printf.sprintf "%d call%s" n (if n = 1 then "" else "s")
+        | Some n -> calls_text ~ko n
         | None -> ""
       in
       { at
@@ -593,7 +605,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; glyph = Turn_done
       ; label
       ; detail =
-          [ turn_detail t.Observer.tc_turn; tokens; cost; calls ]
+          [ turn_detail ~ko t.Observer.tc_turn; tokens; cost; calls ]
           |> List.filter (fun part -> part <> "")
           |> String.concat " \xc2\xb7 "
       }
@@ -605,7 +617,7 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
       ; keeper = o.Observer.to_keeper
       ; glyph = Quiet
       ; label
-      ; detail = turn_detail (keeper_turn_of_observation o)
+      ; detail = turn_detail ~ko (keeper_turn_of_observation o)
       }
   | Observer.Keeper_chat_appended { keeper; connector; _ } ->
       { at
@@ -776,15 +788,15 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
 
 (* The screen draws entries, not bare events. Taking the entry means there is
    no clock argument at the call site to hand in the wrong value. *)
-let row_of_entry ~duration_ms entry =
-  row_of_event ~at:entry.ae_at ~duration_ms entry.ae_event
+let row_of_entry ~ko ~duration_ms entry =
+  row_of_event ~ko ~at:entry.ae_at ~duration_ms entry.ae_event
 
 (* The row the flat scopes draw, under the keeper who acted rather than the
    agent name the feed gave. [measured_of_event] reads the same keeper, so
    the one rule that renames an agent_core lane lives here beside it instead
    of in the renderer. *)
-let keeper_row_of_entry ~traces ~duration_ms entry =
-  { (row_of_entry ~duration_ms entry) with
+let keeper_row_of_entry ~ko ~traces ~duration_ms entry =
+  { (row_of_entry ~ko ~duration_ms entry) with
     keeper = keeper_of_event ~traces entry.ae_event
   }
 
@@ -1074,14 +1086,14 @@ let chunk_tools chunk =
         chunk.ck_wire_tools
   | l -> l
 
-let row_of_chunk chunk =
+let row_of_chunk ~ko chunk =
   let tools = chunk_tools chunk in
   let tools_text = chunk_tools_text tools in
   let tokens =
     match chunk.ck_tokens with
     | None, None -> ""
     | ((Some _, (Some _ | None)) | (None, Some _)) as tokens ->
-        " \xc2\xb7 " ^ settle_tokens_text tokens
+        " \xc2\xb7 " ^ settle_tokens_text ~ko tokens
   in
   let cost =
     match chunk.ck_cost_usd with
@@ -1092,22 +1104,21 @@ let row_of_chunk chunk =
     (* Only when no tool is listed by name: a count next to the list would
        say the same thing twice. *)
     match (tools, chunk.ck_calls) with
-    | [], Some n when n > 0 ->
-        Printf.sprintf "%d call%s" n (if n = 1 then "" else "s")
+    | [], Some n when n > 0 -> calls_text ~ko n
     | _, (Some _ | None) -> ""
   in
   let detail =
     if chunk.ck_settled then
       let body = if tools_text = "" then calls else tools_text in
-      let body = if body = "" then "no calls" else body in
+      let body = if body = "" then (if ko then "호출 없음" else "no calls") else body in
       body ^ tokens ^ cost
-    else if tools_text = "" then "running"
+    else if tools_text = "" then (if ko then "실행 중" else "running")
     else tools_text
   in
   { at = chunk.ck_at
   ; keeper = chunk.ck_keeper
   ; glyph = (if chunk.ck_settled then Turn_done else Call_started)
-  ; label = turn_label chunk.ck_turn
+  ; label = turn_label ~ko chunk.ck_turn
   ; detail
   }
 
@@ -1272,10 +1283,17 @@ let lane_fold_key (event : Observer.event) =
 
 (* The newest occurrence's row, with how many the screen holds in front of
    the detail -- at the end it would be the first thing a long reason cuts. *)
-let folded_lane_row ~count entry =
-  let row = row_of_entry ~duration_ms:None entry in
+let folded_lane_row ~ko ~count entry =
+  let row = row_of_entry ~ko ~duration_ms:None entry in
   if count = 1 then row
   else { row with detail = Printf.sprintf "\xc3\x97%d %s" count row.detail }
+
+(* What the fold leaves outside every chunk, held as what it is until
+   [chunk_rows] chooses its words. [chunks] reads the same fold for the
+   Activity pane and drops these, so the fold itself has no language. *)
+type plain =
+  | Plain_entry of entry
+  | Folded_lane of { count : int; newest : entry }
 
 let fold_chunks ~traces entries =
   let oldest_first = List.rev entries in
@@ -1339,8 +1357,7 @@ let fold_chunks ~traces entries =
               Hashtbl.replace lane_folds key (entry, count)
           | true, None ->
               plains :=
-                (entry.ae_at, keeper_row_of_entry ~traces ~duration_ms:None entry)
-                :: !plains)
+                (entry.ae_at, Plain_entry entry) :: !plains)
       | Some member ->
           let keeper = keeper_of_event ~traces event in
           let session = session_of_member member in
@@ -1363,7 +1380,7 @@ let fold_chunks ~traces entries =
     oldest_first;
   Hashtbl.iter
     (fun _ (entry, count) ->
-      plains := (entry.ae_at, folded_lane_row ~count entry) :: !plains)
+      plains := (entry.ae_at, Folded_lane { count; newest = entry }) :: !plains)
     lane_folds;
   (chunks, !plains)
 
@@ -1395,13 +1412,22 @@ let refresh_projection ~previous ~traces entries =
 
 let projection_chunks projection = projection.projected_chunks
 
-let chunk_rows ~traces entries =
+let chunk_rows ~ko ~traces entries =
   let chunks, plains = fold_chunks ~traces entries in
+  let plains =
+    List.map
+      (fun (at, plain) ->
+        ( at
+        , match plain with
+          | Plain_entry entry -> keeper_row_of_entry ~ko ~traces ~duration_ms:None entry
+          | Folded_lane { count; newest } -> folded_lane_row ~ko ~count newest ))
+      plains
+  in
   let chunk_rows =
     Hashtbl.fold
       (fun _ keeper_chunks acc ->
         List.fold_left
-          (fun acc chunk -> (chunk.ck_at, row_of_chunk chunk) :: acc)
+          (fun acc chunk -> (chunk.ck_at, row_of_chunk ~ko chunk) :: acc)
           acc keeper_chunks)
       chunks []
   in
@@ -1523,7 +1549,7 @@ let evidence_fields (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~at:entry.ae_at ~duration_ms:None event in
+  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~ko:false ~at:entry.ae_at ~duration_ms:None event in
       [ some "Source" "observer event"
       ; some "Event" row.label
       ; some "Detail" row.detail

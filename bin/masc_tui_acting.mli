@@ -91,13 +91,13 @@ val label_of_event : Observer.event -> string
     its label here, so a measurement can ask for the word without building
     the detail sentence that would sit beside it. *)
 
-val row_of_entry : duration_ms:float option -> entry -> row
+val row_of_entry : ko:bool -> duration_ms:float option -> entry -> row
 (** The row an entry draws, wearing the entry's arrival clock. Render calls
     this rather than [row_of_event] so there is no clock argument at the call
     site to hand in the wrong value. *)
 
 val keeper_row_of_entry :
-  traces:(string * string) list -> duration_ms:float option -> entry -> row
+  ko:bool -> traces:(string * string) list -> duration_ms:float option -> entry -> row
 (** The row the Actions and Everything scopes draw: {!row_of_entry} under
     {!keeper_of_event} instead of the agent name the feed gave, so an
     agent_core lane row is drawn under the keeper whose trace it carries.
@@ -105,7 +105,7 @@ val keeper_row_of_entry :
     row. *)
 
 val row_of_event :
-  at:float -> duration_ms:float option -> Observer.event -> row
+  ko:bool -> at:float -> duration_ms:float option -> Observer.event -> row
 (** [at] is the row's clock, given by the caller. The screen is a feed: rows
     are held and drawn in the order they arrived, so arrival is the clock that
     matches the order the operator scrolls through. Reading each event's own
@@ -176,13 +176,16 @@ val turn_input_of_settle : Observer.keeper_turn_complete -> turn_input option
 val turn_input_total : turn_input -> int
 (** The whole input again, cache reads included. *)
 
-val fresh_input_text : int -> string
-(** [in 160.4k new] *)
+val fresh_input_text : ko:bool -> int -> string
+(** [in 160.4k new], [새 입력 160.4k] *)
 
-val cached_input_text : int -> string
-(** [3.56M cached] *)
+val cached_input_text : ko:bool -> int -> string
+(** [3.56M cached], [캐시 3.56M] *)
 
-val turn_input_text : turn_input -> string
+val output_text : ko:bool -> int -> string
+(** [out 6.6k], [출력 6.6k] *)
+
+val turn_input_text : ko:bool -> turn_input -> string
 (** [in 160.4k new · 3.56M cached] for a split input, [in 73.9k] for a whole
     one. *)
 
@@ -240,18 +243,18 @@ val projection_chunks : chunk_projection -> chunk list
 val chunk_tools : chunk -> chunk_tool list
 (** The calls a chunk names: the ledger's when it reported, else the wire's. *)
 
-val turn_number_text : int -> string
+val turn_number_text : ko:bool -> int -> string
 (** [turn 41]. *)
 
-val turn_label : int option -> string
+val turn_label : ko:bool -> int option -> string
 (** The event column's name for a turn: [turn 41], or [turn] when no settle
     in the held window numbered it. *)
 
-val turn_detail : int option -> string
+val turn_detail : ko:bool -> int option -> string
 (** The same turn beside the figures: [turn 41], or nothing when no settle in
     the held window numbered it. *)
 
-val chunk_rows : traces:(string * string) list -> entry list -> row list
+val chunk_rows : ko:bool -> traces:(string * string) list -> entry list -> row list
 (** The [Turns] projection: entries (newest first) folded into one row per
     keeper turn, plus the rows that are not turn lifecycle (chat, approvals,
     server events, internal agent runs) unchanged. What [visible Turns] hides

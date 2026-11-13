@@ -938,13 +938,14 @@ let render_acting (state : state) =
       | Masc_tui_observer.Other _ ->
           None
     in
-    Acting.keeper_row_of_entry ~traces ~duration_ms entry
+    Acting.keeper_row_of_entry ~ko:(state.ui_language = Lang_ko) ~traces ~duration_ms entry
   in
   (* [Turns] folds the whole ring into per-turn rows; the flat filters keep
      the page-lazy pairing above. *)
   let chunked =
     match state.acting_filter with
-    | Acting.Turns -> Some (Acting.chunk_rows ~traces state.acting)
+    | Acting.Turns ->
+        Some (Acting.chunk_rows ~ko:(state.ui_language = Lang_ko) ~traces state.acting)
     | Acting.Actions | Acting.Everything -> None
   in
   let shown =

@@ -2481,7 +2481,7 @@ let () =
     test_preflight_refuses_a_lost_answer_whose_proof_is_version_1;
   test_case "the deploy check refuses a lost body refusal whose proof is version 1" `Quick
     test_preflight_refuses_a_lost_body_refusal_whose_proof_is_version_1;
-  test_case "the deploy check passes an open record whose proof is version 1" `Quick
+  test_case "the Librarian check passes an open record whose proof is version 1" `Quick
     test_preflight_passes_an_open_record_whose_proof_is_version_1;
   test_case "the deploy check names a split owner whose source proof is version 1" `Quick
     test_preflight_names_a_split_owner_whose_source_proof_is_version_1;

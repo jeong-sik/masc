@@ -10,7 +10,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { View } from './console'
-import { ProblemNote, Retry, idTail, slowAfterMs } from './notes'
+import { ProblemNote, Retry, idTail, sessionEndedWords, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
 import { integrations as readIntegrations, owned as readOwned } from './wire'
 import type {
@@ -297,7 +297,7 @@ function PanelBody({ view, onRetry }: { readonly view: PanelView; readonly onRet
     case 'reading':
       return html`<p class="hint" role="status">${view.slow ? '구독을 불러오고 있어요…' : ''}</p>`
     case 'leaving':
-      return html`<p class="hint" role="status">세션이 끝났어요. 로그인 화면으로 이동해요…</p>`
+      return html`<p class="hint" role="status">${sessionEndedWords}</p>`
     case 'failed':
       return html`
         <${ProblemNote} key=${view.failure.attempts} title="구독을 불러오지 못했어요" failure=${view.failure} />

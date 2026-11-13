@@ -60,7 +60,27 @@ let owner ~run_dir ~base_path ~port =
            let* account_seen = read (Server_startup_takeover.account_server_announcement ~run_dir ~base_path) in
            (match elsewhere account_seen with
             | Some announced -> Ok (Account_server_elsewhere { pid; port = announced })
-            | None -> Ok (Owner_unannounced { pid })))
+            | None ->
+              (* No announcement names [pid]. The lease was read before the
+                 announcements, so an owner that left meanwhile, or a successor
+                 that took the lease and announced, would be reported as [pid]
+                 announcing nothing. The lease is asked once more, and the
+                 answer names [pid] only while it still holds it. *)
+              (match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+               | Error (Owner_identity_unavailable No_owner) -> Ok Unowned
+               | Error
+                   ( Server_startup_takeover.Owner_lease_rejected _
+                   | Server_startup_takeover.Owner_identity_unavailable
+                       (Owner_changed | Unsupported | Unavailable | Closed)
+                   | Server_startup_takeover.Current_process_owner as error ) -> Error error
+               | Ok again ->
+                 let now = Owner_process_identity.pid again in
+                 Owner_process_identity.close again;
+                 if now = pid then Ok (Owner_unannounced { pid })
+                 else
+                   Error
+                     (Server_startup_takeover.Owner_identity_unavailable
+                        Owner_process_identity.Owner_changed))))
 let owner_without_making (root : Host_config.base_path_lease_root) ~base_path ~port =
   let rejected rejection = Error (Server_startup_takeover.Owner_lease_rejected rejection) in
   match Server_startup_takeover.lease_file_present root ~base_path with
@@ -71,11 +91,13 @@ let owner_without_making (root : Host_config.base_path_lease_root) ~base_path ~p
      | Error rejection -> rejected rejection
      | Ok run_dir -> owner ~run_dir ~base_path ~port)
 type departure =
+  | Announcement_withdrawn of { pid : int }
   | Owner_now of owner
   | Owner_unreadable of Server_startup_takeover.owner_capture_error
 let confirm server =
   match owner ~run_dir:server.run_dir ~base_path:server.base_path ~port:server.port with
   | Ok (Single_user_server_here current) when current.pid = server.pid -> Ok ()
+  | Ok (Owner_unannounced { pid }) when pid = server.pid -> Error (Announcement_withdrawn { pid })
   | Ok (( Single_user_server_here (_ : single_user_server)
         | Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
         | Account_server_here { pid = (_ : int) }
@@ -98,34 +120,45 @@ let owner_sentence ~base_path ~port = function
                     server of a single user; masc restart --port %d replaces the account server."
       base_path pid announced announced
   | Owner_unannounced { pid } ->
-    Printf.sprintf "pid %d holds %s but announces no port. It is still starting, or a MASC older \
-                    than this one started it. Wait until it has started and run the command \
-                    again. If this message does not change, stop it with kill %d and run masc \
-                    start --base-path %s --port %d."
-      pid base_path pid (Filename.quote base_path) port
+    (* The kernel shows a lease owner and no announcement, and not why. Each
+       cause has its own way on, so all four are said. *)
+    Printf.sprintf "pid %d holds %s but announces no port. It may be starting: wait and run the \
+                    command again. It may be shutting down: run the command again once it has \
+                    exited. It may listen on an address that 127.0.0.1 does not reach, which \
+                    its log says when it starts: commands on this host cannot use it until it \
+                    is started with --host 127.0.0.1 or --host 0.0.0.0. Or a MASC that announces \
+                    no port started it: stop it with kill %d and run masc start."
+      pid base_path pid
   | Unowned -> Printf.sprintf "No process holds %s." base_path
 let departure_sentence ~base_path ~port departure =
-  Printf.sprintf "The server of %s changed after this command checked it: %s" base_path
-    (match departure with
-     | Owner_now now -> owner_sentence ~base_path ~port now
-     | Owner_unreadable unread ->
-       Printf.sprintf "its owner could not be read (%s)."
+  let changed what =
+    Printf.sprintf "The server of %s changed after this command checked it: %s" base_path what in
+  match departure with
+  | Announcement_withdrawn { pid } ->
+    Printf.sprintf "The server of %s (pid %d) withdrew its announcement of port %d after this \
+                    command checked it, as a server does when it shuts down."
+      base_path pid port
+  | Owner_now now -> changed (owner_sentence ~base_path ~port now)
+  | Owner_unreadable unread ->
+    changed
+      (Printf.sprintf "its owner could not be read (%s)."
          (Server_startup_takeover.owner_capture_error_to_string unread))
 let compact_health_version body =
   let unique = function
     | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Some fields
-    | _ -> None in
+    | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None in
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error _ -> None
   | json ->
     (match unique json with
      | None -> None
      | Some fields ->
-       (match List.assoc_opt "server" fields, List.assoc_opt "version" fields with
-        | Some (`String "masc"), Some (`String version) when String.trim version <> "" -> Some version
-        | _ -> None))
+       (match List.assoc_opt "version" fields with
+        | Some (`String version) when String.trim version <> "" -> Some version
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
+        | None -> None))
 let departure_error = function
-  | Owner_now (_ : owner) -> Incumbent_changed
+  | Announcement_withdrawn { pid = (_ : int) } | Owner_now (_ : owner) -> Incumbent_changed
   | Owner_unreadable (_ : Server_startup_takeover.owner_capture_error) -> Owner_unavailable
 let confirmed server () = Result.map_error departure_error (confirm server)
 let authorize_initial_with ~confirm ~version ~expected_version ~login =
@@ -230,34 +263,6 @@ let replacement_readiness ~run_dir ~base_path ~port =
       (Server_startup_takeover.Owner_identity_unavailable
          (Owner_changed | Unsupported | Unavailable | Closed))
   | Error (Server_startup_takeover.Current_process_owner) -> Error Owner_unavailable
-type account_server =
-  | Account_server_on_port of { pid : int }
-  | Account_server_on_another_port of { pid : int; port : int }
-  | Owner_announces_nothing
-  | No_owner
-let account_server ~run_dir ~base_path ~port =
-  owner ~run_dir ~base_path ~port
-  |> Result.map (function
-    | Unowned -> No_owner
-    | Account_server_here { pid } -> Account_server_on_port { pid }
-    | Account_server_elsewhere { pid; port } -> Account_server_on_another_port { pid; port }
-    | Single_user_server_here (_ : single_user_server)
-    | Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
-    | Owner_unannounced { pid = (_ : int) } -> Owner_announces_nothing)
-type holder =
-  | Held_by_nobody
-  | Held_without_announcement
-  | Held_by_account_server of { port : int }
-let holder (root : Host_config.base_path_lease_root) ~base_path ~port =
-  owner_without_making root ~base_path ~port
-  |> Result.map (function
-    | Unowned -> Held_by_nobody
-    | Account_server_here { pid = (_ : int) } -> Held_by_account_server { port }
-    | Account_server_elsewhere { pid = (_ : int); port = announced } ->
-      Held_by_account_server { port = announced }
-    | Single_user_server_here (_ : single_user_server)
-    | Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
-    | Owner_unannounced { pid = (_ : int) } -> Held_without_announcement)
 let stop_account_server ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable

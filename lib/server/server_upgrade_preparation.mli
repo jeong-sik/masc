@@ -15,9 +15,12 @@ type single_user_server
 (** The server of a single user that one kernel read named both as the lease
     owner of a BasePath and as the holder of the single-user announcement
     byte of a port ({!Server_startup_takeover.single_user_server_port_holder}).
-    Only {!owner} and {!owner_without_making} make one. Every send of a
-    credential in this module and in the command lines takes one, and calls
-    {!confirm} right before the send. *)
+    Only {!owner} and {!owner_without_making} make one. The sends of a
+    credential in this module, in [Masc_cli_runtime_config_remote] and in
+    [Masc_cli_model_resume] take one and call {!confirm} right before the
+    send. [masc setup] calls {!confirm} in the caller, before the sign-in and
+    before the Keeper boot. Other senders of the bearer, such as
+    [masc keeper up], do not make this read. *)
 
 val single_user_server_pid : single_user_server -> int
 val single_user_server_port : single_user_server -> int
@@ -33,9 +36,13 @@ type owner =
   | Account_server_elsewhere of { pid : int; port : int }
   | Owner_unannounced of { pid : int }
       (** A process holds the lease, and the kernel shows no announcement of
-          it on either file: a server still booting before its bind, a server
-          older than the announcement, or an owner whose whole-file
-          announcement the lock of another process hid. *)
+          it on either file. The kernel does not say which of these it is: a
+          server still booting before its bind, a server that shuts down (it
+          withdraws the announcement when its listener closes, before it
+          lets go of the lease), a server that listens on an address
+          [127.0.0.1] does not reach and so never announces, a server older
+          than the announcement, or an owner whose whole-file announcement
+          the lock of another process hid. *)
   | Unowned  (** Nothing holds the lease. *)
 
 val owner :
@@ -52,7 +59,12 @@ val owner :
     owner from them, and the answer is then [Owner_unannounced]. Nothing is
     signalled. Like {!replacement_readiness}, it makes the private lease
     directory and an empty lease file when they are missing. An [Error] when
-    the lease or an announcement cannot be read. *)
+    the lease or an announcement cannot be read.
+
+    The lease is read before the announcements. Before [Owner_unannounced]
+    is answered the lease is read once more: [Unowned] when the owner left
+    meanwhile, and an [Owner_identity_unavailable Owner_changed] error when
+    another process took the lease, so the pid named still holds it. *)
 
 val owner_without_making :
   Host_config.base_path_lease_root -> base_path:string -> port:int ->
@@ -64,6 +76,10 @@ val owner_without_making :
     file that cannot be read is an [Owner_lease_rejected]. *)
 
 type departure =
+  | Announcement_withdrawn of { pid : int }
+      (** The same process still holds the lease and announces no port any
+          more: the server closed its listener, as it does when it shuts
+          down. *)
   | Owner_now of owner  (** The kernel now names something else. *)
   | Owner_unreadable of Server_startup_takeover.owner_capture_error
 
@@ -74,14 +90,19 @@ val confirm : single_user_server -> (unit, departure) result
 val owner_sentence : base_path:string -> port:int -> owner -> string
 (** What a command tells the operator about each answer of {!owner}, for
     [base_path] asked about on [port]. Each command appends what it did not
-    do. *)
+    do. The sentence for [Owner_unannounced] lists the four causes the kernel
+    does not tell apart, each with what to do. *)
 
 val departure_sentence : base_path:string -> port:int -> departure -> string
+(** What a command tells the operator when {!confirm} refused the server it
+    had been given. *)
 
 val compact_health_version : string -> string option
-(** The [version] of a compact [/health] body: one object with unique keys,
-    ["server"] = ["masc"], and a non-empty string ["version"]. This field
-    stays public without credentials. [None] for any other body. *)
+(** The [version] of a compact [/health] body: one object with unique keys
+    and a non-empty string ["version"]. This field stays public without
+    credentials. Nothing else in the body is read: which process answers is
+    what the kernel said before the port was asked. [None] for any other
+    body. *)
 
 (** {1 The stop of the server of a single user} *)
 
@@ -100,9 +121,12 @@ val authorize_initial :
 val prepare :
   sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t -> headers:(string * string) list ->
   single_user_server -> (t, error) result
-(** In order: capture the lease owner handle and require its pid to be the
-    pid of the server ([Incumbent_changed] otherwise, and the handle is
-    released); {!confirm}; then the first send of [headers],
+(** In order: capture the lease owner handle ([Owner_unavailable] when
+    nothing holds the lease or the owner cannot be read) and require its pid
+    to be the pid of the server ([Incumbent_changed] otherwise, and the
+    handle is released); {!confirm} ([Incumbent_changed] when the kernel
+    names another answer, [Owner_unavailable] when it cannot be read); then
+    the first send of [headers],
     [GET /api/v1/runtime/config/raw] on the announced port within the
     default timeout ([Admin_required] unless it answers 200). The handle is
     released on a refusal, and on the release of [sw]. *)
@@ -153,51 +177,6 @@ val replacement_readiness :
 (** Observe kernel lease release and loopback bind availability after requesting
     graceful termination. Never signals or starts anything; errors are not exit
     proof. Availability is advisory, so replacement startup still owns conflicts. *)
-
-(** What the kernel says of the account server of a workspace, for a command
-    that was asked about one port. *)
-type account_server =
-  | Account_server_on_port of { pid : int }
-      (** The kernel owner of the lease holds the announcement lock of the
-          port ({!Server_startup_takeover.account_server_port_holder}). *)
-  | Account_server_on_another_port of { pid : int; port : int }
-      (** The kernel owner of the lease announces [port], not the one asked
-          about. *)
-  | Owner_announces_nothing
-      (** A process holds the lease and announces no account server port the
-          kernel showed: the server of a single user, an account server that
-          has not announced yet, or one whose announcement the lock of
-          another process hid from a read about another port. *)
-  | No_owner  (** Nothing holds the lease. *)
-
-val account_server :
-  run_dir:string -> base_path:string -> port:int ->
-  (account_server, Server_startup_takeover.owner_capture_error) result
-(** {!owner}, told only as far as the account server goes. [Account_server_on_port]
-    comes from the byte of [port] alone. A lock that a process other than
-    the owner holds on the announcement file is no account server, whichever
-    byte it is on. It signals nothing, and the pid is a number to show:
-    {!stop_account_server} reads the owner again. An [Error] when the lease
-    or the announcement cannot be read.
-
-    The read makes the private lease directory and an empty lease file when
-    they are missing, as {!replacement_readiness} does. A command that must
-    make nothing asks {!holder}. *)
-
-(** Who holds a BasePath, for a command that must make nothing. *)
-type holder =
-  | Held_by_nobody
-      (** No lease file was ever made, or nothing holds the one there. *)
-  | Held_without_announcement  (** {!Owner_announces_nothing}. *)
-  | Held_by_account_server of { port : int }
-      (** The owner announces [port]: the one asked about, or another. *)
-
-val holder :
-  Host_config.base_path_lease_root -> base_path:string -> port:int ->
-  (holder, Server_startup_takeover.owner_capture_error) result
-(** {!owner_without_making}, told only as far as the account server goes.
-    [port] is the port the announcement is first looked for on, as in
-    {!account_server}. *)
 
 val stop_account_server : run_dir:string -> base_path:string -> port:int -> (unit, error) result
 (** Asks the account server of a multi-account installation to stop: the

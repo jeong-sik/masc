@@ -109,8 +109,11 @@ let test_compact_health_version_reads_one_version () =
     Alcotest.(check (option string)) body expected (Upgrade.compact_health_version body))
     [ {|{"server":"masc","version":"1.2.3"}|}, Some "1.2.3";
       {|{"server":"masc","version":"1.2.3","version":"1.2.4"}|}, None;
-      {|{"version":"1.2.3"}|}, None;
-      {|{"server":"other","version":"1.2.3"}|}, None;
+      (* Which process answers is the kernel's to say, so nothing but the
+         version is read: the public probe may drop every other field. *)
+      {|{"version":"1.2.3"}|}, Some "1.2.3";
+      {|{"live":true,"ready":true,"phase":"ready","version":"1.2.3"}|}, Some "1.2.3";
+      {|{"version":123}|}, None;
       {|{"server":"masc","version":""}|}, None;
       {|["masc","1.2.3"]|}, None;
       "not json", None ]
@@ -122,36 +125,53 @@ let rec retrying f =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> retrying f
 (* A child holds the lease of [base_path] and announces [announces] when it is
    a port. It ends by the signal it is sent: [still_runs] says whether one has
-   ended it, and [reap] waits for the end and says which. *)
-let with_owner ?(announce = Server_startup_takeover.announce_account_server) ~run_dir ~base_path
-    ~announces f =
+   ended it, and [reap] waits for the end and says which. [withdraw] has it
+   withdraw the announcement and keep the lease, as a server does once its
+   listener closes, and returns when that is done. *)
+let with_owner_that_withdraws ?(announce = Server_startup_takeover.announce_account_server) ~run_dir
+    ~base_path ~announces f =
   let ready_read, ready_write = Unix.pipe () in
+  let asked_read, asked_write = Unix.pipe () in
   let child = Unix.fork () in
   if child = 0 then (
     Unix.close ready_read;
+    Unix.close asked_write;
     Sys.set_signal Sys.sigterm Sys.Signal_default;
+    let withdrawal = ref ignore in
     let holds =
       match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
       | Server_startup_takeover.Base_path_acquired lease ->
         (match announces with
          | None -> true
          | Some port ->
-           (* Until the lease is released: these cases ask about the lock, not
-              about the listener that would withdraw it. *)
+           (* Until the lease is released or the test asks for the withdrawal:
+              no listener here would withdraw it. *)
            (match
               Server_startup_takeover.loopback_listener
                 ~address:(Ipaddr.V4 Ipaddr.V4.localhost)
                 ~port
             with
             | Ok listener ->
-              Result.is_ok (announce lease listener ~withdraw_with:ignore)
+              Result.is_ok
+                (announce lease listener ~withdraw_with:(fun withdraw -> withdrawal := withdraw))
             | Error (_ : Server_startup_takeover.loopback_unreached) -> false))
       | Server_startup_takeover.Base_path_already_owned _
       | Server_startup_takeover.Base_path_rejected _ -> false in
     ignore (Unix.write_substring ready_write (if holds then "r" else "x") 0 1);
+    (* One byte asks for the withdrawal, and one byte answers it. *)
+    let asked = Bytes.create 1 in
+    (match retrying (fun () -> Unix.read asked_read asked 0 1) with
+     | 1 -> !withdrawal (); ignore (Unix.write_substring ready_write "w" 0 1)
+     | (_ : int) -> ());
     Unix.close ready_write;
     while true do Unix.pause () done);
   Unix.close ready_write;
+  Unix.close asked_read;
+  let withdraw () =
+    ignore (Unix.write_substring asked_write "w" 0 1);
+    let answered = Bytes.create 1 in
+    ignore (retrying (fun () -> Unix.read ready_read answered 0 1));
+    Alcotest.(check string) "the owner withdrew its announcement" "w" (Bytes.to_string answered) in
   let status = ref None in
   let reap () = match !status with
     | Some ended -> ended
@@ -167,6 +187,7 @@ let with_owner ?(announce = Server_startup_takeover.announce_account_server) ~ru
   Fun.protect
     ~finally:(fun () ->
       Unix.close ready_read;
+      Unix.close asked_write;
       if Option.is_none !status then (
         (try Unix.kill child Sys.sigkill with Unix.Unix_error _ -> ());
         ignore (reap ())))
@@ -174,7 +195,10 @@ let with_owner ?(announce = Server_startup_takeover.announce_account_server) ~ru
       let ready = Bytes.create 1 in
       ignore (retrying (fun () -> Unix.read ready_read ready 0 1));
       Alcotest.(check string) "the owner holds the workspace" "r" (Bytes.to_string ready);
-      f ~still_runs ~reap)
+      f ~still_runs ~reap ~withdraw)
+let with_owner ?announce ~run_dir ~base_path ~announces f =
+  with_owner_that_withdraws ?announce ~run_dir ~base_path ~announces
+    (fun ~still_runs ~reap ~withdraw:(_ : unit -> unit) -> f ~still_runs ~reap)
 let test_account_server_stop_needs_its_announced_port () =
   let root = Filename.temp_file "masc-upgrade-account-" "" in
   Sys.remove root; Unix.mkdir root 0o700;
@@ -233,16 +257,18 @@ let with_byte_locker ?(suffix = ".account-server") ~run_dir ~base_path ~byte f =
       ignore (retrying (fun () -> Unix.read ready_read ready 0 1));
       Alcotest.(check string) "the other process locked its byte" "r" (Bytes.to_string ready);
       f child)
-let sighting_label = function
-  | Ok Server_upgrade_preparation.No_owner -> "nobody holds the workspace"
-  | Ok Owner_announces_nothing -> "the owner announces nothing"
-  | Ok (Account_server_on_port { pid }) -> Printf.sprintf "pid %d announces the port" pid
-  | Ok (Account_server_on_another_port { pid; port }) ->
-    Printf.sprintf "pid %d announces port %d" pid port
-  | Error (Server_startup_takeover.Owner_lease_rejected rejection) ->
-    "rejected: " ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection
-  | Error (Owner_identity_unavailable _) -> "the owner could not be read"
-  | Error Current_process_owner -> "this process holds the lease"
+let owner_label = function
+  | Ok (Upgrade.Single_user_server_here server) ->
+    Printf.sprintf "pid %d serves port %d" (Upgrade.single_user_server_pid server)
+      (Upgrade.single_user_server_port server)
+  | Ok (Single_user_server_elsewhere { pid; port }) ->
+    Printf.sprintf "pid %d serves port %d elsewhere" pid port
+  | Ok (Account_server_here { pid }) -> Printf.sprintf "account server pid %d serves the port" pid
+  | Ok (Account_server_elsewhere { pid; port }) ->
+    Printf.sprintf "account server pid %d serves port %d elsewhere" pid port
+  | Ok (Owner_unannounced { pid }) -> Printf.sprintf "pid %d announces nothing" pid
+  | Ok Unowned -> "nobody holds the workspace"
+  | Error unread -> "unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
 (* The lock of a process that does not hold the lease is no account server,
    on the byte of the port or on another one. The stop goes to the owner of
    the lease only when the owner itself holds the byte of the port. *)
@@ -254,17 +280,17 @@ let test_a_lock_without_the_lease_is_no_account_server () =
     Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
     let port = 9000 in
     let stop port = Server_upgrade_preparation.stop_account_server ~run_dir ~base_path ~port in
-    let check_sighting message expected ~port =
-      Alcotest.(check string) message (sighting_label (Ok expected))
-        (sighting_label (Server_upgrade_preparation.account_server ~run_dir ~base_path ~port)) in
-    check_sighting "a workspace nobody holds" No_owner ~port;
+    let owner port = Upgrade.owner ~run_dir ~base_path ~port in
+    Alcotest.(check string) "a workspace nobody holds" (owner_label (Ok Unowned)) (owner_label (owner port));
     with_byte_locker ~run_dir ~base_path ~byte:port (fun (_ : int) ->
-      check_sighting "a lock on the port, and no owner" No_owner ~port;
-      (* The owner of the lease is the server of a single user: it announces
-         nothing, and the byte of the port is another process's. *)
+      Alcotest.(check string) "a lock on the port, and no owner"
+        (owner_label (Ok Unowned)) (owner_label (owner port));
+      (* The owner of the lease announces nothing, and the byte of the port
+         is another process's. *)
       with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
-        check_sighting "a lock on the port, and an owner that announces nothing"
-          Owner_announces_nothing ~port;
+        (match owner port with
+         | Ok (Upgrade.Owner_unannounced { pid = (_ : int) }) -> ()
+         | other -> Alcotest.failf "the lock of another process named the owner: %s" (owner_label other));
         (match stop port with
          | Error Incumbent_changed -> ()
          | _ -> Alcotest.fail "the owner was asked to stop for the lock of another process");
@@ -273,16 +299,17 @@ let test_a_lock_without_the_lease_is_no_account_server () =
        one a read of the whole file may name. *)
     with_byte_locker ~run_dir ~base_path ~byte:(port - 1) (fun (_ : int) ->
       with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap ->
-        let owner =
-          match Server_upgrade_preparation.account_server ~run_dir ~base_path ~port with
-          | Ok (Account_server_on_port { pid }) -> pid
-          | other -> Alcotest.failf "the account server was not seen: %s" (sighting_label other) in
-        (match Server_upgrade_preparation.account_server ~run_dir ~base_path ~port:(port + 1) with
-         | Ok (Account_server_on_another_port { pid; port = announced }) ->
-           Alcotest.(check int) "the owner is named" owner pid;
+        let pid =
+          match owner port with
+          | Ok (Upgrade.Account_server_here { pid }) -> pid
+          | other -> Alcotest.failf "the account server was not seen: %s" (owner_label other) in
+        (match owner (port + 1) with
+         | Ok (Upgrade.Account_server_elsewhere { pid = named; port = announced }) ->
+           Alcotest.(check int) "the owner is named" pid named;
            Alcotest.(check int) "with the port it announces" port announced
-         | Ok Owner_announces_nothing -> ()
-         | other -> Alcotest.failf "another port named a server of its own: %s" (sighting_label other));
+         | Ok (Upgrade.Owner_unannounced { pid = named }) ->
+           Alcotest.(check int) "the owner is named" pid named
+         | other -> Alcotest.failf "another port named a server of its own: %s" (owner_label other));
         (match stop (port - 1) with
          | Error Incumbent_changed -> ()
          | _ -> Alcotest.fail "the owner was asked to stop on the byte of another process");
@@ -291,66 +318,6 @@ let test_a_lock_without_the_lease_is_no_account_server () =
          | Ok () -> ()
          | Error _ -> Alcotest.fail "the owner that announces the port was not asked to stop");
         Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm))))
-(* Asked about a port the owner does not announce, the answer names the one
-   it does. That is all the read of the whole file gives, and with no lock of
-   another process on the file it cannot miss the owner. *)
-let test_another_port_names_the_port_the_owner_announces () =
-  let root = Filename.temp_file "masc-upgrade-account-" "" in
-  Sys.remove root; Unix.mkdir root 0o700;
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
-    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
-    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
-    let port = 9000 in
-    let sighting port = Server_upgrade_preparation.account_server ~run_dir ~base_path ~port in
-    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
-      let owner =
-        match sighting port with
-        | Ok (Account_server_on_port { pid }) -> pid
-        | other -> Alcotest.failf "the account server was not seen: %s" (sighting_label other) in
-      Alcotest.(check string) "asked about another port"
-        (sighting_label (Ok (Account_server_on_another_port { pid = owner; port })))
-        (sighting_label (sighting (port + 1)));
-      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ())))
-let holder_label = function
-  | Ok Server_upgrade_preparation.Held_by_nobody -> "nobody"
-  | Ok Held_without_announcement -> "an owner that announces nothing"
-  | Ok (Held_by_account_server { port }) -> Printf.sprintf "an account server on port %d" port
-  | Error unread -> "unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
-(* A command that only reads asks who holds the workspace. Where no lease was
-   ever made the answer makes none, and an account server is named with the
-   port it announces, whichever port was asked about. *)
-let test_the_holder_is_read_without_making_anything () =
-  let root = Filename.temp_file "masc-upgrade-holder-" "" in
-  Sys.remove root; Unix.mkdir root 0o700;
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
-    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
-    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
-    let port = 9000 in
-    let holder ?(lease_root = Host_config.Lease_dir_override run_dir) port =
-      holder_label (Server_upgrade_preparation.holder lease_root ~base_path ~port) in
-    let check message expected ~port =
-      Alcotest.(check string) message (holder_label (Ok expected)) (holder port) in
-    let entries path = Array.to_list (Sys.readdir path) in
-    check "a workspace nothing started in" Held_by_nobody ~port;
-    Alcotest.(check (list string)) "the read made nothing in the lease root" [] (entries run_dir);
-    Alcotest.(check string) "with the lease root beside the workspace"
-      (holder_label (Ok Held_by_nobody)) (holder ~lease_root:Host_config.Beside_base_path port);
-    Alcotest.(check (list string)) "no lease root was made" [] (entries base_path);
-    with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
-      check "the server of a single user" Held_without_announcement ~port;
-      Alcotest.(check bool) "the read sent it nothing" true (still_runs ()));
-    check "a lease file nothing holds any more" Held_by_nobody ~port;
-    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
-      check "an account server" (Held_by_account_server { port }) ~port;
-      check "asked about another port" (Held_by_account_server { port }) ~port:(port + 1);
-      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ()));
-    (* A lease root that can hold no lease is an answer of its own: that
-       nobody holds the workspace is not known. *)
-    let file = Filename.concat root "file" in
-    Out_channel.with_open_bin file (fun (_ : Out_channel.t) -> ());
-    match Server_upgrade_preparation.holder (Host_config.Lease_dir_override file) ~base_path ~port with
-    | Error (Server_startup_takeover.Owner_lease_rejected _) -> ()
-    | other -> Alcotest.failf "a lease root that is a file was read: %s" (holder_label other))
 let replacement_sighting_label = function
   | Server_upgrade_preparation.Replacement_serves -> "the replacement serves"
   | Another_process_announces { pid } -> Printf.sprintf "pid %d announces the port" pid
@@ -381,18 +348,6 @@ let test_ready_is_the_answer_of_the_replacement () =
     ~asked:1 "the announcement cannot be read";
   row "no ready answer, while the replacement announces"
     Not_ready (Ok (Some child_pid)) ~asked:0 "no ready answer"
-let owner_label = function
-  | Ok (Upgrade.Single_user_server_here server) ->
-    Printf.sprintf "pid %d serves port %d" (Upgrade.single_user_server_pid server)
-      (Upgrade.single_user_server_port server)
-  | Ok (Single_user_server_elsewhere { pid; port }) ->
-    Printf.sprintf "pid %d serves port %d elsewhere" pid port
-  | Ok (Account_server_here { pid }) -> Printf.sprintf "account server pid %d serves the port" pid
-  | Ok (Account_server_elsewhere { pid; port }) ->
-    Printf.sprintf "account server pid %d serves port %d elsewhere" pid port
-  | Ok (Owner_unannounced { pid }) -> Printf.sprintf "pid %d announces nothing" pid
-  | Ok Unowned -> "nobody holds the workspace"
-  | Error unread -> "unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
 let with_workspace prefix f =
   let root = Filename.temp_file prefix "" in
   Sys.remove root; Unix.mkdir root 0o700;
@@ -434,9 +389,11 @@ let test_owner_tells_an_account_server_from_a_single_user_server () =
         (owner_label (Upgrade.owner ~run_dir ~base_path ~port:(port + 1)));
       Alcotest.(check bool) "the reads sent it nothing" true (still_runs ()));
     with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
-      (match Upgrade.account_server ~run_dir ~base_path ~port with
-       | Ok Owner_announces_nothing -> ()
-       | Ok _ | Error _ -> Alcotest.fail "the server of a single user was read as an account server");
+      (match Upgrade.owner ~run_dir ~base_path ~port with
+       | Ok (Upgrade.Single_user_server_here (_ : Upgrade.single_user_server)) -> ()
+       | other ->
+         Alcotest.failf "the server of a single user was not told from an account server: %s"
+           (owner_label other));
       Alcotest.(check bool) "the reads sent it nothing" true (still_runs ())))
 let test_an_owner_that_announces_nothing_is_named_by_pid () =
   with_workspace "masc-upgrade-silent-" (fun ~root:_ ~base_path ~run_dir ->
@@ -468,6 +425,24 @@ let test_owner_without_making_makes_nothing () =
     Alcotest.(check string) "with the lease root beside the workspace" (owner_label (Ok Unowned))
       (read Host_config.Beside_base_path);
     Alcotest.(check (array string)) "no lease root was made" [||] (Sys.readdir base_path);
+    (* Once a lease file is there the owner is read through it, and the kind
+       of server it announces with it. *)
+    let read_made port = Upgrade.owner_without_making (Host_config.Lease_dir_override run_dir) ~base_path ~port in
+    with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
+      (match read_made port with
+       | Ok (Upgrade.Owner_unannounced { pid = (_ : int) }) -> ()
+       | other -> Alcotest.failf "an owner that announces nothing was read as %s" (owner_label other));
+      Alcotest.(check bool) "the read sent it nothing" true (still_runs ()));
+    Alcotest.(check string) "a lease file nothing holds any more" (owner_label (Ok Unowned))
+      (owner_label (read_made port));
+    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      let pid = match read_made port with
+        | Ok (Upgrade.Account_server_here { pid }) -> pid
+        | other -> Alcotest.failf "the account server was not seen: %s" (owner_label other) in
+      Alcotest.(check string) "asked about another port"
+        (owner_label (Ok (Account_server_elsewhere { pid; port })))
+        (owner_label (read_made (port + 1)));
+      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ()));
     let file = Filename.concat root "file" in
     Out_channel.with_open_bin file (fun (_ : Out_channel.t) -> ());
     match Upgrade.owner_without_making (Host_config.Lease_dir_override file) ~base_path ~port with
@@ -475,6 +450,8 @@ let test_owner_without_making_makes_nothing () =
     | other -> Alcotest.failf "a lease root that is a file was read: %s" (owner_label other))
 let departure_label = function
   | Ok () -> "confirmed"
+  | Error (Upgrade.Announcement_withdrawn { pid }) ->
+    Printf.sprintf "pid %d withdrew its announcement" pid
   | Error (Upgrade.Owner_now now) -> "now " ^ owner_label (Ok now)
   | Error (Owner_unreadable unread) -> owner_label (Error unread)
 let test_confirm_follows_the_kernel () =
@@ -521,16 +498,20 @@ let with_recording_listener listening f =
       serve () in
     Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
       Eio.Fiber.first serve (fun () -> f ~sw ~clock:(Eio.Stdenv.clock env) ~seen))))
+(* A socket that listens on a loopback port the system picked. *)
+let with_loopback_port f =
+  let listening = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect ~finally:(fun () -> Unix.close listening) (fun () ->
+    Unix.setsockopt listening Unix.SO_REUSEADDR true;
+    Unix.bind listening (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+    Unix.listen listening 8;
+    match Unix.getsockname listening with
+    | Unix.ADDR_INET (_, port) -> f listening port
+    | Unix.ADDR_UNIX _ -> Alcotest.fail "loopback fixture port")
+let headers = ["authorization", "Bearer fixture-bearer"]
 let test_prepare_sends_the_bearer_only_to_the_announcing_owner () =
   with_workspace "masc-upgrade-bearer-" (fun ~root:_ ~base_path ~run_dir ->
-    let listening = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Fun.protect ~finally:(fun () -> Unix.close listening) (fun () ->
-      Unix.setsockopt listening Unix.SO_REUSEADDR true;
-      Unix.bind listening (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
-      Unix.listen listening 8;
-      let port = match Unix.getsockname listening with
-        | Unix.ADDR_INET (_, port) -> port | Unix.ADDR_UNIX _ -> Alcotest.fail "loopback fixture port" in
-      let headers = ["authorization", "Bearer fixture-bearer"] in
+    with_loopback_port (fun listening port ->
       let gone =
         with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap ->
           let server = here_pid ~run_dir ~base_path ~port in
@@ -539,7 +520,7 @@ let test_prepare_sends_the_bearer_only_to_the_announcing_owner () =
           server) in
       with_recording_listener listening (fun ~sw ~clock ~seen ->
         (match Upgrade.prepare ~sw ~clock ~headers gone with
-         | Error (Incumbent_changed | Owner_unavailable) -> ()
+         | Error Owner_unavailable -> ()
          | Ok _ | Error _ -> Alcotest.fail "a server that is gone was prepared");
         Alcotest.(check int) "nothing was sent to the port" 0 (List.length !seen));
       with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap ->
@@ -555,6 +536,42 @@ let test_prepare_sends_the_bearer_only_to_the_announcing_owner () =
           Alcotest.(check int) "the bearer went again before the stop" 2 (List.length !seen);
           Upgrade.close owner);
         Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm))))
+(* A server that shuts down keeps the lease and withdraws its announcement.
+   The capture of the lease owner still names the same process, so only the
+   kernel check right before each send keeps the bearer, the stop and the
+   sign-in from it. *)
+let test_a_server_that_withdrew_its_announcement_is_sent_nothing_more () =
+  with_workspace "masc-upgrade-withdrawn-" (fun ~root:_ ~base_path ~run_dir ->
+    with_loopback_port (fun listening port ->
+      with_owner_that_withdraws ~announce:single_user ~run_dir ~base_path ~announces:(Some port)
+        (fun ~still_runs ~reap:_ ~withdraw ->
+          let server = here_pid ~run_dir ~base_path ~port in
+          with_recording_listener listening (fun ~sw ~clock ~seen ->
+            let owner = match Upgrade.prepare ~sw ~clock ~headers server with
+              | Ok owner -> owner
+              | Error _ -> Alcotest.fail "the server the kernel names was not prepared" in
+            Alcotest.(check (list (option string))) "the bearer went to the port once"
+              [Some "Bearer fixture-bearer"] !seen;
+            withdraw ();
+            Alcotest.(check string) "the kernel names the same process without a port"
+              (Printf.sprintf "pid %d withdrew its announcement" (Upgrade.single_user_server_pid server))
+              (departure_label (Upgrade.confirm server));
+            (match Upgrade.request_termination owner with
+             | Error Incumbent_changed -> ()
+             | Ok () | Error _ -> Alcotest.fail "a server that withdrew its announcement was asked to stop");
+            (match Upgrade.prepare ~sw ~clock ~headers server with
+             | Error Incumbent_changed -> ()
+             | Ok _ | Error _ -> Alcotest.fail "a server that withdrew its announcement was prepared");
+            (match
+               Upgrade.authorize_initial ~clock server ~expected_version:"0.0.0"
+                 ~login:(fun () -> Alcotest.fail "a server that withdrew its announcement was signed in to")
+             with
+             | Error Incumbent_changed -> ()
+             | Ok () | Error _ -> Alcotest.fail "a server that withdrew its announcement was authorized");
+            Alcotest.(check (list (option string))) "nothing more went to the port"
+              [Some "Bearer fixture-bearer"] !seen;
+            Upgrade.close owner);
+          Alcotest.(check bool) "it was not asked to stop" true (still_runs ()))))
 let () = Alcotest.run "upgrade preparation"
   ["owner checks",[Alcotest.test_case "initial login waits for the kernel and the version" `Quick
       test_initial_login_waits_for_the_kernel_and_the_version;
@@ -580,14 +597,12 @@ let () = Alcotest.run "upgrade preparation"
       test_owner_without_making_makes_nothing;
     Alcotest.test_case "confirm follows the kernel" `Quick test_confirm_follows_the_kernel;
     Alcotest.test_case "prepare sends the bearer only to the announcing owner" `Quick
-      test_prepare_sends_the_bearer_only_to_the_announcing_owner];
+      test_prepare_sends_the_bearer_only_to_the_announcing_owner;
+    Alcotest.test_case "a server that withdrew its announcement is sent nothing more" `Quick
+      test_a_server_that_withdrew_its_announcement_is_sent_nothing_more];
    "account server",[Alcotest.test_case "the stop goes to the owner that announces the port" `Quick
      test_account_server_stop_needs_its_announced_port;
      Alcotest.test_case "a lock without the lease is no account server" `Quick
        test_a_lock_without_the_lease_is_no_account_server;
-     Alcotest.test_case "another port names the port the owner announces" `Quick
-       test_another_port_names_the_port_the_owner_announces;
-     Alcotest.test_case "the holder is read without making anything" `Quick
-       test_the_holder_is_read_without_making_anything;
      Alcotest.test_case "ready is the answer of the replacement" `Quick
        test_ready_is_the_answer_of_the_replacement]]

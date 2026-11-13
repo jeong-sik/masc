@@ -194,26 +194,26 @@ let base_path_lock_rejection_to_string = function
       path
       reason
   | Announcement_port_invalid { port } ->
-    Printf.sprintf "account server announcement refused: %d is not a port" port
+    Printf.sprintf "port announcement refused: %d is not a port" port
   | Announcement_already_made { path; port } ->
     Printf.sprintf
-      "account server announcement refused: this process already announces port %d path=%s"
+      "port announcement refused: this process already announces port %d path=%s"
       port
       path
   | Announcement_lease_not_active { path } ->
     Printf.sprintf
-      "account server announcement refused: the lease handle is not the active process owner \
+      "port announcement refused: the lease handle is not the active process owner \
        path=%s"
       path
   | Announcement_port_locked { path; port; holder = Some holder } ->
     Printf.sprintf
-      "account server announcement refused: the byte of port %d is locked by pid %d path=%s"
+      "port announcement refused: the byte of port %d is locked by pid %d path=%s"
       port
       holder
       path
   | Announcement_port_locked { path; port; holder = None } ->
     Printf.sprintf
-      "account server announcement refused: the byte of port %d is locked by another process \
+      "port announcement refused: the byte of port %d is locked by another process \
        path=%s"
       port
       path
@@ -229,24 +229,44 @@ let base_path_leases : (string, retained_base_path_fd) Hashtbl.t =
   Hashtbl.create 2
 ;;
 
-(* The port an account server serves, told to the host through the lock table
-   of the kernel. The server locks one byte of a file beside its lease: the
-   byte whose position is the port. The file stays empty. Another process
-   asks the kernel with F_GETLK who holds the byte of a port
+(* The port a server serves, told to the host through the lock table of the
+   kernel. The server locks one byte of a file beside its lease: the byte
+   whose position is the port. The file stays empty. Another process asks
+   the kernel with F_GETLK who holds the byte of a port
    ([Owner_process_identity.byte_holder]). The record is the lock, so it is
    gone the moment its holder is, and no number stays on disk to go stale as
-   the one in a lease file does ([Owner_recorded]).
+   the one in a lease file does ([Owner_recorded]). *)
+type announcing_server =
+  | Account_server
+  | Single_user_server
 
-   lease path -> the descriptor that holds the lock, and the port. POSIX
-   record locks belong to the process, and closing any descriptor of the
-   file drops them. So this descriptor is the only one the announcing
-   process has on the file: the reads below find it by the identity of the
-   file and ask through it, and open nothing ([read_announcement]). *)
-let account_server_announcement_path lease_path = lease_path ^ ".account-server"
-
-let account_server_announcements : (string, Unix.file_descr * int) Hashtbl.t =
-  Hashtbl.create 2
+(* Each kind of server announces on a file of its own, so the lock of one
+   kind never answers a reader that asks about the other. *)
+let announcement_path server lease_path =
+  match server with
+  | Account_server -> lease_path ^ ".account-server"
+  | Single_user_server -> lease_path ^ ".single-user-server"
 ;;
+
+(* The announcement this process holds for one lease. POSIX record locks
+   belong to the process, and closing any descriptor of the file drops them.
+   So [fd] is the only descriptor the announcing process has on the file: the
+   reads below find it by the identity of the file and ask through it, and
+   open nothing ([read_announcement]). [id] tells it from a later
+   announcement on the same lease, so a withdrawal that comes late closes
+   nothing it did not make. *)
+type announcement =
+  { server : announcing_server
+  ; fd : Unix.file_descr
+  ; port : int
+  ; id : int
+  }
+
+(* lease path -> the one announcement this process holds for it. A process
+   serves one kind of server for a lease and announces one port, so the key
+   is the lease alone and a second announcement of either kind is refused. *)
+let announcements : (string, announcement) Hashtbl.t = Hashtbl.create 2
+let announcement_ids = Atomic.make 0
 
 (* A close that fails leaves it open whether the descriptor is gone. It is
    said and not tried again: the number may already name another file. *)
@@ -254,7 +274,7 @@ let close_announcement_fd ~path fd =
   try Unix.close fd with
   | Unix.Unix_error (error, syscall, argument) ->
     Log.Server.error
-      "account server announcement close failed: path=%s error=%s syscall=%s argument=%s"
+      "port announcement close failed: path=%s error=%s syscall=%s argument=%s"
       path
       (Unix.error_message error)
       syscall
@@ -407,14 +427,12 @@ let release_base_path_lease lease =
         lease.path
     else (
       (* The announcement goes first: nothing reads a port from a process that
-         has given the workspace up. Closing the descriptor drops the lock. *)
-      (match Hashtbl.find_opt account_server_announcements lease.path with
-       | None -> ()
-       | Some (announcement_fd, (_ : int)) ->
-         Hashtbl.remove account_server_announcements lease.path;
-         close_announcement_fd
-           ~path:(account_server_announcement_path lease.path)
-           announcement_fd);
+         has given the workspace up. Closing a descriptor drops its lock. *)
+      (match Hashtbl.find_opt announcements lease.path with
+       | Some held ->
+         close_announcement_fd ~path:(announcement_path held.server lease.path) held.fd;
+         Hashtbl.remove announcements lease.path
+       | None -> ());
       (try
          let (_ : int) = Unix.lseek lease.fd 0 Unix.SEEK_SET in
          Unix.lockf lease.fd Unix.F_ULOCK 0
@@ -1446,6 +1464,8 @@ type account_server_announcement =
   ; port : int
   }
 
+type single_user_server_announcement = account_server_announcement
+
 let announcement_failed ~operation ~path reason =
   Error (Lease_io_failed { operation; path; reason })
 ;;
@@ -1462,7 +1482,7 @@ let checked_announcement_fd ~path ~seen fd =
   | exception Unix.Unix_error (error, _, _) ->
     reject
       (Lease_io_failed
-         { operation = "fstat_account_server_announcement"
+         { operation = "fstat_port_announcement"
          ; path
          ; reason = Unix.error_message error
          })
@@ -1496,30 +1516,87 @@ let open_announcement_to_lock path =
   | Ok (Lease_path_other kind) -> Error (Lease_file_non_regular { path; kind })
   | Ok (Lease_path_regular seen) ->
     opened
-      ~operation:"open_account_server_announcement"
+      ~operation:"open_port_announcement"
       ~flags:[]
       ~permissions:0
       ~seen:(Some seen)
   | Ok Lease_path_missing ->
     opened
-      ~operation:"create_account_server_announcement"
+      ~operation:"create_port_announcement"
       ~flags:[ Unix.O_CREAT; Unix.O_EXCL ]
       ~permissions:0o600
       ~seen:None
 ;;
 
-let announce_account_server (lease : base_path_lease) ~port =
-  let path = account_server_announcement_path lease.path in
-  let failed = announcement_failed ~operation:"announce_account_server" ~path in
+type loopback_listener = { port : int }
+
+type loopback_unreached =
+  | Port_out_of_range of int
+  | Out_of_loopback_reach of Ipaddr.t
+
+(* HIGH-RISK-UNREVIEWED: decides which listeners are announced, and so which
+   process a command line that dials the loopback origin may send the bearer
+   of the workspace to (#51075). The origin dials
+   [Masc_network_defaults.masc_http_loopback_peer], 127.0.0.1 (the tests pin
+   the two together). A listener bound on 127.0.0.1 holds that address at its
+   port. One bound on 0.0.0.0 holds it too: Linux refuses another bind of the
+   port in IPv4 while the wildcard listens, and the BSD stack of macOS refuses
+   it to a process of another user that is not root. Any other address, IPv6
+   included, leaves 127.0.0.1 at that port to whichever process binds it. *)
+let loopback_listener ~address ~port =
   match Workspace_connection.port port with
-  | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
+  | Error (_ : Workspace_connection.error) -> Error (Port_out_of_range port)
   | Ok (_ : Workspace_connection.port) ->
+    (match address with
+     | Ipaddr.V4 bound
+       when Ipaddr.V4.compare bound Ipaddr.V4.localhost = 0
+            || Ipaddr.V4.compare bound Ipaddr.V4.any = 0 -> Ok { port }
+     | Ipaddr.V4 (_ : Ipaddr.V4.t) | Ipaddr.V6 (_ : Ipaddr.V6.t) ->
+       Error (Out_of_loopback_reach address))
+;;
+
+let loopback_unreached_to_string = function
+  | Port_out_of_range port -> Printf.sprintf "%d is not a port" port
+  | Out_of_loopback_reach address ->
+    Printf.sprintf
+      "the listener is bound on %s, and a command line on this host dials %s"
+      (Ipaddr.to_string address)
+      Masc_network_defaults.masc_http_loopback_peer
+;;
+
+(* Ends the announcement [id] of the lease at [lease_path] and leaves the
+   lease held. Nothing when the lease was released first, which withdrew it. *)
+let withdraw_announcement ~lease_path ~id =
+  Mutex.protect base_path_lease_mu (fun () ->
+    match Hashtbl.find_opt announcements lease_path with
+    | Some held when held.id = id ->
+      close_announcement_fd ~path:(announcement_path held.server lease_path) held.fd;
+      Hashtbl.remove announcements lease_path
+    | Some (_ : announcement) | None -> ())
+;;
+
+(* HIGH-RISK-UNREVIEWED: a command line takes the holder of this lock for the
+   server of the workspace, and decides from it which process gets the
+   bearer of the workspace (#51075). Only the active lease of this process
+   announces here, on the file of [server] and at the byte of the port of a
+   listener that the loopback origin reaches ([loopback_listener]).
+   [withdraw_with] gets the withdrawal once the lock is taken, and the caller
+   ties it to the switch that owns the listening socket: the switch releases
+   in reverse order, so the lock ends while the socket still holds the port.
+   A lock on the wrong file or byte, or one that outlives the listener, would
+   send that bearer to whatever process serves the port. *)
+let announce server (lease : base_path_lease) ({ port } : loopback_listener) ~withdraw_with =
+  let path = announcement_path server lease.path in
+  let failed = announcement_failed ~operation:"announce_port" ~path in
+  let made =
     Mutex.protect base_path_lease_mu (fun () ->
       match Hashtbl.find_opt base_path_leases lease.path with
       | Some (Active_lease current) when current == lease ->
-        (match Hashtbl.find_opt account_server_announcements lease.path with
-         | Some ((_ : Unix.file_descr), announced) ->
-           Error (Announcement_already_made { path; port = announced })
+        (match Hashtbl.find_opt announcements lease.path with
+         | Some held ->
+           Error
+             (Announcement_already_made
+                { path = announcement_path held.server lease.path; port = held.port })
          | None ->
            (* The private directory was validated when the lease was taken.
               The lease path must still name the file this process holds
@@ -1538,8 +1615,9 @@ let announce_account_server (lease : base_path_lease) ~port =
                     Unix.lockf fd Unix.F_TLOCK 1
                   with
                   | () ->
-                    Hashtbl.replace account_server_announcements lease.path (fd, port);
-                    Ok ()
+                    let id = Atomic.fetch_and_add announcement_ids 1 in
+                    Hashtbl.replace announcements lease.path { server; fd; port; id };
+                    Ok id
                   | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
                     (* Another process holds a lock over the byte. This
                        descriptor holds none, so the kernel can be asked
@@ -1557,7 +1635,24 @@ let announce_account_server (lease : base_path_lease) ~port =
                     failed (Unix.error_message error)))))
       | Some (Active_lease _) | Some (Failed_close _) | None ->
         Error (Announcement_lease_not_active { path = lease.path }))
+  in
+  match made with
+  | Error rejection -> Error rejection
+  | Ok id ->
+    (* Outside the lock: [withdraw_with] is the caller's, and the withdrawal
+       takes the lock again. A caller that cannot take the withdrawal leaves
+       nothing announced behind its exception. *)
+    let withdraw () = withdraw_announcement ~lease_path:lease.path ~id in
+    (match withdraw_with withdraw with
+     | () -> Ok ()
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       withdraw ();
+       Printexc.raise_with_backtrace exn backtrace)
 ;;
+
+let announce_account_server = announce Account_server
+let announce_single_user_server = announce Single_user_server
 
 (* How this process may ask the kernel about an announcement file. *)
 type announcement_reader =
@@ -1571,27 +1666,29 @@ type announcement_reader =
 (* The announcement this process holds on the file that [seen] names. The
    table is keyed by the lease path as this process spelled it, and one
    directory has more than one spelling ([base_path_lock_digest_of_stats]):
-   the file is compared, not the string. A read that took another spelling
-   for another file would open a second descriptor on the file this process
-   locks, and its close would drop the announcement. *)
+   the file is compared, not the string, and so is every announcement of
+   this process, of either kind. A read that found none for a file this
+   process locks would open a second descriptor on it, and its close would
+   drop the announcement. *)
 let own_announcement_on seen =
   Hashtbl.fold
-    (fun (_ : string) (fd, port) found ->
+    (fun (_ : string) (held : announcement) found ->
       match found with
       | Some (_ : Unix.file_descr * int) -> found
-      | None -> if same_file_identity seen (Unix.fstat fd) then Some (fd, port) else None)
-    account_server_announcements
+      | None ->
+        if same_file_identity seen (Unix.fstat held.fd) then Some (held.fd, held.port) else None)
+    announcements
     None
 ;;
 
-(* One read of the announcement file of [base_path]. [absent] is the answer
-   when no file is there: a read makes no file. The file is opened with the
-   checks of a lease file. *)
-let read_announcement ~operation ~run_dir ~base_path ~absent read =
+(* One read of the announcement file of [server] for [base_path]. [absent]
+   is the answer when no file is there: a read makes no file. The file is
+   opened with the checks of a lease file. *)
+let read_announcement server ~operation ~run_dir ~base_path ~absent read =
   match prepare_base_path_lock ~run_dir base_path with
   | Error rejection -> Error rejection
   | Ok prepared ->
-    let path = account_server_announcement_path prepared.path in
+    let path = announcement_path server prepared.path in
     let failed = announcement_failed ~operation ~path in
     Mutex.protect base_path_lease_mu (fun () ->
       match observe_lease_path path with
@@ -1613,12 +1710,12 @@ let read_announcement ~operation ~run_dir ~base_path ~absent read =
 
 let kernel_not_asked failed = failed "the kernel could not be asked about the lock"
 
-let account_server_port_holder ~run_dir ~base_path ~port =
-  let operation = "read_account_server_port_holder" in
+let port_holder server ~run_dir ~base_path ~port =
+  let operation = "read_port_holder" in
   match Workspace_connection.port port with
   | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
   | Ok (_ : Workspace_connection.port) ->
-    read_announcement ~operation ~run_dir ~base_path ~absent:None (fun ~failed reader ->
+    read_announcement server ~operation ~run_dir ~base_path ~absent:None (fun ~failed reader ->
       match reader with
       | Announces_here ((_ : Unix.file_descr), announced) when announced = port ->
         (* NDT-OK: the OS process id is the observed holder identity. *)
@@ -1629,9 +1726,13 @@ let account_server_port_holder ~run_dir ~base_path ~port =
          | Error (_ : Owner_process_identity.error) -> kernel_not_asked failed))
 ;;
 
-let account_server_announcement ~run_dir ~base_path =
+let account_server_port_holder = port_holder Account_server
+let single_user_server_port_holder = port_holder Single_user_server
+
+let whole_file_announcement server ~run_dir ~base_path =
   read_announcement
-    ~operation:"read_account_server_announcement"
+    server
+    ~operation:"read_port_announcement"
     ~run_dir
     ~base_path
     ~absent:None
@@ -1644,11 +1745,13 @@ let account_server_announcement ~run_dir ~base_path =
         (match Owner_process_identity.held_byte fd with
          | Ok None -> Ok None
          | Ok (Some { holder; byte }) ->
-           (* No server announces outside the ports
-              ([announce_account_server]), so a lock there is no
-              announcement. *)
+           (* No server announces outside the ports ([announce]), so a lock
+              there is no announcement. *)
            (match Workspace_connection.port byte with
             | Ok (_ : Workspace_connection.port) -> Ok (Some { pid = holder; port = byte })
             | Error (_ : Workspace_connection.error) -> Ok None)
          | Error (_ : Owner_process_identity.error) -> kernel_not_asked failed))
 ;;
+
+let account_server_announcement = whole_file_announcement Account_server
+let single_user_server_announcement = whole_file_announcement Single_user_server

@@ -6306,20 +6306,20 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
                  (read_file primary_log));
             Alcotest.skip ()
           end;
-          let lease_path =
+          let run_dir =
             match
               Server_startup_takeover.lease_run_dir
                 (Host_config.from_env ()).base_path_lease_root
                 ~base_path:canonical_base_path
             with
-            | Ok run_dir ->
-              Server_startup_takeover.For_testing.lease_path
-                ~run_dir:(Unix.realpath run_dir)
-                ~canonical_base_path
+            | Ok run_dir -> Unix.realpath run_dir
             | Error rejection ->
               Alcotest.failf
                 "the primary's lease root cannot be named: %s"
                 (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+          in
+          let lease_path =
+            Server_startup_takeover.For_testing.lease_path ~run_dir ~canonical_base_path
           in
           let secondary_fd = open_log secondary_log in
           let pid =
@@ -6370,7 +6370,123 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             (String_util.contains_substring secondary_text
               (Printf.sprintf "The lease records PID %d;" primary_pid));
           Alcotest.(check bool) "primary server stays healthy" true
-            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
+            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0);
+          (* A command line asks the kernel, not the server, which process
+             serves the workspace (#51075). The primary served /health, so it
+             passed the announcement of its boot. *)
+          let holder = function
+            | Ok holder -> holder
+            | Error rejection ->
+              Alcotest.failf
+                "the announcement cannot be read: %s"
+                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+          in
+          Alcotest.(check (option int)) "the kernel names the primary for its port"
+            (Some primary_pid)
+            (holder
+               (Server_startup_takeover.single_user_server_port_holder
+                  ~run_dir ~base_path:canonical_base_path ~port:primary_port));
+          Alcotest.(check (option int)) "and no account server is announced" None
+            (holder
+               (Server_startup_takeover.account_server_port_holder
+                  ~run_dir ~base_path:canonical_base_path ~port:primary_port))))
+
+(* A byte another process locked first is not announced over (#51075): the
+   boot of the server of a single user stops before it serves, says which
+   process holds the byte, and records no port. Both listener branches
+   announce, so each is booted. A boot that stops for another reason fails
+   here rather than skipping. *)
+let main_eio_stops_when_its_port_cannot_be_announced ~serving_domain () =
+  with_temp_dir "startup-port-not-announced" (fun dir ->
+      let canonical_base_path = Unix.realpath dir in
+      let exe = Masc_test_runtime.find_main_eio_exe () in
+      let port = find_free_port () in
+      let log_file = Filename.concat dir "server.log" in
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      with_cwd (project_root ()) @@ fun () ->
+      Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
+      let run_dir =
+        match
+          Server_startup_takeover.lease_run_dir
+            (Host_config.from_env ()).base_path_lease_root
+            ~base_path:canonical_base_path
+        with
+        | Ok run_dir -> Unix.realpath run_dir
+        | Error rejection ->
+          Alcotest.failf "the lease root cannot be named: %s"
+            (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+      in
+      (* Taking and giving up the lease makes the private lease directory, as
+         a boot does. *)
+      (match Server_startup_takeover.acquire_base_path_lock ~run_dir canonical_base_path with
+       | Server_startup_takeover.Base_path_acquired lease ->
+         Server_startup_takeover.release_base_path_lease lease
+       | Server_startup_takeover.Base_path_already_owned _
+       | Server_startup_takeover.Base_path_rejected _ ->
+         Alcotest.fail "the lease directory was not made");
+      let announcement =
+        Server_startup_takeover.For_testing.lease_path ~run_dir ~canonical_base_path
+        ^ ".single-user-server"
+      in
+      (* This process takes the byte of the port, as any process of the user
+         can. *)
+      let locker = Unix.openfile announcement [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600 in
+      Fun.protect
+        ~finally:(fun () -> Unix.close locker)
+        (fun () ->
+          ignore (Unix.lseek locker port Unix.SEEK_SET : int);
+          Unix.lockf locker Unix.F_TLOCK 1;
+          let env =
+            main_eio_env_overrides
+              [
+                ("MASC_BASE_PATH", dir);
+                ("MASC_KEEPER_AUTONOMOUS_ENABLED", "false");
+                ("MASC_USE_H2", "0");
+                ("MASC_SERVING_DOMAIN_ENABLED", if serving_domain then "true" else "false");
+                ("DUNE_SOURCEROOT", project_root ());
+              ]
+          in
+          let log_fd =
+            Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
+          in
+          let pid =
+            Unix.create_process_env exe
+              [| exe; "--host"; "127.0.0.1"; "--port"; string_of_int port; "--base-path"; dir |]
+              env Unix.stdin log_fd log_fd
+          in
+          Unix.close log_fd;
+          let deadline = Unix.gettimeofday () +. 60.0 in
+          let rec wait_for_exit () =
+            match Unix.waitpid [ Unix.WNOHANG ] pid with
+            | 0, _ ->
+              if Unix.gettimeofday () >= deadline
+              then (
+                stop_process pid;
+                Alcotest.failf "the server went on booting with its port held\nlog:\n%s"
+                  (read_file log_file));
+              Unix.sleepf 0.1;
+              wait_for_exit ()
+            | _, status -> status
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_for_exit ()
+          in
+          let status = wait_for_exit () in
+          let log = read_file log_file in
+          Alcotest.(check bool) "the boot stops with a nonzero exit" true
+            (match status with
+             | Unix.WEXITED code -> code <> 0
+             | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false);
+          if not
+               (String_util.contains_substring log
+                  (Printf.sprintf
+                     "the HTTP port of this server is not announced to the host: port \
+                      announcement refused: the byte of port %d is locked by pid %d"
+                     port (Unix.getpid ())))
+          then Alcotest.failf "the boot did not stop on the held byte\nlog:\n%s" log;
+          Alcotest.(check bool) "no port is recorded" true
+            (match Workspace_connection.read ~base_path:dir with
+             | Ok None -> true
+             | Ok (Some (_ : Workspace_connection.port)) | Error (_ : Workspace_connection.error) ->
+               false)))
 
 let require_startup_ready ~pid ~port ~log_file =
   if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then
@@ -7393,6 +7509,12 @@ let () =
           Alcotest.test_case
             "main_eio rejects second server on same base path"
             `Slow test_main_eio_rejects_same_base_path_on_second_server;
+          Alcotest.test_case
+            "main_eio stops when its port cannot be announced"
+            `Slow (main_eio_stops_when_its_port_cannot_be_announced ~serving_domain:false);
+          Alcotest.test_case
+            "main_eio stops when its port cannot be announced, serving domain"
+            `Slow (main_eio_stops_when_its_port_cannot_be_announced ~serving_domain:true);
           Alcotest.test_case
             "main_eio partial catalog excludes uncatalogued optional runtime"
             `Slow

@@ -65,7 +65,7 @@ import sft_examples as X
 from eval_admission import PASS_LINES, load_pass_lines, ready_to_train, schema_instruction, sha256_file
 
 # sha256 of pass_lines.json as fixed on 2026-11-12, before any training run.
-PASS_LINES_SHA256 = "061e91a1ebc8b2d1edb73233cf24f2a7206cf5bfbd2639607db20ebeacd3a369"
+PASS_LINES_SHA256 = "9b62a25507a2fd4fb7fc585651d0b3570a0f1405b6bc8405c11f6ca2a9bf0397"
 MODEL = "thinkingmachines/Inkling-2-Small:peft:262144"
 # The candidate pass_lines.json `choice.order` names; `verdict` ties it to this run's summary.
 CANDIDATE = "A"

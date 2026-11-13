@@ -369,13 +369,17 @@ let with_field name value = function
     fail ("expected a JSON object with the field " ^ name)
 let scope_directory fixture scope=Filename.concat (Store.root fixture.store)
   (Filename.concat Store.tool_request_owners_directory (Store.digest scope))
-(* The one refusal of the scan: an original whose consumer stops on the Exact
-   files it reads. *)
-let exact_refusal (report:Lane_addon_store_preflight.report)=match report.refusals with
+(* The one refusal of a record kept in [scope]: an original whose consumer
+   stops on the Exact files it reads. A gate follows its parent, so the scan
+   also refuses the gate, in the gate's scope. *)
+let exact_refusal fixture scope (report:Lane_addon_store_preflight.report)=
+  match List.filter (fun (refusal:Lane_addon_store_preflight.refusal) ->
+      String.equal (Filename.dirname refusal.path) (scope_directory fixture scope)) report.refusals with
   | [{Lane_addon_store_preflight.decoder=Tool_request_exact_reads;_} as refusal] -> refusal
-  | [] | _::_ -> fail "expected one refusal, of an original on the Exact files it reads"
+  | [] | _::_ -> fail "expected one refusal in the scope, of an original on the Exact files it reads"
 let refuses_owner fixture owner report=
-  List.mem (scope_directory fixture (Capture.scope owner)) (exact_refusal report).delete
+  let scope=Capture.scope owner in
+  List.mem (scope_directory fixture scope) (exact_refusal fixture scope report).delete
 let test_closure_projection_preserves_each_partial_move ()=with_fixture (fun ~sw:_ fixture ->
   drive_until fixture settled |> assert_settled;
   let owner,manifest=closure_manifest fixture in
@@ -1913,15 +1917,18 @@ let test_preflight_refuses_a_finished_original_without_its_exact_record ()=with_
      the original's consumer finds no record. *)
   io (fun () -> write record_path (Yojson.Safe.to_string
     (with_field "request_id" (`String "another-request") (Yojson.Safe.from_string record))));
-  let refusal=exact_refusal (closure_preflight fixture) in
+  let report=closure_preflight fixture in
+  let refusal=exact_refusal fixture (Capture.scope owner) report in
   check bool "the refusal deletes the original's own scope" true (deletes (Capture.scope owner) refusal);
   check bool "and the forest scope of its owner" true (deletes (Parts.scope owner) refusal);
   check bool "and the proof link no record is left to name" true (List.mem proof_path refusal.delete);
   check bool "the record is the Exact check's to delete" false (List.mem record_path refusal.delete);
+  check (list string) "the gate follows its parent and deletes the same files" refusal.delete
+    (exact_refusal fixture (Gate.scope owner) report).delete;
   io (fun () -> Sys.remove record_path;Sys.remove proof_path);
   let _,manifest=closure_manifest fixture in
   check bool "a Captured closure reads its member, so the refusal deletes the closure scope too" true
-    (deletes (Closure.scope owner) (exact_refusal (closure_preflight fixture)));
+    (deletes (Closure.scope owner) (exact_refusal fixture (Capture.scope owner) (closure_preflight fixture)));
   ignore (memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)));
   check int "a Closing closure settles its member without reading Exact files" 0
     (List.length (closure_preflight fixture).refusals))
@@ -1957,7 +1964,7 @@ let test_preflight_reads_a_dispatch_pending_original_as_resume_does ()=with_fixt
   refuses "another request's record under the original's ID";
   io (fun () -> Sys.remove record_path);
   check bool "a proof link left without its record is deleted with the owner's scopes" true
-    (List.mem proof_path (exact_refusal (closure_preflight fixture)).delete);
+    (List.mem proof_path (exact_refusal fixture (Capture.scope owner) (closure_preflight fixture)).delete);
   io (fun () -> Sys.remove proof_path);
   passes "with neither file resume asks the worker";
   let proof_json=Yojson.Safe.from_string proof in

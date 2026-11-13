@@ -460,6 +460,17 @@ let directory root (conversation : conversation) =
   Filename.concat root (Conversation_id.to_string conversation.conversation_id)
 ;;
 
+(* A link or a file in the place of the directory counts: a deletion removes
+   it too. *)
+let has_directory root conversation_id =
+  let path = Filename.concat root (Conversation_id.to_string conversation_id) in
+  match Unix.lstat path with
+  | (_ : Unix.stats) -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, call, (_ : string)) ->
+    Error (Printf.sprintf "%s: %s: %s" path call (Unix.error_message error))
+;;
+
 (* A person with no index has no conversation, and reading makes none. *)
 let find root conversation_id =
   let index = Filename.concat root index_name in

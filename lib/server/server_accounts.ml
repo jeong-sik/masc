@@ -52,11 +52,13 @@ let refusal_to_string = function
    workspace: the answer goes to anyone who reaches the listener.
    [Build_identity.to_yojson] is not part of it, because it carries the path
    of the executable and of its checkout, the commit, and when the process
-   started. *)
-let health_server_field = "server"
-let health_version_field = "version"
+   started. The server name and the two shared field names are those of
+   [Server_health_public]; the mode is this server's own key, which the
+   single-user public probe never carries. *)
+let health_server_field = Server_health_public.server_field
+let health_version_field = Server_health_public.version_field
 let health_account_mode_field = "account_mode"
-let health_server_name = "masc"
+let health_server_name = Server_health_public.server_name
 let health_account_mode = Masc_domain.account_mode_label Masc_domain.Multi_account
 
 let health (_ : Httpun.Request.t) reqd =

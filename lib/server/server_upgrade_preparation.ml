@@ -178,7 +178,7 @@ let compact_health_version body =
     (match unique json with
      | None -> None
      | Some fields ->
-       (match List.assoc_opt "version" fields with
+       (match List.assoc_opt Server_health_public.version_field fields with
         | Some (`String version) when String.trim version <> "" -> Some version
         | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
         | None -> None))

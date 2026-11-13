@@ -65,22 +65,25 @@ let store_of ~base_path = Lane_addon_store.create
 let load_attempt ~store =
   O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id |> owner
 
-(* Retains the original under [base_path] and records its dispatch intent. *)
-let retain_original ~base_path =
+(* Retains the original under [base_path] and records its dispatch intent.
+   [edit] stands for the build that prepared the original. *)
+let retain_edited_original ~edit ~base_path =
   (* Original retention requires an existing owned parent as its authority
      anchor; the store creates only its own descendants. *)
   Unix.mkdir (Common.masc_dir_from_base_path ~base_path) 0o700;
   let store = store_of ~base_path in
-  let original = make_original () in
+  let original = edit (make_original ()) in
   O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id original |> retained;
   let current = ref (load_attempt ~store) in
   current := O.advance ~store !current P.Dispatch_intended |> owner;
   store,original,current
 
-let with_fixture f = with_runtime (fun env sw ->
+let retain_original ~base_path = retain_edited_original ~edit:Fun.id ~base_path
+
+let with_fixture ?(edit=Fun.id) f = with_runtime (fun env sw ->
   let base_path = Filename.temp_dir "verifier-journal-" "" in
   Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
-  let store,original,current = retain_original ~base_path in
+  let store,original,current = retain_edited_original ~edit ~base_path in
   f env sw base_path store original current)
 
 let reply calls =
@@ -656,6 +659,68 @@ let test_earlier_open_call_prevents_later_verdict_recovery () = with_fixture (fu
          Alcotest.fail "later verdict bypassed the original still-open call");
       release_original ();Eio.Promise.await finished)))
 
+(* A report answers the answer format its original asked for. An original
+   prepared by a build whose format differed reads no report its run left. *)
+let earlier_format = "Answer with the report format of an earlier build."
+let with_earlier_format original =
+  match V.to_json original with
+  | `Assoc fields -> V.of_json (`Assoc (List.map (fun (key,value) ->
+      if String.equal key "output_contract" then key,`String earlier_format else key,value) fields)) |> get
+  | _ -> Alcotest.fail "original fixture is not an object"
+
+let test_report_under_an_earlier_answer_format_is_not_read () =
+  with_fixture ~edit:with_earlier_format (fun env sw base_path store original current ->
+  Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+    let _,handlers = run_native ~cancel_at:After_report_settles env sw ~base_path ~store ~original ~current
+      [tool_call "settled-report" valid] in
+    Alcotest.(check int) "the reviewer settled its report" 1 handlers);
+  (match X.observe ~base_path ~original (O.progress !current) |> get with
+   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[]} ->
+     Alcotest.(check string) "the ended execution is named by its runtime" model_id runtime_id
+   | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
+     Alcotest.fail "a report under an earlier answer format was read");
+  check_retryable "the refusal names the runtime that ran" [model_id] (reread ~base_path ~store);
+  Alcotest.(check int) "the owner walk opens the next attempt" 1 (next_attempt ~store);
+  let next = O.load_for_destination ~store ~verification_id ~attempt:1 ~installation_id ~package_id |> owner in
+  Alcotest.(check string) "the next attempt asks for the current answer format"
+    (V.canonical_output_contract ()) (V.output_contract next))
+
+let test_open_call_under_an_earlier_answer_format_is_awaited () =
+  with_fixture ~edit:with_earlier_format (fun env sw base_path store original current ->
+  Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+    let ready,signal=Eio.Promise.create () in
+    let release,unblock=Eio.Promise.create () in
+    let finished,complete=Eio.Promise.create () in
+    let released=ref false in
+    let release_call () = if not !released then (released:=true;Eio.Promise.resolve unblock ()) in
+    Eio.Fiber.fork ~sw (fun () ->
+      ignore (run_native ~after_scope_ready:(fun () ->
+        Eio.Promise.resolve signal ();Eio.Promise.await release)
+        env sw ~base_path ~store ~original ~current [tool_call "open-report" valid]);
+      Eio.Promise.resolve complete ());
+    Fun.protect ~finally:release_call (fun () ->
+      Eio.Promise.await ready;
+      (match X.observe ~base_path ~original (O.progress !current) |> get with
+       | Awaiting -> ()
+       | Repair_required _ | No_verdict _ | Verdict _ ->
+         Alcotest.fail "an open call under an earlier answer format was not awaited");
+      release_call ();Eio.Promise.await finished)))
+
+let test_repair_under_an_earlier_answer_format_stays_a_repair () =
+  with_fixture ~edit:with_earlier_format (fun _ _ base_path _ original current ->
+    match X.observe ~base_path ~original (O.progress !current) |> get with
+    | Repair_required _ -> ()
+    | Awaiting | No_verdict _ | Verdict _ ->
+      Alcotest.fail "a missing locator under an earlier answer format became recoverable");
+  with_fixture ~edit:with_earlier_format (fun env sw base_path store original current ->
+    Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
+      ignore (run_native ~cancel_at:While_report_runs env sw ~base_path ~store ~original ~current
+        [tool_call "cancelled-report" valid]));
+    match X.observe ~base_path ~original (O.progress !current) |> get with
+    | Repair_required _ -> ()
+    | Awaiting | No_verdict _ | Verdict _ ->
+      Alcotest.fail "an unsettled report under an earlier answer format authorized a retry")
+
 let () =
   let prompts=Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts;Prompt_registry.load_prompts_from_directory prompts;
@@ -701,4 +766,7 @@ let () =
     Alcotest.test_case "unreadable execution refusal is an error" `Quick test_unreadable_execution_refusal_is_an_error;
     Alcotest.test_case "unknown and malformed execution bindings are refused" `Quick test_reference_bindings_are_strict;
     Alcotest.test_case "pending original cannot change physical workspace" `Quick test_pending_cannot_change_its_physical_workspace;
-    Alcotest.test_case "earlier open call cannot be hidden by a later verdict" `Quick test_earlier_open_call_prevents_later_verdict_recovery]]
+    Alcotest.test_case "earlier open call cannot be hidden by a later verdict" `Quick test_earlier_open_call_prevents_later_verdict_recovery;
+    Alcotest.test_case "a report under an earlier answer format is not read" `Quick test_report_under_an_earlier_answer_format_is_not_read;
+    Alcotest.test_case "an open call under an earlier answer format is awaited" `Quick test_open_call_under_an_earlier_answer_format_is_awaited;
+    Alcotest.test_case "a repair under an earlier answer format stays a repair" `Quick test_repair_under_an_earlier_answer_format_stays_a_repair]]

@@ -16,9 +16,11 @@ type observation =
       { first : string * Verifier_review_ending.t
       ; later : (string * Verifier_review_ending.t) list
       }
-      (** Every recorded execution has ended with its effects settled, and
-          none settled a report invocation; a report that was requested and
-          never started may remain. Each execution's runtime and ending, in
+      (** Every recorded execution has ended with its effects settled, and no
+          report is read: none settled a report invocation, or the original
+          asked for an answer format that is no longer the review protocol. A
+          report that was requested and never started may remain. Each
+          execution's runtime and ending, in
           the order the executions were recorded: there is at least one.
           Whether the original is reviewed again is the caller's reading of
           what the walk left; this module only establishes that no verdict
@@ -44,4 +46,9 @@ val observe : base_path:string -> original:Verifier_review_original.t ->
     them authorizes execution.
     A live or contended writer without a terminal remains [Awaiting]. Confirmed
     writer loss without a canonical terminal is an ending like the others: its
-    tree is read as the lost writer last committed it. *)
+    tree is read as the lost writer last committed it.
+    A report answers the answer format its original asked for. When that
+    format is no longer the review protocol, ended executions are [No_verdict]
+    whatever reports they settled, and their report history is not read. A
+    live writer still makes the attempt [Awaiting], and an execution that
+    needs repair or a missing locator still makes it [Repair_required]. *)

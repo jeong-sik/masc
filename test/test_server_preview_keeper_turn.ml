@@ -381,7 +381,7 @@ let keeper zone (who : someone) name ?(policy = "policy-" ^ name) ?runtime () =
 (* The answer of a turn of a conversation that the client ended without an
    answer. It names the way on and no cause. *)
 let no_answer_in_conversation =
-  {|{"error":"The client ended the turn without an answer. When the turns of this conversation keep failing, start a new conversation."}|}
+  {|{"error":"The client ended the turn without an answer. When the turns of this conversation keep failing, start a new conversation.","code":"no_answer"}|}
 ;;
 
 let body ~keeper ~message =
@@ -768,19 +768,19 @@ let test_turn () =
         Sys.remove (claude ^ ".turn.json");
         check_reply
           "another person's Keeper"
-          (404, {|{"error":"No Keeper of yours has this name."}|})
+          (404, {|{"error":"No Keeper of yours has this name.","code":"unknown_keeper"}|})
           (reply alice (body ~keeper:"keeper-bob" ~message:"hello"));
         check_reply
           "her Keeper with no Runtime"
-          (409, {|{"error":"The Keeper has no Runtime. Give it one of yours first."}|})
+          (409, {|{"error":"The Keeper has no Runtime. Give it one of yours first.","code":"keeper_has_no_runtime"}|})
           (reply alice (body ~keeper:"keeper-alice-idle" ~message:"hello"));
         check_reply
           "a blank message"
-          (400, {|{"error":"The message is blank."}|})
+          (400, {|{"error":"The message is blank.","code":"message_blank"}|})
           (reply alice (body ~keeper:"keeper-alice" ~message:" \n"));
         check_reply
           "a message over the limit"
-          (400, {|{"error":"The message is longer than 4096 bytes."}|})
+          (400, {|{"error":"The message is longer than 4096 bytes.","code":"message_too_long"}|})
           (reply
              alice
              (body ~keeper:"keeper-alice" ~message:(String.make (Server_preview_keeper_turn.max_message_bytes + 1) 'a')));
@@ -828,7 +828,7 @@ let test_turn () =
         in
         check_reply
           "a turn while another runs on the account"
-          (409, {|{"error":"A call of the account of this Keeper's Runtime is running."}|})
+          (409, {|{"error":"A call of the account of this Keeper's Runtime is running. Try again when it ends.","code":"account_call_running"}|})
           busy;
         Alcotest.(check int) "the first turn answers" 200 (fst held);
         Alcotest.(check string) "the first turn's message" "first" (text_of (seen claude) "prompt");
@@ -901,7 +901,7 @@ let test_turn () =
         check_reply
           "a conversation that began on another subscription"
           ( 409
-          , {|{"error":"The conversation of this Keeper began on another subscription of yours. Start a new conversation."}|}
+          , {|{"error":"The conversation of this Keeper began on another subscription of yours. Start a new conversation.","code":"conversation_on_other_subscription"}|}
           )
           (reply alice (body ~keeper:"keeper-alice-idle" ~message:"hello"));
         Alcotest.(check bool)
@@ -966,7 +966,7 @@ let test_turn () =
         Unix.chmod alice_conversation 0o755;
         check_reply
           "a turn of a conversation whose directory is not private"
-          (503, {|{"error":"The record of this conversation could not be read or written."}|})
+          (503, {|{"error":"The record of this conversation could not be read or written.","code":"conversation_record_unavailable"}|})
           (reply alice (body ~keeper:"keeper-alice" ~message:"open"));
         Alcotest.(check bool)
           "starts no client"
@@ -1122,7 +1122,7 @@ let test_turn () =
            conversation, and he reads his own. *)
         check_reply
           "her conversation is not one of his Keeper"
-          (404, {|{"error":"No conversation of this Keeper has this id."}|})
+          (404, {|{"error":"No conversation of this Keeper has this id.","code":"unknown_conversation"}|})
           (read bob [ "keeper_id", "keeper-alice"; "conversation_id", conversation ]);
         Alcotest.(check (list (pair string string)))
           "his Keeper of her Keeper's name has no turn yet"
@@ -1130,7 +1130,7 @@ let test_turn () =
           (shown (read_fields "his Keeper" (read bob [ "keeper_id", "keeper-alice" ])));
         check_reply
           "the conversation of another person's Keeper"
-          (404, {|{"error":"No Keeper of yours has this name."}|})
+          (404, {|{"error":"No Keeper of yours has this name.","code":"unknown_keeper"}|})
           (read alice [ "keeper_id", "keeper-bob" ]);
         List.iter
           (fun (label, query) -> Alcotest.(check int) label 400 (fst (read alice query)))
@@ -1154,7 +1154,9 @@ let test_turn () =
           (fun out -> output_string out half);
         check_reply
           "the read of a record with a half written row"
-          (503, {|{"error":"The record of this conversation could not be read or written."}|})
+          ( 503
+          , {|{"error":"A stopped server left the last row of the conversation record half written. A new conversation of the Keeper cuts the row, and so does its next turn on a Claude Code Runtime.","code":"conversation_row_half_written"}|}
+          )
           (read alice [ "keeper_id", "keeper-alice" ]);
         Alcotest.(check string)
           "the read leaves the row as it was"
@@ -1214,7 +1216,7 @@ let test_turn () =
          | Ok answer ->
            check_reply
              "a new conversation while a call of the account runs"
-             (409, {|{"error":"A call of the account of this Keeper's current conversation is running."}|})
+             (409, {|{"error":"A call of the account of this Keeper's current conversation is running. Try again when it ends.","code":"account_call_running"}|})
              answer
          | Error busy -> Alcotest.fail busy);
         Alcotest.(check string)
@@ -1226,7 +1228,7 @@ let test_turn () =
         Sys.remove (claude ^ ".turn.json");
         check_reply
           "a new conversation of another person's Keeper"
-          (404, {|{"error":"No Keeper of yours has this name."}|})
+          (404, {|{"error":"No Keeper of yours has this name.","code":"unknown_keeper"}|})
           (renew alice (only_keeper "keeper-bob"));
         List.iter
           (fun (label, request) -> Alcotest.(check int) label 400 (fst (renew alice request)))
@@ -1249,7 +1251,7 @@ let test_turn () =
           (fun out -> output_string out "{\"kind\":\"answered\"}\n");
         check_reply
           "a row the server does not understand"
-          (500, {|{"error":"The record of this conversation has a row the server does not understand."}|})
+          (500, {|{"error":"The record of this conversation has a row the server does not understand.","code":"conversation_row_not_understood"}|})
           (reply alice (body ~keeper:"keeper-alice-second" ~message:"hello"));
         Alcotest.(check string)
           "the record keeps the row and gets no other"
@@ -1257,7 +1259,7 @@ let test_turn () =
           (In_channel.with_open_bin second_turns In_channel.input_all);
         check_reply
           "the read of a record with such a row"
-          (500, {|{"error":"The record of this conversation has a row the server does not understand."}|})
+          (500, {|{"error":"The record of this conversation has a row the server does not understand.","code":"conversation_row_not_understood"}|})
           (read alice [ "keeper_id", "keeper-alice-second" ]);
         Alcotest.(check bool) "no client started for either" false (Sys.file_exists (claude ^ ".turn.json"));
         (* Bob's Keeper answers on his home, not hers. *)
@@ -1320,6 +1322,7 @@ let test_turn () =
                     , `String
                         (Access.native_refusal_to_string
                            (Access.Native_tools_reach_other_homes Runtime_native_tools.Native_read)) )
+                  ; "code", `String "native_tools_refused"
                   ]) )
           (reply carol (body ~keeper:"keeper-carol" ~message:"hello"));
         Alcotest.(check bool) "Codex ran no turn" false (Sys.file_exists (codex ^ ".turn.json"))))

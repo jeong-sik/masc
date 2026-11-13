@@ -97,6 +97,9 @@ type error =
       (** A directory was not made or a row was not appended. The detail can
           name a path of the server. *)
   | Not_read of string  (** The detail can name a path of the server. *)
+  | Row_half_written of file
+      (** A stopped server left the last row of the file half written. A read
+          gets it until the next writer of the file cuts the row. *)
   | Row_not_understood of
       { file : file
       ; row : int  (** Counted from 1. *)
@@ -156,8 +159,8 @@ type listed =
 (** The conversations of the Keeper, in the order they were started. The last
     is the one its turns go on in. It reads the index alone and writes
     nothing, and a person with no record has none. A row a stopped server
-    left half written refuses the read ([Not_read]) until a turn or a new
-    conversation of the person cuts it. *)
+    left half written refuses the read ([Row_half_written]) until a turn or a
+    new conversation of the person cuts it. *)
 val conversations : root -> Authz_types.Keeper_id.t -> (listed list, error) result
 
 type outcome =
@@ -184,7 +187,7 @@ type recorded =
 (** The turns of the conversation in order. An [answered] or a [failed] row
     that does not close the turn of the [asked] row before it is a row that
     is not understood. It writes nothing. A row a stopped server left half
-    written refuses the read ([Not_read]) until the next turn of the
+    written refuses the read ([Row_half_written]) until the next turn of the
     conversation, or the {!start} of the one after it, cuts the row. *)
 val turns : root -> conversation -> (recorded list, error) result
 

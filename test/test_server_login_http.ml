@@ -666,7 +666,7 @@ let the_preview_follows_a_login () =
       (fst (keeper_post ~csrf:None turn {|{"keeper_id":"keeper-1","message":"hello"}|}));
     check_reply
       "a turn of a Keeper no one made"
-      (404, {|{"error":"No Keeper of yours has this name."}|})
+      (404, {|{"error":"No Keeper of yours has this name.","code":"unknown_keeper"}|})
       (keeper_post turn {|{"keeper_id":"keeper-2","message":"hello"}|});
     Alcotest.(check int)
       "a connect without the CSRF token stops at the gate"
@@ -1055,6 +1055,12 @@ let call_tool ?(arguments = `Assoc []) ~id name =
 
 let error_json text = Yojson.Safe.to_string (`Assoc [ "error", `String text ])
 
+(* The refusal of a route of a Keeper's turn or conversation, which names its
+   case (issue #51747). *)
+let route_error ~code text =
+  Yojson.Safe.to_string (`Assoc [ "error", `String text; "code", `String code ])
+;;
+
 let a_person_keeps_keepers_over_mcp () =
   with_installation (fun t ->
     let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
@@ -1203,15 +1209,17 @@ let a_person_keeps_keepers_over_mcp () =
       (result reader "masc_my_keeper_turn" ~arguments:(turn "keeper-1" "hello"));
     check
       "a turn of a Keeper no one made"
-      ("true", error_json "No Keeper of yours has this name.")
+      ("true", route_error ~code:"unknown_keeper" "No Keeper of yours has this name.")
       (result owner "masc_my_keeper_turn" ~arguments:(turn "keeper-2" "hello"));
     check
       "a turn of their Keeper of that name does not run on the first person's Runtime"
-      ("true", error_json "The Keeper has no Runtime. Give it one of yours first.")
+      ( "true"
+      , route_error ~code:"keeper_has_no_runtime" "The Keeper has no Runtime. Give it one of yours first."
+      )
       (result theirs "masc_my_keeper_turn" ~arguments:(turn "keeper-1" "hello"));
     check
       "a blank message, in the words of the route"
-      ("true", error_json "The message is blank.")
+      ("true", route_error ~code:"message_blank" "The message is blank.")
       (result owner "masc_my_keeper_turn" ~arguments:(turn "keeper-1" " "));
     Alcotest.(check string)
       "a turn without a message is refused by the definition of the tool"
@@ -1225,11 +1233,13 @@ let a_person_keeps_keepers_over_mcp () =
       (result reader "masc_my_keeper_conversation_new" ~arguments:(keeper "keeper-1"));
     check
       "a conversation of a Keeper no one made"
-      ("true", error_json "No Keeper of yours has this name.")
+      ("true", route_error ~code:"unknown_keeper" "No Keeper of yours has this name.")
       (result owner "masc_my_keeper_conversation_new" ~arguments:(keeper "keeper-2"));
     check
       "a conversation of their Keeper of that name does not start on the first person's account"
-      ("true", error_json "The Keeper has no Runtime. Give it one of yours first.")
+      ( "true"
+      , route_error ~code:"keeper_has_no_runtime" "The Keeper has no Runtime. Give it one of yours first."
+      )
       (result theirs "masc_my_keeper_conversation_new" ~arguments:(keeper "keeper-1"));
     Alcotest.(check string)
       "a conversation without a Keeper is refused by the definition of the tool"
@@ -1266,11 +1276,11 @@ let a_person_keeps_keepers_over_mcp () =
       (result owner "masc_my_keeper_conversation" ~arguments:(keeper "keeper-1"));
     check
       "the conversation of a Keeper no one made"
-      ("true", error_json "No Keeper of yours has this name.")
+      ("true", route_error ~code:"unknown_keeper" "No Keeper of yours has this name.")
       (result owner "masc_my_keeper_conversation" ~arguments:(keeper "keeper-2"));
     check
       "a conversation the Keeper does not have"
-      ("true", error_json "No conversation of this Keeper has this id.")
+      ("true", route_error ~code:"unknown_conversation" "No conversation of this Keeper has this id.")
       (result
          owner
          "masc_my_keeper_conversation"

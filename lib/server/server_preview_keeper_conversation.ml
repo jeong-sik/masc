@@ -4,28 +4,26 @@ module R = Login_routes
 module Login = Server_setup_account_login
 module Conversation = Server_keeper_conversation
 module Turn = Server_preview_keeper_turn
+module E = Server_preview_keeper_error
 
 let ( let* ) = Result.bind
 let ms_per_second = 1000.
-let error status text = R.json status [ "error", `String text ]
 let start_shape = {|The body is {"keeper_id": "<name>"}.|}
 let read_shape = "The query is keeper_id=<name>, and conversation_id=<id> to read an earlier one."
-let unknown_conversation = "No conversation of this Keeper has this id."
-let current_call_running = "A call of the account of this Keeper's current conversation is running."
 let id_json id = `String (Conversation.Conversation_id.to_string id)
 
 (* The body of a new conversation: exactly the one named field. *)
 let start_request_of body =
   match Yojson.Safe.from_string body with
-  | exception Yojson.Json_error (_ : string) -> Error (error R.Bad_request_400 start_shape)
+  | exception Yojson.Json_error (_ : string) -> Error (E.Invalid_request start_shape)
   | `Assoc [ ("keeper_id", `String name) ] -> Ok name
-  | _ -> Error (error R.Bad_request_400 start_shape)
+  | _ -> Error (E.Invalid_request start_shape)
 ;;
 
 let start ~env ~(person : Login.person) ~base_path ~body =
   let answer =
     let* name = start_request_of body in
-    let* keeper_id = Auth_preview_keeper.keeper_id_of name in
+    let* keeper_id = Turn.keeper_id_of name in
     let* (_ : Authz_types.Runtime_id.t), provider_account_id = Turn.assigned person keeper_id in
     let clock = Eio.Stdenv.clock env in
     let* conversation =
@@ -37,8 +35,8 @@ let start ~env ~(person : Login.person) ~base_path ~body =
         ~now_ms:(fun () -> Int.of_float (Eio.Time.now clock *. ms_per_second))
         ~one_call_of:Login.one_call_of
       |> Result.map_error (function
-        | Conversation.Account_busy -> error R.Conflict_409 current_call_running
-        | Conversation.Record_failed failure -> Turn.record_answer ~keeper_id failure)
+        | Conversation.Account_busy -> E.Account_call_running E.Conversation_account
+        | Conversation.Record_failed failure -> Turn.record_error ~keeper_id failure)
     in
     Ok
       (R.json
@@ -47,13 +45,13 @@ let start ~env ~(person : Login.person) ~base_path ~body =
          ; "conversation_id", id_json conversation.Conversation.conversation_id
          ])
   in
-  Result.fold ~ok:Fun.id ~error:Fun.id answer
+  Result.fold ~ok:Fun.id ~error:E.answer answer
 ;;
 
 (* The query of a read: the Keeper once, and a conversation at most once.
    Another name, or a name twice, is not read around. *)
 let read_request_of query =
-  let refused = Error (error R.Bad_request_400 read_shape) in
+  let refused = Error (E.Invalid_request read_shape) in
   match List.sort (fun (left, (_ : string)) (right, (_ : string)) -> String.compare left right) query with
   | [ ("keeper_id", name) ] -> Ok (name, None)
   | [ ("conversation_id", id); ("keeper_id", name) ] ->
@@ -91,10 +89,10 @@ let turn_json (turn : Conversation.recorded) =
 let read ~(person : Login.person) ~base_path ~query =
   let answer =
     let* name, asked_for = read_request_of query in
-    let* keeper_id = Auth_preview_keeper.keeper_id_of name in
+    let* keeper_id = Turn.keeper_id_of name in
     let* (_ : Authz_types.Runtime_id.t option) = Turn.owned person keeper_id in
     let records = Conversation.root ~base_path ~namespace:person.namespace in
-    let recorded result = Result.map_error (Turn.record_answer ~keeper_id) result in
+    let recorded result = Result.map_error (Turn.record_error ~keeper_id) result in
     let* listed = Conversation.conversations records keeper_id |> recorded in
     let current =
       List.fold_left
@@ -114,7 +112,7 @@ let read ~(person : Login.person) ~base_path ~query =
              listed
          with
          | Some { Conversation.conversation; started_at_ms = (_ : int) } -> Ok (Some conversation)
-         | None -> Error (error R.Not_found_404 unknown_conversation))
+         | None -> Error E.Unknown_conversation)
     in
     let* turns =
       match shown with
@@ -147,5 +145,5 @@ let read ~(person : Login.person) ~base_path ~query =
          ; "turns", `List (List.map turn_json turns)
          ])
   in
-  Result.fold ~ok:Fun.id ~error:Fun.id answer
+  Result.fold ~ok:Fun.id ~error:E.answer answer
 ;;

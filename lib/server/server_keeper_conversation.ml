@@ -42,6 +42,7 @@ type file =
 type error =
   | Not_written of string
   | Not_read of string
+  | Row_half_written of file
   | Row_not_understood of
       { file : file
       ; row : int
@@ -60,6 +61,8 @@ let file_name = function
 let error_to_string = function
   | Not_written detail -> "the conversation record was not written: " ^ detail
   | Not_read detail -> "the conversation record was not read: " ^ detail
+  | Row_half_written file ->
+    Printf.sprintf "the last row of %s was left half written by a stopped server" (file_name file)
   | Row_not_understood { file; row } ->
     Printf.sprintf "row %d of %s is not a row of the conversation record" row (file_name file)
   | Id_not_drawn error -> "the id drawn is not an id: " ^ Authz_id.error_to_string error
@@ -293,8 +296,13 @@ let rows_of file decode bytes =
   rows 1 [] (String.split_on_char '\n' bytes)
 ;;
 
+(* A row a stopped server left half written is told from a file that could
+   not be read: the next writer of the file cuts the row, and nothing cuts the
+   other. *)
 let decoded file decode = function
   | Ok snapshot -> rows_of file decode snapshot.Fs_compat.bytes
+  | Error error when Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error ->
+    Error (Row_half_written file)
   | Error error -> Error (Not_read (Fs_compat.private_jsonl_transaction_error_to_string error))
 ;;
 

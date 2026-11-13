@@ -25,12 +25,14 @@ let json_of body =
    and then an id of the log. *)
 let keeper_id_of name =
   match Keeper_id.Keeper_name.of_string name with
-  | Error detail -> Error (error R.Bad_request_400 detail)
+  | Error detail -> Error detail
   | Ok name ->
     Authz_types.Keeper_id.of_string (Keeper_id.Keeper_name.to_string name)
     |> Result.map_error (fun id_error ->
-      error R.Bad_request_400 ("The Keeper name is not an id: " ^ Authz_id.error_to_string id_error))
+      "The Keeper name is not an id: " ^ Authz_id.error_to_string id_error)
 ;;
+
+let keeper_id_answer name = keeper_id_of name |> Result.map_error (error R.Bad_request_400)
 
 let runtime_id_of id =
   Authz_types.Runtime_id.of_string id
@@ -118,7 +120,7 @@ let make zone user_id ~body =
       | Some (`Assoc [ ("keeper_id", `String name) ]) -> Ok name
       | Some _ | None -> Error (error R.Bad_request_400 make_shape)
     in
-    let* keeper_id = keeper_id_of name in
+    let* keeper_id = keeper_id_answer name in
     let made record = keeper_json keeper_id [ "record", `String record ] in
     let made_before () =
       match keepers_of zone with
@@ -160,7 +162,7 @@ let assign zone user_id ~body =
         Ok (name, runtime)
       | Some _ | None -> Error (error R.Bad_request_400 assign_shape)
     in
-    let* keeper_id = keeper_id_of name in
+    let* keeper_id = keeper_id_answer name in
     let* runtime_id = runtime_id_of runtime in
     let assigned record =
       keeper_json

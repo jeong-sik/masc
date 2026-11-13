@@ -1255,7 +1255,7 @@ let render_answering (state : state) =
           match
             Terminal_text.single_line preview.Tui_decode.ktp_text_tail
           with
-          | "" -> "(no text reported yet)"
+          | "" -> ui_text state ~ko:"(아직 보고된 글 없음)" ~en:"(no text reported yet)"
           | tail -> tail
         in
         let preview_width = framed_inner_width cols in
@@ -1268,7 +1268,10 @@ let render_answering (state : state) =
         ; Ansi.dim ^ tail ^ Ansi.reset
         ]
     | None ->
-        [ Ansi.dim ^ "live preview \xe2\x80\x94 none for this row" ^ Ansi.reset
+        [ Ansi.dim
+          ^ ui_text state ~ko:"실시간 미리보기 \xc2\xb7 이 줄에는 없음"
+              ~en:"live preview \xc2\xb7 none for this row"
+          ^ Ansi.reset
         ; ""
         ]
   in

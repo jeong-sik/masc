@@ -269,10 +269,10 @@ let waited_since ~ko ~now since =
   else (
     let whole = int_of_float seconds in
     if whole >= 86_400
-    then Printf.sprintf (if ko then "%dd째 대기" else "%dd waiting") (whole / 86_400)
+    then Printf.sprintf (if ko then "%dd 동안 대기" else "%dd waiting") (whole / 86_400)
     else if whole >= 3_600
-    then Printf.sprintf (if ko then "%dh째 대기" else "%dh waiting") (whole / 3_600)
-    else Printf.sprintf (if ko then "%dm째 대기" else "%dm waiting") (whole / 60))
+    then Printf.sprintf (if ko then "%dh 동안 대기" else "%dh waiting") (whole / 3_600)
+    else Printf.sprintf (if ko then "%dm 동안 대기" else "%dm waiting") (whole / 60))
 ;;
 
 (* When the task was claimed, started or submitted, in the zone the panel was

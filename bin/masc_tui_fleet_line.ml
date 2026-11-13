@@ -115,7 +115,7 @@ let unavailable_text ~ko ~now ~(degradation : F.degradation) ~disconnected_since
   let scan =
     match Masc_tui_message_layout.age_text ~now ~since:degradation.since with
     | Some age ->
-        if ko then Printf.sprintf "%s · %s %s째" (not_observed ko) reason age
+        if ko then Printf.sprintf "%s · %s 동안 %s" (not_observed ko) age reason
         else Printf.sprintf "%s · %s for %s" (not_observed ko) reason age
     | None -> not_observed ko ^ " · " ^ reason
   in
@@ -140,7 +140,7 @@ let trouble_text ~ko ~now trouble =
       let reason = outage_reason_text ~ko reason in
       (match Masc_tui_message_layout.age_text ~now ~since with
        | Some age ->
-           if ko then Printf.sprintf "%s \xc2\xb7 스캔 실패 %s째 (%s)" stale age reason
+           if ko then Printf.sprintf "%s \xc2\xb7 %s 동안 스캔 실패 (%s)" stale age reason
            else Printf.sprintf "%s \xc2\xb7 scans failing for %s (%s)" stale age reason
        | None -> Printf.sprintf "%s (%s)" stale reason)
   | Disconnected { since } ->

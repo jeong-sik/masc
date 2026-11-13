@@ -953,7 +953,7 @@ let model_phase_text ~ko ~show_timing ~now t =
       match Masc_tui_message_layout.age_text ~now ~since with
       | None -> Some word
       | Some age ->
-          Some (Printf.sprintf (if ko then "%s, %s째 새 출력 없음" else "%s, nothing back for %s") word age)
+          Some (Printf.sprintf (if ko then "%s, %s 동안 새 출력 없음" else "%s, nothing back for %s") word age)
   in
   match t.model_signal with
   | None -> None
@@ -1082,7 +1082,7 @@ let phase_text ~ko ~show_timing ~now t =
         | call :: _ -> (
           match Masc_tui_message_layout.age_text ~now ~since:call.started_at with
           | None -> ""
-          | Some age -> Printf.sprintf (if ko then " · 이 호출 %s째" else " · in this call %s") age)
+          | Some age -> Printf.sprintf (if ko then " · 이 호출 %s 경과" else " · in this call %s") age)
       in
       (* Counted from 0 internally, shown from 1 -- the superseded blocks on
          the same screen label themselves [attempt + 1] (render.ml), so a
@@ -1110,7 +1110,7 @@ let phase_text ~ko ~show_timing ~now t =
         | Some since -> (
           match Masc_tui_message_layout.age_text ~now ~since with
           | None -> ""
-          | Some age -> Printf.sprintf (if ko then ", %s째 새 출력 없음" else ", nothing back for %s") age)
+          | Some age -> Printf.sprintf (if ko then ", %s 동안 새 출력 없음" else ", nothing back for %s") age)
       in
       (* The runtime and the attempt, as one tag. The heading above this row
          already says IN PROGRESS or IN PROGRESS ON NEXT CANDIDATE (render_chat.ml); the tag

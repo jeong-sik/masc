@@ -260,7 +260,48 @@ let test_is_successor_of_compares_only_the_question () =
   assert (not (V.is_successor_of ~parent
     (child ~question:{ sample_question with AR.required_evidence = [ "another proof" ] } sample_lookup)))
 
+module Change = Masc.Verifier_review_authority_change
+
+let test_authority_change_is_closed_and_strict () =
+  let authority = { Change.before = String.make 64 'a'; after = String.make 64 'b' } in
+  let format = { Change.before = "earlier answer format"; after = "current answer format" } in
+  let unmoved pair = { pair with Change.after = pair.Change.before } in
+  assert (Change.between ~authority:(unmoved authority) ~output_contract:(unmoved format) = None);
+  assert (Change.between ~authority ~output_contract:(unmoved format) = Some (Change.Authority authority));
+  assert (Change.between ~authority:(unmoved authority) ~output_contract:format
+    = Some (Change.Output_contract format));
+  assert (Change.between ~authority ~output_contract:format
+    = Some (Change.Both { authority; output_contract = format }));
+  List.iter (fun change -> assert (Change.of_json (Change.to_json change) = Ok change))
+    [ Change.Authority authority; Change.Output_contract format
+    ; Change.Both { authority; output_contract = format } ];
+  let rejected json = match Change.of_json json with Ok _ -> false | Error _ -> true in
+  let pair before after = `Assoc [ "before", `String before; "after", `String after ] in
+  let moved = pair (String.make 64 'a') (String.make 64 'b') in
+  let fields = [ "schema", `String Change.schema; "authority", moved; "output_contract", `Null ] in
+  assert (not (rejected (`Assoc fields)));
+  (* An unmoved pair is not evidence, and a change must name something. *)
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", pair (String.make 64 'a') (String.make 64 'a'); "output_contract", `Null ]));
+  assert (rejected (`Assoc [ "schema", `String Change.schema; "authority", `Null; "output_contract", `Null ]));
+  (* Values keep their kind: a digest for the authority, text for the format. *)
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", pair "not-a-digest" (String.make 64 'b'); "output_contract", `Null ]));
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", `Null; "output_contract", pair " " "current answer format" ]));
+  (* The key sets are exact at both levels, and the schema is this one. *)
+  assert (rejected (`Assoc (("evaluator_runtime", `String "rt-a") :: fields)));
+  assert (rejected (`Assoc (List.remove_assoc "output_contract" fields)));
+  assert (rejected (`Assoc (fields @ [ "authority", `Null ])));
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", `Assoc [ "before", `String (String.make 64 'a'); "after", `String (String.make 64 'b')
+      ; "result", `Null ]
+    ; "output_contract", `Null ]));
+  assert (rejected (`Assoc (("schema", `String "verifier_review_authority_change/v0")
+    :: List.remove_assoc "schema" fields)))
+
 let () =
+  test_authority_change_is_closed_and_strict ();
   test_digest_fields_are_strict ();
   test_successor_asks_the_parent_question_with_current_lookup ();
   test_successor_refuses_a_changed_question ();

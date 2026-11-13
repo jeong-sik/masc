@@ -195,7 +195,7 @@ val strip_rows : int
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
-  Masc.Keeper_file_change_evidence.t option -> string option
+  ko:bool -> Masc.Keeper_file_change_evidence.t option -> string option
 
 val recent_chunk_projection :
   Masc_tui_types.state -> Masc_tui_acting.chunk_projection

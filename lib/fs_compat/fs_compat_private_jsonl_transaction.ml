@@ -665,7 +665,7 @@ let rec try_lock_whole_file fd =
   | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> false
 ;;
 
-let with_private_jsonl_stable_lock ~io ~success requested_path f =
+let with_private_jsonl_stable_lock_fd ~io ~success requested_path f =
   let requested_dir = Filename.dirname requested_path in
   run_blocking_private_file_transaction
     ~label:"fs-compat-private-jsonl-transaction"
@@ -724,7 +724,27 @@ let with_private_jsonl_stable_lock ~io ~success requested_path f =
                            ~path:lock_path
                            stable_lock
                        in
-                       f ~dir ~path))))
+                       f ~dir ~path ~lock_fd:stable_lock.fd))))
+;;
+
+let with_private_jsonl_stable_lock ~io ~success requested_path f =
+  with_private_jsonl_stable_lock_fd ~io ~success requested_path
+    (fun ~dir ~path ~lock_fd:_ -> f ~dir ~path)
+;;
+
+let with_private_jsonl_identified_stable_lock ~io ~success requested_path f =
+  with_private_jsonl_stable_lock_fd ~io ~success requested_path
+    (fun ~dir ~path ~lock_fd ->
+       match private_jsonl_capture Inspect_stable_lock (fun () -> Unix.fstat lock_fd) with
+       | Error failure -> Error (Private_jsonl_operation_failed failure)
+       | Ok lock_identity -> f ~dir ~path ~lock_identity)
+;;
+
+(* The stable lock opens [realpath dirname / basename ^ lock_suffix]. Resolving
+   this spelling through the kernel reaches that same directory entry. *)
+let private_jsonl_requested_lock_path requested_path =
+  private_jsonl_lock_path
+    (Filename.concat (Filename.dirname requested_path) (Filename.basename requested_path))
 ;;
 
 let private_jsonl_cursor_of_stats stats =

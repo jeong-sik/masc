@@ -82,6 +82,8 @@ let failure_to_board_error = function
   | Posts_transaction_failed error -> Io_error (Fs_compat.private_jsonl_transaction_error_to_string error)
   | Posts_missing -> Io_error "posts source is missing after this store observed it"
   | Posts_source_binding_mismatch -> Io_error "posts source belongs to another captured workspace"
+  | Posts_policy_source_is_posts_source ->
+    Io_error "creation policy source is the posts source file itself"
   | Posts_snapshot_stale -> Io_error "captured posts snapshot is stale"
   | Posts_workspace_binding_refused rejection ->
     Io_error (Board_workspace_binding.rejection_to_string rejection)
@@ -417,11 +419,18 @@ let append_creation_with_policy store ~(policy : sub_boards_source_observation) 
         match result with
         | Fs_compat.Guard_refused failure -> ordinary (guard_refused ~target:true failure [])
         | Fs_compat.Guard_executed {
-            value = Fs_compat.Guard_refused failure; cleanup_failures } ->
+            value = Fs_compat.Dependency_is_target _; cleanup_failures } ->
+          let trace = diagnostics cleanup_failures in
+          retain_trace store trace;
+          ordinary (not_written Posts_policy_source_is_posts_source trace)
+        | Fs_compat.Guard_executed {
+            value = Fs_compat.Dependency_guarded (Fs_compat.Guard_refused failure);
+            cleanup_failures } ->
           Creation_policy_refused { failure;
             outcome = guard_refused ~target:false failure cleanup_failures }
         | Fs_compat.Guard_executed {
-            value = Fs_compat.Guard_executed { value; cleanup_failures = policy_cleanup };
+            value = Fs_compat.Dependency_guarded (Fs_compat.Guard_executed {
+              value; cleanup_failures = policy_cleanup });
             cleanup_failures = posts_cleanup } ->
           ordinary (classify_write store ~pre_write:observation ~kind:Append_write
             ~workspace_observation:observation.workspace_observation ~bytes

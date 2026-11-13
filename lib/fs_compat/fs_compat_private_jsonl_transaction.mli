@@ -214,6 +214,22 @@ val with_private_jsonl_stable_lock :
   (dir:string -> path:string -> ('a, private_jsonl_transaction_error) result) ->
   ('a, private_jsonl_transaction_error) result
 
+val with_private_jsonl_identified_stable_lock :
+  io:private_jsonl_transaction_io_for_testing ->
+  success:('a -> private_jsonl_transaction_success) ->
+  string ->
+  (dir:string ->
+   path:string ->
+   lock_identity:Unix.stats ->
+   ('a, private_jsonl_transaction_error) result) ->
+  ('a, private_jsonl_transaction_error) result
+(** [with_private_jsonl_stable_lock] that also passes [fstat] of the held
+    stable-lock descriptor, for {!private_jsonl_same_identity}. *)
+
+val private_jsonl_requested_lock_path : string -> string
+(** Spelling of the stable lock that a transaction on this requested path
+    opens, before its parent directory is canonicalized. *)
+
 val private_jsonl_cursor_of_stats :
   Unix.stats ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result

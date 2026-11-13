@@ -233,6 +233,95 @@ let test_unknown_child_cleanup root =
   check string "published bytes do not imply durable child success" "{\"delete\":true}\n" (read child);
   ignore (snapshot parent)
 
+(* A dependency that is the target must come back as a value. Before the
+   identity check the same thread re-locked the target's path mutex, so the
+   alarm turns a wait that never ends into a failed run. *)
+let dependency_deadline_seconds = 30
+
+let append_with_dependency target ~expected ~dependency_path ~dependency suffix =
+  ignore (Unix.alarm dependency_deadline_seconds);
+  Fun.protect ~finally:(fun () -> ignore (Unix.alarm 0)) (fun () ->
+    Fs.append_private_jsonl_durable_locked_at_snapshot_with_dependency_result
+      target ~expected ~dependency_path ~dependency suffix)
+
+let policy_row = "{\"policy\":\"open\"}\n"
+let post_row = "{\"post\":1}\n"
+
+let seed_policy root =
+  let policy = Filename.concat root "sub_boards.jsonl" in
+  ignore (require_write (Fs.append_private_jsonl_durable_stable_result policy policy_row));
+  policy
+
+let require_distinct_append target policy =
+  match append_with_dependency target ~expected:(snapshot target)
+          ~dependency_path:policy ~dependency:(snapshot policy) post_row with
+  | Fs.Guard_executed { value = Fs.Dependency_guarded (Fs.Guard_executed {
+      value; cleanup_failures = [] }); cleanup_failures = [] } -> ignore (require_write value)
+  | Fs.Guard_executed { value = Fs.Dependency_guarded (Fs.Guard_executed _); _ } ->
+    fail "distinct dependency append left guard cleanup failures"
+  | Fs.Guard_executed { value = Fs.Dependency_guarded (Fs.Guard_refused failure); _ }
+  | Fs.Guard_refused failure ->
+    fail (Fs.private_jsonl_transaction_error_to_string failure.guard_error)
+  | Fs.Guard_executed { value = Fs.Dependency_is_target _; _ } ->
+    fail "distinct dependency was judged to be the target"
+
+(* The refusal must leave the target unwritten and both of its locks free:
+   the following append through a distinct dependency has to succeed. *)
+let require_same_file_refusal root target ~dependency_path =
+  let policy = seed_policy root in
+  let expected = snapshot target in
+  (match append_with_dependency target ~expected ~dependency_path ~dependency:expected post_row with
+   | Fs.Guard_executed { value = Fs.Dependency_is_target { target_path; dependency_path = reported };
+       cleanup_failures = [] } ->
+     check string "refusal names the canonical target" target target_path;
+     check string "refusal names the dependency as given" dependency_path reported
+   | Fs.Guard_executed { value = Fs.Dependency_is_target _; _ } ->
+     fail "same-file refusal left target guard cleanup failures"
+   | Fs.Guard_executed { value = Fs.Dependency_guarded _; _ } ->
+     fail "dependency guard started on the target file"
+   | Fs.Guard_refused failure ->
+     fail (Fs.private_jsonl_transaction_error_to_string failure.guard_error));
+  check string "refused append wrote nothing" expected.bytes
+    (if Sys.file_exists target then read target else "");
+  require_distinct_append target policy;
+  check string "target accepts the next append" (expected.bytes ^ post_row) (read target)
+
+let test_dependency_same_spelling root =
+  let target, _, _ = seed root in
+  require_same_file_refusal root target ~dependency_path:target
+
+let test_dependency_dot_spelling root =
+  let target, _, _ = seed root in
+  require_same_file_refusal root target
+    ~dependency_path:(Filename.concat (Filename.concat root ".") "posts.jsonl")
+
+let test_dependency_through_symlinked_directory root =
+  let target, _, _ = seed root in
+  let alias = Filename.concat root "alias" in
+  Unix.symlink root alias;
+  require_same_file_refusal root target ~dependency_path:(Filename.concat alias "posts.jsonl")
+
+let test_dependency_trailing_separator_on_missing_target root =
+  let target = Filename.concat root "posts.jsonl" in
+  require_same_file_refusal root target ~dependency_path:(target ^ Filename.dir_sep)
+
+let test_dependency_distinct_file_appends root =
+  let target, expected, _ = seed root in
+  require_distinct_append target (seed_policy root);
+  check string "append landed after both guards" (expected.bytes ^ post_row) (read target)
+
+let test_dependency_lock_entry_not_inspectable root =
+  let target, expected, _ = seed root in
+  let dependency_path = Filename.concat target "sub_boards.jsonl" in
+  (match append_with_dependency target ~expected ~dependency_path ~dependency:expected post_row with
+   | Fs.Guard_executed { value = Fs.Dependency_guarded (Fs.Guard_refused {
+       guard_path; guard_error = Fs.Private_jsonl_operation_failed {
+         operation = Fs.Inspect_stable_lock; _ } }); cleanup_failures = [] } ->
+     check string "inner refusal names the dependency" dependency_path guard_path
+   | Fs.Guard_executed _ | Fs.Guard_refused _ ->
+     fail "uninspectable dependency lock entry was not an inner refusal");
+  check string "refused append wrote nothing" expected.bytes (read target)
+
 let () =
   Printexc.record_backtrace true;
   match Array.to_list Sys.argv with
@@ -245,4 +334,14 @@ let () =
       case "separate process writer excluded through child write" test_separate_process_excluded;
       case "known child survives reserved guard cleanup" test_known_child_cleanup;
       case "unknown child and reserved guard cleanup both survive" test_unknown_child_cleanup
+    ]; "dependency append", [
+      case "dependency with the target's spelling is refused" test_dependency_same_spelling;
+      case "dependency spelled through ./ is refused" test_dependency_dot_spelling;
+      case "dependency through a symlinked directory is refused"
+        test_dependency_through_symlinked_directory;
+      case "trailing separator on a missing target is refused"
+        test_dependency_trailing_separator_on_missing_target;
+      case "distinct dependency appends" test_dependency_distinct_file_appends;
+      case "uninspectable dependency lock entry refuses inside"
+        test_dependency_lock_entry_not_inspectable
     ]]

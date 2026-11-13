@@ -81,8 +81,10 @@ let body_node ~restore ~read ~owner ~request_id =
   | Some (parent:Owner.retained) ->
     let record=Owner.listed parent in
     let* request=restore ~owner parent in
+    (* The summary was just confirmed equal to the request's index, so it is
+       read back and not computed again. *)
     let* ()=Request.confirm_index request record in
-    let+ index=Request.index request in
+    let+ index=Request.index_of_summary record in
     Some {record;index;body=(fun () -> Ok request)}
 let validate_predecessor_payload ~read ~read_fence ~read_resolution ~require_confirmed request =
   validate ~read_node:(body_node ~restore:Request.restore_payload ~read) ~read ~read_fence ~read_resolution

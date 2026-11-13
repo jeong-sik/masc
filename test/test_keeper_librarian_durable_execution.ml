@@ -2262,6 +2262,8 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     (Result.is_error (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store
       ~require_confirmed:true child_request)));
   io (fun () -> write parent_body parent_bytes);
+  check (result unit string) "the host's lineage check passes with the parent's body" (Ok ())
+    (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store ~require_confirmed:true child_request));
   let with_summary_value id name value f=
     let path=record_path id in
     let honest=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in

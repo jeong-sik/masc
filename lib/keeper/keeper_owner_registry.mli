@@ -122,6 +122,12 @@ val transition_shutdown
   -> from_operation_id:Keeper_shutdown_types.Operation_id.t
   -> to_operation_id:Keeper_shutdown_types.Operation_id.t option
   -> (Keeper_owner.transition_shutdown_result, command_error) result
+(** Hand admission from [from_operation_id] to [to_operation_id] in both the
+    Owner and the intake fence. [Shutdown_transition_reserved_by_other] means
+    both records name that other operation. When the two disagree, or the
+    Owner refuses, the answer is [Error] and each record keeps what it held
+    before the call, unless another fence writer moved the fence meanwhile;
+    the error then names its new value. *)
 
 val await_idle_after_shutdown
   :  base_path:string

@@ -1,6 +1,7 @@
 module Request = Keeper_librarian_durable_request
 module Owner = Keeper_librarian_durable_owner
 module Retained = Lane_addon_tool_request_owner
+module Record = Lane_addon_tool_request_owner.Record
 module Progress = Lane_addon_request_progress
 module Runtime = Lane_addon_runtime
 module Consumer = Keeper_librarian_durable_consumer
@@ -130,26 +131,35 @@ let completed_outcome request =
     Consumer.Official_advanced {atom;official={Keeper_librarian_official_progress.boundary_line}}
   | None,Some progress -> Consumer.Progress_advanced progress
   | None,None -> Consumer.Nothing_to_read
-let validate_lineage ~store originals =
-  let find id=List.find_opt (fun ((record:Retained.retained),_) -> record.request_id=id) originals in
-  let predecessors=List.filter_map (fun (_,request) -> Request.predecessor request) originals in
+(* [listed] is every original of the scope as its record and index; [read]
+   holds the request of each one this pass read. A fenced parent's link is
+   checked on records and indexes. A known-basis link compares whole requests:
+   the pass reads every original that holds a replacement intent, is unfenced,
+   or follows a predecessor of either kind. *)
+let validate_lineage ~store ~fenced ~read listed =
+  let find id=List.find_opt (fun (record,_) -> Record.request_id record=id) listed in
+  let body id=Option.to_result ~none:"Original history lineage needs a request this pass did not read"
+    (List.find_opt (fun ((record:Retained.retained),_) -> record.request_id=id) read) in
+  let predecessors=List.filter_map (fun (_,(index:Request.index)) -> index.predecessor) listed in
   let parent_ids=List.map (fun (parent:Request.predecessor) -> parent.request_id) predecessors in
   let* ()=require (List.length parent_ids=List.length (List.sort_uniq String.compare parent_ids))
     "Original history basis supersession has multiple children" in
-  let* ()=List.fold_left (fun result ((child:Retained.retained),request) ->
+  let* ()=List.fold_left (fun result (child_record,(index:Request.index)) ->
     let* ()=result in
-    match Request.predecessor request with
+    match index.predecessor with
     | None -> Ok ()
     | Some predecessor ->
-      let* parent,parent_request=Option.to_result ~none:"Original history predecessor is absent"
+      let* parent_record,_=Option.to_result ~none:"Original history predecessor is absent"
         (find predecessor.request_id) in
-      let* ()=require (parent.request_digest=predecessor.request_digest && parent.request_id<>child.request_id)
+      let* ()=require (Record.request_digest parent_record=predecessor.request_digest
+        && Record.request_id parent_record<>Record.request_id child_record)
         "Original history predecessor identity changed" in
-      let* fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request:parent_request ~original:parent) in
-      (match fence with
-      | Some _ -> io (fun () -> Resolution_lineage.confirm_predecessor ~store
-          ~require_confirmed:(Progress.phase child.progress<>Progress.Captured) request)
-      | None ->
+      if fenced (Record.request_id parent_record) then
+        io (fun () -> Resolution_lineage.confirm_predecessor_record ~store
+          ~require_confirmed:(Progress.phase (Record.progress child_record)<>Progress.Captured) child_record index)
+      else
+      let* child,request=body (Record.request_id child_record) in
+      let* parent,parent_request=body (Record.request_id parent_record) in
       let* superseded=Keeper_librarian_durable_commit.is_superseded ~request:parent_request ~record:parent in
       let* ()=require superseded "Original history successor has no known superseded basis" in
       let* intended,pending=match Progress.replacement parent.progress with
@@ -169,44 +179,45 @@ let validate_lineage ~store originals =
         ~current:(Source.input child_source).current (Request.source parent_request)
         |> Result.map_error Source.error_to_string in
       require (Source.to_json expected=Source.to_json child_source)
-        "Original history successor changed its immutable source or acknowledgment frontier")) (Ok ()) originals in
-  let* ()=List.fold_left (fun result ((parent:Retained.retained),request) ->
-    let* ()=result in match Progress.replacement parent.progress with
+        "Original history successor changed its immutable source or acknowledgment frontier") (Ok ()) listed in
+  let* ()=List.fold_left (fun result (record,_) ->
+    let* ()=result in match Progress.replacement (Record.progress record) with
     | None -> Ok ()
-    | Some (Preparation_pending intended | Preparation_confirmed intended) ->
+    | Some (Preparation_pending _ | Preparation_confirmed _) ->
+      let* parent,request=body (Record.request_id record) in
+      let* intended=match Progress.replacement parent.progress with
+        | Some (Preparation_pending intended | Preparation_confirmed intended) -> Ok intended
+        | None -> Error "Original history replacement intent disappeared" in
       let* superseded=Keeper_librarian_durable_commit.is_superseded ~request ~record:parent in
       let* ()=require superseded "Original history replacement intent has no superseded basis" in
       let* _=replacement_request parent request intended in
       (match find intended.request_id,Progress.replacement parent.progress with
        | None,Some (Preparation_confirmed _) -> Error "Acknowledged original history replacement is missing"
        | None,Some (Preparation_pending _) -> Ok ()
-       | Some (_,child),Some (Preparation_pending _ | Preparation_confirmed _) ->
+       | Some (child,_),Some (Preparation_pending _ | Preparation_confirmed _) ->
+         let* _,child=body (Record.request_id child) in
          equal_json (Request.to_json child) intended.request "Original history forward replacement payload changed"
-       | (None | Some _),None -> Error "Original history replacement intent disappeared")) (Ok ()) originals in
-  let rec ancestry seen request = match Request.predecessor request with
+       | (None | Some _),None -> Error "Original history replacement intent disappeared")) (Ok ()) listed in
+  let rec ancestry seen (index:Request.index) = match index.predecessor with
     | None -> Ok ()
     | Some predecessor ->
       let* ()=require (not (List.mem predecessor.request_id seen)) "Cyclic original history predecessor lineage" in
       let* _,parent=Option.to_result ~none:"Original history predecessor disappeared" (find predecessor.request_id) in
       ancestry (predecessor.request_id::seen) parent in
-  let* ()=List.fold_left (fun result ((record:Retained.retained),request) ->
-    let* ()=result in ancestry [record.request_id] request) (Ok ()) originals in
-  let+ reversed=List.fold_left (fun result (((record:Retained.retained),request) as original) ->
-    let* values=result in
+  let* ()=List.fold_left (fun result (record,index) ->
+    let* ()=result in ancestry [Record.request_id record] index) (Ok ()) listed in
+  Ok (List.filter (fun ((record:Retained.retained),_) ->
     match Progress.phase record.progress with
-    | Progress.Conflicted _ when not (List.mem record.request_id parent_ids) ->
-      let+ fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request ~original:record) in
-      if Option.is_none fence then original::values else values
-    | Conflicted _
+    | Progress.Conflicted _ -> not (List.mem record.request_id parent_ids) && not (fenced record.request_id)
     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok values) (Ok []) originals in List.rev reversed
+    | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> false) read)
 (* RFC-librarian-history-settles-finished-originals. A chain settles leaf
    first under the day its root was minted, as Workspace Curator chains do:
    each history record, then the gate records of that execution. Every body
    holds its own request ID, so no two records share a body file and a move
    never takes another record's body. *)
-let settle_record ~store ~date (record:Retained.retained) =
-  Retained.settle ~store ~date (Retained.listed record)
+let settle_record ~store ~date record =
+  Retained.settle ~store ~date record
   |> Result.map_error Retained.settle_error_to_string
 let archived ~store ~scope ~date request_id =
   io (fun () -> Retained.settled ~store ~scope ~date ~request_id)
@@ -214,38 +225,38 @@ let archived ~store ~scope ~date request_id =
 let settle_gates ~store ~inventory ~date ~execution_id =
   List.fold_left (fun moved gate ->
     let* moved=moved in
-    let* ()=settle_record ~store ~date gate in Ok (moved+1)) (Ok 0)
+    let* ()=settle_record ~store ~date (Retained.listed gate) in Ok (moved+1)) (Ok 0)
     (Keeper_librarian_durable_gate.Inventory.execution_records inventory ~execution_id)
 let settle_chain ~store ~inventory ~date leaf_first =
-  List.fold_left (fun moved ((record:Retained.retained),_) ->
+  List.fold_left (fun moved (record,_) ->
     let* moved=moved in
     let* ()=settle_record ~store ~date record in
-    let* gates=settle_gates ~store ~inventory ~date ~execution_id:record.request_id in
+    let* gates=settle_gates ~store ~inventory ~date ~execution_id:(Record.request_id record) in
     Ok (moved+1+gates)) (Ok 0) leaf_first
 (* A replacement chain no pass needs again, as its root ID and its originals
    leaf first: the leaf settled without a replacement, and every ancestor a
    superseded basis whose acknowledged replacement is the original below it. *)
-let finished_chains ~settled ~superseded originals =
-  let id ((record:Retained.retained),_)=record.request_id in
-  let mem original list=List.exists (fun other -> id other=id original) list in
-  let find request_id=List.find_opt (fun original -> id original=request_id) originals in
-  let parents=List.filter_map (fun (_,request) -> Option.map
-    (fun (predecessor:Request.predecessor) -> predecessor.request_id) (Request.predecessor request)) originals in
-  let rec upward above (((record:Retained.retained),request) as original) =
+let finished_chains ~settled ~superseded listed =
+  let id (record,_)=Record.request_id record in
+  let find request_id=List.find_opt (fun original -> id original=request_id) listed in
+  let parents=List.filter_map (fun (_,(index:Request.index)) -> Option.map
+    (fun (predecessor:Request.predecessor) -> predecessor.request_id) index.predecessor) listed in
+  let rec upward above ((record,(index:Request.index)) as original) =
     let above=original::above in
-    match Request.predecessor request with
-    | None -> Some (record.request_id,List.rev above)
+    match index.predecessor with
+    | None -> Some (Record.request_id record,List.rev above)
     | Some predecessor ->
       match find predecessor.request_id with
-      | Some (((parent:Retained.retained),_) as next) when mem next settled ->
-        (match Progress.replacement parent.progress with
-         | Some (Preparation_confirmed intended) when intended.request_id=record.request_id -> upward above next
+      | Some ((parent,_) as next) when List.mem (id next) settled ->
+        (match Progress.replacement (Record.progress parent) with
+         | Some (Preparation_confirmed intended) when intended.request_id=Record.request_id record -> upward above next
          | Some (Preparation_confirmed _ | Preparation_pending _) | None -> None)
       | Some _ | None -> None in
-  List.filter_map (fun (((record:Retained.retained),_) as original) ->
-    if mem original settled && not (List.mem record.request_id parents) && not (mem original superseded)
-       && Option.is_none (Progress.replacement record.progress)
-    then upward [] original else None) originals
+  List.filter_map (fun ((record,_) as original) ->
+    if List.mem (id original) settled && not (List.mem (id original) parents)
+       && not (List.mem (id original) superseded)
+       && Option.is_none (Progress.replacement (Record.progress record))
+    then upward [] original else None) listed
 let settle_chains ~store ~inventory chains =
   List.fold_left (fun moved (root,leaf_first) ->
     let* moved=moved in
@@ -257,44 +268,43 @@ let settle_chains ~store ~inventory chains =
    replacement left, then the original and its ancestors, before validation
    needs the replacement. A missing replacement that did not move is left for
    [validate_lineage] to refuse. *)
-let finish_settling ~store originals =
-  let find request_id=List.find_opt (fun ((record:Retained.retained),_) -> record.request_id=request_id) originals in
+let finish_settling ~store listed =
+  let find request_id=List.find_opt (fun (record,_) -> Record.request_id record=request_id) listed in
   (* [original] and its ancestors as the root ID and the chain leaf first.
      Each ancestor must hold the one below it as its acknowledged replacement. *)
-  let rec upward above (((record:Retained.retained),request) as original) =
+  let rec upward above ((record,(index:Request.index)) as original) =
     let above=original::above in
-    match Request.predecessor request with
-    | None -> Ok (record.request_id,List.rev above)
+    match index.predecessor with
+    | None -> Ok (Record.request_id record,List.rev above)
     | Some predecessor ->
       match find predecessor.request_id with
       | None -> Error "Original history predecessor is absent"
-      | Some (((parent:Retained.retained),_) as next) ->
-        if List.exists (fun ((seen:Retained.retained),_) -> seen.request_id=parent.request_id) above
+      | Some ((parent,_) as next) ->
+        if List.exists (fun (seen,_) -> Record.request_id seen=Record.request_id parent) above
         then Error "Cyclic original history predecessor lineage" else
-        match Progress.replacement parent.progress with
-        | Some (Preparation_confirmed intended) when intended.request_id=record.request_id -> upward above next
+        match Progress.replacement (Record.progress parent) with
+        | Some (Preparation_confirmed intended) when intended.request_id=Record.request_id record -> upward above next
         | Some (Preparation_confirmed _ | Preparation_pending _) | None ->
           Error "Original history predecessor does not hold its archived replacement" in
-  List.fold_left (fun moved (((record:Retained.retained),request) as original) ->
+  List.fold_left (fun moved ((record,(index:Request.index)) as original) ->
     let* moved=moved in
-    match Progress.replacement record.progress with
+    match Progress.replacement (Record.progress record) with
     | Some (Preparation_confirmed intended) when Option.is_none (find intended.request_id) ->
       let* root,leaf_first=upward [] original in
       let* date=Request.minted_on root in
-      let* archived=archived ~store ~scope:record.scope ~date intended.request_id in
+      let* archived=archived ~store ~scope:(Record.scope record) ~date intended.request_id in
       if not archived then Ok moved else
-      let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
-        ~owner:(Request.physical_owner request)) in
+      let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store ~owner:index.owner) in
       let* gates=settle_gates ~store ~inventory ~date ~execution_id:intended.request_id in
       let* count=settle_chain ~store ~inventory ~date leaf_first in
       Ok (moved+gates+count)
-    | Some (Preparation_confirmed _ | Preparation_pending _) | None -> Ok moved) (Ok 0) originals
+    | Some (Preparation_confirmed _ | Preparation_pending _) | None -> Ok moved) (Ok 0) listed
 (* Gate records of an archived execution no longer change validation. A stop
    between a chain root and its gate records leaves them here; a stop below
    the root leaves an ancestor that [finish_settling] reaches first. *)
-let settle_orphan_gates ~store ~inventory ~scope originals =
-  let discovered execution_id=List.exists (fun ((record:Retained.retained),_) ->
-    record.request_id=execution_id) originals in
+let settle_orphan_gates ~store ~inventory ~scope listed =
+  let discovered execution_id=List.exists (fun (record,_) ->
+    Record.request_id record=execution_id) listed in
   List.fold_left (fun moved execution_id ->
     let* moved=moved in
     if discovered execution_id then Ok moved else
@@ -349,20 +359,47 @@ let rec consume_one ~config ~keeper_name ~wake =
   let inventory_started=Mtime_clock.now () in
   match Owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name with
   | Error failure -> error (Owner.error_to_string failure)
-  | Ok originals ->
-    match finish_settling ~store originals with
+  | Ok listed ->
+    match finish_settling ~store listed with
     | Error detail -> error ("Original history settle did not finish: " ^ detail)
     | Ok moved when moved>0 ->
       Log.Keeper.info ~keeper_name "durable Librarian finished an interrupted settle: records=%d" moved;
       consume_one ~config ~keeper_name ~wake
     | Ok _ ->
-    let validated=match originals with
+    (* A fenced original is read as its record and index when no known-basis
+       link touches it: it holds no replacement intent, and its predecessor,
+       if any, is fenced and holds none either. The pass does nothing more
+       with such an original. Every other original is read with its body. *)
+    let observed_fences=List.fold_left (fun result (record,index) ->
+      let* fenced=result in
+      let+ fence=io (fun () -> Resolution_lineage.fenced_record ~store ~record ~index) in
+      if Option.is_some fence then Record.request_id record::fenced else fenced) (Ok []) listed in
+    match observed_fences with
+    | Error detail -> error detail
+    | Ok fenced_ids ->
+    let fenced id=List.mem id fenced_ids in
+    let settled_fence id=fenced id && List.exists (fun (record,_) ->
+      Record.request_id record=id && Option.is_none (Progress.replacement (Record.progress record))) listed in
+    let unread (record,(index:Request.index)) =
+      settled_fence (Record.request_id record)
+      && (match index.predecessor with
+          | None -> true
+          | Some predecessor -> settled_fence predecessor.request_id) in
+    let read=List.fold_left (fun result original ->
+      let* read=result in
+      if unread original then Ok read else
+      let+ original=Owner.load ~store original in original::read) (Ok []) listed in
+    match read with
+    | Error failure -> error (Owner.error_to_string failure)
+    | Ok read ->
+    let originals=List.rev read in
+    let validated=match listed with
       | [] -> Ok ([],None)
-      | ((first:Retained.retained),request)::_ ->
+      | (first,(first_index:Request.index))::_ ->
         (* One complete read-only gate observation for this inventory pass.
            Recovery and dispatch below deliberately retain their fresh reads. *)
         let* inventory=io (fun () -> Keeper_librarian_durable_gate.Inventory.read ~store
-          ~owner:(Request.physical_owner request)) in
+          ~owner:first_index.owner) in
         let* unfinished,settled=List.fold_left (fun result ((record,request) as original) ->
           let* unfinished,settled=result in
           let* fence=io (fun () -> Resolution_lineage.fenced_original ~store ~request ~original:record) in
@@ -373,21 +410,22 @@ let rec consume_one ~config ~keeper_name ~wake =
           match frontier with
           | Commit.Unfinished -> Ok (original::unfinished,settled)
           | Commit.Settled -> Ok (unfinished,original::settled)) (Ok ([],[])) originals in
-        Ok (unfinished,Some (first.scope,Request.physical_owner request,inventory,settled)) in
+        Ok (unfinished,Some (Record.scope first,first_index.owner,inventory,settled)) in
     match validated with
     | Error detail -> error detail
     | Ok (unfinished,observed) ->
     let unfinished=List.rev unfinished in
-    (* Every pass reads and verifies the whole retained inventory, so its size
-       and time are what the pass costs before any new work. *)
+    (* Every pass lists the whole retained inventory and verifies each body
+       it reads, so those counts and this time are what the pass costs before
+       any new work. *)
     Log.Keeper.info ~keeper_name
-      "durable Librarian inventory validated: originals=%d unfinished=%d gate_records=%d elapsed_ms=%.1f"
-      (List.length originals) (List.length unfinished)
+      "durable Librarian inventory validated: originals=%d bodies_read=%d unfinished=%d gate_records=%d elapsed_ms=%.1f"
+      (List.length listed) (List.length originals) (List.length unfinished)
       (Option.fold ~none:0 ~some:(fun (_,_,inventory,_) ->
          Keeper_librarian_durable_gate.Inventory.record_count inventory) observed)
       (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span inventory_started (Mtime_clock.now ())))
        /. 1_000_000.);
-    match validate_lineage ~store originals with
+    match validate_lineage ~store ~fenced ~read:originals listed with
     | Error detail -> error detail
     | Ok superseded ->
     match io (fun () -> Refusal.inventory (match observed with
@@ -447,11 +485,13 @@ let rec consume_one ~config ~keeper_name ~wake =
         (* The steps go before the originals that name them, so a stop between
            the two never leaves a step without its original. *)
         let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates ~settled in
-        let* orphans=settle_orphan_gates ~store ~inventory ~scope originals in
+        let* orphans=settle_orphan_gates ~store ~inventory ~scope listed in
         let settled=io (fun () -> List.filter (fun ((record,request) as original) ->
           not (is_candidate original || is_stopped original
             || Refusal.preserves_completed ~settled:refusals ~record ~request)) settled) in
-        let* chains=settle_chains ~store ~inventory (finished_chains ~settled ~superseded originals) in
+        let ids=List.map (fun ((record:Retained.retained),_) -> record.request_id) in
+        let* chains=settle_chains ~store ~inventory
+          (finished_chains ~settled:(ids settled) ~superseded:(ids superseded) listed) in
         Ok (chains,orphans,steps) in
     match moved with
     | Error detail -> error ("Original history settle did not finish: " ^ detail)

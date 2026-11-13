@@ -10,18 +10,6 @@ type 'a launch =
   deliver:(('a, string) result -> Masc_tui_async_protocol.async_msg) ->
   (unit -> ('a, string) result) -> unit
 
-(* What stays when a write is kept back: a post or a comment keeps its draft,
-   a vote has none to keep. *)
-type kept = Draft_kept | Nothing_kept
-
-(* A write kept back says what stopped it, that nothing was sent, and what
-   stayed. *)
-let kept_back ~ko reason kept =
-  let kept = match kept with
-    | Draft_kept -> [ draft_retained ~ko ]
-    | Nothing_kept -> [] in
-  String.concat " · " (String.capitalize_ascii reason :: not_sent ~ko :: kept)
-
 (* Kept back before it starts, because the workspace is not confirmed. *)
 let refuse_unconfirmed state ~report kept =
   let ko = state.ui_language = Lang_ko in

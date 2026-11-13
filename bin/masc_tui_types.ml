@@ -21422,6 +21422,19 @@ let workspace_identity_unread ~ko = workspace_identity_name ~ko ^ " " ^ field_un
    screen that refuses one. *)
 let not_sent ~ko = if ko then "보내지 않음" else "not sent"
 let draft_retained ~ko = if ko then "초안 남아 있음" else "draft retained"
+let queued_input_retained ~ko = if ko then "대기 입력 남아 있음" else "queued input retained"
+
+(* What stays when a request is kept back: a message, a post, a comment or a
+   Keeper declaration keeps its draft, a queued run keeps its input, and a
+   decision or a vote has nothing to keep. *)
+type kept = Draft_kept | Queued_input_kept | Nothing_kept
+
+let kept_back ~ko reason kept =
+  let kept = match kept with
+    | Draft_kept -> [ draft_retained ~ko ]
+    | Queued_input_kept -> [ queued_input_retained ~ko ]
+    | Nothing_kept -> [] in
+  String.concat " · " (String.capitalize_ascii reason :: not_sent ~ko :: kept)
 
 let title_missing_reading ~ko ~error =
   if Option.is_some error then title_failed ~ko else title_unread ~ko

@@ -125,8 +125,11 @@ val refused_before_host : final -> bool
     retains it ([submit] in addons/exact_worker.py, the [fits] check that
     precedes [store.write accepted]); that request has no host terminal and
     no latest execution proof. The host also ends a request with this final
-    when every slot it calls refuses the body ([ending] in
-    server_lane_addon_exact.ml), and then keeps both. The final carries no
+    when no slot it called may pass again (a slot held for its provider's
+    stated wait is noted as [Transient]) and the body refusal ranks first
+    among the input refusals left ([ending] in server_lane_addon_exact.ml,
+    [Exact_lane_failure.ending_input_refusal]); slots that left no usable
+    answer may be among them. The host then keeps both. The final carries no
     answer. Every consumer that confirms a worker final against the host
     store asks this one question when the host holds no record. *)
 val retained_final_to_json : retained_final -> Yojson.Safe.t

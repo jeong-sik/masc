@@ -173,8 +173,10 @@ let consumer_read ~schema (record:Owner.retained) =
 
 (* What a consumer reads once it confirms the body refusal the worker gives
    before the host (Request_body_refused). The host also ends a request with
-   that final when every slot refuses the body, and keeps a record and a proof
-   then. History and floor build the refusal's evidence from the final alone
+   that final when no slot it called may pass again and the body refusal
+   ranks first among the input refusals left ([ending] in
+   server_lane_addon_exact.ml), and keeps a record and a proof then. History
+   and floor build the refusal's evidence from the final alone
    (Final.refusal_evidence). Admission reads the original's latest execution
    proof as the size evidence of its part (size_refused, frontier). *)
 type body_refusal_read = Final_alone | Size_proof
@@ -182,9 +184,11 @@ type body_refusal_read = Final_alone | Size_proof
 (* The latest execution proof is read through the original's record
    (Exact.latest_of_files). Once the Exact check deletes the record at the
    original's path, admission finds no size evidence for the body refusal:
-   the part waits, and no new root follows it (#49910's wait). An original
-   that never had a record waits so before any deletion, so only a deleted
-   record refuses it. *)
+   the part waits, and no new root follows it (#49910's wait). The check
+   refuses on that deletion whatever the receipt holds, so an original whose
+   receipt gave no size evidence before the deletion is refused too. An
+   original that never had a record loses nothing to the Exact check, and
+   passes. *)
 let size_proof_kept body_refusal (deleted:Preflight.deleted_record option) =
   match body_refusal,deleted with
   | Final_alone,_ | Size_proof,None -> Ok ()

@@ -673,6 +673,35 @@ let test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing () = with_f
     (evidence (refused Invalid_request)=Keeper_exact_walk_failure.empty);
   check bool "an outcome that is not a refusal shows nothing" true
     (evidence Lane_addon_exact.Outcome_unknown=Keeper_exact_walk_failure.empty))
+(* History builds the evidence of a body refusal from the final alone
+   (Final.refusal_evidence) and reads no size evidence through the record, so
+   the deploy check passes the original when the Exact check deletes that
+   record (RFC exact-request-skips-a-slot-that-refused-its-input, section 5). *)
+let test_preflight_passes_a_history_body_refusal_whose_record_goes () = with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun _ -> `Request_entity_too_large,
+    {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+  let deliveries= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:deliveries;
+  ignore (run_worker fixture);
+  let refused,capture=only_original fixture in
+  check bool "the host's body refusal ends the original at execution" true
+    (match Progress.phase refused.progress with
+     | Progress.Rejected {stage=Progress.Execution;_} -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+       false);
+  let request=Capture.request capture |> get in
+  let proof_path=Filename.concat (Store.root fixture.store) (Lane_addon_exact.Retained_key.proof_path
+    (Lane_addon_exact.Retained_key.of_request ~declaration_id:"librarian" request)) in
+  let refusals ()=(io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get).refusals in
+  check int "the refusal passes while its record and proof are kept" 0 (List.length (refusals ()));
+  (* A proof link that is not JSON: the Exact check deletes the record with it. *)
+  io (fun () -> write proof_path "{");
+  check int "the final alone gives history its evidence, so the original passes" 0
+    (List.length (refusals ())))
 (* The Librarian worker's declared reply frame is 4 MiB; a request whose host
    listing cannot fit is refused by the worker before the host retains it. *)
 let oversized_turn_bytes = 4_500_000
@@ -3805,6 +3834,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_worker_body_refusal_ends_the_original;
   test_case "a retained provider body refusal shows descent from its receipt" `Quick
     test_retained_body_refusal_shows_descent_from_its_receipt;
+  test_case "the deploy check passes a history body refusal whose record goes" `Quick
+    test_preflight_passes_a_history_body_refusal_whose_record_goes;
   test_case "a refusal the latest execution did not end in shows nothing" `Quick
     test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;

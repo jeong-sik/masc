@@ -377,9 +377,14 @@ let exact_refusal fixture scope (report:Lane_addon_store_preflight.report)=
       String.equal (Filename.dirname refusal.path) (scope_directory fixture scope)) report.refusals with
   | [{Lane_addon_store_preflight.decoder=Tool_request_exact_reads;_} as refusal] -> refusal
   | [] | _::_ -> fail "expected one refusal in the scope, of an original on the Exact files it reads"
-let refuses_owner fixture owner report=
+(* The scan refuses the owner's original, deletes its scope, and refuses no
+   record outside the original and its gate. *)
+let refuses_owner fixture owner (report:Lane_addon_store_preflight.report)=
   let scope=Capture.scope owner in
-  List.mem (scope_directory fixture scope) (exact_refusal fixture scope report).delete
+  let owned=[scope_directory fixture scope;scope_directory fixture (Gate.scope owner)] in
+  List.for_all (fun (refusal:Lane_addon_store_preflight.refusal) ->
+      List.mem (Filename.dirname refusal.path) owned) report.refusals
+  && List.mem (scope_directory fixture scope) (exact_refusal fixture scope report).delete
 let test_closure_projection_preserves_each_partial_move ()=with_fixture (fun ~sw:_ fixture ->
   drive_until fixture settled |> assert_settled;
   let owner,manifest=closure_manifest fixture in
@@ -2004,10 +2009,11 @@ let test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match ()=wit
   check bool "a judgment its recovered answer does not match stops the consumer" true
     (refuses_owner fixture owner (closure_preflight fixture)))
 
-(* The host ends a request with the body refusal when every slot refuses the
-   body, and keeps its record and proof. Admission reads that proof as the
-   size evidence of the part; with one candidate the part stays a singleton
-   frontier behind an execution refusal. *)
+(* The host ends a request with the body refusal when no slot it called may
+   pass again and the body refusal ranks first among the input refusals left;
+   here its only slot refuses the body. It keeps the record and proof.
+   Admission reads that proof as the size evidence of the part; with one
+   candidate the part stays a singleton frontier behind an execution refusal. *)
 let test_preflight_refuses_a_body_refusal_whose_size_evidence_goes ()=
   with_fixture ~initial:["a","Durable A"] (fun ~sw:_ fixture ->
     fixture.set_response (fun _ -> `Request_entity_too_large,refusal "invalid_request_error");
@@ -2033,7 +2039,7 @@ let test_preflight_refuses_a_body_refusal_whose_size_evidence_goes ()=
     check bool "the size evidence goes with the deleted record, so the owner is refused" true
       (refuses_owner fixture owner (closure_preflight fixture));
     io (fun () -> Sys.remove record_path;Sys.remove proof_path);
-    check int "an original with no record waits so before any deletion, and passes" 0
+    check int "an original with no record loses nothing to the Exact check, and passes" 0
       (List.length (closure_preflight fixture).refusals))
 
 type root_publication_cut = Before_child | Child_before_ack | Acknowledged_then_missing

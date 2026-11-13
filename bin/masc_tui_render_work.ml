@@ -1603,8 +1603,14 @@ let render_schedule_list (state : state) =
     if List.length refusal_rows <= room then refusal_rows
     else if room = 0 then []
     else
-      let cue = if selected_row_exists then "… Enter: full refusal diagnostic"
-        else "… refusal diagnostic truncated" in
+      let cue =
+        if selected_row_exists then
+          ui_text state ~ko:"… Enter: 거절 진단 전체"
+            ~en:"… Enter: full refusal diagnostic"
+        else
+          ui_text state ~ko:"… 거절 진단이 잘림"
+            ~en:"… refusal diagnostic truncated"
+      in
       List.filteri (fun index _ -> index < room - 1) refusal_rows
       @ [Message_layout.fit_width cue (max 1 (framed_inner_width cols))]
   in
@@ -1640,22 +1646,31 @@ let render_schedule_list (state : state) =
               c.push (data_unreliable_row ~cols err)
           | None ->
               c.push
-                ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset))
+                ((Theme.bad ())
+                 ^ ui_text state ~ko:"  (일정 저장소를 읽지 못함)"
+                     ~en:"  (schedule store unreadable)"
+                 ^ Ansi.reset))
        end else begin
+         let ko = state.ui_language = Lang_ko in
          let count_text =
            match snapshot.scs_request_count, snapshot.scs_paging with
            | Some total, Schedule_paging_unavailable when snapshot.scs_truncated ->
-               Printf.sprintf "  Requests: %d  (first %d; server paging unavailable)" total
-                 (List.length snapshot.scs_rows)
+               Printf.sprintf
+                 (if ko then "  일정 요청: %d건  (앞 %d건 · 서버가 페이지를 주지 않음)"
+                  else "  Requests: %d  (first %d; server paging unavailable)")
+                 total (List.length snapshot.scs_rows)
            | Some total, Schedule_paging _
              when snapshot.scs_truncated || Option.is_some state.schedules_page.sp_cursor ->
-               Printf.sprintf "  Requests: %d  · page %d (%d shown; pages may change)"
+               Printf.sprintf
+                 (if ko then "  일정 요청: %d건  · %d쪽 (%d건 표시 · 쪽 구성은 바뀔 수 있음)"
+                  else "  Requests: %d  · page %d (%d shown; pages may change)")
                  total (List.length state.schedules_page.sp_previous + 1)
                  (List.length snapshot.scs_rows)
            | Some total, (Schedule_paging_unavailable | Schedule_paging _) ->
-               Printf.sprintf "  Requests: %d" total
+               Printf.sprintf (if ko then "  일정 요청: %d건" else "  Requests: %d") total
            | None, (Schedule_paging_unavailable | Schedule_paging _) ->
-               "  Requests: " ^ Masc_tui_theme.Glyph.no_value
+               (if ko then "  일정 요청: " else "  Requests: ")
+               ^ Masc_tui_theme.Glyph.no_value
          in
          (* One row, not two. The count and the next wake are a phrase each,
             and with nothing due the second row was drawn blank -- a row of
@@ -1663,13 +1678,18 @@ let render_schedule_list (state : state) =
          let next_due_text =
            match snapshot.scs_next_due_iso with
            | Some iso ->
-               Printf.sprintf "%s  \xc2\xb7  Next due: %s%s" Ansi.dim
+               Printf.sprintf
+                 (if ko then "%s  \xc2\xb7  다음 기한: %s%s"
+                  else "%s  \xc2\xb7  Next due: %s%s")
+                 Ansi.dim
                  (Terminal_text.short_timestamp iso) Ansi.reset
            | None -> ""
          in
          let page_read_text = match state.schedules_navigation with
            | Some (ticket, page, _) when Snapshot_read.is_current state.schedules_read ticket ->
-               Printf.sprintf "  · loading page %d" (List.length page.sp_previous + 1)
+               Printf.sprintf
+                 (if ko then "  · %d쪽 조회 중" else "  · loading page %d")
+                 (List.length page.sp_previous + 1)
            | Some _ | None -> "" in
          c.push (Ansi.bold ^ count_text ^ Ansi.reset ^ next_due_text ^ page_read_text);
          c.push_divider ();

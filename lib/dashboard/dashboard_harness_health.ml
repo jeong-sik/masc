@@ -9,20 +9,6 @@ type rail_status =
   | Stale
   | Idle
 
-type harness_verdict_item =
-  { timestamp : float
-  ; task_id : string
-  ; task_title : string
-  ; agent_name : string
-  ; gate : string
-  ; verdict : string
-  ; evaluator_runtime : string
-  ; fallback_reason : string option
-  ; notes_hash : string
-    (** The calibration correlation key: a human label recorded against this
-        hash joins this verdict in {!Eval_calibration.find_divergences}. *)
-  }
-
 let max_recent_verdicts = 8
 let max_signal_scan = 500
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
@@ -48,95 +34,44 @@ let trim_recent (type a) max_items (values : a list) : a list =
   else List.filteri (fun idx _ -> idx < max_items) values
 ;;
 
-let string_field json key = Safe_ops.json_string ~default:"" key json
 let is_stale ~threshold_s timestamp = Time_compat.now () -. timestamp > threshold_s
 
-let date_bounds ?since ?until () =
-  let since =
-    match since with
-    | Some value -> value
-    | None -> ""
-  in
-  let until =
-    match until with
-    | Some value -> value
-    | None -> ""
-  in
-  since, until
-;;
-
-(* Both branches read at most [max_signal_scan] rows. They did not: the
-   unfiltered branch was bounded and the filtered one was not, so supplying a
-   date — which a caller does to narrow the result — removed the row cap and
-   scanned every day-file in range. A one-sided bound widens further, since the
-   missing side is filled with 2020-01-01 / 2099-12-31 below.
-
-   [read_range_recent] is the bounded reader for a date range and takes the
-   same cap the unfiltered branch already uses. *)
-let read_store_records store ?since ?until ~f () =
-  let since, until = date_bounds ?since ?until () in
-  if since = "" && until = ""
-  then Dated_jsonl.filter_map_recent store max_signal_scan ~f
-  else (
-    let start_date = if since = "" then "2020-01-01" else since in
-    let end_date = if until = "" then "2099-12-31" else until in
-    Dated_jsonl.filter_map_range_recent
-      store
-      ~since:start_date
-      ~until:end_date
-      max_signal_scan
-      ~f)
-;;
-
-let verdict_item_json (item : harness_verdict_item) =
+(* [notes_hash] is the calibration correlation key: a human label recorded
+   against it joins this verdict in {!Eval_calibration.find_divergences}. *)
+let verdict_item_json (item : Eval_calibration.verdict_record) =
   `Assoc
     [ "timestamp", `Float item.timestamp
     ; "task_id", `String item.task_id
     ; "task_title", `String item.task_title
     ; "agent_name", `String item.agent_name
-    ; "gate", `String item.gate
-    ; "verdict", `String item.verdict
+    ; "gate", `String (Task.Anti_rationalization.gate_to_string item.gate)
+    ; "verdict", `String (Eval_calibration.verdict_to_string item.verdict)
     ; "evaluator_runtime", `String item.evaluator_runtime
     ; "fallback_reason", Json_util.string_opt_to_json item.fallback_reason
     ; "notes_hash", `String item.notes_hash
     ]
 ;;
 
-let verdict_item_of_json json =
-  if not (String.equal (string_field json "record_type") "verdict")
-  then None
-  else
-    Some
-      { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
-      ; task_id = string_field json "task_id"
-      ; task_title = string_field json "task_title"
-      ; agent_name = string_field json "agent_name"
-      ; gate = string_field json "gate"
-      ; verdict = string_field json "verdict"
-      ; evaluator_runtime = string_field json "evaluator_runtime"
-      ; fallback_reason = Safe_ops.json_string_opt "fallback_reason" json
-      ; notes_hash = string_field json "notes_hash"
-      }
-;;
+type recent_verdicts =
+  { items : Eval_calibration.verdict_record list (** Newest first. *)
+  ; unreadable_rows : int
+    (** Rows of the scanned window the store decoder refused. *)
+  }
 
-let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ~base_path ()
-  : harness_verdict_item list
-  =
-  let verdicts : harness_verdict_item list =
-    read_store_records
-      (Eval_calibration.store ~base_path)
-      ?since
-      ?until
-      ~f:verdict_item_of_json
-      ()
+let read_recent_verdicts ?since ?until ~base_path () : recent_verdicts =
+  let window =
+    Eval_calibration.read_window ?since ?until ~base_path ~max_rows:max_signal_scan ()
   in
-  let verdicts =
+  let items =
     List.sort
-      (fun (left : harness_verdict_item) (right : harness_verdict_item) ->
+      (fun (left : Eval_calibration.verdict_record)
+        (right : Eval_calibration.verdict_record) ->
          Float.compare right.timestamp left.timestamp)
-      verdicts
+      window.verdicts
   in
-  trim_recent limit verdicts
+  { items = trim_recent max_recent_verdicts items
+  ; unreadable_rows = window.unreadable_rows
+  }
 ;;
 
 let evaluator_status ~calibration latest_timestamp =
@@ -156,7 +91,7 @@ let evaluator_status ~calibration latest_timestamp =
       else Healthy)
 ;;
 
-let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
+let latest_timestamp_of_verdicts (verdicts : Eval_calibration.verdict_record list) =
   match verdicts with
   | item :: _ -> Some item.timestamp
   | [] -> None
@@ -164,7 +99,7 @@ let latest_timestamp_of_verdicts (verdicts : harness_verdict_item list) =
 
 let overview_json
       ~(calibration : Yojson.Safe.t)
-      ~(recent_verdicts : harness_verdict_item list)
+      ~(recent_verdicts : Eval_calibration.verdict_record list)
   =
   let verdict_last = latest_timestamp_of_verdicts recent_verdicts in
   let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in
@@ -208,9 +143,10 @@ let json ?since ?until ~base_path () =
           "The safety harness tracks supporting evaluator and long-running continuity \
            rails, so these signals are not a direct keep/discard judge for generator \
            iterations." )
-    ; "overview", overview_json ~calibration ~recent_verdicts
+    ; "overview", overview_json ~calibration ~recent_verdicts:recent_verdicts.items
     ; "calibration", calibration
-    ; "recent_verdicts", `List (List.map verdict_item_json recent_verdicts)
+    ; "recent_verdicts", `List (List.map verdict_item_json recent_verdicts.items)
+    ; "recent_verdicts_unreadable_count", `Int recent_verdicts.unreadable_rows
     ]
 ;;
 

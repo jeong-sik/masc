@@ -16,6 +16,7 @@ from typing import Callable
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "operator-quiz"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # records.py
 
 import quiz_flow as f  # noqa: E402
 import quiz_grading as g  # noqa: E402

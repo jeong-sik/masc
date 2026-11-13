@@ -376,6 +376,10 @@ describe('the frame', () => {
     expect([container.querySelectorAll('main').length, container.querySelectorAll('h1').length]).toEqual([1, 1])
   })
 
+  it('draws the subscriptions panel only for someone signed in', () => {
+    expect(count('section[aria-labelledby="subscriptions-heading"]')).toEqual(named('signed in', 'signing out', 'a sign-out that failed', 'signed out'))
+  })
+
   it('offers the way out only to someone signed in', () => {
     expect(count('header button')).toEqual(named('signed in', 'signing out', 'a sign-out that failed', 'signed out'))
   })

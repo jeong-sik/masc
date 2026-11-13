@@ -594,8 +594,11 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 
 - 진행에는 디스패치 전 거절(`Rejected {stage=Before_dispatch}`)을 적어요.
 - 근거에는 바뀐 것을 닫힌 갈래 셋 가운데 하나로 적어요. 권한만, 답 형식만, 둘 다예요. 권한에는 옛 권한 해시와 지금 권한 해시를, 답 형식에는 두 답 형식의 digest 를 실어요. 바뀐 것이 없는 거절은 만들 수 없어요.
-- 근거는 지금 그 거절을 읽는 곳에 실어요. Task 는 판정 없는 `result`(`verifier_review_worker.ml:112-116`)와 바뀐 것을 새 거절 schema 로 적어요. Goal 은 `goal_verifier_refusal/v1` 봉투(판정 없는 receipt 와 disposition)의 disposition 에 실어요(`goal_verifier_worker.ml:376-385`).
-- 지금 받는 함수는 열쇠 집합을 정확히 맞춰요. Task 는 `terminal_review_result`(`verifier_review_owner.ml:314-326`), Goal 은 `retryable_refusal`(`goal_verifier_worker.ml:484-486`)이에요. 둘 다 새 갈래를 받게 고쳐요.
+- 근거에는 바뀐 것만 닫힌 값으로 실어요. Task 와 Goal 이 같은 근거를 써요.
+- 판정 없는 `result` 나 receipt 는 싣지 않아요. 둘 다 리뷰어 이름(`evaluator_runtime`)을 요구해요(`verifier_review_owner.ml:212`, `:253`). 디스패치 전 거절에는 돈 리뷰어가 없어요. 이름을 만들어 넣으면 Goal host 가 그 이름을 실행 기록 장부에 공개해요(`goal_verifier_host.ml:57-63`).
+- 거절을 읽는 곳은 거절 단계부터 봐요. 디스패치 전 거절이면 새 근거로 읽고, 실행 거절이면 지금 함수로 읽어요.
+- 지금 함수는 넓히지 않아요. 열쇠 집합을 정확히 맞추고, Goal 의 실행 거절도 읽어요. Task 는 `terminal_review_result`·`retry_result`(`verifier_review_owner.ml:314-333`), Goal 은 `refusal_receipt`(`goal_verifier_worker.ml:376-385`)·`retryable_refusal`(`:484-494`)이에요.
+- Goal 의 부모 attempt 줄은 receipt 가 없어서 판정과 리뷰어 이름 없이 끝나요(`goal_verifier_host.ml:64-69`).
 - Goal 은 이 봉투가 맞지 않으면 그 Goal 이 통째로 서요. 처리마다 그 Goal 의 모든 행을 다시 읽고(`recover`, `goal_verification_agent.ml:456-478`), 하나라도 못 읽으면 `Commit_refused` 로 미루고 다음 단계로 가지 않아요(`:565-568`). 부모 attempt 의 실행 기록 줄은 같은 처리 안에서 끝난 것으로 공개해요.
 
 다음 attempt 는 걸음(walk)이 만들어요.
@@ -655,7 +658,10 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 - 설치 때 두 스코프의 레코드와 본문을 모두 지워요. original digest 마다 있는 리뷰 실행 폴더(`verifier-executions/<digest>/`, `verifier_review_execution.ml:14-17`)도 지워요. 그다음 새 build 를 설치해요. 옛 모양을 읽는 코드는 두지 않아요.
 - 잃는 것은 지난 attempt 의 original 과 판정 기록이에요. Task·Goal 에 이미 커밋된 판정과 실행 기록 장부의 줄은 남아요.
 - 기다리던 검증은 서버가 시작할 때 첫 attempt 로 다시 잡혀요. Task 는 시작 정리가 잡고, Goal 은 Goal 검증 lane 의 첫 훑기(`goal_verification_agent.ml:951`)가 잡아요. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 해요.
-- 지우는 레코드를 가리키는 곳이 둘 있어요. 하나는 완료됐지만 실행 기록 장부에 아직 공개되지 않은 Task 리뷰 레코드예요(`verifier_review_publication.ml:128-135`). 다른 하나는 run 마다 한 줄인 Goal 실행 기록(`goal-verification-runs.jsonl`)이에요. 둘을 어떻게 닫을지는 구현 PR 이 정해요(11절).
+- 지우는 레코드를 가리키는 곳이 둘 있어요. 하나는 완료됐지만 실행 기록 장부에 아직 공개되지 않은 Task 리뷰 레코드예요(`verifier_review_publication.ml:128-135`). 다른 하나는 run 마다 한 줄인 Goal 실행 기록(`goal-verification-runs.jsonl`)이에요.
+- **[사실]** 둘 다 새 코드 없이 닫혀요. 두 장부는 재시작 replay 때 Running 줄을 버려요(`replayed_running_completion = None`, `verification_run_registry.ml:154`, `goal_verification_run_registry.ml:115`, `run_registry_core.ml:536-541`).
+- 잃는 것은 하나예요. 커밋은 됐지만 장부에 완료 줄을 아직 못 쓴 Task 리뷰의 완료 줄이에요. 구현 PR 의 Fresh state 항목에 적어요.
+- Goal 의 완료 줄은 이력으로 남아요. 장부 줄은 남은 original 의 run id 로만 찾아요(`goal_verifier_host.ml:20-29`). 그래서 original 이 지워진 줄을 읽는 곳이 없어요.
 
 **[제안]** 시험이에요.
 
@@ -704,7 +710,7 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 | L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것과 보고 도구 이름), `goal_criterion_agent.ml`·`goal_verifier_worker.ml`(패턴 한 줄씩), `verifier_review_worker.ml`, `verifier_review_walk_result.ml(i)`·`verifier_review_ending.ml(i)`(새 파일), `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml(i)`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
 | L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. L2a 전에는 20행이었다. L2a 배포 뒤 잰 값은 18건이고(2026-11-12 13:59Z, 8절), L2c 뒤에는 돌고 있는 리뷰와 남은 10건으로 본다 |
 | L2c | `lane_addon_tool_request_owner.ml`(`load_listed` 와 신원 비교), `completion_authority_agent.ml`(실패 상세), 그 시험 | 목록 읽기를 쓰는 17곳(`load_scope` 14, `fold_all` 1, `load_listed` 직접 2)에서 목록 읽기 실패가 줄어든다. 공용 층이라, 그 자리들이 목록에서 본 진행에 기대지 않는지 리뷰가 봐야 한다 |
-| L2d | `verification_authority_tools.ml(i)`(해시 둘), `verifier_review_original.ml(i)`·`goal_verifier_original.ml(i)`(다음 attempt 를 지금 권한·답 형식·지시로, Goal 측정값 칸, Goal 답 형식 함수 하나로), `verifier_review_owner.ml`(`next_attempt`, `retain_child`, `terminal_review_result`, `retry_result`), `verifier_review_worker.ml`·`goal_verifier_worker.ml`(typed 검사, 거절 근거, `retryable_refusal`, `restore_child`), `verifier_review_execution.ml`(답 형식이 다른 끊긴 리뷰), `completion_authority_agent.ml`·`goal_verification_agent.ml`(같은 처리 안의 다음 attempt), `goal_verifier_host.ml`·`workspace_goals.ml`(Goal 오류 갈래), `lane_addon_request_progress.ml`(전이 하나), 그 시험, `docs/verification-pipeline-policy.md` | original 의 저장 모양이 바뀌어 hard cut 이다. 설치 때 두 리뷰 스코프의 이력을 지운다. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 한다. 공용 상태 기계를 쓰는 다른 곳(`Successor_intended` 를 다루는 lib 파일 10곳)이 새 전이를 내지 않는지 리뷰가 봐야 한다. 조회 권한의 경계라 사람이 리뷰한다 |
+| L2d | `verification_authority_tools.ml(i)`(해시 둘), `verifier_review_original.ml(i)`·`goal_verifier_original.ml(i)`(다음 attempt 를 지금 권한·답 형식·지시로, Goal 측정값 칸, Goal 답 형식 함수 하나로), `verifier_review_authority_change.ml(i)`(새 모듈, 바뀐 것을 닫힌 값으로), `verifier_review_owner.ml`(`next_attempt`, `retain_child`, 거절을 단계별로 읽기), `verifier_review_worker.ml`·`goal_verifier_worker.ml`(typed 검사, 거절 근거, 거절을 단계별로 읽기, `restore_child`), `verifier_review_execution.ml`(답 형식이 다른 끊긴 리뷰), `completion_authority_agent.ml`·`goal_verification_agent.ml`(같은 처리 안의 다음 attempt), `goal_verifier_host.ml`·`workspace_goals.ml`(Goal 오류 갈래), `lane_addon_request_progress.ml`(전이 하나), 그 시험, `docs/verification-pipeline-policy.md` | original 의 저장 모양이 바뀌어 hard cut 이다. 설치 때 두 리뷰 스코프의 이력을 지운다. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 한다. 공용 상태 기계를 쓰는 다른 곳(`Successor_intended` 를 다루는 lib 파일 10곳)이 새 전이를 내지 않는지 리뷰가 봐야 한다. 조회 권한의 경계라 사람이 리뷰한다 |
 | 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |
 | L4 | 그 RFC 의 L3 | 그 RFC 에 적혀 있다 |
@@ -794,7 +800,6 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 - 멈춘 19건 가운데 `unsettled effect` 1건과 `raised` 1건의 원인.
 - L2d 의 4건에서 옛 해시와 지금 해시를 다시 계산해 맞춰 보지 않았어요. 설명 글을 바꾼 커밋(#50387), original 이 잡힌 날짜, 복사하는 코드가 서로 맞는 것까지 봤어요.
 - 리뷰 도구의 설명 글, route, 생산자의 sandbox 설정이 배포 사이에 얼마나 자주 바뀌는지 재지 않았어요. 2026-11-05~11-12 사이 해시 입력 파일을 건드린 커밋 셋 가운데 해시를 바꾼 것으로 확인한 것은 #50387 하나예요.
-- L2d 의 hard cut 이 지우는 레코드를 가리키는 두 곳을 어떻게 닫을지. 실행 기록 장부에 아직 공개되지 않은 완료 Task 리뷰 레코드와, original 을 잃는 Goal 실행 기록 줄이에요. 구현 PR 이 정해요.
 - 권한 불일치로 미뤄진 Goal 검증의 수. 세지 않았어요.
 - 디스패치한 뒤 끊긴 Task attempt 가운데 판정 보고가 남았는데 `Judged` 로 저장되지 않은 것이 얼마나 되는지 재지 않았어요. 10절 8번의 대가가 이 수에 달려 있어요.
 - 공용 진행 상태 기계를 쓰는 lib 파일 10곳을 내가 모두 읽지는 않았어요. 내가 읽은 것은 submit_once, Curator, Librarian 셋이고, 나머지는 조사 에이전트가 읽었어요.

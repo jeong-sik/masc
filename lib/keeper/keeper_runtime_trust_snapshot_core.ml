@@ -17,19 +17,34 @@ type disposition_reason =
   | Healthy
   | Approval_queue_unreadable
   | Pending_operator_decision
-  | Runtime_exhausted
-  | Critical_block
-  | Unknown_runtime_blocker
+  | Runtime_blocker of Keeper_status_bridge_blocker.runtime_blocker_class
   | Keeper_dashboard_worker_exception
   | Receipt_reason of Keeper_execution_receipt.operator_disposition_reason
+
+(* A blocker class shows under its own name, so an operator reads which
+   blocker it is. An unresolved fiber is the one class whose reason has a
+   spelling of its own. *)
+let runtime_blocker_reason_to_wire
+      (blocker_class : Keeper_status_bridge_blocker.runtime_blocker_class)
+  =
+  match blocker_class with
+  | Blocked_by_unresolved_fiber -> "critical_block"
+  | Blocked_by_heartbeat_failures
+  | Blocked_by_turn_failures
+  | Blocked_by_runtime_exhaustion
+  | Blocked_by_provider_runtime_error
+  | Blocked_by_official_client_recovery
+  | Blocked_by_turn_configuration_error
+  | Blocked_by_exception
+  | Blocked_by_operator_interrupt ->
+    Keeper_status_bridge_blocker.runtime_blocker_class_to_string blocker_class
+;;
 
 let disposition_reason_to_wire = function
   | Healthy -> "healthy"
   | Approval_queue_unreadable -> "approval_queue_unavailable"
   | Pending_operator_decision -> "pending_operator_decision"
-  | Runtime_exhausted -> "runtime_exhausted"
-  | Critical_block -> "critical_block"
-  | Unknown_runtime_blocker -> "unknown_runtime_blocker"
+  | Runtime_blocker blocker_class -> runtime_blocker_reason_to_wire blocker_class
   | Keeper_dashboard_worker_exception -> "keeper_dashboard_worker_exception"
   | Receipt_reason reason -> Keeper_execution_receipt.operator_disposition_reason_to_string reason
 ;;
@@ -64,21 +79,7 @@ let fallback_disposition raw =
     Keeper_trust_disposition.Alert, Pending_operator_decision
   | Approval_queue_available _ ->
     (match raw.runtime_blocker_class with
-     | Some Keeper_status_bridge_blocker.Blocked_by_runtime_exhaustion ->
-       Keeper_trust_disposition.Alert, Runtime_exhausted
-     | Some Keeper_status_bridge_blocker.Blocked_by_unresolved_fiber ->
-       Keeper_trust_disposition.Alert, Critical_block
-     (* These seven show as unknown_runtime_blocker. Which reason each should
-        show is a display decision of its own (#43018). *)
-     | Some
-         ( Keeper_status_bridge_blocker.Blocked_by_heartbeat_failures
-         | Keeper_status_bridge_blocker.Blocked_by_turn_failures
-         | Keeper_status_bridge_blocker.Blocked_by_provider_runtime_error
-         | Keeper_status_bridge_blocker.Blocked_by_official_client_recovery
-         | Keeper_status_bridge_blocker.Blocked_by_turn_configuration_error
-         | Keeper_status_bridge_blocker.Blocked_by_exception
-         | Keeper_status_bridge_blocker.Blocked_by_operator_interrupt ) ->
-       Keeper_trust_disposition.Alert, Unknown_runtime_blocker
+     | Some blocker_class -> Keeper_trust_disposition.Alert, Runtime_blocker blocker_class
      | None -> Keeper_trust_disposition.Pass, Healthy)
 ;;
 

@@ -78,15 +78,20 @@ type call_refusal =
   | Refused of string
   | Seats_unknown of string
 
-(* A seat that explicitly left through the play-session endpoint stays
+let cannot_read_auth_config detail = "cannot read the auth config: " ^ detail
+
+(* //HIGH-RISK-UNREVIEWED: admission to every controller-taking DOS call.
+   A seat that explicitly left through the play-session endpoint stays
    invitation-valid but cannot move the machine until it reconnects: its
    input is a client refusal it can correct. Unreadable departure evidence is
-   never read as connected. Principals without a play session (Keepers,
-   operators, Workers) are always connected. *)
+   never read as connected, and an auth config that cannot be read does not
+   say whether seats are checked at all, so it refuses like [pass_refusal].
+   Principals without a play session (Keepers, operators, Workers) are always
+   connected. *)
 let participation_refusal ~transaction ~(config : Workspace.config) ~who =
   match auth_mode ~config with
   | Self_declared -> None
-  | Unreadable _ -> None
+  | Unreadable detail -> Some (Seats_unknown (cannot_read_auth_config detail))
   | Enforced ->
     (match Play_participation.current ~transaction ~base_path:config.base_path ~name:who with
      | Ok Play_participation.Connected -> None
@@ -102,7 +107,7 @@ let participation_refusal ~transaction ~(config : Workspace.config) ~who =
 let pass_refusal ~transaction ~config ~target =
   match auth_mode ~config with
   | Self_declared -> None
-  | Unreadable detail -> Some (Seats_unknown ("cannot read the auth config: " ^ detail))
+  | Unreadable detail -> Some (Seats_unknown (cannot_read_auth_config detail))
   | Enforced -> (
     match target with
     | Error message -> Some (Refused message)

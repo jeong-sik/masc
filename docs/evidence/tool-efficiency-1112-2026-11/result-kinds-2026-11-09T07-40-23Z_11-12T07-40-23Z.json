@@ -1,0 +1,79 @@
+{
+  "window": {
+    "since": "2026-11-09T07:40:23Z",
+    "end": "2026-11-12T07:40:23Z",
+    "hours": 72.0
+  },
+  "execute_calls_by_turn_kind": {
+    "autonomous": 46097,
+    "direct": 37971
+  },
+  "sleep_gh_calls_by_turn_kind": {
+    "autonomous": 304,
+    "direct": 231
+  },
+  "sleep_gh_hours_by_turn_kind": {
+    "autonomous": 21.78,
+    "direct": 14.81
+  },
+  "sleep_gh_hours_percent_by_turn_kind": {
+    "autonomous": 59.5,
+    "direct": 40.5
+  },
+  "loop_sleep_gh_calls_by_turn_kind": {
+    "autonomous": 187,
+    "direct": 66
+  },
+  "loop_sleep_gh_hours_by_turn_kind": {
+    "autonomous": 16.56,
+    "direct": 6.61
+  },
+  "github_wait_hours_by_turn_kind": {
+    "autonomous": 38.34,
+    "direct": 21.43
+  },
+  "github_wait_hours_percent_by_turn_kind": {
+    "autonomous": 64.2,
+    "direct": 35.8
+  },
+  "github_wait_by_keeper": [
+    {
+      "keeper": "rondo",
+      "autonomous": 153,
+      "direct": 190
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "autonomous": 177,
+      "direct": 19
+    },
+    {
+      "keeper": "wkbl-data",
+      "autonomous": 34,
+      "direct": 44
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "autonomous": 53
+    },
+    {
+      "keeper": "wkbl-front",
+      "autonomous": 27,
+      "direct": 21
+    },
+    {
+      "keeper": "pr-updater",
+      "autonomous": 21
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "autonomous": 1,
+      "direct": 10
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "direct": 3,
+      "autonomous": 6
+    }
+  ]
+}

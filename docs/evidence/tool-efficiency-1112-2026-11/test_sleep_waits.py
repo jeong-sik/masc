@@ -92,6 +92,88 @@ class GhWaitKindTest(unittest.TestCase):
         self.assertEqual(sw.gh_wait_kind("gh api user"), "other gh")
 
 
+def in_kind(row: Row, kind: str) -> Row:
+    return {**row, "turn_kind": kind}
+
+
+class KindsTest(unittest.TestCase):
+    def test_sleep_gh_calls_are_split_by_turn_kind(self) -> None:
+        rows = [
+            in_kind(execute("a", "1", 1, 300, f"sleep 290; {RUN}"), "direct"),
+            in_kind(execute("a", "2", 2, 100, f"sleep 90; {RUN}"), "autonomous"),
+            in_kind(execute("b", "3", 3, 200, f"sleep 190; {RUN}"), "autonomous"),
+            in_kind(execute("b", "3", 4, 5, "ls"), "autonomous"),
+        ]
+        result = sw.kinds_of(rows)
+        self.assertEqual(result["execute_calls_by_turn_kind"], {"direct": 1, "autonomous": 3})
+        self.assertEqual(result["sleep_gh_calls_by_turn_kind"], {"direct": 1, "autonomous": 2})
+        self.assertEqual(result["sleep_gh_hours_by_turn_kind"], {"direct": 0.08, "autonomous": 0.08})
+        self.assertEqual(result["sleep_gh_hours_percent_by_turn_kind"], {"direct": 50.0, "autonomous": 50.0})
+
+    def test_a_call_that_is_not_sleep_gh_is_only_an_execute_call(self) -> None:
+        rows = [
+            in_kind(execute("a", "1", 1, 300, "sleep 290; echo done"), "direct"),
+            in_kind(execute("a", "1", 2, 30, f"sleep 20; {RUN}"), "direct"),
+        ]
+        result = sw.kinds_of(rows)
+        self.assertEqual(result["execute_calls_by_turn_kind"], {"direct": 2})
+        self.assertEqual(result["sleep_gh_calls_by_turn_kind"], {})
+        self.assertEqual(result["sleep_gh_hours_percent_by_turn_kind"], {})
+
+    def test_a_row_without_a_turn_kind_is_counted_as_none(self) -> None:
+        result = sw.kinds_of([execute("a", "1", 1, 70, f"sleep 65; {RUN}")])
+        self.assertEqual(result["sleep_gh_calls_by_turn_kind"], {"None": 1})
+
+    def test_keepers_are_sorted_by_their_calls(self) -> None:
+        rows = [
+            in_kind(execute("few", "1", 1, 70, f"sleep 65; {RUN}"), "direct"),
+            in_kind(execute("many", "2", 2, 70, f"sleep 65; {RUN}"), "autonomous"),
+            in_kind(execute("many", "3", 3, 70, f"sleep 65; {RUN}"), "direct"),
+        ]
+        self.assertEqual(
+            sw.kinds_of(rows)["github_wait_by_keeper"],
+            [{"keeper": "many", "autonomous": 1, "direct": 1}, {"keeper": "few", "direct": 1}],
+        )
+
+
+LOOP = "for i in 1 2 3 4 5 6; do " + RUN + "; sleep 30; done"
+
+
+class LoopPollTest(unittest.TestCase):
+    def test_a_loop_poll_of_github_is_counted_apart_from_sleep_gh(self) -> None:
+        rows = [
+            in_kind(execute("a", "1", 1, 300, f"sleep 290; {RUN}"), "direct"),
+            in_kind(execute("a", "2", 2, 180, LOOP), "autonomous"),
+            in_kind(execute("b", "3", 3, 180, LOOP), "direct"),
+        ]
+        result = sw.kinds_of(rows)
+        self.assertEqual(result["sleep_gh_calls_by_turn_kind"], {"direct": 1})
+        self.assertEqual(result["loop_sleep_gh_calls_by_turn_kind"], {"autonomous": 1, "direct": 1})
+        self.assertEqual(result["loop_sleep_gh_hours_by_turn_kind"], {"autonomous": 0.05, "direct": 0.05})
+        self.assertEqual(result["github_wait_hours_by_turn_kind"], {"direct": 0.13, "autonomous": 0.05})
+        self.assertEqual(result["github_wait_hours_percent_by_turn_kind"], {"direct": 72.7, "autonomous": 27.3})
+
+    def test_a_loop_that_does_not_read_github_is_not_counted(self) -> None:
+        loop = "for i in 1 2 3 4 5 6; do curl -s localhost:8935/health; sleep 30; done"
+        result = sw.kinds_of([in_kind(execute("a", "1", 1, 180, loop), "direct")])
+        self.assertEqual(result["loop_sleep_gh_calls_by_turn_kind"], {})
+        self.assertEqual(result["github_wait_hours_percent_by_turn_kind"], {})
+
+    def test_a_short_loop_is_not_counted(self) -> None:
+        result = sw.kinds_of([in_kind(execute("a", "1", 1, 40, LOOP), "direct")])
+        self.assertEqual(result["loop_sleep_gh_calls_by_turn_kind"], {})
+
+    def test_the_keeper_list_counts_both_kinds_of_wait(self) -> None:
+        rows = [
+            in_kind(execute("a", "1", 1, 300, f"sleep 290; {RUN}"), "direct"),
+            in_kind(execute("a", "2", 2, 180, LOOP), "autonomous"),
+        ]
+        self.assertEqual(
+            sw.kinds_of(rows)["github_wait_by_keeper"],
+            [{"keeper": "a", "direct": 1, "autonomous": 1}],
+        )
+
+
 class ShareTest(unittest.TestCase):
     def test_counts(self) -> None:
         rows = [

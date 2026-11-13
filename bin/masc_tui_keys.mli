@@ -570,4 +570,5 @@ val footer_hints_lane_inventory_detail : lang:Masc_tui_types.ui_language -> stri
 val footer_hints_link_preview_empty : lang:Masc_tui_types.ui_language -> string
 val footer_hints_play_invite : lang:Masc_tui_types.ui_language -> string
 val footer_hints_answering : lang:Masc_tui_types.ui_language -> string
+val footer_hints_agenda : lang:Masc_tui_types.ui_language -> openable:bool -> string
 val footer_hints_changes_diff : lang:Masc_tui_types.ui_language -> string

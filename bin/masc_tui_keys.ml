@@ -3362,6 +3362,15 @@ let footer_hints_answering ~lang =
     ; close_binding
     ]
 
+(* The agenda panel. With no row to open, j/k scrolls and Enter is not
+   named. *)
+let footer_hints_agenda ~lang ~openable =
+  hints_in_order ~lang
+    ((if openable then [ b ~ko:"선택" Navigate "j/k" "move" ] else [ scroll_binding ])
+     @ [ page_binding; b ~ko:"처음/끝" Navigate "g/G" "first/last" ]
+     @ (if openable then [ b ~ko:"열기" Act "Enter" "open" ] else [])
+     @ [ close_binding; b ~ko:"도움말" Meta "?" "help" ])
+
 let footer_hints_changes_diff ~lang =
   hints_in_order ~lang
     [ b ~ko:"좌우 이동" Navigate "Shift-Left / Shift-Right" "pan"

@@ -261,9 +261,9 @@ let two_column ~cols left right =
   indent ^ left ^ String.make gap ' ' ^ right
 ;;
 
-let said (row : scheduled) =
+let said ~ko (row : scheduled) =
   match String.trim row.what, String.trim row.who with
-  | "", "" -> "(untitled)"
+  | "", "" -> if ko then "(제목 없음)" else "(untitled)"
   | "", who -> who
   | what, "" -> what
   | what, who -> Printf.sprintf "%s \xc2\xb7 %s" what who
@@ -271,37 +271,38 @@ let said (row : scheduled) =
 
 (* How long the operator has not answered. Coarse on purpose: the row exists
    because the wait is long, and minutes past the first day are noise. *)
-let waited_since ~now since =
+let waited_since ~ko ~now since =
   let seconds = now -. since in
   if Float.compare seconds 0.0 <= 0
-  then "just now"
+  then (if ko then "방금" else "just now")
   else (
     let whole = int_of_float seconds in
     if whole >= 86_400
-    then Printf.sprintf "%dd waiting" (whole / 86_400)
+    then Printf.sprintf (if ko then "%dd째 대기" else "%dd waiting") (whole / 86_400)
     else if whole >= 3_600
-    then Printf.sprintf "%dh waiting" (whole / 3_600)
-    else Printf.sprintf "%dm waiting" (whole / 60))
+    then Printf.sprintf (if ko then "%dh째 대기" else "%dh waiting") (whole / 3_600)
+    else Printf.sprintf (if ko then "%dm째 대기" else "%dm waiting") (whole / 60))
 ;;
 
 (* A Goal's update time is not the time it began awaiting confirmation. *)
-let updated ~now since_iso =
+let updated ~ko ~now since_iso =
   match Time_codec.parse_rfc3339_opt since_iso with
   | None -> ""
   | Some since ->
     let seconds = now -. since in
     if Float.compare seconds 0.0 <= 0
-    then "updated just now"
+    then (if ko then "방금 갱신" else "updated just now")
     else (
       let whole = int_of_float seconds in
       if whole >= 86_400
-      then Printf.sprintf "updated %dd ago" (whole / 86_400)
+      then Printf.sprintf (if ko then "갱신 %dd 전" else "updated %dd ago") (whole / 86_400)
       else if whole >= 3_600
-      then Printf.sprintf "updated %dh ago" (whole / 3_600)
-      else Printf.sprintf "updated %dm ago" (whole / 60))
+      then Printf.sprintf (if ko then "갱신 %dh 전" else "updated %dh ago") (whole / 3_600)
+      else Printf.sprintf (if ko then "갱신 %dm 전" else "updated %dm ago") (whole / 60))
 ;;
 
 let overlay ~ko ~now ~localtime ~cols t =
+  let say korean english = if ko then korean else english in
   let quiet text = { tone = Quiet; text = "  " ^ text; goes_to = Nowhere } in
   (* Why it failed, not only that it did. The reason is beside the flag in the
      state -- "schedule load failed: HTTP 503" -- and this panel dropped it,
@@ -321,11 +322,11 @@ let overlay ~ko ~now ~localtime ~cols t =
      no one had seen. *)
   let wakes =
     match t.coming with
-    | Not_read -> [ quiet "not loaded yet" ]
+    | Not_read -> [ quiet (say "미조회" "not loaded yet") ]
     | Read_failed reason -> [ failure ~cols reason ]
     | Read [] when t.scheduled_freshness = Refresh_needed ->
       [ quiet (if ko then "일정 정보가 오래됐을 수 있음" else "Schedule may be out of date") ]
-    | Read [] -> [ quiet "nothing is scheduled" ]
+    | Read [] -> [ quiet (say "예정된 일정 없음" "nothing is scheduled") ]
     | Read rows ->
       (if t.scheduled_freshness = Refresh_needed then
          [ quiet (if ko then "일정 정보가 오래됐을 수 있음" else "Schedule may be out of date") ]
@@ -339,16 +340,16 @@ let overlay ~ko ~now ~localtime ~cols t =
                  (Printf.sprintf
                     "%-6s  %s"
                     (hour_and_minute ~now ~localtime row)
-                    (said row))
+                    (said ~ko row))
                  row.recurrence
            })
         rows
   in
   let questions =
     match t.blocked with
-    | Not_read -> [ quiet "not loaded yet" ]
+    | Not_read -> [ quiet (say "미조회" "not loaded yet") ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no keeper is holding a call" ]
+    | Read [] -> [ quiet (say "보류된 호출 없음" "no keeper is holding a call") ]
     | Read rows ->
       List.map
         (fun (held : awaiting) ->
@@ -357,16 +358,17 @@ let overlay ~ko ~now ~localtime ~cols t =
            ; text =
                two_column
                  ~cols
-                 (Printf.sprintf "%s is holding %s" held.asked_by held.question)
-                 (waited_since ~now held.asked_at)
+                 (Printf.sprintf (if ko then "%s \xc2\xb7 %s 호출 보류 중" else "%s is holding %s")
+                    held.asked_by held.question)
+                 (waited_since ~ko ~now held.asked_at)
            })
         rows
   in
   let asked =
     match t.asking with
-    | Not_read -> [ quiet "not loaded yet" ]
+    | Not_read -> [ quiet (say "미조회" "not loaded yet") ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no keeper has asked a question" ]
+    | Read [] -> [ quiet (say "답을 기다리는 질문 없음" "no keeper has asked a question") ]
     | Read rows ->
       List.map
         (fun (row : open_question) ->
@@ -381,18 +383,18 @@ let overlay ~ko ~now ~localtime ~cols t =
                  ~cols
                  (match row.first_question with
                   | Some question ->
-                    Printf.sprintf "%s asks: %s" keeper
+                    Printf.sprintf (if ko then "%s 의 질문: %s" else "%s asks: %s") keeper
                       (Masc.Tui_terminal_text.preview_line question)
-                  | None -> Printf.sprintf "%s asked a question" keeper)
-                 (waited_since ~now row.asked_at)
+                  | None -> Printf.sprintf (if ko then "%s 의 질문" else "%s asked a question") keeper)
+                 (waited_since ~ko ~now row.asked_at)
            })
         rows
   in
   let stuck =
     match t.stuck with
-    | Not_read -> [ quiet "not loaded yet" ]
+    | Not_read -> [ quiet (say "미조회" "not loaded yet") ]
     | Read_failed reason -> [ failure ~cols reason ]
-    | Read [] -> [ quiet "no task is on the operator list" ]
+    | Read [] -> [ quiet (say "운영자 목록에 작업 없음" "no task is on the operator list") ]
     (* Every row, oldest first. The panel scrolls, and a row the cursor
        cannot reach is work the operator cannot open. *)
     | Read rows ->
@@ -402,17 +404,17 @@ let overlay ~ko ~now ~localtime ~cols t =
            ; goes_to = Stuck_task row.task_id
            ; text = two_column ~cols
                (Masc.Tui_terminal_text.preview_line row.what)
-               ("since " ^ row.since_iso)
+               (if ko then row.since_iso ^ " 부터" else "since " ^ row.since_iso)
            })
         rows
   in
   let goals =
     match t.confirming with
-    | Not_read -> [ quiet "not loaded yet" ]
+    | Not_read -> [ quiet (say "미조회" "not loaded yet") ]
     | Read_failed reason -> [ failure ~cols reason ]
     (* Short enough for the narrowest panel, like the other notes: a quiet
        row is not fitted. *)
-    | Read [] -> [ quiet "no goal awaits confirmation" ]
+    | Read [] -> [ quiet (say "확인 대기 목표 없음" "no goal awaits confirmation") ]
     | Read rows ->
       List.map
         (fun (row : goal_to_confirm) ->
@@ -421,22 +423,24 @@ let overlay ~ko ~now ~localtime ~cols t =
            ; text =
                two_column
                  ~cols
-                 (Printf.sprintf "%s \xe2\x80\x94 awaiting confirmation" row.title)
-                 (updated ~now row.since_iso)
+                 (Printf.sprintf
+                    (if ko then "%s \xc2\xb7 확인 대기" else "%s \xe2\x80\x94 awaiting confirmation")
+                    row.title)
+                 (updated ~ko ~now row.since_iso)
            })
         rows
   in
   let heading text = { tone = Heading; text; goes_to = Nowhere } in
   let blank = { tone = Quiet; text = ""; goes_to = Nowhere } in
-  (heading "Coming up" :: wakes)
+  (heading (say "다가오는 일정" "Coming up") :: wakes)
   (* The operator task list remains inspectable but is not a request. *)
-  @ [ blank; heading "Holding a call" ]
+  @ [ blank; heading (say "보류된 호출" "Holding a call") ]
   @ questions
-  @ [ blank; heading "Answer a question" ]
+  @ [ blank; heading (say "답할 질문" "Answer a question") ]
   @ asked
-  @ [ blank; heading "Confirm a goal" ]
+  @ [ blank; heading (say "완료 확인 목표" "Confirm a goal") ]
   @ goals
-  @ [ blank; heading "Tasks on the operator list" ]
+  @ [ blank; heading (say "운영자 목록의 작업" "Tasks on the operator list") ]
   @ stuck
 ;;
 

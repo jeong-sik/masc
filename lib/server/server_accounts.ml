@@ -317,6 +317,10 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
   Eio_context.set_switch sw;
   record_port ~base_path config;
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
+  (* The deletions of conversations a stopped server left end beside the
+     routes. The access is published, and each deletion takes the call of its
+     account, as a deletion by its owner does. *)
+  Eio.Fiber.fork ~sw (fun () -> Server_keeper_conversation_purge.resume ~env ~zone ~base_path);
   Log.Server.info
     "the account server of the multi-account installation listens on %s:%d (https port %s); it \
      serves the %d route(s) of its own table, and no route that reads the credentials of a \

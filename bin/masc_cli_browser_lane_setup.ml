@@ -345,10 +345,11 @@ let run
        if not (List.exists writes_a_table modes)
        then install_with file
        else
-         (* RFC-0482 §3.2: while this workspace's server answers, it is the
-            writer. The tables are planned against the text it holds and
-            committed through its text route; with no server answering, the
-            command reads and writes the file itself. *)
+         (* RFC-0482 §3.2: while the process that holds the workspace lease
+            announces the port as its server, it is the writer. The tables are
+            planned against the text it holds and committed through its text
+            route; with nothing holding the lease, the command reads and
+            writes the file itself. *)
          (match server_port with
           | Error message -> refuse message
           | Ok server_port ->

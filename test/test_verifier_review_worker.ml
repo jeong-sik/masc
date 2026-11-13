@@ -231,15 +231,96 @@ let test_refusals_dispatch_nothing () = with_workspace (fun config store ->
      | Error (W.Original_corrupt _) -> () | _ -> Alcotest.fail "different destination accepted");
     let changed = authority ~items:[Store.Evidence_note "different captured evidence"] config in
     (match run store changed 0 with
-     | Error (W.Grants_mismatch _) -> () | _ -> Alcotest.fail "changed snapshot accepted");
+     | Error W.Question_changed -> () | _ -> Alcotest.fail "changed snapshot accepted");
     let another = authority ~worker:"another-producer" config in
     (match run store another 0 with
-     | Error (W.Grants_mismatch _) -> () | _ -> Alcotest.fail "another producer accepted");
+     | Error W.Question_changed -> () | _ -> Alcotest.fail "another producer accepted");
     with_workspace (fun other_config _ ->
       let elsewhere = authority other_config in
       match run store elsewhere 0 with
       | Error (W.Grants_mismatch _) -> () | _ -> Alcotest.fail "another workspace accepted");
-    Alcotest.(check int) "no refused path dispatches a reviewer" 0 !calls))
+    Alcotest.(check int) "no refused path dispatches a reviewer" 0 !calls;
+    (* Another question is not an authority change: nothing is refused and no
+       next attempt may ask it. *)
+    (match P.phase (O.progress (loaded (O.load_retained ~store ~verification_id ~attempt:0
+       ~installation_id ~package_id))) with
+     | P.Captured -> () | _ -> Alcotest.fail "another question left a refusal");
+    Alcotest.(check int) "another question opens no next attempt" 0 (loaded (next_attempt store))))
+
+module Change = Masc.Verifier_review_authority_change
+
+(* An attempt retained for the same question under another lookup authority
+   or answer format, as an earlier build or tool description left it. *)
+let stale_digest = String.make 64 'b'
+let with_output_contract contract original =
+  match V.to_json original with
+  | `Assoc fields -> get (V.of_json (`Assoc (List.map (fun (key,value) ->
+      if String.equal key "output_contract" then key,`String contract else key,value) fields)))
+  | _ -> Alcotest.fail "original fixture is not an object"
+let stale_original ?(authority_moved=true) ?contract a =
+  let current = V.lookup_of_authority a in
+  let lookup = if authority_moved then {current with V.authority_digest=stale_digest} else current in
+  let first = get (V.prepare ~generator_runtime:None ~verification_id ~attempt:0 ~question ~lookup request) in
+  match contract with None -> first | Some contract -> with_output_contract contract first
+let before_dispatch_refusal store attempt =
+  match P.phase (O.progress (loaded (O.load_retained ~store ~verification_id ~attempt
+    ~installation_id ~package_id))) with
+  | P.Rejected {stage=P.Before_dispatch;evidence} -> get (Change.of_json evidence)
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected {stage=P.Execution;_} | Subdividing _ | Subdivided _ ->
+    Alcotest.fail "the moved attempt left no before-dispatch refusal"
+
+let test_moved_authority_is_refused_and_asked_again () = with_workspace (fun config store ->
+  let a=authority config in
+  let current=V.lookup_of_authority a in
+  retain store (stale_original a);
+  let calls=ref 0 in
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+    incr calls;
+    Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "asked again")}) (fun () ->
+    let moved=Change.Authority {Change.before=stale_digest;after=current.V.authority_digest} in
+    (match run store a 0 with
+     | Error (W.Authority_changed change) ->
+       Alcotest.(check bool) "the refusal names the moved authority" true (change=moved)
+     | Ok _ | Error _ -> Alcotest.fail "a moved authority reached the retained attempt");
+    Alcotest.(check int) "the refused attempt reaches no reviewer" 0 !calls;
+    Alcotest.(check bool) "the refusal keeps only what moved" true (before_dispatch_refusal store 0=moved);
+    (match run store a 0 with
+     | Error (W.Authority_changed change) ->
+       Alcotest.(check bool) "a restored refusal names the same change" true (change=moved)
+     | Ok _ | Error _ -> Alcotest.fail "a restored refusal dispatched");
+    Alcotest.(check int) "the walk opens the next attempt" 1
+      (loaded (next_attempt ~lookup:(fun () -> Ok current) store));
+    (match run store a 1 with
+     | Ok {AR.verdict=Some (Approve "asked again");_} -> ()
+     | Ok _ | Error _ -> Alcotest.fail "the next attempt did not ask with the current authority");
+    Alcotest.(check int) "only the next attempt reaches a reviewer" 1 !calls))
+
+let test_moved_answer_format_takes_the_same_path () =
+  let old_contract="Answer with the report format of an earlier build." in
+  List.iter (fun (authority_moved,label) -> with_workspace (fun config store ->
+    let a=authority config in
+    let current=V.lookup_of_authority a in
+    retain store (stale_original ~authority_moved ~contract:old_contract a);
+    let format={Change.before=old_contract;after=V.canonical_output_contract ()} in
+    let expected=
+      if authority_moved then Change.Both {authority={Change.before=stale_digest;
+        after=current.V.authority_digest};output_contract=format}
+      else Change.Output_contract format in
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      Alcotest.fail "a moved answer format dispatched the retained attempt") (fun () ->
+      (match run store a 0 with
+       | Error (W.Authority_changed change) -> Alcotest.(check bool) label true (change=expected)
+       | Ok _ | Error _ -> Alcotest.fail "a moved answer format reached the retained attempt");
+      Alcotest.(check bool) "the refusal keeps the same change" true (before_dispatch_refusal store 0=expected);
+      Alcotest.(check int) "the walk opens the next attempt" 1
+        (loaded (next_attempt ~lookup:(fun () -> Ok current) store));
+      let next=loaded (O.load_for_destination ~store ~verification_id ~attempt:1 ~installation_id ~package_id) in
+      Alcotest.(check string) "the next attempt asks for the current answer format"
+        (V.canonical_output_contract ()) (V.output_contract next))))
+    [false,"only the answer format moved";true,"the authority and the answer format moved"]
 
 let test_known_retry_asks_the_same_question_again () = with_workspace (fun config store ->
   let a=authority config in
@@ -1117,6 +1198,8 @@ let () =
     Alcotest.test_case "worker returns its loaded original after an owner replacement" `Quick test_worker_returns_its_loaded_original;
     Alcotest.test_case "frozen prompt, media, lookup and verdict" `Quick test_frozen_prompt_media_and_lookup;
     Alcotest.test_case "missing and changed authority refuse before dispatch" `Quick test_refusals_dispatch_nothing;
+    Alcotest.test_case "a moved authority is refused and asked again" `Quick test_moved_authority_is_refused_and_asked_again;
+    Alcotest.test_case "a moved answer format takes the same path" `Quick test_moved_answer_format_takes_the_same_path;
     Alcotest.test_case "retry asks the same question again" `Quick test_known_retry_asks_the_same_question_again;
     Alcotest.test_case "bound scope plus definite pre-dispatch failure can retry safely" `Quick test_bound_scope_before_dispatch_failure_has_safe_retry;
     Alcotest.test_case "unknown and cancellation never redispatch" `Quick test_unknown_and_cancelled_never_redispatch;

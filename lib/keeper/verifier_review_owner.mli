@@ -4,7 +4,8 @@
     ({!Verifier_review_original.t}) is a decision's input, not a record; this
     module stores exactly one original per attempt and reads it back as the
     same value. Wakes restore that attempt. Only a known terminal transient
-    refusal authorizes a linked successor. The successor asks the same
+    refusal, or a before-dispatch refusal over moved lookup authority or answer
+    format, authorizes a linked successor. The successor asks the same
     question with the lookup authority current when it is prepared; it never
     overwrites a previous attempt's record.
 
@@ -109,9 +110,11 @@ val next_attempt :
     inventory for this verification. Independently bound foreign identities
     are excluded before semantic Original decoding; target failures remain
     errors and never authorize a fresh attempt.
-    New identities require a definite typed terminal retry and a durably linked
-    successor that asks the parent's question with the lookup authority
-    current at allocation. [lookup] is forced only to allocate a new identity;
+    New identities require a definite typed terminal retry, or a
+    before-dispatch refusal whose closed evidence says the lookup authority or
+    answer format moved, and a durably linked successor that asks the parent's
+    question with the lookup authority current at allocation. [lookup] is
+    forced only to allocate a new identity;
     restoring an intended successor uses its pinned body and never prepares
     authority. A wake alone never allocates.
     The host holds its workspace process lease and serializes this verification

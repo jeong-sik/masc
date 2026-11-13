@@ -63,10 +63,24 @@ val decide_keepalive_scheduling :
   Keeper_world_observation.world_observation ->
   keepalive_scheduling_decision
 
-(** Closed accounting status for one keepalive cycle. Admission busy performs
-    no turn accounting, crash accounting, or work-health refresh. *)
+(** Closed accounting status for one keepalive cycle: whether a turn ran in
+    this cycle and how it ended. The stored failure streak takes no part in
+    it, so a cycle that ran no turn cannot report a failed one (#34673).
+    Admission busy performs no turn accounting, crash accounting, or
+    work-health refresh. *)
 type keepalive_cycle_status =
-  | Turn_cycle_completed
+  | Turn_cycle_turn_succeeded
+      (** The turn ran and completed, checkpointed, or asked for input. *)
+  | Turn_cycle_turn_failed  (** The turn ran and failed. *)
+  | Turn_cycle_without_turn
+      (** The cycle ran and no turn did: warmup not elapsed, nothing
+          scheduled, the phase gate skipped or cancelled the turn, or the
+          Owner is shutting down. *)
+  | Turn_cycle_lifecycle_blocked
+      (** Lifecycle admission denied intake before the cycle body. *)
+  | Turn_cycle_owner_rejected
+      (** The Owner registry refused the autonomous turn outside shutdown.
+          No turn ran and nothing advanced the failure streak. *)
   | Turn_cycle_interrupted
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
@@ -75,6 +89,12 @@ type keepalive_cycle_status =
           stated when its quota resets and the refused attempt had no tool
           effect. *)
 
+(** How the turn that ran in this cycle ended. Only a cycle that ran a turn,
+    or crashed, has one. *)
+type cycle_turn_result =
+  | Cycle_turn_succeeded
+  | Cycle_turn_failed
+
 type work_heartbeat_action =
   | Refresh_work_heartbeat
   | Preserve_work_heartbeat
@@ -82,27 +102,32 @@ type work_heartbeat_action =
 type keepalive_cycle_action =
   | Defer_autonomous_work of Keeper_owner.autonomous_block
   | Skip_interrupted_turn
-  | Record_turn_status of work_heartbeat_action
-  | Rest_without_turn_status
+  | Skip_unadmitted_cycle
+      (** No turn status and no work-health refresh; the refusing site
+          already logged its reason. *)
+  | Record_turn_status of cycle_turn_result * work_heartbeat_action
+  | Refresh_without_turn_status
 
 val decide_keepalive_cycle_action :
   keepalive_cycle_status -> keepalive_cycle_action
-(** Total accounting decision used by the heartbeat effect shell. Completed
-    cycles record and refresh. Operator-interrupted cycles record no turn
-    status and do not refresh the work-health lease. Crashed cycles record
-    while preserving the existing lease, and busy cycles retain their typed
-    admission block without recording a turn. Rested cycles refresh the
-    lease and dispatch neither [Turn_succeeded] nor [Turn_failed], so the
-    Keeper's phase and registry failure cause stay as they were. *)
+(** Total accounting decision used by the heartbeat effect shell. Only a
+    cycle whose turn ran, or that crashed, records a turn status: a succeeded
+    or failed turn records and refreshes, a crashed cycle records the failure
+    while preserving the existing lease. A cycle without a turn and a rested
+    cycle refresh the lease and dispatch neither [Turn_succeeded] nor
+    [Turn_failed], so the Keeper's phase and registry failure cause stay as
+    they were. Lifecycle-blocked and Owner-rejected cycles record no turn
+    status and do not refresh the lease, and neither do operator-interrupted
+    cycles. Busy cycles retain their typed admission block without recording
+    a turn. *)
 
 val owner_turn_rejection_cycle_status :
   Keeper_owner_registry.command_error -> keepalive_cycle_status
 (** Total: the cycle status an Owner-registry rejection of the autonomous
     turn records. [Command_rejected Owner_stopping] and
     [Command_lookup_failed Inventory_stopping] are the shutdown boundary and
-    yield [Turn_cycle_completed]; every other rejection yields
-    [Turn_cycle_crashed]. Never [Turn_cycle_interrupted] or
-    [Turn_cycle_busy]. *)
+    yield [Turn_cycle_without_turn]; every other rejection yields
+    [Turn_cycle_owner_rejected]. No other status is returned. *)
 
 (** Outcome of one keepalive cycle evaluation.
 
@@ -237,7 +262,10 @@ val after_failure_of_cycle_outcome :
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)
 val turn_status_event :
-  turn_fail_count:int -> Keeper_state_machine.event
+  turn_fail_count:int -> cycle_turn_result -> Keeper_state_machine.event
+(** The status event for a turn that ran in this cycle. The cycle's result
+    chooses between [Turn_succeeded] and [Turn_failed]; [turn_fail_count] is
+    the stored streak and only fills [consecutive]. *)
 
 val failure_reason_after_turn_status :
   turn_fail_count:int ->

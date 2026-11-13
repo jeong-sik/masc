@@ -1060,7 +1060,14 @@ let validate_stores_cmd =
            cmdliner_result
              (if jobs < 1
               then errorf "--jobs must be at least 1, got %d" jobs
-              else validate_stores ~jobs base_path))
+              else
+                (* The scans read the workspace the server serves. The server
+                   resolves its path with [Workspace_root] through symlinks,
+                   and Exact proof links and slot observations name the store
+                   root below it. *)
+                match Workspace_root.resolve_current ~flag:(Some base_path) with
+                | Error error -> errorf "%s" (Workspace_root.error_message error)
+                | Ok workspace -> validate_stores ~jobs workspace.Workspace_root.root))
          $ base_path
          $ scan_jobs))
 ;;

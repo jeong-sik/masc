@@ -972,8 +972,8 @@ let render_approvals (state : state) =
            "  %sAlways-allow rules: %d  ·  newest %s / %s%s%s"
            Ansi.dim
            (List.length rules)
-           newest.Tui_decode.gr_keeper
-           newest.Tui_decode.gr_tool
+           (Terminal_text.single_line newest.Tui_decode.gr_keeper)
+           (Terminal_text.single_line newest.Tui_decode.gr_tool)
            (match newest.Tui_decode.gr_expires_at with
             | Some _ -> " (expires)"
             | None -> "")

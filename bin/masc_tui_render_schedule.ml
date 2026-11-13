@@ -1650,28 +1650,53 @@ let fusion_no_values =
   ; frow_run = ""
   }
 
-let fusion_cells ?(state_style = "") columns values =
-  [ Table.cell ~header:"STARTED" ~width:fusion_time_width values.frow_time
-  ; Table.cell ~align:Table.Right ~header:"AGE" ~width:fusion_age_width
+(* The six column heads of the Fusion run table, in one screen language. *)
+type fusion_heads =
+  { fhead_started : string
+  ; fhead_age : string
+  ; fhead_state : string
+  ; fhead_keeper : string
+  ; fhead_preset : string
+  ; fhead_run : string
+  }
+
+let fusion_heads ~ko =
+  if ko then
+    { fhead_started = "시작"; fhead_age = "경과"; fhead_state = "상태"
+    ; fhead_keeper = "키퍼"; fhead_preset = "프리셋"; fhead_run = "실행" }
+  else
+    { fhead_started = "STARTED"; fhead_age = "AGE"; fhead_state = "STATE"
+    ; fhead_keeper = "KEEPER"; fhead_preset = "PRESET"; fhead_run = "RUN" }
+
+(* A row and a width measure draw no head; they lay their cells out on the
+   same columns with every head empty. *)
+let fusion_no_heads =
+  { fhead_started = ""; fhead_age = ""; fhead_state = ""
+  ; fhead_keeper = ""; fhead_preset = ""; fhead_run = "" }
+
+let fusion_cells ?(state_style = "") ~heads columns values =
+  [ Table.cell ~header:heads.fhead_started ~width:fusion_time_width values.frow_time
+  ; Table.cell ~align:Table.Right ~header:heads.fhead_age ~width:fusion_age_width
       values.frow_age
-  ; Table.cell ~style:state_style ~header:"STATE" ~width:fusion_state_width
+  ; Table.cell ~style:state_style ~header:heads.fhead_state ~width:fusion_state_width
       values.frow_state
-  ; Table.cell ~header:"KEEPER" ~width:columns.fcol_keeper values.frow_keeper
+  ; Table.cell ~header:heads.fhead_keeper ~width:columns.fcol_keeper values.frow_keeper
   ]
   @ (if columns.fcol_show_preset then
-       [Table.cell ~header:"PRESET" ~width:fusion_preset_width values.frow_preset]
+       [Table.cell ~header:heads.fhead_preset ~width:fusion_preset_width values.frow_preset]
      else [])
-  @ [Table.cell ~header:"RUN" ~width:columns.fcol_run values.frow_run]
+  @ [Table.cell ~header:heads.fhead_run ~width:columns.fcol_run values.frow_run]
 
 let allocate_fusion_columns ~inner_width ~keeper_width =
   let full = { fcol_keeper = keeper_width; fcol_run = fusion_minimum_run_width;
                fcol_show_preset = true } in
   let fcol_show_preset =
-    Table.used_width (fusion_cells full fusion_no_values) <= inner_width
+    Table.used_width (fusion_cells ~heads:fusion_no_heads full fusion_no_values) <= inner_width
   in
   let named =
     Table.used_width
-      (fusion_cells { fcol_keeper = 0; fcol_run = 0; fcol_show_preset } fusion_no_values)
+      (fusion_cells ~heads:fusion_no_heads
+         { fcol_keeper = 0; fcol_run = 0; fcol_show_preset } fusion_no_values)
   in
   (* Keep dates and state intact. The detail shows the omitted preset and
      complete identities; narrow tables first give those cells to the row. *)
@@ -1679,13 +1704,13 @@ let allocate_fusion_columns ~inner_width ~keeper_width =
   let fcol_run = max 3 (inner_width - named - fcol_keeper) in
   { fcol_keeper; fcol_run; fcol_show_preset }
 
-let fusion_header_row columns =
+let fusion_header_row ~ko columns =
   Table.header_row
-    (fusion_cells columns fusion_no_values)
+    (fusion_cells ~heads:(fusion_heads ~ko) columns fusion_no_values)
 
 let fusion_row ~state_style columns values =
   Table.row
-    (fusion_cells ~state_style columns values)
+    (fusion_cells ~heads:fusion_no_heads ~state_style columns values)
 
 let fusion_sidebar_label ~status ~time ~keeper ~run_id =
   Printf.sprintf "[%s] %s @%s %s" status time keeper run_id

@@ -2222,7 +2222,7 @@ let render_clients (state : state) =
   let last_seen_width =
     List.fold_left (fun widest (row : Masc.Tui_decode.client_row) ->
       max widest (Message_layout.display_width (client_last_seen_text ~read_at row)))
-      (Message_layout.display_width "LAST SEEN") clients
+      (Message_layout.display_width (ui_text state ~ko:"마지막 관측" ~en:"LAST SEEN")) clients
     (* The table keeps its status and identity floor. Exact observations that
        exceed this share are read in the selected client's scrollable detail. *)
     |> min (max 9 (table_width - 9 - 16 - 2 * Masc_tui_table.cell_gap))
@@ -2265,12 +2265,13 @@ let render_clients (state : state) =
   let cells ~status ~name ~agent_type ~keeper ~task ~last_seen =
     List.map (fun column ->
       let header, value = match column with
-        | Client_status_column -> "STATUS", status
-        | Client_name_column -> "NAME", name
-        | Client_type_column -> "TYPE", agent_type
-        | Client_acting_for_column -> "ACTING FOR", keeper
-        | Client_task_column -> "TASK", task
-        | Client_last_seen_column -> "LAST SEEN", last_seen
+        | Client_status_column -> ui_text state ~ko:"상태" ~en:"STATUS", status
+        | Client_name_column -> ui_text state ~ko:"이름" ~en:"NAME", name
+        | Client_type_column -> ui_text state ~ko:"종류" ~en:"TYPE", agent_type
+        | Client_acting_for_column ->
+          ui_text state ~ko:"대신하는 Keeper" ~en:"ACTING FOR", keeper
+        | Client_task_column -> ui_text state ~ko:"태스크" ~en:"TASK", task
+        | Client_last_seen_column -> ui_text state ~ko:"마지막 관측" ~en:"LAST SEEN", last_seen
       in
       let width = if column = Client_name_column then layout.flex_width else column_width column in
       Masc_tui_table.cell ~header ~width value) layout.shown
@@ -2295,7 +2296,7 @@ let render_clients (state : state) =
       match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with
       | Page_failed -> page_failed_note
       | Page_unread -> page_unread_note_while ~reading:state.clients_surface_inflight
-      | Page_empty -> "  (nobody attached)"
+      | Page_empty -> ui_text state ~ko:"  (붙은 클라이언트 없음)" ~en:"  (nobody attached)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do

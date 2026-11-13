@@ -1685,11 +1685,17 @@ let render_schedule_list (state : state) =
               [page_unread_note] made for [r]. *)
            let empty = match snapshot.scs_request_count, state.schedules_page.sp_previous with
              | Some total, _ :: _ when total > 0 ->
-                 "  (no schedules on this page; < returns to the previous page)"
+                 ui_text state
+                   ~ko:"  (이 페이지에 일정 없음 · < 로 이전 페이지)"
+                   ~en:"  (no schedules on this page; < returns to the previous page)"
              | Some total, [] when total > 0 ->
-                 "  (no schedules on this page; refresh to read again)"
+                 ui_text state
+                   ~ko:"  (이 페이지에 일정 없음 · 새로고침으로 다시 읽기)"
+                   ~en:"  (no schedules on this page; refresh to read again)"
              | (Some _ | None), (_ :: _ | []) ->
-                 "  (no scheduled automation \xe2\x80\x94 press n to create one)"
+                 ui_text state
+                   ~ko:"  (자동 일정 없음 \xe2\x80\x94 n 으로 만들기)"
+                   ~en:"  (no scheduled automation \xe2\x80\x94 press n to create one)"
            in
            c.push (Ansi.dim ^ empty ^ Ansi.reset)
          end else begin

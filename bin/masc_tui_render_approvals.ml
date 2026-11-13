@@ -1060,7 +1060,9 @@ let render_approvals (state : state) =
     let lines =
       match Masc_tui_approvals_model.approvals_empty_queue reading with
       | Masc_tui_approvals_model.Nothing_pending ->
-          [ Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset ]
+          [ Ansi.dim
+            ^ ui_text state ~ko:"  (대기 중인 요청 없음)" ~en:"  (no pending approvals)"
+            ^ Ansi.reset ]
       | Masc_tui_approvals_model.Lists_not_read not_read ->
           List.map
             (fun (name, (not_read : Masc_tui_approvals_model.approval_not_read)) ->

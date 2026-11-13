@@ -1671,7 +1671,7 @@
  (name masc_tui_board_upload)
  (wrapped false)
  (modules masc_tui_board_upload)
- (libraries masc.masc_tool_blob_store masc_tui_types unix))
+ (libraries masc.masc_tool_blob_store masc_tui_types masc_tui_value unix))
 
 (library
  (name masc_tui_magnitude)

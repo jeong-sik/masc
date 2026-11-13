@@ -240,7 +240,7 @@ let runtime_routes_detail_lines state ~width =
      | None -> []
      | Some notice ->
          fact ~tone:(runtime_lane_notice_tone notice) (text "작업 결과" "Action result")
-           (Masc_tui_types.runtime_lane_notice_text notice))
+           (Masc_tui_types.runtime_lane_notice_text ~ko notice))
     @ runtime_items ~tone:Page_line.Attention (text "이전 설정 관측" "Stale configuration")
         (Masc_tui_types.runtime_lane_stale_lines state)
   in
@@ -876,7 +876,7 @@ let render_runtime_reading (state : state) =
             c.push_styled ~style:(runtime_lane_notice_style notice) ("  " ^ line))
          (String.split_on_char '\n'
             (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-               (Masc_tui_types.runtime_lane_notice_text notice)));
+               (Masc_tui_types.runtime_lane_notice_text ~ko notice)));
        c.push_divider ());
   (* Counted in [runtime_surface_listing_chrome] as one row each and a
      divider. *)

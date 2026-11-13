@@ -512,7 +512,8 @@ let render_exact_lane_provider_editor (state : state) editor =
    | Some notice ->
      box_lines_styled buf cols ~style:(runtime_lane_notice_style notice)
        (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-          (Masc_tui_types.runtime_lane_notice_text notice)));
+          (Masc_tui_types.runtime_lane_notice_text
+             ~ko:(state.ui_language = Lang_ko) notice)));
   List.iter
     (fun line -> box_line_styled buf cols ~style:(Theme.warn ())
        ("  " ^ Keeper_chat.terminal_safe_text line))
@@ -907,7 +908,8 @@ let render_lanes_overview (state : state) =
        let budget = max 1 (rows - count_frame_lines buf - picker_rows - 4) in
        box_lines_styled_bounded buf cols ~style:(runtime_lane_notice_style notice) ~budget
          (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-                   (Masc_tui_types.runtime_lane_notice_text notice)));
+                   (Masc_tui_types.runtime_lane_notice_text
+                      ~ko:(state.ui_language = Lang_ko) notice)));
   List.iter
     (fun line ->
        box_line_styled buf cols ~style:(Theme.warn ())
@@ -2510,7 +2512,7 @@ let render_lane_inventory_detail (state : state) target =
       @ Option.fold ~none:[] ~some:(wrap (Theme.warn ())) state.lanes_action_error
       @ Option.fold ~none:[] ~some:(fun notice ->
           wrap (runtime_lane_notice_style notice)
-            (Masc_tui_types.runtime_lane_notice_text notice)) state.runtime_lane_notice
+            (Masc_tui_types.runtime_lane_notice_text ~ko notice)) state.runtime_lane_notice
       @ List.concat_map (wrap (Theme.warn ())) (Masc_tui_types.runtime_lane_stale_lines state)
       @ content
   in

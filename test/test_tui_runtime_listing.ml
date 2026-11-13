@@ -106,7 +106,7 @@ let test_http_slot_without_body_deadline_is_refused_for_exact_lane () =
     let rec scan i = i + n <= String.length text && (String.sub text i n = affix || scan (i + 1)) in
     scan 0 in
   Alcotest.(check bool) "the reason names the provider table and the key" true
-    (let text = runtime_pick_refusal_text No_exact_body_deadline gap in
+    (let text = runtime_pick_refusal_text ~ko:false No_exact_body_deadline gap in
      contains "[providers.openrouter]" text && contains "exact-body-timeout-s" text);
   (match runtime_pick_availability (Pick_conversation_lane "primary") gap with
    | Pick_available -> ()
@@ -179,7 +179,7 @@ let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
 
 let notice_text = function
   | None -> "no line"
-  | Some (Lane_write_refused reason) -> "refuse: " ^ reason
+  | Some (Lane_write_refused reason) -> "refuse: " ^ runtime_lane_refusal_text ~ko:false reason
   | Some Lane_write_pending -> "pending"
   | Some (Lane_write_committed _) -> "commit receipt retained"
 
@@ -329,7 +329,7 @@ let test_commit_application_survives_reread () =
       check_receipt "GET cannot upgrade or erase receipt";
       let notice = Lane_write_committed receipt in
       Alcotest.(check bool) "long reason wraps" true
-        (runtime_lane_notice_lines ~cols:40 (Some notice) > 1);
+        (runtime_lane_notice_lines ~ko:false ~cols:40 (Some notice) > 1);
       state.runtime_lane_notice <- Some notice;
       state.runtime_mode <- Runtime_lanes;
       Alcotest.(check bool) "narrow chrome accounts for wrapped receipt" true
@@ -388,7 +388,7 @@ let test_a_new_view_ends_what_a_key_said () =
     dismiss_runtime_lane_notice state;
     Alcotest.(check string) (notice_text (Some notice)) "no line"
       (notice_text state.runtime_lane_notice))
-    [ Lane_write_refused "HTTP 400: no"; Lane_write_pending ]
+    [ Lane_write_refused (Refused_by_server "HTTP 400: no"); Lane_write_pending ]
 
 (* [R] opens the field on the name the lane has now, so the common edit --
    changing part of it -- starts from what is there rather than from empty. *)

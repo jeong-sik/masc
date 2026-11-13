@@ -4502,6 +4502,11 @@ let keeper_detail_tabs =
   [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity; Detail_channels; Detail_automation; Detail_runs; Detail_terminal ]
 
+(* [Detail_identity] is RFC-0392's keeper identity: the work services a
+   Keeper logs into. Each is a remote MCP server declared under
+   [config/identity/], and its tools are handed to the Keeper's turns. The
+   tab is named for those services, as the dashboard and the manual name
+   them. *)
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
   | Detail_items -> "Items"
@@ -4509,7 +4514,7 @@ let keeper_detail_tab_label = function
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
-  | Detail_identity -> "Identity"
+  | Detail_identity -> "Services"
   | Detail_channels -> "Channels"
   | Detail_automation -> "Automation"
   | Detail_runs -> "Runs"
@@ -4527,7 +4532,7 @@ let keeper_detail_tab_title ~ko tab =
     | Detail_instructions -> "설정"
     | Detail_secrets -> "시크릿"
     | Detail_github -> "GitHub"
-    | Detail_identity -> "정체성"
+    | Detail_identity -> "서비스"
     | Detail_channels -> "채널"
     | Detail_automation -> "자동화"
     | Detail_runs -> "실행"

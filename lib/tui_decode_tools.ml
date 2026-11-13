@@ -107,7 +107,6 @@ type effective_tool_surface =
       ets_native_posture : string option;
       ets_skill_snapshot_revision : string;
       ets_skill_resource_read_max_bytes : int option;
-      ets_instruction_skills : Skill_reference.t list;
       (* Documents the catalog could not read. Beside the skills rather than
          missing from them: a skill left out is absent from what the Keeper
          can call, and absence with no reason reads as a skill nobody
@@ -117,7 +116,6 @@ type effective_tool_surface =
          dashboard draws these under "Unavailable Skills"; this reader exists
          so the other renderer of the same surface says it too. *)
       ets_unavailable_skill_names : configured_skill_name_unavailable list;
-      ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int option;
       ets_skill_tool_surface_bytes : int option;
@@ -227,12 +225,6 @@ let decode_effective_tool json =
     | unrecognised -> Ok (Unrecognised_origin unrecognised)
   in
   Ok { et_name; et_origin }
-
-let decode_skill_reference_list json field =
-  let* values = required_list_field json field in
-  match Skill_reference.list_of_yojson (`List values) with
-  | Ok references -> Ok references
-  | Error _ -> Error (Printf.sprintf "%s is not a canonical Skill reference list" field)
 
 let decode_effective_tool_delivery json =
   let* status = required_string_field json "status" in
@@ -404,12 +396,6 @@ let decode_effective_tool_surface json =
             Ok { csn_name; csn_reason })
           unavailable_skill_names_json
       in
-      let* ets_instruction_skills =
-        decode_skill_reference_list json "instruction_skills"
-      in
-      let* ets_composition_skills =
-        decode_skill_reference_list json "composition_skills"
-      in
       let* skill_profiles_json = optional_list_field json "skill_profiles" in
       let* ets_skill_profiles =
         decode_list
@@ -446,10 +432,8 @@ let decode_effective_tool_surface json =
              ets_native_posture;
              ets_skill_snapshot_revision;
              ets_skill_resource_read_max_bytes;
-             ets_instruction_skills;
              ets_skills_left_out;
              ets_unavailable_skill_names;
-             ets_composition_skills;
              ets_skill_profiles;
              ets_tool_surface_bytes;
              ets_skill_tool_surface_bytes;

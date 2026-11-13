@@ -231,7 +231,6 @@ type effective_tool_surface =
       ets_native_posture : string option;
       ets_skill_snapshot_revision : string;
       ets_skill_resource_read_max_bytes : int option;
-      ets_instruction_skills : Skill_reference.t list;
       (* Documents the catalog could not read. Beside the skills rather than
          missing from them: a skill left out is absent from what the Keeper
          can call, and absence with no reason reads as a skill nobody
@@ -241,7 +240,6 @@ type effective_tool_surface =
          dashboard draws these under "Unavailable Skills"; the TUI reads the
          same list so both renderers of this surface say it. *)
       ets_unavailable_skill_names : configured_skill_name_unavailable list;
-      ets_composition_skills : Skill_reference.t list;
       ets_skill_profiles : effective_skill_profile list;
       ets_tool_surface_bytes : int option;
       ets_skill_tool_surface_bytes : int option;

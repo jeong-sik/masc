@@ -1066,8 +1066,10 @@ let render_approvals (state : state) =
             (fun (name, (not_read : Masc_tui_approvals_model.approval_not_read)) ->
               match not_read with
               | Masc_tui_approvals_model.Approval_unread ->
-                  Printf.sprintf "%s  (%s not read yet \xe2\x80\x94 press 'r' to refresh)%s"
-                    Ansi.dim name Ansi.reset
+                  Ansi.dim ^ "  (" ^ name
+                  ^ ui_text state ~ko:" 미조회 \xe2\x80\x94 r로 새로고침)"
+                      ~en:" not read yet \xe2\x80\x94 press 'r' to refresh)"
+                  ^ Ansi.reset
               (* The loader's message already names what failed ("... load
                  failed: ..."), so the row carries it as it came. *)
               | Masc_tui_approvals_model.Approval_failed cause
@@ -1075,7 +1077,8 @@ let render_approvals (state : state) =
                   data_unreliable_row ~cols (Terminal_text.single_line cause)
               | Masc_tui_approvals_model.Approval_unavailable detail ->
                   data_unreliable_row ~cols
-                    (Printf.sprintf "%s unavailable: %s" name
+                    (Printf.sprintf "%s %s: %s" name
+                       (ui_text state ~ko:"사용 불가" ~en:"unavailable")
                        (Terminal_text.single_line detail)))
             not_read
     in

@@ -5081,6 +5081,7 @@ let test_observed_checkpoint_retains_earlier_output () =
     state.msg_target_keeper_name <- Some "alpha";
     state.msg_reasoning_visibility <- Tui_types.Reasoning_full;
     state.msg_tool_visibility <- Tui_types.Tools_full;
+    state.ui_language <- Tui_types.Lang_en;
     let occurrence : Live.tool_occurrence =
       {stream_scope=0; block_index=1; provider_message_id=None; tool_call_id=Some "before-checkpoint"} in
     let log = settled_log ~request_id:"observed-checkpoint"

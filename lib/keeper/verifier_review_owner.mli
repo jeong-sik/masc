@@ -96,7 +96,8 @@ val check_retained : Lane_addon_tool_request_owner.retained -> (unit, string) re
 type next_attempt_error =
   | Load of load_error
   | Lookup_unavailable of string
-      (** The current lookup authority could not be prepared for a new attempt. *)
+      (** The current lookup authority, or the prompt rendered from it, could
+          not be prepared for a new attempt. Nothing is allocated. *)
   | Question_changed
       (** The current authority asks another question than the parent did. *)
 

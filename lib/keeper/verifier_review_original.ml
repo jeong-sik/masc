@@ -111,26 +111,35 @@ type t =
   ; output_contract : string
   }
 
-let prepare ~generator_runtime ~verification_id ~attempt ~question ~lookup req =
+(* A refused input and a prompt template that cannot be rendered now are
+   different failures: the second says nothing about the inputs. *)
+type preparation_error =
+  | Invalid_input of string
+  | Prompt_render of string
+
+let prepare_checked ~generator_runtime ~verification_id ~attempt ~question ~lookup req =
   if Option.fold ~none:false ~some:(fun runtime -> String.trim runtime = "") generator_runtime
-  then Error "verifier review original generator_runtime must be non-blank when present"
+  then Error (Invalid_input "verifier review original generator_runtime must be non-blank when present")
   else if String.trim verification_id = ""
-  then Error "verifier review original requires a non-blank verification_id"
+  then Error (Invalid_input "verifier review original requires a non-blank verification_id")
   else if attempt < 0
-  then Error "verifier review original attempt must be a non-negative integer"
+  then Error (Invalid_input "verifier review original attempt must be a non-negative integer")
   else if not (String_util.is_lowercase_sha256_hex lookup.question_digest)
-  then Error "verifier review original requires a canonical question digest"
+  then Error (Invalid_input "verifier review original requires a canonical question digest")
   else if not (String_util.is_lowercase_sha256_hex lookup.authority_digest)
-  then Error "verifier review original requires a canonical authority digest"
+  then Error (Invalid_input "verifier review original requires a canonical authority digest")
   else if lookup.granted_tools = []
-  then Error "verifier review original requires the reviewer's lookup tool names"
+  then Error (Invalid_input "verifier review original requires the reviewer's lookup tool names")
   else (
     let* system_prompt =
       system_prompt ~lookup_schemas:lookup.granted_tools ~question
         ~lookup_root:lookup.granted_root req
-      |> Result.map_error (fun detail -> "verifier review prompt unavailable: " ^ detail)
+      |> Result.map_error (fun detail -> Prompt_render ("verifier review prompt unavailable: " ^ detail))
     in
-    let* system_instructions=Prompt_registry.render_prompt_template Prompt_names.verification_system [] in
+    let* system_instructions =
+      Prompt_registry.render_prompt_template Prompt_names.verification_system []
+      |> Result.map_error (fun detail -> Prompt_render detail)
+    in
     Ok
       { verification_id
       ; attempt
@@ -145,6 +154,11 @@ let prepare ~generator_runtime ~verification_id ~attempt ~question ~lookup req =
       ; system_instructions
       ; output_contract = canonical_output_contract ()
       })
+;;
+
+let prepare ~generator_runtime ~verification_id ~attempt ~question ~lookup req =
+  prepare_checked ~generator_runtime ~verification_id ~attempt ~question ~lookup req
+  |> Result.map_error (function Invalid_input detail | Prompt_render detail -> detail)
 ;;
 
 let verification_id t = t.verification_id
@@ -507,6 +521,7 @@ let digest t =
 
 type successor_error =
   | Question_changed
+  | Prompt_unavailable of string
   | Successor_unavailable of string
 
 (* HIGH-RISK-UNREVIEWED: the next attempt takes the reviewer's lookup grants,
@@ -521,14 +536,16 @@ let successor ~lookup parent =
   else if parent.attempt = Int.max_int
   then Error (Successor_unavailable "verifier attempt identity exhausted")
   else
-    prepare
+    prepare_checked
       ~generator_runtime:parent.generator_runtime
       ~verification_id:parent.verification_id
       ~attempt:(parent.attempt + 1)
       ~question:parent.question
       ~lookup
       parent.review_request
-    |> Result.map_error (fun detail -> Successor_unavailable detail)
+    |> Result.map_error (function
+      | Invalid_input detail -> Successor_unavailable detail
+      | Prompt_render detail -> Prompt_unavailable detail)
 ;;
 
 let question_projection t =

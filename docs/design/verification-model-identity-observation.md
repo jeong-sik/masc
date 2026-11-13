@@ -81,9 +81,11 @@ Every newly written Task calibration verdict row records
 unbound identity. This is an observation loss for all such new rows, not a
 claim that the original submission lacked an identity. The retained original's
 `generator_runtime` and the request file's captured identity remain in place.
-A durable binding of the full submitting identity has not been implemented;
-v4 only splits the earlier single digest into a question digest and a lookup
-authority digest.
+A durable binding of the full submitting identity has not been implemented.
+v4 splits the earlier single digest into a question digest and a lookup
+authority digest. Its next attempt also renders the prompt, instructions and
+answer format again with the authority current at that attempt. Neither change
+binds the submitting identity.
 
 The reviewer hook in `workspace_metric_hooks.ml` freezes
 `evaluator_execution` exactly when `report_review_verdict` records its single

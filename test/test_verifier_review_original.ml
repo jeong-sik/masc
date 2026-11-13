@@ -41,7 +41,8 @@ let successor_or_fail ~lookup parent =
   match V.successor ~lookup parent with
   | Ok child -> child
   | Error V.Question_changed -> failwith "successor refused the same question"
-  | Error (V.Successor_unavailable detail) -> failwith ("successor failed: " ^ detail)
+  | Error (V.Prompt_unavailable detail | V.Successor_unavailable detail) ->
+    failwith ("successor failed: " ^ detail)
 
 let make_original ~verification_id ~attempt =
   match
@@ -235,7 +236,7 @@ let test_successor_refuses_a_changed_question () =
   let parent = make_original ~verification_id:"vrf-moved" ~attempt:0 in
   match V.successor ~lookup:{ sample_lookup with V.question_digest = String.make 64 'd' } parent with
   | Error V.Question_changed -> ()
-  | Error (V.Successor_unavailable detail) ->
+  | Error (V.Prompt_unavailable detail | V.Successor_unavailable detail) ->
     failwith ("a changed question must be Question_changed: " ^ detail)
   | Ok _ -> failwith "a changed question must not open the next attempt"
 

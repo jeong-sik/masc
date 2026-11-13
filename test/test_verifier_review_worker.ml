@@ -245,15 +245,16 @@ let test_known_retry_asks_the_same_question_again () = with_workspace (fun confi
   let a=authority config in
   let current ()=Ok (V.lookup_of_authority a) in
   let next ()=loaded (next_attempt ~lookup:current store) in
-  let first=original a (next ()) in
+  (* Attempt 0 keeps a lookup root the host no longer grants, so a successor
+     that copied its parent would carry that root and its prompt. *)
+  let first=original ~lookup_root:(AR.Producer_tree ["old-observed-checkout"]) a (next ()) in
   retain store first;
   Alcotest.(check int) "wake without terminal retry keeps original" 0 (next ());
-  let calls=ref 0 in
+  let prompts=ref [] in
   with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error () ->
-    incr calls;
-    Alcotest.(check string) "unchanged authority renders the same prompt" (V.system_prompt_text first) prompt;
-    if !calls=1 then (
+    prompts := prompt :: !prompts;
+    if List.length !prompts=1 then (
       let error=Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
         {retry_after=None;message="definite complete HTTP refusal"}) in
       on_runtime_attempt_error ~runtime_id:"fixture-reviewer" ~attempt:0
@@ -265,6 +266,9 @@ let test_known_retry_asks_the_same_question_again () = with_workspace (fun confi
     Alcotest.(check int) "explicit terminal transition produces one linked successor" 1 retry;
     Alcotest.(check int) "another wake reuses the same successor" retry (next ());
     let second=loaded (O.load_for_destination ~store ~verification_id ~attempt:retry ~installation_id ~package_id) in
+    Alcotest.(check bool) "the successor asks the first question" true (V.is_successor_of ~parent:first second);
+    Alcotest.(check bool) "the successor takes the root granted now" true
+      (V.lookup_root second=(V.lookup_of_authority a).V.granted_root);
     let expected=match V.successor ~lookup:(V.lookup_of_authority a) first with
       | Ok child -> child | Error _ -> Alcotest.fail "successor fixture failed" in
     Alcotest.(check bool) "the successor asks the first question with the current authority" true
@@ -272,7 +276,10 @@ let test_known_retry_asks_the_same_question_again () = with_workspace (fun confi
     (match run store a retry with Ok {AR.verdict=Some (Approve "retry checked");_} -> ()
      | Ok _ | Error _ -> Alcotest.fail "safe linked retry failed");
     ignore (loaded (run store a retry));
-    Alcotest.(check int) "restored judgment never invokes a second model" 2 !calls;
+    Alcotest.(check (list string)) "each attempt sends its own prompt and a restored judgment sends none"
+      [V.system_prompt_text first;V.system_prompt_text second] (List.rev !prompts);
+    Alcotest.(check bool) "the retry prompt is rendered again for the current root" false
+      (String.equal (V.system_prompt_text first) (V.system_prompt_text second));
     Alcotest.(check int) "judgment is not another retry authorization" retry (next ())))
 
 let test_bound_scope_before_dispatch_failure_has_safe_retry () = with_workspace (fun config store ->

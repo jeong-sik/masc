@@ -433,6 +433,7 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
     let* current = lookup () |> Result.map_error (fun detail -> Lookup_unavailable detail) in
     V.successor ~lookup:current parent.original |> Result.map_error (function
       | V.Question_changed -> Question_changed
+      | V.Prompt_unavailable detail -> Lookup_unavailable ("review prompt unavailable: " ^ detail)
       | V.Successor_unavailable detail -> corrupt detail) in
   let rec walk parent rest =
     match Progress.phase parent.record.progress,rest with

@@ -99,15 +99,21 @@ val digest : t -> (string, string) result
 
 type successor_error =
   | Question_changed
+  | Prompt_unavailable of string
   | Successor_unavailable of string
 
 val successor : lookup:lookup -> t -> (t, successor_error) result
 (** The next attempt asks the parent's question with the current lookup. The
     verification id, review request, question (with its few-shot block),
     captured producer runtime and question digest come from the parent. The
-    lookup root, tool names, authority digest, prompt, instructions and
-    output contract are built now from [lookup]. A [lookup] whose question
-    digest differs from the parent's is [Question_changed]. *)
+    lookup root, tool names and authority digest come from [lookup]. The
+    prompt is rendered now from them, the instructions from the current
+    prompt template, and the output contract is this build's.
+
+    A [lookup] whose question digest differs from the parent's is
+    [Question_changed]. A prompt or instruction template that cannot be
+    rendered now is [Prompt_unavailable]; it says nothing about the parent.
+    Any other refusal is [Successor_unavailable]. *)
 
 val is_successor_of : parent:t -> t -> bool
 (** [true] when the child is the next attempt of [parent] and asks the same

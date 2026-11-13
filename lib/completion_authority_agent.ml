@@ -1257,9 +1257,10 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                answered for the intended one. A non-verdict is a no-op
                inside. *)
             let reviewed_request = Verifier_review_original.review_request original in
-            (* The v3 original freezes the generator runtime, not the submitting
-               response identity. The current wake cannot bind that identity to
-               this original, even when both name the same runtime. *)
+            (* The retained original freezes the generator runtime, not the
+               submitting response identity. The current wake cannot bind that
+               identity to this original, even when both name the same
+               runtime. *)
             Eval_calibration.record_verdict
               ~base_path:runtime.config.base_path
               ~task_id:reviewed_request.task_id

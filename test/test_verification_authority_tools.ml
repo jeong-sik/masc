@@ -738,28 +738,43 @@ let test_task_review_does_not_require_inventory () =
    names how a reviewer may look. A later attempt keeps the first and takes
    the second as it is then. *)
 let test_task_review_digests_name_the_question_and_the_authority () =
+  let request : Workspace_verification_store.request_header =
+    {id="vrf-digests";task_id="task-001";worker=producer;created_at=1.} in
+  let review config note =
+    match VAT.create_task_review ~config ~verification_id:request.id
+      ~task_id:request.task_id ~producer
+      ~evidence_access:(Workspace_verification_store.Evidence_available
+        {request;items=[Workspace_verification_store.Evidence_note note]}) with
+    | Ok review -> review
+    | Error detail -> Alcotest.failf "task review unavailable: %s" detail
+  in
+  let question = VAT.task_review_question_binding in
+  let authority = VAT.task_review_authority_binding in
   with_surface ~sandbox_profile:"docker" (fun config _surface ->
-    let request : Workspace_verification_store.request_header =
-      {id="vrf-digests";task_id="task-001";worker=producer;created_at=1.} in
-    let review note =
-      match VAT.create_task_review ~config ~verification_id:request.id
-        ~task_id:request.task_id ~producer
-        ~evidence_access:(Workspace_verification_store.Evidence_available
-          {request;items=[Workspace_verification_store.Evidence_note note]}) with
-      | Ok review -> review
-      | Error detail -> Alcotest.failf "task review unavailable: %s" detail
-    in
-    let first = review "merged and checked" in
-    let again = review "merged and checked" in
-    let other = review "merged, not checked" in
-    Alcotest.(check string) "the same submission asks the same question"
-      (VAT.task_review_question_binding first) (VAT.task_review_question_binding again);
-    Alcotest.(check string) "the same submission holds the same authority"
-      (VAT.task_review_authority_binding first) (VAT.task_review_authority_binding again);
+    let first = review config "merged and checked" in
+    let again = review config "merged and checked" in
+    let other = review config "merged, not checked" in
+    Alcotest.(check string) "the same submission asks the same question" (question first) (question again);
+    Alcotest.(check string) "the same submission holds the same authority" (authority first) (authority again);
     Alcotest.(check bool) "another note asks another question" false
-      (String.equal (VAT.task_review_question_binding first) (VAT.task_review_question_binding other));
+      (String.equal (question first) (question other));
     Alcotest.(check bool) "the question and the authority are separate digests" false
-      (String.equal (VAT.task_review_question_binding first) (VAT.task_review_authority_binding first)))
+      (String.equal (question first) (authority first)));
+  (* The same submission read through another declared playground root is the
+     same question under another lookup authority. *)
+  with_surface (fun config _surface ->
+    let before = review config "merged and checked" in
+    let endpoint = match Masc.Keeper_sandbox_ssh.resolve_endpoint
+        ~base_path:config.base_path ~keeper_name:producer with
+      | Ok endpoint -> endpoint
+      | Error detail -> Alcotest.failf "fixture endpoint unavailable: %s" detail in
+    Out_channel.with_open_text (Filename.concat config.base_path ".masc/config/runtime.toml")
+      (fun output -> output_string output (Exec_ssh_endpoint.to_toml
+        {endpoint with Exec_ssh_endpoint.remote_root="/srv/masc/another-playground"}));
+    let after = review config "merged and checked" in
+    Alcotest.(check string) "a moved lookup root keeps the question" (question before) (question after);
+    Alcotest.(check bool) "a moved lookup root is another authority" false
+      (String.equal (authority before) (authority after)))
 ;;
 
 let test_root_layout_reports_entries_and_discovered_checkouts () =

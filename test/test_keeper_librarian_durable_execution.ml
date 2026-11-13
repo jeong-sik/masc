@@ -2072,6 +2072,29 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   assert_unattached (run_worker fixture);
   io (fun () -> Sys.remove body);
   check string "a pass ends the same without the fenced original's body" with_body (stopped ()))
+(* The deploy check reads no Exact file of a fenced original, as resume reads
+   none (RFC exact-request-skips-a-slot-that-refused-its-input, section 6, L2b-2). *)
+let test_preflight_reads_no_exact_file_of_a_fenced_original () = with_fixture (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let exact=Capture.request request |> get in
+  let record_path=Filename.concat (Store.root fixture.store)
+    (Store.exact_request_path ~declaration_id:"librarian" ~request_id:exact.request_id) in
+  let refusals ()=(io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get).refusals in
+  (* A record the Exact check cannot read: resume stops on it. *)
+  io (fun () -> write record_path "{");
+  check bool "an unfenced original whose record the Exact check deletes is refused" true
+    (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+       refusal.decoder=Lane_addon_store_preflight.Tool_request_exact_reads) (refusals ()));
+  io (fun () -> Sys.remove record_path);
+  let preview=fence_preview fixture request in
+  ignore (memory_action fixture (fun () -> io (fun () ->
+    Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"the original's Exact record is gone"
+      ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
+  io (fun () -> write record_path "{");
+  check int "a fenced original is read by no consumer" 0 (List.length (refusals ())))
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in
@@ -3832,6 +3855,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_history_fence_retains_unknown_and_blocks_late_observations;
   test_case "a fenced unknown original does not block the next history pass" `Quick
     test_history_fence_allows_the_next_history_pass;
+  test_case "the deploy check reads no Exact file of a fenced original" `Quick
+    test_preflight_reads_no_exact_file_of_a_fenced_original;
   test_case "a post-fence cursor change terminates only its continuation" `Quick
     (test_fenced_resolution_survives_cursor_advance ~nested:false);
   test_case "a refused nested continuation does not block its ancestor or fresh history" `Quick

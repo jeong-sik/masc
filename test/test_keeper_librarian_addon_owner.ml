@@ -348,12 +348,34 @@ let closure_manifest fixture =
   let manifest=io (fun () -> Closure.retain ~store:fixture.store ~owner
     ~request_id:(Capture.fresh_request_id owner) ~candidates ~originals |> get) in
   owner,manifest
-let closure_preflight fixture = io (fun () ->
+let preflight_scan fixture = io (fun () ->
   Lane_addon_store_preflight.scan ~validate_tool_request:Keeper_librarian_store_preflight.preflight
-    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get)
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path)
+let closure_preflight fixture = preflight_scan fixture |> get
 let close_member fixture manifest member = io (fun () ->
   Owner.settle ~store:fixture.store ~date:(Closure.date manifest) (Closure.member_record member)
   |> Result.map_error Owner.settle_error_to_string |> get)
+(* An original's Exact record and proof link, as the store keeps them. *)
+let exact_files fixture capture =
+  let request=Capture.request capture |> get in
+  let root=Store.root fixture.store in
+  Filename.concat root (Store.exact_request_path ~declaration_id:"librarian" ~request_id:request.request_id),
+  Filename.concat root (Lane_addon_exact.Retained_key.proof_path
+    (Lane_addon_exact.Retained_key.of_request ~declaration_id:"librarian" request))
+let with_field name value = function
+  | `Assoc fields when List.mem_assoc name fields ->
+    `Assoc (List.map (fun (key,old) -> key,if String.equal key name then value else old) fields)
+  | `Assoc _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    fail ("expected a JSON object with the field " ^ name)
+let scope_directory fixture scope=Filename.concat (Store.root fixture.store)
+  (Filename.concat Store.tool_request_owners_directory (Store.digest scope))
+(* The one refusal of the scan: an original whose consumer stops on the Exact
+   files it reads. *)
+let exact_refusal (report:Lane_addon_store_preflight.report)=match report.refusals with
+  | [{Lane_addon_store_preflight.decoder=Tool_request_exact_reads;_} as refusal] -> refusal
+  | [] | _::_ -> fail "expected one refusal, of an original on the Exact files it reads"
+let refuses_owner fixture owner report=
+  List.mem (scope_directory fixture (Capture.scope owner)) (exact_refusal report).delete
 let test_closure_projection_preserves_each_partial_move ()=with_fixture (fun ~sw:_ fixture ->
   drive_until fixture settled |> assert_settled;
   let owner,manifest=closure_manifest fixture in
@@ -884,6 +906,26 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     check bool "the scan validated several records of the one owner" true (!validated>2);
     check int "the owner's parts and partitions are read once for the whole scan" 2 !forest_reads;
     check int "closure presence is reobserved for every scanned original" !validated !closure_reads;
+    check int "the Librarian check reads the split forest's Exact files and refuses none" 0
+      (List.length (closure_preflight fixture).refusals);
+    (* Discovery compares the partition's evidence with the latest execution
+       of the original that refused its whole input. *)
+    let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+    let split=match List.filter (fun (_,capture) -> List.length (Queue.candidates (Capture.batch capture))>1)
+        (observed_originals fixture) with
+      | [_,capture] -> capture
+      | [] | _::_::_ -> fail "expected the one original that refused its whole input" in
+    let record_path,proof_path=exact_files fixture split in
+    (* Set aside and put back by rename, so the closure below reads the same files. *)
+    let aside path=path ^ ".aside" in
+    io (fun () -> List.iter (fun path -> Sys.rename path (aside path)) [record_path;proof_path]);
+    let partitions=scope_directory fixture (Parts.partition_scope owner) in
+    check bool "a partition whose source execution lost its Exact files is refused" true
+      (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+         refusal.decoder=Lane_addon_store_preflight.Tool_request_exact_reads
+         && String.equal (Filename.dirname refusal.path) partitions)
+        (closure_preflight fixture).refusals);
+    io (fun () -> List.iter (fun path -> Sys.rename (aside path) path) [record_path;proof_path]);
     let _,manifest=closure_manifest fixture in
     let posts=F.post_count fixture.server in
     List.iteri (fun index _ ->
@@ -1338,12 +1380,13 @@ let retained_absorbing_answer_before_gate fixture =
     `OK,F.openai_response (`Assoc (("memory",`Assoc (("new_claims",`List claims)::
       List.remove_assoc "new_claims" memory))::List.remove_assoc "memory" response)));
   retained_answer_before_gate fixture
-let retain_judgment fixture record final = io (fun () ->
-  match Owner.advance ~store:fixture.store ~expected:record
-    ~event:(Progress.Judgment_retained (Lane_addon_exact.final_to_json final)) with
+let retain_judgment_json fixture record judgment = io (fun () ->
+  match Owner.advance ~store:fixture.store ~expected:record ~event:(Progress.Judgment_retained judgment) with
   | Ok (Owner.Stored next | Already_stored next) -> next
   | Ok (Unconfirmed detail) -> fail detail
   | Error error -> fail (Owner.update_error_to_string error))
+let retain_judgment fixture record final =
+  retain_judgment_json fixture record (Lane_addon_exact.final_to_json final)
 let with_policy_overrides keys f =
   let originals=List.map (fun key -> key,(Prompt_registry.resolve_prompt key).override_value) keys in
   Fun.protect ~finally:(fun () -> List.iter (fun (key,value) -> match value with
@@ -1853,6 +1896,107 @@ let test_admission_confirms_a_final_the_host_never_retained ()=with_fixture (fun
     (io (fun () -> Capture.confirm_final ~store:fixture.store capture
        (refused Lane_addon_exact.Request_body_refused)=Ok ())))
 
+(* The deploy check reads an original's Exact files as its consumer reads them
+   (RFC exact-request-skips-a-slot-that-refused-its-input, section 6, L2b-2). *)
+let test_preflight_refuses_a_finished_original_without_its_exact_record ()=with_fixture (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let capture=match observed_originals fixture with [_,capture] -> capture
+    | [] | _::_::_ -> fail "expected one finished original" in
+  let record_path,proof_path=exact_files fixture capture in
+  let record=io (fun () -> Fs_compat.load_file record_path) in
+  let deletes scope (refusal:Lane_addon_store_preflight.refusal)=
+    List.mem (scope_directory fixture scope) refusal.delete in
+  check int "a finished original passes on the Exact files it reads" 0
+    (List.length (closure_preflight fixture).refusals);
+  (* The Exact check deletes a record kept under another request's key, so
+     the original's consumer finds no record. *)
+  io (fun () -> write record_path (Yojson.Safe.to_string
+    (with_field "request_id" (`String "another-request") (Yojson.Safe.from_string record))));
+  let refusal=exact_refusal (closure_preflight fixture) in
+  check bool "the refusal deletes the original's own scope" true (deletes (Capture.scope owner) refusal);
+  check bool "and the forest scope of its owner" true (deletes (Parts.scope owner) refusal);
+  check bool "and the proof link no record is left to name" true (List.mem proof_path refusal.delete);
+  check bool "the record is the Exact check's to delete" false (List.mem record_path refusal.delete);
+  io (fun () -> Sys.remove record_path;Sys.remove proof_path);
+  let _,manifest=closure_manifest fixture in
+  check bool "a Captured closure reads its member, so the refusal deletes the closure scope too" true
+    (deletes (Closure.scope owner) (exact_refusal (closure_preflight fixture)));
+  ignore (memory_action fixture (fun () -> io (fun () -> Closure.intend ~store:fixture.store manifest |> get)));
+  check int "a Closing closure settles its member without reading Exact files" 0
+    (List.length (closure_preflight fixture).refusals))
+
+let test_preflight_reads_a_dispatch_pending_original_as_resume_does ()=with_fixture (fun ~sw:_ fixture ->
+  let _,capture,_=retained_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let record_path,proof_path=exact_files fixture capture in
+  let record=io (fun () -> Fs_compat.load_file record_path) and proof=io (fun () -> Fs_compat.load_file proof_path) in
+  let finished=Yojson.Safe.from_string record in
+  let rewrite path value=io (fun () -> write path (Yojson.Safe.to_string value)) in
+  let restore ()=io (fun () -> write record_path record;write proof_path proof) in
+  let passes reason=check int reason 0 (List.length (closure_preflight fixture).refusals) in
+  let refuses reason=check bool reason true (refuses_owner fixture owner (closure_preflight fixture)) in
+  passes "resume confirms the finished record it recovers";
+  (* A proof link that is not JSON: the Exact check deletes the record with it. *)
+  io (fun () -> write proof_path "{");
+  refuses "the worker returns the final of a lost finished record, and no record confirms it";
+  rewrite record_path (with_field "final" (Lane_addon_exact.final_to_json
+    (Lane_addon_exact.Call_final (Input_refused Lane_addon_exact.Request_body_refused))) finished);
+  passes "the worker's own body refusal needs no record";
+  rewrite record_path (with_field "final" `Null finished);
+  passes "a lost open record sends resume to the worker";
+  restore ();
+  rewrite record_path (with_field "final" (`String "unreadable") finished);
+  refuses "a record whose shape cannot be read shows no final of the original";
+  let request=Capture.request capture |> get in
+  let other=Lane_addon_exact.request_of_json (with_field "messages"
+      (`List [`Assoc ["role",`String "user";"text",`String "Another request under the same ID"]])
+      (Lane_addon_exact.request_to_json request)) |> get in
+  rewrite record_path (finished |> with_field "request" (Lane_addon_exact.request_to_json other)
+    |> with_field "digest" (`String (Lane_addon_exact.digest other)));
+  refuses "another request's record under the original's ID";
+  io (fun () -> Sys.remove record_path);
+  check bool "a proof link left without its record is deleted with the owner's scopes" true
+    (List.mem proof_path (exact_refusal (closure_preflight fixture)).delete);
+  io (fun () -> Sys.remove proof_path);
+  passes "with neither file resume asks the worker";
+  let proof_json=Yojson.Safe.from_string proof in
+  let executions=match member "executions" proof_json with
+    | `List entries -> entries
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+      fail "a proof link lists its executions" in
+  io (fun () -> write record_path record);
+  rewrite proof_path (with_field "executions"
+    (`List (List.map (with_field "store_root" (`String "/another/store/root")) executions)) proof_json);
+  check bool "a proof naming another store root stops the scan before any refusal" true
+    (Result.is_error (preflight_scan fixture));
+  restore ())
+
+let test_preflight_takes_a_body_refusal_judgment_without_a_host_record ()=with_fixture (fun ~sw:_ fixture ->
+  let record,capture,_=retained_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let record_path,proof_path=exact_files fixture capture in
+  memory_action fixture (fun () -> ignore (retain_judgment fixture record
+    (Lane_addon_exact.Call_final (Input_refused Lane_addon_exact.Request_body_refused))));
+  check bool "a host terminal that answered does not confirm the worker's refusal" true
+    (refuses_owner fixture owner (closure_preflight fixture));
+  io (fun () -> Sys.remove record_path);
+  check int "with only a proof link left, the consumer takes the worker's refusal" 0
+    (List.length (closure_preflight fixture).refusals);
+  io (fun () -> Sys.remove proof_path);
+  check int "and with no Exact file at all" 0 (List.length (closure_preflight fixture).refusals))
+
+let test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match ()=with_fixture (fun ~sw:_ fixture ->
+  let record,_,final=retained_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  (* The strict decoder refuses this judgment, so its consumer recovers the
+     final from the record's Answered terminal, which delivered other JSON. *)
+  let judgment=with_field "output" (`Assoc ["not_an_admission_judgment",`Bool true])
+    (Lane_addon_exact.final_to_json final) in
+  memory_action fixture (fun () -> ignore (retain_judgment_json fixture record judgment));
+  check bool "a judgment its recovered answer does not match stops the consumer" true
+    (refuses_owner fixture owner (closure_preflight fixture)))
+
 type root_publication_cut = Before_child | Child_before_ack | Acknowledged_then_missing
 let test_original_gate_root_publication_recovery cut ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,final=retained_answer_before_gate fixture in
@@ -2147,6 +2291,14 @@ let () =
   test_case "forged worker Finished cannot commit without original host execution proof" `Quick test_forged_worker_finished_cannot_commit_without_host_proof;
   test_case "mismatched retained final cannot borrow real original host proof" `Quick test_mismatched_retained_judgment_cannot_borrow_host_proof;
   test_case "admission confirms a final the host never retained" `Quick test_admission_confirms_a_final_the_host_never_retained;
+  test_case "the deploy check refuses a finished original without its Exact record" `Quick
+    test_preflight_refuses_a_finished_original_without_its_exact_record;
+  test_case "the deploy check reads a Dispatch_pending original as resume does" `Quick
+    test_preflight_reads_a_dispatch_pending_original_as_resume_does;
+  test_case "the deploy check takes a body refusal judgment without a host record" `Quick
+    test_preflight_takes_a_body_refusal_judgment_without_a_host_record;
+  test_case "the deploy check refuses a judgment its recovered answer does not match" `Quick
+    test_preflight_refuses_a_judgment_its_recovered_answer_does_not_match;
   test_case "pending first gate intent recovers the same absent child while Off" `Quick (test_original_gate_root_publication_recovery Before_child);
   test_case "published first gate before ACK recovers the same child while Off" `Quick (test_original_gate_root_publication_recovery Child_before_ack);
   test_case "acknowledged missing first gate refuses without replacement" `Quick (test_original_gate_root_publication_recovery Acknowledged_then_missing);

@@ -1406,6 +1406,28 @@ let a_person_keeps_keepers_over_mcp () =
       "the PAT with both reads it on the route"
       200
       (by_route owner (Masc.Auth_preview_keeper.conversation_path ^ "?keeper_id=keeper-1"));
+    (* A deletion is judged as a turn is: a token that reads state alone
+       deletes nothing, and one that manages Keepers is told when no
+       conversation of the person has the id. *)
+    let delete_by_route token id =
+      let reply =
+        send
+          (fresh_browser ())
+          router
+          ~meth:"DELETE"
+          ~path:(Masc.Auth_preview_keeper.conversation_entry_prefix ^ id)
+          ~headers:[ "Authorization", "Bearer " ^ token ]
+      in
+      reply.status, reply.body
+    in
+    Alcotest.(check int)
+      "a PAT that reads state deletes no conversation"
+      403
+      (fst (delete_by_route reader "conversation-1"));
+    Alcotest.(check (pair int string))
+      "a PAT that manages Keepers is told no conversation of the person has the id"
+      (404, route_error ~code:"unknown_conversation" "No conversation of yours has this id.")
+      (delete_by_route owner "conversation-1");
     check
       "a Keeper with no turn yet has no conversation"
       ( "false"

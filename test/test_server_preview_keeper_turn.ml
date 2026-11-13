@@ -1,5 +1,5 @@
-(* The turns of a person's Keeper in the localhost preview (plan D2-8) and the
-   conversation they make (plan S1b-3). The
+(* The turns of a person's Keeper in the localhost preview (plan D2-8), the
+   conversation they make (plan S1b-3), and its deletion (plan S1b-3c). The
    zone is on real files, made by the real bootstrap, and its records are made
    by the real writers. The runtime is the provider of a runtime.toml with a
    login receipt of each account. The Claude Code CLI is a script that answers
@@ -50,7 +50,10 @@ let commit zone ~author ~kind body =
    [<script>.started] after the message and waits. While [<script>.fail] is
    there it ends after the message with no answer, and while [<script>.lost]
    is there it ends so when it was started to resume a session. The session
-   is the one it was started with, new or resumed. *)
+   is the one it was started with, new or resumed. It prints the version
+   [<script>.version] holds, or 2.1.322. A purge appends the home and the
+   arguments to [<script>.purge.jsonl] and exits 0, or 1 while
+   [<script>.purge-fail] is there. *)
 let fake_claude = {|#!/usr/bin/env python3
 import json
 import os
@@ -63,6 +66,14 @@ script = sys.argv[0]
 if "auth" in args and "status" in args:
     print(json.dumps({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"}))
     sys.exit(0)
+if args == ["--version"]:
+    version = Path(script + ".version")
+    print(version.read_text().strip() if version.exists() else "2.1.322 (Claude Code)")
+    sys.exit(0)
+if "purge" in args:
+    with open(script + ".purge.jsonl", "a") as log:
+        log.write(json.dumps({"home": os.environ.get("CLAUDE_CONFIG_DIR"), "args": args}) + "\n")
+    sys.exit(1 if Path(script + ".purge-fail").exists() else 0)
 
 def read():
     return json.loads(sys.stdin.readline())
@@ -888,6 +899,7 @@ let test_turn () =
               (Conversation.root ~base_path ~namespace:alice.person.namespace)
               idle
               (get (Provider_account_id.of_string "another-account"))
+              ~deleted:(Server_keeper_conversation_purge.deletion_began alice.person)
               ~draw:(fun () -> "conversation-elsewhere")
               ~now_ms:(fun () -> start_ms)
               ~one_call_of:Login.one_call_of
@@ -1310,6 +1322,177 @@ let test_turn () =
           "a home of its own"
           false
           (String.equal (home_of ~base_path alice) (home_of ~base_path bob));
+        (* She deletes a conversation (plan S1b-3c). Claude Code purges the
+           project the turns of it started in, on the home of the account
+           they ran on, and the directory of the conversation goes. *)
+        let delete (who : someone) id =
+          let answer =
+            Server_preview_keeper_conversation.delete ~env ~person:who.person ~base_path ~conversation_id:id
+          in
+          R.status_code answer.R.status, answer.R.body
+        in
+        let deleted id copy =
+          200, Yojson.Safe.to_string (`Assoc [ "conversation_id", `String id; "vendor_copy", `String copy ])
+        in
+        let not_hers =
+          404, {|{"error":"No conversation of yours has this id.","code":"unknown_conversation"}|}
+        in
+        let not_of_keeper =
+          404, {|{"error":"No conversation of this Keeper has this id.","code":"unknown_conversation"}|}
+        in
+        let purges = claude ^ ".purge.jsonl" in
+        let purged () = if Sys.file_exists purges then List.length (rows purges) else 0 in
+        let status_of (who : someone) id =
+          Authz_purge_state.find
+            (Z.snapshot zone).Z.state.Authz_state.purges
+            (Authz_purge_event.Keeper_conversation
+               { owner = who.person.user_id; conversation_id = get (Conversation.Conversation_id.of_string id) })
+        in
+        let listed fields =
+          match List.assoc_opt "conversations" fields with
+          | Some (`List listed) ->
+            List.map
+              (function
+                | `Assoc fields -> text_of fields "conversation_id", List.assoc_opt "deletion" fields
+                | _ -> Alcotest.fail "a listed conversation is not an object")
+              listed
+          | _ -> Alcotest.fail "the read has no list"
+        in
+        check_reply "her first conversation is deleted" (deleted conversation "removed") (delete alice conversation);
+        (match rows purges with
+         | [ asked ] ->
+           Alcotest.(check (list string))
+             "the CLI purges the project of its turns, with no settings layer"
+             [ "--setting-sources="; "purge"; "--yes"; List.fold_left Filename.concat alice_records [ conversation; "cwd" ] ]
+             (args_of asked);
+           Alcotest.(check string) "on the home of her account" (home_of ~base_path alice) (text_of asked "home")
+         | _ -> Alcotest.fail "the CLI was not asked once");
+        Alcotest.(check bool) "its directory is gone" false (Sys.file_exists alice_conversation);
+        (match status_of alice conversation with
+         | Some (Authz_purge_state.Purged { vendor_copy = Authz_purge_event.Removed }) -> ()
+         | Some _ | None -> Alcotest.fail "the log does not have the deletion as gone through");
+        check_reply
+          "a read of the deleted conversation"
+          not_of_keeper
+          (read alice [ "keeper_id", "keeper-alice"; "conversation_id", conversation ]);
+        check_reply "a deletion of it again" not_hers (delete alice conversation);
+        check_reply "his deletion of her conversation" not_hers (delete bob current);
+        Alcotest.(check bool) "starts none" true (Option.is_none (status_of alice current));
+        (* Her current conversation had no turn, so no client holds it and
+           the CLI is not asked. She has no current conversation after it:
+           no earlier one comes back. *)
+        check_reply "her current conversation, with no turn" (deleted followed "none") (delete alice followed);
+        Alcotest.(check int) "the CLI is not asked for it" 1 (purged ());
+        let after = read_fields "after the deletions" (read alice [ "keeper_id", "keeper-alice" ]) in
+        Alcotest.(check bool)
+          "she has no current conversation"
+          true
+          (List.assoc_opt "current_conversation_id" after = Some `Null);
+        Alcotest.(check (list (pair string (option string))))
+          "the list keeps the conversation she did not delete"
+          [ current, None ]
+          (List.map (fun (id, deletion) -> id, Option.map Yojson.Safe.to_string deletion) (listed after));
+        let later =
+          answered
+            "the turn after her current conversation is deleted"
+            ~keeper:"keeper-alice"
+            ~runtime:alice_runtime
+            ~text:"echo: later"
+            ~continued:false
+            (reply alice (body ~keeper:"keeper-alice" ~message:"later"))
+        in
+        Alcotest.(check bool)
+          "goes on in a new conversation"
+          false
+          (List.mem later [ conversation; current; followed ]);
+        Alcotest.(check bool)
+          "and makes no directory of the deleted one"
+          false
+          (Sys.file_exists (Filename.concat alice_records followed));
+        (* A directory that cannot be removed: the log has the deletion as
+           failed, the list shows it so, and the conversation is not read. A
+           deletion again ends it, and the CLI is not asked again for the
+           copy it removed. *)
+        let current_directory = Filename.concat alice_records current in
+        Unix.chmod current_directory 0o500;
+        let refused =
+          Fun.protect ~finally:(fun () -> Unix.chmod current_directory 0o700) (fun () -> delete alice current)
+        in
+        check_reply
+          "a deletion whose directory cannot be removed"
+          ( 503
+          , {|{"error":"The files of this conversation could not all be removed. It is listed as a deletion that failed, and no turn goes on in it. Ask again to delete it.","code":"conversation_not_deleted"}|}
+          )
+          refused;
+        Alcotest.(check int) "the CLI purged its project" 2 (purged ());
+        (match status_of alice current with
+         | Some
+             (Authz_purge_state.Failed
+                { failed_stage = Authz_purge_event.Folder_not_removed; vendor_copy = Authz_purge_event.Removed }) ->
+           ()
+         | Some _ | None -> Alcotest.fail "the log does not have the deletion as failed");
+        Alcotest.(check (list (pair string (option string))))
+          "the list shows the deletion that failed"
+          [ current, Some {|"failed"|}; later, None ]
+          (List.map
+             (fun (id, deletion) -> id, Option.map Yojson.Safe.to_string deletion)
+             (listed (read_fields "a failed deletion" (read alice [ "keeper_id", "keeper-alice" ]))));
+        check_reply
+          "and does not read it"
+          not_of_keeper
+          (read alice [ "keeper_id", "keeper-alice"; "conversation_id", current ]);
+        check_reply "a deletion of it again" (deleted current "removed") (delete alice current);
+        Alcotest.(check int) "does not ask the CLI again" 2 (purged ());
+        Alcotest.(check bool) "and removes the directory" false (Sys.file_exists current_directory);
+        (* A CLI older than claude purge is not asked, and one that does not
+           exit 0 leaves the copy as one that may remain. *)
+        let version = claude ^ ".version" in
+        Out_channel.with_open_bin version (fun out -> output_string out "2.1.287 (Claude Code)\n");
+        check_reply "a deletion with an older CLI" (deleted later "may_remain") (delete alice later);
+        Sys.remove version;
+        Alcotest.(check int) "the older CLI is not asked to purge" 2 (purged ());
+        let refuse = claude ^ ".purge-fail" in
+        Out_channel.with_open_bin refuse (fun (_ : out_channel) -> ());
+        check_reply "a deletion the CLI does not purge" (deleted renewed "may_remain") (delete alice renewed);
+        Sys.remove refuse;
+        Alcotest.(check int) "the CLI was asked" 3 (purged ());
+        (* A deletion waits for no call of the account: it is told the
+           account is busy and writes nothing. *)
+        (match
+           Login.one_call_of
+             (get (Provider_account_id.of_string bob.account_id))
+             ~busy:"the call of the test did not start"
+             (fun () -> Ok (delete bob his_conversation))
+         with
+         | Ok answer ->
+           check_reply
+             "a deletion while a call of the account runs"
+             ( 409
+             , {|{"error":"A call of the account this conversation began on is running. Try again when it ends.","code":"account_call_running"}|}
+             )
+             answer
+         | Error busy -> Alcotest.fail busy);
+        Alcotest.(check bool) "writes nothing" true (Option.is_none (status_of bob his_conversation));
+        (* A deletion that stopped after its first record: nothing shows the
+           conversation, and the next deletion of it ends it. *)
+        let his_target =
+          Authz_purge_event.Keeper_conversation
+            { owner = bob.person.user_id; conversation_id = get (Conversation.Conversation_id.of_string his_conversation) }
+        in
+        (match Authz_purge.start zone ~user_id:bob.person.user_id his_target with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_purge.error_detail error));
+        let pending = read_fields "a pending deletion" (read bob [ "keeper_id", "keeper-alice" ]) in
+        Alcotest.(check (pair bool int))
+          "is not shown, and leaves no current conversation"
+          (true, 0)
+          (List.assoc_opt "current_conversation_id" pending = Some `Null, List.length (listed pending));
+        check_reply "the next deletion ends it" (deleted his_conversation "removed") (delete bob his_conversation);
+        Alcotest.(check bool)
+          "and removes its directory"
+          false
+          (Sys.file_exists (Filename.concat (records_of ~base_path bob) his_conversation));
+        check_reply "a deletion of an id that is no id" (400, {|{"error":"The path ends in the id of the conversation.","code":"invalid_request"}|}) (delete alice "..");
         (* Carol's Keeper runs on Codex. Its least posture reads what the
            server process reads, which holds the homes of other people, so
            the turn is refused and Codex runs none. *)

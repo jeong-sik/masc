@@ -1723,16 +1723,18 @@ let changes_status_lines ~cols input =
         | Changes_workspace_unconfirmed ->
             one
               [ { text =
-                    say input.ko "작업 공간 미확인 · 파일을 열 수 없음"
-                      "workspace unconfirmed; files cannot be opened"
+                    Masc_tui_words.workspace_name ~ko:input.ko ^ " "
+                    ^ Masc_tui_words.field_unconfirmed ~ko:input.ko
+                    ^ middle_dot ^ say input.ko "파일을 열 수 없음" "files cannot be opened"
                 ; tone = Warn
                 }
               ]
         | Changes_revalidating ->
             one
               [ { text =
-                    say input.ko "변경 다시 확인 중 · 아직 파일을 열 수 없음"
-                      "rechecking changes; files cannot be opened yet"
+                    say input.ko "변경 다시 확인 중" "rechecking changes"
+                    ^ middle_dot
+                    ^ say input.ko "아직 파일을 열 수 없음" "files cannot be opened yet"
                 ; tone = Warn
                 }
               ]

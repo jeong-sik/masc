@@ -21401,6 +21401,15 @@ let title_failed ~ko = "(" ^ field_failed ~ko ^ ")"
    it; the fleet line sits below this module and spells the same pair. *)
 let field_stale ~ko = if ko then "이전 관측" else "stale"
 
+(* The workspace the server serves, named where the TUI cannot confirm it:
+   the identity was not read, the latest read did not match again, or the
+   server is not ready to say ([server_authority_ready]). A request that
+   needs it is kept back, and rows read before it say so, in these words. *)
+let workspace_identity_name ~ko = if ko then "워크스페이스 식별" else "workspace identity"
+let workspace_identity_unconfirmed ~ko =
+  workspace_identity_name ~ko ^ if ko then " 미확인" else " unconfirmed"
+let workspace_identity_unread ~ko = workspace_identity_name ~ko ^ " " ^ field_unread ~ko
+
 let title_missing_reading ~ko ~error =
   if Option.is_some error then title_failed ~ko else title_unread ~ko
 

@@ -184,9 +184,13 @@ Keeper 로 가르면 `masc-productor-owner` 는 163건 중 144건이 `autonomous
 
 **[사실]** 11-13 09:48 KST 배포 뒤 영수증 일정(`delivery=receipt`)은 2건 만들어졌어요. 둘 다 `e-masc-the-leader` 의 한 턴(`keeper_turn_id` 12611)이고 `turn_kind` 는 `autonomous` 예요(첫 호출은 `keeper_name` 을 빼서 입력 검증이 거절했어요). 그 Keeper 는 이어서 `keeper_receipt_wait` 를 부르지 못했어요. 도구가 그 턴에 없었어요. `masc_schedule_create` 의 설명은 `delivery=receipt` 에 「`keeper_receipt_wait` 로 기다려라」고 적는데, 이 설명은 `autonomous` 턴에도 똑같이 가요.
 
+**[사실]** 그 일정은 대기 도구 없이 끝까지 돌았어요. 일정 `sched-827f4693a31d3cd018d752c0e9bbcb02` 는 13:26 KST 에 만들어졌고 본문에 `receipt_key`(`schedule-receipt:` 로 시작하는 값, #51737)가 들어 있어요. run 이 끝나서 due 가 13:41:35 KST(epoch 1794544895)로 당겨졌고 상태는 `succeeded` 예요(`schedules.json`). `e-masc-the-leader` 는 13:51:16 KST 에 `tool_result_ready` 자극을 소비하고 새 턴에 들어갔어요(서버 로그 `turn entry: consumed stimulus … class=tool_result_ready`). 영수증 id 와 자극 id 를 맞춰 보지는 못했어요. 영수증 파일을 찾지 못했어요. 13:41:35 와 13:51:16 사이 9.7분은 그 Keeper 의 앞 턴이 1,389초(`long-turn` 경고) 걸려 13:51:15 에 끝났기 때문이에요.
+
+**[사실]** 이 길은 코드에서 나와요. `Keeper_client_tool_outbox_wake.notify` 는 어떤 실행도 소유하지 않은 영수증(`Unowned_only`)마다 `Tool_result_ready`(urgency `Immediate`) 자극을 큐에 넣고 Keeper 를 깨워요. 대기를 기록한 채팅 operation 이 있는 영수증만 그 실행이 소유해서 자극이 가지 않아요. `autonomous` 턴은 대기를 기록하지 않으니 영수증 일정을 만들고 턴을 끝내면 영수증이 자극으로 와요.
+
 **[사실]** 배포 뒤 4.64시간(11-13 00:48:28Z~05:27:07Z)은 Execute 가 `autonomous` 572건, `direct` 125건이고 `sleep`+`gh` 는 0건이에요. 활동량이 기준선 시간당 건수의 약 1/8이라 효과로 읽지 않아요.
 
-**[제안]** 6절의 지표는 `turn_kind` 로 나눠서 읽어요. 이 스택의 효과는 `direct` 턴의 `sleep`+`gh` 시간이 줄었는지로 판정하고, `autonomous` 턴 값은 이 스택과 상관없는 값으로 따로 적어요. `autonomous` 턴이 같은 턴에서 영수증을 기다려야 하는지는 7절 5번으로 올려요. 체크포인트가 없는 턴이 영수증을 기다리게 하려면 턴을 보관하는 방법부터 새로 정해야 해서, 구현 전에 RFC 가 따로 필요해요.
+**[제안]** 6절의 지표는 `turn_kind` 로 나눠서 읽어요. 이 스택의 효과는 `direct` 턴의 `sleep`+`gh` 시간이 줄었는지로 판정하고, `autonomous` 턴 값은 이 스택과 상관없는 값으로 따로 적어요. `autonomous` 턴이 같은 턴에서 영수증을 기다리게 하는 구조 변경은 하지 않아요. 위 두 [사실]처럼 그 턴은 영수증 일정을 만들고 끝내면 영수증이 와요. 남는 질문은 구조가 아니라 `autonomous` 턴이 왜 턴을 끝내지 않고 `sleep` 하는가예요(7절 5번).
 
 ## 6. 재는 것
 
@@ -212,7 +216,7 @@ Keeper 로 가르면 `masc-productor-owner` 는 163건 중 144건이 `autonomous
 3. **결정(사용자, 2026-11-12): 예, 두 Keeper 에게 각자 한 번 물어요.** 2026-11-12 17:42 KST 에 Board 글 두 개로 보냈어요. `masc-productor-owner` 는 1분 뒤 답했어요(3절). 글 번호는 `rondo` 가 `p-e5fe85dd65a9be6aab87462f35410853`, `masc-productor-owner` 가 `p-45dacfc018a91c4ab3a2eff9cd3e8af2` 예요. 답은 글의 댓글에 와요. `rondo` 도 같은 날 12:21Z 에 답했어요(3절).
 4. **결정(사용자, 2026-11-13): 영수증 키는 배포 전에 고치고 일정 본문에 둬요. ACK 뒤 재전달은 닫지 않고 한계로 문서화해요.** 5.2 [미해결] 1 은 #51737 이 고쳐요. 2 는 위 5.2 의 [결정]대로 둬요.
 
-5. **정할 것(사용자): `autonomous` 턴의 `sleep`+`gh`(기준선 304건, 21.78 h)를 어떻게 하나.** 영수증 대기가 닿지 않는 몫이에요(5.3). `autonomous` 턴이 쓸 수 있는 길은 `until_github_run`(턴을 끝내고 나중에 깨움)뿐이에요. 후보는 (가) 둔다, (나) 영수증 대기를 체크포인트 없는 턴으로 넓히는 RFC 를 쓴다예요. (나)가 건드리는 곳은 operation 기록(`Chat_operation_store`, `keeper_receipt_wait_state.ml` 186줄, `keeper_direct_checkpoint_continuation.ml` 134줄), `Keeper_owner` 의 `Defer_direct_checkpoint` 명령, `keeper_run_tools_setup.ml` 의 `descriptors_for_run`, 그리고 autonomous 순환에서 operation 을 만드는 일이에요. 한 PR 크기가 아니라서 RFC 가 먼저예요. `until_github_run`(`delivery` 기본 `queue`)은 이미 autonomous 순환을 나중에 깨워 주므로, (나)가 더하는 것은 「턴의 작업 상태를 잃지 않고 같은 턴에서 이어 가는 것」이에요. 그 값은 재 보지 않았어요. `rondo` 는 sleep 을 고른 이유로 「턴을 놓고 싶지 않다」를 들었어요(3절).
+5. **정할 것(사용자): `autonomous` 턴의 `sleep`+`gh`(기준선 304건, 21.78 h)는 구조를 바꾸지 않고 둬요(추천).** 근거는 5.3 의 끝까지 돈 일정이에요. `autonomous` 턴은 대기 도구 없이 영수증 일정을 만들고 턴을 끝내면 `Tool_result_ready` 자극으로 영수증을 받아요. 영수증 대기를 체크포인트 없는 턴으로 넓히는 RFC 는 `Chat_operation_store`, `keeper_receipt_wait_state.ml`, `keeper_direct_checkpoint_continuation.ml`, `Keeper_owner` 의 `Defer_direct_checkpoint`, `autonomous` 순환의 operation 생성을 건드려서 한 PR 크기가 아니에요. 그 값은 「턴의 작업 상태를 잃지 않고 같은 턴에서 이어 가는 것」뿐인데 재 보지 않았어요. 대가는 `autonomous` 턴이 `sleep` 을 고르는 304건을 이 스택이 줄이지 못하는 것이에요. 이유는 `rondo` 한 명의 답(「턴을 놓고 싶지 않다」, 3절)밖에 없어요. 반대로 보려면 `autonomous` 턴 `sleep`+`gh` 직후 같은 턴에서 이어 간 작업의 양을 먼저 재야 해요.
 
 ## 8. 확인하지 못한 것
 

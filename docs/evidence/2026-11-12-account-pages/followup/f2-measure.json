@@ -32,27 +32,6 @@
     "title": "MASC 계정",
     "firstTabStop": "button#go outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "button#go",
-      "hovered": "body",
-      "elements": 93,
-      "sha256": "1eeae23527119c22"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 93,
-      "sha256": "17a1257791200e62"
-    },
     "attempts": 1
   },
   {
@@ -88,27 +67,6 @@
     "title": "MASC 계정",
     "firstTabStop": "body",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 94,
-      "sha256": "dd3424b9b17731b1"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 94,
-      "sha256": "ac55f1c8fa63d04d"
-    },
     "attempts": 1
   },
   {
@@ -144,27 +102,6 @@
     "title": "MASC 초대",
     "firstTabStop": "button#go outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "button#go",
-      "hovered": "body",
-      "elements": 26,
-      "sha256": "84fd236bda3e0853"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 26,
-      "sha256": "61988aab340b73cb"
-    },
     "attempts": 1
   },
   {
@@ -200,27 +137,6 @@
     "title": "이 주소에는 초대 정보가 없어요",
     "firstTabStop": "a outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "a",
-      "hovered": "body",
-      "elements": 26,
-      "sha256": "ad6cfa47763b1b0e"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 26,
-      "sha256": "8968af99946f15cb"
-    },
     "attempts": 1
   },
   {
@@ -256,27 +172,6 @@
     "title": "MASC 초대",
     "firstTabStop": "body",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 27,
-      "sha256": "9b4fe3c3316fd345"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 27,
-      "sha256": "e15ec8cd50082827"
-    },
     "attempts": 1
   },
   {
@@ -312,28 +207,7 @@
     "title": "MASC 계정",
     "firstTabStop": "button#signout outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "button#signout",
-      "hovered": "main",
-      "elements": 93,
-      "sha256": "713d1fdbfcccfdf6"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 93,
-      "sha256": "01849fc88b99bd4e"
-    },
-    "attempts": 2
+    "attempts": 1
   },
   {
     "label": "f2",
@@ -368,27 +242,6 @@
     "title": "MASC 계정",
     "firstTabStop": "button#signout outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "button#signout",
-      "hovered": "main",
-      "elements": 97,
-      "sha256": "d911178a93aaac7e"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 97,
-      "sha256": "6d71a746379063d2"
-    },
     "attempts": 1
   },
   {
@@ -424,27 +277,6 @@
     "title": "MASC 계정",
     "firstTabStop": "button#signout outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "button#signout",
-      "hovered": "main",
-      "elements": 97,
-      "sha256": "ef4c6707c9f06e51"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 97,
-      "sha256": "3fd4a7a32c385405"
-    },
     "attempts": 1
   },
   {
@@ -480,27 +312,6 @@
     "title": "MASC 계정",
     "firstTabStop": "a#reopen outline=solid 2px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "a#reopen",
-      "hovered": "body",
-      "elements": 93,
-      "sha256": "383790de5f053fd0"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "body",
-      "elements": 93,
-      "sha256": "1dd937a1242edae0"
-    },
     "attempts": 1
   },
   {
@@ -538,27 +349,6 @@
     "title": "MASC 계정",
     "firstTabStop": "button#go outline=auto 1px",
     "horizontalScrollAt320": "none",
-    "widthAt320": 320,
-    "styles320": {
-      "innerWidth": 320,
-      "innerHeight": 800,
-      "devicePixelRatio": 2,
-      "visibilityState": "visible",
-      "focused": "button#go",
-      "hovered": "html",
-      "elements": 93,
-      "sha256": "0e643817a6f6bdf1"
-    },
-    "styles1280": {
-      "innerWidth": 1280,
-      "innerHeight": 800,
-      "devicePixelRatio": 1,
-      "visibilityState": "visible",
-      "focused": "body",
-      "hovered": "html",
-      "elements": 93,
-      "sha256": "e4c4b1cb2a3fabfb"
-    },
     "attempts": 1
   }
 ]

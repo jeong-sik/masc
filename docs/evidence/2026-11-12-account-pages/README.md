@@ -119,7 +119,7 @@ sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트> 
 
 - `refused_401`. 실제 서버의 `GET /auth/github/callback` 을 쿠키 없이 열었어요.
 - `refused_404_no_client`. GitHub client 가 없는 서버의 같은 주소예요.
-- `done_held`. 로그인을 마친 화면이에요. GitHub 로그인이 있어야 나오는 답이라 브라우저로는 못 가요. 로그인 시험(`test_server_login_http`)이 GitHub 를 대신해 로그인을 끝낸 자리에서 서버가 답한 header 와 바이트를 저장했고(`harness/ux-dump-done.py`), 대역이 그것을 그대로 줘요. 이 화면은 뜨자마자 다음 주소로 떠나요. 재는 동안 머물게 하려고 대역이 정책의 script nonce 만 다른 값으로 바꿔 줬어요. sheet 의 nonce 는 그대로예요.
+- `done_held`. 로그인을 마친 화면이에요. GitHub 로그인이 있어야 나오는 답이라 브라우저로는 못 가요. 로그인 시험(`test_server_login_http`)이 GitHub 를 대신해 로그인을 끝낸 자리에서 서버가 답한 header 와 바이트를 저장했고(`harness/ux-dump-done.py`), 대역이 그것을 그대로 줘요. 이 화면의 script 는 뜨자마자 다음 주소로 떠나게 써 있어요(`login_routes.ml` 의 `completion_page`). 재는 동안 머물게 하려고 대역이 정책의 script nonce 만 다른 값으로 바꿔 줬어요. sheet 의 nonce 는 그대로예요.
 
 | 상태 | HTTP | axe 위반 | incomplete | CSS 규칙 | 정책 위반 | `style` 속성 | 24px 미만 대상 | 가장 낮은 대상 | landmark | 문서 `lang` | 첫 Tab | 320px 가로 넘침 | 시도 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -130,13 +130,15 @@ sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트> 
 | 전: refused_404_no_client | 404 | 4 | 1 | 0 | 0 | 0 | 1 | 20px | 0 | `en` | `a` | none | 1 |
 
 - "전" 두 줄은 앞 층 바이너리(`b85f755a84bb`)의 같은 두 주소예요(`l1c/l1c-before-measure.json`). axe 위반 넷은 `landmark-one-main`, `page-has-heading-one`, `region` 둘이고 incomplete 는 `bypass` 예요. 화면에 style 이 없었고, 하나뿐인 링크의 높이가 20px 이었어요.
-- 정책. 실패 화면은 `default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` 이에요. 전에는 `style-src` 가 없었어요. 완료 화면은 여기에 `script-src 'nonce-N'` 이 더 있고, 이 줄은 전과 같아요.
-- `done_held` 의 정책 위반 1건은 `script-src-elem` 이에요. 대역이 막아 둔 그 script 예요. 서버가 답한 그대로면 script 가 돌고 화면이 떠나요.
+- 정책. 실패 화면은 `default-src 'none'; style-src 'nonce-N'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` 이에요. N 은 답마다 새로 뽑는 값이에요. 전에는 `style-src` 가 없었어요. 완료 화면은 여기에 `script-src 'nonce-N'` 이 더 있고, 이 줄은 전과 같아요.
+- `done_held` 의 정책 위반 1건은 `script-src-elem` 이에요. 대역이 막아 둔 그 script 예요. 서버가 답한 그대로 둔 화면에서 script 가 돌아 떠나는 것은 재지 않았어요.
 - 문서 제목은 `MASC 로그인 실패`, `MASC 로그인 완료` 예요.
 - 나머지 아홉 줄(로그인 전 다섯, 로그인한 셋, 대조군)은 L1b 표와 값이 같아요.
 - 완료 화면의 `href` 는 시험이 고른 돌아갈 주소예요. 실제 로그인에서는 로그인을 시작한 화면이 보낸 주소가 들어가요.
 
-경로 시험(`test_login_routes`)이 두 화면의 정책과 sheet 의 nonce 를 붙드는지는 코드를 일부러 틀리게 고쳐서 봤어요(`l1c/policy-mutants.py`, 결과 `l1c/policy-mutants.tsv`). 고칠 때마다 시험을 다시 빌드해 돌렸고 넷 다 시험이 실패했어요. 끝나면 스크립트가 소스를 원래대로 되돌려요.
+경로 시험(`test_login_routes`)이 두 화면의 정책과 nonce 와 sheet 를 붙드는지는 코드를 일부러 틀리게 고쳐서 봐요(`l1c/policy-mutants.py`, 결과 `l1c/policy-mutants.tsv`). 고칠 때마다 시험을 다시 빌드해 돌리고, 끝나면 스크립트가 소스를 원래대로 되돌려요.
+
+이 층에서 처음 돌린 것은 아래 표의 위 넷이었고, 넷 다 잡혔어요. 그런데 완료 화면 정책의 `style-src` 와 그 뒤 지시어는 어떤 시험도 읽지 않았어요(#51592 리뷰). 완료 화면 시험은 정책에서 첫 nonce(`script-src` 의 것)만 꺼냈고, 실패 화면 시험은 빈 nonce·빈 sheet·모든 답이 같은 nonce 를 그대로 통과시켰어요. 후속 PR 이 시험을 고친 뒤 열둘을 다시 돌렸고, 열둘 다 잡혔어요.
 
 | 틀리게 고친 것 | 결과 | 실패한 시험 |
 | --- | --- | --- |
@@ -144,6 +146,14 @@ sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트> 
 | 실패 화면의 정책에서 `style-src` 를 뺌 | 잡힘 | `refused` 의 `start`, `callback` |
 | 실패 화면의 sheet 를 정책과 다른 nonce 로 실음 | 잡힘 | `refused` 의 `start`, `callback` |
 | 완료 화면의 sheet 를 정책과 다른 nonce 로 실음 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+| 완료 화면의 정책에서 `style-src` 를 뺌 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+| 완료 화면의 `style-src` 를 다른 nonce 로 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+| 완료 화면의 `script-src` 에 `'unsafe-inline'` 을 더함 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+| 완료 화면의 정책에서 `base-uri`·`form-action`·`frame-ancestors` 를 뺌 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+| 완료 화면의 `default-src` 를 `'self'` 로 | 잡힘 | `sign-in` 의 `Google, then sign out` |
+| 모든 실패 화면이 같은 nonce 를 씀 | 잡힘 | `refused` 의 `start`, `callback` |
+| 실패 화면의 nonce 가 빈 값 | 잡힘 | `refused` 의 `start`, `callback` |
+| 화면 뼈대의 sheet 가 빈 값 | 잡힘 | `sign-in` 의 `Google, then sign out`, `refused` 의 `start`, `callback` |
 
 | 캡처 | 상태 |
 | --- | --- |
@@ -157,7 +167,7 @@ sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트> 
 
 - 재는 법(`harness/invite-reopen.sh`, `harness/invite-reopen.mjs`). 실제 서버의 `/accounts/invite` 를 주소창이 여는 방식(`Page.navigate`)으로 열어요. 걸음마다 브라우저가 문서를 다시 읽었는지, 주소의 `#` 뒤 길이, 보이는 제목, 단추를 누르면 나갈 token 이 어느 링크 것인지를 적어요.
 - token 둘은 모양만 맞춘 지어낸 값이에요(hex 64자). 서버가 낸 값이 아니고, 어떤 걸음도 그 값을 서버로 보내지 않아요.
-- 전은 L1c 절의 바이너리(`e39944514abc`)예요. 그 뒤로 main 의 `lib/auth_preview.ml` 은 바뀌지 않았어요. 후는 고친 커밋 `9107df280028` 의 바이너리예요(sha256 앞 12자리 `c36648c75d65`, tree 는 `lib` `d37cb8ccb5a7`, `bin` `3c542c1c07e1`). 두 서버가 답한 `/accounts/invite` 는 nonce 를 빼면 더한 한 줄만 달라요.
+- 전은 L1c 절의 바이너리(`e39944514abc`)예요. 그 뒤로 main 의 `lib/auth_preview.ml` 은 바뀌지 않았어요. 후는 고친 커밋 `9107df280028` 의 바이너리예요(sha256 앞 12자리 `c36648c75d65`, tree 는 `lib` `d37cb8ccb5a7`, `bin` `3c542c1c07e1`). 화면 본문과 script 를 쓰는 `auth_preview.ml` 은 두 `lib` tree 에서 6줄 더하고 1줄 뺀 것만 달라요. 화면 뼈대(`auth/account_page.ml`·`.css`)는 같아요. 경로를 다는 `server/server_login_http.ml` 처럼 다른 `lib` 파일도 여럿 달라요(`git diff --numstat 29d587c3e5fb 9107df280028:lib`). 서버가 답한 본문은 커밋하지 않아서 두 답을 직접 비교한 기록은 없어요.
 
 | 걸음 | 전 (문서 · `#` 뒤 길이 · 제목 · 양식의 token) | 후 |
 | --- | --- | --- |
@@ -228,29 +238,30 @@ sh harness/ux-layer.sh <masc 바이너리> <label> <출력 폴더> <빈 포트> 
 
 로그아웃도 답을 가려요. 세션이 끝났으면(204, 또는 세션이 없다는 401) 화면을 처음부터 다시 읽어요. 그 밖의 답이면 세션을 다시 읽고, 세션이 그대로면 로그아웃이 안 됐다고 상태 줄에 적어요.
 
-- 재는 법(`harness/session-views.sh`, `harness/session-views.mjs`). 실제 서버가 답한 `/` 를 저장해 대역(`harness/ux-mock.mjs`)으로 주고, 대역이 세션 경로와 로그아웃 경로의 답을 경우마다 바꿔요. 로그아웃 단추는 키보드로 눌러요(focus 뒤 Enter). 줄마다 그 뒤 세션 경로가 무엇을 답하는지도 적어요. 그 값이 세션의 실제 상태예요.
-- 대역에 경우 셋을 더했어요. `session_unread`(세션 경로가 503), `signout_refused`(로그아웃이 503, 세션은 그대로), `zone_stops_at_signout`(로그아웃이 503 이고 그 뒤 세션 경로도 503).
+- 재는 법(`harness/session-views.sh`, `harness/session-views.mjs`). 실제 서버가 답한 `/` 를 저장해 대역(`harness/ux-mock.mjs`)으로 주고, 대역이 세션 경로와 로그아웃 경로의 답을 경우마다 바꿔요. 로그아웃 단추는 키보드로 눌러요(focus 뒤 Enter). 줄마다 그 뒤 세션 경로의 답도 적어요. 그 값은 대역이 그 경우에 정한 답이에요. 실제 서버의 세션을 읽은 값이 아니에요.
+- 대역에 경우 셋을 더했어요. `session_unread`(세션 경로가 503), `signout_refused`(로그아웃이 503, 그 뒤 세션 경로는 200), `zone_stops_at_signout`(로그아웃이 503 이고 그 뒤 세션 경로도 503).
+- 실제 서버에서 503 인 로그아웃의 결과는 셋이에요. 권한 파일을 못 읽으면 세션 경로도 503 이에요(`zone_stops_at_signout`). 로그아웃 기록을 남기지 못했으면 세션이 그대로예요(`signout_refused`). 기록은 남겼는데 답을 쓰지 못했으면 세션이 끝났어요. 셋째는 대역으로 만들지 않았어요.
 - 전은 앞 절의 고친 바이너리(`c36648c75d65`)예요. 앞 절의 변경은 초대 화면 script 한 줄이라 `/` 화면의 소스는 main 과 같아요. 후는 커밋 `0d6a6c20f925` 의 바이너리예요(sha256 앞 12자리 `299351730ed1`, tree 는 `lib` `6f21c79c99ae`, `bin` `3c542c1c07e1`).
-- "문서에 남은 그 사람의 id" 는 보이든 숨었든 문서 글자에 든 지어낸 id(`pa_`, `rt_`, `pat_`, `usr_`)의 수예요.
+- "문서에 남은 그 사람의 id" 는 보이든 숨었든 문서 글자에 든 지어낸 id(`pa_`, `rt_`, `pat_`, `usr_`)의 수예요. 처음 커밋한 값은 둘씩 적었어요. `<select>` 의 선택지 글자는 사이에 아무것도 없이 이어져서, 세는 식의 `\b` 가 붙은 id 를 못 셌어요(#51658 리뷰). 식을 고쳐 2026-11-13 에 같은 두 바이너리로 다시 쟀고, 표는 그 값이에요. 이 열 말고는 처음 값과 같아요.
 
 | 경우 | | 보이는 화면 | 그 뒤 세션 경로의 답 | 상태 줄의 첫 줄 | focus | 문서에 남은 그 사람의 id | 문서 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 세션 경로가 503 인 서버에서 화면을 연다 | 전 | 로그인 카드 | 503 | 보이지 않음 | `body` | 0 | - |
 | | 후 | 확인하지 못했다는 안내 | 503 | 보이지 않음 | `body` | 0 | - |
-| 로그아웃한다, 서버가 세션을 끝낸다(204) | 전 | 로그인 카드 | 401 | 보이지 않음 | `body` | 11 | 그대로 |
+| 로그아웃한다, 서버가 세션을 끝낸다(204) | 전 | 로그인 카드 | 401 | 보이지 않음 | `body` | 13 | 그대로 |
 | | 후 | 로그인 카드 | 401 | 보이지 않음 | `body` | 0 | 다시 읽음 |
-| 로그아웃한다, 서버가 거절하고(503) 세션은 그대로다 | 전 | 로그인한 사람의 도구 | 200 | `session of usr_01JCM8P0Y4A7M2 until 2026-11-…` | `button#signout` | 13 | 그대로 |
-| | 후 | 로그인한 사람의 도구 | 200 | `The sign-out did not happen (503), and the s…` | `button#signout` | 13 | 그대로 |
-| 로그아웃한다, 서버가 거절하고(503) 세션 경로도 503 이 된다 | 전 | 로그인 카드 | 503 | 보이지 않음 | `body` | 11 | 그대로 |
-| | 후 | 확인하지 못했다는 안내 | 503 | 보이지 않음 | `a#reopen` | 11 | 그대로 |
+| 로그아웃한다, 서버가 거절하고(503) 세션은 그대로다 | 전 | 로그인한 사람의 도구 | 200 | `session of usr_01JCM8P0Y4A7M2 until 2026-11-…` | `button#signout` | 15 | 그대로 |
+| | 후 | 로그인한 사람의 도구 | 200 | `The sign-out did not happen (503), and the s…` | `button#signout` | 15 | 그대로 |
+| 로그아웃한다, 서버가 거절하고(503) 세션 경로도 503 이 된다 | 전 | 로그인 카드 | 503 | 보이지 않음 | `body` | 13 | 그대로 |
+| | 후 | 확인하지 못했다는 안내 | 503 | 보이지 않음 | `a#reopen` | 13 | 그대로 |
 
 - 첫째 경우의 전. 세션 경로는 503 인데 화면은 로그인 카드예요.
-- 둘째 경우의 전. 로그아웃한 뒤에도 그 사람의 id 열하나가 숨은 채 문서에 남았고, 누른 단추가 숨어서 focus 가 `body` 로 갔어요. 후에는 문서를 다시 읽어서 남는 것이 없어요.
+- 둘째 경우의 전. 로그아웃한 뒤에도 그 사람의 id 열셋이 숨은 채 문서에 남았고, 누른 단추가 숨어서 focus 가 `body` 로 갔어요. 후에는 문서를 다시 읽어서 남는 것이 없어요.
 - 셋째 경우의 전. 로그아웃이 안 됐는데 화면은 누르기 전과 같아요. `sign-out: 503` 줄을 바로 다음 읽기가 덮어썼어요.
 - 넷째 경우의 전. 세션이 끝났다는 답이 없는데 화면은 로그인 카드예요. 후에는 안내가 뜨고 focus 가 "다시 열기" 링크로 가요. 세션이 끝났다는 답이 없으니 문서는 그대로 둬요.
 - 표는 `python3 harness/session-views-table.py followup/before-session-views.json followup/after-session-views.json` 이 만들어요.
 
-새 안내 화면의 수치는 `harness/ux-layer.sh` 에 상태 하나(`session_unread`)를 더해 쟀어요(`followup/f2-measure.json`).
+새 안내 화면의 수치는 `harness/ux-layer.sh` 에 상태 하나를 더해 쟀어요(`followup/f2-measure.json`). 바이너리는 후 바이너리(`299351730ed1`)이고, 상태 인자는 `'[["session_unread","MOCK","session_unread","/"]]'` 예요. 처음 커밋한 파일은 이 폴더에 없는 측정 스크립트(열린 스택 #51718 의 판)로 잰 것이었고, `member_new` 가 두 번째 시도에 재졌어요(#51658 리뷰). 2026-11-13 에 이 폴더의 harness 로 다시 쟀어요. 다시 잰 값은 처음 값과 시도 수만 달라요. 캡처는 바이트까지 같아요.
 
 | 상태 | HTTP | axe 위반 | incomplete | CSS 규칙 | 정책 위반 | `style` 속성 | 24px 미만 대상 | 가장 낮은 대상 | 보이는 경로 답 원문 | 자유 입력 칸 | 로그인 단추(DOM) | 첫 Tab | 320px 가로 넘침 | 시도 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|

@@ -2,3 +2,11 @@ a refused page may run a script of the server	caught	callback; start
 a refused page names no style source	caught	callback; start
 the sheet of a refused page is under another nonce	caught	callback; start
 the sheet of a completed page is under another nonce	caught	Google, then sign out
+a completed page names no style source	caught	Google, then sign out
+the style source of a completed page has another nonce	caught	Google, then sign out
+a completed page may run any inline script	caught	Google, then sign out
+a completed page has none of the page limits	caught	Google, then sign out
+a completed page takes anything from its own server	caught	Google, then sign out
+every refused page has the same nonce	caught	callback; start
+a refused page has an empty nonce	caught	callback; start
+the sheet of the frame is empty	caught	Google, then sign out; callback; start

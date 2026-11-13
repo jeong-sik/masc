@@ -44,34 +44,66 @@ python3 "$ROOT_DIR/scripts/changelog-fragments.py" check --dir "$ROOT_DIR/change
 # ancestors of main and describe either picks v0.48.0 — making the report
 # rescan everything v0.49.0/v0.50.0 already folded — or, on a shallow
 # checkout, fails and silently skips the report. Pick the newest v*.*.* tag
-# by version instead, and use that release's main-reflection commit as the
-# base so the scan covers only main commits after the release.
+# by version instead, and start the scan where that release's fold stopped
+# seeing this branch.
 last_tag="$(git for-each-ref refs/tags --format='%(refname:short)' --sort=-v:refname 2>/dev/null \
   | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
 base_ref=""
 if [ -n "$last_tag" ]; then
-  # The release branch is folded back onto main by a single squash whose
-  # subject names the tag; on the first-parent chain the newest match is
-  # that release's reflection commit.
-  base_ref="$(git log --first-parent -F -1 --format=%H \
-    --grep="chore(release): merge $last_tag back into main" 2>/dev/null || true)"
-  if [ -z "$base_ref" ] && git merge-base --is-ancestor "$last_tag" HEAD 2>/dev/null; then
-    # No squash reflection found; fall back to the tag itself when the repo
-    # still tags directly on main, which is what describe used to do.
-    base_ref="$last_tag"
+  # Two commits bound what the last release folded, and git names both.
+  #   fold: the first-parent commit that set dune-project's version to the
+  #         tag's. The fold and the version bump are one commit (this script
+  #         writes both), and nothing merged after it was folded.
+  #   cut:  the merge base of the tag and HEAD, the last commit of this
+  #         branch the release branch saw.
+  # The scan starts at whichever is the ancestor of the other. v0.70.0 was
+  # folded on its release branch and reached main 95 pull requests after the
+  # cut, with none of their fragments folded: the cut is the base. v0.71.0
+  # was folded on main and its release branch merged main 23 commits later:
+  # the fold is the base, and the tag would leave those 23 unscanned.
+  # The fold's subject says nothing reliable. These releases reached main as
+  # "Backport v0.70.0 release fold ..." and "chore(release): bump version to
+  # ...", a subject search for "merge <tag> back into main" matched none of
+  # them, and the tag stood in as the base for every one (#51334).
+  # -S lists the commits where the count of the version line changes — the
+  # one that writes it and the later one that replaces it — so the file is
+  # read at each candidate and only a commit that carries the line counts.
+  last_version_line="(version ${last_tag#v})"
+  fold_ref=""
+  fold_candidates="$(git log --first-parent --format=%H -S"$last_version_line" -- dune-project)"
+  for candidate in $fold_candidates; do
+    if grep -Fxq -- "$last_version_line" <<<"$(git show "$candidate:dune-project")"; then
+      fold_ref="$candidate"
+      break
+    fi
+  done
+  if [ -z "$fold_ref" ]; then
+    # Nothing on this branch folded the last release: it is not folded back
+    # here yet, or the checkout is too shallow to reach the fold. Any base
+    # picked now would be a guess that widens or narrows the report unseen,
+    # so the bump stops before it changes a file.
+    echo "error: no first-parent commit of HEAD sets dune-project to" \
+      "'$last_version_line', so the commit that folded $last_tag cannot be" \
+      "identified and the missing-fragment report has no base." \
+      "Fold $last_tag back onto this branch (or fetch the full history) and rerun." >&2
+    exit 1
   fi
-  if [ -z "$base_ref" ]; then
-    # Between tagging and folding the branch back onto main the reflection
-    # commit does not exist yet and the tag is not an ancestor of HEAD. The
-    # tag still names the release cut, and `git log <tag>..HEAD` is a range
-    # query that needs no ancestry: since the release branch shares the cut
-    # commit with main, the range covers exactly the post-cut window. Fall
-    # back to it instead of skipping the report — a skipped report is how
-    # v0.69.0's window went unchecked (only the reflection-grep matched).
-    base_ref="$last_tag"
-    echo "note: using $last_tag itself as the missing-fragment base" \
-      "(no 'chore(release): merge $last_tag back into main' commit on" \
-      "first-parent and the tag is not an ancestor of HEAD)" >&2
+  if ! cut_ref="$(git merge-base "$last_tag" HEAD)"; then
+    echo "error: $last_tag and HEAD share no commit, so the point where the" \
+      "release left this branch is unknown and the missing-fragment report" \
+      "has no base." >&2
+    exit 1
+  fi
+  if git merge-base --is-ancestor "$fold_ref" "$cut_ref"; then
+    base_ref="$fold_ref"
+  elif git merge-base --is-ancestor "$cut_ref" "$fold_ref"; then
+    base_ref="$cut_ref"
+  else
+    echo "error: the commit that folded $last_tag ($fold_ref) and the commit" \
+      "where $last_tag left this branch ($cut_ref) are on separate lines of" \
+      "history, so neither bounds the other and the missing-fragment report" \
+      "has no base." >&2
+    exit 1
   fi
 fi
 if [ -n "$base_ref" ]; then

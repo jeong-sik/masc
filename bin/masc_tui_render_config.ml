@@ -15,14 +15,15 @@ module Theme_choice = Masc_tui_theme_choice
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while
    seconds only look precise. *)
-let binary_age_text = function
-  | None -> "age unknown"
-  | Some seconds when seconds < 60. -> "built just now"
+let binary_age_text ~ko = function
+  | None -> if ko then "커밋 시각 모름" else "commit age unknown"
+  | Some seconds when seconds < 60. -> if ko then "방금 커밋" else "committed just now"
   | Some seconds when seconds < 3600. ->
-      Printf.sprintf "built %.0fm ago" (seconds /. 60.)
+      Printf.sprintf (if ko then "커밋 %.0fm 전" else "commit %.0fm ago") (seconds /. 60.)
   | Some seconds when seconds < 86400. ->
-      Printf.sprintf "built %.0fh ago" (seconds /. 3600.)
-  | Some seconds -> Printf.sprintf "built %.0fd ago" (seconds /. 86400.)
+      Printf.sprintf (if ko then "커밋 %.0fh 전" else "commit %.0fh ago") (seconds /. 3600.)
+  | Some seconds ->
+      Printf.sprintf (if ko then "커밋 %.0fd 전" else "commit %.0fd ago") (seconds /. 86400.)
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this
@@ -1616,7 +1617,11 @@ let config_metadata_style = function
 let config_identity_rows ~cols (state : state) =
   let width = framed_inner_width cols in
   let rows = match state.server_identity with
-  | None -> [Printf.sprintf "  port :%d · server identity unread" state.port]
+  | None ->
+      [ Printf.sprintf
+          (if state.ui_language = Lang_ko then "  포트 :%d · 서버 식별을 아직 읽지 않음"
+           else "  port :%d · server identity unread")
+          state.port ]
   | Some identity ->
       let base =
         Terminal_text.single_line (Canonical_path.to_string identity.Tui_decode.sid_base_path) in
@@ -1647,12 +1652,12 @@ let config_identity_rows ~cols (state : state) =
           Message_layout.fit_middle masc_room masc
       in
       let server =
-        "server " ^ String.concat " · "
+        ui_text state ~ko:"서버 " ~en:"server " ^ String.concat " · "
           [ Terminal_text.single_line
               ("v" ^ identity.sid_version ^ " "
                ^ Masc_tui_footer.short_commit identity.sid_binary_commit);
             Printf.sprintf ":%d" state.port;
-            binary_age_text identity.sid_binary_commit_age_s ]
+            binary_age_text ~ko:(state.ui_language = Lang_ko) identity.sid_binary_commit_age_s ]
       in
       Printf.sprintf "  base %s   masc %s" base masc
       :: (Masc_tui_text_block.rows ~max_cells:(max 1 (width - 2)) server
@@ -1664,8 +1669,8 @@ let config_identity_rows ~cols (state : state) =
          the last confirmed identity and the configuration below it. The
          reason is cut in the middle so its start and its end stay readable. *)
       let max_cells = max 1 (width - 2) in
-      let lead = "(server identity unconfirmed: " in
-      let trail = "; last confirmed below)" in
+      let lead = ui_text state ~ko:"(서버 식별 미확인: " ~en:"(server identity unconfirmed: " in
+      let trail = ui_text state ~ko:" · 마지막 확인은 아래)" ~en:"; last confirmed below)" in
       let reason = Terminal_text.single_line reason in
       let room =
         max_cells - Message_layout.display_width lead - Message_layout.display_width trail

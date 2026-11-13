@@ -26151,7 +26151,9 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
         ; sc_chrome = 7 + List.length (runtime_config_edit_lines ~cols state)
             + (if Option.is_some state.runtime_config_view_error then 1 else 0)
             + (match state.runtime_config_view with None -> 0 | Some r ->
-              List.length (Masc_tui_runtime_config_view.summary_lines r.rcv_metadata))
+              List.length
+                (Masc_tui_runtime_config_view.summary_lines
+                   ~ko:(state.ui_language = Lang_ko) r.rcv_metadata))
         ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }

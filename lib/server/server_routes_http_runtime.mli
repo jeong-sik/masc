@@ -119,8 +119,8 @@ val make_health_json :
     JSON body.  [listener] defaults to ["http/1.1"]; {!health_handler} passes
     {!listener_of_protocol} of the request's protocol, so a request that came
     over HTTP/2 reports ["h2"].  This is the force-compute diagnostic builder
-    used by tests and snapshot refreshes.  The public [/health] route uses
-    {!make_health_response_json}; callers request cached full diagnostics with
+    used by tests and snapshot refreshes.  The [/health] route answers a
+    reader with {!make_health_response_json}; callers request cached full diagnostics with
     [/health?full=1].
 
     {2 Top-level keys (operator-visible contract)}
@@ -208,8 +208,9 @@ val make_health_response_json :
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
   Yojson.Safe.t
-(** [make_health_response_json ?listener ~request_authority request] is the public [/health]
-    renderer.  It returns {!make_health_probe_json} by default.  When the
+(** [make_health_response_json ?listener ~request_authority request] renders
+    the [/health] body of a requester the server gives a read of its state;
+    {!health_handler} decides who that is.  It returns {!make_health_probe_json} by default.  When the
     request query contains [full=1] / [full=true], it returns the latest cached
     full-health snapshot plus cheap request-local fields and marks the snapshot
     for refresh when it is missing or stale.  The HTTP handler must not
@@ -227,7 +228,8 @@ val make_health_response_body :
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
   string * (string * string) list
-(** Shared H1/H2 health JSON body and request-local Server-Timing headers.
+(** Shared H1/H2 health JSON body of a reader and request-local Server-Timing
+    headers.
     Builds through {!make_health_response_json}, then serializes before emitting
     the header. [health_response] is the total JSON-builder duration and overlaps
     [health_build_identity], [health_paths], [health_internal_auth], and
@@ -366,30 +368,32 @@ val keeper_fleet_runtime_resolution_light_fields :
     and cheap to read. *)
 
 val health_handler : Httpun.Request.t -> Http_reqd.t -> unit
-(** [health_handler request reqd] writes {!make_health_response_json} as the
-    response body. Its [protocol.listener] is {!listener_of_protocol} of the
-    protocol [reqd] came on. *)
+(** [health_handler request reqd] decides once who the requester is, with
+    {!Server_auth.board_access_for_request}, and answers one of three ways.
+
+    - A requester the server gives a read of its state (a verified credential
+      that may read state, or no credential on a server that asks for none)
+      gets {!make_health_response_body}; its [protocol.listener] is
+      {!listener_of_protocol} of the protocol [reqd] came on.
+    - A requester it gives none, and every requester before a workspace is
+      published, gets {!Server_health_public.health_json} and nothing else;
+      [full] is not read and no snapshot refresh is requested.
+    - A credential the server cannot accept gets
+      {!Server_auth.respond_auth_error}, never either body. *)
 
 val liveness_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [liveness_handler request reqd] always responds [200] as
     soon as the HTTP accept loop is running.  Does NOT depend
     on server_state initialisation — Kubernetes / Railway
-    liveness probe target.  Body:
-    [{"live": true, "startup": <Server_startup_state.to_yojson>}]. *)
+    liveness probe target.  Body: {!Server_health_public.liveness_json}, the
+    same to every requester; no credential is read. *)
 
 val readiness_handler : Httpun.Request.t -> Http_reqd.t -> unit
-(** [readiness_handler request reqd] responds [200] only when
-    [Server_startup_state.state_ready] is [true].
-
-    | State | HTTP status | Body fields |
-    |---|---|---|
-    | ready | [200 OK] | [ready: true], [phase], [pid] |
-    | not ready | [503 Service Unavailable] | [ready: false], [phase], [elapsed_sec], [pid] |
-
-    [pid] is the answering server process, so [masc restart] can tell its
-    replacement's answer from the draining predecessor's on the same port.
-    Pinned at the contract seam — orchestrators (k8s, Railway)
-    key off the [200] vs [503] distinction. *)
+(** [readiness_handler request reqd] responds [200] only when a workspace is
+    published and [Server_startup_state.state_ready] is [true], and [503]
+    otherwise. The body is {!Server_health_public.readiness_json} on both,
+    the same to every requester; no credential is read. Orchestrators
+    (k8s, Railway) key off the [200] vs [503] distinction. *)
 
 (** {1 Board} *)
 

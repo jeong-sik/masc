@@ -1884,50 +1884,74 @@ let make_health_response_body ?listener ~request_authority request =
   in
   body, Server_timing.extra_header timing
 
-(** Health check handler *)
+type health_requester =
+  | Reads
+  | Reads_nothing
+  | Refused of Masc_domain.masc_error
+
+(* HIGH-RISK-UNREVIEWED [H1]: the one decision of who gets more than the
+   public probe. It is [Server_auth.board_access_for_request] and nothing
+   else: Operator and Named read, Anonymous does not, and a credential that
+   judgment refuses is refused here, never taken for no credential. Before a
+   workspace is published nobody reads: there is no credential store to judge
+   with. The match names every reader constructor, so a new one stops the
+   build here. *)
+let health_requester request =
+  match current_server_state_opt () with
+  | None -> Reads_nothing
+  | Some state ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    (match Server_auth.board_access_for_request ~base_path request with
+     | Ok
+         ( ( Masc_board_handlers.Board_access.Operator
+           | Masc_board_handlers.Board_access.Named _ )
+         , (_ : string option) ) -> Reads
+     | Ok (Masc_board_handlers.Board_access.Anonymous, (_ : string option)) -> Reads_nothing
+     | Error error -> Refused error)
+;;
+
+(* The readiness both [/health/ready] and the public body of [/health] say:
+   a published state and the startup flag, read once. *)
+let public_readiness () =
+  let ready = Option.is_some (ready_server_state ()) in
+  ready, (Server_startup_state.snapshot ()).phase
+;;
+
+(* HIGH-RISK-UNREVIEWED [H2]: only the [Reads] branch builds or reads
+   anything beyond the public probe: the query, the probe body, the operator
+   rollup, the full-health snapshot and its refresh request, and the timing
+   header. The other two branches run none of it. *)
 let health_handler request reqd =
-  let request_authority = Server_request_authority.current_exn () in
-  let listener = listener_of_protocol (Http_reqd.protocol reqd) in
-  let body, extra_headers =
-    make_health_response_body ~listener ~request_authority request
-  in
-  Http.Response.json ~extra_headers body reqd
+  match health_requester request with
+  | Reads ->
+    let request_authority = Server_request_authority.current_exn () in
+    let listener = listener_of_protocol (Http_reqd.protocol reqd) in
+    let body, extra_headers =
+      make_health_response_body ~listener ~request_authority request
+    in
+    Http.Response.json ~extra_headers body reqd
+  | Reads_nothing ->
+    let ready, phase = public_readiness () in
+    Http.Response.json_value (Server_health_public.health_json ~ready ~phase) reqd
+  | Refused error -> Server_auth.respond_auth_error request reqd error
+;;
+
+(* HIGH-RISK-UNREVIEWED [H4]: the two sibling probes answer everyone with no
+   judgment of the requester, so a field added to either body is public. *)
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.
     Does not depend on server_state initialization.
     Kubernetes/Railway liveness probe target. *)
 let liveness_handler _request reqd =
-  let startup = Server_startup_state.to_yojson () in
-  Http.Response.json_value
-    (`Assoc
-       [
-         ("live", `Bool true);
-         ("startup", startup);
-       ])
-    reqd
+  Http.Response.json_value Server_health_public.liveness_json reqd
+;;
 
 (** Readiness probe: responds 200 only after the startup barrier and state publication. *)
 let readiness_handler _request reqd =
-  let current = Server_startup_state.snapshot () in
-  if Option.is_some (ready_server_state ()) then
-    Http.Response.json_value
-      (`Assoc
-         [
-           ("ready", `Bool true);
-           ("phase", `String (Server_startup_state.phase_to_string current.phase));
-           ("pid", `Int (Unix.getpid ()));
-         ])
-      reqd
-  else
-    Http.Response.json_value ~status:`Service_unavailable
-      (`Assoc
-         [
-           ("ready", `Bool false);
-           ("phase", `String (Server_startup_state.phase_to_string current.phase));
-           ("elapsed_sec", `Float (Server_startup_state.elapsed_since_start ()));
-           ("pid", `Int (Unix.getpid ()));
-         ])
-      reqd
+  let ready, phase = public_readiness () in
+  let status = if ready then `OK else `Service_unavailable in
+  Http.Response.json_value ~status (Server_health_public.readiness_json ~ready ~phase) reqd
+;;
 
 let board_comment_request_of_query ~offset ~limit =
   let open Result.Syntax in

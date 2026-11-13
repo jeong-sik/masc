@@ -54,6 +54,13 @@ val serve_table
     file of the server. The log has the text. Both entries use the same
     request-owner relay when the connection runs on the HTTP serving domain. *)
 
+val health_probe_exempt : path:string -> Httpun.Request.t -> bool
+(** Whether {!serve} leaves the request out of the client address limit and of
+    the agent bucket: [/health/live] and [/health/ready] always, and [/health]
+    while the request carries no credential header. A [/health] request that
+    carries one makes the server check it, so it is counted like any other
+    request. Every other path is counted. *)
+
 val respond_request_authority_bad_request
   :  error_code:string
   -> message:string

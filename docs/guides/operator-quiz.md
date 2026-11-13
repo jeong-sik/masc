@@ -202,7 +202,7 @@ Results 에 일곱 lane 이 나온다.
 
 - `ask_id` 와 `question_id` 는 `quiz/questions` 행의 `Ask id, for a dispute`·`Question id, for a dispute` 에 있다.
 - TUI 에서는 Results 에서 그 행을 고르고 `a` 로 동작 양식을 연다. 양식은 칸을 하나씩 보여 주고, 그 칸의 설명을 아래에 적는다.
-  1. `kind` 에서 Right 로 `dispute` 를 고른다.
+  1. `kind` 에서 Left/Right 로 값을 바꿔 `dispute` 를 고른다.
   2. Tab 으로 다음 칸에 간다. `questions` 는 `compose` 의 칸이라 비워 둔다.
   3. `ask_id`·`question_id`·`note` 를 적는다. 양식은 Results 를 가리므로, 값은 양식을 열기 전에 마우스로 끌어 복사해 두고 칸에서 터미널 붙여넣기로 넣는다.
   4. `Ctrl-S` 로 보낼 내용을 확인하고 Enter 로 한 번 보낸다. Esc 는 보내지 않고 닫는다.

@@ -1,0 +1,85 @@
+id = "operator-lesson"
+revision = "0.1.0"
+title = "Operator lesson"
+ui_category = "memory_judgment"
+contributions = ["derive", "act"]
+image = "masc-lane-operator-lesson:0.1.0"
+command = ["python3", "server.py", "--state", "/state"]
+
+[world.actions]
+tool = "lane_act"
+
+[world.state]
+mode = "persistent"
+
+[world.exact_outputs.outline]
+schema = "schemas/outline.json"
+
+[world.exact_outputs.scene]
+schema = "schemas/scene.json"
+
+[world.outputs.lesson]
+lanes = ["lesson/scenes", "lesson/sessions", "lesson/measures"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {"type": "array", "maxItems": 0,
+      "items": {"type": "object", "properties": {}, "additionalProperties": false},
+      "description": "Always empty: the lesson reads records through binding.records."},
+    "language": {"type": "string", "minLength": 1,
+      "description": "The language every scene is written in, such as ko"},
+    "since": {"type": "number", "minimum": 0,
+      "description": "Unix time in seconds. The first lesson reads records made from then on; later lessons read from where the last outlined lesson stopped."},
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "enum": ["board", "repository", "wiki", "github_pulls"]},
+          "visibilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "enum": ["public", "unlisted", "internal", "direct"]},
+            "description": "Board only. Every post in these visibilities can reach the provider of each slot bound to this installation's outline and scene outputs in runtime.toml. Before adding internal, or naming direct, confirm that each of those providers may receive such posts."
+          },
+          "repository_id": {"type": "string", "minLength": 1, "description": "Repository and github_pulls only: a registered repository"},
+          "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
+            "description": "Repository only: files, or folders ending in /, such as changelog.d/"}
+        },
+        "required": ["source_id", "kind"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["sources", "language", "since", "records"],
+  "additionalProperties": false
+}'''
+presentation = '''{
+  "description": "Short lessons written from the workspace's own records, each paragraph quoting its source",
+  "readings": [
+    {"lane_id": "lesson/scenes", "path": ["body"], "label": "Scene", "unit": null, "format": "text"},
+    {"lane_id": "lesson/scenes", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"},
+    {"lane_id": "lesson/scenes", "path": ["session_id"], "label": "Session", "unit": null, "format": "text"},
+    {"lane_id": "lesson/sessions", "path": ["state"], "label": "Session", "unit": null, "format": "text"},
+    {"lane_id": "lesson/sessions", "path": ["scenes"], "label": "Scenes asked, outlined, written, rejected, waiting", "unit": null, "format": "json"},
+    {"lane_id": "lesson/sessions", "path": ["rejected_entries"], "label": "Outline entries dropped", "unit": null, "format": "json"},
+    {"lane_id": "lesson/sessions", "path": ["rejected_scenes"], "label": "Scenes not written", "unit": null, "format": "json"},
+    {"lane_id": "lesson/sessions", "path": ["failure"], "label": "Why it failed", "unit": null, "format": "json"},
+    {"lane_id": "lesson/sessions", "path": ["superseded_by"], "label": "Superseded by", "unit": null, "format": "text"},
+    {"lane_id": "lesson/measures", "path": ["scenes_written"], "label": "Scenes written", "unit": "scenes", "format": "number"},
+    {"lane_id": "lesson/measures", "path": ["sessions"], "label": "Sessions by state", "unit": null, "format": "json"},
+    {"lane_id": "lesson/measures", "path": ["rejected_entries"], "label": "Outline entries dropped by reason", "unit": null, "format": "json"},
+    {"lane_id": "lesson/measures", "path": ["rejected_scenes"], "label": "Scenes not written by reason", "unit": null, "format": "json"},
+    {"lane_id": "lesson/measures", "path": ["failed_sessions"], "label": "Failed sessions by reason", "unit": null, "format": "json"}
+  ]
+}'''

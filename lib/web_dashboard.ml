@@ -391,7 +391,7 @@ let log_bundle_freshness_warning () =
   | Fresh -> ()
   | Unknown_identity ->
     Log.Dashboard.warn
-      "dashboard source identity unavailable — inspect /health dashboard_surface.recovery"
+      "dashboard source identity unavailable — inspect /health dashboard_surface.recovery with the workspace credential"
   | Mismatched { dashboard_commit; binary_commit } ->
     Log.Dashboard.warn
       "dashboard source %s differs from server source %s — inspect /health dashboard_surface.recovery"

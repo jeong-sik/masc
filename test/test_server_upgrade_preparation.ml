@@ -484,7 +484,8 @@ let test_confirm_follows_the_kernel () =
       let server = here_pid ~run_dir ~base_path ~port in
       Alcotest.(check string) "the same server" "confirmed" (departure_label (Upgrade.confirm server));
       Unix.kill (Upgrade.single_user_server_pid server) Sys.sigterm;
-      ignore (reap ());
+      Alcotest.(check bool) "the pid named is the process that held the lease" true
+        (reap () = Unix.WSIGNALED Sys.sigterm);
       Alcotest.(check string) "the server is gone" ("now " ^ owner_label (Ok Unowned))
         (departure_label (Upgrade.confirm server));
       with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap:_ ->

@@ -54,6 +54,11 @@ let pending ?id ?(items=evidence) config =
   goal.id
 let authority config goal_id = get (A.create_goal_review ~config ~goal_id)
 let original authority = get (V.prepare ~attempt:0 ~authority)
+(* The current authority admits a retained original as it is: the same
+   question, and neither the lookup authority nor the answer format moved. *)
+let admits original authority =
+  V.question_matches original authority && V.authority_change original authority = Ok None
+let bindings authority = A.goal_review_question_binding authority, A.goal_review_authority_binding authority
 
 let test_fresh_goal_without_keeper_or_manual_playground () =
   with_initialized_workspace (fun config ->
@@ -91,7 +96,7 @@ let test_fresh_goal_without_keeper_or_manual_playground () =
     let restored_authority = authority config goal.id in
     ignore (original restored_authority);
     Alcotest.(check bool) "bootstrap repair preserves retained authority" true
-      (V.matches_authority prepared restored_authority);
+      (admits prepared restored_authority);
     let after = match Goal_store.find_goal config ~goal_id:goal.id with
       | Goal_store.Goal_found goal -> goal
       | Goal_absent | Store_unavailable _ -> Alcotest.fail "Goal disappeared during preparation" in
@@ -141,7 +146,7 @@ let test_stored_goal_preparation_and_actual_visual_lookup () = with_workspace (f
     Alcotest.(check string) "stored system message remains exact"
       (V.system_instructions prepared) (V.system_instructions restored);
     Alcotest.(check string) "full original digest remains exact" digest (get (V.digest restored));
-    Alcotest.(check bool) "same full host capability admits original" true (V.matches_authority restored authority);
+    Alcotest.(check bool) "same full host capability admits original" true (admits restored authority);
     Alcotest.(check bool) "complete original evidence survives storage" true
       (Yojson.Safe.equal (V.to_json prepared) (V.to_json restored));
     let replacement = original authority in
@@ -171,8 +176,12 @@ let test_other_subject_evidence_and_workspace_refuse () = with_workspace (fun co
   ignore (stored (Goal_store.upsert_goal_with_events ~actor:"test" config ~id:goal_id ~target_value:"101" ()));
   request_complete config goal_id;
   let changed_criterion = authority config goal_id in
-  List.iter (fun other -> Alcotest.(check bool) "different current proof or submission refuses" false
-    (V.matches_authority prepared other)) [other_goal; changed_submission; changed_criterion];
+  List.iter (fun other -> Alcotest.(check bool) "different current proof or submission asks another question" false
+    (V.question_matches prepared other)) [other_goal; changed_submission; changed_criterion];
+  (match V.successor ~authority:changed_submission prepared with
+   | Error V.Question_changed -> ()
+   | Ok _ | Error (V.Prompt_unavailable _ | V.Successor_unavailable _) ->
+     Alcotest.fail "another question must not open the next attempt");
   let other_path = Filename.temp_dir "other-goal-workspace-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree other_path) (fun () ->
     let other_config = Workspace.default_config other_path in
@@ -181,8 +190,11 @@ let test_other_subject_evidence_and_workspace_refuse () = with_workspace (fun co
     Fs_compat.mkdir_p other_root;
     let other = authority other_config (pending ~id:goal_id other_config) in
     Alcotest.(check bool) "another workspace cannot supply the original authority" false
-      (V.matches_authority prepared other));
-  let child = get (V.successor prepared) in
+      (V.question_matches prepared other));
+  let child = match V.successor ~authority:admitted prepared with
+    | Ok child -> child
+    | Error (V.Question_changed | V.Prompt_unavailable _ | V.Successor_unavailable _) ->
+      Alcotest.fail "the same question must open its next attempt" in
   Alcotest.(check int) "successor advances only attempt" 1 (V.attempt child);
   let without_attempt = function
     | `Assoc fields -> `Assoc (List.remove_assoc "attempt" fields)
@@ -233,10 +245,10 @@ let test_reported_source_is_captured_without_changing_authority () =
     let second = reported config goal_id ~value:"2/3"
       ~source:"https://example.com/frozen/second-evidence" in
     let fresh = authority config goal_id in
-    Alcotest.(check string) "reported context does not change lookup grants"
-      (A.goal_review_binding admitted) (A.goal_review_binding fresh);
+    Alcotest.(check (pair string string)) "reported context changes neither the question nor the lookup grants"
+      (bindings admitted) (bindings fresh);
     Alcotest.(check bool) "new report cannot revoke a retained original" true
-      (V.matches_authority prepared fresh);
+      (admits prepared fresh);
     check_prompt_observation "new preparation sees newer report" (original fresh)
       (Ok (Some second));
     let restored = get (V.of_json captured) in
@@ -253,7 +265,7 @@ let test_reported_source_is_captured_without_changing_authority () =
       | _ -> Alcotest.fail "original must be an object" in
     let older = get (V.of_json older) in
     Alcotest.(check bool) "earlier prompt schema keeps the same authority" true
-      (V.matches_authority older fresh))
+      (admits older fresh))
 
 let test_only_current_goal_revision_is_reported () = with_workspace (fun config _root ->
   let goal_id = pending config in
@@ -295,12 +307,48 @@ let test_unavailable_report_keeps_original_and_lookup_authority () =
      | Ok _ -> Alcotest.fail "corrupt report store became missing or reported");
     check_prompt_observation "new original explicitly carries lookup unavailability"
       (original unavailable) observation;
-    Alcotest.(check string) "unavailable report cannot revoke lookup grants"
-      (A.goal_review_binding admitted) (A.goal_review_binding unavailable);
+    Alcotest.(check (pair string string)) "unavailable report cannot revoke the question or lookup grants"
+      (bindings admitted) (bindings unavailable);
     Alcotest.(check bool) "unavailable report does not invalidate original authority" true
-      (V.matches_authority prepared unavailable);
+      (admits prepared unavailable);
     check_prompt_observation "retained original still has its captured report"
       (get (V.of_json (V.to_json prepared))) (Ok (Some row)))
+
+let with_field key value = function
+  | `Assoc fields -> `Assoc (List.map (fun (name, old) -> if String.equal name key then name, value else name, old) fields)
+  | _ -> Alcotest.fail "original must be an object"
+
+let test_successor_asks_the_same_question_with_the_current_authority () =
+  with_workspace (fun config _root ->
+    let goal_id = pending config in
+    let first = reported config goal_id ~value:"1/3"
+      ~source:"https://example.com/frozen/first-evidence" in
+    (* An attempt retained under an earlier lookup authority, as a changed
+       tool description leaves it. *)
+    let stale = get (V.of_json (V.to_json (original (authority config goal_id))
+      |> with_field "authority_binding" (`String (String.make 64 'b'))
+      |> with_field "lookup_schemas" (`List [`String "tool_read_file"])
+      |> with_field "prompt" (`String "Prompt rendered for an earlier lookup authority"))) in
+    ignore (reported config goal_id ~value:"2/3" ~source:"https://example.com/frozen/second-evidence");
+    let current = authority config goal_id in
+    Alcotest.(check bool) "the stale attempt asks the current question" true (V.question_matches stale current);
+    Alcotest.(check bool) "the stale attempt holds another lookup authority" true
+      (match V.authority_change stale current with Ok (Some _) -> true | Ok None | Error _ -> false);
+    match V.successor ~authority:current stale with
+    | Error (V.Question_changed | V.Prompt_unavailable _ | V.Successor_unavailable _) ->
+      Alcotest.fail "the same question must open its next attempt"
+    | Ok child ->
+      Alcotest.(check int) "the next attempt" 1 (V.attempt child);
+      Alcotest.(check bool) "the child asks the parent's question" true (V.is_successor_of ~parent:stale child);
+      Alcotest.(check string) "the child holds the current lookup authority"
+        (A.goal_review_authority_binding current) (V.authority_binding child);
+      Alcotest.(check (list string)) "the child holds the current tools"
+        (V.lookup_schemas (original current)) (V.lookup_schemas child);
+      check_prompt_observation "the child asks with the parent's report, not the newer one" child
+        (Ok (Some first));
+      Alcotest.(check bool) "the child prompt is rendered again" false
+        (String.equal (V.prompt child) (V.prompt stale));
+      Alcotest.(check bool) "the current authority admits the child" true (admits child current))
 
 let test_task_capability_is_submission_bound () = with_workspace (fun config _root ->
   let without_task_id = pending config in
@@ -326,7 +374,7 @@ let test_task_capability_is_submission_bound () = with_workspace (fun config _ro
   List.iter (fun (id,prepared) ->
     let restored = get (V.of_json (V.to_json prepared)) in
     Alcotest.(check bool) "retained original matches after unrelated live Task changes" true
-      (V.matches_authority restored (authority config id)))
+      (admits restored (authority config id)))
     [without_task_id,retained_without_task;with_task_id,retained_with_task];
   let result = (A.goal_review_lookup (authority config with_task_id)).dispatch
     ~name:"keeper_tasks_list" ~args:(`Assoc ["task_ids",`List [`String task.id]]) in
@@ -345,4 +393,6 @@ let () = Alcotest.run "goal verifier original" ["host preparation", [
   Alcotest.test_case "malformed immutable input refuses" `Quick test_malformed_original_refuses;
   Alcotest.test_case "reported source and immutable authority" `Quick test_reported_source_is_captured_without_changing_authority;
   Alcotest.test_case "exact Goal and criterion measurement" `Quick test_only_current_goal_revision_is_reported;
-  Alcotest.test_case "unavailable report preserves original authority" `Quick test_unavailable_report_keeps_original_and_lookup_authority]]
+  Alcotest.test_case "unavailable report preserves original authority" `Quick test_unavailable_report_keeps_original_and_lookup_authority;
+  Alcotest.test_case "next attempt asks the same question with current authority" `Quick
+    test_successor_asks_the_same_question_with_the_current_authority]]

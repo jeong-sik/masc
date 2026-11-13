@@ -10,6 +10,7 @@ import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
+import type { PanelView, SubscriptionsModel } from './subscriptions'
 import { csrfHeader, paths } from './wire'
 import type { Send } from './wire'
 
@@ -65,6 +66,14 @@ function the(container: Element, selector: string): HTMLElement {
   if (first === undefined || found.length !== 1) throw new Error(`${found.length} elements match ${selector}`)
   return first
 }
+
+/** A subscriptions panel that waits for someone to be signed in. The panel
+    has its own tests; here it only has to be there. */
+const waitingPanel = (): SubscriptionsModel => ({
+  view: signal<PanelView>({ kind: 'waiting' }),
+  load: vi.fn(() => Promise.resolve()),
+  retry: vi.fn(() => Promise.resolve()),
+})
 
 /** Longer than any wait the console announces or times. */
 const longMs = 1000
@@ -354,7 +363,7 @@ describe('the frame', () => {
   const drawn = (view: View) => {
     const state = signal(view)
     const model = { view: state, load: vi.fn(() => Promise.resolve()), signOut: vi.fn(() => Promise.resolve()) } satisfies ConsoleModel
-    return { container: render(html`<${ConsoleFrame} model=${model} />`).container, model, state }
+    return { container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} />`).container, model, state }
   }
   const count = (selector: string) => views.map(([name, view]) => [name, drawn(view).container.querySelectorAll(selector).length])
 
@@ -377,9 +386,10 @@ describe('the frame', () => {
       'an account that changed', 'a reading of the account of now', 'a sign-out that failed'))
   })
 
+  // The panels under the frame have lines of their own; these are the frame's.
   it('has one line a screen reader reads out, which is filled while the page waits or moves', () => {
-    expect(count('[role=status]')).toEqual(named(...views.map(([name]) => name)))
-    const filled = views.map(([name, view]) => [name, the(drawn(view).container, '[role=status]').textContent === '' ? 0 : 1])
+    expect(count('main > [role=status]')).toEqual(named(...views.map(([name]) => name)))
+    const filled = views.map(([name, view]) => [name, the(drawn(view).container, 'main > [role=status]').textContent === '' ? 0 : 1])
     expect(filled).toEqual(named(
       'a long reading', 'leaving', 'a retry under way', 'a retry that found no session', 'a reading of the account of now', 'signed out'))
   })
@@ -407,7 +417,7 @@ describe('the frame', () => {
   const live = (answers: readonly Scripted[]) => {
     const { send } = scripted(answers)
     const model = createConsole({ send, leave: vi.fn() })
-    return { model, container: render(html`<${ConsoleFrame} model=${model} />`).container }
+    return { model, container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} />`).container }
   }
 
   it('puts a new note on the page when a reading fails again', async () => {

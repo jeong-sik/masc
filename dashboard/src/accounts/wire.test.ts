@@ -2,7 +2,7 @@
 // carry. A reader that took a wrong answer for a right one would hand the
 // frame a value no route promised.
 import { describe, expect, it } from 'vitest'
-import { csrfHeader, paths, readSession, readWho, session, signOut, who } from './wire'
+import { csrfHeader, integrations, owned, paths, readIntegrations, readOwned, readSession, readWho, session, signOut, who } from './wire'
 import type { Send } from './wire'
 
 interface Sent { readonly path: string; readonly init: RequestInit }
@@ -106,5 +106,100 @@ describe('signing out', () => {
     ['no answer', 'no answer', { kind: 'unreachable' }],
   ] as const)('gives the problem of %s', async (_name, answer, problem) => {
     expect(await signOut(scripted([answer]).send, 'token')).toEqual({ ok: false, problem })
+  })
+})
+
+describe('readIntegrations', () => {
+  const one = (fields: Record<string, unknown>): unknown => ({
+    integrations: [{ integration_id: 'claude_code', display_name: 'Claude Code', models: ['claude-sonnet-5'], calls: 'allowed', ...fields }],
+  })
+  it('reads a subscription whose models a Keeper may call', () => {
+    expect(readIntegrations(one({}))).toEqual([
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
+    ])
+  })
+  it.each([
+    ['native_unpublished', 'native_unpublished'],
+    ['native_tools_reach_other_homes', 'native_tools_reach_other_homes'],
+    ['native_tools_reach_person_homes', 'native_tools_reach_person_homes'],
+    ['person_homes_unread', 'person_homes_unread'],
+    ['a code named later', 'unrecognised'],
+  ] as const)('reads the refusal %s as %s', (code, refusal) => {
+    expect(readIntegrations(one({ calls: 'refused', refusal: code }))?.[0]?.calls).toEqual({ kind: 'refused', refusal })
+  })
+  it('reads an empty name and no models as they came', () => {
+    expect(readIntegrations(one({ display_name: '', models: [] }))?.[0]).toMatchObject({ displayName: '', models: [] })
+  })
+  it.each([
+    ['no object', []],
+    ['no list', { integrations: {} }],
+    ['no id', one({ integration_id: '' })],
+    ['a name that is no string', one({ display_name: null })],
+    ['a model that is no string', one({ models: ['claude-sonnet-5', 7] })],
+    ['an empty model', one({ models: [''] })],
+    ['no calls', one({ calls: undefined })],
+    ['calls of another word', one({ calls: 'maybe' })],
+    ['a refusal with no code', one({ calls: 'refused' })],
+  ])('refuses %s', (_name, value) => {
+    expect(readIntegrations(value)).toBeNull()
+  })
+})
+
+describe('readOwned', () => {
+  const answer = (account: Record<string, unknown>, runtime: Record<string, unknown>): unknown => ({
+    provider_accounts: [{ provider_account_id: 'acct_1', integration_id: 'claude_code', ...account }],
+    runtimes: [{ runtime_id: 'acct_1.claude-sonnet-5', provider_account_id: 'acct_1', model: 'claude-sonnet-5', ...runtime }],
+  })
+  it('reads the facts the server read', () => {
+    expect(readOwned(answer({}, {}))).toEqual({
+      accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' } }],
+      runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
+    })
+  })
+  it('reads nothing owned', () => {
+    expect(readOwned({ provider_accounts: [], runtimes: [] })).toEqual({ accounts: [], runtimes: [] })
+  })
+  it.each([
+    ['login_receipt_missing', 'login_receipt_missing'],
+    ['login_receipt_unreadable', 'login_receipt_unreadable'],
+    ['a code named later', 'unrecognised'],
+  ] as const)('reads why the subscription of an account is not known: %s as %s', (code, unread) => {
+    expect(readOwned(answer({ integration_id: null, unread: code }, {}))?.accounts[0]?.integration).toEqual({ read: false, unread })
+  })
+  it.each([
+    ['account_integration_unread', 'account_integration_unread'],
+    ['configuration_unavailable', 'configuration_unavailable'],
+    ['template_not_declared', 'template_not_declared'],
+    ['runtime_not_bound', 'runtime_not_bound'],
+    ['a code named later', 'unrecognised'],
+  ] as const)('reads why the model of a Runtime is not known: %s as %s', (code, unread) => {
+    expect(readOwned(answer({}, { model: null, unread: code }))?.runtimes[0]?.model).toEqual({ read: false, unread })
+  })
+  it.each([
+    ['no object', 'acct_1'],
+    ['accounts as ids, the shape before', { provider_accounts: ['acct_1'], runtimes: [] }],
+    ['no runtimes', { provider_accounts: [] }],
+    ['an account with no id', answer({ provider_account_id: '' }, {})],
+    ['an empty integration', answer({ integration_id: '' }, {})],
+    ['an integration and why it was not read', answer({ unread: 'login_receipt_missing' }, {})],
+    ['an unread integration with no reason', answer({ integration_id: null }, {})],
+    ['a missing integration', answer({ integration_id: undefined }, {})],
+    ['a Runtime with no account', answer({}, { provider_account_id: undefined })],
+    ['a model that is no string', answer({}, { model: 5 })],
+    ['an unread model with a reason that is no string', answer({}, { model: null, unread: 1 })],
+  ])('refuses %s', (_name, value) => {
+    expect(readOwned(value)).toBeNull()
+  })
+})
+
+describe('reading the subscriptions', () => {
+  it.each([
+    ['what the server offers', integrations, paths.integrations, { integrations: [] }, []],
+    ['what the person owns', owned, paths.owned, { provider_accounts: [], runtimes: [] }, { accounts: [], runtimes: [] }],
+  ] as const)('asks for %s with the cookie of this origin and no bearer token', async (_name, read, path, body, value) => {
+    const { send, sent } = scripted([json(200, body)])
+    expect(await read(send)).toEqual({ ok: true, value })
+    expect(sent.map((one) => [one.path, one.init.method, one.init.credentials])).toEqual([[path, 'GET', 'same-origin']])
+    expect(headersOfTheOne(sent).has('authorization')).toBe(false)
   })
 })

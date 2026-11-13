@@ -3575,6 +3575,18 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Observation_layout.Context_unavailable reason ->
             add_row context_label (Ansi.dim ^ reason ^ Ansi.reset)
       in
+      (* A Keeper row without identity has no context to read: the row says
+         why from the Keeper row itself, in the screen language. *)
+      (match k.k_identity with
+       | Error (Tui_decode.Keeper_not_started as absence) ->
+           add_row context_label
+             (Ansi.dim ^ Tui_decode.keeper_identity_absence_text ~ko absence ^ Ansi.reset)
+       | Error (Tui_decode.Identity_unreadable _ as absence) ->
+           add_row context_label
+             ((Theme.bad ())
+              ^ Terminal_text.single_line (Tui_decode.keeper_identity_absence_text ~ko absence)
+              ^ Ansi.reset)
+       | Ok _ ->
       (match live_context_view state k with
        | Masc_tui_fetched.Absent ->
            add_row context_label (Ansi.dim ^ t "읽기 전" "not loaded" ^ Ansi.reset)
@@ -3585,7 +3597,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            add_row (t "갱신:" "Refresh:") ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset);
            add_context observation
        | Masc_tui_fetched.Failed detail ->
-           add_row context_label ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset));
+           add_row context_label ((Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset)));
       add_empty ();
 
       let header_lines = List.rev !lines in
@@ -3992,9 +4004,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        | Ok identity ->
          add_row (t "생성:" "Created:") (Terminal_text.short_timestamp identity.k_created_at);
          add_row (t "수정:" "Updated:") (Terminal_text.short_timestamp identity.k_updated_at)
-       | Error reason ->
+       | Error absence ->
            Message_layout.wrap_words ~max_cells:(max 1 (inner - 26))
-             (Terminal_text.single_line reason)
+             (Terminal_text.single_line (Tui_decode.keeper_identity_absence_text ~ko absence))
            |> List.iteri (fun index line ->
                 add_row (if index = 0 then t "메타데이터:" "Metadata:" else "") line));
 

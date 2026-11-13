@@ -51,11 +51,21 @@ val keeper_cost_summary : Keeper_cost_coverage.t -> string
 (** A lifetime reported sum with its pricing uncertainty; zero alone never
     establishes free or fully priced usage. *)
 
+(** Why a Keeper row carries no identity. A declared Keeper that has not run
+    has none to read. A roster row whose brief metadata did not decode carries
+    the decoder's sentence. *)
+type keeper_identity_absence =
+  | Keeper_not_started
+  | Identity_unreadable of string
+
+val keeper_identity_absence_text : ko:bool -> keeper_identity_absence -> string
+(** The reason as a screen draws it. The decoder's sentence is drawn as it is. *)
+
 type keeper = {
   k_origin : keeper_origin;
   k_name : string;
   k_paused : bool;
-  k_identity : (keeper_identity, string) result;
+  k_identity : (keeper_identity, keeper_identity_absence) result;
       (** A metadata failure withdraws trace attribution and timestamps, not
           the independently observed Keeper name or lifecycle controls. *)
   k_activity : keeper_activity option;
@@ -63,12 +73,12 @@ type keeper = {
           Absence is an unavailable observation, never a zero measurement. *)
 }
 
-val keeper_trace_id : keeper -> (string, string) result
-(** Trace identity or the original metadata failure. *)
+val keeper_trace_id : keeper -> (string, keeper_identity_absence) result
+(** Trace identity or the reason the row has none. *)
 
 type keeper_trace_projection = {
   bindings : (string * string) list;
-  unavailable : (string * string) list;
+  unavailable : (string * keeper_identity_absence) list;
 }
 (** Independently readable identities and named failures, in roster order.
     Failed identities never supply a correlation binding. *)

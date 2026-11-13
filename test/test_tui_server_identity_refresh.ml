@@ -170,7 +170,7 @@ let test_chat_file_observation_retains_its_read_epoch () =
   state.msg_file_changes_keeper <- Some "alpha";
   state.repository_changes_scope <- Some (Tui_decode.Repository_change_repository "repo");
   state.keepers <- [Tui_decode.{ k_origin=Persisted_keeper; k_name="alpha";
-    k_paused=false; k_identity=Error "not observed";
+    k_paused=false; k_identity=Error (Identity_unreadable "not observed");
     k_activity=Some { k_current_task_id=Some "task-current"; k_total_turns=0;
       k_total_tokens=0; k_total_cost_usd=Keeper_cost_coverage.empty;
       k_last_turn_at=None; k_last_proactive_outcome=None } }];
@@ -642,7 +642,7 @@ let test_detail_focus_waits_for_authoritative_roster () =
   let open Masc_tui_types in
   let origin = identity "/workspace/a" in
   let keeper name : keeper = { k_origin = Tui_decode.Persisted_keeper; k_name = name;
-    k_paused = false; k_identity = Error "not needed for navigation"; k_activity = None } in
+    k_paused = false; k_identity = Error (Tui_decode.Identity_unreadable "not needed for navigation"); k_activity = None } in
   let suspended () =
     let state = create_state ~workspace:"local" ~local_base_path:"/workspace/a"
       ~port:0 () in

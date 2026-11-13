@@ -41,7 +41,10 @@ after `scripts/install-local-build.sh`:
    SIGTERM to the lease owner it identified with `F_GETLK`, the same request
    `masc setup` makes. The operator credential goes only to the process the
    kernel names as lease owner and announcer of the port, and the kernel is
-   asked again before each send. Nothing is forced down.
+   asked again before each send. Nothing is forced down. When the kernel no
+   longer names that server at one of these checks, restart and `masc setup`
+   say what it names now: the pid that withdrew its announcement, as a
+   server does when it shuts down, or the owner that took its place.
 3. It starts `masc start --wait-for-previous-owner` in its own process group
    with its output appended to `<base>/.masc/logs/masc-start-<UTC time>.log`
    (`--log` chooses another file). That process sleeps on the lease until

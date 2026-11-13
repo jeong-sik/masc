@@ -271,6 +271,8 @@ let prepare_server ~base_path ~port ~owned =
                                      setup again." base_path)
              | Error (Upgrade.Owner_unavailable | Upgrade.Port_unavailable | Upgrade.Invalid_health
                      | Upgrade.Admin_required | Upgrade.Incumbent_changed
+                     | Upgrade.Not_confirmed { server = (_ : Upgrade.single_user_server);
+                                               departure = (_ : Upgrade.departure) }
                      | Upgrade.Already_requested | Upgrade.Closed) ->
                fail (Printf.sprintf "The owner of %s and port %d could not be checked. No server \
                                      was started or signed in to." base_path port))

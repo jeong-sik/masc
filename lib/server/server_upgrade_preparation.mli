@@ -2,12 +2,6 @@
     lease owner and port announcer. Nothing here starts a process or forces
     one down. *)
 type t
-type error = Invalid_health  (** The port gave no compact [/health] version. *)
-  | Admin_required | Owner_unavailable
-  | Incumbent_changed
-      (** The kernel no longer names the witnessed process as lease owner and
-          port announcer, or it answers another version. *)
-  | Already_requested | Closed | Port_unavailable
 
 (** {1 Who holds a workspace, as the kernel says} *)
 
@@ -116,11 +110,24 @@ val compact_health_version : string -> string option
 
 (** {1 The stop of the server of a single user} *)
 
+type error = Invalid_health  (** The port gave no compact [/health] version. *)
+  | Admin_required | Owner_unavailable
+  | Incumbent_changed
+      (** The captured lease owner is not the witnessed process, the server
+          answers another version, or the lease owner is not the account
+          server of the port. *)
+  | Not_confirmed of { server : single_user_server; departure : departure }
+      (** {!confirm} refused [server] right before a step of the stop.
+          [departure] says what the kernel names now: the pid that withdrew
+          its announcement, another owner, or the reason the owner could not
+          be read. {!departure_sentence} words it. *)
+  | Already_requested | Closed | Port_unavailable
+
 val authorize_initial :
   clock:[> float Eio.Time.clock_ty] Eio.Resource.t -> single_user_server ->
   expected_version:string -> login:(unit -> bool) -> (unit, error) result
-(** In order: {!confirm} ([Incumbent_changed] when the kernel names another
-    answer, [Owner_unavailable] when it cannot be read); a compact
+(** In order: {!confirm} ([Not_confirmed] with the departure when it
+    refuses); a compact
     [GET /health] on the announced port within
     {!Masc_http_client.default_request_timeout_sec} ([Invalid_health] when no
     version is read); a version other than [expected_version] gives
@@ -134,16 +141,15 @@ val prepare :
 (** In order: capture the lease owner handle ([Owner_unavailable] when
     nothing holds the lease or the owner cannot be read) and require its pid
     to be the pid of the server ([Incumbent_changed] otherwise, and the
-    handle is released); {!confirm} ([Incumbent_changed] when the kernel
-    names another answer, [Owner_unavailable] when it cannot be read); then
-    the first send of [headers],
+    handle is released); {!confirm} ([Not_confirmed] with the departure when
+    it refuses); then the first send of [headers],
     [GET /api/v1/runtime/config/raw] on the announced port within the
     default timeout ([Admin_required] unless it answers 200). The handle is
     released on a refusal, and on the release of [sw]. *)
 
 val request_termination : t -> (unit, error) result
-(** Call only after the user selects replacement. In order: {!confirm}; the
-    second send of the headers; then the identity-bound SIGTERM through the
+(** Call only after the user selects replacement. In order: {!confirm}
+    ([Not_confirmed] with the departure when it refuses); the second send of the headers; then the identity-bound SIGTERM through the
     captured handle, which refuses a process that is no longer the one
     captured. Success is a request, not proof of drain. Caller waits for
     lease/port release and starts the replacement with the same workspace

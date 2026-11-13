@@ -1,9 +1,3 @@
-type error = Invalid_health | Admin_required | Owner_unavailable
-  | Incumbent_changed | Already_requested | Closed | Port_unavailable
-type phase = Prepared | Requested | Released
-type t = {confirm:unit -> (unit,error) result;
-  authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
-  lock:Eio.Mutex.t; mutable phase:phase}
 open Result.Syntax
 
 type single_user_server = {run_dir:string; base_path:string; port:int; pid:int}
@@ -100,6 +94,14 @@ type departure =
   | Announcement_withdrawn of { pid : int }
   | Owner_now of owner
   | Owner_unreadable of Server_startup_takeover.owner_capture_error
+type error = Invalid_health | Admin_required | Owner_unavailable
+  | Incumbent_changed
+  | Not_confirmed of { server : single_user_server; departure : departure }
+  | Already_requested | Closed | Port_unavailable
+type phase = Prepared | Requested | Released
+type t = {confirm:unit -> (unit,error) result;
+  authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
+  lock:Eio.Mutex.t; mutable phase:phase}
 let confirm server =
   match owner ~run_dir:server.run_dir ~base_path:server.base_path ~port:server.port with
   | Ok (Single_user_server_here current) when current.pid = server.pid -> Ok ()
@@ -170,10 +172,10 @@ let compact_health_version body =
         | Some (`String version) when String.trim version <> "" -> Some version
         | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
         | None -> None))
-let departure_error = function
-  | Announcement_withdrawn { pid = (_ : int) } | Owner_now (_ : owner) -> Incumbent_changed
-  | Owner_unreadable (_ : Server_startup_takeover.owner_capture_error) -> Owner_unavailable
-let confirmed server () = Result.map_error departure_error (confirm server)
+(* The departure goes to the caller whole: the pid and the cause are what the
+   operator is told when a stop is given up. *)
+let confirmed server () =
+  Result.map_error (fun departure -> Not_confirmed { server; departure }) (confirm server)
 let authorize_initial_with ~confirm ~version ~expected_version ~login =
   let* () = confirm () in
   match version () with

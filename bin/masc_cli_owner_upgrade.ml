@@ -13,6 +13,10 @@ type observation =
 let error_message = function
   | Upgrade.Admin_required -> "The running workspace rejected local operator access. Sign in before restarting it."
   | Incumbent_changed -> "The server that announces this port changed after inspection. Refresh setup before restarting it."
+  | Not_confirmed { server; departure } ->
+    (* The pid and the cause of the departure, not only that something
+       changed. The sign-in may have happened by then; the stop has not. *)
+    Upgrade.departure_sentence server departure ^ " It was not asked to stop."
   | Owner_unavailable -> "The running workspace owner could not be verified."
   | Invalid_health -> "The server of this workspace did not answer its version on the selected port."
   | Already_requested -> "A graceful shutdown was already requested."

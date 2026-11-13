@@ -96,6 +96,7 @@ let stop_error_message = function
     "the running server refused local operator access; sign in and run restart again"
   | Incumbent_changed ->
     "the server that announces this port changed while restart was checking it; run restart again"
+  | Not_confirmed { server; departure } -> Upgrade.departure_sentence server departure
   | Owner_unavailable -> "the workspace owner could not be verified"
   | Invalid_health -> "the server did not answer its version on this port"
   | Already_requested -> "a graceful shutdown was already requested"
@@ -190,7 +191,14 @@ let refusal_message ~run_dir ~base_path ~port = function
   | Owner_unverifiable reason ->
     Printf.sprintf "The owner of %s could not be checked (%s). Nothing was stopped or started."
       base_path reason
-  | Stop_refused error ->
+  | Stop_refused (Upgrade.Not_confirmed { server; departure }) ->
+    (* The server restart had checked left before the stop request: its pid
+       and what the kernel names now are said, not only that it changed. *)
+    Upgrade.departure_sentence server departure ^ " Nothing was stopped or started."
+  | Stop_refused
+      (( Upgrade.Admin_required | Upgrade.Incumbent_changed | Upgrade.Owner_unavailable
+       | Upgrade.Invalid_health | Upgrade.Already_requested | Upgrade.Closed
+       | Upgrade.Port_unavailable ) as error) ->
     Printf.sprintf "The stop request was not sent: %s." (stop_error_message error)
   | Log_unopenable { path; reason } ->
     Printf.sprintf "The log file %s could not be opened (%s). A server named above as asked \

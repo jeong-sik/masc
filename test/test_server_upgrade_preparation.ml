@@ -556,18 +556,21 @@ let test_a_server_that_withdrew_its_announcement_is_sent_nothing_more () =
             Alcotest.(check string) "the kernel names the same process without a port"
               (Printf.sprintf "pid %d withdrew its announcement" (Upgrade.single_user_server_pid server))
               (departure_label (Upgrade.confirm server));
-            (match Upgrade.request_termination owner with
-             | Error Incumbent_changed -> ()
-             | Ok () | Error _ -> Alcotest.fail "a server that withdrew its announcement was asked to stop");
-            (match Upgrade.prepare ~sw ~clock ~headers server with
-             | Error Incumbent_changed -> ()
-             | Ok _ | Error _ -> Alcotest.fail "a server that withdrew its announcement was prepared");
-            (match
-               Upgrade.authorize_initial ~clock server ~expected_version:"0.0.0"
-                 ~login:(fun () -> Alcotest.fail "a server that withdrew its announcement was signed in to")
-             with
-             | Error Incumbent_changed -> ()
-             | Ok () | Error _ -> Alcotest.fail "a server that withdrew its announcement was authorized");
+            (* Each refusal carries the pid that withdrew, which is what
+               restart and setup tell the operator. *)
+            let withdrawn step = function
+              | Error (Upgrade.Not_confirmed { server = refused; departure = Announcement_withdrawn { pid } }) ->
+                Alcotest.(check int) (step ^ ": the pid that withdrew is carried")
+                  (Upgrade.single_user_server_pid server) pid;
+                Alcotest.(check int) (step ^ ": for the server that was checked")
+                  (Upgrade.single_user_server_pid server) (Upgrade.single_user_server_pid refused)
+              | Ok () | Error _ -> Alcotest.failf "%s: a server that withdrew its announcement went on" step in
+            withdrawn "the stop" (Upgrade.request_termination owner);
+            withdrawn "the first bearer"
+              (Result.map (fun (_ : Upgrade.t) -> ()) (Upgrade.prepare ~sw ~clock ~headers server));
+            withdrawn "the sign-in"
+              (Upgrade.authorize_initial ~clock server ~expected_version:"0.0.0"
+                 ~login:(fun () -> Alcotest.fail "a server that withdrew its announcement was signed in to"));
             Alcotest.(check (list (option string))) "nothing more went to the port"
               [Some "Bearer fixture-bearer"] !seen;
             Upgrade.close owner);

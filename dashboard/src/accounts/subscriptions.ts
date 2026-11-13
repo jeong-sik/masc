@@ -120,14 +120,44 @@ export function follow(frame: ReadonlySignal<View>, panel: SubscriptionsModel): 
   })
 }
 
+// ---- what the panel knows of each account ----
+
+/** What the panel knows of one account before it says anything. */
+export interface AccountFacts {
+  readonly account: ProviderAccount
+  /** The subscription the server offers for the account, or null when the
+      account's subscription is not known or the server no longer offers it:
+      nothing can be done with the account here. */
+  readonly offered: Integration | null
+  /** The Runtimes made on the account. */
+  readonly runtimes: readonly Runtime[]
+  /** A model was checked on the account and the server still finds it in its
+      settings. A Runtime whose model it cannot read is not one a turn runs on. */
+  readonly checked: boolean
+}
+
+/** The facts of each account, in the order the server lists the accounts.
+    No Runtime is left out: an account is never unlinked
+    (lib/auth/authz_provider_account.ml has only `link`), and a Runtime is
+    made only on an account its maker owns (lib/auth/authz_runtime_state.ml
+    refuses it with `Account_not_theirs`). */
+export function accountFacts(integrations: readonly Integration[], owned: Owned): readonly AccountFacts[] {
+  return owned.accounts.map((account) => {
+    const integration = account.integration
+    const runtimes = owned.runtimes.filter((runtime) => runtime.accountId === account.id)
+    const offered = integration.read ? integrations.find((one) => one.id === integration.value) ?? null : null
+    return { account, offered, runtimes, checked: runtimes.some((runtime) => runtime.model.read) }
+  })
+}
+
 // ---- words ----
 
 /** The name of the subscription of an account: the name the operator gave
     the provider, its id when the name is empty, or the id the login named
     when the server no longer offers it. */
-function subscriptionName(account: ProviderAccount, offered: Integration | undefined): string {
+function subscriptionName(account: ProviderAccount, offered: Integration | null): string {
   if (!account.integration.read) return '어떤 구독인지 알 수 없는 계정'
-  if (offered === undefined) return account.integration.value
+  if (offered === null) return account.integration.value
   return offered.displayName === '' ? offered.id : offered.displayName
 }
 
@@ -171,17 +201,15 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
 // ---- the panel ----
 
 /** What an account can do here, in words and a border, never in colour alone.
-    `calls` is null when the server does not offer the subscription of the
-    account: nothing can be done with it here, so nothing is suggested. A
-    model counts as checked while the server still finds it in its settings;
-    a Runtime whose model it cannot read is not one a turn runs on. */
-function Chips({ runtimes, calls }: { readonly runtimes: readonly Runtime[]; readonly calls: Calls | null }): VNode {
-  if (calls === null) return html`<p class="chips"><span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
-  const checked = runtimes.some((runtime) => runtime.model.read)
+    Nothing is suggested for an account the server offers no subscription for:
+    nothing can be done with it here. */
+function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
+  if (facts.offered === null) return html`<p class="chips"><span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
+  const runs = facts.offered.calls.kind === 'allowed'
   return html`
     <p class="chips">
-      <span class=${checked ? 'chip' : 'chip chip-todo'}>${checked ? '모델 확인됨' : '모델 확인 필요'}</span>
-      <span class=${calls.kind === 'allowed' ? 'chip' : 'chip chip-todo'}>${calls.kind === 'allowed' ? 'Keeper 실행 가능' : 'Keeper 실행 불가'}</span>
+      <span class=${facts.checked ? 'chip' : 'chip chip-todo'}>${facts.checked ? '모델 확인됨' : '모델 확인 필요'}</span>
+      <span class=${runs ? 'chip' : 'chip chip-todo'}>${runs ? 'Keeper 실행 가능' : 'Keeper 실행 불가'}</span>
     </p>
   `
 }
@@ -204,44 +232,28 @@ function Models({ runtimes }: { readonly runtimes: readonly Runtime[] }): VNode 
   `
 }
 
-function AccountRow({ account, runtimes, offered }: {
-  readonly account: ProviderAccount
-  readonly runtimes: readonly Runtime[]
-  readonly offered: readonly Integration[]
-}): VNode {
-  const integrationId = account.integration.read ? account.integration.value : null
-  const integration = integrationId === null ? undefined : offered.find((one) => one.id === integrationId)
-  const name = subscriptionName(account, integration)
-  const calls = integration === undefined ? null : integration.calls
+function AccountRow({ facts }: { readonly facts: AccountFacts }): VNode {
+  const { account, offered } = facts
+  const name = subscriptionName(account, offered)
   return html`
     <li class="row">
       <h3 class="row-title">${name}</h3>
       <p class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
-      <${Chips} runtimes=${runtimes} calls=${calls} />
+      <${Chips} facts=${facts} />
       ${account.integration.read
-        ? (integration === undefined ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
+        ? (offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
         : html`<p class="hint">${integrationUnreadWords(account.integration.unread)}</p>`}
-      ${calls !== null && calls.kind === 'refused' ? html`<p class="hint">${refusedWords(calls, name)}</p>` : null}
-      <${Models} runtimes=${runtimes} />
+      ${offered !== null && offered.calls.kind === 'refused' ? html`<p class="hint">${refusedWords(offered.calls, name)}</p>` : null}
+      <${Models} runtimes=${facts.runtimes} />
     </li>
   `
 }
 
-/** A row for each account, with the Runtimes made on it. No Runtime is left
-    out: an account is never unlinked (lib/auth/authz_provider_account.ml has
-    only `link`), and a Runtime is made only on an account its maker owns
-    (lib/auth/authz_runtime_state.ml refuses it with `Account_not_theirs`). */
 function Read({ integrations, owned }: { readonly integrations: readonly Integration[]; readonly owned: Owned }): VNode {
   if (owned.accounts.length === 0) return html`<p>아직 연결한 구독이 없어요.</p>`
   return html`
     <ul class="rows">
-      ${owned.accounts.map((account) => html`
-        <${AccountRow}
-          key=${account.id}
-          account=${account}
-          runtimes=${owned.runtimes.filter((runtime) => runtime.accountId === account.id)}
-          offered=${integrations} />
-      `)}
+      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} />`)}
     </ul>
   `
 }

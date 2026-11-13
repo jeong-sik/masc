@@ -9,10 +9,10 @@ import { act, cleanup, fireEvent, render } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import type { View } from './console'
-import { SubscriptionsPanel, createSubscriptions, follow } from './subscriptions'
-import type { PanelView, SubscriptionsModel } from './subscriptions'
+import { SubscriptionsPanel, accountFacts, createSubscriptions, follow } from './subscriptions'
+import type { AccountFacts, PanelView, SubscriptionsModel } from './subscriptions'
 import { paths } from './wire'
-import type { Send } from './wire'
+import type { Integration, Send } from './wire'
 
 interface Sent { readonly path: string; readonly init: RequestInit }
 type Scripted = Response | 'no answer' | Promise<Response>
@@ -193,6 +193,56 @@ describe('following the console', () => {
     await vi.waitFor(() => { expect(kind(panel)).toBe(`read for ${person}`) })
     stop()
     expect(sent.length).toBe(2)
+  })
+})
+
+describe('what the panel knows of each account', () => {
+  const integrations: readonly Integration[] = [
+    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], calls: { kind: 'allowed' } },
+    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' } },
+  ]
+  const facts = accountFacts(integrations, {
+    accounts: [
+      { id: 'acct_gone', integration: { read: true, value: 'muse' } },
+      { id: 'acct_claude', integration: { read: true, value: 'claude_code' } },
+      { id: 'acct_codex', integration: { read: true, value: 'codex' } },
+      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' } },
+      { id: 'acct_new', integration: { read: true, value: 'claude_code' } },
+    ],
+    runtimes: [
+      { id: 'acct_codex.gpt-5.5', accountId: 'acct_codex', model: { read: true, value: 'gpt-5.5' } },
+      { id: 'acct_claude.claude-opus-9', accountId: 'acct_claude', model: { read: false, unread: 'runtime_not_bound' } },
+      { id: 'acct_gone.muse-1', accountId: 'acct_gone', model: { read: false, unread: 'template_not_declared' } },
+      { id: 'acct_claude.claude-sonnet-5', accountId: 'acct_claude', model: { read: true, value: 'claude-sonnet-5' } },
+      { id: 'acct_unknown.x', accountId: 'acct_unknown', model: { read: false, unread: 'account_integration_unread' } },
+    ],
+  })
+  const byAccount = <T>(pick: (one: AccountFacts) => T) => facts.map((one) => [one.account.id, pick(one)])
+
+  it('keeps the order the server lists the accounts in', () => {
+    expect(facts.map((one) => one.account.id)).toEqual(['acct_gone', 'acct_claude', 'acct_codex', 'acct_unknown', 'acct_new'])
+  })
+
+  it('finds the subscription the server offers for an account, and none when it is not known or no longer offered', () => {
+    expect(byAccount((one) => (one.offered === null ? null : one.offered.id))).toEqual([
+      ['acct_gone', null], ['acct_claude', 'claude_code'], ['acct_codex', 'codex'], ['acct_unknown', null], ['acct_new', 'claude_code'],
+    ])
+  })
+
+  it('gives an account only the Runtimes made on it', () => {
+    expect(byAccount((one) => one.runtimes.map((runtime) => runtime.id))).toEqual([
+      ['acct_gone', ['acct_gone.muse-1']],
+      ['acct_claude', ['acct_claude.claude-opus-9', 'acct_claude.claude-sonnet-5']],
+      ['acct_codex', ['acct_codex.gpt-5.5']],
+      ['acct_unknown', ['acct_unknown.x']],
+      ['acct_new', []],
+    ])
+  })
+
+  it('counts a model as checked only while the server still finds it in its settings', () => {
+    expect(byAccount((one) => one.checked)).toEqual([
+      ['acct_gone', false], ['acct_claude', true], ['acct_codex', true], ['acct_unknown', false], ['acct_new', false],
+    ])
   })
 })
 

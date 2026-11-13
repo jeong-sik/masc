@@ -104,8 +104,15 @@ let recover_child ~config ~keeper_name ~store intent =
     | (None | Some _),(Requested | Refused _ | Fenced) -> Error (Intent.Conflict "Resolution has no child publication intent") in
   let* ()=io (fun () ->
     let* ()=Request.confirm_record request child in
-    require (Request.request_id request=intended.request_id && child.request_digest=intended.request_digest)
-      "Published resolution child differs from its durable intent") |> unavailable in
+    let* ()=require (Request.request_id request=intended.request_id && child.request_digest=intended.request_digest)
+      "Published resolution child differs from its durable intent" in
+    (* The record names a child only by ID and digest, so the child itself
+       says whose child it is. *)
+    match Request.predecessor request with
+    | Some predecessor ->
+      require (predecessor.request_id=parent.request_id && predecessor.request_digest=parent.request_digest)
+        "Resolution child has another original predecessor"
+    | None -> Error "Resolution child has no original predecessor") |> unavailable in
   match intent.phase with
   | Child_intended _ -> io (fun () -> Intent.confirm_child ~store ~expected:intent child) |> Result.map (fun _ -> ())
   | Child_confirmed _ -> io (fun () -> Lineage.confirm_predecessor ~store ~require_confirmed:true request) |> unavailable

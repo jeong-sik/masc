@@ -77,15 +77,6 @@ let validator () =
   | Some History_execution ->
     let* owner=history_owner record in
     let* capture=history_capture ~read ~read_fence ~read_resolution ~owner record in
-    (* Lineage reads a resolution record only from its child. One with no
-       child yet is read here, so a record this build cannot read is refused
-       before the server starts and not on the Keeper's first pass. *)
-    let* stored=read_resolution ~scope:record.scope ~request_id:record.request_id in
-    let* ()=match stored with
-      | None -> Ok ()
-      | Some stored ->
-        Keeper_librarian_history_resolution_intent.decode_published ~scope:record.scope
-          ~request_id:record.request_id stored |> Result.map (fun _ -> ()) in
     Keeper_librarian_durable_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
   | Some Floor_execution ->
     let* owner=history_owner record in

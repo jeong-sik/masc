@@ -40,6 +40,9 @@ type decoder =
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.Published_reader.read} *)
   | Tool_request_payload (** The consumer's current pure payload decoder. *)
+  | History_resolution
+      (** The consumer's decoder for one file of a scope's history resolution
+          directory. *)
 
 type tool_request_reader = scope:string -> request_id:string ->
   (Lane_addon_tool_request_owner.retained option, string) result
@@ -72,9 +75,10 @@ type refusal =
         (** What fresh state deletes with the server stopped. For a record it
             is that file. For a native claim it is the slot directory, then the
             binding and observations of the instance the slot names, when that
-            could be read and they exist. For a tool request owner it is the
-            record's scope directory and, when they exist, the scope's request
-            body, history fence and history resolution directories. *)
+            could be read and they exist. For a tool request owner or a
+            history resolution record it is the scope's directories that
+            exist: owner records, request bodies, history fences and history
+            resolution records. *)
   }
 
 type report =
@@ -93,7 +97,12 @@ val fresh_state_step : refusal -> string
 (** The fresh-state line the preflight prints: stop the server, delete
     [delete], start the new build. *)
 
-val scan : ?validate_tool_request:(unit -> payload_validator) -> Store.t -> base_path:string -> (report, string) result
+type history_resolution_validator = group:string -> name:string -> Yojson.Safe.t -> (unit, string) result
+(** One file of [history-resolutions/<group>/<name>]. *)
+
+val scan : ?validate_tool_request:(unit -> payload_validator) ->
+  ?validate_history_resolution:history_resolution_validator ->
+  Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's
     decoders. A missing store directory is an empty store. [Error] means a
     directory exists and cannot be listed. The scan runs beside a live server
@@ -102,7 +111,8 @@ val scan : ?validate_tool_request:(unit -> payload_validator) -> Store.t -> base
     then the body its check reads. *)
 
 module For_testing : sig
-  val scan : ?validate_tool_request:(unit -> payload_validator) -> after_read:(string -> unit) ->
+  val scan : ?validate_tool_request:(unit -> payload_validator) ->
+    ?validate_history_resolution:history_resolution_validator -> after_read:(string -> unit) ->
     Store.t -> base_path:string -> (report, string) result
   (** The same scan, calling [after_read] with each record's path once its
       bytes are read and before they are decoded, so a test can move a file

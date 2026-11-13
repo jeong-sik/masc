@@ -28,6 +28,11 @@ val to_public_json : t -> Yojson.Safe.t
 val decode_published : scope:string -> request_id:string -> Yojson.Safe.t ->
   (t list, string) result
 (** Pure strict envelope decoder for the deployment preflight's owned bytes. *)
+val check_published_file : group:string -> name:string -> Yojson.Safe.t -> (unit, string) result
+(** What a pass does with one file of a scope's resolution directory, for the
+    deployment preflight: [group] is the directory's name, [name] the file's.
+    A pass decodes every file there, whether or not its original still has a
+    record. *)
 val submit : config:Workspace.config -> keeper_name:string -> request_id:string ->
   expected:Keeper_librarian_history_resolution_state.guard -> actor:string ->
   reason:string -> now:float -> (t * bool, error) result

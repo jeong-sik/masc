@@ -217,6 +217,22 @@ let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
     let* fence=Fence.read ~store ~scope ~request_id |> unavailable in
     let* ()=match fence with None -> Ok () | Some _ -> Error (Conflict "Original is already fenced") in
     let+ ()=persist ~store ~scope ~request_id ~previous (values@[candidate]) in candidate,false
+(* One file of a scope's resolution directory: the record names its own
+   original, the file is named by that original, and the envelope decodes. *)
+let decode_inventory_row ~scope ~name json =
+  let* request_id=match json with
+    | `Assoc fields -> (match List.assoc_opt "request_id" fields with Some (`String value) -> Ok value
+      | _ -> Error "Resolution inventory has no original ID")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "Invalid resolution inventory record" in
+  let* ()=require (name=Store.digest request_id ^ ".json") "Resolution inventory filename differs" in
+  decode ~scope ~request_id json
+let check_published_file ~group ~name json =
+  let* scope=match json with
+    | `Assoc fields -> (match List.assoc_opt "scope" fields with Some (`String value) -> Ok value
+      | _ -> Error "Resolution record has no scope")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "Invalid resolution inventory record" in
+  let* ()=require (Store.digest scope=group) "Resolution record is stored under another scope" in
+  decode_inventory_row ~scope ~name json |> Result.map (fun _ -> ())
 let active_for_keeper ~config ~keeper_name =
   let store=Store.of_config config in
   let* scope=Request.discovery_scope ~base_path:config.Workspace.base_path
@@ -224,12 +240,7 @@ let active_for_keeper ~config ~keeper_name =
   let* rows=Store.history_resolution_inventory store ~scope |> unavailable in
   List.fold_left (fun result (name,json) ->
     let* values=result in
-    let* request_id=match json with
-      | `Assoc fields -> (match List.assoc_opt "request_id" fields with Some (`String value) -> Ok value
-        | _ -> Error (Unavailable "Resolution inventory has no original ID"))
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error (Unavailable "Invalid resolution inventory record") in
-    let* ()=if name=Store.digest request_id ^ ".json" then Ok () else Error (Unavailable "Resolution inventory filename differs") in
-    let* intents=decode ~scope ~request_id json |> unavailable in
+    let* intents=decode_inventory_row ~scope ~name json |> unavailable in
     match List.rev intents with
     | [] -> Ok values
     | intent::_ ->

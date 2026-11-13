@@ -218,6 +218,81 @@ let test_filter_map_recent_does_not_swallow_callback_failure () =
         (Dated_jsonl.filter_map_recent store 10 ~f:(fun _ ->
            raise (Yojson.Json_error "decoder rejected the row"))))
 
+(* ── recent views ─────────────────────────────────────── *)
+
+let view_of_i n = Dated_jsonl.recent_view n ~f:(fun j -> Some (json_i j))
+
+let day_path dir month day = Filename.concat (Filename.concat dir month) (day ^ ".jsonl")
+
+let test_recent_view_reads_like_filter_map_recent () =
+  let location = temp_store "dated_jsonl_view_reads" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":3}|}; "not-json"; {|{"i":4}|} ];
+  let store = Dated_jsonl.open_store location in
+  check (list int) "newest three parsed rows across months" [ 2; 3; 4 ]
+    (Dated_jsonl.read_recent_view (view_of_i 3) store)
+
+let test_recent_view_keeps_the_answer_while_sizes_hold () =
+  (* Day files only grow. Rewriting rows to the same length breaks that rule
+     on purpose: the store's rows change, the view still answers from its
+     kept read, and that is how a test sees an unchanged store go unread. *)
+  let location = temp_store "dated_jsonl_view_kept" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|} ];
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 2 in
+  check (list int) "first read" [ 1; 2 ] (Dated_jsonl.read_recent_view view store);
+  Out_channel.with_open_bin (day_path dir "2026-01" "01") (fun oc ->
+    output_string oc "{\"i\":7}\n{\"i\":8}\n");
+  check (list int) "the rows changed" [ 7; 8 ]
+    (Dated_jsonl.filter_map_recent store 2 ~f:(fun j -> Some (json_i j)));
+  check (list int) "same sizes, kept answer" [ 1; 2 ]
+    (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_reads_an_appended_row () =
+  let location = temp_store "dated_jsonl_view_append" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|} ];
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 2 in
+  check (list int) "first read" [ 1; 2 ] (Dated_jsonl.read_recent_view view store);
+  write_dated_file dir "2026-01" "01" [ {|{"i":3}|} ];
+  check (list int) "appended row" [ 2; 3 ] (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_reads_a_new_day_file () =
+  let location = temp_store "dated_jsonl_view_new_day" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 2 in
+  check (list int) "first read" [ 1; 2 ] (Dated_jsonl.read_recent_view view store);
+  write_dated_file dir "2026-02" "01" [ {|{"i":3}|} ];
+  check (list int) "new month's file" [ 2; 3 ] (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_drops_a_removed_day_file () =
+  let location = temp_store "dated_jsonl_view_removed" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  write_dated_file dir "2026-01" "02" [ {|{"i":2}|} ];
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 2 in
+  check (list int) "first read" [ 1; 2 ] (Dated_jsonl.read_recent_view view store);
+  Sys.remove (day_path dir "2026-01" "01");
+  check (list int) "removed file's row is gone" [ 2 ]
+    (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_reads_the_first_file_of_an_empty_store () =
+  (* An empty store's read opens no file, so only the day-file list can tell
+     the next call that a file arrived. *)
+  let location = temp_store "dated_jsonl_view_empty" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 2 in
+  check (list int) "empty store" [] (Dated_jsonl.read_recent_view view store);
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  check (list int) "first file" [ 1 ] (Dated_jsonl.read_recent_view view store)
+
 let test_collect_matching_counts_selected_rows () =
   let location = temp_store "dated_jsonl_collect_matching" in
   let dir = Dated_jsonl.Store.dir location in
@@ -1772,6 +1847,21 @@ let () =
             test_filter_map_recent_calls_the_projection_newest_first;
           test_case "callback failure is not swallowed" `Quick
             test_filter_map_recent_does_not_swallow_callback_failure;
+        ] );
+      ( "recent_view",
+        [
+          test_case "reads like filter_map_recent" `Quick
+            test_recent_view_reads_like_filter_map_recent;
+          test_case "keeps the answer while sizes hold" `Quick
+            test_recent_view_keeps_the_answer_while_sizes_hold;
+          test_case "reads an appended row" `Quick
+            test_recent_view_reads_an_appended_row;
+          test_case "reads a new day file" `Quick
+            test_recent_view_reads_a_new_day_file;
+          test_case "drops a removed day file" `Quick
+            test_recent_view_drops_a_removed_day_file;
+          test_case "reads the first file of an empty store" `Quick
+            test_recent_view_reads_the_first_file_of_an_empty_store;
         ] );
       ( "collect_matching",
         [ test_case "n counts selected rows" `Quick

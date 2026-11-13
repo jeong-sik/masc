@@ -214,6 +214,23 @@ val filter_map_recent :
     and a 100k-row window materialises gigabytes that the decoder immediately
     discards. *)
 
+type 'a recent_view
+(** A {!filter_map_recent} read with a fixed row count and projection that
+    keeps each store's answer until the store's day files change. The kept
+    answers live in the view, so make one view per projection and keep it. *)
+
+val recent_view : int -> f:(Yojson.Safe.t -> 'a option) -> 'a recent_view
+(** [recent_view n ~f] reads like [filter_map_recent t n ~f]. [f] must be
+    pure: a kept answer is returned without calling it again. *)
+
+val read_recent_view : 'a recent_view -> t -> 'a list
+(** [read_recent_view view t] is [filter_map_recent t n ~f] for the view's
+    [n] and [f]. When [t]'s day-file list and the size of every file the
+    previous read opened are unchanged, it returns that read's answer
+    without opening a day file. Day files only grow by appending, so a file
+    rewritten to its old size reads as unchanged, the same rule
+    {!count_entries} follows. *)
+
 val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
 (** [read_recent ?offset t n] returns the newest [n] entries in chronological
     order (oldest first), skipping the first [offset] newest entries.

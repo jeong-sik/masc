@@ -78,6 +78,11 @@ val reload : store:Lane_addon_store.t -> retained -> (retained option, error) re
     body {!load} already verified; only progress can differ. A record that
     names another digest or binding is an error, and [None] means the record
     is gone (settled or removed). *)
+val load_record : store:Lane_addon_store.t -> scope:string -> request_id:string ->
+  (Record.t option, error) result
+(** One record as {!discover} reads it, by its ID, without reading the request
+    body. [None] means the key is absent. The record's summary is the
+    consumer's to check; {!load} reads and checks the body. *)
 val load_listed : store:Lane_addon_store.t -> Record.t -> (retained, error) result
 (** Restore one observed record and its complete body using {!load}, then
     confirm that the record still has the discovered identity: scope, request

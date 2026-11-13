@@ -2247,6 +2247,46 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     let record=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:id |> owned |> Option.get in
     let request=Capture.restore ~owner:(Capture.physical_owner request) record |> get in record,request) in
   let child,child_request=load_child child_id in
+  (* The Keeper's lineage check reads the fenced parent as its record and
+     the index in that record's summary. *)
+  let module Lineage=Keeper_librarian_history_resolution_lineage in
+  let record_path id=Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest id ^ ".json"))) in
+  let parent_body=Filename.concat root (Store.tool_request_body_path ~scope:original.scope
+    ~request_digest:original.request_digest) in
+  let parent_bytes=io (fun () -> In_channel.with_open_bin parent_body In_channel.input_all) in
+  let lineage ()=io (fun () -> Lineage.confirm_predecessor ~store:fixture.store ~require_confirmed:true child_request) in
+  io (fun () -> Sys.remove parent_body);
+  check (result unit string) "lineage of a resolution child passes without the parent's body" (Ok ()) (lineage ());
+  check bool "the host's lineage check still reads the parent's body" true
+    (Result.is_error (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store
+      ~require_confirmed:true child_request)));
+  io (fun () -> write parent_body parent_bytes);
+  let with_summary_value id name value f=
+    let path=record_path id in
+    let honest=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in
+    let changed=match Yojson.Safe.from_string honest with
+      | `Assoc fields -> `Assoc (List.map (fun (field,stored) -> match field,stored with
+          | "summary",`Assoc summary -> field,`Assoc (List.map (fun (key,old) ->
+              if key=name then key,`String value else key,old) summary)
+          | _ -> field,stored) fields)
+      | _ -> fail "original record is not an object" in
+    let changed=Yojson.Safe.to_string changed in
+    check bool ("the fixture changes the index value "^name) true (changed<>honest);
+    io (fun () -> write path changed);
+    let result=f () in
+    io (fun () -> write path honest);
+    result in
+  check (result unit string) "a parent index with another source basis breaks the lineage"
+    (Error "History resolution child changed its original source or owner")
+    (with_summary_value original.request_id "source_basis_digest" (String.make 64 '0') lineage);
+  check (result unit string) "the unchanged parent index passes again" (Ok ()) (lineage ());
+  check bool "a record whose index differs from its body is refused where the body is read" true
+    (with_summary_value child_id "exact_digest" (String.make 64 '0') (fun () -> io (fun () ->
+      match Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id with
+      | Ok (Some record) -> Capture.restore ~owner:(Capture.physical_owner request) record
+        =Error "Original history index differs from its request"
+      | Ok None | Error _ -> false)));
   let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
     | Ok (Owner.Stored child | Already_stored child) -> child
     | Ok (Unconfirmed detail) -> fail detail

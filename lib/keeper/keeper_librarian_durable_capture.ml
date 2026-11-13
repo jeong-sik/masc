@@ -535,6 +535,10 @@ let to_json original =
     "range_id",optional M.durable_range_id_to_json original.atom_receipt;
     "official_range_id",optional M.official_range_id_to_json original.official_receipt;
     "input_text",json_text (I.to_json original.original_input)]
+(* [with_current] changes [revision] and [original_input.current] and nothing
+   else, so two sources with equal basis differ by those two fields at most. *)
+let basis_json original =
+  to_json {original with revision=None;original_input={original.original_input with current=None}}
 let of_json json =
   let* f=fields ["schema";"purpose";"runtime_keepers_dir";"extent";"boundaries";"positions";
     "source_text";"counterparts_text";"external_before";"external_prepared";"expected_revision";"range_id";"official_range_id";"input_text"] json in

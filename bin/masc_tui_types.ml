@@ -26961,7 +26961,8 @@ let keeper_message_inflight_rows (state : state) ~now =
   List.map (fun group -> true, summary group)
     (keeper_message_inflight_drawn state)
   @ if keeper_message_history_loading state then
-      [false, "  Loading conversation history…"]
+      [ false
+      , ui_text state ~ko:"  대화 기록 조회 중…" ~en:"  Loading conversation history…" ]
     else []
 
 let keeper_message_schedule_rows state ~now ~max_rows =

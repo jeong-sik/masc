@@ -100,23 +100,27 @@ let test_partial_settlement_and_change_support () = with_batch (fun batch ->
   Judgment.verify ~facts:[fact alpha] judgments |> require;
   check (list string) "deferred Beta cannot block settled Alpha and transient input"
     ["one";"two";"three"] (Judgment.settled_requests judgments);
-  let verify support claims changes = Judgment.verify_support ~new_claims:claims
-    ~has_changes:changes ~change_support:support judgments in
-  verify ["one"] [fact alpha] true |> require;
-  verify ["two"] [] true |> require;
-  verify [] [] false |> require;
-  List.iter (fun (label,support) -> verify support [fact alpha] true |> refused label)
+  let verify support additions = Judgment.verify_support ~additions
+    ~change_support:support judgments in
+  verify ["one"] [fact alpha] |> require;
+  verify ["two"] [] |> require;
+  (* Drops and merges reach verify_support as no additions: they need no support. *)
+  verify [] [] |> require;
+  List.iter (fun (label,support) -> verify support [fact alpha] |> refused label)
     ["unknown support",["outside"]; "duplicate support",["one";"one"];
      "deferred support",["four"]; "not-durable support",["three"];
-     "mutation without support",[]];
-  verify ["two"] [fact alpha] true |> refused "new claim supported only by already-represented outcome";
-  verify ["one"] [fact beta] true |> refused "new claim not linked to its incorporated support";
+     "addition without support",[]];
+  verify ["two"] [fact alpha] |> refused "addition supported only by already-represented outcome";
+  verify ["one"] [fact beta] |> refused "addition not linked to its incorporated support";
+  List.iter (fun (label,support) -> verify support [] |> refused label)
+    ["unknown support without additions",["outside"];
+     "deferred support without additions",["four"]];
   let all_deferred = List.map (fun id -> row id "deferred" `Null) ["one";"two";"three";"four"] in
   let _, deferred, _ = Judgment.unwrap ~batch (envelope all_deferred) |> require in
   check (list string) "all deferred consumes nothing" [] (Judgment.settled_requests deferred);
-  Judgment.verify_support ~new_claims:[] ~has_changes:false ~change_support:[] deferred |> require;
-  Judgment.verify_support ~new_claims:[fact alpha] ~has_changes:true ~change_support:[] deferred
-    |> refused "all deferred cannot authorize a Memory mutation")
+  Judgment.verify_support ~additions:[] ~change_support:[] deferred |> require;
+  Judgment.verify_support ~additions:[fact alpha] ~change_support:[] deferred
+    |> refused "all deferred cannot authorize an addition")
 
 let test_structured_output_schema_accepts_the_envelope () = with_batch (fun batch ->
   let schema = Judgment.output_schema

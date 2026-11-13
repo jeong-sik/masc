@@ -31,7 +31,6 @@ let with_async_switch state ~action start =
 (* The forms an $EDITOR round trip fills, each named once in both languages
    for the notices about it. *)
 type connector_change = Channel_bind | Channel_unbind | Channel_binding_edit
-type schedule_change = Schedule_create | Schedule_modify
 
 type editor_form =
   | Board_draft
@@ -70,8 +69,7 @@ let editor_form_name ~ko = function
   | Keeper_settings keeper -> keeper ^ (if ko then " 설정" else " settings")
   | Keeper_creation -> if ko then "Keeper 만들기" else "create"
   | Repository_addition -> if ko then "저장소 등록" else "add"
-  | Schedule_form Schedule_create -> if ko then "일정 만들기" else "create"
-  | Schedule_form Schedule_modify -> if ko then "일정 편집" else "modify"
+  | Schedule_form change -> schedule_change_name ~ko change
 
 (* What quitting the editor leaves. Four forms say what stayed as it was; the
    rest name themselves as called off. The task cancel form says the task
@@ -1968,11 +1966,15 @@ let wrap_original answer =
   match Original_results.answer_kind answer with
   | Original_results.Read -> Original_msg answer
 
-let check_workspace_request ?schedule_form_action ?refresh_ticket
+(* Whether a request captured under [authority] for [identity] may still go
+   out. The guard withdraws it when the workspace moved, when the server
+   identity is not confirmed, or when the server, asked again just before
+   sending, names another workspace or none. *)
+let admit_workspace_request ?schedule_form_change ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
   let refresh_ticket = Option.value refresh_ticket ~default:state.http_refresh_order in
-  if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-  else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+  if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
+  else if not (server_authority_ready state) then Error Workspace_identity_not_confirmed
   else
     let reading_authority = state.workspace_read_authority in
     (* Health observes the endpoint identity; the comparison below decides
@@ -1980,27 +1982,35 @@ let check_workspace_request ?schedule_form_action ?refresh_ticket
        neither require a health receipt nor erase a foreign observation. *)
     let reading = Masc_tui_workspace_read.without_binding (fun () ->
       Masc_tui_loader.load_server_identity ~host ~port) in
-    if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+    if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
     else if reading_authority != state.workspace_read_authority || not (server_authority_ready state)
-    then Error "Workspace identity is unconfirmed"
+    then Error Workspace_identity_not_confirmed
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
-      let detail = "Workspace identity changed or is unavailable; request withdrawn" in
+      let refusal = Workspace_identity_changed in
       (* The form refusal is a receipt; the observed identity is a separately
          stamped read. A newer refresh can retire the latter alone. *)
-      Option.iter (fun action ->
+      Option.iter (fun change ->
         enqueue_async mailbox
           (Workspace_scoped (authority, None,
             Schedule_msg (Schedule_form_authority_refused
-              { action; detail; workspace = workspace_input_identity_of_server identity }))))
-        schedule_form_action;
+              { change; refusal; workspace = workspace_input_identity_of_server identity }))))
+        schedule_form_change;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
         enqueue_async mailbox
           (Workspace_scoped (authority, Some reading_authority,
             Workspace_msg (Workspace_identity_unconfirmed
-              { detail; latest = reading; prior_contact; refresh_ticket })));
-      Error detail
+              { detail = workspace_refusal_text ~ko:false refusal; latest = reading
+              ; prior_contact; refresh_ticket })));
+      Error refusal
     end
+
+(* The guard's refusal in English, for the surfaces whose other sentences are
+   still English. A surface that moves to the screen language takes
+   [admit_workspace_request] and says the refusal with [workspace_refusal_text]. *)
+let check_workspace_request ?refresh_ticket ?prior_contact state ~mailbox ~authority ~identity ~host ~port () =
+  admit_workspace_request ?refresh_ticket ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()
+  |> Result.map_error (workspace_refusal_text ~ko:false)
 
 (* The server this screen reads. It runs on this machine, so the address is
    loopback and there is nothing to configure.
@@ -2022,17 +2032,26 @@ let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
 (* One request chain retains the fact that an earlier identity probe reached
    its endpoint. A later probe failure does not erase that contact. *)
-let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
+let workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port =
   let prior_contact = ref Masc_tui_server_lifecycle.Nothing_answered in
   fun () ->
-    let result = check_workspace_request ~prior_contact:!prior_contact
+    let result = admit_workspace_request ~prior_contact:!prior_contact
         state ~mailbox ~authority ~identity ~host ~port () in
     (match result with
      | Ok () -> prior_contact := Masc_tui_server_lifecycle.Server_reached
      | Error _ -> ());
     result
 
+(* The same chain with the refusal in English; see [check_workspace_request]. *)
+let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
+  let admit = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
+  fun () -> Result.map_error (workspace_refusal_text ~ko:false) (admit ())
+
 (* Capture the endpoint authority before an extracted request can suspend. *)
+let capture_workspace_admission state ~mailbox =
+  workspace_admission_sequence state ~mailbox ~authority:state.workspace_authority
+    ~identity:state.server_identity ~host:server_peer_host ~port:state.port
+
 let capture_workspace_check state ~mailbox =
   workspace_check_sequence state ~mailbox ~authority:state.workspace_authority
     ~identity:state.server_identity ~host:server_peer_host ~port:state.port
@@ -22314,18 +22333,23 @@ let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
       report_kept_back state workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
-  let check = capture_workspace_check state ~mailbox in
+  let admit = capture_workspace_admission state ~mailbox in
   state.schedule_cancel_error <- None;
   report_action state "system"
-    (Printf.sprintf "cancelling schedule %s" schedule_id);
+    (if state.ui_language = Lang_ko then Printf.sprintf "일정 %s 취소 보내는 중" schedule_id
+     else Printf.sprintf "cancelling schedule %s" schedule_id);
   let host = server_peer_host in
   let port = state.port in
   let run_cancel () =
     let result =
-      match Result.bind (check ())
-        (fun () -> Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id) with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+      match admit () with
+      | Error refusal -> Error (Request_withdrawn refusal)
+      | Ok () ->
+        (match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
+         | Error detail -> Error (Request_failed detail)
+         | Ok json ->
+           Result.map_error (fun detail -> Request_failed detail)
+             (Masc.Tui_decode.tool_envelope_outcome json))
     in
     enqueue_async mailbox (Schedule_msg (Schedule_cancel_done (schedule_id, result)))
   in
@@ -22357,7 +22381,8 @@ let handle_schedule_cancel_key state ~mailbox =
           state.schedule_cancel_armed <- Some row.sch_schedule_id;
           state.schedule_cancel_error <- None;
           report_action state "system"
-            (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
+            (schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko)
+               row.sch_schedule_id))
 
 (* Send the operator's verdict through the verification route. Same
    fiber-and-mailbox shape as the other writes; whether the task still awaits
@@ -23789,12 +23814,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~before:authority;
       report_action state "error" detail
       end
-  | Schedule_msg (Schedule_form_authority_refused {action; detail; workspace}) ->
+  | Schedule_msg (Schedule_form_authority_refused {change; refusal; workspace}) ->
       (* Identity observation is delivered separately under its read epoch. *)
-      state.schedule_form_refusal <- Some
-        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
-        ; sfr_workspace = workspace };
-      report_action state "error" (action ^ ": " ^ detail)
+      let form_refusal =
+        { sfr_change = change; sfr_reason = Schedule_form_request (Request_withdrawn refusal)
+        ; sfr_at = Unix.gettimeofday (); sfr_workspace = workspace } in
+      state.schedule_form_refusal <- Some form_refusal;
+      report_action state "error"
+        (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) form_refusal)
   | Lane_msg (Lane_package_catalog_loaded (generation,directory,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -27027,7 +27054,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Ok message ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- None;
-          report_action state "system" ("Schedule: " ^ message);
+          report_action state "system"
+            (ui_text state ~ko:"일정: " ~en:"Schedule: " ^ message);
           (* The row shown still carries the old status until a read lands; a
              cancelled row that reads "scheduled" invites a second cancel. The
              server announces [schedule_store_invalidated] for this write too, so the
@@ -32594,28 +32622,25 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_schedule_form ~change ~stem ~post =
     let form = Schedule_form change in
-    (* The Schedules form row reads "<action>: <reason>" and its other reasons
-       are still English, so the editor's reason is English there too; the
-       Schedules layer moves the whole row. *)
-    let action = editor_form_name ~ko:false form in
+    let ko = state.ui_language = Lang_ko in
     (* A refusal stays on the Schedules surface for the last-action window:
        the action line alone is lost under a workspace warning. A new
        attempt clears the previous one. *)
     state.schedule_form_refusal <- None;
     let authority = state.workspace_authority in
     let identity = state.server_identity in
-    let report_form_refusal detail =
-      state.schedule_form_refusal <- Some
-        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
-        ; sfr_workspace = workspace_input_identity_of_server identity };
-      report_action state "error" (action ^ ": " ^ detail)
+    let report_form_refusal reason =
+      let refusal =
+        { sfr_change = change; sfr_reason = reason; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace_input_identity_of_server identity } in
+      state.schedule_form_refusal <- Some refusal;
+      report_action state "error" (schedule_form_refusal_text ~ko refusal)
     in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_form_refusal
-        (Masc_tui_editor.abort_detail ~ko:false
-           (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset))
+        (Schedule_form_editor (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset))
     | Some _ ->
       (match
          Masc_tui_editor.roundtrip ~restore:hand_off_terminal
@@ -32624,29 +32649,31 @@ Use relative paths for resources already held in the package. -->
        | Error Masc_tui_editor.Cancelled ->
            report_editor_abort state ~form Masc_tui_editor.Cancelled
        | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
-           report_form_refusal (Masc_tui_editor.abort_detail ~ko:false abort)
+           report_form_refusal (Schedule_form_editor abort)
        | Ok declaration ->
          (match Yojson.Safe.from_string declaration with
           | exception Yojson.Json_error message ->
-            report_form_refusal ("body is not JSON: " ^ message)
+            report_form_refusal (Schedule_form_not_json message)
           | `Assoc _ ->
-            (match Result.bind
-               (check_workspace_request ~schedule_form_action:action state
-                  ~mailbox:async_messages ~authority ~identity ~host ~port ())
-               (fun () -> post declaration) with
-             | Error detail -> report_form_refusal detail
+            (match
+               admit_workspace_request ~schedule_form_change:change state
+                 ~mailbox:async_messages ~authority ~identity ~host ~port ()
+             with
+             | Error refusal -> report_form_refusal (Schedule_form_request (Request_withdrawn refusal))
+             | Ok () ->
+             match post declaration with
+             | Error detail -> report_form_refusal (Schedule_form_request (Request_failed detail))
              | Ok response ->
                (match Masc.Tui_decode.tool_envelope_outcome response with
-                | Error detail -> report_form_refusal detail
+                | Error detail -> report_form_refusal (Schedule_form_request (Request_failed detail))
                 | Ok message ->
-                  report_action state "system" (action ^ ": " ^ message);
+                  report_action state "system" (schedule_change_name ~ko change ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
                   (* Owed, as after a cancel: the [schedule_store_invalidated] this
                      write announces folds into the same read. *)
                   owe_schedules_read state))
-          | _ ->
-            report_form_refusal "the editor form must be a JSON object"))
+          | _ -> report_form_refusal Schedule_form_not_an_object))
   in
   let handle_schedule_create () =
     handle_schedule_form ~change:Schedule_create
@@ -32660,13 +32687,21 @@ Use relative paths for resources already held in the package. -->
        refused before an editor opens; their reason goes to the footer. *)
     state.schedule_form_refusal <- None;
     match selected_schedule_row state with
-    | None -> report_action state "error" "modify: no schedule under the cursor"
+    | None ->
+      let ko = state.ui_language = Lang_ko in
+      report_action state "error"
+        (schedule_change_name ~ko Schedule_modify ^ ": "
+         ^ (if ko then "커서 아래 일정 없음" else "no schedule under the cursor"))
     (* The refusal was always real; it just arrived after the operator had
        edited fifteen fields and saved. The status is on the screen before the
        key is pressed, so the answer is available here. *)
     | Some row ->
       (match Masc_tui_types.schedule_update_form_json row with
-       | Error reason -> report_action state "error" ("modify: " ^ reason)
+       | Error reason ->
+         let ko = state.ui_language = Lang_ko in
+         report_action state "error"
+           (schedule_change_name ~ko Schedule_modify ^ ": "
+            ^ schedule_modify_refusal_text ~ko reason)
        | Ok stem ->
          handle_schedule_form ~change:Schedule_modify ~stem
            ~post:(fun body_json ->

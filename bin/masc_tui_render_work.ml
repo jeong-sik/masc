@@ -1545,10 +1545,11 @@ let schedule_list_freshness (state : state) =
    warning. *)
 let schedule_form_refusal_rows (state : state) ~cols =
   match state.schedule_form_refusal with
-  | Some { sfr_action; sfr_detail; sfr_at; sfr_workspace = _ }
+  | Some ({ sfr_at; _ } as refusal)
     when Unix.gettimeofday () -. sfr_at <= Masc_tui_types.last_action_window_s ->
       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
-        (Terminal_text.single_line (sfr_action ^ ": " ^ sfr_detail))
+        (Terminal_text.single_line
+           (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) refusal))
   | Some _ | None -> []
 
 (* Rows the Schedules page spends around its list, counted once so the
@@ -1863,9 +1864,8 @@ let render_schedule_list (state : state) =
          (match state.schedule_cancel_armed with
           | Some schedule_id ->
               c.push
-                ((Theme.warn ())
-                ^ Printf.sprintf
-                    "  armed: cancel %s -- same key again to send"
+                ((Theme.warn ()) ^ "  "
+                ^ schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko)
                     (Terminal_text.single_line schedule_id)
                 ^ Ansi.reset)
           | None -> ());
@@ -1873,7 +1873,11 @@ let render_schedule_list (state : state) =
           | Some (schedule_id, err) ->
               c.push
                 ((Theme.bad ()) ^ "  "
-                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (framed_inner_width cols - 4)
+                ^ fit_width
+                    (Terminal_text.single_line
+                       (schedule_id ^ ": "
+                        ^ request_failure_text ~ko:(state.ui_language = Lang_ko) err))
+                    (framed_inner_width cols - 4)
                 ^ Ansi.reset)
           | None -> ())
        end))
@@ -2213,7 +2217,9 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
      | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
-         [Theme.bad (), ui_text state ~ko:"취소 오류: " ~en:"Cancel error: " ^ wire error]
+         [ Theme.bad ()
+         , ui_text state ~ko:"취소 오류: " ~en:"Cancel error: "
+           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko) error) ]
      | Some _ | None -> [])
     @ (match schedule_source_warning state with
        | None -> []
@@ -2222,9 +2228,7 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
        | None -> []
        | Some id ->
            [ Theme.warn ()
-           , if state.ui_language = Lang_ko then
-               "취소 준비됨: " ^ wire id ^ " \xc2\xb7 x 를 한 번 더 누르면 보냄"
-             else "Armed: cancel " ^ wire id ^ " -- press x again to submit" ]) in
+           , schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko) (wire id) ]) in
   let fields = schedule_detail_lines ~ko:(state.ui_language = Lang_ko) ~width
       ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history

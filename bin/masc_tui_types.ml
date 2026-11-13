@@ -3000,6 +3000,52 @@ let schedule_counts_line counts =
       Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
         (string_of_int closed_total) (String.concat ", " parts)
 
+(* Why the modify editor does not open on a row: the store refuses rows in
+   that status (as last read), or this build cannot read the recurrence or the
+   delivery the form would carry back, so saving would put a default over it. *)
+type schedule_modify_refusal =
+  | Schedule_status_not_modifiable of string
+  | Schedule_recurrence_unreadable of string
+  | Schedule_delivery_unreadable of { delivery : string; detail : string }
+  | Schedule_delivery_not_a_string
+
+let schedule_modify_refusal_text ~ko = function
+  | Schedule_status_not_modifiable status ->
+      if ko then
+        Printf.sprintf
+          "%s 상태 일정은 편집할 수 없음 \xc2\xb7 마지막으로 읽은 값 \xc2\xb7 바뀌었으면 새로고침"
+          status
+      else
+        Printf.sprintf
+          "the store refuses to modify a %s schedule (status as last \
+           read; refresh if it has changed)"
+          status
+  | Schedule_recurrence_unreadable detail ->
+      if ko then
+        Printf.sprintf
+          "이 빌드가 반복 규칙을 읽지 못함(%s) \xc2\xb7 저장하면 기본값으로 덮어씀"
+          detail
+      else
+        Printf.sprintf
+          "this build cannot read the schedule's recurrence (%s); the form \
+           would save a default over it"
+          detail
+  | Schedule_delivery_unreadable { delivery; detail } ->
+      if ko then
+        Printf.sprintf
+          "이 빌드가 전달 방식을 읽지 못함(%S, %s) \xc2\xb7 저장하면 기본값으로 덮어씀"
+          delivery detail
+      else
+        Printf.sprintf
+          "this build cannot read the schedule's delivery %S (%s); the form \
+           would save a default over it"
+          delivery detail
+  | Schedule_delivery_not_a_string ->
+      if ko then "전달 방식이 문자열이 아님 \xc2\xb7 저장하면 기본값으로 덮어씀"
+      else
+        "the schedule's delivery is not a string; the form would save a \
+         default over it"
+
 (** Why the store would refuse a modify, read before the editor opens.
 
     The rule is [Schedule_domain.modify_allowed], the same function
@@ -3012,17 +3058,12 @@ let schedule_counts_line counts =
     renders as itself, and it is the server's call, not ours, whether it can
     be modified. Refusing on a word we cannot read would turn forward
     compatibility into a locked row. *)
-let schedule_modify_refusal (row : schedule_row) : string option =
+let schedule_modify_refusal (row : schedule_row) : schedule_modify_refusal option =
   match Schedule_domain.schedule_status_of_string row.sch_status with
   | Error _ -> None
   | Ok status ->
       if Schedule_domain.modify_allowed status then None
-      else
-        Some
-          (Printf.sprintf
-             "the store refuses to modify a %s schedule (status as last \
-              read; refresh if it has changed)"
-             row.sch_status)
+      else Some (Schedule_status_not_modifiable row.sch_status)
 
 (* The recurrence fields of both schedule forms. The defaults are what a new
    schedule starts with; the modify form passes only the fields of the row's
@@ -3058,16 +3099,9 @@ let schedule_form_delivery (row : schedule_row) =
        | None -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
        | Some (`String raw) ->
            Result.map_error
-             (fun detail ->
-                Printf.sprintf
-                  "this build cannot read the schedule's delivery %S (%s); the form \
-                   would save a default over it"
-                  raw detail)
+             (fun detail -> Schedule_delivery_unreadable { delivery = raw; detail })
              (Schedule_supported_kinds.keeper_wake_delivery_of_string raw)
-       | Some _ ->
-           Error
-             "the schedule's delivery is not a string; the form would save a \
-              default over it")
+       | Some _ -> Error Schedule_delivery_not_a_string)
   | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
 
 let schedule_modify_form (row : schedule_row) recurrence ~delivery =
@@ -3134,15 +3168,11 @@ let schedule_modify_form (row : schedule_row) recurrence ~delivery =
     this build cannot read is refused too: the update replaces the whole
     definition, so a form built without that recurrence would save a default
     over it. *)
-let schedule_update_form_json (row : schedule_row) : (string, string) result =
+let schedule_update_form_json (row : schedule_row)
+    : (string, schedule_modify_refusal) result =
   match schedule_modify_refusal row, row.sch_recurrence with
   | Some reason, (Ok _ | Error _) -> Error reason
-  | None, Error detail ->
-      Error
-        (Printf.sprintf
-           "this build cannot read the schedule's recurrence (%s); the form \
-            would save a default over it"
-           detail)
+  | None, Error detail -> Error (Schedule_recurrence_unreadable detail)
   | None, Ok recurrence ->
       Result.map
         (fun delivery -> schedule_modify_form row recurrence ~delivery)
@@ -9108,13 +9138,42 @@ type preset_save_receipt =
   ; psr_visible : bool
   }
 
+(* The two Schedules forms an $EDITOR round trip fills. *)
+type schedule_change = Schedule_create | Schedule_modify
+
+let schedule_change_name ~ko = function
+  | Schedule_create -> if ko then "일정 만들기" else "create"
+  | Schedule_modify -> if ko then "일정 편집" else "modify"
+
+(* Why the workspace guard withdrew a request before it left: the workspace
+   moved since the request captured its authority, the server identity is not
+   confirmed, or the server, asked again just before sending, named another
+   workspace or none. *)
+type workspace_refusal =
+  | Workspace_authority_withdrawn
+  | Workspace_identity_not_confirmed
+  | Workspace_identity_changed
+
+(* A request the workspace guard withdrew, or one the transport or the server
+   answered with a failure, which is said in its own words. *)
+type request_failure =
+  | Request_withdrawn of workspace_refusal
+  | Request_failed of string
+
+(* Why a Schedules form did not reach the server, or the server's refusal. *)
+type schedule_form_refusal_reason =
+  | Schedule_form_editor of Masc_tui_editor.abort
+  | Schedule_form_not_json of string
+  | Schedule_form_not_an_object
+  | Schedule_form_request of request_failure
+
 (* A refused schedule create or modify form, kept on the Schedules surface for
    the last-action window. [sfr_workspace] is the workspace the form was sent
    to: a reading that only loses the identity, or reads that workspace again,
    keeps the refusal; a reading of another workspace retires it. *)
 type schedule_form_refusal =
-  { sfr_action : string
-  ; sfr_detail : string
+  { sfr_change : schedule_change
+  ; sfr_reason : schedule_form_refusal_reason
   ; sfr_at : float
   ; sfr_workspace : workspace_input_identity option
   }
@@ -10685,7 +10744,7 @@ type state = {
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
-  mutable schedule_cancel_error: (string * string) option;
+  mutable schedule_cancel_error: (string * request_failure) option;
   (* The latest refused create/modify form, kept on the Schedules surface for
      the last-action window. *)
   mutable schedule_form_refusal: schedule_form_refusal option;
@@ -21462,6 +21521,46 @@ let kept_back ~ko reason kept =
     | Queued_input_kept -> [ queued_input_retained ~ko ]
     | Nothing_kept -> [] in
   String.concat " · " (String.capitalize_ascii reason :: not_sent ~ko :: kept)
+
+(* What the workspace guard says when it withdraws a request, in the shape of
+   every request kept back. The English sentences are the ones the surfaces
+   still in English have always drawn. *)
+let workspace_refusal_text ~ko refusal =
+  if ko then
+    kept_back ~ko
+      (match refusal with
+       | Workspace_authority_withdrawn -> "워크스페이스가 바뀜"
+       | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
+       | Workspace_identity_changed -> "워크스페이스 식별이 바뀌었거나 읽히지 않음")
+      Nothing_kept
+  else
+    match refusal with
+    | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
+    | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
+    | Workspace_identity_changed ->
+        "Workspace identity changed or is unavailable; request withdrawn"
+
+let request_failure_text ~ko = function
+  | Request_withdrawn refusal -> workspace_refusal_text ~ko refusal
+  | Request_failed detail -> detail
+
+let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
+  let reason =
+    match sfr_reason with
+    | Schedule_form_editor abort -> Masc_tui_editor.abort_detail ~ko abort
+    | Schedule_form_not_json message ->
+        (if ko then "JSON 이 아님: " else "body is not JSON: ") ^ message
+    | Schedule_form_not_an_object ->
+        if ko then "양식이 JSON 객체가 아님" else "the editor form must be a JSON object"
+    | Schedule_form_request failure -> request_failure_text ~ko failure
+  in
+  schedule_change_name ~ko sfr_change ^ ": " ^ reason
+
+(* The cancel key's first press, said on the action line, under the list and
+   in the detail. *)
+let schedule_cancel_armed_text ~ko schedule_id =
+  if ko then "취소 준비됨: " ^ schedule_id ^ " \xc2\xb7 x 를 한 번 더 누르면 보냄"
+  else "Armed: cancel " ^ schedule_id ^ " \xc2\xb7 press x again to send"
 
 let title_missing_reading ~ko ~error =
   if Option.is_some error then title_failed ~ko else title_unread ~ko

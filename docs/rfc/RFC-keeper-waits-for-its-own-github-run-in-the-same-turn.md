@@ -169,7 +169,7 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 
 ### 5.3 영수증 대기가 닿는 턴
 
-**[사실]** `keeper_receipt_wait` 는 채팅 실행을 맡은 턴(`turn_kind` 가 `direct`)에만 주어져요. 채팅 실행이 없는 run(autonomous, verifier, metric hook)은 도구 목록에서 이 도구가 빠져요(`lib/keeper/keeper_run_tools_setup.ml` 의 `descriptors_for_run`). 도구가 턴을 보관한 체크포인트에서 끝내고 대기를 그 체크포인트에 적는데, autonomous 턴에는 끝낼 체크포인트가 없기 때문이에요. 위 5.2 와 4절은 이 조건을 다루지 않았어요.
+**[사실]** `keeper_receipt_wait` 는 채팅 실행을 맡은 턴(`turn_kind` 가 `direct`)에만 주어져요. 채팅 실행이 없는 run(autonomous, verifier, metric hook)은 도구 목록에서 이 도구가 빠져요(`lib/keeper/keeper_run_tools_setup.ml` 의 `descriptors_for_run`). 도구가 턴을 채팅 operation 의 보관 체크포인트에서 끝내고, 대기를 `Chat_operation_store.defer_direct_checkpoint ~operation_id` 로 그 operation 에 적기 때문이에요. 채팅 턴은 `Keeper_repetition_scope.Execution.direct_operation operation_id` 로 operation 을 얻어요(`keeper_turn.ml`). autonomous 순환(`Keeper_unified_turn.run_keeper_cycle`)에는 `operation_id` 도 `Chat_operation_store` 참조도 없어요. autonomous 턴도 체크포인트는 저장하지만 대기를 적을 operation 기록이 없어요. 위 5.2 와 4절은 이 조건을 다루지 않았어요.
 
 **[사실]** 기준선 창(11-09T07:40Z~11-12T07:40Z, 72시간)의 `sleep`+`gh` 호출 535건을 `turn_kind` 로 나눴어요(`sleep_waits.py kinds`, 결과 `result-kinds-2026-11-09T07-40-23Z_11-12T07-40-23Z.json`). 합이 2절의 535건과 같아요.
 
@@ -212,7 +212,7 @@ Keeper 로 가르면 `masc-productor-owner` 는 163건 중 144건이 `autonomous
 3. **결정(사용자, 2026-11-12): 예, 두 Keeper 에게 각자 한 번 물어요.** 2026-11-12 17:42 KST 에 Board 글 두 개로 보냈어요. `masc-productor-owner` 는 1분 뒤 답했어요(3절). 글 번호는 `rondo` 가 `p-e5fe85dd65a9be6aab87462f35410853`, `masc-productor-owner` 가 `p-45dacfc018a91c4ab3a2eff9cd3e8af2` 예요. 답은 글의 댓글에 와요. `rondo` 도 같은 날 12:21Z 에 답했어요(3절).
 4. **결정(사용자, 2026-11-13): 영수증 키는 배포 전에 고치고 일정 본문에 둬요. ACK 뒤 재전달은 닫지 않고 한계로 문서화해요.** 5.2 [미해결] 1 은 #51737 이 고쳐요. 2 는 위 5.2 의 [결정]대로 둬요.
 
-5. **정할 것(사용자): `autonomous` 턴의 `sleep`+`gh`(기준선 304건, 21.78 h)를 어떻게 하나.** 영수증 대기가 닿지 않는 몫이에요(5.3). `autonomous` 턴이 쓸 수 있는 길은 `until_github_run`(턴을 끝내고 나중에 깨움)뿐이에요. 후보는 (가) 둔다, (나) 영수증 대기를 체크포인트 없는 턴으로 넓히는 RFC 를 쓴다예요. (나)는 `keeper_run_tools_setup.ml` 의 조건과 `Keeper_owner` 의 보관 방식을 건드려요.
+5. **정할 것(사용자): `autonomous` 턴의 `sleep`+`gh`(기준선 304건, 21.78 h)를 어떻게 하나.** 영수증 대기가 닿지 않는 몫이에요(5.3). `autonomous` 턴이 쓸 수 있는 길은 `until_github_run`(턴을 끝내고 나중에 깨움)뿐이에요. 후보는 (가) 둔다, (나) 영수증 대기를 체크포인트 없는 턴으로 넓히는 RFC 를 쓴다예요. (나)가 건드리는 곳은 operation 기록(`Chat_operation_store`, `keeper_receipt_wait_state.ml` 186줄, `keeper_direct_checkpoint_continuation.ml` 134줄), `Keeper_owner` 의 `Defer_direct_checkpoint` 명령, `keeper_run_tools_setup.ml` 의 `descriptors_for_run`, 그리고 autonomous 순환에서 operation 을 만드는 일이에요. 한 PR 크기가 아니라서 RFC 가 먼저예요. `until_github_run`(`delivery` 기본 `queue`)은 이미 autonomous 순환을 나중에 깨워 주므로, (나)가 더하는 것은 「턴의 작업 상태를 잃지 않고 같은 턴에서 이어 가는 것」이에요. 그 값은 재 보지 않았어요. `rondo` 는 sleep 을 고른 이유로 「턴을 놓고 싶지 않다」를 들었어요(3절).
 
 ## 8. 확인하지 못한 것
 

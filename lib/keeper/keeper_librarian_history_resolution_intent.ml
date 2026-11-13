@@ -310,33 +310,35 @@ let intend_child ~store ~expected request = update ~store ~expected (fun actual 
   let+ ()=require (staged.request_digest=Request.body_digest request)
     "Resolution child body differs from its request digest" in
   {actual with phase=Child_intended {request_id=staged.request_id;request_digest=staged.request_digest}})
-let confirm_child ~store ~expected (child:Owner.retained) = update ~store ~expected (fun actual ->
+let confirm_child ~store ~expected child = update ~store ~expected (fun actual ->
+  let module Record=Owner.Record in
   let* expected_child=match actual.phase with Child_intended child -> Ok child
     | Requested | Refused _ | Fenced | Child_confirmed _ -> Error "Resolution child is not awaiting acknowledgement" in
-  let+ ()=require (child.scope=actual.scope && child.request_id=expected_child.request_id
-    && child.request_digest=expected_child.request_digest
-    && Progress.phase child.progress=Progress.Captured) "Unacknowledged resolution child differs or has execution progress" in
+  let+ ()=require (Record.scope child=actual.scope && Record.request_id child=expected_child.request_id
+    && Record.request_digest child=expected_child.request_digest
+    && Progress.phase (Record.progress child)=Progress.Captured) "Unacknowledged resolution child differs or has execution progress" in
   {actual with phase=Child_confirmed expected_child})
 let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) =
   update ~store ~expected (fun actual ->
     let* child=match actual.phase with Child_confirmed child -> Ok child
       | Requested | Refused _ | Fenced | Child_intended _ -> Error "Resolution child is not acknowledged" in
     (* The completed original is the resolution child or a replacement that
-       descends from it. Only the second needs the child's own body. *)
-    let* root=if Request.request_id request=child.request_id then
+       descends from it. A descendant kept the child's source and changed
+       only its current Memory, which is an equal basis digest. *)
+    let* same_basis=if Request.request_id request=child.request_id then
         let+ ()=require (Request.body_digest request=child.request_digest)
-          "Resolution child differs from its durable intent" in request
+          "Resolution child differs from its durable intent" in true
       else
-        let* record=Owner.load ~store ~scope:actual.scope ~request_id:child.request_id
+        let* record=Owner.load_record ~store ~scope:actual.scope ~request_id:child.request_id
           |> Result.map_error Owner.error_to_string in
         let* record=Option.to_result ~none:"Resolution child is absent" record in
-        let* ()=require (record.request_digest=child.request_digest)
+        let* ()=require (Owner.Record.request_digest record=child.request_digest)
           "Resolution child differs from its durable intent" in
-        Request.restore_payload ~owner:(Request.physical_owner request) record in
-    let* source=Source.with_current ~expected_revision:(Source.expected_revision (Request.source request))
-      ~current:(Source.input (Request.source request)).current (Request.source root)
-      |> Result.map_error Source.error_to_string in
-    let* ()=require (Option.is_none actual.memory_commit && Source.to_json source=Source.to_json (Request.source request)
+        let* (root:Request.index)=Request.index_of_summary record in
+        let+ basis=Request.source_basis_digest request in
+        basis=root.source_basis_digest && root.owner=Request.physical_owner request in
+    let source=Request.source request in
+    let* ()=require (Option.is_none actual.memory_commit && same_basis
       && Request.scope (Request.physical_owner request)=actual.scope)
       "Resolution completion changed its original source or was already recorded" in
     let* ()=Request.confirm_record request completed in

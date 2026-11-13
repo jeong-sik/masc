@@ -56,7 +56,7 @@ val confirm_fence : store:Lane_addon_store.t -> expected:t ->
 val intend_child : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_durable_request.t -> (t, error) result
 val confirm_child : store:Lane_addon_store.t -> expected:t ->
-  Lane_addon_tool_request_owner.retained -> (t, error) result
+  Lane_addon_tool_request_owner.Record.t -> (t, error) result
 val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
   request:Keeper_librarian_durable_request.t ->
   completed:Lane_addon_tool_request_owner.retained -> (t, error) result

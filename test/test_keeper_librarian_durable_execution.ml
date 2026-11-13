@@ -2264,13 +2264,13 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   io (fun () -> write parent_body parent_bytes);
   check (result unit string) "the host's lineage check passes with the parent's body" (Ok ())
     (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store ~require_confirmed:true child_request));
-  let with_summary_value id name value f=
+  let with_summary_json id name value f=
     let path=record_path id in
     let honest=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in
     let changed=match Yojson.Safe.from_string honest with
       | `Assoc fields -> `Assoc (List.map (fun (field,stored) -> match field,stored with
           | "summary",`Assoc summary -> field,`Assoc (List.map (fun (key,old) ->
-              if key=name then key,`String value else key,old) summary)
+              if key=name then key,value else key,old) summary)
           | _ -> field,stored) fields)
       | _ -> fail "original record is not an object" in
     let changed=Yojson.Safe.to_string changed in
@@ -2279,6 +2279,25 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     let result=f () in
     io (fun () -> write path honest);
     result in
+  let with_summary_value id name value f=with_summary_json id name (`String value) f in
+  (* The resolution pass reads a waiting pair as two records and their
+     indexes, and neither body. *)
+  let resolution_pass ()=memory_action fixture (fun () -> Resolution_work.run_serialized
+    ~config:fixture.config ~keeper_name) |> Result.map_error Resolution_intent.error_to_string in
+  io (fun () -> Sys.remove parent_body;Sys.remove child_body);
+  check (result unit string) "the resolution pass reads neither body of a waiting pair" (Ok ()) (resolution_pass ());
+  io (fun () -> write parent_body parent_bytes;write child_body body_bytes);
+  check (result unit string) "a parent index with another source digest differs from its fence"
+    (Error "History fence immutable binding differs; publication remains blocked")
+    (with_summary_value original.request_id "source_digest" (String.make 64 '0') resolution_pass);
+  check (result unit string) "a child index naming another predecessor digest stops the resolution"
+    (Error "Resolution child has another original predecessor")
+    (with_summary_json child_id "predecessor" (`Assoc ["request_digest",`String (String.make 64 '0');
+      "request_id",`String original.request_id]) resolution_pass);
+  check (result unit string) "a child index with another source basis breaks the lineage the pass confirms"
+    (Error "History resolution child changed its original source or owner")
+    (with_summary_value child_id "source_basis_digest" (String.make 64 '0') resolution_pass);
+  check (result unit string) "the unchanged pair passes again" (Ok ()) (resolution_pass ());
   check (result unit string) "a parent index with another source basis breaks the lineage"
     (Error "History resolution child changed its original source or owner")
     (with_summary_value original.request_id "source_basis_digest" (String.make 64 '0') lineage);

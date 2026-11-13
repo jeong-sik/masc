@@ -336,8 +336,10 @@ val keeper_call_disposition_of_string :
     Read by the call log decoder here and by the TUI's live observer, so the
     two planes agree on the vocabulary. *)
 
-val keeper_call_disposition_to_string : keeper_call_disposition -> string
-(** The inverse of {!keeper_call_disposition_of_string}. *)
+val keeper_call_disposition_word : ko:bool -> keeper_call_disposition -> string
+(** The disposition in the screen's words, Korean when [ko]: the words the
+    Keeper list uses for a tool's outcome. Not the wire word, which only
+    {!keeper_call_disposition_of_string} reads. *)
 
 type keeper_call_original =
   | Original_not_read

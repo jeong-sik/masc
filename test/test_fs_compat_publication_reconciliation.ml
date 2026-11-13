@@ -953,6 +953,61 @@ let test_existing_registry_permissions_are_not_repaired () =
     ((Unix.stat recovery_root).st_perm land 0o7777)
 ;;
 
+(* Each fiber finds the lane missing and builds its own skeleton; one rename
+   publishes, and every other creator removes its skeleton and opens the
+   published lane. *)
+let test_concurrent_first_lane_creators_share_one_lane () =
+  with_tmp_dir @@ fun temp_root ->
+  Eio_main.run @@ fun env ->
+  let fs = Eio.Stdenv.fs env in
+  let registry_root = Filename.concat temp_root "registry" in
+  Unix.mkdir registry_root 0o700;
+  let owner_name = "concurrent-first-lane" in
+  let owner =
+    match Core.owner_of_string owner_name with
+    | Ok owner -> owner
+    | Error error -> fail (Core.validation_error_to_string error)
+  in
+  let create () =
+    Eio.Switch.run @@ fun sw ->
+    match
+      Core.open_registry ~sw ~registry_root:Eio.Path.(fs / registry_root)
+    with
+    | Error error -> fail (Core.transition_error_to_string error)
+    | Ok registry ->
+      (match
+         Core.with_store
+           ~registry
+           ~owner
+           ~on_release_failure:(fun _ -> fail "store release failed")
+           ignore
+       with
+       | Ok (Core.Store_scope_released ()) -> ()
+       | Ok (Core.Store_scope_release_failed _) -> fail "store release failed"
+       | Error error -> fail (Core.transition_error_to_string error))
+  in
+  Eio.Fiber.all [ create; create; create; create ];
+  let recovery_root = Filename.concat registry_root "fs-publication-recovery" in
+  check
+    (list string)
+    "the published lane holds exactly its three areas"
+    [ "active"; "forensic"; "owned" ]
+    (Sys.readdir (owner_lane_path ~registry_root ~owner:owner_name)
+     |> Array.to_list
+     |> List.sort String.compare);
+  check
+    (list string)
+    "no creator left a skeleton behind"
+    []
+    (Sys.readdir (Filename.concat recovery_root "staging") |> Array.to_list);
+  with_registry ~fs ~registry_root @@ fun registry ->
+  check
+    bool
+    "the owner is ready"
+    true
+    (report_ready (reconcile ~fs registry (inventory_owner registry owner_name)))
+;;
+
 let test_existing_lane_permissions_are_not_repaired () =
   with_tmp_dir @@ fun temp_root ->
   Eio_main.run @@ fun env ->
@@ -2189,6 +2244,10 @@ let () =
             "single borrow drains exactly once"
             `Quick
             test_single_borrow_drains_exactly_once
+        ; test_case
+            "concurrent first lane creators share one lane"
+            `Quick
+            test_concurrent_first_lane_creators_share_one_lane
         ] )
     ]
 ;;

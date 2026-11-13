@@ -73,6 +73,13 @@ let with_directory f =
     Unix.mkdir (Filename.concat path "registry") 0o700;
     f (Unix.realpath path))
 
+(* An earlier [Eio_main.run] in this process leaves a SIGCHLD handler behind,
+   so the child's own death can interrupt the wait for it. *)
+let rec reap pid =
+  match Unix.waitpid [] pid with
+  | _, status -> status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap pid
+
 let kill_at cut directory =
   let ready_read, ready_write = Unix.pipe ~cloexec:true () in
   let hold_read, hold_write = Unix.pipe ~cloexec:true () in
@@ -87,14 +94,14 @@ let kill_at cut directory =
       Unix.close ready_read; Unix.close hold_write;
       if not !reaped then (
         (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        ignore (Unix.waitpid [] pid)))
+        ignore (reap pid)))
     (fun () ->
        let byte = Bytes.create 1 in
        check int "child reached requested real write boundary" 1
          (Unix.read ready_read byte 0 1);
        check char "boundary acknowledgement" '!' (Bytes.get byte 0);
        Unix.kill pid Sys.sigkill;
-       let _, status = Unix.waitpid [] pid in
+       let status = reap pid in
        reaped := true;
        check bool "producer actually died by SIGKILL" true (status = Unix.WSIGNALED Sys.sigkill))
 
@@ -150,11 +157,91 @@ let test_crash cut () = with_directory @@ fun directory ->
    | Published | Parent_synced ->
      check string "reconciliation preserves published target bytes" payload (Fs_compat.load_file target_path))
 
+let lane_owner index = Printf.sprintf "lane-crash-%d" index
+
+(* Announces each owner on stdout before opening its lane for the first time,
+   and never returns: the parent sends SIGKILL after the announcement it chose,
+   so the kill lands while the last announced owner's lane is being created. *)
+let lane_child directory =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  let registry = match Fs_compat.Publication_recovery.open_registry ~sw ~fs
+      ~registry_root:Eio.Path.(fs / Filename.concat directory "root") with
+    | Ok value -> value
+    | Error error -> fail (Fs_compat.Publication_recovery.registry_error_to_string error) in
+  let rec loop index =
+    ignore (Unix.write_substring Unix.stdout "!" 0 1);
+    (match Fs_compat.Publication_recovery.with_lane ~registry ~owner:(lane_owner index) ignore with
+     | Ok (Fs_compat.Publication_recovery.Lane_released ()) -> ()
+     | Ok (Fs_compat.Publication_recovery.Lane_release_failed _) -> fail "lane release failed"
+     | Error error -> fail (Fs_compat.Publication_recovery.lane_open_error_to_string error));
+    loop (index + 1)
+  in
+  loop 0
+
+let kill_after_lane_announcements count directory =
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let pid = Unix.create_process Sys.executable_name
+      [|Sys.executable_name; "--lane-child"; directory|]
+      Unix.stdin ready_write Unix.stderr in
+  Unix.close ready_write;
+  let reaped = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close ready_read;
+      if not !reaped then (
+        (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+        ignore (reap pid)))
+    (fun () ->
+       let byte = Bytes.create 1 in
+       for _ = 1 to count do
+         check int "child announced the next owner" 1 (Unix.read ready_read byte 0 1)
+       done;
+       Unix.kill pid Sys.sigkill;
+       let status = reap pid in
+       reaped := true;
+       check bool "lane creator actually died by SIGKILL" true (status = Unix.WSIGNALED Sys.sigkill);
+       (* The child kept running until the signal arrived. *)
+       let rec announced total =
+         if Unix.read ready_read byte 0 1 = 0 then total else announced (total + 1)
+       in
+       announced count)
+
+let lane_kill_rounds = 12
+
+(* Issue #46718: a process that died while creating an owner's lane for the
+   first time left a lane without all of its areas, and every later call by
+   that owner was refused until the registry was removed by hand. *)
+let test_first_lane_creation_survives_sigkill () =
+  for round = 1 to lane_kill_rounds do
+    with_directory @@ fun directory ->
+    let announced = kill_after_lane_announcements round directory in
+    Eio_main.run @@ fun env ->
+    (* Owner [announced - 1] was being created when the child died, the one
+       before it was complete, and the one after it was never started. *)
+    for index = max 0 (announced - 2) to announced do
+      for attempt = 1 to 2 do
+        let path = Filename.concat directory (Printf.sprintf "root/after-%d-%d" index attempt) in
+        match Fs_compat.create_file_exclusive ~fs:(Eio.Stdenv.fs env)
+                ~owner:(lane_owner index) ~path ~permissions:0o600 "payload" with
+        | Ok () -> check string "published after the creator died" "payload" (Fs_compat.load_file path)
+        | Error error ->
+          failf "owner %s is blocked after its lane creator died (%d owners announced): %s"
+            (lane_owner index) announced (Fs_compat.create_file_error_to_string error)
+      done
+    done
+  done
+
 let () =
   match Array.to_list Sys.argv with
   | [_; "--crash-child"; name; directory] ->
     (match List.find_opt (fun cut -> String.equal name (cut_name cut)) cuts with
      | Some cut -> child cut directory
      | None -> fail "unknown child crash boundary")
+  | [_; "--lane-child"; directory] -> lane_child directory
   | _ -> run "exclusive-create process crash"
-      ["SIGKILL/reopen", List.map (fun cut -> test_case (cut_name cut) `Quick (test_crash cut)) cuts]
+      [ "SIGKILL/reopen", List.map (fun cut -> test_case (cut_name cut) `Quick (test_crash cut)) cuts
+      ; "SIGKILL/first lane creation",
+        [ test_case "later calls by every owner succeed" `Quick test_first_lane_creation_survives_sigkill ]
+      ]

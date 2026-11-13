@@ -22,7 +22,7 @@ type filter =
   | Everything
 
 val next_filter : filter -> filter
-val filter_label : filter -> string
+val filter_label : ko:bool -> filter -> string
 
 type entry = {
   ae_at : float;  (** when the TUI received it *)

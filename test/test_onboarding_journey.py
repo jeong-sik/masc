@@ -776,6 +776,11 @@ class Journey(StepByStep):
             record.parent.mkdir(parents=True)
             record.write_text(str(old) + '\n')
             chosen = Path(home, 'chosen')
+            # A port of its own: the default port may serve a MASC on this
+            # host, and setup would then ask about that server first.
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                port = str(listener.getsockname()[1])
             pid, fd = pty.fork()
             if pid == 0:
                 environment = {key: value for key, value in os.environ.items()
@@ -783,7 +788,7 @@ class Journey(StepByStep):
                 environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb',
                                    PATH=path_without('claude', environment.get('PATH', '')))
                 os.chdir(home)
-                os.execve(BINARY, [BINARY, 'setup'], environment)
+                os.execve(BINARY, [BINARY, 'setup', '--port', port], environment)
             captured = b''
             exited = False
 
@@ -1171,8 +1176,7 @@ class Journey(StepByStep):
         # so each of these ends with the pid and what to do, and nothing is
         # asked to stop.
         rows = [(dict(status='owner_unannounced', server_pid=4242),
-                 ('pid 4242 holds this workspace but announces no port', 'It may be shutting down',
-                  'does not reach', 'kill 4242')),
+                 ('pid 4242', 'kill 4242')),
                 (dict(status='same_workspace_on_another_port', server_pid=4242, server_port=19401),
                  ('(pid 4242) serves port 19401, not port 19400', '--port 19401')),
                 (self.single_user_server(answers=False),

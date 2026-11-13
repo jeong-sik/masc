@@ -90,6 +90,10 @@ let owner_without_making (root : Host_config.base_path_lease_root) ~base_path ~p
     (match Server_startup_takeover.lease_run_dir root ~base_path with
      | Error rejection -> rejected rejection
      | Ok run_dir -> owner ~run_dir ~base_path ~port)
+let lease_directory (root : Host_config.base_path_lease_root) ~base_path =
+  match root with
+  | Host_config.Beside_base_path -> Filename.concat base_path Common.owner_lease_dirname
+  | Host_config.Lease_dir_override dir -> dir
 type departure =
   | Announcement_withdrawn of { pid : int }
   | Owner_now of owner
@@ -105,7 +109,7 @@ let confirm server =
         | Owner_unannounced { pid = (_ : int) }
         | Unowned ) as now) -> Error (Owner_now now)
   | Error unread -> Error (Owner_unreadable unread)
-let owner_sentence ~base_path ~port = function
+let owner_sentence ~lease_dir ~base_path ~port = function
   | Single_user_server_here server ->
     Printf.sprintf "The server of %s (pid %d) serves port %d." base_path server.pid port
   | Single_user_server_elsewhere { pid; port = announced } ->
@@ -129,8 +133,12 @@ let owner_sentence ~base_path ~port = function
                     is started with --host 127.0.0.1 or --host 0.0.0.0. Or a MASC that announces \
                     no port started it: stop it with kill %d and run masc start."
       pid base_path pid
-  | Unowned -> Printf.sprintf "No process holds %s." base_path
-let departure_sentence ~base_path ~port departure =
+  | Unowned ->
+    (* A server that reads its lease from another directory is not seen here,
+       so the directory that was read is named. *)
+    Printf.sprintf "No process holds the lease of %s under %s." base_path lease_dir
+let departure_sentence server departure =
+  let { run_dir; base_path; port; pid = (_ : int) } = server in
   let changed what =
     Printf.sprintf "The server of %s changed after this command checked it: %s" base_path what in
   match departure with
@@ -138,7 +146,7 @@ let departure_sentence ~base_path ~port departure =
     Printf.sprintf "The server of %s (pid %d) withdrew its announcement of port %d after this \
                     command checked it, as a server does when it shuts down."
       base_path pid port
-  | Owner_now now -> changed (owner_sentence ~base_path ~port now)
+  | Owner_now now -> changed (owner_sentence ~lease_dir:run_dir ~base_path ~port now)
   | Owner_unreadable unread ->
     changed
       (Printf.sprintf "its owner could not be read (%s)."

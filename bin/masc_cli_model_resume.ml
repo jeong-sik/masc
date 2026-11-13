@@ -44,15 +44,18 @@ module Upgrade = Server_upgrade_preparation
 let resume ~clock ~base_path ~port ~agent =
   let refused_with tail sentence = Refused (sentence ^ tail) in
   let not_sent = " The saved model settings were not sent." in
-  match Upgrade.owner_without_making (Host_config.host ()).base_path_lease_root ~base_path ~port with
+  let root = (Host_config.host ()).base_path_lease_root in
+  let lease_dir = Upgrade.lease_directory root ~base_path in
+  match Upgrade.owner_without_making root ~base_path ~port with
   | Error unread ->
     Refused (Printf.sprintf "The owner of %s could not be checked (%s). The saved model settings \
                              were not sent." base_path
                (Server_startup_takeover.owner_capture_error_to_string unread))
   | Ok Upgrade.Unowned ->
-    Refused (Printf.sprintf "No process holds %s, so no server can load the saved model settings. \
-                             Start it with masc start --base-path %s --port %d and run this again."
-               base_path (Filename.quote base_path) port)
+    Refused (Printf.sprintf "%s No server can load the saved model settings. Start it with masc \
+                             start --base-path %s --port %d and run this again."
+               (Upgrade.owner_sentence ~lease_dir ~base_path ~port Upgrade.Unowned)
+               (Filename.quote base_path) port)
   | Ok (Upgrade.Single_user_server_here server) ->
     let origin = Masc_network_defaults.masc_http_loopback_origin ~port in
     (match Masc_http_client.get_sync ~clock ~timeout_sec:Masc_http_client.default_request_timeout_sec
@@ -63,7 +66,7 @@ let resume ~clock ~base_path ~port ~agent =
         | Some token ->
           (match Upgrade.confirm server with
            | Error departure ->
-             refused_with not_sent (Upgrade.departure_sentence ~base_path ~port departure)
+             refused_with not_sent (Upgrade.departure_sentence server departure)
            | Ok () ->
              let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent;
                             "content-type", "application/json"] in
@@ -79,7 +82,7 @@ let resume ~clock ~base_path ~port ~agent =
                   (Upgrade.single_user_server_pid server) port))
   | Ok ((Upgrade.Single_user_server_elsewhere _ | Upgrade.Account_server_here _
         | Upgrade.Account_server_elsewhere _ | Upgrade.Owner_unannounced _) as owner) ->
-    refused_with not_sent (Upgrade.owner_sentence ~base_path ~port owner)
+    refused_with not_sent (Upgrade.owner_sentence ~lease_dir ~base_path ~port owner)
 
 let run ~base_path ~port ~agent =
   try

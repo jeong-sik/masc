@@ -26,13 +26,19 @@ type refusal =
   | Log_unopenable of { path : string; reason : string }
   | Spawn_failed of string
 
+(* Which kind of server the replacement is: the announcement file on which
+   the kernel named it as the holder of the byte of the port. *)
+type replacement_kind =
+  | Single_user_replacement
+  | Account_replacement
+
 type watched =
-  | Replacement_ready
+  | Replacement_ready of replacement_kind
   | Replacement_exited of Unix.process_status option
 
 (* One look at the replacement: ready, or what there is to say while waiting. *)
 type look =
-  | Ready
+  | Ready of replacement_kind
   | Waiting of string option
 
 (* How often the replacement's readiness answer is read again. Each read uses
@@ -101,9 +107,10 @@ let stop_error_message = function
    What the port answers only names the version of a server the kernel
    already named, and is read without credentials.
 
-   An owner that announces nothing gets no stop: it is a server still
-   booting, or one started by a MASC older than the announcement, and the
-   refusal names its pid.
+   An owner that announces nothing gets no stop, and the refusal names its
+   pid: the kernel does not say whether it is starting, shutting down,
+   listening out of loopback reach, or started by a MASC that does not
+   announce.
 
    The price is paid by a command that ends in a refusal: reading the owner
    makes the private lease directory and an empty lease file when they are
@@ -143,7 +150,7 @@ let observe ~clock ~run_dir ~base_path ~port =
      | Ok Upgrade.Port_busy -> Error Port_held_by_unknown_process
      | Error error -> Error (Owner_unverifiable (stop_error_message error)))
 
-let refusal_message ~base_path ~port = function
+let refusal_message ~run_dir ~base_path ~port = function
   | Host_not_an_address host ->
     Printf.sprintf "--host %s is not an IP address, and the replacement could not bind it. \
                     Nothing was stopped or started." host
@@ -152,23 +159,27 @@ let refusal_message ~base_path ~port = function
                     replacement bound to --host %s. Nothing was stopped or started; use \
                     `masc start --host %s` for that address." host host
   | Port_held_by_unknown_process ->
-    Printf.sprintf "Port %d is held by a process that is not this workspace's MASC server. \
+    Printf.sprintf "Port %d is held by a process that is not this workspace's MASC server: %s \
                     Nothing was stopped or started." port
+      (Upgrade.owner_sentence ~lease_dir:run_dir ~base_path ~port Upgrade.Unowned)
   | Owner_without_answer ->
     Printf.sprintf "A process began to hold %s while restart was checking it, so nothing was \
                     asked to stop. Run restart again." base_path
   | Owner_unannounced { pid } ->
-    Upgrade.owner_sentence ~base_path ~port (Upgrade.Owner_unannounced { pid })
+    Upgrade.owner_sentence ~lease_dir:run_dir ~base_path ~port (Upgrade.Owner_unannounced { pid })
     ^ " Nothing was stopped or started."
   | Single_user_server_on_another_port { pid; port = announced } ->
-    Printf.sprintf "The server of %s (pid %d) serves port %d, not port %d. Nothing was stopped \
-                    or started; pass --port %d." base_path pid announced port announced
+    Upgrade.owner_sentence ~lease_dir:run_dir ~base_path ~port
+      (Upgrade.Single_user_server_elsewhere { pid; port = announced })
+    ^ " Nothing was stopped or started."
   | Single_user_server_without_answer { pid } ->
     Printf.sprintf "The server of %s (pid %d) announces port %d and does not answer its version \
                     there, so it was not asked to stop. If it is starting, run restart again \
                     once it is ready. If it is stuck, stop it with kill %d and run restart \
                     again." base_path pid port pid
   | Account_server_on_another_port { pid; port = announced } ->
+    (* [Upgrade.owner_sentence] sends the operator of another command to
+       [masc restart]. This is that command, so it names the port to pass. *)
     Printf.sprintf "The account server of %s (pid %d) serves port %d, not port %d. Nothing \
                     was stopped or started; pass --port %d."
       base_path pid announced port announced
@@ -242,8 +253,10 @@ let readiness_answer = function
   | Ok ((_ : int), (_ : string)) | Error (_ : string) -> Upgrade.Not_ready
 
 (* Whether the 200 is the replacement's is [Upgrade.replacement_sighting]: by
-   the holder of the announcement byte of the port, on the file of whichever
-   kind of server the replacement announces. No pid in the answer is read.
+   the holder of the announcement byte of the port. The file of the server of
+   a single user is asked first, and the file of the account server only
+   when nobody holds the byte on the first. The file that names the
+   replacement is the kind of server it is. No pid in the answer is read.
    The replacement takes that lock after it binds and before it serves
    [/health] ([Server_runtime_bootstrap], [Server_accounts.run]).
 
@@ -253,33 +266,39 @@ let readiness_answer = function
    says that the replacement announced and that the port answers, not that
    the replacement answered. *)
 (* HIGH-RISK-UNREVIEWED: restart reports the replacement ready only when the
-   process it spawned holds the announcement byte of [port]. *)
+   process it spawned holds the announcement byte of [port], and reports it
+   as the kind of server whose file the kernel named it on. *)
 let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let answer = fresh_get ~clock ~port Server_health_paths.readiness in
-  let port_holder () =
-    match Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port with
-    | Ok None -> Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port
-    | (Ok (Some (_ : int)) | Error (_ : Server_startup_takeover.base_path_lock_rejection)) as held ->
-      held
+  let sighting holder =
+    Upgrade.replacement_sighting ~child_pid:child.pid (readiness_answer answer)
+      ~port_holder:(fun () -> holder ~run_dir ~base_path ~port)
   in
-  match
-    Upgrade.replacement_sighting ~child_pid:child.pid (readiness_answer answer) ~port_holder
-  with
-  | Upgrade.Replacement_serves -> Ready
-  | Upgrade.Another_process_announces { pid } ->
+  let another pid =
     Waiting (Some (Printf.sprintf "pid %d holds the announcement of port %d" pid port))
-  | Upgrade.Announcement_unreadable rejection ->
+  in
+  let unreadable rejection =
     Waiting
       (Some
          ("the owner lease cannot be read: "
           ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))
-  | Upgrade.Nobody_announces
+  in
+  match sighting Server_startup_takeover.single_user_server_port_holder with
+  | Upgrade.Replacement_serves -> Ready Single_user_replacement
+  | Upgrade.Another_process_announces { pid } -> another pid
+  | Upgrade.Announcement_unreadable rejection -> unreadable rejection
   | Upgrade.No_ready_answer -> Waiting (describe_answer answer)
+  | Upgrade.Nobody_announces ->
+    (match sighting Server_startup_takeover.account_server_port_holder with
+     | Upgrade.Replacement_serves -> Ready Account_replacement
+     | Upgrade.Another_process_announces { pid } -> another pid
+     | Upgrade.Announcement_unreadable rejection -> unreadable rejection
+     | Upgrade.Nobody_announces | Upgrade.No_ready_answer -> Waiting (describe_answer answer))
 
 let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let rec ready last =
     match look ~clock ~run_dir ~base_path ~port child with
-    | Ready -> Replacement_ready
+    | Ready kind -> Replacement_ready kind
     | Waiting note ->
       (match note with
        | Some text when note <> last -> Printf.printf "  %s\n%!" text
@@ -292,20 +311,26 @@ let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
     (fun () -> ready None)
 
 (* The replacement is this executable, so its commit is the one built into
-   this process; the port is asked only for the public version. *)
-let build_summary ~clock ~port =
-  match fresh_get ~clock ~port Server_health_paths.health with
-  | Ok (200, body) ->
-    (match Server_accounts.health_version body with
+   this process. Which kind of server it is came from the kernel with the
+   ready answer; the port is asked only for the public version. *)
+let build_summary ~clock ~port kind =
+  let version =
+    match fresh_get ~clock ~port Server_health_paths.health with
+    | Ok (200, body) -> Upgrade.compact_health_version body
+    | Ok ((_ : int), (_ : string)) | Error (_ : string) -> None
+  in
+  match kind with
+  | Account_replacement ->
+    (match version with
      | Some version -> Printf.sprintf "the account server masc %s" version
-     | None ->
-       (match Upgrade.compact_health_version body, Masc.Build_identity.embedded_commit with
-        | Some version, Some commit ->
-          Printf.sprintf "masc %s (%s)" version
-            (if String.length commit > 11 then String.sub commit 0 11 else commit)
-        | Some version, None -> "masc " ^ version
-        | None, (_ : string option) -> "masc"))
-  | Ok _ | Error _ -> "masc"
+     | None -> "the account server")
+  | Single_user_replacement ->
+    (match version, Masc.Build_identity.embedded_commit with
+     | Some version, Some commit ->
+       Printf.sprintf "masc %s (%s)" version
+         (if String.length commit > 11 then String.sub commit 0 11 else commit)
+     | Some version, None -> "masc " ^ version
+     | None, (_ : string option) -> "masc")
 
 let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
   let open Result.Syntax in
@@ -316,7 +341,8 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
     | Nothing_running ->
       (* Nobody was asked to stop, so a lease someone takes meanwhile is a
          real owner: plain start refuses it instead of waiting forever. *)
-      Printf.printf "No server holds %s; starting one on port %d.\n%!" base_path port;
+      Printf.printf "%s Starting a server on port %d.\n%!"
+        (Upgrade.owner_sentence ~lease_dir:run_dir ~base_path ~port Upgrade.Unowned) port;
       Ok []
     | This_workspace { version; server } ->
       let* () =
@@ -353,10 +379,9 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
     pid log_path;
   let started_at = Eio.Time.now clock in
   match watch ~clock ~run_dir ~base_path ~port child with
-  | Replacement_ready ->
+  | Replacement_ready kind ->
     Printf.printf "Ready after %.1f s: %s, pid %d, serving %s on port %d.\n%!"
-      (Eio.Time.now clock -. started_at) (build_summary ~clock ~port)
-      pid base_path port;
+      (Eio.Time.now clock -. started_at) (build_summary ~clock ~port kind) pid base_path port;
     Ok 0
   | Replacement_exited status ->
     Printf.eprintf "pid %d %s before it was ready. Last lines of %s:\n%!"
@@ -387,7 +412,7 @@ let run ~base_path ~port ~host ~log_path ~agent ~login =
        with
        | Ok code -> code
        | Error refusal ->
-         prerr_endline (refusal_message ~base_path ~port refusal);
+         prerr_endline (refusal_message ~run_dir ~base_path ~port refusal);
          1
        | exception (Unix.Unix_error _ | Sys_error _ as error) ->
          Printf.eprintf "Restart stopped: %s. A server named above as asked to stop is \

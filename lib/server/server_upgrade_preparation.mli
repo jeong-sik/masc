@@ -87,13 +87,22 @@ val confirm : single_user_server -> (unit, departure) result
 (** {!owner} again for the same run directory, BasePath and port. [Ok ()]
     only when the answer is [Single_user_server_here] with the same pid. *)
 
-val owner_sentence : base_path:string -> port:int -> owner -> string
+val lease_directory : Host_config.base_path_lease_root -> base_path:string -> string
+(** The directory the lease of [base_path] is looked for in, as a name to
+    show: [<base_path>/.masc-owner], or the directory
+    [MASC_BASE_PATH_LEASE_DIR] names. Nothing is read or made. A server
+    started with another lease root holds its lease elsewhere, and no read
+    here sees it. *)
+
+val owner_sentence : lease_dir:string -> base_path:string -> port:int -> owner -> string
 (** What a command tells the operator about each answer of {!owner}, for
     [base_path] asked about on [port]. Each command appends what it did not
-    do. The sentence for [Owner_unannounced] lists the four causes the kernel
-    does not tell apart, each with what to do. *)
+    do. The sentence for [Unowned] names [lease_dir], the directory the lease
+    was read in ({!lease_directory}). The sentence for [Owner_unannounced]
+    lists the four causes the kernel does not tell apart, each with what to
+    do. *)
 
-val departure_sentence : base_path:string -> port:int -> departure -> string
+val departure_sentence : single_user_server -> departure -> string
 (** What a command tells the operator when {!confirm} refused the server it
     had been given. *)
 

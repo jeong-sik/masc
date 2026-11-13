@@ -33,7 +33,8 @@ let voice_setup_path = "/api/v1/voice/setup"
    stops the command. The port is read without credentials only for
    [/health/ready]. *)
 let find ~clock ~base_path ~port ~agent =
-  match Upgrade.owner_without_making (Host_config.host ()).base_path_lease_root ~base_path ~port with
+  let root = (Host_config.host ()).base_path_lease_root in
+  match Upgrade.owner_without_making root ~base_path ~port with
   | Ok Upgrade.Unowned -> Ok No_server
   | Error unread ->
     Error
@@ -67,16 +68,13 @@ let find ~clock ~base_path ~port ~agent =
             "The server of %s (pid %d) announces port %d and does not answer there. Run this again \
              when it does. Nothing was saved."
             base_path (Upgrade.single_user_server_pid owner) port))
-  | Ok (Upgrade.Single_user_server_elsewhere { pid; port = announced }) ->
-    Error
-      (Printf.sprintf
-         "This workspace's server (pid %d) runs on port %d, not port %d. Run this again with --port \
-          %d. Nothing was saved."
-         pid announced port announced)
   | Ok
-      ((Upgrade.Owner_unannounced _ | Upgrade.Account_server_here _ | Upgrade.Account_server_elsewhere _)
-       as owner) ->
-    Error (Upgrade.owner_sentence ~base_path ~port owner ^ " Nothing was saved.")
+      (( Upgrade.Single_user_server_elsewhere _ | Upgrade.Owner_unannounced _
+       | Upgrade.Account_server_here _ | Upgrade.Account_server_elsewhere _ ) as owner) ->
+    Error
+      (Upgrade.owner_sentence ~lease_dir:(Upgrade.lease_directory root ~base_path) ~base_path ~port
+         owner
+       ^ " Nothing was saved.")
 
 (* HIGH-RISK-UNREVIEWED: every send of the bearer asks the kernel again, right
    before it, whether it still names the server [find] found. A command that
@@ -86,11 +84,7 @@ let checked server ~refused send =
   match Upgrade.confirm server.owner with
   | Ok () -> send ()
   | Error departure ->
-    refused
-      (Upgrade.departure_sentence
-         ~base_path:(Upgrade.single_user_server_base_path server.owner)
-         ~port:(Upgrade.single_user_server_port server.owner) departure
-       ^ " Nothing more was sent to it.")
+    refused (Upgrade.departure_sentence server.owner departure ^ " Nothing more was sent to it.")
 
 let string_field json name =
   match Yojson.Safe.Util.member name json with

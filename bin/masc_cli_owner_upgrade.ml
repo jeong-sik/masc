@@ -118,25 +118,18 @@ type request_phase = Request_not_confirmed | Request_confirmed
 type stop_refusal =
   | Owner_not_stopped of Upgrade.error
   | Owner_unread of { base_path : string; reason : string }
-  | Nobody_holds_workspace
-  | Account_server_holds_workspace
-  | Owner_unannounced_stop of { base_path : string; port : int; pid : int }
-  | Serves_another_port of { base_path : string; port : int; pid : int; announced : int }
+  | Not_the_server_to_stop of { base_path : string; port : int; owner : Upgrade.owner }
+      (* What the kernel names when it is not the server of a single user on
+         [port]: nothing, another port, an account server, or an owner that
+         announces no port. *)
 let stop_refusal_message = function
   | Owner_not_stopped error -> error_message error
   | Owner_unread { base_path; reason } -> owner_unread ~base_path reason
-  | Nobody_holds_workspace ->
-    "No process holds the lease this MASC reads for this workspace, so no server was signed in \
-     to or stopped."
-  | Account_server_holds_workspace ->
-    "This workspace is held by its account server, which no local operator signs in to. \
-     masc restart stops and replaces it."
-  | Owner_unannounced_stop { base_path; port; pid } ->
-    Upgrade.owner_sentence ~base_path ~port (Upgrade.Owner_unannounced { pid })
+  | Not_the_server_to_stop { base_path; port; owner } ->
+    Upgrade.owner_sentence
+      ~lease_dir:(Upgrade.lease_directory (Host_config.host ()).base_path_lease_root ~base_path)
+      ~base_path ~port owner
     ^ " No server was signed in to or stopped."
-  | Serves_another_port { base_path; port; pid; announced } ->
-    Printf.sprintf "The server of %s (pid %d) serves port %d, not port %d. No server was signed \
-                    in to or stopped; run setup with --port %d." base_path pid announced port announced
 (* HIGH-RISK-UNREVIEWED: the stop below signs a local operator in and sends
    its bearer to the port. The kernel is asked first, as [masc restart] asks
    it, and before anything is made. Only the server of a single user that the
@@ -148,13 +141,13 @@ let stoppable ~base_path ~port =
   match owner ~base_path ~port with
   | Error reason -> Error (Owner_unread { base_path; reason })
   | Ok (Upgrade.Single_user_server_here server) -> Ok server
-  | Ok Upgrade.Unowned -> Error Nobody_holds_workspace
-  | Ok (Upgrade.Account_server_here { pid = (_ : int) }
-       | Upgrade.Account_server_elsewhere { pid = (_ : int); port = (_ : int) }) ->
-    Error Account_server_holds_workspace
-  | Ok (Upgrade.Owner_unannounced { pid }) -> Error (Owner_unannounced_stop { base_path; port; pid })
-  | Ok (Upgrade.Single_user_server_elsewhere { pid; port = announced }) ->
-    Error (Serves_another_port { base_path; port; pid; announced })
+  | Ok
+      (( Upgrade.Unowned
+       | Upgrade.Account_server_here { pid = (_ : int) }
+       | Upgrade.Account_server_elsewhere { pid = (_ : int); port = (_ : int) }
+       | Upgrade.Owner_unannounced { pid = (_ : int) }
+       | Upgrade.Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) } ) as owner) ->
+    Error (Not_the_server_to_stop { base_path; port; owner })
 let stop ~base_path ~port ~agent ~expected_version ~login =
   let phase = ref Request_not_confirmed in
   let not_stopped answer = Result.map_error (fun error -> Owner_not_stopped error) answer in

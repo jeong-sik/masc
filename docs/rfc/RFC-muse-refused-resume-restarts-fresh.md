@@ -84,19 +84,25 @@ Keeper 한 명, 하루치다. 세션이 턴마다 얼마씩 자라는지는 토�
 
 ## 5. 바뀌는 곳
 
-- 기록: 조건 2 를 만족한 Resume 거절은 `Provider_rejected` 대신
-  `Vendor_session_full` 로 적는다. 조건 3 을 얻으면 `No_activity_observed`, 못
-  얻으면 `Activity_observed` 다. Codex·Claude Code 가 Gate 이어 쓰기 넘침에 쓰는
-  같은 값이고 실패 성격(`Fatal`)도 같다. 새 상태나 필드는 만들지 않는다.
-- 다시 열기: `Vendor_session_full No_activity_observed` 이고 조건 1 이 참이면
-  같은 실행에서 Muse 시도를 한 번 더 부른다. claim 은 지금처럼 이 recovery 를 새
-  claim 으로 넘기므로(`keeper_official_client_session_store.ml:1544`) Start 가
-  된다. 저장소 정리와 씨앗(carried range)은 지금 Start 와 같다.
+- 다시 열기: 조건 1~3 이 참이면 같은 실행에서 Muse 시도를 한 번 더 부른다. 거절은
+  지금처럼 `Provider_rejected` 로 적는다. claim 은 이 recovery 를 이미 새 claim 으로
+  넘긴다(`keeper_official_client_session_store.ml:1536-1548`). 그래서 다시 부른
+  시도는 Start 가 되고, recovery 를 푸는 호출은 따로 없다. 저장소 정리와
+  씨앗(carried range)은 지금 Start 와 같다.
 - 로그: 다시 열 때 한 줄을 남긴다. "host session <id> refused the turn input;
   the turn starts a fresh session" 꼴이다. 배포 뒤 셀 근거다.
-- 구현 PR 에서 확인할 것: `Vendor_session_full` 을 읽는 곳
-  (`Keeper_direct_gate_continuation.session_full` 등)이 일반 턴의 기록을 받아도
-  뜻이 맞는지.
+- 기록 종류는 바꾸지 않는다. 다른 두 값은 이 거절의 사실과 맞지 않는다.
+  - `Vendor_session_full`: Gate 판정은 이 값을 Gate 이어 쓰기 자신의 거절로 읽는다
+    (`keeper_direct_gate_continuation.ml:444-463`). 자신인지는 직전 settlement 가
+    Gate 를 잡은 턴과 같은지로 가린다. 그런데 Gate 를 기다리는 동안 다른 일반 작업이
+    같은 세션을 이어 쓸 수 있다(`keeper_official_client_session_store.ml:1580-1584`).
+    Gate 를 잡은 턴 바로 다음 일반 작업이 거절되면 직전 settlement 가 같다. 그러면
+    일어나지 않은 Gate 거절이 `Gate_session_full` 로 남고 Gate 가 영영 끝난다.
+  - `Input_rejected`: Claude Code 는 일반 턴의 넘침을 이 값으로 적는다
+    (`keeper_claude_code_runtime.ml:554-564`). claim 은 이 값을 넘기지 않는다
+    (`keeper_official_client_session_store.ml:1510-1519`). 효과가 보인 거절이면
+    운영자가 풀 때까지 다음 턴이 막힌다. 지금 Muse 는 다음 턴이 새 세션을 연다. 이
+    차이를 바꾸는 일은 이 RFC 밖이다.
 
 ## 6. 하지 않는 것
 
@@ -126,8 +132,8 @@ Keeper 한 명, 하루치다. 세션이 턴마다 얼마씩 자라는지는 토�
    를 얻었다. 같은 실행에서 Start 로 이어져 턴이 성공한다. 세션 저장소에는 새
    세션의 settlement 가 남는다.
 2. Start 가 거절됐다. 다시 열지 않고 #51625 의 거절 기록 길로 끝난다.
-3. `Turn_quiet` 를 얻지 못했다. 다시 열지 않는다. `Vendor_session_full
-   Activity_observed` 로 남고 턴은 `Provider_attempt_effect_fenced` 로 끝난다.
+3. `Turn_quiet` 를 얻지 못했다. 다시 열지 않는다. 세션 저장소에는
+   `Provider_rejected` 가 남고 턴은 `Provider_attempt_effect_fenced` 로 끝난다.
 4. 사용량 창이 찼다. 다시 열지 않는다.
 5. Gate continuation 의 Resume 이 거절됐다. 다시 열지 않는다.
 6. 다시 연 Start 도 거절됐다. 두 번째로 다시 열지 않는다.

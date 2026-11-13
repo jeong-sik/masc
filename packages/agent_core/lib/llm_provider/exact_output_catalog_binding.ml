@@ -363,6 +363,7 @@ let%test "exact functional capability projection has a stable golden" =
     ; "serving_constraint=none"
     ; "max_output=some:3"
     ; "json_mode=1"
+    ; "json_schema_dialect=openai_json_schema"
     ; "native_schema=0"
     ; "multimodal=1"
     ; "image=1"

@@ -14,7 +14,16 @@ let rec remove_tree path =
     Unix.rmdir path)
   else Sys.remove path
 
+(* [Server_auth.http_auth_strict_enabled] is also true for a bind host or a
+   base URL that is not loopback. The fixture serves loopback, so a case
+   decides strict auth with [strict] alone and a shell that exports either
+   variable does not decide it instead (#51058). *)
+let with_loopback_identity run =
+  Masc_test_deps.with_process_env Env_config_core.http_base_url_env_key None (fun () ->
+    Masc_test_deps.with_process_env Env_config_core.host_env_key None run)
+
 let with_gateway ?https_port ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ run -> run ()) ~make_routes run =
+  with_loopback_identity @@ fun () ->
   let base_path = Filename.temp_dir "h2-gateway-" "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
@@ -470,7 +479,7 @@ let test_a_cut_request_body_reaches_no_route () =
         !delivered)
 
 let test_fusion_workspace_admission () =
-  with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
+  with_gateway ~make_routes:production (fun ~player ~reader client ->
     strict None (fun () ->
       let state = match Server_auth.For_testing.snapshot_server_state () with
         | Some state -> state | None -> fail "fixture server has no workspace" in
@@ -481,7 +490,10 @@ let test_fusion_workspace_admission () =
       let expected = [ "expected_base_path", [ base ]; "expected_masc_root", [ root ] ] in
       let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
       let receipt = Masc.Workspace.read_precondition_admission_header in
-      let read path fields = request_with_headers ~token:player ~meth:`GET client (target path fields) in
+      (* Fusion runs are read through [Server_auth.with_board_access]
+         (#50387): a token needs CanReadState, which a Player lacks. *)
+      let read_as token path fields = request_with_headers ~token ~meth:`GET client (target path fields) in
+      let read = read_as reader in
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
       Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:base
@@ -493,6 +505,10 @@ let test_fusion_workspace_admission () =
       let code, headers, _ = read "/api/v1/dashboard/fusion-runs" expected in
       check int "bound list succeeds" 200 code;
       check bool "bound list attests workspace" true (List.mem receipt headers);
+      let code, _, _ = read_as player "/api/v1/dashboard/fusion-runs" expected in
+      check int "a Player token lacks the CanReadState a Fusion read requires" 403 code;
+      let code, _, _ = read_as player "/api/v1/dashboard/fusion-runs/unknown" expected in
+      check int "a Player token is refused before the Fusion detail lookup" 403 code;
       let code, headers, _ = read "/api/v1/dashboard/fusion-runs" foreign in
       check int "foreign list is refused before projection" 409 code;
       check bool "foreign list has no admission receipt" false (List.mem receipt headers);
@@ -515,9 +531,9 @@ let test_fusion_workspace_admission () =
       let code, headers, _ = read_board foreign in
       check int "foreign Board original is refused before lookup" 409 code;
       check bool "foreign Board original has no receipt" false (List.mem receipt headers);
-      let code, _, _ = read board expected in
+      let code, _, _ = read_as player board expected in
       check int "optional reaction actor still rejects the Player token" 403 code;
-      let code, _, _ = read board foreign in
+      let code, _, _ = read_as player board foreign in
       check int "foreign workspace is refused before reaction auth, as on HTTP/1.1" 409 code;
       strict (Some "1") (fun () ->
         let code, _, _ = read_board expected in

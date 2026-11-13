@@ -162,6 +162,26 @@ let observation_to_yojson (observation : observation) =
            `Assoc [ "state", `String "reported"
                   ; "record", to_yojson row ])
 
+let observation_of_yojson json : (observation, string) result =
+  let label = "goal_measurement observation" in
+  match Json_util.assoc_member_opt "state" json with
+  | Some (`String "not_recorded") ->
+      let* _ = fields label [ "state" ] json in
+      Ok (Ok None)
+  | Some (`String "reported") ->
+      let* json = fields label [ "state"; "record" ] json in
+      (match Json_util.assoc_member_opt "record" json with
+       | Some record ->
+           let* row = decode record in
+           Ok (Ok (Some row))
+       | None -> Error (label ^ ": missing record"))
+  | Some (`String "unavailable") ->
+      let* json = fields label [ "state"; "reason" ] json in
+      (match Json_util.assoc_member_opt "reason" json with
+       | Some (`String reason) -> Ok (Error reason)
+       | Some _ | None -> Error (label ^ ": reason must be a string"))
+  | Some _ | None -> Error (label ^ ": unknown state")
+
 let projection records goal =
   observation_to_yojson (latest_for_goal records goal)
 

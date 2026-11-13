@@ -63,6 +63,10 @@ val observation_to_yojson : observation -> Yojson.Safe.t
 (** The existing reported, not_recorded, or unavailable wire projection of
     an observation. A reported value does not certify target attainment. *)
 
+val observation_of_yojson : Yojson.Safe.t -> (observation, string) result
+(** Strict inverse of {!observation_to_yojson}: the state and its exact field
+    set must match, and a reported row passes the checks a stored row does. *)
+
 val projection :
   (t list, string) result -> Goal_store.goal -> Yojson.Safe.t
 (** Observe a Goal and serialize that observation with

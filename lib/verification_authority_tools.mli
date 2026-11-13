@@ -90,7 +90,13 @@ val goal_review_measurement : goal_review -> Goal_measurement.observation
     grant no lookup authority and certify no success. Later measurements do
     not invalidate an already retained original or change its prompt bytes. *)
 val goal_review_evidence : goal_review -> Workspace_verification_store.submitted_evidence_item list
-val goal_review_binding : goal_review -> string
+val goal_review_question_binding : goal_review -> string
+(** Canonical SHA-256 of the question: the Goal, its pending request and
+    criterion, the workspace and the submitted snapshot. *)
+val goal_review_authority_binding : goal_review -> string
+(** Canonical SHA-256 of the lookup authority: the shared ownership root and
+    the complete tool schemas. The tool list follows the kinds of sources the
+    submission names, so a changed submission can move both digests. *)
 val goal_review_root_layout : goal_review -> string list
 val goal_review_base_path : goal_review -> string
 val goal_review_lookup : goal_review -> Task.Anti_rationalization.lookup_surface

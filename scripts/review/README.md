@@ -103,3 +103,14 @@ receipt and only a candidate ref still pointing to its own commit are removed.
 
 Offline focused checks include `python3 -m unittest -v scripts/review/test_github_reviews.py`,
 `test_review_worklist.py`, `test_queue_ledger.py` and `test_stack_scope.py`.
+
+## The `merge` check on main
+
+The `Approval auto-merge` workflow (`.github/workflows/approval-auto-merge.yml`)
+has one job named `merge`. It runs on `workflow_run` of `Approval merge
+request`, so its result is attached to the head of `main` at that moment. A red
+`merge` there means one merge attempt ended red (a hold, a refused read, or a
+read that stayed failed after `github-get.py`'s bounded retries); it is not a
+failed build or test run, and it does not rerun itself. Successful `merge`
+runs carry the same name, so read the job log before treating a red one as
+`main` red.

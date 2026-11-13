@@ -53,7 +53,7 @@ class GitHubGet(unittest.TestCase):
                 self.assertTrue(all(c[2:4] == ['--method', 'GET'] for _, c in calls))
 
     def test_auth_missing_resource_server_error_and_unusable_quota_stay_failures(self):
-        cases = [(403, {}), (404, {}), (503, {'Retry-After': '10'}), (429, {}),
+        cases = [(403, {}), (404, {}), (500, {'Retry-After': '10'}), (429, {}),
                  (403, {'X-RateLimit-Remaining': '0'}),
                  (403, {'X-RateLimit-Remaining': '9', 'X-RateLimit-Reset': '1030'}),
                  (429, {'Retry-After': 'invalid'}), (429, {'Retry-After': '0'})]
@@ -244,6 +244,125 @@ class GitHubGet(unittest.TestCase):
             client.read('repos/o/r/pulls/1')
         self.assertEqual(raised.exception.status, 403)
         self.assertEqual((len(calls), client.boundary_retries), (2, 0))
+
+    def test_a_transient_503_waits_its_retry_after_and_then_reads(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(503, {'message': 'unavailable'}, {'Retry-After': '3'})
+                    if len(calls) == 1 else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(calls, [1000.0, 1003.0])
+        self.assertEqual(clock.sleeps, [3])
+        self.assertEqual((client.pauses, client.transient_retries), (0, 1))
+
+    def test_each_transient_retry_honors_its_own_retry_after(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            wait = {1: '1', 2: '3'}.get(len(calls))
+            return (response(502, {'message': 'bad gateway'}, {'Retry-After': wait})
+                    if wait else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(calls, [1000.0, 1001.0, 1004.0])
+        self.assertEqual(client.transient_retries, 2)
+
+    def test_a_transient_retry_after_date_waits_out_the_server_time(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(504, {'message': 'timeout'},
+                             {'Retry-After': formatdate(1007, usegmt=True)})
+                    if len(calls) == 1 else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(calls, [1000.0, 1007.0])
+
+    def test_transient_retries_are_bounded_then_a_visible_failure(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return response(503, {'message': 'unavailable'}, {'Retry-After': '3'})
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        error = raised.exception
+        self.assertNotIsInstance(error, GET.QuotaLimited)
+        self.assertIsInstance(error, GET.TransientRetryExhausted)
+        self.assertIsInstance(error, ValueError)  # the merge worker exits 1 on this
+        self.assertEqual(error.status, 503)
+        self.assertEqual(error.details['retry_state'], 'transient_retries_exhausted')
+        self.assertEqual(error.details['transient_retries'], GET.TRANSIENT_RETRIES)
+        self.assertEqual(len(calls), 1 + GET.TRANSIENT_RETRIES)
+        self.assertEqual(clock.sleeps, [3] * GET.TRANSIENT_RETRIES)
+
+    def test_a_5xx_without_a_usable_retry_after_stays_a_visible_failure(self):
+        for status, headers in [(502, {}), (503, {}), (504, {}),
+                                (503, {'Retry-After': 'invalid'}),
+                                (500, {'Retry-After': '3'})]:
+            with self.subTest(status=status, headers=headers):
+                clock, calls = Clock(), []
+                def run(command, **kwargs):
+                    calls.append(command)
+                    return response(status, {'message': 'refused'}, headers)
+                client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+                with self.assertRaises(GET.ApiFailure) as raised:
+                    client.read('repos/o/r/pulls/1')
+                self.assertNotIsInstance(raised.exception, GET.TransientRetryExhausted)
+                self.assertEqual((len(calls), clock.sleeps, client.transient_retries), (1, [], 0))
+
+    def test_a_caller_deadline_cuts_a_transient_wait_without_an_early_retry(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return response(503, {'message': 'unavailable'}, {'Retry-After': '30'})
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        client.deadline = 1005.0
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        self.assertNotIsInstance(raised.exception, GET.TransientRetryExhausted)
+        self.assertEqual((calls, clock.sleeps), ([1000.0], [5.0]))
+
+    def test_a_retry_after_beyond_the_cap_is_not_waited_out(self):
+        for value in (str(GET.TRANSIENT_MAX_PAUSE_SECONDS + 1), '3600',
+                      formatdate(1000 + 3600, usegmt=True)):
+            with self.subTest(retry_after=value):
+                clock, calls = Clock(), []
+                def run(command, **kwargs):
+                    calls.append(clock.now)
+                    return response(503, {'message': 'unavailable'}, {'Retry-After': value})
+                client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+                with self.assertRaises(GET.ApiFailure) as raised:
+                    client.read('repos/o/r/pulls/1')
+                self.assertNotIsInstance(raised.exception, GET.TransientRetryExhausted)
+                self.assertEqual((len(calls), clock.sleeps, client.pauses,
+                                  client.transient_retries), (1, [], 0, 0))
+
+    def test_a_retry_after_at_the_cap_is_waited_out(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(503, {'message': 'unavailable'},
+                             {'Retry-After': str(GET.TRANSIENT_MAX_PAUSE_SECONDS)})
+                    if len(calls) == 1 else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(clock.sleeps, [GET.TRANSIENT_MAX_PAUSE_SECONDS])
+
+    def test_a_later_non_transient_refusal_carries_no_transient_state(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(503, {'message': 'unavailable'}, {'Retry-After': '1'})
+                    if len(calls) == 1 else response(404, {'message': 'not found'}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        with self.assertRaises(GET.ApiFailure) as raised:
+            client.read('repos/o/r/pulls/1')
+        self.assertEqual(raised.exception.status, 404)
+        self.assertNotIn('retry_state', raised.exception.details)
+        self.assertEqual((len(calls), client.transient_retries), (2, 1))
 
 
 if __name__ == '__main__':

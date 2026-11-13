@@ -1,38 +1,44 @@
-let test_admin_workspace_and_incarnation () =
+module Upgrade = Server_upgrade_preparation
+(* A capture that counts its signals and releases. *)
+let counting_capture ~signals ~closes () =
+  Ok ((fun () -> incr signals; Ok ()), (fun () -> incr closes))
+let test_the_stop_is_confirmed_again_before_the_second_bearer () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-    let base = Unix.realpath (Filename.get_temp_dir_name ()) in
-    let version = ref "0.35.2" and admin = ref true and signals = ref 0 and closes = ref 0 in
-    let health () = Ok (Yojson.Safe.to_string (`Assoc ["version",`String !version;
-      "paths",`Assoc ["effective_base_path",`String base]])) in
-    let prepare () = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-      ~observe:health ~authorize:(fun () -> !admin)
-      ~capture:(fun () -> Ok ((fun () -> incr signals; Ok ()),(fun () -> incr closes))) in
-    let owner = match prepare () with Ok owner -> owner | Error _ -> Alcotest.fail "valid owner preparation" in
+    let confirmed = ref (Ok ()) and admin = ref true and authorizations = ref 0 in
+    let signals = ref 0 and closes = ref 0 in
+    let owner = match Upgrade.For_testing.prepare ~sw ~capture:(counting_capture ~signals ~closes)
+        ~confirm:(fun () -> !confirmed)
+        ~authorize:(fun () -> incr authorizations; !admin) with
+      | Ok owner -> owner | Error _ -> Alcotest.fail "valid owner preparation" in
     Alcotest.check Alcotest.int "preparation never stops server" 0 !signals;
-    admin := false;
-    (match Server_upgrade_preparation.request_termination owner with
+    Alcotest.check Alcotest.int "the first bearer went out" 1 !authorizations;
+    confirmed := Error Upgrade.Incumbent_changed;
+    (match Upgrade.request_termination owner with
+     | Error Incumbent_changed -> () | _ -> Alcotest.fail "a server the kernel no longer names was asked to stop");
+    Alcotest.check Alcotest.int "no second bearer to a server the kernel no longer names" 1 !authorizations;
+    confirmed := Ok (); admin := false;
+    (match Upgrade.request_termination owner with
      | Error Admin_required -> () | _ -> Alcotest.fail "lost admin permission ignored");
-    admin := true; version := "0.35.5";
-    (match Server_upgrade_preparation.request_termination owner with
-     | Error Incumbent_changed -> () | _ -> Alcotest.fail "replaced incumbent accepted");
     Alcotest.check Alcotest.int "revalidation failures never signal" 0 !signals;
-    version := "0.35.2";
-    ignore (Server_upgrade_preparation.request_termination owner |> Result.get_ok);
-    (match Server_upgrade_preparation.request_termination owner with
+    admin := true;
+    ignore (Upgrade.request_termination owner |> Result.get_ok);
+    (match Upgrade.request_termination owner with
      | Error Already_requested -> () | _ -> Alcotest.fail "duplicate request accepted");
     Alcotest.check Alcotest.int "explicit request exactly once" 1 !signals;
-    Server_upgrade_preparation.close owner; Server_upgrade_preparation.close owner;
+    Upgrade.close owner; Upgrade.close owner;
     Alcotest.check Alcotest.int "identity released once" 1 !closes))
-let test_other_workspace_never_receives_credentials () =
+let test_an_unconfirmed_owner_never_receives_the_bearer () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-    let authorizations = ref 0 in
-    let result = Server_upgrade_preparation.For_testing.prepare ~sw
-      ~base_path:(Filename.get_temp_dir_name ())
-      ~observe:(fun () -> Ok {|{"version":"0.35.2","paths":{"effective_base_path":"/"}}|})
-      ~authorize:(fun () -> incr authorizations; true)
-      ~capture:(fun () -> Alcotest.fail "unrelated workspace captured") in
-    (match result with Error Different_workspace -> () | _ -> Alcotest.fail "workspace conflict ignored");
-    Alcotest.check Alcotest.int "no credential transmission across workspace conflict" 0 !authorizations))
+    let authorizations = ref 0 and signals = ref 0 and closes = ref 0 in
+    let result = Upgrade.For_testing.prepare ~sw ~capture:(counting_capture ~signals ~closes)
+      ~confirm:(fun () -> Error Upgrade.Incumbent_changed)
+      ~authorize:(fun () -> incr authorizations; true) in
+    (match result with
+     | Error Incumbent_changed -> ()
+     | _ -> Alcotest.fail "a server the kernel does not name was prepared");
+    Alcotest.check Alcotest.int "no bearer to a server the kernel does not name" 0 !authorizations;
+    Alcotest.check Alcotest.int "the captured owner was released" 1 !closes;
+    Alcotest.check Alcotest.int "nothing was signalled" 0 !signals))
 let test_drain_requires_lease_and_port_release () =
   let root = Filename.temp_file "masc-upgrade-drain-" "" in
   Sys.remove root; Unix.mkdir root 0o700;
@@ -43,82 +49,71 @@ let test_drain_requires_lease_and_port_release () =
     Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,0)); Unix.listen socket 1;
     let port = match Unix.getsockname socket with Unix.ADDR_INET (_,port) -> port
       | _ -> Alcotest.fail "loopback fixture port" in
-    (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
+    (match Upgrade.replacement_readiness ~run_dir ~base_path ~port with
      | Ok Port_busy -> () | _ -> Unix.close socket; Alcotest.fail "occupied port was restart-ready");
     Unix.close socket;
-    (match Server_upgrade_preparation.replacement_readiness ~run_dir ~base_path ~port with
+    (match Upgrade.replacement_readiness ~run_dir ~base_path ~port with
      | Ok Replacement_can_start -> () | _ -> Alcotest.fail "released owner/port not observed"))
-let test_duplicate_health_never_authorizes () =
-  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-    let base = Filename.get_temp_dir_name () in
-    let path = Yojson.Safe.to_string (`String base) in
-    let payloads = [
-      "{\"version\":\"0.35.2\",\"version\":\"0.35.5\",\"paths\":{\"effective_base_path\":" ^ path ^ "}}";
-      "{\"version\":\"0.35.2\",\"paths\":{\"effective_base_path\":" ^ path ^ ",\"effective_base_path\":\"/\"}}"] in
-    List.iter (fun body ->
-      (match Server_upgrade_preparation.authorize_initial ~base_path:base
-        ~expected_version:"0.35.2" ~body
-        ~login:(fun () -> Alcotest.fail "ambiguous initial health invoked login/mint") with
-       | Error Invalid_health -> () | _ -> Alcotest.fail "ambiguous pre-login identity accepted");
-      match Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-        ~observe:(fun () -> Ok body)
-        ~authorize:(fun () -> Alcotest.fail "ambiguous health transmitted credentials")
-        ~capture:(fun () -> Alcotest.fail "ambiguous health captured owner") with
-      | Error Invalid_health -> () | _ -> Alcotest.fail "duplicate identity fields accepted") payloads))
-let test_initial_login_identity () =
-  let base_path = Unix.realpath (Filename.get_temp_dir_name ()) in
-  let body = Yojson.Safe.to_string (`Assoc ["version", `String "0.35.4";
-    "paths", `Assoc ["effective_base_path", `String base_path]]) in
-  let calls = ref 0 in
-  let login () = incr calls; true in
-  (match Server_upgrade_preparation.authorize_initial ~base_path ~expected_version:"0.35.5" ~body ~login with
+let test_initial_login_waits_for_the_kernel_and_the_version () =
+  let logins = ref 0 and versions = ref 0 in
+  let login () = incr logins; true in
+  let authorize ~confirm ~answered =
+    Upgrade.For_testing.authorize_initial ~confirm
+      ~version:(fun () -> incr versions; answered) ~expected_version:"0.35.4" ~login in
+  (match authorize ~confirm:(fun () -> Error Upgrade.Incumbent_changed) ~answered:(Some "0.35.4") with
+   | Error Incumbent_changed -> () | _ -> Alcotest.fail "a server the kernel does not name was signed in to");
+  Alcotest.check Alcotest.int "the port was not asked before the kernel" 0 !versions;
+  (match authorize ~confirm:(fun () -> Ok ()) ~answered:None with
+   | Error Invalid_health -> () | _ -> Alcotest.fail "a port without a version was signed in to");
+  (match authorize ~confirm:(fun () -> Ok ()) ~answered:(Some "0.35.5") with
    | Error Incumbent_changed -> () | _ -> Alcotest.fail "changed version invoked login");
-  (match Server_upgrade_preparation.authorize_initial ~base_path:"/" ~expected_version:"0.35.4" ~body ~login with
-   | Error Different_workspace -> () | _ -> Alcotest.fail "other workspace invoked login");
-  Alcotest.check Alcotest.int "rejected identity never mints" 0 !calls;
-  (match Server_upgrade_preparation.authorize_initial ~base_path ~expected_version:"0.35.4" ~body ~login with
+  Alcotest.check Alcotest.int "rejected identity never mints" 0 !logins;
+  (match authorize ~confirm:(fun () -> Ok ()) ~answered:(Some "0.35.4") with
    | Ok () -> () | Error _ -> Alcotest.fail "exact identity rejected");
-  Alcotest.check Alcotest.int "exact identity authorizes once" 1 !calls
+  Alcotest.check Alcotest.int "exact identity authorizes once" 1 !logins
 let test_termination_request_survives_observation_failure () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-    let base = Unix.realpath (Filename.get_temp_dir_name ()) in
-    let health () = Ok (Yojson.Safe.to_string (`Assoc ["version",`String "fixture";
-      "paths",`Assoc ["effective_base_path",`String base]])) in
     List.iter (fun expected ->
       let signals = ref 0 in
-      let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-        ~observe:health ~authorize:(fun () -> true)
+      let owner = Upgrade.For_testing.prepare ~sw ~confirm:(fun () -> Ok ()) ~authorize:(fun () -> true)
         ~capture:(fun () -> Ok ((fun () -> incr signals; Ok ()),(fun () -> ()))) |> Result.get_ok in
-      (match Server_upgrade_preparation.request_termination_and_observe owner ~observe:(fun () -> expected) with
+      (match Upgrade.request_termination_and_observe owner ~observe:(fun () -> expected) with
        | Requested observed when observed = expected -> ()
        | Requested _ | Not_requested _ -> Alcotest.fail "termination request lost or readiness invented");
-      (match Server_upgrade_preparation.request_termination_and_observe owner
+      (match Upgrade.request_termination_and_observe owner
         ~observe:(fun () -> Alcotest.fail "duplicate termination observed again") with
        | Not_requested Already_requested -> ()
        | Not_requested _ | Requested _ -> Alcotest.fail "termination was replayed");
       Alcotest.check Alcotest.int "one signal regardless of observed readiness" 1 !signals;
-      Server_upgrade_preparation.close owner)
-      [Error Server_upgrade_preparation.Owner_unavailable; Ok Owner_draining; Ok Port_busy; Ok Replacement_can_start];
-    let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-      ~observe:health ~authorize:(fun () -> true)
+      Upgrade.close owner)
+      [Error Upgrade.Owner_unavailable; Ok Owner_draining; Ok Port_busy; Ok Replacement_can_start];
+    let owner = Upgrade.For_testing.prepare ~sw ~confirm:(fun () -> Ok ()) ~authorize:(fun () -> true)
       ~capture:(fun () -> Ok ((fun () -> Ok ()),(fun () -> ()))) |> Result.get_ok in
-    (match Server_upgrade_preparation.request_termination_and_observe owner
+    (match Upgrade.request_termination_and_observe owner
       ~observe:(fun () -> raise (Sys_error "lease observation failed")) with
      | Requested (Error Owner_unavailable) -> ()
      | Requested _ | Not_requested _ -> Alcotest.fail "post-request file error lost termination evidence")))
 let test_refused_termination_never_observes () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-    let base = Unix.realpath (Filename.get_temp_dir_name ()) and admin = ref true in
-    let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-      ~observe:(fun () -> Ok (Yojson.Safe.to_string (`Assoc ["version",`String "fixture";
-        "paths",`Assoc ["effective_base_path",`String base]])))
+    let admin = ref true in
+    let owner = Upgrade.For_testing.prepare ~sw ~confirm:(fun () -> Ok ())
       ~authorize:(fun () -> !admin)
       ~capture:(fun () -> Ok ((fun () -> Alcotest.fail "unauthorized signal"),(fun () -> ()))) |> Result.get_ok in
     admin := false;
-    match Server_upgrade_preparation.request_termination_and_observe owner
+    match Upgrade.request_termination_and_observe owner
       ~observe:(fun () -> Alcotest.fail "observation after refused termination") with
     | Not_requested Admin_required -> ()
     | Not_requested _ | Requested _ -> Alcotest.fail "refused request reported as sent"))
+let test_compact_health_version_reads_one_version () =
+  List.iter (fun (body, expected) ->
+    Alcotest.(check (option string)) body expected (Upgrade.compact_health_version body))
+    [ {|{"server":"masc","version":"1.2.3"}|}, Some "1.2.3";
+      {|{"server":"masc","version":"1.2.3","version":"1.2.4"}|}, None;
+      {|{"version":"1.2.3"}|}, None;
+      {|{"server":"other","version":"1.2.3"}|}, None;
+      {|{"server":"masc","version":""}|}, None;
+      {|["masc","1.2.3"]|}, None;
+      "not json", None ]
 (* A process that ran an Eio loop keeps the SIGCHLD handler of the posix
    backend, and the end of a child then interrupts the call that waits for it. *)
 let rec retrying f =
@@ -128,7 +123,8 @@ let rec retrying f =
 (* A child holds the lease of [base_path] and announces [announces] when it is
    a port. It ends by the signal it is sent: [still_runs] says whether one has
    ended it, and [reap] waits for the end and says which. *)
-let with_owner ~run_dir ~base_path ~announces f =
+let with_owner ?(announce = Server_startup_takeover.announce_account_server) ~run_dir ~base_path
+    ~announces f =
   let ready_read, ready_write = Unix.pipe () in
   let child = Unix.fork () in
   if child = 0 then (
@@ -148,9 +144,7 @@ let with_owner ~run_dir ~base_path ~announces f =
                 ~port
             with
             | Ok listener ->
-              Result.is_ok
-                (Server_startup_takeover.announce_account_server lease listener
-                   ~withdraw_with:ignore)
+              Result.is_ok (announce lease listener ~withdraw_with:ignore)
             | Error (_ : Server_startup_takeover.loopback_unreached) -> false))
       | Server_startup_takeover.Base_path_already_owned _
       | Server_startup_takeover.Base_path_rejected _ -> false in
@@ -208,11 +202,11 @@ let test_account_server_stop_needs_its_announced_port () =
       Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm)))
 (* A process without the lease locks [byte] of the announcement file of the
    workspace, as any process of this user can. It is killed at the end. *)
-let with_byte_locker ~run_dir ~base_path ~byte f =
+let with_byte_locker ?(suffix = ".account-server") ~run_dir ~base_path ~byte f =
   let path =
     Server_startup_takeover.For_testing.lease_path
       ~run_dir:(Unix.realpath run_dir) ~canonical_base_path:(Unix.realpath base_path)
-    ^ ".account-server" in
+    ^ suffix in
   let ready_read, ready_write = Unix.pipe () in
   let child = Unix.fork () in
   if child = 0 then (
@@ -359,16 +353,14 @@ let test_the_holder_is_read_without_making_anything () =
     | other -> Alcotest.failf "a lease root that is a file was read: %s" (holder_label other))
 let replacement_sighting_label = function
   | Server_upgrade_preparation.Replacement_serves -> "the replacement serves"
-  | Another_server_answers { pid } -> Printf.sprintf "pid %d answers" pid
   | Another_process_announces { pid } -> Printf.sprintf "pid %d announces the port" pid
   | Nobody_announces -> "nobody announces the port"
   | Announcement_unreadable (_ : Server_startup_takeover.base_path_lock_rejection) ->
     "the announcement cannot be read"
   | No_ready_answer -> "no ready answer"
 (* The rule [masc restart] waits on. A 200 on the port is the predecessor's
-   until it is the replacement's own: by the pid in the answer, or, for an
-   answer that names no process, by who holds the announcement lock. The
-   kernel is asked only for an answer that names no process. *)
+   until the replacement holds the announcement lock of the port. The kernel
+   is asked only once the port answered ready. *)
 let test_ready_is_the_answer_of_the_replacement () =
   let child_pid = 4242 and predecessor = 77 in
   let row message answer holder ~asked expected =
@@ -378,28 +370,216 @@ let test_ready_is_the_answer_of_the_replacement () =
         ~port_holder:(fun () -> incr asks; holder) in
     Alcotest.(check string) message expected (replacement_sighting_label sighting);
     Alcotest.(check int) (message ^ ": times the kernel was asked") asked !asks in
-  row "an answer that names the replacement" (Ready_named child_pid) (Ok None)
-    ~asked:0 "the replacement serves";
-  row "an answer that names the predecessor, while the replacement announces"
-    (Ready_named predecessor) (Ok (Some child_pid)) ~asked:0 "pid 77 answers";
-  row "an answer that names no process, and the replacement announces"
-    Ready_unnamed (Ok (Some child_pid)) ~asked:1 "the replacement serves";
-  row "an answer that names no process, and the predecessor still announces"
-    Ready_unnamed (Ok (Some predecessor)) ~asked:1 "pid 77 announces the port";
-  row "an answer that names no process, and nobody announces"
-    Ready_unnamed (Ok None) ~asked:1 "nobody announces the port";
-  row "an answer that names no process, and an announcement that cannot be read"
-    Ready_unnamed (Error (Server_startup_takeover.Announcement_port_invalid { port = 0 }))
+  row "a ready answer, and the replacement announces"
+    Answered_ready (Ok (Some child_pid)) ~asked:1 "the replacement serves";
+  row "a ready answer, and the predecessor still announces"
+    Answered_ready (Ok (Some predecessor)) ~asked:1 "pid 77 announces the port";
+  row "a ready answer, and nobody announces"
+    Answered_ready (Ok None) ~asked:1 "nobody announces the port";
+  row "a ready answer, and an announcement that cannot be read"
+    Answered_ready (Error (Server_startup_takeover.Announcement_port_invalid { port = 0 }))
     ~asked:1 "the announcement cannot be read";
   row "no ready answer, while the replacement announces"
     Not_ready (Ok (Some child_pid)) ~asked:0 "no ready answer"
+let owner_label = function
+  | Ok (Upgrade.Single_user_server_here server) ->
+    Printf.sprintf "pid %d serves port %d" (Upgrade.single_user_server_pid server)
+      (Upgrade.single_user_server_port server)
+  | Ok (Single_user_server_elsewhere { pid; port }) ->
+    Printf.sprintf "pid %d serves port %d elsewhere" pid port
+  | Ok (Account_server_here { pid }) -> Printf.sprintf "account server pid %d serves the port" pid
+  | Ok (Account_server_elsewhere { pid; port }) ->
+    Printf.sprintf "account server pid %d serves port %d elsewhere" pid port
+  | Ok (Owner_unannounced { pid }) -> Printf.sprintf "pid %d announces nothing" pid
+  | Ok Unowned -> "nobody holds the workspace"
+  | Error unread -> "unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
+let with_workspace prefix f =
+  let root = Filename.temp_file prefix "" in
+  Sys.remove root; Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let base_path = Filename.concat root "workspace" and run_dir = Filename.concat root "run" in
+    Unix.mkdir base_path 0o700; Unix.mkdir run_dir 0o700;
+    f ~root ~base_path ~run_dir)
+let single_user = Server_startup_takeover.announce_single_user_server
+let here_pid ~run_dir ~base_path ~port =
+  match Upgrade.owner ~run_dir ~base_path ~port with
+  | Ok (Upgrade.Single_user_server_here server) -> server
+  | other -> Alcotest.failf "the server of a single user was not seen: %s" (owner_label other)
+let test_owner_names_a_single_user_server_on_its_port () =
+  with_workspace "masc-upgrade-single-" (fun ~root:_ ~base_path ~run_dir ->
+    let port = 9000 in
+    with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      let server = here_pid ~run_dir ~base_path ~port in
+      Alcotest.(check int) "the port it announces" port (Upgrade.single_user_server_port server);
+      Alcotest.(check string) "the workspace it holds" base_path (Upgrade.single_user_server_base_path server);
+      Alcotest.(check bool) "the read sent it nothing" true (still_runs ())))
+let test_owner_names_the_port_a_single_user_server_announces () =
+  with_workspace "masc-upgrade-single-" (fun ~root:_ ~base_path ~run_dir ->
+    let port = 9000 in
+    with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      let pid = Upgrade.single_user_server_pid (here_pid ~run_dir ~base_path ~port) in
+      Alcotest.(check string) "asked about another port"
+        (owner_label (Ok (Single_user_server_elsewhere { pid; port })))
+        (owner_label (Upgrade.owner ~run_dir ~base_path ~port:(port + 1)));
+      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ())))
+let test_owner_tells_an_account_server_from_a_single_user_server () =
+  with_workspace "masc-upgrade-kind-" (fun ~root:_ ~base_path ~run_dir ->
+    let port = 9000 in
+    with_owner ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      let pid = match Upgrade.owner ~run_dir ~base_path ~port with
+        | Ok (Upgrade.Account_server_here { pid }) -> pid
+        | other -> Alcotest.failf "the account server was not seen: %s" (owner_label other) in
+      Alcotest.(check string) "the account server, asked about another port"
+        (owner_label (Ok (Account_server_elsewhere { pid; port })))
+        (owner_label (Upgrade.owner ~run_dir ~base_path ~port:(port + 1)));
+      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ()));
+    with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs ~reap:_ ->
+      (match Upgrade.account_server ~run_dir ~base_path ~port with
+       | Ok Owner_announces_nothing -> ()
+       | Ok _ | Error _ -> Alcotest.fail "the server of a single user was read as an account server");
+      Alcotest.(check bool) "the reads sent it nothing" true (still_runs ())))
+let test_an_owner_that_announces_nothing_is_named_by_pid () =
+  with_workspace "masc-upgrade-silent-" (fun ~root:_ ~base_path ~run_dir ->
+    let port = 9000 in
+    with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
+      (match Upgrade.owner ~run_dir ~base_path ~port with
+       | Ok (Upgrade.Owner_unannounced { pid }) ->
+         Alcotest.(check bool) "a pid of a live process is named" true (pid > 0)
+       | other -> Alcotest.failf "an owner that announces nothing was read as %s" (owner_label other));
+      Alcotest.(check bool) "the read sent it nothing" true (still_runs ())))
+let test_a_lock_without_the_lease_is_no_single_user_server () =
+  with_workspace "masc-upgrade-squat-" (fun ~root:_ ~base_path ~run_dir ->
+    let port = 9000 in
+    with_byte_locker ~suffix:".single-user-server" ~run_dir ~base_path ~byte:port (fun (_ : int) ->
+      Alcotest.(check string) "a lock on the port, and no owner"
+        (owner_label (Ok Unowned)) (owner_label (Upgrade.owner ~run_dir ~base_path ~port));
+      with_owner ~run_dir ~base_path ~announces:None (fun ~still_runs ~reap:_ ->
+        (match Upgrade.owner ~run_dir ~base_path ~port with
+         | Ok (Upgrade.Owner_unannounced { pid = (_ : int) }) -> ()
+         | other -> Alcotest.failf "the lock of another process named the owner: %s" (owner_label other));
+        Alcotest.(check bool) "it was sent nothing" true (still_runs ()))))
+let test_owner_without_making_makes_nothing () =
+  with_workspace "masc-upgrade-unmade-" (fun ~root ~base_path ~run_dir ->
+    let port = 9000 in
+    let read root = owner_label (Upgrade.owner_without_making root ~base_path ~port) in
+    Alcotest.(check string) "a workspace nothing started in" (owner_label (Ok Unowned))
+      (read (Host_config.Lease_dir_override run_dir));
+    Alcotest.(check (array string)) "the read made nothing in the lease root" [||] (Sys.readdir run_dir);
+    Alcotest.(check string) "with the lease root beside the workspace" (owner_label (Ok Unowned))
+      (read Host_config.Beside_base_path);
+    Alcotest.(check (array string)) "no lease root was made" [||] (Sys.readdir base_path);
+    let file = Filename.concat root "file" in
+    Out_channel.with_open_bin file (fun (_ : Out_channel.t) -> ());
+    match Upgrade.owner_without_making (Host_config.Lease_dir_override file) ~base_path ~port with
+    | Error (Server_startup_takeover.Owner_lease_rejected _) -> ()
+    | other -> Alcotest.failf "a lease root that is a file was read: %s" (owner_label other))
+let departure_label = function
+  | Ok () -> "confirmed"
+  | Error (Upgrade.Owner_now now) -> "now " ^ owner_label (Ok now)
+  | Error (Owner_unreadable unread) -> owner_label (Error unread)
+let test_confirm_follows_the_kernel () =
+  with_workspace "masc-upgrade-confirm-" (fun ~root:_ ~base_path ~run_dir ->
+    let port = 9000 in
+    with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap ->
+      let server = here_pid ~run_dir ~base_path ~port in
+      Alcotest.(check string) "the same server" "confirmed" (departure_label (Upgrade.confirm server));
+      Unix.kill (Upgrade.single_user_server_pid server) Sys.sigterm;
+      ignore (reap ());
+      Alcotest.(check string) "the server is gone" ("now " ^ owner_label (Ok Unowned))
+        (departure_label (Upgrade.confirm server));
+      with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap:_ ->
+        let successor = here_pid ~run_dir ~base_path ~port in
+        Alcotest.(check bool) "another process" true
+          (Upgrade.single_user_server_pid successor <> Upgrade.single_user_server_pid server);
+        Alcotest.(check string) "another process announces the port"
+          ("now " ^ owner_label (Ok (Single_user_server_here successor)))
+          (departure_label (Upgrade.confirm server)))))
+(* A loopback listener that answers 200 to every request and records the
+   authorization header of each, for as long as [f] runs. *)
+let with_recording_listener listening f =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    Eio_context.set_env env; Eio_context.set_switch sw;
+    Eio_context.set_net (Eio.Stdenv.net env); Eio_context.set_clock (Eio.Stdenv.clock env);
+    let socket = Eio_unix.Net.import_socket_listening ~sw ~close_unix:false listening in
+    let seen = ref [] in
+    let answer flow =
+      let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
+      let rec headers acc =
+        match Eio.Buf_read.line reader with
+        | "" -> acc
+        | line ->
+          (match String.index_opt line ':' with
+           | Some colon when String.lowercase_ascii (String.sub line 0 colon) = "authorization" ->
+             headers (Some (String.trim (String.sub line (colon + 1) (String.length line - colon - 1))))
+           | Some _ | None -> headers acc) in
+      let (_ : string) = Eio.Buf_read.line reader in
+      seen := headers None :: !seen;
+      Eio.Flow.copy_string "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}" flow in
+    let rec serve () =
+      Eio.Net.accept_fork ~sw socket ~on_error:ignore (fun flow _ -> answer flow);
+      serve () in
+    Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
+      Eio.Fiber.first serve (fun () -> f ~sw ~clock:(Eio.Stdenv.clock env) ~seen))))
+let test_prepare_sends_the_bearer_only_to_the_announcing_owner () =
+  with_workspace "masc-upgrade-bearer-" (fun ~root:_ ~base_path ~run_dir ->
+    let listening = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+    Fun.protect ~finally:(fun () -> Unix.close listening) (fun () ->
+      Unix.setsockopt listening Unix.SO_REUSEADDR true;
+      Unix.bind listening (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+      Unix.listen listening 8;
+      let port = match Unix.getsockname listening with
+        | Unix.ADDR_INET (_, port) -> port | Unix.ADDR_UNIX _ -> Alcotest.fail "loopback fixture port" in
+      let headers = ["authorization", "Bearer fixture-bearer"] in
+      let gone =
+        with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap ->
+          let server = here_pid ~run_dir ~base_path ~port in
+          Unix.kill (Upgrade.single_user_server_pid server) Sys.sigterm;
+          ignore (reap ());
+          server) in
+      with_recording_listener listening (fun ~sw ~clock ~seen ->
+        (match Upgrade.prepare ~sw ~clock ~headers gone with
+         | Error (Incumbent_changed | Owner_unavailable) -> ()
+         | Ok _ | Error _ -> Alcotest.fail "a server that is gone was prepared");
+        Alcotest.(check int) "nothing was sent to the port" 0 (List.length !seen));
+      with_owner ~announce:single_user ~run_dir ~base_path ~announces:(Some port) (fun ~still_runs:_ ~reap ->
+        let server = here_pid ~run_dir ~base_path ~port in
+        with_recording_listener listening (fun ~sw ~clock ~seen ->
+          let owner = match Upgrade.prepare ~sw ~clock ~headers server with
+            | Ok owner -> owner
+            | Error _ -> Alcotest.fail "the server the kernel names was not prepared" in
+          Alcotest.(check (list (option string))) "the bearer went to the port once"
+            [Some "Bearer fixture-bearer"] !seen;
+          (match Upgrade.request_termination owner with
+           | Ok () -> () | Error _ -> Alcotest.fail "the server the kernel names was not asked to stop");
+          Alcotest.(check int) "the bearer went again before the stop" 2 (List.length !seen);
+          Upgrade.close owner);
+        Alcotest.(check bool) "SIGTERM, no escalation" true (reap () = Unix.WSIGNALED Sys.sigterm))))
 let () = Alcotest.run "upgrade preparation"
-  ["owner checks",[Alcotest.test_case "initial login identity" `Quick test_initial_login_identity;Alcotest.test_case "admin and exact incumbent" `Quick test_admin_workspace_and_incarnation;
-    Alcotest.test_case "workspace conflict" `Quick test_other_workspace_never_receives_credentials;
+  ["owner checks",[Alcotest.test_case "initial login waits for the kernel and the version" `Quick
+      test_initial_login_waits_for_the_kernel_and_the_version;
+    Alcotest.test_case "the stop is confirmed again before the second bearer" `Quick
+      test_the_stop_is_confirmed_again_before_the_second_bearer;
+    Alcotest.test_case "an unconfirmed owner never receives the bearer" `Quick
+      test_an_unconfirmed_owner_never_receives_the_bearer;
     Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
     Alcotest.test_case "request and observation stay distinct" `Quick test_termination_request_survives_observation_failure;
     Alcotest.test_case "refused request never observes" `Quick test_refused_termination_never_observes;
-    Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes];
+    Alcotest.test_case "compact health version" `Quick test_compact_health_version_reads_one_version];
+   "single-user server",[Alcotest.test_case "the owner names a single-user server on its port" `Quick
+      test_owner_names_a_single_user_server_on_its_port;
+    Alcotest.test_case "the owner names the port a single-user server announces" `Quick
+      test_owner_names_the_port_a_single_user_server_announces;
+    Alcotest.test_case "the owner tells an account server from a single-user server" `Quick
+      test_owner_tells_an_account_server_from_a_single_user_server;
+    Alcotest.test_case "an owner that announces nothing is named by pid" `Quick
+      test_an_owner_that_announces_nothing_is_named_by_pid;
+    Alcotest.test_case "a lock without the lease is no single-user server" `Quick
+      test_a_lock_without_the_lease_is_no_single_user_server;
+    Alcotest.test_case "the owner is read without making anything" `Quick
+      test_owner_without_making_makes_nothing;
+    Alcotest.test_case "confirm follows the kernel" `Quick test_confirm_follows_the_kernel;
+    Alcotest.test_case "prepare sends the bearer only to the announcing owner" `Quick
+      test_prepare_sends_the_bearer_only_to_the_announcing_owner];
    "account server",[Alcotest.test_case "the stop goes to the owner that announces the port" `Quick
      test_account_server_stop_needs_its_announced_port;
      Alcotest.test_case "a lock without the lease is no account server" `Quick

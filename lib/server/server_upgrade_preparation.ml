@@ -1,81 +1,193 @@
-type error = Invalid_health | Different_workspace | Admin_required | Owner_unavailable
+type error = Invalid_health | Admin_required | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
-type incumbent = {base_path:string; version:string}
 type phase = Prepared | Requested | Released
-type t = {incumbent:incumbent; observe:unit -> (string,error) result;
+type t = {confirm:unit -> (unit,error) result;
   authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
   lock:Eio.Mutex.t; mutable phase:phase}
 open Result.Syntax
-let decode_health body =
+
+type single_user_server = {run_dir:string; base_path:string; port:int; pid:int}
+let single_user_server_pid server = server.pid
+let single_user_server_port server = server.port
+let single_user_server_base_path server = server.base_path
+type owner =
+  | Single_user_server_here of single_user_server
+  | Single_user_server_elsewhere of { pid : int; port : int }
+  | Account_server_here of { pid : int }
+  | Account_server_elsewhere of { pid : int; port : int }
+  | Owner_unannounced of { pid : int }
+  | Unowned
+(* HIGH-RISK-UNREVIEWED: every command line that sends the workspace bearer,
+   the admin credential or a private operator token sends it only to a
+   [Single_user_server_here], and this read is the only one that makes one:
+   the kernel owner of the lease of [base_path] must be the process that
+   holds the byte of [port] on the file of the server of a single user. What
+   answers on the port never decides it. *)
+let owner ~run_dir ~base_path ~port =
+  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+  | Error (Owner_identity_unavailable No_owner) -> Ok Unowned
+  | Error
+      ( Server_startup_takeover.Owner_lease_rejected _
+      | Server_startup_takeover.Owner_identity_unavailable
+          (Owner_changed | Unsupported | Unavailable | Closed)
+      | Server_startup_takeover.Current_process_owner as error ) -> Error error
+  | Ok handle ->
+    let pid = Owner_process_identity.pid handle in
+    Owner_process_identity.close handle;
+    let read answer =
+      Result.map_error (fun rejection -> Server_startup_takeover.Owner_lease_rejected rejection) answer in
+    let* single = read (Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port) in
+    match single with
+    | Some holder when holder = pid -> Ok (Single_user_server_here {run_dir; base_path; port; pid})
+    | Some (_ : int) | None ->
+      let* account = read (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port) in
+      (match account with
+       | Some holder when holder = pid -> Ok (Account_server_here { pid })
+       | Some (_ : int) | None ->
+         (* The owner holds the byte of this port on neither file. Which port it
+            does announce is for the answer to name, and that is all the
+            whole-file reads are for: they can miss the owner behind the lock
+            of another process, and then the owner is taken for one that
+            announces nothing. *)
+         let elsewhere = function
+           | Some { Server_startup_takeover.pid = announcer; port = announced }
+             when announcer = pid && announced <> port -> Some announced
+           | Some (_ : Server_startup_takeover.account_server_announcement) | None -> None in
+         let* single_seen = read (Server_startup_takeover.single_user_server_announcement ~run_dir ~base_path) in
+         match elsewhere single_seen with
+         | Some announced -> Ok (Single_user_server_elsewhere { pid; port = announced })
+         | None ->
+           let* account_seen = read (Server_startup_takeover.account_server_announcement ~run_dir ~base_path) in
+           (match elsewhere account_seen with
+            | Some announced -> Ok (Account_server_elsewhere { pid; port = announced })
+            | None -> Ok (Owner_unannounced { pid })))
+let owner_without_making (root : Host_config.base_path_lease_root) ~base_path ~port =
+  let rejected rejection = Error (Server_startup_takeover.Owner_lease_rejected rejection) in
+  match Server_startup_takeover.lease_file_present root ~base_path with
+  | Error rejection -> rejected rejection
+  | Ok false -> Ok Unowned
+  | Ok true ->
+    (match Server_startup_takeover.lease_run_dir root ~base_path with
+     | Error rejection -> rejected rejection
+     | Ok run_dir -> owner ~run_dir ~base_path ~port)
+type departure =
+  | Owner_now of owner
+  | Owner_unreadable of Server_startup_takeover.owner_capture_error
+let confirm server =
+  match owner ~run_dir:server.run_dir ~base_path:server.base_path ~port:server.port with
+  | Ok (Single_user_server_here current) when current.pid = server.pid -> Ok ()
+  | Ok (( Single_user_server_here (_ : single_user_server)
+        | Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
+        | Account_server_here { pid = (_ : int) }
+        | Account_server_elsewhere { pid = (_ : int); port = (_ : int) }
+        | Owner_unannounced { pid = (_ : int) }
+        | Unowned ) as now) -> Error (Owner_now now)
+  | Error unread -> Error (Owner_unreadable unread)
+let owner_sentence ~base_path ~port = function
+  | Single_user_server_here server ->
+    Printf.sprintf "The server of %s (pid %d) serves port %d." base_path server.pid port
+  | Single_user_server_elsewhere { pid; port = announced } ->
+    Printf.sprintf "The server of %s (pid %d) serves port %d, not port %d. Run the command again \
+                    with --port %d." base_path pid announced port announced
+  | Account_server_here { pid } ->
+    Printf.sprintf "The account server of %s (pid %d) serves port %d. This command works with the \
+                    server of a single user; masc restart replaces the account server."
+      base_path pid port
+  | Account_server_elsewhere { pid; port = announced } ->
+    Printf.sprintf "The account server of %s (pid %d) serves port %d. This command works with the \
+                    server of a single user; masc restart --port %d replaces the account server."
+      base_path pid announced announced
+  | Owner_unannounced { pid } ->
+    Printf.sprintf "pid %d holds %s but announces no port. It is still starting, or a MASC older \
+                    than this one started it. Wait until it has started and run the command \
+                    again. If this message does not change, stop it with kill %d and run masc \
+                    start --base-path %s --port %d."
+      pid base_path pid (Filename.quote base_path) port
+  | Unowned -> Printf.sprintf "No process holds %s." base_path
+let departure_sentence ~base_path ~port departure =
+  Printf.sprintf "The server of %s changed after this command checked it: %s" base_path
+    (match departure with
+     | Owner_now now -> owner_sentence ~base_path ~port now
+     | Owner_unreadable unread ->
+       Printf.sprintf "its owner could not be read (%s)."
+         (Server_startup_takeover.owner_capture_error_to_string unread))
+let compact_health_version body =
   let unique = function
     | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Some fields
     | _ -> None in
-  try
-    match unique (Yojson.Safe.from_string body) with
-    | None -> Error Invalid_health
-    | Some fields ->
-      (match List.assoc_opt "version" fields, Option.bind (List.assoc_opt "paths" fields) unique with
-       | Some (`String version), Some paths ->
-         (match List.assoc_opt "effective_base_path" paths with
-          | Some (`String path) ->
-            let actual = Unix.realpath path in
-            if String.trim version = "" then Error Invalid_health
-            else Ok {base_path=actual;version}
-          | _ -> Error Invalid_health)
-       | _ -> Error Invalid_health)
-  with Yojson.Json_error _ | Unix.Unix_error _ -> Error Invalid_health
-let decode ~base_path body =
-  let* incumbent = decode_health body in
-  if incumbent.base_path = base_path then Ok incumbent else Error Different_workspace
-let authorize_initial ~base_path ~expected_version ~body ~login =
-  let* incumbent = decode ~base_path body in
-  if incumbent.version <> expected_version then Error Incumbent_changed
-  else if login () then Ok () else Error Admin_required
-let prepare_with ~sw ~base_path ~observe ~authorize ~capture =
-  let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
-  let* body = observe () in
-  let* incumbent = decode ~base_path body in
-  if not (authorize ()) then Error Admin_required else
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> None
+  | json ->
+    (match unique json with
+     | None -> None
+     | Some fields ->
+       (match List.assoc_opt "server" fields, List.assoc_opt "version" fields with
+        | Some (`String "masc"), Some (`String version) when String.trim version <> "" -> Some version
+        | _ -> None))
+let departure_error = function
+  | Owner_now (_ : owner) -> Incumbent_changed
+  | Owner_unreadable (_ : Server_startup_takeover.owner_capture_error) -> Owner_unavailable
+let confirmed server () = Result.map_error departure_error (confirm server)
+let authorize_initial_with ~confirm ~version ~expected_version ~login =
+  let* () = confirm () in
+  match version () with
+  | None -> Error Invalid_health
+  | Some version when version <> expected_version -> Error Incumbent_changed
+  | Some (_ : string) -> if login () then Ok () else Error Admin_required
+let loopback_url server path = Masc_network_defaults.masc_http_loopback_origin ~port:server.port ^ path
+(* HIGH-RISK-UNREVIEWED: [login] mints the admin credential of the workspace,
+   so it runs only after the kernel named [server] again and the port it
+   announces answered the version the operator selected. *)
+let authorize_initial ~clock server ~expected_version ~login =
+  let version () =
+    match Masc_http_client.get_sync ~clock ~timeout_sec:Masc_http_client.default_request_timeout_sec
+            ~headers:[] ~url:(loopback_url server Server_health_paths.health) () with
+    | Ok (200, body) -> compact_health_version body
+    | Ok ((_ : int), (_ : string)) | Error (_ : string) -> None in
+  authorize_initial_with ~confirm:(confirmed server) ~version ~expected_version ~login
+let prepare_with ~sw ~capture ~confirm ~authorize =
   let* signal, raw_release = capture () in
   let released = Atomic.make false in
   let release () = if not (Atomic.exchange released true) then raw_release () in
   Eio.Switch.on_release sw release;
   let checked =
-    let* body = observe () in
-    let* current = decode ~base_path body in
-    if current <> incumbent then Error Incumbent_changed else
-      Ok {incumbent;observe;authorize;signal;release;lock=Eio.Mutex.create ();phase=Prepared}
+    let* () = confirm () in
+    if not (authorize ()) then Error Admin_required else
+      Ok {confirm;authorize;signal;release;lock=Eio.Mutex.create ();phase=Prepared}
   in
   (match checked with Ok _ -> () | Error _ -> release ());
   checked
-let incumbent owner = owner.incumbent
+(* HIGH-RISK-UNREVIEWED: the second send of the bearer, and the SIGTERM after
+   it, go out only after the kernel names the prepared server again. *)
 let request_termination owner =
   Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
     match owner.phase with
     | Released -> Error Closed
     | Requested -> Error Already_requested
     | Prepared ->
-      let* body = owner.observe () in
-      let* current = decode ~base_path:owner.incumbent.base_path body in
-      if current <> owner.incumbent then Error Incumbent_changed
-      else if not (owner.authorize ()) then Error Admin_required
+      let* () = owner.confirm () in
+      if not (owner.authorize ()) then Error Admin_required
       else let* () = owner.signal () in owner.phase <- Requested; Ok ())
 let close owner = Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
   if owner.phase <> Released then (owner.release (); owner.phase <- Released))
-let prepare ~sw ~clock ~headers ~run_dir ~base_path ~port =
-  if port < 1 || port > 65535 then Error Invalid_health else
-  let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
-  let url path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path in
-  let observe () = match Masc_http_client.get_sync ~clock ~url:(url Server_health_paths.full) ~headers:[] () with
-    | Ok (200, body) -> Ok body | Ok _ | Error _ -> Error Invalid_health in
-  let authorize () = match Masc_http_client.get_sync ~clock ~url:(url "/api/v1/runtime/config/raw") ~headers () with
+(* HIGH-RISK-UNREVIEWED: the first send of the bearer. The owner handle that
+   the SIGTERM goes through is captured first and must be the process the
+   kernel named; then the kernel is asked again, and only then is the bearer
+   sent. *)
+let prepare ~sw ~clock ~headers server =
+  let authorize () =
+    match Masc_http_client.get_sync ~clock ~timeout_sec:Masc_http_client.default_request_timeout_sec
+            ~url:(loopback_url server "/api/v1/runtime/config/raw") ~headers () with
     | Ok (200, _) -> true | Ok _ | Error _ -> false in
-  let capture () = match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
-    | Error _ -> Error Owner_unavailable
+  let capture () =
+    match Server_startup_takeover.capture_existing_owner ~run_dir:server.run_dir ~base_path:server.base_path with
+    | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable
+    | Ok handle when Owner_process_identity.pid handle <> server.pid ->
+      Owner_process_identity.close handle; Error Incumbent_changed
     | Ok handle -> Ok ((fun () -> Owner_process_identity.request_termination handle
           |> Result.map_error (fun _ -> Owner_unavailable)),
         (fun () -> Owner_process_identity.close handle)) in
-  prepare_with ~sw ~base_path ~observe ~authorize ~capture
+  prepare_with ~sw ~capture ~confirm:(confirmed server) ~authorize
 let suggest_loopback_port () =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -84,7 +196,10 @@ let suggest_loopback_port () =
       match Unix.getsockname socket with
       | Unix.ADDR_INET (_,port) -> Ok port | Unix.ADDR_UNIX _ -> Error Port_unavailable)
   with Unix.Unix_error _ -> Error Port_unavailable
-module For_testing = struct let prepare = prepare_with end
+module For_testing = struct
+  let authorize_initial = authorize_initial_with
+  let prepare = prepare_with
+end
 
 type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start
 type termination_outcome =
@@ -121,56 +236,28 @@ type account_server =
   | Owner_announces_nothing
   | No_owner
 let account_server ~run_dir ~base_path ~port =
-  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
-  | Error (Owner_identity_unavailable No_owner) -> Ok No_owner
-  | Error
-      ( Server_startup_takeover.Owner_lease_rejected _
-      | Server_startup_takeover.Owner_identity_unavailable
-          (Owner_changed | Unsupported | Unavailable | Closed)
-      | Server_startup_takeover.Current_process_owner as error ) -> Error error
-  | Ok owner ->
-    let pid = Owner_process_identity.pid owner in
-    Owner_process_identity.close owner;
-    let read answer =
-      Result.map_error (fun rejection -> Server_startup_takeover.Owner_lease_rejected rejection) answer in
-    let* holder = read (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port) in
-    if holder = Some pid then Ok (Account_server_on_port { pid }) else
-    (* The owner does not hold the byte of this port. Which port it does
-       announce is for the refusal to name, and that is all the whole-file
-       read is for: it can miss the owner behind the lock of another process,
-       and then the owner is taken for one that announces nothing. An owner
-       that it shows on this very port announced after the byte was read: the
-       answer stays what the byte said, and the next read of the byte finds
-       it. *)
-    let* seen = read (Server_startup_takeover.account_server_announcement ~run_dir ~base_path) in
-    (match seen with
-     | Some { Server_startup_takeover.pid = announcer; port = announced }
-       when announcer = pid && announced <> port ->
-       Ok (Account_server_on_another_port { pid; port = announced })
-     | Some (_ : Server_startup_takeover.account_server_announcement) | None ->
-       Ok Owner_announces_nothing)
+  owner ~run_dir ~base_path ~port
+  |> Result.map (function
+    | Unowned -> No_owner
+    | Account_server_here { pid } -> Account_server_on_port { pid }
+    | Account_server_elsewhere { pid; port } -> Account_server_on_another_port { pid; port }
+    | Single_user_server_here (_ : single_user_server)
+    | Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
+    | Owner_unannounced { pid = (_ : int) } -> Owner_announces_nothing)
 type holder =
   | Held_by_nobody
   | Held_without_announcement
   | Held_by_account_server of { port : int }
-(* HIGH-RISK-UNREVIEWED: a command that signs a local operator in, and sends
-   its bearer to a port, refuses on this answer before it does either. *)
 let holder (root : Host_config.base_path_lease_root) ~base_path ~port =
-  let rejected rejection = Error (Server_startup_takeover.Owner_lease_rejected rejection) in
-  match Server_startup_takeover.lease_file_present root ~base_path with
-  | Error rejection -> rejected rejection
-  | Ok false -> Ok Held_by_nobody
-  | Ok true ->
-    (match Server_startup_takeover.lease_run_dir root ~base_path with
-     | Error rejection -> rejected rejection
-     | Ok run_dir ->
-       account_server ~run_dir ~base_path ~port
-       |> Result.map (function
-         | No_owner -> Held_by_nobody
-         | Owner_announces_nothing -> Held_without_announcement
-         | Account_server_on_port { pid = (_ : int) } -> Held_by_account_server { port }
-         | Account_server_on_another_port { pid = (_ : int); port = announced } ->
-           Held_by_account_server { port = announced }))
+  owner_without_making root ~base_path ~port
+  |> Result.map (function
+    | Unowned -> Held_by_nobody
+    | Account_server_here { pid = (_ : int) } -> Held_by_account_server { port }
+    | Account_server_elsewhere { pid = (_ : int); port = announced } ->
+      Held_by_account_server { port = announced }
+    | Single_user_server_here (_ : single_user_server)
+    | Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
+    | Owner_unannounced { pid = (_ : int) } -> Held_without_announcement)
 let stop_account_server ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable
@@ -186,22 +273,18 @@ let stop_account_server ~run_dir ~base_path ~port =
            Error Owner_unavailable)
       | Ok (Some (_ : int)) | Ok None -> Error Incumbent_changed)
 type readiness_answer =
-  | Ready_named of int
-  | Ready_unnamed
+  | Answered_ready
   | Not_ready
 type replacement_sighting =
   | Replacement_serves
-  | Another_server_answers of { pid : int }
   | Another_process_announces of { pid : int }
   | Nobody_announces
   | Announcement_unreadable of Server_startup_takeover.base_path_lock_rejection
   | No_ready_answer
 let replacement_sighting ~child_pid answer ~port_holder =
   match answer with
-  | Ready_named pid when pid = child_pid -> Replacement_serves
-  | Ready_named pid -> Another_server_answers { pid }
   | Not_ready -> No_ready_answer
-  | Ready_unnamed ->
+  | Answered_ready ->
     (match port_holder () with
      | Ok (Some holder) when holder = child_pid -> Replacement_serves
      | Ok (Some holder) -> Another_process_announces { pid = holder }

@@ -316,12 +316,17 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
       let read_fence=read_sidecar Lane_addon_store.history_fence_path in
       let read_resolution=read_sidecar Lane_addon_store.history_resolution_path in
       (* Discovery reads a scope as a whole and fails it on one record it
-         cannot read, so fresh state deletes the scope: its owner records and
-         its request bodies. *)
+         cannot read, so fresh state deletes the scope: its owner records, its
+         request bodies, and the history fences and resolution records that
+         name those originals. A resolution record left behind names an
+         original that is gone, and stops every pass of its Keeper. *)
       let scope_directories ~group ~group_dir _ =
         group_dir
         :: List.filter exists
-             [ Filename.concat root (Filename.concat Lane_addon_store.tool_request_bodies_directory group) ] in
+             (List.map (fun namespace -> Filename.concat root (Filename.concat namespace group))
+                [ Lane_addon_store.tool_request_bodies_directory
+                ; Lane_addon_store.history_fences_directory
+                ; Lane_addon_store.history_resolutions_directory ]) in
       scan_grouped ~after_read ~delete:scope_directories root
         Lane_addon_store.tool_request_owners_directory ~entry:tool_request_owner_entry
         (fun ~group ->

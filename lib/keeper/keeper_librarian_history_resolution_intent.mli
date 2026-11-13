@@ -18,7 +18,6 @@ type t = private {
   reason:string;
   submitted_at:float;
   phase:phase;
-  child_payload:Lane_addon_request_progress.preparation_intent option;
   memory_commit:memory_commit option;
 }
 type error = Invalid of string | Conflict of string | Unavailable of string
@@ -59,5 +58,7 @@ val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
 (** Serialized Memory-lane use only. Confirm exact current committed range
     receipts under Memory locks without recovery, then retain that observation.
     A missing/pending/uncertain receipt does not establish completion. *)
-val intended_child : t -> Lane_addon_request_progress.preparation_intent option
-(** Internal continuation/lineage payload, never an HTTP projection. *)
+val child : t -> child option
+(** The child a [Child_intended] or [Child_confirmed] intent names by ID and
+    digest. The intent holds no request: the child's request is the body file
+    its digest names, staged before the intent and read where it is used. *)

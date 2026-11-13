@@ -39,9 +39,10 @@ let validate ~restore ~read ~read_fence ~read_resolution ~require_confirmed requ
               | Requested | Refused _ | Fenced -> false) intents) in
           let* ()=require (intent.expected=fence.expected && intent.actor=fence.actor && intent.reason=fence.reason)
             "History child intent does not own the original fence" in
-          let* intended=Option.to_result ~none:"Resolution child payload is absent" (Intent.intended_child intent) in
-          let* intended_digest=Owner.request_digest intended.request in
-          let* ()=require (intended_digest=Request.body_digest request) "History child differs from its durable intent" in
+          (* The intent names its child by digest, and equal digests are
+             equal requests. *)
+          let* intended=Option.to_result ~none:"Resolution child intent is absent" (Intent.child intent) in
+          let* ()=require (intended.request_digest=Request.body_digest request) "History child differs from its durable intent" in
           let* expected=Source.with_current ~expected_revision:(Source.expected_revision (Request.source request))
             ~current:(Source.input (Request.source request)).current (Request.source parent_request)
             |> Result.map_error Source.error_to_string in
@@ -56,6 +57,8 @@ let confirm_predecessor ~store ~require_confirmed request =
   validate ~restore:Request.restore ~require_confirmed request
     ~read:(fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string)
     ~read_fence:(Store.load_history_fence store) ~read_resolution:(Store.load_history_resolution store)
+(* Names the acknowledged child only. Its lineage is confirmed by whoever
+   reads that child next. *)
 let confirmed_resolution_child ~store ~request ~original =
   let* fence=fenced_original ~store ~request ~original in
   match fence with
@@ -67,8 +70,5 @@ let confirmed_resolution_child ~store ~request ~original =
     let* intent=Option.to_result ~none:"Fenced history original has no active resolution" (List.find_opt (fun intent ->
       intent.Intent.expected=fence.expected && intent.actor=fence.actor && intent.reason=fence.reason) intents) in
     match intent.phase with
-    | Intent.Child_confirmed child ->
-      let* intended=Option.to_result ~none:"Acknowledged resolution child payload is absent" (Intent.intended_child intent) in
-      let* request=Request.of_json ~owner:(Request.physical_owner request) intended.request in
-      let+ ()=confirm_predecessor ~store ~require_confirmed:true request in Some child.request_id
+    | Intent.Child_confirmed child -> Ok (Some child.request_id)
     | Requested | Refused _ | Fenced | Child_intended _ -> Ok None

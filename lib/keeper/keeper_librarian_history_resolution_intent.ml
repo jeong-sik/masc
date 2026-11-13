@@ -19,7 +19,6 @@ type memory_commit = {request_id:string;receipts:Memory.durable_range_receipt li
 type t = {
   intent_id:string;scope:string;original_request_id:string;expected:Fence.guard;
   actor:string;reason:string;submitted_at:float;phase:phase;
-  child_payload:Progress.preparation_intent option;
   memory_commit:memory_commit option;
 }
 type error = Invalid of string | Conflict of string | Unavailable of string
@@ -49,8 +48,7 @@ let to_public_json intent = `Assoc (("memory_commit",(match intent.memory_commit
 let to_json intent = `Assoc (("scope",`String intent.scope)::
   ("memory_commit",(match intent.memory_commit with None -> `Null | Some proof ->
     `Assoc ["request_id",`String proof.request_id;"receipts",`List (List.map Codec.durable_range_receipt_to_json proof.receipts)]))::
-  ("child_payload",(match intent.child_payload with
-    | None -> `Null | Some intended -> `Assoc ["request_id",`String intended.request_id;"request",intended.request]))::public_fields intent)
+  public_fields intent)
 let hash = function
   | `String value when String_util.is_lowercase_sha256_hex value -> Ok value
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> Error "Invalid resolution digest"
@@ -84,12 +82,6 @@ let phase_of_json json =
     let+ ()=Json.finish ~context fields in
     if kind="child_intended" then Child_intended child else Child_confirmed child
   | _ -> Error "Unknown history resolution phase"
-let preparation_of_json json =
-  let context="history resolution child payload" in
-  let* fields=Json.object_fields ~context json in
-  let* request_id,fields=Json.field ~context "request_id" Json.as_non_blank fields in
-  let* request,fields=Json.field ~context "request" Result.ok fields in
-  let+ ()=Json.finish ~context fields in ({Progress.request_id;request}:Progress.preparation_intent)
 let memory_commit_of_json json =
   let context="history resolution Memory receipt" in
   let* fields=Json.object_fields ~context json in
@@ -99,13 +91,9 @@ let memory_commit_of_json json =
   let* ()=Json.finish ~context fields in
   let+ ()=require (receipts<>[] && List.for_all (function Memory.Committed _ -> true | Prepared _ -> false) receipts)
     "Resolution completion has no committed Memory receipts" in {request_id;receipts}
-let restore_child (intended:Progress.preparation_intent) =
-  let* owner=match intended.request with
-    | `Assoc fields -> let* json=Option.to_result ~none:"Resolution child has no owner" (List.assoc_opt "owner" fields) in
-      Request.owner_of_json json
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Error "Invalid resolution child payload" in
-  let* child=Request.of_json ~owner intended.request in
-  let+ ()=require (Request.request_id child=intended.request_id) "Resolution child ID differs from its payload" in child
+let child intent = match intent.phase with
+  | Child_intended child | Child_confirmed child -> Some child
+  | Requested | Refused _ | Fenced -> None
 let same_atom (left:Current.durable_range_id) (right:Current.durable_range_id) =
   {left with unread_messages=[]}={right with unread_messages=[]}
 let same_official (left:Current.official_range_id) (right:Current.official_range_id) =
@@ -135,36 +123,31 @@ let of_json json =
   let* reason,fields=Json.field ~context "reason" Json.as_non_blank fields in
   let* submitted_at,fields=Json.field ~context "submitted_at" clock fields in
   let* phase,fields=Json.field ~context "phase" phase_of_json fields in
-  let* child_payload,fields=Json.field ~context "child_payload" (Json.as_nullable preparation_of_json) fields in
   let* memory_commit,fields=Json.field ~context "memory_commit" (Json.as_nullable memory_commit_of_json) fields in
   let* ()=Json.finish ~context fields in
   let* expected_id=digest (payload ~scope ~request_id:original_request_id ~expected ~actor ~reason) in
   let* id_scope=Request.scope_of_request_id original_request_id in
   let* ()=require (intent_id=expected_id && id_scope=scope) "Resolution intent identity differs" in
-  let* ()=match phase,child_payload with
-    | (Requested | Refused _ | Fenced),None -> Ok ()
-    | (Child_intended expected_child | Child_confirmed expected_child),Some intended ->
-      let* request=restore_child intended in
-      let* request_digest=Owner.request_digest intended.request in
-      let* ()=require (request_digest=expected_child.request_digest && intended.request_id=expected_child.request_id
-        && Request.scope (Request.physical_owner request)=scope && intended.request_id<>original_request_id)
+  (* The child is named by ID and digest. Its request is the body file that
+     digest names; whoever reads that body checks it there. The request ID
+     carries its scope. *)
+  let* ()=match phase with
+    | Requested | Refused _ | Fenced -> Ok ()
+    | Child_intended expected_child | Child_confirmed expected_child ->
+      let* child_scope=Request.scope_of_request_id expected_child.request_id in
+      require (child_scope=scope && expected_child.request_id<>original_request_id)
         "Resolution child binding differs" in
-      (match Request.predecessor request with
-       | Some predecessor -> require (predecessor.request_id=original_request_id) "Resolution child has another predecessor"
-       | None -> Error "Resolution child has no predecessor")
-    | (Requested | Refused _ | Fenced),Some _
-    | (Child_intended _ | Child_confirmed _),None -> Error "Resolution child payload presence differs" in
-  let* ()=match memory_commit,phase,child_payload with
-    | None,(Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _),_ -> Ok ()
-    | Some proof,Child_confirmed _,Some intended ->
-      let* request=restore_child intended in
+  (* [observe_memory_commit] proves the receipts against the completed
+     original's source when it writes them. A reader does not repeat that. *)
+  let* ()=match memory_commit,phase with
+    | None,(Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _) -> Ok ()
+    | Some proof,Child_confirmed _ ->
       let* proof_scope=Request.scope_of_request_id proof.request_id in
-      require (proof_scope=scope && complete_receipts (Request.source request) proof.receipts)
-        "Resolution completion differs from its original source"
-    | Some _,(Requested | Refused _ | Fenced | Child_intended _),_
-    | Some _,Child_confirmed _,None -> Error "Resolution completion precedes its child acknowledgement" in
-  Ok {intent_id;scope;original_request_id;expected;actor;reason;submitted_at;phase;child_payload;memory_commit}
-let envelope ~scope ~request_id intents = `Assoc ["schema",`String "keeper.librarian.history-resolution.v1";
+      require (proof_scope=scope) "Resolution completion belongs to another scope"
+    | Some _,(Requested | Refused _ | Fenced | Child_intended _) ->
+      Error "Resolution completion precedes its child acknowledgement" in
+  Ok {intent_id;scope;original_request_id;expected;actor;reason;submitted_at;phase;memory_commit}
+let envelope ~scope ~request_id intents = `Assoc ["schema",`String "keeper.librarian.history-resolution.v2";
   "scope",`String scope;"request_id",`String request_id;"intents",`List (List.map to_json intents)]
 let decode ~scope ~request_id json =
   let context="history resolution envelope" in
@@ -174,7 +157,7 @@ let decode ~scope ~request_id json =
   let* stored_id,fields=Json.field ~context "request_id" Json.as_string fields in
   let* values,fields=Json.field ~context "intents" (Json.as_list of_json) fields in
   let* ()=Json.finish ~context fields in
-  let* ()=require (schema="keeper.librarian.history-resolution.v1" && stored_scope=scope && stored_id=request_id
+  let* ()=require (schema="keeper.librarian.history-resolution.v2" && stored_scope=scope && stored_id=request_id
     && values<>[] && List.for_all (fun intent -> intent.scope=scope && intent.original_request_id=request_id) values)
     "History resolution envelope binding differs" in
   let ids=List.map (fun intent -> intent.intent_id) values in
@@ -219,7 +202,7 @@ let submit ~config ~keeper_name ~request_id ~expected ~actor ~reason ~now =
   let store=Store.of_config config in
   let* intent_id=digest (payload ~scope ~request_id ~expected ~actor ~reason) |> Result.map_error (fun detail -> Invalid detail) in
   let* candidate=of_json (to_json {intent_id;scope;original_request_id=request_id;expected;actor;reason;
-    submitted_at=now;phase=Requested;child_payload=None;memory_commit=None}) |> Result.map_error (fun detail -> Invalid detail) in
+    submitted_at=now;phase=Requested;memory_commit=None}) |> Result.map_error (fun detail -> Invalid detail) in
   let* previous,values=load ~store ~scope ~request_id in
   match List.find_opt (fun intent -> intent.intent_id=intent_id) values with
   | Some existing -> Ok (existing,true)
@@ -308,22 +291,37 @@ let intend_child ~store ~expected request = update ~store ~expected (fun actual 
     | Some predecessor -> require (predecessor.request_id=parent.request_id && predecessor.request_digest=parent.request_digest)
       "Resolution child has another original predecessor"
     | None -> Error "Resolution child has no original predecessor" in
-  let payload:Progress.preparation_intent={request_id=Request.request_id request;request=Request.to_json request} in
-  let+ request_digest=Owner.request_digest payload.request in
-  {actual with phase=Child_intended {request_id=payload.request_id;request_digest};child_payload=Some payload})
+  (* The child's request is durable under its digest before the intent names
+     it. The body is the one file retaining the child writes. *)
+  let* staged=Owner.prepare_successor ~store ~scope:actual.scope
+    ~request_id:(Request.request_id request) ~request:(Request.to_json request)
+    |> Result.map_error Owner.error_to_string in
+  let+ ()=require (staged.request_digest=Request.body_digest request)
+    "Resolution child body differs from its request digest" in
+  {actual with phase=Child_intended {request_id=staged.request_id;request_digest=staged.request_digest}})
 let confirm_child ~store ~expected (child:Owner.retained) = update ~store ~expected (fun actual ->
-  let* intended=Option.to_result ~none:"Resolution child intent is absent" actual.child_payload in
   let* expected_child=match actual.phase with Child_intended child -> Ok child
     | Requested | Refused _ | Fenced | Child_confirmed _ -> Error "Resolution child is not awaiting acknowledgement" in
   let+ ()=require (child.scope=actual.scope && child.request_id=expected_child.request_id
-    && child.request_digest=expected_child.request_digest && child.request_id=intended.request_id
+    && child.request_digest=expected_child.request_digest
     && Progress.phase child.progress=Progress.Captured) "Unacknowledged resolution child differs or has execution progress" in
   {actual with phase=Child_confirmed expected_child})
-let intended_child intent = intent.child_payload
 let observe_memory_commit ~store ~expected ~request ~(completed:Owner.retained) =
   update ~store ~expected (fun actual ->
-    let* intended=Option.to_result ~none:"Resolution child payload is absent" actual.child_payload in
-    let* root=restore_child intended in
+    let* child=match actual.phase with Child_confirmed child -> Ok child
+      | Requested | Refused _ | Fenced | Child_intended _ -> Error "Resolution child is not acknowledged" in
+    (* The completed original is the resolution child or a replacement that
+       descends from it. Only the second needs the child's own body. *)
+    let* root=if Request.request_id request=child.request_id then
+        let+ ()=require (Request.body_digest request=child.request_digest)
+          "Resolution child differs from its durable intent" in request
+      else
+        let* record=Owner.load ~store ~scope:actual.scope ~request_id:child.request_id
+          |> Result.map_error Owner.error_to_string in
+        let* record=Option.to_result ~none:"Resolution child is absent" record in
+        let* ()=require (record.request_digest=child.request_digest)
+          "Resolution child differs from its durable intent" in
+        Request.restore_payload ~owner:(Request.physical_owner request) record in
     let* source=Source.with_current ~expected_revision:(Source.expected_revision (Request.source request))
       ~current:(Source.input (Request.source request)).current (Request.source root)
       |> Result.map_error Source.error_to_string in

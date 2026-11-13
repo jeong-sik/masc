@@ -73,8 +73,8 @@ type refusal =
             is that file. For a native claim it is the slot directory, then the
             binding and observations of the instance the slot names, when that
             could be read and they exist. For a tool request owner it is the
-            record's scope directory and, when it exists, the scope's request
-            body directory. *)
+            record's scope directory and, when they exist, the scope's request
+            body, history fence and history resolution directories. *)
   }
 
 type report =

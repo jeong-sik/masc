@@ -1,0 +1,8 @@
+### Fixed
+
+- The Board persist-lock metric observers run after the persistence lock is
+  released. They ran while it was held, so an observer that read Board through
+  the same lock waited on itself and every later Board write stopped behind
+  it. An observer that fails is now reported after the write it measured, with
+  that write's receipt; a failing acquire observer no longer prevents the
+  write (#51273, #PENDING).

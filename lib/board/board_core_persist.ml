@@ -254,45 +254,70 @@ let with_lock store f =
 
 (** Serialize JSONL writes. Callers must never hold the state mutex while
     acquiring [persist_mutex]. Acquire the persist lock before taking a state
-    snapshot, and retain it until the snapshot has been written. *)
+    snapshot, and retain it until the snapshot has been written.
+
+    The lock body only measures. Both metric observers run after
+    [persist_mutex] is released, so an observer may call back into Board, and
+    the held duration covers [f] alone. The acquire-wait sample is therefore
+    reported after [f]: an observer exception follows the write instead of
+    preventing it. *)
 let with_persist_lock_internal ~defer_settlement store f =
   let observe f =
     try f (); Ok () with
     | exn -> Error (exn, Printexc.get_raw_backtrace ())
   in
   let started = Time_compat.now () in
-  let observed =
-    Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
-      let acquired = Time_compat.now () in
-      match observe (fun () ->
-        Board_metrics_hooks.observe_persist_lock_acquire_sec
-          (acquired -. started)) with
-      | Error failure -> Error failure
-      | Ok () ->
+  let acquired_at = ref None in
+  let measured =
+    try
+      Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
+        let acquired = Time_compat.now () in
+        acquired_at := Some acquired;
         (* Reserved settlement travels as a carrier and leaves the lock
            cleanly so an uncertain store retains its evidence. Only an explicit
-           non-reserved exception crossing [use_rw] poisons it. Observer
-           exceptions leave normally before re-raising. *)
+           non-reserved exception crossing [use_rw] poisons it. *)
         let result =
           try Ok (f ()) with
           | Board_posts_source.Reserved_settlement settlement -> Error settlement
         in
-        let observation = observe (fun () ->
-          let released = Time_compat.now () in
-          Board_metrics_hooks.observe_persist_lock_held_sec
-            (released -. acquired))
-        in
-        Ok (result, observation))
+        let released = Time_compat.now () in
+        result, acquired, released)
+    with
+    | exn ->  (* cancel-guard-ok: re-raises the original exception below *)
+      (* [f] poisoned the lock, or the lock was never acquired. A wait that
+         ended in acquisition is still reported; the original exception wins
+         over an observer failure. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      (match !acquired_at with
+       | None -> ()
+       | Some acquired ->
+         let (_ : (unit, exn * Printexc.raw_backtrace) result) =
+           observe (fun () ->
+             Board_metrics_hooks.observe_persist_lock_acquire_sec
+               (acquired -. started))
+         in
+         ());
+      Printexc.raise_with_backtrace exn backtrace
   in
-  match observed with
-  | Ok (Ok result, Ok ()) -> result
-  | Ok (Error settlement, _) ->
+  let result, acquired, released = measured in
+  let acquire_observation =
+    observe (fun () ->
+      Board_metrics_hooks.observe_persist_lock_acquire_sec (acquired -. started))
+  in
+  let held_observation =
+    observe (fun () ->
+      Board_metrics_hooks.observe_persist_lock_held_sec (released -. acquired))
+  in
+  match result, acquire_observation, held_observation with
+  | Ok result, Ok (), Ok () -> result
+  | Error settlement, (Ok () | Error _), (Ok () | Error _) ->
     if defer_settlement then raise (Board_posts_source.Reserved_settlement settlement)
     else Printexc.raise_with_backtrace settlement.exception_ settlement.backtrace
-  | Error (exn, backtrace) | Ok (Ok _, Error (exn, backtrace)) ->
-    (* The observer ran outside mutation work, and [persist_mutex] is already
-       released. Fusion still owns its origin lock: carry reserved observer
-       failures through that lock too, without inventing a write receipt. *)
+  | Ok _, Error (exn, backtrace), (Ok () | Error _)
+  | Ok _, Ok (), Error (exn, backtrace) ->
+    (* [persist_mutex] is already released. Fusion still owns its origin lock:
+       carry reserved observer failures through that lock too, without
+       inventing a write receipt. *)
     (match defer_settlement, Board_posts_source.reserved_exception (exn, backtrace) with
      | true, Some (exception_, original_backtrace) ->
        raise (Deferred_persist_observer (exception_, original_backtrace))

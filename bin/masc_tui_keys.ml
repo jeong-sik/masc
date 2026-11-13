@@ -943,8 +943,8 @@ let for_surface = function
       ; b ~ko:"요약" Act "b" "summary" ~detail:List_only
           ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
         (* [t] and [p] answer on the list only. In a Goal detail [p] is Pause
-           and [r] is Resume (the Actions row), so the detail footer must not
-           name [p] as Approvals. *)
+           or Resume (the Actions row), so the detail footer must not name [p]
+           as Approvals. *)
       ; b ~ko:"목표 / 작업" Navigate "t" "Goals / Tasks" ~detail:List_only
           ~help:"switch between Goals and the active task list"
       ; b ~ko:"승인" Navigate "p" "Approvals" ~detail:List_only
@@ -1479,12 +1479,10 @@ let footer_hints ~lang ?detail_open ?has_rows ?has_reading surface =
     (List.filter (answers_in_state ?detail_open ?has_rows ?has_reading)
        (for_surface surface))
 
-(* [r] is Resume for a paused Goal, so the generic refresh label must not
-   advertise it as a read in this detail. The Candle read has its own key. *)
+(* The Candle read has its own key and leads the hints. *)
 let planning_goal_hints ~lang ~detail_open ~has_rows =
   let bindings = for_surface Planning
     |> List.filter (answers_in_state ~detail_open ?has_rows)
-    |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r"))
     |> List.map (fun binding ->
       if detail_open && String.equal binding.key "j/k" then
         {binding with label = "scroll"; label_ko = "스크롤"}

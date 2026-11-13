@@ -187,6 +187,7 @@ describe('readOwned', () => {
     ['a reason with no integration', answer({ integration_id: undefined, unread: 'login_receipt_missing' }, {})],
     ['a reason with no model', answer({}, { model: undefined, unread: 'runtime_not_bound' })],
     ['a Runtime with no account', answer({}, { provider_account_id: undefined })],
+    ['a Runtime on an account not listed', answer({}, { provider_account_id: 'acct_2' })],
     ['a model that is no string', answer({}, { model: 5 })],
     ['an unread model with a reason that is no string', answer({}, { model: null, unread: 1 })],
   ])('refuses %s', (_name, value) => {

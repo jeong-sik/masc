@@ -243,11 +243,17 @@ function readRuntime(json: unknown): Runtime | null {
   return id === null || accountId === null || model === null ? null : { id, accountId, model }
 }
 
+/** What a person owns. Every Runtime is on one of the accounts listed: the
+    authorization log makes a Runtime only on an account its maker owns
+    (lib/auth/authz_runtime_state.ml, `Account_not_theirs`), and never unlinks
+    an account. An answer that breaks this is not what the route promises. */
 export function readOwned(json: unknown): Owned | null {
   if (!isRecord(json)) return null
   const accounts = readList(json.provider_accounts, readAccount)
   const runtimes = readList(json.runtimes, readRuntime)
-  return accounts === null || runtimes === null ? null : { accounts, runtimes }
+  if (accounts === null || runtimes === null) return null
+  const listed = new Set(accounts.map((account) => account.id))
+  return runtimes.every((runtime) => listed.has(runtime.accountId)) ? { accounts, runtimes } : null
 }
 
 const refusal = (status: number, json: unknown): Problem =>

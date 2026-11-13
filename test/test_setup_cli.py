@@ -991,18 +991,35 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                         # A real boot: bounded by the 60 s setup gives its
                         # server, and the steps after it.
                         setup_port = self.unused_port()
+
+                        def observed_status():
+                            # An owner that cannot be read answers a document
+                            # without a status; the document says why.
+                            document = json.loads(run('setup-server', '--port', setup_port).stdout)
+                            if document.get('status') is None:
+                                self.fail('setup-server named no status: %r' % (document,))
+                            return document
+
+                        def freed_within(seconds):
+                            deadline = time.monotonic() + seconds
+                            while time.monotonic() < deadline:
+                                if observed_status()['status'] == 'free':
+                                    return True
+                                time.sleep(.2)
+                            return observed_status()['status'] == 'free'
+
                         try:
                             result = run('setup', '--no-tui', '--port', setup_port, timeout=240)
                         finally:
                             # Setup stops the server it started when it does
-                            # not finish. One it left running is ended here.
-                            left = json.loads(run('setup-server', '--port', setup_port).stdout)
+                            # not finish. One it left running is ended here,
+                            # before its workspace is removed under it.
+                            left = observed_status()
                             if 'server_pid' in left:
                                 os.kill(left['server_pid'], signal.SIGTERM)
-                                deadline = time.monotonic() + 60
-                                while time.monotonic() < deadline and json.loads(
-                                        run('setup-server', '--port', setup_port).stdout)['status'] != 'free':
-                                    time.sleep(.2)
+                                if not freed_within(60):
+                                    os.kill(left['server_pid'], signal.SIGKILL)
+                                    self.assertTrue(freed_within(15), 'the server setup left did not end')
                     else:
                         left = None
                         result = run('setup', '--no-tui', '--port', str(server.server_port), *sandbox_args)
@@ -1036,8 +1053,12 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 self.assertIn('The running workspace has loaded your saved model settings.', result.stdout)
                 self.assertTrue((base / '.masc/auth/local-admin.token').exists())
                 self.assertEqual(posted, [])
-                if result.returncode != 0:
-                    self.assertEqual(left['status'], 'free', 'setup left the server it started running')
+                # The Keeper boot fails in this fixture: its docker stand-in
+                # answers no security options. Setup then ends with exit 1
+                # and stops the server it started.
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('Starting imp failed', result.stderr)
+                self.assertEqual(left['status'], 'free', 'setup left the server it started running')
             elif while_waiting == 'leaves':
                 # The server setup found left before it was ready. Setup says
                 # so at once; it does not wait out its minute for a process

@@ -97,6 +97,10 @@ let read ~(person : Login.person) ~base_path ~query =
     let records = Conversation.root ~base_path ~namespace:person.namespace in
     let recorded result = Result.map_error (Turn.record_error ~keeper_id) result in
     let* listed = Conversation.conversations records keeper_id |> recorded in
+    (* The judgment of the deletions and the read of the turns come between
+       two removals of a directory, so a read does not bring back one a
+       deletion removed. *)
+    Conversation.reading @@ fun () ->
     let standing (listed : Conversation.listed) =
       Purge.standing person listed.conversation.conversation_id
     in

@@ -114,6 +114,24 @@ let exact_outputs ~directory world =
   | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
   | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world.exact_outputs must be a table"
+(* A row action fills a lane action, so the package must expose an action
+   tool. It names the lane whose rows offer it: a package that selects its
+   lanes must name one of them. A package that emits every lane cannot know its
+   lanes at install, so its names are not checked here. *)
+let check_row_actions ~outputs ~action_tool (presentation : Lane_addon_presentation.t) =
+  match presentation.Lane_addon_presentation.actions, action_tool with
+  | [], (Some _ | None) -> Ok ()
+  | _ :: _, None -> Error "presentation actions require a world.actions.tool"
+  | actions, Some _ ->
+      let emits_every_lane = List.exists (fun (_, selection) -> match selection with
+        | All_lanes -> true | Selected_lanes _ -> false) outputs in
+      let selected = List.concat_map (fun (_, selection) -> match selection with
+        | All_lanes -> [] | Selected_lanes lanes -> lanes) outputs in
+      (match List.find_opt (fun (action : Lane_addon_presentation.row_action) ->
+          not emits_every_lane && not (List.mem action.Lane_addon_presentation.lane_id selected)) actions with
+       | None -> Ok ()
+       | Some action ->
+           Error ("presentation action lane is not an output lane: " ^ action.Lane_addon_presentation.lane_id))
 let load ~path =
   let parse () =
     let path = Unix.realpath path in
@@ -315,6 +333,7 @@ let load ~path =
     let* presentation = json "presentation" in
     let* presentation = match presentation with None -> Ok Lane_addon_presentation.empty
       | Some value -> Lane_addon_presentation.of_json value in
+    let* () = check_row_actions ~outputs ~action_tool presentation in
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in

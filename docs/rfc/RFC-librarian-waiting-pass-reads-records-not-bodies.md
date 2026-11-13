@@ -167,7 +167,7 @@ related: ["0500", "librarian-history-unknown-resolution", "librarian-durable-mes
 
 | 자리 | P 본문 | C 본문 | R |
 |---|---:|---:|---:|
-| `Resolution_work.run_serialized` 가 scope 의 resolution 기록을 모두 푼다(`keeper_librarian_history_resolution_intent.ml` 241~249행). 풀 때마다 child 요청을 타입으로 풀고 digest 를 계산한다(147~148행) | | | 1 |
+| `Resolution_work.run_serialized`(`keeper_librarian_history_resolution_work.ml` 166행)가 `Intent.active_for_keeper` 를 불러 scope 의 resolution 기록을 모두 푼다(`keeper_librarian_history_resolution_intent.ml` 241~249행). 풀 때마다 child 요청을 타입으로 풀고 digest 를 계산한다(같은 파일 147~148행) | | | 1 |
 | `recover_child` 가 부모를 읽고(`keeper_librarian_history_resolution_work.ml` 81행), child 를 읽고(87행), 계보를 확인한다(100행) | 2 | 1 | 1 |
 | `retain_completion` 이 child 를 읽고 계보를 확인한 뒤에 phase 를 본다(105~122행) | 1 | 1 | 1 |
 | `discover` 가 scope 의 원본을 본문까지 읽는다(`keeper_librarian_durable_owner.ml` 46~56행) | 1 | 1 | |
@@ -577,7 +577,7 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
 | L2 | 3.4절의 조건을 만족하는 원본은 `load` 를 부르지 않기, gate 를 기록으로 찾기 | 8절의 pass 시험 |
 | L3 | 기록만으로 모든 scope 를 도는 owner 함수, 결과가 전달될 때 Keeper 를 찾는 길(3.8절) | 8절의 wake 시험 |
 
-- L0 이 첫 층이다. 2026-11-13 에 잰 검증 시간의 84% 가 해소 쌍의 Keeper 에서 나왔고, 로그에 잡히지 않는 계보 읽기가 그 밖에 pass 마다 부모 본문 다섯 번, resolution 기록 다섯 번이기 때문이다(1.6절). L0 뒤에 로그의 검증 시간에서 빠지는 것은 부모 본문 읽기다. child 본문 읽기는 L2 와 #51280 이 줄인다.
+- L0 이 첫 층이다. 2026-11-13 에 잰 검증 시간의 84% 가 해소 쌍의 Keeper 에서 나왔고, pass 마다 부모 본문을 여섯 번, resolution 기록을 다섯 번 읽기 때문이다(1.6절). 그 가운데 로그의 검증 시간에 잡히는 것은 부모 본문 한 번뿐이다. 나머지 부모 본문 다섯 번과 resolution 기록 다섯 번은 어느 로그에도 없다. L0 뒤에 로그의 검증 시간에서 빠지는 것은 부모 본문 읽기다. child 본문 읽기는 L2 와 #51280 이 줄인다.
 - 3.7절의 설치가 지금의 두 쌍을 지운다. L0 의 효과는 그 뒤에 운영자가 새로 해소한 쌍에서 잰다. L0 은 접수 모듈, worker 호출, `lane_addon_exact.ml` 을 고치지 않는다. L1 에 기대지 않는다.
 - L0 이 history 원본과 resolution 기록의 모양을 바꾼다. 지우고 설치하는 층은 L0 하나다(3.7절).
 - L1 은 저장된 것을 바꾸지 않는다. L1 만으로 worker 호출 앞의 본문 읽기(1.1절 여섯째 줄)가 history, floor step, admission 에서 없어진다. Curator 는 다른 길로 부르므로 남는다(5절).

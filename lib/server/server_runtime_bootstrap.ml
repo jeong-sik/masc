@@ -1694,9 +1694,9 @@ let activate_owner_state
   }
 ;;
 
-let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user ?input_base_path
-    ?on_ready ~accept_store_quarantine ~make_routes ~make_request_handler ~make_h2_request_handler
-    ~make_h2_error_handler () =
+let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user ~lease
+    ?input_base_path ?on_ready ~accept_store_quarantine ~make_routes ~make_request_handler
+    ~make_h2_request_handler ~make_h2_error_handler () =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
@@ -2190,6 +2190,21 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   (* 3. Start serving -- /health responds before init completes *)
   let run_serving ~sw ~socket ~https_listener ~routes:_ ~request_handler
       ~h2_request_handler ~h2_error_handler =
+    (* HIGH-RISK-UNREVIEWED: a command line takes the process that announces
+       this port for the server of the workspace, and decides from it which
+       process gets the bearer of the workspace (#51075). The port is
+       [config.port], the cleartext listener that [socket] bound, which a
+       command line asks at [Masc_network_defaults.masc_http_loopback_origin].
+       Both listener branches reach here once, after the bind and the route
+       table. A server whose port the host cannot read does not serve: the
+       boot stops before [on_ready] runs and before the port is recorded. *)
+    (match Server_startup_takeover.announce_single_user_server lease ~port:config.port with
+     | Ok () -> ()
+     | Error rejection ->
+       raise
+         (Env_config_core.Config_error
+            ("the HTTP port of this server is not announced to the host: "
+             ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection)));
     Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
@@ -2352,6 +2367,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
       ~port
       ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
       ~single_user
+      ~lease:judged.lease
       ?input_base_path
       ?on_ready
       ~accept_store_quarantine

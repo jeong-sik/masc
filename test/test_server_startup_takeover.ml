@@ -1752,9 +1752,9 @@ let announcement_path ~run_dir base_path =
     ~canonical_base_path:(Unix.realpath base_path)
   ^ ".account-server"
 
-(* Another process holds the lease and announces [port]; it leaves when the
-   write end it is given back closes. *)
-let spawn_announcing_owner ~run_dir base_path ~port =
+(* Another process holds the lease and announces [port] with [announce]; it
+   leaves when the write end it is given back closes. *)
+let spawn_announcing_owner ~announce ~run_dir base_path ~port =
   let ready_read, ready_write = Unix.pipe () in
   let release_read, release_write = Unix.pipe () in
   match Unix.fork () with
@@ -1763,7 +1763,7 @@ let spawn_announcing_owner ~run_dir base_path ~port =
     close_quietly release_write;
     (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
      | Server_startup_takeover.Base_path_acquired lease ->
-       (match Server_startup_takeover.announce_account_server lease ~port with
+       (match announce lease ~port with
         | Ok () ->
           ignore (Unix.write_substring ready_write "1" 0 1 : int);
           let buffer = Bytes.create 1 in
@@ -1781,15 +1781,17 @@ let spawn_announcing_owner ~run_dir base_path ~port =
     close_quietly ready_read;
     (owner_pid, release_write)
 
-(* Asks the kernel from another process whether [port] is announced: a lock
-   is not inherited across fork, and the tables of this process are. *)
-let announcement_is_held_in_the_kernel ~run_dir base_path ~port =
-  let path = announcement_path ~run_dir base_path in
+(* Asks the kernel from another process whether the byte of [port] in the
+   file at [path] is locked: a lock is not inherited across fork, and the
+   tables of this process are. A file that is not there holds no lock. *)
+let byte_is_held_in_the_kernel path ~port =
   match Unix.fork () with
   | 0 ->
-    let fd = Unix.openfile path [ Unix.O_RDWR ] 0o600 in
-    ignore (Unix.lseek fd port Unix.SEEK_SET : int);
-    (match Unix.lockf fd Unix.F_TEST 1 with
+    (match
+       let fd = Unix.openfile path [ Unix.O_RDWR ] 0o600 in
+       ignore (Unix.lseek fd port Unix.SEEK_SET : int);
+       Unix.lockf fd Unix.F_TEST 1
+     with
      | () -> Unix._exit 1
      | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) -> Unix._exit 0
      | exception Unix.Unix_error _ -> Unix._exit 2)
@@ -1797,6 +1799,9 @@ let announcement_is_held_in_the_kernel ~run_dir base_path ~port =
     (match waitpid_nointr probe_pid with
      | Some (_, Unix.WEXITED 0) -> true
      | Some (_, _) | None -> false)
+
+let announcement_is_held_in_the_kernel ~run_dir base_path ~port =
+  byte_is_held_in_the_kernel (announcement_path ~run_dir base_path) ~port
 
 (* The end of a child interrupts a read once an Eio loop left its SIGCHLD
    handler in this process. *)
@@ -1844,7 +1849,11 @@ let test_port_holder_is_exact_beside_the_locks_of_other_processes () =
     Alcotest.(check bool) "a read makes no file" false
       (Sys.file_exists (announcement_path ~run_dir base_path));
     let first_pid, first_release = spawn_byte_locker ~run_dir base_path ~byte:before in
-    let owner_pid, owner_release = spawn_announcing_owner ~run_dir base_path ~port in
+    let owner_pid, owner_release =
+      spawn_announcing_owner
+        ~announce:Server_startup_takeover.announce_account_server
+        ~run_dir base_path ~port
+    in
     let second_pid, second_release = spawn_byte_locker ~run_dir base_path ~byte:after in
     Fun.protect
       ~finally:(fun () ->
@@ -1988,7 +1997,11 @@ let test_announcement_names_the_owner_and_ends_with_it () =
   with_base_and_run "startup-takeover-announcement" (fun ~base_path ~run_dir ->
     let port = 9000 in
     check_announcement "nothing before any owner" (Ok None) ~run_dir base_path;
-    let owner_pid, release_write = spawn_announcing_owner ~run_dir base_path ~port in
+    let owner_pid, release_write =
+      spawn_announcing_owner
+        ~announce:Server_startup_takeover.announce_account_server
+        ~run_dir base_path ~port
+    in
     let released = ref false in
     let release () =
       if not !released
@@ -2078,6 +2091,137 @@ let test_announcement_on_a_directory_is_refused () =
       Alcotest.(check bool) "nor for the lock of a port" true
         (is_directory_refusal
            (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port:9000)))
+
+(* The announcement of the server of a single user. *)
+
+(* The file the server of a single user announces on, its suffix written out
+   as [announcement_path] writes out the one of the account server. *)
+let single_user_announcement_path ~run_dir base_path =
+  Server_startup_takeover.For_testing.lease_path
+    ~run_dir:(Unix.realpath run_dir)
+    ~canonical_base_path:(Unix.realpath base_path)
+  ^ ".single-user-server"
+
+let check_single_user_port_holder message expected ~run_dir base_path ~port =
+  Alcotest.(check string) message (port_holder_label expected)
+    (port_holder_label
+       (Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port))
+
+let check_single_user_announcement message expected ~run_dir base_path =
+  Alcotest.(check string) message (announcement_label expected)
+    (announcement_label
+       (Server_startup_takeover.single_user_server_announcement ~run_dir ~base_path))
+
+(* Another process announces as the server of a single user. A reader of
+   that kind is answered with it, and a reader of the account server is not:
+   were the two kinds on one file, the kernel would name the owner to both. *)
+let test_a_single_user_announcement_is_not_the_account_servers () =
+  with_base_and_run "startup-takeover-single-user-apart" (fun ~base_path ~run_dir ->
+    let port = 9000 in
+    let owner_pid, release_write =
+      spawn_announcing_owner
+        ~announce:Server_startup_takeover.announce_single_user_server
+        ~run_dir base_path ~port
+    in
+    let released = ref false in
+    let release () =
+      if not !released
+      then (
+        released := true;
+        close_quietly release_write)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        release ();
+        stop_process owner_pid)
+      (fun () ->
+        check_single_user_port_holder "the kernel names the owner for its port"
+          (Ok (Some owner_pid)) ~run_dir base_path ~port;
+        check_single_user_announcement "and for the whole file"
+          (Ok (Some { Server_startup_takeover.pid = owner_pid; port }))
+          ~run_dir base_path;
+        check_port_holder "a reader of the account server is not answered with it" (Ok None)
+          ~run_dir base_path ~port;
+        check_announcement "nor for the whole file of the account server" (Ok None)
+          ~run_dir base_path;
+        Alcotest.(check bool) "the lock is on the file of a single user" true
+          (byte_is_held_in_the_kernel (single_user_announcement_path ~run_dir base_path) ~port);
+        release ();
+        owner_exited_on_its_own owner_pid;
+        check_single_user_port_holder "nothing once the owner is gone" (Ok None)
+          ~run_dir base_path ~port))
+
+(* The other way round: the account server announces, and a reader of a
+   single user is not answered with it. *)
+let test_an_account_server_announcement_is_not_a_single_users () =
+  with_base_and_run "startup-takeover-account-apart" (fun ~base_path ~run_dir ->
+    let port = 9000 in
+    let owner_pid, release_write =
+      spawn_announcing_owner
+        ~announce:Server_startup_takeover.announce_account_server
+        ~run_dir base_path ~port
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        close_quietly release_write;
+        stop_process owner_pid)
+      (fun () ->
+        check_port_holder "the kernel names the account server for its port"
+          (Ok (Some owner_pid)) ~run_dir base_path ~port;
+        check_single_user_port_holder "a reader of a single user is not answered with it"
+          (Ok None) ~run_dir base_path ~port;
+        check_single_user_announcement "nor for the whole file of a single user" (Ok None)
+          ~run_dir base_path))
+
+(* The owner announces one port, once; a number that is no port is refused
+   before anything is announced. *)
+let test_a_single_user_owner_announces_one_port_once () =
+  with_base_and_run "startup-takeover-single-user-own" (fun ~base_path ~run_dir ->
+    match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease was not acquired"
+    | Server_startup_takeover.Base_path_acquired lease ->
+      let port = 9001 in
+      let path = single_user_announcement_path ~run_dir base_path in
+      let released = ref false in
+      let release () =
+        if not !released
+        then (
+          released := true;
+          Server_startup_takeover.release_base_path_lease lease)
+      in
+      let announce port = Server_startup_takeover.announce_single_user_server lease ~port in
+      Fun.protect ~finally:release (fun () ->
+        check_announced "a number below the ports is refused" "0 is not a port" (announce 0);
+        check_announced "a number above the ports is refused" "65536 is not a port"
+          (announce 65536);
+        (match
+           Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port:0
+         with
+         | Error (Server_startup_takeover.Announcement_port_invalid { port = 0 }) -> ()
+         | answer ->
+           Alcotest.fail ("a number that is no port was asked about: " ^ port_holder_label answer));
+        check_announced "the port is announced" "announced" (announce port);
+        check_single_user_port_holder "the owner holds the byte of its port"
+          (Ok (Some (Unix.getpid ()))) ~run_dir base_path ~port;
+        check_single_user_announcement "the owner reads its own announcement"
+          (Ok (Some { Server_startup_takeover.pid = Unix.getpid (); port }))
+          ~run_dir base_path;
+        check_announced "a second announcement is refused, and names the first"
+          (Printf.sprintf "this process already announces port %d" port)
+          (announce (port + 1));
+        check_port_holder "a reader of the account server is not answered" (Ok None)
+          ~run_dir base_path ~port;
+        Alcotest.(check bool) "the reads left the lock on the file of a single user" true
+          (byte_is_held_in_the_kernel path ~port);
+        Alcotest.(check bool) "and the refusal took no lock on the second port" false
+          (byte_is_held_in_the_kernel path ~port:(port + 1));
+        release ();
+        Alcotest.(check bool) "the release of the lease withdrew it" false
+          (byte_is_held_in_the_kernel path ~port);
+        check_single_user_announcement "nothing after the release" (Ok None)
+          ~run_dir base_path))
 
 let () =
   Alcotest.run "Server_startup_takeover"
@@ -2177,5 +2321,14 @@ let () =
             test_a_replaced_lease_path_announces_nothing;
           Alcotest.test_case "the owner is found under another spelling of the lease root"
             `Quick test_owner_is_found_under_another_spelling_of_the_lease_root;
+        ] );
+      ( "single-user server announcement",
+        [
+          Alcotest.test_case "it is not read as the account server's" `Quick
+            test_a_single_user_announcement_is_not_the_account_servers;
+          Alcotest.test_case "the account server's is not read as it" `Quick
+            test_an_account_server_announcement_is_not_a_single_users;
+          Alcotest.test_case "the owner announces one port once" `Quick
+            test_a_single_user_owner_announces_one_port_once;
         ] );
     ]

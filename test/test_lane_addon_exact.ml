@@ -1426,7 +1426,11 @@ let with_workspace f =
   Unix.mkdir base 0o700;
   Fun.protect ~finally:(fun () -> remove_tree base) (fun () ->
     Eio_main.run (fun _env ->
-      let root = Store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path:base) in
+      (* The store creates its own root, not the workspace's .masc directory
+         above it. *)
+      let masc_dir = Common.masc_dir_from_base_path ~base_path:base in
+      Unix.mkdir masc_dir 0o700;
+      let root = Store.directory ~masc_dir in
       f ~base (Store.create ~root)))
 
 let answered store id =
@@ -1484,17 +1488,19 @@ let test_preflight_deletes_a_refused_record_with_its_link_and_observations () =
     check (list string) "the record reader refuses it"
       [Preflight.decoder_name Preflight.Exact_record] (readers report))
 
+(* A proof of attempt 2 in a link whose record holds attempt 1 only. *)
+let renumbered link = match Yojson.Safe.from_file link with
+  | `Assoc fields ->
+    let renumber = function
+      | `Assoc entry -> `Assoc (List.map (fun (name,value) ->
+          if String.equal name "attempt_ordinal" then name,`Int 2 else name,value) entry)
+      | entry -> entry in
+    Yojson.Safe.to_file link (`Assoc (List.map (fun (name,value) -> match name,value with
+      | "executions",`List entries -> name,`List (List.map renumber entries)
+      | _ -> name,value) fields))
+  | _ -> fail "original execution link object expected"
+
 let test_preflight_reads_the_proof_link_with_its_record () =
-  let renumbered link = match Yojson.Safe.from_file link with
-    | `Assoc fields ->
-      let renumber = function
-        | `Assoc entry -> `Assoc (List.map (fun (name,value) ->
-            if String.equal name "attempt_ordinal" then name,`Int 2 else name,value) entry)
-        | entry -> entry in
-      Yojson.Safe.to_file link (`Assoc (List.map (fun (name,value) -> match name,value with
-        | "executions",`List entries -> name,`List (List.map renumber entries)
-        | _ -> name,value) fields))
-    | _ -> fail "original execution link object expected" in
   List.iter (fun (label,damage,at_link,decoder) -> with_workspace (fun ~base store ->
     let original = answered store "preflight-link" in
     let record = record_file store original and link = link_file store original in
@@ -1549,6 +1555,23 @@ let test_preflight_names_a_link_written_after_the_listing () =
     check (list (pair string (list string))) "the record listed again names the later link" []
       (refused report))
 
+let test_preflight_names_only_the_files_left_when_it_refuses () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-removed" in
+    let record = record_file store original and link = link_file store original in
+    renumbered link;
+    (* The server removes the link after the check read it and before the
+       check refuses the record. *)
+    let removed = ref false in
+    let after_read path =
+      if String.equal path link && not !removed then (
+        removed := true;
+        Sys.remove link) in
+    let report = preflight ~after_read base in
+    check bool "the link was removed during the check" true !removed;
+    check (list (pair string (list string))) "fresh state names the record alone"
+      [record, [record]] (refused report))
+
 let test_preflight_refuses_a_slot_observation_the_sweep_cannot_read () =
   with_workspace (fun ~base store ->
     ignore (answered store "preflight-observed");
@@ -1575,6 +1598,32 @@ let test_preflight_stops_on_another_store_root () =
         check bool ("the stop names both roots: " ^ detail) true
           (Astring.String.is_infix ~affix:(Store.root store) detail
            && Astring.String.is_infix ~affix:alias detail)))
+
+let test_preflight_stops_on_an_observation_of_another_store_root () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-observed-moved" in
+    let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file (link_file store original)) with
+      | `List [proof] -> proof
+      | _ -> fail "expected one original proof" in
+    require (Observation.retain ~store ~declaration_id ~request_id:original.Exact.request_id
+      ~attempt_ordinal:1 ~proof []);
+    let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+    (* The root the store had in a workspace that was moved here. *)
+    let moved = Filename.concat (Filename.dirname base) "moved-workspace/.masc/lane-addons" in
+    Sys.readdir observations |> Array.iter (fun name ->
+      let path = Filename.concat observations name in
+      match Yojson.Safe.from_file path with
+      | `Assoc fields ->
+        Yojson.Safe.to_file path
+          (`Assoc (List.map (fun (field,value) ->
+             if String.equal field "store_root" then field,`String moved else field,value) fields))
+      | _ -> fail "slot observation object expected");
+    match Preflight.For_testing.scan ~after_read:ignore Preflight.Store.Exact_requests ~base_path:base with
+    | Ok _ -> fail "an observation written under another store root must stop the check"
+    | Error detail ->
+      check bool ("the stop names both roots: " ^ detail) true
+        (Astring.String.is_infix ~affix:moved detail
+         && Astring.String.is_infix ~affix:(Store.root store) detail))
 
 let test_preflight_binds_a_link_written_between_its_reads () =
   with_workspace (fun ~base store ->
@@ -1686,8 +1735,12 @@ let () =
         ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
         ; test_case "a link written after the listing is not refused" `Quick
             test_preflight_names_a_link_written_after_the_listing
+        ; test_case "a link removed before the refusal is not named" `Quick
+            test_preflight_names_only_the_files_left_when_it_refuses
         ; test_case "a slot observation the sweep cannot read is refused" `Quick
             test_preflight_refuses_a_slot_observation_the_sweep_cannot_read
         ; test_case "another store root stops the check" `Quick test_preflight_stops_on_another_store_root
+        ; test_case "an observation of another store root stops the check" `Quick
+            test_preflight_stops_on_an_observation_of_another_store_root
         ; test_case "a link written between the reads is bound to the second read" `Quick
             test_preflight_binds_a_link_written_between_its_reads ] ) ]

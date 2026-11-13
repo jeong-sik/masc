@@ -132,6 +132,7 @@ module For_testing : sig
     Store.t -> base_path:string -> (report, string) result
   (** The same scan, calling [after_read] with each record's path once its
       bytes are read and before they are decoded, so a test can move a file
-      at the point a running server could. An Exact record is reported after
-      its first read, before its proof link is read. *)
+      at the point a running server could. The Exact scan calls it for every
+      file it reads: a record, its proof link and the record again, in that
+      order before the next record, and each slot observation. *)
 end

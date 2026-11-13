@@ -352,7 +352,7 @@ let read_first ~after_read ~group ~name path =
 (* The slot observations of one declaration, read once with the startup
    sweep's read: the request each file belongs to. The sweep stops at a file
    it cannot read, so the check refuses that file. *)
-let read_slot_observations store ~root report ~declaration_id =
+let read_slot_observations ~after_read store ~root report ~declaration_id =
   let dir = Filename.concat root (Exact_observation.directory ~declaration_id) in
   let* names = entries dir in
   let* owned, report =
@@ -360,7 +360,7 @@ let read_slot_observations store ~root report ~declaration_id =
       (fun state name ->
          let* owned, report = state in
          let path = Filename.concat dir name in
-         match read_file ~after_read:ignore ~delete:record_alone ~path Result.ok with
+         match read_file ~after_read ~delete:record_alone ~path Result.ok with
          | Gone -> Ok (owned, report)
          | Unreadable refusal -> Ok (owned, refused report refusal)
          | Read json ->
@@ -383,7 +383,7 @@ let read_slot_observations store ~root report ~declaration_id =
    again. Fresh state deletes a refused record with its link and the slot
    observations of its request: [run] reads that link with the record, and the
    observations are read with that link. *)
-let check_record store ~root ~observations report { record_path; first; key } =
+let check_record ~after_read store ~root ~observations report { record_path; first; key } =
   let link = Filename.concat root (Exact.Retained_key.proof_path key) in
   let { Exact.Retained_key.request_id; _ } = key in
   let delete _ =
@@ -396,41 +396,44 @@ let check_record store ~root ~observations report { record_path; first; key } =
   in
   let read_second proof =
     match
-      read_file ~after_read:ignore ~delete ~path:record_path (fun second ->
+      read_file ~after_read ~delete ~path:record_path (fun second ->
         decoded Exact_record (Exact.check_retained_record ~store ~first ~proof ~second))
     with
     | Gone -> Ok report
     | Unreadable refusal -> Ok (refused report refusal)
     | Read () -> Ok (counted report)
   in
-  match read_file ~after_read:ignore ~delete ~path:link Result.ok with
+  match read_file ~after_read ~delete ~path:link Result.ok with
   | Gone -> read_second None
   | Unreadable refusal -> Ok (refused report refusal)
   | Read proof ->
     let* () = same_store store ~path:link (Exact.proof_store_roots proof) in
     read_second (Some proof)
 
+let link_name key = Filename.basename (Exact.Retained_key.proof_path key)
+
 (* The proof links of one declaration that no record names. The server writes
    a record before its link, so the records are listed again after the links:
-   a record written in between names its link too. A link removed before it is
-   refused is not refused. *)
-let unnamed_proof_links ~root report ~group ~group_dir ~declaration_id ~listed ~named =
+   a record written in between names its link too, and so does a name gone or
+   unreadable at its first read, which the server may have written since. A
+   link removed before it is refused is not refused. *)
+let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~read_names
+    ~named_links =
   let dir = Filename.concat root (Exact.proof_directory ~declaration_id) in
   let* links = entries dir in
   let* again = entries group_dir in
-  let link_name key = Filename.basename (Exact.Retained_key.proof_path key) in
   let later =
     List.filter_map
       (fun name ->
-         if List.mem name listed
+         if List.mem name read_names
          then None
          else
-           match read_first ~after_read:ignore ~group ~name (Filename.concat group_dir name) with
+           match read_first ~after_read ~group ~name (Filename.concat group_dir name) with
            | Read { key; _ } -> Some (link_name key)
            | Gone | Unreadable _ -> None)
       (json_names again)
   in
-  let named = List.map (fun { key; _ } -> link_name key) named @ later in
+  let named = named_links @ later in
   Ok
     (List.fold_left
        (fun report link ->
@@ -448,38 +451,57 @@ let unnamed_proof_links ~root report ~group ~group_dir ~declaration_id ~listed ~
        report
        (json_names links))
 
+(* What the check keeps of one declaration between its records: the slot
+   observations, read once the first record names the declaration, the names
+   of the records read and the proof links they name. *)
+type declaration_read =
+  { declaration_id : string
+  ; observations : (string * string) list
+  ; read_names : string list
+  ; named_links : string list
+  }
+
 (* Exact requests (RFC exact-request-skips-a-slot-that-refused-its-input 3.3).
-   Per declaration the check reads every record once, the slot observations,
-   each record's proof link and the record again, then the proof links no
-   record names. The declaration comes from a record whose ids name its own
-   path; the links of a declaration none of whose records can be read are not
-   found. *)
+   Per declaration the check reads a record, its proof link and the record
+   again before it reads the next record, then the proof links no record
+   names. The declaration comes from a record whose ids name its own path; the
+   links of a declaration none of whose records can be read are not found. *)
 let scan_exact_declaration ~after_read store ~root report ~group ~group_dir =
   let* listed = entries group_dir in
-  let records = json_names listed in
-  let report, keyed =
+  let* report, declaration =
     List.fold_left
-      (fun (report, keyed) name ->
+      (fun state name ->
+         let* report, declaration = state in
          match read_first ~after_read ~group ~name (Filename.concat group_dir name) with
-         | Gone -> report, keyed
-         | Unreadable refusal -> refused report refusal, keyed
-         | Read record -> report, record :: keyed)
-      (report, [])
-      records
+         | Gone -> Ok (report, declaration)
+         | Unreadable refusal -> Ok (refused report refusal, declaration)
+         | Read record ->
+           let* report, ({ observations; read_names; named_links; _ } as declaration) =
+             match declaration with
+             | Some declaration -> Ok (report, declaration)
+             | None ->
+               let { Exact.Retained_key.declaration_id; _ } = record.key in
+               let* observations, report =
+                 read_slot_observations ~after_read store ~root report ~declaration_id
+               in
+               Ok (report, { declaration_id; observations; read_names = []; named_links = [] })
+           in
+           let* report = check_record ~after_read store ~root ~observations report record in
+           Ok
+             ( report
+             , Some
+                 { declaration with
+                   read_names = name :: read_names
+                 ; named_links = link_name record.key :: named_links
+                 } ))
+      (Ok (report, None))
+      (json_names listed)
   in
-  match List.rev keyed with
-  | [] -> Ok report
-  | { key = { Exact.Retained_key.declaration_id; _ }; _ } :: _ as keyed ->
-    let* observations, report = read_slot_observations store ~root report ~declaration_id in
-    let* report =
-      List.fold_left
-        (fun report record ->
-           let* report = report in
-           check_record store ~root ~observations report record)
-        (Ok report)
-        keyed
-    in
-    unnamed_proof_links ~root report ~group ~group_dir ~declaration_id ~listed:records ~named:keyed
+  match declaration with
+  | None -> Ok report
+  | Some { declaration_id; read_names; named_links; _ } ->
+    unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~read_names
+      ~named_links
 
 let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ _ -> Ok ()))
     ?(validate_history_resolution=(fun ~group:_ ~name:_ _ -> Ok ())) ~after_read store ~base_path =

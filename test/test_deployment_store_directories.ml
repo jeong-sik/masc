@@ -432,11 +432,22 @@ let test_lane_addon_exact_requests () = with_lane_store (fun base root ->
 
 (* validate-stores resolves --base-path as the server resolves its workspace,
    so the workspace's .masc directory, a ./ suffix and a symlink to the
-   workspace all read the store the server serves. *)
+   workspace all read the store the server serves. The proof file names the
+   root the server writes under, through symlinks: a check that read the store
+   under another root would stop on it before it refuses the record. *)
 let test_base_path_forms_read_the_served_store exe () = with_lane_store (fun base root ->
-  let path = grouped root Lane_addon_store.exact_requests_directory ~group:"quiz" ~id:"broken" in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  write path "{";
+  let record = exact_record ~declaration_id:"quiz" ~request_id:"served"
+      ~messages:[`Assoc ["role", `String "user"; "text", `String "hello"]] in
+  let path = grouped root Lane_addon_store.exact_requests_directory ~group:"quiz" ~id:"served" in
+  put path record;
+  let link = match Lane_addon_exact.Retained_key.of_record record with
+    | Ok key -> Filename.concat root (Lane_addon_exact.Retained_key.proof_path key)
+    | Error detail -> failf "the record names no proof file: %s" detail in
+  let served = Lane_addon_store.directory
+      ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base)) in
+  (* No attempt of the record has this proof, so the check refuses the record
+     once the root matches. *)
+  put link (`Assoc ["executions", `List [`Assoc ["store_root", `String served]]]);
   let alias = Filename.temp_file "preflight-lane-addons-alias-" "" in
   Sys.remove alias;
   Unix.symlink base alias;
@@ -448,7 +459,8 @@ let test_base_path_forms_read_the_served_store exe () = with_lane_store (fun bas
         (status <> Unix.WEXITED 0);
       check bool ("--base-path " ^ base_path ^ " reads the served store: " ^ output) true
         (String_util.contains_substring words "lane-addon exact requests rows=1 refused=1"
-         && String_util.contains_substring words (Filename.basename path)))
+         && String_util.contains_substring words (Filename.basename path)
+         && String_util.contains_substring words (Filename.basename link)))
       [Filename.concat base ".masc/"; Filename.concat base "./"; alias]))
 
 let owner_request = `Assoc ["query", `String "rows"]

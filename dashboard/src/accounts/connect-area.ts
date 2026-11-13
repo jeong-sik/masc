@@ -5,7 +5,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useLayoutEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
-import type { ConnectModel, ConnectView, Ended, Input } from './connect'
+import type { ConnectModel, ConnectView, Input, Known } from './connect'
+import type { LoginEnd } from './login'
 import { ProblemNote, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
 import type { Integration } from './wire'
@@ -13,12 +14,14 @@ import type { Integration } from './wire'
 // ---- what a client printed ----
 
 /** Removes what a terminal would act on rather than show: escape sequences
-    and control characters other than tab and newline. */
+    (an OSC ends at BEL or at ESC \\, whichever comes first), control
+    characters other than tab and newline, and the marks that turn the
+    direction of text. */
 export function printable(text: string): string {
   return text
-    .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, '')
 }
 
 const address = /https:\/\/[^\s<>"'`]+/g
@@ -58,7 +61,7 @@ function Transcript({ text }: { readonly text: string }): VNode {
   }
   parts.push(shown.slice(at))
   return html`
-    <pre ref=${box} class="transcript" role="region" tabindex="0" aria-label="로그인 도구가 보낸 안내" onScroll=${onScroll}>${parts}</pre>
+    <pre ref=${box} class="transcript" role="region" tabindex="0" aria-label="로그인 도구가 보낸 안내" lang="en" onScroll=${onScroll}>${parts}</pre>
   `
 }
 
@@ -66,27 +69,37 @@ function Transcript({ text }: { readonly text: string }): VNode {
 
 function inputWords(input: Input): string {
   switch (input) {
-    case 'not_asked': return '로그인 도구가 켜졌어요. 안내를 기다리고 있어요…'
-    case 'asked': return '로그인 도구가 답을 기다려요. 안내에 나온 주소에서 로그인한 뒤, 받은 코드를 붙여 넣어 주세요.'
+    case 'ready': return '로그인 도구의 안내를 따라 주세요. 받은 코드는 붙여 넣고, 키는 아래 단추로 보내요.'
     case 'sending': return '보내고 있어요…'
-    case 'not_taken': return '보내지 못했어요. 다시 보내 주세요.'
+    case 'pending': return '로그인 도구가 보낸 답을 받기를 기다려요…'
+    case 'not_taken': return '서버가 답을 받았다고 하지 않았어요. 다시 보내 주세요.'
   }
 }
 
-function endedWords(ended: Ended): string {
+function endedWords(ended: LoginEnd): string {
   switch (ended) {
     case 'failed': return '로그인하지 못했어요. 처음부터 다시 해 주세요.'
-    case 'cancelled': return '로그인을 취소했어요.'
+    case 'cancelled': return '로그인이 취소됐어요.'
     case 'interrupted': return '로그인이 중간에 멈췄어요. 처음부터 다시 해 주세요.'
-    case 'unrecorded': return '로그인은 끝났지만 서버가 결과를 적지 못했어요. 이 서버를 운영하는 사람에게 알려 주세요.'
-    case 'unknown': return '연결이 끊겨서 로그인이 어떻게 됐는지 알 수 없어요. 새 계정이 생겼다면 아래 목록에 나와요.'
+    case 'unrecorded': return '로그인은 끝났지만 서버가 결과를 적지 못했어요. 새 계정이 생겼다면 아래 목록에 나와요.'
+  }
+}
+
+/** What the page says of a login whose stream it no longer reads. A reading
+    or a cancel that failed is said in an alert, under the steps' line. */
+function knownWords(known: Known): string {
+  switch (known.kind) {
+    case 'runs': return '이 화면이 로그인 도구와 연결을 잃었어요. 로그인 도구는 아직 돌고 있어요. 다시 확인하거나 로그인을 취소해 주세요.'
+    case 'unread': return ''
+    case 'cancel_taken': return '서버가 취소를 받았어요. 다시 확인하면 로그인이 어떻게 끝났는지 보여요.'
+    case 'cancel_not_taken': return ''
   }
 }
 
 /** What a Keeper can do with an account of the subscription, said before it is picked. */
 const callsWords = (integration: Integration): string =>
   integration.calls.kind === 'allowed'
-    ? '연결하면 이 구독으로 Keeper를 실행할 수 있어요.'
+    ? '연결하고 모델을 확인하면 이 구독으로 Keeper를 실행할 수 있어요.'
     : '연결은 되지만 이 서버에서는 이 구독으로 Keeper를 실행할 수 없어요.'
 
 const keys = [
@@ -133,22 +146,25 @@ function Choosing({ model, integrations }: AreaProps): VNode {
   `
 }
 
-function Running({ model, view }: AreaProps & { readonly view: Extract<ConnectView, { kind: 'running' }> }): VNode {
-  const ready = view.input === 'asked' || view.input === 'not_taken'
+/** A login whose stream the page reads, running or being cancelled. The
+    controls stay where they are while a cancel is on its way, marked, so the
+    transcript keeps its place and a pressed button stays under the focus. */
+function Following({ model, view }: AreaProps & { readonly view: Extract<ConnectView, { kind: 'running' | 'cancelling' }> }): VNode {
+  const running = view.kind === 'running'
+  const ready = running && (view.input === 'ready' || view.input === 'not_taken')
   const onSubmit = (event: Event): void => {
     event.preventDefault()
     const field = (event.currentTarget as HTMLFormElement).elements.namedItem('code')
-    // A code typed while the client is not asking stays in the field.
     if (!ready || !(field instanceof HTMLInputElement) || field.value === '') return
     const text = field.value
-    field.value = ''
-    void model.reply({ kind: 'text', text })
+    // The code stays in the field until the server took it.
+    void model.reply({ kind: 'text', text }).then((taken) => { if (taken && field.value === text) field.value = '' })
   }
   return html`
     <${Transcript} text=${view.transcript} />
     <form class="reply" onSubmit=${onSubmit}>
       <label for="connect-code">로그인 코드</label>
-      <input id="connect-code" name="code" type="password" autocomplete="off" spellcheck=${false} />
+      <input id="connect-code" name="code" type="password" autocomplete="one-time-code" spellcheck=${false} />
       <button type="submit" aria-disabled=${!ready}>코드 보내기</button>
     </form>
     <div class="actions" role="group" aria-label="로그인 도구에 보낼 키">
@@ -156,26 +172,38 @@ function Running({ model, view }: AreaProps & { readonly view: Extract<ConnectVi
         <button key=${key} type="button" aria-disabled=${!ready} onClick=${() => { if (ready) void model.reply({ kind: 'key', key }) }}>${label}</button>
       `)}
     </div>
-    <p class="actions"><button type="button" onClick=${() => { void model.cancel() }}>로그인 취소</button></p>
+    <p class="actions">
+      <button type="button" aria-disabled=${!running} onClick=${() => { if (running) void model.cancel() }}>로그인 취소</button>
+    </p>
   `
 }
 
 /** The line a screen reader reads out for each step. It is on the page in every step. */
 function statusWords(view: ConnectView): string {
   switch (view.kind) {
-    case 'closed': return view.linked ? '구독을 연결했어요. 새 계정이 아래 목록에 있어요.' : ''
+    case 'closed': return view.linked ? '구독을 연결했어요.' : ''
     case 'choosing': return ''
     case 'starting': return '로그인 도구를 켜고 있어요…'
-    case 'running': return view.cancelNotTaken ? '취소하지 못했어요. 다시 눌러 주세요.' : inputWords(view.input)
+    case 'running': return view.cancelNotTaken ? `취소하지 못했어요. 로그인은 계속 돌아요. ${inputWords(view.input)}` : inputWords(view.input)
     case 'cancelling': return '로그인을 멈추고 있어요…'
     case 'checking': return '로그인이 어떻게 됐는지 확인하고 있어요…'
-    case 'detached':
-      return view.failure === null
-        ? '이 화면과 로그인 도구의 연결이 끊겼지만 로그인 도구는 아직 돌고 있어요. 잠시 뒤 다시 확인하거나 로그인을 취소해 주세요.'
-        : ''
+    case 'detached': return knownWords(view.known)
     case 'ended': return view.ended === 'cancelled' ? endedWords(view.ended) : ''
     case 'failed': return ''
     case 'leaving': return sessionEndedWords
+  }
+}
+
+/** The alert of a reading or a cancel of a detached login that failed. */
+function KnownNote({ known }: { readonly known: Known }): VNode | null {
+  switch (known.kind) {
+    case 'runs':
+    case 'cancel_taken':
+      return null
+    case 'unread':
+      return html`<${ProblemNote} title="로그인이 어떻게 됐는지 확인하지 못했어요" failure=${known.failure} />`
+    case 'cancel_not_taken':
+      return html`<${ProblemNote} title="로그인을 취소하지 못했어요" failure=${{ problem: known.problem, attempts: 1 }} />`
   }
 }
 
@@ -190,15 +218,15 @@ function Step(props: AreaProps & { readonly view: ConnectView }): VNode | null {
     case 'choosing':
       return html`<${Choosing} ...${props} />`
     case 'running':
-      return html`<${Running} ...${props} view=${view} />`
     case 'cancelling':
-      return html`<${Transcript} text=${view.transcript} />`
+      return html`<${Following} ...${props} view=${view} />`
     case 'detached':
       return html`
-        ${view.failure === null ? null : html`<${ProblemNote} title="로그인이 어떻게 됐는지 확인하지 못했어요" failure=${view.failure} />`}
+        <${KnownNote} known=${view.known} />
         <p class="actions">
           <button type="button" class="primary" onClick=${() => { void model.check() }}>다시 확인</button>
           <button type="button" onClick=${() => { void model.cancel() }}>로그인 취소</button>
+          <button type="button" onClick=${model.close}>닫기</button>
         </p>
       `
     case 'ended':
@@ -232,7 +260,7 @@ export function ConnectArea(props: AreaProps): VNode {
     else heading.current?.focus()
   }, [view.kind])
   const open = view.kind !== 'closed'
-  const closable = view.kind === 'choosing' || view.kind === 'ended' || view.kind === 'failed'
+  const closable = view.kind === 'choosing' || view.kind === 'ended' || view.kind === 'failed' || view.kind === 'detached'
   return html`
     <div class="connect">
       <p>

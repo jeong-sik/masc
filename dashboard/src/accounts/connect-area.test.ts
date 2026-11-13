@@ -11,7 +11,8 @@ import { act, cleanup, fireEvent, render } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { ConnectArea, printable } from './connect-area'
-import type { ConnectModel, ConnectView, Ended } from './connect'
+import type { ConnectModel, ConnectView, Input, Known } from './connect'
+import type { LoginEnd } from './login'
 import type { Integration } from './wire'
 
 const integrations: readonly Integration[] = [
@@ -20,9 +21,11 @@ const integrations: readonly Integration[] = [
 ]
 const loginId = 'a'.repeat(64)
 const printed = 'Open https://claude.ai/oauth/authorize?code=true&state=x to sign in.\nPaste code here: '
-const running = (input: 'not_asked' | 'asked' | 'sending' | 'not_taken', cancelNotTaken = false): ConnectView =>
+const running = (input: Input, cancelNotTaken = false): ConnectView =>
   ({ kind: 'running', integrationId: 'claude_code', loginId, transcript: printed, input, cancelNotTaken })
-const ended = (end: Ended): ConnectView => ({ kind: 'ended', integrationId: 'claude_code', ended: end })
+const cancelling: ConnectView = { kind: 'cancelling', integrationId: 'claude_code', loginId, transcript: printed, input: 'ready' }
+const ended = (end: LoginEnd): ConnectView => ({ kind: 'ended', integrationId: 'claude_code', ended: end })
+const detached = (known: Known): ConnectView => ({ kind: 'detached', integrationId: 'claude_code', loginId, known })
 const unreachable = { problem: { kind: 'unreachable' }, attempts: 2 } as const
 
 const views: ReadonlyArray<readonly [string, ConnectView]> = [
@@ -30,20 +33,21 @@ const views: ReadonlyArray<readonly [string, ConnectView]> = [
   ['closed after a link', { kind: 'closed', linked: true }],
   ['choosing', { kind: 'choosing' }],
   ['starting', { kind: 'starting', integrationId: 'claude_code' }],
-  ['running, not asked', running('not_asked')],
-  ['running, asked', running('asked')],
+  ['running, ready', running('ready')],
   ['running, sending', running('sending')],
+  ['running, a reply pending', running('pending')],
   ['running, a reply not taken', running('not_taken')],
-  ['running, a cancel not taken', running('asked', true)],
-  ['cancelling', { kind: 'cancelling', integrationId: 'claude_code', loginId, transcript: printed }],
+  ['running, a cancel not taken', running('ready', true)],
+  ['cancelling', cancelling],
   ['checking', { kind: 'checking', integrationId: 'claude_code', loginId }],
-  ['detached', { kind: 'detached', integrationId: 'claude_code', loginId, failure: null }],
-  ['detached, its receipt unread', { kind: 'detached', integrationId: 'claude_code', loginId, failure: unreachable }],
+  ['detached', detached({ kind: 'runs' })],
+  ['detached, its receipt unread', detached({ kind: 'unread', failure: unreachable })],
+  ['detached, a cancel taken', detached({ kind: 'cancel_taken' })],
+  ['detached, a cancel not taken', detached({ kind: 'cancel_not_taken', problem: { kind: 'unreachable' } })],
   ['ended: failed', ended('failed')],
   ['ended: cancelled', ended('cancelled')],
   ['ended: interrupted', ended('interrupted')],
   ['ended: unrecorded', ended('unrecorded')],
-  ['ended: unknown', ended('unknown')],
   ['failed', { kind: 'failed', integrationId: 'claude_code', failure: unreachable }],
   ['leaving', { kind: 'leaving' }],
 ]
@@ -58,7 +62,7 @@ function counting(view: ConnectView) {
     open: vi.fn(),
     close: vi.fn(),
     start: vi.fn((_integrationId: string) => Promise.resolve()),
-    reply: vi.fn((_input: unknown) => Promise.resolve()),
+    reply: vi.fn((_input: unknown) => Promise.resolve(true)),
     cancel: vi.fn(() => Promise.resolve()),
     check: vi.fn(() => Promise.resolve()),
     reset: vi.fn(),
@@ -94,7 +98,7 @@ describe('each step', () => {
 
   it('says a problem where a screen reader announces it only when the login failed or ended without the person', () => {
     expect(count('[role=alert]')).toEqual(named(
-      'detached, its receipt unread', 'ended: failed', 'ended: interrupted', 'ended: unrecorded', 'ended: unknown', 'failed',
+      'detached, its receipt unread', 'detached, a cancel not taken', 'ended: failed', 'ended: interrupted', 'ended: unrecorded', 'failed',
     ))
   })
 
@@ -105,38 +109,39 @@ describe('each step', () => {
 
   it('lets the steps close only where nothing runs', () => {
     expect(count('button[aria-controls=connect-steps][aria-disabled=true]')).toEqual(except(
-      'closed', 'closed after a link', 'choosing', 'ended: failed', 'ended: cancelled', 'ended: interrupted', 'ended: unrecorded',
-      'ended: unknown', 'failed',
+      'closed', 'closed after a link', 'choosing', 'ended: failed', 'ended: cancelled', 'ended: interrupted', 'ended: unrecorded', 'failed',
+      'detached', 'detached, its receipt unread', 'detached, a cancel taken', 'detached, a cancel not taken',
     ))
   })
 
   it('offers the subscriptions to pick from when a login can start', () => {
     expect(count('input[type=radio]').map(([name, radios]) => [name, radios === integrations.length ? 1 : 0])).toEqual(named(
-      'choosing', 'ended: failed', 'ended: cancelled', 'ended: interrupted', 'ended: unrecorded', 'ended: unknown', 'failed',
+      'choosing', 'ended: failed', 'ended: cancelled', 'ended: interrupted', 'ended: unrecorded', 'failed',
     ))
   })
 
   it('shows what the client printed while a login runs', () => {
     expect(count('pre.transcript')).toEqual(named(
-      'running, not asked', 'running, asked', 'running, sending', 'running, a reply not taken', 'running, a cancel not taken', 'cancelling',
+      'running, ready', 'running, sending', 'running, a reply pending', 'running, a reply not taken', 'running, a cancel not taken', 'cancelling',
     ))
   })
 
-  it('marks the reply buttons while the client is not asking', () => {
+  it('marks the reply buttons while the server holds a reply or a cancel is on its way', () => {
     const marked = views.map(([name, view]) => [name, drawn(view).container.querySelectorAll('form.reply button[aria-disabled=true], [role=group] button[aria-disabled=true]').length])
-    expect(marked).toEqual(views.map(([name]) => [name, name === 'running, not asked' || name === 'running, sending' ? 6 : 0]))
+    expect(marked).toEqual(views.map(([name]) => [name, ['running, sending', 'running, a reply pending', 'cancelling'].includes(name) ? 6 : 0]))
   })
 
-  it('offers to check again and to cancel a login the page lost track of', () => {
-    for (const name of ['detached', 'detached, its receipt unread']) {
+  it('offers to check again, to cancel and to close a login the page lost track of', () => {
+    for (const name of ['detached', 'detached, its receipt unread', 'detached, a cancel taken', 'detached, a cancel not taken']) {
       const view = views.find(([one]) => one === name)?.[1]
       if (view === undefined) throw new Error(`no step ${name}`)
       const { container, model } = drawn(view)
-      const [check, cancel] = container.querySelectorAll('#connect-steps button')
-      if (check === undefined || cancel === undefined) throw new Error(`no buttons in ${name}`)
+      const [check, cancel, close] = container.querySelectorAll('#connect-steps button')
+      if (check === undefined || cancel === undefined || close === undefined) throw new Error(`no buttons in ${name}`)
       fireEvent.click(check)
       fireEvent.click(cancel)
-      expect([name, model.check.mock.calls.length, model.cancel.mock.calls.length]).toEqual([name, 1, 1])
+      fireEvent.click(close)
+      expect([name, model.check.mock.calls.length, model.cancel.mock.calls.length, model.close.mock.calls.length]).toEqual([name, 1, 1, 1])
       cleanup()
     }
   })
@@ -163,23 +168,24 @@ describe('the controls', () => {
     expect(model.start.mock.calls).toEqual([['codex']])
   })
 
-  it('sends a code and empties its field only while the client asks', () => {
-    const notAsked = drawn(running('not_asked'))
-    const field = the<HTMLInputElement>(notAsked.container, '#connect-code')
-    field.value = 'code#1'
-    fireEvent.submit(the(notAsked.container, 'form.reply'))
-    const kept = field.value
-    cleanup()
-    const asked = drawn(running('asked'))
-    const askedField = the<HTMLInputElement>(asked.container, '#connect-code')
-    askedField.value = 'code#1'
-    fireEvent.submit(the(asked.container, 'form.reply'))
-    expect([kept, notAsked.model.reply.mock.calls.length, askedField.value, asked.model.reply.mock.calls]).toEqual([
-      'code#1', 0, '', [[{ kind: 'text', text: 'code#1' }]],
+  it('sends a code only while the server holds no reply, and empties its field once the server took it', async () => {
+    const typed = async (view: ConnectView, taken: boolean) => {
+      const { container, model } = drawn(view)
+      model.reply.mockImplementation(() => Promise.resolve(taken))
+      const field = the<HTMLInputElement>(container, '#connect-code')
+      field.value = 'code#1'
+      fireEvent.submit(the(container, 'form.reply'))
+      await act(() => Promise.resolve())
+      const result = [field.value, model.reply.mock.calls]
+      cleanup()
+      return result
+    }
+    expect([await typed(running('pending'), true), await typed(running('ready'), false), await typed(running('ready'), true)]).toEqual([
+      ['code#1', []], ['code#1', [[{ kind: 'text', text: 'code#1' }]]], ['', [[{ kind: 'text', text: 'code#1' }]]],
     ])
   })
 
-  it('sends a key only while the client asks', () => {
+  it('sends a key only while the server holds no reply', () => {
     const press = (view: ConnectView) => {
       const { container, model } = drawn(view)
       for (const button of container.querySelectorAll('[role=group] button')) fireEvent.click(button)
@@ -193,13 +199,17 @@ describe('the controls', () => {
     ]])
   })
 
-  it('cancels a running login', () => {
-    const { container, model } = drawn(running('not_asked'))
-    const buttons = [...container.querySelectorAll('#connect-steps button')]
-    const last = buttons.at(-1)
-    if (last === undefined) throw new Error('no buttons')
-    fireEvent.click(last)
-    expect(model.cancel.mock.calls.length).toBe(1)
+  it('cancels a running login, and not again while the cancel is on its way', () => {
+    const press = (view: ConnectView): readonly [string | null, number] => {
+      const { container, model } = drawn(view)
+      const last = [...container.querySelectorAll('#connect-steps button')].at(-1)
+      if (last === undefined) throw new Error('no buttons')
+      fireEvent.click(last)
+      const result = [last.getAttribute('aria-disabled'), model.cancel.mock.calls.length] as const
+      cleanup()
+      return result
+    }
+    expect([press(running('ready')), press(cancelling)]).toEqual([['false', 1], ['true', 0]])
   })
 })
 
@@ -220,14 +230,14 @@ describe('the focus', () => {
   })
 
   it('goes back to the button that opens the steps once they close under the pressed button', async () => {
-    const { container, to } = moving(running('asked'))
+    const { container, to } = moving(running('ready'))
     the(container, '#connect-code').focus()
     await to({ kind: 'closed', linked: true })
     expect(document.activeElement).toBe(the(container, 'button[aria-controls=connect-steps]'))
   })
 
   it('stays where the person put it when it did not fall', async () => {
-    const { container, to } = moving(running('asked'))
+    const { container, to } = moving(running('ready'))
     const elsewhere = document.body.appendChild(document.createElement('button'))
     try {
       elsewhere.focus()
@@ -242,14 +252,64 @@ describe('the focus', () => {
     }
   })
 
-  it('stays on the field while a reply is sent and the client asks again', async () => {
-    const { container, to } = moving(running('asked'))
+  it('stays on the field while a reply is sent and the client takes it', async () => {
+    const { container, to } = moving(running('ready'))
     const field = the(container, '#connect-code')
     field.focus()
     await to(running('sending'))
-    await to(running('not_asked'))
-    await to(running('asked'))
+    await to(running('pending'))
+    await to(running('ready'))
     expect(document.activeElement).toBe(field)
+  })
+
+  it('stays on the cancel button while the cancel is on its way, and goes to the heading once the login stopped', async () => {
+    const { container, to } = moving(running('ready'))
+    const cancel = [...container.querySelectorAll<HTMLElement>('#connect-steps button')].at(-1)
+    if (cancel === undefined) throw new Error('no buttons')
+    cancel.focus()
+    await to(cancelling)
+    const stayed = document.activeElement === cancel
+    await to(ended('cancelled'))
+    expect([stayed, document.activeElement === container.querySelector('h3')]).toEqual([true, true])
+  })
+
+  it('goes to the heading when a reading of a detached login takes its buttons away', async () => {
+    const { container, to } = moving(detached({ kind: 'runs' }))
+    the(container, '#connect-steps button.primary').focus()
+    await to({ kind: 'checking', integrationId: 'claude_code', loginId })
+    expect(document.activeElement).toBe(container.querySelector('h3'))
+  })
+})
+
+describe('the line a screen reader reads out', () => {
+  it('stays one element as the steps change, so each new step is read out', async () => {
+    const model = counting({ kind: 'closed', linked: false })
+    const { container } = render(html`<${ConnectArea} model=${model} integrations=${integrations} />`)
+    const line = the(container, '[role=status]')
+    const said: string[] = []
+    for (const next of [{ kind: 'choosing' }, { kind: 'starting', integrationId: 'claude_code' }, running('ready'), cancelling, ended('cancelled')] as const) {
+      await act(() => { model.view.value = next })
+      said.push(the(container, '[role=status]') === line ? line.textContent ?? '' : 'another element')
+    }
+    expect([said.includes('another element'), new Set(said.filter((one) => one !== '')).size]).toEqual([false, 4])
+  })
+})
+
+describe('the transcript', () => {
+  it('keeps its end in view as it grows, and stays where the person scrolled back to', async () => {
+    const model = counting(running('ready'))
+    const { container } = render(html`<${ConnectArea} model=${model} integrations=${integrations} />`)
+    const box = the<HTMLPreElement>(container, 'pre.transcript')
+    const size = { height: 500 }
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => size.height })
+    Object.defineProperty(box, 'clientHeight', { configurable: true, get: () => 100 })
+    await act(() => { model.view.value = { ...running('ready'), transcript: `${printed}more\n` } as ConnectView })
+    const followed = box.scrollTop
+    box.scrollTop = 0
+    fireEvent.scroll(box)
+    size.height = 800
+    await act(() => { model.view.value = { ...running('ready'), transcript: `${printed}more\nmore\n` } as ConnectView })
+    expect([followed, box.scrollTop]).toEqual([500, 0])
   })
 })
 
@@ -261,7 +321,7 @@ describe('what a client printed', () => {
       '\x1b]8;;https://elsewhere.example\x07a link a terminal would follow\x1b]8;;\x07',
       'Open https://claude.ai/oauth/authorize?code=true&state=x',
     ].join('\n')
-    const { container } = drawn({ kind: 'cancelling', integrationId: 'claude_code', loginId, transcript: text })
+    const { container } = drawn({ ...cancelling, transcript: text } as ConnectView)
     const transcript = the(container, 'pre.transcript')
     const links = [...transcript.querySelectorAll('a')].map((one) => [one.getAttribute('href'), one.getAttribute('rel'), one.getAttribute('target')])
     expect([transcript.querySelectorAll('img, script').length, links]).toEqual([
@@ -271,5 +331,14 @@ describe('what a client printed', () => {
 
   it('loses what a terminal would act on, and keeps tabs and new lines', () => {
     expect(printable('\x1b[1;32mgreen\x1b[0m\tcode\r\n\x07\x1b]0;title\x07done\x7f')).toBe('green\tcode\ndone')
+  })
+
+  it('keeps the text between two links a terminal would follow, whichever way they end', () => {
+    const linked = (end: string) => `\x1b]8;;https://a.example${end}Open https://claude.ai/x\x1b]8;;${end} to sign in`
+    expect([printable(linked('\x1b\\')), printable(linked('\x07'))]).toEqual(['Open https://claude.ai/x to sign in', 'Open https://claude.ai/x to sign in'])
+  })
+
+  it('loses the marks that turn the direction of text', () => {
+    expect(printable('\u202ecode\u202c \u2066x\u2069')).toBe('code x')
   })
 })

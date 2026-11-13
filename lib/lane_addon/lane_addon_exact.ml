@@ -3,14 +3,6 @@ open Result.Syntax
 type role = User | Assistant
 type message = { role : role; text : string }
 
-type request =
-  { request_id : string
-  ; output : string
-  ; system : string option
-  ; messages : message list
-  ; schema : Yojson.Safe.t option
-  }
-
 let request_keys = [ "kind"; "request_id"; "output"; "system"; "messages"; "schema" ]
 
 let message_of_json = function
@@ -29,54 +21,87 @@ let message_to_json message =
   `Assoc [ "role", `String (match message.role with User -> "user" | Assistant -> "assistant")
          ; "text", `String message.text ]
 
-let request_of_json = function
-  | `Assoc fields ->
-    let text key =
-      match List.assoc_opt key fields with
-      | Some (`String value) when String.trim value <> "" -> Ok value
-      | Some _ | None -> Error (key ^ " requires a non-blank string")
-    in
-    let* () =
-      let keys = List.map fst fields in
-      if List.length keys = List.length (List.sort_uniq String.compare keys) then Ok ()
-      else Error "an exact_output request has duplicate keys"
-    in
-    let* () =
-      match List.find_opt (fun (key, _) -> not (List.mem key request_keys)) fields with
-      | Some (key, _) -> Error ("an exact_output request has no key " ^ key)
-      | None -> Ok ()
-    in
-    let* () =
-      match List.assoc_opt "kind" fields with
-      | Some (`String "exact_output") -> Ok ()
-      | Some _ | None -> Error "kind must be exact_output"
-    in
-    let* request_id = text "request_id" in
-    let* output = text "output" in
-    let* system =
-      match List.assoc_opt "system" fields with
-      | None | Some `Null -> Ok None
-      | Some (`String value) -> Ok (Some value)
-      | Some _ -> Error "system must be a string"
-    in
-    let* messages =
-      match List.assoc_opt "messages" fields with
-      | Some (`List (_ :: _ as values)) ->
-        let rec loop acc = function
-          | [] -> Ok (List.rev acc)
-          | value :: rest ->
-            let* message = message_of_json value in
-            loop (message :: acc) rest
-        in
-        loop [] values
-      | Some _ | None -> Error "messages requires at least one conversation message"
-    in
-    let* schema = match List.assoc_opt "schema" fields with
-      | None -> Ok None
-      | Some (`Assoc _ as schema) -> Lane_addon_action.canonical schema |> Result.map Option.some
-      | Some _ -> Error "request schema must be a JSON object" in
-    Ok { request_id; output; system; messages; schema }
-  | _ -> Error "an exact_output request must be an object"
+(* Every request in this file comes from [Request.of_json]: the record is
+   private here as it is in the interface. [of_json] keeps the schema
+   canonical, so two requests with equal canonical bodies write the same JSON
+   and have the same [digest]. *)
+module Request : sig
+  type t = private
+    { request_id : string
+    ; output : string
+    ; system : string option
+    ; messages : message list
+    ; schema : Yojson.Safe.t option
+    }
+  val of_json : Yojson.Safe.t -> (t, string) result
+end = struct
+  type t =
+    { request_id : string
+    ; output : string
+    ; system : string option
+    ; messages : message list
+    ; schema : Yojson.Safe.t option
+    }
+
+  let of_json = function
+    | `Assoc fields ->
+      let text key =
+        match List.assoc_opt key fields with
+        | Some (`String value) when String.trim value <> "" -> Ok value
+        | Some _ | None -> Error (key ^ " requires a non-blank string")
+      in
+      let* () =
+        let keys = List.map fst fields in
+        if List.length keys = List.length (List.sort_uniq String.compare keys) then Ok ()
+        else Error "an exact_output request has duplicate keys"
+      in
+      let* () =
+        match List.find_opt (fun (key, _) -> not (List.mem key request_keys)) fields with
+        | Some (key, _) -> Error ("an exact_output request has no key " ^ key)
+        | None -> Ok ()
+      in
+      let* () =
+        match List.assoc_opt "kind" fields with
+        | Some (`String "exact_output") -> Ok ()
+        | Some _ | None -> Error "kind must be exact_output"
+      in
+      let* request_id = text "request_id" in
+      let* output = text "output" in
+      let* system =
+        match List.assoc_opt "system" fields with
+        | None | Some `Null -> Ok None
+        | Some (`String value) -> Ok (Some value)
+        | Some _ -> Error "system must be a string"
+      in
+      let* messages =
+        match List.assoc_opt "messages" fields with
+        | Some (`List (_ :: _ as values)) ->
+          let rec loop acc = function
+            | [] -> Ok (List.rev acc)
+            | value :: rest ->
+              let* message = message_of_json value in
+              loop (message :: acc) rest
+          in
+          loop [] values
+        | Some _ | None -> Error "messages requires at least one conversation message"
+      in
+      let* schema = match List.assoc_opt "schema" fields with
+        | None -> Ok None
+        | Some (`Assoc _ as schema) -> Lane_addon_action.canonical schema |> Result.map Option.some
+        | Some _ -> Error "request schema must be a JSON object" in
+      Ok { request_id; output; system; messages; schema }
+    | _ -> Error "an exact_output request must be an object"
+end
+
+type request = Request.t = private
+  { request_id : string
+  ; output : string
+  ; system : string option
+  ; messages : message list
+  ; schema : Yojson.Safe.t option
+  }
+
+let request_of_json = Request.of_json
 
 let request_to_json request =
   `Assoc
@@ -89,6 +114,29 @@ let request_to_json request =
      @ (match request.schema with None -> [] | Some schema -> ["schema",schema]))
 
 let digest request = Lane_addon_store.digest (Yojson.Safe.to_string (request_to_json request))
+
+(* A request with the digest of that same request. Proofs and records name a
+   request only by its [request_id] and [digest], so every read or write that
+   binds a proof or a record to a request takes this value. [make] is the only
+   way to build one.
+
+   The digest writes the whole request out as text. It is made the first time
+   a read or write compares it, names a proof file with it or writes it into a
+   new record, so a read that stops before any of these writes nothing out.
+   One value belongs to one operation, which uses it from one flow at a time:
+   a [Systhread_host.run] step runs on another thread while its caller waits.
+   So no two threads force it at once. *)
+module Digested : sig
+  type t
+  val make : request -> t
+  val request : t -> request
+  val digest : t -> string
+end = struct
+  type t = { request : request; digest : string Lazy.t }
+  let make request = { request; digest = lazy (digest request) }
+  let request t = t.request
+  let digest t = Lazy.force t.digest
+end
 
 (* Baseline validation constructs one. [run] and the worker receipt path
    additionally check the original request's partial shape before delivery. *)
@@ -492,7 +540,8 @@ let record_of_json = function
     Ok { digest; request; attempts; final }
   | _ -> Error "record must be an object"
 
-let bound_record ~declaration_id request wire =
+let bound_record ~declaration_id bound wire =
+    let request = Digested.request bound in
     let* wire = Lane_addon_action.canonical wire in
     let* record = record_of_json wire in
     let* encoded = Lane_addon_action.canonical
@@ -502,9 +551,11 @@ let bound_record ~declaration_id request wire =
     let* original = request_of_json record.request in
     let* expected = Lane_addon_action.canonical (request_to_json request) in
     let* captured = Lane_addon_action.canonical (request_to_json original) in
-    let* () = if String.equal record.digest (digest original)
-        && String.equal record.digest (digest request)
-        && Yojson.Safe.equal captured record.request && Yojson.Safe.equal captured expected then Ok ()
+    (* Both requests come from [Request.of_json], so equal canonical bodies
+       have equal digests. Comparing the record's digest with the caller's
+       once also covers the original's. *)
+    let* () = if Yojson.Safe.equal captured record.request && Yojson.Safe.equal captured expected
+        && String.equal record.digest (Digested.digest bound) then Ok ()
       else Error "retained Exact record differs from the original request or digest" in
     Ok record
 
@@ -577,7 +628,7 @@ let check_retained_record wire =
     | _ -> Error "record must be an object" in
   let* stored = record_of_json wire in
   let* original = request_of_json stored.request in
-  let* stored = bound_record ~declaration_id original wire in
+  let* stored = bound_record ~declaration_id (Digested.make original) wire in
   let* _ = validate_record ~request:original ~schema:None stored in
   Ok ()
 
@@ -601,7 +652,8 @@ let unreadable result =
 let invalid result =
   Result.map_error (fun detail -> Recovery_invalid detail) result
 
-let observe_retained_classified ~store ~declaration_id ~schema request =
+let observe_retained_classified ~store ~declaration_id ~schema bound =
+  let request = Digested.request bound in
   (* [original_schema] reads no record: it validates the caller's own schema and
      compares it with the grant kept in the request. A mismatch there cannot be
      cured by reading again, so it is an invalid original rather than an
@@ -612,24 +664,28 @@ let observe_retained_classified ~store ~declaration_id ~schema request =
   match wire with
   | None -> Ok Retained_absent
   | Some wire ->
-    let* record = invalid (bound_record ~declaration_id request wire) in
+    let* record = invalid (bound_record ~declaration_id bound wire) in
     invalid (validate_record ~request ~schema:(Some schema) record)
 
 let observe_retained ~store ~declaration_id ~schema request =
   Result.map_error describe_recovery_error
-    (observe_retained_classified ~store ~declaration_id ~schema request)
+    (observe_retained_classified ~store ~declaration_id ~schema (Digested.make request))
 
 (* The host link belongs to the original request owner, not to a worker
    evidence address. Canonical tagged tuples keep both ID spaces unambiguous. *)
 let proof_tuple values = Yojson.Safe.to_string (`List values)
 let proof_instance_id ~declaration_id =
   proof_tuple [`String "exact-original-execution"; `String declaration_id]
-(* [digest] is the whole request written out as text and hashed. The proof
-   functions below take it as an argument: the entry point of an operation
-   takes it once and every proof it reads or writes shares it. *)
-let proof_key ~declaration_id ~digest request =
+(* A proof file is named by its original request's [request_id] and
+   [digest]. *)
+let proof_request_key ~request_id ~digest =
+  proof_tuple [`String "original-request"; `String request_id; `String digest]
+(* The proof functions below take a [Digested.t]. The entry point of an
+   operation makes it once and every proof it reads or writes shares it. *)
+let proof_key ~declaration_id bound =
   proof_instance_id ~declaration_id,
-  proof_tuple [`String "original-request"; `String request.request_id; `String digest]
+  proof_request_key ~request_id:(Digested.request bound).request_id
+    ~digest:(Digested.digest bound)
 let proof_directory ~declaration_id =
   Lane_addon_store.host_result_directory ~instance_id:(proof_instance_id ~declaration_id)
 
@@ -665,15 +721,17 @@ let validate_execution (execution : execution_result) =
   | (Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _), Some _ ->
       Error "original failure cannot retain a successful execution receipt"
 
-let proof_to_json ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution =
+let proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution =
+  let request = Digested.request bound in
   `Assoc ["version", `Int 1; "kind", `String "exact-original-execution";
     "store_root", `String (Lane_addon_store.root store); "declaration_id", `String declaration_id;
-    "request_id", `String request.request_id; "digest", `String digest;
+    "request_id", `String request.request_id; "digest", `String (Digested.digest bound);
     "request", request_to_json request; "schema", schema; "attempt_ordinal", `Int attempt_ordinal;
     "outcome", outcome_to_json execution.outcome;
     "receipt", Keeper_exact_walk_receipt.to_json execution.receipt]
 
-let decode_proof ~store ~declaration_id ~digest request ~attempt_ordinal json =
+let decode_proof ~store ~declaration_id bound ~attempt_ordinal json =
+  let request = Digested.request bound in
   let* normalized = Lane_addon_action.canonical json in
   let field name = match normalized with
     | `Assoc fields -> Option.to_result ~none:("missing original execution " ^ name) (List.assoc_opt name fields)
@@ -705,27 +763,27 @@ let decode_proof ~store ~declaration_id ~digest request ~attempt_ordinal json =
   let execution = {outcome; receipt} in
   let* () = validate_execution execution in
   let* encoded = Lane_addon_action.canonical
-    (proof_to_json ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution) in
+    (proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution) in
   if Yojson.Safe.equal normalized encoded then Ok (schema, execution)
   else Error "original execution proof has unknown, conflicting or rebound identity fields"
 
 (* One existing Store link retains this original request's sparse ordered
    completed attempts. Losing the Exact index cannot hide an earlier proof
    merely because its ordinal was greater than one. This is not a work index. *)
-let proofs_to_json ~store ~declaration_id ~digest request proofs =
+let proofs_to_json ~store ~declaration_id bound proofs =
   `Assoc ["version",`Int 1; "kind",`String "exact-original-executions";
     "executions",`List (List.map (fun (attempt_ordinal,schema,execution) ->
-      proof_to_json ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution) proofs)]
+      proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution) proofs)]
 
 (* The proof link is read from disk and then decoded. Callers that must tell a
    transient read failure from a permanently invalid link use these two steps
    apart; [load_proofs] keeps them together for callers that need only the
    result. *)
-let load_proof_wire ~store ~declaration_id ~digest request =
-  let instance_id,request_id=proof_key ~declaration_id ~digest request in
+let load_proof_wire ~store ~declaration_id bound =
+  let instance_id,request_id=proof_key ~declaration_id bound in
   Lane_addon_store.load_host_result store ~instance_id ~request_id
 
-let decode_proofs ~store ~declaration_id ~digest request = function
+let decode_proofs ~store ~declaration_id bound = function
   | None -> Ok []
   | Some wire ->
     let* normalized=Lane_addon_action.canonical wire in
@@ -742,16 +800,16 @@ let decode_proofs ~store ~declaration_id ~digest request = function
             | Some (`Int ordinal) when ordinal>previous -> Ok ordinal
             | Some _ | None -> Error "original execution ordinals must be positive and strictly increasing")
         | _ -> Error "original execution attempt must be an object" in
-      let* schema,execution=decode_proof ~store ~declaration_id ~digest request ~attempt_ordinal wire in
+      let* schema,execution=decode_proof ~store ~declaration_id bound ~attempt_ordinal wire in
       Ok (attempt_ordinal,(attempt_ordinal,schema,execution)::proofs)) (Ok (0,[])) values in
     let proofs=List.rev proofs in
-    let* encoded=Lane_addon_action.canonical (proofs_to_json ~store ~declaration_id ~digest request proofs) in
+    let* encoded=Lane_addon_action.canonical (proofs_to_json ~store ~declaration_id bound proofs) in
     if Yojson.Safe.equal normalized encoded then Ok proofs
     else Error "original execution link has unknown or conflicting fields"
 
-let load_proofs ~store ~declaration_id ~digest request =
-  let* wire=load_proof_wire ~store ~declaration_id ~digest request in
-  decode_proofs ~store ~declaration_id ~digest request wire
+let load_proofs ~store ~declaration_id bound =
+  let* wire=load_proof_wire ~store ~declaration_id bound in
+  decode_proofs ~store ~declaration_id bound wire
 
 let proof_request_id ~declaration_id ~file_name json =
   let* request = match json with
@@ -762,9 +820,12 @@ let proof_request_id ~declaration_id ~file_name json =
            | None -> Error "missing original execution request")
         | Some _ | None -> Error "original execution link requires nonempty completed attempts")
     | _ -> Error "original execution link must be an object" in
-  let instance_id, request_key = proof_key ~declaration_id ~digest:(digest request) request in
+  (* The sweep binds this file to no caller's request. It only checks that the
+     file holds the request its name says. *)
+  let request_key = proof_request_key ~request_id:request.request_id ~digest:(digest request) in
   if String.equal file_name
-      (Filename.basename (Lane_addon_store.host_result_path ~instance_id ~request_id:request_key))
+      (Filename.basename (Lane_addon_store.host_result_path
+        ~instance_id:(proof_instance_id ~declaration_id) ~request_id:request_key))
   then Ok request.request_id
   else Error "original execution link is stored under another request's name"
 
@@ -797,8 +858,8 @@ let proof_matches_attempt record (ordinal,_schema,execution) =
 let bind_proofs record proofs =
   List.fold_left (fun state proof -> let* ()=state in proof_matches_attempt record proof) (Ok ()) proofs
 
-let bound_proofs ~store ~declaration_id ~digest request record =
-  let* proofs=load_proofs ~store ~declaration_id ~digest request in
+let bound_proofs ~store ~declaration_id bound record =
+  let* proofs=load_proofs ~store ~declaration_id bound in
   let* ()=bind_proofs record proofs in
   Ok proofs
 
@@ -823,27 +884,27 @@ let size_refused_slots ~schema proofs =
       ([],[]) (List.rev proofs) in
     List.rev refused
 
-let retain_proof ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution =
+let retain_proof ~store ~declaration_id bound ~schema ~attempt_ordinal execution =
   let* () = validate_execution execution in
-  let json = proof_to_json ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution in
-  let* _ = decode_proof ~store ~declaration_id ~digest request ~attempt_ordinal json in
-  let* proofs=load_proofs ~store ~declaration_id ~digest request in
+  let json = proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution in
+  let* _ = decode_proof ~store ~declaration_id bound ~attempt_ordinal json in
+  let* proofs=load_proofs ~store ~declaration_id bound in
   let* updated=match selected_proof ~attempt_ordinal proofs with
     | Some (original_schema,original) ->
       let* expected=Lane_addon_action.canonical json in
-      let* actual=Lane_addon_action.canonical (proof_to_json ~store ~declaration_id ~digest request
+      let* actual=Lane_addon_action.canonical (proof_to_json ~store ~declaration_id bound
         ~schema:original_schema ~attempt_ordinal original) in
       if Yojson.Safe.equal expected actual then Ok proofs else Error "conflicting original execution proof"
     | None ->
       if List.exists (fun (ordinal,_,_) -> ordinal>attempt_ordinal) proofs
       then Error "original execution proof cannot insert an earlier completed attempt"
       else Ok (proofs @ [attempt_ordinal,schema,execution]) in
-  let json=proofs_to_json ~store ~declaration_id ~digest request updated in
+  let json=proofs_to_json ~store ~declaration_id bound updated in
   let* expected=Lane_addon_action.canonical json in
-  let instance_id,request_id=proof_key ~declaration_id ~digest request in
+  let instance_id,request_id=proof_key ~declaration_id bound in
   let* ()=Lane_addon_store.save_host_result store ~instance_id ~request_id json in
-  let* confirmed=load_proofs ~store ~declaration_id ~digest request in
-  let* confirmed=Lane_addon_action.canonical (proofs_to_json ~store ~declaration_id ~digest request confirmed) in
+  let* confirmed=load_proofs ~store ~declaration_id bound in
+  let* confirmed=Lane_addon_action.canonical (proofs_to_json ~store ~declaration_id bound confirmed) in
   if Yojson.Safe.equal expected confirmed then Ok ()
   else Error "original execution proof changed before durable confirmation"
 
@@ -852,17 +913,17 @@ let read_original_execution ~store ~declaration_id ~schema ~attempt_ordinal requ
   if attempt_ordinal <= 0 then Error "original execution attempt ordinal must be positive"
   else
     let* schema=original_schema ~declaration_id ~schema request in
-    let digest=digest request in
+    let bound=Digested.make request in
     let* wire=Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
     match wire with
     | None ->
-      let* proofs=load_proofs ~store ~declaration_id ~digest request in
+      let* proofs=load_proofs ~store ~declaration_id bound in
       if proofs=[] then Ok No_completed_original
       else Error "original execution proof has no original Exact request"
     | Some wire ->
-      let* record=bound_record ~declaration_id request wire in
+      let* record=bound_record ~declaration_id bound wire in
       let* _=validate_record ~request ~schema:None record in
-      let* proofs=bound_proofs ~store ~declaration_id ~digest request record in
+      let* proofs=bound_proofs ~store ~declaration_id bound record in
       (match selected_proof ~attempt_ordinal proofs with
        | None -> Ok No_completed_original
        | Some (retained_schema,execution) ->
@@ -873,19 +934,19 @@ type latest_original_execution =
   | No_completed_latest
   | Completed_latest of { attempt_ordinal : int; execution : execution_result }
 
-let read_latest_original_execution ~store ~declaration_id ~schema request =
+let read_latest_bound ~store ~declaration_id ~schema bound =
+  let request = Digested.request bound in
   let* schema=original_schema ~declaration_id ~schema request in
-  let digest=digest request in
   let* wire=Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
   match wire with
   | None ->
-    let* proofs=load_proofs ~store ~declaration_id ~digest request in
+    let* proofs=load_proofs ~store ~declaration_id bound in
     if proofs=[] then Ok No_completed_latest
     else Error "original execution proof has no original Exact request"
   | Some wire ->
-    let* record=bound_record ~declaration_id request wire in
+    let* record=bound_record ~declaration_id bound wire in
     let* _=validate_record ~request ~schema:None record in
-    let* proofs=bound_proofs ~store ~declaration_id ~digest request record in
+    let* proofs=bound_proofs ~store ~declaration_id bound record in
     let rec last_execution_ordinal ordinal = function
       | Delivery_refused _ :: earlier -> last_execution_ordinal (ordinal - 1) earlier
       | [] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted
@@ -901,12 +962,16 @@ let read_latest_original_execution ~store ~declaration_id ~schema request =
       if Yojson.Safe.equal schema retained_schema then Ok (Completed_latest {attempt_ordinal;execution})
       else Error "original execution proof differs from the supplied original schema"
 
+let read_latest_original_execution ~store ~declaration_id ~schema request =
+  read_latest_bound ~store ~declaration_id ~schema (Digested.make request)
+
 let read_latest_slot_observations ~store ~declaration_id ~schema request =
-  let* latest=read_latest_original_execution ~store ~declaration_id ~schema request in
+  let bound = Digested.make request in
+  let* latest=read_latest_bound ~store ~declaration_id ~schema bound in
   match latest with
   | No_completed_latest -> Ok None
   | Completed_latest {attempt_ordinal;execution} ->
-    let proof=proof_to_json ~store ~declaration_id ~digest:(digest request) request ~schema
+    let proof=proof_to_json ~store ~declaration_id bound ~schema
       ~attempt_ordinal execution in
     Lane_addon_exact_observation.read ~store ~declaration_id ~request_id:request.request_id
       ~attempt_ordinal ~proof
@@ -934,26 +999,26 @@ let recover_retained ~store ~declaration_id ~schema request =
   (* Same split as [observe_retained]: the schema is the caller's own, so a
      mismatch is permanent. *)
   let* schema = invalid (original_schema ~declaration_id ~schema request) in
+  let bound = Digested.make request in
   let key = Lane_addon_store.root store, declaration_id, request.request_id in
   (* [observe_retained] already reports [recovery_error], so a concurrent claim
      is forwarded unchanged instead of being folded into one class. *)
-  if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema request
+  if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema bound
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
     let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
       ~request_id:request.request_id) in
     (* The proof link is read from disk and then decoded. A read that fails may
        succeed later; a link that decodes to something else never will. *)
     let proofs () =
-      let digest = digest request in
-      let* wire = unreadable (load_proof_wire ~store ~declaration_id ~digest request) in
-      invalid (decode_proofs ~store ~declaration_id ~digest request wire) in
+      let* wire = unreadable (load_proof_wire ~store ~declaration_id bound) in
+      invalid (decode_proofs ~store ~declaration_id bound wire) in
     match wire with
     | None ->
         let* proofs = proofs () in
         if proofs = [] then Ok Retained_absent
         else Error (Recovery_invalid "original execution proof has no original Exact request")
     | Some wire ->
-        let* record = invalid (bound_record ~declaration_id request wire) in
+        let* record = invalid (bound_record ~declaration_id bound wire) in
         let* observed = invalid (validate_record ~request ~schema:(Some schema) record) in
         let* proofs = proofs () in
         let* () = invalid (bind_proofs record proofs) in
@@ -973,7 +1038,7 @@ let recover_retained ~store ~declaration_id ~schema request =
                         let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
                           ~request_id:request.request_id
                           (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
-                        observe_retained_classified ~store ~declaration_id ~schema request))
+                        observe_retained_classified ~store ~declaration_id ~schema bound))
         | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
             | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
         | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->
@@ -1013,7 +1078,7 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
   (* Identity precedes permission: even a refused request owns its id. *)
   if not (claim key) then Ok (Not_final Attempt_in_progress)
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
-    let digest = digest request in
+    let bound = Digested.make request in
     let save record =
       Systhread_host.run ~label:"addon-exact-request-save" (fun () ->
         Lane_addon_store.save_exact_request store ~declaration_id ~request_id
@@ -1027,17 +1092,18 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
         let* original = request_of_json stored.request in
         let* () = if String.equal original.request_id request_id then Ok ()
           else Error "retained Exact record has a different original request ID" in
-        let* stored = bound_record ~declaration_id original json in
+        let* stored = bound_record ~declaration_id (Digested.make original) json in
         let* _ = validate_record ~request:original ~schema:None stored in
         Ok (Some stored) in
     match retained with
-    | Some record when not (String.equal record.digest digest) -> Ok (Final Request_id_reused)
+    | Some record when not (String.equal record.digest (Digested.digest bound)) -> Ok (Final Request_id_reused)
     | None | Some _ ->
       let previous = match retained with
         | Some record -> record
-        | None -> {digest; request = request_to_json request; attempts = []; final = None} in
+        | None -> {digest = Digested.digest bound; request = request_to_json (Digested.request bound);
+            attempts = []; final = None} in
       let* proofs=Systhread_host.run ~label:"addon-exact-proofs-load" (fun () ->
-        bound_proofs ~store ~declaration_id ~digest request previous) in
+        bound_proofs ~store ~declaration_id bound previous) in
       let finish = finish_record in
       let* previous, recovered = match previous.final with
         | None ->
@@ -1170,14 +1236,14 @@ let run ~store ~declaration_id ~(package : Lane_addon_types.package) ~runner ~au
                      marker before its proof. *)
                   let* () = mark_started () in
                   Systhread_host.run ~label:"addon-exact-proof-retain" (fun () ->
-                    retain_proof ~store ~declaration_id ~digest request ~schema
+                    retain_proof ~store ~declaration_id bound ~schema
                       ~attempt_ordinal:(List.length previous.attempts + 1) execution) in
               (* Optional observations have their own proof-bound link. A
                  failed diagnostic write cannot undo accepted original work. *)
               (match execution,Exact_lane_slot_capture.observations slot_capture with
                | Some execution,Some observations ->
                  let attempt_ordinal=List.length previous.attempts+1 in
-                 let proof=proof_to_json ~store ~declaration_id ~digest request ~schema ~attempt_ordinal execution in
+                 let proof=proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution in
                  (match Systhread_host.run ~label:"addon-exact-observation-retain" (fun () ->
                     Lane_addon_exact_observation.retain ~store ~declaration_id
                       ~request_id:request.request_id ~attempt_ordinal ~proof observations) with

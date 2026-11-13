@@ -473,16 +473,22 @@ let render_exact_lane_provider_editor (state : state) editor =
     in
     let heading =
       match rows with
-      | [] -> Printf.sprintf "  %s (0) · a adds one" title
+      | [] ->
+          Printf.sprintf
+            (if state.ui_language = Lang_ko then "  %s (0) · a 로 추가"
+             else "  %s (0) · a adds one")
+            title
       | _ :: _ -> Printf.sprintf "  %s (%d)" title (List.length rows)
     in
     (None, heading)
     :: List.map (fun (index, row) -> Some index, row.Masc_tui_types.sr_slot) rows
   in
   let display_rows =
-    group_rows Masc_tui_types.Catalog_slot "HTTP slots · tried first"
+    group_rows Masc_tui_types.Catalog_slot
+      (ui_text state ~ko:"HTTP 슬롯 · 먼저 시도" ~en:"HTTP slots · tried first")
     @ group_rows Masc_tui_types.Official_client_slot
-        "CLI slots · tried after every HTTP slot"
+        (ui_text state ~ko:"CLI 슬롯 · HTTP 슬롯을 모두 시도한 뒤"
+           ~en:"CLI slots · tried after every HTTP slot")
   in
   box_top buf cols;
   box_line buf cols
@@ -492,7 +498,9 @@ let render_exact_lane_provider_editor (state : state) editor =
        ~readings:[] ~position:None);
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.info ())
-    (Printf.sprintf "  %s · HTTP candidates first, then CLI candidates"
+    (Printf.sprintf
+       (if state.ui_language = Lang_ko then "  %s · HTTP 후보 먼저, 그다음 CLI 후보"
+        else "  %s · HTTP candidates first, then CLI candidates")
        (Terminal_text.single_line lane));
   (match state.lanes_action_error with
    | None -> ()
@@ -511,17 +519,27 @@ let render_exact_lane_provider_editor (state : state) editor =
     (Masc_tui_types.runtime_lane_stale_lines state);
   (match state.runtime_lane_write with
    | Masc_tui_types.Lane_write_posting ->
-     box_line_styled buf cols ~style:(Theme.info ()) "  Saving candidate order..."
+     box_line_styled buf cols ~style:(Theme.info ())
+       (ui_text state ~ko:"  후보 순서 저장 중…" ~en:"  Saving candidate order...")
    | Masc_tui_types.Lane_write_rereading _ ->
-     box_line_styled buf cols ~style:(Theme.info ()) "  Reading current candidate order..."
+     box_line_styled buf cols ~style:(Theme.info ())
+       (ui_text state ~ko:"  현재 후보 순서 조회 중…"
+          ~en:"  Reading current candidate order...")
    | Masc_tui_types.Lane_write_idle -> ());
-  (match Masc_tui_types.runtime_picker_projection
-     ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols) state with
+  let picker =
+    Masc_tui_types.runtime_picker_projection
+      ~page:(Masc_tui_types.runtime_exact_picker_page state ~terminal_rows ~cols) state
+  in
+  (match picker with
    | Some picker ->
      let action = match picker.Masc_tui_types.rlp_pick with
-       | Masc_tui_types.Pick_exact_lane_replacement _ -> "Replace selected candidate", "Enter replace"
+       | Masc_tui_types.Pick_exact_lane_replacement _ ->
+           ui_text state ~ko:"선택한 후보 교체" ~en:"Replace selected candidate",
+           ui_text state ~ko:"Enter 교체" ~en:"Enter replace"
        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
-       | Pick_new_lane _ -> "Add fallback candidate", "Enter add" in
+       | Pick_new_lane _ ->
+           ui_text state ~ko:"후보 추가" ~en:"Add fallback candidate",
+           ui_text state ~ko:"Enter 추가" ~en:"Enter add" in
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ fst action);
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -537,24 +555,27 @@ let render_exact_lane_provider_editor (state : state) editor =
             | Masc_tui_types.Runtime_choice runtime ->
             let destination =
               match picker.rlp_pick, runtime.ro_exact_slot_group with
-              | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_http_slots -> "HTTP replacement"
-              | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_cli_slots -> "CLI replacement"
+              | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_http_slots -> ui_text state ~ko:"HTTP 교체" ~en:"HTTP replacement"
+              | Masc_tui_types.Pick_exact_lane_replacement _, Tui_decode.Exact_cli_slots -> ui_text state ~ko:"CLI 교체" ~en:"CLI replacement"
               | (Pick_conversation_lane _, Tui_decode.Exact_http_slots)
               | (Pick_exact_lane _, Tui_decode.Exact_http_slots)
               | (Pick_new_lane _, Tui_decode.Exact_http_slots)
               | (Pick_media_failover, Tui_decode.Exact_http_slots)
-              | (Pick_route_default, Tui_decode.Exact_http_slots) -> "HTTP tail"
+              | (Pick_route_default, Tui_decode.Exact_http_slots) ->
+                  ui_text state ~ko:"HTTP 끝에" ~en:"HTTP tail"
               | (Pick_conversation_lane _, Tui_decode.Exact_cli_slots)
               | (Pick_exact_lane _, Tui_decode.Exact_cli_slots)
               | (Pick_new_lane _, Tui_decode.Exact_cli_slots)
               | (Pick_media_failover, Tui_decode.Exact_cli_slots)
-              | (Pick_route_default, Tui_decode.Exact_cli_slots) -> "CLI tail"
+              | (Pick_route_default, Tui_decode.Exact_cli_slots) ->
+                  ui_text state ~ko:"CLI 끝에" ~en:"CLI tail"
               | (Pick_conversation_lane _, Tui_decode.Exact_output_unsupported)
               | (Pick_exact_lane _, Tui_decode.Exact_output_unsupported)
               | (Pick_exact_lane_replacement (_, _, _), Tui_decode.Exact_output_unsupported)
               | (Pick_new_lane _, Tui_decode.Exact_output_unsupported)
               | (Pick_media_failover, Tui_decode.Exact_output_unsupported)
-              | (Pick_route_default, Tui_decode.Exact_output_unsupported) -> "no output schema"
+              | (Pick_route_default, Tui_decode.Exact_output_unsupported) ->
+                  ui_text state ~ko:"출력 스키마 없음" ~en:"no output schema"
             in
             let line bracket note =
               Printf.sprintf "  %s [%s] %s%s"
@@ -579,9 +600,12 @@ let render_exact_lane_provider_editor (state : state) editor =
                else box_line buf cols)
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
-                    then "  (already declared)" else "")));
-            let prefix = "      Quota scope " in
-            let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+                    then ui_text state ~ko:"  (이미 선언됨)" ~en:"  (already declared)"
+                    else "")));
+            let prefix = ui_text state ~ko:"      쿼터 범위 " ~en:"      Quota scope " in
+            let suffix =
+              " · " ^ format_context_tokens runtime.ro_effective_max_context
+              ^ ui_text state ~ko:" 컨텍스트" ~en:" context" in
             let scope_width =
               max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
@@ -593,7 +617,9 @@ let render_exact_lane_provider_editor (state : state) editor =
          | Some (Masc_tui_types.Runtime_choice runtime) ->
            box_line_styled buf cols ~style:(Theme.recede ())
              ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (framed_inner_width cols - 2))
-                (Terminal_text.single_line ("Connection " ^ runtime.ro_provider_id ^ " · Selected " ^ runtime.ro_id)))
+                (Terminal_text.single_line
+                   (ui_text state ~ko:"연결 " ~en:"Connection " ^ runtime.ro_provider_id
+                    ^ ui_text state ~ko:" · 선택 " ~en:" · Selected " ^ runtime.ro_id)))
          | Some (Masc_tui_types.Lane_choice _) | None -> ())
       | None -> ());
      box_line_styled buf cols ~style:(Theme.info ())
@@ -608,17 +634,23 @@ let render_exact_lane_provider_editor (state : state) editor =
           box_line_styled buf cols ~style:(Theme.warn ())
             ("  " ^ Terminal_text.single_line (Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading))
       | Runtime_catalog_unread ->
-          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue unread · showing slot IDs"
+          box_line_styled buf cols ~style:(Theme.recede ())
+            (ui_text state ~ko:"  런타임 목록 미조회 · 슬롯 ID 로 표시"
+               ~en:"  runtime catalogue unread · showing slot IDs")
       | Runtime_catalog_loading ->
-          box_line_styled buf cols ~style:(Theme.recede ()) "  runtime catalogue loading · showing slot IDs"
+          box_line_styled buf cols ~style:(Theme.recede ())
+            (ui_text state ~ko:"  런타임 목록 조회 중 · 슬롯 ID 로 표시"
+               ~en:"  runtime catalogue loading · showing slot IDs")
       | Runtime_catalog_failed detail ->
           box_line_styled buf cols ~style:(Theme.warn ())
-            ("  runtime catalogue read failed: " ^ Terminal_text.single_line detail ^ " · showing slot IDs"));
+            (ui_text state ~ko:"  런타임 목록 조회 실패: " ~en:"  runtime catalogue read failed: "
+             ^ Terminal_text.single_line detail
+             ^ ui_text state ~ko:" · 슬롯 ID 로 표시" ~en:" · showing slot IDs"));
      (* Reserve a key line and the frame bottom; at least the selected row
         stays visible on a short terminal. The ordinal places the moving
         window in the complete declaration. *)
      let visible =
-       let reserved = if entries <> [] && Option.is_none selected_index then 8 else 7 in
+       let reserved = if entries <> [] && Option.is_none selected_index then 6 else 5 in
        max 1 (min (List.length display_rows) (rows - count_frame_lines buf - reserved))
      in
      let selected_display_index =
@@ -635,7 +667,8 @@ let render_exact_lane_provider_editor (state : state) editor =
      in
      if entries = [] then
        box_line_styled buf cols ~style:(Theme.recede ())
-         "  no provider slots declared; a adds one"
+         (ui_text state ~ko:"  선언된 슬롯 없음 · a 로 추가"
+            ~en:"  no provider slots declared; a adds one")
      else
        display_rows
        |> List.iteri (fun display_index (index, label) ->
@@ -659,14 +692,15 @@ let render_exact_lane_provider_editor (state : state) editor =
                    | Some runtime -> Masc_tui_types.runtime_model_picker_title runtime
                    | None -> Terminal_text.single_line row.Masc_tui_types.sr_slot)
                   (if row.Masc_tui_types.sr_admitted then ""
-                   else "  (not admitted)")
+                   else ui_text state ~ko:"  (수락되지 않음)" ~en:"  (not admitted)")
               in
               if Some index = selected_index
               then box_line_selected buf cols line
               else box_line buf cols line));
      if entries <> [] && Option.is_none (selected_index) then
        box_line_styled buf cols ~style:(Theme.warn ())
-         "  no slot selected; j/k selects a current slot";
+         (ui_text state ~ko:"  선택한 슬롯 없음 · j/k 로 현재 슬롯 선택"
+            ~en:"  no slot selected; j/k selects a current slot");
      (match Masc_tui_types.slot_editor_cursor_row state with
       | None -> ()
       | Some row ->
@@ -674,32 +708,41 @@ let render_exact_lane_provider_editor (state : state) editor =
            String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog in
         let identity = Terminal_text.single_line
           ((match selected_runtime with
-            | Some runtime -> "Connection " ^ runtime.ro_provider_id ^ " · "
-            | None -> "") ^ "Selected " ^ row.sr_slot) in
+            | Some runtime ->
+                ui_text state ~ko:"연결 " ~en:"Connection " ^ runtime.ro_provider_id ^ " · "
+            | None -> "")
+           ^ ui_text state ~ko:"선택 " ~en:"Selected " ^ row.sr_slot) in
         (match selected_runtime with
          | Some runtime ->
-           let prefix = "  Quota scope " in
-           let suffix = " · " ^ format_context_tokens runtime.ro_effective_max_context ^ " context" in
+           let prefix = ui_text state ~ko:"  쿼터 범위 " ~en:"  Quota scope " in
+           let suffix =
+             " · " ^ format_context_tokens runtime.ro_effective_max_context
+             ^ ui_text state ~ko:" 컨텍스트" ~en:" context" in
            let scope_width =
              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
              (prefix ^ Masc_tui_message_layout.truncate_middle scope_width
                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
-         | None -> box_line_styled buf cols ~style:(Theme.warn ()) "  Model details unavailable");
+         | None ->
+             box_line_styled buf cols ~style:(Theme.warn ())
+               (ui_text state ~ko:"  모델 정보 없음" ~en:"  Model details unavailable"));
         box_line_styled buf cols ~style:(Theme.recede ())
           ("  " ^ Masc_tui_message_layout.truncate_middle (max 1 (framed_inner_width cols - 2)) identity));
      box_line_styled buf cols ~style:(Theme.recede ())
-       "  arrows/j/k select · r replace model/effort · a add fallback · 1 first in group";
-     box_line_styled buf cols ~style:(Theme.recede ())
-       "  J/K reorder · x remove · Enter/d settings · e TOML · Esc back";
-     box_line_styled buf cols ~style:(Theme.recede ())
-       "  Changes save immediately; file and application results are shown separately");
+       (ui_text state
+          ~ko:"  바꾸면 바로 저장됩니다. 파일 결과와 적용 결과는 따로 표시됩니다."
+          ~en:"  Changes save immediately; file and application results are shown separately"));
   for _ = 1 to max 0 (rows - count_frame_lines buf - 2) do
     box_empty buf cols
   done;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (match picker with
+          (* The picker names its own keys on the row under its choices. *)
+          | Some _ -> Masc_tui_keys.footer_hints ~lang:state.ui_language state.view
+          | None -> Masc_tui_keys.footer_hints_exact_model_order ~lang:state.ui_language));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 let render_lanes_overview (state : state) =

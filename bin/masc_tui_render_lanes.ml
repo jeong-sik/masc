@@ -610,7 +610,9 @@ let render_exact_lane_provider_editor (state : state) editor =
               max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
             box_line_styled buf cols ~style:(Theme.recede ())
               (prefix ^ Masc_tui_message_layout.truncate_middle scope_width
-                 (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix));
+                 (Terminal_text.single_line
+                    (runtime_quota_scope_label ~ko:(state.ui_language = Lang_ko) runtime))
+               ^ suffix));
      (match picker.rlp_selected_row with
       | Some offset ->
         (match List.nth_opt picker.rlp_choices offset with
@@ -724,7 +726,9 @@ let render_exact_lane_provider_editor (state : state) editor =
              max 1 (framed_inner_width cols - Message_layout.display_width (prefix ^ suffix)) in
            box_line_styled buf cols ~style:(Theme.info ())
              (prefix ^ Masc_tui_message_layout.truncate_middle scope_width
-                (Terminal_text.single_line (runtime_quota_scope_label runtime)) ^ suffix)
+                (Terminal_text.single_line
+                   (runtime_quota_scope_label ~ko:(state.ui_language = Lang_ko) runtime))
+              ^ suffix)
          | None ->
              box_line_styled buf cols ~style:(Theme.warn ())
                (ui_text state ~ko:"  모델 정보 없음" ~en:"  Model details unavailable"));
@@ -978,7 +982,8 @@ let render_lanes_overview (state : state) =
                    (Ansi.dim ^ note ^ Ansi.reset));
               box_line_styled buf cols ~style:(Theme.recede ())
                 (ui_text state ~ko:"      쿼터 범위 " ~en:"      Quota scope "
-                  ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
+                  ^ Terminal_text.single_line
+                      (runtime_quota_scope_label ~ko:(state.ui_language = Lang_ko) runtime)
                   ^ ui_text state ~ko:" · 연결 " ~en:" · Connection "
                   ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id))

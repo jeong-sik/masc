@@ -24061,12 +24061,16 @@ let runtime_picker_choice_id = function
 
 (* The decoder retains a credential-location quota scope from the same response.
    It cannot identify a subscription after credentials change at that location. *)
-let runtime_quota_scope_label (runtime : Tui_decode.runtime_option) =
+let runtime_quota_scope_label ~ko (runtime : Tui_decode.runtime_option) =
   match runtime.ro_quota_scope_id with
   | Some scope_id -> scope_id
   | None -> (match runtime.ro_quota_scope with
-      | Some scope -> "unavailable; response-local scope " ^ scope
-      | None -> "unavailable (no quota scope reported)")
+      | Some scope ->
+          (if ko then "미확인; 이 응답에서만 쓰는 범위 "
+           else "unavailable; response-local scope ") ^ scope
+      | None ->
+          if ko then "미확인 (응답에 쿼터 범위 없음)"
+          else "unavailable (no quota scope reported)")
 
 type runtime_picker_projection = {
   rlp_lane : string;
@@ -24100,12 +24104,13 @@ let format_context_tokens tokens =
   else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
   else Printf.sprintf "%d" tokens
 
+(* Every word of this label is English, so the scope fallback is English too. *)
 let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
       runtime.Tui_decode.ro_declared_reasoning_effort in
   Masc.Tui_terminal_text.sanitize_terminal_text
     (Printf.sprintf "%s %s · Quota scope %s · Connection %s · %s context · %s"
-       runtime.Tui_decode.ro_model effort (runtime_quota_scope_label runtime) runtime.Tui_decode.ro_provider_id
+       runtime.Tui_decode.ro_model effort (runtime_quota_scope_label ~ko:false runtime) runtime.Tui_decode.ro_provider_id
        (format_context_tokens runtime.Tui_decode.ro_effective_max_context) runtime.Tui_decode.ro_id)
 
 let runtime_picker_label = function

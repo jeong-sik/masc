@@ -13,9 +13,11 @@ python3 test/test_dune_source_discovery.py
 
 This check requires Dune 3.22 or newer. It copies the actual root `dune` file
 into temporary projects and queries `dune describe workspace`; it does not
-compile MASC. Incomplete includes and invalid build stanzas under `artifacts/`
-must be ignored while normal sources remain visible and their errors still
-fail. Controls without the root boundary must reject the same snapshots.
+compile MASC. Incomplete includes, invalid build stanzas and links back into
+the checkout under `artifacts/` must be ignored while normal sources remain
+visible and their errors still fail. Controls without the root boundary must
+reject the same snapshots, and a control that reads `artifacts/` as data must
+reject the link.
 The check is also included in `@runtest` and selectable as
 `TARGET_SUITES=test_dune_source_discovery` in the existing Test workflow.
 It does not prove a full build, runtime behavior or discovery outside the

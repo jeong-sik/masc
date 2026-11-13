@@ -135,7 +135,13 @@ let recover_child ~config ~keeper_name ~store intent =
       | None -> Error "Resolution child has no original predecessor" in
     index) |> unavailable in
   match intent.phase with
-  | Child_intended _ -> io (fun () -> Intent.confirm_child ~store ~expected:intent child) |> Result.map (fun _ -> ())
+  | Child_intended _ ->
+    (* The acknowledgement is written once. The child's body is read here so
+       the index just checked is the body's before the intent says so. *)
+    let* ()=io (fun () ->
+      let* original=Owner.load_listed ~store child |> Result.map_error Owner.error_to_string in
+      let+ _=Request.restore ~owner:index.owner original in ()) |> unavailable in
+    io (fun () -> Intent.confirm_child ~store ~expected:intent child) |> Result.map (fun _ -> ())
   | Child_confirmed _ ->
     io (fun () -> Lineage.confirm_predecessor_record ~store ~require_confirmed:true child index) |> unavailable
   | Requested | Refused _ | Fenced -> Error (Intent.Conflict "Resolution child phase changed")
@@ -150,22 +156,25 @@ let find_completed ~config ~keeper_name ~store ~child_id =
       let* record=load_record ~store ~scope ~request_id:id ~absent:"Resolution child is absent" in
       let+ index=observed_index ~config ~keeper_name ~foreign:"Resolution child belongs to another Keeper" record in
       record,index) in
-    (* Every original the descent reaches has its lineage confirmed here,
-       fenced or not. *)
-    let* ()=io (fun () -> Lineage.confirm_predecessor_record ~store ~require_confirmed:true record index) in
+    (* Every original the descent reaches has its lineage confirmed, fenced
+       or not: from its record and index while no body is needed, from the
+       body where one is read anyway. *)
+    let by_record ()=io (fun () -> Lineage.confirm_predecessor_record ~store ~require_confirmed:true record index) in
     let* fence=io (fun () -> Lineage.fenced_record ~store ~record ~index) in
     match fence with
     | Some _ ->
+      let* ()=by_record () in
       let* next=io (fun () -> Lineage.confirmed_resolution_child ~store ~record ~index) in
       (match next with None -> Ok None | Some next -> descend (id::seen) next)
     | None ->
     match Progress.phase (Owner.Record.progress record) with
     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-    | Rejected _ | Subdividing _ | Subdivided _ -> Ok None
+    | Rejected _ | Subdividing _ | Subdivided _ -> let+ ()=by_record () in None
     | Finished _ | Conflicted _ ->
     let* original,request=io (fun () ->
       let* original=Owner.load_listed ~store record |> Result.map_error Owner.error_to_string in
       let+ request=Request.restore ~owner:index.owner original in original,request) in
+    let* ()=io (fun () -> Lineage.confirm_predecessor ~store ~require_confirmed:true request) in
     let* frontier=io (fun () ->
       Keeper_librarian_durable_commit.validate ~store ~request ~record:original) in
     match Progress.phase original.progress,frontier with

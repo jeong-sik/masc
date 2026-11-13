@@ -159,7 +159,15 @@ class OwnerWithoutModel(unittest.TestCase):
                     return True
                 return False
 
-            replacement = None
+            # The replacement is not a child of this process. Restart prints
+            # its pid before it waits, so the pid is read from that output
+            # whether restart returned or was given up on.
+            said = base/'restart.out'
+
+            def replacement():
+                started = re.search(r'Started pid (\d+)', said.read_text() if said.exists() else '')
+                return int(started.group(1)) if started else None
+
             with (base/'server.log').open('wb') as log:
                 process = subprocess.Popen([BINARY, 'start', '--base-path', tmp, '--port', str(port)],
                                            env=env, stdout=log, stderr=log, start_new_session=True)
@@ -169,20 +177,19 @@ class OwnerWithoutModel(unittest.TestCase):
                         self.assertIsNone(process.poll(), 'the server exited before it was ready')
                         self.assertLess(time.monotonic(), deadline, 'readiness deadline exceeded')
                         time.sleep(.1)
-                    result = subprocess.run([BINARY, 'restart', '--base-path', tmp, '--port', str(port)],
-                                            env=env, capture_output=True, text=True, timeout=180,
-                                            stdin=subprocess.DEVNULL)
-                    started = re.search(r'Started pid (\d+)', result.stdout)
-                    if started:
-                        replacement = int(started.group(1))
-                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                    self.assertIn(f'(pid {process.pid}) on port {port} to stop', result.stdout)
-                    self.assertIn('Ready after', result.stdout)
-                    self.assertIsNotNone(replacement, result.stdout)
-                    self.assertNotEqual(replacement, process.pid)
+                    with said.open('wb') as out:
+                        result = subprocess.run([BINARY, 'restart', '--base-path', tmp, '--port', str(port)],
+                                                env=env, stdout=out, stderr=subprocess.PIPE, text=True,
+                                                timeout=120, stdin=subprocess.DEVNULL)
+                    printed = said.read_text()
+                    self.assertEqual(result.returncode, 0, printed + result.stderr)
+                    self.assertIn(f'(pid {process.pid}) on port {port} to stop', printed)
+                    self.assertIn('Ready after', printed)
+                    self.assertIsNotNone(replacement(), printed)
+                    self.assertNotEqual(replacement(), process.pid)
                     # Ready is said only once the old server let go of the workspace.
                     self.assertIsNotNone(process.wait(timeout=30))
-                    self.assertFalse(gone(replacement), 'the replacement is not running')
+                    self.assertFalse(gone(replacement()), 'the replacement is not running')
                     self.assertTrue(ready())
                 finally:
                     if process.poll() is None:
@@ -190,15 +197,15 @@ class OwnerWithoutModel(unittest.TestCase):
                         try: process.wait(timeout=10)
                         except subprocess.TimeoutExpired:
                             os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
-                    if replacement is not None and not gone(replacement):
-                        # Not a child of this process: it is watched until it is gone.
-                        os.kill(replacement, signal.SIGTERM)
+                    successor = replacement()
+                    if successor is not None and not gone(successor):
+                        os.kill(successor, signal.SIGTERM)
                         deadline = time.monotonic()+15
-                        while not gone(replacement) and time.monotonic() < deadline:
+                        while not gone(successor) and time.monotonic() < deadline:
                             time.sleep(.1)
-                        if not gone(replacement):
-                            os.kill(replacement, signal.SIGKILL)
-                            while not gone(replacement):
+                        if not gone(successor):
+                            os.kill(successor, signal.SIGKILL)
+                            while not gone(successor):
                                 time.sleep(.1)
 
 if __name__ == '__main__':

@@ -99,9 +99,11 @@ class StandIn:
     """A server that answers readiness and serves RUNTIME_TOML as its
     runtime.toml, recording every request and what the command sends."""
 
-    def __init__(self, ready=True, save_status=200, speaking=None):
+    def __init__(self, ready=True, save_status=200, speaking=None, before_source=None):
         self.ready, self.save_status = ready, save_status
         self.speaking = speaking
+        # Runs once the command asked for runtime.toml, before it is answered.
+        self.before_source = before_source
         self.requests, self.saves, self.save_paths, self.authorizations = [], [], [], []
         stand_in = self
 
@@ -123,6 +125,8 @@ class StandIn:
                     self.answer(200 if stand_in.ready else 503, {"ready": stand_in.ready})
                 elif self.path == "/api/v1/runtime/config/raw":
                     stand_in.authorizations.append(self.headers.get("authorization"))
+                    if stand_in.before_source is not None:
+                        stand_in.before_source()
                     self.answer(200, {"ok": True, "source_text": RUNTIME_TOML,
                                       "source_revision": REVISION, "path": SERVER_PATH})
                 elif self.path == "/api/v1/voice/setup":
@@ -319,6 +323,23 @@ class ConfigSetCommand(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("account server", result.stderr)
         self.assertEqual(server.requests, [])
+        self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
+
+    # The kernel is asked again before each send of the bearer. The server
+    # here gives the workspace up after it answered the read: the save that
+    # would follow is not sent to the port it left behind.
+    def test_a_server_that_left_after_the_read_gets_no_save(self):
+        root = self.scratch()
+        base = workspace(root)
+        sign_in(base)
+        server = self.stand_in(root, base, kind=None)
+        holder = self.announce(root, base, server.port, "single-user")
+        server.before_source = holder.close
+        result = masc(root, "autonomous.enabled=false", "--base-path", str(base),
+                      "--port", str(server.port))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("changed after this command checked it", result.stderr)
+        self.assertEqual(server.requests, [("GET", "/health/ready"), ("GET", "/api/v1/runtime/config/raw")])
         self.assertEqual(runtime_toml(base).read_text(), RUNTIME_TOML)
 
     def test_a_server_on_another_port_stops_the_command(self):

@@ -674,7 +674,7 @@ wizard-default = true
 # below bind each model once per level, and a keeper is assigned the level the
 # work deserves. Claude Code rejects "none" and "minimal"; Codex takes both.
 #
-# The Claude Code ladder: Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5 at
+# The Claude Code ladder: Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5 at
 # every level the CLI takes (low..max), and Haiku 4.5.
 # Haiku 4.5 carries no level, so the CLI picks; its window is 200K
 # (OpenRouter /models anthropic/claude-haiku-4.5, 2026-09-22), and it
@@ -804,8 +804,11 @@ supports-image-input = true
 
 [claude_code.claude-code-opus-5-5-max]
 
+# The fable slots serve Claude Fable 5.2 (released 2026-11-09). They send the
+# exact id, not the `fable` alias, and Claude Code needs 2.1.321 or later for
+# it (code.claude.com/docs/en/model-config, checked 2026-11-13).
 [models.claude-code-fable-low]
-api-name = "claude-fable-5-1"
+api-name = "claude-fable-5-2"
 max-context = 1000000
 tools-support = true
 streaming = true
@@ -817,7 +820,7 @@ supports-image-input = true
 [claude_code.claude-code-fable-low]
 
 [models.claude-code-fable-medium]
-api-name = "claude-fable-5-1"
+api-name = "claude-fable-5-2"
 max-context = 1000000
 tools-support = true
 streaming = true
@@ -829,7 +832,7 @@ supports-image-input = true
 [claude_code.claude-code-fable-medium]
 
 [models.claude-code-fable-high]
-api-name = "claude-fable-5-1"
+api-name = "claude-fable-5-2"
 max-context = 1000000
 tools-support = true
 streaming = true
@@ -841,7 +844,7 @@ supports-image-input = true
 [claude_code.claude-code-fable-high]
 
 [models.claude-code-fable-xhigh]
-api-name = "claude-fable-5-1"
+api-name = "claude-fable-5-2"
 max-context = 1000000
 tools-support = true
 streaming = true
@@ -853,7 +856,7 @@ supports-image-input = true
 [claude_code.claude-code-fable-xhigh]
 
 [models.claude-code-fable-max]
-api-name = "claude-fable-5-1"
+api-name = "claude-fable-5-2"
 max-context = 1000000
 tools-support = true
 streaming = true

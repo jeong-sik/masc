@@ -3577,7 +3577,7 @@ let test_bench_anthropic_lane_sends_high_with_the_embedded_catalog () =
         check string (model_id ^ ": wire effort") "high"
           (body |> Json.member "output_config" |> Json.member "effort"
            |> Json.to_string)
-  ) [ "claude-fable-5"; "claude-fable-5-1" ]
+  ) [ "claude-fable-5"; "claude-fable-5-1"; "claude-fable-5-2" ]
 
 type snapshot_auth = Snapshot_no_auth | Snapshot_api_key | Snapshot_unknown
 

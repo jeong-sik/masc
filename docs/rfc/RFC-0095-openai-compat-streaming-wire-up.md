@@ -91,7 +91,7 @@ observer attach. metric 이 provider-k 에서는 흐르고 openai_compat 에서�
 | ID | 가설 | 일차 검증 방법 |
 |---|---|---|
 | H1 | Agent SDK 가 `Custom_openai_compat` binding 에 대해 `run_stream` 진입 시 outbound HTTP body 의 `stream: true` 필드를 *송신하지 않음* | local llama-server `--verbose` 또는 mitmproxy 로 inbound body capture, `"stream"` 필드 검사 |
-| H2 | runtime.toml `streaming = true` provider/model 플래그가 *provider config → SDK request body* 변환 단계에서 dead-read (`Runtime_config.openai_compatible_custom_model` 흐름) | `rg '"stream"' lib/runtime_config*` + `rg 'streaming' lib/oas_compat/` 호출 경로 trace |
+| H2 | runtime.toml `streaming = true` provider/model 플래그가 *provider config → SDK request body* 변환 단계에서 dead-read (`Runtime_config.openai_compatible_custom_model` 흐름) | `rg '"stream"' lib/runtime_config*` 호출 경로 trace |
 | H3 | SDK 는 stream=true 를 송신하고 SSE 를 수신하지만 *openai_compat path 의 chunk parser 가 metric callback chain 으로 forward 하지 않음* (라벨 분류 단계 누락) | metric 의 `provider=""` fallback bucket 에 count > 0 발생 여부 (라벨 누락 emit) |
 
 H1/H2/H3 는 *상호 배타 아님*. Phase 0 이 어느 가설이 참인지 결정한다.

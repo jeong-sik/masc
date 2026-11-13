@@ -813,13 +813,13 @@ let test_exact_replacement_search_exposes_model_effort_and_same_group () =
   (match runtime_picker_projection state with
    | Some picker ->
      Alcotest.(check string) "loaded catalogue has no eligible replacement"
-       "  (no eligible replacement in this candidate group)" (runtime_picker_empty_note picker)
+       "  (no eligible replacement in this candidate group)" (runtime_picker_empty_note ~ko:false picker)
    | None -> Alcotest.fail "replacement picker is closed");
   List.iter (fun (reading, expected) ->
     state.runtime_catalog_reading <- reading;
     match runtime_picker_projection state with
     | Some picker -> Alcotest.(check string) "cached rows do not imply a fresh read"
-        expected (runtime_picker_empty_note picker)
+        expected (runtime_picker_empty_note ~ko:false picker)
     | None -> Alcotest.fail "replacement picker is closed")
     [ Runtime_catalog_loading, "  (runtime catalogue loading)"
     ; Runtime_catalog_failed "offline", "  (runtime catalogue read failed: offline)" ];
@@ -1128,7 +1128,7 @@ let test_a_typed_filter_narrows_the_drawn_choices () =
   Alcotest.(check (list string)) "only the ids with ol" [ "ollama.qwen" ] rows;
   Alcotest.(check (option string)) "and it is under the cursor" (Some "ollama.qwen") selected;
   Alcotest.(check string) "the header counts the catalogue"
-    "filter: ol\xe2\x96\x8f 1 of 5" picker.rlp_summary;
+    "필터: ol\xe2\x96\x8f 5개 중 1개" picker.rlp_summary;
   Alcotest.(check bool) "the filter holds typed keys" true
     (text_input_target state ~compact_viewport:false = Some Text_runtime_picker_filter);
   Alcotest.(check bool) "and so holds q" false
@@ -1143,12 +1143,12 @@ let test_an_empty_match_is_not_an_unread_catalogue () =
   Alcotest.(check (list string)) "nothing is drawn" [] rows;
   Alcotest.(check (option string)) "nothing is selected" None selected;
   Alcotest.(check string) "the note says the filter kept nothing"
-    "  (no runtime among 5 matches the filter)" (runtime_picker_empty_note picker);
+    "  (no runtime among 5 matches the filter)" (runtime_picker_empty_note ~ko:false picker);
   let unread = state () in
   open_runtime_lane_pick unread (Pick_conversation_lane "primary");
   let _, _, picker = drawn unread in
   Alcotest.(check string) "an unread catalogue still says unread"
-    "  (runtime catalogue unread)" (runtime_picker_empty_note picker)
+    "  (runtime catalogue unread)" (runtime_picker_empty_note ~ko:false picker)
 
 (* The filter matches the text the row draws. A model id carrying a control
    byte is drawn with it escaped, and typing what is drawn finds it. *)
@@ -1225,7 +1225,7 @@ let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
     [ "coding"; "vision"; "anthropic.claude"; "openai.gpt"; "ollama.qwen"; "zai.glm" ] rows;
   Alcotest.(check (option string)) "the head is selected" (Some "coding") selected;
   Alcotest.(check string) "the header counts both groups" "6 of 6 \xc2\xb7 / filter"
-    (keeper_runtime_picker_summary view);
+    (keeper_runtime_picker_summary ~ko:false view);
   (* "gl" is in the coding lane's route and in zai.glm's id: both stay, lane
      first, so the order across the two groups is kept. *)
   state.runtime_pick_list <- keeper_pick_after state [ "/"; "g"; "l" ];
@@ -1235,7 +1235,7 @@ let test_the_keeper_picker_filters_across_lanes_and_runtimes () =
   Alcotest.(check (option string)) "the first match is under the cursor" (Some "coding") selected;
   Alcotest.(check string) "the header names the filter"
     "filter: gl\xe2\x96\x8f 2 of 6 \xe2\x80\x94 \xe2\x86\x91/\xe2\x86\x93 move, Enter choose, Esc clear filter"
-    (keeper_runtime_picker_summary view);
+    (keeper_runtime_picker_summary ~ko:false view);
   (* The badge is drawn, so it is filtered on: "lane" keeps the lanes. *)
   state.runtime_pick_list <- keeper_pick_after state [ "\127"; "\127"; "l"; "a"; "n"; "e" ];
   let rows, _, _ = keeper_drawn state in

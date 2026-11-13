@@ -915,7 +915,7 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
     let terminal_rows = match terminal_rows with Some rows -> rows | None -> fst (get_terminal_size ()) in
     let view = Masc_tui_pick_list.view ~page:(skill_source_picker_page state ~terminal_rows)
       ~window:Masc_tui_pick_list.Opens_at_cursor ~label:Fun.id picker.ssp_sources picker.ssp_list in
-    skill_source_picker_prefix (Masc_tui_pick_list.summary view)
+    skill_source_picker_prefix (Masc_tui_pick_list.summary ~ko:(state.ui_language = Lang_ko) view)
     @ (if view.rows = [] then [Theme.warn (), " No matching source"] else
         List.mapi (fun index source ->
           (if view.selected_row = Some index then Theme.selection else Ansi.dim),

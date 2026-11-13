@@ -546,7 +546,7 @@ let render_exact_lane_provider_editor (state : state) editor =
        ("  " ^ picker.Masc_tui_types.rlp_summary);
      if picker.Masc_tui_types.rlp_choices = [] then
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Masc_tui_types.runtime_picker_empty_note picker)
+         (Masc_tui_types.runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) picker)
      else
        picker.Masc_tui_types.rlp_choices
        |> List.iteri (fun offset choice ->
@@ -593,7 +593,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               (* The bracket carries the refusal: a note after the model
                  is the first thing the frame cuts. *)
               box_line_styled buf cols ~style:(Theme.recede ())
-                (line (Masc_tui_types.runtime_pick_refusal_tag refusal) "")
+                (line (Masc_tui_types.runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal) "")
             | Masc_tui_types.Pick_available ->
               (if picker.rlp_selected_row = Some offset
                then box_line_selected buf cols
@@ -623,7 +623,7 @@ let render_exact_lane_provider_editor (state : state) editor =
          | Some (Masc_tui_types.Lane_choice _) | None -> ())
       | None -> ());
      box_line_styled buf cols ~style:(Theme.info ())
-       ("  " ^ Masc_tui_types.runtime_picker_keys (snd action) picker.rlp_filter)
+       ("  " ^ Masc_tui_types.runtime_picker_keys ~ko:(state.ui_language = Lang_ko) (snd action) picker.rlp_filter)
    | None ->
      let catalog = match state.runtime_catalog_reading with
        | Runtime_catalog_read | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ -> state.runtime_catalog
@@ -632,7 +632,9 @@ let render_exact_lane_provider_editor (state : state) editor =
       | Runtime_catalog_read -> ()
       | Runtime_catalog_refreshing _ | Runtime_catalog_stale _ ->
           box_line_styled buf cols ~style:(Theme.warn ())
-            ("  " ^ Terminal_text.single_line (Masc_tui_types.runtime_catalog_reading_suffix state.runtime_catalog_reading))
+            ("  " ^ Terminal_text.single_line
+                      (Masc_tui_types.runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
+                         state.runtime_catalog_reading))
       | Runtime_catalog_unread ->
           box_line_styled buf cols ~style:(Theme.recede ())
             (ui_text state ~ko:"  런타임 목록 미조회 · 슬롯 ID 로 표시"
@@ -919,14 +921,16 @@ let render_lanes_overview (state : state) =
    | Some picker ->
        box_line_styled buf cols ~style:(Theme.info ())
          (Printf.sprintf
-            "  adding a candidate to the candidate order of %s — %s — %s"
+            (if state.ui_language = Lang_ko then "  %s 의 후보 순서에 후보 추가 — %s — %s"
+             else "  adding a candidate to the candidate order of %s — %s — %s")
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane)
             picker.Masc_tui_types.rlp_summary
-            (Masc_tui_types.runtime_picker_keys "Enter append"
+            (Masc_tui_types.runtime_picker_keys ~ko:(state.ui_language = Lang_ko)
+               (ui_text state ~ko:"Enter 추가" ~en:"Enter append")
                picker.Masc_tui_types.rlp_filter));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())
-           (Masc_tui_types.runtime_picker_empty_note picker)
+           (Masc_tui_types.runtime_picker_empty_note ~ko:(state.ui_language = Lang_ko) picker)
        else
          List.iteri
            (fun offset choice ->
@@ -941,25 +945,31 @@ let render_lanes_overview (state : state) =
                     picker.Masc_tui_types.rlp_pick runtime
                 with
                 | Masc_tui_types.Pick_refused refusal ->
-                  ( Ansi.dim ^ "[" ^ Masc_tui_types.runtime_pick_refusal_tag refusal
+                  ( Ansi.dim ^ "[" ^ Masc_tui_types.runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal
                     ^ "] " ^ Ansi.reset
                   , "" )
                 | Masc_tui_types.Pick_available ->
                   ( ""
                   , if List.exists (String.equal runtime.ro_id) picker.rlp_already
-                    then "  (already a slot)"
+                    then ui_text state ~ko:"  (이미 슬롯)" ~en:"  (already a slot)"
                     else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-                    then "  (same provider as a current slot)"
+                    then
+                      ui_text state ~ko:"  (현재 슬롯과 같은 provider)"
+                        ~en:"  (same provider as a current slot)"
                     else "" )
               in
               let mark =
                 if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
               in
               let ctx =
-                Printf.sprintf " [%s context]"
+                Printf.sprintf
+                  (if state.ui_language = Lang_ko then " [%s 컨텍스트]" else " [%s context]")
                   (format_context_tokens runtime.ro_effective_max_context)
               in
-              let def = if runtime.ro_is_default then " [default]" else "" in
+              let def =
+                if runtime.ro_is_default then ui_text state ~ko:" [기본]" ~en:" [default]"
+                else ""
+              in
               box_line buf cols
                 (Printf.sprintf "  %s %s%s%s%s%s"
                    mark refusal_prefix
@@ -967,8 +977,10 @@ let render_lanes_overview (state : state) =
                    ctx def
                    (Ansi.dim ^ note ^ Ansi.reset));
               box_line_styled buf cols ~style:(Theme.recede ())
-                ("      Quota scope " ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
-                  ^ " · Connection " ^ Terminal_text.single_line runtime.ro_provider_id
+                (ui_text state ~ko:"      쿼터 범위 " ~en:"      Quota scope "
+                  ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
+                  ^ ui_text state ~ko:" · 연결 " ~en:" · Connection "
+                  ^ Terminal_text.single_line runtime.ro_provider_id
                   ^ " · " ^ Terminal_text.single_line runtime.ro_id))
            picker.Masc_tui_types.rlp_choices));
   let used_rows = count_frame_lines buf in

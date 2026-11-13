@@ -180,7 +180,11 @@ let view ~page ~window ~label items t =
   ; filter = t.query
   }
 
-let summary v =
-  match v.filter with
-  | None -> Printf.sprintf "%d of %d \xc2\xb7 / filter" v.shown v.total
-  | Some query -> Printf.sprintf "filter: %s\xe2\x96\x8f %d of %d" query v.shown v.total
+let summary ~ko v =
+  match v.filter, ko with
+  | None, false -> Printf.sprintf "%d of %d \xc2\xb7 / filter" v.shown v.total
+  | None, true -> Printf.sprintf "%d개 중 %d개 \xc2\xb7 / 필터" v.total v.shown
+  | Some query, false ->
+      Printf.sprintf "filter: %s\xe2\x96\x8f %d of %d" query v.shown v.total
+  | Some query, true ->
+      Printf.sprintf "필터: %s\xe2\x96\x8f %d개 중 %d개" query v.total v.shown

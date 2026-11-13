@@ -83,9 +83,10 @@ type window =
 val view :
   page:int -> window:window -> label:('a -> string) -> 'a list -> t -> 'a view
 
-val summary : 'a view -> string
+val summary : ko:bool -> 'a view -> string
 (** The header's count and filter: ["12 of 12 · / filter"] with no filter,
-    ["filter: cl▏ 3 of 12"] while one is typed. *)
+    ["filter: cl▏ 3 of 12"] while one is typed. On a Korean screen
+    ["12개 중 12개 · / 필터"] and ["필터: cl▏ 12개 중 3개"]. *)
 
 val lowercase_contains : needle:string -> string -> bool
 (** Whether [needle] occurs in the haystack, folding ASCII case on both

@@ -1080,7 +1080,7 @@ let test_measuring_reads_what_the_row_draws () =
   List.iter
     (fun (what, event) ->
       let on_screen = drawn event in
-      let measured = Acting.measured_of_event ~traces event in
+      let measured = Acting.measured_of_event ~ko:false ~traces event in
       check string (what ^ ": the same event word")
         on_screen.Acting.measured_label measured.Acting.measured_label;
       check string (what ^ ": the keeper the row is drawn under")

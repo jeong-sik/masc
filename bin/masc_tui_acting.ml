@@ -298,27 +298,28 @@ let run_elapsed elapsed_s =
    spells every detail sentence the measurement throws away. The row asks
    this function for its label rather than spelling the word a second time,
    so the two readings cannot drift. *)
-let agent_core_label (e : Observer.agent_core) =
+let agent_core_label ~ko (e : Observer.agent_core) =
+  let say korean english = if ko then korean else english in
   let skill = Option.exists is_skill_tool e.Observer.tool in
   match e.Observer.kind with
-  | Observer.Tool_called -> if skill then "skill call" else "call"
-  | Observer.Tool_completed -> if skill then "skill returned" else "returned"
-  | Observer.Turn_started -> "turn start"
-  | Observer.Turn_ready -> "turn ready"
-  | Observer.Turn_completed -> "turn end"
-  | Observer.Agent_started -> "agent start"
-  | Observer.Agent_completed _ -> "agent done"
-  | Observer.Agent_failed _ -> "agent failed"
-  | Observer.Agent_yielded _ -> "agent yielded"
-  | Observer.Agent_input_required _ -> "waiting for input"
-  | Observer.Tool_approval_completed -> "approval settled"
-  | Observer.Telemetry -> "telemetry"
-  | Observer.Relay_subscription_loss _ -> "observer events lost"
+  | Observer.Tool_called -> if skill then say "스킬 호출" "skill call" else say "호출" "call"
+  | Observer.Tool_completed -> if skill then say "스킬 반환" "skill returned" else say "반환" "returned"
+  | Observer.Turn_started -> say "턴 시작" "turn start"
+  | Observer.Turn_ready -> say "턴 준비" "turn ready"
+  | Observer.Turn_completed -> say "턴 끝" "turn end"
+  | Observer.Agent_started -> say "에이전트 시작" "agent start"
+  | Observer.Agent_completed _ -> say "에이전트 완료" "agent done"
+  | Observer.Agent_failed _ -> say "에이전트 실패" "agent failed"
+  | Observer.Agent_yielded _ -> say "에이전트 양보" "agent yielded"
+  | Observer.Agent_input_required _ -> say "입력 대기" "waiting for input"
+  | Observer.Tool_approval_completed -> say "승인 결정됨" "approval settled"
+  | Observer.Telemetry -> say "텔레메트리" "telemetry"
+  | Observer.Relay_subscription_loss _ -> say "관찰 이벤트 유실" "observer events lost"
   | Observer.Agent_core_other name -> name
 
-let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
+let agent_core_row ~ko ~at ~duration_ms (e : Observer.agent_core) =
   let tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool in
-  let label = agent_core_label e in
+  let label = agent_core_label ~ko e in
   let glyph, detail =
     match e.Observer.kind with
     (* The wire's [turn] is the agent session's ordinal for the provider
@@ -466,10 +467,11 @@ let keeper_of_event ~traces (event : Observer.event) =
    for the other measured column. [row_of_event] reads its label here, so the
    word has one owner and a measurement can ask for it without building the
    detail sentence that sits beside it. *)
-let label_of_event (event : Observer.event) =
+let label_of_event ~ko (event : Observer.event) =
+  let say korean english = if ko then korean else english in
   match event with
-  | Observer.Agent_core e -> agent_core_label e
-  | Observer.Keeper_heartbeat _ -> "heartbeat"
+  | Observer.Agent_core e -> agent_core_label ~ko e
+  | Observer.Keeper_heartbeat _ -> say "하트비트" "heartbeat"
   | Observer.Keeper_tool_call c -> (
       let skill = is_skill_tool c.Observer.kt_tool in
       match c.Observer.kt_disposition with
@@ -478,86 +480,86 @@ let label_of_event (event : Observer.event) =
             match disposition with
             | Ok disposition ->
                 Masc.Tui_decode.keeper_call_disposition_to_string disposition
-            | Error _ -> "unknown disposition"
+            | Error _ -> say "처리 결과 불명" "unknown disposition"
           in
-          if skill then "skill \xc2\xb7 " ^ word else word
-      | None -> if skill then "skill call" else "tool call")
-  | Observer.Keeper_turn_complete _ -> "turn done"
+          if skill then say "스킬 \xc2\xb7 " "skill \xc2\xb7 " ^ word else word
+      | None -> if skill then say "스킬 호출" "skill call" else say "도구 호출" "tool call")
+  | Observer.Keeper_turn_complete _ -> say "턴 완료" "turn done"
   | Observer.Keeper_composite_changed _ -> "composite"
-  | Observer.Keeper_metrics_appended _ -> "metrics"
-  | Observer.Keeper_turn_observation _ -> "call"
-  | Observer.Keeper_chat_appended _ -> "chat"
-  | Observer.Keeper_memory_journal_appended _ -> "memory"
+  | Observer.Keeper_metrics_appended _ -> say "지표" "metrics"
+  | Observer.Keeper_turn_observation _ -> say "호출" "call"
+  | Observer.Keeper_chat_appended _ -> say "채팅" "chat"
+  | Observer.Keeper_memory_journal_appended _ -> say "메모리" "memory"
   | Observer.Keeper_runtime_journal_appended { journal = Observer.Native_tasks_journal; _ } -> "native tasks"
   | Observer.Keeper_runtime_journal_appended { journal = Observer.Child_content_journal; _ } -> "child content"
-  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ -> "chat stream"
-  | Observer.Keeper_waiting_inventory_changed _ -> "waiting queue"
-  | Observer.Keeper_async_requests_changed _ -> "async requests"
-  | Observer.Keeper_skill_activations_changed _ -> "skill activations"
-  | Observer.Keeper_roster_change _ -> "roster"
-  | Observer.Keeper_turn_changed { change = Observer.Turn_state; _ } -> "turns"
-  | Observer.Keeper_turn_changed { change = Observer.Turn_preview; _ } -> "preview"
-  | Observer.Fusion_run_status _ -> "fusion"
+  | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ -> say "채팅 스트림" "chat stream"
+  | Observer.Keeper_waiting_inventory_changed _ -> say "대기열" "waiting queue"
+  | Observer.Keeper_async_requests_changed _ -> say "비동기 요청" "async requests"
+  | Observer.Keeper_skill_activations_changed _ -> say "스킬 활성화" "skill activations"
+  | Observer.Keeper_roster_change _ -> say "Keeper 목록" "roster"
+  | Observer.Keeper_turn_changed { change = Observer.Turn_state; _ } -> say "턴 상태" "turns"
+  | Observer.Keeper_turn_changed { change = Observer.Turn_preview; _ } -> say "미리보기" "preview"
+  | Observer.Fusion_run_status _ -> say "Fusion" "fusion"
   | Observer.Lane_resource resource -> (
       match resource.Observer.lr_lifecycle with
-      | Masc.Lane_addon_resource_events.Acquired -> "resource acquired"
-      | Masc.Lane_addon_resource_events.Acquire_failed -> "acquisition failed"
-      | Masc.Lane_addon_resource_events.Release_confirmed -> "resource released"
-      | Masc.Lane_addon_resource_events.Release_incomplete -> "release unconfirmed")
-  | Observer.Internal_agent_runs_changed _ -> "internal runs"
-  | Observer.Workspace_store_changed Observer.Schedule_store -> "schedule"
-  | Observer.Workspace_store_changed Observer.Pending_confirms -> "pending confirmation"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests -> "verification"
-  | Observer.Workspace_store_changed Observer.Goal_projection -> "goals"
+      | Masc.Lane_addon_resource_events.Acquired -> say "리소스 확보" "resource acquired"
+      | Masc.Lane_addon_resource_events.Acquire_failed -> say "확보 실패" "acquisition failed"
+      | Masc.Lane_addon_resource_events.Release_confirmed -> say "리소스 반납" "resource released"
+      | Masc.Lane_addon_resource_events.Release_incomplete -> say "반납 미확인" "release unconfirmed")
+  | Observer.Internal_agent_runs_changed _ -> say "내부 실행" "internal runs"
+  | Observer.Workspace_store_changed Observer.Schedule_store -> say "일정" "schedule"
+  | Observer.Workspace_store_changed Observer.Pending_confirms -> say "확인 대기" "pending confirmation"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests -> say "검증" "verification"
+  | Observer.Workspace_store_changed Observer.Goal_projection -> say "목표" "goals"
   | Observer.Workspace_store_changed Observer.Runtime_config -> "runtime.toml"
-  | Observer.Workspace_store_changed Observer.Skill_catalog -> "skill catalog"
-  | Observer.Workspace_store_changed Observer.Lane_addon_exports -> "lane add-on exports"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> "repositories"
-  | Observer.Gate_connector_changed _ -> "connector"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> "harness"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients -> "clients"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Account_emails -> "accounts"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> "provider usage"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> "provider standing"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs -> "keeper costs"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> "workspace health"
+  | Observer.Workspace_store_changed Observer.Skill_catalog -> say "스킬 카탈로그" "skill catalog"
+  | Observer.Workspace_store_changed Observer.Lane_addon_exports -> say "Lane Add-on 도구" "lane add-on exports"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories -> say "저장소" "repositories"
+  | Observer.Gate_connector_changed _ -> say "커넥터" "connector"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts -> say "하네스" "harness"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients -> say "클라이언트" "clients"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Account_emails -> say "계정" "accounts"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> say "제공자 사용량" "provider usage"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> say "제공자 상태" "provider standing"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs -> say "Keeper 비용" "keeper costs"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> say "작업 공간 상태" "workspace health"
   | Observer.Dataset_changed
-      (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> "login"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics _) -> "metrics"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals -> "goals"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config -> "runtime config"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors -> "connectors"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations _) -> "skill record"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog -> "skills"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe -> "runtime probe"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics -> "runtime history"
+      (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> say "로그인" "login"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics _) -> say "지표" "metrics"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals -> say "목표" "goals"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config -> say "런타임 설정" "runtime config"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors -> say "커넥터" "connectors"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations _) -> say "스킬 기록" "skill record"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog -> say "스킬" "skills"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe -> say "런타임 점검" "runtime probe"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics -> say "런타임 기록" "runtime history"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live _) -> "machine live"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation _) -> "browser observation"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation _) -> say "브라우저 관측" "browser observation"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room _) -> "play room"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats -> "play seats"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory -> "world memory"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) -> "dashboard observation"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> "add-ons"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> "memory health"
-  | Observer.Keeper_event_queue_changed _ -> "event queue"
-  | Observer.Board_changed _ -> "board"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) -> say "대시보드 관측" "dashboard observation"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> say "Add-on" "add-ons"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> say "메모리 상태" "memory health"
+  | Observer.Keeper_event_queue_changed _ -> say "이벤트 큐" "event queue"
+  | Observer.Board_changed _ -> say "보드" "board"
   | Observer.Approval_change
       ( Observer.Approval_queue_changed | Observer.Approval_rules_changed
-      | Observer.Gate_mode_changed | Observer.Gate_keeper_settings_changed _ ) -> "gate"
+      | Observer.Gate_mode_changed | Observer.Gate_keeper_settings_changed _ ) -> say "Gate" "gate"
   | Observer.Approval_change
       (Observer.Tool_approval_waits_changed _ | Observer.Tool_approval_mode_changed _) ->
-      "tool approval"
+      say "도구 승인" "tool approval"
   | Observer.Approval_change
       (Observer.Keeper_asks_changed _ | Observer.Installation_asks_changed _) ->
-      "questions"
-  | Observer.Snapshot _ | Observer.Execution_snapshot -> "snapshot"
+      say "질문" "questions"
+  | Observer.Snapshot _ | Observer.Execution_snapshot -> say "스냅샷" "snapshot"
   | Observer.Other name -> name
 
 let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
-  let label = label_of_event event in
+  let label = label_of_event ~ko event in
   match event with
-  | Observer.Agent_core e -> agent_core_row ~at ~duration_ms e
+  | Observer.Agent_core e -> agent_core_row ~ko ~at ~duration_ms e
   | Observer.Keeper_heartbeat h ->
       { at
       ; keeper = h.Observer.hb_keeper
@@ -1567,9 +1569,9 @@ type measured = { measured_keeper : string; measured_label : string }
 let measured_of_row row =
   { measured_keeper = row.keeper; measured_label = row.label }
 
-let measured_of_event ~traces event =
+let measured_of_event ~ko ~traces event =
   { measured_keeper = keeper_of_event ~traces event
-  ; measured_label = label_of_event event
+  ; measured_label = label_of_event ~ko event
   }
 
 (* The cells a name takes once drawn. The table draws the keeper and the

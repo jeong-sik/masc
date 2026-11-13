@@ -994,7 +994,8 @@ let render_acting (state : state) =
       | None ->
           List.map
             (fun (entry, _older) ->
-              Acting.measured_of_event ~traces entry.Acting.ae_event)
+              Acting.measured_of_event ~ko:(state.ui_language = Lang_ko) ~traces
+                entry.Acting.ae_event)
             visible
     in
     Acting.columns ~inner_width:(framed_inner_width cols) measured

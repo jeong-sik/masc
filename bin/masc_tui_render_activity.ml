@@ -813,10 +813,19 @@ let acting_notices (state : state) ~trace_unavailable =
         Some (Terminal_text.single_line
           (observer_replay_description ~source_loss:state.observer_source_loss state.observer_replay))
   in
+  let warning text = Theme.warn (), text in
+  let trace =
+    Option.map
+      (fun text ->
+        ( (if Masc_tui_acting_pane.trace_absences_warn trace_unavailable then Theme.warn ()
+           else Theme.recede ())
+        , text ))
+      (Masc_tui_acting_pane.trace_unavailable_summary ~ko:(state.ui_language = Lang_ko)
+         trace_unavailable)
+  in
   List.filter_map Fun.id
-    [ feed; dropped; undecodable; unseen; replay
-    ; Masc_tui_acting_pane.trace_unavailable_summary ~ko:(state.ui_language = Lang_ko)
-        trace_unavailable ]
+    [ Option.map warning feed; Option.map warning dropped; Option.map warning undecodable
+    ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
   (* Top/title/divider, column heading, then overflow/bottom/footer. *)
@@ -941,7 +950,7 @@ let render_acting (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   List.iter
-    (fun notice -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ notice))
+    (fun (style, notice) -> box_line_styled buf cols ~style ("  " ^ notice))
     notices;
   (* Measured over every row the filter keeps, not the page on screen, so the
      columns do not move while a reader scrolls. Only the two named columns

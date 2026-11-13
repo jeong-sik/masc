@@ -414,6 +414,10 @@ val legend : ko:bool -> cols:int -> string
 val age_text : now:float -> float -> string
 (** How long ago, in the feed's own duration shape ([12.4s], [2m05s]). *)
 
+val trace_absences_warn : (string * Masc.Tui_decode.keeper_identity_absence) list -> bool
+(** Whether any named Keeper lost a trace it had. A Keeper that never started
+    lost none: its row is a note, drawn dim. *)
+
 val trace_unavailable_summary :
   ko:bool -> (string * Masc.Tui_decode.keeper_identity_absence) list -> string option
 (** One summary row; complete reasons remain in each Keeper's scrollable

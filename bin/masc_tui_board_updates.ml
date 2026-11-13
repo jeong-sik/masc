@@ -120,16 +120,16 @@ let apply_publication state ~report ~refresh outcome =
           ~reading:None ~kind:Workspace_operation_outcome then
         apply_current_publication state ~report ~refresh outcome request
 
+let comment_outcome_unknown ~ko =
+  if ko then "댓글 결과 미확인 · 다시 보내기 전에 댓글을 확인하세요"
+  else "Board comment outcome unknown · check the thread before retrying"
+
 let comment_launch_failed state ~request_id =
   match state.board_write with
   | Board_commenting current when current == request_id ->
     state.board_write <- Board_idle;
     state.board_compose_armed <- false;
-    let ko = state.ui_language = Lang_ko in
-    state.board_post_error <-
-      Some
-        (if ko then "댓글 결과 미확인 · 다시 보내기 전에 댓글을 확인하세요"
-         else "Board comment outcome unknown · check the thread before retrying")
+    state.board_post_error <- Some (comment_outcome_unknown ~ko:(state.ui_language = Lang_ko))
   | Board_idle | Board_posting _ | Board_commenting _ -> ()
 
 let comment_done state ~request_id ~post_id ~sent_draft ~report ~refresh ~refresh_detail result =
@@ -152,8 +152,7 @@ let comment_done state ~request_id ~post_id ~sent_draft ~report ~refresh ~refres
         refresh_detail post_id
     | Error err ->
         state.board_compose_armed <- false;
-        state.board_post_error <-
-          Some ((if state.ui_language = Lang_ko then "댓글 실패: " else "Board comment failed: ") ^ err))
+        state.board_post_error <- Some err)
   | Board_idle | Board_posting _ | Board_commenting _ -> ()
 
 let vote_done state ~report ~refresh ~refresh_detail target result =

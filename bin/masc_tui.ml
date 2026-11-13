@@ -22720,7 +22720,10 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
                 { request_id
                 ; post_id
                 ; sent_draft
-                ; result = Error "Board comment interrupted; outcome unknown; check the thread before retrying"
+                ; result =
+                    Error
+                      (Masc_tui_board_updates.comment_outcome_unknown
+                         ~ko:(state.ui_language = Lang_ko))
                 })
             in
             let on_not_run () =

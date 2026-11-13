@@ -14,17 +14,18 @@ type 'a launch =
    a vote has none to keep. *)
 type kept = Draft_kept | Nothing_kept
 
-(* A write kept back because the workspace is not confirmed says what
-   stopped it, that nothing was sent, and what stayed. *)
-let refuse_unconfirmed state ~report kept =
-  let ko = state.ui_language = Lang_ko in
+(* A write kept back says what stopped it, that nothing was sent, and what
+   stayed. *)
+let kept_back ~ko reason kept =
   let kept = match kept with
     | Draft_kept -> [ draft_retained ~ko ]
     | Nothing_kept -> [] in
-  let detail =
-    String.concat " · "
-      (String.capitalize_ascii (workspace_identity_unconfirmed ~ko) :: not_sent ~ko :: kept)
-  in
+  String.concat " · " (String.capitalize_ascii reason :: not_sent ~ko :: kept)
+
+(* Kept back before it starts, because the workspace is not confirmed. *)
+let refuse_unconfirmed state ~report kept =
+  let ko = state.ui_language = Lang_ko in
+  let detail = kept_back ~ko (workspace_identity_unconfirmed ~ko) kept in
   state.board_post_error <- Some detail;
   report "error" detail
 
@@ -154,7 +155,7 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
-        | None -> Error (workspace_identity_unread ~ko) in
+        | None -> Error (kept_back ~ko (workspace_identity_unread ~ko) Draft_kept) in
       match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json );
@@ -185,7 +186,7 @@ let start_vote state ~launch ~report ~target ~(up : bool) ~send =
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
-        | None -> Error (workspace_identity_unread ~ko) in
+        | None -> Error (kept_back ~ko (workspace_identity_unread ~ko) Nothing_kept) in
       match send ~expected_workspace ~port with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )

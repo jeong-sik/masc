@@ -285,6 +285,11 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
   | jq '.paths | {effective_base_path, effective_masc_root, roots_diverge}'
 ```
 
+기본 설정인 loopback 서버에서는 이 명령을 그대로 쓰면 됩니다. 토큰을 요구하는
+서버(`MASC_HTTP_AUTH_STRICT`를 켰거나 bind host·base URL이 loopback이 아닌 서버)는
+credential 없는 요청에 `paths`가 없는 짧은 공개 probe로 답합니다. 그런 서버에는
+`-H "Authorization: Bearer $MASC_TOKEN"`을 붙이세요.
+
 직접 작성하는 설정과 스킬 외에 `.masc/`의 파일은 런타임이 관리합니다.
 작업, 기록과 승인 상태는 MASC 도구로 변경하세요.
 

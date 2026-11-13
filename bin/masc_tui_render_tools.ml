@@ -934,7 +934,8 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
        that had already been made and refused. *)
     | None ->
         [ ( (if Option.is_some (selected_tools_error state) then Theme.bad () else Theme.warn ())
-          , " Effective Keeper Surface " ^ title_missing_reading ~error:(selected_tools_error state) )
+          , " Effective Keeper Surface " ^ title_missing_reading ~ko:(state.ui_language = Lang_ko)
+                ~error:(selected_tools_error state) )
         ]
     | Some { Masc.Tui_decode_tools.ts_effective = None; _ } ->
         [ (Theme.warn ()), " Effective Keeper Surface — no Keeper selected" ]

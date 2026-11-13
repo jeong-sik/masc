@@ -617,7 +617,7 @@ let render_prompt_registry (state : state) =
      registry not asked yet and for one whose read failed, the same as for a
      registry with no prompts. *)
   let count_text =
-    title_count_of_view prompts ~count:(fun _ ->
+    title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts ~count:(fun _ ->
         Printf.sprintf (if state.ui_language = Lang_ko then "%d/%d개" else "%d/%d prompts") total all_prompt_count)
   in
   box_top buf cols;
@@ -723,7 +723,8 @@ let render_runtime_prompt_assets (state : state) =
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt assets cursor in
   let count_text =
-    title_count_of_view prompts ~count:(fun _ -> Printf.sprintf (if state.ui_language = Lang_ko then "%d개" else "%d assets") total)
+    title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts
+      ~count:(fun _ -> Printf.sprintf (if state.ui_language = Lang_ko then "%d개" else "%d assets") total)
   in
   box_top buf cols;
   let reading =

@@ -21351,35 +21351,33 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
    one cost two cells on the keeper chat header -- the narrowest row the TUI
    draws, which at 120 columns beside the roster has none to spare. Both
    spellings come from here so the words stay one. *)
-let field_unread = "not loaded"
-let title_unread = "(" ^ field_unread ^ ")"
+let field_unread ~ko = if ko then "미조회" else "not loaded"
+let title_unread ~ko = "(" ^ field_unread ~ko ^ ")"
 (* The same pair one layer down. A title brackets its words because it has no
    label to hang them on; a labelled field does not, and said so already for
    the unread half. The failed half had no name here, so the Memory header
    spelled the title's words itself, minus the brackets -- the one place in
    the TUI that decided what a field says after a failed read. *)
-let field_failed = "load failed"
-let title_failed = "(" ^ field_failed ^ ")"
+let field_failed ~ko = if ko then "조회 실패" else "load failed"
+let title_failed ~ko = "(" ^ field_failed ~ko ^ ")"
 
-let title_missing_reading ~error =
-  if Option.is_some error then title_failed else title_unread
+let title_missing_reading ~ko ~error =
+  if Option.is_some error then title_failed ~ko else title_unread ~ko
 
 (* The same answer for a slot that already has a label in front of it. Two
    rows reached for the title's words because this had no name: Overview drew
    "Pulse: (load failed)" and Lanes "Lane Add-ons: (not loaded)", and the
    brackets there say a second time what the label in front of them already
    said. *)
-let field_missing_reading ~error =
-  if Option.is_some error then field_failed else field_unread
+let field_missing_reading ~ko ~error =
+  if Option.is_some error then field_failed ~ko else field_unread ~ko
 
 (* The same answer in the here row. The row's gap sets a reading off from the
    path, so it takes no brackets, and it reads in the screen's language like
    the path beside it. Four rows each wrote this Korean pair by hand and the
    rest drew the bracketed English on a Korean screen. *)
 let here_missing_reading (state : state) ~error =
-  ui_text state
-    ~ko:(if Option.is_some error then "조회 실패" else "미조회")
-    ~en:(field_missing_reading ~error)
+  field_missing_reading ~ko:(state.ui_language = Lang_ko) ~error
 
 (* The Activity feed's title reading. A count is a reading only once the feed
    has answered. With no server on the port the feed never opens, and a title
@@ -21415,11 +21413,11 @@ let activity_title_reading ~observer ~shown ~held =
    still waiting reads as not loaded, the way a title before any request does.
    A failed refresh keeps counting the rows it still draws; the pane's status
    row is what says they are stale. *)
-let title_count_of_view view ~count =
+let title_count_of_view ~ko view ~count =
   match view with
   | Masc_tui_fetched.Ready value | Masc_tui_fetched.Stale (value, _) -> count value
-  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread
-  | Masc_tui_fetched.Failed _ -> title_failed
+  | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> title_unread ~ko
+  | Masc_tui_fetched.Failed _ -> title_failed ~ko
 
 (* What a polled surface can say when it has no rows to draw. Three facts,
    not one: nothing has been read yet, the read failed, or the read came back

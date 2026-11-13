@@ -427,7 +427,11 @@ let render_keeper_calls (state : state) =
         heading ~readings:[ ui_text state ~ko:"읽는 중" ~en:"loading" ]
     | None ->
         heading
-          ~readings:[ field_missing_reading ~error:state.keeper_calls_error ]
+          ~readings:
+            [ field_missing_reading
+                ~ko:(state.ui_language = Lang_ko)
+                ~error:state.keeper_calls_error
+            ]
     | Some snapshot ->
         (* The verdict says what is wrong with the log; the reason says why,
            and it is not always the verdict said twice. Four of the words

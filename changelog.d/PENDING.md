@@ -1,0 +1,10 @@
+### Fixed
+
+- The merge worker reserves or requests a merge only after it has read a
+  `type-check` run that compiled the head, or a skipped one on a scope it saw
+  changes no source. A run still in progress, a missing run, any other
+  conclusion and a check-run answer it cannot read now hold the merge; a run
+  in progress could end `skipped`, which GitHub accepts. A reservation made
+  earlier is dropped when the reads before it fail, a GET that `gh` does not
+  finish in 120 seconds is a failed read, and a native stack is held while its
+  top does not contain the current head of a lower layer (#PENDING).

@@ -3,7 +3,7 @@ rfc: "stack-type-check-runs-at-the-top"
 title: "스택의 type-check 는 꼭대기 PR 에서 한 번 돈다"
 status: Implemented
 created: 2026-11-12
-updated: 2026-11-13
+updated: 2026-11-14
 author: claude
 supersedes: []
 superseded_by: null
@@ -91,7 +91,15 @@ worker 는 병합하려는 head 의 `type-check` check-run 가운데 가장 새 
 가장 새 실행에 따라:
 
 - 완료된 `skipped` 면 병합 범위가 main 대비 바꾼 파일을 직접 읽는다(`compare/main...{head}`). 소스가 없으면 진행한다. 있으면 `Hold` 다. 파일이 300개(compare 상한)에 닿으면 `Hold` 다. 옮긴 파일은 옛 이름도 본다.
-- 그 밖(성공, 실패, 진행 중, 없음)은 지금처럼 GitHub 에 맡긴다. GitHub 은 도는 검사를 기다리고 실패한 검사를 거절한다. 검사가 끝나도 worker 를 깨우는 이벤트가 없어서, 진행 중에 `Hold` 하면 승인이 끝난 범위가 다음 이벤트까지 병합되지 않는다.
+- `success` 면 진행한다.
+- 그 밖은 모두 `Hold` 다(#51578). 진행 중, 없음, 실패나 취소 같은 다른 결론, 읽을 수 없는 응답이 여기에 든다.
+  - 진행 중인 실행은 `skipped` 로 끝날 수 있다. 예약이 걸려 있으면 GitHub 은 그 `skipped` 로 병합한다. 그래서 worker 는 끝난 결과를 직접 본 뒤에만 예약하거나 병합을 요청한다.
+  - status 와 conclusion 은 GitHub 문서에 적힌 값만 받는다. 그 밖의 값, 모양이 어긋난 check-run 은 읽을 수 없는 응답이다. 판정은 `scripts/review/type-check-state.py` 가 닫힌 타입으로 한다.
+  - `Hold` 된 범위는 30분마다 도는 `approval-merge-sweep` 이 worker 를 다시 돌린다. 승인이 type-check 보다 먼저 끝난 PR 은 병합이 길게는 30분 늦는다. 검사가 끝날 때 worker 를 깨우는 이벤트는 여전히 없다.
+
+예약 전 읽기가 끝까지 가지 못하면 이미 걸린 예약을 푼다. `Hold`, HTTP 오류, 읽을 수 없는 응답, 한도가 모두 같다. GET 하나가 120초 안에 끝나지 않으면 실패한 읽기다.
+
+스택은 한 가지를 더 본다. 꼭대기의 type-check 는 꼭대기 head 의 트리를 컴파일했다. 병합되지 않은 아래층의 지금 head 가 모두 꼭대기 head 에 들어 있어야 그 결과가 아래층에도 맞다. worker 는 `compare/{맨 아래 층 head}...{꼭대기 head}` 의 commit 목록에서 아래층 head 를 찾는다. 빠진 층이 있으면 `Hold` 다.
 
 소스 패턴은 `changes` job 과 같은 목록을 쓴다. 목록은 한 곳에 두고 둘이 같이 읽는다(§7 의 1단계).
 
@@ -121,12 +129,13 @@ worker 는 병합하려는 head 의 `type-check` check-run 가운데 가장 새 
    - 41층의 마지막 head 는 모두 type-check 가 `skipped` 였다. 병합 뒤 `main-minimal-build`(run 43373486170)가 05:52:47Z 에 성공했다.
 2. **중간 층이 단독으로 컴파일되는지 모른다.** 스택을 통째로 병합하면 main 에는 층마다 commit 이 하나씩 생긴다. 중간 commit 에서 `git bisect` 가 빌드 실패를 만날 수 있다.
 3. **실패한 층을 가리키지 못한다.** 꼭대기에서 실패하면 어느 층이 원인인지는 컴파일 오류의 파일로 찾아야 한다.
-4. **worker 의 API 호출이 는다.** 독립 Ready PR 은 worker 가 깨어날 때마다 check-run 읽기가 한 번 든다. type-check 가 `skipped` 면 compare 가 한 번 더 든다. 문서나 dashboard 만 바꾼 PR 이 여기에 든다. 스택은 승인이 다 모인 실행에서만 든다. 이 RFC 전에는 0번이었다. 이 호출은 Actions 토큰의 시간당 한도(1,000)를 쓴다.
+4. **worker 의 API 호출이 는다.** 독립 Ready PR 은 worker 가 깨어날 때마다 check-run 읽기가 한 번 든다. type-check 가 `skipped` 면 compare 가 한 번 더 든다. 문서나 dashboard 만 바꾼 PR 이 여기에 든다. 스택은 승인이 다 모인 실행에서만 든다. 이때 층 비교가 스택의 commit 100개마다 한 번 더 든다. 층 수만큼 들지는 않는다. 이 RFC 전에는 0번이었다. 이 호출은 Actions 토큰의 시간당 한도(1,000)를 쓴다.
 5. **꼭대기가 `skipped` 인 큰 스택은 멈춘다.** compare 는 파일을 300개까지만 준다. 꼭대기가 소스를 바꾸지 않았고 스택 전체가 300개 넘게 바꿨으면 worker 는 소스가 없다고 확인하지 못해 `Hold` 다. 이때는 꼭대기 브랜치에서 `pr-type-check` 를 `workflow_dispatch` 로 한 번 돌려야 한다(§4.2 의 `Hold` 메시지).
 6. **사람이 직접 병합하는 길은 이 확인을 지나지 않는다.** ruleset 은 `skipped` 를 통과로 친다. 스택에서 빠진 PR 을 사람이 UI 로 병합하면 1번과 같은 일이 생긴다.
 7. **옛 판정으로 검사한 스택은 한 번 멈춘다.** 꼭대기가 `skipped` 이고 아래층에 소스가 있는 스택은 worker 가 `Hold` 한다. 스택이 다시 rebase 되면 새 판정으로 꼭대기에서 type-check 가 돈다. 아니면 꼭대기 브랜치에서 `pr-type-check` 를 `workflow_dispatch` 로 돌린다.
-8. **아래층만 push 하고 위층을 다시 올리지 않으면 그 commit 은 컴파일되지 않는다.** 아래층은 `skipped` 이고, 꼭대기의 `success` 는 그 commit 을 담지 않은 트리의 결과다. worker 는 이 경우를 보지 않는다. 이 RFC 전에도 위층은 다시 검사되지 않았다. 달라진 것은 아래층 자신의 트리도 검사되지 않는다는 점이다. `gh stack` 으로 올리면 모든 층이 같이 올라가서 생기지 않는다.
-9. **`changes` 가 도는 몇 초 사이에 PR 이 스택에서 빠지면 막지 못한다.** 그때 worker 가 예약을 걸면 type-check 는 진행 중이고, 곧 아래층 판정으로 `skipped` 가 된다.
+8. **아래층만 push 하고 위층을 다시 올리지 않으면 스택이 멈춘다.** 아래층은 `skipped` 이고, 꼭대기의 `success` 는 그 commit 을 담지 않은 트리의 결과다. worker 는 꼭대기 head 가 그 층의 head 를 담지 않는 것을 보고 `Hold` 한다(§4.2). 위층을 다시 올리면 풀린다. `gh stack` 으로 올리면 모든 층이 같이 올라가서 생기지 않는다. 사람이 직접 병합하면 6번과 같다.
+9. **승인이 type-check 보다 먼저 끝나면 병합이 늦는다.** worker 는 끝나지 않은 검사에서 예약도 병합 요청도 하지 않는다. 다음 이벤트나 30분 확인 job 이 다시 본다.
+10. **`success` 를 읽고 예약한 뒤 같은 head 에 새 실행이 생기는 경우는 다음 worker 실행까지 보지 못한다.** 그 실행이 `skipped` 로 끝나도 예약은 남아 있다. 다음 worker 실행이 예약을 푼다.
 
 ## 6. 고르지 않은 것
 

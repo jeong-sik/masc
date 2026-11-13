@@ -114,6 +114,15 @@ class GitHubGet(unittest.TestCase):
             GET.Client(run=run).read('--method=POST')
         self.assertEqual(calls, [['gh', 'api', '--method', 'GET', '--include', '--', '--method=POST']])
 
+    def test_a_get_that_gh_does_not_finish_is_a_failed_read(self):
+        limits = []
+        def run(command, **kwargs):
+            limits.append(kwargs['timeout'])
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'])
+        with self.assertRaisesRegex(GET.ApiFailure, 'did not answer'):
+            GET.Client(run=run).read('repos/o/r/pulls/1')
+        self.assertEqual(limits, [GET.GET_TIMEOUT_SECONDS])
+
     def test_separate_link_headers_preserve_the_next_page_and_its_change_request(self):
         calls = []
         first = ('HTTP/2.0 200 OK\n'

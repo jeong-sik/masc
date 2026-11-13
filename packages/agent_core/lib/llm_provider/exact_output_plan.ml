@@ -807,9 +807,11 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
      the fingerprint domain, which intentionally changed
      every plan fingerprint. Any further mismatch here means the fingerprint
      material drifted again — update this pin only for a deliberate,
-     commit-documented material change. *)
+     commit-documented material change. #45881 put the declared Chat schema
+     dialect into the material (after the structured-output flag), which
+     moved this pin to the value below. *)
   let agent_core_plan_v2_anthropic_fingerprint =
-    "a823aaf450989799c6af800e78fecb1fbc1a3a8f395315271776dd2225081b6f"
+    "409139e24f12dd7a0b5f91b7428f92d109b33c6a4118dff79502a59e7dd270f0"
   in
   let anthropic_codec = Provider_http_codec.of_config config in
   let openai_codec =

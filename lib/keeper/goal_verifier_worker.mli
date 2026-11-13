@@ -46,9 +46,11 @@ val load :
 val inventory :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   (retained list, error) result
-(** Strict actual scope discovery. A malformed, missing or changed published
-    original rejects the inventory; partial results are not a complete list.
-    Neither function creates an original, authorizes dispatch or picks a retry. *)
+(** Strict actual scope discovery. A malformed or missing published original,
+    or one whose identity changed after the listing, rejects the inventory;
+    partial results are not a complete list. Each original's progress is as
+    read when it was loaded. Neither function creates an original, authorizes
+    dispatch or picks a retry. *)
 
 val check_retained : Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** What a deploy preflight checks of one stored record: the strict check

@@ -617,6 +617,41 @@ let test_barrier_does_not_hide_an_external_disappearance () = with_store (fun ro
       ~f:(fun found original -> original::found)) |> get in
   fail_inventory result)
 
+(* The listing and each read after it hold the scope serializer on their own,
+   so another review can advance a listed record in between. *)
+let test_a_listing_returns_progress_written_after_it () = with_store (fun _root store ->
+  retain_own store "listed";
+  retain_own store "advanced";
+  let advance () =
+    match Owner.advance ~store ~expected:(some (owned (load store "advanced")))
+            ~event:Progress.Dispatch_intended with
+    | Ok (Owner.Stored _) -> ()
+    | Ok (Owner.Already_stored _ | Owner.Unconfirmed _) -> Alcotest.fail "dispatch intent not stored"
+    | Error error -> Alcotest.fail (Owner.update_error_to_string error) in
+  let found = owned (Owner.For_testing.fold_all ~store ~init:[] ~after_inventory:advance
+      ~f:(fun found original -> original :: found)) in
+  Alcotest.(check (list string)) "both listed originals are returned" ["advanced"; "listed"]
+    (List.sort String.compare (List.map (fun (original : Owner.retained) -> original.request_id) found));
+  let read = some (List.find_opt (fun (original : Owner.retained) -> original.request_id = "advanced") found) in
+  let now = some (owned (load store "advanced")) in
+  Alcotest.check json "the listing returns the record's progress as read now"
+    (Progress.to_json now.progress) (Progress.to_json read.progress))
+
+let test_a_listing_refuses_a_record_whose_identity_changed_after_it () = with_store (fun root store ->
+  retain_own store "original";
+  let resummarize () =
+    let renamed = match Yojson.Safe.from_file (path root "original") with
+      | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
+          if key = "summary" then key, `String "another subject" else key, value) fields)
+      | _ -> Alcotest.fail "original record is not an object" in
+    save (path root "original") (Yojson.Safe.to_string renamed) in
+  match Owner.For_testing.fold_all ~store ~init:[] ~after_inventory:resummarize
+          ~f:(fun found original -> original :: found) with
+  | Error (Owner.Store_unavailable detail) ->
+    Alcotest.(check string) "the changed identity is the refusal" "an inventoried original changed" detail
+  | Error error -> Alcotest.fail (Owner.error_to_string error)
+  | Ok _ -> Alcotest.fail "a record whose identity changed after the listing was returned")
+
 let test_admitted_barrier_survives_cancellation () = with_store (fun root store ->
   retain_own store "original";
   let record = listed store "original" in
@@ -717,6 +752,10 @@ let () =
     (fun () -> run_guarded_scenario "MASC_TEST_46252_SWEEP");
   Alcotest.test_case "barrier does not hide external disappearance" `Quick
     test_barrier_does_not_hide_an_external_disappearance;
+  Alcotest.test_case "a listing returns progress another review wrote after it" `Quick
+    test_a_listing_returns_progress_written_after_it;
+  Alcotest.test_case "a listing refuses a record whose identity changed after it" `Quick
+    test_a_listing_refuses_a_record_whose_identity_changed_after_it;
   Alcotest.test_case "admitted barrier finishes before cancellation releases it" `Quick
     (fun () -> run_guarded_scenario "MASC_TEST_46252_ADMITTED");
   Alcotest.test_case "barrier is released after an exception" `Quick

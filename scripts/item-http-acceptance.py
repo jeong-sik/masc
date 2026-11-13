@@ -305,6 +305,37 @@ def port_is_occupied():
     return False
 
 
+# HIGH-RISK-UNREVIEWED [H7]: the read that precedes the first bearer. The
+# server answers a requester without a credential only the public probe, which
+# names no workspace, so what answers on the port cannot say whose it is. The
+# kernel can: `setup-server` reads the lease of the workspace and the port its
+# holder announces, with the environment the child was started with (the lease
+# root comes from it). Only the child this script started, named as holder of
+# this workspace and announcer of this port, may be sent a bearer.
+def kernel_names_the_child():
+    observed = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
+                              env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    try:
+        document = json.loads(observed.stdout)
+    except ValueError:
+        raise RuntimeError('setup-server printed no document; inspect its stderr: '
+                           + observed.stderr.strip()) from None
+    require(isinstance(document, dict), 'setup-server document is not an object')
+    status = document.get('status')
+    if status is None:
+        # The holder could not be read this time. Nothing is known, so nothing
+        # is sent; the readiness deadline bounds the wait.
+        return False
+    if status == 'same_workspace' and document.get('server_pid') == server.pid:
+        return True
+    if status == 'free':
+        return False
+    if status == 'owner_unannounced' and document.get('server_pid') == server.pid:
+        return False
+    # Another process holds the workspace or the port.
+    raise PortCollision()
+
+
 def start_ready(log):
     global server, reservation, port, origin
     deadline = time.monotonic() + 60
@@ -324,20 +355,7 @@ def start_ready(log):
                         raise PortCollision()
                     raise RuntimeError('isolated server exited during startup; inspect server.log')
                 try:
-                    # Establish workspace identity anonymously before sending
-                    # any bearer. A foreign listener is a port collision.
-                    status, body, _ = request('/health?full=1', False)
-                    if status == 200:
-                        try:
-                            health = json.loads(body)
-                        except (ValueError, UnicodeError):
-                            raise PortCollision() from None
-                        if not isinstance(health, dict) or not isinstance(health.get('paths'), dict):
-                            raise PortCollision()
-                        paths = health['paths']
-                        if (paths.get('effective_base_path') != str(base.resolve())
-                                or paths.get('effective_masc_root') != str((base / '.masc').resolve())):
-                            raise PortCollision()
+                    if kernel_names_the_child():
                         status, _, _ = request('/health/ready', False)
                         if status == 200:
                             return

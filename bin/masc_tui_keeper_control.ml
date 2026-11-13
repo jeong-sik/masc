@@ -220,7 +220,7 @@ let health_label ~ko reading =
   match reading.liveness with
   | Invalid _ -> if ko then "설정 오류" else "config error"
   | Unobserved -> Decode.keeper_health_word ~ko None
-  | Absent -> if ko then "목록에 없음" else "absent"
+  | Absent -> if ko then "실시간 목록에 없음" else "absent from live roster"
   | Present runtime -> Decode.keeper_health_word ~ko (Some runtime.Decode.kr_health)
 
 type action =

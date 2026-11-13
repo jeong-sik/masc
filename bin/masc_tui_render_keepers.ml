@@ -3327,21 +3327,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     let base_height = max 0 (rows - framed_chrome_rows) in
     (* Info shows the current outfit; Items changes only the drawing for its
        selected preview. Both use the server's observed equipment. *)
-    let portrait_reading = match (keeper_reading state k).Keeper_control.liveness with
+    let portrait_reading =
+      let reading = keeper_reading state k in
+      match reading.Keeper_control.liveness with
       | Keeper_control.Present runtime -> runtime.kr_portrait
-      | Keeper_control.Unobserved ->
-        Tui_decode.Unavailable (ui_text state ~ko:"아직 읽지 않음" ~en:"not yet read")
-      | Keeper_control.Absent ->
-        Tui_decode.Unavailable
-          (ui_text state ~ko:"실시간 목록에 없음" ~en:"absent from live roster")
       (* The profile error's full text owns the failure section on the Info
          tab, where it wraps under its own heading. The portrait row is a
          status line read on the Items tab too, where no failure section
          exists, so its sentence names the state and no location: a second
          unwrapped copy of the whole diagnosis here is what made the pane
          read as broken. *)
-      | Keeper_control.Invalid _ ->
-          Tui_decode.Unavailable "invalid keeper profile" in
+      | Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Invalid _ ->
+          Tui_decode.Unavailable
+            (Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading) in
     let account = selected_item_account state in
     let items = item_browser_items state in
     let cursor = Item_account.cursor ~items state.item_cursor in
@@ -3534,7 +3532,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             (match k.k_origin, (keeper_reading state k).Keeper_control.liveness with
              | Tui_decode.Remote_keeper,
                  (Keeper_control.Invalid _ | Unobserved | Absent) ->
-                 Ansi.dim ^ t "미관측" "not observed" ^ Ansi.reset
+                 Ansi.dim ^ Keeper_control.health_label ~ko (keeper_reading state k) ^ Ansi.reset
              | (Tui_decode.Persisted_keeper | Declared_keeper _), _
              | Remote_keeper, Keeper_control.Present _ ->
                  if k.k_paused then (Theme.warn ()) ^ t "예" "yes" ^ Ansi.reset
@@ -3636,7 +3634,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       add_numbered_section ~first:true
         (t "1. 현재 장애 · 보드 격리" "1. Current Failure & Board Attention");
       let indent = "  " in
-      let absent_text = t "실시간 목록에 없음" "absent from live roster" in
       let wrap ?(tone = "") text =
         Message_layout.wrap_words
           ~max_cells:(max 1 (inner - Message_layout.display_width indent))
@@ -3668,10 +3665,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 | Some signature -> wrap ~tone:Ansi.dim signature
                 | None -> ())
             | None -> wrap ~tone:Ansi.dim (t "없음" "none"))
-        | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim (t "미관측" "unread")
-        | Keeper_control.Absent -> wrap ~tone:Ansi.dim absent_text
+        | Keeper_control.Unobserved | Keeper_control.Absent ->
+            wrap ~tone:Ansi.dim (Keeper_control.health_label ~ko (keeper_reading state k))
         | Keeper_control.Invalid detail ->
-            wrap ~tone:(Theme.bad ()) (t "설정 오류: " "config error: " ^ detail)
+            wrap ~tone:(Theme.bad ())
+              (Keeper_control.health_label ~ko (keeper_reading state k) ^ ": " ^ detail)
       in
 
       (* Blocked Board-attention partitions wait here for an
@@ -3993,10 +3991,11 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
                history_row terminal_label (Printf.sprintf "%d · %s" attempt runtime_id);
                wrap (Keeper_request_failure.summary failure)))
-       | Keeper_control.Unobserved -> wrap ~tone:Ansi.dim (t "실시간 목록 미관측" "live roster unread")
-       | Keeper_control.Absent -> wrap ~tone:Ansi.dim absent_text
+       | Keeper_control.Unobserved | Keeper_control.Absent ->
+         wrap ~tone:Ansi.dim (Keeper_control.health_label ~ko (keeper_reading state k))
        | Keeper_control.Invalid detail ->
-         wrap ~tone:(Theme.warn ()) (t "목록을 읽지 못함: " "roster unavailable: " ^ detail));
+         wrap ~tone:(Theme.warn ())
+           (Keeper_control.health_label ~ko (keeper_reading state k) ^ ": " ^ detail));
 
       (* Lifetime totals & Timestamps section *)
       add_numbered_section (t "6. 누적 통계 · 생성 이력" "6. Lifetime Totals & Timestamps");

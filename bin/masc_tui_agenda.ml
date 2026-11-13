@@ -228,7 +228,7 @@ type line =
   }
 
 (* Cells the left column keeps before the right one is dropped: a clock that
-   has spilled onto a second day ("08:00 08/27") and enough of a name to tell
+   has spilled onto a second day ("08-27 08:00") and enough of a name to tell
    two keepers apart. *)
 let minimum_left_cells = 24
 

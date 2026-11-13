@@ -16971,7 +16971,8 @@ let apply_remote_keeper_rows state =
           if List.exists (fun (row : Tui_decode.keeper_runtime) ->
               String.equal name row.kr_name) observed then None
           else Some { Tui_decode.k_origin = Remote_keeper; k_name = name;
-            k_paused = false; k_identity = Error reason; k_activity = None }) errors,
+            k_paused = false; k_identity = Error (Tui_decode.Identity_unreadable reason);
+            k_activity = None }) errors,
         Some (String.concat "; " (List.map (fun (name, reason) -> name ^ ": " ^ reason) errors))
     in
     replace_keeper_rows ~before_view_change:(fun () -> retire_remote_image_for_navigation state)

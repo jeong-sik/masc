@@ -154,6 +154,12 @@ let reading ?(paused = false) ?(liveness = Control.Unobserved) name :
     Control.reading =
   { name; paused; liveness }
 
+let identity_absence =
+  Alcotest.testable
+    (fun ppf absence ->
+      Format.pp_print_string ppf (Decode.keeper_identity_absence_text ~ko:false absence))
+    ( = )
+
 let action_testable =
   Alcotest.testable
     (fun fmt action -> Format.pp_print_string fmt (Control.action_label action))
@@ -935,7 +941,7 @@ let test_remote_identity_failure_preserves_observed_controls () =
   in
   let runtime = decode metadata in
   let keeper = Decode.keeper_of_runtime runtime in
-  Alcotest.(check (result string string)) "canonical server trace" (Ok "trace-1")
+  Alcotest.(check (result string identity_absence)) "canonical server trace" (Ok "trace-1")
     (Decode.keeper_trace_id keeper);
   Alcotest.(check bool) "public roster never invents activity" true
     (Option.is_none keeper.k_activity);
@@ -945,13 +951,15 @@ let test_remote_identity_failure_preserves_observed_controls () =
     Alcotest.(check bool) "invalid identity is explicit" true
       (Result.is_error keeper.k_identity);
     let reason = match keeper.k_identity with
-      | Error reason -> reason
+      | Error (Decode.Identity_unreadable _ as reason) -> reason
+      | Error Decode.Keeper_not_started ->
+          Alcotest.fail "a roster row is not a Keeper that has not started"
       | Ok _ -> Alcotest.fail "invalid identity unexpectedly succeeded" in
-    Alcotest.(check (result string string)) "original identity failure survives" (Error reason)
-      (Decode.keeper_trace_id keeper);
+    Alcotest.(check (result string identity_absence)) "original identity failure survives"
+      (Error reason) (Decode.keeper_trace_id keeper);
     let projection = Decode.keeper_trace_projection [keeper] in
     Alcotest.(check (list (pair string string))) "invalid identity cannot bind events" [] projection.bindings;
-    Alcotest.(check (list (pair string string))) "named failure remains readable"
+    Alcotest.(check (list (pair string identity_absence))) "named failure remains readable"
       [keeper.k_name, reason] projection.unavailable;
     let valid = Decode.keeper_of_runtime (decode (match row with
       | `Assoc fields -> (match List.assoc "meta" fields with
@@ -961,7 +969,7 @@ let test_remote_identity_failure_preserves_observed_controls () =
     let mixed = Decode.keeper_trace_projection [valid; keeper] in
     Alcotest.(check (list (pair string string))) "valid correlation survives beside failure"
       [valid.k_name, "trace-1"] mixed.bindings;
-    Alcotest.(check (list (pair string string))) "failure not hidden by valid correlation"
+    Alcotest.(check (list (pair string identity_absence))) "failure not hidden by valid correlation"
       [keeper.k_name, reason] mixed.unavailable;
     let reading = reading ~liveness:(Control.Present runtime) keeper.k_name in
     check_actions "independently valid lifecycle remains actionable"

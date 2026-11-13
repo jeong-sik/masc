@@ -29,7 +29,7 @@ let keeper name : Decode.keeper =
   { k_origin = Decode.Persisted_keeper
   ; k_name = name
   ; k_paused = false
-  ; k_identity = Error "not needed"
+  ; k_identity = Error (Decode.Identity_unreadable "not needed")
   ; k_activity = None
   }
 

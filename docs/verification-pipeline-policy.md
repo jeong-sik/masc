@@ -132,6 +132,20 @@ stable session namespace. Their pre-dispatch owner reference is retained too;
 interrupted official sessions require operator reconciliation because this
 observer cannot establish a structured verdict from their session alone.
 
+## 5. The next attempt
+
+The next attempt of a Task or Goal review asks the same question with the
+lookup authority current now. The question (subject, workspace, submitted
+evidence and, for a Goal, the reported measurement it was asked with) comes
+from the parent. Lookup grants, prompt, instructions and answer format are
+built when the attempt is prepared. A changed question opens no next attempt.
+
+A retained attempt whose lookup authority or answer format is not the current
+one is refused before dispatch. The refusal holds only what moved, so it has no
+receipt, verdict or evaluator runtime. The same processing then opens the next
+attempt once; if that one is refused too, the review waits for the next
+processing.
+
 Run-registry timestamps, elapsed time and tool observations describe the host's
 current review or reconciliation attempt. A recovery wake does not reconstruct
 the original model's start time, elapsed time or complete lookup history; an

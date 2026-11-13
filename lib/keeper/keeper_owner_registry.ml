@@ -600,6 +600,27 @@ let restore_shutdown ~base_path ~keeper_name ~operation_id =
         |> Result.map_error (fun error -> Command_rejected error))
 ;;
 
+let operation_id_label = function
+  | None -> "none"
+  | Some operation_id -> Keeper_shutdown_types.Operation_id.to_string operation_id
+;;
+
+(* The Owner and the intake fence each name the shutdown operation that holds
+   the Keeper's admission, and a handoff moves both or neither. The fence moves
+   first: it is the step that refuses when another operation holds it, and
+   putting it back is one compare-and-set under the slot mutex that never
+   waits. Putting the Owner back would be another mailbox request, which a
+   closed Owner refuses. Moving the Owner first leaves Owner=B and intake=C on
+   an intake conflict, and no retry of A -> B can repair that because the
+   Owner no longer names A (#28637).
+
+   The two writes are still two steps, and no lock spans them. While the Owner
+   request is queued, another writer sees the fence moved and the Owner not
+   yet: [begin_shutdown] re-installs the Owner's operation into a fence this
+   call opened, the same window [rollback_shutdown] has. A put-back that finds
+   the slot moved leaves it and names both values. Both records live only in
+   memory: a process exit drops them together, and boot recovery restores them
+   from the durable shutdown records. *)
 let transition_shutdown
       ~base_path
       ~keeper_name
@@ -610,37 +631,88 @@ let transition_shutdown
   | Error error -> Error (Command_lookup_failed error)
   | Ok owner ->
     Eio.Cancel.protect (fun () ->
+      let handoff_conflict ~owner ~intake =
+        shutdown_fence_error
+          (Printf.sprintf
+             "keeper=%s handoff=%s->%s owner=%s intake=%s"
+             keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string from_operation_id)
+             (operation_id_label to_operation_id)
+             owner
+             intake)
+      in
+      (* [put_fence_back] answers what the fence holds after it ran: [Ok] when
+         that is the state before this call, [Error] when another writer moved
+         it in between. *)
+      let move_owner ~put_fence_back =
+        let refused ~owner_refusal ~error_after_put_back =
+          match put_fence_back () with
+          | Ok intake_id -> Error (error_after_put_back ~intake_id)
+          | Error intake_id ->
+            Error
+              (handoff_conflict
+                 ~owner:owner_refusal
+                 ~intake:
+                   (Printf.sprintf
+                      "%s (moved by another writer during the handoff)"
+                      (operation_id_label intake_id)))
+        in
+        match
+          Keeper_owner.transition_shutdown owner ~from_operation_id ~to_operation_id
+        with
+        | Ok
+            (( Keeper_owner.Shutdown_transition_applied
+             | Keeper_owner.Shutdown_transition_already_applied ) as moved) ->
+          Ok moved
+        | Ok (Keeper_owner.Shutdown_transition_reserved_by_other owner_id) ->
+          (* The fence named [from_operation_id], the successor or nobody, so
+             the two records disagree. Nothing is released. *)
+          refused
+            ~owner_refusal:(Keeper_shutdown_types.Operation_id.to_string owner_id)
+            ~error_after_put_back:(fun ~intake_id ->
+              handoff_conflict
+                ~owner:(Keeper_shutdown_types.Operation_id.to_string owner_id)
+                ~intake:(operation_id_label intake_id))
+        | Error error ->
+          refused
+            ~owner_refusal:(Keeper_owner.error_to_string error)
+            ~error_after_put_back:(fun ~intake_id:_ -> Command_rejected error)
+      in
       match
-        Keeper_owner.transition_shutdown owner ~from_operation_id ~to_operation_id
+        Keeper_shutdown_intake_fence.transition_shutdown
+          ~base_path
+          ~keeper_name
+          ~from_operation_id
+          ~to_operation_id
       with
-      | Error error -> Error (Command_rejected error)
-      | Ok owner_result ->
-        ignore
-          (Keeper_shutdown_intake_fence.transition_shutdown
-             ~base_path
-             ~keeper_name
-             ~from_operation_id
-             ~to_operation_id
-            : Keeper_shutdown_intake_fence.transition_result);
-        let owner_id = Keeper_owner.shutdown_operation_id owner in
-        let fence_id =
-          Keeper_shutdown_intake_fence.shutdown_operation_id
-            ~base_path
-            ~keeper_name
-        in
-        let same_id =
-          match owner_id, fence_id with
-          | None, None -> true
-          | Some left, Some right ->
-            Keeper_shutdown_types.Operation_id.equal left right
-          | None, Some _ | Some _, None -> false
-        in
-        if same_id
-        then Ok owner_result
-        else
-          Error
-            (shutdown_fence_error
-               (Printf.sprintf "keeper=%s transition results diverged" keeper_name)))
+      | Keeper_shutdown_intake_fence.Transition_reserved_by_other intake_id ->
+        (* Nothing moved. Another operation holds admission only when the Owner
+           names it too. Otherwise [from_operation_id] may still hold the
+           Owner, and its caller has to see a failure and retry. *)
+        (match Keeper_owner.shutdown_operation_id owner with
+         | Some owner_id
+           when Keeper_shutdown_types.Operation_id.equal owner_id intake_id ->
+           Ok (Keeper_owner.Shutdown_transition_reserved_by_other intake_id)
+         | (None | Some _) as owner_id ->
+           Error
+             (handoff_conflict
+                ~owner:(operation_id_label owner_id)
+                ~intake:(Keeper_shutdown_types.Operation_id.to_string intake_id)))
+      | Keeper_shutdown_intake_fence.Transition_applied { previous } ->
+        move_owner ~put_fence_back:(fun () ->
+          match
+            Keeper_shutdown_intake_fence.revert_transition
+              ~base_path
+              ~keeper_name
+              ~applied:to_operation_id
+              ~previous
+          with
+          | Keeper_shutdown_intake_fence.Reverted -> Ok previous
+          | Keeper_shutdown_intake_fence.Revert_conflict current -> Error current)
+      | Keeper_shutdown_intake_fence.Transition_already_applied ->
+        (* The fence already named the successor; this call wrote nothing to
+           it and has nothing to put back. *)
+        move_owner ~put_fence_back:(fun () -> Ok to_operation_id))
 ;;
 
 let await_idle_after_shutdown ~base_path ~keeper_name =

@@ -32,13 +32,13 @@ A drop of a planted stale fact or a correction target is right. A complement
 target or a fact of a duplicate pair is to be absorbed, so dropping it goes
 against the label. Any other drop is off label, and a blind judge classifies it
 at verdict time (`audit_decisions`). These follow what each fact is. Stale
-drop recall, pair merges and the label's growth count only requests whose
-label asks for a change: on the others MASC refuses one unless a candidate is
-misjudged. Growth is the claims an answer adds minus the memory IDs it takes
-out, beside the label's. Records with a use time count on the same requests: a
-record still ahead is to stay, so its drop is the loss this counts on its own
-besides the off-label drop it also is, and a record already past is one of the
-planted stale facts, counted on its own as well.
+drop recall, pair merges, the label's growth and the records with a use time
+count on every request: MASC takes drops and merges without a supporting
+candidate (RFC-0517 §7.1). Growth is the claims an answer adds minus the memory
+IDs it takes out, beside the label's. A record still ahead is to stay, so its
+drop is the loss this counts on its own besides the off-label drop it also is,
+and a record already past is one of the planted stale facts, counted on its own
+as well.
 
 Text comparison cannot tell whether a merge keeps the knowledge it absorbs.
 A row names, for each merge the label expects and the answer made, the memory
@@ -203,11 +203,7 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     ids = {claim: mid for mid, claim in claims.items()}
     texts = {c.request_id: c.proposed_fact.claim for c in item.prompt.candidates}
     stale = set(label.planted_stale)
-    # What the label asks of stale facts, pairs and records; MASC refuses those changes without support.
-    planted = stale if label.supports_change else set[str]()
-    pairs = label.duplicates if label.supports_change else ()
-    ahead = label.scheduled_ahead if label.supports_change else frozenset[str]()
-    past = label.scheduled_past if label.supports_change else frozenset[str]()
+    pairs, ahead, past = label.duplicates, label.scheduled_ahead, label.scheduled_past
     corrected = {c.supersedes for c in label.candidates if c.supersedes is not None}
     complemented = {c.absorbs for c in label.candidates if c.absorbs is not None}
     paired = {mid for pair in label.duplicates for mid in pair}
@@ -242,7 +238,7 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
             "dropped": len(left.dropped), "dropped_expected": len(left.dropped & asked),
             "dropped_unmerged": sorted(left.dropped & merged), "dropped_off_label": sorted(left.dropped - asked - merged),
             "absorbed": len(left.absorbed), "absorbs": {mid: labeled.get(mid, "other") for mid in sorted(left.absorbed)},
-            "planted": len(planted), "planted_dropped": len(left.dropped & planted),
+            "planted": len(stale), "planted_dropped": len(left.dropped & stale),
             "planted_absorbed": len(stale & left.absorbed.keys()),
             "scheduled_ahead": len(ahead), "scheduled_ahead_dropped": len(left.dropped & ahead),
             "scheduled_past": len(past), "scheduled_past_dropped": len(left.dropped & past),
@@ -251,4 +247,4 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
             "merges_absorbed": complements_done + pairs_done,
             "added": len(left.added), "removed": len(left.dropped | left.absorbed.keys()),
             "expected_added": sum(c.outcome == "incorporated" for c in label.candidates),
-            "expected_removed": len(corrected) + len(complemented) + len(planted) + len(pairs)}
+            "expected_removed": len(corrected) + len(complemented) + len(stale) + len(pairs)}

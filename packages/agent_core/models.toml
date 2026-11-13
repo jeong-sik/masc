@@ -40,6 +40,7 @@
 # Assistant-prefill exclusions verified 2026-10-09 against primary guides:
 # Fable 5 and Mythos 5/Preview: https://platform.claude.com/docs/en/models/fable-5/migration-guide
 # Fable 5.1: https://platform.claude.com/docs/en/models/fable-5-1/migration-guide
+# Fable 5.2 (checked 2026-11-13): https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
 # Opus 5/5.5: https://platform.claude.com/docs/en/models/opus-5-5/migration-guide
 # Sonnet 5/5.5: https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide
 # These are explicit catalog facts; unknown models keep the base default.
@@ -91,6 +92,38 @@ supports_required_tool_choice = false
 supports_named_tool_choice = false
 input_per_million = 10.0
 output_per_million = 50.0
+cache_write_multiplier = 1.25
+cache_read_multiplier = 0.025
+
+# Claude Fable 5.2 (released 2026-11-09). Model page, migration guide, thinking
+# guide and pricing table checked 2026-11-13: 1M/128K, $8/$40, 5m cache write
+# $10 = 1.25x, cache read $0.20 = 0.025x (the pricing footnote groups it with
+# 5.1). The migration guide says the API surface, always-on adaptive thinking,
+# the forced tool choice restriction and the prefill refusal match 5.1, and the
+# thinking guide keeps temperature, top_p and top_k unsendable, so the
+# capability fields are the 5.1 row's. They are read from those pages, not
+# sent to the API. The prices differ, so 5.2 does not share that row.
+# https://platform.claude.com/docs/en/models/fable-5-2/migration-guide
+# Every 5.2 request runs a prefix check. For every model of the Anthropic kind
+# the request builder drops a thinking block whose request prefix changed
+# before it sends the block (Reasoning_history_projection.verify_prefix_binding,
+# #42729), so the row needs no field for it.
+[[models]]
+model_id = "claude-fable-5-2"
+suggested_clients = ["claude_code"]
+base = "anthropic"
+reasoning_replay = "turn_scoped_system_context_preserve_always"
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+supports_assistant_prefill = false
+anthropic_thinking_control = "always_adaptive"
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh", "max"]
+max_context_tokens = 1000000
+max_output_tokens = 128000
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+input_per_million = 8.0
+output_per_million = 40.0
 cache_write_multiplier = 1.25
 cache_read_multiplier = 0.025
 
@@ -1657,14 +1690,61 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 # Gemini Models
+# Gemini 4 rows: 1,048,576 is one window shared by input and output, and 65,536
+# is the default synchronous output. One non-streaming hop on Carbon and Argon
+# stops at 32,768 tokens (models.list reports that figure as outputTokenLimit;
+# the thinking guide and the long-decode page state it). Streaming calls and
+# Hydrogen run to 65,536 per hop, and longer output continues across hops
+# through long decode. temperature, top_p and top_k are ignored, explicit
+# caching is unsupported and implicit cache reads are billed at 0.05x
+# (ai.google.dev/gemini-api/docs/models/<id>, pricing and thinking, checked
+# 2026-11-13). Carbon and Argon are billed $2/$10 through 2026-11-30. The rows
+# carry the standard rate from 2026-12-01, so until then cost estimates for
+# those two are twice the billed rate.
+[[models]]
+# gemini-4-hydrogen-{low,medium,high,xhigh}, served through the Antigravity
+# Google subscription (`agy models` on agy 1.5.8). Generally available
+# 2026-11-12. thinkingLevel low|medium|high|xhigh with high as the default;
+# minimal is refused (whats-new-gemini-4-hydrogen). $1.50/$7.50, cache reads
+# $0.075. A non-streaming hop runs to 65,536 here.
+model_id = "gemini-4-hydrogen"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+accepted_reasoning_efforts = ["low", "medium", "high", "xhigh"]
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+input_per_million = 1.5
+output_per_million = 7.5
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.05
+
+[[models]]
+# gemini-4-carbon-{low,medium,high}, served through the Antigravity Google
+# subscription (`agy models` on agy 1.5.8). Generally available 2026-11-10.
+# thinkingLevel low|medium|high with medium as the default. $4/$20 standard,
+# cache reads $0.20.
+model_id = "gemini-4-carbon"
+base = "gemini"
+max_context_tokens = 1048576
+max_output_tokens = 65536
+accepted_reasoning_efforts = ["low", "medium", "high"]
+supports_top_k = false
+ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
+input_per_million = 4.0
+output_per_million = 20.0
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.05
+
 [[models]]
 # gemini-4-argon-{high,medium,low}, served through the Antigravity Google
 # subscription (`agy models` on agy 1.3.2). Official page
 # ai.google.dev/gemini-api/docs/whats-new-gemini-4-argon and OpenRouter
 # GET /api/v1/models (`google/gemini-4-argon`), checked 2026-10-14:
 # 1,048,576 in / 65,536 default out, thinkingLevel low|medium|high (medium
-# default), temperature/top_p/top_k ignored, $2/$10 introductory pricing with
-# 0.05x implicit cache reads.
+# default), temperature/top_p/top_k ignored, 0.05x implicit cache reads.
+# Generally available 2026-10-13. $4/$20 standard (the pricing page's
+# introductory $2/$10 ends 2026-11-30, checked 2026-11-13).
 model_id = "gemini-4-argon"
 base = "gemini"
 max_context_tokens = 1048576
@@ -1672,8 +1752,8 @@ max_output_tokens = 65536
 accepted_reasoning_efforts = ["low", "medium", "high"]
 supports_top_k = false
 ignored_sampling_parameters = ["temperature", "top_p", "top_k"]
-input_per_million = 2.0
-output_per_million = 10.0
+input_per_million = 4.0
+output_per_million = 20.0
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.05
 
@@ -2598,7 +2678,7 @@ supports_parallel_tool_suppression = true
 # preset and was refused any reasoning effort (#37849). deepseek-anthropic
 # below takes the same wire but answers claude-* ids with its own models, so it
 # does not declare this.
-serves_bare_models = ["claude-fable-5", "claude-fable-5-1", "claude-mythos-5", "claude-mythos-preview", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-haiku-5-5"]
+serves_bare_models = ["claude-fable-5", "claude-fable-5-1", "claude-fable-5-2", "claude-mythos-5", "claude-mythos-preview", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-haiku-5-5"]
 kind = "anthropic"
 base_url = "https://api.anthropic.com"
 request_path = "/v1/messages"
@@ -2779,7 +2859,7 @@ cache_read_multiplier = 0.1
 id = "gemini"
 # These provider-independent model rows describe this native endpoint. The
 # declaration applies only to catalog rows, not capability-manifest overrides.
-serves_bare_models = ["gemini-4-argon", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite", "gemini-3"]
+serves_bare_models = ["gemini-4-hydrogen", "gemini-4-carbon", "gemini-4-argon", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-pro-preview", "gemini-3.1-pro", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite", "gemini-3"]
 kind = "gemini"
 base_url = "https://generativelanguage.googleapis.com/v1beta"
 request_path = ""

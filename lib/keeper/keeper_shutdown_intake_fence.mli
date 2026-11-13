@@ -21,9 +21,18 @@ type restore_result =
   | Restore_conflict of Keeper_shutdown_types.Operation_id.t
 
 type transition_result =
-  | Transition_applied
+  | Transition_applied of { previous : Keeper_shutdown_types.Operation_id.t option }
+      (** [previous] is what the slot held before this call wrote
+          [to_operation_id]: the source operation, or nothing when the slot
+          was open and the successor was installed. *)
   | Transition_already_applied
   | Transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type revert_result =
+  | Reverted
+  | Revert_conflict of Keeper_shutdown_types.Operation_id.t option
+      (** The slot no longer holds what the transition wrote; it holds this.
+          Nothing was changed. *)
 
 type 'a registration_commit_result =
   | Registration_committed of 'a
@@ -64,6 +73,17 @@ val transition_shutdown
   -> from_operation_id:Keeper_shutdown_types.Operation_id.t
   -> to_operation_id:Keeper_shutdown_types.Operation_id.t option
   -> transition_result
+
+val revert_transition
+  :  base_path:string
+  -> keeper_name:string
+  -> applied:Keeper_shutdown_types.Operation_id.t option
+  -> previous:Keeper_shutdown_types.Operation_id.t option
+  -> revert_result
+(** Put [previous] back when the slot still holds [applied], the
+    [to_operation_id] of a [transition_shutdown] that answered
+    [Transition_applied { previous }]. A slot another writer has moved since
+    is left as it is. *)
 
 val shutdown_operation_id
   :  base_path:string

@@ -140,7 +140,18 @@ let with_owner ~run_dir ~base_path ~announces f =
         (match announces with
          | None -> true
          | Some port ->
-           Result.is_ok (Server_startup_takeover.announce_account_server lease ~port))
+           (* Until the lease is released: these cases ask about the lock, not
+              about the listener that would withdraw it. *)
+           (match
+              Server_startup_takeover.loopback_listener
+                ~address:(Ipaddr.V4 Ipaddr.V4.localhost)
+                ~port
+            with
+            | Ok listener ->
+              Result.is_ok
+                (Server_startup_takeover.announce_account_server lease listener
+                   ~withdraw_with:ignore)
+            | Error (_ : Server_startup_takeover.loopback_unreached) -> false))
       | Server_startup_takeover.Base_path_already_owned _
       | Server_startup_takeover.Base_path_rejected _ -> false in
     ignore (Unix.write_substring ready_write (if holds then "r" else "x") 0 1);

@@ -25,8 +25,12 @@ A baseline names what it was counted for and under: the provider and the model, 
 template and the prompt_counts.py. When the file names another of them the baseline is stale and the
 file is refused. After a change of prompt_counts.py alone, set the baseline to null, count the
 model's runs again with `prompt_compare.py baseline`, and pin what it prints. After a change of the
-model, the pass lines or the template the old runs are refused as well (`prompt_counts.measure`,
-`prompt_compare.baseline_problem`), so the model runs again first.
+pass lines the old runs are refused as well (`prompt_counts.measure`, `prompt_compare.baseline_problem`).
+A change that leaves every prompt and the request as they were, such as one of the checker or the
+scores, needs no model call: `eval_admission.py rescore` scores each run again from its call log into
+a new folder, the judges decide that folder's off-label drops and absorbs in new folders, and those
+runs are counted. After any other change of the pass lines, or a change of the model or the
+template, the model runs again first.
 
 The template of the baseline is config/prompts/librarian.md as the pass lines pin it. A file that
 names another template is refused (`pinned_lines`), so pass lines pinned again for a new template

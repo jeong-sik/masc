@@ -291,14 +291,31 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
      ready only once it announces. A server that cannot announce could not
      be replaced by a command, so its boot stops.
 
+     Only a socket that a command line reaches at the loopback origin is
+     announced. A server bound elsewhere serves without an announcement:
+     commands on this host dial 127.0.0.1 and could reach another process
+     there. [sw] owns [socket], so the withdrawal registered on it runs
+     before the socket closes.
+
      It comes after every check that can stop a boot: a command that reads
      the announcement reads a server that goes on to serve. The one step
      after it that can refuse is the publication, which refuses a process
      that published before, and a boot publishes once. *)
   let* () =
-    Result.map_error
-      (fun rejection -> Port_not_announced rejection)
-      (Server_startup_takeover.announce_account_server lease ~port:config.port)
+    match Server_startup_takeover.loopback_listener ~address ~port:config.port with
+    | Error unreached ->
+      Log.Server.warn
+        "the port of the account server is not announced to the host (%s): a command line \
+         on this host finds no server for this workspace"
+        (Server_startup_takeover.loopback_unreached_to_string unreached);
+      Ok ()
+    | Ok listener ->
+      Result.map_error
+        (fun rejection -> Port_not_announced rejection)
+        (Server_startup_takeover.announce_account_server
+           lease
+           listener
+           ~withdraw_with:(Eio.Switch.on_release sw))
   in
   let* () =
     Result.map_error

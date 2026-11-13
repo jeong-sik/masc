@@ -46,6 +46,17 @@
       }
     },
     {
+      "publisher": "anthropic",
+      "model_id": "claude-fable-5-2",
+      "release": {
+        "status": "official_release",
+        "released_on": "2026-11-09",
+        "kind": "general_availability",
+        "source_url": "https://platform.claude.com/docs/en/models/fable-5-2/overview",
+        "checked_on": "2026-11-13"
+      }
+    },
+    {
       "publisher": "openai",
       "model_id": "gpt-5.6-sol",
       "release": {

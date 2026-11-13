@@ -50,9 +50,9 @@ val run_json_path : Workspace_utils.config -> string -> string
 
 (** {1 Run lifecycle}
 
-    [init] / [update_plan] implement read-modify-write safety via
-    per-[run.json] file locks to prevent lost updates across
-    concurrent fibers. *)
+    [init], [update_plan] and the creation inside [get] write [run.json]
+    under one per-[run.json] file lock, so concurrent fibers do not lose
+    one another's writes. *)
 
 val write_run : Workspace_utils.config -> run_record -> (unit, error) result
 (** An authoritative metadata write failure is returned to the caller.

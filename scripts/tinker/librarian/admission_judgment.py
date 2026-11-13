@@ -3,7 +3,9 @@
 
 - `unwrap`: 17-90 `nonblank`, `wrapper_of_json` and `unwrap`, with the
   keeper_memory_os_types.ml:153 `field_set_rejection` reason text
-- `verify` and `verify_support`: 92-130
+- `verify` and `verify_support`: 92-128
+- `additions`: keeper_librarian_runtime.ml:1103-1113, the new claims
+  `validate_admission_proposal` passes to `verify_support`
 
 Pure: no I/O.
 """
@@ -158,10 +160,19 @@ def verify(judgments: tuple[Judgment, ...], selection: Selection) -> Violation |
     return None
 
 
+def additions(selection: Selection) -> tuple[str, ...]:
+    """keeper_librarian_runtime.ml:1103-1113: the new claims a supporting candidate has to carry. A
+    claim that absorbs current memories, and revises no dropped one, merges what admission already
+    read; drops need no candidate either (RFC-0517 §7.1)."""
+    merges = frozenset(claim for _, claim in selection.absorbed)
+    revises = frozenset(claim for _, claim in selection.revisions)
+    return tuple(claim for claim in selection.added_claims if claim in revises or claim not in merges)
+
+
 def verify_support(
-    judgments: tuple[Judgment, ...], support: tuple[str, ...], selection: Selection
+    judgments: tuple[Judgment, ...], support: tuple[str, ...], added: tuple[str, ...]
 ) -> Violation | None:
-    """keeper_memory_admission_judgment.ml:109-130 `verify_support`."""
+    """keeper_memory_admission_judgment.ml:109-128 `verify_support`, given `additions`."""
     by_id = {judgment.request_id: judgment for judgment in judgments}
     supported: set[str] = set()
     for request_id in support:
@@ -178,14 +189,7 @@ def verify_support(
                 "change depends on unsettled or nondurable candidate: " + request_id,
             )
         supported.add(request_id)
-    has_changes = bool(
-        selection.added_claims or selection.dropped or selection.absorbed or selection.revisions
-    )
-    if has_changes and not supported:
-        return _admission_invalid(
-            Kind.CHANGES_WITHOUT_SUPPORT, "Memory changes require settled candidate support"
-        )
-    for claim in selection.added_claims:
+    for claim in added:
         if not any(
             judgment.request_id in supported
             and judgment.outcome == "incorporated"

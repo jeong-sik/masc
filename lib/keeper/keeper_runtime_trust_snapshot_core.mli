@@ -28,9 +28,10 @@ type disposition_reason =
   | Healthy
   | Approval_queue_unreadable
   | Pending_operator_decision
-  | Runtime_exhausted
-  | Critical_block
-  | Unknown_runtime_blocker
+  | Runtime_blocker of Keeper_status_bridge_blocker.runtime_blocker_class
+  (** Shown as the class's own name
+      ({!Keeper_status_bridge_blocker.runtime_blocker_class_to_string}), except
+      an unresolved fiber, which shows as [critical_block]. *)
   | Keeper_dashboard_worker_exception
   | Receipt_reason of Keeper_execution_receipt.operator_disposition_reason
 

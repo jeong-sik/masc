@@ -1363,7 +1363,10 @@ let for_surface = function
                  a published Skill"
       ; b ~ko:"조합 성능" Act "f" "Composition performance"
           ~help:"outside async requests, select the next Composition and load its exact-revision performance charts"
-      ; b ~ko:"스킬 그래프" Act "Ctrl-O" "Skill graph" ~help:"outside async requests, preview the declared composition with Pele"
+      ; b ~ko:"스킬 그래프" Act "Ctrl-O" "Skill graph"
+          ~help:"outside async requests, preview the selected Composition Skill's \
+                 declared graph with Pele; Normal Skills have none, and f selects \
+                 a Composition"
       (* Enter's Skill-evidence role (outside async runs, masc_tui.ml: the
          "\r" arm) is named on the sheet's Enter row only. The footer table
          cannot carry Enter -- the fitter never drops it -- so advertising it

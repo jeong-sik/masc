@@ -795,6 +795,44 @@ type librarian_payload_fixture = {
   base:string; root:string; store:Lane_addon_store.t; owner:Admission.owner;
   capture:Admission.t; parent:Original.retained; gate_id:string; gate_request:Yojson.Safe.t;
 }
+(* The host retains an original's Exact record and proof when it answers.
+   The deploy check reads them as the original's consumer does (RFC
+   exact-request-skips-a-slot-that-refused-its-input, section 3.3), so the
+   fixture's judgment is the final [run] retains. The store is the one the
+   server serves, so the proof names the root the check reads. *)
+let host_answer ~base ~(declared:Lane_addon_types.exact_output) request answer =
+  let module Exact=Lane_addon_exact in
+  let module Receipt=Keeper_exact_walk_receipt in
+  let store=Lane_addon_store.create ~root:(Lane_addon_store.directory
+    ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base))) in
+  let package:Lane_addon_types.package =
+    { id = Keeper_librarian_admission_capture.package_id; revision = "1"; title = "Librarian fixture"
+    ; ui_category = None; contributions = [ Lane_addon_types.Observe ]; command = [ "unused" ]
+    ; directory = "/nonexistent"; skills_directory = None; action_tool = None
+    ; state_storage = Lane_addon_types.Ephemeral; tool_invocation = Lane_addon_types.Direct; tool_hooks = []
+    ; worker_service = Lane_addon_types.Mcp_tools; exported_tools = []; outputs = []
+    ; refresh_policy = Lane_addon_types.Every_hint; model_access = Lane_addon_types.Model_disabled
+    ; exact_outputs = [ declared ]; operator_asks = false; web_search = false
+    ; binding_schema = None; presentation = Lane_addon_presentation.empty
+    ; execution = Lane_addon_types.Container { runtime = Lane_addon_types.Docker; image = "unused"
+        ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } } in
+  let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+        before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
+  let slot="fixture" in
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate ->
+      require (before_dispatch Exact.Generation);
+      let receipt=Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:[slot]
+        ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+        ~cli:(Receipt.cli ~visited:[slot] ~dispatched:[slot] ~failures:[] ~result:(Receipt.Answered slot))
+        |> require in
+      {Exact.outcome=Exact.Call_ended (Exact.Answered {output=require (validate answer);slot;usage=None});receipt}) in
+  match Eio_main.run (fun _ ->
+      Exact.run ~store ~declaration_id:"librarian" ~package ~runner ~authorize_request request) with
+  | Ok (Exact.Final final) -> final
+  | Ok (Exact.Not_final _) -> fail "the host must end the fixture original"
+  | Error detail -> fail detail
 let with_librarian_payload f = with_lane_store (fun base root ->
   let module Queue=Keeper_memory_admission_queue in
   let module L=Keeper_librarian in
@@ -849,9 +887,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
   let exact=Admission.request capture |> require in
   let output:Lane_addon_types.exact_output={name=exact.output;schema=Option.get exact.schema;
     request_schema=Lane_addon_types.Consumer_request_schema} in
-  let checked=Lane_addon_exact.validate_answer ~output exact proposal |> require in
-  let judgment=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final
-    (Lane_addon_exact.Answered {output=checked;slot="fixture";usage=None})) in
+  let judgment=Lane_addon_exact.final_to_json (host_answer ~base ~declared:output exact proposal) in
   let parent=advance_original store parent [Progress.Dispatch_intended;Progress.Judgment_retained judgment] in
   let gate_id="captured-gate" in
   let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-admission-gate";

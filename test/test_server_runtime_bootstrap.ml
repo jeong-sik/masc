@@ -6306,20 +6306,20 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
                  (read_file primary_log));
             Alcotest.skip ()
           end;
-          let lease_path =
+          let run_dir =
             match
               Server_startup_takeover.lease_run_dir
                 (Host_config.from_env ()).base_path_lease_root
                 ~base_path:canonical_base_path
             with
-            | Ok run_dir ->
-              Server_startup_takeover.For_testing.lease_path
-                ~run_dir:(Unix.realpath run_dir)
-                ~canonical_base_path
+            | Ok run_dir -> Unix.realpath run_dir
             | Error rejection ->
               Alcotest.failf
                 "the primary's lease root cannot be named: %s"
                 (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+          in
+          let lease_path =
+            Server_startup_takeover.For_testing.lease_path ~run_dir ~canonical_base_path
           in
           let secondary_fd = open_log secondary_log in
           let pid =
@@ -6370,7 +6370,30 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
             (String_util.contains_substring secondary_text
               (Printf.sprintf "The lease records PID %d;" primary_pid));
           Alcotest.(check bool) "primary server stays healthy" true
-            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0)))
+            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0);
+          (* A command line asks the kernel, not the server, which process
+             serves the workspace (#51075). The primary served /health, so it
+             passed the announcement of its boot. *)
+          let holder = function
+            | Ok holder -> holder
+            | Error rejection ->
+              Alcotest.failf
+                "the announcement cannot be read: %s"
+                (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+          in
+          Alcotest.(check (option int)) "the kernel names the primary for its port"
+            (Some primary_pid)
+            (holder
+               (Server_startup_takeover.single_user_server_port_holder
+                  ~run_dir ~base_path:canonical_base_path ~port:primary_port));
+          Alcotest.(check (option int)) "the refused secondary announces no port" None
+            (holder
+               (Server_startup_takeover.single_user_server_port_holder
+                  ~run_dir ~base_path:canonical_base_path ~port:secondary_port));
+          Alcotest.(check (option int)) "and no account server is announced" None
+            (holder
+               (Server_startup_takeover.account_server_port_holder
+                  ~run_dir ~base_path:canonical_base_path ~port:primary_port))))
 
 let require_startup_ready ~pid ~port ~log_file =
   if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then

@@ -6,6 +6,11 @@ module Conversation = Server_keeper_conversation
 type busy_account =
   | Runtime_account
   | Conversation_account
+  | Deleted_conversation_account
+
+type conversations_of =
+  | Of_keeper
+  | Of_person
 
 type t =
   | Invalid_request of string
@@ -15,8 +20,9 @@ type t =
   | Account_runtime_invalid of string
   | Turn_refused of string
   | Native_tools_refused of string
+  | Deletion_refused
   | Unknown_keeper
-  | Unknown_conversation
+  | Unknown_conversation of conversations_of
   | Unknown_account of string
   | Keeper_has_no_runtime
   | Account_call_running of busy_account
@@ -32,8 +38,18 @@ type t =
   | Conversation_row_not_understood
   | Conversation_row_half_written
   | Conversation_record_unavailable
+  | Conversation_not_deleted
   | Server_unavailable of string
   | Internal of string
+
+let of_record_error : Conversation.error -> t = function
+  | Conversation.Row_not_understood _ -> Conversation_row_not_understood
+  | Conversation.Row_half_written _ -> Conversation_row_half_written
+  | Conversation.Not_read _ | Conversation.Not_written _ -> Conversation_record_unavailable
+  | Conversation.Id_not_drawn _ ->
+    (* The id is drawn by {!Auth.generate_token}, whose hex is an id. *)
+    Internal "The record of this conversation could not be given an id."
+;;
 
 let of_failure (failure : Conversation.failure) ~silent_after_s ~in_conversation =
   match failure with
@@ -66,9 +82,15 @@ let parts = function
   | Account_runtime_invalid sentence -> R.Bad_request_400, "account_runtime_invalid", sentence
   | Turn_refused sentence -> R.Forbidden_403, "turn_refused", sentence
   | Native_tools_refused sentence -> R.Forbidden_403, "native_tools_refused", sentence
+  | Deletion_refused ->
+    ( R.Forbidden_403
+    , "deletion_refused"
+    , "Your account is not active, so it deletes no conversation." )
   | Unknown_keeper -> R.Not_found_404, "unknown_keeper", "No Keeper of yours has this name."
-  | Unknown_conversation ->
+  | Unknown_conversation Of_keeper ->
     R.Not_found_404, "unknown_conversation", "No conversation of this Keeper has this id."
+  | Unknown_conversation Of_person ->
+    R.Not_found_404, "unknown_conversation", "No conversation of yours has this id."
   | Unknown_account sentence -> R.Not_found_404, "unknown_account", sentence
   | Keeper_has_no_runtime ->
     ( R.Conflict_409
@@ -82,6 +104,10 @@ let parts = function
     ( R.Conflict_409
     , "account_call_running"
     , "A call of the account of this Keeper's current conversation is running." ^ try_again )
+  | Account_call_running Deleted_conversation_account ->
+    ( R.Conflict_409
+    , "account_call_running"
+    , "A call of the account this conversation began on is running." ^ try_again )
   | Conversation_on_other_subscription ->
     ( R.Conflict_409
     , "conversation_on_other_subscription"
@@ -134,6 +160,11 @@ let parts = function
     ( R.Service_unavailable_503
     , "conversation_record_unavailable"
     , "The record of this conversation could not be read or written." )
+  | Conversation_not_deleted ->
+    ( R.Service_unavailable_503
+    , "conversation_not_deleted"
+    , "The files of this conversation could not all be removed. It is listed as a deletion \
+       that failed, and no turn goes on in it. Ask again to delete it." )
   | Server_unavailable sentence -> R.Service_unavailable_503, "server_unavailable", sentence
   | Internal sentence -> R.Internal_error_500, "internal_error", sentence
 ;;

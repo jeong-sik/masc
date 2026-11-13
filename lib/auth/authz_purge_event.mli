@@ -54,6 +54,10 @@ type vendor_copy =
       (** A turn reached the CLI, and the CLI was too old to be asked or did
           not exit 0. *)
 
+(** The label of the record: [removed], [none] or [may_remain]. The route
+    that deletes a conversation answers with it too. *)
+val vendor_copy_label : vendor_copy -> string
+
 type failed_stage = Folder_not_removed  (** The folder of the target is still there. *)
 
 type t =

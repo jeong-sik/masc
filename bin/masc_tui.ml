@@ -28,19 +28,93 @@ let with_async_switch state ~action start =
   | Some sw -> start sw
   | None -> report_action state "error" (action ^ ": asynchronous runtime unavailable")
 
-(* One place decides how an aborted $EDITOR form reads. Only the cancel
-   differs by caller, because only the action's own name belongs in it; an
-   editor that never ran and a temp file that could not be read are the same
-   fact wherever they happen, and neither is the operator saying no. *)
-let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
-  =
+(* The forms an $EDITOR round trip fills, each named once in both languages
+   for the notices about it. *)
+type connector_change = Channel_bind | Channel_unbind | Channel_binding_edit
+type schedule_change = Schedule_create | Schedule_modify
+
+type editor_form =
+  | Board_draft
+  | Code_draft
+  | Gate_rejection
+  | Connector_form of connector_change
+  | Harness_overrule
+  | Verification_rejection
+  | Task_cancellation
+  | Runtime_config_text
+  | Skill_creation
+  | Original_request_lookup
+  | Skill_source of string
+  | Prompt_text of string
+  | Keeper_settings of string
+  | Keeper_creation
+  | Repository_addition
+  | Schedule_form of schedule_change
+
+let editor_form_name ~ko = function
+  | Board_draft -> if ko then "글쓰기" else "Board compose"
+  | Code_draft -> if ko then "코드 초안" else "Code draft"
+  | Gate_rejection -> if ko then "Gate 거절" else "Gate rejection"
+  | Connector_form Channel_bind -> if ko then "채널 연결" else "bind"
+  | Connector_form Channel_unbind -> if ko then "채널 연결 해제" else "unbind"
+  | Connector_form Channel_binding_edit -> if ko then "채널 연결 편집" else "edit binding"
+  | Harness_overrule -> if ko then "판정 뒤집기" else "overrule"
+  | Verification_rejection -> if ko then "검증 거절" else "reject"
+  | Task_cancellation -> if ko then "작업 취소" else "cancel"
+  | Runtime_config_text -> "runtime.toml"
+  | Skill_creation -> if ko then "Skill 만들기" else "Skill creation"
+  | Original_request_lookup ->
+    if ko then "원래 비동기 요청 찾기" else "Original async request lookup"
+  | Skill_source name -> name ^ (if ko then " 편집" else " edit")
+  | Prompt_text key -> key ^ (if ko then " 프롬프트" else " prompt")
+  | Keeper_settings keeper -> keeper ^ (if ko then " 설정" else " settings")
+  | Keeper_creation -> if ko then "Keeper 만들기" else "create"
+  | Repository_addition -> if ko then "저장소 등록" else "add"
+  | Schedule_form Schedule_create -> if ko then "일정 만들기" else "create"
+  | Schedule_form Schedule_modify -> if ko then "일정 편집" else "modify"
+
+(* What quitting the editor leaves. Four forms say what stayed as it was; the
+   rest name themselves as called off. The task cancel form says the task
+   stays, because "작업 취소 취소" reads as undoing itself. *)
+let editor_form_left_alone ~ko form =
+  match form with
+  | Board_draft -> if ko then "초안 그대로" else "Board draft unchanged"
+  | Runtime_config_text ->
+    if ko then "runtime.toml 그대로 · 앞서 쓴 초안 남아 있음"
+    else "runtime.toml unchanged · any earlier draft is retained"
+  | Prompt_text key -> key ^ (if ko then ": 프롬프트 그대로" else ": prompt unchanged")
+  | Keeper_settings keeper ->
+    keeper ^ (if ko then ": 설정 그대로" else ": settings unchanged")
+  | Task_cancellation -> if ko then "작업 취소 안 함" else "task not cancelled"
+  | Code_draft | Gate_rejection | Connector_form _ | Harness_overrule
+  | Verification_rejection | Skill_creation | Original_request_lookup
+  | Skill_source _ | Keeper_creation | Repository_addition | Schedule_form _ ->
+    editor_form_name ~ko form ^ (if ko then " 취소" else " cancelled")
+
+(* One place decides how an aborted $EDITOR form reads: the form's name, then
+   what happened. An editor that never ran and a temp file that could not be
+   read are the same fact wherever they happen, and neither is the operator
+   saying no. *)
+let report_editor_abort state ~form (abort : Masc_tui_editor.abort) =
+  let ko = state.ui_language = Lang_ko in
   match abort with
   | Masc_tui_editor.Cancelled ->
-    report_action state "system"
-      (match cancelled with Some text -> text | None -> action ^ " cancelled")
+    report_action state "system" (editor_form_left_alone ~ko form)
   | Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ ->
     report_action state "error"
-      (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
+      (editor_form_name ~ko form ^ ": " ^ Masc_tui_editor.abort_detail ~ko abort)
+
+(* No editor is set. Said before a form opens, where the check saves a read
+   or a stem, in the words the round trip itself would use. *)
+let report_editor_unset state ~form =
+  report_editor_abort state ~form
+    (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset)
+
+(* Opening a file needs a Neovim to talk to or an editor to hand the terminal
+   to. *)
+let editor_jump_unset state =
+  ui_text state ~ko:"편집기 없음 · Neovim 안에서 실행하거나 $EDITOR 를 설정하세요"
+    ~en:"no editor · run this inside Neovim, or set $EDITOR"
 
 module Code_results = Masc_tui_code_results
 module Context_results = Masc_tui_context_results
@@ -22524,9 +22598,12 @@ let handle_verification_approve_key state ~mailbox =
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
   | None ->
-      state.board_post_error <- Some "no $EDITOR set; export EDITOR to edit draft";
+      state.board_post_error <-
+        Some
+          (Masc_tui_editor.abort_detail ~ko:(state.ui_language = Lang_ko)
+             (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset));
       state.board_compose_armed <- false;
-      report_action state "error" "no $EDITOR set; export EDITOR to edit draft"
+      report_editor_unset state ~form:Board_draft
   | Some _ -> (
       let current_draft = Buffer.contents state.board_draft in
       let stem =
@@ -22540,21 +22617,23 @@ let open_board_composer_editor state ~restore ~reenter =
         Masc_tui_editor.roundtrip ~restore ~reenter ~suffix:".md" stem
       with
       | Error abort ->
-          report_editor_abort state ~action:"Board compose"
-            ~cancelled:"Board draft unchanged" abort;
+          report_editor_abort state ~form:Board_draft abort;
           state.board_compose_armed <- false
       | Ok edited ->
           let trimmed = String.trim edited in
           if Board_composer.is_untouched_template ~draft:trimmed
              && String.length (String.trim current_draft) = 0 then begin
             state.board_compose_armed <- false;
-            report_action state "system" "Board compose cancelled (empty draft)"
+            report_action state "system"
+              (ui_text state ~ko:"글쓰기 취소 · 빈 초안"
+                 ~en:"Board compose cancelled · empty draft")
           end else begin
             Buffer.clear state.board_draft;
             Buffer.add_string state.board_draft trimmed;
             state.board_compose_armed <- false;
             state.board_post_error <- None;
-            report_action state "system" "Board draft updated from editor"
+            report_action state "system"
+              (ui_text state ~ko:"편집기로 초안을 고침" ~en:"Board draft updated from editor")
           end )
 ;;
 
@@ -22646,6 +22725,10 @@ let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool
 let send_in_flight state =
   ui_text state ~ko:"이미 보내는 중" ~en:"a send is already in flight"
 
+(* Without the terminal hand-off pair the editor cannot take the screen. *)
+let editor_not_here state =
+  ui_text state ~ko:"여기서는 편집기를 열 수 없음" ~en:"external editor not available here"
+
 (* Compose-mode keys. Sending is armed rather than pressed: esc offers
    send-or-discard, so a stray key during writing cannot publish. Returns
    false for keys this pane does not own, so Tab and quit keep their global
@@ -22683,7 +22766,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           open_board_composer_editor state ~restore:r ~reenter:re;
           true
       | _ ->
-          state.board_post_error <- Some "external editor not available here";
+          state.board_post_error <- Some (editor_not_here state);
           true )
   | "e" | "E" when state.board_compose_armed -> (
       match restore, reenter with
@@ -22691,7 +22774,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           open_board_composer_editor state ~restore:r ~reenter:re;
           true
       | _ ->
-          state.board_post_error <- Some "external editor not available here";
+          state.board_post_error <- Some (editor_not_here state);
           true )
   | "h" | "H" when state.board_compose_armed && Option.is_none state.board_compose_reply_to ->
       state.board_compose_hearth <-
@@ -30537,23 +30620,21 @@ let main
       let suffix = if String.equal suffix "" then ".txt" else suffix in
       (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
           ~suffix (Masc_tui_code_draft.text draft) with
-       | Error abort -> report_editor_abort state ~action:"Code draft" abort
+       | Error abort -> report_editor_abort state ~form:Code_draft abort
        | Ok text -> match Code_results.edit_draft state draft text with
          | Ok () -> report_action state "system" "Draft retained in this session; S explicitly saves to the server"
          | Error detail -> report_action state "error" detail)
   in
   let reject_gate_approval (pending : Tui_decode.gate_pending) =
     match Masc_tui_editor.editor_command () with
-    | None ->
-      report_action state "error"
-        "no $EDITOR set; export EDITOR to reject this Gate approval"
+    | None -> report_editor_unset state ~form:Gate_rejection
     | Some _ -> (
       let stem = "{\n  \"reason\": \"\"\n}\n" in
       match
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action:"Gate rejection" abort
+      | Error abort -> report_editor_abort state ~form:Gate_rejection abort
       | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error error ->
@@ -31035,21 +31116,23 @@ let main
   (* Connector bind/unbind: the highlighted transport owns the route. The
      form edits only the route body, so its visible selection and mutation
      target cannot disagree. *)
-  let handle_connector_form ?fixed_channel_id ~action ~connector
+  let handle_connector_form ?fixed_channel_id ~change ~connector
       ~required_fields ~stem ~post () =
+    let form = Connector_form change in
+    (* The form's other notices are still English; they move with the
+       connector screen's own sentences. *)
+    let action = editor_form_name ~ko:false form in
     let authority = state.workspace_authority in
     let identity = state.server_identity in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
-    | None ->
-      report_action state "error"
-        ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
+    | None -> report_editor_unset state ~form
     | Some _ -> (
       match
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action abort
+      | Error abort -> report_editor_abort state ~form abort
       | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error e ->
@@ -31115,7 +31198,7 @@ let main
     match selected_connector () with
     | None -> report_action state "error" "bind: select a transport first"
     | Some selected ->
-        handle_connector_form ~action:"bind" ~connector:selected.cn_id
+        handle_connector_form ~change:Channel_bind ~connector:selected.cn_id
           ~required_fields:[ "channel_id"; "keeper_name" ]
           ~stem:
             (Yojson.Safe.pretty_to_string
@@ -31138,7 +31221,7 @@ let main
     | None -> report_action state "error" "unbind: select a transport first"
     | Some selected ->
         let submit ?fixed_channel_id channel_id =
-          handle_connector_form ?fixed_channel_id ~action:"unbind"
+          handle_connector_form ?fixed_channel_id ~change:Channel_unbind
             ~connector:selected.cn_id ~required_fields:[ "channel_id" ]
             ~stem:
               (Yojson.Safe.pretty_to_string
@@ -31301,7 +31384,7 @@ let main
          | None -> report_action state "error" "edit: select a binding with J/K"
          | Some binding ->
              handle_connector_form ~fixed_channel_id:binding.cb_channel_id
-               ~action:"edit binding" ~connector:connector.cn_id
+               ~change:Channel_binding_edit ~connector:connector.cn_id
                ~required_fields:[ "channel_id"; "keeper_name" ]
                ~stem:
                  (Yojson.Safe.pretty_to_string
@@ -31383,15 +31466,14 @@ let main
     | Some row -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_action state "error"
-              "no $EDITOR set; export EDITOR to overrule here"
+            report_editor_unset state ~form:Harness_overrule
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
               Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                 ~reenter:take_back_terminal stem
             with
-            | Error abort -> report_editor_abort state ~action:"overrule" abort
+            | Error abort -> report_editor_abort state ~form:Harness_overrule abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -31434,15 +31516,14 @@ let main
         let task_id = row.Masc.Tui_decode.vr_task_id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_action state "error"
-              "no $EDITOR set; export EDITOR to reject here"
+            report_editor_unset state ~form:Verification_rejection
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
               Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                 ~reenter:take_back_terminal stem
             with
-            | Error abort -> report_editor_abort state ~action:"reject" abort
+            | Error abort -> report_editor_abort state ~form:Verification_rejection abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -31477,8 +31558,7 @@ let main
         let task_id = task.id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_action state "error"
-              "no $EDITOR set; export EDITOR to cancel here"
+            report_editor_unset state ~form:Task_cancellation
         | Some _ -> (
             let stem =
               Yojson.Safe.pretty_to_string
@@ -31489,7 +31569,7 @@ let main
               Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                 ~reenter:take_back_terminal stem
             with
-            | Error abort -> report_editor_abort state ~action:"cancel" abort
+            | Error abort -> report_editor_abort state ~form:Task_cancellation abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -31560,8 +31640,10 @@ let main
          | Some session ->
              match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                ~reenter:take_back_terminal ~suffix:".toml" session.text with
+             (* The lane add-ons pane is still English, so the reason in it is
+                too; the pane's own layer moves both. *)
              | Error abort -> map_lane_addons state (fun view ->
-                 {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail abort ^ "; TOML draft retained")})
+                 {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail ~ko:false abort ^ "; TOML draft retained")})
              | Ok text -> map_lane_addons state (fun view ->
                  Addons.put_document {view with error=None;scroll=0}
                    {session with text;message=Some "Draft edited; s saves through the shared TOML owner"}))
@@ -31613,8 +31695,7 @@ let main
       let session = runtime_config_working_session reading in
       (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal ~suffix:".toml" session.text with
-       | Error abort -> report_editor_abort state ~action:"runtime.toml"
-           ~cancelled:"runtime.toml unchanged; any earlier draft is retained" abort
+       | Error abort -> report_editor_abort state ~form:Runtime_config_text abort
        | Ok edited ->
          if String.equal edited session.base.source_text then begin
            release_runtime_document_recovery state ~workspace ~path:session.base.path;
@@ -31905,11 +31986,11 @@ Use relative paths for resources already held in the package. -->
       | Some draft -> draft.scd_source_text
       | None -> skill_template ~composition in
     match Masc_tui_editor.editor_command () with
-    | None -> report_action state "error" "Set $EDITOR to author a Skill document"
+    | None -> report_editor_unset state ~form:Skill_creation
     | Some _ ->
       (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
           ~suffix:".md" source_text with
-       | Error abort -> report_editor_abort state ~action:"Skill creation" abort
+       | Error abort -> report_editor_abort state ~form:Skill_creation abort
        | Ok source_text ->
          state.tools_skill_create_drafts <-
            { scd_source_id = source_id; scd_composition = composition; scd_source_text = source_text; scd_origin = origin }
@@ -32000,7 +32081,7 @@ Use relative paths for resources already held in the package. -->
       | None -> `Assoc ["submitted_by",`String "";"request_id",`String "";"keeper_name",`String ""] in
     match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
         ~suffix:".json" (Yojson.Safe.pretty_to_string target ^ "\n") with
-    | Error abort -> report_editor_abort state ~action:"Original async request lookup" abort
+    | Error abort -> report_editor_abort state ~form:Original_request_lookup abort
     | Ok text ->
       let decoded = match Yojson.Safe.from_string text with
         | json -> Masc.Tui_decode_async_request.target_of_json json
@@ -32109,7 +32190,7 @@ Use relative paths for resources already held in the package. -->
        | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
          (match Masc_tui_editor.editor_command () with
           | None ->
-            report_action state "error" "no $EDITOR set; export EDITOR to edit Skills"
+            report_editor_unset state ~form:(Skill_source name)
           | Some _ ->
             (match
                Masc_tui_editor.roundtrip
@@ -32119,7 +32200,7 @@ Use relative paths for resources already held in the package. -->
                  loaded.sel_source_text
              with
              | Error abort ->
-               report_editor_abort state ~action:(name ^ " edit") abort
+               report_editor_abort state ~form:(Skill_source name) abort
              | Ok edited when String.equal edited loaded.sel_source_text ->
                report_action state "system" (name ^ " unchanged")
              | Ok edited ->
@@ -32247,18 +32328,14 @@ Use relative paths for resources already held in the package. -->
     | Some row -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        report_action state "error"
-          "no $EDITOR set; export EDITOR to edit prompts here"
+        report_editor_unset state ~form:(Prompt_text row.Tui_decode.pr_key)
       | Some _ -> (
         match
           Masc_tui_editor.roundtrip ~restore:hand_off_terminal
             ~reenter:take_back_terminal row.Tui_decode.pr_effective
         with
         | Error abort ->
-          report_editor_abort state
-            ~action:(row.Tui_decode.pr_key ^ " prompt")
-            ~cancelled:(row.Tui_decode.pr_key ^ ": prompt unchanged")
-            abort
+          report_editor_abort state ~form:(Prompt_text row.Tui_decode.pr_key) abort
         | Ok edited ->
           (match
              Result.bind (check ()) (fun () ->
@@ -32310,10 +32387,7 @@ Use relative paths for resources already held in the package. -->
           ~reenter:take_back_terminal ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
       with
       | Error abort ->
-          report_editor_abort state
-            ~action:(keeper_name ^ " settings")
-            ~cancelled:(keeper_name ^ ": settings unchanged")
-            abort
+          report_editor_abort state ~form:(Keeper_settings keeper_name) abort
       | Ok edited ->
         let reopen reason =
           if String.equal edited stem then
@@ -32355,10 +32429,9 @@ Use relative paths for resources already held in the package. -->
   let handle_keeper_settings_edit ~format () =
     match selected_keeper state with
     | None -> report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
-    | Some _ ->
+    | Some keeper ->
       (match Masc_tui_editor.editor_command () with
-       | None -> report_action state "error"
-           "no $EDITOR set; export EDITOR to edit keeper settings here"
+       | None -> report_editor_unset state ~form:(Keeper_settings keeper.k_name)
        | Some _ ->
          match Masc_tui_types.begin_keeper_settings_editor state
              ~format
@@ -32393,7 +32466,7 @@ Use relative paths for resources already held in the package. -->
     let return_to = Option.value state.keeper_creation_return ~default:return_to in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
+      report_editor_unset state ~form:Keeper_creation
     | Some _ -> (
       (* Which fields a creation cannot omit is [parse]'s business, so the
          stem comes from there rather than being restated here. Restating it
@@ -32410,7 +32483,7 @@ Use relative paths for resources already held in the package. -->
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action:"create" abort
+      | Error abort -> report_editor_abort state ~form:Keeper_creation abort
       | Ok declaration -> (
         state.keeper_creation_draft <- Some declaration;
         state.keeper_creation_draft_owner <- ref ();
@@ -32466,8 +32539,7 @@ Use relative paths for resources already held in the package. -->
     let check = capture_workspace_check state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_action state "error"
-        "no $EDITOR set; export EDITOR to add a repository here"
+      report_editor_unset state ~form:Repository_addition
     | Some _ -> (
       let stem =
         String.concat "\n"
@@ -32484,7 +32556,7 @@ Use relative paths for resources already held in the package. -->
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action:"add" abort
+      | Error abort -> report_editor_abort state ~form:Repository_addition abort
       | Ok declaration -> (
         let declared field =
           match Yojson.Safe.from_string declaration with
@@ -32513,7 +32585,12 @@ Use relative paths for resources already held in the package. -->
             owe_repositories_read state
           | Error detail -> report_action state "error" detail))
   in
-  let handle_schedule_form ~action ~stem ~post =
+  let handle_schedule_form ~change ~stem ~post =
+    let form = Schedule_form change in
+    (* The Schedules form row reads "<action>: <reason>" and its other reasons
+       are still English, so the editor's reason is English there too; the
+       Schedules layer moves the whole row. *)
+    let action = editor_form_name ~ko:false form in
     (* A refusal stays on the Schedules surface for the last-action window:
        the action line alone is lost under a workspace warning. A new
        attempt clears the previous one. *)
@@ -32530,16 +32607,17 @@ Use relative paths for resources already held in the package. -->
     match Masc_tui_editor.editor_command () with
     | None ->
       report_form_refusal
-        ("no $EDITOR set; export EDITOR to " ^ action ^ " a schedule here")
+        (Masc_tui_editor.abort_detail ~ko:false
+           (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset))
     | Some _ ->
       (match
          Masc_tui_editor.roundtrip ~restore:hand_off_terminal
            ~reenter:take_back_terminal stem
        with
        | Error Masc_tui_editor.Cancelled ->
-           report_editor_abort state ~action Masc_tui_editor.Cancelled
+           report_editor_abort state ~form Masc_tui_editor.Cancelled
        | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
-           report_form_refusal (Masc_tui_editor.abort_detail abort)
+           report_form_refusal (Masc_tui_editor.abort_detail ~ko:false abort)
        | Ok declaration ->
          (match Yojson.Safe.from_string declaration with
           | exception Yojson.Json_error message ->
@@ -32564,7 +32642,7 @@ Use relative paths for resources already held in the package. -->
             report_form_refusal "the editor form must be a JSON object"))
   in
   let handle_schedule_create () =
-    handle_schedule_form ~action:"create"
+    handle_schedule_form ~change:Schedule_create
       ~stem:(Masc_tui_types.schedule_create_form_json ())
       ~post:(fun body_json ->
         Masc_tui_http.post_schedule_create_json ~host:server_peer_host
@@ -32583,7 +32661,7 @@ Use relative paths for resources already held in the package. -->
       (match Masc_tui_types.schedule_update_form_json row with
        | Error reason -> report_action state "error" ("modify: " ^ reason)
        | Ok stem ->
-         handle_schedule_form ~action:"modify" ~stem
+         handle_schedule_form ~change:Schedule_modify ~stem
            ~post:(fun body_json ->
              Masc_tui_http.post_schedule_update ~host:server_peer_host
                ~port:state.port ~body_json))
@@ -37034,7 +37112,7 @@ Use relative paths for resources already held in the package. -->
                      match Masc_tui_editor_jump.route () with
                      | Masc_tui_editor_jump.No_editor ->
                          report_action state "error"
-                           "no editor: run this inside Neovim, or set $EDITOR"
+                           (editor_jump_unset state)
                      | Masc_tui_editor_jump.Remote_neovim { server } -> (
                          let target =
                            { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line = 1 }
@@ -42588,7 +42666,7 @@ Use relative paths for resources already held in the package. -->
                       match Masc_tui_editor_jump.route () with
                       | Masc_tui_editor_jump.No_editor ->
                           report_action state "error"
-                            "no editor: run this inside Neovim, or set $EDITOR"
+                            (editor_jump_unset state)
                       | Masc_tui_editor_jump.Remote_neovim { server } -> (
                           (* The editor is already on screen. Nothing here
                              gives up the terminal, so this surface keeps

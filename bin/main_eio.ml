@@ -3364,7 +3364,7 @@ let keeper_create_declaration_from_editor () =
        Error
          (Printf.sprintf
             "masc keeper-create --edit: %s. Nothing was created."
-            (Masc_tui_editor.abort_detail abort))
+            (Masc_tui_editor.abort_detail ~ko:false abort))
      | Ok edited -> Masc_cli_keeper_create.declaration_of_form edited)
 
 (* The keeper name becomes a path segment in the request URL, so it is both

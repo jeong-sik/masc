@@ -60,6 +60,7 @@ type setting =
   ; effective : effective
   ; value_kind : value_kind
   ; value_range : value_range
+  ; value_meaning : (string -> (unit, string) result) option
   ; default_display : string
   ; reload_class : reload_class
   ; consumers : string list
@@ -111,6 +112,7 @@ let display_credential_presence = function
 
 let setting
     ?(range = Unbounded)
+    ?meaning
     ?(reload_class = Process_restart)
     ~effective
     ~env_name
@@ -126,6 +128,7 @@ let setting
   ; effective
   ; value_kind
   ; value_range = range
+  ; value_meaning = meaning
   ; default_display = default
   ; reload_class
   ; consumers
@@ -184,6 +187,11 @@ let all =
       ~category:Lifecycle
       "Global switch for automatic Keeper startup and spontaneous turns"
   ; setting
+      ~meaning:
+        (fun text ->
+           Result.map
+             (fun (_ : string) -> ())
+             (Env_config_keeper.KeeperAutonomous.validate_wake_prompt text))
       ~effective:
         (Reader
            (fun () ->
@@ -191,7 +199,7 @@ let all =
                  panel and the turn agree. *)
               Env_config_keeper.KeeperAutonomous.wake_prompt ()))
       ~env_name:"MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
-      ~exposure:(Toml_only "autonomous.wake_prompt")
+      ~exposure:(Toml_only Env_config_keeper.KeeperAutonomous.wake_prompt_toml_key)
       ~value_kind:String
       ~default:Env_config_keeper.KeeperAutonomous.default_wake_prompt
       ~consumers:[ "Keeper_unified_prompt" ]
@@ -764,6 +772,11 @@ let all =
        change takes a restart; a running guest booted with another size is
        replaced at the keeper's next turn rather than adopted. *)
     setting
+      ~meaning:
+        (fun text ->
+           Result.map
+             (fun (_ : Keeper_microvm_guest_size.memory option) -> ())
+             (Env_config_sandbox.Runtime.microvm_memory_configured text))
       ~effective:
         (Reader
            (fun () ->
@@ -805,6 +818,11 @@ let all =
        stop the config from loading: that is the file the operator sets the key
        in. The guest boot refuses instead, naming this key. *)
     setting
+      ~meaning:
+        (fun text ->
+           Result.map
+             (fun (_ : Ipaddr.t option) -> ())
+             (Env_config_sandbox.Runtime.microvm_dns_configured text))
       ~reload_class:Process_restart
       ~effective:
         (Reader
@@ -822,6 +840,11 @@ let all =
        Blank copies the host's first resolver; a guest is refused when that resolver \
        is zone-scoped, link-local, loopback or multicast"
   ; setting
+      ~meaning:
+        (fun text ->
+           Result.map
+             (fun (_ : string option) -> ())
+             (Env_config_runtime.Tools.searxng_url_configured text))
       ~effective:
         (Reader
            (fun () ->

@@ -106,9 +106,13 @@ module KeeperAutonomous : sig
       checkpoint every autonomous turn, so its cost recurs for the life of the
       conversation rather than being paid once. *)
 
+  val wake_prompt_toml_key : string
+  (** The runtime.toml key of the fleet wake prompt; a refusal names it. *)
+
   val validate_wake_prompt : string -> (string, string) result
   (** Trims, then rejects blank and over-bound values with an operator-facing
-      reason. Applied where [MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT] is read. *)
+      reason. Applied where runtime.toml is validated and where the value is
+      read. *)
 
   val default_wake_prompt : string
   (** Wording used when the fleet does not configure one. Single definition;

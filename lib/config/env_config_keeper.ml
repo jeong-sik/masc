@@ -194,7 +194,9 @@ module KeeperAutonomous = struct
       instead of being left to the operator's judgement. *)
   let max_wake_prompt_bytes = 2048
 
-  (** Contract for the fleet env var. [Error] carries an operator-facing
+  let wake_prompt_toml_key = "autonomous.wake_prompt"
+
+  (** Contract for the fleet value. [Error] carries an operator-facing
       reason; blank is rejected rather than folded into the default, so
       "unset" and "set to nothing" stay distinguishable. *)
   let validate_wake_prompt raw =
@@ -253,7 +255,7 @@ module KeeperAutonomous = struct
        | Error reason ->
          raise
            (Env_config_core.Config_error
-              (Printf.sprintf "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: %s" reason)))
+              (Printf.sprintf "%s: %s" wake_prompt_toml_key reason)))
   ;;
 
   (** Fleet value else the literal default. This is what a keeper that states

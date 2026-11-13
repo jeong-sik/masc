@@ -8,8 +8,10 @@
    value must change nothing, and the boot store must answer exactly as the
    environment did.
 
-   The loader also runs each reader on what the file supplied: a value the
-   reader rejects fails the load and leaves the store as it was. *)
+   What a value has to mean is judged where the file's text is validated, the
+   check that saving, previewing, the deployment check and the boot load share:
+   a value its row refuses is an issue under its runtime.toml key, and the load
+   stores nothing from that file. *)
 open Alcotest
 
 module R = Keeper_runtime_setting_registry
@@ -169,9 +171,8 @@ let mentions ~affix text =
   from 0
 ;;
 
-(* Both keys pass the type and range check of the file. The wake prompt's reader
-   rejects a blank one. [metrics.max_bytes] is already in the store when the
-   reader check finds that. *)
+(* Both keys have the type and range their rows declare. The wake prompt's row
+   refuses a blank one, and [metrics.max_bytes] is in the same file. *)
 let blank_wake_prompt_runtime_toml =
   "[metrics]\nmax_bytes = 4096\n\n[autonomous]\nwake_prompt = \"\"\n"
 ;;
@@ -207,6 +208,68 @@ let test_a_rejected_load_restores_what_the_store_held () =
     check (option string) "the rejected value is not left" None
       (Config_boot_overrides.get_opt wake_prompt_name));
   Config_boot_overrides.reset_for_tests ()
+;;
+
+(* One refused value per row that judges what its value means. The text check
+   is the one the dashboard's save and preview, [masc config set] and the
+   deployment check call, so a value refused here cannot be written and then
+   stop the next boot. *)
+let refused_meanings =
+  [ "autonomous.wake_prompt", "[autonomous]\nwake_prompt = \"\"\n"
+  ; ( "autonomous.wake_prompt"
+    , Printf.sprintf
+        "[autonomous]\nwake_prompt = \"%s\"\n"
+        (String.make (Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes + 1) 'a') )
+  ; "sandbox.microvm_memory", "[sandbox]\nmicrovm_memory = \"8\"\n"
+  ; "sandbox.microvm_dns", "[sandbox]\nmicrovm_dns = \"127.0.0.1\"\n"
+  ; "web_search.searxng_url", "[web_search]\nsearxng_url = \"ftp://search.example\"\n"
+  ; ( "web_search.searxng_url"
+    , "[web_search]\nsearxng_url = \"http://user:secret@search.example\"\n" )
+  ]
+;;
+
+let test_the_text_check_refuses_a_value_its_row_rejects () =
+  List.iter
+    (fun (key, source) ->
+       Config_boot_overrides.reset_for_tests ();
+       (match Keeper_runtime_config.validate_source_text source with
+        | Error detail -> failf "%s did not parse: %s" key detail
+        | Ok report ->
+          (match report.Keeper_runtime_config.issues with
+           | [ issue ] ->
+             check string "the issue is under the runtime.toml key" key
+               issue.Keeper_runtime_config.key;
+             check bool "the issue refuses the text" true
+               (issue.Keeper_runtime_config.severity = Keeper_runtime_config.Error);
+             check bool (key ^ ": the reason names no environment variable") false
+               (mentions ~affix:"MASC_" issue.Keeper_runtime_config.detail)
+           | issues -> failf "%s gave %d issues, not one" key (List.length issues)));
+       with_runtime_toml source (fun base_path ->
+         match Keeper_runtime_config.load_and_apply ~base_path with
+         | Ok _ -> failf "%s was applied" key
+         | Error failure ->
+           check bool "the load names the same key" true
+             (mentions ~affix:key failure.Keeper_runtime_config.message)))
+    refused_meanings;
+  Config_boot_overrides.reset_for_tests ()
+;;
+
+(* Blank is unset for the three rows that have a default to fall back to, and
+   the text check agrees with their readers. *)
+let test_the_text_check_accepts_what_the_rows_accept () =
+  List.iter
+    (fun source ->
+       match Keeper_runtime_config.validate_source_text source with
+       | Error detail -> failf "%S did not parse: %s" source detail
+       | Ok report ->
+         check bool (source ^ " is accepted") true
+           (Keeper_runtime_config.validation_report_is_valid report))
+    [ "[autonomous]\nwake_prompt = \"what changed?\"\n"
+    ; "[sandbox]\nmicrovm_memory = \"8g\"\nmicrovm_dns = \"168.126.63.1\"\n"
+    ; "[sandbox]\nmicrovm_memory = \"\"\nmicrovm_dns = \"\"\n"
+    ; "[web_search]\nsearxng_url = \"https://search.example:8443/\"\n"
+    ; "[web_search]\nsearxng_url = \"\"\n"
+    ]
 ;;
 
 let test_a_value_its_reader_accepts_stays_applied () =
@@ -336,6 +399,10 @@ let () =
             test_a_value_its_reader_rejects_fails_the_load
         ; test_case "a rejected load restores what the store held" `Quick
             test_a_rejected_load_restores_what_the_store_held
+        ; test_case "the text check refuses a value its row rejects" `Quick
+            test_the_text_check_refuses_a_value_its_row_rejects
+        ; test_case "the text check accepts what the rows accept" `Quick
+            test_the_text_check_accepts_what_the_rows_accept
         ; test_case "a value its reader accepts stays applied" `Quick
             test_a_value_its_reader_accepts_stays_applied
         ; test_case "the turn admission bound comes from the file" `Quick

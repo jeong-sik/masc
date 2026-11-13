@@ -311,7 +311,9 @@ def port_is_occupied():
 # kernel can: `setup-server` reads the lease of the workspace and the port its
 # holder announces, with the environment the child was started with (the lease
 # root comes from it). Only the child this script started, named as holder of
-# this workspace and announcer of this port, may be sent a bearer.
+# this workspace and announcer of this port, may be sent a bearer. Three
+# answers keep the wait going and send nothing: no holder yet, the child as a
+# holder that has not announced its port, and a holder that could not be read.
 def kernel_names_the_child():
     observed = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
                               env=env, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)

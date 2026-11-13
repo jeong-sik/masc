@@ -36,16 +36,30 @@ type scope
     abstract so provider row ids, environment references, and file references
     cannot be mixed accidentally at call sites. *)
 
-val note_exhausted : scope:scope -> resets_at:float -> unit
-(** Remember that [scope]'s quota window is exhausted until
+type refusal = Keeper_runtime_failure_route.hard_quota_source =
+  | Payment_refused  (** an HTTP 402: the account's balance or budget *)
+  | Provider_quota_refused  (** the provider's typed hard quota, e.g. a spent usage window *)
+(** The typed constructor a hard-quota refusal arrived as. *)
+
+(** Who set the entry that rests a scope. *)
+type cause =
+  | Refused of refusal  (** a refused call *)
+  | Usage_read  (** a usage read that found the gating window spent *)
+
+val note_exhausted : scope:scope -> source:refusal -> resets_at:float -> unit
+(** Remember that a refusal of kind [source] stated [scope] is exhausted until
     [resets_at] (Unix epoch seconds).  A later [resets_at] for the same
-    scope extends the window; an earlier one is ignored so a stale
-    retry hint cannot shorten a window a fresher response already
+    scope extends the window and takes its cause; an earlier one is ignored
+    so a stale retry hint cannot shorten a window a fresher response already
     established. *)
 
-val note_observed_exhausted : scope:scope -> unit
-(** Remember that [scope] answered a hard quota rejection without stating when
-    it resets.  No reset is claimed: the observation rests the scope from the
+val note_read_spent_until : scope:scope -> resets_at:float -> unit
+(** {!note_exhausted} for a usage read that found [scope]'s gating window
+    spent until [resets_at]. *)
+
+val note_observed_exhausted : scope:scope -> source:refusal -> unit
+(** Remember that [scope] answered a hard quota rejection of kind [source]
+    without stating when it resets.  No reset is claimed: the observation rests the scope from the
     wall-clock moment of this call for the hard-quota fallback cap, or until
     {!note_succeeded} clears it.  A scope that already has a stated window
     still ahead keeps it — the provider's own answer says more than an
@@ -60,7 +74,7 @@ val note_read_without_reset : scope:scope -> unit
     answers the question that refusal leaves: {!answered_rest} reports it, so
     another read is not asked for the same scope while that rest lasts. *)
 
-val note_observed_exhausted_at : now:float -> scope:scope -> unit
+val note_observed_exhausted_at : now:float -> scope:scope -> source:refusal -> unit
 (** {!note_observed_exhausted} with the moment of observation given as [now]
     instead of read from the wall clock.
 
@@ -100,6 +114,16 @@ val rest : scope:scope -> now:float -> rest option
 (** When [scope]'s rest ends, and who set that time; [None] when nothing
     rests it at [now].  It reads the same entry {!is_exhausted} reads, so the
     two agree at every [now].  Passed entries are pruned on read. *)
+
+type spent =
+  { cause : cause
+  ; rest : rest
+  }
+
+val spent : scope:scope -> now:float -> spent option
+(** {!rest} together with who set it, for a surface that shows why [scope]
+    rests. It reads the same entry, so [spent] is [Some] exactly when {!rest}
+    is. Ordering does not read the cause. *)
 
 type answered_rest =
   | Stated_reset_ahead  (** a stated window that has not passed at [now] *)

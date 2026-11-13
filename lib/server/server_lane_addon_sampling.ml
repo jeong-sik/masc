@@ -56,12 +56,12 @@ let note_provider_failure runtime error =
   | Route.Retry_after_observed {retry_class=Rate_limited;retry_after} ->
       Option.iter (fun (runtime : Runtime_instance.t) -> Runtime_candidate_backpressure.note_rate_limit
         ~candidate:runtime.candidate_backpressure ~retry_after) runtime
-  | Retry_after_observed {retry_class=Hard_quota;retry_after} ->
+  | Retry_after_observed {retry_class=Hard_quota source;retry_after} ->
       Option.iter (fun runtime ->
         let scope=Runtime_instance.quota_scope_of_runtime runtime in
         match Route.usable_retry_after retry_after with
-        | Some seconds -> Runtime_quota_window.note_exhausted ~scope ~resets_at:(Time_compat.now () +. seconds)
-        | None -> Runtime_quota_window.note_observed_exhausted ~scope) runtime
+        | Some seconds -> Runtime_quota_window.note_exhausted ~scope ~source ~resets_at:(Time_compat.now () +. seconds)
+        | None -> Runtime_quota_window.note_observed_exhausted ~scope ~source) runtime
   | Retry_after_observed {retry_class=Empty_completion _;_} -> note_answered runtime
   | Retry_after_observed {retry_class=(Server_error | Network_transient | Provider_timeout
                                        | Local_admission_timeout | Provider_capacity);_}

@@ -602,7 +602,7 @@ let test_a_lane_whose_every_slot_waits_starts_nothing () =
     Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       let resets_at = Time_compat.now () +. 3600.0 in
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Runtime_instance.quota_scope_of_runtime (fixture_runtime F.cli_primary_runtime)) ~resets_at;
       let calls = ref [] in
       let cli_runner : Keeper_lane_cli_oneshot.runner =
@@ -632,7 +632,7 @@ let test_no_wake_before_the_reset_starts_a_call () =
     Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       let resets_at = Float.ceil (Time_compat.now () +. 3600.0) in
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Runtime_instance.quota_scope_of_runtime (fixture_runtime F.cli_primary_runtime)) ~resets_at;
       let calls = ref [] in
       let cli_runner : Keeper_lane_cli_oneshot.runner =
@@ -894,7 +894,7 @@ let test_a_held_cli_slot_survives_the_retained_receipt () =
     Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       let resets_at = Float.ceil (Time_compat.now () +. 3600.0) in
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Runtime_instance.quota_scope_of_runtime (fixture_runtime F.cli_primary_runtime)) ~resets_at;
       let calls = ref [] in
       let cli_runner : Keeper_lane_cli_oneshot.runner =

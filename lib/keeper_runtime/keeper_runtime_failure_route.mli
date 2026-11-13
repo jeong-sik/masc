@@ -24,6 +24,12 @@
     [HardQuota] constructors. Rate-limit messages and status prose are never
     reclassified. *)
 
+(** Which typed constructor refused for an account's quota or balance. *)
+type hard_quota_source =
+  | Payment_refused  (** the typed [PaymentRequired]: an HTTP 402 *)
+  | Provider_quota_refused
+      (** the provider's typed [HardQuota], e.g. a spent usage window *)
+
 (** Typed class of the observed retryable provider/runtime failure. *)
 type retry_class =
   | Rate_limited
@@ -32,10 +38,10 @@ type retry_class =
           declares [usage-read], the Keeper walk reads it once, as after
           [Authorization_refused], and a spent window rests the scope until
           its stated reset. *)
-  | Hard_quota
+  | Hard_quota of hard_quota_source
       (** account-level quota or balance exhaustion: an HTTP 402 payment
-          refusal, or a provider's typed hard-quota failure. Which of the two
-          refused is {!hard_quota_source}. *)
+          refusal, or a provider's typed hard-quota failure. The payload says
+          which of the two refused. *)
   | Provider_capacity
       (** the provider refused for its own capacity: an HTTP 529 overload,
           a provider [CapacityExhausted] pool, or the MASC envelope that
@@ -52,11 +58,6 @@ type retry_class =
       (** the wait expired in MASC's own permit queue or local capacity gate,
           before anything reached the provider
           ([Candidate_fault.Local_admission]) *)
-
-type hard_quota_source =
-  | Payment_refused  (** the typed [PaymentRequired]: an HTTP 402 *)
-  | Provider_quota_refused
-      (** the provider's typed [HardQuota], e.g. a spent usage window *)
 
 val hard_quota_source : Agent_core.Error.t -> hard_quota_source option
 (** Which typed constructor carried a hard quota; [None] for every other

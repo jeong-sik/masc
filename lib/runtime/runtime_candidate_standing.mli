@@ -54,7 +54,12 @@ val order_exact :
 type observation =
   | Answered
   | Rate_limited of { retry_after : float option }
-  | Hard_quota of { resets_at : float option }
+  | Hard_quota of
+      { source : Runtime_quota_window.refusal
+            (** the typed constructor that refused: a 402 or the provider's
+                hard quota *)
+      ; resets_at : float option
+      }
   | Credential_refused of { noted_at : float }
       (** The provider refused the credential itself. Shown to operators
           ({!Runtime_credential_refusal}); it orders nothing. *)

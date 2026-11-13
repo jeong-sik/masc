@@ -986,7 +986,7 @@ let scope_room ~coverage ~now (held : recorded list) =
    reset, and only a success clears an observation. *)
 let rest_scope ~scope ~coverage ~now held =
   match scope_room ~coverage ~now held with
-  | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+  | Spent_until resets_at -> Runtime_quota_window.note_read_spent_until ~scope ~resets_at
   | Spent_without_reset -> Runtime_quota_window.note_read_without_reset ~scope
   | No_gating_window | Room_left -> ()
 ;;
@@ -1070,7 +1070,7 @@ let restore ~scope ~now (reports : (float * report) list) =
                 ~now
                 (List.filter (fun (r : recorded) -> r.source = source) recorded)
             with
-            | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+            | Spent_until resets_at -> Runtime_quota_window.note_read_spent_until ~scope ~resets_at
             | Spent_without_reset | No_gating_window | Room_left -> ()))
       sources
 ;;

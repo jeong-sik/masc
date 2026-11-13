@@ -1,8 +1,12 @@
 (* Total typed failure routing. See keeper_runtime_failure_route.mli. *)
 
+type hard_quota_source =
+  | Payment_refused
+  | Provider_quota_refused
+
 type retry_class =
   | Rate_limited
-  | Hard_quota
+  | Hard_quota of hard_quota_source
   | Provider_capacity
   | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
   | Server_error
@@ -61,10 +65,6 @@ type route =
       }
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of { terminal : terminal_class }
-
-type hard_quota_source =
-  | Payment_refused
-  | Provider_quota_refused
 
 let hard_quota_source (err : Agent_core.Error.t) =
   match err with
@@ -304,7 +304,7 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
   match Llm_provider.Candidate_fault.of_api_error api with
   | Llm_provider.Candidate_fault.Binding Credential -> rotate Auth_failed
   | Llm_provider.Candidate_fault.Binding Account_access -> rotate Authorization_refused
-  | Llm_provider.Candidate_fault.Binding Account -> observe Hard_quota
+  | Llm_provider.Candidate_fault.Binding Account -> observe (Hard_quota Payment_refused)
   | Llm_provider.Candidate_fault.Binding Model_absent ->
     rotate Model_unavailable
   | Llm_provider.Candidate_fault.Binding Rate_limit -> observe Rate_limited
@@ -350,7 +350,7 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
 let route_of_provider_error (p : Llm_provider.Error.provider_error) =
   match p with
   | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
-  | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
+  | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after (Hard_quota Provider_quota_refused)
   | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
     observe_retry ?retry_after Provider_capacity
   | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
@@ -499,7 +499,7 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
   let cap_sec = Float.max 0.0 cap_sec in
   let unstated () =
     match retry_class with
-    | Hard_quota -> cap_sec
+    | Hard_quota (Payment_refused | Provider_quota_refused) -> cap_sec
     | Rate_limited
     | Provider_capacity
     | Empty_completion _
@@ -521,7 +521,7 @@ let route_kind_label = function
 
 let retry_class_label = function
   | Rate_limited -> "rate_limited"
-  | Hard_quota -> "hard_quota"
+  | Hard_quota (Payment_refused | Provider_quota_refused) -> "hard_quota"
   | Provider_capacity -> "provider_capacity"
   | Empty_completion { stop_reason } ->
     "empty_completion_" ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason
@@ -592,8 +592,8 @@ let response_observed = function
        true
      | Rate_limited
      (* 429: the request was refused before any generation. *)
-     | Hard_quota
-     (* 402: refused before any generation. *)
+     | Hard_quota (Payment_refused | Provider_quota_refused)
+     (* a 402 or a spent quota: refused before any generation. *)
      | Provider_capacity
      (* the provider's overload or capacity pool: refused before any
         generation. *)
@@ -754,7 +754,7 @@ let route_resumes_on_same_path = function
           while unknown reasons now have their own terminal class. Keep
           injected retry values closed rather than guessing recovery. *)
        false
-     | Hard_quota ->
+     | Hard_quota (Payment_refused | Provider_quota_refused) ->
        (* a quota comes back by itself only when the provider said when; one
           with no reset may stay closed until the account is paid. *)
        Option.is_some (usable_retry_after retry_after))

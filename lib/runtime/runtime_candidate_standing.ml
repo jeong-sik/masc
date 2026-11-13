@@ -113,7 +113,10 @@ let order_exact ~now ~quota_scope_of ~candidate_backpressure_of candidates =
 type observation =
   | Answered
   | Rate_limited of { retry_after : float option }
-  | Hard_quota of { resets_at : float option }
+  | Hard_quota of
+      { source : Runtime_quota_window.refusal
+      ; resets_at : float option
+      }
   | Credential_refused of { noted_at : float }
 
 let observe ~candidate ~quota_scope = function
@@ -127,23 +130,23 @@ let observe ~candidate ~quota_scope = function
       Runtime_credential_refusal.note_refused ~scope ~at:noted_at) quota_scope
   | Rate_limited {retry_after} ->
     Option.iter (fun candidate -> Backpressure.note_rate_limit ~candidate ~retry_after) candidate
-  | Hard_quota {resets_at} ->
+  | Hard_quota {source; resets_at} ->
     Option.iter (fun scope -> match resets_at with
-      | Some resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
-      | None -> Runtime_quota_window.note_observed_exhausted ~scope) quota_scope
+      | Some resets_at -> Runtime_quota_window.note_exhausted ~scope ~source ~resets_at
+      | None -> Runtime_quota_window.note_observed_exhausted ~scope ~source) quota_scope
 
 let observe_http_error ~now ~candidate ~quota_scope error =
   let note = observe ~candidate:(Some candidate) ~quota_scope:(Some quota_scope) in
-  let hard_quota retry_after =
+  let hard_quota source retry_after =
     let resets_at = Option.map (( +. ) now)
       (Keeper_runtime_failure_route.usable_retry_after retry_after) in
-    note (Hard_quota {resets_at}) in
+    note (Hard_quota {source; resets_at}) in
   match error with
   | Llm_provider.Http_client.HttpError {code; body; retry_after_header} ->
     (match Llm_provider.Retry.classify_refusal ~status:code ~body ~retry_after_header with
      | Llm_provider.Retry.RateLimited {retry_after; _} -> note (Rate_limited {retry_after})
      | Llm_provider.Retry.PaymentRequired _ ->
-       hard_quota (Llm_provider.Retry.resolve_retry_after
+       hard_quota Runtime_quota_window.Payment_refused (Llm_provider.Retry.resolve_retry_after
          ~body:(Llm_provider.Http_client.refusal_body_text body) ~header:retry_after_header)
      | Llm_provider.Retry.Overloaded _ | Llm_provider.Retry.ServerError _
      | Llm_provider.Retry.AuthError _ | Llm_provider.Retry.AuthorizationError _
@@ -152,7 +155,8 @@ let observe_http_error ~now ~candidate ~quota_scope error =
      | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _ -> ())
   | Llm_provider.Http_client.ProviderFailure {kind; _} ->
     (match kind with
-     | Llm_provider.Http_client.Hard_quota {retry_after} -> hard_quota retry_after
+     | Llm_provider.Http_client.Hard_quota {retry_after} ->
+       hard_quota Runtime_quota_window.Provider_quota_refused retry_after
      | Llm_provider.Http_client.Capacity_exhausted _
      | Llm_provider.Http_client.Capability_mismatch _
      | Llm_provider.Http_client.Cli_policy_invalid _

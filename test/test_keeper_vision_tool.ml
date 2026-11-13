@@ -1048,7 +1048,7 @@ let test_vision_candidates_follow_quota_window () =
         | None -> failwith ("missing runtime " ^ id)
       in
       assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ]);
-      Runtime_quota_window.note_observed_exhausted ~scope:(scope "p1.vision-a");
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:(scope "p1.vision-a");
       assert (Vt.vision_runtime_ids ~now = [ "p2.vision-b"; "p1.vision-a" ]);
       Runtime_quota_window.note_succeeded ~scope:(scope "p1.vision-a");
       assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ])))
@@ -1121,7 +1121,7 @@ let test_vision_rate_survives_other_answers_and_clears_before_validation () =
          Alcotest.(check (option (float 0.0))) "body retry hint wins over header" (Some 180.0) retry_after
        | Some {rate_limit=None;_} | None -> Alcotest.fail "missing actual 429 observation");
       let scope = Runtime_instance.quota_scope_of_runtime a in
-      Runtime_quota_window.note_observed_exhausted ~scope;
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
       Runtime_candidate_backpressure.note_failed_attempt ~candidate:a.candidate_backpressure
         ~failure:Server_error ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"vision-owner");
       (* The 429 stated a Retry-After, so the head is held until it ends
@@ -1236,7 +1236,7 @@ let test_vision_every_runtime_held_answers_held () =
       Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
         let now = Unix.gettimeofday () in
         let hold id resets_at =
-          Runtime_quota_window.note_exhausted
+          Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
             ~scope:(Runtime_instance.quota_scope_of_runtime (vision_standing_runtime id))
             ~resets_at in
         let earliest = now +. 1800.0 in
@@ -1277,7 +1277,7 @@ let test_vision_every_runtime_held_answers_held () =
 let test_vision_held_runtime_is_not_called_by_any_path () =
   with_vision_standing (fun ~a ~b:_ ~run ->
     let a_reset = Unix.gettimeofday () +. 3600.0 in
-    Runtime_quota_window.note_exhausted
+    Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
       ~scope:(Runtime_instance.quota_scope_of_runtime a) ~resets_at:a_reset;
     let calls = ref [] in
     let refuse ~sw:_ ~net:_ ~clock:_ ~config ~messages:_ ?tools:_ () =

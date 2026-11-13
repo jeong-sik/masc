@@ -12,10 +12,10 @@ type integration =
   ; calls : calls
   }
 
-(* The posture a call of the client starts with: the default configuration of
-   Claude Code and of Codex, which a verification and a Keeper turn both
-   start from, and the read posture that a verification of Muse sets, which
-   is its default too. *)
+(* The posture a call of the client starts with, by the name its default
+   configuration reads: a verification starts each client with that
+   configuration, and the preview Keeper turn starts Claude Code and Codex
+   the same way. *)
 let call_posture : Client.client -> Runtime_native_tools.posture = function
   | Client.Claude -> Runtime_native_tools.claude_code_default
   | Client.Codex -> Runtime_native_tools.codex_default
@@ -29,10 +29,22 @@ let calls_of client =
   | Error refusal -> Refused refusal
 ;;
 
+(* A binding makes its Runtime from the model row it names, as a Runtime is
+   materialized; a binding of no declared row makes none. A model row that
+   declares no tool calling is not offered: the verification refuses it
+   before any client starts. *)
 let models (config : Runtime_schema.config) provider_id =
   List.filter_map
     (fun (binding : Runtime_schema.binding) ->
-      if String.equal binding.provider_id provider_id then Some binding.model_id else None)
+      if not (String.equal binding.provider_id provider_id)
+      then None
+      else (
+        match Runtime_schema.model_of_id config binding.model_id with
+        | None -> None
+        | Some model ->
+          (match Runtime_verification.model_refusal model with
+           | Some (_ : Runtime_verification.unavailable) -> None
+           | None -> Some binding.model_id)))
     config.bindings
 ;;
 

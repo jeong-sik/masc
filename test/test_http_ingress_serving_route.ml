@@ -242,6 +242,32 @@ let test_serving_route_waits_when_connections_run_on_the_owner () =
     (List.for_all (fun (_path, domain) -> domain = outcome.owner_domain) outcome.ran)
 ;;
 
+(* A probe is left out of the client address limit only while answering it
+   reads no credential. A header is a credential here whatever its value: the
+   server has to judge it. *)
+let test_a_health_probe_is_exempt_only_while_it_reads_no_credential () =
+  let exempt ?(headers = []) path =
+    Server_http_ingress.health_probe_exempt
+      ~path
+      (Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET path)
+  in
+  let bearer = [ "authorization", "Bearer x" ] in
+  let check name expected actual = Alcotest.(check bool) name expected actual in
+  check "the health route without a credential" true (exempt Server_health_paths.health);
+  check "the health route with a bearer" false (exempt ~headers:bearer Server_health_paths.health);
+  check
+    "the health route with a header that is not a bearer"
+    false
+    (exempt ~headers:[ "authorization", "Basic x" ] Server_health_paths.health);
+  check
+    "the health route with an internal token"
+    false
+    (exempt ~headers:[ "x-masc-internal-token", "x" ] Server_health_paths.health);
+  check "liveness with a bearer" true (exempt ~headers:bearer Server_health_paths.liveness);
+  check "readiness with a bearer" true (exempt ~headers:bearer Server_health_paths.readiness);
+  check "a route that is not a probe" false (exempt "/api/v1/status")
+;;
+
 let () =
   Alcotest.run
     "http_ingress_serving_route"
@@ -254,6 +280,12 @@ let () =
             "the same route waits when connections run on the owner's domain"
             `Quick
             test_serving_route_waits_when_connections_run_on_the_owner
+        ] )
+    ; ( "client address limit"
+      , [ Alcotest.test_case
+            "a health probe is exempt only while it reads no credential"
+            `Quick
+            test_a_health_probe_is_exempt_only_while_it_reads_no_credential
         ] )
     ]
 ;;

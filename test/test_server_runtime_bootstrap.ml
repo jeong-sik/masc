@@ -5061,14 +5061,18 @@ let test_startup_state_readiness_after_init () =
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
 
-let startup_http_response router path =
+let startup_http_response ?(headers = []) router path =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
   in
+  let header_lines =
+    List.map (fun (name, value) -> Printf.sprintf "%s: %s\r\n" name value) headers
+    |> String.concat ""
+  in
   let wire =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n\r\n" path
+    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s\r\n" path header_lines
   in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
   ignore
@@ -5091,6 +5095,14 @@ let startup_http_response router path =
   in
   drain ();
   Buffer.contents output
+
+(* Whether the server asks every reader for a credential follows three
+   settings; a test of the health routes pins all three so the shell it runs
+   in decides nothing. *)
+let with_health_posture ~strict f =
+  with_env "MASC_HTTP_AUTH_STRICT" (Some (if strict then "true" else "false")) @@ fun () ->
+  with_env "MASC_HOST" (Some "127.0.0.1") @@ fun () ->
+  with_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1:8935") f
 
 (* The OpenAPI document names the listener a request was admitted on. The TLS
    listener admits a port-less Host at the https default port, and the
@@ -5158,6 +5170,9 @@ let test_openapi_servers_url_follows_the_admitted_authority () =
          (String_util.contains_substring tls "\"url\":\"https://127.0.0.1:443\""))
 
 let test_mcp_transport_requires_explicit_readiness () =
+  (* The body read below is the one a server that asks for no credential
+     gives a request without one, published and before readiness. *)
+  with_health_posture ~strict:false @@ fun () ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   let previous_startup = Server_startup_state.snapshot () in
   Fun.protect
@@ -5227,6 +5242,340 @@ let test_mcp_transport_requires_explicit_readiness () =
        let readiness = startup_http_response router "/health/ready" in
        Alcotest.(check bool) "/health/ready admits published owner" true
          (String.starts_with ~prefix:"HTTP/1.1 200" readiness))
+
+(* The health routes through the router, as the HTTP/1.1 listener runs them.
+   [/health] answers one of three ways by who asks; the two sibling probes
+   say the same to everyone. *)
+
+let health_answer ?headers router path =
+  let response = startup_http_response ?headers router path in
+  let separator = "\r\n\r\n" in
+  let head, body =
+    let rec find from =
+      if from + String.length separator > String.length response
+      then Alcotest.failf "no complete response on %s: %S" path response
+      else if String.equal (String.sub response from (String.length separator)) separator
+      then
+        ( String.sub response 0 from
+        , String.sub response (from + String.length separator)
+            (String.length response - from - String.length separator) )
+      else find (from + 1)
+    in
+    find 0
+  in
+  match String.split_on_char '\n' head |> List.map String.trim with
+  | [] -> Alcotest.failf "no status line on %s" path
+  | status_line :: header_lines ->
+    let status =
+      match String.split_on_char ' ' status_line with
+      | _ :: code :: _ ->
+        (match int_of_string_opt code with
+         | Some code -> code
+         | None -> Alcotest.failf "unreadable status line on %s: %S" path status_line)
+      | _ -> Alcotest.failf "unreadable status line on %s: %S" path status_line
+    in
+    let header line =
+      match String.index_opt line ':' with
+      | None -> None
+      | Some colon ->
+        Some
+          ( String.lowercase_ascii (String.sub line 0 colon)
+          , String.trim (String.sub line (colon + 1) (String.length line - colon - 1)) )
+    in
+    status, List.filter_map header header_lines, body
+;;
+
+let health_json path body =
+  match Yojson.Safe.from_string body with
+  | json -> json
+  | exception Yojson.Json_error error ->
+    Alcotest.failf "the body of %s is not JSON (%s): %S" path error body
+;;
+
+let json_keys = function
+  | `Assoc fields -> List.sort String.compare (List.map fst fields)
+  | json -> Alcotest.failf "expected a JSON object, got %s" (Yojson.Safe.to_string json)
+;;
+
+let public_health_keys = [ "live"; "phase"; "ready"; "server"; "version" ]
+let bearer token = [ "Authorization", "Bearer " ^ token ]
+let server_timing_header = "server-timing"
+
+type health_routes =
+  { health_base_path : string
+  ; health_router : Http_server_eio.Router.t
+  ; admin_token : string
+  ; worker_token : string
+  ; player_token : string
+  }
+
+let health_admin_name = "health-admin"
+
+(* A published, ready workspace with one stored credential of each role, and
+   the production table of the health routes. *)
+let with_health_routes ~strict f =
+  with_temp_dir "health-requester" @@ fun dir ->
+  let config_root = make_config_root dir in
+  with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+  with_config_input "MASC_BASE_PATH" (Some dir) @@ fun () ->
+  with_health_posture ~strict @@ fun () ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Server_startup_state.snapshot () in
+  Config_dir_resolver.reset ();
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Server_startup_state.For_testing.restore previous_startup;
+      Config_dir_resolver.reset ();
+      Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
+    (fun () ->
+       let state = Mcp_server.For_testing.create_state ~base_path:dir in
+       ignore (Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
+       Auth.save_auth_config dir
+         { Masc_domain.default_auth_config with enabled = true; require_token = true };
+       let token agent_name role =
+         match Auth.create_token dir ~agent_name ~role with
+         | Ok (token, (_ : Masc_domain.agent_credential)) -> token
+         | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+       in
+       let admin_token = token health_admin_name Masc_domain.Admin in
+       let worker_token = token "health-worker" Masc_domain.Worker in
+       let player_token = token "health-player" Masc_domain.Player in
+       Server_startup_state.reset ();
+       Server_startup_state.mark_blocking ();
+       Server_auth.For_testing.restore_server_state (Some state);
+       Server_startup_state.mark_state_ready () |> Result.get_ok;
+       let authority =
+         match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+         | Ok authority -> authority
+         | Error `Malformed -> Alcotest.fail "fixture authority must be valid"
+       in
+       Server_request_authority.with_current authority @@ fun () ->
+       f
+         { health_base_path = dir
+         ; health_router =
+             Server_routes_http_routes_frontend.add_routes (Http_server_eio.Router.create ())
+         ; admin_token
+         ; worker_token
+         ; player_token
+         })
+;;
+
+let both_postures f = List.iter (fun strict -> f ~strict) [ true; false ]
+let posture_name ~strict = if strict then "strict" else "not strict"
+
+let check_public_health ~name ~ready ~phase (status, headers, body) =
+  let open Yojson.Safe.Util in
+  let json = health_json name body in
+  Alcotest.(check int) (name ^ ": status") 200 status;
+  Alcotest.(check (list string)) (name ^ ": the five public keys") public_health_keys
+    (json_keys json);
+  Alcotest.(check string) (name ^ ": server") "masc" (json |> member "server" |> to_string);
+  Alcotest.(check string) (name ^ ": version") Runtime_build_version.current
+    (json |> member "version" |> to_string);
+  Alcotest.(check bool) (name ^ ": live") true (json |> member "live" |> to_bool);
+  Alcotest.(check bool) (name ^ ": ready") ready (json |> member "ready" |> to_bool);
+  Alcotest.(check string) (name ^ ": phase") phase (json |> member "phase" |> to_string);
+  Alcotest.(check bool) (name ^ ": no timing header") false
+    (List.mem_assoc server_timing_header headers)
+;;
+
+let test_health_says_only_the_public_probe_without_a_credential_under_strict_auth () =
+  with_health_routes ~strict:true @@ fun routes ->
+  List.iter
+    (fun path ->
+       check_public_health ~name:path ~ready:true ~phase:"ready"
+         (health_answer routes.health_router path))
+    [ Server_health_paths.health; Server_health_paths.full ]
+;;
+
+let test_health_answers_a_reader_in_full () =
+  let open Yojson.Safe.Util in
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  let readers =
+    [ "an admin bearer", bearer routes.admin_token
+    ; "a worker bearer", bearer routes.worker_token
+    ]
+    @ if strict then [] else [ "no credential", [] ]
+  in
+  List.iter
+    (fun (who, headers) ->
+       let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+       let status, response_headers, body =
+         health_answer ~headers routes.health_router Server_health_paths.health
+       in
+       let json = health_json name body in
+       Alcotest.(check int) (name ^ ": status") 200 status;
+       Alcotest.(check string) (name ^ ": names the served workspace")
+         (Unix.realpath routes.health_base_path)
+         (Unix.realpath (json |> member "paths" |> member "effective_base_path" |> to_string));
+       Alcotest.(check bool) (name ^ ": startup section") true
+         (json |> member "startup" |> member "state_ready" |> to_bool);
+       Alcotest.(check string) (name ^ ": status field") "ok"
+         (json |> member "status" |> to_string);
+       Alcotest.(check bool) (name ^ ": timing header") true
+         (List.mem_assoc server_timing_header response_headers);
+       Alcotest.(check (option string)) (name ^ ": the command line reads its version")
+         (Some Runtime_build_version.current)
+         (Server_upgrade_preparation.compact_health_version body);
+       let full_status, (_ : (string * string) list), full_body =
+         health_answer ~headers routes.health_router Server_health_paths.full
+       in
+       let full = health_json name full_body in
+       Alcotest.(check int) (name ^ ": full status") 200 full_status;
+       Alcotest.(check string) (name ^ ": full detail") "full"
+         (full |> member "health_detail" |> to_string);
+       (match full |> member "full_health_snapshot" with
+        | `Assoc _ -> ()
+        | json ->
+          Alcotest.failf "%s: full_health_snapshot is %s" name (Yojson.Safe.to_string json)))
+    readers
+;;
+
+let test_health_refuses_a_credential_it_cannot_accept () =
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  let workspace_secret = Auth.init_workspace_secret routes.health_base_path in
+  let refused ~who ~expected headers =
+    let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+    let status, (_ : (string * string) list), body =
+      health_answer ~headers routes.health_router Server_health_paths.health
+    in
+    Alcotest.(check int) (name ^ ": status") expected status;
+    (match health_json name body with
+     | `Assoc fields ->
+       List.iter
+         (fun key ->
+            Alcotest.(check bool) (name ^ ": no " ^ key) false (List.mem_assoc key fields))
+         ("paths" :: "build" :: "startup" :: public_health_keys)
+     | json -> Alcotest.failf "%s: the refusal is %s" name (Yojson.Safe.to_string json));
+    Alcotest.(check bool) (name ^ ": does not name the workspace") false
+      (String_util.contains_substring body routes.health_base_path)
+  in
+  refused ~who:"a header that is not a bearer" ~expected:401 [ "Authorization", "Basic x" ];
+  refused ~who:"an unknown bearer" ~expected:401 (bearer "no-such-token");
+  refused ~who:"the workspace secret as a bearer" ~expected:401 (bearer workspace_secret);
+  refused ~who:"a credential that may not read state" ~expected:403
+    (bearer routes.player_token);
+  (* A credential the store cannot read is the server's failure. A mode-0
+     file stands in for the failed open; root opens it, so there is nothing
+     to make unreadable. *)
+  if Unix.geteuid () <> 0
+  then (
+    let credential_file = Auth.credential_file routes.health_base_path health_admin_name in
+    Unix.chmod credential_file 0o000;
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.chmod credential_file 0o600 with
+        | Unix.Unix_error _ -> ())
+      (fun () ->
+         refused ~who:"a credential the store cannot read" ~expected:503
+           (bearer routes.admin_token)))
+;;
+
+let test_the_sibling_probes_say_the_same_to_everyone () =
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  List.iter
+    (fun (who, headers) ->
+       let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+       let live_status, (_ : (string * string) list), live_body =
+         health_answer ~headers routes.health_router Server_health_paths.liveness
+       in
+       Alcotest.(check int) (name ^ ": liveness status") 200 live_status;
+       Alcotest.(check (list string)) (name ^ ": liveness keys") [ "live" ]
+         (json_keys (health_json name live_body));
+       let ready_status, (_ : (string * string) list), ready_body =
+         health_answer ~headers routes.health_router Server_health_paths.readiness
+       in
+       Alcotest.(check int) (name ^ ": readiness status") 200 ready_status;
+       Alcotest.(check (list string)) (name ^ ": readiness keys") [ "phase"; "ready" ]
+         (json_keys (health_json name ready_body)))
+    [ "no credential", []
+    ; "an admin bearer", bearer routes.admin_token
+    ; "an unknown bearer", bearer "no-such-token"
+    ]
+;;
+
+let test_health_before_the_workspace_is_published_is_the_public_probe () =
+  let open Yojson.Safe.Util in
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  Server_startup_state.reset ();
+  Server_startup_state.mark_blocking ();
+  Server_auth.For_testing.restore_server_state None;
+  List.iter
+    (fun (who, headers) ->
+       let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+       check_public_health ~name ~ready:false ~phase:"blocking"
+         (health_answer ~headers routes.health_router Server_health_paths.health);
+       let status, (_ : (string * string) list), body =
+         health_answer ~headers routes.health_router Server_health_paths.readiness
+       in
+       let json = health_json name body in
+       Alcotest.(check int) (name ^ ": readiness status") 503 status;
+       Alcotest.(check (list string)) (name ^ ": readiness keys") [ "phase"; "ready" ]
+         (json_keys json);
+       Alcotest.(check bool) (name ^ ": not ready") false (json |> member "ready" |> to_bool))
+    [ "no credential", []
+    ; "an admin bearer", bearer routes.admin_token
+    ; "an unknown bearer", bearer "no-such-token"
+    ]
+;;
+
+let test_public_ready_follows_the_readiness_probe () =
+  with_health_routes ~strict:true @@ fun routes ->
+  let state = Server_auth.For_testing.snapshot_server_state () in
+  Server_startup_state.reset ();
+  Server_startup_state.mark_blocking ();
+  Server_auth.For_testing.restore_server_state state;
+  let readiness_status () =
+    let status, (_ : (string * string) list), (_ : string) =
+      health_answer routes.health_router Server_health_paths.readiness
+    in
+    status
+  in
+  check_public_health ~name:"published, before readiness" ~ready:false ~phase:"blocking"
+    (health_answer routes.health_router Server_health_paths.health);
+  Alcotest.(check int) "readiness refuses before the startup flag" 503 (readiness_status ());
+  Server_startup_state.mark_state_ready () |> Result.get_ok;
+  check_public_health ~name:"published and ready" ~ready:true ~phase:"ready"
+    (health_answer routes.health_router Server_health_paths.health);
+  Alcotest.(check int) "readiness admits after the startup flag" 200 (readiness_status ())
+;;
+
+let test_only_a_reader_gets_the_rollup_and_asks_for_a_refresh () =
+  with_health_routes ~strict:true @@ fun routes ->
+  let module Refresh = Server_routes_http_runtime.For_testing in
+  let refresh_requested () =
+    let (_ : int), (_ : int), (_ : bool), (_ : int), (_ : bool), requested =
+      Refresh.full_health_refresh_worker_stats ()
+    in
+    requested
+  in
+  let get ?headers path = health_answer ?headers routes.health_router path in
+  let admin = bearer routes.admin_token in
+  Refresh.refresh_full_health_snapshot_now (Httpun.Request.create `GET Server_health_paths.full);
+  let (_ : int), (_ : (string * string) list), reader_body =
+    get ~headers:admin Server_health_paths.health
+  in
+  Alcotest.(check bool) "a reader's probe carries the rollup" true
+    (List.mem "overall_status" (json_keys (health_json "reader" reader_body)));
+  check_public_health ~name:"no credential, with a snapshot held" ~ready:true ~phase:"ready"
+    (get Server_health_paths.health);
+  Refresh.reset_full_health_snapshot ();
+  check_public_health ~name:"no credential asking for the full body" ~ready:true ~phase:"ready"
+    (get Server_health_paths.full);
+  Alcotest.(check bool) "a request without a read asks for no refresh" false
+    (refresh_requested ());
+  let status, (_ : (string * string) list), (_ : string) =
+    get ~headers:admin Server_health_paths.full
+  in
+  Alcotest.(check int) "a reader's full body" 200 status;
+  Alcotest.(check bool) "a reader asks for the refresh" true (refresh_requested ())
+;;
 
 let test_startup_state_lazy_inventory_does_not_publish_readiness () =
   Server_startup_state.reset ();
@@ -7440,6 +7789,24 @@ let () =
             test_mcp_transport_requires_explicit_readiness;
           Alcotest.test_case "OpenAPI servers url follows the admitted authority" `Quick
             test_openapi_servers_url_follows_the_admitted_authority;
+          Alcotest.test_case
+            "health says only the public probe without a credential under strict auth"
+            `Quick
+            test_health_says_only_the_public_probe_without_a_credential_under_strict_auth;
+          Alcotest.test_case "health answers a reader in full" `Quick
+            test_health_answers_a_reader_in_full;
+          Alcotest.test_case "health refuses a credential it cannot accept" `Quick
+            test_health_refuses_a_credential_it_cannot_accept;
+          Alcotest.test_case "the sibling probes say the same to everyone" `Quick
+            test_the_sibling_probes_say_the_same_to_everyone;
+          Alcotest.test_case
+            "health before the workspace is published is the public probe" `Quick
+            test_health_before_the_workspace_is_published_is_the_public_probe;
+          Alcotest.test_case "public ready follows the readiness probe" `Quick
+            test_public_ready_follows_the_readiness_probe;
+          Alcotest.test_case
+            "only a reader gets the rollup and asks for a refresh" `Quick
+            test_only_a_reader_gets_the_rollup_and_asks_for_a_refresh;
           Alcotest.test_case
             "lazy inventory stays blocking until explicit readiness"
             `Quick

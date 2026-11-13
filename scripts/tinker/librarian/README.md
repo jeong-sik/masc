@@ -363,6 +363,10 @@ pinned again and the baselines stand; a change of `prompt_counts.py` leaves
 them stale as above. `prompt_lines.json` and `runs.json` are read as written:
 a file that is not JSON, a key the comparison does not read, a key written
 twice in one object, or a value of another shape is refused.
+A run folder is parsed where it is read: a `summary.json` or `rows.jsonl`
+that cannot be read or is not JSON, a field left out and a field of another
+type each end the count in one line that names the file, the line of
+`rows.jsonl`, and the field. No field is filled in.
 
 Each metric counts hits over
 chances, summed over a side's runs. Its noise σ is the binomial standard error

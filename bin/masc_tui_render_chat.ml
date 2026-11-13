@@ -833,7 +833,7 @@ let keeper_message_identity ~max_cells state keeper_name =
           | Keeper_control.Absent ->
               (match keeper.k_origin with
                | Tui_decode.Declared_keeper _ ->
-                   ui_text state ~ko:"아직 시작하지 않음" ~en:"never started"
+                   Tui_decode.keeper_never_started_text ~ko:(state.ui_language = Lang_ko)
                (* [status] is the only place the bare header carries the
                   Keeper's AUTO/YOLO mode and gate, so the absent label keeps
                   that stance. *)
@@ -845,7 +845,7 @@ let keeper_message_identity ~max_cells state keeper_name =
        | None ->
            let detail = match keeper.k_origin with
              | Tui_decode.Declared_keeper requirements ->
-               ui_text state ~ko:"아직 시작하지 않음" ~en:"never started"
+               Tui_decode.keeper_never_started_text ~ko:(state.ui_language = Lang_ko)
                ^ " · " ^ String.concat " · "
                  (List.map Masc.Keeper_declared_roster.requirement_label requirements)
              | Persisted_keeper | Remote_keeper -> status ^ " · —"
@@ -4502,9 +4502,17 @@ let render_keeper_message (state : state) =
     let context_item =
       if not target_registered then None
       else
+        let keeper =
+          List.find_opt (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
+            state.keepers
+        in
+        match keeper with
+        (* A Keeper that never started has no context to read, so the header
+           draws no failed read for it. *)
+        | Some { k_identity = Error Tui_decode.Keeper_not_started; _ } -> None
+        | Some { k_identity = Ok _ | Error (Tui_decode.Identity_unreadable _); _ } | None ->
         let reading =
-          match List.find_opt (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
-                  state.keepers with
+          match keeper with
           | None -> Masc_tui_fetched.Absent
           | Some keeper -> live_context_view state keeper in
         match reading with

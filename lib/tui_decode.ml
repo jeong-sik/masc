@@ -43,8 +43,10 @@ type keeper_identity_absence =
   | Keeper_not_started
   | Identity_unreadable of string
 
+let keeper_never_started_text ~ko = if ko then "아직 시작하지 않음" else "never started"
+
 let keeper_identity_absence_text ~ko = function
-  | Keeper_not_started -> if ko then "시작 전" else "Keeper has not started"
+  | Keeper_not_started -> keeper_never_started_text ~ko
   | Identity_unreadable detail -> detail
 
 type keeper = {

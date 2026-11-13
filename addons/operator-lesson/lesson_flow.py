@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -51,9 +52,16 @@ def language_of_binding(binding: dict) -> str:
 
 def since_of_binding(binding: dict) -> float:
     since = binding.get("since")
-    if isinstance(since, bool) or not isinstance(since, (int, float)) or since != since or since < 0:
-        raise InvalidBinding("binding.since must be the Unix time, in seconds, the first lesson reads from")
-    return float(since)
+    problem = InvalidBinding("binding.since must be the Unix time, in seconds, the first lesson reads from")
+    if isinstance(since, bool) or not isinstance(since, (int, float)):
+        raise problem
+    try:
+        seconds = float(since)
+    except OverflowError as error:
+        raise problem from error
+    if not math.isfinite(seconds) or seconds < 0:
+        raise problem
+    return seconds
 
 
 def _cite(value: dict) -> l.Cite:
@@ -62,6 +70,23 @@ def _cite(value: dict) -> l.Cite:
 
 def _blank(*values: str) -> bool:
     return any(not value.strip() for value in values)
+
+
+def _entry_rejected(session_id: str, request_id: str, at: int, reason: l.EntryRejection) -> l.EntryRejected:
+    """The rejection as the log can keep it. A reason that carries what the
+    model wrote, such as a pin UTF-8 cannot hold, would otherwise refuse the
+    whole write and leave the request listed for good."""
+    event = l.EntryRejected(session_id, request_id, at, reason)
+    problem = l.unreadable(event)
+    return event if problem is None else l.EntryRejected(session_id, request_id, at, l.NotRecordable(problem))
+
+
+def _scene_rejected(session_id: str, entry_id: str, request_id: str, reason: l.SceneRejection) -> l.SceneRejected:
+    """As _entry_rejected, for a scene."""
+    event = l.SceneRejected(session_id, entry_id, request_id, reason)
+    problem = l.unreadable(event)
+    return event if problem is None else l.SceneRejected(session_id, entry_id, request_id,
+                                                         l.NotRecordable(problem))
 
 
 def _payload(body: dict) -> dict:
@@ -324,7 +349,7 @@ class Flow:
                     passed.append(checked)
                     continue
                 checked = l.NotRecordable(problem)
-            rejected.append(l.EntryRejected(session.session_id, request_id, at, checked))
+            rejected.append(_entry_rejected(session.session_id, request_id, at, checked))
         if not passed:
             self.log.append(rejected + [l.SessionFailed(session.session_id, l.NoEntryPassed())])
             return
@@ -407,4 +432,4 @@ class Flow:
         if isinstance(outcome, l.SceneWritten):
             self.log.append([outcome])
         else:
-            self.log.append([l.SceneRejected(session.session_id, asked.entry_id, asked.request_id, outcome)])
+            self.log.append([_scene_rejected(session.session_id, asked.entry_id, asked.request_id, outcome)])

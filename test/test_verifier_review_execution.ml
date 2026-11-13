@@ -260,7 +260,7 @@ let test_cancelled_reviewer_without_report_retries_as_a_successor () = with_fixt
   Eio.Time.with_timeout_exn env#clock Exact_output_fixture.fixture_wait_seconds (fun () ->
     ignore (run_native ~cancel_at:While_provider_answers env sw ~base_path ~store ~original ~current []));
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[]} ->
+   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[];cause=X.No_settled_report} ->
      Alcotest.(check string) "the cancelled execution is named by its runtime" model_id runtime_id
    | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
      Alcotest.fail "a settled cancellation without a report was not read as one ending without a verdict");
@@ -283,7 +283,7 @@ let test_reviewer_cancelled_before_its_report_starts_is_reviewed_again () = with
       (run_native ~cancel_at:Before_report_starts env sw ~base_path ~store ~original ~current
         [tool_call "unstarted-report" valid]));
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[]} ->
+   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[];cause=X.No_settled_report} ->
      Alcotest.(check string) "the cancelled execution is named by its runtime" model_id runtime_id
    | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
      Alcotest.fail "a requested report that never started was not read as an ending without a verdict");
@@ -401,7 +401,7 @@ let after_reviewer_process_ends process_end f = with_runtime (fun env sw ->
 
 let test_reviewer_process_ending_before_any_report_ends_without_a_verdict () =
   after_reviewer_process_ends Before_any_report (fun ~base_path:_ ~store:_ -> function
-    | X.No_verdict {first=runtime_id,Verifier_review_ending.Owner_lost;later=[]} ->
+    | X.No_verdict {first=runtime_id,Verifier_review_ending.Owner_lost;later=[];cause=X.No_settled_report} ->
       Alcotest.(check string) "the lost execution is named by its runtime" model_id runtime_id
     | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
       Alcotest.fail "a journal whose writer is gone was not read as an ending without a verdict")
@@ -589,7 +589,7 @@ let test_cut_walk_whose_reviewer_replied_without_a_report_is_reviewed_again () =
   Alcotest.(check (pair int int)) "the reviewer replied once and called no report" (1,0)
     (run_native env sw ~base_path ~store ~original ~current []);
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | No_verdict {first=_,Verifier_review_ending.Succeeded;later=[]} -> ()
+   | No_verdict {first=_,Verifier_review_ending.Succeeded;later=[];cause=X.No_settled_report} -> ()
    | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
      Alcotest.fail "a reply without a report was not read as a success without a verdict");
   reread ~base_path ~store |> check_retryable "the ended execution's runtime is named" [model_id];
@@ -675,10 +675,10 @@ let test_report_under_an_earlier_answer_format_is_not_read () =
       [tool_call "settled-report" valid] in
     Alcotest.(check int) "the reviewer settled its report" 1 handlers);
   (match X.observe ~base_path ~original (O.progress !current) |> get with
-   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[]} ->
+   | No_verdict {first=runtime_id,Verifier_review_ending.Cancelled;later=[];cause=X.Answer_format_moved} ->
      Alcotest.(check string) "the ended execution is named by its runtime" model_id runtime_id
    | No_verdict _ | Awaiting | Repair_required _ | Verdict _ ->
-     Alcotest.fail "a report under an earlier answer format was read");
+     Alcotest.fail "a report under an earlier answer format was read, or its cause was not named");
   check_retryable "the refusal names the runtime that ran" [model_id] (reread ~base_path ~store);
   Alcotest.(check int) "the owner walk opens the next attempt" 1 (next_attempt ~store);
   let next = O.load_for_destination ~store ~verification_id ~attempt:1 ~installation_id ~package_id |> owner in

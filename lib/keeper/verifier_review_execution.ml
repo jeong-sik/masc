@@ -83,12 +83,15 @@ let references ~original progress =
     | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _ -> Ok refs) (Ok []) (P.events progress) in
   Ok (List.rev refs)
 
+type no_verdict_cause = No_settled_report | Answer_format_moved
+
 type observation =
   | Awaiting
   | Repair_required of string
   | No_verdict of
       { first : string * Verifier_review_ending.t
       ; later : (string * Verifier_review_ending.t) list
+      ; cause : no_verdict_cause
       }
   | Verdict of AR.review_result
 
@@ -180,7 +183,7 @@ let observe ~base_path ~original progress =
          behind is not read: the attempt ends as one without a verdict, and
          its next attempt asks with the current format. *)
       if not (String.equal (V.output_contract original) (V.canonical_output_contract ()))
-      then Ok (No_verdict {first=ending first;later=List.map ending later})
+      then Ok (No_verdict {first=ending first;later=List.map ending later;cause=Answer_format_moved})
       else
       (* Report calls are counted over the whole attempt. A requested report
          that was never settled recorded nothing: with no settled report it
@@ -190,7 +193,7 @@ let observe ~base_path ~original progress =
         List.map (fun report -> call.reference,report) call.reports) ended in
       let requested = List.fold_left (fun total call -> total + call.requested_reports) 0 ended in
       match settled,requested with
-      | [],_ -> Ok (No_verdict {first=ending first;later=List.map ending later})
+      | [],_ -> Ok (No_verdict {first=ending first;later=List.map ending later;cause=No_settled_report})
       | [reference,report],1 ->
         (match verdict_of_report report with
          | Error detail -> Ok (Repair_required detail)

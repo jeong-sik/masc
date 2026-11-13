@@ -1196,11 +1196,50 @@ body_timeout_s=30.0
     (field "last_observation" (List.nth rows 3)=`Null)
 ;;
 
+(* The registry keeps [max_completed_retained] completed runs per lane, so a
+   busy lane cannot evict a quiet one. The snapshot read the newest
+   [max_completed_retained] runs of all lanes, so a quiet lane behind that many
+   newer runs of another lane showed no retained run (2026-11-12:
+   candle_appraiser had 14). This is the only test here that fills the
+   process-global registry. The busy lane's runs stay Running: the registry
+   sorts its completed runs on every mutation, and 2,000 completions took
+   seven seconds. *)
+let test_snapshot_counts_a_quiet_lane_behind_a_busy_one () =
+  let registry = Exact.global () in
+  let register ~run_id ~lane ~started_at =
+    Exact.register_running registry ~run_id ~lane ~actor:"keeper-test" ~started_at
+      ~input:(Exact.Exact_input (`Assoc []))
+  in
+  register ~run_id:"quiet" ~lane:Exact.Candle_appraiser ~started_at:1.;
+  (match
+     Exact.mark_completed registry ~run_id:"quiet" ~outcome:Exact.Succeeded ~elapsed_s:1.
+       ~selected_slot:None ~output:`Null ()
+   with
+   | Ok () -> ()
+   | Error _ -> fail "the quiet run's completion was refused");
+  for index = 1 to Exact.max_completed_retained do
+    register ~run_id:(Printf.sprintf "busy-%d" index) ~lane:Exact.Board_attention
+      ~started_at:(float_of_int (index + 1))
+  done;
+  let retained lane_id =
+    lane_by_id (Projection.snapshot_json ()) lane_id
+    |> Yojson.Safe.Util.member "retained_run_count"
+    |> Yojson.Safe.Util.to_int
+  in
+  check int "the quiet lane keeps its run" 1 (retained "candle_appraiser");
+  check int "the busy lane keeps what the registry retains" Exact.max_completed_retained
+    (retained "board_attention_exact")
+;;
+
 let () =
   run
     "server standalone lane projection"
     [ ( "snapshot"
       , [ test_case
+            "a quiet lane behind a busy lane keeps its retained runs"
+            `Quick
+            test_snapshot_counts_a_quiet_lane_behind_a_busy_one
+        ; test_case
             "Goal judgement metric is independent of replacement request"
             `Quick
             test_goal_judgement_metric_does_not_depend_on_replacement_request

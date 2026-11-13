@@ -988,28 +988,20 @@ let observe () =
   let resolve_lane lane_id = match List.assoc_opt lane_id configurations with
     | Some configuration -> configuration
     | None -> Registry_unavailable "unknown standalone lane" in
-  (* [list_runs] is already newest-first from the registry's immutable
-     projection. Do not call [recent_runs] here: it sorts the entire list
-     again, and persistence-failed core rows can remain Running beyond normal
-     completed retention. Traverse once for the source count and take only the
-     bounded prefix used by this matrix. *)
-  let exact_run_source =
-    Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
-  in
-  let rec take_exact_runs remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | run :: rest -> take_exact_runs (remaining - 1) (run :: acc) rest
-  in
+  (* The matrix reads every run the registry retains. The registry's own
+     bound is per lane, applied on every register and completion, so a busy
+     lane cannot evict a quiet one (#31480, lane audit W8). This read used to
+     take the newest [max_completed_retained] runs of all lanes, a window
+     sized when retention was one global bound (#31169). Under the per-lane
+     bound it cut across lanes: on 2026-11-12 it read 2,000 of 5,329 retained
+     runs, and candle_appraiser, with 14 retained, showed none. [list_runs] is
+     already newest-first; do not call [recent_runs], which sorts it again. *)
   let exact_runs =
-    take_exact_runs
-      Exact_lane_run_registry.max_completed_retained
-      []
-      exact_run_source
+    Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
   in
   { now=Time_compat.now (); resolve_lane; resolve_addon; addon_lanes;
     jev_readiness=Typesafeai_config.readiness ();
-    exact_runs_total=List.length exact_run_source; exact_runs;
+    exact_runs_total=List.length exact_runs; exact_runs;
     verification_runs=Verification_run_registry.list_runs (Verification_run_registry.global ());
     goal_verification_runs=retained_goal_reviews () }
 ;;

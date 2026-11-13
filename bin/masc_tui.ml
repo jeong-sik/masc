@@ -35702,8 +35702,9 @@ Use relative paths for resources already held in the package. -->
                       | "k" | "up" -> update (Addons.move_action view (-1))
                       | "J" | "K" -> scroll_lane_addons ~page:false ~down:(key = "J")
                       | "\r" | "\n" | "enter" ->
-                          (match Addons.submit_action view with
-                           | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                          (match Addons.enter_action view with
+                           | Ok (next,None) -> update next
+                           | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=lane_addons_input_failure detail})
                       | _ -> ())
                  (* A line that takes letters owns them. This branch answered

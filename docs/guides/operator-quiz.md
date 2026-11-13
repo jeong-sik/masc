@@ -107,13 +107,16 @@ max_output_tokens = 2048
 ## 설치본 갱신과 출제 복구
 
 저장소 소스가 바뀌어도 실행 중인 설치 패키지는 자동으로 바뀌지 않는다. 패키지의
-`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.3.2` 이고,
+`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.3.3` 이고,
 이미지 `0.1.0` 은 Python 과 공용 protocol 모듈을 담는 실행 환경이다. worker 코드는
 설치한 패키지 폴더를 `/addon` 에 읽기 전용으로 붙여 실행한다. `0.3.0` 은 관측 row 에
 `quiz/scorecard` 와 `quiz/review` 를 더했을 뿐 `log.jsonl` 의 모양은 그대로라, 아래
 갱신 절차대로 올려도 log 를 옮기지 않는다. `0.3.1` 은 Results 에 보이는 값의 선언만
 늘렸고, `0.3.2` 는 그 선언의 순서를 바꿔 Results 가 `quiz/scorecard` 부터 열리게 했다.
-둘 다 row 와 log 는 그대로다.
+둘 다 row 와 log 는 그대로다. `0.3.3` 은 action 을 `kind` 별 갈래로 나누고, 이의를 걸 수
+있는 질문 row 에 `dispute` 칸을 더해 Results 에서 바로 이의를 걸게 했다. log 는 그대로다.
+`0.3.3` 의 행 동작 선언(presentation `actions`)은 그것을 아는 서버와 TUI 만 읽는다. 옛 서버는
+패키지를 거절하고, 옛 TUI 는 lane 화면을 읽지 못한다. 서버와 TUI 를 먼저 올린 뒤 패키지를 올린다.
 
 1. 원본 로그와 요청 blob, 설치 선언 및 현재 instance/volume 식별자를 보관한다.
 2. 검증한 패키지를 새 불변 경로에 설치한다. 실행 중인 패키지 폴더를 덮어쓰지 않는다.
@@ -200,12 +203,13 @@ Results 에 일곱 lane 이 나온다.
 {"kind": "dispute", "ask_id": "s-…-ask", "question_id": "q1", "note": "그 글은 계획도 기록한다고 적혀 있다"}
 ```
 
-- `ask_id` 와 `question_id` 는 `quiz/questions` 행의 `Ask id, for a dispute`·`Question id, for a dispute` 에 있다.
-- TUI 에서는 Results 에서 그 행을 고르고 `a` 로 동작 양식을 연다. 양식은 칸을 하나씩 보여 주고, 그 칸의 설명을 아래에 적는다.
-  1. `kind` 에서 Left/Right 로 값을 바꿔 `dispute` 를 고른다.
-  2. Tab 으로 다음 칸에 간다. `questions` 는 `compose` 의 칸이라 비워 둔다.
-  3. `ask_id`·`question_id`·`note` 를 적는다. 양식은 Results 를 가리므로, 값은 양식을 열기 전에 마우스로 끌어 복사해 두고 칸에서 터미널 붙여넣기로 넣는다.
-  4. `Ctrl-S` 로 보낼 내용을 확인하고 Enter 로 한 번 보낸다. Esc 는 보내지 않고 닫는다.
+- 이의를 걸 수 있는 `quiz/questions` 행에는 `dispute` 칸이 있고, 그 안에 `ask_id` 와 `question_id` 가 있다. 그 질문의 `grade` 요청이 아직 결과를 기다리면 이 칸이 없다.
+- TUI 에서는 Results 의 `quiz/questions` 에서 j/k 로 그 행을 고르고 `a` 를 누른다. 그 행의 동작 목록이 열린다.
+  1. `Dispute this grade` 를 고르고 Enter 를 누른다. 행에 `dispute` 칸이 없으면 이 줄 끝에 `unavailable` 과 이유가 붙고, Enter 를 누르면 그 이유가 오류 줄에 나온다.
+  2. 양식 맨 위에 `kind`·`ask_id`·`question_id` 가 행의 값으로 잠겨 있다. `note` 만 쓴다.
+  3. `Ctrl-S` 로 보낼 내용을 확인하고 Enter 로 한 번 보낸다. Esc 는 보내지 않고 닫는다.
+  - 목록 맨 아래 `Other action` 은 이 설치의 action 양식을 연다. 첫 칸에서 Left/Right 로 `Compose`·`Dispute`·`Export` 를 고른다.
+- 보낼 때 TUI 는 그 행을 다시 읽는다. 양식을 연 사이 행이 바뀌었으면 보내지 않고 다시 열라고 적는다.
 - `A` 명령 입력의 `act {…}` 로 보내도 같다. Keeper 는 `masc_lane_act` 로 같은 action 을 보낼 수 있다.
 - 패키지는 `Disputed` 를 남기고 `grade` 요청을 하나 낸다. 이 요청에는 메모, 지금의 판정, 패키지가 읽어 둔 출처 원문이 들어간다.
 - 결과는 새 `Judged` 다. 정답 key 로 낸 판정보다 앞서고, 판정 기록에 모두 남는다. 이미 있던 판정을 바꾸면 G 에 센다.

@@ -404,7 +404,33 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
   let tools = Yojson.Safe.Util.(result 1 |> member "tools" |> to_list) in
   let tool name = List.find (fun tool -> Yojson.Safe.Util.(member "name" tool) = `String name) tools in
   check int "the worker advertises its four tools" 4 (List.length tools);
-  ignore (unwrap (Lane_addon_action.validate_schema (Yojson.Safe.Util.member "inputSchema" (tool "lane_act"))));
+  let schema = Yojson.Safe.Util.member "inputSchema" (tool "lane_act") in
+  ignore (unwrap (Lane_addon_action.validate_schema schema));
+  (* Each kind is its own closed alternative, so the host refuses a member
+     another kind uses before the worker sees the action. *)
+  let send action = Lane_addon_action.validate ~schema ~name:"lane_act"
+    (`Assoc [ "context", Yojson.Safe.from_string context; "request_id", `String "act-2";
+              "action", Yojson.Safe.from_string action ]) in
+  List.iter (fun (label, action) -> check bool label true (Result.is_ok (send action)))
+    [ "a compose with a count", {|{"kind":"compose","questions":2}|};
+      "a dispute with its three members", {|{"kind":"dispute","ask_id":"a","question_id":"q1","note":"n"}|};
+      "an export alone", {|{"kind":"export"}|} ];
+  List.iter (fun (label, action) -> check bool label true (Result.is_error (send action)))
+    [ "a dispute that names questions",
+      {|{"kind":"dispute","ask_id":"a","question_id":"q1","note":"n","questions":1}|};
+      "a compose without a count", {|{"kind":"compose"}|};
+      "a dispute without a note", {|{"kind":"dispute","ask_id":"a","question_id":"q1"}|} ];
+  (* The shipped dispute row action is offered on the Dispute alternative of
+     the schema this worker advertises, and leaves only the note. *)
+  let package = (unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml"))).package in
+  (match package.action_tool, package.presentation.Lane_addon_presentation.actions with
+   | Some tool_name, [ action ] ->
+       (match Lane_addon_row_action.judge ~tool_name ~tool_schema:schema action with
+        | Lane_addon_row_action.Offered
+            { branch = Some 1; human = [ { Lane_addon_row_action.name = "note"; required = true } ] } -> ()
+        | Lane_addon_row_action.(Offered _ | Refused _) ->
+            fail "the dispute row action is offered on the Dispute alternative and leaves the note")
+   | (Some _ | None), _ -> fail "the quiz declares one row action and its action tool");
   ignore (unwrap (Lane_addon_packet.decode (structured 2)));
   check string "compose is confirmed" "confirmed" Yojson.Safe.Util.(structured 3 |> member "status" |> to_string);
   (match unwrap (Lane_addon_host_request.listing_of_json (structured 4)) with

@@ -362,6 +362,14 @@ val read_latest_original_execution : store:Lane_addon_store.t -> declaration_id:
     no retry, partition, worker delivery, Memory or ACK authority. Offload the
     complete blocking scope in Eio contexts. *)
 
+val latest_of_files : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
+  proof:Yojson.Safe.t option -> (latest_original_execution, string) result
+(** What {!read_latest_original_execution} answers when the original's Exact
+    record and proof link hold [record] and [proof] ([None] when a file is
+    absent). [store] names only the root each proof must name. Reads nothing
+    and writes nothing. *)
+
 val read_latest_slot_observations : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (Exact_lane_slot_observation.t list option,string) result
 (** Validate the actual latest original execution first, then read only its
@@ -396,6 +404,12 @@ val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
     the full domain answer and rechecks authority before its separate effects.
     Run the complete blocking read/validation scope on a system thread in Eio. *)
 
+val observe_record : declaration_id:string -> schema:Yojson.Safe.t -> request ->
+  Yojson.Safe.t option -> (retained_observation, string) result
+(** What {!observe_retained} answers when the original's Exact record holds
+    this JSON ([None] when there is no record). Reads nothing and writes
+    nothing. *)
+
 type recovery_error =
   | Recovery_unavailable of string
       (** The record could not be read at all. A later attempt may find it. *)
@@ -423,6 +437,16 @@ val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
     the immutable original consumer still validates its answer and authority.
     In Eio, protect the complete system-thread call from cancellation so
     publication and confirmation finish before returning its observation. *)
+
+val recovery_of_files : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
+  proof:Yojson.Safe.t option -> (retained_observation, string) result
+(** What {!recover_retained} answers when it holds the claim and the
+    original's Exact record and proof link hold [record] and [proof] ([None]
+    when a file is absent). An open record it finishes from its proof is
+    answered as the terminal it publishes. Every [Error] is one it returns as
+    [Recovery_invalid]. [store] names only the root each proof must name.
+    Reads nothing and writes nothing. *)
 
 val run :
   store:Lane_addon_store.t ->

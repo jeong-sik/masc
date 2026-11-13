@@ -12,6 +12,8 @@ import type { VNode } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { ProblemNote, Retry, idTail, slowAfterMs } from './notes'
 import type { Failure, Next, Shown } from './notes'
+import { SubscriptionsPanel } from './subscriptions'
+import type { SubscriptionsModel } from './subscriptions'
 import { session as readSession, signOut as endSession, who as readWho } from './wire'
 import type { Answer, Problem, Role, Send, Session, Who } from './wire'
 
@@ -182,7 +184,11 @@ function Account({ who, signOut, onSignOut }: { readonly who: Who; readonly sign
 /** What is under the heading of the page in one state. A note of a failure
     is made anew for each failure (its key is the count), so a screen reader
     says the second one as it said the first. */
-function Body({ view, onRetry }: { readonly view: View; readonly onRetry: () => void }): VNode {
+function Body({ view, subscriptions, onRetry }: {
+  readonly view: View
+  readonly subscriptions: SubscriptionsModel
+  readonly onRetry: () => void
+}): VNode {
   switch (view.kind) {
     case 'reading':
       return html`<p class="hint" role="status">${view.slow ? '내 계정을 불러오고 있어요…' : ''}</p>`
@@ -206,7 +212,8 @@ function Body({ view, onRetry }: { readonly view: View; readonly onRetry: () => 
         ${view.signOut.kind === 'failed'
           ? html`<${ProblemNote} key=${view.signOut.failure.attempts} title="로그아웃하지 못했어요" failure=${view.signOut.failure} />`
           : null}
-        <p>구독, Keeper, 토큰은 아직 처음 화면에서 다뤄요.</p>
+        <${SubscriptionsPanel} model=${subscriptions} />
+        <p>구독 연결과 모델 확인, Keeper, 토큰은 아직 처음 화면에서 해요.</p>
         <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `
@@ -219,7 +226,10 @@ function Body({ view, onRetry }: { readonly view: View; readonly onRetry: () => 
 const takesThePressedButton = (from: View['kind'], to: View['kind']): boolean =>
   ((from === 'failed' || from === 'changed') && to === 'signed_in') || (from === 'signed_in' && to === 'changed')
 
-export function ConsoleFrame({ model }: { readonly model: ConsoleModel }): VNode {
+export function ConsoleFrame({ model, subscriptions }: {
+  readonly model: ConsoleModel
+  readonly subscriptions: SubscriptionsModel
+}): VNode {
   const view = model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
   const shown = useRef(view.kind)
@@ -238,7 +248,7 @@ export function ConsoleFrame({ model }: { readonly model: ConsoleModel }): VNode
     </header>
     <main>
       <h1 ref=${heading} tabindex="-1">내 계정</h1>
-      <${Body} view=${view} onRetry=${() => { void model.load() }} />
+      <${Body} view=${view} subscriptions=${subscriptions} onRetry=${() => { void model.load() }} />
     </main>
   `
 }

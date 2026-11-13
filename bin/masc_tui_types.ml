@@ -27066,24 +27066,35 @@ let keeper_message_history_loading (state : state) =
   | Some _, None | None, (Some _ | None) -> false
 
 let keeper_message_inflight_rows (state : state) ~now =
+  let ko = state.ui_language = Lang_ko in
   let batch_label group =
     if group.count = 1 then ""
-    else Printf.sprintf "%d messages in one turn · " group.count
+    else
+      Printf.sprintf
+        (if ko then "한 턴 메시지 %d개 · " else "%d messages in one turn · ")
+        group.count
   in
   let activity group =
     if group.reconciling_count > 0 then
-      if group.count = 1 then "reconciling"
-      else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
+      if group.count = 1 then ui_text state ~ko:"기록 대조 중" ~en:"reconciling"
+      else
+        Printf.sprintf
+          (if ko then "스트림 %d개 기록 대조 중" else "reconciling %d stream(s)")
+          group.reconciling_count
     else
       let transcript = group.representative.log.tl_transcript in
       if Masc_tui_keeper_chat_transcript.awaiting_continuation transcript then
-        "awaiting continuation"
+        ui_text state ~ko:"이어서 진행 대기" ~en:"awaiting continuation"
       else
         match Masc_tui_keeper_chat_transcript.phase transcript with
-        | Masc_tui_keeper_chat_transcript.Waiting -> "waiting to start"
-        | Masc_tui_keeper_chat_transcript.Working -> "running"
-        | Masc_tui_keeper_chat_transcript.Stream_ended -> "finishing"
-        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> "failed"
+        | Masc_tui_keeper_chat_transcript.Waiting ->
+            ui_text state ~ko:"시작 대기" ~en:"waiting to start"
+        | Masc_tui_keeper_chat_transcript.Working ->
+            ui_text state ~ko:"진행 중" ~en:"running"
+        | Masc_tui_keeper_chat_transcript.Stream_ended ->
+            ui_text state ~ko:"마무리 중" ~en:"finishing"
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
+            ui_text state ~ko:"요청 실패" ~en:"failed"
   in
   let summary group =
     let age =

@@ -734,9 +734,10 @@ let decode_proof ~store ~declaration_id bound ~attempt_ordinal json =
   let* stored = match json with
     | `Assoc fields -> Ok fields
     | _ -> Error "original execution proof must be an object" in
-  (* The version is read before any other field, so a proof of another
-     version is refused unread. Canonical turns an integral float into an
-     integer, so the integer fields are read from the JSON as stored. *)
+  (* The version is checked before the receipt, schema and outcome are
+     decoded, so none of them is read from a proof of another version.
+     Canonical turns an integral float into an integer, so the integer
+     fields are read from the JSON as stored. *)
   let* () = match List.assoc_opt "version" stored with
     | Some (`Int version) when version = proof_version -> Ok ()
     | Some _ | None ->

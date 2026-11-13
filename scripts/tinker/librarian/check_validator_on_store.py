@@ -295,16 +295,17 @@ def refusal_label(detail: str) -> str:
     return fixed if fixed is not None else "other: " + reason.split(":")[0]
 
 
-def count_refusals(lane: Path, admission_requests: frozenset[str], counts: Counter[str]) -> None:
-    """A proof names its request by request_id and holds no request body, so the
-    request's own record says whether it is an admission request."""
+def count_refusals(lane: Path, admission_requests: frozenset[tuple[str, str]], counts: Counter[str]) -> None:
+    """A proof names its request by request_id and digest and holds no request
+    body, so the request's own record says whether it is an admission request."""
     requests: set[str] = set()
     for path in sorted((lane / "host-results").rglob("*.json")):
         record = read_record(path)
         executions = field(record, "executions") if record is not None else Absent()
         for execution in executions if isinstance(executions, tuple) else ():
             request_id = text_field(execution, "request_id")
-            if request_id is None or request_id not in admission_requests:
+            digest = text_field(execution, "digest")
+            if request_id is None or digest is None or (request_id, digest) not in admission_requests:
                 continue
             semantic = field(execution, "receipt", "http", "semantic")
             for refusal in semantic if isinstance(semantic, tuple) else ():
@@ -328,7 +329,7 @@ def main() -> int:
     lane = E.store_dir(base).parent
     answered = {record.digest: record for record in E.answered_admissions(base)}
     read_digests: set[str] = set()
-    admission_requests: set[str] = set()
+    admission_requests: set[tuple[str, str]] = set()
     file_template = R.template_from_markdown(template_path.read_text(encoding="utf-8"))
     counts: Counter[str] = Counter()
     if isinstance(file_template, R.TemplateError):
@@ -355,9 +356,9 @@ def main() -> int:
             continue
         if text_field(record, "request", "output") == ADMISSION_OUTPUT:
             admitted = text_field(record, "request_id")
-            if admitted is not None:
-                admission_requests.add(admitted)
             digest = text_field(record, "digest")
+            if admitted is not None and digest is not None:
+                admission_requests.add((admitted, digest))
             if digest is not None:
                 read_digests.add(digest)
             listed = answered.get(digest) if digest is not None else None

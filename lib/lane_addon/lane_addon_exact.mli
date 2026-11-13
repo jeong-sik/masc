@@ -354,7 +354,8 @@ val read_original_execution : store:Lane_addon_store.t -> declaration_id:string 
     answers use the same partial shape guard as {!validate_answer}. The
     proof names the original request by its [request_id] and [digest] and
     keeps the canonical schema; it holds no request body. A proof of another
-    version returns [Error] before any other field is read. This
+    version returns [Error] before its receipt, schema or outcome is
+    decoded. This
     read does not establish full consumer-dialect compliance or replace the
     fresh package baseline and consumer authority checks before delivery.
     A complete proof may precede final publication. This read never claims,

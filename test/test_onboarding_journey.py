@@ -1171,8 +1171,8 @@ class Journey(StepByStep):
         # so each of these ends with the pid and what to do, and nothing is
         # asked to stop.
         rows = [(dict(status='owner_unannounced', server_pid=4242),
-                 ('pid 4242 holds this workspace but announces no port', 'kill 4242',
-                  'masc start --base-path /workspace --port 19400')),
+                 ('pid 4242 holds this workspace but announces no port', 'It may be shutting down',
+                  'does not reach', 'kill 4242')),
                 (dict(status='same_workspace_on_another_port', server_pid=4242, server_port=19401),
                  ('(pid 4242) serves port 19401, not port 19400', '--port 19401')),
                 (self.single_user_server(answers=False),
@@ -1335,6 +1335,9 @@ class Journey(StepByStep):
             server = int(named.group(1))
             try:
                 self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+                # The kernel named the replacement on the account server's
+                # announcement file, and restart reports it as that kind.
+                self.assertIn(': the account server masc ', started.stdout)
                 for asked in (port, other):
                     with self.subTest(asked=asked):
                         observed = masc('setup-server', '--port', asked)
@@ -1352,7 +1355,9 @@ class Journey(StepByStep):
                 self.assertEqual(stopped.returncode, 1, stopped.stderr)
                 receipt = json.loads(stopped.stdout)
                 self.assertIs(receipt['termination_requested'], False)
-                self.assertIn('held by its account server', receipt['error'])
+                self.assertIn('The account server of ' + str(base), receipt['error'])
+                self.assertIn('masc restart replaces the account server', receipt['error'])
+                self.assertIn('No server was signed in to or stopped.', receipt['error'])
                 os.kill(server, 0)  # It still runs.
             finally:
                 os.kill(server, signal.SIGTERM)

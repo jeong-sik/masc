@@ -2299,13 +2299,14 @@ def answered_version(observed):
     return observed.get('server_version') if observed['server_answers'] else None
 
 
-def owner_unannounced_line(observed, base_path, port):
+def owner_unannounced_line(observed):
     """What an `owner_unannounced` observation says of the process, and what to do."""
     pid = str(observed['server_pid'])
-    return ('pid ' + pid + ' holds this workspace but announces no port. It is still starting, or a MASC '
-            'older than this one started it. Wait until it has started and run setup again. If this '
-            'message does not change, stop it with kill ' + pid + ' and run masc start --base-path '
-            + shlex.quote(str(base_path)) + ' --port ' + str(port) + '.')
+    return ('pid ' + pid + ' holds this workspace but announces no port. It may be starting: wait and '
+            'run setup again. It may be shutting down: run setup again once it has exited. It may '
+            'listen on an address that 127.0.0.1 does not reach, which its log says when it starts: '
+            'setup cannot use it until it is started with --host 127.0.0.1 or --host 0.0.0.0. Or a '
+            'MASC that announces no port started it: stop it with kill ' + pid + ' and run masc start.')
 
 
 def account_server_line(observed):
@@ -2364,7 +2365,7 @@ def account_installation(binary, state, port):
               + ('' if version is None else ' (MASC ' + terminal_text(version) + ')')
               + '. It started before the config asked for accounts.', file=sys.stderr)
     elif status == 'owner_unannounced':
-        print(unannounced + ' ' + owner_unannounced_line(observed, base, port), file=sys.stderr)
+        print(unannounced + ' ' + owner_unannounced_line(observed), file=sys.stderr)
     else:
         raise SetupError('MASC returned an unknown server observation')
     # The journey ends before its workspace screen, so the way to another
@@ -2408,7 +2409,7 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                 raise SetupError('Shutdown was requested; its completion remains unconfirmed. Inspect this workspace before restarting it.')
             continue
         if state == 'owner_unannounced':
-            raise SetupError(owner_unannounced_line(observed, base_path, port))
+            raise SetupError(owner_unannounced_line(observed))
         if state == 'same_workspace_on_another_port':
             announced = str(observed['server_port'])
             raise SetupError('The server of this workspace (pid ' + str(observed['server_pid']) + ') serves port '

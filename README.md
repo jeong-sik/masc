@@ -374,6 +374,7 @@ Keeper, use its lifecycle controls in the Keepers view before closing the UI.
 | I want to… | Read |
 |---|---|
 | Install, upgrade or recover a workspace | [Installation](docs/INSTALL.md) |
+| Let people sign in and run Keepers on their own subscriptions | [Account server setup](docs/guides/account-server-setup.md) · [Invitations](docs/guides/account-server-invitations.md) · [MCP of a person](docs/guides/account-server-mcp.md) |
 | Learn the terminal interface | [TUI guide](docs/TUI-GUIDE.md) |
 | Connect my own agent | [MCP templates](docs/MCP-TEMPLATE.md) |
 | Configure and operate Keepers | [Keeper manual](docs/KEEPER-USER-MANUAL.md) · [File model](docs/KEEPER-FILE-MODEL.md) |

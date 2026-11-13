@@ -73,6 +73,10 @@ export interface Integration {
   readonly calls: Calls
 }
 
+/** The name the operator gave a subscription, or its id when the name is empty. */
+export const integrationName = (integration: Integration): string =>
+  integration.displayName === '' ? integration.id : integration.displayName
+
 /** A fact the server read, or the code of why it could not. A code this
     console does not know is kept apart as `unrecognised`. */
 export type Fact<T, Unread extends string> =

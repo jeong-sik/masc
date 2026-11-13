@@ -530,10 +530,9 @@ let authorize_retained_read ~bindings ~access json =
   | _ -> Error "retained instance identity is ambiguous or absent"
 (* [persist] writes the binding a commit proposes; every other reader sees the
    published state through [entry_json]. *)
-let entry_fields_with ~state ~seq ~(output : output) e =
+let entry_fields_with ~state ~seq ~(output : output) ~action_schema e =
   ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
-    "action_schema", (match e.connection with None -> `Null
-      | Some c -> Option.fold ~none:`Null ~some:Fun.id (c.worker.action_schema ()));
+    "action_schema", Option.fold ~none:`Null ~some:Fun.id action_schema;
     "run_id", `String e.run_id;
     "addon_id", `String e.package.id; "title", `String e.package.title;
     "revision", `String e.package.revision; "phase", phase_to_json (Lifecycle.project state);
@@ -549,11 +548,17 @@ let entry_fields_with ~state ~seq ~(output : output) e =
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
     "resource", (match e.connection with None -> `Null | Some c -> Lifecycle.resource_to_json c.worker.resource)]
-(* Row action verdicts are judged from the advertised schema each time the
-   state is published. [persist] never writes them. *)
-let entry_fields e = entry_fields_with ~state:e.state ~seq:e.seq ~output:e.output e
+let advertised_action_schema e = Option.bind e.connection (fun c -> c.worker.action_schema ())
+(* Row action verdicts are judged each time the state is published, from the
+   one schema read for [action_schema], so both fields describe the same
+   worker. [persist] never writes them. *)
+let entry_fields e =
+  let action_schema = advertised_action_schema e in
+  entry_fields_with ~state:e.state ~seq:e.seq ~output:e.output ~action_schema e
   @ Lane_addon_row_action.snapshot_fields ~actions:e.package.presentation.Lane_addon_presentation.actions
-      ~tool_schema:(Option.bind e.connection (fun c -> c.worker.action_schema ()))
+      ~tool:(match e.package.action_tool, action_schema with
+        | Some name, Some schema -> Some (name, schema)
+        | Some _, None | None, (Some _ | None) -> None)
 let entry_json e = `Assoc (entry_fields e)
 (* A released worker that never held a resource and never committed an
    observation leaves nothing for Inspect, Slice or Evidence.  When
@@ -793,7 +798,8 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
     let proposed = match held with
       | Some (_, _, settle) when not e.stopping -> settle e.state
       | Some _ | None -> e.state in
-    let json = `Assoc (entry_fields_with ~state:proposed ~seq ~output e) in
+    let json = `Assoc (entry_fields_with ~state:proposed ~seq ~output
+      ~action_schema:(advertised_action_schema e) e) in
     let write = match Eio.Fiber.get binding_writer_key with
       | Some write -> write
       | None -> (fun ~store ~instance_id json -> Lane_addon_store.save_binding_staged store ~instance_id json) in

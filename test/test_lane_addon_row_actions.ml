@@ -1,6 +1,6 @@
 (* RFC lane-row-offers-actions-filled-from-its-own-fields L1: the presentation
-   [actions] grammar, the row value reader, the manifest lane check and the
-   host verdict. *)
+   [actions] grammar, the row value reader, the manifest action tool check and
+   the host verdict. *)
 open Alcotest
 module P = Masc.Lane_addon_presentation
 module R = Masc.Lane_addon_row_action
@@ -65,8 +65,24 @@ let row_values_are_typed () =
   let reading = { P.lane_id = "l"; path = [ "dispute"; "question_id" ]; label = "q"; unit = None; format = P.Json } in
   check bool "json reading of null" true (P.value reading fields = Ok `Null)
 
-let tool action = `Assoc [ "type", `String "object"; "properties", `Assoc [ "action", json action ] ]
-let verdict schema = R.judge ~tool_schema:(tool schema) (action ())
+(* A whole lane action tool schema, valid as a worker must advertise it. *)
+let tool_name = "lane_act"
+let tool action = json (Printf.sprintf {|{"type":"object","properties":{
+  "context":{"type":"object","properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}},
+             "required":["instance_id","incarnation"],"additionalProperties":false},
+  "request_id":{"type":"string"},"action":%s},
+  "required":["context","request_id","action"],"additionalProperties":false}|} action)
+let verdict schema = R.judge ~tool_name ~tool_schema:(tool schema) (action ())
+(* The check a send of the filled action meets: the package's kind, the row's
+   two ids and a value for each named operator member. *)
+let send schema human = Masc.Lane_addon_action.validate ~schema:(tool schema) ~name:tool_name
+  (`Assoc [ "context", `Assoc [ "instance_id", `String "quiz"; "incarnation", `String "quiz" ];
+            "request_id", `String "r1";
+            "action", `Assoc ([ "kind", `String "dispute"; "ask_id", `String "a1"; "question_id", `String "q1" ]
+                              @ List.map (fun name -> name, `String "typed") human) ])
+let with_keyword key value text = match json text with
+  | `Assoc fields -> Yojson.Safe.to_string (`Assoc (fields @ [ key, json value ]))
+  | _ -> fail "fixture is not an object"
 let string_member = {|{"type":"string"}|}
 let branch kind members required = Printf.sprintf
   {|{"type":"object","title":"%s","properties":{"kind":{"type":"string","const":"%s"}%s},"required":[%s],"additionalProperties":false}|}
@@ -82,10 +98,24 @@ let verdicts () =
     | R.Offered { branch; human } ->
         check (option int) (label ^ ": branch") expected_branch branch;
         check (list (pair string bool)) (label ^ ": human members") expected_human
-          (List.map (fun (member : R.human_member) -> member.name, member.required) human)
+          (List.map (fun (member : R.human_member) -> member.name, member.required) human);
+        (* An offer agrees with the send check: the filled action passes, and
+           it fails without the operator's required members. *)
+        check bool (label ^ ": the filled action sends") true
+          (Result.is_ok (send schema (List.map (fun (member : R.human_member) -> member.name) human)));
+        check bool (label ^ ": a required operator member is needed")
+          (List.exists (fun (member : R.human_member) -> member.required) human)
+          (Result.is_error (send schema (List.filter_map (fun (member : R.human_member) ->
+               if member.required then None else Some member.name) human)))
     | R.Refused _ -> fail (label ^ ": expected Offered") in
   let refused label expected schema =
     check bool label true (verdict schema = R.Refused expected) in
+  (* These schemas pass the advertised schema check, so a worker can send
+     them. *)
+  let refused_valid label expected schema =
+    check bool (label ^ ": a worker can advertise it") true
+      (Result.is_ok (Masc.Lane_addon_action.validate_schema (tool schema)));
+    refused label expected schema in
   let flat kinds = Printf.sprintf
     {|{"type":"object","properties":{"kind":{"type":"string","enum":[%s]},"ask_id":%s,"question_id":%s,"note":%s},"required":["kind"],"additionalProperties":false}|}
     kinds string_member string_member string_member in
@@ -106,15 +136,25 @@ let verdicts () =
     {|{"type":"object","properties":{"kind":{"type":"string"}},"additionalProperties":false,"oneOf":[{"type":"object","properties":{},"additionalProperties":false}]}|};
   refused "open object" R.Schema_shape_unsupported
     {|{"type":"object","properties":{"kind":{"type":"string"},"ask_id":{"type":"string"},"question_id":{"type":"string"}},"additionalProperties":true}|};
+  (* A whole-object const or enum limits the action beyond its members. *)
+  refused_valid "a const on the oneOf node" R.Schema_shape_unsupported
+    (with_keyword "const" {|{"kind":"export"}|} three_branches);
+  refused_valid "an enum on a branch" R.Schema_shape_unsupported
+    (Printf.sprintf {|{"type":"object","oneOf":[%s,%s]}|} (branch "compose" [ "topic" ] [])
+       (with_keyword "enum" {|[{"kind":"dispute","ask_id":"a","question_id":"q"}]|}
+          (branch "dispute" [ "ask_id"; "question_id" ] [])));
+  refused_valid "a const on the one object" R.Schema_shape_unsupported
+    (with_keyword "const" {|{"kind":"compose"}|} (flat {|"compose","dispute"|}));
   check bool "no action property" true
-    (R.judge ~tool_schema:(`Assoc [ "type", `String "object" ]) (action ()) = R.Refused R.Schema_shape_unsupported)
+    (R.judge ~tool_name ~tool_schema:(`Assoc [ "type", `String "object" ]) (action ())
+     = R.Refused R.Schema_shape_unsupported)
 
 let snapshot_fields () =
-  check bool "no actions, no field" true (R.snapshot_fields ~actions:[] ~tool_schema:None = []);
+  check bool "no actions, no field" true (R.snapshot_fields ~actions:[] ~tool:None = []);
   check bool "no advertised schema" true
-    (R.snapshot_fields ~actions:[ action () ] ~tool_schema:None = [ "row_actions", `Null ]);
+    (R.snapshot_fields ~actions:[ action () ] ~tool:None = [ "row_actions", `Null ]);
   check bool "one verdict per action" true
-    (R.snapshot_fields ~actions:[ action () ] ~tool_schema:(Some (tool three_branches))
+    (R.snapshot_fields ~actions:[ action () ] ~tool:(Some (tool_name, tool three_branches))
      = [ "row_actions", json {|[{"index":0,"offered":{"branch":1,"human":[{"name":"note","required":true}]}}]|} ])
 
 let manifest ~actions_tool ~outputs ~actions = Printf.sprintf {|id = "row-action-probe"
@@ -129,17 +169,18 @@ cpus = 1
 memory_bytes = 67108864
 pids = 16
 max_reply_bytes = 4096
-
-[world.outputs.quiz]
 %s
-
 [interface]
 presentation = '''{"actions":[%s]}'''
 |} (if actions_tool then {|"observe", "act"|} else {|"observe"|})
   (if actions_tool then "\n[world.actions]\ntool = \"lane_act\"\n" else "")
   outputs actions
 
-let manifest_checks_action_lanes () =
+let port lanes = Printf.sprintf "\n[world.outputs.quiz]\n%s\n" lanes
+
+(* Ports publish lanes to other installations; a package also emits lanes no
+   port names, so a row action's lane is not checked against them. *)
+let manifest_checks_action_tool () =
   let directory = Filename.temp_dir "row-action-manifest" "" in
   let path = Filename.concat directory "lane.toml" in
   let load text =
@@ -148,18 +189,23 @@ let manifest_checks_action_lanes () =
   Fun.protect ~finally:(fun () ->
       (try Sys.remove path with Sys_error _ -> ()); (try Sys.rmdir directory with Sys_error _ -> ()))
     (fun () ->
-      let loaded label result = match result with
+      let actions label result = match result with
         | Ok (package : Masc.Lane_addon_types.package) ->
-            check int label 1 (List.length package.Masc.Lane_addon_types.presentation.P.actions)
+            List.length package.Masc.Lane_addon_types.presentation.P.actions
         | Error error -> fail (label ^ ": " ^ Masc.Lane_addon_manifest.error_to_string error) in
-      loaded "a selected output lane" (load (manifest ~actions_tool:true
-        ~outputs:{|lanes = ["quiz/questions"]|} ~actions:dispute_action));
-      loaded "every lane is emitted" (load (manifest ~actions_tool:true
-        ~outputs:"all_lanes = true" ~actions:dispute_action));
-      check bool "a lane the package does not emit" true (Result.is_error (load (manifest
-        ~actions_tool:true ~outputs:{|lanes = ["quiz/sessions"]|} ~actions:dispute_action)));
+      let loaded label ~outputs =
+        check int label 1 (actions label (load (manifest ~actions_tool:true ~outputs ~actions:dispute_action))) in
+      loaded "a lane one port names" ~outputs:(port {|lanes = ["quiz/questions"]|});
+      loaded "a port with every lane" ~outputs:(port "all_lanes = true");
+      loaded "a lane no port names" ~outputs:(port {|lanes = ["quiz/sessions"]|});
+      loaded "no port" ~outputs:"";
+      (* The same package loads without the row action, so the action alone
+         is what needs the tool. *)
+      let outputs = port {|lanes = ["quiz/questions"]|} in
+      check int "no action tool and no row action" 0
+        (actions "no action tool" (load (manifest ~actions_tool:false ~outputs ~actions:"")));
       check bool "no action tool" true (Result.is_error (load (manifest
-        ~actions_tool:false ~outputs:{|lanes = ["quiz/questions"]|} ~actions:dispute_action))))
+        ~actions_tool:false ~outputs ~actions:dispute_action))))
 
 let () =
   run "lane_addon_row_actions" [
@@ -173,5 +219,5 @@ let () =
       test_case "verdicts" `Quick verdicts;
       test_case "snapshot fields" `Quick snapshot_fields;
     ];
-    "manifest", [ test_case "action lanes are output lanes" `Quick manifest_checks_action_lanes ];
+    "manifest", [ test_case "row actions need an action tool, not a port" `Quick manifest_checks_action_tool ];
   ]

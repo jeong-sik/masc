@@ -24,10 +24,17 @@ let names = function
       | _, (Some _ | None) -> None) values (Some [])
   | _ -> None
 
+(* A judged node carries only these keywords besides [title] and
+   [description]. Any other keyword on it, such as an object [const] or
+   [enum], limits the whole action in a way the members do not show, so the
+   node is unsupported. *)
+let only keywords fields =
+  List.for_all (fun (key, _) -> List.mem key ("title" :: "description" :: keywords)) fields
+
 (* A branch is a closed object: it accepts exactly the members it declares, so
    a member a row action names either belongs to it or refuses it. *)
 let closed_object = function
-  | `Assoc fields when not (List.mem_assoc "oneOf" fields) ->
+  | `Assoc fields when only [ "type"; "properties"; "required"; "additionalProperties" ] fields ->
       (match List.assoc_opt "type" fields, List.assoc_opt "properties" fields,
              List.assoc_opt "additionalProperties" fields with
        | Some (`String "object"), Some (`Assoc properties), Some (`Bool false) ->
@@ -42,9 +49,8 @@ let closed_object = function
    fail "exactly one alternative" on every send. *)
 let shape = function
   | `Assoc fields when List.mem_assoc "oneOf" fields ->
-      (match List.assoc_opt "type" fields, List.assoc_opt "properties" fields,
-             List.assoc_opt "oneOf" fields with
-       | Some (`String "object"), None, Some (`List (_ :: _ as alternatives)) ->
+      (match List.assoc_opt "type" fields, List.assoc_opt "oneOf" fields with
+       | Some (`String "object"), Some (`List (_ :: _ as alternatives)) when only [ "type"; "oneOf" ] fields ->
            let branches = List.filter_map closed_object alternatives in
            if List.length branches = List.length alternatives then Some (Union branches) else None
        | _ -> None)
@@ -58,29 +64,31 @@ let action_object = function
       | _ -> None)
   | _ -> None
 
-let accepts branch (action : P.row_action) =
+(* A fixed value is checked under the action tool's name, as a send checks
+   that member, because the checker's rules depend on that name. *)
+let accepts ~tool_name branch (action : P.row_action) =
   let member_schema name =
     Option.to_result ~none:(Member_not_in_branch name) (List.assoc_opt name branch.properties) in
   let* _ = Lane_addon_json.traverse (fun (name, _) -> member_schema name) action.P.fixed in
   let* _ = Lane_addon_json.traverse (fun (name, _) -> member_schema name) action.P.from_row in
   let* _ = Lane_addon_json.traverse (fun (name, value) ->
       let* schema = member_schema name in
-      Lane_addon_action.validate_input ~schema ~name value
+      Lane_addon_action.validate_input ~schema ~name:tool_name value
       |> Result.map_error (fun _ -> Fixed_value_rejected name)) action.P.fixed in
   let taken name = List.mem_assoc name action.P.fixed || List.mem_assoc name action.P.from_row in
   Ok (List.filter_map (fun (name, _) ->
       if taken name then None else Some { name; required = List.mem name branch.required })
       branch.properties)
 
-let judge ~tool_schema action =
+let judge ~tool_name ~tool_schema action =
   match Option.bind (action_object tool_schema) shape with
   | None -> Refused Schema_shape_unsupported
-  | Some (Single branch) -> (match accepts branch action with
+  | Some (Single branch) -> (match accepts ~tool_name branch action with
       | Ok human -> Offered { branch = None; human }
       | Error refusal -> Refused refusal)
   | Some (Union branches) ->
       let accepted = List.concat (List.mapi (fun index branch ->
-          match accepts branch action with Ok human -> [ (index, human) ] | Error _ -> []) branches) in
+          match accepts ~tool_name branch action with Ok human -> [ (index, human) ] | Error _ -> []) branches) in
       (match accepted with
        | [] -> Refused No_branch_accepts
        | [ (index, human) ] -> Offered { branch = Some index; human }
@@ -109,10 +117,10 @@ let to_json ~index = function
 (* Written only for a package that declares row actions, so every other
    instance snapshot keeps its shape. [null] while no worker advertises an
    action schema: there is nothing to judge against yet. *)
-let snapshot_fields ~actions ~tool_schema = match actions with
+let snapshot_fields ~actions ~tool = match actions with
   | [] -> []
   | actions ->
-      [ "row_actions", (match tool_schema with
+      [ "row_actions", (match tool with
           | None -> `Null
-          | Some tool_schema -> `List (List.mapi (fun index action ->
-              to_json ~index (judge ~tool_schema action)) actions)) ]
+          | Some (tool_name, tool_schema) -> `List (List.mapi (fun index action ->
+              to_json ~index (judge ~tool_name ~tool_schema action)) actions)) ]

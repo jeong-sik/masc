@@ -9,7 +9,8 @@ type human_member = { name : string; required : bool }
 type refusal =
   | Schema_shape_unsupported
       (** The action is neither one closed object nor an object [oneOf] of
-          closed objects. *)
+          closed objects, or one of those nodes carries a keyword besides
+          their structure, [title] and [description]. *)
   | No_branch_accepts
   | Several_branches_accept of int list
   | Member_not_in_branch of string
@@ -23,18 +24,21 @@ type verdict =
           for a single closed object. *)
   | Refused of refusal
 
-val judge : tool_schema:Yojson.Safe.t -> Lane_addon_presentation.row_action -> verdict
+val judge :
+  tool_name:string -> tool_schema:Yojson.Safe.t -> Lane_addon_presentation.row_action -> verdict
 (** [tool_schema] is the whole advertised lane action tool schema; the action
     is its [action] property. A branch accepts when it declares every fixed and
-    row member and accepts every fixed value. Exactly one accepting branch is
-    Offered. *)
+    row member and accepts every fixed value. Fixed values are checked under
+    [tool_name], the name a send is checked under. Exactly one accepting branch
+    is Offered. *)
 
 val to_json : index:int -> verdict -> Yojson.Safe.t
 
 val snapshot_fields :
   actions:Lane_addon_presentation.row_action list ->
-  tool_schema:Yojson.Safe.t option ->
+  tool:(string * Yojson.Safe.t) option ->
   (string * Yojson.Safe.t) list
 (** The instance snapshot's [row_actions]: nothing for a package without row
-    actions, [null] while no action schema is advertised, otherwise one verdict
-    per action in declaration order. *)
+    actions, [null] while no action tool name and schema are advertised,
+    otherwise one verdict per action in declaration order. [tool] is the action
+    tool's name and its advertised schema. *)

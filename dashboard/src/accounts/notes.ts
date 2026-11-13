@@ -44,12 +44,16 @@ function problemWords(problem: Shown): string {
   }
 }
 
+/** What a page says while the browser leaves for the sign-in page because a
+    request found that the session had ended. */
+export const sessionEndedWords = '세션이 끝났어요. 로그인 화면으로 이동해요…'
+
 /** What the status line under a button that reads again says. */
 function nextWords(next: Next): string {
   switch (next) {
     case 'idle': return ''
     case 'reading': return '다시 불러오고 있어요…'
-    case 'leaving': return '세션이 끝났어요. 로그인 화면으로 이동해요…'
+    case 'leaving': return sessionEndedWords
   }
 }
 

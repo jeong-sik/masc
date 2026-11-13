@@ -229,7 +229,7 @@ let exit_description = function
 
 (* What a readiness answer that is not the replacement's 200 says, so the wait
    shows why it goes on. [None] while nothing listens yet. *)
-let describe_answer ~child_pid = function
+let describe_answer = function
   | Error _ -> None
   | Ok (status, body) ->
     (match json_field "phase" body, json_field "error" body with
@@ -274,7 +274,7 @@ let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
          ("the owner lease cannot be read: "
           ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))
   | Upgrade.Nobody_announces
-  | Upgrade.No_ready_answer -> Waiting (describe_answer ~child_pid:child.pid answer)
+  | Upgrade.No_ready_answer -> Waiting (describe_answer answer)
 
 let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
   let rec ready last =

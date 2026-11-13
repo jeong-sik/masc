@@ -1,0 +1,36 @@
+baseline	all pass	
+m01-acted-on-first	caught	1: reading the subscriptions leaves for the sign-in page when a reading of the subscriptions, while the offer failed finds no session
+m02-acted-on-second	caught	1: reading the subscriptions leaves for the sign-in page when a reading of the offer, while the other reading failed finds no session
+m05-reads-again-for-same-person	caught	3: reading the subscriptions reads once for a person however often it is asked; reading the subscriptions does nothing for a person whose reading failed: the retry reads again
+m06-retry-while-retrying	caught	1: reading the subscriptions reads once on a retry however often it is asked
+m07b-slow-at-once	caught	2: reading the subscriptions says it is waiting only once a reading is slow; reading the subscriptions says a reading is slow only once it has lasted long enough itself
+m08-follow-does-not-track	caught	2: following the console reads for each person the console comes to show signed in, and no more; following the console reads once for a person whose console moves between states
+m09-read-state-alert	caught	2: the panel has one line a screen reader reads out in each state; the panel says a problem where a screen reader announces it only when a reading failed
+m10-attempts-reset	caught	2: reading the subscriptions says a failure, counts the failures in a row, and reads again on a retry; the panel puts a new note on the page when a reading fails again
+m11-no-leave	caught	4: reading the subscriptions keeps the page of a failed reading while it leaves after a retry finds no session; reading the subscriptions leaves for the sign-in page when a reading of the subscriptions finds no session
+m12-checked-any-runtime	caught	1: what the panel knows of each account counts a model as checked only while the server still finds it in its settings
+m15-fact-value-and-unread	caught	1: readOwned refuses an integration and why it was not read
+m16-fact-missing-field	caught	2: readOwned refuses a reason with no integration; readOwned refuses a reason with no model
+m17-accounts-old-shape	caught	1: readOwned refuses accounts as ids, the shape before
+m18-runtimes-optional	caught	1: readOwned refuses no runtimes
+m19-refused-without-code	caught	1: readIntegrations refuses a refusal with no code
+m20-unknown-refusal-known	caught	1: readIntegrations reads the refusal a code named later as unrecognised
+m21-unknown-model-unread-known	caught	1: readOwned reads why the model of a Runtime is not known: a code named later as unrecognised
+m22-unknown-integration-unread-known	caught	1: readOwned reads why the subscription of an account is not known: a code named later as unrecognised
+n02-runtimes-not-filtered	caught	3: what the panel knows of each account gives an account only the Runtimes made on it; what the panel knows of each account says whether a Keeper can run on an account, or what stands in its way
+n03-offered-ignores-id	caught	2: what the panel knows of each account finds the subscription the server offers for an account, and none when it is not known or no longer offered; what the panel knows of each account says whether a Keeper can run on an account, or what stands in its way
+n04-offered-for-unknown-account	caught	2: what the panel knows of each account finds the subscription the server offers for an account, and none when it is not known or no longer offered; what the panel knows of each account says whether a Keeper can run on an account, or what stands in its way
+n05-accounts-reordered	caught	5: what the panel knows of each account keeps the order the server lists the accounts in; what the panel knows of each account finds the subscription the server offers for an account, and none when it is not known or no longer offered
+n06b-chip-says-runs-always	NOT CAUGHT	
+n07b-chip-says-checked-always	NOT CAUGHT	
+p01-older-reading-writes	caught	2: reading the subscriptions drops what it read for a person who is no longer the one shown; reading the subscriptions takes the answer of the newest reading, whatever an older one ends with
+p02-stale-timer-marks-slow	caught	1: reading the subscriptions says a reading is slow only once it has lasted long enough itself
+p03-retry-drops-its-page	caught	1: reading the subscriptions keeps the page of a failed reading while it leaves after a retry finds no session
+p04-keeper-ignores-model	caught	1: what the panel knows of each account says whether a Keeper can run on an account, or what stands in its way
+p05-keeper-ignores-refusal	caught	1: what the panel knows of each account says whether a Keeper can run on an account, or what stands in its way
+p06-runnable-all	caught	1: what the panel knows of each account names the subscriptions a Keeper may run on here
+p07-no-heading-focus	caught	1: the panel moves the focus to the heading of the panel when a retry reads
+p08-focus-taken-from-elsewhere	caught	1: the panel leaves a focus the person moved elsewhere during a retry where it is
+p09-focus-on-first-read	caught	1: the panel leaves the focus alone when the first reading reads
+p10-owned-on-unlisted-account	caught	1: readOwned refuses a Runtime on an account not listed
+p11-offer-names-every-subscription	NOT CAUGHT	

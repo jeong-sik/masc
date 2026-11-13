@@ -184,7 +184,12 @@ class OwnerWithoutModel(unittest.TestCase):
                     printed = said.read_text()
                     self.assertEqual(result.returncode, 0, printed + result.stderr)
                     self.assertIn(f'(pid {process.pid}) on port {port} to stop', printed)
-                    self.assertIn('Ready after', printed)
+                    # The kernel named the replacement on the single-user
+                    # announcement file, and restart reports it as that kind.
+                    ready_lines = [line for line in printed.splitlines() if line.startswith('Ready after')]
+                    self.assertEqual(len(ready_lines), 1, printed)
+                    self.assertRegex(ready_lines[0], r'^Ready after [0-9.]+ s: masc')
+                    self.assertNotIn('the account server', ready_lines[0])
                     self.assertIsNotNone(replacement(), printed)
                     self.assertNotEqual(replacement(), process.pid)
                     # Ready is said only once the old server let go of the

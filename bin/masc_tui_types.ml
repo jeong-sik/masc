@@ -21423,6 +21423,11 @@ let title_unread ~ko = "(" ^ field_unread ~ko ^ ")"
 let field_failed ~ko = if ko then "조회 실패" else "load failed"
 let title_failed ~ko = "(" ^ field_failed ~ko ^ ")"
 
+(* A reading kept from before a refresh that failed, in RFC-0519 section 2's
+   word. The Runtime probe column and the Metrics Memory and Gate rows draw
+   it; the fleet line sits below this module and spells the same pair. *)
+let field_stale ~ko = if ko then "이전 관측" else "stale"
+
 let title_missing_reading ~ko ~error =
   if Option.is_some error then title_failed ~ko else title_unread ~ko
 

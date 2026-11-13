@@ -12,6 +12,7 @@ type reading = {
 }
 type t = { description : string option; readings : reading list; actions : row_action list }
 type row_value = Present of Yojson.Safe.t | Absent | Wrong_shape
+type reading_refusal = Field_absent | Field_wrong_shape | Format_mismatch
 let empty = {description=None; readings=[]; actions=[]}
 open Result.Syntax
 let text = function
@@ -115,9 +116,9 @@ let row_value path fields = match resolve path fields with
 let value (reading : reading) fields =
   let* value = match resolve reading.path fields with
     | Present value -> Ok value
-    | Absent -> Error "field unavailable"
-    | Wrong_shape -> Error "field path does not address an object" in
+    | Absent -> Error Field_absent
+    | Wrong_shape -> Error Field_wrong_shape in
   match reading.format,value with
   | Text,`String _ | Number,(`Int _ | `Intlit _) | Boolean,`Bool _ | Json,_ -> Ok value
   | Number,`Float number when Float.is_finite number -> Ok value
-  | (Text | Number | Boolean), _ -> Error "field does not match declared display format"
+  | (Text | Number | Boolean), _ -> Error Format_mismatch

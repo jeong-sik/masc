@@ -245,7 +245,8 @@ val value_rows : depth:int -> Yojson.Safe.t -> value_row list
     bullet, a string is its own text, and a nested value sits one level
     deeper. A written line break starts a row. *)
 val result_readings :
-  instance -> Row.row -> (Masc.Lane_addon_presentation.reading * (Yojson.Safe.t, string) result) list
+  instance -> Row.row ->
+  (Masc.Lane_addon_presentation.reading * (Yojson.Safe.t, Masc.Lane_addon_presentation.reading_refusal) result) list
 (** The row's value for each reading declared on the row's exact Lane. *)
 val result_window : rows:int -> focus:int -> count:int -> int * int
 (** [(first, shown)]: the list rows the Results list draws when [count] rows

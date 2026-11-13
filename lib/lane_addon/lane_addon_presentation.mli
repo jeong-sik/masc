@@ -32,7 +32,12 @@ val row_value : string list -> Yojson.Safe.t -> row_value
 (** The value a row action member reads from a row's fields. [Absent]: a key
     on the path is missing. [Wrong_shape]: a step on the path is not an object,
     or the value is [null]. *)
-val value : reading -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
+(** Why a reading shows no value. The screen writes the words. *)
+type reading_refusal =
+  | Field_absent  (** a key on the path is missing *)
+  | Field_wrong_shape  (** a step on the path is not an object *)
+  | Format_mismatch  (** the value does not match the declared [format] *)
+val value : reading -> Yojson.Safe.t -> (Yojson.Safe.t, reading_refusal) result
 (** The value [reading.path] addresses in a row's fields, once it matches the
     declared format. A text value keeps its line breaks; the terminal and HTML
     consumers lay the value out and sanitize/escape it at their own display

@@ -1530,15 +1530,20 @@ let value_row_spans ~width (row : value_row) =
        | None -> Span.empty) ] in
   led_rows ~width ~lead ~text_style:Span.plain row.text
 
+let reading_refusal_text : Masc.Lane_addon_presentation.reading_refusal -> string = function
+  | Field_absent -> "field unavailable"
+  | Field_wrong_shape -> "field path does not address an object"
+  | Format_mismatch -> "field does not match declared display format"
+
 let reading_spans ~width ((reading : Masc.Lane_addon_presentation.reading), value) =
   let unit = Option.fold ~none:"" ~some:(fun unit -> " " ^ unit) reading.unit in
   let label = Span.text (label_style ()) (Masc.Tui_terminal_text.sanitize_terminal_text reading.label) in
   let beside text = led_rows ~width ~lead:(Span.concat [ label; Span.text Span.plain "  " ])
       ~text_style:Span.plain (text ^ unit) in
   match value with
-  | Error detail ->
+  | Error refusal ->
       led_rows ~width ~lead:(Span.concat [ label; Span.text Span.plain "  " ])
-        ~text_style:(muted_style ()) ("unavailable · " ^ detail)
+        ~text_style:(muted_style ()) ("unavailable · " ^ reading_refusal_text refusal)
   | Ok value ->
       let outline () =
         Span.concat [ label; Span.text (muted_style ()) unit ]

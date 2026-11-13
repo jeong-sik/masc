@@ -342,9 +342,12 @@ F1 만으로는 아무것도 고쳐지지 않는다. 지우기가 보여도 틀�
   - `adds_unsupported`: 원래 기억과 근거 후보 어디에도 없고 그 말에서 바로 나오지도 않는 사실, 조건, 원인, 수, 이름, 때, 상태를 말한다.
   - `uncertain`: case 만으로는 가를 수 없다.
 - 이 판정은 세부가 빠졌는지 보지 않는다. 빠진 세부는 흡수 게이트와 하네스의 합침 판정이 본다.
-- 셈은 근거 후보가 있는 합침과 없는 합침을 나눈다. 근거 후보가 없는 합침은 §7.1 전에는 거절되던 답이다.
+- 셈은 합침을 둘로 나눈다. 지지 후보가 그 claim 을 `incorporated` 로 가리키면 §7.1 전에도 받던 합침이다(`verify_support`).
+  그런 후보가 없으면 §7.1 로만 받는 합침이다. `already_represented` 후보만 그 claim 을 가리키는 합침도 여기에 든다.
 - 지우기·합침 판정처럼 E-synth 실행만 받는다. 게이트와 pass lines 는 이 숫자를 읽지 않는다.
-- 도구는 `scripts/tinker/librarian/merge_additions.py` 다. 판정자 폴더는 합침 판정과 같은 방식으로 쓴다.
+- 도구는 `scripts/tinker/librarian/merge_additions.py` 다. 판정자 폴더에는 case 와 판정 기준만 둔다.
+  흡수 게이트의 분류가 섞이지 않게 librarian.md 는 주지 않는다.
+- 셀 때는 실행과 판정 기준에서 case 를 다시 만든다. 판정자 폴더의 case 와 판정 기준이 그것과 같을 때만 판정을 읽는다.
 
 ### 7.3 admission 이 빈 입력 칸을 그릴지
 

@@ -44,7 +44,7 @@ base path·port·host 는 `masc start` 와 같은 방식으로 정한다. 코드
    | lease 주인이 이 포트를 한 사용자 서버로 알린다 | 그 포트의 `/health` 에서 버전만 읽고 2 로 간다. 버전을 못 읽으면 pid 를 알리고 거절한다 |
    | lease 주인이 이 포트를 계정 서버로 알린다 | 호스트 권한으로 종료를 요청하고 3 으로 간다(`stop_account_server`) |
    | lease 주인이 다른 포트를 알린다 | 거절한다. 그 포트를 알려 준다 |
-   | lease 주인이 아무 포트도 알리지 않는다 | 거절한다. pid 를 알려 준다. 아직 뜨는 중이거나, 포트를 알리지 않는 옛 MASC 가 띄운 서버다. 다 뜬 뒤 다시 하거나, `kill <pid>` 뒤 `masc start` 를 한다 |
+   | lease 주인이 아무 포트도 알리지 않는다 | 거절한다. pid 를 알려 준다. 커널은 이유를 말하지 않아서 문구가 네 경우를 다 적는다. 뜨는 중이면 기다린다. 끝나는 중이면 끝난 뒤 다시 한다. 127.0.0.1 이 닿지 않는 주소에서 듣는 서버면 이 host 의 명령으로는 쓸 수 없다. 포트를 알리지 않는 MASC 가 띄운 서버면 `kill <pid>` 뒤 `masc start` 를 한다 |
    | lease 주인이 없고 포트가 비어 있다 | 멈출 서버가 없다. 3 으로 간다 |
    | lease 주인이 없는데 포트를 누가 잡고 있다 | 거절한다. 아무것도 멈추거나 띄우지 않는다 |
 
@@ -73,7 +73,7 @@ Ready after 14.2 s: masc 0.64.0 (d0c79a5d83a), pid 8821, serving /Users/dancer/m
 
 ### 2.3 새 서버인지는 포트 알림으로 가른다
 
-`/health/ready` 는 200 인지만 본다. 본문은 읽지 않는다. 200 이 오면 이 포트의 알림 바이트를 누가 쥐고 있는지 커널에 한 번 묻는다(`Server_upgrade_preparation.replacement_sighting`). 한 사용자 서버 파일을 먼저 보고, 거기 주인이 없으면 계정 서버 파일을 본다. 그 주인이 3 에서 띄운 pid 면 준비된 것이다. 서버는 listener 를 bind 한 뒤, `/health` 에 답하기 전에 알린다. 그래서 새 서버가 200 을 줄 때는 이미 알린 뒤다. 앞 서버는 끝날 때까지 자기 바이트를 쥐고 있으므로, 그동안은 `pid A holds the announcement of port P` 가 찍힌다.
+`/health/ready` 는 200 인지만 본다. 본문은 읽지 않는다. 200 이 오면 이 포트의 알림 바이트를 누가 쥐고 있는지 커널에 한 번 묻는다(`Server_upgrade_preparation.replacement_sighting`). 한 사용자 서버 파일을 먼저 보고, 거기 주인이 없으면 계정 서버 파일을 본다. 그 주인이 3 에서 띄운 pid 면 준비된 것이다. 주인이 나온 파일이 새 서버의 종류다. `Ready after` 줄은 그 종류로 적고, 포트에서는 버전만 읽는다. 서버는 listener 를 bind 한 뒤, `/health` 에 답하기 전에 알린다. 그래서 새 서버가 200 을 줄 때는 이미 알린 뒤다. 앞 서버는 listener 를 닫을 때 자기 바이트를 놓고, lease 는 끝날 때까지 쥔다. 앞 서버가 아직 알리는 동안 200 이 오면 `pid A holds the announcement of port P` 가 찍힌다. 앞 서버가 바이트를 놓은 뒤에는 새 서버가 알릴 때까지 새 줄 없이 기다린다. 그 사이 다른 명령은 앞 서버를 포트를 알리지 않는 주인으로 본다.
 
 ### 2.4 pg_ctl restart 와 다른 점
 
@@ -106,7 +106,7 @@ RFC-0447 §2.3·§3·§4·§5 를 이 내용으로 고쳤다.
 - R1 교체: 이 workspace 의 서버(pid A)가 떠 있을 때 `masc restart` 가 exit 0 이다. 출력에 A 와 새 pid B 가 있다. A 는 SIGTERM 한 번으로 끝나고, `/health/ready` 가 200 이고 B 가 포트 알림 바이트를 쥔다(`test_model_independent_owner.py` 의 `test_restart_replaces_a_real_server`). B 의 로그에 `Waiting for the previous owner … PID A` 가 한 줄 있다.
 - R2 빈 workspace: 서버가 없을 때 종료 요청 없이 띄우고 exit 0 이다.
 - R3 다른 프로세스의 포트: 이 workspace 의 lease 주인이 없는데 포트를 누가 잡고 있으면 exit 1 이다. 그 프로세스는 그대로 돌고, 아무것도 띄우지 않는다.
-- R3a 알리지 않는 주인: lease 주인이 아무 포트도 알리지 않으면 exit 1 이고, 문구에 그 pid 가 있다. 로그인하지 않고, 아무것도 멈추거나 띄우지 않는다.
+- R3a 알리지 않는 주인: lease 주인이 아무 포트도 알리지 않으면 exit 1 이고, 문구에 그 pid 가 있다. 로그인하지 않고, 아무것도 멈추거나 띄우지 않는다. 다른 포트를 알리는 주인, 알린 포트에서 버전을 답하지 않는 주인, R3 도 같다(`test_setup_cli.py` 의 `test_restart_leaves_a_workspace_it_cannot_stop_alone`).
 - R4 기동 실패: 새 서버가 준비 전에 끝나면(예: RFC-0420 의 저장소 거부) exit 1 이고 로그 끝부분이 나온다.
 - R5 대기 단위 검사: `test_server_startup_takeover` 의 "a waiting start takes the lease when the owner exits". `on_wait` 안에서만 주인에게 끝내라고 알려, 대기가 잠금을 쥔 동안 시작되고 주인이 스스로 끝나는 순간 끝남을 보인다. 주인의 종료 상태가 0 이라 시그널을 받지 않았음도, 받은 lease 를 다른 프로세스가 커널에서 잡지 못함도 보인다.
 - R6 두 번째 대기자: 같은 파일의 "a second waiter is refused while one waits". 첫 대기자가 기다리는 동안 두 번째는 첫 대기자의 pid 를 담은 `Another_replacement_waits` 를 받고, 주인이 끝나면 첫 대기자가 lease 를 받는다. waiter 잠금을 빼면 이 검사가 실패한다.

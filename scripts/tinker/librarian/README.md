@@ -50,6 +50,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `audit_decisions.py` | Checks the judge's decisions, and turns its classes for off-label drops into the memories the verdict leaves out |
 | `merge_cases.py` | At verdict time, asks a blind judge of every memory an answer absorbs what MASC's absorb gate asks, in the gate's words |
 | `merge_decisions.py` | Checks the judge's classes for absorbs, and counts absorb precision and judged merge recall from them |
+| `merge_additions.py` | Asks a blind judge whether each claim an answer merges memories into says what its sources and cited candidates do not, and counts the classes; no gate reads them |
 | `admission_request.py` | Reads an admission prompt into typed parts and writes it back byte for byte |
 | `admission_template.py` | Splits `config/prompts/librarian.md` at its variables |
 | `prompt_facts.py` | Reads and writes the prompt's current memory and candidates as MASC's JSON |
@@ -302,6 +303,15 @@ It also lists, by item, the memory IDs each candidate dropped that the live
 answer keeps (`dropped_not_in_live`). G2 caps their number; read the list
 before an install, since the count does not tell a lost memory from a stale
 one the live answer kept.
+
+`merge_additions.py cases` takes `--requests`, `--run` and `--out` as
+`merge_cases.py` does and writes the judge's folder the same way, with one case
+for each claim an answer merges memories into: the memories it stands in for,
+the candidates it cites and the claim.
+`merge_additions.py count` makes the cases again from the run, reads the
+decisions only while the judge's cases and the key are those, and prints each
+target's merges by class, apart for claims that cite a candidate and claims that
+cite none (RFC-0517 §7.2). The verdict and the gates do not read these numbers.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. So does HTTP 402 from Tinker: the

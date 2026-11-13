@@ -1256,6 +1256,73 @@ let test_mixed_admission ~depends_on_deferred () =
       (Fs_compat.load_file queue_path))
 ;;
 
+(* RFC-0517 §7.1: a pass whose only candidate is not durable may still drop
+   current memories, and merge them, with empty change_support. The same answer
+   is refused when its new claim absorbs nothing, or revises the dropped memory
+   through [supersedes]: no candidate carried that knowledge. *)
+type unsupported_change = Drops_only | Merges_current | Merges_and_supersedes | Absorbs_nothing
+
+let test_admission_change_without_candidate_support shape () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  let module Queue = Masc.Keeper_memory_admission_queue in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"unsupported merge fixture" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let initial = Current.replace ~keepers_dir ~keeper_id ~expected_revision:None
+    ~now:1_000_000. ~source:{Current.kind=Current.Explicit_write; trace_id="seed"}
+    ~facts:[current_a;current_b] () |> require in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = Masc_test_deps.meta_of_json_fixture
+    (`Assoc ["name",`String keeper_id;"trace_id",`String "unsupported-merge"]) |> require in
+  let written = Masc.Keeper_tool_memory_runtime.keeper_memory_write_with_outcome
+    ~config ~meta ~args:(`Assoc ["content",`String "A transient debug print."]) in
+  let request_id = Yojson.Safe.Util.(Yojson.Safe.from_string written.raw_output
+    |> member "request_id" |> to_string) in
+  let admission = match Queue.read_pending ~keepers_dir ~keeper_id |> require with
+    | Some batch -> batch | None -> fail "missing candidate" in
+  let merged = "keep A, stated once" in
+  let claim absorbs supersedes = `Assoc ["claim",`String merged;
+    "category",`String "fact";"supersedes",supersedes;"absorbs",`List absorbs;
+    "evidence",`Assoc ["conversation",`List [];"tools",`List [];
+      "counterpart",`Bool false;"task_contexts",`Bool false]] in
+  (* [committed_facts] is the Memory a committed answer leaves; None is a refusal. *)
+  let new_claims, committed_facts = match shape with
+    | Drops_only -> [], Some [current_a.claim]
+    | Merges_current -> [claim [`String "m1"] `Null], Some [merged]
+    | Merges_and_supersedes -> [claim [`String "m1"] (`String "m2")], None
+    | Absorbs_nothing -> [claim [] `Null], None in
+  let commits = Option.is_some committed_facts in
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    Ok (Yojson.Safe.to_string (`Assoc [
+      "memory",`Assoc ["new_claims",`List new_claims;
+        "dropped",`List [`Assoc [Librarian.wire_field_memory_id,`String "m2";
+          Librarian.wire_field_reason,`String "B was withdrawn"]];
+        "working_contexts",`List []];
+      "change_support",`List [];
+      "candidates",`List [`Assoc ["request_id",`String request_id;
+        "outcome",`String "not_durable";"memory_claim",`Null;
+        "reason",`String "A debug print is not durable."]]])) in
+  let committed = ref 0 in
+  Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission
+    ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+  check int "only drops and pure merges commit without support" (if commits then 1 else 0) !committed;
+  Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
+  check bool "the settled candidate is consumed only with the commit" (not commits)
+    (Option.is_some (Queue.read_pending ~keepers_dir ~keeper_id |> require));
+  let after = match Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require with
+    | Some value -> value | None -> fail "snapshot absent" in
+  check (list string) "B goes and a merge replaces A; a refused answer changes nothing"
+    (Option.value committed_facts ~default:[current_a.claim;current_b.claim])
+    (List.map (fun (f : Memory.fact) -> f.claim) after.facts)
+;;
+
 let test_a_later_report_without_capacity_evidence_keeps_the_refusal () =
   let report evidence : Runtime.not_committed =
     { input_capacity_evidence = evidence;
@@ -2015,6 +2082,14 @@ let () =
             (test_mixed_admission ~depends_on_deferred:false)
         ; test_case "change depending on deferred A has no effects" `Quick
             (test_mixed_admission ~depends_on_deferred:true)
+        ; test_case "drops commit without candidate support" `Quick
+            (test_admission_change_without_candidate_support Drops_only)
+        ; test_case "merge and drop commit without candidate support" `Quick
+            (test_admission_change_without_candidate_support Merges_current)
+        ; test_case "a merge that revises a dropped memory still needs candidate support" `Quick
+            (test_admission_change_without_candidate_support Merges_and_supersedes)
+        ; test_case "a new claim absorbing nothing still needs candidate support" `Quick
+            (test_admission_change_without_candidate_support Absorbs_nothing)
         ; test_case "queued observation sees later retirement before admission" `Quick
             (test_admission_retirement_evidence ~reobserved:false)
         ; test_case "later reobservation may be admitted despite retirement history" `Quick

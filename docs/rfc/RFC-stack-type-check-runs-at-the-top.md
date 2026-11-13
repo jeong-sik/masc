@@ -3,7 +3,7 @@ rfc: "stack-type-check-runs-at-the-top"
 title: "스택의 type-check 는 꼭대기 PR 에서 한 번 돈다"
 status: Implemented
 created: 2026-11-12
-updated: 2026-11-12
+updated: 2026-11-13
 author: claude
 supersedes: []
 superseded_by: null
@@ -117,6 +117,8 @@ worker 는 병합하려는 head 의 `type-check` check-run 가운데 가장 새 
 ## 5. 대가
 
 1. **부분 병합은 검사 없이 통과한다.** GitHub 은 아래에서부터 이어진 층을 따로 병합하게 해 준다. 그 층들의 type-check 는 `skipped` 라서 규칙을 통과한다. 병합되는 트리(중간 층)는 아무도 컴파일해 보지 않았다. worker 는 부분 병합을 하지 않는다. 사람이 UI 나 API 로 하면 생긴다. 병합 뒤 `main-minimal-build` 가 잡는다. 2026-11-03 에 PR 단계 type-check 없이 병합된 PR 셋이 main 의 type-check 를 깨뜨렸고, `pr-type-check` 는 그래서 생겼다(workflow 머리 주석).
+   - 2026-11-13T05:38Z 에 실제로 있었다. 스택 #51624 의 아래 41층이 한 번에 병합됐다. 병합 계정은 `jeong-sik` 이다. worker 는 `github.token` 으로 병합하므로 worker 의 병합이 아니다.
+   - 41층의 마지막 head 는 모두 type-check 가 `skipped` 였다. 병합 뒤 `main-minimal-build`(run 43373486170)가 05:52:47Z 에 성공했다.
 2. **중간 층이 단독으로 컴파일되는지 모른다.** 스택을 통째로 병합하면 main 에는 층마다 commit 이 하나씩 생긴다. 중간 commit 에서 `git bisect` 가 빌드 실패를 만날 수 있다.
 3. **실패한 층을 가리키지 못한다.** 꼭대기에서 실패하면 어느 층이 원인인지는 컴파일 오류의 파일로 찾아야 한다.
 4. **worker 의 API 호출이 는다.** 독립 Ready PR 은 worker 가 깨어날 때마다 check-run 읽기가 한 번 든다. type-check 가 `skipped` 면 compare 가 한 번 더 든다. 문서나 dashboard 만 바꾼 PR 이 여기에 든다. 스택은 승인이 다 모인 실행에서만 든다. 이 RFC 전에는 0번이었다. 이 호출은 Actions 토큰의 시간당 한도(1,000)를 쓴다.
@@ -145,7 +147,12 @@ worker 는 병합하려는 head 의 `type-check` check-run 가운데 가장 새 
 1. **판정 스크립트와 시험(#51536, 끝).** `scripts/ci/pr_source_changes.py` 와 시험 13개. 로컬 git 저장소로 2층 스택을 만들어 스크립트를 실제로 돌린다. "꼭대기가 dashboard 층이고 아래층에 `.ml` 이 있다"가 들어 있다.
 2. **worker 확인과 시험(#51564, 끝).** `scripts/review/test_approval_auto_merge.py` 에 시험 9개. `workflow_dispatch` 실행의 `type-check` 가 그 commit 의 check-run 목록에 나오는 것은 실제 commit(`16a8484415eb`)에서 확인했다.
 3. **1과 2를 한 스택으로 올렸다.** 스택 #51537 이 2026-11-12T07:05Z 에 통째로 병합됐다.
-4. **측정(남음).** 층 10개 이상인 스택의 다음 restack 에서 `pr-type-check` 실행 수와 queued 시간을 §1 과 비교한다. 아래층이 runner 에서 `src=false` 로 끝나는 것도 그때 본다.
+4. **측정(2026-11-13, 끝).** 스택 #51624(TUI, 열린 층 47개)를 01:2xZ 에 통째로 다시 올렸다.
+   - `pr-type-check` 실행은 68개였다. type-check job 이 runner 에서 돈 것은 꼭대기 하나(376초)다. 61개는 `skipped` 였다. 6개는 같은 PR 의 새 실행에 밀려 runner 를 잡기 전에 취소됐다.
+   - 아래층의 `changes` 는 `src=false: stack #51624: the top pull request checks every layer` 로 끝났다(run 43344588397). 꼭대기는 `src=true: top of stack #51624; 155 files since 71626e7e1d80` 였다(run 43344577369).
+   - `changes` job 65개가 runner 를 잡았다. 하나에 2~8초, 합쳐 261초다. runner 를 기다린 시간은 길어야 5초였다.
+   - 옛 판정이면 소스를 바꾼 층마다 type-check 가 돈다. 이 스택은 49층 가운데 48층이 소스를 바꾼다(`is_source` 로 셈). 47층을 한 번 다시 올리면 type-check 가 약 46번 돈다. §1 의 job 시간(368~533초)으로 약 17,000~24,500초다. 이번에는 376초였다.
+   - 실행 목록은 `actions/workflows/pr-type-check.yml/runs?created=<구간>` 으로, job 시간은 `actions/runs/<id>/jobs` 로 읽었다.
 
 ## 8. 사용자 결정
 

@@ -6,7 +6,8 @@ and work with their own Keepers from that client. This guide covers what
 the endpoint serves, how to connect, and what it does not do yet.
 
 The single-user server has its own `/mcp`, with other tools and other
-credentials. Nothing here applies to it.
+credentials. Nothing here applies to it. How an operator sets the account
+server up is in [Setting up the account server](account-server-setup.md).
 
 ## What the endpoint serves
 
@@ -18,7 +19,7 @@ request, one JSON answer.
 | `initialize` | The negotiated revision, the server, and the `tools` capability. No `Mcp-Session-Id`. |
 | `server/discover` | The supported revisions, for a client of revision 2026-07-28. |
 | `ping` | An empty result. |
-| `tools/list` | The six tools below, on one page. |
+| `tools/list` | The eight tools below, on one page. |
 | `tools/call` | The result of the tool. |
 | a notification | 202 with no body. |
 

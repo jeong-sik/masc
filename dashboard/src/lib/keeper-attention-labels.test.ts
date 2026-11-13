@@ -38,6 +38,17 @@ describe('keeper attention labels', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it('labels a runtime blocker class the trust snapshot names as the reason', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(attentionReasonLabel('heartbeat_failures', false)).toBe('하트비트 실패')
+    expect(attentionReasonLabel('turn_failures', false)).toBe('턴 실패 반복')
+    expect(attentionReasonLabel('turn_configuration_error', false)).toBe('실행 설정 오류')
+    expect(attentionReasonLabel('exception', false)).toBe('런타임 예외')
+    expect(attentionReasonLabel('operator_interrupt', false)).toBe('운영자가 턴을 멈춤')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('labels typed next actions without warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

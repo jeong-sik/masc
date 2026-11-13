@@ -304,7 +304,7 @@ let prepare_code_history_rows (state : state) ~cols =
                   | Fc_edited _ -> say "수정" "EDIT" | Fc_inserted _ -> say "메모" "MEMO"
                   | Fc_written _ | Fc_materialized _ -> say "쓰기" "WRITE"
                 in
-                let anchor = match file_change_evidence_label change.fc_line_evidence with
+                let anchor = match file_change_evidence_label ~ko change.fc_line_evidence with
                   | Some label -> label | None -> "L?"
                 in
                 [field "Keeper" change.fc_keeper; field (say "날짜" "Date") (date change.fc_at);

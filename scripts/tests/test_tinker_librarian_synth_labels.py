@@ -28,7 +28,6 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librarian"))
 
-import admission_result as AR
 import admission_validator as AV
 import audit_decisions as D
 import eval_admission as V
@@ -52,6 +51,7 @@ from tinker_librarian_synth_fixtures import (
 )
 from tinker_librarian_teacher_fixtures import (
     OFF_KINDS,
+    STALE_ONLY,
     Reply,
     absorbing_m2,
     log_calls,
@@ -69,12 +69,11 @@ from tinker_librarian_teacher_fixtures import (
 
 
 class LabelTest(unittest.TestCase):
-    def test_a_label_names_the_planted_facts_and_asks_for_them_only_with_support(self) -> None:
+    def test_a_label_names_the_planted_facts_whatever_the_candidates(self) -> None:
         alone = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))))
         supported = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.PARAPHRASE))))
         for label in (alone, supported):
             self.assertEqual((label.planted_stale, label.duplicates), (frozenset({"m4"}), (("m5", "m6"),)))
-        self.assertEqual((alone.supports_change, supported.supports_change), (False, True))
 
     def test_a_label_keeps_a_record_ahead_and_drops_a_past_one(self) -> None:
         label = S.label_of(request(SCHEDULED, candidates_of((S.CandidateKind.PARAPHRASE,))))
@@ -100,16 +99,15 @@ class ContractTest(unittest.TestCase):
                         corrected = {cl.supersedes for cl in label.candidates if cl.supersedes is not None}
                         complemented = {cl.absorbs: merged(by_id[cl.absorbs], by_request[cl.request_id])
                                         for cl in label.candidates if cl.absorbs is not None}
-                        asks = label.supports_change
-                        self.assertEqual(set(got.dropped),
-                                         (label.planted_stale if asks else frozenset[str]()) | corrected)
+                        self.assertEqual(set(got.dropped), label.planted_stale | corrected)
                         self.assertEqual(dict(got.absorbed), complemented | {
-                            gone: by_id[kept].claim for kept, gone in label.duplicates if asks})
+                            gone: by_id[kept].claim for kept, gone in label.duplicates})
                         gone = set(got.dropped) | set(dict(got.absorbed))
                         self.assertEqual(set(got.memory_after) - set(got.added_claims),
                                          {f.claim for f in facts if f.memory_id not in gone})
 
-    def test_masc_refuses_planted_facts_taken_out_without_support(self) -> None:
+    def test_masc_accepts_planted_facts_taken_out_without_support(self) -> None:
+        # RFC-0517 §7.1: a drop needs no supporting candidate.
         req = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT,)))
         [c] = req.candidates
         answer = json.dumps({"memory": {"new_claims": [], "dropped": [{"memory_id": "m4", "reason": "낡은 상태"}],
@@ -118,8 +116,8 @@ class ContractTest(unittest.TestCase):
                                              "memory_claim": None, "reason": "일시 상태"}],
                              "change_support": []}, ensure_ascii=False)
         result = AV.validate(prompt_of(req), answer)
-        assert isinstance(result, AV.Invalid)
-        self.assertEqual([v.kind for v in result.violations], [AR.Kind.CHANGES_WITHOUT_SUPPORT])
+        assert isinstance(result, AV.Valid), result
+        self.assertEqual(result.answer.dropped, ("m4",))
 
 
 def teacher_answer(req: S.SynthRequest, *, absorbs: tuple[str, ...], pair: bool, dropped: tuple[str, ...]) -> str:
@@ -152,10 +150,13 @@ class TeacherTest(unittest.TestCase):
 
     def test_an_answer_that_absorbs_a_memory_waits_for_the_merge_judge(self) -> None:
         both = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
-        plain = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT)))
-        for req, answer, waits in ((both, label_answer(both), True), (plain, label_answer(plain), False)):
+        transients = candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))
+        # No candidate supports a change in the last two: the label merges the pair all the same and
+        # drops m4 (RFC-0517 §7.1), so only the answer without a pair to merge is kept at once.
+        unsupported, plain = request(PLANTED, transients), request(STALE_ONLY, transients)
+        for req, waits in ((both, True), (unsupported, True), (plain, False)):
             item = M.SynthItem(req.item_id, prompt_of(req), "", S.label_of(req))
-            self.assertEqual(T.screened(item, V.check(item.prompt, answer), {"item": req.item_id}),
+            self.assertEqual(T.screened(item, V.check(item.prompt, label_answer(req)), {"item": req.item_id}),
                              T.Target({"item": req.item_id}, waits))
         item = M.SynthItem(both.item_id, prompt_of(both), "", S.label_of(both))
         stale = teacher_answer(both, absorbs=("m1", "m4"), pair=True, dropped=())
@@ -245,13 +246,18 @@ class TeacherNoteTest(unittest.TestCase):
                     label = S.label_of(req)
                     self.assertEqual(notes.setdefault(T.label_note(item_of(req)), label), label, kinds)
 
-    def test_a_label_no_candidate_supports_gets_a_note_that_leaves_memory_as_it_is(self) -> None:
+    def test_a_label_no_candidate_supports_still_asks_for_its_drops_and_merges(self) -> None:
+        # RFC-0517 §7.1: MASC takes drops and merges without a supporting candidate.
         req = request(SCHEDULED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT)))
         label = S.label_of(req)
         self.assertTrue(label.planted_stale and label.duplicates and label.scheduled_ahead)
         self.assertEqual(T.memory_lines(label, [f.memory_id for f in req.facts]), [
-            ("- 기억 변경을 지지하는 후보가 없습니다. 현재 기억은 모두 그대로 남습니다. "
-             "new_claims 와 dropped 는 비어 있고 change_support 는 [] 입니다.")])
+            "- m4: 한 시점의 상태만 적은 기억입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            "- m7: 쓸 날이 아직 남은 기록입니다. 그대로 남습니다.",
+            "- m8: 쓸 날이 이미 지난 기록입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            ("- m5, m6: 같은 지식을 표현만 바꿔 적은 두 기억입니다. 둘 중 남길 기억의 문장을 그대로 복사한 "
+             "claim 이 new_claims 에 있고, 그 absorbs 에 두 ID 가 모두 있습니다."),
+            T.NOTE_REST])
 
     def test_a_label_that_restates_a_claim_memory_does_not_hold_stops_the_note(self) -> None:
         req = request(PLANTED, candidates_of((S.CandidateKind.PARAPHRASE,)))
@@ -381,7 +387,7 @@ class TeacherMergeTest(unittest.TestCase):
             request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE))), 1)
         self.off = train_request(request(PLANTED, candidates_of(OFF_KINDS)), 2)
         self.plain = train_request(
-            request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))), 3)
+            request(STALE_ONLY, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))), 3)
         self.requests, self.out = sampled_folder(self.folder, [
             (self.labeled, (label_answer(self.labeled),)), (self.off, (absorbing_m2(self.off),)),
             (self.plain, (label_answer(self.plain),))])

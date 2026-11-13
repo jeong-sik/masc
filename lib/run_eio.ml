@@ -133,29 +133,41 @@ let read_run config task_id : (run_record, error) result =
     | None ->
       Error (Invalid_run { task_id; path })
 
-(** Initialize run for task *)
-let init config ~task_id ~agent_name : (run_record, string) result =
-  try
-    ensure_initialized config;
-    ensure_run_dir config task_id;
-    let created_at = Masc_domain.now_iso () in
-    let run = {
-      task_id;
-      agent_name;
-      plan = "";
-      created_at;
-      updated_at = created_at;
-    } in
-    (* Create default files *)
-    let plan_file = plan_path config task_id in
-    if not (path_exists config plan_file) then
-      write_text_file plan_file "# Run Plan\n\n";
-    write_run config run
-    |> Result.map (fun () -> run)
-    |> Result.map_error error_to_string
-  with
+(* Every writer of [run.json] runs inside this lock: the two that replace the
+   record ([init], the bootstrap in [get]) and the one that rewrites its plan
+   ([update_plan]). A replacement that ran beside a plan update could land
+   between that update's read and its write, and the update then wrote back the
+   record it had read, undoing the replacement. *)
+let with_run_lock config ~task_id f =
+  with_file_lock config (run_json_path config task_id) f
+
+(* The caller holds the [run.json] lock. *)
+let create_run_locked config ~task_id ~agent_name : (run_record, error) result =
+  ensure_initialized config;
+  ensure_run_dir config task_id;
+  let created_at = Masc_domain.now_iso () in
+  let run = {
+    task_id;
+    agent_name;
+    plan = "";
+    created_at;
+    updated_at = created_at;
+  } in
+  (* Create default files *)
+  let plan_file = plan_path config task_id in
+  if not (path_exists config plan_file) then
+    write_text_file plan_file "# Run Plan\n\n";
+  write_run config run |> Result.map (fun () -> run)
+
+let locked_run_result config ~task_id f : (run_record, string) result =
+  try with_run_lock config ~task_id f |> Result.map_error error_to_string with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
+
+(** Initialize run for task *)
+let init config ~task_id ~agent_name : (run_record, string) result =
+  locked_run_result config ~task_id (fun () ->
+    create_run_locked config ~task_id ~agent_name)
 
 (** Update plan.
 
@@ -170,8 +182,7 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     same critical section keeps them consistent. *)
 let update_plan config ~task_id ~content : (run_record, error) result =
   try
-    let run_file = run_json_path config task_id in
-    with_file_lock config run_file (fun () ->
+    with_run_lock config ~task_id (fun () ->
       match read_run config task_id with
       | Error e -> Error e
       | Ok run ->
@@ -186,12 +197,14 @@ let update_plan config ~task_id ~content : (run_record, error) result =
 (** Get run details. Missing runs are bootstrapped so resume/read paths do
     not block autonomous keeper turns before any explicit masc_run_init call. *)
 let get ?agent_name config ~task_id : (Yojson.Safe.t, string) result =
+  (* The existence check and the creation share one critical section, so a run
+     another caller creates and plans in between is read, not replaced. *)
   let read_or_create_run () =
-    let path = run_json_path config task_id in
-    if path_exists config path then
-      Result.map_error error_to_string (read_run config task_id)
-    else
-      init config ~task_id ~agent_name
+    locked_run_result config ~task_id (fun () ->
+      if path_exists config (run_json_path config task_id) then
+        read_run config task_id
+      else
+        create_run_locked config ~task_id ~agent_name)
   in
   match read_or_create_run () with
   | Error e -> Error e

@@ -136,22 +136,25 @@ let tasks_with_identities_memoized tasks =
     result
 ;;
 
-(* The in-progress Goals each Task is linked to, from the Goal store and the
-   primary link registry: the readers the turn's task context uses. [Error]
-   when either cannot be read, so the caller marks every row unread instead
-   of unlinked. The registry is read only when a Goal is in progress. *)
-let active_goals_by_task ~(config : Workspace.config) =
-  match Goal_store.list_goals_result config () with
+let in_progress_goal_ids ~(config : Workspace.config) =
+  Goal_store.list_goals_result config ()
+  |> Result.map
+       (List.filter_map (fun (goal : Goal_store.goal) ->
+          if Goal_phase.admits_self_directed_progress goal.phase
+          then Some goal.id
+          else None))
+;;
+
+(* The in-progress Goals each Task is linked to: [active_goals] is the Goal
+   read the observation already made, and the primary link registry is read
+   here, the reader the turn's task context uses. [Error] when either is
+   unreadable, so the caller marks every row unread instead of unlinked. The
+   registry is read only when a Goal is in progress. *)
+let active_goals_by_task ~(config : Workspace.config) ~active_goals =
+  match active_goals with
   | Error unavailable -> Error (Goal_store.unavailable_to_string unavailable)
-  | Ok goals ->
-    (match
-       List.filter_map
-         (fun (goal : Goal_store.goal) ->
-            if Goal_phase.admits_self_directed_progress goal.phase
-            then Some goal.id
-            else None)
-         goals
-     with
+  | Ok goal_ids ->
+    (match goal_ids with
      | [] -> Ok (fun ~task_id:(_ : string) -> [])
      | active_goal_ids ->
        Result.map
@@ -192,11 +195,11 @@ let seconds_per_day = 86_400.0
    within its priority. Its age is [Created_at_unreadable], not zero. When the
    Goal links cannot be read every row is [Goal_links_unread] and step 1 does
    not apply. *)
-let claimable_rows ~(config : Workspace.config) ~keeper_name ~now = function
+let claimable_rows ~(config : Workspace.config) ~keeper_name ~active_goals ~now = function
   | [] -> []
   | claimable ->
     let goal_links_of =
-      match active_goals_by_task ~config with
+      match active_goals_by_task ~config ~active_goals with
       | Ok active_goals -> fun ~task_id -> Active_goals (active_goals ~task_id)
       | Error detail ->
         Log.Keeper.warn ~keeper_name "claimable tasks: Goal links unreadable: %s" detail;
@@ -246,7 +249,7 @@ let claimable_rows ~(config : Workspace.config) ~keeper_name ~now = function
 
 (** Read one authoritative backlog snapshot. Counts, claimable rows, and
     revision are projected from the same primary read. *)
-let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
+let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta) ~active_goals
   : backlog_snapshot
   =
   try
@@ -299,6 +302,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          claimable_rows
            ~config
            ~keeper_name:meta.name
+           ~active_goals
            ~now:(Time_compat.now ())
            (List.filter
               (fun ((task : Masc_domain.task), _) ->

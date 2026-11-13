@@ -7,7 +7,8 @@ issues and revokes invitations, and what they do not do yet.
 
 The host operator makes the first Admin invitation without a server, with
 `masc auth bootstrap` and `masc auth invite`. Those commands write Admin
-invitations only and revoke none.
+invitations only and revoke none. The steps are in
+[Setting up the account server](account-server-setup.md).
 
 ## What the routes do
 

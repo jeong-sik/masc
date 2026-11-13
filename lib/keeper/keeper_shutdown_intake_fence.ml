@@ -16,9 +16,13 @@ type restore_result =
   | Restore_conflict of Keeper_shutdown_types.Operation_id.t
 
 type transition_result =
-  | Transition_applied
+  | Transition_applied of { previous : Keeper_shutdown_types.Operation_id.t option }
   | Transition_already_applied
   | Transition_reserved_by_other of Keeper_shutdown_types.Operation_id.t
+
+type revert_result =
+  | Reverted
+  | Revert_conflict of Keeper_shutdown_types.Operation_id.t option
 
 type 'a registration_commit_result =
   | Registration_committed of 'a
@@ -129,15 +133,36 @@ let transition_shutdown
       | Some existing, _
         when Keeper_shutdown_types.Operation_id.equal existing from_operation_id ->
         slot.shutdown_operation_id <- to_operation_id;
-        Transition_applied
+        Transition_applied { previous = Some existing }
       | None, None -> Transition_already_applied
       | Some existing, Some successor
         when Keeper_shutdown_types.Operation_id.equal existing successor ->
         Transition_already_applied
       | None, Some successor ->
         slot.shutdown_operation_id <- Some successor;
-        Transition_applied
+        Transition_applied { previous = None }
       | Some existing, _ -> Transition_reserved_by_other existing)
+;;
+
+let revert_transition ~base_path ~keeper_name ~applied ~previous =
+  let holds_applied current =
+    Option.equal Keeper_shutdown_types.Operation_id.equal current applied
+  in
+  let slot =
+    match previous with
+    | Some _ -> Some (slot_for ~base_path ~keeper_name)
+    | None -> find_slot ~base_path ~keeper_name
+  in
+  match slot with
+  | None -> if holds_applied None then Reverted else Revert_conflict None
+  | Some slot ->
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      let current = slot.shutdown_operation_id in
+      if holds_applied current
+      then (
+        slot.shutdown_operation_id <- previous;
+        Reverted)
+      else Revert_conflict current)
 ;;
 
 let shutdown_operation_id ~base_path ~keeper_name =

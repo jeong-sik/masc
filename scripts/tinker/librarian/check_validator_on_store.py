@@ -61,7 +61,6 @@ ADMISSION_OUTPUT = "admission"
 # Recorded reasons whose text has no variable part, by the kind that gives that text.
 FIXED_REASONS: dict[str, str] = {
     "admission_invalid: new Memory claim has no incorporated supporting candidate": V.Kind.NEW_CLAIM_WITHOUT_SUPPORT.value,
-    "admission_invalid: Memory changes require settled candidate support": V.Kind.CHANGES_WITHOUT_SUPPORT.value,
     "claim_schema_mismatch": "claim_schema_mismatch (claim_* kinds)",
     "dropped_schema_mismatch": "dropped_schema_mismatch (dropped_* kinds)",
     "duplicate object member": V.Kind.DUPLICATE_MEMBER.value,

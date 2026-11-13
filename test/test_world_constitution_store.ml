@@ -307,6 +307,71 @@ let test_an_unterminated_last_line_is_reported_as_such () =
       | others ->
         Alcotest.failf "expected one rejection, got %d" (List.length others))
 
+let append_bytes ~base_path bytes =
+  let channel =
+    open_out_gen [ Open_append; Open_creat; Open_binary ] 0o600
+      (Store.ledger_path ~base_path)
+  in
+  output_string channel bytes;
+  close_out channel
+
+(* A server that died inside an append leaves a last line with no newline.
+   The next article is still written: the unfinished line is cut and the
+   lines before it are kept byte for byte (#37117). *)
+let test_an_article_is_added_after_an_unfinished_last_line () =
+  with_world (fun base_path ->
+      add ~base_path (article "a norm written before the crash");
+      let before = Fs_compat.load_file (Store.ledger_path ~base_path) in
+      append_bytes ~base_path "{\"kind\":";
+      let held = held_or_fail ~base_path () in
+      add ~base_path (article "a norm written after the crash");
+      let ledger = load_or_fail ~base_path () in
+      Alcotest.(check (list string)) "both norms are held"
+        [ "a norm written before the crash"; "a norm written after the crash" ]
+        (texts ledger);
+      Alcotest.(check int) "the unfinished line is gone" 0
+        (List.length ledger.rejected);
+      let after = Fs_compat.load_file (Store.ledger_path ~base_path) in
+      Alcotest.(check string) "the lines before it are kept" before
+        (String.sub after 0 (String.length before));
+      Alcotest.(check int) "the ledger ends at the new line" (String.length after)
+        ledger.end_offset;
+      Alcotest.(check (option (list string)))
+        "a position read beside the unfinished line still folds"
+        (Some [ "a norm written before the crash" ])
+        (Option.map article_texts (articles_at_or_fail ~base_path held.Store.at)))
+
+(* The same holds when the crash hit the very first append. *)
+let test_an_article_is_added_to_a_ledger_that_is_only_an_unfinished_line () =
+  with_world (fun base_path ->
+      Fs_compat.mkdir_p (Filename.dirname (Store.ledger_path ~base_path));
+      append_bytes ~base_path "{\"kind\":";
+      add ~base_path (article "the first norm");
+      let ledger = load_or_fail ~base_path () in
+      Alcotest.(check (list string)) "the norm is held" [ "the first norm" ]
+        (texts ledger);
+      Alcotest.(check int) "the unfinished line is gone" 0
+        (List.length ledger.rejected))
+
+(* Bytes with no newline are not a move even when they read as one: the next
+   append cuts them, so holding them now would show a norm that then
+   vanishes. *)
+let test_an_unfinished_last_line_that_reads_whole_is_not_held () =
+  with_world (fun base_path ->
+      add ~base_path (article "a readable norm");
+      let whole = Fs_compat.load_file (Store.ledger_path ~base_path) in
+      append_bytes ~base_path (String.sub whole 0 (String.length whole - 1));
+      let ledger = load_or_fail ~base_path () in
+      Alcotest.(check int) "one norm, not two moves" 1 (List.length ledger.entries);
+      Alcotest.(check int) "the ledger ends before the unfinished line"
+        (String.length whole) ledger.end_offset;
+      match ledger.rejected with
+      | [ rejected ] ->
+        Alcotest.(check string) "reported as the unfinished last line"
+          "unterminated_final_line" (Store.line_end_to_string rejected.line_end)
+      | others ->
+        Alcotest.failf "expected one rejection, got %d" (List.length others))
+
 (* RFC-0504: one line retires a bundle and names its replacement, so the
    ledger keeps which norm replaced which. *)
 let test_replacing_retires_the_bundle_and_adds_the_replacement () =
@@ -533,5 +598,12 @@ let () =
             test_a_line_that_does_not_decode_is_reported_not_dropped;
           Alcotest.test_case "an unterminated last line is reported as such" `Quick
             test_an_unterminated_last_line_is_reported_as_such;
+          Alcotest.test_case "an article is added after an unfinished last line" `Quick
+            test_an_article_is_added_after_an_unfinished_last_line;
+          Alcotest.test_case
+            "an article is added to a ledger that is only an unfinished line" `Quick
+            test_an_article_is_added_to_a_ledger_that_is_only_an_unfinished_line;
+          Alcotest.test_case "an unfinished last line that reads whole is not held" `Quick
+            test_an_unfinished_last_line_that_reads_whole_is_not_held;
         ] );
     ]

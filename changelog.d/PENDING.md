@@ -1,0 +1,10 @@
+### Fixed
+
+- A world constitution ledger whose last line has no newline, left by a
+  server that died inside an append, takes the next article again: the
+  unfinished line is cut under the append lock and the article is written
+  after the last complete line. Before, every add, edit and removal ended in
+  `the ledger does not end at a line boundary` until the file was repaired by
+  hand. The unfinished line is reported and never read as a move, and a
+  newline-terminated line that does not decode is still reported and kept
+  (#PENDING).

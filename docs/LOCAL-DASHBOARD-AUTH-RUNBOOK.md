@@ -28,6 +28,8 @@ Truth fields:
 - `effective_masc_root`
 - `cwd_masc_root`
 - `roots_diverge`
+- `strict_mode_requested`
+- `startup_rejected`
 
 This works as written on a loopback server without strict auth. A server that
 requires a token (`MASC_HTTP_AUTH_STRICT`, or a bind host or base URL that is
@@ -35,8 +37,6 @@ not loopback) answers a request without a credential with a public probe that
 has no `paths`; add `-H "Authorization: Bearer <raw-token>"` there. A
 credential the server cannot accept is answered 401, 403 or 503, not the
 public probe.
-- `strict_mode_requested`
-- `startup_rejected`
 
 If `effective_base_path` is not the base path you expected, fix that first. In shared workspace setups, the live auth store is `<base-path>/.masc/auth` even when the server process is running from a sub-repo worktree.
 

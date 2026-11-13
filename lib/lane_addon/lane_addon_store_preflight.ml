@@ -413,24 +413,21 @@ let check_record ~after_read store ~root ~observations report { record_path; fir
 let link_name key = Filename.basename (Exact.Retained_key.proof_path key)
 
 (* The proof links of one declaration that no record names. The server writes
-   a record before its link, so the records are listed again after the links:
-   a record written in between names its link too, and so does a name gone or
-   unreadable at its first read, which the server may have written since. A
-   link removed before it is refused is not refused. *)
-let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~read_names
-    ~named_links =
+   a record before its link, so the records are listed and read again after
+   the links: a record written in between names its link too. Every record is
+   read again, since the startup sweep may have removed a name read before and
+   the same request id may have been written there since, with another digest
+   and so another link. A link removed before it is refused is not refused. *)
+let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~named_links =
   let dir = Filename.concat root (Exact.proof_directory ~declaration_id) in
   let* links = entries dir in
   let* again = entries group_dir in
   let later =
     List.filter_map
       (fun name ->
-         if List.mem name read_names
-         then None
-         else
-           match read_first ~after_read ~group ~name (Filename.concat group_dir name) with
-           | Read { key; _ } -> Some (link_name key)
-           | Gone | Unreadable _ -> None)
+         match read_first ~after_read ~group ~name (Filename.concat group_dir name) with
+         | Read { key; _ } -> Some (link_name key)
+         | Gone | Unreadable _ -> None)
       (json_names again)
   in
   let named = named_links @ later in
@@ -452,12 +449,11 @@ let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_
        (json_names links))
 
 (* What the check keeps of one declaration between its records: the slot
-   observations, read once the first record names the declaration, the names
-   of the records read and the proof links they name. *)
+   observations, read once the first record names the declaration, and the
+   proof links the records read name. *)
 type declaration_read =
   { declaration_id : string
   ; observations : (string * string) list
-  ; read_names : string list
   ; named_links : string list
   }
 
@@ -476,7 +472,7 @@ let scan_exact_declaration ~after_read store ~root report ~group ~group_dir =
          | Gone -> Ok (report, declaration)
          | Unreadable refusal -> Ok (refused report refusal, declaration)
          | Read record ->
-           let* report, ({ observations; read_names; named_links; _ } as declaration) =
+           let* report, ({ observations; named_links; _ } as declaration) =
              match declaration with
              | Some declaration -> Ok (report, declaration)
              | None ->
@@ -484,24 +480,17 @@ let scan_exact_declaration ~after_read store ~root report ~group ~group_dir =
                let* observations, report =
                  read_slot_observations ~after_read store ~root report ~declaration_id
                in
-               Ok (report, { declaration_id; observations; read_names = []; named_links = [] })
+               Ok (report, { declaration_id; observations; named_links = [] })
            in
            let* report = check_record ~after_read store ~root ~observations report record in
-           Ok
-             ( report
-             , Some
-                 { declaration with
-                   read_names = name :: read_names
-                 ; named_links = link_name record.key :: named_links
-                 } ))
+           Ok (report, Some { declaration with named_links = link_name record.key :: named_links }))
       (Ok (report, None))
       (json_names listed)
   in
   match declaration with
   | None -> Ok report
-  | Some { declaration_id; read_names; named_links; _ } ->
-    unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~read_names
-      ~named_links
+  | Some { declaration_id; named_links; _ } ->
+    unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~named_links
 
 let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ _ -> Ok ()))
     ?(validate_history_resolution=(fun ~group:_ ~name:_ _ -> Ok ())) ~after_read store ~base_path =

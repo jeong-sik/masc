@@ -445,8 +445,8 @@ let test_base_path_forms_read_the_served_store exe () = with_lane_store (fun bas
     | Error detail -> failf "the record names no proof file: %s" detail in
   let served = Lane_addon_store.directory
       ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base)) in
-  (* No attempt of the record has this proof, so the check refuses the record
-     once the root matches. *)
+  (* The link holds nothing but its root. Once the root matches, the link
+     does not decode, and the check refuses the record with it. *)
   put link (`Assoc ["executions", `List [`Assoc ["store_root", `String served]]]);
   let alias = Filename.temp_file "preflight-lane-addons-alias-" "" in
   Sys.remove alias;

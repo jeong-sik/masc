@@ -1536,6 +1536,28 @@ let test_preflight_refuses_a_link_no_record_names () =
     check (list string) "no record names it"
       [Preflight.decoder_name Preflight.Exact_proof_link] (readers report))
 
+let test_preflight_skips_an_unnamed_link_removed_before_it_is_refused () =
+  with_workspace (fun ~base store ->
+    let orphaned = answered store "preflight-orphan-removed" in
+    let kept = answered store "preflight-orphan-kept" in
+    let link = link_file store orphaned in
+    Sys.remove (record_file store orphaned);
+    (* A copy of a record under another request's key is refused at its first
+       read and read again after the links are listed. *)
+    let misfiled = Filename.concat (Store.root store)
+        (Store.exact_request_path ~declaration_id ~request_id:"preflight-orphan-elsewhere") in
+    write_bytes misfiled (read_bytes (record_file store kept));
+    let reads = ref 0 in
+    let after_read path =
+      if String.equal path misfiled then (
+        incr reads;
+        (* The server removes the unnamed link after the check listed it. *)
+        if !reads = 2 then Sys.remove link) in
+    let report = preflight ~after_read base in
+    check int "the misfiled record is read before and after the links are listed" 2 !reads;
+    check (list (pair string (list string))) "the removed link is not named"
+      [misfiled, [misfiled]] (refused report))
+
 let test_preflight_names_a_link_written_after_the_listing () =
   with_workspace (fun ~base store ->
     let listed = answered store "preflight-listed" in
@@ -1733,6 +1755,8 @@ let () =
             test_preflight_reads_the_proof_link_with_its_record
         ; test_case "a misfiled record is refused alone" `Quick test_preflight_refuses_a_misfiled_record_alone
         ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
+        ; test_case "a link removed before it is refused is not named" `Quick
+            test_preflight_skips_an_unnamed_link_removed_before_it_is_refused
         ; test_case "a link written after the listing is not refused" `Quick
             test_preflight_names_a_link_written_after_the_listing
         ; test_case "a link removed before the refusal is not named" `Quick

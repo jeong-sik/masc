@@ -26,6 +26,9 @@ let subscription_model_rows =
        them at 0.1x. Landing 5.1 on the shorter row would bill its cache reads
        at four times the real rate, which no lookup failure would announce. *)
   ; "claude-fable-5-1", "claude-fable-5-1"
+    (* 5.2 reads cached tokens at the same 0.025x but bills input at $8 and
+       output at $40 against 5.1's $10 and $50, so it has its own row too. *)
+  ; "claude-fable-5-2", "claude-fable-5-2"
   ; "claude-sonnet-5", "claude-sonnet-5"
     (* Sonnet 5.5 refuses forced tool use where sonnet-5 takes it, and
        "claude-sonnet-5" prefixes it, so it needs its own row. *)
@@ -249,8 +252,8 @@ let test_documented_claude_prefill_exclusions () =
         check bool (model_id ^ " retains accepted user-ending history") true
           (Result.is_ok (P.Complete.inspect_serialized_request ~stream ~config
             ~messages:(prefill @ [user]) ()))) [false; true])
-      ["claude-fable-5"; "claude-fable-5-1"; "claude-mythos-5"; "claude-mythos-preview";
-       "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
+      ["claude-fable-5"; "claude-fable-5-1"; "claude-fable-5-2"; "claude-mythos-5";
+       "claude-mythos-preview"; "claude-opus-5-5"; "claude-sonnet-5"; "claude-sonnet-5-5"];
     List.iter (fun model_id ->
       check bool (model_id ^ " keeps existing default admission") true
         (Result.is_ok (P.Complete.inspect_serialized_request ~stream:false
@@ -427,6 +430,7 @@ let anthropic_cache_pricing_rows =
   ; "claude-sonnet-5-5", 1.25, 0.05
   ; "claude-fable-5", 1.25, 0.1
   ; "claude-fable-5-1", 1.25, 0.025
+  ; "claude-fable-5-2", 1.25, 0.025
   ]
 ;;
 
@@ -452,19 +456,22 @@ let test_anthropic_rows_price_cache_tokens () =
     anthropic_cache_pricing_rows
 ;;
 
-(* What the Messages API answered for each model on 2026-10-08. A sampling
-   parameter with a non-default value came back 400 on every one of them, so a
-   row has to keep all three off the wire. Forced tool use -- tool_choice "any"
-   or a named tool -- came back 400 on the three marked false and 200 on the
-   rest. The flags are read through the resolved capabilities, the way a
-   request is checked, so a 5.5 or 5.1 id that fell back to the shorter row
-   would show here. *)
+(* What the Messages API answered for each model on 2026-10-08, except
+   claude-fable-5-2: no call was made for it, so its row follows its model page
+   and thinking guide (checked 2026-11-13). A sampling parameter with a
+   non-default value came back 400 on every one of them, so a row has to keep
+   all three off the wire. Forced tool use -- tool_choice "any" or a named
+   tool -- came back 400 on the rows marked false and 200 on the rest. The
+   flags are read through the resolved capabilities, the way a request is
+   checked, so a 5.5 or 5.1 id that fell back to the shorter row would show
+   here. *)
 let claude_rows_forced_tool_choice =
   [ "claude-opus-5-5", false
   ; "claude-sonnet-5", true
   ; "claude-sonnet-5-5", false
   ; "claude-fable-5", true
   ; "claude-fable-5-1", false
+  ; "claude-fable-5-2", false
   ; "claude-haiku-5-5", true
   ]
 ;;

@@ -1463,7 +1463,7 @@ def install_composition_fixtures(
                 "identity: "
                 + json.dumps(skill_reference_json(installed_reference), sort_keys=True)
             )
-        flow = profile.get("flow")
+        flow = profile.get("flow") if isinstance(profile, dict) else None
         planned_batches = planned_fixture_batches(
             flow.get("batches") if isinstance(flow, dict) else None
         )
@@ -1988,6 +1988,9 @@ class MissionRun:
                 raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
             except (urllib.error.URLError, json.JSONDecodeError) as error:
                 raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+        else:
+            # Every attempt breaks, retries or raises; the last one cannot retry.
+            raise AcceptanceError(f"Dashboard GET {path} failed: no attempt was made")
         if not isinstance(value, dict):
             raise AcceptanceError(f"Dashboard GET {path} returned a non-object payload")
         return value
@@ -3401,10 +3404,10 @@ class MissionRun:
                 if row.get("composition_tool") == INLINE_FIXTURE_TOOL
             ]
             run_ids = {
-                row.get("composition_run_id")
+                turn_run_id
                 for row in turn_rows
-                if isinstance(row.get("composition_run_id"), str)
-                and row.get("composition_run_id")
+                if isinstance(turn_run_id := row.get("composition_run_id"), str)
+                and turn_run_id
             }
             if len(run_ids) != 1:
                 inline_turn_errors.append(f"{label}:runs={sorted(run_ids)}")
@@ -3554,9 +3557,9 @@ class MissionRun:
                 coordinator_turn_evidence_errors.append(f"{label}:missing_turn")
                 continue
             keeper_turn_ids = {
-                row.get("keeper_turn_id")
+                keeper_turn_id
                 for row in rows_for_turn("coordinator", turn)
-                if isinstance(row.get("keeper_turn_id"), int)
+                if isinstance(keeper_turn_id := row.get("keeper_turn_id"), int)
             }
             if len(keeper_turn_ids) != 1:
                 coordinator_turn_evidence_errors.append(
@@ -4441,17 +4444,18 @@ def verify_bundle(
     runtime_strategy = (
         resources.get("runtime_strategy") if isinstance(resources, dict) else None
     )
+    runtime_ids = (
+        list(runtime_by_role.values()) if isinstance(runtime_by_role, dict) else []
+    )
     valid_runtime_map = (
         isinstance(runtime_by_role, dict)
         and set(runtime_by_role) == EXPECTED_ROLES
         and all(
             isinstance(runtime_id, str) and bool(runtime_id.strip())
-            for runtime_id in runtime_by_role.values()
+            for runtime_id in runtime_ids
         )
     )
-    distinct_runtime_count = (
-        len(set(runtime_by_role.values())) if valid_runtime_map else 0
-    )
+    distinct_runtime_count = len(set(runtime_ids)) if valid_runtime_map else 0
     if not valid_runtime_map:
         errors.append("bundle runtime map does not name all five roles")
     if isinstance(resources, dict) and resources.get("distinct_runtime_count") != distinct_runtime_count:
@@ -4709,6 +4713,7 @@ def main() -> int:
             )
         # A run installs its composition fixtures inside preflight, so every
         # argument the run needs is settled before that first write.
+        run_setup: tuple[dict[str, Any], pathlib.Path] | None = None
         if args.run:
             if not args.allow_mutation:
                 raise AcceptanceError("--run requires explicit --allow-mutation")
@@ -4734,6 +4739,7 @@ def main() -> int:
             )
             output_dir = pathlib.Path(args.output_dir).resolve()
             prepare_output_dir(output_dir)
+            run_setup = (runtime_receipt, output_dir)
         client, health, preflight_result = preflight(
             catalog=catalog,
             catalog_path=catalog_path,
@@ -4745,9 +4751,12 @@ def main() -> int:
             expected_source_sha=args.expected_source_sha,
             install_fixtures=args.run,
         )
-        if args.preflight:
+        # The mode group is required and exclusive, and --validate-catalog and
+        # --verify returned above: no run setup means --preflight.
+        if run_setup is None:
             print(json.dumps(preflight_result, ensure_ascii=False, indent=2))
             return 0
+        runtime_receipt, output_dir = run_setup
 
         writer = EvidenceWriter(output_dir)
         writer.write_json("health.json", health)

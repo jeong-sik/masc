@@ -17,7 +17,7 @@ implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613",
 2026-11-12 오후에 검증 멈춤(1.2 의 둘째 묶음, 3.2, 5.2 와 거기에 딸린 표)을 `b2f9ee56605d` 기준으로 다시 썼어요. 처음 글은 멈춘 원인을 세지 않았고, 읽을 자료도 잘못 골랐어요. 그 뒤 적대적 검토를 두 번 받아 L2a 를 고쳤어요. 다시 돌지는 헌법대로 실패의 typed 판정이 정해요. 리뷰의 걸음(walk)이 결론을 남기지 못한 시도만 다시 걸어요. L1 은 PR #51440(L1a)과 #51470(L1b)으로 구현했어요.
 2026-11-12 저녁에 L2 를 구현하면서 5.2 를 코드대로 고쳤어요. L2b 는 PR #51525 와 #51589, L2a 는 PR #51540, #51613, #51618 이에요. 고친 자리에는 "구현하며 고쳤어요"라고 적었어요.
 2026-11-12 밤에 L2a 배포 뒤 측정(8절)을 적고, 거기서 찾은 경합을 고치는 L2c(5.2)를 더했어요. L2c 의 줄 번호는 `origin/main` `79c51d7c6725` 기준이에요.
-2026-11-13 에 L2c 로 움직이지 않는 권한 불일치 4건의 원인을 찾아 L2d(5.2)를 더했어요. 독립 적대 검토를 한 번 받아 고쳤어요. L2d 의 줄 번호는 `origin/main` `a28f9269d797` 기준이에요.
+2026-11-13 에 L2c 로 움직이지 않는 권한 불일치 4건의 원인을 찾아 L2d(5.2)를 더했어요. 독립 적대 검토를 세 번 받아 고쳤어요. L2d 의 줄 번호는 `origin/main` `a28f9269d797` 기준이에요.
 
 - 요청된 판정 보고는 정산된 보고가 있을 때만 세요. 호출 노드가 아니라 기록된 provider 응답에서 읽어요.
 - "보고 없이 성공으로 끝난 실행은 수리"라는 규칙은 뺐어요. 지금 코드와 맞지 않았어요.
@@ -44,9 +44,9 @@ implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613",
 - **[사실]** L2a 배포 뒤 판정 없이 선 제출은 2026-11-12 12:59Z 에 17개, 13:59Z 에 18개예요(기대 10). 가장 큰 몫(8)은 공용 목록 읽기 실패예요(8절). **[추정]** 그 가운데 `changed` 5개는 같은 스코프의 다른 레코드가 진행을 쓴 사이에 깨진 것이에요(5.2 L2c).
   - **[제안]** L2c: 목록 읽기는 레코드의 신원만 대조하고, 진행 값은 지금 읽은 레코드를 따라요(5.2).
 - **[사실]** L2c 로 움직이지 않는 권한 불일치 4개의 첫 original 은 모두 리뷰 도구의 설명 글을 바꾼 배포(#50387) 전에 잡혔어요. 그 도구는 모든 리뷰에 들어가요. 다음 attempt 는 부모 original 의 조회 권한 해시를 그대로 복사해요. **[추정]** 그래서 다음 attempt 를 몇 번 잡아도 같은 자리에서 멈춰요. Goal 리뷰는 같은 자리에서 재시도 없이 미뤄져요(5.2 L2d).
-  - **[제안]** L2d: 다음 attempt 는 같은 질문을 지금 조회 권한으로 물어요. 권한만 바뀌었으면 같은 처리 안에서 다음 attempt 를 잡아요. 질문이 다르면 지금처럼 멈춰요(5.2).
+  - **[제안]** L2d: 다음 attempt 는 같은 질문을 지금 조회 권한과 답 형식으로 물어요. 권한이나 답 형식만 바뀌었으면 같은 처리 안에서 다음 attempt 를 잡아요. 질문이 다르면 지금처럼 멈춰요(5.2).
 - 새 상태, 새 저장소, 새 Gate 는 없어요. L1 이 문자열 `Error` 로 나가던 결과 셋을 닫힌 합의 갈래로 옮겨요. L2d 는 original 의 해시 칸 하나를 둘로 나누고, 공용 진행 상태 기계에 전이를 하나 더해요(hard cut).
-- 사용자가 정할 것은 10절에 있어요. 1·2·4·5번은 2026-11-12 에, 6·7번은 2026-11-13 에 정했어요. 3번이 남았어요.
+- 사용자가 정할 것은 10절에 있어요. 1·2·4·5번은 2026-11-12 에, 6·7·8번은 2026-11-13 에 정했어요. 3번이 남았어요.
 
 ## 1. 배경 (측정)
 
@@ -570,7 +570,7 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 
 질문은 무엇을 판정할지예요. 첫 attempt 를 잡을 때 굳어요.
 
-- Task 의 질문은 검증 id, Task, 생산자, 제출 근거, workspace(base_path), 리뷰 요청, 질문 글이에요. 질문 글에는 서버가 그때 만든 few-shot 예시와 근거 자세도 들어가요(`completion_authority_agent.ml:1132-1141`).
+- Task 의 질문은 검증 id, Task, 생산자와 그 실행 증거(`generator_runtime`), 제출 근거, workspace(base_path), 리뷰 요청, 질문 글이에요. 질문 글에는 서버가 그때 만든 few-shot 예시와 근거 자세도 들어가요(`completion_authority_agent.ml:1132-1141`). 서버가 골랐어도 무엇을 판정할지의 일부라서 질문이에요.
 - Goal 의 질문은 Goal id, 요청 id, 기준(criterion), 제출 근거, workspace(base_path), 보고된 측정값이에요.
 
 조회 권한은 리뷰어가 어디를 어떻게 읽을지예요. 서버가 attempt 를 잡을 때 정해요. ownership_root, route, read_authority, 리뷰 도구(이름, 설명 글, 입력 schema), Goal 의 root layout 이에요.
@@ -585,23 +585,25 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 디스패치 전 검사를 typed 로 나눠요.
 
 - subject 나 질문 해시가 다르면 질문이 바뀐 것이에요. Task 는 지금처럼 `Raised` 예요. Goal 은 지금처럼 재시도 없이 미뤄요.
-- 권한 해시나 도구 이름 목록만 다르면 `Authority_changed` 예요. 답 형식만 달라도 같아요.
+- 권한 해시나 도구 이름 목록만 다르면 `Authority_changed` 예요. 답 형식만 달라도 `Authority_changed` 예요.
 - Goal 의 다른 목적지 레코드와 권한 준비 실패는 권한이 바뀐 것이 아니에요. `Authority_changed` 에서 떼고, 지금처럼 미뤄요.
 - 준비한 권한의 route 가 디스패치 직전에 다시 계산한 route 와 다를 수 있어요(`validate_task_review`, `verification_authority_tools.ml:821-825`). 이것은 이번 처리에서 준비한 권한이 이미 낡은 것이에요. 지금은 `Raised` 예요(`verifier_review_worker.ml:145-146`). 권한 준비 실패와 같은 길(`defer_unavailable`)로 미뤄요.
 - 이 미룸에도 재시도는 걸리지 않아요. 다음 서버 시작 sweep 이나 새 제출 때, 새로 준비한 권한으로 L2d 가 이어요. 기다리는 것은 `Raised` 와 같지만, 사람이 풀 멈춤으로 적히지 않아요.
 
 `Authority_changed` 면 그 attempt 를 디스패치하지 않고 끝내요.
 
-- 진행에는 디스패치 전 거절(`Rejected {stage=Before_dispatch}`)을 적어요. 근거에는 달라진 것을 적어요. 권한이면 옛 권한 해시와 지금 권한 해시를, 답 형식이면 두 답 형식의 digest 를 적어요.
-- 근거의 모양은 지금 그 거절을 읽는 곳이 받는 모양을 따라요. Task 는 판정 없는 `result` 를 실어요(`verifier_review_worker.ml:112-116`). Goal 은 `goal_verifier_refusal/v1` 봉투(판정 없는 receipt 와 disposition)에 실어요(`goal_verifier_worker.ml:376-385`).
+- 진행에는 디스패치 전 거절(`Rejected {stage=Before_dispatch}`)을 적어요.
+- 근거에는 바뀐 것을 닫힌 갈래 셋 가운데 하나로 적어요. 권한만, 답 형식만, 둘 다예요. 권한에는 옛 권한 해시와 지금 권한 해시를, 답 형식에는 두 답 형식의 digest 를 실어요. 바뀐 것이 없는 거절은 만들 수 없어요.
+- 근거는 지금 그 거절을 읽는 곳에 실어요. Task 는 판정 없는 `result`(`verifier_review_worker.ml:112-116`)와 바뀐 것을 새 거절 schema 로 적어요. Goal 은 `goal_verifier_refusal/v1` 봉투(판정 없는 receipt 와 disposition)의 disposition 에 실어요(`goal_verifier_worker.ml:376-385`).
+- 지금 받는 함수는 열쇠 집합을 정확히 맞춰요. Task 는 `terminal_review_result`(`verifier_review_owner.ml:314-326`), Goal 은 `retryable_refusal`(`goal_verifier_worker.ml:484-486`)이에요. 둘 다 새 갈래를 받게 고쳐요.
 - Goal 은 이 봉투가 맞지 않으면 그 Goal 이 통째로 서요. 처리마다 그 Goal 의 모든 행을 다시 읽고(`recover`, `goal_verification_agent.ml:456-478`), 하나라도 못 읽으면 `Commit_refused` 로 미루고 다음 단계로 가지 않아요(`:565-568`). 부모 attempt 의 실행 기록 줄은 같은 처리 안에서 끝난 것으로 공개해요.
 
 다음 attempt 는 걸음(walk)이 만들어요.
 
-- 걸음이 맨 끝에서 권한이 바뀐 디스패치 전 거절을 보면, 지금 권한으로 다음 attempt 를 만들어요. L2a 의 실행 재시도를 만드는 자리(`verifier_review_owner.ml:431-444`)와 같은 꼴이에요. 지금은 이 거절을 맨 끝으로 두고 그 attempt 를 돌려줘요(Task `:445-447`, Goal `goal_verifier_worker.ml:574-575`. Goal 의 실행 재시도는 `:558-570`).
+- 걸음이 맨 끝에서 `Authority_changed` 디스패치 전 거절(권한이든 답 형식이든)을 보면, 지금 권한과 답 형식으로 다음 attempt 를 만들어요. L2a 의 실행 재시도를 만드는 자리(`verifier_review_owner.ml:431-444`)와 같은 꼴이에요. 지금은 이 거절을 맨 끝으로 두고 그 attempt 를 돌려줘요(Task `:445-447`, Goal `goal_verifier_worker.ml:574-575`. Goal 의 실행 재시도는 `:558-570`).
 - 그래서 거절을 적은 뒤 `Successor_intended` 를 쓰기 전에 처리가 끊겨도, 다음 처리의 걸음이 다음 attempt 를 만들어요.
-- 거절을 적은 처리는 걸음을 한 번 더 돌려, 같은 처리 안에서 다음 attempt 를 바로 물어요. Task 는 처리마다 권한을 한 번 준비해요(`Eio.Lazy`, `completion_authority_agent.ml:1123-1126`). Goal 은 처리마다 권한 값을 하나 만들어요(`goal_verification_agent.ml:505-507`). 다음 attempt 를 만드는 것과 돌리는 것은 그 값 하나를 같이 써요. 그래서 해시 검사에서 다시 `Authority_changed` 가 되지 않아요.
-- 처리 한 번에 이어 묻는 것은 한 번이에요. 그 attempt 도 권한이 바뀌었다고 하면 거절만 적고, 권한 준비 실패처럼 미뤄요. 다음 처리의 걸음이 이어요.
+- 거절을 적은 처리는 걸음을 한 번 더 돌려, 같은 처리 안에서 다음 attempt 를 바로 물어요. Task 는 처리마다 권한을 한 번 준비해요(`Eio.Lazy`, `completion_authority_agent.ml:1123-1126`). Goal 은 처리마다 권한 값을 하나 만들어요(`goal_verification_agent.ml:505-507`). 다음 attempt 를 만드는 것과 돌리는 것은 그 값 하나를 같이 써요. 그래서 해시 검사에서 다시 `Authority_changed` 가 되지 않아요. 답 형식은 build 상수라서(`anti_rationalization.ml:108`, `:399`) 한 처리 안에서 바뀌지 않아요.
+- 처리 한 번에 이어 묻는 것은 한 번이에요. 그 attempt 도 `Authority_changed` 면 거절만 적고, 권한 준비 실패처럼 미뤄요. 다음 처리의 걸음이 이어요.
 - 재시도 타이머, 새 멈춤 원인, 실행 기록 장부의 새 결과 이름은 필요 없어요. 재시도를 거는 규칙(`retry_request_of_stop_cause`)은 그대로예요.
 - 공용 진행 상태 기계(`lib/lane_addon/lane_addon_request_progress.ml`)에 전이를 하나 더해요. 지금 `Successor_intended` 는 실행 뒤 거절(`Rejected {stage=Execution}`)에서만 받아요(`:199-203`). 디스패치 전 거절에서도 받게 해요.
 - 새 상태는 없어요. 진행 타입은 디스패치 전 거절을 실은 `Subdividing` 을 이미 표현하고, submit_once 는 그것을 이미 다뤄요(`lane_addon_submit_once.ml:202-204`). Librarian 은 자기 기록에서 디스패치 전 거절을 거부하고(`keeper_librarian_original_gate.ml:389`), Curator 는 자기 다음 attempt 를 만들 때 거부해요(`server_workspace_memory_addon.ml:322`). 두 쪽은 새 전이를 낼 일이 없어요.
@@ -610,17 +612,23 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 서버가 중간에 멈춰도 같은 몸통으로 이어요.
 
 - 부모의 진행에 다음 attempt 몸통의 digest 를 먼저 박는 순서는 그대로예요(`Owner.prepare_successor` → `Successor_intended` → `retain_child`, `verifier_review_owner.ml:441-444`). 그 사이에 서버가 멈추면, 다음 처리 때 저장해 둔 몸통을 digest 대로 되살려요(`:422-429`). 권한을 다시 준비해 몸통을 새로 만들지 않아요.
-- 걸음은 처리마다 attempt 0 부터 부모를 하나씩 다시 확인해요(`verifier_review_owner.ml:416-430`, `:454`). 이때 지금은 실행 거절만 다음 attempt 의 근거로 받아요(`retry_result`, `:329-333`. Goal 은 `restore_child`, `goal_verifier_worker.ml:515-522`). 권한이 바뀌었다는 디스패치 전 거절도 받게 해요. 아니면 그 뒤의 처리가 모두 `Corrupt_original` 로 멈춰요.
-- `retain_child` 와 Goal 의 `restore_child` 는 질문 칸, 질문 해시, attempt 번호를 부모와 비교해요. 권한 칸, 답 형식, 지시는 부모의 `Successor_intended` digest 가 고정해요. 지금은 몸통 전체를 부모의 복사본과 비교해요(`verifier_review_owner.ml:400-404`, `goal_verifier_worker.ml:523-527`).
-- 되살린 attempt 가 그 처리의 권한과 다르면, 그 처리 안에서 `Authority_changed` 로 끝내고 그다음 attempt 를 잡아요.
+- 걸음은 처리마다 attempt 0 부터 부모를 하나씩 다시 확인해요(`verifier_review_owner.ml:416-430`, `:454`). 이때 지금은 실행 거절만 다음 attempt 의 근거로 받아요(`retry_result`, `:329-333`. Goal 은 `restore_child`, `goal_verifier_worker.ml:515-522`). `Authority_changed` 디스패치 전 거절도(권한이든 답 형식이든) 받게 해요. 아니면 그 뒤의 처리가 모두 `Corrupt_original` 로 멈춰요.
+- `retain_child` 와 Goal 의 `restore_child` 는 질문 칸(Task 는 `generator_runtime` 도), 질문 해시, attempt 번호를 부모와 비교해요. 권한 칸, 답 형식, 지시는 부모의 `Successor_intended` digest 가 고정해요. 지금은 몸통 전체를 부모의 복사본과 비교해요(`verifier_review_owner.ml:400-404`, `goal_verifier_worker.ml:523-527`).
+- 되살린 attempt 가 그 처리의 권한이나 답 형식과 다르면, 그 처리 안에서 `Authority_changed` 로 끝내고 그다음 attempt 를 잡아요.
 
-답 형식(`output_contract`)과 지시(`system_instructions`)도 같은 규칙을 따라요(10절 7번). 둘 다 제출한 쪽이 아니라 서버가 정해요. 그래서 질문이 아니에요.
+답 형식(`output_contract`)과 지시(`system_instructions`)도 같은 규칙을 따라요(10절 7번). 둘은 무엇을 판정할지가 아니라 어떻게 답할지를 정해요. 그래서 질문이 아니에요.
 
 - 첫 attempt 는 둘을 그때 값으로 만들어요(`verifier_review_original.ml:110`, `:122`, `goal_verifier_original.ml:58-60`). 지금 코드에서 다음 attempt 는 부모의 둘을 그대로 복사해요(`verifier_review_original.ml:478-480`, `goal_verifier_original.ml:158-160`). 바꾸면 첫 attempt 처럼 지금 값으로 만들어요.
 - 지금은 `output_contract` 가 다르면 Task 는 `Original_corrupt` 로 멈춰요(`verifier_review_worker.ml:147-149`). Goal 은 `Original_invalid` 로 미뤄요(`goal_verifier_worker.ml:642-644`). 바꾸면 질문이 같을 때 `Authority_changed` 로 끝나고, 걸음이 다음 attempt 를 만들어요.
-- `system_instructions` 는 디스패치 전에 비교하지 않고 저장된 값을 써요(`verifier_review_worker.ml:215`, `goal_verifier_worker.ml:691`). 이것은 그대로 둬요. 그래서 디스패치 전 검사에 더해지는 것은 답 형식뿐이에요.
+- Goal 은 답 형식을 만드는 함수(`output_contract_text`, `goal_verifier_original.ml:20-23`)와 비교하는 함수(`Verifier_review_original.canonical_output_contract`, `goal_verifier_worker.ml:642-643`)가 따로예요. 지금은 두 글이 같고, 갈라지면 `Original_invalid` 로 바로 드러나요. 바꾼 뒤에 갈라지면 Goal 의 모든 attempt 가 디스패치 전에 끝나고 처리마다 하나씩 쌓여요. 그래서 Goal 도 `canonical_output_contract` 하나로 만들고 비교해요. `output_contract_text` 는 지워요.
+- `system_instructions` 는 디스패치 전에 비교하지 않고 저장된 값을 써요(`verifier_review_worker.ml:215`, `goal_verifier_worker.ml:691`). 이것은 그대로 둬요. 그래서 `Authority_changed` 로 가는 경우에 더해지는 것은 답 형식뿐이에요.
+- 디스패치한 Task attempt 는 실행 기록을 읽기 전에 답 형식을 한 번 더 비교해요(`verifier_review_execution.ml:160-162`). 지금은 다르면 `Execution_repair_required` 로 멈추고 재시도가 걸리지 않아요(`verifier_review_worker.ml:46-49`, `completion_authority_agent.ml:1240`, `:662`).
+- 바꾸면 답 형식이 다를 때 판정 보고를 읽지 않아요(10절 8번). 실행이 끝났고 수리할 기록이 없으면, 보고가 있어도 보고가 없을 때와 같은 `No_verdict` 로 봐요(`verifier_review_execution.ml:188`). 그다음은 L2a 가 판정 보고 없는 실행을 다루는 길 그대로예요(`verifier_review_worker.ml:53`).
+- 아직 기다리는 실행(`Awaiting`)과 수리가 필요한 기록은 지금 갈래 그대로예요.
+- 옛 답 형식의 보고를 읽는 코드는 두지 않아요. 그래서 답 형식이 다르면, 판정을 저장하기 전에 끊긴 리뷰의 보고는 버리고 다시 물어요.
+- Goal 에는 디스패치한 뒤의 답 형식 비교가 없어요. 디스패치했을 수 있는 attempt 는 답 형식과 상관없이 자동으로 다시 돌리지 않고 `Execution_pending` 으로 둬요(`goal_verifier_worker.ml:637`).
 
-잃는 것이 있어요. 지금은 한 검증의 attempt 가 모두 같은 권한으로 돌아요. 바꾸면 attempt 마다 권한이 다를 수 있어요. 각 attempt 의 original 은 자기 권한을 적고 있어서, 어느 attempt 가 어떤 도구로 판정했는지는 기록에 남아요.
+잃는 것이 있어요. 지금은 한 검증의 attempt 가 모두 같은 권한·답 형식·지시로 돌아요. 바꾸면 attempt 마다 셋이 다를 수 있어요. 각 attempt 의 original 은 자기 것을 적고 있어서, 어느 attempt 가 어떤 도구와 규약으로 판정했는지는 기록에 남아요.
 
 그래도 되는 까닭이에요.
 
@@ -638,7 +646,7 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 
 바뀌지 않는 것이에요.
 
-- 디스패치한 뒤의 attempt 는 권한을 다시 보지 않아요. 답을 받은 attempt 는 지금처럼 그 답으로 판정해요.
+- 디스패치한 뒤의 attempt 는 권한을 다시 보지 않아요. 판정을 저장한 attempt(`Judged`)는 지금처럼 그 판정을 써요. 판정을 저장하기 전에 끊긴 Task attempt 는 답 형식이 같을 때만 판정 보고를 읽어요(10절 8번).
 - `retry_request_of_stop_cause` 와 L2a 의 typed 판정(`Reviews_again`, `Model_absent`, `Producer_must_act`)이에요.
 
 **[제안]** 저장 모양이 바뀌어요. 해시 칸이 둘이 되고, Goal original 에 측정값 칸이 생겨요. hard cut 으로 해요.
@@ -652,15 +660,19 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 **[제안]** 시험이에요.
 
 - 디스패치 전 original 의 권한 해시만 다르면(리뷰 도구 하나의 설명 글을 바꾼 권한) 그 attempt 는 디스패치 전 거절로 끝나요. 같은 처리 안에서 다음 attempt 가 지금 권한 해시와 지금 도구 목록으로 잡혀 디스패치돼요. 질문 칸과 질문 해시는 부모와 같아요. 지금 코드에서는 `Grants_mismatch` 로 멈춰요.
-- 디스패치 전 거절을 적은 뒤 `Successor_intended` 를 쓰기 전에 처리가 끊기면, 다음 처리의 걸음이 지금 권한으로 다음 attempt 를 만들어요.
+- 디스패치 전 거절을 적은 뒤 `Successor_intended` 를 쓰기 전에 처리가 끊기면, 다음 처리의 걸음이 지금 권한으로 다음 attempt 를 만들어요. 답 형식 거절도 같아요.
 - subject 나 질문 해시가 다르면(제출 근거 하나를 바꾼 경우) 지금처럼 `Raised` 이고 다음 attempt 를 만들지 않아요. base_path 만 달라도 같아요.
 - `Successor_intended` 를 쓴 뒤 다음 attempt 를 retain 하기 전에 서버가 멈추면, 다음 처리 때 저장한 몸통을 digest 대로 되살려요. 그 사이 권한이 또 바뀌었으면 그 처리 안에서 그다음 attempt 를 잡아요.
 - L2a 의 실행 재시도도 지금 권한으로 다음 attempt 를 잡아요.
 - 디스패치한 뒤의 attempt 는 권한이 바뀌어도 그 답으로 판정해요.
+- 디스패치한 뒤 끊긴 Task attempt 의 답 형식이 다르면, 실행 기록에 판정 보고가 있어도 읽지 않고 `No_verdict` 로 봐요. 지금 코드에서는 `Execution_repair_required` 로 멈춰요.
+- 답 형식이 달라도 실행이 아직 기다리는 중이면 지금처럼 `Execution_pending` 이에요.
 - 공용 상태 기계는 디스패치 전 거절에서 `Successor_intended` 를 받고, 다른 단계에서는 지금처럼 거부해요.
 - 디스패치 전 original 의 `output_contract` 만 다르면 그 attempt 를 끝내고, 다음 attempt 가 지금 답 형식과 지시로 디스패치돼요. 지금 코드에서는 Task 는 `Original_corrupt` 로 멈추고 Goal 은 `Original_invalid` 로 미뤄요.
 - 지시만 바뀐 뒤 L2a 실행 재시도로 잡힌 다음 attempt 는 지금 지시를 가져요. 디스패치 전 original 은 지시가 달라도 저장된 지시로 디스패치돼요.
-- Goal 리뷰에서 위의 것과 같은 사례를 돌려요. 권한이 바뀐 거절이 있는 Goal 도 `recover` 를 지나 다음 attempt 로 가요. 다른 목적지 레코드와 권한 준비 실패는 다음 attempt 를 만들지 않아요.
+- 권한과 답 형식이 둘 다 바뀌면 근거에 둘 다 적혀요.
+- 다음 attempt 의 `generator_runtime` 이 부모와 다르면 `retain_child` 가 받지 않아요.
+- Goal 리뷰에서 위의 것과 같은 사례를 돌려요. 권한이나 답 형식이 바뀐 거절이 있는 Goal 도 `recover` 를 지나 다음 attempt 로 가요. 다른 목적지 레코드와 권한 준비 실패는 다음 attempt 를 만들지 않아요.
 
 **[추정]** L2d 를 설치하면 hard cut 이 멈춘 4개의 original 을 지우고, 서버 시작 정리가 지금 권한으로 첫 attempt 를 잡아요. 그 뒤의 결과는 리뷰가 정해요.
 
@@ -692,7 +704,7 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 | L2a | `anti_rationalization.ml(i)`(실패 관측에 판정을 싣는 것과 보고 도구 이름), `goal_criterion_agent.ml`·`goal_verifier_worker.ml`(패턴 한 줄씩), `verifier_review_worker.ml`, `verifier_review_walk_result.ml(i)`·`verifier_review_ending.ml(i)`(새 파일), `agent_execution_projection.ml`, `agent_execution_projection_intf.mli`, `agent.ml(i)`, `verifier_review_execution.ml(i)`, `verifier_review_owner.ml(i)`, `completion_authority_agent.ml`(주석), 그 시험, `docs/verification-pipeline-policy.md`, `docs/constitution.xml` | 끊긴 리뷰가 다시 돈다. 리뷰 한 번의 토큰이 다시 든다. 연결 실패가 이어지면 그 리뷰에 pulse 마다 시도 하나가 쌓인다(5.2). 헌법 invariant 와 검증 정책 문서의 문장이 바뀐다 |
 | L2b | `operator_task_attention.ml` 과 그 목록을 그리는 곳 | 운영자 목록에 판정을 기다리는 제출이 모두 실린다. L2a 전에는 20행이었다. L2a 배포 뒤 잰 값은 18건이고(2026-11-12 13:59Z, 8절), L2c 뒤에는 돌고 있는 리뷰와 남은 10건으로 본다 |
 | L2c | `lane_addon_tool_request_owner.ml`(`load_listed` 와 신원 비교), `completion_authority_agent.ml`(실패 상세), 그 시험 | 목록 읽기를 쓰는 17곳(`load_scope` 14, `fold_all` 1, `load_listed` 직접 2)에서 목록 읽기 실패가 줄어든다. 공용 층이라, 그 자리들이 목록에서 본 진행에 기대지 않는지 리뷰가 봐야 한다 |
-| L2d | `verification_authority_tools.ml(i)`(해시 둘), `verifier_review_original.ml(i)`·`goal_verifier_original.ml(i)`(다음 attempt 를 지금 권한·답 형식·지시로, Goal 측정값 칸), `verifier_review_owner.ml`(`next_attempt`, `retain_child`, `retry_result`), `verifier_review_worker.ml`·`goal_verifier_worker.ml`(typed 검사, `restore_child`), `completion_authority_agent.ml`·`goal_verification_agent.ml`(같은 처리 안의 다음 attempt), `goal_verifier_host.ml`·`workspace_goals.ml`(Goal 오류 갈래), `lane_addon_request_progress.ml`(전이 하나), 그 시험, `docs/verification-pipeline-policy.md` | original 의 저장 모양이 바뀌어 hard cut 이다. 설치 때 두 리뷰 스코프의 이력을 지운다. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 한다. 공용 상태 기계를 쓰는 다른 곳(`Successor_intended` 를 다루는 lib 파일 10곳)이 새 전이를 내지 않는지 리뷰가 봐야 한다. 조회 권한의 경계라 사람이 리뷰한다 |
+| L2d | `verification_authority_tools.ml(i)`(해시 둘), `verifier_review_original.ml(i)`·`goal_verifier_original.ml(i)`(다음 attempt 를 지금 권한·답 형식·지시로, Goal 측정값 칸, Goal 답 형식 함수 하나로), `verifier_review_owner.ml`(`next_attempt`, `retain_child`, `terminal_review_result`, `retry_result`), `verifier_review_worker.ml`·`goal_verifier_worker.ml`(typed 검사, 거절 근거, `retryable_refusal`, `restore_child`), `verifier_review_execution.ml`(답 형식이 다른 끊긴 리뷰), `completion_authority_agent.ml`·`goal_verification_agent.ml`(같은 처리 안의 다음 attempt), `goal_verifier_host.ml`·`workspace_goals.ml`(Goal 오류 갈래), `lane_addon_request_progress.ml`(전이 하나), 그 시험, `docs/verification-pipeline-policy.md` | original 의 저장 모양이 바뀌어 hard cut 이다. 설치 때 두 리뷰 스코프의 이력을 지운다. 판정은 났지만 커밋 전인 attempt 는 리뷰를 한 번 더 한다. 공용 상태 기계를 쓰는 다른 곳(`Successor_intended` 를 다루는 lib 파일 10곳)이 새 전이를 내지 않는지 리뷰가 봐야 한다. 조회 권한의 경계라 사람이 리뷰한다 |
 | 미디어 거절 | `keeper_turn_driver.ml` 의 미디어 갈래 | 7일 로그에 0줄이라 맨 뒤다 |
 | L3 | 그 RFC 의 8절 | 그 RFC 에 적혀 있다 |
 | L4 | 그 RFC 의 L3 | 그 RFC 에 적혀 있다 |
@@ -732,8 +744,9 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 | L2c | 서버 시작 한 번 동안 로그의 `an inventoried original changed` 줄(검증 멈춤과 Librarian wake 거절) | 검증 5(Task 5개에 한 줄씩), Librarian 3(2026-11-12 10:31:50Z 시작) | 레코드 신원이 바뀐 경우만 남는다. 지금 자료로는 0. 같은 기간 `an inventoried original disappeared` 줄은 0 이고, L2c 는 그 실패를 다루지 않는다 |
 | L2c | 마지막 사건이 목록 읽기 실패인 `awaiting_verification` 제출 | 8(`changed` 5, `inventory unavailable` 3, 13:59Z) | 배포 뒤 첫 시작 정리가 지나면 `changed` 는 0. `inventory unavailable` 은 상세가 남아서 다시 나눠 센다 |
 | L2d | 마지막 사건이 `retained subject or lookup authority differs` 인 `awaiting_verification` 제출 | 4(2026-11-12 13:59Z) | 설치 뒤에는 질문이 바뀐 제출만 멈춘다. 지금 자료로는 0 |
-| L2d | 권한이나 답 형식이 바뀌어 디스패치 전에 끝난 attempt 수 | 갈래가 없다 | 셈만 적는다. 목표값은 두지 않는다. 배포마다 생기면 권한 해시에 들어가는 칸을 다시 본다 |
+| L2d | 권한이나 답 형식이 바뀌어 디스패치 전에 끝난 attempt 수(근거 갈래별로) | 갈래가 없다 | 셈만 적는다. 목표값은 두지 않는다. 권한 갈래가 배포마다 생기면 그 배포의 diff 에서 바뀐 칸을 찾고, 권한 해시에 들어가는 칸을 다시 본다. 답 형식 갈래는 답 형식을 바꾼 배포 뒤에만 생긴다 |
 | L2d | `Goal subject or complete lookup authority differs` 로 미뤄진 Goal 검증 | 세지 않았다 | 설치 뒤에는 질문이 바뀐 것만 남는다 |
+| L2d | 답 형식이 달라 판정 보고를 읽지 않은 끊긴 Task attempt 수 | 갈래가 없다 | 셈만 적는다. 버린 보고가 있었던 것을 따로 센다. 그 수가 10절 8번의 대가다 |
 | L3 | 7일 동안 외부 세션이 만든 Task 중 todo 비율 | 45% (102/227) | 낮아지는지 본다. 목표값은 두지 않는다 |
 | L3 | `task_claim_next` 가 간 Task 의 반납 횟수 | 27 | 같은 Task 로 다시 가지 않는지 본다 |
 | L4 | 7일 `Mention_rejected` | 17 | 선언된 이름의 진짜 실패만 남는다 |
@@ -770,7 +783,8 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 | 4 | L2b 를 `task-lifecycle` RFC 의 3단계에서 떼어 먼저 낼지 | 2026-11-12 에 정했다: 먼저 낸다(PR #51525). L2a 뒤에 남는 제출을 볼 곳이 운영자 목록뿐이다 | 그 RFC 의 단계 순서가 바뀐다. 그 RFC 3.7 은 목록이 짧다는 전제를 1단계 뒤로 잡았다. 먼저 내면 그때까지 목록에 돌고 있는 리뷰도 같이 보인다 |
 | 5 | L2a 배포 뒤 남은 목록 읽기 경합 | 2026-11-12 에 정했다: RFC 절(L2c)부터 쓰고 구현한다. 규칙은 "목록 읽기는 레코드의 신원만 대조하고, 진행 값은 지금 읽은 레코드를 따른다"이다 | 공용 층(목록 읽기를 쓰는 17곳)의 실패 조건이 바뀐다. 다른 쪽은 검증 lane 의 선택만 바꾸는 것인데, 그러면 Librarian 의 같은 경합이 남는다 |
 | 6 | L2c 뒤에도 남는 권한 불일치 | 2026-11-13 에 정했다: RFC 절(L2d)부터 쓰고 구현한다. 규칙은 "다음 attempt 는 같은 질문을 지금 조회 권한으로 묻는다"이다. 해시를 질문과 권한으로 나눈다. 디스패치 전 original 의 권한만 다르면 그 attempt 를 끝내고 지금 권한으로 다음 attempt 를 잡는다. 질문이 다르면 지금처럼 멈춘다. Task 리뷰와 Goal 리뷰 모두 바꾸고 hard cut 으로 설치한다 | 한 검증의 attempt 마다 권한이 다를 수 있다. 각 attempt 의 original 이 자기 권한을 적어서 기록에는 남는다. 조회 권한의 경계라 사람이 리뷰한다. 다른 쪽은 생산자에게 돌려보내는 것(`Producer_must_act`)인데, 도구 설명이 바뀌는 배포마다 생산자가 같은 제출을 다시 해야 한다 |
-| 7 | 답 형식(`output_contract`)과 지시(`system_instructions`)도 L2d 규칙을 따를지 | 2026-11-13 에 정했다: 따른다. 둘 다 제출한 쪽이 아니라 서버가 정하는 것이라 질문이 아니다. 다음 attempt 는 둘을 지금 것으로 만든다. 디스패치 전 original 의 답 형식만 다르면 권한이 바뀐 것과 같게 끝내고 다음 attempt 로 간다. 지시는 지금 비교하지 않으니 답 형식만 이 갈래에 닿는다 | 리뷰 규약을 바꾸는 배포 뒤에도 기다리던 리뷰가 새 규약으로 다시 돈다. 다른 쪽은 지금처럼 두는 것이다. 그러면 규약을 바꾸는 배포마다 Task 리뷰는 `Original_corrupt` 로 멈추고, Goal 리뷰는 `Original_invalid` 로 재시도 없이 미뤄진다 |
+| 7 | 답 형식(`output_contract`)과 지시(`system_instructions`)도 L2d 규칙을 따를지 | 2026-11-13 에 정했다: 따른다. 둘 다 무엇을 판정할지가 아니라 어떻게 답할지를 정하는 것이라 질문이 아니다. 다음 attempt 는 둘을 지금 것으로 만든다. 디스패치 전 original 의 답 형식만 다르면 권한이 바뀐 것과 같게 끝내고 다음 attempt 로 간다. 지시는 지금 비교하지 않으니 답 형식만 이 갈래에 닿는다 | 리뷰 규약을 바꾸는 배포 뒤에도 아직 디스패치되지 않은 리뷰가 새 규약으로 다시 돈다. 디스패치한 뒤 끊긴 Task 리뷰는 8번이다. 다른 쪽은 지금처럼 두는 것이다. 그러면 규약을 바꾸는 배포마다 Task 리뷰는 `Original_corrupt` 로 멈추고, Goal 리뷰는 `Original_invalid` 로 재시도 없이 미뤄진다 |
+| 8 | 디스패치한 뒤 끊긴 Task 리뷰의 답 형식이 지금과 다를 때 | 2026-11-13 에 정했다: 답 형식이 다르면 실행 기록의 판정 보고를 읽지 않는다. 보고가 없을 때처럼 L2a 대로 다음 attempt 로 가고, 다음 attempt 는 지금 답 형식으로 묻는다. 옛 답 형식의 보고를 읽으려면 옛 규약을 읽는 코드를 둬야 한다 | 판정 보고가 남았지만 `Judged` 로 저장되기 전에 끊긴 리뷰는 그 보고를 버리고 다시 돈다. 리뷰 토큰이 한 번 더 든다. 다른 쪽은 지금처럼 `Execution_repair_required` 로 멈추는 것이다. 그러면 답 형식을 바꾸는 배포가 서버를 다시 시작할 때 돌던 Task 리뷰가 모두 서고, 운영자가 하나씩 푼다 |
 
 ## 11. 확인하지 못한 것
 
@@ -782,6 +796,7 @@ L2c 가 움직이지 않는다고 적은 권한 불일치 4개를 따라가서 �
 - 리뷰 도구의 설명 글, route, 생산자의 sandbox 설정이 배포 사이에 얼마나 자주 바뀌는지 재지 않았어요. 2026-11-05~11-12 사이 해시 입력 파일을 건드린 커밋 셋 가운데 해시를 바꾼 것으로 확인한 것은 #50387 하나예요.
 - L2d 의 hard cut 이 지우는 레코드를 가리키는 두 곳을 어떻게 닫을지. 실행 기록 장부에 아직 공개되지 않은 완료 Task 리뷰 레코드와, original 을 잃는 Goal 실행 기록 줄이에요. 구현 PR 이 정해요.
 - 권한 불일치로 미뤄진 Goal 검증의 수. 세지 않았어요.
+- 디스패치한 뒤 끊긴 Task attempt 가운데 판정 보고가 남았는데 `Judged` 로 저장되지 않은 것이 얼마나 되는지 재지 않았어요. 10절 8번의 대가가 이 수에 달려 있어요.
 - 공용 진행 상태 기계를 쓰는 lib 파일 10곳을 내가 모두 읽지는 않았어요. 내가 읽은 것은 submit_once, Curator, Librarian 셋이고, 나머지는 조사 에이전트가 읽었어요.
 - 12:59Z 에 완료 기록이 없던 실행 3개가 언제 끝났는지. 13:59Z 에는 모두 완료 기록이 있는데, 완료 행에는 적힌 시각이 없어요.
 - L2c 의 경합을 운영 설치에서 재현하지 않았어요. 로그 시각, 동시 실행 수, 코드 읽기가 서로 맞는 것까지 봤어요.

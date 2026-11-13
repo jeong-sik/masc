@@ -301,14 +301,14 @@ C6 은 증거 파일을 읽고 쓰는 몫에 대한 것이다. 요청 기록을 
 - 그 값은 `lane_addon_exact.ml` 안의 하위 모듈이 요청에서만 만든다. 하위 모듈 밖에서는 요청과 다른 digest 를 짝지을 수 없다.
 - 이 값과 만드는 함수는 `.mli` 로 내보내지 않는다. `.mli` 가 내보내는 증거 함수는 sweep 이 쓰는 `proof_directory` 와 `proof_request_id` 둘이다(`lane_addon_exact.mli:349`, `:352`). 증거를 읽고 쓰는 함수는 모두 그 파일 안에 있다. 그래서 `.mli` 에 `private` 를 붙여서는 아무것도 막지 못한다.
 - 보장은 "호출자의 요청에 증거나 기록을 묶는 읽기와 쓰기는 모두 그 값을 받는다"이다.
-- sweep 의 `proof_request_id` 는 요청 없이 파일 안의 `request_id` 와 `digest` 문자열로 그 파일의 이름만 확인한다. 아무것도 묶지 않으니 문자열로 이름을 내는 함수를 쓴다. `proof_key` 도 그 함수로 이름을 낸다.
-- 연산마다 한 번 만들어 넘긴다. #51463 과 같다. `read_latest_slot_observations` 는 같은 값으로 읽고 관측의 증거를 다시 만든다(`:909` 를 대신한다). `recover_retained` 는 요청을 잡기 전에 만들어 `observe_retained_classified` 와 증거 읽기에 넘긴다.
-- `bound_record` 는 요청 본문을 견준 뒤 `record.digest` 를 그 값의 digest 와 견준다. digest 를 두 번 내는 줄(`:505-506`)은 지운다. 요청은 `request_of_json` 만 만들고, schema 를 canonical 로 둔다(`:76`, `lane_addon_exact.mli:33-41`). 그래서 본문이 같은 두 요청은 digest 도 같다. `record.digest` 를 한 번만 견줘도 거절하는 기록이 같다.
+- 증거 파일 이름은 `request_id` 와 `digest` 두 문자열로 이름을 내는 함수 하나가 낸다. `proof_key` 와 sweep 의 `proof_request_id` 가 같이 쓴다. sweep 은 호출자의 요청에 아무것도 묶지 않으니 이 값을 만들지 않는다. L2a 의 sweep 은 파일 안 요청 본문에서 두 문자열을 낸다. 파일의 `request_id`·`digest` 칸에서 읽는 일은 본문을 빼는 L2b-3 이 한다.
+- 연산마다 한 번 만들어 넘긴다. #51463 과 같다. `read_latest_slot_observations` 는 같은 값으로 읽고 관측의 증거를 다시 만든다(`:909` 를 대신한다). `recover_retained` 는 요청을 잡기 전에 만들어 `observe_retained_classified` 와 증거 읽기에 넘긴다. digest 는 처음 견주거나, 증거 파일 이름을 내거나, 새 기록에 적을 때 만든다. 그 전에 멈춘 읽기는 digest 를 내지 않는다. 기록이 없는 `observe_retained` 처럼 digest 가 필요 없는 길이 그렇다.
+- `bound_record` 는 요청 본문을 견준 뒤 `record.digest` 를 그 값의 digest 와 견준다. digest 를 두 번 내는 줄(`:505-506`)은 지운다. 요청은 `request_of_json` 만 만들고, schema 를 canonical 로 둔다(`:76`, `lane_addon_exact.mli:33-41`). 파일 안에서도 `Request` 하위 모듈이 그 레코드를 private 로 두어, 그 함수 밖에서는 요청을 만들 수 없다. 그래서 본문이 같은 두 요청은 digest 도 같다. `record.digest` 를 한 번만 견줘도 거절하는 기록이 같다.
 - 저장된 요청으로 기록을 묶는 곳은 저장된 요청으로 값을 만든다. `run` 의 `:1030` 과 `check_retained_record` 의 `:580` 이다. `run` 은 그 뒤 기록의 digest 를 호출자의 값의 digest 와 견준다(`:1034`). 저장된 기록이 깨졌으면 호출자의 요청과 상관없이 `Error` 로 끝난다.
 - slot 관측은 바꾸지 않는다. 관측은 digest 가 아니라 증거 JSON 의 sha 로 증거에 묶인다(`lane_addon_exact_observation.ml:13-16`).
 - 요청을 decode 만 하는 길은 이 값을 만들지 않는다. 요청이 digest 를 들고 다니는 안은 그 길에도 digest 값을 치르게 해서 #51463 이 고르지 않았다(#51461 의 첫 댓글).
 
-덤으로 요청 전체를 해시하는 횟수가 준다. 해시 한 번은 요청 전체를 글로 쓴다(`:91`). `read_latest_original_execution` 은 한 번 읽을 때 요청을 세 번 해시한다(`:878`, `:505-506`). `read_latest_slot_observations` 는 네 번, `recover_retained` 는 다섯 번까지다. L2a 뒤에는 연산마다 한 번이다. 저장된 요청으로 기록을 묶는 `run` 만 두 번이다. #51461 의 첫 댓글이 남은 일로 적은 `bound_record` 의 두 번도 없어진다. 저장 모양과 동작은 같다. L2 의 아래 층으로 둔다(§7).
+덤으로 요청의 digest 를 내는 횟수가 준다. digest 한 번은 요청 전체를 글로 써서 해시한다(`:91`). `read_latest_original_execution` 은 한 번 읽을 때 digest 를 세 번 낸다(`:878`, `:505-506`). `read_latest_slot_observations` 는 네 번, `recover_retained` 는 다섯 번까지다. L2a 뒤에는 연산마다 많아야 한 번이다. 저장된 요청으로 기록을 묶는 `run` 만 두 번이다. #51461 의 첫 댓글이 남은 일로 적은 `bound_record` 의 두 번도 없어진다. slot 관측의 identity 는 digest 가 아니라 증거 JSON 을 해시한다(`lane_addon_exact_observation.ml:13-16`). 그 JSON 에는 L2b-3 전까지 요청 전체가 들어 있다. 저장 모양과 동작은 같다. L2 의 아래 층으로 둔다(§7).
 
 **정수 칸.** 바깥 `version`, `attempt_ordinal`, receipt 의 `version` 은 canonical 로 바꾸기 전의 JSON 에서 정수여야 한다. canonical 은 정수로 떨어지는 float 를 정수로 바꾼다. receipt 가 version 2 인 증거는 main 도 원래 JSON 에서 바깥 `version` 과 `attempt_ordinal` 이 정수인지 본다(`:694-699`). receipt 가 version 1 인 증거에서는 main 의 읽기가 세 곳에서 float 를 받는다.
 
@@ -361,6 +361,29 @@ version 1 증거를 아는 코드는 두지 않는다. version 1 증거는 정�
 - 증거가 수십 개일 때와 수백 개일 때 읽기 한 번의 시간. 증거를 다 읽는 것은 L1 의 fold 와 attempt 묶기가 요구한다(§8).
 - 설치 시점에 preflight 가 거절할 exact 기록의 수와, validator 가 찍을 Librarian owner 의 수(§5).
 - validate-stores 의 최대 RSS. 검사는 §1.2 의 1.05 GB 증거 파일을 `run` 처럼 parse 하고 canonical 로 바꾼다.
+
+2026-11-13 00:2x~00:3xZ 에 셋을 쟀다. 라이브 저장소는 읽기만 했다.
+
+읽기 한 번의 CPU 시간은 증거 수에 비례한다. 증거에서 `request` 칸을 뺀 v2 모양 파일을 만들어 쟀다.
+
+- 증거 하나의 모양은 라이브 증거 1,696개에서 골랐다. `request` 칸을 뺀 크기가 중앙값(1,515 바이트)인 것과 90 백분위(8,617 바이트)인 것이다. 문자열 값은 같은 길이의 다른 글자로 바꿨다.
+- 읽기는 `load_proofs` 를 본떴다. parse, 링크의 canonical, 증거마다 canonical 두 번, 다시 만든 링크의 canonical, 비교다. canonical 은 `lane_addon_json.ml` 의 함수를 그대로 옮겼다.
+- masc 밖의 독립 OCaml 5.5.2 프로그램이고, 프로세스 하나에서 일곱 번 잰 중앙값이다.
+- 그때 기계의 load average 는 461 이었다(CPU 16개). 그래서 wall 시간이 수십 배 흔들렸고, 프로세스 CPU 시간을 적는다.
+
+| 증거 수 | 중앙값 크기 | 90 백분위 크기 |
+|---|---|---|
+| 10 | 0.35 ms | 2.2 ms |
+| 30 | 1.4 ms | 7.0 ms |
+| 100 | 4.8 ms | 24.9 ms |
+| 300 | 15.4 ms | 76.2 ms |
+| 866 | 44.2 ms | 226 ms |
+
+거절된 호출 한 번은 이 읽기를 세 번 한다(§3.3 의 쓰기). 30 MB 이하의 증거 파일 471개 가운데 증거가 50개를 넘는 파일은 둘이다(866개, 223개). 둘 다 끝난 요청이다. 30 MB 를 넘는 파일은 §1.2 의 그 파일 하나다. 그 파일은 증거별로 세지 않았다(attempt 292).
+
+설치 때 거절할 exact 기록은 00:32:17Z 에 472개다. 기록 477개 가운데 증거 파일을 가진 것이다. 그 가운데 열린 기록은 6개다. 증거는 모두 version 1 이라 L2 를 설치할 때 모두 거절된다. Librarian owner 의 수는 L2b-2 의 validator 가 설치 때 센다. 13:33:53Z 의 값은 §5 에 있다.
+
+§1.2 의 1,055,315,219 바이트 파일을 위 프로그램으로 한 번 parse 하고 canonical 로 바꿨다. CPU 8.4 초(user 7.6, sys 0.8), wall 56.2 초가 걸렸고, 최대 RSS 는 2,990,342,144 바이트였다. L2 를 설치할 때 검사는 이 파일을 한 번 읽고, 첫 증거의 version 에서 거절한다.
 
 ### 3.4 L3 — 요청 기록 (방향)
 
@@ -510,13 +533,15 @@ Librarian 원본은 version 1 증거가 남아도 멈추고, 기록과 증거를
 |---|---|---|
 | L1a | receipt 하나에서 slot 별로 불렀는지와 입력 크기 거절인지를 읽는 함수와 시험 | `keeper_exact_walk_receipt.ml`·`.mli` |
 | L1b | `run` 이 증거에서 목록을 모아 runner 에 넘긴다. runner 가 기다리는 slot 이 있을 때 건너뛴다 | `lane_addon_exact.ml`·`.mli`, `server_lane_addon_exact.ml`, TUI·dashboard 글 |
-| L2a | 요청과 그 digest 를 묶은 값. `lane_addon_exact.ml` 안의 하위 모듈로 두고 내보내지 않는다. 호출자의 요청에 증거나 기록을 묶는 읽기와 쓰기가 그 값을 받는다. 저장 모양과 동작은 같다 | `lane_addon_exact.ml` |
-| L2b | 증거에서 `request` 칸을 뺀다. 정수 검사, sweep 의 이름 확인, preflight 의 증거 읽기와 지울 경로, 이름으로 찾는 기록 없는 증거, 서버와 같은 함수로 정하는 store root, Librarian validator 의 포트와 owner 의 scope 전부, tinker 스크립트, Fresh state 항목 | `lane_addon_exact.ml`·`.mli`, `lane_addon_store_preflight.ml`·`.mli`(`:39` 의 `Exact_record` 설명 포함), `keeper_librarian_store_preflight.ml`, `bin/deployment_preflight_helper.ml`, `scripts/tinker/librarian/check_validator_on_store.py`, `test/test_lane_addon_exact.ml`, `test/test_lane_addon_exact_runner.ml`, `test/test_lane_addon_host_cycle.ml`(`:18`), `test/test_workspace_curator_addon_commit.ml`(`:262`), `test/test_keeper_librarian_preflight.ml`, `test/test_deployment_store_directories.ml`(`:421-431`), `changelog.d` |
+| L2a | 요청과 그 digest 를 묶은 값. `lane_addon_exact.ml` 안의 하위 모듈로 두고 내보내지 않는다. 요청 레코드도 파일 안에서 private 로 둔다. 호출자의 요청에 증거나 기록을 묶는 읽기와 쓰기가 그 값을 받는다. 저장 모양과 동작은 같다(#51751) | `lane_addon_exact.ml` |
+| L2b-1 | preflight 의 exact 검사가 `run` 처럼 기록, 증거 파일, 기록 순서로 읽는다. 거절한 기록의 `fresh state` 줄에 증거 파일과 그 요청의 slot 관측 파일을 같이 찍는다. 이름으로 찾는 기록 없는 증거, decode 하지 못한 slot 관측, 증거와 관측의 `store_root` 비교, 서버와 같은 함수로 정하는 store root | `lane_addon_exact.ml`·`.mli`, `lane_addon_store_preflight.ml`·`.mli`(`:39` 의 `Exact_record` 설명 포함), `bin/deployment_preflight_helper.ml`, `test/test_deployment_store_directories.ml`(`:421-431`), `changelog.d` |
+| L2b-2 | Librarian validator 가 실행 원본이 가리키는 exact 기록과 증거를 읽는다. 읽지 못하면 그 원본을 거절하고 그 owner 의 scope 를 모두 찍는다. validator 의 포트와, 거절 결과에 싣는 지울 scope | `keeper_librarian_store_preflight.ml`, `lane_addon_store_preflight.ml`·`.mli`, `test/test_keeper_librarian_preflight.ml`, `changelog.d` |
+| L2b-3 | 증거에서 `request` 칸을 뺀다. 정수 검사, 파일의 `request_id`·`digest` 칸으로 하는 sweep 의 이름 확인, tinker 스크립트, Fresh state 항목 | `lane_addon_exact.ml`, `scripts/tinker/librarian/check_validator_on_store.py`, `test/test_lane_addon_exact.ml`, `test/test_lane_addon_exact_runner.ml`, `test/test_lane_addon_host_cycle.ml`(`:18`), `test/test_workspace_curator_addon_commit.ml`(`:262`), `changelog.d` |
 | L3 | 요청 본문을 기록 밖으로 | `lane_addon_exact.ml`, `lane_addon_store.ml`, preflight |
 
 L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 
-L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다. L2b 는 PR 하나다. 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양을 봐야 한다. `test_lane_addon_host_cycle.ml:18` 과 `test_workspace_curator_addon_commit.ml:262` 는 version 1 receipt(`Receipt.make`)를 runner 결과로 돌려준다. `run` 이 그 receipt 를 증거에 담으니 L2b 에서 `make_v2` 로 바꾼다.
+L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다(#51751). L2b 의 세 층은 한 스택으로 올린다. 스택은 맨 위 PR 로 한 번에 병합되니, 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양으로 들어간다. L2b-1 과 L2b-2 는 version 1 증거로도 맞게 돈다. 두 검사는 그 기록을 읽는 쪽의 decode 를 쓴다(§3.3 의 preflight). 그래서 L2b-3 이 decode 를 바꾸면 검사도 같이 바뀐다. `test_lane_addon_host_cycle.ml:18` 과 `test_workspace_curator_addon_commit.ml:262` 는 version 1 receipt(`Receipt.make`)를 runner 결과로 돌려준다. `run` 이 그 receipt 를 증거에 담으니 L2b-3 에서 `make_v2` 로 바꾼다.
 
 ## 8. 대안
 
@@ -556,6 +581,8 @@ L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다. L2b 는 
 | D5 | L1 이 덮지 않는 400 의 되풀이(§1.1)를 어떻게 하나 | 건너뛰기를 넓히지 않는다. claude 계열의 지출 한도 400 은 #49686 에서 정한다 | §3.5 | tinker 계열처럼 오류 코드 없이 본문을 거절하는 slot 은, 다른 slot 이 기다리는 동안 host event 마다 같은 본문을 한 번씩 받는다. 잰 경우 요청 여섯에 slot 둘이다. 호출마다 증거가 하나 는다. L2 뒤에도 거절된 호출 한 번은 그 요청의 증거 n개를 세 번 읽고 n+1개를 쓴다(§3.3). 증거 하나는 평균 약 3.5 KB 다(§1.1, 계산값). L2 는 증거 쪽에서 요청 크기를 떼어 낸다. 호출마다 기록을 두 번(새 기록의 첫 호출은 세 번) 저장하는 몫에는 요청 크기가 남는다(§3.4) |
 
 2026-11-12 에 사용자가 D3 과 D5 를 추천대로 골랐다. L2 를 먼저 혼자 설치하고, L3 은 L2 를 설치한 뒤 잰 값으로 정한다. 건너뛰기는 400 으로 넓히지 않는다.
+
+2026-11-13 에 사용자가 L2b 를 세 층 스택(§7)으로 올리기로 골랐다. 한 PR 에 14개 파일을 고치면, 설치 때 지울 것을 정하는 preflight 의 결함을 리뷰가 놓치기 쉽다. 구현 전에 §3.3 의 셋을 쟀다.
 
 ## 10. 확인하지 않은 것
 

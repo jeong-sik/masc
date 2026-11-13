@@ -874,6 +874,42 @@ let keeper_chat_operation_store =
   }
 ;;
 
+(* 2026-11-12 (#51587): #51429 moved a receipt's [arguments] to
+   [{"known": _}] / [{"unknown": true}] and no deploy check read the outbox,
+   so an install passed with receipts of the earlier shape in three keepers'
+   outboxes. The read is the one [Keeper_client_tool_outbox.load] applies to
+   each file. *)
+let keeper_tool_outbox_store =
+  { store = "keeper tool outbox receipts"
+  ; on_refusal =
+      "every request of that keeper fails before the provider call, because \
+       the runtime loads the whole outbox first and stops at the first receipt \
+       it cannot read; the receipt stays on disk until someone removes it"
+  ; scan =
+      (fun ~base_path ->
+         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+           (* The runtime reaches an outbox only through this path, which a
+              directory that is not named like a Keeper does not have. *)
+           match Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name:keeper_id with
+           | Error (_ : string) -> report
+           | Ok (_ : string) ->
+             (match
+                Keeper_client_tool_outbox.inspect_committed
+                  ~base_path
+                  ~keeper_name:keeper_id
+              with
+              | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
+              | Ok receipts ->
+                List.fold_left
+                  (fun report (path, verdict) ->
+                     count_row
+                       report
+                       (Result.map_error (fun detail -> path ^ ": " ^ detail) verdict))
+                  report
+                  receipts)))
+  }
+;;
+
 module Id = struct
   type t =
     | Keeper_meta
@@ -899,6 +935,7 @@ module Id = struct
     | Keeper_event_queue
     | Keeper_chat_transcripts
     | Keeper_chat_operations
+    | Keeper_tool_outbox
   [@@deriving enumerate]
 end
 
@@ -949,6 +986,7 @@ let reader : Id.t -> reader = function
   | Id.Keeper_event_queue -> Refuse_boot (Refusing.Event_queue, event_queue_store)
   | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store
   | Id.Keeper_chat_operations -> Preflight_only keeper_chat_operation_store
+  | Id.Keeper_tool_outbox -> Preflight_only keeper_tool_outbox_store
 ;;
 
 let name id =

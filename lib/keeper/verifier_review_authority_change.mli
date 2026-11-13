@@ -4,13 +4,14 @@
     This is the evidence of a before-dispatch refusal. Such a refusal reaches
     no reviewer and has no verdict, so it carries no review result, receipt or
     evaluator runtime. The question did not move: a changed question is not an
-    authority change and never produces this value. *)
+    authority change and never produces this value. Only {!between} and
+    {!of_json} build a value, so every value names something that moved. *)
 
-type pair = { before : string; after : string }
+type pair = private { before : string; after : string }
 (** The retained digest first, then the current one. Both are canonical
-    SHA-256 text. *)
+    SHA-256 text and they differ. *)
 
-type t =
+type t = private
   | Authority of pair
       (** The lookup authority digest moved. *)
   | Output_contract of pair
@@ -25,10 +26,15 @@ val answer_format_digest : string -> string
 (** The digest an answer format pair records for one answer format text. *)
 
 val between :
-  authority:pair -> retained_format:string -> current_format:string -> t option
-(** [authority] holds the retained and current lookup authority digests. The
-    two answer format texts are recorded as their digests. [None] when neither
-    moved, so a change without a moved value cannot be built. *)
+  retained_authority:string -> current_authority:string ->
+  retained_format:string -> current_format:string -> (t option, string) result
+(** The two lookup authority digests must be canonical SHA-256 text. The two
+    answer format texts are recorded as their digests. [Ok None] when neither
+    moved. *)
+
+val begins_at : authority:string -> answer_format:string -> t -> bool
+(** [true] when every moved value starts at this retained lookup authority
+    digest and answer format text, so the change belongs to that original. *)
 
 val to_json : t -> Yojson.Safe.t
 

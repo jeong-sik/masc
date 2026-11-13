@@ -263,22 +263,42 @@ let test_is_successor_of_compares_only_the_question () =
 module Change = Masc.Verifier_review_authority_change
 
 let test_authority_change_is_closed_and_strict () =
-  let authority = { Change.before = String.make 64 'a'; after = String.make 64 'b' } in
-  let unmoved = { authority with Change.after = authority.Change.before } in
+  let a = String.make 64 'a' and b = String.make 64 'b' in
   let retained_format = "earlier answer format" and current_format = "current answer format" in
-  let format =
-    { Change.before = Change.answer_format_digest retained_format
-    ; after = Change.answer_format_digest current_format } in
-  let between authority current_format = Change.between ~authority ~retained_format ~current_format in
-  assert (between unmoved retained_format = None);
-  assert (between authority retained_format = Some (Change.Authority authority));
-  assert (between unmoved current_format = Some (Change.Output_contract format));
-  assert (between authority current_format = Some (Change.Both { authority; output_contract = format }));
+  let retained_digest = Change.answer_format_digest retained_format
+  and current_digest = Change.answer_format_digest current_format in
+  let between current_authority current_format =
+    match Change.between ~retained_authority:a ~current_authority ~retained_format ~current_format with
+    | Ok change -> change
+    | Error detail -> failwith ("between refused two digests: " ^ detail) in
+  (* What moved, as (before, after) for the authority and the answer format. *)
+  let values (p : Change.pair) = p.Change.before, p.Change.after in
+  let moved = function
+    | Change.Authority p -> Some (values p), None
+    | Change.Output_contract p -> None, Some (values p)
+    | Change.Both { authority; output_contract } -> Some (values authority), Some (values output_contract) in
+  assert (between a retained_format = None);
+  assert (Option.map moved (between b retained_format) = Some (Some (a, b), None));
+  assert (Option.map moved (between a current_format)
+          = Some (None, Some (retained_digest, current_digest)));
+  assert (Option.map moved (between b current_format)
+          = Some (Some (a, b), Some (retained_digest, current_digest)));
+  (* Only digests name an authority. *)
+  assert (Result.is_error (Change.between ~retained_authority:"not-a-digest" ~current_authority:b
+    ~retained_format ~current_format));
+  (* A change belongs to the original whose authority and answer format it
+     moved away from. *)
+  (match between b current_format with
+   | Some change ->
+     assert (Change.begins_at ~authority:a ~answer_format:retained_format change);
+     assert (not (Change.begins_at ~authority:b ~answer_format:retained_format change));
+     assert (not (Change.begins_at ~authority:a ~answer_format:current_format change))
+   | None -> failwith "the authority and the answer format both moved");
   (* The round trip passes only because both pairs hold SHA-256 digests: the
      evidence keeps the digests of the two answer formats, not their text. *)
   List.iter (fun change -> assert (Change.of_json (Change.to_json change) = Ok change))
-    [ Change.Authority authority; Change.Output_contract format
-    ; Change.Both { authority; output_contract = format } ];
+    (List.filter_map Fun.id
+       [ between b retained_format; between a current_format; between b current_format ]);
   let rejected json = match Change.of_json json with Ok _ -> false | Error _ -> true in
   let pair before after = `Assoc [ "before", `String before; "after", `String after ] in
   let moved = pair (String.make 64 'a') (String.make 64 'b') in

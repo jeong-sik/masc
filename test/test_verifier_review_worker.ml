@@ -269,6 +269,13 @@ let before_dispatch_refusal store attempt =
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected {stage=P.Execution;_} | Subdividing _ | Subdivided _ ->
     Alcotest.fail "the moved attempt left no before-dispatch refusal"
+(* The change a retained attempt holding [retained_authority] and
+   [retained_format] meets under the current authority. *)
+let expected_change ~retained_authority ~retained_format (current : V.lookup) =
+  match Change.between ~retained_authority ~current_authority:current.V.authority_digest
+      ~retained_format ~current_format:(V.canonical_output_contract ()) with
+  | Ok (Some change) -> change
+  | Ok None | Error _ -> Alcotest.fail "the change fixture moved nothing"
 
 let test_moved_authority_is_refused_and_asked_again () = with_workspace (fun config store ->
   let a=authority config in
@@ -279,7 +286,8 @@ let test_moved_authority_is_refused_and_asked_again () = with_workspace (fun con
       ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls;
     Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;verdict=Some (AR.Approve "asked again")}) (fun () ->
-    let moved=Change.Authority {Change.before=stale_digest;after=current.V.authority_digest} in
+    let moved=expected_change ~retained_authority:stale_digest
+      ~retained_format:(V.canonical_output_contract ()) current in
     (match run store a 0 with
      | Error (W.Authority_changed change) ->
        Alcotest.(check bool) "the refusal names the moved authority" true (change=moved)
@@ -303,24 +311,28 @@ let test_moved_answer_format_takes_the_same_path () =
     let a=authority config in
     let current=V.lookup_of_authority a in
     retain store (stale_original ~authority_moved ~contract:old_contract a);
-    let format={Change.before=Change.answer_format_digest old_contract;
-      after=Change.answer_format_digest (V.canonical_output_contract ())} in
-    let expected=
-      if authority_moved then Change.Both {authority={Change.before=stale_digest;
-        after=current.V.authority_digest};output_contract=format}
-      else Change.Output_contract format in
+    let expected=expected_change ~retained_format:old_contract current
+      ~retained_authority:(if authority_moved then stale_digest else current.V.authority_digest) in
+    let calls=ref 0 in
     with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt:_
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
-      Alcotest.fail "a moved answer format dispatched the retained attempt") (fun () ->
+      incr calls;
+      Ok {AR.selected_runtime_id="fixture-reviewer";evaluator_execution=None;
+        verdict=Some (AR.Approve "asked in the current format")}) (fun () ->
       (match run store a 0 with
        | Error (W.Authority_changed change) -> Alcotest.(check bool) label true (change=expected)
        | Ok _ | Error _ -> Alcotest.fail "a moved answer format reached the retained attempt");
+      Alcotest.(check int) "the refused attempt reaches no reviewer" 0 !calls;
       Alcotest.(check bool) "the refusal keeps the same change" true (before_dispatch_refusal store 0=expected);
       Alcotest.(check int) "the walk opens the next attempt" 1
         (loaded (next_attempt ~lookup:(fun () -> Ok current) store));
       let next=loaded (O.load_for_destination ~store ~verification_id ~attempt:1 ~installation_id ~package_id) in
       Alcotest.(check string) "the next attempt asks for the current answer format"
-        (V.canonical_output_contract ()) (V.output_contract next))))
+        (V.canonical_output_contract ()) (V.output_contract next);
+      (match run store a 1 with
+       | Ok {AR.verdict=Some (Approve "asked in the current format");_} -> ()
+       | Ok _ | Error _ -> Alcotest.fail "the next attempt did not ask in the current answer format");
+      Alcotest.(check int) "only the next attempt reaches a reviewer" 1 !calls)))
     [false,"only the answer format moved";true,"the authority and the answer format moved"]
 
 let test_known_retry_asks_the_same_question_again () = with_workspace (fun config store ->

@@ -875,9 +875,12 @@ let test_moved_authority_is_asked_again_in_the_same_processing () =
             | Error _ -> fail "retained attempt is unreadable" in
           (match P.phase (O.progress (load 0)) with
            | Subdivided ({stage=P.Before_dispatch;evidence},_) ->
+             let format = V.output_contract stale in
              check bool "the refusal names the moved authority" true
-               (Change.of_json evidence
-                = Ok (Change.Authority {Change.before=stale_digest;after=current.V.authority_digest}))
+               (Result.map Option.some (Change.of_json evidence)
+                = Change.between ~retained_authority:stale_digest
+                    ~current_authority:current.V.authority_digest
+                    ~retained_format:format ~current_format:format)
            | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
            | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _
            | Subdivided ({stage=P.Execution;_},_) ->

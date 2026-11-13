@@ -334,12 +334,17 @@ let retry_result evidence =
 
 (* A successor needs a refusal that authorizes one: an execution refusal that
    names a runtime to review again, or a before-dispatch refusal whose closed
-   evidence says what moved. The stage decides which evidence to read. *)
-let successor_authorized (refusal : Progress.refusal) =
+   evidence says what moved away from this original. The stage decides which
+   evidence to read. *)
+let successor_authorized original (refusal : Progress.refusal) =
   match refusal.stage with
   | Progress.Execution -> retry_result refusal.evidence
   | Progress.Before_dispatch ->
-    Verifier_review_authority_change.of_json refusal.evidence |> Result.map (fun _ -> ())
+    let* change = Verifier_review_authority_change.of_json refusal.evidence in
+    if Verifier_review_authority_change.begins_at ~authority:(V.authority_binding original)
+        ~answer_format:(V.output_contract original) change
+    then Ok ()
+    else Error "before-dispatch refusal names another original's authority or answer format"
 
 (* Routing metadata proves only which verification owns these immutable bytes.
    It never constructs an Original or grants execution of an unsupported body. *)
@@ -455,7 +460,7 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
   let rec walk parent rest =
     match Progress.phase parent.record.progress,rest with
     | (Progress.Subdividing (refusal,successor) | Subdivided (refusal,successor)),_ ->
-      let* () = successor_authorized refusal |> Result.map_error corrupt in
+      let* () = successor_authorized parent.original refusal |> Result.map_error corrupt in
       let* child = loaded (match rest with
         | child::_ -> Ok child.original
         | [] -> let* json = Owner.load_successor_request ~store ~scope successor
@@ -478,7 +483,7 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
       (* HIGH-RISK-UNREVIEWED: the same question met another lookup authority
          or answer format before dispatch. The next attempt asks it again with
          the current authority, whatever the refused attempt held. *)
-      let* () = successor_authorized refusal |> Result.map_error corrupt in
+      let* () = successor_authorized parent.original refusal |> Result.map_error corrupt in
       allocate parent
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
       | Commit_unknown _ | Finished _ | Conflicted _),[] -> Ok (V.attempt parent.original)

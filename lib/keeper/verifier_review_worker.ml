@@ -158,14 +158,18 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
      format is not the current one is refused before dispatch. The refusal
      keeps only what moved; the next attempt asks the same question with the
      current authority, so the old grants never reach a reviewer. *)
+  let* moved = Change.between ~retained_authority:(V.authority_binding original)
+      ~current_authority:current.V.authority_digest
+      ~retained_format:(V.output_contract original) ~current_format:(V.canonical_output_contract ())
+    |> Result.map_error (fun detail -> Original_corrupt detail) in
   let* () =
-    match Change.between
-      ~authority:{Change.before=V.authority_binding original;after=current.V.authority_digest}
-      ~retained_format:(V.output_contract original) ~current_format:(V.canonical_output_contract ()) with
+    match moved with
     | Some change ->
       let* _ = save retained (Progress.Refused {stage=Progress.Before_dispatch;evidence=Change.to_json change}) in
       Error (Authority_changed change)
     | None ->
+      (* The same authority digest names the same tools, so other names mean
+         the retained original disagrees with its own digest. *)
       if V.lookup_schemas original = current.V.granted_tools then Ok ()
       else Error (Original_corrupt "retained lookup tools differ from their authority digest") in
 

@@ -1243,11 +1243,12 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               in Ok (attempt,reviewed_original,result)
             in
             (* HIGH-RISK-UNREVIEWED: an attempt refused before dispatch because
-               its lookup authority or answer format moved is asked again in
-               this same processing. The walk opens the next attempt with the
+               its lookup authority or answer format moved is asked again once
+               in this same processing. The walk opens the next attempt with the
                authority this processing prepared, and the worker checks it
-               against that same value, so the second pass cannot meet a moved
-               authority. If it does, the two disagree and the review stops. *)
+               against that same value. A second refusal keeps only its own
+               record and waits for the next processing, as an unavailable
+               lookup authority does. *)
             let run_result = match run_once () with
               | Error (Verifier_review_worker.Authority_changed _) -> run_once ()
               | (Ok _ | Error (Verifier_review_worker.Original_not_found | Original_corrupt _
@@ -1267,8 +1268,8 @@ let process_task_once ?(registry=Verification_run_registry.global ())
             | Error Verifier_review_worker.Question_changed ->
               stop (Raised {detail="the submitted subject or evidence changed after the review original was prepared"})
             | Error (Verifier_review_worker.Authority_changed change) ->
-              stop (Raised {detail="a successor prepared in this processing still met a moved authority: "
-                ^ Verifier_review_authority_change.to_string change})
+              defer_unavailable ~stage:Verification_run_registry.Lookup_surface
+                ~detail:(Verifier_review_authority_change.to_string change)
             | Ok (attempt,original,result) ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback

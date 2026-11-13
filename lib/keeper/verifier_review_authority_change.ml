@@ -15,15 +15,31 @@ let answer_format_digest = Lane_addon_store.digest
 
 let moved pair = not (String.equal pair.before pair.after)
 
-let between ~authority ~retained_format ~current_format =
-  let output_contract =
-    { before = answer_format_digest retained_format; after = answer_format_digest current_format }
-  in
-  match moved authority, moved output_contract with
-  | true, true -> Some (Both { authority; output_contract })
-  | true, false -> Some (Authority authority)
-  | false, true -> Some (Output_contract output_contract)
-  | false, false -> None
+let between ~retained_authority ~current_authority ~retained_format ~current_format =
+  if not (String_util.is_lowercase_sha256_hex retained_authority
+          && String_util.is_lowercase_sha256_hex current_authority)
+  then Error "lookup authority values are not digests"
+  else (
+    let authority = { before = retained_authority; after = current_authority } in
+    let output_contract =
+      { before = answer_format_digest retained_format; after = answer_format_digest current_format }
+    in
+    Ok
+      (match moved authority, moved output_contract with
+       | true, true -> Some (Both { authority; output_contract })
+       | true, false -> Some (Authority authority)
+       | false, true -> Some (Output_contract output_contract)
+       | false, false -> None))
+;;
+
+let begins_at ~authority ~answer_format t =
+  let from_authority pair = String.equal pair.before authority in
+  let from_format pair = String.equal pair.before (answer_format_digest answer_format) in
+  match t with
+  | Authority pair -> from_authority pair
+  | Output_contract pair -> from_format pair
+  | Both { authority = moved_authority; output_contract } ->
+    from_authority moved_authority && from_format output_contract
 ;;
 
 let pair_to_json pair = `Assoc [ "before", `String pair.before; "after", `String pair.after ]

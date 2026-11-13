@@ -1554,6 +1554,66 @@ streaming = true
 
 [antigravity_subscription.antigravity-gemini-4-argon-low]
 
+# Gemini 4 Carbon and Hydrogen, listed by `agy models` (agy 1.5.8, 2026-11-13)
+# with the level in each name; Hydrogen alone has xhigh. The window is the
+# catalog rows' 1,048,576. Which of them an account can call depends on its
+# Antigravity plan (antigravity.google/docs/plans).
+[models.antigravity-gemini-4-carbon-high]
+api-name = "gemini-4-carbon-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-carbon-high]
+
+[models.antigravity-gemini-4-carbon-medium]
+api-name = "gemini-4-carbon-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-carbon-medium]
+
+[models.antigravity-gemini-4-carbon-low]
+api-name = "gemini-4-carbon-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-carbon-low]
+
+[models.antigravity-gemini-4-hydrogen-xhigh]
+api-name = "gemini-4-hydrogen-xhigh"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-hydrogen-xhigh]
+
+[models.antigravity-gemini-4-hydrogen-high]
+api-name = "gemini-4-hydrogen-high"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-hydrogen-high]
+
+[models.antigravity-gemini-4-hydrogen-medium]
+api-name = "gemini-4-hydrogen-medium"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-hydrogen-medium]
+
+[models.antigravity-gemini-4-hydrogen-low]
+api-name = "gemini-4-hydrogen-low"
+max-context = 1048576
+tools-support = true
+streaming = true
+
+[antigravity_subscription.antigravity-gemini-4-hydrogen-low]
+
 [models.antigravity-gemini-3-8-flash-high]
 api-name = "gemini-3.8-flash-high"
 max-context = 1048576

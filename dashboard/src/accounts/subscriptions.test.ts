@@ -10,7 +10,7 @@ import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import type { View } from './console'
 import { slowAfterMs } from './notes'
-import { SubscriptionsPanel, accountFacts, createSubscriptions, follow } from './subscriptions'
+import { SubscriptionsPanel, accountFacts, createSubscriptions, follow, runnable } from './subscriptions'
 import type { AccountFacts, PanelView, SubscriptionsModel } from './subscriptions'
 import { paths } from './wire'
 import type { Integration, Send } from './wire'
@@ -150,6 +150,32 @@ describe('reading the subscriptions', () => {
     expect([kind(panel), sent.length]).toEqual([`read for ${person}`, 4])
   })
 
+  it('does nothing for a person whose reading failed: the retry reads again', async () => {
+    const { panel, sent } = start({ [paths.integrations]: [notReady()], [paths.owned]: [ownedNothing()] })
+    await panel.load(person)
+    await panel.load(person)
+    expect([kind(panel), sent.length]).toEqual([`failed for ${person}`, 2])
+  })
+
+  it('takes the answer of the newest reading, whatever an older one ends with', async () => {
+    const first = later()
+    const { panel } = start({ [paths.integrations]: [first.answer, offered(), offered()], [paths.owned]: [ownedOne(), ownedNothing(), ownedOne()] })
+    const older = panel.load(person)
+    await panel.load(other)
+    await panel.load(person)
+    first.give(notReady())
+    await older
+    expect(kind(panel)).toBe(`read for ${person}`)
+  })
+
+  it('keeps the page of a failed reading while it leaves after a retry finds no session', async () => {
+    const { panel, leave } = start({ [paths.integrations]: [notReady(), offered()], [paths.owned]: [ownedNothing(), noSession()] })
+    await panel.load(person)
+    await panel.retry()
+    const view = panel.view.value
+    expect([view.kind, view.kind === 'failed' ? view.next : null, leave.mock.calls.length]).toEqual(['failed', 'leaving', 1])
+  })
+
   it.each([
     ['the subscriptions', { [paths.integrations]: [offered()], [paths.owned]: [noSession()] }],
     ['the offer, while the other reading failed', { [paths.integrations]: [noSession()], [paths.owned]: [notReady()] }],
@@ -248,6 +274,20 @@ describe('what the panel knows of each account', () => {
     ])
   })
 
+  it('says whether a Keeper can run on an account, or what stands in its way', () => {
+    expect(byAccount((one) => one.keeper)).toEqual([
+      ['acct_gone', { kind: 'not_offered' }],
+      ['acct_claude', { kind: 'can_run' }],
+      ['acct_codex', { kind: 'refused', refusal: 'native_tools_reach_other_homes' }],
+      ['acct_unknown', { kind: 'not_offered' }],
+      ['acct_new', { kind: 'needs_model' }],
+    ])
+  })
+
+  it('names the subscriptions a Keeper may run on here', () => {
+    expect(runnable(integrations).map((one) => one.id)).toEqual(['claude_code'])
+  })
+
   it('counts a model as checked only while the server still finds it in its settings', () => {
     expect(byAccount((one) => one.checked)).toEqual([
       ['acct_gone', false], ['acct_claude', true], ['acct_codex', true], ['acct_unknown', false], ['acct_new', false],
@@ -273,6 +313,7 @@ describe('the panel', () => {
     ['leaving', { kind: 'leaving', forUser: person }],
     ['a reading that failed', { kind: 'failed', forUser: person, failure: { problem: refused, attempts: 1 }, next: 'idle' }],
     ['a retry under way', { kind: 'failed', forUser: person, failure: { problem: { kind: 'unreachable' }, attempts: 2 }, next: 'reading' }],
+    ['a retry that found no session', { kind: 'failed', forUser: person, failure: { problem: refused, attempts: 1 }, next: 'leaving' }],
     ['nothing connected', read({ accounts: [], runtimes: [] })],
     ['accounts of each kind', read({
       accounts: [
@@ -309,12 +350,12 @@ describe('the panel', () => {
   })
 
   it('says a problem where a screen reader announces it only when a reading failed', () => {
-    expect(count('[role=alert]')).toEqual(named('a reading that failed', 'a retry under way'))
+    expect(count('[role=alert]')).toEqual(named('a reading that failed', 'a retry under way', 'a retry that found no session'))
   })
 
   it('offers a retry only when a reading failed, and marks it while it runs', () => {
-    expect(count('button')).toEqual(named('a reading that failed', 'a retry under way'))
-    expect(count('button[aria-disabled=true]')).toEqual(named('a retry under way'))
+    expect(count('button')).toEqual(named('a reading that failed', 'a retry under way', 'a retry that found no session'))
+    expect(count('button[aria-disabled=true]')).toEqual(named('a retry under way', 'a retry that found no session'))
   })
 
   it('has a row for each account', () => {
@@ -327,6 +368,31 @@ describe('the panel', () => {
     if (button === null) throw new Error('no retry button')
     fireEvent.click(button)
     expect(model.retry).toHaveBeenCalledTimes(1)
+  })
+
+  /** The panel over a model that answers from lists. */
+  const live = (byPath: Readonly<Record<string, readonly Scripted[]>>) => {
+    const { panel } = start(byPath)
+    return { panel, container: render(html`<${SubscriptionsPanel} model=${panel} />`).container }
+  }
+
+  it('puts a new note on the page when a reading fails again', async () => {
+    const { panel, container } = live({ [paths.integrations]: [notReady(), notReady()], [paths.owned]: [ownedNothing(), ownedNothing()] })
+    await act(() => panel.load(person))
+    const first = container.querySelector('[role=alert]')
+    await act(() => panel.retry())
+    const second = container.querySelector('[role=alert]')
+    expect([first === null, second === null, second === first]).toEqual([false, false, false])
+  })
+
+  it('moves the focus to the heading of the panel when a retry reads', async () => {
+    const { panel, container } = live({ [paths.integrations]: [notReady(), offered()], [paths.owned]: [ownedNothing(), ownedOne()] })
+    await act(() => panel.load(person))
+    const button = container.querySelector('button')
+    if (button === null) throw new Error('no retry button')
+    button.focus()
+    await act(() => panel.retry())
+    expect(document.activeElement).toBe(container.querySelector('h2'))
   })
 
   it('draws what the model reads', async () => {

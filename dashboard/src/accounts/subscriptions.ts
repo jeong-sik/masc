@@ -7,13 +7,14 @@
 
 import { effect, signal, type ReadonlySignal } from '@preact/signals'
 import { html } from 'htm/preact'
+import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { View } from './console'
 import { ProblemNote, Retry, idTail, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
 import { integrations as readIntegrations, owned as readOwned } from './wire'
 import type {
-  Calls, Integration, IntegrationUnread, ModelUnread, Owned, Problem, ProviderAccount, Runtime, Send,
+  CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, Problem, ProviderAccount, Runtime, Send,
 } from './wire'
 
 export type PanelView =
@@ -35,9 +36,9 @@ export interface PanelDeps {
 export interface SubscriptionsModel {
   readonly view: ReadonlySignal<PanelView>
   /** Reads what the person `userId` connected and what the server offers. A
-      call for the person the panel reads or has read does nothing and
-      settles at once; a call for another person starts over, and what was
-      read for the first is dropped. */
+      call for the person the panel already shows does nothing and settles at
+      once, even after a failure: `retry` reads again. A call for another
+      person starts over, and what was read for the first is dropped. */
   readonly load: (userId: string) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
   readonly retry: () => Promise<void>
@@ -61,23 +62,29 @@ async function readBoth(send: Send): Promise<Found> {
 
 export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsModel {
   const view = signal<PanelView>({ kind: 'waiting' })
+  /** The reading whose answer the panel takes. A later one, a retry or the
+      reading for another person signed in meanwhile, replaces it. */
+  let latest = 0
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
+    latest += 1
+    const mine = latest
     const slow = setTimeout(() => {
       const now = view.peek()
-      if (now.kind === 'reading' && now.forUser === forUser) view.value = { ...now, slow: true }
+      if (mine === latest && now.kind === 'reading') view.value = { ...now, slow: true }
     }, slowAfterMs)
     const found = await readBoth(send)
     clearTimeout(slow)
-    // Another person was signed in while the panel read: what it read is not theirs.
-    const now = view.peek()
-    if (now.kind === 'waiting' || now.forUser !== forUser) return
+    if (mine !== latest) return
     if (found.ok) {
       view.value = { kind: 'read', forUser, integrations: found.integrations, owned: found.owned }
       return
     }
     if (found.problem.kind === 'signed_out') {
-      view.value = { kind: 'leaving', forUser }
+      // A retry keeps its button on the page while the browser leaves, so the
+      // focus of the person who pressed it stays where it was (notes.ts, `Next`).
+      const now = view.peek()
+      view.value = now.kind === 'failed' ? { ...now, next: 'leaving' } : { kind: 'leaving', forUser }
       leave()
       return
     }
@@ -126,7 +133,28 @@ export interface AccountFacts {
   /** A model was checked on the account and the server still finds it in its
       settings. A Runtime whose model it cannot read is not one a turn runs on. */
   readonly checked: boolean
+  readonly keeper: KeeperOn
 }
+
+/** Whether a Keeper can run on an account here, or what stands in its way. */
+export type KeeperOn =
+  /** The server lets a Keeper run on the subscription, and a model was checked on the account. */
+  | { readonly kind: 'can_run' }
+  /** The server lets a Keeper run on the subscription; no model of the account is checked. */
+  | { readonly kind: 'needs_model' }
+  | { readonly kind: 'refused'; readonly refusal: CallRefusal }
+  /** The account's subscription is not known, or the server no longer offers it. */
+  | { readonly kind: 'not_offered' }
+
+function keeperOn(offered: Integration | null, checked: boolean): KeeperOn {
+  if (offered === null) return { kind: 'not_offered' }
+  if (offered.calls.kind === 'refused') return { kind: 'refused', refusal: offered.calls.refusal }
+  return checked ? { kind: 'can_run' } : { kind: 'needs_model' }
+}
+
+/** The subscriptions a Keeper may run on here. */
+export const runnable = (integrations: readonly Integration[]): readonly Integration[] =>
+  integrations.filter((one) => one.calls.kind === 'allowed')
 
 /** The facts of each account, in the order the server lists the accounts.
     No Runtime is left out: an account is never unlinked
@@ -138,7 +166,8 @@ export function accountFacts(integrations: readonly Integration[], owned: Owned)
     const integration = account.integration
     const runtimes = owned.runtimes.filter((runtime) => runtime.accountId === account.id)
     const offered = integration.read ? integrations.find((one) => one.id === integration.value) ?? null : null
-    return { account, offered, runtimes, checked: runtimes.some((runtime) => runtime.model.read) }
+    const checked = runtimes.some((runtime) => runtime.model.read)
+    return { account, offered, runtimes, checked, keeper: keeperOn(offered, checked) }
   })
 }
 
@@ -149,9 +178,11 @@ export function accountFacts(integrations: readonly Integration[], owned: Owned)
     when the server no longer offers it. */
 function subscriptionName(account: ProviderAccount, offered: Integration | null): string {
   if (!account.integration.read) return '어떤 구독인지 알 수 없는 계정'
-  if (offered === null) return account.integration.value
-  return offered.displayName === '' ? offered.id : offered.displayName
+  return offered === null ? account.integration.value : integrationName(offered)
 }
+
+const integrationName = (integration: Integration): string =>
+  integration.displayName === '' ? integration.id : integration.displayName
 
 function integrationUnreadWords(unread: IntegrationUnread | 'unrecognised'): string {
   switch (unread) {
@@ -162,8 +193,8 @@ function integrationUnreadWords(unread: IntegrationUnread | 'unrecognised'): str
 }
 
 /** Why a Keeper does not run on an account of the subscription `name` here. */
-function refusedWords(calls: Extract<Calls, { readonly kind: 'refused' }>, name: string): string {
-  switch (calls.refusal) {
+function refusedWords(refusal: CallRefusal, name: string): string {
+  switch (refusal) {
     case 'native_tools_reach_other_homes':
       return `이 서버는 다른 사람의 폴더에 닿을 수 있는 도구를 막아요. 그래서 ${name} 구독으로는 Keeper를 실행할 수 없어요.`
     case 'native_tools_reach_person_homes':
@@ -185,7 +216,7 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
     case 'account_integration_unread': return null
     case 'template_not_declared': return null
     case 'configuration_unavailable': return '서버 설정을 읽지 못해서 모델을 알 수 없어요.'
-    case 'runtime_not_bound': return '서버 설정에 이 모델이 없어요.'
+    case 'runtime_not_bound': return '서버 설정이 바뀌어서 이 구독으로 이 모델을 부를 수 없어요.'
     case 'unrecognised': return '서버가 이 모델을 알려 주지 않았어요.'
   }
 }
@@ -196,12 +227,13 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
     Nothing is suggested for an account the server offers no subscription for:
     nothing can be done with it here. */
 function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
-  if (facts.offered === null) return html`<p class="chips"><span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
-  const runs = facts.offered.calls.kind === 'allowed'
+  const { keeper, checked } = facts
+  if (keeper.kind === 'not_offered') return html`<p class="chips"><span class="chip chip-todo">여기서 쓸 수 없음</span></p>`
   return html`
     <p class="chips">
-      <span class=${facts.checked ? 'chip' : 'chip chip-todo'}>${facts.checked ? '모델 확인됨' : '모델 확인 필요'}</span>
-      <span class=${runs ? 'chip' : 'chip chip-todo'}>${runs ? 'Keeper 실행 가능' : 'Keeper 실행 불가'}</span>
+      <span class=${checked ? 'chip' : 'chip chip-todo'}>${checked ? '모델 확인됨' : '모델 확인 필요'}</span>
+      ${keeper.kind === 'can_run' ? html`<span class="chip">Keeper 실행 가능</span>` : null}
+      ${keeper.kind === 'refused' ? html`<span class="chip chip-todo">Keeper 실행 불가</span>` : null}
     </p>
   `
 }
@@ -235,10 +267,18 @@ function AccountRow({ facts }: { readonly facts: AccountFacts }): VNode {
       ${account.integration.read
         ? (offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
         : html`<p class="hint">${integrationUnreadWords(account.integration.unread)}</p>`}
-      ${offered !== null && offered.calls.kind === 'refused' ? html`<p class="hint">${refusedWords(offered.calls, name)}</p>` : null}
+      ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
       <${Models} runtimes=${facts.runtimes} />
     </li>
   `
+}
+
+/** What the server lets a Keeper run on, said before anything is connected. */
+function Offer({ integrations }: { readonly integrations: readonly Integration[] }): VNode {
+  const names = runnable(integrations).map(integrationName)
+  if (integrations.length === 0) return html`<p class="hint">이 서버에는 연결할 수 있는 구독이 없어요.</p>`
+  if (names.length === 0) return html`<p class="hint">이 서버에서는 지금 어떤 구독으로도 Keeper를 실행할 수 없어요.</p>`
+  return html`<p class="hint">이 서버에서 Keeper를 실행할 수 있는 구독: ${names.join(', ')}</p>`
 }
 
 function Read({ integrations, owned }: { readonly integrations: readonly Integration[]; readonly owned: Owned }): VNode {
@@ -265,6 +305,7 @@ function PanelBody({ view, onRetry }: { readonly view: PanelView; readonly onRet
       `
     case 'read':
       return html`
+        <${Offer} integrations=${view.integrations} />
         <${Read} integrations=${view.integrations} owned=${view.owned} />
         <p class="hint" role="status"></p>
       `
@@ -272,11 +313,22 @@ function PanelBody({ view, onRetry }: { readonly view: PanelView; readonly onRet
 }
 
 export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsModel }): VNode {
+  const view = model.view.value
+  const heading = useRef<HTMLHeadingElement>(null)
+  const shown = useRef(view.kind)
+  // A retry that read takes the pressed button away. The focus then goes to
+  // the heading of the panel, not to the body of the page; a focus the person
+  // moved elsewhere meanwhile stays.
+  useEffect(() => {
+    const fell = document.activeElement === null || document.activeElement === document.body
+    if (shown.current === 'failed' && view.kind === 'read' && fell) heading.current?.focus()
+    shown.current = view.kind
+  }, [view.kind])
   return html`
     <section aria-labelledby="subscriptions-heading">
-      <h2 id="subscriptions-heading">구독</h2>
-      <p class="hint">내 구독을 연결하면 그 구독으로 내 Keeper가 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
-      <${PanelBody} view=${model.view.value} onRetry=${() => { void model.retry() }} />
+      <h2 id="subscriptions-heading" ref=${heading} tabindex="-1">구독</h2>
+      <p class="hint">내 Keeper는 내가 연결한 구독으로 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
+      <${PanelBody} view=${view} onRetry=${() => { void model.retry() }} />
     </section>
   `
 }

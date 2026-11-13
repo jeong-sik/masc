@@ -296,9 +296,19 @@ module Retained_key : sig
   (** The declaration, request ID and request digest a retained record of the
       Exact store names, read without decoding the rest of the record. *)
 
+  val of_request : declaration_id:string -> request -> t
+  (** The key [declaration_id] keeps this request's record and proof link
+      under. *)
+
+  val equal : t -> t -> bool
+
   val proof_path : t -> string
   (** The proof link of that request, below {!Lane_addon_store.root}. *)
 end
+
+val retained_final : Yojson.Safe.t -> (final option, string) result
+(** The final a retained record of the Exact store holds, [None] while it is
+    open. Reads the record's shape only; it binds the record to no request. *)
 
 val proof_store_roots : Yojson.Safe.t -> string list
 (** The store roots the entries of a proof link name, read without decoding

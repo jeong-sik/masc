@@ -871,11 +871,21 @@ module Retained_key = struct
       Ok { declaration_id; request_id; digest }
     | _ -> Error "record must be an object"
 
+  let of_request ~declaration_id request =
+    { declaration_id; request_id = request.request_id; digest = digest request }
+
+  let equal left right =
+    String.equal left.declaration_id right.declaration_id
+    && String.equal left.request_id right.request_id
+    && String.equal left.digest right.digest
+
   let proof_path key =
     Lane_addon_store.host_result_path
       ~instance_id:(proof_instance_id ~declaration_id:key.declaration_id)
       ~request_id:(proof_request_key ~request_id:key.request_id ~digest:key.digest)
 end
+
+let retained_final json = Result.map (fun record -> record.final) (record_of_json json)
 
 let proof_store_roots = function
   | `Assoc fields ->

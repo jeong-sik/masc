@@ -203,6 +203,12 @@ let test_push_masks_secrets_in_details () =
    the day file stopped decoding as UTF-8 for every reader
    (system_log_2026-09-11.jsonl seq 33886532). The sink owns the JSONL
    contract, so the sink is what keeps the line valid. *)
+let open_file_sink ?identity_recheck_interval_s dir =
+  match Log.Ring.init_file_sink ?identity_recheck_interval_s dir with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Log.Ring.file_sink_error_to_string error)
+;;
+
 let test_sink_line_stays_valid_utf8_json () =
   let module_name = "TestLogUtf8Sink" in
   let dir =
@@ -210,7 +216,7 @@ let test_sink_line_stays_valid_utf8_json () =
       (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-log-utf8-%d-%d" (Unix.getpid ()) (Random.bits ()))
   in
-  Log.Ring.init_file_sink dir;
+  open_file_sink dir;
   (* 가 is EA B0 80; the last byte is missing, as after a byte-budget cut. *)
   let cut = "\xEA\xB0" in
   let message =

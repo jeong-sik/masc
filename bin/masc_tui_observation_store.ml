@@ -18,10 +18,11 @@ let initialize ~base_path =
     let admissions=Filename.concat admissions_directory "ask-followup.jsonl" in
     Out_channel.with_open_gen [Open_wronly;Open_creat;Open_excl;Open_binary]
       0o600 admissions (fun _ -> ());
-    Log.Ring.init_file_sink directory;
-    {directory;admissions}
+    Log.Ring.init_file_sink directory
+    |> Result.map (fun () -> {directory;admissions})
+    |> Result.map_error Log.Ring.file_sink_error_to_string
   with
-  | store -> Ok store
+  | outcome -> outcome
   | exception (Unix.Unix_error _ | Sys_error _ as exn) ->
     Error (Printexc.to_string exn) in
   let observed_ns=Mtime_clock.elapsed_ns () in

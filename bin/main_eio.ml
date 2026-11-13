@@ -529,8 +529,23 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)
   let log_dir = Filename.concat masc_dir "logs" in
-  Fs_compat.mkdir_p log_dir;
-  Log.Ring.init_file_sink log_dir;
+  (* No Eio loop runs here, so [Fs_compat.mkdir_p] takes its [Unix] path and
+     a refused mkdir is a [Unix_error]. Both failures end the boot like the
+     refusals around them: one [FATAL] sentence and exit 1. Left to escape,
+     the exception reaches the command line parser, which exits 125 (#51246).
+     The file sink is not up, and a record emitted now would retry the
+     directory that was just refused, so the sentence goes to stderr. *)
+  (match Fs_compat.mkdir_p log_dir with
+   | () -> ()
+   | exception Unix.Unix_error (error, call, path) ->
+     Printf.eprintf "[FATAL] cannot create the log directory %s: %s (%s %s)\n%!"
+       log_dir (Unix.error_message error) call path;
+     exit 1);
+  (match Log.Ring.init_file_sink log_dir with
+   | Ok () -> ()
+   | Error error ->
+     Printf.eprintf "[FATAL] %s\n%!" (Log.Ring.file_sink_error_to_string error);
+     exit 1);
   (* Before any keeper boots, as for the console mirror below: the JSONL
      append and flush move to one OS thread, so a slow write() no longer
      stops the producing domain. They were the main thread's largest

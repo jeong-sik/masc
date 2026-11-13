@@ -988,13 +988,19 @@ let test_actual_followup_report_keeps_unobserved_and_bad_artifacts () =
   check bool "offline report leaves actual canonical resources unchanged" true
     (resources=Masc.Workspace.get_tasks_raw config && resources2=Masc.Workspace.get_tasks_raw config2)
 
+let open_file_sink ?identity_recheck_interval_s dir =
+  match Log.Ring.init_file_sink ?identity_recheck_interval_s dir with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Log.Ring.file_sink_error_to_string error)
+;;
+
 let test_actual_followup_structured_sink_and_export () = with_answer @@ fun base config ask resolution task_id state ->
   (* Last case: the process-global production sink owns its channel until exit.
      This private directory is removed only after all sink reads have finished. *)
   Log.set_level Log.Info;
   let server_logs=Filename.concat (Masc.Workspace.masc_dir config) "logs" in
   Fs_compat.mkdir_p server_logs;
-  Log.Ring.init_file_sink server_logs;
+  open_file_sink server_logs;
   Log.Server.info "Original server log resource before client storage";
   let stored_files directory=Array.to_list (Sys.readdir directory)
     |> List.filter_map (fun name ->

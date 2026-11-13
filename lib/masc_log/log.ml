@@ -883,6 +883,44 @@ module Ring = struct
       buf_ring;
     Queue.length buf_ring
 
+  type sink_io_failure =
+    | Unix_failure of { error : Unix.error; call : string; path : string }
+    | Sys_failure of string
+    | Eio_failure of string
+
+  type file_sink_error =
+    | Restore_undecodable of { dir : string; reason : string }
+    | Restore_io of { dir : string; failure : sink_io_failure }
+    | Open_io of { dir : string; failure : sink_io_failure }
+
+  let sink_io_failure_to_string = function
+    | Unix_failure { error; call; path } ->
+        Printf.sprintf "%s (%s %s)" (Unix.error_message error) call path
+    | Sys_failure message | Eio_failure message -> message
+
+  let file_sink_error_to_string = function
+    | Restore_undecodable { dir; reason } ->
+        Printf.sprintf "cannot restore the log entries in %s: %s" dir reason
+    | Restore_io { dir; failure } ->
+        Printf.sprintf "cannot read the log files in %s: %s" dir
+          (sink_io_failure_to_string failure)
+    | Open_io { dir; failure } ->
+        Printf.sprintf "cannot open a log file in %s: %s" dir
+          (sink_io_failure_to_string failure)
+
+  (* The three exceptions a file operation of the sink raises: [Unix] calls,
+     [Stdlib] channels, and [Eio.Path] when the restore runs inside an Eio
+     loop. Any other exception is not an I/O outcome and keeps propagating.
+     [Stdlib.Error] is spelled out because a bare [Error] in this file is
+     the log level. *)
+  let sink_io f =
+    match f () with
+    | value -> Ok value
+    | exception Unix.Unix_error (error, call, path) ->
+        Stdlib.Error (Unix_failure { error; call; path })
+    | exception Sys_error message -> Stdlib.Error (Sys_failure message)
+    | exception (Eio.Io _ as exn) -> Stdlib.Error (Eio_failure (Printexc.to_string exn))
+
   let init_file_sink
       ?(identity_recheck_interval_s = default_sink_identity_recheck_interval_s)
       dir =
@@ -895,13 +933,28 @@ module Ring = struct
          the previous directory A is no longer an authorized destination. *)
       file_base_dir := "";
       file_current_date := "";
-      let loaded = load_from_file dir in
-      file_base_dir := dir;
-      let oc, date = open_channel dir in
-      file_channel := Some oc;
-      file_current_date := date;
-      if loaded > 0 then
-        Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded)
+      let restored =
+        sink_io (fun () ->
+          match load_from_file dir with
+          | loaded -> Ok loaded
+          | exception Entry_decode_error reason -> Stdlib.Error reason)
+      in
+      match restored with
+      | Stdlib.Error failure -> Stdlib.Error (Restore_io { dir; failure })
+      | Ok (Stdlib.Error reason) ->
+          Stdlib.Error (Restore_undecodable { dir; reason })
+      | Ok (Ok loaded) ->
+          file_base_dir := dir;
+          (match sink_io (fun () -> open_channel dir) with
+           | Stdlib.Error failure -> Stdlib.Error (Open_io { dir; failure })
+           | Ok (oc, date) ->
+               file_channel := Some oc;
+               file_current_date := date;
+               if loaded > 0 then
+                 Printf.eprintf
+                   "[%s] [INFO] [Log] Restored %d log entries from disk\n%!"
+                   (timestamp ()) loaded;
+               Ok ()))
 
   let cleanup_old_files ?(keep_days = 7) dir =
     if Sys.file_exists dir then begin

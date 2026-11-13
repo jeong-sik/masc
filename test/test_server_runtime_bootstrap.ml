@@ -5061,7 +5061,7 @@ let test_startup_state_readiness_after_init () =
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
 
-let startup_http_response ?(headers = []) router path =
+let startup_http_response ?(meth = "GET") ?(headers = []) router path =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
@@ -5072,7 +5072,7 @@ let startup_http_response ?(headers = []) router path =
     |> String.concat ""
   in
   let wire =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s\r\n" path header_lines
+    Printf.sprintf "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s\r\n" meth path header_lines
   in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
   ignore
@@ -5247,8 +5247,8 @@ let test_mcp_transport_requires_explicit_readiness () =
    [/health] answers one of three ways by who asks; the two sibling probes
    say the same to everyone. *)
 
-let health_answer ?headers router path =
-  let response = startup_http_response ?headers router path in
+let health_answer ?meth ?headers router path =
+  let response = startup_http_response ?meth ?headers router path in
   let separator = "\r\n\r\n" in
   let head, body =
     let rec find from =
@@ -5497,6 +5497,27 @@ let test_the_sibling_probes_say_the_same_to_everyone () =
     ; "an admin bearer", bearer routes.admin_token
     ; "an unknown bearer", bearer "no-such-token"
     ]
+;;
+
+(* HEAD has no route on the three paths, so the table refuses it before any
+   health handler: the answer is the table's fixed refusal, for a reader too,
+   and carries neither body. *)
+let test_head_on_a_health_route_runs_no_handler () =
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  List.iter
+    (fun path ->
+       List.iter
+         (fun (who, headers) ->
+            let name = Printf.sprintf "%s, %s, HEAD %s" (posture_name ~strict) who path in
+            let status, (_ : (string * string) list), body =
+              health_answer ~meth:"HEAD" ~headers routes.health_router path
+            in
+            Alcotest.(check int) (name ^ ": status") 405 status;
+            Alcotest.(check bool) (name ^ ": no body or the fixed refusal") true
+              (List.mem body [ ""; "405 Method Not Allowed" ]))
+         [ "no credential", []; "an admin bearer", bearer routes.admin_token ])
+    [ Server_health_paths.health; Server_health_paths.liveness; Server_health_paths.readiness ]
 ;;
 
 let test_health_before_the_workspace_is_published_is_the_public_probe () =
@@ -7799,6 +7820,8 @@ let () =
             test_health_refuses_a_credential_it_cannot_accept;
           Alcotest.test_case "the sibling probes say the same to everyone" `Quick
             test_the_sibling_probes_say_the_same_to_everyone;
+          Alcotest.test_case "HEAD on a health route runs no handler" `Quick
+            test_head_on_a_health_route_runs_no_handler;
           Alcotest.test_case
             "health before the workspace is published is the public probe" `Quick
             test_health_before_the_workspace_is_published_is_the_public_probe;

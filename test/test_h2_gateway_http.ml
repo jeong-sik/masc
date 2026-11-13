@@ -895,7 +895,8 @@ let test_health_over_h2_follows_the_same_split () =
    body. The production table has no HEAD route: it resolves HEAD on the three
    paths to "method not allowed" before any handler. OPTIONS is answered by
    the ingress before the table. HEAD is read from the table and not over the
-   connection because the h2 client rejects the text body of that refusal. *)
+   connection because the h2 client rejects the text body of that refusal;
+   [test_server_runtime_bootstrap] sends HEAD over HTTP/1.1 and reads the 405. *)
 let test_other_methods_reach_no_health_handler () =
   health_posture ~strict:true @@ fun () ->
   let captured = ref None in

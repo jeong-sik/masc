@@ -56,8 +56,10 @@ let routes ~ran =
    left to answer. *)
 let error_handler _client_addr ?request:_ _error _respond = ()
 
+let fixture_client : Eio.Net.Sockaddr.stream = `Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)
+
 (* The connection, on the calling domain, for as long as [sw] lives. *)
-let serve_connection ~sw ~routes server_fd =
+let serve_connection ?(client_addr = fixture_client) ~sw ~routes server_fd =
   let trust_policy = trust_policy () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Switch.run (fun conn_sw ->
@@ -67,7 +69,7 @@ let serve_connection ~sw ~routes server_fd =
           ~sw:conn_sw
           ~request_handler:(Server_http_ingress.http1_handler ~trust_policy routes)
           ~error_handler
-          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+          client_addr
           flow));
     `Stop_daemon)
 ;;
@@ -268,6 +270,107 @@ let test_a_health_probe_is_exempt_only_while_it_reads_no_credential () =
   check "a route that is not a probe" false (exempt "/api/v1/status")
 ;;
 
+(* The ingress applies that rule to the limit of a client address. The client
+   here has an address no other test uses, so its bucket holds only what this
+   test does. A request the limit leaves out never touches the bucket; a
+   counted one takes a token from it, and is refused once the bucket is empty. *)
+let limited_client : Eio.Net.Sockaddr.stream =
+  `Tcp (Eio.Net.Ipaddr.of_raw "\127\000\000\077", 54321)
+;;
+
+let probe_routes () =
+  List.fold_left
+    (fun router path ->
+       Server_route.Serving.get Server_route.Always_public path
+         (fun _request reqd -> respond_text "probe" reqd)
+         router)
+    (Masc.Http_server_eio.Router.create ())
+    [ Server_health_paths.health; Server_health_paths.liveness; Server_health_paths.readiness ]
+;;
+
+let status_code status_line =
+  match String.split_on_char ' ' status_line with
+  | _ :: code :: _ ->
+    (match int_of_string_opt code with
+     | Some code -> code
+     | None -> Alcotest.failf "unreadable status line %S" status_line)
+  | _ -> Alcotest.failf "unreadable status line %S" status_line
+;;
+
+(* [ask ?headers path] is the status the ingress answers [limited_client]. *)
+let with_limited_client f =
+  Eio_main.run
+  @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Time.with_timeout_exn clock 60.0
+  @@ fun () ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+  @@ fun () ->
+  let server_fd, client_fd = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  serve_connection ~client_addr:limited_client ~sw ~routes:(probe_routes ()) server_fd;
+  let flow = Eio_unix.Net.import_socket_stream ~sw ~close_unix:true client_fd in
+  let reader = Eio.Buf_read.of_flow flow ~max_size:(1 lsl 16) in
+  f (fun ?(headers = []) path ->
+    let header_lines =
+      List.map (fun (name, value) -> Printf.sprintf "%s: %s\r\n" name value) headers
+      |> String.concat ""
+    in
+    Eio.Flow.copy_string
+      (Printf.sprintf "GET %s HTTP/1.1\r\nhost: %s:%d\r\n%s\r\n" path host port header_lines)
+      flow;
+    let status_line, (_ : string) = read_response reader in
+    status_code status_line)
+;;
+
+let test_the_ingress_counts_a_health_request_only_when_it_carries_a_credential () =
+  with_limited_client
+  @@ fun ask ->
+  let key = Masc.Rate_limit.key_of_sockaddr limited_client in
+  let full = Masc.Rate_limit.burst_of_config () in
+  let left () = Masc.Rate_limit.remaining_global ~key in
+  let bearer = [ "authorization", "Bearer x" ] in
+  Alcotest.(check int) "nothing has been counted for this client" full (left ());
+  List.iter
+    (fun (name, headers, path) ->
+       Alcotest.(check int) (name ^ " is answered") 200 (ask ~headers path);
+       Alcotest.(check int) (name ^ " is not counted") full (left ()))
+    [ "the health route without a credential", [], Server_health_paths.health
+    ; "liveness with a bearer", bearer, Server_health_paths.liveness
+    ; "readiness with a bearer", bearer, Server_health_paths.readiness
+    ];
+  Alcotest.(check int) "the health route with a bearer is answered" 200
+    (ask ~headers:bearer Server_health_paths.health);
+  Alcotest.(check int) "and takes one token" (full - 1) (left ());
+  (* An empty bucket gains a token every few milliseconds, so a round empties
+     it and asks at once; one round in which the ask arrives before the next
+     token is enough. A request the limit leaves out is answered in every
+     round, whatever the bucket holds. *)
+  let rec refused_within rounds =
+    if rounds = 0
+    then false
+    else (
+      while Masc.Rate_limit.check_global ~key do
+        ()
+      done;
+      Alcotest.(check int) "an empty bucket does not stop a request without a credential" 200
+        (ask Server_health_paths.health);
+      Alcotest.(check int) "nor a sibling probe" 200
+        (ask ~headers:bearer Server_health_paths.liveness);
+      match ask ~headers:bearer Server_health_paths.health with
+      | 429 -> true
+      | 200 -> refused_within (rounds - 1)
+      | other -> Alcotest.failf "unexpected status %d for a counted health request" other)
+  in
+  Alcotest.(check bool) "a health request with a bearer over the limit is refused" true
+    (refused_within 200)
+;;
+
 let () =
   Alcotest.run
     "http_ingress_serving_route"
@@ -286,6 +389,10 @@ let () =
             "a health probe is exempt only while it reads no credential"
             `Quick
             test_a_health_probe_is_exempt_only_while_it_reads_no_credential
+        ; Alcotest.test_case
+            "the ingress counts a health request only when it carries a credential"
+            `Quick
+            test_the_ingress_counts_a_health_request_only_when_it_carries_a_credential
         ] )
     ]
 ;;

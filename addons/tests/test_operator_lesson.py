@@ -124,7 +124,8 @@ class Compose(Base):
 
     def test_a_binding_without_since_is_refused(self):
         for binding in ({"records": [BOARD], "language": "ko"}, BINDING | {"since": True},
-                        BINDING | {"since": "yesterday"}, BINDING | {"since": -1}):
+                        BINDING | {"since": "yesterday"}, BINDING | {"since": -1},
+                        BINDING | {"since": float("inf")}, BINDING | {"since": 10 ** 400}):
             with self.assertRaises(f.InvalidBinding):
                 self.compose(binding=binding)
         self.assertEqual(self.flow.sessions(), [])
@@ -197,6 +198,23 @@ class Outline(Base):
                                 lambda m: entry("e2", m["material"][0]))
         self.assertEqual([e.entry_id for e in session.entries], ["e2"])
         self.assertIsInstance(session.rejected[0].reason, l.NotRecordable)
+
+    def test_a_rejection_whose_cite_the_log_cannot_keep_is_still_written(self):
+        unkeepable = {"kind": "board_post", "source_id": "board", "pin": "p-\ud800"}
+        session = self.outlined(lambda m: entry("e1", unkeepable), lambda m: entry("e2", m["material"][0]))
+        self.assertEqual([e.entry_id for e in session.entries], ["e2"])
+        self.assertIsInstance(session.rejected[0].reason, l.NotRecordable)
+
+        def scene(payload):
+            written = quoting(payload)
+            written["output"]["paragraphs"][0]["sources"] = [unkeepable | {"quote": "x"}]
+            return written
+
+        self.host.scene = scene
+        self.host.run(self.flow)
+        session = self.session(session.session_id)
+        self.assertEqual(session.state, l.WRITTEN)
+        self.assertIsInstance(session.rejected_scenes[0].reason, l.NotRecordable)
 
     def test_an_outline_with_no_entry_that_passes_fails_the_session(self):
         session = self.outlined(lambda m: entry("e1"))

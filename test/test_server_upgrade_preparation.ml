@@ -448,6 +448,28 @@ let test_owner_without_making_makes_nothing () =
     match Upgrade.owner_without_making (Host_config.Lease_dir_override file) ~base_path ~port with
     | Error (Server_startup_takeover.Owner_lease_rejected _) -> ()
     | other -> Alcotest.failf "a lease root that is a file was read: %s" (owner_label other))
+(* The lease is read before the announcements. When no announcement names
+   the owner, the lease is read once more, so an owner that left meanwhile or
+   a successor is not reported as the first pid announcing nothing. *)
+let test_the_lease_is_read_again_before_an_owner_is_called_unannounced () =
+  let first = 4242 and port = 9000 in
+  let read_with second =
+    let captures = ref 0 in
+    let capture () = incr captures; if !captures = 1 then Ok first else second in
+    let answer =
+      Upgrade.For_testing.owner ~capture ~run_dir:"run" ~base_path:"workspace" ~port
+        ~single_holder:(fun () -> Ok None) ~account_holder:(fun () -> Ok None)
+        ~single_seen:(fun () -> Ok None) ~account_seen:(fun () -> Ok None) in
+    Alcotest.(check int) "the lease was read twice" 2 !captures;
+    owner_label answer in
+  Alcotest.(check string) "the same owner still holds the lease"
+    (owner_label (Ok (Owner_unannounced { pid = first }))) (read_with (Ok first));
+  Alcotest.(check string) "the owner left meanwhile" (owner_label (Ok Unowned))
+    (read_with (Error (Server_startup_takeover.Owner_identity_unavailable Owner_process_identity.No_owner)));
+  Alcotest.(check string) "another process took the lease meanwhile"
+    (owner_label
+       (Error (Server_startup_takeover.Owner_identity_unavailable Owner_process_identity.Owner_changed)))
+    (read_with (Ok (first + 1)))
 let departure_label = function
   | Ok () -> "confirmed"
   | Error (Upgrade.Announcement_withdrawn { pid }) ->
@@ -598,6 +620,8 @@ let () = Alcotest.run "upgrade preparation"
       test_a_lock_without_the_lease_is_no_single_user_server;
     Alcotest.test_case "the owner is read without making anything" `Quick
       test_owner_without_making_makes_nothing;
+    Alcotest.test_case "the lease is read again before an owner is called unannounced" `Quick
+      test_the_lease_is_read_again_before_an_owner_is_called_unannounced;
     Alcotest.test_case "confirm follows the kernel" `Quick test_confirm_follows_the_kernel;
     Alcotest.test_case "prepare sends the bearer only to the announcing owner" `Quick
       test_prepare_sends_the_bearer_only_to_the_announcing_owner;

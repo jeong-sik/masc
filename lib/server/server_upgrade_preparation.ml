@@ -19,24 +19,23 @@ type owner =
    holds the byte of [port] on the file of the server of a single user. What
    answers on the port never decides it. Other senders of the bearer, such as
    [masc keeper up] and [masc keeper-create], do not make this read. *)
-let owner ~run_dir ~base_path ~port =
-  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
-  | Error (Owner_identity_unavailable No_owner) -> Ok Unowned
+let owner_with ~capture ~single_holder ~account_holder ~single_seen ~account_seen ~run_dir
+    ~base_path ~port =
+  match capture () with
+  | Error (Server_startup_takeover.Owner_identity_unavailable No_owner) -> Ok Unowned
   | Error
       ( Server_startup_takeover.Owner_lease_rejected _
       | Server_startup_takeover.Owner_identity_unavailable
           (Owner_changed | Unsupported | Unavailable | Closed)
       | Server_startup_takeover.Current_process_owner as error ) -> Error error
-  | Ok handle ->
-    let pid = Owner_process_identity.pid handle in
-    Owner_process_identity.close handle;
+  | Ok pid ->
     let read answer =
       Result.map_error (fun rejection -> Server_startup_takeover.Owner_lease_rejected rejection) answer in
-    let* single = read (Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port) in
+    let* single = read (single_holder ()) in
     match single with
     | Some holder when holder = pid -> Ok (Single_user_server_here {run_dir; base_path; port; pid})
     | Some (_ : int) | None ->
-      let* account = read (Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port) in
+      let* account = read (account_holder ()) in
       (match account with
        | Some holder when holder = pid -> Ok (Account_server_here { pid })
        | Some (_ : int) | None ->
@@ -49,11 +48,11 @@ let owner ~run_dir ~base_path ~port =
            | Some { Server_startup_takeover.pid = announcer; port = announced }
              when announcer = pid && announced <> port -> Some announced
            | Some (_ : Server_startup_takeover.account_server_announcement) | None -> None in
-         let* single_seen = read (Server_startup_takeover.single_user_server_announcement ~run_dir ~base_path) in
+         let* single_seen = read (single_seen ()) in
          match elsewhere single_seen with
          | Some announced -> Ok (Single_user_server_elsewhere { pid; port = announced })
          | None ->
-           let* account_seen = read (Server_startup_takeover.account_server_announcement ~run_dir ~base_path) in
+           let* account_seen = read (account_seen ()) in
            (match elsewhere account_seen with
             | Some announced -> Ok (Account_server_elsewhere { pid; port = announced })
             | None ->
@@ -62,21 +61,32 @@ let owner ~run_dir ~base_path ~port =
                  that took the lease and announced, would be reported as [pid]
                  announcing nothing. The lease is asked once more, and the
                  answer names [pid] only while it still holds it. *)
-              (match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
-               | Error (Owner_identity_unavailable No_owner) -> Ok Unowned
+              (match capture () with
+               | Error (Server_startup_takeover.Owner_identity_unavailable No_owner) -> Ok Unowned
                | Error
                    ( Server_startup_takeover.Owner_lease_rejected _
                    | Server_startup_takeover.Owner_identity_unavailable
                        (Owner_changed | Unsupported | Unavailable | Closed)
                    | Server_startup_takeover.Current_process_owner as error ) -> Error error
-               | Ok again ->
-                 let now = Owner_process_identity.pid again in
-                 Owner_process_identity.close again;
+               | Ok now ->
                  if now = pid then Ok (Owner_unannounced { pid })
                  else
                    Error
                      (Server_startup_takeover.Owner_identity_unavailable
                         Owner_process_identity.Owner_changed))))
+let owner ~run_dir ~base_path ~port =
+  let capture () =
+    Result.map
+      (fun handle ->
+        let pid = Owner_process_identity.pid handle in
+        Owner_process_identity.close handle;
+        pid)
+      (Server_startup_takeover.capture_existing_owner ~run_dir ~base_path) in
+  owner_with ~capture ~run_dir ~base_path ~port
+    ~single_holder:(fun () -> Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port)
+    ~account_holder:(fun () -> Server_startup_takeover.account_server_port_holder ~run_dir ~base_path ~port)
+    ~single_seen:(fun () -> Server_startup_takeover.single_user_server_announcement ~run_dir ~base_path)
+    ~account_seen:(fun () -> Server_startup_takeover.account_server_announcement ~run_dir ~base_path)
 let owner_without_making (root : Host_config.base_path_lease_root) ~base_path ~port =
   let rejected rejection = Error (Server_startup_takeover.Owner_lease_rejected rejection) in
   match Server_startup_takeover.lease_file_present root ~base_path with
@@ -245,6 +255,7 @@ let suggest_loopback_port () =
       | Unix.ADDR_INET (_,port) -> Ok port | Unix.ADDR_UNIX _ -> Error Port_unavailable)
   with Unix.Unix_error _ -> Error Port_unavailable
 module For_testing = struct
+  let owner = owner_with
   let authorize_initial = authorize_initial_with
   let prepare = prepare_with
 end

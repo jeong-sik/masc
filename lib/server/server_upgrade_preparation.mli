@@ -160,6 +160,24 @@ val suggest_loopback_port : unit -> (int, error) result
 (** OS-selected candidate, not a reserved port. Recheck conflicts at startup. *)
 
 module For_testing : sig
+  val owner :
+    capture:(unit -> (int, Server_startup_takeover.owner_capture_error) result) ->
+    single_holder:(unit -> (int option, Server_startup_takeover.base_path_lock_rejection) result) ->
+    account_holder:(unit -> (int option, Server_startup_takeover.base_path_lock_rejection) result) ->
+    single_seen:
+      (unit ->
+       ( Server_startup_takeover.account_server_announcement option
+       , Server_startup_takeover.base_path_lock_rejection ) result) ->
+    account_seen:
+      (unit ->
+       ( Server_startup_takeover.account_server_announcement option
+       , Server_startup_takeover.base_path_lock_rejection ) result) ->
+    run_dir:string -> base_path:string -> port:int ->
+    (owner, Server_startup_takeover.owner_capture_error) result
+  (** The order of {!owner}, over the reads it is given. [capture] answers the
+      pid of the lease owner and is asked a second time only before
+      [Owner_unannounced] is answered. *)
+
   val authorize_initial :
     confirm:(unit -> (unit, error) result) -> version:(unit -> string option) ->
     expected_version:string -> login:(unit -> bool) -> (unit, error) result

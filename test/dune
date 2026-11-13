@@ -4752,7 +4752,8 @@
   masc_tui_render_metrics
   masc_tui_render_prim
   masc_tui_theme
-  masc_tui_types))
+  masc_tui_types
+  masc_tui_value))
 
 (test
  (name test_tui_memory_usage)

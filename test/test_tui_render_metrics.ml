@@ -296,7 +296,14 @@ let test_retained_task_outcomes () =
   let kpis = Render_metrics.calculate_kpis state in
   check int "active-only list does not erase completed outcomes" 2 (Option.get kpis.tasks).completed;
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
-  check bool "snapshot window is explicit" true (contains output "2026-09-06 12:00 UTC");
+  (* The window is drawn in the operator's zone, so the expected start is
+     drawn by the same notation rather than spelled in UTC. *)
+  let window_start =
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+      ~now:(Unix.gettimeofday ()) flow.window_started_at
+  in
+  check bool "snapshot window is explicit" true
+    (contains output ("Window: " ^ window_start ^ " to "));
   check bool "source warning does not erase known counts" true (contains output "New tasks 3 · Done 1 · Cancelled 1");
   check bool "source warning is visible" true (contains output "goal links unavailable");
   check bool "old glow cache is not presented as history" false (contains output "Heatmap")
@@ -439,7 +446,7 @@ let test_assignee_rows_capped () =
   state.task_flow <- Some flow;
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
   check bool "the tail is reported rather than dropped" true
-    (contains output "3 further assignees not listed")
+    (contains output "    3 more")
 ;;
 
 let test_approval_source_observations () =

@@ -19,7 +19,9 @@ so `Invalid` carries exactly one violation:
    keeper_memory_admission_judgment.ml:22-90 `unwrap` (admission_judgment.py),
    keeper_librarian.ml:1051-1157 `selection_of_json_result` (librarian_selection.py),
    keeper_memory_admission_judgment.ml:92-130 `verify` and `verify_support`
-   (admission_judgment.py)
+   (admission_judgment.py). Since RFC-0517 §7.1, `verify_support` checks only the
+   new claims `validate_admission_proposal` picks as additions
+   (`admission_judgment.additions`)
 
 The result types and rule kinds are in admission_result.py.
 
@@ -94,7 +96,7 @@ def validate(prompt: AdmissionPrompt, answer_text: str) -> Valid | Invalid:
     if isinstance(selection, Violation):
         return _refuse(selection)
     refusal = admission_judgment.verify(judgments, selection) or admission_judgment.verify_support(
-        judgments, support, selection
+        judgments, support, admission_judgment.additions(selection)
     )
     if refusal is not None:
         return _refuse(refusal)

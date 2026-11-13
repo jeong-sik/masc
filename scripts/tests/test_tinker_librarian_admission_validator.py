@@ -216,10 +216,12 @@ MUTATIONS: dict[V.Kind, tuple[str, ...]] = {
         W.write(answer(support=("r1", "r3"))),
         W.write(answer(candidates=(J1, J2, edit(J3, ("outcome", "deferred"))), support=("r1", "r3"))),
     ),
-    V.Kind.CHANGES_WITHOUT_SUPPORT: (W.write(answer(support=())),),
     V.Kind.NEW_CLAIM_WITHOUT_SUPPORT: (
         W.write(answer(support=("r2",))),
         W.write(answer(candidates=(edit(J1, ("outcome", "already_represented")), J2, J3))),
+        # A claim that revises a dropped memory is an addition, with or without absorbs.
+        W.write(answer(support=())),
+        W.write(answer(new_claims=(edit(CLAIM, ("absorbs", ("m3",))),), support=())),
     ),
 }
 
@@ -245,6 +247,26 @@ class ValidatorTest(unittest.TestCase):
         result = V.validate(make_prompt(), text)
         assert isinstance(result, V.Valid), result
         self.assertTrue(result.answer.deferred)
+
+    def test_drops_and_merges_need_no_support(self) -> None:
+        # RFC-0517 §7.1: change_support covers additions only. No candidate names NEW here.
+        unnamed = (
+            edit(J1, ("outcome", "not_durable"), ("memory_claim", None)),
+            edit(J2, ("outcome", "not_durable"), ("memory_claim", None)),
+            J3,
+        )
+        merge = edit(CLAIM, ("supersedes", None), ("absorbs", ("m2", "m3")))
+        cases = {
+            "drop": (answer(new_claims=(), candidates=unnamed, support=()), (), ("m1",)),
+            "merge": (answer(new_claims=(merge,), dropped=(), candidates=unnamed, support=()), (NEW,), ()),
+            "merge and drop": (answer(new_claims=(merge,), candidates=unnamed, support=()), (NEW,), ("m1",)),
+        }
+        for name, (text, added, dropped) in cases.items():
+            with self.subTest(case=name):
+                result = V.validate(make_prompt(), W.write(text))
+                assert isinstance(result, V.Valid), result
+                self.assertEqual(result.answer.added_claims, added)
+                self.assertEqual(result.answer.dropped, dropped)
 
     def test_every_kind_has_a_mutation(self) -> None:
         self.assertEqual(set(MUTATIONS), set(V.Kind))

@@ -122,7 +122,8 @@ val read
     - 500 or 503: the record of the conversations could not be read, or the
       authorization log did not take a record of the deletion. A deletion
       whose end was not recorded stays pending, and a deletion of it again
-      finishes it. *)
+      finishes it. A start the log gave up leaves the conversation listed
+      as a deletion that failed, and a deletion of it again ends it. *)
 val delete
   :  env:Eio_unix.Stdenv.base
   -> person:Server_setup_account_login.person

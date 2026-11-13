@@ -1493,6 +1493,83 @@ let test_turn () =
           false
           (Sys.file_exists (Filename.concat (records_of ~base_path bob) his_conversation));
         check_reply "a deletion of an id that is no id" (400, {|{"error":"The path ends in the id of the conversation.","code":"invalid_request"}|}) (delete alice "..");
+        (* A start the log does not take: another process holds the lock of
+           the log, so the append fails after the intent of the start went
+           into the store. The zone blocks the conversation (design 8.3): it
+           is listed as a deletion that failed and not read, though the log
+           has no record of it. The next deletion of it ends it and closes
+           the block, past a row a stopped server left half written in the
+           index. *)
+        let blocked =
+          answered
+            "the turn before a deletion the log does not take"
+            ~keeper:"keeper-alice"
+            ~runtime:alice_runtime
+            ~text:"echo: blocked"
+            ~continued:false
+            (reply alice (body ~keeper:"keeper-alice" ~message:"blocked"))
+        in
+        let ((held, (_ : out_channel)) as holder) =
+          Unix.open_process_args
+            "python3"
+            [| "python3"
+             ; "-c"
+             ; "import fcntl, os, sys\n\
+                fd = os.open(sys.argv[1], os.O_RDWR)\n\
+                fcntl.lockf(fd, fcntl.LOCK_EX)\n\
+                print('held', flush=True)\n\
+                sys.stdin.read()\n"
+             ; Fs_compat.private_jsonl_lock_path (Authz_log.path_of_base_path ~base_path)
+            |]
+        in
+        Alcotest.(check string) "another process holds the lock of the log" "held" (input_line held);
+        let refused = delete alice blocked in
+        Alcotest.(check bool) "and lets it go" true (Unix.close_process holder = Unix.WEXITED 0);
+        check_reply
+          "a deletion the log does not take"
+          ( 503
+          , {|{"error":"The deletion could not be recorded, and nothing was deleted. Ask again to delete it.","code":"server_unavailable"}|}
+          )
+          refused;
+        let blocked_subject =
+          Authz_purge_event.subject
+            (Authz_purge_event.Keeper_conversation
+               { owner = alice.person.user_id; conversation_id = get (Conversation.Conversation_id.of_string blocked) })
+        in
+        Alcotest.(check (list bool))
+          "keeps its directory, has no record in the log, and is blocked"
+          [ true; true; true ]
+          [ Sys.file_exists (Filename.concat alice_records blocked)
+          ; Option.is_none (status_of alice blocked)
+          ; Authz_state.revocation (Z.snapshot zone).Z.state blocked_subject
+            = Authz_records.Revocation_state.Pending
+          ];
+        let blocked_list = read_fields "a blocked deletion" (read alice [ "keeper_id", "keeper-alice" ]) in
+        Alcotest.(check (pair bool (list (pair string (option string)))))
+          "is listed as a deletion that failed, and is not current"
+          (true, [ blocked, Some {|"failed"|} ])
+          ( List.assoc_opt "current_conversation_id" blocked_list = Some `Null
+          , List.map (fun (id, deletion) -> id, Option.map Yojson.Safe.to_string deletion) (listed blocked_list) );
+        check_reply "and is not read" not_of_keeper (read alice [ "keeper_id", "keeper-alice"; "conversation_id", blocked ]);
+        Out_channel.with_open_gen
+          [ Open_wronly; Open_append; Open_binary ]
+          0o600
+          (Filename.concat alice_records "index.jsonl")
+          (fun out -> output_string out {|{"kind":"started","conversation_id":"half|});
+        let asked = purged () in
+        check_reply "a deletion of it again" (deleted blocked "removed") (delete alice blocked);
+        Alcotest.(check int) "asks the CLI" (asked + 1) (purged ());
+        (match status_of alice blocked with
+         | Some (Authz_purge_state.Purged { vendor_copy = Authz_purge_event.Removed }) -> ()
+         | Some _ | None -> Alcotest.fail "the log does not have the deletion as gone through");
+        Alcotest.(check (list bool))
+          "removes its directory, ends the block, and cuts the half row of the index"
+          [ false; true; true ]
+          [ Sys.file_exists (Filename.concat alice_records blocked)
+          ; Authz_state.revocation (Z.snapshot zone).Z.state blocked_subject
+            = Authz_records.Revocation_state.Not_pending
+          ; fst (read alice [ "keeper_id", "keeper-alice" ]) = 200
+          ];
         (* Carol's Keeper runs on Codex. Its least posture reads what the
            server process reads, which holds the homes of other people, so
            the turn is refused and Codex runs none. *)

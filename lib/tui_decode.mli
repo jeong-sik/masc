@@ -1674,8 +1674,11 @@ type server_identity = {
           ordered diagnostic list. Missing typed evidence grants no target;
           its original valid diagnostic vector remains readable. *)
 }
-(** Which server the TUI is talking to, from [/health] or an attested scoped
-    Observer response. Fields absent from the latter remain unknown.
+(** Which server the TUI is talking to, from the reader's [/health] or an
+    attested scoped Observer response. Fields absent from the latter remain
+    unknown. The public probe, which the server answers to a requester it
+    gives no read, fills [sid_version] and [sid_state_ready] only; the paths
+    and the commit are empty.
 
     The footer said [Port: 8935] and nothing else, so two checkouts serving
     on the same port were indistinguishable from the screen -- and a binary

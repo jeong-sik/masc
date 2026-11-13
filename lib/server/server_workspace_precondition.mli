@@ -6,8 +6,8 @@
 
 val served_workspace : unit -> Request_workspace_precondition.workspace option
 (** The workspace this server serves, resolved now from the server state with
-    {!Server_base_path_diagnostics.served_paths} -- the pair [/health]
-    reports -- or [None] before the server state exists. A request that
+    {!Server_base_path_diagnostics.served_paths} -- the pair the reader's
+    [/health] reports -- or [None] before the server state exists. A request that
     carries no precondition never resolves it. *)
 
 val check_request :
@@ -17,8 +17,8 @@ val check_request :
   Httpun.Request.t ->
   Request_workspace_precondition.decision
 (** The decision for [request] at [path]. [served] is called only for a
-    well-formed precondition. [/health], the probe a client reads after a
-    refusal, is never checked. *)
+    well-formed precondition. [/health], the probe a client that may read the
+    server's state reads after a refusal, is never checked. *)
 
 val check_current_request :
   path:string -> Httpun.Request.t -> Request_workspace_precondition.decision

@@ -381,8 +381,55 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 서버 경로를 담지 않는다.
 
 `/health` 는 확인하지 않는다. 거절을 받은 client 가 서버가 어느 작업공간을
-보는지 읽는 곳이라서다. 이 확인은 route 인증보다 먼저 돈다. 인증 없는 client 도
-경로를 맞춰 볼 수 있지만, 같은 경로를 `/health` 가 이미 공개한다.
+보는지 읽는 곳이라서다. 그 경로는 서버 상태를 읽을 수 있는 요청만 받는다(6.0.2).
+이 확인은 route 인증보다 먼저 돈다.
+
+### 6.0.2 Health probe
+
+`GET /health`, `GET /health/live`, `GET /health/ready` 는 route 인증 없이 누구에게나
+답한다(`Always_public`). 서버 상태를 읽을 수 없는 요청은 세 handler 에서 아래
+공개 probe 만 받는다. 호스트, 작업공간, 빌드, 프로세스에 관한 값은 없다
+(`Server_health_public`).
+
+| 경로 | 공개 probe 본문 | 상태 |
+|---|---|---|
+| `/health` | `server`(`"masc"`), `version`(release 버전), `live`, `ready`, `phase` 다섯 키 | 200 |
+| `/health/live` | `live` | 200 |
+| `/health/ready` | `ready`, `phase` | 준비됐으면 200, 아니면 503 |
+
+`phase` 는 `blocking`, `lazy`, `ready`, `degraded` 중 하나다. `/health` 의 `ready` 는
+`/health/ready` 가 200 을 주는 조건과 같다. `/health/live` 와 `/health/ready` 는
+credential 을 읽지 않고 모든 요청에 같은 본문을 준다.
+
+`/health` 는 요청이 누구인지 한 번 판정한다(`Server_auth.board_access_for_request`).
+작업공간이 게시된 서버는 이렇게 답한다.
+
+| 요청 | strict 아님 | strict |
+|---|---|---|
+| credential 없음 | 전체 본문 | 공개 probe |
+| 저장된 Admin bearer | 전체 본문 | 전체 본문 |
+| Worker bearer, 이름이 붙은 내부 Keeper token | 전체 본문 | 전체 본문 |
+| Player bearer | 403 | 403 |
+| bearer 가 아닌 헤더, 모르거나 만료된 bearer, 이름 없는 내부 token, workspace secret | 401 | 401 |
+| credential 저장소를 읽지 못함 | 503 | 503 |
+
+전체 본문은 `paths`, `build`, `startup` 을 담은 `/health` 응답이고, `?full=1` 이면
+캐시된 full health 다. strict 는 7.3 의 Strict HTTP 다. `MASC_HTTP_AUTH_STRICT` 를
+켰거나, bind host 가 loopback 이 아니거나, `MASC_HTTP_BASE_URL` 의 host 가 loopback 이
+아니면 strict 다.
+
+- 작업공간이 게시되기 전에는 credential 이 있든 없든 공개 probe 를 받는다.
+- 공개 probe 를 받는 요청은 `?full=1` 을 붙여도 같은 본문을 받는다. full health
+  snapshot 을 새로 만들라는 요청도 남기지 않는다.
+- 서버가 받을 수 없는 credential 은 credential 없음으로 보지 않는다. 위 표의
+  거절로 답하고 두 본문 중 어느 것도 주지 않는다.
+
+client 별 rate limit 은 credential 을 읽지 않는 probe 만 건너뛴다. `/health/live` 와
+`/health/ready` 는 늘 건너뛴다. `/health` 는 `Authorization` 과
+`x-masc-internal-token` 이 둘 다 없는 요청만 건너뛴다. 둘 중 하나라도 있으면 서버가
+credential 을 확인하므로 다른 요청처럼 센다
+(`Server_http_ingress.health_probe_exempt`). 계정 서버의 `/health` 는 credential 을
+읽지 않아서 경로만으로 건너뛴다.
 
 ### 6.1 MCP 엔드포인트 (`Server_routes_http_routes_frontend` 가 경로 표에 등록, 두 전송 공용)
 

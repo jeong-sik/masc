@@ -305,13 +305,14 @@ before an install, since the count does not tell a lost memory from a stale
 one the live answer kept.
 
 `merge_additions.py cases` takes `--requests`, `--run` and `--out` as
-`merge_cases.py` does and writes the judge's folder the same way, with one case
-for each claim an answer merges memories into: the memories it stands in for,
-the candidates it cites and the claim.
-`merge_additions.py count` makes the cases again from the run, reads the
-decisions only while the judge's cases and the key are those, and prints each
-target's merges by class, apart for claims that cite a candidate and claims that
-cite none (RFC-0517 §7.2). The verdict and the gates do not read these numbers.
+`merge_cases.py` does. Its judge's folder holds only `cases.jsonl` and
+`judge.md`, with one case for each claim an answer merges memories into: the
+memories it stands in for, the candidates it cites and the claim.
+`merge_additions.py count` makes the cases, the key and `judge.md` again from
+the run, reads the decisions only while the folder holds exactly those, and
+prints each target's merges by class, apart for merges a supporting candidate
+incorporates and merges only RFC-0517 §7.1 lets in. The verdict and the gates do
+not read these numbers.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. So does HTTP 402 from Tinker: the

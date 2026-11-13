@@ -1132,8 +1132,8 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       match
         empty_page_of ~snapshot:state.lane_runs ~error:state.lane_runs_error
       with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:state.lane_runs_loading
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.lane_runs_loading
       | Page_empty ->
           text "  (보관된 실행이 없음)" "  (no retained runs for this lane)"
     in
@@ -2003,7 +2003,7 @@ let render_lane_run_detail (state : state) ~run_id =
       let line =
         match error with
         | None -> Ansi.dim, (if measurement then "  (loading measurement artifact)" else "  (loading exact run record)")
-        | Some _ -> Ansi.dim, page_failed_note
+        | Some _ -> Ansi.dim, page_failed_note ~ko:(state.ui_language = Lang_ko)
       in
       box_line_styled buf cols ~style:(fst line) (snd line);
       for _ = 2 to filler_rows do
@@ -2294,8 +2294,8 @@ let render_clients (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.clients_surface ~error:state.clients_surface_error with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:state.clients_surface_inflight
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.clients_surface_inflight
       | Page_empty -> ui_text state ~ko:"  (붙은 클라이언트 없음)" ~en:"  (nobody attached)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

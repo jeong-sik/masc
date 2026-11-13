@@ -171,8 +171,8 @@ let render_verification_list (state : state) =
         empty_page_of ~snapshot:state.verification
           ~error:state.verification_error
       with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:state.verification_inflight
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.verification_inflight
       | Page_empty -> "  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -738,8 +738,8 @@ let render_harness_list (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:state.harness_inflight
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.harness_inflight
       | Page_empty -> ui_text state ~ko:"  (기록된 판정 없음)" ~en:"  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

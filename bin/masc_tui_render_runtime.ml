@@ -889,9 +889,9 @@ let render_runtime_reading (state : state) =
         empty_page_of ~snapshot:state.runtime_surface
           ~error:state.runtime_surface_error
       with
-      | Page_failed -> page_failed_note
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
       | Page_unread ->
-          page_unread_note_while
+          page_unread_note_while ~ko:(state.ui_language = Lang_ko)
             ~reading:(Option.is_some state.runtime_surface_inflight)
       | Page_empty ->
           (match state.runtime_mode with

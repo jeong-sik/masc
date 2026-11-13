@@ -2987,7 +2987,7 @@ let render_keeper_axes (state : state) =
           | Workspace_identity_match | Workspace_identity_match_unconfirmed _
           | Workspace_identity_unread ->
             "   no keeper metadata under .masc/keepers/")
-      | Page_unread -> Some page_unread_note
+      | Page_unread -> Some (page_unread_note ~ko:(state.ui_language = Lang_ko))
       | Page_failed -> None
   in
   let room_for_note = List.fold_left (fun n entry -> n + entry_lines entry) 0 entries_window < entry_rows in
@@ -4616,7 +4616,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              (Terminal_text.single_line run.fur_run_id)) runs)
       in
       match Masc_tui_fusion_model.keeper_runs_view state with
-      | Masc_tui_fetched.Absent -> [ Ansi.dim ^ page_unread_note ^ Ansi.reset ]
+      | Masc_tui_fetched.Absent -> [ Ansi.dim ^ (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset ]
       | Masc_tui_fetched.Loading -> [ loading_row "loading Fusion runs" ]
       | Masc_tui_fetched.Failed detail -> [ failure detail ]
       (* Rows already held stay on a failed refresh, as they do on the Fusion

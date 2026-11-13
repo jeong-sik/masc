@@ -1616,7 +1616,7 @@ let render_schedule_list (state : state) =
             c.push (data_unreliable_row ~cols err)
         | None ->
             let reading = Snapshot_read.in_flight state.schedules_read in
-            c.push (Ansi.dim ^ page_unread_note_while ~reading ^ Ansi.reset))
+            c.push (Ansi.dim ^ page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading ^ Ansi.reset))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with

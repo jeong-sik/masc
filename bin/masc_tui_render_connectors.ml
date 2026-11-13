@@ -209,7 +209,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser";
           c.push_divider ();
-          let empty_line = browser_lane_picker_empty_line view in
+          let empty_line = browser_lane_picker_empty_line ~ko:(state.ui_language = Lang_ko) view in
           let choices = browser_choices view in
           let room =
             Int.max 1 (budget - picker_frame_rows - List.length (Option.to_list empty_line)) in
@@ -446,10 +446,10 @@ let render_connectors (state : state) =
             empty_page_of ~snapshot:state.connectors
               ~error:state.connectors_error
           with
-          | Page_failed -> Some page_failed_note
+          | Page_failed -> Some (page_failed_note ~ko:(state.ui_language = Lang_ko))
           (* The notice above the list is already saying that a read runs. *)
           | Page_unread when reading -> None
-          | Page_unread -> Some page_unread_note
+          | Page_unread -> Some (page_unread_note ~ko:(state.ui_language = Lang_ko))
           | Page_empty -> Some "  (no connectors registered)"
         in
         Option.iter (c.push_styled ~style:(Theme.recede ())) empty

@@ -21275,16 +21275,19 @@ let visible_system_log_entries (state : state) = System_logs_view.visible (syste
    that nothing had loaded. [r] is what loads it, and the reader was left to
    find that out somewhere else. Two surfaces did name the key, which is how a
    reader on the others learned there was nothing to learn. *)
-let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+let page_unread_note ~ko =
+  if ko then "  (미조회 · r:다시 읽기)"
+  else "  (not loaded yet \xe2\x80\x94 press r)"
 
 (* The same row once the first read has been asked and has not answered. [r]
    asks for what is already being asked, so the row stops sending the reader
    to it. Each surface keeps its own record of a read on the wire, so the
    caller passes that fact. *)
-let page_reading_note = "  (reading\xe2\x80\xa6)"
+let page_reading_note ~ko =
+  if ko then "  (조회 중)" else "  (reading\xe2\x80\xa6)"
 
-let page_unread_note_while ~reading =
-  if reading then page_reading_note else page_unread_note
+let page_unread_note_while ~ko ~reading =
+  if reading then page_reading_note ~ko else page_unread_note ~ko
 
 (* [reading] for a pane whose reading is a [Masc_tui_fetched] view: asked, with
    no answer to show yet. *)
@@ -21311,21 +21314,28 @@ let surface_reads_pending (state : state) =
    failed;" -- repeated that verdict. Some titles carry it as well. What the
    reason cannot say is that this emptiness is not a count of zero. That is
    the sentence, and it is all of it now. *)
-let page_failed_note = "  (nothing here is a reading)"
+let page_failed_note ~ko =
+  if ko then "  (조회 실패 · 현재 값 미확인)" else "  (nothing here is a reading)"
 
 (* The row the Browser Lane picker draws when it has no connection to offer,
    and [None] when it has one. A discovery that failed used to leave an empty
    list, so the picker answered "No active native browser connections" under
    the red failure: the operator was told the browser was gone when the list
    had not been read. Only a discovery that answered can say there are none. *)
-let browser_lane_picker_empty_line (view : Browser_lane_view.t) =
+let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   match view.clients, view.load with
   | Some (_ :: _), _ -> None
-  | (None | Some []), Loading _ -> Some "  Waiting for active connections\xe2\x80\xa6"
-  | Some [], (Idle | No_browser | Failed _) -> Some "  No active native browser connections"
-  | None, Failed _ -> Some page_failed_note
-  | None, (Idle | No_browser) -> Some page_unread_note
+  | (None | Some []), Loading _ ->
+      Some
+        (if ko then "  활성 연결을 기다리는 중\xe2\x80\xa6"
+         else "  Waiting for active connections\xe2\x80\xa6")
+  | Some [], (Idle | No_browser | Failed _) ->
+      Some
+        (if ko then "  활성 native browser 연결 없음"
+         else "  No active native browser connections")
+  | None, Failed _ -> Some (page_failed_note ~ko)
+  | None, (Idle | No_browser) -> Some (page_unread_note ~ko)
 
 (* What a title says where its counts would go. A read nobody has asked for and a
    read that failed both leave the snapshot empty, and the title is the row on

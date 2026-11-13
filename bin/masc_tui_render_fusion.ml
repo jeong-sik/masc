@@ -214,8 +214,8 @@ let render_fusion_list (state : state) =
       match
         empty_page_of ~snapshot ~error:failure
       with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:(view_is_loading reading)
+      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
+      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:(view_is_loading reading)
       | Page_empty ->
           if Option.is_some replay_warning then
             ui_text state
@@ -1128,7 +1128,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
              [ Ansi.dim, "  (loading exact Fusion detail)" ]
          | None, Some _ ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, page_failed_note ]
+             [ Ansi.dim, page_failed_note ~ko:(state.ui_language = Lang_ko) ]
          | Some detail, (Some _ | None) ->
              fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4))
                ~frame_width:(framed_inner_width cols) detail)

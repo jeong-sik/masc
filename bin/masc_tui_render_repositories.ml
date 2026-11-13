@@ -851,7 +851,8 @@ let render_changes_list (state : state) =
       ~inner_width:(max 1 (framed_inner_width cols - 2))
   in
   let col_hdr =
-    "  " ^ Render_schedule.change_header_row ~layout:file_change_layout
+    "  " ^ Render_schedule.change_header_row
+           ~ko:(state.ui_language = Lang_ko) ~layout:file_change_layout
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
@@ -928,8 +929,12 @@ let render_changes_list (state : state) =
       | Page_failed -> page_failed_note
       | Page_unread ->
           if state.changes_inflight then page_reading_note
-          else "  (pick a keeper on the Keepers surface, then press r)"
-      | Page_empty -> "  (this keeper wrote no files in the window)"
+          else
+            ui_text state ~ko:"  (키퍼 화면에서 Keeper 를 고른 뒤 r 누르기)"
+              ~en:"  (pick a keeper on the Keepers surface, then press r)"
+      | Page_empty ->
+          ui_text state ~ko:"  (이 Keeper 가 이 기간에 쓴 파일 없음)"
+            ~en:"  (this keeper wrote no files in the window)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do

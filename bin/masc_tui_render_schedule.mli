@@ -294,7 +294,8 @@ val system_log_layout : inner_width:int -> system_log_column Masc_tui_table.layo
     in that order before shrinking the message. The two retained columns
     share the actual available width, including in a narrow frame. *)
 
-val system_log_header_row : layout:system_log_column Masc_tui_table.layout -> string
+val system_log_header_row :
+  ko:bool -> layout:system_log_column Masc_tui_table.layout -> string
 val system_log_row :
   styles:system_log_styles -> level_style:string ->
   layout:system_log_column Masc_tui_table.layout -> system_log_row_values -> string
@@ -410,6 +411,7 @@ type schedule_layout = private {
 }
 
 val schedule_layout :
+  ko:bool ->
   inner_width:int ->
   target_width:int ->
   wake_width:int ->
@@ -422,7 +424,7 @@ val schedule_layout :
     cannot consume the recurrence. Very narrow tables shrink those primary
     widths and the detail carries their full readings. *)
 
-val schedule_header_row : layout:schedule_layout -> string
+val schedule_header_row : ko:bool -> layout:schedule_layout -> string
 
 val schedule_row :
   ?status_style:string ->
@@ -519,7 +521,7 @@ val kauto_layout :
 
 val kauto_plain_styles : kauto_row_styles
 
-val kauto_header_row : layout:kauto_layout -> string
+val kauto_header_row : ko:bool -> layout:kauto_layout -> string
 
 val kauto_row :
   styles:kauto_row_styles ->
@@ -622,7 +624,8 @@ val change_layout : inner_width:int -> change_column Masc_tui_table.layout
     operation and the result; the file and the summary stay, and the summary
     takes what the others leave, never below its floor. *)
 
-val change_header_row : layout:change_column Masc_tui_table.layout -> string
+val change_header_row :
+  ko:bool -> layout:change_column Masc_tui_table.layout -> string
 
 val change_row :
   op_style:string ->

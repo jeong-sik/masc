@@ -171,16 +171,18 @@ Keeper 가 `Execute` 를 `run_in_background` 로 불러 `gh run watch <id>` 나 
 
 **[사실]** `keeper_receipt_wait` 는 채팅 실행을 맡은 턴(`turn_kind` 가 `direct`)에만 주어져요. 채팅 실행이 없는 run(autonomous, verifier, metric hook)은 도구 목록에서 이 도구가 빠져요(`lib/keeper/keeper_run_tools_setup.ml` 의 `descriptors_for_run`). 도구가 턴을 채팅 operation 의 보관 체크포인트에서 끝내고, 대기를 `Chat_operation_store.defer_direct_checkpoint ~operation_id` 로 그 operation 에 적기 때문이에요. 채팅 턴은 `Keeper_repetition_scope.Execution.direct_operation operation_id` 로 operation 을 얻어요(`keeper_turn.ml`). autonomous 순환(`Keeper_unified_turn.run_keeper_cycle`)에는 `operation_id` 도 `Chat_operation_store` 참조도 없어요. autonomous 턴도 체크포인트는 저장하지만 대기를 적을 operation 기록이 없어요. 위 5.2 와 4절은 이 조건을 다루지 않았어요.
 
-**[사실]** 기준선 창(11-09T07:40Z~11-12T07:40Z, 72시간)의 `sleep`+`gh` 호출 535건을 `turn_kind` 로 나눴어요(`sleep_waits.py kinds`, 결과 `result-kinds-2026-11-09T07-40-23Z_11-12T07-40-23Z.json`). 합이 2절의 535건과 같아요.
+**[사실]** 기준선 창(11-09T07:40Z~11-12T07:40Z, 72시간)의 GitHub 대기를 `turn_kind` 로 나눴어요(`sleep_waits.py kinds`, 결과 `result-kinds-2026-11-09T07-40-23Z_11-12T07-40-23Z.json`). `sleep`+`gh` 열의 합은 2절의 535건과 같아요.
 
-| `turn_kind` | Execute | `sleep`+`gh` 호출 | 시간 | 시간 몫 |
-|---|---|---|---|---|
-| `direct` | 37,971 | 231 | 14.81 h | 40.5% |
-| `autonomous` | 46,097 | 304 | 21.78 h | 59.5% |
+| `turn_kind` | Execute | `sleep`+`gh` | 반복 조회 | GitHub 대기 합 | 시간 몫 |
+|---|---|---|---|---|---|
+| `direct` | 37,971 | 231건 14.81 h | 66건 6.61 h | 297건 21.43 h | 35.8% |
+| `autonomous` | 46,097 | 304건 21.78 h | 187건 16.56 h | 491건 38.34 h | 64.2% |
 
-Keeper 로 가르면 `masc-productor-owner` 는 163건 중 144건이 `autonomous` 예요. `rondo` 는 223건 중 148건이 `direct`, 75건이 `autonomous` 예요.
+반복 조회는 반복문 안에서 GitHub 를 읽는 호출이에요(`for i in 1 2 …; do gh api …; sleep 30; done`). 2절의 `sleep` 276건(24.6시간) 중 253건(23.17시간, 92%)이에요. 리터럴 `sleep` 합이 호출 시간의 절반 미만이라 2절의 `sleep`+`gh` 535건에 들어가지 않았어요. 둘을 합친 GitHub 대기는 788건, 59.77시간이고 60초 이상 앞에서 기다린 76.8시간의 78%예요(`sleep_waits.py kinds`, 반복 조회는 `is_loop_sleep_gh`). 2절의 36.6시간은 GitHub 대기를 38% 적게 잡았어요. 반복 조회 253건이 읽은 것은 Actions run 133건, check run 73건, PR 상태 20건, 리뷰·댓글 20건, 그 밖 7건이에요.
 
-**[사실]** 그래서 영수증 일정 대기가 줄일 수 있는 `sleep`+`gh` 는 최대 231건, 14.81시간(40.5%)이에요. 나머지 59.5%는 이 도구를 못 써요. 같은 72시간의 `masc_schedule_create` 301건 중 266건(88%)과 `until_github_*` 를 쓴 129건 중 112건(87%)도 `autonomous` 턴에서 나왔어요.
+Keeper 로 가르면 `masc-productor-owner` 는 196건 중 177건이 `autonomous` 예요. `rondo` 는 343건 중 190건이 `direct`, 153건이 `autonomous` 예요.
+
+**[사실]** 그래서 영수증 일정 대기가 줄일 수 있는 GitHub 대기는 최대 297건, 21.43시간(35.8%)이에요. 나머지 64.2%(491건, 38.34시간)는 이 도구를 못 써요. 같은 72시간의 `masc_schedule_create` 301건 중 266건(88%)과 `until_github_*` 를 쓴 129건 중 112건(87%)도 `autonomous` 턴에서 나왔어요.
 
 **[사실]** 11-13 09:48 KST 배포 뒤 영수증 일정(`delivery=receipt`)은 2건 만들어졌어요. 둘 다 `e-masc-the-leader` 의 한 턴(`keeper_turn_id` 12611)이고 `turn_kind` 는 `autonomous` 예요(첫 호출은 `keeper_name` 을 빼서 입력 검증이 거절했어요). 그 Keeper 는 이어서 `keeper_receipt_wait` 를 부르지 못했어요. 도구가 그 턴에 없었어요. `masc_schedule_create` 의 설명은 `delivery=receipt` 에 「`keeper_receipt_wait` 로 기다려라」고 적는데, 이 설명은 `autonomous` 턴에도 똑같이 가요.
 
@@ -190,7 +192,7 @@ Keeper 로 가르면 `masc-productor-owner` 는 163건 중 144건이 `autonomous
 
 **[사실]** 배포 뒤 4.64시간(11-13 00:48:28Z~05:27:07Z)은 Execute 가 `autonomous` 572건, `direct` 125건이고 `sleep`+`gh` 는 0건이에요. 활동량이 기준선 시간당 건수의 약 1/8이라 효과로 읽지 않아요.
 
-**[제안]** 6절의 지표는 `turn_kind` 로 나눠서 읽어요. 이 스택의 효과는 `direct` 턴의 `sleep`+`gh` 시간이 줄었는지로 판정하고, `autonomous` 턴 값은 이 스택과 상관없는 값으로 따로 적어요. `autonomous` 턴이 같은 턴에서 영수증을 기다리게 하는 구조 변경은 하지 않아요. 위 두 [사실]처럼 그 턴은 영수증 일정을 만들고 끝내면 영수증이 와요. 남는 질문은 구조가 아니라 `autonomous` 턴이 왜 턴을 끝내지 않고 `sleep` 하는가예요(7절 5번).
+**[제안]** 6절의 지표는 `turn_kind` 로 나눠서 읽어요. 이 스택의 효과는 `direct` 턴의 GitHub 대기 시간(`github_wait_hours_by_turn_kind` 의 `direct`)이 줄었는지로 판정하고, `autonomous` 턴 값은 이 스택과 상관없는 값으로 따로 적어요. `autonomous` 턴이 같은 턴에서 영수증을 기다리게 하는 구조 변경은 하지 않아요. 위 두 [사실]처럼 그 턴은 영수증 일정을 만들고 끝내면 영수증이 와요. 남는 질문은 구조가 아니라 `autonomous` 턴이 왜 턴을 끝내지 않고 `sleep` 하는가예요(7절 5번).
 
 ## 6. 재는 것
 
@@ -216,14 +218,14 @@ Keeper 로 가르면 `masc-productor-owner` 는 163건 중 144건이 `autonomous
 3. **결정(사용자, 2026-11-12): 예, 두 Keeper 에게 각자 한 번 물어요.** 2026-11-12 17:42 KST 에 Board 글 두 개로 보냈어요. `masc-productor-owner` 는 1분 뒤 답했어요(3절). 글 번호는 `rondo` 가 `p-e5fe85dd65a9be6aab87462f35410853`, `masc-productor-owner` 가 `p-45dacfc018a91c4ab3a2eff9cd3e8af2` 예요. 답은 글의 댓글에 와요. `rondo` 도 같은 날 12:21Z 에 답했어요(3절).
 4. **결정(사용자, 2026-11-13): 영수증 키는 배포 전에 고치고 일정 본문에 둬요. ACK 뒤 재전달은 닫지 않고 한계로 문서화해요.** 5.2 [미해결] 1 은 #51737 이 고쳐요. 2 는 위 5.2 의 [결정]대로 둬요.
 
-5. **정할 것(사용자): `autonomous` 턴의 `sleep`+`gh`(기준선 304건, 21.78 h)는 구조를 바꾸지 않고 둬요(추천).** 근거는 5.3 의 끝까지 돈 일정이에요. `autonomous` 턴은 대기 도구 없이 영수증 일정을 만들고 턴을 끝내면 `Tool_result_ready` 자극으로 영수증을 받아요. 영수증 대기를 체크포인트 없는 턴으로 넓히는 RFC 는 `Chat_operation_store`, `keeper_receipt_wait_state.ml`, `keeper_direct_checkpoint_continuation.ml`, `Keeper_owner` 의 `Defer_direct_checkpoint`, `autonomous` 순환의 operation 생성을 건드려서 한 PR 크기가 아니에요. 그 값은 「턴의 작업 상태를 잃지 않고 같은 턴에서 이어 가는 것」뿐인데 재 보지 않았어요. 대가는 `autonomous` 턴이 `sleep` 을 고르는 304건을 이 스택이 줄이지 못하는 것이에요. 이유는 `rondo` 한 명의 답(「턴을 놓고 싶지 않다」, 3절)밖에 없어요. 반대로 보려면 `autonomous` 턴 `sleep`+`gh` 직후 같은 턴에서 이어 간 작업의 양을 먼저 재야 해요.
+5. **정할 것(사용자): `autonomous` 턴의 GitHub 대기(기준선 491건, 38.34 h: `sleep`+`gh` 304건 21.78 h, 반복 조회 187건 16.56 h)는 구조를 바꾸지 않고 둬요(추천).** 근거는 5.3 의 끝까지 돈 일정이에요. `autonomous` 턴은 대기 도구 없이 영수증 일정을 만들고 턴을 끝내면 `Tool_result_ready` 자극으로 영수증을 받아요. 영수증 대기를 체크포인트 없는 턴으로 넓히는 RFC 는 `Chat_operation_store`, `keeper_receipt_wait_state.ml`, `keeper_direct_checkpoint_continuation.ml`, `Keeper_owner` 의 `Defer_direct_checkpoint`, `autonomous` 순환의 operation 생성을 건드려서 한 PR 크기가 아니에요. 그 값은 「턴의 작업 상태를 잃지 않고 같은 턴에서 이어 가는 것」뿐인데 재 보지 않았어요. 대가는 `autonomous` 턴이 `sleep` 을 고르는 491건을 이 스택이 줄이지 못하는 것이에요. 이유는 `rondo` 한 명의 답(「턴을 놓고 싶지 않다」, 3절)밖에 없어요. 반대로 보려면 `autonomous` 턴의 GitHub 대기 직후 같은 턴에서 이어 간 작업의 양을 먼저 재야 해요.
 
 ## 8. 확인하지 못한 것
 
 - 두 Keeper 가 왜 이 모양에서 일정을 쓰지 않았는지. 둘의 답은 스스로 한 말이고 장부와 맞춰 보지 않았어요(3절). `rondo` 가 말한 「push 직후 run 을 한 번 읽고 queued 면 일정을 만든다」가 지켜지는지는 배포 뒤 창(6절)으로 봐요.
 - (나-2)의 읽기를 일정 틱과 나누는 구조의 크기(5.2).
 - 5.2 [미해결] 2(ACK 뒤 재전달)가 얼마나 자주 일어나는지. 재 보지 않았어요.
-- 반복문 안의 `sleep` 276건(24.6시간) 중 GitHub 읽기가 차지하는 몫.
+- 반복문 안의 `sleep` 276건(24.6시간) 중 GitHub 가 아닌 23건(1.4시간)이 읽는 것은 `curl` 16건, 파일·로그 6건, 프로세스 1건으로 가르기만 했고 그 일이 무엇을 기다리는지는 보지 않았어요(5.3).
 - `rondo` 가 run id 를 어디서 얻는지. 같은 턴의 `git push` 뒤라는 것만 알아요.
 - 분류는 정규식이에요(`push`·`gh workflow run` 등 명령 목록, 리터럴 `sleep` 합). 셸 변수로 감춘 명령, 반복문의 `sleep` 은 놓쳐요.
 - 이 창은 영수증 대기 스택 배포 전이에요. 배포 뒤 Keeper 가 달라졌는지 모르고, 24시간 값은 11-13 16:47 KST 에 읽어요.

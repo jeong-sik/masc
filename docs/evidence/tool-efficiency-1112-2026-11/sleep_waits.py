@@ -18,7 +18,9 @@
   follow a `git push`, `gh workflow run` or `gh pr create|merge|ready` earlier in the same turn, how many sit in
   a turn with two or more of them, and how many `until_github_run` or `until_github_checks` schedules the Keeper
   created in the window.
-- `kinds`: the Execute calls and the `sleep+gh` calls by `turn_kind`. `keeper_receipt_wait` is offered to a turn
+- `kinds`: the Execute calls, the `sleep+gh` calls and the loop polls of GitHub by `turn_kind`. A loop poll is a
+  foreground call of 60 s or more with a `sleep` in a loop of unknown count (`for i in ...; do gh ...; sleep 30; done`)
+  that reads GitHub; its literal sleeps are under half of the call, so `sleep+gh` does not count it. `keeper_receipt_wait` is offered to a turn
   that serves a chat execution (`direct`) and not to an `autonomous` one (`descriptors_for_run` in
   `lib/keeper/keeper_run_tools_setup.ml`), so the `direct` share of the `sleep+gh` hours is the most the
   receipt wait can reach.
@@ -168,29 +170,60 @@ def is_sleep_gh(row: Row) -> bool:
     )
 
 
+def is_loop_sleep_gh(row: Row) -> bool:
+    """A foreground call of 60 s or more with a `sleep` in a loop of unknown count that reads GitHub."""
+    command = command_of(row)
+    return (
+        is_long_foreground(row)
+        and head_group(command) == "sleep"
+        and sleep_group(command, number(row, "duration_ms") / 1000) is None
+        and GH.search(command) is not None
+    )
+
+
+def hours_by_kind(ms: dict[str, float]) -> dict[str, float]:
+    return {kind: round(value / 3.6e6, 2) for kind, value in ms.items()}
+
+
+def percent_by_kind(ms: dict[str, float]) -> dict[str, float]:
+    total = sum(ms.values())
+    return {kind: round(100 * value / total, 1) for kind, value in ms.items()} if total else {}
+
+
 def kinds_of(rows: Iterable[Row]) -> dict[str, object]:
     execute: collections.Counter[str] = collections.Counter()
     calls: collections.Counter[str] = collections.Counter()
+    loop_calls: collections.Counter[str] = collections.Counter()
     ms: collections.defaultdict[str, float] = collections.defaultdict(float)
+    loop_ms: collections.defaultdict[str, float] = collections.defaultdict(float)
+    github_ms: collections.defaultdict[str, float] = collections.defaultdict(float)
     per_keeper: collections.defaultdict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
     for row in rows:
         if row.get("tool") != "Execute":
             continue
         kind = str(row.get("turn_kind"))
         execute[kind] += 1
+        duration = number(row, "duration_ms")
         if is_sleep_gh(row):
             calls[kind] += 1
-            ms[kind] += number(row, "duration_ms")
-            per_keeper[str(row.get("keeper"))][kind] += 1
-    total_ms = sum(ms.values())
+            ms[kind] += duration
+        elif is_loop_sleep_gh(row):
+            loop_calls[kind] += 1
+            loop_ms[kind] += duration
+        else:
+            continue
+        github_ms[kind] += duration
+        per_keeper[str(row.get("keeper"))][kind] += 1
     return {
         "execute_calls_by_turn_kind": dict(execute),
         "sleep_gh_calls_by_turn_kind": dict(calls),
-        "sleep_gh_hours_by_turn_kind": {kind: round(value / 3.6e6, 2) for kind, value in ms.items()},
-        "sleep_gh_hours_percent_by_turn_kind": {
-            kind: round(100 * value / total_ms, 1) for kind, value in ms.items()
-        } if total_ms else {},
-        "sleep_gh_by_keeper": [
+        "sleep_gh_hours_by_turn_kind": hours_by_kind(ms),
+        "sleep_gh_hours_percent_by_turn_kind": percent_by_kind(ms),
+        "loop_sleep_gh_calls_by_turn_kind": dict(loop_calls),
+        "loop_sleep_gh_hours_by_turn_kind": hours_by_kind(loop_ms),
+        "github_wait_hours_by_turn_kind": hours_by_kind(github_ms),
+        "github_wait_hours_percent_by_turn_kind": percent_by_kind(github_ms),
+        "github_wait_by_keeper": [
             {"keeper": keeper, **dict(counts)}
             for keeper, counts in sorted(per_keeper.items(), key=lambda item: -sum(item[1].values()))[:TOP_KEEPERS]
         ],

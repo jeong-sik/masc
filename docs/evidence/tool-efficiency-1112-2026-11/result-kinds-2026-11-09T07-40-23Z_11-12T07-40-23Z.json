@@ -20,15 +20,31 @@
     "autonomous": 59.5,
     "direct": 40.5
   },
-  "sleep_gh_by_keeper": [
+  "loop_sleep_gh_calls_by_turn_kind": {
+    "autonomous": 187,
+    "direct": 66
+  },
+  "loop_sleep_gh_hours_by_turn_kind": {
+    "autonomous": 16.56,
+    "direct": 6.61
+  },
+  "github_wait_hours_by_turn_kind": {
+    "autonomous": 38.34,
+    "direct": 21.43
+  },
+  "github_wait_hours_percent_by_turn_kind": {
+    "autonomous": 64.2,
+    "direct": 35.8
+  },
+  "github_wait_by_keeper": [
     {
       "keeper": "rondo",
-      "autonomous": 75,
-      "direct": 148
+      "autonomous": 153,
+      "direct": 190
     },
     {
       "keeper": "masc-productor-owner",
-      "autonomous": 144,
+      "autonomous": 177,
       "direct": 19
     },
     {
@@ -38,7 +54,16 @@
     },
     {
       "keeper": "wkbl-web-leader",
-      "autonomous": 17
+      "autonomous": 53
+    },
+    {
+      "keeper": "wkbl-front",
+      "autonomous": 27,
+      "direct": 21
+    },
+    {
+      "keeper": "pr-updater",
+      "autonomous": 21
     },
     {
       "keeper": "code-reviewer-brother",
@@ -46,19 +71,9 @@
       "direct": 10
     },
     {
-      "keeper": "wkbl-front",
-      "direct": 1,
-      "autonomous": 9
-    },
-    {
-      "keeper": "goo-yang-bong",
-      "autonomous": 7,
-      "direct": 1
-    },
-    {
       "keeper": "e-masc-the-leader",
-      "direct": 1,
-      "autonomous": 5
+      "direct": 3,
+      "autonomous": 6
     }
   ]
 }

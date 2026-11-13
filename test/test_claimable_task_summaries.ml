@@ -71,7 +71,10 @@ let add_with_priority config ~title ~created_by ~priority =
 ;;
 
 let snapshot config meta =
-  Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
+  Keeper_world_observation_inputs.read_backlog_snapshot
+    ~config
+    ~meta
+    ~active_goals:(Keeper_world_observation_inputs.in_progress_goal_ids ~config)
 ;;
 
 let with_config f =

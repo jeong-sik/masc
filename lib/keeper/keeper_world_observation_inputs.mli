@@ -84,7 +84,18 @@ val read_held_task_skills : config:Workspace.config -> meta:keeper_meta -> held_
     that builds its prompt without a world observation. A failed or recovered
     read yields [] and counts an observation failure. *)
 
-val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backlog_snapshot
+val in_progress_goal_ids
+  :  config:Workspace.config
+  -> (string list, Goal_store.unavailable) result
+(** The ids of the Goals in progress (Executing or Verifying), from one Goal
+    store read. An observation reads it once and uses the value twice: as its
+    [active_goals] and for the Goal links of its claimable Task rows. *)
+
+val read_backlog_snapshot
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> active_goals:(string list, Goal_store.unavailable) result
+  -> backlog_snapshot
 (** One source-preserving primary backlog read. [claimable_tasks] and its count,
     [unclaimed_count], [failed_count], and [revision] therefore cannot describe
     different backlog revisions. Only typed task identities cross into prompt
@@ -92,9 +103,10 @@ val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backl
 
     [claimable_tasks] is in the order the rows are shown: Tasks linked to an
     in-progress Goal first, then priority, then newest, then id. That is not
-    the order [Workspace.claim_next_r] picks in (priority, then oldest). The
-    Goal links come from a second read, of the Goal store and the primary link
-    registry, made only when a Task is claimable. *)
+    the order [Workspace.claim_next_r] picks in (priority, then oldest).
+    [active_goals] is the caller's Goal read ({!in_progress_goal_ids}); the
+    primary link registry is read here, only when a Task is claimable and a
+    Goal is in progress. *)
 
 val tasks_with_identities_memoized
   :  Masc_domain.task list

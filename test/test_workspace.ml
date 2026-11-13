@@ -2229,7 +2229,10 @@ let test_read_backlog_snapshot_excludes_self_owned_orphan () =
     let _ = Workspace.end_session config ~agent_name:keeper in
     let meta = keeper_meta_for_self_filter keeper in
     let snapshot =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
+      Keeper_world_observation_inputs.read_backlog_snapshot
+        ~config
+        ~meta
+        ~active_goals:(Keeper_world_observation_inputs.in_progress_goal_ids ~config)
     in
     Alcotest.(check int)
       "keeper's own orphan excluded from failed count"
@@ -2246,7 +2249,10 @@ let test_read_backlog_snapshot_falls_back_to_unscoped_claimable_task () =
     in
     let meta = keeper_meta_for_goal_filter keeper in
     let snapshot =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
+      Keeper_world_observation_inputs.read_backlog_snapshot
+        ~config
+        ~meta
+        ~active_goals:(Keeper_world_observation_inputs.in_progress_goal_ids ~config)
     in
     Alcotest.(check int)
       "claimable count falls back to unscoped todo"
@@ -2294,7 +2300,10 @@ let test_read_backlog_snapshot_preserves_unreadable_observation () =
        Alcotest.fail "valid recovery source was not preserved");
     let meta = keeper_meta_for_self_filter "keeper-backlog-recovery-agent" in
     let snapshot =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
+      Keeper_world_observation_inputs.read_backlog_snapshot
+        ~config
+        ~meta
+        ~active_goals:(Keeper_world_observation_inputs.in_progress_goal_ids ~config)
     in
     Alcotest.(check int) "recovery unclaimed count is inert" 0 snapshot.unclaimed_count;
     Alcotest.(check int)
@@ -2309,7 +2318,10 @@ let test_read_backlog_snapshot_preserves_unreadable_observation () =
     write_corrupt (Workspace.backlog_recovery_path config);
     let meta = keeper_meta_for_self_filter "keeper-backlog-failure-agent" in
     let snapshot =
-      Keeper_world_observation_inputs.read_backlog_snapshot ~config ~meta
+      Keeper_world_observation_inputs.read_backlog_snapshot
+        ~config
+        ~meta
+        ~active_goals:(Keeper_world_observation_inputs.in_progress_goal_ids ~config)
     in
     Alcotest.(check int)
       "unreadable unclaimed count is inert"

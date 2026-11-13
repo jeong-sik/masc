@@ -1644,14 +1644,6 @@ let collect_board_events_without_advancing_cursor
     ~meta
 ;;
 
-(* Goals are shared intent: the store is the only record of which ones are
-   still open, so the observation reads it directly. *)
-let open_goal_ids ~(config : Workspace.config) =
-  Goal_store.list_goals_result config ()
-  |> Result.map (List.filter_map (fun (g : Goal_store.goal) ->
-       if Goal_phase.admits_self_directed_progress g.phase then Some g.id else None))
-;;
-
 let observe
       ~(pending_board_events : pending_board_event list option)
       ~(config : Workspace.config)
@@ -1664,7 +1656,12 @@ let observe
       ~meta
       ~fleet_limit:(Keeper_config.keeper_fleet_messages_max ())
   in
-  let backlog_snapshot = read_backlog_snapshot ~config ~meta in
+  (* Goals are shared intent: the store is the only record of which ones are
+     still open. One read gives the observation's [active_goals] and the Goal
+     links of its claimable Task rows, so the two cannot describe different
+     Goal store states. *)
+  let active_goals = Inputs.in_progress_goal_ids ~config in
+  let backlog_snapshot = read_backlog_snapshot ~config ~meta ~active_goals in
   let unclaimed_task_count = backlog_snapshot.unclaimed_count in
   let claimable_tasks = backlog_snapshot.claimable_tasks in
   let failed_task_count = backlog_snapshot.failed_count in
@@ -1693,7 +1690,7 @@ let observe
   { pending_messages
   ; pending_board_events
   ; idle_seconds
-  ; active_goals = open_goal_ids ~config
+  ; active_goals
   ; unclaimed_task_count
   ; claimable_tasks
   ; held_task_skills = backlog_snapshot.held_task_skills
@@ -1717,7 +1714,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
       ~(active_goals : (string list, Goal_store.unavailable) result)
   : world_observation
   =
-  let backlog_snapshot = read_backlog_snapshot ~config ~meta in
+  let backlog_snapshot = read_backlog_snapshot ~config ~meta ~active_goals in
   let unclaimed_task_count = backlog_snapshot.unclaimed_count in
   let claimable_tasks = backlog_snapshot.claimable_tasks in
   let failed_task_count = backlog_snapshot.failed_count in

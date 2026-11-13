@@ -225,7 +225,7 @@ let overview_capacity_lines (state : state) =
              fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)]
       @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~ko ~now detail)) trouble)
       @ (if state.workspace_identity = Workspace_identity_match then [] else
-           [warning (text "워크스페이스 식별 미확인" "Workspace identity unconfirmed")])
+           [warning (workspace_identity_unconfirmed ~ko)])
       @ Option.to_list (Option.map (fun detail ->
           (if retained then quiet else warning) (Terminal_text.single_line detail))
           (Masc_tui_fleet_line.blocker_text ~ko fleet))

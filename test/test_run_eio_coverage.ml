@@ -95,6 +95,8 @@ let with_initialized_masc f =
   let tmp_dir = make_test_dir () in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  (* A caller that finds the run lock taken waits on this clock. *)
+  Time_compat.set_clock (Eio.Stdenv.clock env);
   let config = Workspace.default_config tmp_dir in
   let _ = Workspace.init config ~agent_name:None in
   Fun.protect
@@ -323,6 +325,90 @@ let test_get_run_with_updated_plan () =
   | Error e -> failf "get failed: %s" e
 
 (* ============================================================
+   Writers of run.json share one lock
+   ============================================================ *)
+
+let agent_of config task_id =
+  match Run_eio.read_run config task_id with
+  | Ok run -> run.agent_name
+  | Error e -> failf "read_run failed: %s" (Run_eio.error_to_string e)
+
+(* The test holds the run.json lock the way a plan update does: it reads the
+   record, another caller initializes the run again meanwhile, and it writes
+   back what it read. The second init has to wait for the lock, so its record
+   is the one that stays. *)
+let test_second_init_waits_for_the_run_lock () =
+  with_initialized_masc @@ fun config ->
+  let task_id = "task-lock-init" in
+  ignore (Run_eio.init config ~task_id ~agent_name:(Some "first"));
+  Eio.Switch.run @@ fun sw ->
+  let second =
+    Workspace_utils.with_file_lock config (Run_eio.run_json_path config task_id)
+      (fun () ->
+        let read =
+          match Run_eio.read_run config task_id with
+          | Ok run -> run
+          | Error e -> failf "read_run failed: %s" (Run_eio.error_to_string e)
+        in
+        let second =
+          Eio.Fiber.fork_promise ~sw (fun () ->
+            Run_eio.init config ~task_id ~agent_name:(Some "second"))
+        in
+        Eio.Fiber.yield ();
+        check (option string) "record is untouched while the lock is held"
+          (Some "first") (agent_of config task_id);
+        (match Run_eio.write_run config { read with plan = "# Plan" } with
+         | Ok () -> ()
+         | Error e -> failf "write_run failed: %s" (Run_eio.error_to_string e));
+        second)
+  in
+  (match Eio.Promise.await_exn second with
+   | Ok run -> check (option string) "second init succeeds" (Some "second") run.agent_name
+   | Error e -> failf "second init failed: %s" e);
+  check (option string) "the second init is the stored record"
+    (Some "second") (agent_of config task_id)
+
+(* A get that finds no run creates one. While another writer holds the lock
+   and has not written yet, that creation waits; once the writer's record is
+   there, get reads it instead of replacing it. *)
+let test_get_bootstrap_waits_for_the_run_lock () =
+  with_initialized_masc @@ fun config ->
+  let task_id = "task-lock-get" in
+  let run_file = Run_eio.run_json_path config task_id in
+  Eio.Switch.run @@ fun sw ->
+  let got =
+    Workspace_utils.with_file_lock config run_file (fun () ->
+      let got =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          Run_eio.get ~agent_name:"reader" config ~task_id)
+      in
+      Eio.Fiber.yield ();
+      check bool "no record is created while the lock is held" false
+        (Sys.file_exists run_file);
+      (match
+         Run_eio.write_run config
+           { Run_eio.task_id
+           ; agent_name = Some "writer"
+           ; plan = "# Writer plan"
+           ; created_at = "2026-01-01T00:00:00Z"
+           ; updated_at = "2026-01-01T00:00:00Z"
+           }
+       with
+       | Ok () -> ()
+       | Error e -> failf "write_run failed: %s" (Run_eio.error_to_string e));
+      got)
+  in
+  match Eio.Promise.await_exn got with
+  | Error e -> failf "get failed: %s" e
+  | Ok json ->
+    let open Yojson.Safe.Util in
+    let run = json |> member "run" in
+    check string "get reads the writer's record" "writer"
+      (run |> member "agent_name" |> to_string);
+    check string "the writer's plan is kept" "# Writer plan"
+      (run |> member "plan" |> to_string)
+
+(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -366,5 +452,11 @@ let () =
     "io_edge_cases", [
       test_case "init idempotent" `Quick test_init_run_idempotent;
       test_case "get with updated plan" `Quick test_get_run_with_updated_plan;
+    ];
+    "run_lock", [
+      test_case "second init waits for the run lock" `Quick
+        test_second_init_waits_for_the_run_lock;
+      test_case "get bootstrap waits for the run lock" `Quick
+        test_get_bootstrap_waits_for_the_run_lock;
     ];
   ]

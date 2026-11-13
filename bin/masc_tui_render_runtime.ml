@@ -371,9 +371,10 @@ let runtime_detail_lines state target ~width =
         @ fact "Local runtime"
             (runtime_bool runtime.ro_is_local)
       in
+      (* Every label on this page is English, so the scope fallback is too. *)
       let connection_fields =
         fact "Connection / provider ID" runtime.ro_provider_id
-        @ fact "Quota scope" (runtime_quota_scope_label runtime)
+        @ fact "Quota scope" (runtime_quota_scope_label ~ko:false runtime)
         @ fact "Response-local quota scope"
             (Option.value ~default:"not reported" runtime.ro_quota_scope)
       in
@@ -644,7 +645,7 @@ let runtime_picker_choice_rows ~ko picker =
           (match picker.rlp_pick with
            | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
                push (say "      쿼터 범위 " "      Quota scope "
-                 ^ Terminal_text.single_line (runtime_quota_scope_label runtime)
+                 ^ Terminal_text.single_line (runtime_quota_scope_label ~ko runtime)
                  ^ say " · 연결 " " · Connection "
                  ^ Terminal_text.single_line runtime.ro_provider_id
                  ^ " · " ^ Terminal_text.single_line runtime.ro_id)

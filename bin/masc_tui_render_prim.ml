@@ -1378,27 +1378,31 @@ let file_change_range_label
   else Printf.sprintf "L%d-%d" range.start_line range.end_line
 
 
-let file_change_evidence_label = function
+let file_change_evidence_label ~ko = function
   | None -> None
   | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
-    Some "empty file"
+    Some (if ko then "빈 파일" else "empty file")
   | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
     Some (file_change_range_label range)
   | Some
       (Masc.Keeper_file_change_evidence.Edited
         { occurrence_count; occurrences = None }) ->
-    Some (Printf.sprintf "%d matches; ranges omitted" occurrence_count)
+    Some
+      (Printf.sprintf
+         (if ko then "%d건 일치 · 범위 생략" else "%d matches; ranges omitted")
+         occurrence_count)
   | Some
       (Masc.Keeper_file_change_evidence.Edited
         { occurrence_count; occurrences = Some occurrences }) ->
     (match occurrences with
-     | [] -> Some (Printf.sprintf "%d matches" occurrence_count)
+     | [] ->
+       Some (Printf.sprintf (if ko then "%d건 일치" else "%d matches") occurrence_count)
      | first :: _ ->
        let old_range = file_change_range_label first.old_range in
        let changed =
          match first.new_range with
          | Some new_range -> old_range ^ "→" ^ file_change_range_label new_range
-         | None -> old_range ^ "→deleted"
+         | None -> old_range ^ (if ko then "→삭제" else "→deleted")
        in
        if occurrence_count = 1
        then Some changed
@@ -1425,7 +1429,9 @@ let acting_pane_changes_and_source (state : state) =
                | Masc.Tui_decode.Fc_materialized _ -> Pane.File_written)
           ; file_succeeded = change.fc_succeeded
           ; file_at = change.fc_at
-          ; file_where = file_change_evidence_label change.fc_line_evidence
+          ; file_where =
+              file_change_evidence_label ~ko:(state.ui_language = Lang_ko)
+                change.fc_line_evidence
           }
         in
         let changes = Pane.Changes_ready
@@ -3128,19 +3134,20 @@ let planning_phase_label ~ko = function
 (* The key and label a Goal detail uses for each lifecycle request. [c]
    requests completion or recovery; its submission does not prove a judge was
    dispatched. Operator confirmation reads and binds the exact proof through
-   the admin route. *)
+   the admin route. [p] is Pause and Resume both: no phase offers the two
+   ([Goal_phase.decide_transition]), so the Goal on screen picks the one [p]
+   sends, and [r] stays the refresh it is on every other screen. *)
 let planning_action_key = function
   | Goal_phase.Public_action.Request_complete -> "c"
   | Goal_phase.Public_action.Drop -> "x"
   | Goal_phase.Public_action.Reopen -> "o"
-  | Goal_phase.Public_action.Pause -> "p"
-  | Goal_phase.Public_action.Resume -> "r"
+  | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume -> "p"
   | Goal_phase.Public_action.Block -> "b"
   | Goal_phase.Public_action.Unblock -> "u"
 
-let planning_action_of_key key =
+let planning_action_of_key ~offers key =
   let key = String.lowercase_ascii key in
-  List.find_opt (fun action -> String.equal (planning_action_key action) key)
+  List.find_opt (fun action -> String.equal (planning_action_key action) key && offers action)
     Goal_phase.Public_action.all
 
 let planning_action_confirmation_keys action =
@@ -4126,8 +4133,10 @@ let render_repository_changes_diff (state : state) ~path =
     ; ds_error = state.repository_changes_diff_error
     ; ds_scroll = state.repository_changes_diff_scroll
     ; ds_hscroll = state.repository_changes_diff_hscroll
-    ; ds_unchanged = "  (this file matches its last commit, or is untracked)"
-    ; ds_esc_hint = "esc back to files"
+    ; ds_unchanged =
+        ui_text state ~ko:"  (이 파일은 마지막 커밋과 같거나 추적되지 않음)"
+          ~en:"  (this file matches its last commit, or is untracked)"
+    ; ds_esc_hint = ui_text state ~ko:"Esc:파일 목록" ~en:"esc back to files"
     ; ds_footer_hints = Masc_tui_keys.footer_hints_git_diff ~lang:state.ui_language
     ; ds_surface_key = "repository-changes-diff"
     ; ds_clamped = (fun scroll -> Repository_changes_diff_scroll scroll)
@@ -6203,7 +6212,8 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       notice @ (match List.find_opt (fun (r:Tui_decode.runtime_option) -> String.equal r.ro_id id) state.runtime_catalog with
        | None -> ["Connection/model configuration unavailable in the current catalogue"]
        | Some runtime ->
-         [ Printf.sprintf "Quota scope %s · %s" (runtime_quota_scope_label runtime) runtime.ro_provider
+         (* Every line of this block is English, so the scope fallback is too. *)
+         [ Printf.sprintf "Quota scope %s · %s" (runtime_quota_scope_label ~ko:false runtime) runtime.ro_provider
          ; "Connection " ^ runtime.ro_provider_id
          ; Printf.sprintf "Configured context %d tokens (%s) · model %s"
              runtime.ro_effective_max_context (Tui_decode.runtime_context_source_label runtime.ro_max_context_source) runtime.ro_model

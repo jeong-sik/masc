@@ -2,21 +2,20 @@
     [keeper_supervisor.ml] (godfile decomp).
 
     [supervise_keepalive] decides whether to spawn a supervised
-    keepalive fiber for [meta]. It launches fresh registrations and
-    resumes registrations still in [Offline]. Other registered phases
-    remain owned by the lifecycle sweep. On a fresh registration:
+    keepalive fiber for [meta]. It launches only an owner whose
+    execution truth is [Recoverable]: a fresh registration, or a
+    registration still in [Offline]. Other registered phases remain
+    owned by the lifecycle sweep. A launch:
 
-    1. Asks [Keeper_registry] for a spawn-slot decision. On [Error
-       reason], records the denial and publishes an [Admission_denied]
-       lifecycle event in [Offline] phase; the keeper does not spawn.
-    2. On [Ok ()]:
-       - registers offline in [Keeper_registry]
-       - lazily initializes the workspace root (Workspace.init)
-       - syncs keeper workspace presence + writes meta (failures degrade
-         to original meta but tick failure counters)
-       - calls the injected [~launch_supervised_fiber] to actually
-         spawn the supervised fiber
-       - publishes a [Started] / [Running]-phase lifecycle event
+    1. Registers the lane through [Keeper_keepalive_launch_transaction].
+       A refused registration is logged and nothing is spawned.
+    2. Lazily initializes the workspace root (Workspace.init).
+    3. Calls the injected [~launch_supervised_fiber] to spawn the
+       supervised fiber.
+    4. Wakes the owner's queued-operation drain and publishes a
+       [Started] / [Running]-phase lifecycle event.
+
+    Every other verdict retains the owner and only logs the reason.
 
     Two parent-local callbacks are injected to avoid sibling -> parent
     cycles:
@@ -81,25 +80,6 @@ let supervise_keepalive
           (Keeper_activation_readiness.owner_runtime_of_registry_entry
              (Keeper_registry.get ~base_path meta.name))
         (Ok meta)
-  in
-  let record_recovery_retained reason =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string LifecycleDispatchRejections)
-      ~labels:
-        [ "keeper", meta.name
-        ; "event", "supervisor_keepalive_start"
-        ; "reason", reason
-        ]
-      ();
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Admission_denied
-           ; phase = Some Keeper_state_machine.Offline
-           })
-      meta.name
-      reason
-      ()
   in
   let wake_queued_owner_operations () =
     match
@@ -247,57 +227,35 @@ let supervise_keepalive
           |> Result.map_error (fun error -> `Registration error))
       ~rollback:Keeper_keepalive_launch_transaction.Remove_registered
   in
+  (* [Unknown], [Shutdown_fenced], [Retained_disabled] and [Paused_dead] are
+     the owner's standing state, and the sweep reads it again on every pass.
+     These branches dispatch and launch nothing, so they count no lifecycle
+     dispatch rejection and publish no [Admission_denied]: both mean a launch
+     was attempted and refused, as in [Keeper_keepalive.start_keepalive] and
+     the sweep's crashed-lane restart. The log line keeps the reason. The
+     state itself is read from the registry phase, the persisted meta and the
+     runtime health [owner_lifecycle] (#29485). *)
   match execution_truth with
   | Keeper_activation_readiness.Unknown detail ->
-    record_recovery_retained "unknown";
     Log.Keeper.error
       "%s: supervisor keepalive recovery retained because owner execution truth is unknown: %s"
       meta.name
       detail
   | Keeper_activation_readiness.Shutdown_fenced operation_id ->
-    record_recovery_retained "shutdown_fenced";
     Log.Keeper.warn
       "%s: supervisor keepalive recovery retained by shutdown operation %s"
       meta.name
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Keeper_activation_readiness.Retained_disabled reason ->
-    let reason =
-      Keeper_activation_readiness.retained_disabled_reason_to_wire reason
-    in
-    record_recovery_retained reason;
-    (* This is the only durable signal that the supervisor is declining to
-       recover a keeper it will keep declining.
-
-       #29467 demoted it to the routine channel as steady-state noise. That
-       read the volume without reading what produced it. The two admission
-       rules for one keeper disagree: process boot excludes only
-       {paused, declarative_autoboot_disabled, autoboot_disabled,
-       shutdown_admission_fence} (keeper_runtime.ml), while this recovery path
-       classifies through [classify_owner_execution], which is
-       [~require_proactive:true] and so refuses any keeper with proactive
-       disabled. A keeper boot would happily start therefore cannot be brought
-       back by the sweep once it falls Offline — it retries and refuses every
-       ~30s until the server restarts.
-
-       That is what the volume was. 25 canary keepers sat Offline from
-       2026-08-21 through 2026-08-22T01:30:56Z emitting 14,017 of that day's
-       130,102 rows, and the 01:31:12Z restart moved every one of them
-       [offline -> running via fiber_started]. Quieting the line would have
-       hidden a fleet-wide liveness failure, so it stays at Info until the
-       admission asymmetry is closed. See #29487. *)
     Log.Keeper.info
       "%s: supervisor keepalive recovery retained by disabled policy: %s"
       meta.name
-      reason
+      (Keeper_activation_readiness.retained_disabled_reason_to_wire reason)
   | Keeper_activation_readiness.Paused_dead reason ->
-    let reason =
-      Keeper_activation_readiness.paused_dead_reason_to_wire reason
-    in
-    record_recovery_retained reason;
     Log.Keeper.info
       "%s: supervisor keepalive recovery retained by paused/dead owner truth: %s"
       meta.name
-      reason
+      (Keeper_activation_readiness.paused_dead_reason_to_wire reason)
   | Keeper_activation_readiness.Executable -> ()
   | Keeper_activation_readiness.Recoverable ->
     (match Keeper_registry.get ~base_path meta.name with

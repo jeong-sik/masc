@@ -1801,6 +1801,8 @@ let test_official_client_declarations_load () =
       ; "claude_code.claude-code-opus-5-5-high"
       ; "codex_subscription.codex-gpt-5-6"
       ; "antigravity_subscription.antigravity-gemini-4-argon-high"
+      ; "antigravity_subscription.antigravity-gemini-4-carbon-high"
+      ; "antigravity_subscription.antigravity-gemini-4-hydrogen-xhigh"
       ; "antigravity_subscription.antigravity-gemini-3-7-flash-high"
       ]
 ;;

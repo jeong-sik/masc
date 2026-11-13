@@ -195,7 +195,7 @@ val strip_rows : int
 val change_row_address : Masc.Tui_decode.file_change -> string
 
 val file_change_evidence_label :
-  Masc.Keeper_file_change_evidence.t option -> string option
+  ko:bool -> Masc.Keeper_file_change_evidence.t option -> string option
 
 val recent_chunk_projection :
   Masc_tui_types.state -> Masc_tui_acting.chunk_projection
@@ -539,8 +539,11 @@ val planning_action_key : Goal_phase.Public_action.t -> string
 val planning_action_confirmation_keys : Goal_phase.Public_action.t -> string list
 (** The key a goal detail takes for a lifecycle request. *)
 
-val planning_action_of_key : string -> Goal_phase.Public_action.t option
-(** Parse the same keys drawn in the Goal detail action strip. *)
+val planning_action_of_key :
+  offers:(Goal_phase.Public_action.t -> bool) -> string -> Goal_phase.Public_action.t option
+(** Parse the same keys drawn in the Goal detail action strip. [offers] says
+    which requests the Goal on screen accepts; [p] names Pause or Resume,
+    whichever of the two it accepts. *)
 
 val planning_action_label : ko:bool -> Goal_phase.Public_action.t -> string
 (** What the goal detail's Actions and ARMED rows call that request. *)

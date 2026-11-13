@@ -271,12 +271,22 @@ let start_instant =
   | None -> Alcotest.fail "the clock left the range of Ptime"
 ;;
 
+(* Login receipts live under the configuration directory of the user, so an
+   installation has its own. *)
+let config_home = "XDG_CONFIG_HOME"
+
 let with_installation f =
   Eio_main.run (fun env ->
     let root = Filename.temp_dir "server-login-http-" "" in
+    let previous = Sys.getenv_opt config_home in
     Fun.protect
-      ~finally:(fun () -> remove_tree root)
+      ~finally:(fun () ->
+        (match previous with
+         | Some value -> Unix.putenv config_home value
+         | None -> Unix.unsetenv config_home);
+        remove_tree root)
       (fun () ->
+        Unix.putenv config_home (Filename.concat root "xdg");
         let base = Filename.concat root "base" in
         Unix.mkdir base 0o700;
         let store = Filename.concat (Filename.concat root "store") "external.jsonl" in
@@ -500,7 +510,73 @@ tools-support = true
 streaming = true
 
 [claude_code."claude-sonnet-5"]
+
+[models.agy-only]
+api-name = "agy-only"
+max-context = 200000
+tools-support = true
+
+[agy.agy-only]
 |}
+;;
+
+(* The workspace of [t] declares the providers of [declared_toml]. *)
+let declare_providers t =
+  let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:t.base) "config" in
+  Fs_compat.mkdir_p config;
+  Out_channel.with_open_bin
+    (Filename.concat config Config_dir_resolver.runtime_toml_filename)
+    (fun out -> output_string out declared_toml)
+;;
+
+(* An account [login_id] of the person whose login of [integration] left its
+   receipt, as the connect route leaves it, with a Runtime of each of
+   [models] on it (plan L2b). The id of a login has the shape of a generated
+   token. *)
+let connect t ~user_id ~login_id ~integration models =
+  let account = get_ok (Provider_account_id.of_string login_id) in
+  (match Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+  (match
+     Runtime_setup_login_receipt.save
+       ~workspace:t.base
+       ~actor:(Runtime_setup_login_session.Person (User_id.to_string user_id))
+       { Runtime_setup_login_receipt.login_id
+       ; integration_id = integration
+       ; account = Runtime_setup_login_receipt.Linked
+       ; status = Runtime_setup_login_receipt.Complete Runtime_setup_login_client.Authenticated
+       }
+   with
+   | Ok () -> ()
+   | Error (Runtime_setup_login_receipt.Not_found | Runtime_setup_login_receipt.Unavailable) ->
+     Alcotest.fail "the login receipt was not saved");
+  List.iter
+    (fun model ->
+      match
+        Authz_runtime.make
+          t.routes.R.zone
+          ~user_id
+          ~provider_account_id:account
+          ~runtime_id:(get_ok (Runtime_id.of_string (login_id ^ "." ^ model)))
+          ~self_effects:Effect.(Set.of_list [ Invoke_model; Use_tool ])
+          ~draw:(fun () -> "grant-" ^ login_id ^ "-" ^ model)
+      with
+      | Ok (_ : Grant_id.t) -> ()
+      | Error error -> Alcotest.fail (Authz_runtime.error_detail error))
+    models
+;;
+
+(* The receipt of [login_id] made readable by others, which the server
+   refuses to read (test_runtime_setup_login_receipt.ml finds it the same
+   way). *)
+let spoil_receipt login_id =
+  match Env_config_core.default_base_path_record_path_opt () with
+  | None -> Alcotest.fail "no private registry root"
+  | Some record ->
+    Unix.chmod
+      (Filename.concat (Filename.dirname record) ("credentials/setup-logins/" ^ login_id ^ ".json"))
+      0o644
 ;;
 
 let the_preview_follows_a_login () =
@@ -596,13 +672,57 @@ let the_preview_follows_a_login () =
      with
      | Ok grant -> Alcotest.(check string) "the Self grant" "grant-1" (Grant_id.to_string grant)
      | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
-    let owned = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+    (* Plan L2b: three accounts whose logins left receipts, named so the log
+       keeps them in this order. The login of the first was of Codex, which
+       the workspace declared then and will not declare here. The server
+       refuses to read the receipt of the second. The third is Claude Code. *)
+    let codex = String.make 64 'c' in
+    let spoiled = String.make 64 'd' in
+    let connected = String.make 64 'e' in
+    connect t ~user_id ~login_id:codex ~integration:"codex" [ "gpt-5.5" ];
+    connect t ~user_id ~login_id:spoiled ~integration:"claude_code" [ "claude-sonnet-5" ];
+    spoil_receipt spoiled;
+    connect t ~user_id ~login_id:connected ~integration:"claude_code" [ "claude-sonnet-5"; "claude-opus-9"; "agy-only" ];
+    let accounts () =
+      let reply = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+      reply.status, reply.body
+    in
+    let account id fact = Printf.sprintf {|{"provider_account_id":"%s",%s}|} id fact in
+    let runtime account model fact =
+      Printf.sprintf {|{"runtime_id":"%s.%s","provider_account_id":"%s",%s}|} account model account fact
+    in
+    let unread code = Printf.sprintf {|"model":null,"unread":"%s"|} code in
+    (* The answer, with the model of the Codex Runtime and of each Runtime of
+       the Claude Code account. The first account left no receipt, so the
+       subscription of it and the model of its Runtime are not known, and so
+       for the account whose receipt is refused. *)
+    let answer ~codex_model connected_models =
+      Printf.sprintf
+        {|{"provider_accounts":[%s],"runtimes":[%s]}|}
+        (String.concat
+           ","
+           [ account "account-1" {|"integration_id":null,"unread":"login_receipt_missing"|}
+           ; account codex {|"integration_id":"codex"|}
+           ; account spoiled {|"integration_id":null,"unread":"login_receipt_unreadable"|}
+           ; account connected {|"integration_id":"claude_code"|}
+           ])
+        (String.concat
+           ","
+           (runtime "account-1" "claude-sonnet-5-5" (unread "account_integration_unread")
+            :: runtime codex "gpt-5.5" codex_model
+            :: runtime spoiled "claude-sonnet-5" (unread "account_integration_unread")
+            :: List.map (fun (model, fact) -> runtime connected model fact) connected_models))
+    in
+    (* This workspace has no runtime.toml yet. *)
     Alcotest.(check (pair int string))
-      "owns the subscription and its Runtime"
+      "owns the subscriptions and their Runtimes"
       ( 200
-      , {|{"provider_accounts":["account-1"],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1"}]}|}
-      )
-      (owned.status, owned.body);
+      , answer
+          ~codex_model:(unread "configuration_unavailable")
+          (List.map
+             (fun model -> model, unread "configuration_unavailable")
+             [ "agy-only"; "claude-opus-9"; "claude-sonnet-5" ]) )
+      (accounts ());
     (* Plan D1-5: the person makes a Keeper and gives it their Runtime. *)
     let csrf = csrf_of t admin in
     let keeper_post ?(csrf = Some csrf) path body =
@@ -696,11 +816,7 @@ let the_preview_follows_a_login () =
     (* Once the workspace declares its providers, the route reads them: the
        Claude Code one, and not the Antigravity one, which the connect route
        refuses a person by the same rule. *)
-    let config = Filename.concat (Common.masc_dir_from_base_path ~base_path:t.base) "config" in
-    Fs_compat.mkdir_p config;
-    Out_channel.with_open_bin
-      (Filename.concat config Config_dir_resolver.runtime_toml_filename)
-      (fun out -> output_string out declared_toml);
+    declare_providers t;
     check_reply
       "the integrations of the workspace"
       ( 200
@@ -726,6 +842,20 @@ let the_preview_follows_a_login () =
       "a connect of a declared server over HTTP"
       (refused "This connection needs its native account setup before web discovery.")
       (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"local"}|});
+    (* With the runtime.toml, a Runtime has the model of the binding of its
+       own account's provider that makes its id. The workspace does not
+       declare Codex. Claude Code has no binding of claude-opus-9, and only
+       Antigravity binds agy-only. *)
+    check_reply
+      "the models of the Runtimes"
+      ( 200
+      , answer
+          ~codex_model:(unread "template_not_declared")
+          [ "agy-only", unread "runtime_not_bound"
+          ; "claude-opus-9", unread "runtime_not_bound"
+          ; "claude-sonnet-5", {|"model":"claude-sonnet-5"|}
+          ] )
+      (accounts ());
     let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
     Alcotest.(check string)
@@ -1086,6 +1216,11 @@ let a_person_keeps_keepers_over_mcp () =
      with
      | Ok (_ : Grant_id.t) -> ()
      | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
+    (* Plan L2b: the tool reads the receipts and the runtime.toml of the
+       workspace, as the route does. *)
+    declare_providers t;
+    let connected = String.make 64 'e' in
+    connect t ~user_id ~login_id:connected ~integration:"claude_code" [ "claude-sonnet-5" ];
     (* A PAT of [browser]'s person whose scope allows [effects]. *)
     let pat browser ~csrf effects =
       let issued =
@@ -1131,8 +1266,11 @@ let a_person_keeps_keepers_over_mcp () =
     check
       "the Runtimes of the person"
       ( "false"
-      , {|{"provider_accounts":["account-1"],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1"}]}|}
-      )
+      , Printf.sprintf
+          {|{"provider_accounts":[{"provider_account_id":"account-1","integration_id":null,"unread":"login_receipt_missing"},{"provider_account_id":"%s","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"account_integration_unread"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
+          connected
+          connected
+          connected )
       (result owner "masc_my_runtimes");
     check "no Keeper yet" ("false", {|{"keepers":[]}|}) (result owner "masc_my_keepers");
     Alcotest.(check string)

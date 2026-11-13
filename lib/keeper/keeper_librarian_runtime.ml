@@ -1100,10 +1100,19 @@ let validate_admission_proposal ~now ~batch ~input:selected_input output =
   let* accepted = validate_selection ~now selected_input memory in
   let* () = Judgment.verify ~facts:accepted.selection.facts judgments |> Result.map_error invalid in
   let selection = accepted.selection in
-  let has_changes = selection.new_claims <> [] || selection.dropped <> []
-    || selection.absorbed <> [] || selection.revisions <> [] in
-  let* () = Judgment.verify_support ~new_claims:selection.new_claims ~has_changes
-    ~change_support judgments |> Result.map_error invalid in
+  (* A new claim that absorbs current memories, and continues no dropped one,
+     merges what admission already read. A claim that absorbs nothing, or that
+     revises a dropped memory through [supersedes], brings knowledge only a
+     candidate can carry (RFC-0517 §7.1). *)
+  let merges identity = List.exists (fun (statement : Keeper_memory_os_types.absorbed_statement) ->
+    String.equal statement.into identity) selection.absorbed in
+  let revises identity = List.exists (fun (revision : Keeper_memory_os_types.revision) ->
+    String.equal revision.superseded_by identity) selection.revisions in
+  let additions = List.filter (fun fact ->
+    let identity = Keeper_memory_os_types.memory_id fact in
+    revises identity || not (merges identity)) selection.new_claims in
+  let* () = Judgment.verify_support ~additions ~change_support judgments
+    |> Result.map_error invalid in
   let settled = Judgment.settled_requests judgments in
   if settled = [] then Ok Deferred
   else

@@ -64,6 +64,7 @@ import {
   keeperToolApprovals,
   liveSendOwnsRequest,
   appendThreadEntry,
+  mergeServerHistoryEntries,
   THREAD_ENTRY_CAP,
 } from './keeper-state'
 import {
@@ -101,7 +102,7 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
-import { _resetKeeperStreamBuffersForTests, applyKeeperOperationTurnEvent } from './keeper-stream'
+import { _resetKeeperStreamBuffersForTests, applyKeeperOperationTurnEvent, KEEPER_LIVE_SEND_ROW_MISSING } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperChatHistoryMessage } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
@@ -851,6 +852,89 @@ describe('sendKeeperThreadMessage operation stream', () => {
       text: 'answer',
       delivery: 'delivered',
     })
+  })
+
+  it('delivers a tool frame to the stored row after history replaces the placeholder mid-stream', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'answer' })
+      const placeholder = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+      if (!placeholder) throw new Error('missing placeholder')
+      // A history refetch lands first: the stored row of the same operation
+      // replaces the placeholder under an id the client cannot mint.
+      mergeServerHistoryEntries('echo', [{
+        ...placeholder,
+        id: 'stored-reply',
+        text: 'answer',
+        rawText: 'answer',
+        timestamp: '2026-11-13T00:00:00Z',
+        delivery: 'history',
+        streamState: null,
+      }])
+      expect(keeperThreads.value.echo?.some(entry => entry.id === placeholder.id)).toBe(false)
+      const lateTool: KeeperChatStreamEvent = {
+        type: 'TOOL_CALL_START',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 4,
+        toolCallName: 'Read',
+        toolCallId: 'late-tool',
+      }
+      // The broadcast copy is discarded while this send owns the operation,
+      // so the direct stream is the only carrier of the frame.
+      expect(liveSendOwnsRequest(opts.operationId)).toBe(true)
+      applyKeeperOperationTurnEvent('echo', { operationId: opts.operationId, event: lateTool })
+      expect(keeperThreads.value.echo?.some(entry => entry.toolCallId === 'late-tool')).toBe(false)
+      opts.onEvent(lateTool)
+      // Response content cannot reopen the stored row.
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: ' duplicated tail' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    expect(keeperThreads.value.echo?.find(entry => entry.toolCallId === 'late-tool')).toMatchObject({
+      role: 'tool',
+      label: 'Read',
+    })
+    const stored = keeperThreads.value.echo?.find(entry => entry.id === 'stored-reply')
+    expect(stored).toMatchObject({ text: 'answer', delivery: 'history', streamState: null })
+    expect(stored?.traceSteps).toMatchObject([{ kind: 'tool', name: 'Read' }])
+  })
+
+  it('fails the send when a frame arrives and no row carries its operation', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      keeperThreads.value = { echo: [] }
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'answer' })
+      return { terminal: true }
+    })
+
+    await expect(sendKeeperThreadMessage('echo', '질문')).rejects.toThrow(KEEPER_LIVE_SEND_ROW_MISSING)
+    expect(keeperActionErrors.value.echo).toBe(KEEPER_LIVE_SEND_ROW_MISSING)
   })
 
   it('keeps another operation approval when an older direct response arrives after its broadcast', async () => {

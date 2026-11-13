@@ -25,10 +25,9 @@ memory; the expected answer drops it without a superseding claim. A fact with
 answer keeps one of the two and absorbs the other into it. A fact with `use_at`
 is a record of something to do or pass on at that time, known only from memory.
 Its use time falls on a day after every candidate's, and the expected answer
-keeps it; or on a day before them, and it is planted stale. MASC accepts a Memory
-change only when an incorporated or already_represented candidate supports it
-(`keeper_memory_admission_judgment.ml` `verify_support`), so in a request whose
-candidates are all transient the planted facts stay too.
+keeps it; or on a day before them, and it is planted stale. MASC takes these drops
+and merges without a supporting candidate (RFC-0517 §7.1), so the expected answer
+makes them in a request whose candidates are all transient too.
 
 What a claim carries besides its meaning (a date, a time, a PR/issue/task
 number) is planned from shares measured on the retained records, and
@@ -288,32 +287,16 @@ class CandidateLabel:
 @dataclass(frozen=True, slots=True)
 class RequestLabel:
     """`planted_stale` are the planted stale facts and `duplicates` pairs a fact with its planted
-    duplicate, whatever the candidates. The answer drops the stale facts and keeps one fact of each
-    pair, absorbing the other into it, only when a candidate can support a Memory change
-    (`supports_change`): MASC refuses any other change (`verify_support`). `scheduled_ahead` are
-    the records whose use is still ahead, which the answer keeps, and `scheduled_past` the records
-    whose use has passed, which are among the stale facts."""
+    duplicate. The answer drops the stale facts and keeps one fact of each pair, absorbing the other
+    into it, whatever the candidates: MASC takes drops and merges without a supporting candidate
+    (RFC-0517 §7.1). `scheduled_ahead` are the records whose use is still ahead, which the answer
+    keeps, and `scheduled_past` the records whose use has passed, which are among the stale facts."""
 
     candidates: tuple[CandidateLabel, ...]
     planted_stale: frozenset[str]
     duplicates: tuple[tuple[str, str], ...]
     scheduled_ahead: frozenset[str]
     scheduled_past: frozenset[str]
-
-    @property
-    def supports_change(self) -> bool:
-        return any(can_support(c.outcome) for c in self.candidates)
-
-
-def can_support(outcome: Outcome) -> bool:
-    """Whether a candidate with this outcome may support a Memory change (`verify_support`)."""
-    match outcome:
-        case "incorporated" | "already_represented":
-            return True
-        case "not_durable":
-            return False
-        case _:
-            assert_never(outcome)
 
 
 def candidate_label(candidate: Candidate, by_id: dict[str, MemoryFact]) -> CandidateLabel:

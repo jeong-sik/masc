@@ -168,18 +168,33 @@ let test_suspension_visibility_and_keys () =
   check (list string) "suspended goals stay available for operator restore"
     ["paused"; "blocked"]
     (planning_visible_goals ~filter:Planning_filter_active ~sort:Planning_sort_phase_priority input |> ids);
-  List.iter (fun (key, action) ->
-    check bool ("key " ^ key) true (Masc_tui_render_prim.planning_action_of_key key = Some action))
-    ["p", Goal_phase.Public_action.Pause; "R", Goal_phase.Public_action.Resume;
-     "b", Goal_phase.Public_action.Block; "U", Goal_phase.Public_action.Unblock];
+  let action_of ~phase key =
+    Masc_tui_render_prim.planning_action_of_key
+      ~offers:(fun action -> Goal_phase.offers_public_action ~phase ~action) key in
+  List.iter (fun (phase, key, action) ->
+    check bool ("key " ^ key) true (action_of ~phase key = Some action))
+    [Goal_phase.Executing, "p", Goal_phase.Public_action.Pause;
+     Goal_phase.Paused Goal_phase.Resume_verifying, "P", Goal_phase.Public_action.Resume;
+     Goal_phase.Executing, "b", Goal_phase.Public_action.Block;
+     Goal_phase.Blocked Goal_phase.Resume_executing, "U", Goal_phase.Public_action.Unblock];
+  let keys = List.sort_uniq String.compare
+      (List.map Masc_tui_render_prim.planning_action_key Goal_phase.Public_action.all) in
+  List.iter (fun phase ->
+    check bool "r refreshes and sends no Goal request" true (action_of ~phase "r" = None);
+    (* [p] names Pause and Resume only because no phase offers both. *)
+    List.iter (fun key ->
+      let offered = List.filter (fun action ->
+        String.equal (Masc_tui_render_prim.planning_action_key action) key
+        && Goal_phase.offers_public_action ~phase ~action) Goal_phase.Public_action.all in
+      check bool ("at most one request under " ^ key) true (List.length offered <= 1))
+      keys)
+    Goal_phase.all;
   let read_key = Masc_tui_keys.goal_candle_refresh_key in
   check bool "Candle read cannot arm a Goal action" true
-    (Masc_tui_render_prim.planning_action_of_key read_key = None);
+    (List.for_all (fun phase -> action_of ~phase read_key = None) Goal_phase.all);
   check bool "paused Goal footer offers the Candle read" true
     (List.mem (read_key ^ ":Candle")
-       (String.split_on_char ' ' (Masc_tui_keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)));
-  check bool "paused Goal footer does not call Resume refresh" false
-    (List.mem "r:refresh" (String.split_on_char ' ' (Masc_tui_keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)))
+       (String.split_on_char ' ' (Masc_tui_keys.footer_hints_planning_goal_detail ~lang:Masc_tui_types.Lang_en)))
 
 let test_narrow_planning_rollup_and_clause_packing () =
   let cols = 80 in

@@ -14056,30 +14056,38 @@ let clear_connectors_read state =
   state.connectors_read <- Connector_read.empty
 
 let connectors_read_notice state =
+  let ko = state.ui_language = Lang_ko in
+  let recheck_queued = if ko then " · 재확인 예약됨" else " · recheck queued" in
   match Connector_read.view state.connectors_read with
   | Connector_read.Quiet -> None
   | Reading (cause, follow_up) ->
       (match Connector_read.stage state.connectors_read with
        | Some Connector_read.Names_pending ->
-           Some ("Connector status received; reading names"
+           Some ((if ko then "커넥터 상태 수신 · 이름 읽는 중"
+                  else "Connector status received; reading names")
              ^ (match follow_up with
                 | No_follow_up -> ""
-                | Read_after_write -> " · recheck queued"))
+                | Read_after_write -> recheck_queued))
        | Some Status_pending | None ->
            let activity = match cause, follow_up with
-             | Connector_read.Refresh, No_follow_up -> "Reading connectors"
-             | After_write, No_follow_up -> "Rechecking bindings"
+             | Connector_read.Refresh, No_follow_up ->
+                 if ko then "커넥터 읽는 중" else "Reading connectors"
+             | After_write, No_follow_up ->
+                 if ko then "연결 재확인 중" else "Rechecking bindings"
              | Refresh, Read_after_write | After_write, Read_after_write ->
-                 "Reading connectors; recheck queued"
+                 if ko then "커넥터 읽는 중" ^ recheck_queued
+                 else "Reading connectors; recheck queued"
            in
            Some (activity ^ (match state.connectors with
              | None -> "…"
-             | Some _ -> " · last observation")))
+             | Some _ -> if ko then " · 마지막 관측" else " · last observation")))
   | Waiting_after_write ->
       Some (if server_authority_ready state
-        then "Binding recheck pending · r:retry"
-        else "Binding recheck pending · waiting for workspace confirmation")
-  | Failed_to_start -> Some "Connector read could not start"
+        then (if ko then "연결 재확인 대기 · r:재시도" else "Binding recheck pending · r:retry")
+        else (if ko then "연결 재확인 대기 · 작업 공간 확인을 기다리는 중"
+              else "Binding recheck pending · waiting for workspace confirmation"))
+  | Failed_to_start ->
+      Some (if ko then "커넥터 읽기를 시작하지 못했습니다" else "Connector read could not start")
 
 let workspace_reply_admitted state ~authority ~reading ~kind =
   authority = state.workspace_authority
@@ -14107,11 +14115,16 @@ let visible_resources state =
     ~day:state.resource_day) state.resources_list
 
 let resource_inventory_status state =
+  let ko = state.ui_language = Lang_ko in
   let notice = Option.map (fun (report, prior) ->
     let detail = Printf.sprintf
-      "Previously opened report %s (revision %d) was absent from a completed inventory observation; access or publication may have changed."
+      (if ko
+       then "이전에 연 보고서 %s(리비전 %d): 완료된 목록 조회에서 빠졌습니다. 접근 권한이나 게시 상태가 바뀌었을 수 있습니다."
+       else "Previously opened report %s (revision %d) was absent from a completed inventory observation; access or publication may have changed.")
       report.Masc_tui_resource_catalog.id report.revision.revision in
-    match prior with None -> detail | Some prior -> detail ^ " Previous read: " ^ prior)
+    match prior with
+    | None -> detail
+    | Some prior -> detail ^ (if ko then " 이전 조회: " else " Previous read: ") ^ prior)
     state.resource_inventory_notice in
   match List.filter_map Fun.id [state.resources_error; notice] with
   | [] -> None
@@ -21719,10 +21732,10 @@ let keeper_rows_page (state : state) ~error =
    the list to [] before asking, so a read that answered with no resources and
    a read not answered yet were the same empty list, and both said
    "(loading...)" -- for good, on a server that exposes no resources. *)
-let resources_empty_note (list : Masc_tui_resource_catalog.t list option) =
+let resources_empty_note ~ko (list : Masc_tui_resource_catalog.t list option) =
   match list with
-  | None -> Some " (loading\xe2\x80\xa6)"
-  | Some [] -> Some " (no resources)"
+  | None -> Some (if ko then " (읽는 중\xe2\x80\xa6)" else " (loading\xe2\x80\xa6)")
+  | Some [] -> Some (if ko then " (리소스 없음)" else " (no resources)")
   | Some (_ :: _) -> None
 
 (* A successful refresh need not contain a turn that just finished. Its GET
@@ -24105,12 +24118,16 @@ let runtime_picker_choice_id = function
 
 (* The decoder retains a credential-location quota scope from the same response.
    It cannot identify a subscription after credentials change at that location. *)
-let runtime_quota_scope_label (runtime : Tui_decode.runtime_option) =
+let runtime_quota_scope_label ~ko (runtime : Tui_decode.runtime_option) =
   match runtime.ro_quota_scope_id with
   | Some scope_id -> scope_id
   | None -> (match runtime.ro_quota_scope with
-      | Some scope -> "unavailable; response-local scope " ^ scope
-      | None -> "unavailable (no quota scope reported)")
+      | Some scope ->
+          (if ko then "미확인; 이 응답에서만 쓰는 범위 "
+           else "unavailable; response-local scope ") ^ scope
+      | None ->
+          if ko then "미확인 (응답에 쿼터 범위 없음)"
+          else "unavailable (no quota scope reported)")
 
 type runtime_picker_projection = {
   rlp_lane : string;
@@ -24144,12 +24161,13 @@ let format_context_tokens tokens =
   else if tokens >= 1_000 then Printf.sprintf "%dk" (tokens / 1_000)
   else Printf.sprintf "%d" tokens
 
+(* Every word of this label is English, so the scope fallback is English too. *)
 let runtime_model_picker_label (runtime : Tui_decode.runtime_option) =
   let effort = Option.fold ~none:"default" ~some:Tui_decode.runtime_reasoning_effort_label
       runtime.Tui_decode.ro_declared_reasoning_effort in
   Masc.Tui_terminal_text.sanitize_terminal_text
     (Printf.sprintf "%s %s · Quota scope %s · Connection %s · %s context · %s"
-       runtime.Tui_decode.ro_model effort (runtime_quota_scope_label runtime) runtime.Tui_decode.ro_provider_id
+       runtime.Tui_decode.ro_model effort (runtime_quota_scope_label ~ko:false runtime) runtime.Tui_decode.ro_provider_id
        (format_context_tokens runtime.Tui_decode.ro_effective_max_context) runtime.Tui_decode.ro_id)
 
 let runtime_picker_label = function
@@ -27105,24 +27123,35 @@ let keeper_message_history_loading (state : state) =
   | Some _, None | None, (Some _ | None) -> false
 
 let keeper_message_inflight_rows (state : state) ~now =
+  let ko = state.ui_language = Lang_ko in
   let batch_label group =
     if group.count = 1 then ""
-    else Printf.sprintf "%d messages in one turn · " group.count
+    else
+      Printf.sprintf
+        (if ko then "한 턴 메시지 %d개 · " else "%d messages in one turn · ")
+        group.count
   in
   let activity group =
     if group.reconciling_count > 0 then
-      if group.count = 1 then "reconciling"
-      else Printf.sprintf "reconciling %d stream(s)" group.reconciling_count
+      if group.count = 1 then ui_text state ~ko:"기록 대조 중" ~en:"reconciling"
+      else
+        Printf.sprintf
+          (if ko then "스트림 %d개 기록 대조 중" else "reconciling %d stream(s)")
+          group.reconciling_count
     else
       let transcript = group.representative.log.tl_transcript in
       if Masc_tui_keeper_chat_transcript.awaiting_continuation transcript then
-        "awaiting continuation"
+        ui_text state ~ko:"이어서 진행 대기" ~en:"awaiting continuation"
       else
         match Masc_tui_keeper_chat_transcript.phase transcript with
-        | Masc_tui_keeper_chat_transcript.Waiting -> "waiting to start"
-        | Masc_tui_keeper_chat_transcript.Working -> "running"
-        | Masc_tui_keeper_chat_transcript.Stream_ended -> "finishing"
-        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> "failed"
+        | Masc_tui_keeper_chat_transcript.Waiting ->
+            ui_text state ~ko:"시작 대기" ~en:"waiting to start"
+        | Masc_tui_keeper_chat_transcript.Working ->
+            ui_text state ~ko:"진행 중" ~en:"running"
+        | Masc_tui_keeper_chat_transcript.Stream_ended ->
+            ui_text state ~ko:"마무리 중" ~en:"finishing"
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
+            ui_text state ~ko:"요청 실패" ~en:"failed"
   in
   let summary group =
     let age =

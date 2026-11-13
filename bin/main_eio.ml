@@ -1314,9 +1314,10 @@ let auth_cmd =
           "A person signs in with GitHub, connects their own Claude Code or \
            Codex subscription, makes Runtimes and Keepers on it, and sends a \
            Keeper a message that the subscription answers once. The preview \
-           serves the login routes and the routes of a person's own \
-           subscriptions, Runtimes and Keepers, and no MCP or Board route. It \
-           takes the workspace lease until it stops."
+           serves the login routes, the routes of a person's own \
+           subscriptions, Runtimes and Keepers, and the MCP endpoint of a \
+           person, and no Board route. It takes the workspace lease until it \
+           stops."
       ; `P
           "The workspace must be activated with masc auth bootstrap. Make the \
            invitation link with MASC_HTTP_BASE_URL=http://127.0.0.1:PORT so it \

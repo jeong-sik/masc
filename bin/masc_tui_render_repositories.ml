@@ -674,7 +674,7 @@ let change_row_summary ~ko (change : Masc.Tui_decode.file_change) =
     | Masc.Tui_decode.Fc_materialized _ ->
       if ko then "(blob 으로 만듦)" else "(materialized blob)"
   in
-  match file_change_evidence_label change.fc_line_evidence with
+  match file_change_evidence_label ~ko change.fc_line_evidence with
   | None -> content
   | Some label ->
     Printf.sprintf "%s%s[%s]%s %s" Ansi.bold (Theme.info ()) label Ansi.reset
@@ -811,7 +811,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
             ~en:"  the log holds the blob's identity, not its bytes" ]
   in
   let notes =
-    match file_change_evidence_label change.fc_line_evidence with
+    match file_change_evidence_label ~ko:(state.ui_language = Lang_ko) change.fc_line_evidence with
     | None -> notes
     | Some label ->
         notes @ [ ui_text state ~ko:"  도구가 보고한 줄 " ~en:"  producer lines " ^ label ]
@@ -1089,8 +1089,10 @@ let render_changes_tree_diff (state : state)
     ; ds_error = state.changes_tree_diff_error
     ; ds_scroll = state.changes_diff_scroll
     ; ds_hscroll = state.changes_diff_hscroll
-    ; ds_unchanged = "  (this file matches its last commit)"
-    ; ds_esc_hint = "esc closes"
+    ; ds_unchanged =
+        ui_text state ~ko:"  (이 파일은 마지막 커밋과 같음)"
+          ~en:"  (this file matches its last commit)"
+    ; ds_esc_hint = ui_text state ~ko:"Esc:닫기" ~en:"esc closes"
     ; ds_footer_hints = Masc_tui_keys.footer_hints_changes_diff ~lang:state.ui_language
     ; ds_surface_key = "changes"
     ; ds_clamped = (fun scroll -> Changes_diff_scroll scroll)

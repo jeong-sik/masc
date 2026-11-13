@@ -217,7 +217,10 @@ val filter_map_recent :
 type 'a recent_view
 (** A {!filter_map_recent} read with a fixed row count and projection that
     keeps each store's answer until the store's day files change. The kept
-    answers live in the view, so make one view per projection and keep it. *)
+    answers live in the view, so make one view per projection and keep it.
+    The view holds one answer per store directory it has read, for as long
+    as the view lives; an answer for a store that is gone is never served,
+    because its files no longer match. *)
 
 val recent_view : int -> f:(Yojson.Safe.t -> 'a option) -> 'a recent_view
 (** [recent_view n ~f] reads like [filter_map_recent t n ~f]. [f] must be
@@ -225,11 +228,17 @@ val recent_view : int -> f:(Yojson.Safe.t -> 'a option) -> 'a recent_view
 
 val read_recent_view : 'a recent_view -> t -> 'a list
 (** [read_recent_view view t] is [filter_map_recent t n ~f] for the view's
-    [n] and [f]. When [t]'s day-file list and the size of every file the
-    previous read opened are unchanged, it returns that read's answer
-    without opening a day file. Day files only grow by appending, so a file
-    rewritten to its old size reads as unchanged, the same rule
-    {!count_entries} follows. *)
+    [n] and [f]. It lists [t]'s day files once and reads from that list.
+    When the list equals the one the previous read used, and every file that
+    read opened is still the same file (device and inode) with the same size
+    and modification time, it returns that read's answer without opening a
+    day file.
+
+    A listing that fails, or a file whose identity cannot be taken before it
+    is read, keeps no answer; the call still returns what
+    [filter_map_recent] returns. A file replaced in place by different bytes
+    with the same inode, size and modification time reads as unchanged; the
+    store's writers only append and remove whole files. *)
 
 val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
 (** [read_recent ?offset t n] returns the newest [n] entries in chronological

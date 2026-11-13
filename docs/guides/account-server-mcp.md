@@ -6,7 +6,8 @@ and work with their own Keepers from that client. This guide covers what
 the endpoint serves, how to connect, and what it does not do yet.
 
 The single-user server has its own `/mcp`, with other tools and other
-credentials. Nothing here applies to it.
+credentials. Nothing here applies to it. How an operator sets the account
+server up is in [Setting up the account server](account-server-setup.md).
 
 ## What the endpoint serves
 

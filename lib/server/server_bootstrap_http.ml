@@ -233,7 +233,8 @@ let record_cleartext_accept ~mode latency_s =
    is followed by a backoff sleep; [on_stop ()] runs once when the loop ends
    by cancellation. [serve_connection ~conn_sw client_addr connection] runs
    in a fiber of its own whose release records the close and closes the
-   accepted flow. [connection] is that flow with the connection's bounds
+   accepted flow. A failure of that connection's switch, from any of its
+   fibers, is logged and ends with the connection. [connection] is that flow with the connection's bounds
    (RFC-0518 D4, D6): no listener reads or writes the flow itself. *)
 let run_accept_loop
       ~sw
@@ -255,16 +256,30 @@ let run_accept_loop
       disable_nagle flow;
       record_accept (Unix.gettimeofday () -. accept_start);
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
-          on_connection_release conn_sw ~record_closed ~listener_tag flow;
-          let connection =
-            Server_connection_socket.wrap ~sw:conn_sw ~clock ~listener_tag client_addr flow
-          in
-          try serve_connection ~conn_sw client_addr connection with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Misc.error "[%s] connection error: %s"
-              listener_tag (Printexc.to_string exn)));
+        try
+          Eio.Switch.run ~name:listener_tag (fun conn_sw ->
+            on_connection_release conn_sw ~record_closed ~listener_tag flow;
+            let connection =
+              Server_connection_socket.wrap ~sw:conn_sw ~clock ~listener_tag client_addr flow
+            in
+            try serve_connection ~conn_sw client_addr connection with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Misc.error "[%s] connection error: %s"
+                listener_tag (Printexc.to_string exn))
+        with
+        | exn ->
+          (* The connection's switch failed: a fiber or daemon on [conn_sw]
+             other than [serve_connection] raised, and [Eio.Switch.run] raises
+             it again here. An exception that leaves this fiber fails [sw],
+             the listener's switch. [Eio.Fiber.check] raises when this fiber's
+             own context, the listener's, is cancelled, so the listener's end
+             goes on as it does. Otherwise the failure is this connection's,
+             whatever the exception is: a [Cancelled] that a connection fiber
+             carried out of some other scope does not cancel the listener. *)
+          Eio.Fiber.check ();
+          Log.Misc.error "[%s] connection failed: %s"
+            listener_tag (Printexc.to_string exn));
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->

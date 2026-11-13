@@ -124,7 +124,12 @@ val with_cleanups_on_release :
     within {!Server_connection_socket.preparation_bound_s}: the first bytes
     on the HTTP/1.1 and h2c loops, the protocol choice on the auto loop, the
     TLS handshake on the TLS loop. A connection that was not ready is logged
-    at debug. *)
+    at debug.
+
+    Each connection runs under a switch of its own. When any fiber or daemon
+    of that switch raises, the connection ends, the exception is logged at
+    error, and the loop accepts the next connection. Cancelling the
+    listener's switch ends the loop and its connections. *)
 
 val serve :
   sw:Eio.Switch.t ->

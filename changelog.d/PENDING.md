@@ -1,0 +1,9 @@
+### Fixed
+
+- An HTTP listener (HTTP/1.1, h2c, auto, TLS) keeps accepting when a fiber or
+  watching daemon of one connection raises. The accept loop caught only what
+  the connection's serving fiber raised, so an exception from another fiber of
+  the connection's switch reached the listener's switch and ended the
+  listener. The failure is now logged at error as `connection failed` and ends
+  with that connection; cancelling the listener still ends the loop
+  (#PENDING).

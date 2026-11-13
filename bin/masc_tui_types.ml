@@ -21444,6 +21444,12 @@ let workspace_identity_unconfirmed ~ko =
   workspace_identity_name ~ko ^ if ko then " 미확인" else " unconfirmed"
 let workspace_identity_unread ~ko = workspace_identity_name ~ko ^ " " ^ field_unread ~ko
 
+(* What a send the TUI kept back did not do, and what stayed where it was. A
+   refusal reads reason · not sent · what was kept, in these words on every
+   screen that refuses one. *)
+let not_sent ~ko = if ko then "보내지 않음" else "not sent"
+let draft_retained ~ko = if ko then "초안 남아 있음" else "draft retained"
+
 let title_missing_reading ~ko ~error =
   if Option.is_some error then title_failed ~ko else title_unread ~ko
 

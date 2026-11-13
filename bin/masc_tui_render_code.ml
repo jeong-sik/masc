@@ -630,7 +630,7 @@ let render_code (state : state) =
             else
               path
               ^ (if Option.is_some (current_code_draft state) then
-                   ui_text state ~ko:" · 초안 남아 있음 (V)" ~en:" · draft retained (V)"
+                   " · " ^ draft_retained ~ko:(state.ui_language = Lang_ko) ^ " (V)"
                  else "")
           in
           (* The note (a language-server answer, a PR link) rides the title

@@ -22216,11 +22216,13 @@ let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
           send_board_vote state ~mailbox ~up target
       | Masc_tui_board_vote.Arm (target, up) ->
           state.board_vote_armed <- Some (target, up);
+          let ko = state.ui_language = Lang_ko in
+          let key = if up then "v" else "V" in
+          let direction = Masc_tui_board_vote.direction ~ko ~up in
+          let target_text = Masc_tui_board_vote.describe ~ko target in
           report_action state "system"
-            (Printf.sprintf "press %s again to vote %s on %s"
-               (if up then "v" else "V")
-               (if up then "up" else "down")
-               (Masc_tui_board_vote.describe target)))
+            (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key target_text direction
+             else Printf.sprintf "press %s again to vote %s on %s" key direction target_text))
 
 (* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
    the other writes; the server's store rules decide whether the row is still

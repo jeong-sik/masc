@@ -284,7 +284,7 @@ val elapsed_text : float -> string option
     [None], and every caller draws it the way it draws a duration the feed did
     not give. *)
 
-val evidence_fields : entry -> (string * string option) list
+val evidence_fields : ko:bool -> entry -> (string * string option) list
 (** Producer references from one immutable observer event. Missing IDs and
     input/output are explicit; no matching by name, time, or neighbouring row. *)
 

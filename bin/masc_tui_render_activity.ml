@@ -719,7 +719,7 @@ let render_acting_evidence (state : state) entry =
          ~en:"1. Event Identity & Execution Context")
     @ ((ui_text state ~ko:"TUI 수신 시각" ~en:"TUI received at",
          Some (Masc_domain.iso8601_of_unix_seconds entry.Masc_tui_acting.ae_at))
-       :: Masc_tui_acting.evidence_fields entry
+       :: Masc_tui_acting.evidence_fields ~ko:(state.ui_language = Lang_ko) entry
        |> List.concat_map (fun (label, value) ->
            let prefix = "  " ^ label ^ ": " in
            let text = match value with

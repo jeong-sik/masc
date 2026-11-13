@@ -1487,7 +1487,8 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
               None)
         before
 
-let evidence_fields (entry : entry) =
+let evidence_fields ~ko (entry : entry) =
+  let say korean english = if ko then korean else english in
   let field label value = label, value in
   let some label value = field label (Some value) in
   let number label value = field label (Option.map string_of_int value) in
@@ -1504,9 +1505,9 @@ let evidence_fields (entry : entry) =
         | Telemetry -> "telemetry_event"
         | Relay_subscription_loss _ -> Masc.Keeper_event_bridge.subscription_loss_event_type
         | Agent_core_other name -> name in
-      [ some "Source" "runtime observer event"
-      ; some "Event kind" kind
-      ; field "Tool name" e.tool
+      [ some (say "출처" "Source") (say "런타임 관찰 이벤트" "runtime observer event")
+      ; some (say "이벤트 종류" "Event kind") kind
+      ; field (say "도구 이름" "Tool name") e.tool
       ; field "Tool use ID" e.tool_use_id
       ; field "Execution ID" e.execution_id
       ; field "Event ID" e.event_id
@@ -1514,7 +1515,7 @@ let evidence_fields (entry : entry) =
       ; field "Parent event ID" e.parent
       ; field "Caused by" e.caused_by
       ; field "Correlation ID" e.correlation
-      ; field "Runtime agent" e.agent
+      ; field (say "런타임 에이전트" "Runtime agent") e.agent
       ; field
           (match e.kind with
            (* These carry the run's own wire id there, not a task. *)
@@ -1526,44 +1527,44 @@ let evidence_fields (entry : entry) =
            | Agent_core_other _ ->
                "Task ID")
           e.task
-      ; number "Agent session turn" e.turn
-      ; field "Batch index / size" (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
-      ; some "Input/output" "not carried by this observer event"
-      ; some "Skill receipt" "not carried by this observer event"
+      ; number (say "에이전트 세션 턴" "Agent session turn") e.turn
+      ; field (say "배치 순서 / 크기" "Batch index / size") (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
+      ; some (say "입출력" "Input/output") (say "이 관찰 이벤트에 실려 오지 않음" "not carried by this observer event")
+      ; some (say "스킬 영수증" "Skill receipt") (say "이 관찰 이벤트에 실려 오지 않음" "not carried by this observer event")
       ]
   | Observer.Keeper_tool_call call ->
       let schedule_fields =
         match call.kt_schedule with
-        | None -> [ field "Execution schedule" None ]
-        | Some (Error error) -> [ some "Execution schedule error" error ]
+        | None -> [ field (say "실행 방식" "Execution schedule") None ]
+        | Some (Error error) -> [ some (say "실행 방식 오류" "Execution schedule error") error ]
         | Some (Ok schedule) ->
-            [ some "Execution mode"
+            [ some (say "실행 방식" "Execution mode")
                 (match schedule.execution_mode with
-                 | Agent_core.Tool_contract.Concurrent -> "concurrent"
-                 | Agent_core.Tool_contract.Serial -> "serial")
-            ; some "Planned index (zero-based)" (string_of_int schedule.planned_index)
-            ; some "Batch index (zero-based) / size"
+                 | Agent_core.Tool_contract.Concurrent -> (say "동시" "concurrent")
+                 | Agent_core.Tool_contract.Serial -> (say "순차" "serial"))
+            ; some (say "계획 순서 (0부터)" "Planned index (zero-based)") (string_of_int schedule.planned_index)
+            ; some (say "배치 순서 (0부터) / 크기" "Batch index (zero-based) / size")
                 (Printf.sprintf "%d / %d" schedule.batch_index schedule.batch_size)
             ]
       in
-      [ some "Source" "keeper_tool_call observer event"
+      [ some (say "출처" "Source") (say "keeper_tool_call 관찰 이벤트" "keeper_tool_call observer event")
       ; some "Keeper" call.kt_keeper
-      ; some "Tool name" call.kt_tool
-      ; number "Agent session turn" call.kt_turn
+      ; some (say "도구 이름" "Tool name") call.kt_tool
+      ; number (say "에이전트 세션 턴" "Agent session turn") call.kt_turn
       ; (match call.kt_disposition with
-         | None -> field "Disposition" None
+         | None -> field (say "처리 결과" "Disposition") None
          | Some (Ok disposition) ->
-             some "Disposition"
+             some (say "처리 결과" "Disposition")
                (Masc.Tui_decode.keeper_call_disposition_to_string disposition)
-         | Some (Error error) -> some "Disposition error" error)
+         | Some (Error error) -> some (say "처리 결과 오류" "Disposition error") error)
       ; field "Tool use ID" call.kt_tool_use_id
-      ; some "Input/output" "producer-redacted observations below; full payload not guaranteed"
+      ; some (say "입출력" "Input/output") (say "아래는 보낸 쪽이 가린 관측 · 전체 내용은 보장되지 않음" "producer-redacted observations below; full payload not guaranteed")
       ] @ schedule_fields
-  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~ko:false ~at:entry.ae_at ~duration_ms:None event in
-      [ some "Source" "observer event"
-      ; some "Event" row.label
-      ; some "Detail" row.detail
-      ; some "Call evidence" "this event is not an exact tool invocation"
+  | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~ko ~at:entry.ae_at ~duration_ms:None event in
+      [ some (say "출처" "Source") (say "관찰 이벤트" "observer event")
+      ; some (say "이벤트" "Event") row.label
+      ; some (say "상세" "Detail") row.detail
+      ; some (say "호출 근거" "Call evidence") (say "이 이벤트는 도구 호출 그 자체가 아님" "this event is not an exact tool invocation")
       ]
 
 (* ── The Activity table's two measured columns ─────────────────────────── *)

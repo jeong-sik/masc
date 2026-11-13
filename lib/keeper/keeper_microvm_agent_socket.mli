@@ -6,7 +6,9 @@
 val guest_path : string
 (** Where the agent binds inside the guest. It is on the root filesystem:
     [--publish-socket] does not reach a socket on a tmpfs, a named volume or
-    a host directory mount (RFC 4.2). *)
+    a host directory mount (RFC 4.2). The guest's vminitd connects to it under
+    [/run/container/<guest name>/rootfs], and that whole path fits Linux's
+    107-byte socket path for the longest guest name. *)
 
 val host_path : base_path:string -> guest_name:string -> string
 (** [<base_path>/.masc/microvm/agent/<16 hex of SHA-256(guest_name)>.sock].

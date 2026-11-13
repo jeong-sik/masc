@@ -175,7 +175,8 @@ let save_prompt_height state = if Option.is_some state.resource_save_prompt then
    the status line when there is one. *)
 let list_rows state ~rows =
   let status = Option.is_some (resource_inventory_status state)
-    || Option.is_some (resources_empty_note (visible_resources state)) in
+    || Option.is_some
+         (resources_empty_note ~ko:(state.ui_language = Lang_ko) (visible_resources state)) in
   max 0 (pane_surface_content_height ~rows - save_prompt_height state - 2
     - (if status then 1 else 0))
 
@@ -255,7 +256,7 @@ let render_resources (state : state) =
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
           ()
       | None ->
-          (match resources_empty_note (visible_resources state) with
+          (match resources_empty_note ~ko:(state.ui_language = Lang_ko) (visible_resources state) with
            | Some note ->
                framed_line pane_buf pane_cols (Ansi.dim ^ note ^ Ansi.reset);
                ()

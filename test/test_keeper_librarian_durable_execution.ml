@@ -703,10 +703,10 @@ let version_1_proof fixture request=
       key,if String.equal key "executions" then executions value else value) fields))))
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "a proof link is an object"
 (* The deploy check refuses [original], kept in [scope], on the Exact files it
-   reads. A gate follows its parent, so the check refuses each gate record of
-   that original, in [gate], for the same reason. Every refusal deletes
-   [scope], and [gate] when the store holds it. The check refuses nothing
-   else. *)
+   reads, and refuses no other record outside [gate]. A gate follows its
+   parent, so a refusal in [gate] is one of the same reason. Every refusal
+   deletes [scope], and [gate] when the store holds it. Whether a gate is
+   refused at all is [refused_in]'s to check. *)
 let refuses_original fixture ~(original:Owner.retained) (scope,gate)
     (refusals:Lane_addon_store_preflight.refusal list)=
   let scope=scope_directory fixture scope and gate=scope_directory fixture gate in
@@ -770,6 +770,12 @@ let test_preflight_passes_a_history_body_refusal_whose_record_goes () = with_fix
    Exact check deletes the record, no record confirms the answer. *)
 let test_preflight_refuses_a_lost_history_answer_whose_proof_is_version_1 () = with_fixture (fun ~sw:_ fixture ->
   let original,capture=lose_the_final fixture in
+  check bool "the host retains its answer" true
+    (match latest fixture capture with
+     | Exact.Completed_latest {execution={outcome=Call_ended (Answered _);_};_} -> true
+     | No_completed_latest
+     | Completed_latest {execution={outcome=Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+         | Call_refused _;_};_} -> false);
   let request=Capture.request capture |> get in
   check int "with its version 2 proof resume confirms the answer it recovers" 0
     (List.length (librarian_refusals fixture));
@@ -3065,15 +3071,21 @@ let first_step_request fixture request=
   record,Keeper_librarian_floor_step_request.request step |> get
 let floor_scopes request=let owner=Capture.physical_owner request in
   Keeper_librarian_floor_step_request.scope owner,Keeper_librarian_floor_step_gate.scope owner
-(* A finished step holds its judgment, which resume confirms through the
-   step's Exact record. Once the Exact check deletes that record, no record
-   confirms the answer, so the deploy check refuses the floor owner. *)
+(* An answered step holds the judgment of its answer (Judged), which resume
+   confirms through the step's Exact record. Once the Exact check deletes that
+   record, no record confirms the answer, so the deploy check refuses the
+   floor owner. *)
 let test_preflight_refuses_a_floor_step_whose_proof_is_version_1 () = with_fixture (fun ~sw:_ fixture ->
   provider_refuses_one_turn fixture size_refusal;
   let candidate,request=candidate_and_request fixture in
   fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
   ignore (finished (descend fixture candidate));
   let original,step=first_step_request fixture request in
+  check bool "the first step holds the judgment of its answer" true
+    (match Progress.phase original.progress with
+     | Progress.Judged _ -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _ | Finished _
+     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
   check int "with version 2 proofs the deploy check passes the floor" 0
     (List.length (librarian_refusals fixture));
   version_1_proof fixture step;

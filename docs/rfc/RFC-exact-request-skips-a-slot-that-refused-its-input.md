@@ -332,9 +332,9 @@ L2 의 읽기는 원래 JSON 에서 바깥 `version` 이 정수 2 인지, `attem
 
 1. `Exact_requests` scan(`lane_addon_store_preflight.ml:289-293`)은 `run` 의 읽기를 쓴다. 기록과, 기록이 가리키는 증거 파일을 같이 decode 한다(`bound_proofs`, `lane_addon_exact.ml:800-803`). main 의 scan 은 기록만 본다(`check_retained_record`, `:572-582`).
 2. 읽는 순서는 기록, 증거 파일, 기록이다. 첫 기록에서 `declaration_id`, 요청, `digest` 를 얻는다. 증거는 두 번째로 읽은 기록에 묶는다. 서버는 attempt n 을 기록에 쓴 뒤에만 증거 n 을 쓰고, attempt 를 지우지 않는다(§2.4). 그래서 증거 뒤에 읽은 기록은 그 증거의 attempt 를 모두 갖는다. 기록을 한 번만 먼저 읽으면, 그사이 서버가 보탠 증거 n+1 이 짝 없는 증거가 된다. 그러면 멀쩡한 기록을 거절한다(`proof_matches_attempt`, `:775-777`). 두 번째로 읽은 기록도 첫 기록에서 얻은 요청과 digest 로 `bound_record` 와 `validate_record` 를 통과해야 한다. preflight 는 서버가 도는 동안에도 돈다(`lane_addon_store_preflight.mli:13-15`). 두 번째 읽기에서 기록이 없으면 지운 기록으로 본다. 기록을 읽는 규칙과 같다(`lane_addon_store_preflight.ml:129-147`).
-3. 파일은 preflight 가 경로로 읽는다. store 의 load 함수는 파일과 디렉터리를 fsync 한다(`lane_addon_store.ml:659`, `:1163-1165`). preflight 는 아무것도 sync 하지 않는다(`lane_addon_store_preflight.mli:13-15`). 그래서 `check_retained_record` 는 기록과 증거 파일의 JSON 을 받는 순수 함수가 된다. `Lane_addon_exact` 는 기록에서 증거 파일의 경로를 내는 함수를 내보낸다. 이 decode 는 store 의 root 에 달려 있다. 증거와 관측에는 그것을 쓴 store 의 root 가 들어 있다(`proof_to_json`, `:670`; `lane_addon_exact_observation.ml:9`). decode 는 그 칸을 견준다(`:707-710`; `lane_addon_exact_observation.ml:30-35`). 서버는 `Workspace_root.resolve_current` 로 root 를 정한다. 이 함수는 경로를 정규화한 뒤 `realpath` 로 symlink 까지 푼다(`lib/config/workspace_root.ml:44-54`). 서버는 그 root 로 시작한다(`lib/server/server_base_path_guard.ml:9`, `:18-20`; `bin/main_eio.ml:420-442`). preflight 는 받은 값을 그대로 쓴다(`lane_addon_store_preflight.ml:280`). 그래서 helper 가 scan 전에 같은 함수로 root 를 정하고, store 를 서버처럼 `Lane_addon_store.create` 로 만든다. 설치 스크립트는 이미 그 함수가 낸 root 를 넘긴다(`bin/deployment_preflight_helper.ml:1290-1296`, `scripts/install-local-build.sh:217`, `:285`). 그래도 root 가 다른 경우는 작업 공간 디렉터리를 옮기거나 복원했을 때다(`lane_addon_exact.mli:322-324`). 그때는 그 증거와 관측을 지울 것으로 찍지 않는다. 증거의 decode 는 root 가 다른 경우를 다른 오류 variant 로 돌려준다. 관측의 `request_id` 읽기는 오류 문자열 하나만 돌려준다(`lane_addon_exact_observation.ml:19-35`). 그래서 검사는 관측 파일을 그 읽기에 넘기기 전에 `store_root` 칸을 견준다. root 가 다른 증거나 관측을 만나면 검사는 두 root 를 적고 끝난다. 그 파일이 다른 store 에서 왔는지, 검사의 root 가 틀렸는지 가를 수 없어서다.
-4. 기록을 거절하면 `fresh state` 줄에 셋을 찍는다. 기록 파일, 증거 파일, 그 요청의 slot 관측 파일이다. 기록이 JSON 으로 읽히지만 decode 에 실패하면, 그 JSON 의 `declaration_id`, `request_id`, `digest` 문자열로 경로를 낸다. 그 문자열로 낸 기록 경로가 그 파일의 경로와 같을 때만 그렇게 한다. 기록 파일의 디렉터리는 `declaration_id` 의 digest, 이름은 `request_id` 의 digest 다(`lane_addon_store.ml:332-335`). action receipt 의 검사와 같은 확인이다(`check_action`, `lane_addon_store_preflight.ml:211-222`). 경로가 다르면 그 기록 파일만 찍는다. 그러지 않으면 다른 요청을 가리키는 기록 하나가 멀쩡한 요청의 증거를 지울 목록에 올린다. 증거를 잃은 요청의 시작 표시는 `Outcome_unknown` 으로 남는다(`lane_addon_exact.mli:436-437`). 관측 파일은 declaration 마다 관측 디렉터리를 한 번 decode 해서 `request_id` 로 고른다. sweep 과 같은 읽기(`Lane_addon_exact_observation.request_id`, `server_unowned_exact_sweep.ml:95-100`)를 쓴다. decode 하지 못한 관측 파일은 그 파일을 찍는다. sweep 은 그런 파일 하나에 그 실행 전체를 멈춘다(`:96-100`, `:211-218`). main 은 거절의 `delete` 를 기록 경로만으로 만든다(`lane_addon_store_preflight.ml:133-147`, `:170`, `:290`). 세 scan 이 같이 쓰는 decode 결과에 지울 경로를 싣도록 그 타입을 바꾼다.
-5. Librarian 의 preflight validator(`keeper_librarian_store_preflight.ml:54-112`)는 exact 요청을 가리키는 실행 원본마다 그 기록과 증거 파일을 2·3 과 같이 읽어 decode 한다. Librarian 이 쓰는 `read_latest_original_execution` 과 같은 decode 다. 읽지 못하면 그 원본을 거절하고 그 owner 의 scope 를 모두 찍는다. admission owner 는 실행, parts, partitions, gate, closure 다(`keeper_librarian_admission_closure.ml:25-28`). history owner 와 floor owner 는 실행과 gate 다. scope 마다 그 digest 를 이름으로 한 디렉터리 셋을 찍는다. owner 기록(`tool-request-owners`), 요청 본문(`tool-request-bodies`), 정산된 원본(`tool-request-owners-settled`)이다. 이 build 가 읽지 않는 scope 를 지울 때 적는 세 디렉터리와 같다(`bin/deployment_preflight_helper.ml:845-847`). history owner 의 scope 는 fence 와 resolution 디렉터리도 찍는다. 그 둘의 이름도 scope 의 digest 로 정해진다(`lane_addon_store.ml:762-763`, `:805-806`). validator 의 포트(`payload_validator`, `lane_addon_store_preflight.mli:52-55`)에 exact 기록과 증거를 경로로 읽는 포트를 더한다. body, archive 포트와 같은 방식이다. 지울 scope 의 목록은 validator 의 거절 결과에 싣는다.
+3. 파일은 preflight 가 경로로 읽는다. store 의 load 함수는 파일과 디렉터리를 fsync 한다(`lane_addon_store.ml:659`, `:1163-1165`). preflight 는 아무것도 sync 하지 않는다(`lane_addon_store_preflight.mli:13-15`). 그래서 `check_retained_record` 는 기록과 증거 파일의 JSON 을 받는 순수 함수가 된다. `Lane_addon_exact` 는 기록 JSON 에서 그 키와 증거 파일의 경로를 내는 함수를 내보낸다(`Retained_key.of_record`, `Retained_key.proof_path`). 이 decode 는 store 의 root 에 달려 있다. 증거와 관측에는 그것을 쓴 store 의 root 가 들어 있다(`proof_to_json`, `:670`; `lane_addon_exact_observation.ml:9`). decode 는 그 칸을 견준다(`:707-710`; `lane_addon_exact_observation.ml:30-35`). 서버는 `Workspace_root.resolve_current` 로 root 를 정한다. 이 함수는 경로를 정규화한 뒤 `realpath` 로 symlink 까지 푼다(`lib/config/workspace_root.ml:44-54`). 서버는 그 root 로 시작한다(`lib/server/server_base_path_guard.ml:9`, `:18-20`; `bin/main_eio.ml:420-442`). preflight 는 받은 값을 그대로 쓴다(`lane_addon_store_preflight.ml:280`). 그래서 helper 가 scan 전에 같은 함수로 root 를 정한다. scan 은 그 root 로 store 를 서버처럼 `Lane_addon_store.create` 로 만든다. scan 의 인자는 base path 다. 설치 스크립트는 이미 그 함수가 낸 root 를 넘긴다(`bin/deployment_preflight_helper.ml:1290-1296`, `scripts/install-local-build.sh:217`, `:285`). 그래도 root 가 다른 경우는 작업 공간 디렉터리를 옮기거나 복원했을 때다(`lane_addon_exact.mli:322-324`). 그때는 그 증거와 관측을 지울 것으로 찍지 않는다. 증거의 decode(`decode_proof`)는 root 가 다른 경우에도 오류 문자열 하나만 돌려준다. 관측의 `request_id` 읽기(`Lane_addon_exact_observation.request_id`)도 같다. 그래서 검사는 두 파일을 decode 하기 전에 파일이 적은 `store_root` 를 검사의 root 와 견준다. 그 칸은 그 파일의 모양을 정한 모듈이 읽는다(`Lane_addon_exact.proof_store_roots`, `Lane_addon_exact_observation.store_root`). root 가 다른 증거나 관측을 만나면 검사는 두 root 를 적고 끝난다. 그 파일이 다른 store 에서 왔는지, 검사의 root 가 틀렸는지 가를 수 없어서다.
+4. 기록을 거절하면 `fresh state` 줄에 셋을 찍는다. 기록 파일, 증거 파일, 그 요청의 slot 관측 파일이다. 검사는 기록을 decode 하기 전에 그 JSON 의 `declaration_id`, `request_id`, `digest` 문자열을 읽는다(`Retained_key.of_record`). 증거 파일과 관측 파일은 이 문자열로 찾는다. 그 문자열로 낸 기록 경로가 그 파일의 경로와 같을 때만 그렇게 한다. decode 에 성공하는 기록도 이 확인을 거친다. `run` 은 호출자가 준 두 값으로 낸 경로에서 기록을 읽고, 기록에 적힌 두 값과 견준다. 기록 파일의 디렉터리는 `declaration_id` 의 digest, 이름은 `request_id` 의 digest 다(`lane_addon_store.ml:332-335`). action receipt 의 검사와 같은 확인이다(`check_action`, `lane_addon_store_preflight.ml:211-222`). 경로가 다르면 그 기록 파일만 찍는다. 그러지 않으면 다른 요청을 가리키는 기록 하나가 멀쩡한 요청의 증거를 지울 목록에 올린다. 증거를 잃은 요청의 시작 표시는 `Outcome_unknown` 으로 남는다(`lane_addon_exact.mli:436-437`). 관측 파일은 declaration 마다 관측 디렉터리를 한 번 decode 해서 `request_id` 로 고른다. sweep 과 같은 읽기(`Lane_addon_exact_observation.request_id`, `server_unowned_exact_sweep.ml:95-100`)를 쓴다. decode 하지 못한 관측 파일은 그 파일을 찍는다. sweep 은 그런 파일 하나에 그 실행 전체를 멈춘다(`:96-100`, `:211-218`). main 은 거절의 `delete` 를 기록 경로만으로 만든다(`lane_addon_store_preflight.ml:133-147`, `:170`, `:290`). exact 검사는 지울 경로를 기록의 키로 정한다. 그래서 지울 경로를 미리 받는 다른 scan 의 읽기(`read_entries`) 대신 따로 돈다. 파일 하나를 읽고 해석하고 그사이 지워졌는지 보는 부분(`read_file`)과 그룹 디렉터리를 도는 부분(`scan_groups`)은 다른 scan 과 같이 쓴다.
+5. Librarian 검사는 exact 요청을 가리키는 실행 원본마다 그 기록과 증거 파일을 2·3 과 같이 경로로 읽는다. 읽는 순서와 경우는 그 원본을 다음에 읽는 소비자를 따른다(§5 의 소비자 표). final 을 가진 접수 원본은 `confirm_final` 을 따른다. 먼저 기록으로 경우를 나눈다(`observe_retained`). 기록이 없으면 worker 가 host 전에 거절한 final 만 통과한다(`refused_before_host`). 기록이 없는 다른 final 과 열린 기록은 거절한다. 끝난 기록은 기록이 전한 final 과 원본의 final 을 견준다. 증거는 final 이 `Call_final` 일 때만 읽는다(`read_latest_original_execution`). 다른 단계와 다른 원본은 L2b-2 가 단계마다 소비자의 읽기를 먼저 적고 따른다(§10). 읽지 못하거나 소비자가 멈출 원본은 거절하고 그 owner 의 scope 를 모두 찍는다. admission owner 는 실행, parts, partitions, gate, closure 다(`keeper_librarian_admission_closure.ml:25-28`). history owner 와 floor owner 는 실행과 gate 다. scope 마다 그 digest 를 이름으로 한 디렉터리 셋을 찍는다. owner 기록(`tool-request-owners`), 요청 본문(`tool-request-bodies`), 정산된 원본(`tool-request-owners-settled`)이다. 이 build 가 읽지 않는 scope 를 지울 때 적는 세 디렉터리와 같다(`bin/deployment_preflight_helper.ml:845-847`). history owner 의 scope 는 fence 와 resolution 디렉터리도 찍는다. 그 둘의 이름도 scope 의 digest 로 정해진다(`lane_addon_store.ml:762-763`, `:805-806`). 이 검사는 `Keeper_librarian_store_preflight.validator` 와 따로 둔다. validator 는 런타임에서도 돈다. `recover_closure` 는 closure 를 정산하기 전에 validator 로 그 closure 를 확인한다. `run_queue` 는 큐를 돌 때마다 `recover_closure` 를 먼저 부른다(`keeper_librarian_admission_owner.ml`). closure 복구는 exact 기록을 읽지 않는다. validator 에 exact 포트를 더하면 큐를 돌 때마다 closure member 마다 exact 기록과 증거를 decode 한다. 그 읽기가 실패하면 그 Keeper 의 큐가 돌지 못한다. 그래서 helper 의 `validate_tool_request` 가 Librarian 원본에 validator 를 부른 뒤 이 검사를 부른다. 검사는 파일을 경로로 읽고 아무것도 sync 하지 않는다(3). decode 는 `Lane_addon_exact` 가 내보내는 순수 함수가 한다. 기록과 증거는 L2b-1 의 `check_retained_record` 로 읽는다. 기록으로 경우를 나누는 순수 함수는 L2b-2 가 내보낸다. 지울 scope 의 목록은 이 검사의 거절 결과에 싣는다.
 
 5 가 필요한 이유는 §5 의 소비자 표다. Librarian 원본은 exact 기록과 증거가 없어도 멈춘다. 그래서 4 만으로는 설치 뒤 첫 pass 에서 그 원본이 멈춘다. owner 의 scope 를 모두 찍는 이유는 partition 과 gate 다. partition 은 크기 증거를 낸 실행 원본의 id 와, 그 실행의 최신 증거 발췌를 갖는다(`keeper_librarian_admission_parts.ml:267-269`). validator 는 parts 와 partitions 의 모양만 본다(`keeper_librarian_store_preflight.ml:66-73`). 가이드도 이 검사가 Memory parts discovery 를 돌리지 않는다고 적는다(`docs/guides/DURABLE-STORE-HARD-CUT.md` 의 Lane Add-on tool request owners 절). 그래서 실행 원본만 지우면 다시 돈 검사가 통과한다. 설치 뒤에는 `discover` 가 pass 마다 "Original parent execution is missing" 으로 멈춘다(`keeper_librarian_admission_parts.ml:228`, `:609-616`). gate 는 부모가 없으면 다음 검사에서야 거절된다(`keeper_librarian_store_preflight.ml:85-105`). 한 번에 다 찍어야 검사 한 번에 끝난다. workspace-curator 원본은 기록이 없으면 worker 에 묻고 이어 간다. 그래서 curator 의 validator 는 바꾸지 않는다.
 
@@ -359,12 +359,12 @@ version 1 증거를 아는 코드는 두지 않는다. version 1 증거는 정�
 구현 전에 잴 것:
 
 - 증거가 수십 개일 때와 수백 개일 때 읽기 한 번의 시간. 증거를 다 읽는 것은 L1 의 fold 와 attempt 묶기가 요구한다(§8).
-- 설치 시점에 preflight 가 거절할 exact 기록의 수와, validator 가 찍을 Librarian owner 의 수(§5).
+- 설치 시점에 preflight 가 거절할 exact 기록의 수와, Librarian 검사가 찍을 Librarian owner 의 수(§5).
 - validate-stores 의 최대 RSS. 검사는 §1.2 의 1.05 GB 증거 파일을 `run` 처럼 parse 하고 canonical 로 바꾼다.
 
-2026-11-13 00:2x~00:3xZ 에 셋을 쟀다. 라이브 저장소는 읽기만 했다.
+2026-11-13 00:2x~00:3xZ 에 첫째와 셋째, 둘째 가운데 exact 기록의 수를 쟀다. Librarian owner 의 수는 재지 않았다. 라이브 저장소는 읽기만 했다.
 
-읽기 한 번의 CPU 시간은 증거 수에 비례한다. 증거에서 `request` 칸을 뺀 v2 모양 파일을 만들어 쟀다.
+증거에서 `request` 칸을 뺀 v2 모양 파일을 만들어 읽기 한 번의 CPU 시간을 쟀다. 증거 하나당 시간은 증거 수가 늘면 조금 는다. 증거 10개에서 866개로 가면 중앙값 크기는 0.035 ms 에서 0.051 ms 로, 90 백분위 크기는 0.22 ms 에서 0.26 ms 로 는다(아래 표의 계산값). 잰 것은 parse, canonical, 비교다. outcome 과 receipt 의 decode, 파일 읽기는 재지 않았다.
 
 - 증거 하나의 모양은 라이브 증거 1,696개에서 골랐다. `request` 칸을 뺀 크기가 중앙값(1,515 바이트)인 것과 90 백분위(8,617 바이트)인 것이다. 문자열 값은 같은 길이의 다른 글자로 바꿨다.
 - 읽기는 `load_proofs` 를 본떴다. parse, 링크의 canonical, 증거마다 canonical 두 번, 다시 만든 링크의 canonical, 비교다. canonical 은 `lane_addon_json.ml` 의 함수를 그대로 옮겼다.
@@ -381,9 +381,9 @@ version 1 증거를 아는 코드는 두지 않는다. version 1 증거는 정�
 
 거절된 호출 한 번은 이 읽기를 세 번 한다(§3.3 의 쓰기). 30 MB 이하의 증거 파일 471개 가운데 증거가 50개를 넘는 파일은 둘이다(866개, 223개). 둘 다 끝난 요청이다. 30 MB 를 넘는 파일은 §1.2 의 그 파일 하나다. 그 파일은 증거별로 세지 않았다(attempt 292).
 
-설치 때 거절할 exact 기록은 00:32:17Z 에 472개다. 기록 477개 가운데 증거 파일을 가진 것이다. 그 가운데 열린 기록은 6개다. 증거는 모두 version 1 이라 L2 를 설치할 때 모두 거절된다. Librarian owner 의 수는 L2b-2 의 validator 가 설치 때 센다. 13:33:53Z 의 값은 §5 에 있다.
+설치 때 거절할 exact 기록은 00:32:17Z 에 472개다. 기록 477개 가운데 증거 파일을 가진 것이다. 그 가운데 열린 기록은 6개다. 증거는 모두 version 1 이라 L2 를 설치할 때 모두 거절된다. Librarian owner 의 수는 L2b-2 의 Librarian 검사가 설치 때 센다. 13:33:53Z 의 값은 §5 에 있다.
 
-§1.2 의 1,055,315,219 바이트 파일을 위 프로그램으로 한 번 parse 하고 canonical 로 바꿨다. CPU 8.4 초(user 7.6, sys 0.8), wall 56.2 초가 걸렸고, 최대 RSS 는 2,990,342,144 바이트였다. L2 를 설치할 때 검사는 이 파일을 한 번 읽고, 첫 증거의 version 에서 거절한다.
+§1.2 의 1,055,315,219 바이트 파일을 위 프로그램으로 한 번 parse 하고 canonical 로 바꿨다. CPU 8.4 초(user 7.6, sys 0.8), wall 56.2 초가 걸렸고, 최대 RSS 는 2,990,342,144 바이트였다. L2 를 설치할 때 검사는 이 파일을 한 번 parse 하고, 링크 전체를 canonical 로 바꾼 뒤 첫 증거에서 거절한다(`decode_proofs`). L2b-3 의 decode 는 증거마다 바깥 `version` 을 다른 칸보다 먼저 본다. main 의 decode 는 schema 와 outcome 을 본 뒤에 version 을 본다.
 
 ### 3.4 L3 — 요청 기록 (방향)
 
@@ -471,7 +471,7 @@ preflight 가 설치 전에 그런 기록과 Librarian 원본을 거절한다(§
 | 지울 것 | 찍는 검사 | 지운 뒤 |
 |---|---|---|
 | 증거 파일이 있는 exact 요청 기록, 그 증거 파일, 그 요청의 slot 관측 파일 | `Exact_requests` scan(§3.3 의 4) | 그 요청의 원본은 `Retained_absent` 를 본다(`lane_addon_exact.ml:950-953`). 소비자별 결과는 아래 표다 |
-| 그 기록을 가리키는 Librarian 실행 원본의 owner 가 가진 scope 전부. scope 마다 owner 기록, 요청 본문, 정산된 원본의 디렉터리. history owner 의 scope 는 fence 와 resolution 디렉터리도 | Librarian validator(§3.3 의 5) | 그 owner 의 접수, parts, gate, history 작업이 사라진다. 다시 만들어지는지는 확인하지 않았다(§10) |
+| 그 기록을 가리키는 Librarian 실행 원본의 owner 가 가진 scope 전부. scope 마다 owner 기록, 요청 본문, 정산된 원본의 디렉터리. history owner 의 scope 는 fence 와 resolution 디렉터리도 | Librarian 검사(§3.3 의 5) | 그 owner 의 접수, parts, gate, history 작업이 사라진다. 다시 만들어지는지는 확인하지 않았다(§10) |
 
 12:53:00Z 에 증거 파일이 있는 기록은 140개다. 그 가운데 같은 request id 의 소비자 원본이 있는 것은 86개다(§1.2). 13:33:53Z 에 Librarian 쪽을 다시 셌다. 증거 파일이 있는 기록은 152개다. 그 기록을 가리키는 Librarian owner 는 admission 5, history 5 다. floor owner 는 없다. admission owner 다섯은 모두 parts(파일 55)와 gate(파일 79)를 가진다. partitions 는 없고, closure 디렉터리가 하나 있다(파일 없음). history owner 다섯은 gate, fence, resolution 이 없다. 같은 기록을 가리키는 다른 원본 기록은 candle-appraisals 13개, workspace-curator 17개다.
 
@@ -488,7 +488,7 @@ Librarian 원본은 version 1 증거가 남아도 멈추고, 기록과 증거를
 
 **preflight 가 잡지 못하는 것.**
 
-- 운영자가 `fresh state` 줄의 일부만 지우는 경우. exact 기록과 증거만 지우고 Librarian scope 를 남기면, 다시 돌린 validate-stores 는 통과한다. validator 는 기록이 없는 것을 Librarian 의 읽기처럼 받아들인다(`No_completed_latest`). 그 원본은 설치 뒤 첫 pass 에서 위 표대로 멈춘다. 증거만 남기면 다시 돈 검사가 이름으로 찾아 찍는다(§3.3). 찍힌 줄을 다 지우는 것은 다른 fresh state 줄과 같이 운영자의 몫이다(가이드의 2·3단계).
+- 운영자가 `fresh state` 줄의 일부만 지우는 경우. exact 기록과 증거만 지우고 Librarian scope 를 남기면, 다시 돌린 Librarian 검사는 그 원본의 소비자처럼 판단한다(§3.3 의 5). final 을 가진 접수 원본은 기록이 없으면 거절하고 owner 의 scope 를 다시 찍는다. worker 가 host 전에 거절한 final 은 통과한다. 소비자가 기록 없음을 받아들이는 단계의 원본은 통과한다. 그 단계는 L2b-2 가 적는다(§10). 증거만 남기면 다시 돈 검사가 이름으로 찾아 찍는다(§3.3). 찍힌 줄을 다 지우는 것은 다른 fresh state 줄과 같이 운영자의 몫이다(가이드의 2·3단계).
 - 기록이 하나도 읽히지 않는 declaration 의 증거(§3.3). 12:53:00Z 에는 기록 없는 증거가 없다.
 - 검사를 통과한 뒤 옛 서버가 쓴 version 1 증거. 설치 스크립트는 서버를 다시 띄우지 않아서, 옛 서버는 `masc restart` 전까지 쓴다(`scripts/install-local-build.sh:463`). Fresh state 항목이 순서를 적는다. 멈춤, 검사, 지움, 설치, 시작이다(§3.3). 검사가 서버가 멈췄는지 확인하지는 않는다. 부팅 때 막는 안은 §8 에 적었다.
 
@@ -510,21 +510,22 @@ Librarian 원본은 version 1 증거가 남아도 멈추고, 기록과 증거를
 | L1 | A 가 기다리면서 입력 거절 증거도 있으면 기다리는 slot 으로만 적는다. 예외가 나지 않는다 | 해당 없음 |
 | L1 | A 를 부른 증거 뒤에 A 가 로컬 거절된 증거가 있으면 앞 증거가 정한다 | 해당 없음 |
 | L1 | B 가 기다리고 A 를 건너뛴 걷기에서 CLI slot 이 답하면 요청이 끝나고 receipt 의 `excluded_http` 에 A, B 가 있다 | A 를 부른다 |
-| L2 | 증거를 남긴 파일에 `request` 칸이 없다. 파일의 크기가 요청 본문의 크기에 따라 늘지 않는다 | 는다 |
-| L2 | 다른 요청으로 읽으면 거절한다. `digest` 가 다르다 | 본문 비교로 거절 |
-| L2 | version 1 증거 파일은 읽기를 거절한다 | 읽는다 |
-| L2 | 바깥 `version`, `attempt_ordinal`, receipt `version` 가운데 하나가 정수로 떨어지는 float(`2.0`)면 거절한다 | receipt version 1 이면 읽는다 |
-| L2 | receipt version 1 이 든 증거는 거절한다 | 읽는다 |
-| L2 | sweep 은 증거의 `request_id` 와 `digest` 로 파일 이름을 확인한다. 다른 이름 아래에 있으면 멈춘다 | 본문으로 확인 |
-| L2 | preflight 는 version 1 증거가 있는 기록을 거절하고 기록, 증거, 그 요청의 slot 관측 파일의 경로를 찍는다 | 증거를 읽지 않는다 |
-| L2 | preflight 가 첫 기록을 읽은 뒤 attempt 와 증거가 보태져도 그 기록을 거절하지 않는다. 그 사이에 `after_read` 로 보탠다(`lane_addon_store_preflight.ml:133-138`) | 해당 없음 |
-| L2 | 증거 디렉터리에 어느 기록으로도 나오지 않는 이름이 있으면 그 파일을 찍는다. 검사가 기록 목록을 본 뒤 서버가 쓴 기록과 증거는 찍지 않는다. 찍기 전에 사라진 파일도 찍지 않는다 | 해당 없음 |
-| L2 | decode 하지 못한 slot 관측 파일을 찍는다 | 찍지 않는다 |
-| L2 | decode 하지 못한 기록의 경로가 그 JSON 의 `declaration_id`·`request_id` 로 낸 경로와 다르면, 그 기록 파일만 찍는다 | 기록 파일만 찍는다 |
-| L2 | `--base-path` 를 `<ws>/.masc/`, `<ws>/./`, `<ws>` 를 가리키는 symlink 로 주어도 `<ws>` 로 돈 서버의 증거를 읽는다 | `<ws>/.masc/` 면 `<ws>/.masc/.masc` 를 훑고 통과한다. 나머지 둘은 맞는 디렉터리를 훑는다(`lib/core/common.ml:99-100`). 기록만 읽어 root 를 견주지 않는다 |
-| L2 | 증거나 slot 관측의 `store_root` 가 검사의 root 와 다르면 지울 줄을 찍지 않고 두 root 를 적고 끝난다 | 해당 없음 |
-| L2 | Librarian validator 는 version 1 증거를 가리키는 실행 원본을 거절하고 그 owner 의 scope 를 모두 찍는다 | 통과한다 |
-| L2 | partition 의 실행 원본이 version 1 증거를 가리키면, 검사 한 번이 그 owner 의 실행, parts, partitions, gate, closure 를 찍는다. 찍힌 것을 지우면 다시 돈 검사가 통과한다 | 통과한다 |
+| L2b-3 | 증거를 남긴 파일에 `request` 칸이 없다. 파일의 크기가 요청 본문의 크기에 따라 늘지 않는다 | 는다 |
+| L2b-3 | 다른 요청으로 읽으면 거절한다. `digest` 가 다르다 | 본문 비교로 거절 |
+| L2b-3 | version 1 증거 파일은 읽기를 거절한다 | 읽는다 |
+| L2b-3 | 바깥 `version`, `attempt_ordinal`, receipt `version` 가운데 하나가 정수로 떨어지는 float(`2.0`)면 거절한다 | receipt version 1 이면 읽는다 |
+| L2b-3 | receipt version 1 이 든 증거는 거절한다 | 읽는다 |
+| L2b-3 | sweep 은 증거의 `request_id` 와 `digest` 로 파일 이름을 확인한다. 다른 이름 아래에 있으면 멈춘다 | 본문으로 확인 |
+| L2b-3 | preflight 는 version 1 증거가 있는 기록을 거절하고 기록, 증거, 그 요청의 slot 관측 파일의 경로를 찍는다 | 증거를 읽지 않는다 |
+| L2b-1 | preflight 가 첫 기록을 읽은 뒤 attempt 와 증거가 보태져도 그 기록을 거절하지 않는다. 그 사이에 `after_read` 로 보탠다(`lane_addon_store_preflight.ml:133-138`) | 해당 없음 |
+| L2b-1 | 증거 디렉터리에 어느 기록으로도 나오지 않는 이름이 있으면 그 파일을 찍는다. 검사가 기록 목록을 본 뒤 서버가 쓴 기록과 증거는 찍지 않는다. 찍기 전에 사라진 파일도 찍지 않는다 | 해당 없음 |
+| L2b-1 | decode 하지 못한 slot 관측 파일을 찍는다 | 찍지 않는다 |
+| L2b-1 | 기록의 경로가 그 JSON 의 `declaration_id`·`request_id` 로 낸 경로와 다르면, decode 할 수 있어도 그 기록 파일만 찍는다 | decode 할 수 있으면 통과한다. 하지 못하면 기록 파일만 찍는다 |
+| L2b-1 | `--base-path` 를 `<ws>/.masc/`, `<ws>/./`, `<ws>` 를 가리키는 symlink 로 주어도 `<ws>` 로 돈 서버의 증거를 읽는다 | `<ws>/.masc/` 면 `<ws>/.masc/.masc` 를 훑고 통과한다. 나머지 둘은 맞는 디렉터리를 훑는다(`lib/core/common.ml:99-100`). 기록만 읽어 root 를 견주지 않는다 |
+| L2b-1 | 증거나 slot 관측의 `store_root` 가 검사의 root 와 다르면 지울 줄을 찍지 않고 두 root 를 적고 끝난다 | 해당 없음 |
+| L2b-2 | final 을 가진 접수 원본의 exact 기록이 없으면 Librarian 검사가 그 원본을 거절하고 그 owner 의 scope 를 모두 찍는다. worker 가 host 전에 거절한 final 은 통과한다 | 통과한다 |
+| L2b-3 | Librarian 검사는 version 1 증거를 가리키는 실행 원본을 거절하고 그 owner 의 scope 를 모두 찍는다 | 통과한다 |
+| L2b-3 | partition 의 실행 원본이 version 1 증거를 가리키면, 검사 한 번이 그 owner 의 실행, parts, partitions, gate, closure 를 찍는다. 찍힌 것을 지우면 다시 돈 검사가 통과한다 | 통과한다 |
 | L3 | attempt 를 보탤 때 요청 본문 파일을 다시 쓰지 않는다 | 다시 쓴다 |
 
 ## 7. 층
@@ -534,14 +535,14 @@ Librarian 원본은 version 1 증거가 남아도 멈추고, 기록과 증거를
 | L1a | receipt 하나에서 slot 별로 불렀는지와 입력 크기 거절인지를 읽는 함수와 시험 | `keeper_exact_walk_receipt.ml`·`.mli` |
 | L1b | `run` 이 증거에서 목록을 모아 runner 에 넘긴다. runner 가 기다리는 slot 이 있을 때 건너뛴다 | `lane_addon_exact.ml`·`.mli`, `server_lane_addon_exact.ml`, TUI·dashboard 글 |
 | L2a | 요청과 그 digest 를 묶은 값. `lane_addon_exact.ml` 안의 하위 모듈로 두고 내보내지 않는다. 요청 레코드도 파일 안에서 private 로 둔다. 호출자의 요청에 증거나 기록을 묶는 읽기와 쓰기가 그 값을 받는다. 저장 모양과 동작은 같다(#51751) | `lane_addon_exact.ml` |
-| L2b-1 | preflight 의 exact 검사가 `run` 처럼 기록, 증거 파일, 기록 순서로 읽는다. 거절한 기록의 `fresh state` 줄에 증거 파일과 그 요청의 slot 관측 파일을 같이 찍는다. 이름으로 찾는 기록 없는 증거, decode 하지 못한 slot 관측, 증거와 관측의 `store_root` 비교, 서버와 같은 함수로 정하는 store root | `lane_addon_exact.ml`·`.mli`, `lane_addon_store_preflight.ml`·`.mli`(`:39` 의 `Exact_record` 설명 포함), `bin/deployment_preflight_helper.ml`, `test/test_deployment_store_directories.ml`(`:421-431`), `changelog.d` |
-| L2b-2 | Librarian validator 가 실행 원본이 가리키는 exact 기록과 증거를 읽는다. 읽지 못하면 그 원본을 거절하고 그 owner 의 scope 를 모두 찍는다. validator 의 포트와, 거절 결과에 싣는 지울 scope | `keeper_librarian_store_preflight.ml`, `lane_addon_store_preflight.ml`·`.mli`, `test/test_keeper_librarian_preflight.ml`, `changelog.d` |
-| L2b-3 | 증거에서 `request` 칸을 뺀다. 정수 검사, 파일의 `request_id`·`digest` 칸으로 하는 sweep 의 이름 확인, tinker 스크립트, Fresh state 항목 | `lane_addon_exact.ml`, `scripts/tinker/librarian/check_validator_on_store.py`, `test/test_lane_addon_exact.ml`, `test/test_lane_addon_exact_runner.ml`, `test/test_lane_addon_host_cycle.ml`(`:18`), `test/test_workspace_curator_addon_commit.ml`(`:262`), `changelog.d` |
+| L2b-1 | preflight 의 exact 검사가 `run` 과 같은 decode 로 기록, 증거 파일, 기록 순서로 읽는다. 거절한 기록의 `fresh state` 줄에 증거 파일과 그 요청의 slot 관측 파일을 같이 찍는다. 이름으로 찾는 기록 없는 증거, decode 하지 못한 slot 관측, 증거와 관측의 `store_root` 비교, 서버와 같은 함수로 정하는 store root | `lane_addon_exact.ml`·`.mli`, `lane_addon_store_preflight.ml`·`.mli`(`:39` 의 `Exact_record` 설명 포함), `lane_addon_exact_observation.ml`·`.mli`, `bin/deployment_preflight_helper.ml`, `docs/guides/DURABLE-STORE-HARD-CUT.md`, `test/test_lane_addon_exact.ml`, `test/test_deployment_store_directories.ml`, `changelog.d` |
+| L2b-2 | Librarian 검사가 실행 원본이 가리키는 exact 기록과 증거를 그 원본의 소비자처럼 읽는다. 소비자가 멈출 원본은 거절하고 그 owner 의 scope 를 모두 찍는다. validator 와 따로 두어 런타임의 closure 복구는 exact 기록을 읽지 않는다. 기록으로 경우를 나누는 순수 함수와, 거절 결과에 싣는 지울 scope | `keeper_librarian_store_preflight.ml`·`.mli`, `lane_addon_exact.ml`·`.mli`, `lane_addon_store_preflight.ml`·`.mli`, `bin/deployment_preflight_helper.ml`, `docs/guides/DURABLE-STORE-HARD-CUT.md`, `test/test_keeper_librarian_addon_owner.ml`, `changelog.d` |
+| L2b-3 | 증거에서 `request` 칸을 뺀다. 바깥 `version` 을 먼저 보는 decode 와 정수 검사, version 2 receipt 만 읽는 `Keeper_exact_walk_receipt.of_json`, 파일의 `request_id`·`digest` 칸으로 하는 sweep 의 이름 확인, version 1 을 거절하는 preflight 와 Librarian 검사의 시험, tinker 스크립트, Fresh state 항목 | `lane_addon_exact.ml`, `keeper_exact_walk_receipt.ml`·`.mli`, `scripts/tinker/librarian/check_validator_on_store.py`, `test/test_lane_addon_exact.ml`, `test/test_lane_addon_exact_runner.ml`, `test/test_keeper_librarian_addon_owner.ml`, `test/test_lane_addon_host_cycle.ml`(`:18`), `test/test_workspace_curator_addon_commit.ml`(`:262`), `changelog.d` |
 | L3 | 요청 본문을 기록 밖으로 | `lane_addon_exact.ml`, `lane_addon_store.ml`, preflight |
 
 L1a 는 부르는 곳이 L1b 다. 둘을 한 스택으로 올린다.
 
-L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다(#51751). L2b 의 세 층은 한 스택으로 올린다. 스택은 맨 위 PR 로 한 번에 병합되니, 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양으로 들어간다. L2b-1 과 L2b-2 는 version 1 증거로도 맞게 돈다. 두 검사는 그 기록을 읽는 쪽의 decode 를 쓴다(§3.3 의 preflight). 그래서 L2b-3 이 decode 를 바꾸면 검사도 같이 바뀐다. `test_lane_addon_host_cycle.ml:18` 과 `test_workspace_curator_addon_commit.ml:262` 는 version 1 receipt(`Receipt.make`)를 runner 결과로 돌려준다. `run` 이 그 receipt 를 증거에 담으니 L2b-3 에서 `make_v2` 로 바꾼다.
+L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다(#51751). L2b 의 세 층은 한 스택으로 올린다. 스택은 맨 위 PR 로 한 번에 병합되니, 쓰는 쪽, 읽는 쪽, sweep, preflight 가 같은 모양으로 들어간다. L2b-1 과 L2b-2 는 version 1 증거로도 맞게 돈다. 두 검사는 그 기록을 읽는 쪽의 decode 를 쓴다(§3.3 의 preflight). 그래서 L2b-3 이 decode 를 바꾸면 검사도 같이 바뀐다. §6 에서 version 1 을 거절하는 행은 L2b-3 의 decode 가 들어와야 통과하니 L2b-3 의 시험이다. 증거가 version 2 receipt 만 담으면 `Keeper_exact_walk_receipt.of_json` 의 version 1 갈래를 lib 에서 부르는 곳이 없다. L2b-3 이 그 갈래를 지운다. version 1 receipt 를 만드는 `make` 는 `keeper_librarian_runtime.ml` 이 메모리에서 쓰니 남는다. `test_lane_addon_host_cycle.ml:18` 과 `test_workspace_curator_addon_commit.ml:262` 는 version 1 receipt(`Receipt.make`)를 runner 결과로 돌려준다. `run` 이 그 receipt 를 증거에 담으니 L2b-3 에서 `make_v2` 로 바꾼다.
 
 ## 8. 대안
 
@@ -558,7 +559,7 @@ L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다(#51751). 
 | 증거를 attempt 마다 파일 하나로 둔다. 한 디렉터리에 두고 이름에 ordinal 을 넣는다 | 요청 기록 없이는 어떤 ordinal 이 있는지 알 수 없다. 기록이 없는데 증거가 있으면 세 읽기가 오류로 멈춘다(`lane_addon_exact.ml:858-861`, `:881-884`, `:951-954`). 이름에 ordinal 을 넣으면 그 읽기들이 증거를 찾지 못하고 없다고 읽는다. 기록을 잃어도 증거는 숨지 않는다는 성질(`:712-714`)을 잃는다. 디렉터리를 통째로 훑으면 읽기 한 번이 그 declaration 의 지난 요청 수에 비례한다 |
 | 증거를 요청마다 append-only 파일로 둔다 | 쓰기는 증거 하나로 준다. 읽기는 줄지 않는다(위 줄). 쓰다 끊긴 꼬리를 다루는 규칙은 `Fs_compat` 에 있다(`fs_compat.mli:1436`, `:1729`, `:1833`). 그 규칙을 쓰는 읽기 길이 이 저장소에 새로 생긴다. 파일이 JSON 하나에서 줄 단위로 바뀌어 sweep 과 preflight 의 읽기도 바뀐다. 남는 몫은 n 에 비례한다 |
 | 최신 증거 하나만 읽는다 | `.mli` 의 약속(모든 증거를 견준 뒤 돌려준다)을 바꾼다. L1 은 slot 마다 그 slot 을 부른 가장 최근 증거를 찾는다. 최신 증거가 그 slot 을 모르면 앞 증거를 봐야 한다(`size_refused_slots`, `:809-824`) |
-| 거절한 exact 기록의 `fresh state` 줄에, 같은 request id 의 소비자 원본 scope 를 모두 같이 찍는다 | 검사 한 곳에서 끝난다. 대신 기록이 없어도 이어 가는 원본까지 지운다(workspace-curator, §5). 원본을 지울지는 그 소비자의 읽기가 정한다(#49587). 그래서 Librarian validator 가 찍는다(§3.3 의 5) |
+| 거절한 exact 기록의 `fresh state` 줄에, 같은 request id 의 소비자 원본 scope 를 모두 같이 찍는다 | 검사 한 곳에서 끝난다. 대신 기록이 없어도 이어 가는 원본까지 지운다(workspace-curator, §5). 원본을 지울지는 그 소비자의 읽기가 정한다(#49587). 그래서 Librarian 검사가 찍는다(§3.3 의 5) |
 | preflight 가 `host-results` 의 파일을 모두 열어 version 1 증거를 찍는다 | 이름 목록으로 찾는 것(§3.3)보다 더 잡는 것은 기록이 하나도 읽히지 않는 declaration 의 증거다. 대신 증거 파일을 기록 쪽 읽기와 따로 한 번 더 연다. §1.2 의 1.05 GB 파일도 두 번 parse 한다. 디렉터리마다 무엇의 파일인지도 열어서 가려야 한다 |
 | 이 build 의 검사를 base-path lease 아래에서 돌려, 서버가 멈춘 뒤에만 통과하게 한다(`bin/deployment_preflight_helper.ml:360-365`) | 모든 설치가 서버를 멈춰야 돈다. 검사는 옛 서버가 도는 동안 돌도록 돼 있다(`lane_addon_store_preflight.mli:13-15`, `scripts/install-local-build.sh:153`). 이 cut 하나의 조건을 모든 설치에 건다 |
 | 이 cut 을 부팅 때 막는다. 증거 store 를 부팅이 읽고 거절하는 store 로 바꿔, version 1 증거가 있으면 새 서버가 시작하지 않게 한다(`scripts/install-local-build.sh:277-283`) | 부팅마다 증거를 모두 parse 해야 한다. 시작 sweep 이 읽는 증거는 2026-11-06 에 약 2.7 GB 였다. 그래서 sweep 은 준비를 붙잡지 않도록 worker domain 에서 읽는다(`server_runtime_startup_maintenance.ml:180-182`). 부팅 검사는 준비 전에 끝나야 한다 |
@@ -582,7 +583,7 @@ L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다(#51751). 
 
 2026-11-12 에 사용자가 D3 과 D5 를 추천대로 골랐다. L2 를 먼저 혼자 설치하고, L3 은 L2 를 설치한 뒤 잰 값으로 정한다. 건너뛰기는 400 으로 넓히지 않는다.
 
-2026-11-13 에 사용자가 L2b 를 세 층 스택(§7)으로 올리기로 골랐다. 한 PR 에 14개 파일을 고치면, 설치 때 지울 것을 정하는 preflight 의 결함을 리뷰가 놓치기 쉽다. 구현 전에 §3.3 의 셋을 쟀다.
+2026-11-13 에 사용자가 L2b 를 세 층 스택(§7)으로 올리기로 골랐다. 한 PR 에 14개 파일을 고치면, 설치 때 지울 것을 정하는 preflight 의 결함을 리뷰가 놓치기 쉽다. 구현 전에 §3.3 의 측정 가운데 Librarian owner 의 수를 뺀 것을 쟀다.
 
 ## 10. 확인하지 않은 것
 
@@ -601,7 +602,7 @@ L2a 는 L2b 의 아래 층이다. 혼자 병합돼도 동작은 같다(#51751). 
 - 원본 resume 이 §1.2 의 파일을 읽는 횟수. resume 을 부르는 때를 따라가지 않았다.
 - §1.2 의 RSS 증가가 그 파일을 읽고 decode 해서인지.
 - 증거 파일 하나를 읽고 decode 하는 시간과, store 의 load 가 하는 fsync 의 비용.
-- Librarian validator 가 기록 없는 실행 원본을 Librarian 의 다음 pass 처럼 판단해야 하는지(§5 의 잡지 못하는 것). 그러려면 validator 가 원본의 단계마다 host 결과가 있어야 하는지 알아야 한다.
+- Librarian 원본의 단계마다 소비자가 exact 기록과 증거를 어떻게 읽는지. final 을 가진 접수 원본(`confirm_final`)만 따라갔다. L2b-2 가 단계마다 그 읽기를 먼저 적고, Librarian 검사가 그 표를 따른다(§3.3 의 5).
 - §1.1 의 Librarian 요청 여섯 가운데 넷이 11:30Z 에 열린 목록에 없는 이유. 끝났는지 지워졌는지 보지 않았다.
 - 열린 요청 가운데 한 번 실행되고 멈춘 셋(`lane_unconfigured` 둘, `provider_unavailable` 하나)이 왜 열려 있는지. 열하루 넘게 바뀌지 않았다.
 

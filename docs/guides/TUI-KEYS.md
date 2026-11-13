@@ -807,6 +807,8 @@ count is drawn beyond the available space.
 | `d` | remove the selected published package; press d again on the same row to confirm |
 | `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
+| `Ctrl-S` | in Available, unfold or fold the runtime, digest and byte-budget rows |
+| `Y` | in Available, copy the diagnostics with whole digests and the selected Skill's whole revision |
 | `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
 | `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
 | `t / T` | from async request detail, read its original source Task and history |

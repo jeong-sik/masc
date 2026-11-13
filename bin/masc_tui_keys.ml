@@ -294,7 +294,9 @@ let runtime_footer_binding ~(mode : runtime_mode) = function
 (* Ctrl-S folds the turn dashboard back to its progress line, and unfolds it.
    The terminal used to take this byte for flow control -- raw mode clears
    IXON now, which is what makes it bindable at all. A letter would not do:
-   in the composer every letter is text.
+   in the composer every letter is text. The Tools Available section folds
+   its diagnostics with the same key: that heading is not a row the cursor
+   stops on, and the letters are taken (RFC tui-one-screen-grammar, 3.1).
 
    The byte and the printed name sit together because the chat pane prints
    the name on the folded line while masc_tui.ml matches the byte. Apart,
@@ -1496,6 +1498,18 @@ let footer_hints_planning_goal_list ~lang ~has_rows =
 let footer_hints_planning_goal_detail ~lang =
   planning_goal_hints ~lang ~detail_open:true ~has_rows:None
 
+(* The Available section folds its diagnostics -- the runtime, the digests
+   and the byte budgets -- under one heading, and draws each digest by its
+   first twelve characters. Both keys answer there only, so only that
+   section's footer names them. *)
+let tools_diagnostics_bindings =
+  [ b ~ko:"진단 펴기/접기" Act expand_turn_label "diagnostics"
+      ~help:"in Available, unfold or fold the runtime, digest and byte-budget rows"
+  ; b ~ko:"진단 복사" Act "Y" "copy diagnostics"
+      ~help:"in Available, copy the diagnostics with whole digests and the \
+             selected Skill's whole revision"
+  ]
+
 let footer_hints_tools ~lang ~pane =
   let bracket = tools_bracket_binding ~pane in
   let bindings =
@@ -1521,7 +1535,9 @@ let footer_hints_tools ~lang ~pane =
           (fun a b -> compare (group_rank a.group) (group_rank b.group)) bindings)
   | Tools_storage ->
       hints_in_order ~lang (reading @ [ tools_refresh; listing_next; listing_quit ])
-  | Tools_surface | Tools_async | Tools_activations | Tools_usage ->
+  | Tools_surface ->
+      hints_of_bindings ~lang (bindings @ tools_diagnostics_bindings)
+  | Tools_async | Tools_activations | Tools_usage ->
       hints_of_bindings ~lang bindings
 
 type ask_supply =
@@ -2916,7 +2932,7 @@ let located_sections ~lang ?current () =
                    (entries ~lang lane_run_detail_bindings)
                @ entries ~lang [preflight_detail_binding]
            | Planning -> entries ~lang work_task_detail_bindings
-           | Tools -> entries ~lang tools_detail_bindings
+           | Tools -> entries ~lang (tools_diagnostics_bindings @ tools_detail_bindings)
            | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
            | Overview | Acting | Metrics | Clients | Board | Approvals | Schedules
            | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Runtime

@@ -6,6 +6,7 @@
 
 module Instant = Masc_tui_value.Instant
 module Count = Masc_tui_value.Count
+module Hash = Masc_tui_value.Hash
 
 (* [Unix.tm] counts years from 1900. *)
 let tm_year_origin = 1900
@@ -109,6 +110,15 @@ let test_only_one_is_singular () =
         (Count.reading ~ko:false Count.Entry count))
     [ (0, "0 entries"); (1, "1 entry"); (2, "2 entries"); (8347, "8,347 entries") ]
 
+(* A digest is drawn by its head, so the shown text is the start a reader can
+   find in the copied whole. A value shorter than the cut comes back whole
+   instead of raising. *)
+let test_a_hash_keeps_its_head () =
+  let digest = "0b9c6e1f4a2d7c3e8f5a1b6c2d7e3f8a4b9c5d0e1f6a2b7c3d8e4f9a5b0c6d1e" in
+  Alcotest.(check string) "a 64-character digest" (String.sub digest 0 12)
+    (Hash.short digest);
+  Alcotest.(check string) "a value shorter than the cut" "0b9c" (Hash.short "0b9c")
+
 let () =
   Alcotest.run "tui_value"
     [ ( "instant distance",
@@ -131,4 +141,6 @@ let () =
         [ Alcotest.test_case "a sign is not a digit" `Quick test_a_sign_is_not_a_digit
         ; Alcotest.test_case "only one is singular" `Quick test_only_one_is_singular
         ] )
+    ; ( "hash",
+        [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )
     ]

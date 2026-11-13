@@ -18454,7 +18454,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
   Masc_tui_types.reconcile_detail_intent_origins state reading;
   let previous = state.workspace_identity in
   let chat_workspace = chat_input_workspace state in
-  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
+  Masc_tui_types.store_server_identity_reading state reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
       ~local_paths:state.local_workspace_paths reading;

@@ -198,6 +198,14 @@ let pulse_line ~cols (state : state) kpis =
    wrote each name a second time beside [metrics_section_label], and was cut
    before the third name at 150 columns beside the Activity pane. The order is
    the order 1, 2 and 3 select. *)
+(* Why the server identity has no GC or scheduler block to draw: none has
+   been read yet, the last read failed, or the one read did not carry it. *)
+let identity_gap (state : state) =
+  match state.server_identity, state.server_identity_error with
+  | Some _, (None | Some _) -> Unknown.Unreported
+  | None, Some _ -> Unknown.Read_failed
+  | None, None -> Unknown.Unread
+
 let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
   let inner_width = max 10 (framed_inner_width cols) in
   let tab section = (metrics_section_label ~ko section, active = section, section) in
@@ -245,13 +253,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | Some { sid_scheduler = Some s; _ } -> Some s
     | _ -> None
   in
-  (* Why the server identity has no GC or scheduler section to draw: none has
-     been read, or the one read did not carry it. *)
-  let identity_gap =
-    match state.server_identity with
-    | None -> Unknown.Unread
-    | Some _ -> Unknown.Unreported
-  in
+  let identity_gap = identity_gap state in
   let domains = match sched_opt with
     | Some { ssch_pool_domains = Some count; _ } -> Count.grouped count
     | Some { ssch_pool_domains = None; _ } -> Unknown.(glyph Unreported)
@@ -341,11 +343,13 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
   (* Why a block the server identity holds has nothing in it. Not read yet is
-     said in the word every surface uses for a reading not loaded. *)
+     said in the word every surface uses for a reading not loaded; a failed
+     read is the loader's own sentence, as the transport block draws it. *)
   let identity_gap =
-    match state.server_identity with
-    | None -> field_unread ~ko
-    | Some _ -> say "서버가 보고하지 않음" "not reported by the server"
+    match state.server_identity, state.server_identity_error with
+    | Some _, (None | Some _) -> say "서버가 보고하지 않음" "not reported by the server"
+    | None, Some error -> Terminal_text.single_line error
+    | None, None -> field_unread ~ko
   in
   let reported_count =
     Option.fold ~none:Unknown.(glyph Unreported) ~some:Count.grouped

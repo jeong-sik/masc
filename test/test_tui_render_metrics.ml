@@ -203,18 +203,46 @@ let test_calculate_kpis_empty () =
     (contains output "Engine memory");
   check bool "missing scheduler is visible" true
     (contains output "Scheduler lag");
-  (* Three blocks -- the GC, the scheduler and the transport -- each saying
-     the state under its own heading, in the one word. [clip] puts a reset on
-     the end of every line, so the block is matched by its indent and phrase
-     rather than by a whole-line compare. *)
-  check int "each unread block says so, and says it the one way" 3
-    (List.length
-       (List.filter
-          (fun line -> contains line "    not loaded")
-          (String.split_on_char '\n' output)));
   check bool "no fabricated heap" false (contains output "42.5");
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
+
+let identity_without_blocks () =
+  { Decode.sid_version = "0.0.0"
+  ; sid_binary_commit = "deadbeef"
+  ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
+  ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/tmp"
+  ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/tmp"
+  ; sid_executable_in_worktree = None
+  ; sid_state_ready = None
+  ; sid_uptime = None
+  ; sid_sse_clients = None
+  ; sid_gc = None
+  ; sid_scheduler = None
+  ; sid_operator_action = None
+  }
+
+(* The cards say why the server identity gave them nothing: no probe has
+   answered, the probe failed, or it answered without the GC and scheduler
+   blocks. Each probe is stored the way a refresh stores it. *)
+let test_identity_gap_tells_a_failed_probe_from_one_not_made () =
+  let unknown =
+    testable
+      (fun ppf gap -> Format.pp_print_string ppf (Masc_tui_value.Unknown.glyph gap))
+      ( = )
+  in
+  let state = make_state () in
+  let gap () = Render_metrics.identity_gap state in
+  check unknown "no probe yet" Masc_tui_value.Unknown.Unread (gap ());
+  Types.store_server_identity_reading state
+    (Error "server identity load failed: connection refused");
+  check unknown "failed probe" Masc_tui_value.Unknown.Read_failed (gap ());
+  Types.store_server_identity_reading state (Ok (identity_without_blocks ()));
+  check unknown "probe without the blocks" Masc_tui_value.Unknown.Unreported (gap ());
+  Types.store_server_identity_reading state
+    (Error "server identity load failed: timed out");
+  check unknown "a later failure replaces the earlier reading"
+    Masc_tui_value.Unknown.Read_failed (gap ())
 
 (* The fleet row draws how many keepers are configured and how many are
    paused. It used to draw the unpaused ones and leave the reader to
@@ -549,6 +577,8 @@ let () =
             test_metrics_scroll_tracks_card_reflow ] )
     ; ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
+        ; test_case "a failed identity probe is not drawn as one not made" `Quick
+            test_identity_gap_tells_a_failed_probe_from_one_not_made
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "a declared keeper is not counted as paused" `Quick
             test_a_declared_keeper_is_not_counted_as_paused

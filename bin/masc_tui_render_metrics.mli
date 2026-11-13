@@ -19,6 +19,12 @@ type metrics_kpis = {
 }
 
 val calculate_kpis : state -> metrics_kpis
+
+val identity_gap : state -> Masc_tui_value.Unknown.t
+(** Why the cards have no GC or scheduler value from the server identity:
+    [Unread] before a probe answers, [Read_failed] after the probe that
+    cleared it failed, [Unreported] when the identity read did not carry the
+    block. *)
 val section_pills_line : ko:bool -> cols:int -> active:metrics_section -> string
 
 val render_section_fleet : ?session_rows:int -> cols:int -> state -> string list

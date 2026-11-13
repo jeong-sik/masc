@@ -41,8 +41,9 @@ flowchart LR
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
 - Put generated evidence and copied source snapshots under `artifacts/`. The root
-  Dune file treats that directory as data, preserving files without evaluating
-  copied build stanzas. `.gitignore` alone does not stop Dune source discovery.
+  Dune file leaves that directory out of source discovery, so copied build
+  stanzas and links inside it are never read. `.gitignore` alone does not stop
+  Dune source discovery.
 - For GitHub Native Stacks, inspect REST `stack` metadata and follow [Native GitHub Stacks](NATIVE-GITHUB-STACKS.md). Merge the top PR so the whole stack lands at once; a non-main direct base is not a parent-merge blocker. Review every PR in the stack.
 - Document the feature where readers look for it. README introduces the product,
   CONTRIBUTING starts development, manuals explain use, specs define interfaces,

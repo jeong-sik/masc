@@ -66,6 +66,22 @@ class SourceDiscoveryTest(unittest.TestCase):
             "Unknown field",
         )
 
+    def test_link_back_into_the_checkout(self):
+        # Evidence trees copy checkout layouts, links included. A link to an
+        # ancestor makes Dune meet one directory twice; a directory read as
+        # data is still walked, so it fails the same way.
+        link = self.root / "artifacts/runs/fixture/tree/artifacts"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(self.root / "artifacts", target_is_directory=True)
+        protected = self.describe()
+        self.assertEqual(protected.returncode, 0, protected.stderr)
+        self.assertIn("visible_source.ml", protected.stdout)
+
+        self.write("dune", "(data_only_dirs artifacts)\n")
+        data_only = self.describe()
+        self.assertNotEqual(data_only.returncode, 0, data_only.stdout)
+        self.assertIn("has already been scanned", data_only.stderr)
+
     def test_normal_source_errors_are_reported(self):
         self.write("src/dune", "(include missing-normal-source.inc)\n")
         result = self.describe()

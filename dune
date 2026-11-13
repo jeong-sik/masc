@@ -11,11 +11,13 @@
   ; into the source tree, the server drops it, and the build stops with
   ; "File unavailable: logs/masc-runtime-health-proof.<pid>.v2". Nothing in
   ; the tree builds from logs/ and git does not track it.
-  logs))
-
-; Generated evidence may contain incomplete source snapshots and dune files.
-; Keep those files available as data without evaluating their build stanzas.
-(data_only_dirs artifacts)
+  logs
+  ; Generated evidence: incomplete source snapshots, copied build stanzas and
+  ; links back into this checkout. Nothing in the tree builds from artifacts/
+  ; and git does not track it. Read as data, it is still walked, so one link
+  ; to an ancestor stops every build with "Path artifacts has already been
+  ; scanned".
+  artifacts))
 
 ; Warning 32 (unused value declaration) is set here, once, for the whole
 ; tree. It used to be decided per library: of 121 stanzas under lib/, 84

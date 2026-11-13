@@ -1979,10 +1979,11 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
                          (Keeper_chat_transcript.drawn log.tl_transcript))) turn_ref)) ->
         let style = Message_layout.Keeper in
         let label = keeper_name in
+        let ko = state.ui_language = Lang_ko in
         let note =
           match state.keeper_turns_error with
-          | None -> "진행 중"
-          | Some _ -> "마지막 관측, 갱신 실패"
+          | None -> if ko then "진행 중" else "in progress"
+          | Some _ -> if ko then "마지막 관측, 갱신 실패" else "last observed; refresh failed"
         in
         let speech = ({ delivery_state = None; style
            ; heading_boundary = Message_layout.Inherit_heading
@@ -2010,8 +2011,9 @@ let polled_turn_output_with_anchors (state : state) ~keeper_name ~role_label_col
               ~column:role_label_column ~style:status_style "STATUS";
             role_label_mark_cells = Message_layout.role_label_mark_cells
               ~column:role_label_column ~style:status_style ();
-            body = Printf.sprintf "%s · %s · 최근 출력 발췌"
-              note (Masc_tui_answering.lane_word lane) } ]
+            body = Printf.sprintf
+              (if ko then "%s · %s · 최근 출력 발췌" else "%s · %s · recent output excerpt")
+              note (Masc_tui_answering.lane_word ~ko lane) } ]
     | Some
         { ktr_state =
             ( Tui_decode.Keeper_turn_idle | Tui_decode.Keeper_turn_running _

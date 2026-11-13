@@ -6445,15 +6445,12 @@ let keeper_deletions_hints (state : state) ~scrollable =
 
 ;;
 
-(* The panel behind [;]. The strip above the composer says whether anything is
-   coming; this says what, and who is stopped waiting for an answer.
-
-   Tone rather than a colour per row: the headings carry the structure, a
-   held call is the one thing that needs answering now, and the wakes recede
-   the same way they do on the strip. *)
+(* The panel behind [@]: who is mid-turn or just finished, from the turns
+   poll. *)
 let answering_lines (state : state) =
   let _, cols = get_terminal_size () in
   Masc_tui_answering.overlay
+    ~ko:(state.ui_language = Lang_ko)
     ~width:(max 0 (framed_inner_width cols - 2))
     ~now:(Unix.gettimeofday ())
     ~chat_target:state.msg_target_keeper_name

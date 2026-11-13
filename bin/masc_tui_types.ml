@@ -26702,6 +26702,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
           ; motion = Masc_tui_answering.Still; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
+          ~ko:(state.ui_language = Lang_ko)
           ~show_timing:(keeper_message_timing_visible state)
           ?stop_keys:(keeper_observed_stop_hint state)
           ~now:(Unix.gettimeofday ()) ~keeper_name ~error:state.keeper_turns_error

@@ -1654,8 +1654,9 @@ type server_identity = {
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
   sid_state_ready : bool option;
-      (** [/health] [startup.state_ready] or a ready scoped Observer receipt.
-          [None] means neither booting nor vouched ready. *)
+      (** [/health] [startup.state_ready], the public probe's top-level
+          [ready] when the answer has no [startup] section, or a ready scoped
+          Observer receipt. [None] means neither booting nor vouched ready. *)
   sid_uptime : string option;
       (** [/health] [uptime] human-readable elapsed duration (e.g. "1h 42m"). *)
   sid_sse_clients : int option;

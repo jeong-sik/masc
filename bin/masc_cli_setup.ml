@@ -196,21 +196,6 @@ let run_process ~base_path argv =
 let require_ok label action =
   if action () <> 0 then fail (label ^ " failed; fix the diagnostic above and run setup again.")
 
-let field key json =
-  match json with `Assoc fields -> List.assoc_opt key fields | _ -> None
-
-let health_state ~base_path body =
-  let json =
-    try Yojson.Safe.from_string body
-    with Yojson.Json_error message -> fail ("The selected port did not return MASC health JSON: " ^ message)
-  in
-  match Option.bind (field "paths" json) (field "effective_base_path") with
-  | Some (`String actual) when String.equal (Unix.realpath actual) base_path ->
-    Option.bind (field "startup" json) (field "state_ready") = Some (`Bool true)
-  | Some (`String actual) ->
-    fail (Printf.sprintf "Port belongs to workspace %s, not %s. Use --port with an unused port." actual base_path)
-  | _ -> fail "The selected port has no workspace identity; use an unused --port."
-
 (* The server setup started is gone before it answered. What it wrote last
    is the reason -- a base path another server holds, a port that stayed
    taken -- and part of that is written before the server's own log exists,
@@ -221,6 +206,33 @@ let server_exit_message (report : Masc_tui_server_lifecycle.exit_report) =
     (Masc_tui_server_lifecycle.describe_last_line report.last_line)
     (Masc_tui_server_lifecycle.describe_output report.output)
 
+module Upgrade = Server_upgrade_preparation
+
+let owner_unread_message ~base_path unread =
+  Printf.sprintf "The owner of %s could not be checked (%s). No server was started or signed in to."
+    base_path (Server_startup_takeover.owner_capture_error_to_string unread)
+
+(* Why setup does not go on with what holds the workspace, for every answer
+   of the kernel but the server of a single user on this port and nothing. *)
+let owner_refusal ~base_path ~port (owner : Upgrade.owner) =
+  match owner with
+  | Upgrade.Single_user_server_elsewhere { pid; port = announced } ->
+    Printf.sprintf "The server of %s (pid %d) serves port %d, not port %d. Run setup again with \
+                    --port %d." base_path pid announced port announced
+  | Upgrade.Account_server_here { pid } | Upgrade.Account_server_elsewhere { pid; port = (_ : int) } ->
+    Printf.sprintf "%s is held by its account server (pid %d). Setup prepares imp for the server \
+                    of a single user, so it does not run here. masc restart replaces the account \
+                    server." base_path pid
+  | Upgrade.Owner_unannounced { pid = (_ : int) }
+  | Upgrade.Single_user_server_here (_ : Upgrade.single_user_server)
+  | Upgrade.Unowned ->
+    Upgrade.owner_sentence ~base_path ~port owner ^ " No server was started or signed in to."
+
+(* HIGH-RISK-UNREVIEWED: setup signs a local operator in and sends its bearer
+   only to the server this returns, which the kernel named as lease owner of
+   [base_path] and announcer of [port]: the one that held it already, or the
+   one setup started. What answers on the port decides none of it; the port
+   is read only for [/health/ready] once the kernel named the server. *)
 let prepare_server ~base_path ~port ~owned =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -230,25 +242,51 @@ let prepare_server ~base_path ~port ~owned =
       Eio_context.set_clock (Eio.Stdenv.clock env);
       Masc_http_client.with_scoped_pool ~sw ~env (fun () ->
         let clock = Eio.Stdenv.clock env in
-        let read () =
-          Masc_http_client.get_sync ~clock
-            ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full)
-            ~headers:[] ()
+        let root = (Host_config.host ()).base_path_lease_root in
+        let read_owner () =
+          match Upgrade.owner_without_making root ~base_path ~port with
+          | Error unread -> fail (owner_unread_message ~base_path unread)
+          | Ok owner -> owner
         in
-        let initial = read () in
-        (match initial with
-         (* See the readiness wait below: this first read validates ownership even while state is loading. *)
-         | Ok (200, body) -> ignore (health_state ~base_path body)
-         | Ok (status, _) -> fail (Printf.sprintf "Port %d returned HTTP %d; choose an unused --port." port status)
-         | Error _ ->
-           (match Masc_tui_server_lifecycle.start
-                    ~masc_bin:Sys.executable_name ~base_path ~host:"127.0.0.1" ~port
-                    ~env:(Config_dir_resolver.environment_for_workspace
-                      ~cwd:(Sys.getcwd ()) ~base_path ~env:(Unix.environment ())) with
-            | Error message -> fail message
-            | Ok server -> owned := Some server));
+        let expected =
+          match read_owner () with
+          | Upgrade.Single_user_server_here server -> Upgrade.single_user_server_pid server
+          | Upgrade.Unowned ->
+            let run_dir =
+              match Server_startup_takeover.lease_run_dir root ~base_path with
+              | Ok run_dir -> run_dir
+              | Error rejection ->
+                fail (Printf.sprintf "The owner lease root of %s could not be prepared (%s). No \
+                                      server was started or signed in to." base_path
+                        (Server_startup_takeover.base_path_lock_rejection_to_string rejection))
+            in
+            (match Upgrade.replacement_readiness ~run_dir ~base_path ~port with
+             | Ok Upgrade.Replacement_can_start ->
+               (match Masc_tui_server_lifecycle.start
+                        ~masc_bin:Sys.executable_name ~base_path ~host:"127.0.0.1" ~port
+                        ~env:(Config_dir_resolver.environment_for_workspace
+                          ~cwd:(Sys.getcwd ()) ~base_path ~env:(Unix.environment ())) with
+                | Error message -> fail message
+                | Ok server -> owned := Some server; Masc_tui_server_lifecycle.owned_pgid server)
+             | Ok Upgrade.Port_busy ->
+               fail (Printf.sprintf "Port %d is in use by a process that does not hold %s. Choose \
+                                     an unused --port." port base_path)
+             | Ok Upgrade.Owner_draining ->
+               fail (Printf.sprintf "A process began to hold %s while setup was checking it. Run \
+                                     setup again." base_path)
+             | Error (Upgrade.Owner_unavailable | Upgrade.Port_unavailable | Upgrade.Invalid_health
+                     | Upgrade.Admin_required | Upgrade.Incumbent_changed
+                     | Upgrade.Already_requested | Upgrade.Closed) ->
+               fail (Printf.sprintf "The owner of %s and port %d could not be checked. No server \
+                                     was started or signed in to." base_path port))
+          | (Upgrade.Single_user_server_elsewhere _ | Upgrade.Account_server_here _
+            | Upgrade.Account_server_elsewhere _ | Upgrade.Owner_unannounced _) as owner ->
+            fail (owner_refusal ~base_path ~port owner)
+        in
         (* Startup is a bounded resource operation, not a Keeper turn budget.
-           A server that became ready as the bound passed is ready. *)
+           A server that became ready as the bound passed is ready. The boot
+           announces its port after it binds, so until the kernel names it
+           the server is still starting. *)
         match
           Watched_work.run
             ~watcher:(fun () -> Eio.Time.sleep clock 60.0; Error `Timeout)
@@ -257,27 +295,58 @@ let prepare_server ~base_path ~port ~owned =
                 (match Option.bind !owned Masc_tui_server_lifecycle.exit_report with
                  | Some report -> fail (server_exit_message report)
                  | None -> ());
-                match read () with
-                | Ok (200, body) when health_state ~base_path body -> Ok ()
-                | Ok (status, _) when status <> 200 ->
-                  fail (Printf.sprintf "Server readiness returned HTTP %d." status)
-                | Ok _ | Error _ -> Eio.Time.sleep clock 0.2; wait ()
+                let again () = Eio.Time.sleep clock 0.2; wait () in
+                match read_owner () with
+                | Upgrade.Single_user_server_here server
+                  when Upgrade.single_user_server_pid server = expected ->
+                  (match Masc_http_client.get_sync ~clock
+                           ~timeout_sec:Masc_http_client.default_request_timeout_sec ~headers:[]
+                           ~url:(Masc_network_defaults.masc_http_loopback_origin ~port
+                                 ^ Server_health_paths.readiness) () with
+                   | Ok (200, (_ : string)) -> Ok server
+                   | Ok (503, (_ : string)) | Error (_ : string) -> again ()
+                   | Ok (status, (_ : string)) ->
+                     fail (Printf.sprintf "Server readiness returned HTTP %d." status))
+                | Upgrade.Unowned -> again ()
+                | Upgrade.Owner_unannounced { pid } when pid = expected -> again ()
+                | Upgrade.Single_user_server_here server ->
+                  fail (Printf.sprintf "pid %d, not the server setup started (pid %d), now holds \
+                                        %s. Nothing was signed in to; run setup again."
+                          (Upgrade.single_user_server_pid server) expected base_path)
+                | Upgrade.Owner_unannounced { pid } ->
+                  fail (Printf.sprintf "pid %d, not the server setup started (pid %d), now holds \
+                                        %s. Nothing was signed in to; run setup again."
+                          pid expected base_path)
+                | (Upgrade.Single_user_server_elsewhere _ | Upgrade.Account_server_here _
+                  | Upgrade.Account_server_elsewhere _) as owner ->
+                  fail (owner_refusal ~base_path ~port owner)
               in wait ())
         with
-        | Ok () ->
+        | Ok server ->
           (match Workspace_connection.port port with
            | Error error -> fail (Workspace_connection.error_message error)
            | Ok port -> (match Workspace_connection.save ~base_path ~port with
-             | Ok () -> () | Error error -> prerr_endline (Workspace_connection.error_message error)))
+             | Ok () -> () | Error error -> prerr_endline (Workspace_connection.error_message error)));
+          server
         | Error `Timeout ->
           fail
-            (match !owned with
-             | Some server ->
-               "Server is not ready yet; "
-               ^ Masc_tui_server_lifecycle.describe_output
-                   (Masc_tui_server_lifecycle.startup_output server)
-               ^ ". Rerun setup once it is."
-             | None -> "Server is not ready yet; inspect its logs and rerun setup."))))
+            (Printf.sprintf "The server of %s (pid %d) did not become ready on port %d within 60 s%s. \
+                             Rerun setup once it is." base_path expected port
+               (match !owned with
+                | Some server ->
+                  "; " ^ Masc_tui_server_lifecycle.describe_output
+                           (Masc_tui_server_lifecycle.startup_output server)
+                | None -> "")))))
+
+(* HIGH-RISK-UNREVIEWED: before each step that mints or sends the operator
+   credential, the kernel must still name the server [prepare_server]
+   returned. *)
+let confirm_or_fail ~base_path ~port server =
+  match Upgrade.confirm server with
+  | Ok () -> ()
+  | Error departure ->
+    fail (Upgrade.departure_sentence ~base_path ~port departure
+          ^ " Nothing more was sent to it; run setup again.")
 
 let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image ~validate_runtime ~login ~resume_models
     ~start_keeper ~open_tui ~sandbox_profile ~microvm_backend =
@@ -326,12 +395,14 @@ let run_with_selection ~network_mode ~base_path ~port ~initialize ~prepare_image
         (match selection.backend with
          | Sandbox.Remote_ssh -> ()
          | Sandbox.Docker | Sandbox.Apple_container | Sandbox.Nerdctl_kata | Sandbox.Microsandbox -> require_ok "Sandbox image preparation" (fun () -> prepare_image ~selection));
-        prepare_server ~base_path ~port ~owned;
+        let server = prepare_server ~base_path ~port ~owned in
+        confirm_or_fail ~base_path ~port server;
         require_ok "Local operator sign-in" login;
         require_ok "Activating saved model settings" resume_models;
         require_ok "Sandbox selection commit"
           (fun () -> match Sandbox.commit_staged ~path ~original ~staged with
             | Ok () -> 0 | Error reason -> prerr_endline reason; 1);
+        confirm_or_fail ~base_path ~port server;
         require_ok "Starting imp" start_keeper;
         Printf.printf "\n%s\n\
           Keepers: select imp, open its chat, and say hello. Then ask it to create a Board post\n\

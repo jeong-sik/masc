@@ -17,12 +17,14 @@ type owner =
   | Account_server_elsewhere of { pid : int; port : int }
   | Owner_unannounced of { pid : int }
   | Unowned
-(* HIGH-RISK-UNREVIEWED: every command line that sends the workspace bearer,
-   the admin credential or a private operator token sends it only to a
+(* HIGH-RISK-UNREVIEWED: the sends of a credential in this module, in
+   [Masc_cli_runtime_config_remote] and in [Masc_cli_model_resume], and the
+   two steps of [masc setup] (the sign-in and the Keeper boot), go only to a
    [Single_user_server_here], and this read is the only one that makes one:
    the kernel owner of the lease of [base_path] must be the process that
    holds the byte of [port] on the file of the server of a single user. What
-   answers on the port never decides it. *)
+   answers on the port never decides it. Other senders of the bearer, such as
+   [masc keeper up] and [masc keeper-create], do not make this read. *)
 let owner ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Error (Owner_identity_unavailable No_owner) -> Ok Unowned

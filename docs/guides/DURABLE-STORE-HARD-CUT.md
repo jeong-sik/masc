@@ -110,6 +110,20 @@ not run Memory parts discovery, publication recovery or a provider. Discovery
 reads a scope as a whole and fails it on one record it cannot read, so the
 `fresh state` line names both scope directories.
 
+A Librarian original's consumer also reads the original's Exact record and
+proof file. The check reads them as that consumer does, on the files the
+exact-request check below leaves. When the consumer would stop on them, the
+original is refused (`consumer Exact reads of the original`). Its `fresh state`
+line names, for every scope of the original's owner, the owner records, request
+bodies, settled originals, history fences and history resolutions that exist.
+When no record of the original is left, the line also names its proof file. A
+member of a Closing or Closed admission closure and a fenced history original
+are read by no consumer, so neither is refused. A proof file that names another
+store root stops this check as it stops the exact-request check. Delete the
+exact-request lines and these lines together: once both files are gone, a
+Dispatch_pending original that lost its finished record looks like one the host
+never ran, and the next check passes it.
+
 ### Lane Add-on exact requests
 
 Exact request records are

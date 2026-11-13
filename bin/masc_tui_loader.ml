@@ -293,7 +293,7 @@ let load_active_tasks ~fresh (base_path : string) :
                 |> List.map (fun item ->
                      { Masc_tui_agenda.task_id =
                          Masc.Operator_task_attention.task_id item
-                     ; what = Masc.Operator_task_attention.summary item
+                     ; what = Masc.Operator_task_attention.summary ~ko:false item
                      ; since_iso = Masc.Operator_task_attention.waiting_since item
                      })))
       , goal_task_links )

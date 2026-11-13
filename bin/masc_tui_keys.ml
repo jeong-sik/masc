@@ -2372,6 +2372,28 @@ let footer_hints_lanes_run_detail_for ~lang ~preflight =
   if preflight then hints_of_bindings ~lang [preflight_detail_binding] ^ "  " ^ detail
   else detail
 
+(* The recorded activity of one repository: its list, and the context of
+   the selected change. *)
+let footer_hints_workspace_activity ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"맥락" Navigate "v" "context"
+    ; b ~ko:"선택" Navigate "j/k" "select"
+    ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+    ; b ~ko:"파일" Navigate "Enter" "file"
+    ; b ~ko:"다시 읽기" Act "r" "refresh"
+    ; b ~ko:"뒤로" Navigate "Esc" "back"
+    ]
+
+let footer_hints_workspace_activity_context ~lang =
+  hints_in_order ~lang
+    [ b ~ko:"스크롤" Navigate "j/k" "scroll"
+    ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
+    ; b ~ko:"처음/끝" Navigate "Home/End" "edges"
+    ; b ~ko:"파일" Navigate "Enter" "file"
+    ; b ~ko:"다시 읽기" Act "r" "refresh"
+    ; b ~ko:"목록" Navigate "Esc" "list"
+    ]
+
 let footer_hints_git_changes ~lang =
   hints_of_bindings ~lang
     ([ b ~ko:"선택" Navigate "j/k" "move"

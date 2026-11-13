@@ -121,8 +121,6 @@ class Sampled:
 # schema's field names. No particle follows an ID: which one fits depends on the ID's last digit.
 NOTE_HEAD = ("이 요청의 후보와 현재 기억을 하나씩 대조해 확인한 사실입니다. 답은 아래 사실과 맞습니다.\n"
              "reason 은 기억과 후보의 내용으로 적고, 이 글은 말하지 않습니다.")
-NOTE_UNSUPPORTED = ("- 기억 변경을 지지하는 후보가 없습니다. 현재 기억은 모두 그대로 남습니다. "
-                    "new_claims 와 dropped 는 비어 있고 change_support 는 [] 입니다.")
 # A correction's or complement's target has its ID in its candidate's line, so this line leaves it out.
 NOTE_REST = "- 이 글에 ID 가 나오지 않는 기억은 모두 그대로 남습니다. dropped, absorbs, supersedes 어디에도 없습니다."
 
@@ -154,10 +152,8 @@ def candidate_line(label: S.CandidateLabel, ids: dict[str, str]) -> str:
 
 
 def memory_lines(label: S.RequestLabel, shown: list[str]) -> list[str]:
-    """What the label says of current memory, in the order the prompt shows it (`shown`). A label
-    no candidate supports asks for no change, whatever is planted: MASC refuses one."""
-    if not label.supports_change:
-        return [NOTE_UNSUPPORTED]
+    """What the label says of current memory, in the order the prompt shows it (`shown`), whatever
+    the candidates: MASC takes these drops and merges without a supporting candidate (RFC-0517 §7.1)."""
     lines: list[str] = []
     for mid in shown:
         if mid in label.scheduled_past:

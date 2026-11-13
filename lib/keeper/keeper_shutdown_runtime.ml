@@ -1051,7 +1051,7 @@ let recover_claimed
                 ~from_operation_id:operation.operation_id
                 ~to_operation_id:successor_operation_id
             with
-            | Keeper_shutdown_intake_fence.Transition_applied
+            | Keeper_shutdown_intake_fence.Transition_applied _
             | Keeper_shutdown_intake_fence.Transition_already_applied ->
               reclaim_settled_record ~config recovered;
               Ok recovered

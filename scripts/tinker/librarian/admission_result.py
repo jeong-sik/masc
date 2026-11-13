@@ -62,7 +62,6 @@ class Kind(Enum):
     DUPLICATE_CHANGE_SUPPORT = "duplicate_change_support"
     UNKNOWN_CHANGE_SUPPORT = "unknown_change_support"
     UNSETTLED_CHANGE_SUPPORT = "unsettled_change_support"
-    CHANGES_WITHOUT_SUPPORT = "changes_without_support"
     NEW_CLAIM_WITHOUT_SUPPORT = "new_claim_without_support"
 
 
@@ -124,7 +123,6 @@ def masc_rule(kind: Kind) -> str:
             Kind.DUPLICATE_CHANGE_SUPPORT
             | Kind.UNKNOWN_CHANGE_SUPPORT
             | Kind.UNSETTLED_CHANGE_SUPPORT
-            | Kind.CHANGES_WITHOUT_SUPPORT
             | Kind.NEW_CLAIM_WITHOUT_SUPPORT
         ):
             return "keeper_memory_admission_judgment.ml:109 verify_support"

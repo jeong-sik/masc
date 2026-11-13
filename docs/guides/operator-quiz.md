@@ -200,7 +200,13 @@ Results 에 일곱 lane 이 나온다.
 {"kind": "dispute", "ask_id": "s-…-ask", "question_id": "q1", "note": "그 글은 계획도 기록한다고 적혀 있다"}
 ```
 
-- `ask_id` 와 `question_id` 는 `quiz/questions` 행에 있다. TUI 에서는 Lane Add-on 화면의 `A` 로 명령을 열고 `act {…}` 로 보낸다. Keeper 는 `masc_lane_act` 로 같은 action 을 보낼 수 있다.
+- `ask_id` 와 `question_id` 는 `quiz/questions` 행의 `Ask id, for a dispute`·`Question id, for a dispute` 에 있다.
+- TUI 에서는 Results 에서 그 행을 고르고 `a` 로 동작 양식을 연다. 양식은 칸을 하나씩 보여 주고, 그 칸의 설명을 아래에 적는다.
+  1. `kind` 에서 Right 로 `dispute` 를 고른다.
+  2. Tab 으로 다음 칸에 간다. `questions` 는 `compose` 의 칸이라 비워 둔다.
+  3. `ask_id`·`question_id`·`note` 를 적는다. 양식은 Results 를 가리므로, 값은 양식을 열기 전에 마우스로 끌어 복사해 두고 칸에서 터미널 붙여넣기로 넣는다.
+  4. `Ctrl-S` 로 보낼 내용을 확인하고 Enter 로 한 번 보낸다. Esc 는 보내지 않고 닫는다.
+- `A` 명령 입력의 `act {…}` 로 보내도 같다. Keeper 는 `masc_lane_act` 로 같은 action 을 보낼 수 있다.
 - 패키지는 `Disputed` 를 남기고 `grade` 요청을 하나 낸다. 이 요청에는 메모, 지금의 판정, 패키지가 읽어 둔 출처 원문이 들어간다.
 - 결과는 새 `Judged` 다. 정답 key 로 낸 판정보다 앞서고, 판정 기록에 모두 남는다. 이미 있던 판정을 바꾸면 G 에 센다.
 - 같은 action 을 다시 보내도 아무것도 쓰지 않고 같은 요청을 가리킨다. 그 질문에 아직 결과를 기다리는 `grade` 요청이 있거나, 답한 질문이 아니거나, 메모가 비어 있으면 `failed_before_effect` 로 거절한다.

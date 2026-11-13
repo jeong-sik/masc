@@ -2131,7 +2131,11 @@ let detail_lines ~height ~width view =
   | None, _ -> ["The selected Plugin changed. Esc returns to the list."]
   | Some item, Some snapshot ->
       let header = instance_heading snapshot item ^ " · " ^ phase_label item.phase in
-      let head = List.concat_map wrap ["?:help  Esc:back  Tab:section  j/k:move  D:raw"; header]
+      (* The footer drops its last items first, and the worker controls sit
+         there, so [a] is named here too whenever it opens this worker's form. *)
+      let actions =
+        if can_observe item && Option.is_some item.action_schema then "  a:actions" else "" in
+      let head = List.concat_map wrap ["?:help  Esc:back  Tab:section  j/k:move" ^ actions ^ "  D:raw"; header]
         @ [tab_strip ~width view; ""]
         @ List.concat_map wrap (diagnostic_lines view) in
       let record_rows = List.map snd (ordered_rows view snapshot) in
@@ -2407,7 +2411,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       (["Run action on " ^ menu.target_title]
        @ diagnostic_lines view
        @ (match menu.form with
-       | Some form -> Masc_tui_schema_form.lines form
+       | Some form -> Masc_tui_schema_form.lines ~show_description:true form
        | None -> [
         Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
           (menu.cursor+1) (List.length menu.choices);

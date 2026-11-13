@@ -445,11 +445,21 @@ let render_keeper_calls (state : state) =
             | Some reason -> " · " ^ Terminal_text.single_line reason
           in
           let health =
-            Masc.Tui_decode.keeper_call_log_health_to_string
-              snapshot.Masc.Tui_decode.kcs_health
+            match snapshot.Masc.Tui_decode.kcs_health with
+            | Masc.Tui_decode.Call_log_ok -> ui_text state ~ko:"정상" ~en:"ok"
+            | Masc.Tui_decode.Call_log_empty -> ui_text state ~ko:"비어 있음" ~en:"empty"
+            | Masc.Tui_decode.Call_log_missing -> ui_text state ~ko:"기록 없음" ~en:"missing"
+            | Masc.Tui_decode.Call_log_stale -> ui_text state ~ko:"오래됨" ~en:"stale"
+            | Masc.Tui_decode.Call_log_coverage_gap ->
+                ui_text state ~ko:"기록 공백" ~en:"coverage_gap"
+            | Masc.Tui_decode.Call_log_unknown unknown -> Terminal_text.single_line unknown
           in
           match snapshot.Masc.Tui_decode.kcs_latest_age_s with
-          | Some age -> Printf.sprintf "%s · latest %.0fs ago%s" health age reason
+          | Some age ->
+              Printf.sprintf
+                (if state.ui_language = Lang_ko then "%s · 최근 기록 %.0f초 전%s"
+                 else "%s · latest %.0fs ago%s")
+                health age reason
           | None -> health ^ reason
         in
         heading

@@ -125,7 +125,7 @@ size evidence of that refusal through the record, and without it the part and
 every later candidate of that Keeper wait. A proof file that names another
 store root stops this check as it stops the exact-request check. Delete the
 exact-request lines and these lines together: once both files are gone, the
-next check passes two originals it refused. A Dispatch_pending original that
+next check passes two kinds of original it refused. A Dispatch_pending original that
 lost its finished record looks like one the host never ran. An admission
 original the host ended with the body refusal looks like one the worker
 refused before the host.

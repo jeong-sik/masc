@@ -138,8 +138,8 @@ let validator () =
 (* The deploy check of a Librarian original's Exact files (RFC
    exact-request-skips-a-slot-that-refused-its-input 3.3, item 5). It refuses
    an original exactly when its consumer stops on the Exact files the Exact
-   check leaves, or waits for a size proof that check deletes, and reads them
-   as that consumer reads them. The validator above stays as the runtime runs
+   check leaves, or reads its size evidence through a record that check
+   deletes, and reads them as that consumer reads them. The validator above stays as the runtime runs
    it. *)
 module Preflight = Lane_addon_store_preflight
 module Exact = Lane_addon_exact

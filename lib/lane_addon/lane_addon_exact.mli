@@ -129,7 +129,7 @@ val refused_before_host : final -> bool
     stated wait is noted as [Transient]) and the body refusal ranks first
     among the input refusals left ([ending] in server_lane_addon_exact.ml,
     [Exact_lane_failure.ending_input_refusal]); slots that left no usable
-    answer may be among them. The host then keeps both. The final carries no
+    answer may also be among the slots it called. The host then keeps both. The final carries no
     answer. Every consumer that confirms a worker final against the host
     store asks this one question when the host holds no record. *)
 val retained_final_to_json : retained_final -> Yojson.Safe.t

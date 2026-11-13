@@ -280,11 +280,17 @@ val lease_file_present :
     is the port. Another process asks the kernel with [F_GETLK] who holds
     the byte of a port.
 
+    Only a listener that a command line on this host reaches at
+    {!Masc_network_defaults.masc_http_loopback_origin} is announced
+    ({!loopback_listener}), so the process the kernel names is the one that
+    command dials. A server bound elsewhere announces nothing.
+
     The record is the lock, so no number is left on disk to go stale. It
-    ends when its holder exits, gives the lease up
-    ({!release_base_path_lease}), or execs: the descriptor that holds it does
-    not cross an exec, and {!prepare_base_path_lease_exec_handoff} carries
-    the lease alone. The empty file stays.
+    ends when its listener closes (the server withdraws it first), when its
+    holder gives the lease up ({!release_base_path_lease}), exits, or execs:
+    the descriptor that holds it does not cross an exec, and
+    {!prepare_base_path_lease_exec_handoff} carries the lease alone. The
+    empty file stays.
 
     A process of the same effective UID can lock bytes of the file without
     the lease, as it can signal the server. So a lock says nothing by
@@ -295,27 +301,62 @@ val lease_file_present :
     another process took there first stops the boot of the server
     ({!announce_account_server}). *)
 
-val announce_account_server : base_path_lease -> port:int -> (unit, base_path_lock_rejection) result
-(** Announce [port] as the port of the account server, until the lease is
-    released, or the process exits or execs. Call it once, with the port
-    bound. Each refusal says why, and after one nothing more is announced
-    than before the call: a [port] outside 1..65535
-    ([Announcement_port_invalid]), a handle that is not the active lease of
-    this process ([Announcement_lease_not_active]), a second call
-    ([Announcement_already_made], and the first announcement stays), a byte
-    that another process holds a lock on ([Announcement_port_locked]), a
-    lease path that no longer names the lease this process holds
-    ([Lease_identity_changed]), and an announcement file that is not a
-    regular file of this user with one name (the [Lease_file_*] refusals).
-    The file is made when it is missing, and is never removed. The directory
-    is not validated again as {!acquire_base_path_lock} validated it (the
-    boundary of #24344). *)
+type loopback_listener
+(** A port from 1 through 65535 bound on [127.0.0.1], the peer of
+    {!Masc_network_defaults.masc_http_loopback_origin}, or on [0.0.0.0]. While
+    such a listener listens, no process of another user takes [127.0.0.1] at
+    its port: Linux refuses that bind beside the wildcard, and macOS refuses
+    it to a process of another user that is not root. *)
+
+type loopback_unreached =
+  | Port_out_of_range of int
+  | Out_of_loopback_reach of Ipaddr.t
+      (** Bound on an address that leaves [127.0.0.1] at the port to whichever
+          process binds it: another loopback address such as [127.0.0.2], an
+          IPv6 address, or the address of an interface. *)
+
+val loopback_listener :
+  address:Ipaddr.t -> port:int -> (loopback_listener, loopback_unreached) result
+(** The listener that [Eio.Net.listen] bound on [address] at [port], when the
+    loopback origin reaches it. *)
+
+val loopback_unreached_to_string : loopback_unreached -> string
+
+val announce_account_server :
+  base_path_lease ->
+  loopback_listener ->
+  withdraw_with:((unit -> unit) -> unit) ->
+  (unit, base_path_lock_rejection) result
+(** Announce the port of [listener] as the port of the account server. Call it
+    once the port is bound. Once the lock is taken, [withdraw_with] gets the
+    function that withdraws it, and the caller hands that function to the
+    switch that owns the listening socket ([Eio.Switch.on_release]). The
+    switch releases in reverse order of registration, so the announcement
+    ends while the socket still holds the port, and no other process can take
+    the port while the kernel names this one. When [withdraw_with] raises,
+    the announcement is withdrawn and the exception goes on. The release of
+    the lease, an exit and an exec end it too.
+
+    A process makes one announcement per lease, whatever the kind. Each
+    refusal says why, and after one nothing more is announced than before the
+    call: a handle that is not the active lease of this process
+    ([Announcement_lease_not_active]), a second announcement
+    ([Announcement_already_made], naming the first, which stays), a byte that
+    another process holds a lock on ([Announcement_port_locked]), a lease path
+    that no longer names the lease this process holds
+    ([Lease_identity_changed]), and an announcement file that is not a regular
+    file of this user with one name (the [Lease_file_*] refusals). The file
+    is made when it is missing, and is never removed. The directory is not
+    validated again as {!acquire_base_path_lock} validated it (the boundary
+    of #24344). *)
 
 val announce_single_user_server :
-  base_path_lease -> port:int -> (unit, base_path_lock_rejection) result
+  base_path_lease ->
+  loopback_listener ->
+  withdraw_with:((unit -> unit) -> unit) ->
+  (unit, base_path_lock_rejection) result
 (** {!announce_account_server} for the server of a single user, on its own
-    file. A second call is a second call of this kind: an announcement of
-    the account server does not refuse it. *)
+    file. *)
 
 val account_server_port_holder :
   run_dir:string -> base_path:string -> port:int -> (int option, base_path_lock_rejection) result

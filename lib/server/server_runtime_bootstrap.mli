@@ -318,9 +318,12 @@ val judge
     handler makers are not used. Each server announces its HTTP port to the
     host under the lease of [judged] once its listener is bound
     ({!Server_startup_takeover.announce_account_server},
-    {!Server_startup_takeover.announce_single_user_server}). An account server
-    that does not start, or a server of a single user that cannot announce,
-    raises [Env_config_core.Config_error]. Either runs on the base path that
+    {!Server_startup_takeover.announce_single_user_server}), when a command
+    line reaches the listener at the loopback origin
+    ({!Server_startup_takeover.loopback_listener}), and withdraws it before
+    the listener closes. An account server that does not start, or a server
+    of a single user whose announcement is refused, raises
+    [Env_config_core.Config_error]. Either runs on the base path that
     [judged] was read from. [input_base_path] is that path as the operator
     typed it, before it was made canonical: the diagnostics of a single user
     show it, nothing opens it, and the account server does not use it.

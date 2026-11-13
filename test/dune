@@ -2154,6 +2154,9 @@
   masc.toml_line_editor
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
+  ; test_server_startup_takeover names the bind addresses a port announcement
+  ; is made for
+  ipaddr
  masc_test_deps
   masc.server
   masc.config_dir_resolver
@@ -2232,6 +2235,8 @@
   masc_test_deps
   masc_test_runtime
   masc.embedded_config
+  ; a boot whose port is not announced records no port
+  masc.workspace_connection
   bigstringaf)
  (deps ../bin/main_eio.exe)
   (action
@@ -6327,7 +6332,7 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio eio_main masc.server masc.host_config masc.fs_compat))
+ (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.host_config masc.fs_compat))
 
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)

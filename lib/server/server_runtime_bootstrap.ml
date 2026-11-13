@@ -2193,18 +2193,33 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
     (* HIGH-RISK-UNREVIEWED: a command line takes the process that announces
        this port for the server of the workspace, and decides from it which
        process gets the bearer of the workspace (#51075). The port is
-       [config.port], the cleartext listener that [socket] bound, which a
-       command line asks at [Masc_network_defaults.masc_http_loopback_origin].
-       Both listener branches reach here once, after the bind and the route
-       table. A server whose port the host cannot read does not serve: the
-       boot stops before [on_ready] runs and before the port is recorded. *)
-    (match Server_startup_takeover.announce_single_user_server lease ~port:config.port with
-     | Ok () -> ()
-     | Error rejection ->
-       raise
-         (Env_config_core.Config_error
-            ("the HTTP port of this server is not announced to the host: "
-             ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection)));
+       [config.port], the cleartext listener that [socket] bound on
+       [address]. It is announced only when a command line that dials
+       [Masc_network_defaults.masc_http_loopback_origin] reaches that socket;
+       a server bound elsewhere serves without an announcement, and commands
+       send it nothing. [sw] owns [socket], so the withdrawal registered on it
+       runs before the socket closes. Both listener branches reach here once,
+       after the bind and the route table. A refused announcement stops the
+       boot before [on_ready] runs and before the port is recorded. *)
+    (match Server_startup_takeover.loopback_listener ~address ~port:config.port with
+     | Error unreached ->
+       Log.Server.warn
+         "the HTTP port of this server is not announced to the host (%s): a command line on \
+          this host finds no server for this workspace and sends it no credential"
+         (Server_startup_takeover.loopback_unreached_to_string unreached)
+     | Ok listener ->
+       (match
+          Server_startup_takeover.announce_single_user_server
+            lease
+            listener
+            ~withdraw_with:(Eio.Switch.on_release sw)
+        with
+        | Ok () -> ()
+        | Error rejection ->
+          raise
+            (Env_config_core.Config_error
+               ("the HTTP port of this server is not announced to the host: "
+                ^ Server_startup_takeover.base_path_lock_rejection_to_string rejection))));
     Eio.Promise.resolve publish_listener_bound ();
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with

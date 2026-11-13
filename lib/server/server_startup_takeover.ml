@@ -248,15 +248,25 @@ let announcement_path server lease_path =
   | Single_user_server -> lease_path ^ ".single-user-server"
 ;;
 
-(* (kind of server, lease path) -> the descriptor that holds the lock, and
-   the port. POSIX record locks belong to the process, and closing any
-   descriptor of the file drops them. So this descriptor is the only one the
-   announcing process has on the file: the reads below find it by the
-   identity of the file and ask through it, and open nothing
-   ([read_announcement]). *)
-let announcements : (announcing_server * string, Unix.file_descr * int) Hashtbl.t =
-  Hashtbl.create 2
-;;
+(* The announcement this process holds for one lease. POSIX record locks
+   belong to the process, and closing any descriptor of the file drops them.
+   So [fd] is the only descriptor the announcing process has on the file: the
+   reads below find it by the identity of the file and ask through it, and
+   open nothing ([read_announcement]). [id] tells it from a later
+   announcement on the same lease, so a withdrawal that comes late closes
+   nothing it did not make. *)
+type announcement =
+  { server : announcing_server
+  ; fd : Unix.file_descr
+  ; port : int
+  ; id : int
+  }
+
+(* lease path -> the one announcement this process holds for it. A process
+   serves one kind of server for a lease and announces one port, so the key
+   is the lease alone and a second announcement of either kind is refused. *)
+let announcements : (string, announcement) Hashtbl.t = Hashtbl.create 2
+let announcement_ids = Atomic.make 0
 
 (* A close that fails leaves it open whether the descriptor is gone. It is
    said and not tried again: the number may already name another file. *)
@@ -416,18 +426,13 @@ let release_base_path_lease lease =
         "BasePath lease release ignored because the handle is not the active owner: path=%s"
         lease.path
     else (
-      (* The announcements go first: nothing reads a port from a process that
+      (* The announcement goes first: nothing reads a port from a process that
          has given the workspace up. Closing a descriptor drops its lock. *)
-      Hashtbl.filter_map_inplace
-        (fun (server, announced_lease) ((announcement_fd, (_ : int)) as held) ->
-          if String.equal announced_lease lease.path
-          then (
-            close_announcement_fd
-              ~path:(announcement_path server announced_lease)
-              announcement_fd;
-            None)
-          else Some held)
-        announcements;
+      (match Hashtbl.find_opt announcements lease.path with
+       | Some held ->
+         close_announcement_fd ~path:(announcement_path held.server lease.path) held.fd;
+         Hashtbl.remove announcements lease.path
+       | None -> ());
       (try
          let (_ : int) = Unix.lseek lease.fd 0 Unix.SEEK_SET in
          Unix.lockf lease.fd Unix.F_ULOCK 0
@@ -1523,24 +1528,75 @@ let open_announcement_to_lock path =
       ~seen:None
 ;;
 
+type loopback_listener = { port : int }
+
+type loopback_unreached =
+  | Port_out_of_range of int
+  | Out_of_loopback_reach of Ipaddr.t
+
+(* HIGH-RISK-UNREVIEWED: decides which listeners are announced, and so which
+   process a command line that dials the loopback origin may send the bearer
+   of the workspace to (#51075). The origin dials
+   [Masc_network_defaults.masc_http_loopback_peer], 127.0.0.1 (the tests pin
+   the two together). A listener bound on 127.0.0.1 holds that address at its
+   port. One bound on 0.0.0.0 holds it too: Linux refuses another bind of the
+   port in IPv4 while the wildcard listens, and the BSD stack of macOS refuses
+   it to a process of another user that is not root. Any other address, IPv6
+   included, leaves 127.0.0.1 at that port to whichever process binds it. *)
+let loopback_listener ~address ~port =
+  match Workspace_connection.port port with
+  | Error (_ : Workspace_connection.error) -> Error (Port_out_of_range port)
+  | Ok (_ : Workspace_connection.port) ->
+    (match address with
+     | Ipaddr.V4 bound
+       when Ipaddr.V4.compare bound Ipaddr.V4.localhost = 0
+            || Ipaddr.V4.compare bound Ipaddr.V4.any = 0 -> Ok { port }
+     | Ipaddr.V4 (_ : Ipaddr.V4.t) | Ipaddr.V6 (_ : Ipaddr.V6.t) ->
+       Error (Out_of_loopback_reach address))
+;;
+
+let loopback_unreached_to_string = function
+  | Port_out_of_range port -> Printf.sprintf "%d is not a port" port
+  | Out_of_loopback_reach address ->
+    Printf.sprintf
+      "the listener is bound on %s, and a command line on this host dials %s"
+      (Ipaddr.to_string address)
+      Masc_network_defaults.masc_http_loopback_peer
+;;
+
+(* Ends the announcement [id] of the lease at [lease_path] and leaves the
+   lease held. Nothing when the lease was released first, which withdrew it. *)
+let withdraw_announcement ~lease_path ~id =
+  Mutex.protect base_path_lease_mu (fun () ->
+    match Hashtbl.find_opt announcements lease_path with
+    | Some held when held.id = id ->
+      close_announcement_fd ~path:(announcement_path held.server lease_path) held.fd;
+      Hashtbl.remove announcements lease_path
+    | Some (_ : announcement) | None -> ())
+;;
+
 (* HIGH-RISK-UNREVIEWED: a command line takes the holder of this lock for the
    server of the workspace, and decides from it which process gets the
    bearer of the workspace (#51075). Only the active lease of this process
-   announces here, on the file of [server] and at the byte of [port]; the
-   caller gives the port its listener bound. A lock on the wrong file or
-   byte would send that bearer to whatever process serves the port. *)
-let announce server (lease : base_path_lease) ~port =
+   announces here, on the file of [server] and at the byte of the port of a
+   listener that the loopback origin reaches ([loopback_listener]).
+   [withdraw_with] gets the withdrawal once the lock is taken, and the caller
+   ties it to the switch that owns the listening socket: the switch releases
+   in reverse order, so the lock ends while the socket still holds the port.
+   A lock on the wrong file or byte, or one that outlives the listener, would
+   send that bearer to whatever process serves the port. *)
+let announce server (lease : base_path_lease) ({ port } : loopback_listener) ~withdraw_with =
   let path = announcement_path server lease.path in
   let failed = announcement_failed ~operation:"announce_port" ~path in
-  match Workspace_connection.port port with
-  | Error (_ : Workspace_connection.error) -> Error (Announcement_port_invalid { port })
-  | Ok (_ : Workspace_connection.port) ->
+  let made =
     Mutex.protect base_path_lease_mu (fun () ->
       match Hashtbl.find_opt base_path_leases lease.path with
       | Some (Active_lease current) when current == lease ->
-        (match Hashtbl.find_opt announcements (server, lease.path) with
-         | Some ((_ : Unix.file_descr), announced) ->
-           Error (Announcement_already_made { path; port = announced })
+        (match Hashtbl.find_opt announcements lease.path with
+         | Some held ->
+           Error
+             (Announcement_already_made
+                { path = announcement_path held.server lease.path; port = held.port })
          | None ->
            (* The private directory was validated when the lease was taken.
               The lease path must still name the file this process holds
@@ -1559,8 +1615,9 @@ let announce server (lease : base_path_lease) ~port =
                     Unix.lockf fd Unix.F_TLOCK 1
                   with
                   | () ->
-                    Hashtbl.replace announcements (server, lease.path) (fd, port);
-                    Ok ()
+                    let id = Atomic.fetch_and_add announcement_ids 1 in
+                    Hashtbl.replace announcements lease.path { server; fd; port; id };
+                    Ok id
                   | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
                     (* Another process holds a lock over the byte. This
                        descriptor holds none, so the kernel can be asked
@@ -1578,6 +1635,20 @@ let announce server (lease : base_path_lease) ~port =
                     failed (Unix.error_message error)))))
       | Some (Active_lease _) | Some (Failed_close _) | None ->
         Error (Announcement_lease_not_active { path = lease.path }))
+  in
+  match made with
+  | Error rejection -> Error rejection
+  | Ok id ->
+    (* Outside the lock: [withdraw_with] is the caller's, and the withdrawal
+       takes the lock again. A caller that cannot take the withdrawal leaves
+       nothing announced behind its exception. *)
+    let withdraw () = withdraw_announcement ~lease_path:lease.path ~id in
+    (match withdraw_with withdraw with
+     | () -> Ok ()
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       withdraw ();
+       Printexc.raise_with_backtrace exn backtrace)
 ;;
 
 let announce_account_server = announce Account_server
@@ -1601,10 +1672,11 @@ type announcement_reader =
    drop the announcement. *)
 let own_announcement_on seen =
   Hashtbl.fold
-    (fun (_ : announcing_server * string) (fd, port) found ->
+    (fun (_ : string) (held : announcement) found ->
       match found with
       | Some (_ : Unix.file_descr * int) -> found
-      | None -> if same_file_identity seen (Unix.fstat fd) then Some (fd, port) else None)
+      | None ->
+        if same_file_identity seen (Unix.fstat held.fd) then Some (held.fd, held.port) else None)
     announcements
     None
 ;;

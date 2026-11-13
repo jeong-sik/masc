@@ -1187,7 +1187,7 @@ let test_roster_decode_reads_rows () =
         "health parsed" true
         (match rows with
          | [ _; second ] ->
-           Decode.keeper_health_to_string second.Decode.kr_health = "idle"
+           Decode.keeper_health_reading second.Decode.kr_health = Decode.Health_idle
          | _ -> false);
       Alcotest.(check bool)
         "phase parsed" true
@@ -1500,11 +1500,9 @@ let test_roster_decode_keeps_the_axes_apart () =
   match Decode.decode_keeper_runtime_list json with
   | Error err -> Alcotest.fail ("roster must decode: " ^ err)
   | Ok ([ row ], _, _, _, _) ->
-      Alcotest.(check string) "health survives the surface fold" "offline"
-        (Decode.keeper_health_to_string row.Decode.kr_health);
+      Alcotest.(check bool) "health survives the surface fold" true
+        (Decode.keeper_health_reading row.Decode.kr_health = Decode.Health_offline);
       Alcotest.(check bool) "pause is its own field" true row.Decode.kr_paused;
-      Alcotest.(check bool) "and does not replace the health" true
-        (Decode.keeper_health_to_string row.Decode.kr_health <> "paused");
       Alcotest.(check bool) "the action is carried" true
         (row.Decode.kr_next_action
          = Some Masc.Keeper_status_runtime.Recover)

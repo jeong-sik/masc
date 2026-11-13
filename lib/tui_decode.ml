@@ -85,7 +85,6 @@ type keeper_phase = Keeper_state_machine.phase
 let keeper_phase_of_string = Keeper_state_machine.phase_of_string
 
 type keeper_health = Keeper_types.keeper_health
-let keeper_health_to_string = Keeper_status_runtime.keeper_health_to_string
 let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
 
 type keeper_health_reading =

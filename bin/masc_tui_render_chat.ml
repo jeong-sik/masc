@@ -741,16 +741,6 @@ let skill_tone_of_state :
   | Keeper_chat_transcript.Skill_evidence_unavailable -> Message_layout.Skill_failure
 
 
-(* [None] is a roster that was not read, not a health the roster could not
-   name: the word says so, and it is the word the header's tally uses for
-   the same keepers, so a column of ten of them and "10 unread" above it
-   are one fact drawn twice rather than two. *)
-let keeper_health_word (health : Tui_decode.keeper_health option) =
-  match health with
-  | None -> "unread"
-  | Some value -> Tui_decode.keeper_health_to_string value
-
-
 let keeper_message_identity ~max_cells state keeper_name =
   let fit_identity text =
     if Message_layout.display_width text <= max_cells then text
@@ -823,7 +813,7 @@ let keeper_message_identity ~max_cells state keeper_name =
           [ status_color
           ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
           ; " "
-          ; keeper_health_word health
+          ; Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading
           ; Ansi.reset
           ; stance
           ]
@@ -838,7 +828,8 @@ let keeper_message_identity ~max_cells state keeper_name =
                   Keeper's AUTO/YOLO mode and gate, so the absent label keeps
                   that stance. *)
                | Persisted_keeper | Remote_keeper ->
-                   ui_text state ~ko:"없음" ~en:"absent" ^ stance)
+                   Keeper_control.health_label ~ko:(state.ui_language = Lang_ko) reading
+                   ^ stance)
           | Keeper_control.Unobserved | Keeper_control.Invalid _ | Keeper_control.Present _ -> status in
         with_suggested_action (fit_identity (compact_status ^ Ansi.reset))
       else (match runtime with

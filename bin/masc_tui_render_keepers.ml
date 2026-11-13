@@ -36,15 +36,15 @@ let schedule_status_is_terminal = Masc_tui_render_work.schedule_status_is_termin
 
 (* Healthy keepers stay quiet beside their NOW activity. A health deviation
    remains available to the secondary detail row instead of repeating a
-   separate health word in every compact row. *)
-let keeper_health_deviation_word (health : Tui_decode.keeper_health option) =
-  match health with
-  | None -> "unread"
-  | Some value -> (
-      match Tui_decode.keeper_health_reading value with
-      | Tui_decode.Health_running -> ""
-      | Tui_decode.Health_idle | Tui_decode.Health_failing | Tui_decode.Health_offline ->
-          Tui_decode.keeper_health_to_string value)
+   separate health word in every compact row. A keeper with no health is
+   named by why it has none: the roster was not read, it left the keeper
+   out, or it reported the keeper's configuration as an error. *)
+let keeper_health_deviation_word ~ko (reading : Keeper_control.reading) =
+  match Option.map Tui_decode.keeper_health_reading (Keeper_control.health reading) with
+  | Some Tui_decode.Health_running -> None
+  | None
+  | Some (Tui_decode.Health_idle | Tui_decode.Health_failing | Tui_decode.Health_offline) ->
+      Some (Keeper_control.health_label ~ko reading)
 
 (* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
    of deriving a model by splitting its spelling: the phase is a separate
@@ -231,35 +231,43 @@ let keeper_activity_style (activity : Keeper_list_model.activity) =
   | Verifying -> Theme.category Theme.Slot_1
   | External_waiting | Idle | Paused | Unknown -> Theme.recede ()
 
-let keeper_badge_text (badge : Keeper_list_model.badge) =
+let keeper_badge_text ~ko (badge : Keeper_list_model.badge) =
   let glyph = Masc_tui_keeper_mark.badge_glyph badge in
+  let marked korean english = glyph ^ " " ^ if ko then korean else english in
   match badge with
-  | Badge_read_error -> glyph ^ " read error"
-  | Badge_waiting_unavailable -> glyph ^ " waiting unavailable"
+  | Badge_read_error -> marked "조회 실패" "read error"
+  | Badge_waiting_unavailable -> marked "대기 목록 조회 불가" "waiting unavailable"
   | Badge_async { running; ownership_unknown } ->
-      Printf.sprintf "%s async %d%s" glyph running
-        (if ownership_unknown > 0 then Printf.sprintf " (%d owner?)" ownership_unknown else "")
-  | Badge_async_queued count -> Printf.sprintf "%s queued %d" glyph count
-  | Badge_async_cancelling count -> Printf.sprintf "%s cancelling %d" glyph count
-  | Badge_delegate -> glyph ^ " delegate result"
-  | Badge_verification -> glyph ^ " verify"
-  | Badge_schedule -> glyph ^ " schedule"
-  | Badge_quota_spent -> glyph ^ " quota spent"
+      let unowned = ownership_unknown > 0 in
+      marked
+        (Printf.sprintf "별도 실행 %d%s" running
+           (if unowned then Printf.sprintf " (주인 모름 %d)" ownership_unknown else ""))
+        (Printf.sprintf "async %d%s" running
+           (if unowned then Printf.sprintf " (%d owner?)" ownership_unknown else ""))
+  | Badge_async_queued count ->
+      marked (Printf.sprintf "실행 대기 %d" count) (Printf.sprintf "queued %d" count)
+  | Badge_async_cancelling count ->
+      marked (Printf.sprintf "취소 중 %d" count) (Printf.sprintf "cancelling %d" count)
+  | Badge_delegate -> marked "위임 결과" "delegate result"
+  | Badge_verification -> marked "검증 대기" "verify"
+  | Badge_schedule -> marked "일정" "schedule"
+  | Badge_quota_spent -> marked "한도 소진" "quota spent"
 
 (* Between two pieces of DETAIL. *)
 let detail_separator = " · "
 
-let keeper_task_detail (row : Keeper_list_model.row) =
+let keeper_task_detail ~ko (row : Keeper_list_model.row) =
+  let task_word = if ko then "작업 " else "task " in
   match row.task with
   | Some task ->
       let id = Terminal_text.single_line task.Tui_decode.id in
       let title = Terminal_text.single_line task.Tui_decode.title in
-      Some ("task " ^ id ^ if String.equal title "" then "" else detail_separator ^ title)
+      Some (task_word ^ id ^ if String.equal title "" then "" else detail_separator ^ title)
   | None -> (
       match row.keeper.Tui_decode.k_activity with
-      | Some activity -> Option.map (fun id -> "task " ^ Terminal_text.single_line id)
+      | Some activity -> Option.map (fun id -> task_word ^ Terminal_text.single_line id)
           activity.Tui_decode.k_current_task_id
-      | None -> Some "task not observed")
+      | None -> Some (if ko then "작업 조회 불가" else "task not observed"))
 
 let keeper_waiting_item_text (item : Tui_decode.waiting_item) =
   Terminal_text.single_line
@@ -267,7 +275,7 @@ let keeper_waiting_item_text (item : Tui_decode.waiting_item) =
      else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
      else item.kwi_waiting_on)
 
-let keeper_waiting_detail (row : Keeper_list_model.row) =
+let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
   match row.waiting with
   | Keeper_list_model.Waiting_observed { Tui_decode.kwr_waiting_on = (first :: rest as items); _ } ->
       (* A delegate result's operator sentence includes the other Keeper and
@@ -280,7 +288,9 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
         | None -> first
       in
       Some (keeper_waiting_item_text item
-        ^ (match rest with [] -> "" | _ -> Printf.sprintf " (+%d more)" (List.length rest)))
+        ^ (match rest with
+           | [] -> ""
+           | _ -> Printf.sprintf (if ko then " (외 %d)" else " (%d more)") (List.length rest)))
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
 
@@ -295,7 +305,7 @@ type path_rest =
   | Path_resting of string  (* The rest the next dispatch waits out. *)
   | Path_unread of string  (* The rest did not read. *)
 
-let keeper_path_rest ?now (row : Keeper_list_model.row) =
+let keeper_path_rest ~ko ?now (row : Keeper_list_model.row) =
   match row.reading.Keeper_control.liveness with
   | Keeper_control.Present runtime
     when Tui_decode.keeper_phase_executes_turns runtime.Tui_decode.kr_phase ->
@@ -311,53 +321,59 @@ let keeper_path_rest ?now (row : Keeper_list_model.row) =
            in
            let basis_word =
              match release_basis with
-             | Tui_decode.Stated_by_provider -> "제공자"
-             | Tui_decode.Bounded_by_masc -> "상한"
+             | Tui_decode.Stated_by_provider -> if ko then "제공자" else "provider"
+             | Tui_decode.Bounded_by_masc -> if ko then "상한" else "bound"
            in
            Some
              (Path_resting
-                (Printf.sprintf "쉬는 중%s (%s · %s)"
+                (Printf.sprintf (if ko then "쉬는 중%s (%s · %s)" else "resting%s (%s · %s)")
                    time_clause
                    (Terminal_text.single_line runtime_id)
                    basis_word))
-       | Error detail -> Some (Path_unread ("쉼 읽기 실패: " ^ Terminal_text.single_line detail)))
+       | Error detail ->
+           Some
+             (Path_unread
+                ((if ko then "쉼 조회 실패: " else "rest read failed: ")
+                 ^ Terminal_text.single_line detail)))
   | Keeper_control.Present _ | Keeper_control.Absent | Keeper_control.Unobserved
   | Keeper_control.Invalid _ -> None
 
 (* The last piece of DETAIL, so right reads as next. The runtime that serves
    the next dispatch is named only after a failed turn ([Trail_failed]), and
    then, like a rest, behind the next mark. *)
-let keeper_next_text ?now (row : Keeper_list_model.row) =
+let keeper_next_text ~ko ?now (row : Keeper_list_model.row) =
   let after_failure () =
     match Keeper_list_model.trail_of_row row with
     | Keeper_trail.Trail_failed _ -> true
     | Keeper_trail.Trail_sound -> false
   in
   let marked text = Masc_tui_keeper_mark.axis_next_glyph ^ " " ^ text in
-  match keeper_path_rest ?now row with
+  match keeper_path_rest ~ko ?now row with
   | None -> None
   | Some (Path_serving runtime_id) -> if after_failure () then Some (marked runtime_id) else None
   | Some (Path_resting text) -> Some (if after_failure () then marked text else text)
   | Some (Path_unread text) -> Some text
 
-let keeper_approval_text (approval : Tui_decode.keeper_tool_approval) =
-  "hold " ^ Terminal_text.single_line approval.kta_tool
+let keeper_approval_text ~ko (approval : Tui_decode.keeper_tool_approval) =
+  (if ko then "승인 대기 " else "hold ") ^ Terminal_text.single_line approval.kta_tool
   ^ detail_separator ^ Terminal_text.single_line approval.kta_question
 
-let keeper_questions_text count =
-  Masc_tui_message_layout.count_noun count "question" ^ " awaiting you"
+let keeper_questions_text ~ko count =
+  if ko then Printf.sprintf "답을 기다리는 질문 %d건" count
+  else Masc_tui_message_layout.count_noun count "question" ^ " awaiting you"
 
-let keeper_detail_text ?now (row : Keeper_list_model.row) =
+let keeper_detail_text ~ko ?now (row : Keeper_list_model.row) =
   let health =
-    match keeper_health_deviation_word (Keeper_control.health row.reading) with
-    | "" -> None
-    | word -> Some ("health " ^ word)
+    Option.map
+      (fun word -> (if ko then "상태 " else "health ") ^ word)
+      (keeper_health_deviation_word ~ko row.reading)
   in
-  List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  List.map (keeper_badge_text ~ko) (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
-      [ Option.map keeper_approval_text row.approval
-      ; (if row.open_questions > 0 then Some (keeper_questions_text row.open_questions) else None)
-      ; keeper_waiting_detail row; keeper_task_detail row; health; keeper_next_text ?now row ]
+      [ Option.map (keeper_approval_text ~ko) row.approval
+      ; (if row.open_questions > 0 then Some (keeper_questions_text ~ko row.open_questions) else None)
+      ; keeper_waiting_detail ~ko row; keeper_task_detail ~ko row; health
+      ; keeper_next_text ~ko ?now row ]
   |> String.concat detail_separator
 
 (* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
@@ -365,8 +381,8 @@ let keeper_detail_text ?now (row : Keeper_list_model.row) =
    The text is fitted as plain text, so a cut mark takes the colour of the text
    it cuts. A sentence that fills the cell is fitted together with the rest, so
    the rest it pushes out is still marked by the cut. *)
-let keeper_detail_cell ?now ~width ~failure_context row =
-  let rest = keeper_detail_text ?now row in
+let keeper_detail_cell ~ko ?now ~width ~failure_context row =
+  let rest = keeper_detail_text ~ko ?now row in
   match failure_context with
   | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
   | Some sentence ->
@@ -497,7 +513,7 @@ let keeper_row_content ~ko ~(columns : Render_schedule.keeper_columns)
        else "")
     ; (if columns.kcol_show_detail then
          " "
-         ^ keeper_detail_cell ~now ~width:columns.kcol_task
+         ^ keeper_detail_cell ~ko ~now ~width:columns.kcol_task
              ~failure_context:
                (Render_schedule.keeper_failure_context_for_detail
                   ~show_runtime:columns.kcol_show_runtime failure_context)
@@ -566,12 +582,12 @@ let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
 let secondary_indent_cells = Render_schedule.keeper_marker_width + 2
 let secondary_separator = "  ·  "
 
-let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
+let keeper_secondary_row_content ~ko ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
   let indent_cells = secondary_indent_cells in
   let available = max 0 (inner - indent_cells) in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime (keeper_row_runtime row) in
   let detail =
-    match keeper_detail_text ?now row with
+    match keeper_detail_text ~ko ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
@@ -1705,7 +1721,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
         Option.value (Message_layout.age_text ~now ~since) ~default:Masc_tui_theme.Glyph.no_value
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let detail = keeper_detail_text ~now row in
+  let detail = keeper_detail_text ~ko:(state.ui_language = Lang_ko) ~now row in
   let now_entries =
     [ keeper_activity_style activity
       ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
@@ -1723,7 +1739,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
     List.filter_map Fun.id
       [ Option.map style_axis_cell
           (Masc_tui_render_keeper_story.next_run_cell state ~now ~keeper_name)
-      ; Option.map dim (keeper_next_text ~now row)
+      ; Option.map dim (keeper_next_text ~ko:(state.ui_language = Lang_ko) ~now row)
       ; lag
       ]
   in
@@ -1896,7 +1912,7 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
       (if row.reading.Keeper_control.paused then text "저장된 일시정지 · " "stored pause · " else "")
       ^ keeper_source ^ task_source ^ title
   | None ->
-      (match keeper_waiting_detail row with
+      (match keeper_waiting_detail ~ko:(state.ui_language = Lang_ko) row with
        | Some reason ->
            (if Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
                || Option.is_some state.keeper_turns_error then
@@ -2676,11 +2692,11 @@ let render_keeper_axes (state : state) =
       (fun widest (row : Keeper_list_model.row) ->
         let failure_width = failure_sentence_cells row in
         let next_width =
-          match keeper_next_text ~now:now_unix row with
+          match keeper_next_text ~ko ~now:now_unix row with
           | None -> 0
           | Some text ->
             let task_w =
-              match keeper_task_detail row with
+              match keeper_task_detail ~ko row with
               | None -> 0
               | Some t -> Message_layout.display_width t + 3
             in
@@ -2973,7 +2989,7 @@ let render_keeper_axes (state : state) =
                    ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name
                    ~runtime:(keeper_row_runtime row)
                in
-               emit (keeper_secondary_row_content ~now:now_unix ~inner ~cells row)
+               emit (keeper_secondary_row_content ~ko ~now:now_unix ~inner ~cells row)
            | Axis_row.Failure_chain -> emit (grid_failure_line grid ~now:now_unix row)))
     entries_window;
 

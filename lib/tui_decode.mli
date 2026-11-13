@@ -760,7 +760,6 @@ type keeper_health
     library to name one. *)
 
 val keeper_health_of_string : string -> keeper_health option
-val keeper_health_to_string : keeper_health -> string
 
 type keeper_health_reading =
   | Health_running  (** Phase Running and at least one turn recorded *)

@@ -2485,7 +2485,7 @@ let render_machine_activity (state : state) session =
     ~path:[ Masc.Machine_lane.to_wire (Masc_tui_machine_activity.owner session).machine
           ; lane_activity_step state ]
     ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
-    (Masc_tui_machine_activity.lines session)
+    (Masc_tui_machine_activity.lines ~ko:(state.ui_language = Lang_ko) session)
 
 let render_exact_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
@@ -2494,7 +2494,7 @@ let render_exact_activity (state : state) session =
     ~path:[ Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane
           ; lane_activity_step state ]
     ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
-    (Masc_tui_exact_activity.lines session)
+    (Masc_tui_exact_activity.lines ~ko:(state.ui_language = Lang_ko) session)
 
 let render_lanes (state : state) =
   match Masc_tui_types.shown_machine_activity state with

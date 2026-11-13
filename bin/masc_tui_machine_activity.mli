@@ -31,7 +31,10 @@ val reapply : t -> t
 (** Explicitly apply only the desired activity to the displayed current file.
     Other current settings are preserved; a different file path is refused. *)
 val discard : t -> t
-val start_save : generation:int -> t -> (t * request * write, string) result
+val start_save :
+  generation:int -> t -> (t * request * write, Masc_tui_activity_notice.t) result
 val finish_save : request -> write_result -> t -> t
-val lines : t -> Masc_tui_page_line.t list
+val lines : ko:bool -> t -> Masc_tui_page_line.t list
+(** The page in Korean when [ko] is true, in English otherwise. The keys
+    are the footer's; the page spells none. *)
 val matches : request -> t -> bool

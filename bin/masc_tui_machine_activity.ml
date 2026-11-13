@@ -1,3 +1,4 @@
+module Notice = Masc_tui_activity_notice
 type owner = { workspace : string * string; machine : Masc.Machine_lane.t }
 type document = Masc_tui_runtime_config_edit.document
 type reading = { document : (document, string) result; activity : (Machine_configuration.activity, string) result }
@@ -7,7 +8,7 @@ type phase = Idle | Reading of int | Writing of int
 type t = {
   owner : owner; draft : draft option; current : document option;
   observed : (Machine_configuration.activity, string) result option;
-  phase : phase; message : string option; receipt : Masc_tui_runtime_config_receipt.t option;
+  phase : phase; message : Notice.t option; receipt : Masc_tui_runtime_config_receipt.t option;
 }
 type operation = Read | Save of write
 type request = { owner : owner; generation : int; operation : operation }
@@ -26,9 +27,10 @@ let create owner = {owner;draft=None;current=None;observed=None;phase=Idle;messa
 let table machine = Runtime_toml_namespace.(key Machines) ^ "." ^ Masc.Machine_lane.to_wire machine
 let configuration (document : document) =
   try
-    let* toml = Otoml.Parser.from_string_result document.source_text in
-    Machine_configuration.parse toml
-  with Otoml.Duplicate_key detail | Otoml.Type_error detail -> Error detail
+    let given result = Result.map_error (fun detail -> Notice.Given detail) result in
+    let* toml = given (Otoml.Parser.from_string_result document.source_text) in
+    given (Machine_configuration.parse toml)
+  with Otoml.Duplicate_key detail | Otoml.Type_error detail -> Error (Notice.Given detail)
 let configured_activity machine (config : Machine_configuration.t) = match machine with
   | Masc.Machine_lane.Msx -> config.msx_enabled
   | Dos -> config.dos_enabled
@@ -41,18 +43,18 @@ let apply desired machine (document : document) =
   let source_text = Toml_line_editor.edit_table_bool document.source_text
     ~path:(table machine) ~key:"enabled" ~value:desired in
   match configuration {document with source_text} with
-  | Error _ -> Error "Inline or dotted machine settings require the Runtime source editor; no file was changed."
+  | Error _ -> Error Notice.Machine_declared_inline
   | Ok observed ->
       if Machine_configuration.equal observed (with_activity machine desired config)
       then Ok source_text
-      else Error "The edit did not preserve machine configuration; use the Runtime source editor."
+      else Error Notice.Machine_edit_lost_configuration
 
 let suspend_read t = match t.phase with
   | Reading _ -> {t with phase=Idle}
   | Idle | Writing _ -> t
 let suspend t = {t with phase=Idle;current=None;observed=None;message=Some
-  (match t.phase with Writing _ -> "Save result unconfirmed after workspace change. Read current before retrying."
-   | Idle | Reading _ -> "Workspace reading withdrawn; activity draft retained.")}
+  (match t.phase with Writing _ -> Notice.Saving_when_workspace_changed
+   | Idle | Reading _ -> Notice.Reading_withdrawn)}
 let matches (request : request) (t : t) = same_owner request.owner t.owner &&
   match request.operation, t.phase with
   | Read, Reading generation | Save _, Writing generation -> generation=request.generation
@@ -65,9 +67,9 @@ let finish_read request result t =
   if not (matches request t) then t else
   let t = {t with phase=Idle;current=None;observed=None} in
   match result with
-  | Error detail -> {t with message=Some (detail ^ " · draft retained")}
+  | Error detail -> {t with message=Some (Notice.Read_failed detail)}
   | Ok {document=Error detail;activity=observed} ->
-      {t with observed=Some observed;message=Some (detail ^ " · draft retained")}
+      {t with observed=Some observed;message=Some (Notice.Read_failed detail)}
   | Ok {document=Ok current;activity=observed} ->
     (match activity t.owner.machine current with
      | Error detail -> {t with observed=Some observed;message=Some detail}
@@ -84,11 +86,11 @@ let finish_read request result t =
        let draft = if retain then t.draft else Some {base=current;desired=enabled} in
        {t with draft;current=Some current;observed=Some observed;message=None})
 let ready t =
-  if busy t then Error "A request is pending." else
+  if busy t then Error Notice.Request_pending else
   match t.draft,t.current with
   | Some draft, Some current when draft.base.path=current.path -> Ok (draft,current)
-  | Some _, Some _ -> Error "The configuration file path changed. Discard this draft before editing the new file."
-  | None, _ | _, None -> Error "Read the current configuration before editing or saving."
+  | Some _, Some _ -> Error Notice.Path_changed
+  | None, _ | _, None -> Error Notice.Unread
 let toggle t = match ready t with
   | Error detail -> {t with message=Some detail}
   | Ok (draft, _) ->
@@ -100,22 +102,22 @@ let reapply t = match ready t with
   | Ok (draft,current) ->
     (match apply draft.desired t.owner.machine current with
      | Error detail -> {t with message=Some detail}
-     | Ok _ -> {t with draft=Some {draft with base=current};message=Some "Activity reapplied to current settings. s saves explicitly."})
+     | Ok _ -> {t with draft=Some {draft with base=current};message=Some Notice.Reapplied})
 let discard t =
-  if busy t then {t with message=Some "A request is pending."} else
+  if busy t then {t with message=Some Notice.Request_pending} else
   match t.current with
-  | None -> {t with draft=None;message=Some "Draft discarded. r reads current settings."}
+  | None -> {t with draft=None;message=Some Notice.Draft_discarded_unread}
   | Some current ->
     (match activity t.owner.machine current with
      | Error detail -> {t with draft=None;message=Some detail}
-     | Ok enabled -> {t with draft=Some {base=current;desired=enabled};message=Some "Draft discarded; no file was written.";receipt=None})
+     | Ok enabled -> {t with draft=Some {base=current;desired=enabled};message=Some Notice.Draft_discarded;receipt=None})
 let start_save ~generation t =
   let* draft,current = ready t in
   let* () = if draft.base.source_revision<>current.source_revision
-    then Error "File changed. u reapplies only this activity to current settings; s then saves."
+    then Error Notice.File_changed_before_save
     else Ok () in
   let* was_enabled = activity t.owner.machine draft.base in
-  let* () = if was_enabled=draft.desired then Error "No activity change to save." else Ok () in
+  let* () = if was_enabled=draft.desired then Error Notice.No_change else Ok () in
   let* source_text = apply draft.desired t.owner.machine draft.base in
   let write = {source_text;expected_source_revision=draft.base.source_revision;expected_source_path=draft.base.path} in
   Ok ({t with phase=Writing generation;message=None},
@@ -129,45 +131,69 @@ let finish_save request result t =
       | Some draft, Durable -> Some {draft with base={draft.base with source_text=write.source_text;source_revision=receipt.source_revision}}
       | (Some _ | None), Durability_unconfirmed _ | None, Durable -> t.draft in
     {t with draft;current=None;observed=None;receipt=Some receipt;
-      message=Some "Write receipt received. Read current settings before editing again."}
-  | Save _,Conflict current -> {t with current=Some current;observed=None;message=Some "File changed; draft retained. u reapplies activity to the current file."}
-  | Save _,Refused detail -> {t with message=Some detail}
-  | Save _,Unconfirmed detail -> {t with current=None;observed=None;message=Some (detail ^ " · read current before retrying")}
+      message=Some Notice.Receipt_received}
+  | Save _,Conflict current -> {t with current=Some current;observed=None;message=Some Notice.Conflict_kept}
+  | Save _,Refused detail -> {t with message=Some (Notice.Given detail)}
+  | Save _,Unconfirmed detail -> {t with current=None;observed=None;message=Some (Notice.Save_unconfirmed detail)}
   | Read,_ -> t
-let lines (t : t) =
-  let flag value = if value then "On" else "Off" in
+let lines ~ko (t : t) =
+  let say korean english = if ko then korean else english in
+  let flag value = if value then say "켜짐" "On" else say "꺼짐" "Off" in
   let label = match t.owner.machine with Masc.Machine_lane.Msx -> "MSX" | Dos -> "DOS" in
   let current_enabled, current = match t.current with
-    | None -> None, [L.fact "Current file" "unverified"]
+    | None -> None, [L.fact (say "현재 파일" "Current file") (say "미확인" "unverified")]
     | Some document ->
       (match activity t.owner.machine document with
-       | Error detail -> None, [L.note ~tone:L.Failure detail]
-       | Ok enabled -> Some enabled, [L.fact "File" document.path; L.fact "Current file" (flag enabled)]) in
+       | Error notice -> None, [L.note ~tone:L.Failure (Notice.text ~ko notice)]
+       | Ok enabled ->
+         Some enabled,
+         [L.fact (say "파일" "File") document.path;
+          L.fact (say "현재 파일" "Current file") (flag enabled)]) in
   let draft = match t.draft with None -> [] | Some draft ->
     (* A draft that differs from the file's activity has not been saved. *)
     let unsaved = match current_enabled with
       | Some enabled -> not (Bool.equal enabled draft.desired)
       | None -> false in
-    [(if unsaved then L.fact ~tone:L.Attention "Activity draft" (flag draft.desired ^ " · not saved")
-      else L.fact "Activity draft" (flag draft.desired));
-     L.fact ~tone:L.Quiet "Based on revision" draft.base.source_revision] in
+    [(if unsaved then
+        L.fact ~tone:L.Attention (say "활동 초안" "Activity draft")
+          (flag draft.desired ^ say " · 저장 안 됨" " · not saved")
+      else L.fact (say "활동 초안" "Activity draft") (flag draft.desired));
+     L.fact ~tone:L.Quiet (say "기준 revision" "Based on revision") draft.base.source_revision] in
   let conflict = match t.draft,t.current with
     | Some draft,Some current when draft.base.source_revision<>current.source_revision ->
-      [L.note ~tone:L.Attention "File changed. u reapplies only activity to current settings; x discards the draft."]
+      [L.note ~tone:L.Attention
+         (say "파일이 바뀌었습니다. u 는 활동만 현재 설정에 다시 적용하고, x 는 초안을 버립니다."
+            "File changed. u reapplies only activity to current settings; x discards the draft.")]
     | Some _,Some _ | None,_ | _,None -> [] in
-  [L.Title ("Machine activity · " ^ label);
-   L.note ~tone:L.Quiet "Off stops new execution and input; accepted work finishes.";
-   L.note ~tone:L.Quiet "Machine state and checkpoints remain. Inspection, saving and cleanup stay available."]
+  let server = say "서버 활동" "Server activity" in
+  [L.Title (say "머신 켜고 끄기 · " "Machine activity · " ^ label);
+   L.note ~tone:L.Quiet
+     (say "끄면 새 실행과 입력을 멈춥니다. 이미 받은 작업은 끝냅니다."
+        "Off stops new execution and input; accepted work finishes.");
+   L.note ~tone:L.Quiet
+     (say "머신 상태와 체크포인트는 남습니다. 살펴보기, 저장, 정리는 계속 쓸 수 있습니다."
+        "Machine state and checkpoints remain. Inspection, saving and cleanup stay available.")]
   @ (match t.observed with
-    | None -> [L.fact "Server activity" "not read"]
-    | Some (Error detail) -> [L.note ~tone:L.Failure ("Server activity read failed: " ^ detail)]
-    | Some (Ok Machine_configuration.Enabled) -> [L.fact "Server activity" "On (last read)"]
-    | Some (Ok Disabled) -> [L.fact "Server activity" "Off (last read)"]
-    | Some (Ok Unobserved) -> [L.fact "Server activity" "configuration unavailable (last read)"])
+    | None -> [L.fact server (say "읽지 않음" "not read")]
+    | Some (Error detail) ->
+      [L.note ~tone:L.Failure
+         (say "서버 활동을 읽지 못함: " "Server activity read failed: " ^ detail)]
+    | Some (Ok Machine_configuration.Enabled) ->
+      [L.fact server (say "켜짐 (마지막 읽기)" "On (last read)")]
+    | Some (Ok Disabled) -> [L.fact server (say "꺼짐 (마지막 읽기)" "Off (last read)")]
+    | Some (Ok Unobserved) ->
+      [L.fact server
+         (say "설정을 읽을 수 없음 (마지막 읽기)" "configuration unavailable (last read)")])
   @ current @ draft @ conflict
-  @ (match t.phase with Idle -> [] | Reading _ -> [L.note "Reading current configuration…"] | Writing _ -> [L.note "Saving activity…"])
-  @ Option.to_list (Option.map (fun message -> L.note message) t.message)
+  @ (match t.phase with
+     | Idle -> []
+     | Reading _ -> [L.note (say "현재 설정을 읽는 중…" "Reading current configuration…")]
+     | Writing _ -> [L.note (say "활동 저장 중…" "Saving activity…")])
+  @ Option.to_list (Option.map (fun notice -> L.note (Notice.text ~ko notice)) t.message)
   @ (match t.receipt with None -> [] | Some receipt -> [L.note (Masc_tui_runtime_config_receipt.lane_summary receipt)])
-  @ [L.note "Space change draft · s save · r read current · u reapply · x discard · Esc back";
-     L.note ~tone:L.Quiet "The file and server reading are separate observations; r reads both again.";
-     L.note ~tone:L.Quiet "On allows new work. It does not load or restore a machine."]
+  @ [L.note ~tone:L.Quiet
+       (say "파일과 서버 읽기는 따로 관측한 것입니다. r 로 둘 다 다시 읽습니다."
+          "The file and server reading are separate observations; r reads both again.");
+     L.note ~tone:L.Quiet
+       (say "켜면 새 작업을 받습니다. 머신을 불러오거나 되살리지는 않습니다."
+          "On allows new work. It does not load or restore a machine.")]

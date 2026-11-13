@@ -745,7 +745,8 @@ type task_review =
   ; subject : Workspace_verification_store.request_header
   ; layout : Task.Anti_rationalization.lookup_root
   ; route : Yojson.Safe.t
-  ; binding : string
+  ; question_binding : string
+  ; authority_binding : string
   }
 
 let keeper_review_route (meta : Keeper_meta_contract.keeper_meta) route =
@@ -781,6 +782,10 @@ let captured_review_route t =
   | (Workspace_producer | Keeper_producer _), None -> review_route t
   | Workspace_producer, Some _ -> Error "workspace producer cannot own a Keeper endpoint"
 
+let projection_digest projection =
+  let open Result.Syntax in
+  let* canonical = Lane_addon_action.canonical projection in
+  Ok (Lane_addon_store.digest (Yojson.Safe.to_string canonical))
 
 let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_access =
   let open Result.Syntax in
@@ -799,20 +804,23 @@ let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_acc
       let tool_json (tool : Types_core.tool_schema) =
         `Assoc ["name", `String tool.name; "description", `String tool.description;
           "input_schema", tool.input_schema] in
-      let projection = `Assoc ["purpose", `String "task_review";
+      (* The question is what the producer submitted. The authority is how a
+         reviewer may look at it now. A later attempt keeps the question and
+         takes the authority current at that attempt. *)
+      let* question_binding = projection_digest (`Assoc ["purpose", `String "task_review_question";
         "subject", Workspace_verification_store.request_header_to_yojson request;
         "base_path", `String config.Workspace.base_path;
+        "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)]) in
+      let* authority_binding = projection_digest (`Assoc ["purpose", `String "task_review_authority";
         "ownership_root", `String review_tools.ownership_root;
         "route", route;
         "read_authority", (match review_tools.read_authority with None -> `Null
           | Some authority -> Keeper_sandbox_remote_lane.read_authority_identity authority);
-        "schemas", `List (List.map tool_json (schemas review_tools));
-        "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)] in
-      let* canonical = Lane_addon_action.canonical projection in
-      let binding = Lane_addon_store.digest (Yojson.Safe.to_string canonical) in
-      Ok {review_tools; subject=request; layout; route; binding}
+        "schemas", `List (List.map tool_json (schemas review_tools))]) in
+      Ok {review_tools; subject=request; layout; route; question_binding; authority_binding}
 
-let task_review_binding t = t.binding
+let task_review_question_binding t = t.question_binding
+let task_review_authority_binding t = t.authority_binding
 let task_review_base_path t = t.review_tools.config.base_path
 let task_review_root t = t.layout
 let task_review_tools t = t.review_tools

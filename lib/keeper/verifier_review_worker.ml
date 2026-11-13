@@ -132,15 +132,18 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
   let subject = Authority.task_review_subject authority in
   let req = V.review_request original in
   let lookup = Authority.task_review_lookup authority in
-  (* The binding covers the host ownership root, route, subject, schemas and
-     submitted evidence. A frozen inventory observation is not lookup authority. *)
+  let current = V.lookup_of_authority authority in
+  (* The question digest covers the subject, workspace and submitted evidence.
+     The authority digest covers the host ownership root, route, read
+     authority and tool schemas. A frozen inventory observation is not lookup
+     authority. *)
   let* () =
     if String.equal subject.id verification_id
       && String.equal subject.task_id req.AR.task_id
       && String.equal subject.worker req.agent_name
-      && String.equal (V.lookup_binding original) (Authority.task_review_binding authority)
-      && V.lookup_schemas original =
-        List.map (fun (schema : Types_core.tool_schema) -> schema.name) lookup.AR.schemas
+      && String.equal (V.question_binding original) current.V.question_digest
+      && String.equal (V.authority_binding original) current.V.authority_digest
+      && V.lookup_schemas original = current.V.granted_tools
     then Ok () else Error (Grants_mismatch "retained subject or lookup authority differs") in
   let* () = Authority.validate_task_review authority
     |> Result.map_error (fun detail -> Grants_mismatch detail) in

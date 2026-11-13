@@ -36,9 +36,15 @@ val create_task_review :
     of the submitted evidence. Lookup availability is observed by each tool.
     No caller dispatch closure can be substituted for this surface. *)
 
-val task_review_binding : task_review -> string
-(** Canonical SHA-256 of the complete authority projection, including full tool
-    schemas and submitted evidence bytes, rather than only names or layout. *)
+val task_review_question_binding : task_review -> string
+(** Canonical SHA-256 of the question: the submitted header, workspace and
+    submitted evidence bytes. Every attempt of one verification asks this
+    same question. *)
+val task_review_authority_binding : task_review -> string
+(** Canonical SHA-256 of the lookup authority: ownership root, captured route,
+    read authority and full tool schemas, rather than only names or layout.
+    Submitted evidence decides which descriptors are offered, so a changed
+    submission can move both bindings; callers compare the question first. *)
 val task_review_base_path : task_review -> string
 val task_review_root : task_review -> Task.Anti_rationalization.lookup_root
 val task_review_tools : task_review -> t

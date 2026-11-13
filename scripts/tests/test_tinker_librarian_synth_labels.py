@@ -245,13 +245,18 @@ class TeacherNoteTest(unittest.TestCase):
                     label = S.label_of(req)
                     self.assertEqual(notes.setdefault(T.label_note(item_of(req)), label), label, kinds)
 
-    def test_a_label_no_candidate_supports_gets_a_note_that_leaves_memory_as_it_is(self) -> None:
+    def test_a_label_no_candidate_supports_still_asks_for_its_drops_and_merges(self) -> None:
+        # RFC-0517 §7.1: MASC takes drops and merges without a supporting candidate.
         req = request(SCHEDULED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT)))
         label = S.label_of(req)
         self.assertTrue(label.planted_stale and label.duplicates and label.scheduled_ahead)
         self.assertEqual(T.memory_lines(label, [f.memory_id for f in req.facts]), [
-            ("- 기억 변경을 지지하는 후보가 없습니다. 현재 기억은 모두 그대로 남습니다. "
-             "new_claims 와 dropped 는 비어 있고 change_support 는 [] 입니다.")])
+            "- m4: 한 시점의 상태만 적은 기억입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            "- m7: 쓸 날이 아직 남은 기록입니다. 그대로 남습니다.",
+            "- m8: 쓸 날이 이미 지난 기록입니다. dropped 에 있고, 어떤 claim 의 absorbs 에도 없습니다.",
+            ("- m5, m6: 같은 지식을 표현만 바꿔 적은 두 기억입니다. 둘 중 남길 기억의 문장을 그대로 복사한 "
+             "claim 이 new_claims 에 있고, 그 absorbs 에 두 ID 가 모두 있습니다."),
+            T.NOTE_REST])
 
     def test_a_label_that_restates_a_claim_memory_does_not_hold_stops_the_note(self) -> None:
         req = request(PLANTED, candidates_of((S.CandidateKind.PARAPHRASE,)))

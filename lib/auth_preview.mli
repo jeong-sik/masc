@@ -111,8 +111,30 @@ val keeper_conversation_reader
   -> Auth_gate.request
   -> (person, Login_routes.answer) result
 
-(** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}]: the ids of
-    the accounts the person owns ({!Authz_provider_account.owned}), and the
-    Runtimes they own as [{"runtime_id":...,"provider_account_id":...}]
-    ({!Authz_runtime.owned}). *)
-val provider_accounts : Authz_state.t -> person -> Login_routes.answer
+(** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}].
+
+    - The accounts the person owns ({!Authz_provider_account.owned}), as
+      [{"provider_account_id":...,"integration_id":...}]: the integration the
+      login of the account named, read from its receipt under [base_path].
+    - The Runtimes they own ({!Authz_runtime.owned}), as
+      [{"runtime_id":...,"provider_account_id":...,"model":...}]: the model
+      of the binding of the account's template that makes the Runtime id
+      ({!Runtime_account_runtime.binding_of}), the binding a turn of the
+      Runtime finds. The model is the key of its [models.<id>] table, as
+      the integrations list names it; a turn sends the model's [api-name],
+      which may be another name. [config] is the runtime.toml of the
+      workspace, [None] when it could not be read.
+
+    Each account's receipt is read once per answer. A fact that is not read
+    is [null], and ["unread"] says why. For an integration:
+    [login_receipt_missing] or [login_receipt_unreadable]. For a model:
+    [account_integration_unread], [configuration_unavailable],
+    [template_not_declared] (runtime.toml no longer declares the account's
+    integration) or [runtime_not_bound] (no binding of it makes the Runtime
+    id). *)
+val provider_accounts
+  :  base_path:string
+  -> config:Runtime_schema.config option
+  -> Authz_state.t
+  -> person
+  -> Login_routes.answer

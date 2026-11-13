@@ -327,8 +327,10 @@ let verify t ~base_path request reqd =
       Server_setup_account_login.verify ~person:(person_of t person) ~base_path ~body request reqd))
 ;;
 
-let provider_accounts t request reqd =
-  as_person t request reqd (fun state person -> respond reqd (Auth_preview.provider_accounts state person))
+let provider_accounts t ~base_path request reqd =
+  as_person t request reqd (fun state person ->
+    let config = Result.to_option (Server_runtime_setup_actions.config ~base_path) in
+    respond reqd (Auth_preview.provider_accounts ~base_path ~config state person))
 ;;
 
 let integrations t ~base_path request reqd =
@@ -437,7 +439,7 @@ let add_person_routes t ~env ~base_path router =
   |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
   |> Server_route.get Server_route.Always_public Authz_activation.invitation_path (page Auth_preview.invite_page t)
   |> Server_route.get access whoami_path (whoami t)
-  |> Server_route.get access Auth_preview.provider_accounts_path (provider_accounts t)
+  |> Server_route.get access Auth_preview.provider_accounts_path (provider_accounts t ~base_path)
   |> Server_route.get access Server_person_integrations.path (integrations t ~base_path)
   |> Server_route.post access Auth_preview.connect_path (connect t ~base_path)
   |> Server_route.post access Auth_preview.verify_path (verify t ~base_path)

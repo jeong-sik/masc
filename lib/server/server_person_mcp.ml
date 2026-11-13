@@ -175,7 +175,11 @@ let conversation_query arguments =
 let run installation caller tool ~arguments =
   match tool with
   | Whoami -> Auth_preview.whoami caller.trusted ~now_ms:caller.now_ms caller.gate
-  | Runtimes -> judged Auth_preview.person caller (Auth_preview.provider_accounts (state caller))
+  | Runtimes ->
+    judged Auth_preview.person caller (fun person ->
+      let base_path = installation.base_path in
+      let config = Result.to_option (Server_runtime_setup_actions.config ~base_path) in
+      Auth_preview.provider_accounts ~base_path ~config (state caller) person)
   | Keepers -> judged Auth_preview.keeper_owner caller (Auth_preview_keeper.list (state caller))
   | Keeper_create ->
     judged Auth_preview.keeper_owner caller (fun user_id ->

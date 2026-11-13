@@ -20,6 +20,7 @@ type disposition_reason =
   | Runtime_blocker of Keeper_status_bridge_blocker.runtime_blocker_class
   | Keeper_dashboard_worker_exception
   | Receipt_reason of Keeper_execution_receipt.operator_disposition_reason
+[@@deriving enumerate]
 
 (* A blocker class shows under its own name, so an operator reads which
    blocker it is. An unresolved fiber is the one class whose reason has a

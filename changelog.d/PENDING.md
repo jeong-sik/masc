@@ -1,0 +1,11 @@
+### Fixed
+
+- The dashboard labels every reason the Keeper trust snapshot writes.
+  `pending_operator_decision`, `keeper_dashboard_worker_exception`,
+  `healthy`, `runtime_fallback`, `input_required`, `phase_skipped` and
+  `accept_rejected` had no entry in the attention reason labels, so a
+  surface that labels the snapshot's reason showed the raw value. A new
+  fixture, `keeper-trust-disposition-reasons.json`, is checked against
+  every value of the snapshot's reason type on the server and against the
+  label function on the dashboard, so a reason added on either side fails
+  a test until the other follows (#43117).

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import bridgeAttention from '../api/fixtures/keeper-attention-reasons.json'
+import trustDisposition from '../api/fixtures/keeper-trust-disposition-reasons.json'
 import {
   ATTENTION_REASONS,
   NEXT_HUMAN_ACTIONS,
@@ -81,5 +82,20 @@ describe('keeper attention vocabularies', () => {
   it('label every first action the status bridge writes', () => {
     const known: readonly string[] = NEXT_HUMAN_ACTIONS
     expect(bridgeAttention.next_human_actions.filter(action => !known.includes(action))).toEqual([])
+  })
+
+  // test_keeper_trust_disposition_reason pins this fixture to every string the
+  // trust snapshot writes as a disposition reason: its own reasons, each
+  // runtime blocker class and each receipt reason. A reason is labelled when
+  // the label function knows it, so a string it only echoes back fails here.
+  it('label every disposition reason the trust snapshot writes', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(
+      trustDisposition.disposition_reasons.filter(
+        reason => attentionReasonLabel(reason, false) === reason,
+      ),
+    ).toEqual([])
+    expect(warn).not.toHaveBeenCalled()
   })
 })

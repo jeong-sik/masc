@@ -38,8 +38,12 @@ function warnUnknownAttentionToken(kind: 'attention_reason' | 'next_human_action
 //      runtime_attempts_exhausted, provider_runtime_error,
 //      fiber_unresolved, runtime_blocked)
 //   - lib/dashboard/dashboard_goals.ml ('runtime_trust_snapshot_unavailable')
-//   - lib/keeper/keeper_execution_receipt.ml operator disposition reasons that
-//     can become trust attention_reason via keeper_runtime_trust_snapshot.ml
+//   - lib/keeper/keeper_runtime_trust_snapshot_core.ml disposition_reason:
+//     the snapshot's own reasons (healthy, approval_queue_unavailable,
+//     pending_operator_decision, keeper_dashboard_worker_exception), every
+//     runtime blocker class, and every receipt operator disposition reason.
+//     The snapshot writes them as `disposition_reason`, and as
+//     `attention_reason` when the status bridge gives none.
 export const ATTENTION_REASONS = [
   'approval_pending',
   'paused',
@@ -68,6 +72,15 @@ export const ATTENTION_REASONS = [
   // and the union did not carry it, so the surface showed a Keeper needing
   // attention with no word for why.
   'keepalive_stopped',
+  // The trust snapshot's own reasons, and the receipt reasons it relays on a
+  // passing disposition.
+  'healthy',
+  'pending_operator_decision',
+  'keeper_dashboard_worker_exception',
+  'runtime_fallback',
+  'input_required',
+  'phase_skipped',
+  'accept_rejected',
 ] as const
 export type AttentionReason = typeof ATTENTION_REASONS[number]
 
@@ -94,6 +107,13 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
   keepalive_stopped: 'keepalive 가 멈춤 - 최근 오류 확인 필요',
+  healthy: '정상',
+  pending_operator_decision: '운영자 결정 대기 - 승인 요청이 남아 있음',
+  keeper_dashboard_worker_exception: '대시보드가 이 Keeper 행을 만들지 못함',
+  runtime_fallback: '런타임 폴백',
+  input_required: '사용자 입력 대기',
+  phase_skipped: 'phase 건너뜀',
+  accept_rejected: '응답에 쓸 내용이 없어 거절 - 출력 예산 확인',
 }
 
 // keeper_runtime_trust_snapshot.ml emits a SEPARATE, larger attention_reason

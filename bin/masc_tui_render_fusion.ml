@@ -40,14 +40,16 @@ let fusion_run_summary run =
           (Terminal_text.single_line failure.frs_failure_code)
           (Terminal_text.single_line failure.frs_error) )
 
-let fusion_replay_warning = function
+let fusion_replay_warning ~ko = function
   | Masc.Tui_decode_fusion.Fusion_not_replayed | Masc.Tui_decode_fusion.Fusion_log_absent -> None
   | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines = 0; dropped_running = 0;
                                 incomplete = false } -> None
   | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines; dropped_running; incomplete } ->
       Some (Printf.sprintf
-        "Registry startup read: %d invalid rows; %d registrations omitted%s"
-        malformed_lines dropped_running (if incomplete then "; read incomplete" else ""))
+        (if ko then "시작 시 registry 읽기: 잘못된 행 %d개, 제외된 등록 %d개%s"
+         else "Registry startup read: %d invalid rows; %d registrations omitted%s")
+        malformed_lines dropped_running
+        (if incomplete then (if ko then ", 읽기 미완료" else "; read incomplete") else ""))
 
 let render_fusion_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -64,7 +66,8 @@ let render_fusion_list (state : state) =
   let shown = List.length entries in
   let history_count = shown - List.length runs in
   let replay_warning = Option.bind snapshot
-      (fun snapshot -> fusion_replay_warning snapshot.fus_replay) in
+      (fun snapshot ->
+        fusion_replay_warning ~ko:(state.ui_language = Lang_ko) snapshot.fus_replay) in
   (* The list's own failure first: with rows held it marks them stale, with
      none it is the page. A launch form that could not open says so on the
      same row when the list itself read fine. *)

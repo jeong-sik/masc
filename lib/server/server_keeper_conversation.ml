@@ -403,13 +403,22 @@ let last listed =
   List.fold_left (fun (_ : listed option) listed -> Some listed) None listed
 ;;
 
-let current_or_start root keeper_id provider_account_id ~draw ~now_ms =
+(* An earlier conversation does not come back when the last one is deleted:
+   the person deleted what the Keeper was going on in. *)
+let current ~deleted listed =
+  match last listed with
+  | Some { conversation; started_at_ms = (_ : int) } ->
+    if deleted conversation.conversation_id then None else Some conversation
+  | None -> None
+;;
+
+let current_or_start root keeper_id provider_account_id ~deleted ~draw ~now_ms =
   Eio.Mutex.use_ro index_lock (fun () ->
     let* () = private_directory root in
     let index = Filename.concat root index_name in
     let* started = recovered Index started_of index in
-    match last (of_keeper keeper_id started) with
-    | Some { conversation; started_at_ms = (_ : int) } -> Ok conversation
+    match current ~deleted (of_keeper keeper_id started) with
+    | Some conversation -> Ok conversation
     | None -> append_started ~index keeper_id provider_account_id ~draw ~now_ms)
 ;;
 
@@ -436,6 +445,77 @@ let turns root conversation =
   if Sys.file_exists path then Result.bind (observed Turns turn_row_of path) turns_of else Ok []
 ;;
 
+let directory root (conversation : conversation) =
+  Filename.concat root (Conversation_id.to_string conversation.conversation_id)
+;;
+
+(* A person with no index has no conversation, and reading makes none. *)
+let find root conversation_id =
+  let index = Filename.concat root index_name in
+  if Sys.file_exists index
+  then
+    Result.map
+      (List.find_map (fun (started : started) ->
+         let conversation = started.listed.conversation in
+         if Conversation_id.equal conversation.conversation_id conversation_id
+         then Some conversation
+         else None))
+      (observed Index started_of index)
+  else Ok None
+;;
+
+type reach =
+  | Reached
+  | Not_reached
+  | No_record
+
+let client_reach root conversation =
+  let path = turns_path root conversation in
+  if Sys.file_exists path
+  then (
+    let reached (turn : recorded) =
+      match turn.outcome with
+      | Answered { text = _; model = _; session_id = _; at_ms = _ } | Unrecorded -> true
+      | Failed { failure; at_ms = _ } -> reached_client failure
+    in
+    let* rows = observed Turns turn_row_of path in
+    let* recorded = turns_of rows in
+    Ok (if List.exists reached recorded then Reached else Not_reached))
+  else Ok No_record
+;;
+
+(* [open_turn] uses the directory of the conversation and the one its client
+   starts in only as directories that are no links, so the real path of the
+   latter is the real path of the root and the two names under it. *)
+let project_path root conversation =
+  match Unix.realpath root with
+  | real_root ->
+    Ok
+      (List.fold_left
+         Filename.concat
+         real_root
+         [ Conversation_id.to_string conversation.conversation_id; cwd_name ])
+  | exception Unix.Unix_error (error, _, _) ->
+    Error (Not_read (Printf.sprintf "%s: %s" root (Unix.error_message error)))
+;;
+
+(* [Fs_compat.remove_tree] removes a link without following it, and a path
+   that is gone is no error. Whether the directory went is read from it
+   after. *)
+let remove root conversation =
+  let path = directory root conversation in
+  let still_there detail = Error (Printf.sprintf "%s: %s" path detail) in
+  match Fs_compat.remove_tree path with
+  | exception Sys_error detail -> still_there detail
+  | exception Unix.Unix_error (error, call, (_ : string)) ->
+    still_there (Printf.sprintf "%s: %s" call (Unix.error_message error))
+  | () ->
+    (match Unix.lstat path with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+     | exception Unix.Unix_error (error, _, _) -> still_there (Unix.error_message error)
+     | (_ : Unix.stats) -> still_there "it is still there")
+;;
+
 (* The conversation a new one follows gets no turn after it. A row a stopped
    server left half written there is cut now, as its next turn would have
    cut it, so a read of it finds whole rows. *)
@@ -455,16 +535,16 @@ let settle root conversation =
    of that one runs inside the call of its account, and so does this: the
    cut and the [started] row of the new one come before the call ends, and
    no turn of the one it follows writes after them. *)
-let start root keeper_id provider_account_id ~draw ~now_ms ~one_call_of =
+let start root keeper_id provider_account_id ~deleted ~draw ~now_ms ~one_call_of =
   Eio.Mutex.use_ro index_lock (fun () ->
     let recorded result = Result.map_error (fun error -> Record_failed error) result in
     let* () = private_directory root |> recorded in
     let index = Filename.concat root index_name in
     let* started = recovered Index started_of index |> recorded in
     let begin_new () = append_started ~index keeper_id provider_account_id ~draw ~now_ms |> recorded in
-    match last (of_keeper keeper_id started) with
+    match current ~deleted (of_keeper keeper_id started) with
     | None -> begin_new ()
-    | Some { conversation = followed; started_at_ms = (_ : int) } ->
+    | Some followed ->
       one_call_of followed.provider_account_id ~busy:Account_busy (fun () ->
         let* () = settle root followed |> recorded in
         begin_new ()))

@@ -362,7 +362,9 @@ let agent_core_row ~ko ~at ~duration_ms (e : Observer.agent_core) =
         (Attention, Option.value ~default:"" e.Observer.tool)
     | Observer.Telemetry -> (Quiet, "")
     | Observer.Relay_subscription_loss { dropped_count; _ } ->
-        (Attention, Printf.sprintf "%d events lost before relay" dropped_count)
+        (Attention, Printf.sprintf
+            (if ko then "중계 전에 이벤트 %d개 유실" else "%d events lost before relay")
+            dropped_count)
     | Observer.Agent_core_other _ ->
         (Attention, Option.value ~default:"" e.Observer.tool)
   in
@@ -558,6 +560,7 @@ let label_of_event ~ko (event : Observer.event) =
 
 let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   let label = label_of_event ~ko event in
+  let say korean english = if ko then korean else english in
   match event with
   | Observer.Agent_core e -> agent_core_row ~ko ~at ~duration_ms e
   | Observer.Keeper_heartbeat h ->
@@ -571,7 +574,10 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
              (h.Observer.hb_in_turn, Option.bind h.Observer.hb_in_flight_ms elapsed_text)
            with
            | Some true, Some in_flight ->
-               Printf.sprintf "%s \xc2\xb7 in turn for %s" phase in_flight
+               Printf.sprintf
+                 (if ko then "%s \xc2\xb7 턴 진행 중 %s"
+                  else "%s \xc2\xb7 in turn for %s")
+                 phase in_flight
            | (Some true | Some false | None), (Some _ | None) -> phase)
       }
   | Observer.Keeper_tool_call c ->
@@ -685,99 +691,101 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
       ; glyph = Quiet
       ; label
       ; detail =
-          "the " ^ Masc.Internal_agent_runs_event.registry_to_wire registry
-          ^ " run registry changed"
+          (let name = Masc.Internal_agent_runs_event.registry_to_wire registry in
+           if ko then name ^ " 실행 목록이 바뀜"
+           else "the " ^ name ^ " run registry changed")
       }
   | Observer.Workspace_store_changed Observer.Schedule_store ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "schedule status may have changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "일정 상태가 바뀌었을 수 있음" "schedule status may have changed" }
   | Observer.Workspace_store_changed Observer.Pending_confirms ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "pending confirmation status may have changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "확인 대기 상태가 바뀌었을 수 있음" "pending confirmation status may have changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a verification request changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "검증 요청이 바뀜" "a verification request changed" }
   | Observer.Workspace_store_changed Observer.Goal_projection ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a Goal changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "목표가 바뀜" "a Goal changed" }
   | Observer.Workspace_store_changed Observer.Runtime_config ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "runtime.toml changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "runtime.toml 이 바뀜" "runtime.toml changed" }
   | Observer.Workspace_store_changed Observer.Skill_catalog ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the skill catalog was published" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "스킬 카탈로그가 게시됨" "the skill catalog was published" }
   | Observer.Workspace_store_changed Observer.Lane_addon_exports ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a Lane Add-on's exported tools changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "Lane Add-on 이 내보내는 도구가 바뀜" "a Lane Add-on's exported tools changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the repository catalog changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "저장소 목록이 바뀜" "the repository catalog changed" }
   | Observer.Gate_connector_changed { connector } ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "connector " ^ connector ^ " changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "커넥터 " "connector " ^ connector ^ say " 바뀜" " changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a judge verdict or label was recorded" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "판정이나 라벨이 기록됨" "a judge verdict or label was recorded" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = "an OAuth login attempt changed" }
+      { at; keeper; glyph = Quiet; label; detail = say "OAuth 로그인 시도가 바뀜" "an OAuth login attempt changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a workspace client row changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "작업 공간 클라이언트 항목이 바뀜" "a workspace client row changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Account_emails ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a login rewrote the account credentials" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "로그인이 계정 자격 증명을 다시 씀" "a login rewrote the account credentials" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a provider usage report was recorded" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "제공자 사용량 보고가 기록됨" "a provider usage report was recorded" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime's quota or rate-limit standing changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "런타임의 한도나 속도 제한 상태가 바뀜" "a runtime's quota or rate-limit standing changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the Keeper cost window took or dropped a row" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "Keeper 비용 구간에 줄이 들어오거나 빠짐" "the Keeper cost window took or dropped a row" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = "the metrics ledger took a row" }
+      { at; keeper; glyph = Quiet; label; detail = say "지표 기록에 줄이 들어옴" "the metrics ledger took a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the Goal projection changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "목표 목록이 바뀜" "the Goal projection changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime.toml commit was attempted" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "runtime.toml 저장을 시도함" "a runtime.toml commit was attempted" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a connector's status changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "커넥터 상태가 바뀜" "a connector's status changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = "the Skill activation ledger took a row" }
+      { at; keeper; glyph = Quiet; label; detail = say "스킬 활성화 기록에 줄이 들어옴" "the Skill activation ledger took a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a Skill catalog snapshot was published" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "스킬 카탈로그 스냅샷이 게시됨" "a Skill catalog snapshot was published" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the Home Health line moved" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "Home Health 줄이 바뀜" "the Home Health line moved" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a runtime probe landed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "런타임 점검 결과가 들어옴" "a runtime probe landed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the runtime history took or dropped a row" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "런타임 기록에 줄이 들어오거나 빠짐" "the runtime history took or dropped a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the Lane inventory changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "Lane 목록이 바뀜" "the Lane inventory changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live { machine }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation { scope; _ }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
           (Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "Play seat authority changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "Play seat 권한이 바뀜" "Play seat authority changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "a web dashboard observation changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "웹 대시보드 관측이 바뀜" "a web dashboard observation changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "the workspace memory inventory changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say "작업 공간 메모리 목록이 바뀜" "the workspace memory inventory changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room { machine }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = "a memory health input was written" }
+      { at; keeper; glyph = Quiet; label; detail = say "메모리 상태 입력이 기록됨" "a memory health input was written" }
   | Observer.Keeper_event_queue_changed { keeper } ->
-      { at; keeper; glyph = Quiet; label; detail = "the event queue changed" }
+      { at; keeper; glyph = Quiet; label; detail = say "이벤트 큐가 바뀜" "the event queue changed" }
   | Observer.Board_changed { post_id } ->
       { at
       ; keeper = "server"
       ; glyph = Quiet
       ; label
-      ; detail = Option.value post_id ~default:"a comment or a reaction changed"
+      ; detail = Option.value post_id ~default:(say "댓글이나 반응이 바뀜" "a comment or a reaction changed")
       }
   | Observer.Approval_change change ->
       let detail =
         match change with
-        | Observer.Approval_queue_changed -> "the approval queue changed"
-        | Observer.Approval_rules_changed -> "the standing rules changed"
-        | Observer.Gate_mode_changed -> "a Gate mode changed"
-        | Observer.Gate_keeper_settings_changed _ -> "the Keeper's Gate settings changed"
-        | Observer.Tool_approval_waits_changed _ -> "a held tool call changed"
-        | Observer.Tool_approval_mode_changed _ -> "the tool approval mode changed"
-        | Observer.Keeper_asks_changed _ -> "the Keeper's questions changed"
+        | Observer.Approval_queue_changed -> say "승인 대기열이 바뀜" "the approval queue changed"
+        | Observer.Approval_rules_changed -> say "항상 허용 규칙이 바뀜" "the standing rules changed"
+        | Observer.Gate_mode_changed -> say "Gate 모드가 바뀜" "a Gate mode changed"
+        | Observer.Gate_keeper_settings_changed _ -> say "Keeper 의 Gate 설정이 바뀜" "the Keeper's Gate settings changed"
+        | Observer.Tool_approval_waits_changed _ -> say "보류된 도구 호출이 바뀜" "a held tool call changed"
+        | Observer.Tool_approval_mode_changed _ -> say "도구 승인 모드가 바뀜" "the tool approval mode changed"
+        | Observer.Keeper_asks_changed _ -> say "Keeper 의 질문이 바뀜" "the Keeper's questions changed"
         | Observer.Installation_asks_changed { declaration_id } ->
-            "the questions of " ^ declaration_id ^ " changed"
+            if ko then declaration_id ^ " 의 질문이 바뀜"
+            else "the questions of " ^ declaration_id ^ " changed"
       in
       { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
   | Observer.Snapshot projection ->

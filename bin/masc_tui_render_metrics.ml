@@ -519,24 +519,30 @@ let render_section_resources ~cols (state : state) =
       let moment at =
         Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
       in
-      [ Printf.sprintf
-          (if ko then "    새 작업 %s · 완료 %s · 취소 %s"
-           else "    New tasks %s · Done %s · Cancelled %s")
-          (Count.grouped flow.recent.created) (Count.grouped flow.recent.completed)
-          (Count.grouped flow.recent.cancelled)
+      (* A count of the tasks in a status, which the Tasks screen names. *)
+      let in_status (tag : Masc_domain.Task_status_tag.t) count =
+        Masc_tui_task_document.status_tag_label ~ko tag ^ " " ^ Count.grouped count
+      in
+      let row parts = "    " ^ String.concat " · " parts in
+      [ row
+          [ say "새 작업 " "New tasks " ^ Count.grouped flow.recent.created
+          ; in_status Done flow.recent.completed
+          ; in_status Cancelled flow.recent.cancelled ]
       ; Printf.sprintf (if ko then "    구간: %s ~ %s" else "    Window: %s to %s")
           (moment flow.window_started_at) (moment flow.observed_at)
-      ; Printf.sprintf
-          (if ko then "    지금 열린 작업 %s: 할 일 %s · 담당됨 %s · 진행 중 %s · 검증 대기 %s"
-           else "    Current open %s: todo %s · claimed %s · working %s · verification %s")
-          (Count.grouped (Task_flow.open_count current)) (Count.grouped current.todo)
-          (Count.grouped current.claimed) (Count.grouped current.in_progress)
-          (Count.grouped current.awaiting_verification)
-      ; Printf.sprintf
-          (if ko then "    백로그 전체 %s · 완료 %s · 취소 %s · 스냅샷 %s 전"
-           else "    Retained total %s · Done %s · Cancelled %s · snapshot %s ago")
-          (Count.grouped (Task_flow.total_count current)) (Count.grouped current.completed)
-          (Count.grouped current.cancelled) (age_text (now -. flow.observed_at))
+      ; say "    지금 열린 작업 " "    Current open "
+        ^ Count.grouped (Task_flow.open_count current) ^ ": "
+        ^ String.concat " · "
+            [ in_status Todo current.todo
+            ; in_status Claimed current.claimed
+            ; in_status In_progress current.in_progress
+            ; in_status Awaiting_verification current.awaiting_verification ]
+      ; row
+          [ say "백로그 전체 " "Retained total " ^ Count.grouped (Task_flow.total_count current)
+          ; in_status Done current.completed
+          ; in_status Cancelled current.cancelled
+          ; Printf.sprintf (if ko then "스냅샷 %s 전" else "snapshot %s ago")
+              (age_text (now -. flow.observed_at)) ]
       ; say "    가장 오래된 열린 작업: " "    Oldest open task registration: "
         ^ Option.fold ~none:(say "등록 시각을 아는 작업 없음" "none with a known timestamp")
             ~some:(fun at ->

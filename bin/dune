@@ -2380,6 +2380,10 @@
   masc_tui_fleet_line
   ; the turn lane's words, which the Answering pane draws too
   masc_tui_answering
+  ; the task status words, which the Tasks screen draws too, and the status
+  ; tags they are looked up by (Masc_domain.Task_status_tag)
+  masc_tui_task_document
+  masc_types
   unix))
 
 (library

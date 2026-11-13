@@ -9,6 +9,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import type { View } from './console'
+import { slowAfterMs } from './notes'
 import { SubscriptionsPanel, accountFacts, createSubscriptions, follow } from './subscriptions'
 import type { AccountFacts, PanelView, SubscriptionsModel } from './subscriptions'
 import { paths } from './wire'
@@ -142,6 +143,13 @@ describe('reading the subscriptions', () => {
     expect([kind(panel), sent.length]).toEqual([`read for ${person}`, 2])
   })
 
+  it('reads once on a retry however often it is asked', async () => {
+    const { panel, sent } = start({ [paths.integrations]: [notReady(), offered()], [paths.owned]: [ownedNothing(), ownedNothing()] })
+    await panel.load(person)
+    await Promise.all([panel.retry(), panel.retry()])
+    expect([kind(panel), sent.length]).toEqual([`read for ${person}`, 4])
+  })
+
   it.each([
     ['the subscriptions', { [paths.integrations]: [offered()], [paths.owned]: [noSession()] }],
     ['the offer, while the other reading failed', { [paths.integrations]: [noSession()], [paths.owned]: [notReady()] }],
@@ -158,8 +166,9 @@ describe('reading the subscriptions', () => {
     const { panel } = start({ [paths.integrations]: [answer.answer], [paths.owned]: [ownedNothing()] })
     const done = panel.load(person)
     const slow = (): unknown => (panel.view.value.kind === 'reading' ? panel.view.value.slow : panel.view.value.kind)
+    await vi.advanceTimersByTimeAsync(slowAfterMs - 1)
     expect(slow()).toBe(false)
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(1)
     expect(slow()).toBe(true)
     answer.give(offered())
     await done

@@ -1,0 +1,10 @@
+### Internal
+
+- Every case of `test_tool_misc_coverage` now starts with no web search
+  provider named and no provider credential, whatever the shell exports. The
+  names come from `Web_search_provider.all`, so a provider added later is
+  closed too. The case "dispatch names zai without a key" blanked only
+  `ZAI_API_KEY`: with `OLLAMA_API_KEY` in the shell, Ollama joined the chain
+  behind the named provider and the search went to ollama.com. The case now
+  reproduces a shell that exports a credential for every provider and checks
+  the plan before it dispatches (#PENDING).

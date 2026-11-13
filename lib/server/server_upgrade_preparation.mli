@@ -11,9 +11,6 @@ val authorize_initial : base_path:string -> expected_version:string -> body:stri
   login:(unit -> bool) -> (unit, error) result
 (** Validates workspace and selected version before invoking the login callback. *)
 
-val prepare :
-  sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t -> headers:(string * string) list ->
-  run_dir:string -> base_path:string -> port:int -> (t, error) result
 val incumbent : t -> incumbent
 val request_termination : t -> (unit, error) result
 (** Call only after the user selects replacement. Rechecks workspace/version and
@@ -104,6 +101,50 @@ val holder :
     when the lease root, the lease or the announcement cannot be read; a root
     or a path to the lease file that cannot be read is an
     [Owner_lease_rejected]. *)
+
+type single_user_listener
+(** Proof that the kernel owner of the lease of a BasePath is the process
+    that announces a port as the server of a single user
+    ({!Server_startup_takeover.single_user_server_port_holder}). Only
+    {!single_user_listener} makes one, so a function that takes one cannot
+    be reached with a port that was merely asked about or that merely
+    answered over HTTP. It is what was true at the read: {!prepare} reads
+    again before it sends. *)
+
+type listener_refusal =
+  | No_lease_owner  (** Nothing holds the lease. *)
+  | Owner_announces_no_port of { pid : int }
+      (** The owner [pid] holds no single-user announcement the kernel
+          showed: a server built before the announcement, one bound where
+          the loopback origin does not reach, an account server, or an
+          owner that has not announced yet. Nothing ties it to the port. *)
+  | Owner_listens_on_another_port of { pid : int; port : int }
+      (** The owner announces [port], not the one asked about. *)
+  | Listener_unread of Server_startup_takeover.owner_capture_error
+      (** The lease or the announcement could not be read. *)
+
+val single_user_listener :
+  run_dir:string -> base_path:string -> port:int -> (single_user_listener, listener_refusal) result
+(** Whether the process that holds the lease of [base_path] is the one that
+    listens on [port], asked of the kernel alone: the owner of the lease
+    must hold the single-user announcement lock of the byte of [port]. A
+    lock that another process holds on that byte confirms nothing. It
+    signals nothing and sends nothing. Like {!account_server} it makes the
+    private lease directory and an empty lease file when they are missing;
+    a command that must make nothing asks {!holder} first. *)
+
+val listener_port : single_user_listener -> int
+val listener_base_path : single_user_listener -> string
+
+val prepare :
+  sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t ->
+  listener:single_user_listener -> token:string -> agent:string -> (t, error) result
+(** Prepares the stop of the server of a single user. This is the only
+    function that sends the bearer [token] of the operator, and the only
+    port it can send it to is the one inside [listener]. Before each request
+    that carries the bearer, here and in {!request_termination}, the kernel
+    is asked again whether the same owner still announces the port;
+    otherwise the answer is [Incumbent_changed] and no bearer leaves. *)
 
 val stop_account_server : run_dir:string -> base_path:string -> port:int -> (unit, error) result
 (** Asks the account server of a multi-account installation to stop: the

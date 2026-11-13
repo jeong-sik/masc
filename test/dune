@@ -6334,6 +6334,12 @@
  (modules test_server_upgrade_preparation)
  (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.host_config masc.fs_compat))
 
+(test
+ (name test_upgrade_bearer_destination)
+ (modules test_upgrade_bearer_destination)
+ (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.fs_compat
+  masc.http_client masc.masc_eio_context))
+
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
 

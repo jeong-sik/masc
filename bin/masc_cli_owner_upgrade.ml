@@ -103,8 +103,32 @@ let inspect ~base_path ~port =
       (match Upgrade.suggest_loopback_port () with Ok port -> ["suggested_port", `Int port] | Error _ -> []) in
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
     "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
-let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login use =
+(* Why the owner of a workspace was not signed in to, as sentences that end
+   before what the command did not do. *)
+let listener_refusal_message ~base_path ~port = function
+  | Upgrade.No_lease_owner ->
+    Printf.sprintf "No process holds the lease this MASC reads for %s, so what answers on \
+                    port %d is not its server and was sent no operator credential." base_path port
+  | Upgrade.Owner_announces_no_port { pid } ->
+    Printf.sprintf "The process that holds %s (pid %d) does not tell this host which port it \
+                    listens on, so nothing shows that port %d is its own, and no operator \
+                    credential was sent there. A server built before this check, or one bound \
+                    outside 127.0.0.1, announces nothing: stop it yourself (send SIGTERM to pid \
+                    %d, wait for it to exit), then run `masc start`." base_path pid port pid
+  | Upgrade.Owner_listens_on_another_port { pid; port = announced } ->
+    Printf.sprintf "The server of %s (pid %d) listens on port %d, not port %d. No operator \
+                    credential was sent to port %d; pass --port %d."
+      base_path pid announced port port announced
+  | Upgrade.Listener_unread unread ->
+    Printf.sprintf "The owner of %s could not be checked (%s), so no operator credential was sent."
+      base_path (Server_startup_takeover.owner_capture_error_to_string unread)
+(* HIGH-RISK-UNREVIEWED: signs the local operator in and hands its bearer to
+   [Upgrade.prepare] (#51321). Workspace and port come out of [listener], the
+   kernel's word that the owner of the lease listens there, so neither the
+   sign-in nor the bearer can be reached for a port that only answered. *)
+let with_selected_owner ~sw ~clock ~listener ~agent ~expected_version ~login use =
   let open Result.Syntax in
+  let base_path = Upgrade.listener_base_path listener and port = Upgrade.listener_port listener in
   let* () = match Masc_http_client.get_sync ~clock ~headers:[]
     ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full) () with
     | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
@@ -112,9 +136,7 @@ let with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~lo
     | Ok _ | Error _ -> Error Upgrade.Invalid_health in
   let* token = match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
     | None -> Error Upgrade.Admin_required | Some token -> Ok token in
-  let* run_dir = owner_lease_run_dir ~base_path in
-  let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent] in
-  let* owner = Upgrade.prepare ~sw ~clock ~headers ~run_dir ~base_path ~port in
+  let* owner = Upgrade.prepare ~sw ~clock ~listener ~token ~agent in
   Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
     if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed
     else use owner)
@@ -124,6 +146,8 @@ type stop_refusal =
   | Owner_unread of { base_path : string; reason : string }
   | Nobody_holds_workspace
   | Account_server_holds_workspace
+  | Owner_listener_unconfirmed of
+      { base_path : string; port : int; refusal : Upgrade.listener_refusal }
 let stop_refusal_message = function
   | Owner_not_stopped error -> error_message error
   | Owner_unread { base_path; reason } -> owner_unread ~base_path reason
@@ -133,6 +157,8 @@ let stop_refusal_message = function
   | Account_server_holds_workspace ->
     "This workspace is held by its account server, which no local operator signs in to. \
      masc restart stops and replaces it."
+  | Owner_listener_unconfirmed { base_path; port; refusal } ->
+    listener_refusal_message ~base_path ~port refusal ^ " No server was changed."
 (* The stop below signs a local operator in and sends its bearer to the port.
    The kernel is asked first, as [masc restart] asks it, and before anything
    is made: where nothing holds the lease, what answers on the port is not
@@ -140,15 +166,21 @@ let stop_refusal_message = function
    elsewhere answers so too), and an owner that announces the port of an
    account server, the one asked about or another, is not signed in to,
    whatever answers on the port. An owner that announces
-   nothing is taken for the server of a single user. An account server is
-   one too until it announces; it does not answer the health of a single
-   user on its port, and the stop goes no further than that answer. *)
+   no account server must be the server of a single user that the kernel
+   shows on this very port ([Upgrade.single_user_listener]); the lease file
+   is there by then, so that read makes nothing. The answer is the value the
+   sign-in and the bearer need, and without it the stop ends here. *)
 let stoppable ~base_path ~port =
   match holder ~base_path ~port with
   | Error reason -> Error (Owner_unread { base_path; reason })
   | Ok Upgrade.Held_by_nobody -> Error Nobody_holds_workspace
   | Ok (Upgrade.Held_by_account_server { port = (_ : int) }) -> Error Account_server_holds_workspace
-  | Ok Upgrade.Held_without_announcement -> Ok ()
+  | Ok Upgrade.Held_without_announcement ->
+    let unconfirmed refusal = Owner_listener_unconfirmed { base_path; port; refusal } in
+    (match owner_lease_run_dir ~base_path with
+     | Error (error : Upgrade.error) -> Error (Owner_not_stopped error)
+     | Ok run_dir ->
+       Upgrade.single_user_listener ~run_dir ~base_path ~port |> Result.map_error unconfirmed)
 let stop ~base_path ~port ~agent ~expected_version ~login =
   let phase = ref Request_not_confirmed in
   let not_stopped answer = Result.map_error (fun error -> Owner_not_stopped error) answer in
@@ -156,10 +188,10 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     with_http (fun sw clock ->
       let open Result.Syntax in
-      let* () = stoppable ~base_path ~port in
+      let* listener = stoppable ~base_path ~port in
       let* run_dir = not_stopped (owner_lease_run_dir ~base_path) in
       not_stopped @@
-      with_selected_owner ~sw ~clock ~base_path ~port ~agent ~expected_version ~login (fun owner ->
+      with_selected_owner ~sw ~clock ~listener ~agent ~expected_version ~login (fun owner ->
         match Upgrade.request_termination_and_observe owner ~observe:(fun () ->
           phase := Request_confirmed;
           prerr_endline "Waiting for this workspace to shut down gracefully. Ctrl-C stops waiting; setup never forces it down.";

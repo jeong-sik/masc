@@ -62,7 +62,7 @@ let request_termination owner =
       else let* () = owner.signal () in owner.phase <- Requested; Ok ())
 let close owner = Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
   if owner.phase <> Released then (owner.release (); owner.phase <- Released))
-let prepare ~sw ~clock ~headers ~run_dir ~base_path ~port =
+let prepare_at ~sw ~clock ~headers ~run_dir ~base_path ~port =
   if port < 1 || port > 65535 then Error Invalid_health else
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
   let url path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path in
@@ -171,6 +171,63 @@ let holder (root : Host_config.base_path_lease_root) ~base_path ~port =
          | Account_server_on_port { pid = (_ : int) } -> Held_by_account_server { port }
          | Account_server_on_another_port { pid = (_ : int); port = announced } ->
            Held_by_account_server { port = announced }))
+type single_user_listener = { run_dir : string; base_path : string; port : int; pid : int }
+type listener_refusal =
+  | No_lease_owner
+  | Owner_announces_no_port of { pid : int }
+  | Owner_listens_on_another_port of { pid : int; port : int }
+  | Listener_unread of Server_startup_takeover.owner_capture_error
+(* HIGH-RISK-UNREVIEWED: this read decides which port gets the bearer of the
+   operator (#51321). A [single_user_listener] is made here and nowhere else,
+   and only when the kernel owner of the lease is the process that holds the
+   single-user announcement lock of the very byte of [port]. What the port
+   answers over HTTP is not read. *)
+let single_user_listener ~run_dir ~base_path ~port =
+  let unread rejection = Listener_unread (Server_startup_takeover.Owner_lease_rejected rejection) in
+  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+  | Error (Owner_identity_unavailable No_owner) -> Error No_lease_owner
+  | Error
+      ( Server_startup_takeover.Owner_lease_rejected _
+      | Server_startup_takeover.Owner_identity_unavailable
+          (Owner_changed | Unsupported | Unavailable | Closed)
+      | Server_startup_takeover.Current_process_owner as error ) -> Error (Listener_unread error)
+  | Ok owner ->
+    (* The owner stays captured over the reads, so the pid the locks are
+       compared with is the one of the process that holds the lease. *)
+    Fun.protect ~finally:(fun () -> Owner_process_identity.close owner) (fun () ->
+      let pid = Owner_process_identity.pid owner in
+      match Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port with
+      | Error rejection -> Error (unread rejection)
+      | Ok (Some holder) when holder = pid -> Ok { run_dir; base_path; port; pid }
+      | Ok (Some (_ : int)) | Ok None ->
+        (* The owner does not hold the byte of this port. The whole-file read
+           only names the port for the refusal, as in [account_server]. *)
+        (match Server_startup_takeover.single_user_server_announcement ~run_dir ~base_path with
+         | Error rejection -> Error (unread rejection)
+         | Ok (Some { Server_startup_takeover.pid = announcer; port = announced })
+           when announcer = pid && announced <> port ->
+           Error (Owner_listens_on_another_port { pid; port = announced })
+         | Ok (Some (_ : Server_startup_takeover.single_user_server_announcement)) | Ok None ->
+           Error (Owner_announces_no_port { pid })))
+let listener_port (listener : single_user_listener) = listener.port
+let listener_base_path (listener : single_user_listener) = listener.base_path
+(* HIGH-RISK-UNREVIEWED: the only place that puts the bearer of the operator
+   in a request (#51321). The port is the one inside [listener], so no port
+   that the kernel did not confirm can be named here. The confirmation is
+   read again right before each request that carries the bearer: once here,
+   and before every later [observe], which [request_termination] runs just
+   before it authorizes. An owner that left, or a port that changed hands,
+   ends in [Incumbent_changed] with nothing sent. *)
+let prepare ~sw ~clock ~listener ~token ~agent =
+  let { run_dir; base_path; port; pid } = listener in
+  let still_listens () =
+    match single_user_listener ~run_dir ~base_path ~port with
+    | Ok (again : single_user_listener) when again.pid = pid -> Ok ()
+    | Ok (_ : single_user_listener) | Error (_ : listener_refusal) -> Error Incumbent_changed in
+  let* () = still_listens () in
+  let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent] in
+  let* owner = prepare_at ~sw ~clock ~headers ~run_dir ~base_path ~port in
+  Ok { owner with observe = (fun () -> let* () = still_listens () in owner.observe ()) }
 let stop_account_server ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable

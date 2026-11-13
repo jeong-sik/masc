@@ -76,3 +76,27 @@ val delete
   -> base_path:string
   -> Authz_types.Conversation_id.t
   -> (Authz_purge_event.vendor_copy, error) result
+
+(** Ends the deletions a stopped server left (design 8.5-5), at the start of
+    a server that serves the routes of the persons. A pending deletion goes
+    on from the third step.
+
+    A conversation whose deletion went through and whose directory a restore
+    brought back is deleted again from the third step, and the system
+    maintenance records its end once more (design 8.5-6). The restore may
+    have brought back the home of the account too, so the CLI is asked again
+    for a copy the deletion removed or left as one that may remain. A
+    conversation no client got a message of keeps [none].
+
+    A deletion that failed waits for its owner to ask again. A pending one
+    whose owner was deleted is left: their membership named the directory of
+    their records, and the deletion of the principal took it out.
+
+    Each deletion runs inside the call of its account, as the deletion of
+    its owner does, and the status is read again there. One whose account
+    has a call running is left to the next start or to its owner. What
+    happens goes to the log of the server. An exception of one deletion goes
+    there too and leaves that deletion as it is: the others go on, and the
+    server keeps serving. Cancellation and the exceptions of a process that
+    cannot go on are raised. *)
+val resume : env:Eio_unix.Stdenv.base -> zone:Authz_zone.t -> base_path:string -> unit

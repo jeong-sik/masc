@@ -238,6 +238,12 @@ val client_reach : root -> conversation -> (reach, error) result
     when the directory of the conversation is gone. *)
 val project_path : root -> conversation -> (string, error) result
 
+(** Whether something is in the place of the directory of the conversation
+    of this id: the directory, or a link or a file there. It reads no index.
+    [Error] is the detail of a place that could not be looked at, which can
+    name a path of the server. *)
+val has_directory : root -> Conversation_id.t -> (bool, string) result
+
 (** Remove the directory of the conversation: its turns file and the
     directory its client started in. A link in it is removed, not followed.
     It waits for the reads in {!reading}. [Error] is the detail, which can

@@ -66,6 +66,9 @@ type since =
   | After_failure of Event.vendor_copy
       (* A deletion before this one failed, and wrote this of the copy. No
          turn went on in the conversation after it. *)
+  | After_restore of Event.vendor_copy
+      (* A deletion went through and wrote this of the copy, and a restore
+         brought its directory back. *)
 
 let client_mgr clock =
   Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:Process_eio.child_exit_grace_seconds
@@ -156,6 +159,13 @@ let vendor_copy ~since ~reach ~purge =
   match since with
   | After_failure ((Event.Removed | Event.No_copy) as copy) -> copy
   | After_failure Event.May_remain -> purge ()
+  | After_restore (Event.Removed | Event.May_remain) ->
+    (* The restore may have brought back the home of the account too, and
+       with it the copy. *)
+    purge ()
+  | After_restore Event.No_copy ->
+    (* No client got a message of it, so no copy was made to come back. *)
+    Event.No_copy
   | Fresh ->
     (match reach () with
      | Some Conversation.Reached | None -> purge ()
@@ -233,4 +243,119 @@ let delete ~env ~(person : Login.person) ~base_path conversation_id =
       | Some (Purges.Pending { earlier_vendor_copy = None }) -> finish After_stop
       | Some (Purges.Pending { earlier_vendor_copy = Some copy }) -> finish (After_failure copy)
       | Some (Purges.Purged { vendor_copy = _ }) -> Error Not_found)
+;;
+
+(* A place that could not be looked at is left as it is: a deletion that went
+   through stays so. *)
+let not_looked_at conversation_id detail =
+  Log.Server.warn
+    "The directory of deleted conversation %s was not looked at, so a restore of it is not \
+     undone: %s"
+    (Conversation_id.to_string conversation_id)
+    detail
+;;
+
+(* The status is judged again inside the call of the account, where the
+   deletion of the owner runs too, so the two do not both end it. *)
+let resume_one ~env ~zone ~base_path ~owner ~namespace conversation_id =
+  let person = { Login.zone; user_id = owner; namespace } in
+  let records = Conversation.root ~base_path ~namespace in
+  let id = Conversation_id.to_string conversation_id in
+  match Conversation.find records conversation_id with
+  | Error error ->
+    Log.Server.warn
+      "The deletion of conversation %s was not resumed: the conversations were not read: %s"
+      id
+      (Conversation.error_to_string error)
+  | Ok None ->
+    Log.Server.warn
+      "The deletion of conversation %s was not resumed: its owner has no conversation of the id"
+      id
+  | Ok (Some conversation) ->
+    let ended since = Result.map Option.some (finish ~env person ~base_path ~records conversation ~since) in
+    (match
+       Login.one_call_of conversation.Conversation.provider_account_id ~busy:Account_busy (fun () ->
+         match status_of person conversation_id with
+         | Some (Purges.Pending { earlier_vendor_copy = None }) -> ended After_stop
+         | Some (Purges.Pending { earlier_vendor_copy = Some copy }) -> ended (After_failure copy)
+         | Some (Purges.Purged { vendor_copy }) ->
+           (match Conversation.has_directory records conversation_id with
+            | Ok true -> ended (After_restore vendor_copy)
+            | Ok false -> Ok None
+            | Error detail ->
+              not_looked_at conversation_id detail;
+              Ok None)
+         | Some (Purges.Failed { failed_stage = _; vendor_copy = _ }) | None -> Ok None)
+     with
+     | Ok (Some vendor_copy) ->
+       Log.Server.info
+         "The deletion of conversation %s ended at the start of the server; the copy of the vendor \
+          is %s"
+         id
+         (Event.vendor_copy_label vendor_copy)
+     | Ok None -> ()
+     | Error Account_busy ->
+       Log.Server.warn
+         "The deletion of conversation %s was not resumed: a call of its account runs. The next \
+          start of the server, or a deletion by its owner, ends it."
+         id
+     | Error (Directory_not_removed (_ : Event.vendor_copy) | Not_ended (_ : Authz_purge.error)) ->
+       (* {!finish} logged the detail. *)
+       ()
+     | Error (Not_found | Record_unavailable (_ : Conversation.error) | Not_started (_ : Authz_purge.error))
+       ->
+       (* Only the start of a deletion by its owner answers these. *)
+       Log.Server.warn "The deletion of conversation %s was not resumed" id)
+;;
+
+(* An exception of one deletion would end the switch of the server, and at
+   each start again, since the record it came from is still there. It goes
+   to the log, and the deletion stays as it is, for the next start or its
+   owner, as the deletions of the other records go on. *)
+let guarded conversation_id f =
+  match f () with
+  | () -> ()
+  | exception ((Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn) ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exception exn ->
+    Log.Server.warn
+      "The deletion of conversation %s was not resumed: %s"
+      (Conversation_id.to_string conversation_id)
+      (Printexc.to_string exn)
+;;
+
+let resume ~env ~zone ~base_path =
+  let state = (Authz_zone.snapshot zone).Authz_zone.state in
+  (* An owner wrote [Purge_pending] while active, so with a membership. A
+     deletion of the principal takes it out, and with it the one name of
+     the directory of their records. *)
+  let namespace_of owner =
+    Option.map
+      (fun membership -> membership.Authz_principal_state.account_home_namespace)
+      (Authz_principal_state.find_membership state.Authz_state.principals owner)
+  in
+  List.iter
+    (fun ((target : Event.target), (status : Purges.status)) ->
+       let (Event.Keeper_conversation { owner; conversation_id }) = target in
+       guarded conversation_id @@ fun () ->
+       match status, namespace_of owner with
+       | Purges.Pending { earlier_vendor_copy = _ }, Some namespace ->
+         resume_one ~env ~zone ~base_path ~owner ~namespace conversation_id
+       | Purges.Pending { earlier_vendor_copy = _ }, None ->
+         Log.Server.warn
+           "The deletion of conversation %s was not resumed: its owner has no membership, so \
+            nothing names the directory of their records"
+           (Conversation_id.to_string conversation_id)
+       | Purges.Purged { vendor_copy = _ }, Some namespace ->
+         (* A conversation that went through and is not back costs no read
+            of its index. *)
+         (match Conversation.has_directory (Conversation.root ~base_path ~namespace) conversation_id with
+          | Ok true -> resume_one ~env ~zone ~base_path ~owner ~namespace conversation_id
+          | Ok false -> ()
+          | Error detail -> not_looked_at conversation_id detail)
+       | Purges.Purged { vendor_copy = _ }, None -> ()
+       | Purges.Failed { failed_stage = _; vendor_copy = _ }, (Some _ | None) ->
+         (* Its owner asks for the deletion again. *)
+         ())
+    (Purges.to_list state.Authz_state.purges)
 ;;

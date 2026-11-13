@@ -3,7 +3,8 @@
 // person learns before pressing anything what an account cannot do.
 //
 // `createSubscriptions` reads them for the person the console shows and
-// holds the person's connecting of a subscription (connect.ts);
+// holds the person's connecting of a subscription (connect.ts) and checks of
+// a model (check.ts);
 // `SubscriptionsPanel` draws whatever state it is given, and
 // account-rows.ts a card for each account.
 
@@ -11,6 +12,8 @@ import { effect, signal, type ReadonlySignal } from '@preact/signals'
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
+import { createChecks } from './check'
+import type { ChecksModel } from './check'
 import { createConnect } from './connect'
 import type { ConnectModel } from './connect'
 import { ConnectArea } from './connect-area'
@@ -49,6 +52,8 @@ export interface SubscriptionsModel {
   readonly retry: () => Promise<void>
   /** The connecting of a subscription by the person the panel shows. */
   readonly connecting: ConnectModel
+  /** The checks of a model of an account by the person the panel shows. */
+  readonly checking: ChecksModel
 }
 
 type Found =
@@ -108,7 +113,9 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     return now.kind === 'read' ? read(now.forUser, 0) : Promise.resolve()
   }
 
-  const connecting = createConnect({ send, leave, token: () => session?.csrfToken ?? null, refresh })
+  const token = (): string | null => session?.csrfToken ?? null
+  const connecting = createConnect({ send, leave, token, refresh })
+  const checking = createChecks({ send, leave, token, refresh })
 
   // The methods read the state with peek(): a caller inside an effect does
   // not come to depend on the panel's state.
@@ -117,6 +124,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     session = next
     if (now.kind !== 'waiting' && now.forUser === next.userId) return Promise.resolve()
     connecting.reset()
+    checking.reset()
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
   }
@@ -128,7 +136,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     return read(now.forUser, now.failure.attempts)
   }
 
-  return { view, load, retry, connecting }
+  return { view, load, retry, connecting, checking }
 }
 
 /** Reads the subscriptions of each person the console comes to show
@@ -148,9 +156,10 @@ function Offer({ integrations }: { readonly integrations: readonly Integration[]
   return html`<p class="hint">이 서버에서 Keeper를 실행할 수 있는 구독: ${names.join(', ')}</p>`
 }
 
-function PanelBody({ view, connecting, onRetry }: {
+function PanelBody({ view, connecting, checking, onRetry }: {
   readonly view: PanelView
   readonly connecting: ConnectModel
+  readonly checking: ChecksModel
   readonly onRetry: () => void
 }): VNode {
   switch (view.kind) {
@@ -169,7 +178,7 @@ function PanelBody({ view, connecting, onRetry }: {
       return html`
         <${Offer} integrations=${view.integrations} />
         ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
-        <${AccountList} integrations=${view.integrations} owned=${view.owned} />
+        <${AccountList} integrations=${view.integrations} owned=${view.owned} checks=${checking} />
         <p class="hint" role="status"></p>
       `
   }
@@ -194,7 +203,7 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
     <section aria-labelledby="subscriptions-heading">
       <h2 id="subscriptions-heading" ref=${heading} tabindex="-1">구독</h2>
       <p class="hint">내 Keeper는 내가 연결한 구독으로 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
-      <${PanelBody} view=${view} connecting=${model.connecting} onRetry=${() => { void model.retry() }} />
+      <${PanelBody} view=${view} connecting=${model.connecting} checking=${model.checking} onRetry=${() => { void model.retry() }} />
     </section>
   `
 }

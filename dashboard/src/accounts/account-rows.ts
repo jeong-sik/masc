@@ -1,10 +1,13 @@
 // The rows of the subscriptions panel: a card for each account the person
 // connected, with the Runtimes made on it and whether a Keeper may run on it
-// here. Each card says before anything is pressed what its account cannot do.
+// here. Each card says before anything is pressed what its account cannot do,
+// and on an account a Keeper may run on, the person checks a model in its card.
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { idTail } from './notes'
+import { checkLimitMinutes } from './check'
+import type { Check, CheckFailure, ChecksModel } from './check'
+import { ProblemNote, idTail, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
 import type { CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, ProviderAccount, Runtime } from './wire'
 
@@ -107,6 +110,55 @@ function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
   }
 }
 
+const operatorWords = '이 서버를 운영하는 사람에게 알려 주세요.'
+
+/** Why a call of a model did not pass, and what the person can do next. */
+function checkFailureWords(failure: CheckFailure): string {
+  switch (failure) {
+    case 'rate_limited': return '구독 쪽이 요청이 많다며 잠시 막았어요. 잠시 뒤 다시 확인해 주세요.'
+    case 'quota_exhausted': return '이 구독의 사용량을 다 썼어요. 사용량이 다시 열린 뒤 확인해 주세요.'
+    case 'provider_overloaded': return '구독 쪽 서버가 바쁘거나 오류를 냈어요. 잠시 뒤 다시 확인해 주세요.'
+    case 'provider_auth_refused':
+    case 'provider_rejected':
+      return '구독 쪽이 이 계정의 요청을 받지 않았어요. 이 계정이 이 모델을 쓸 수 있는지 확인해 주세요.'
+    case 'model_not_found': return '구독 쪽에 이 모델이 없어요. 다른 모델을 골라 주세요.'
+    case 'timed_out': return '정해진 시간 안에 확인이 끝나지 않았어요. 다시 확인해 주세요.'
+    case 'tool_not_called':
+    case 'tool_result_not_consumed':
+      return '모델이 답했지만 확인용 도구를 제대로 쓰지 않았어요. Keeper는 도구를 써야 일할 수 있어요. 다시 확인하거나 다른 모델을 골라 주세요.'
+    case 'empty_response': return '모델이 빈 답을 보냈어요. 다시 확인해 주세요.'
+    case 'provider_unreachable': return `이 서버가 구독 쪽에 닿지 못했어요. ${operatorWords}`
+    case 'model_unreported': return `구독 쪽이 어떤 모델이 답했는지 알려 주지 않았어요. ${operatorWords}`
+    case 'client_not_authenticated': return `로그인 도구가 이 계정의 로그인을 찾지 못했어요. ${operatorWords}`
+    case 'missing_credential':
+    case 'invalid_credential':
+    case 'unsupported_runtime':
+    case 'tools_not_declared':
+    case 'invalid_configuration':
+    case 'client_not_started':
+    case 'account_not_authorized':
+      return `이 서버의 설정 때문에 확인하지 못했어요. ${operatorWords}`
+    case 'unrecognised': return '이 화면이 모르는 까닭으로 확인하지 못했어요.'
+  }
+}
+
+/** The line a screen reader reads out for the check of an account. A check
+    that came to nothing is said in an alert under it. */
+function checkWords(check: Check): string {
+  switch (check.kind) {
+    case 'checking':
+      return `${check.model} 모델을 확인하고 있어요. 서버가 이 계정으로 모델을 한 번 불러 봐요. 길게는 ${checkLimitMinutes}분쯤 걸려요.`
+    case 'passed':
+      return check.made
+        ? `${check.model} 모델을 확인했어요. 이제 이 구독으로 Keeper를 실행할 수 있어요.`
+        : `${check.model} 모델을 다시 확인했어요. 이 모델로 Keeper를 실행할 수 있어요.`
+    case 'failed':
+    case 'not_done':
+      return ''
+    case 'leaving': return sessionEndedWords
+  }
+}
+
 // ---- the rows ----
 
 /** What an account can do here, in words and a border, never in colour alone.
@@ -142,7 +194,55 @@ function Models({ runtimes }: { readonly runtimes: readonly Runtime[] }): VNode 
   `
 }
 
-function AccountRow({ facts }: { readonly facts: AccountFacts }): VNode {
+/** The alert of a call of a model that did not pass. */
+function FailedNote({ check }: { readonly check: Extract<Check, { kind: 'failed' }> }): VNode {
+  return html`
+    <div class="callout" role="alert">
+      <p class="callout-title">${check.model} 모델을 확인하지 못했어요</p>
+      <p>${checkFailureWords(check.failure)}</p>
+      ${check.reason === null ? null : html`<p class="hint">서버가 알려 준 이유: <span lang="en">${check.reason}</span></p>`}
+      ${check.attempts > 1 ? html`<p class="hint">${check.attempts}번 시도했어요.</p>` : null}
+    </div>
+  `
+}
+
+/** The models of the subscription of an account, the button that checks the
+    one picked, and what the latest check found. The button stays where it is
+    while a check runs, marked, so the focus of the person who pressed it
+    stays on it. The line a screen reader reads out is there from the start;
+    each check that comes to nothing puts a new alert on the page, so a
+    second one for the same reason is read out too. */
+function CheckArea({ accountId, models, check, checks }: {
+  readonly accountId: string
+  readonly models: readonly string[]
+  readonly check: Check | undefined
+  readonly checks: ChecksModel
+}): VNode {
+  if (models.length === 0) return html`<p class="hint">이 서버에는 이 구독으로 확인할 수 있는 모델이 없어요. ${operatorWords}</p>`
+  const busy = check?.kind === 'checking' || check?.kind === 'leaving'
+  const onSubmit = (event: Event): void => {
+    event.preventDefault()
+    const picked = new FormData(event.currentTarget as HTMLFormElement).get('model')
+    if (!busy && typeof picked === 'string') void checks.check(accountId, picked)
+  }
+  const field = `check-model-${accountId}`
+  return html`
+    <form class="check" onSubmit=${onSubmit}>
+      <label for=${field}>확인할 모델</label>
+      <select id=${field} name="model">
+        ${models.map((model) => html`<option key=${model} value=${model}>${model}</option>`)}
+      </select>
+      <button type="submit" aria-disabled=${busy}>모델 확인</button>
+    </form>
+    <p class="hint" role="status">${check === undefined ? '' : checkWords(check)}</p>
+    ${check?.kind === 'failed' ? html`<${FailedNote} key=${check.attempts} check=${check} />` : null}
+    ${check?.kind === 'not_done'
+      ? html`<${ProblemNote} key=${check.attempts} title=${`${check.model} 모델을 확인하지 못했어요`} failure=${{ problem: check.problem, attempts: check.attempts }} />`
+      : null}
+  `
+}
+
+function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly checks: ChecksModel }): VNode {
   const { account, offered } = facts
   const name = subscriptionName(account, offered)
   return html`
@@ -155,15 +255,22 @@ function AccountRow({ facts }: { readonly facts: AccountFacts }): VNode {
         : html`<p class="hint">${integrationUnreadWords(account.integration.unread)}</p>`}
       ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
       <${Models} runtimes=${facts.runtimes} />
+      ${offered !== null && offered.calls.kind === 'allowed'
+        ? html`<${CheckArea} accountId=${account.id} models=${offered.models} check=${checks.checks.value.get(account.id)} checks=${checks} />`
+        : null}
     </li>
   `
 }
 
-export function AccountList({ integrations, owned }: { readonly integrations: readonly Integration[]; readonly owned: Owned }): VNode {
+export function AccountList({ integrations, owned, checks }: {
+  readonly integrations: readonly Integration[]
+  readonly owned: Owned
+  readonly checks: ChecksModel
+}): VNode {
   if (owned.accounts.length === 0) return html`<p>아직 연결한 구독이 없어요.</p>`
   return html`
     <ul class="rows">
-      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} />`)}
+      ${accountFacts(integrations, owned).map((facts) => html`<${AccountRow} key=${facts.account.id} facts=${facts} checks=${checks} />`)}
     </ul>
   `
 }

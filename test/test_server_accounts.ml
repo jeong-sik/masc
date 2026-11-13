@@ -272,13 +272,13 @@ let no_login_client = {|{"enabled":true,"require_token":true,"account_mode":"Mul
 let github_secret_env = "MASC_TEST_ACCOUNTS_GITHUB_SECRET"
 let unset_secret_env = "MASC_TEST_ACCOUNTS_UNSET_SECRET"
 
-let with_github_client ~redirect_uri ~client_secret_env =
+let with_login_client ~member ~redirect_uri ~client_secret_env =
   Yojson.Safe.to_string
     (`Assoc
         [ "enabled", `Bool true
         ; "require_token", `Bool true
         ; "account_mode", `String "Multi_account"
-        ; ( "github"
+        ; ( member
           , `Assoc
               [ "client_id", `String "client-of-the-case"
               ; "redirect_uri", `String redirect_uri
@@ -286,6 +286,9 @@ let with_github_client ~redirect_uri ~client_secret_env =
               ] )
         ])
 ;;
+
+let with_github_client = with_login_client ~member:"github"
+let with_google_client = with_login_client ~member:"google"
 
 let https_redirect = "https://masc.example" ^ Server_login_http.github_callback_path
 
@@ -364,8 +367,8 @@ let refusal_label : Server_accounts.refusal -> string = function
     Printf.sprintf "github redirect on %s, the callback is %s" redirect_path callback_path
   | Server_accounts.Login_client_refused
       (Server_account_login.Redirect_not_the_callback
-         { provider = Login_routes.Google; callback_path = _; redirect_path = _ }) ->
-    "google redirect not on the callback"
+         { provider = Login_routes.Google; callback_path; redirect_path }) ->
+    Printf.sprintf "google redirect on %s, the callback is %s" redirect_path callback_path
   | Server_accounts.Login_client_refused
       (Server_account_login.Redirect_not_on_the_base_url
          { provider = Login_routes.Github; base_url_origin; redirect_origin }) ->
@@ -374,6 +377,12 @@ let refusal_label : Server_accounts.refusal -> string = function
       (Server_account_login.Redirect_not_on_the_base_url
          { provider = Login_routes.Google; base_url_origin = _; redirect_origin = _ }) ->
     "google redirect not on the base URL"
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Redirect_not_read { provider = Login_routes.Github; redirect_uri }) ->
+    Printf.sprintf "github redirect not read: %S" redirect_uri
+  | Server_accounts.Login_client_refused
+      (Server_account_login.Redirect_not_read { provider = Login_routes.Google; redirect_uri }) ->
+    Printf.sprintf "google redirect not read: %S" redirect_uri
   | Server_accounts.Route_of_another_kind _ -> "route of another kind"
   | Server_accounts.Https_listener_refused _ -> "HTTPS listener refused"
   | Server_accounts.Listener_not_bound { host; port = _; reason = _ } ->
@@ -517,6 +526,35 @@ let test_stops_when_a_login_client_is_refused () =
           ~redirect_uri:(https_redirect ^ "/")
           ~client_secret_env:github_secret_env
       , "github redirect on /auth/github/callback/, the callback is /auth/github/callback" )
+      (* The provider is sent the redirect as it is written and the router
+         finds a route by the bytes of a path, so a path that only decodes
+         or resolves to the callback is one this server answers 404 on
+         ([test_serves_its_table_alone]). *)
+    ; ( with_github_client
+          ~redirect_uri:"https://masc.example/%61uth/github/callback"
+          ~client_secret_env:github_secret_env
+      , "github redirect on /%61uth/github/callback, the callback is /auth/github/callback" )
+    ; ( with_github_client
+          ~redirect_uri:"https://masc.example/auth%2Fgithub/callback"
+          ~client_secret_env:github_secret_env
+      , "github redirect on /auth%2Fgithub/callback, the callback is /auth/github/callback" )
+    ; ( with_github_client
+          ~redirect_uri:"https://masc.example/auth/../auth/github/callback"
+          ~client_secret_env:github_secret_env
+      , "github redirect on /auth/../auth/github/callback, the callback is /auth/github/callback"
+      )
+    ; ( with_google_client
+          ~redirect_uri:"https://masc.example/auth/oidc/%63allback"
+          ~client_secret_env:github_secret_env
+      , "google redirect on /auth/oidc/%63allback, the callback is /auth/oidc/callback" )
+    ; ( with_google_client
+          ~redirect_uri:"https://masc.example/auth/oidc%2Fcallback"
+          ~client_secret_env:github_secret_env
+      , "google redirect on /auth/oidc%2Fcallback, the callback is /auth/oidc/callback" )
+    ; ( with_google_client
+          ~redirect_uri:"https://masc.example/auth/./oidc/callback"
+          ~client_secret_env:github_secret_env
+      , "google redirect on /auth/./oidc/callback, the callback is /auth/oidc/callback" )
     ]
 ;;
 
@@ -528,6 +566,92 @@ let redirect_check_label = function
   | Ok Server_account_login.Compared_with_the_base_url -> "compared"
   | Ok Server_account_login.No_base_url -> "no base URL"
   | Error refusal -> refusal_label (Server_accounts.Login_client_refused refusal)
+;;
+
+(* A redirect is read as the operator wrote it: an origin and a path. The
+   origin is the same one in another case of its scheme or its host and with
+   the default port written out; the path is the callback byte for byte.
+   What is not an https URL of a host is refused by the client itself. *)
+let test_reads_a_redirect_as_it_is_written () =
+  let base_url =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"127.0.0.1"
+        ~bind_port:8935
+        ~https_port:None
+        ~explicit_base_url:(Some "https://masc.example")
+    with
+    | Ok policy -> Some (Server_request_authority.projection_context policy)
+    | Error error -> Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  let outcome_of login_clients =
+    match
+      Server_account_login.clients_of_config
+        ~getenv:(fun (_ : string) -> Some "secret-of-the-case")
+        login_clients
+    with
+    | Ok clients ->
+      redirect_check_label (Server_account_login.redirects_on_the_server ~base_url clients)
+    | Error refusal -> refusal_label (Server_accounts.Login_client_refused refusal)
+  in
+  let member redirect_uri =
+    Some
+      { Masc_domain.client_id = "client-of-the-case"
+      ; redirect_uri
+      ; client_secret_env = github_secret_env
+      }
+  in
+  let github = Server_login_http.github_callback_path in
+  let google = Server_login_http.google_callback_path in
+  List.iter
+    (fun (redirect_uri, expected) ->
+      Alcotest.(check string)
+        (Printf.sprintf "the GitHub redirect %S" redirect_uri)
+        expected
+        (outcome_of { Read.google = None; github = member redirect_uri }))
+    [ "https://masc.example" ^ github, "compared"
+    ; "HTTPS://MASC.Example" ^ github, "compared"
+    ; "https://masc.example:443" ^ github, "compared"
+    ; ( "https://masc.example:8443" ^ github
+      , "github redirect on https://masc.example:8443, the base URL is on https://masc.example" )
+    ; ( "https://masc.ex%61mple" ^ github
+      , "github redirect on https://masc.ex%61mple, the base URL is on https://masc.example" )
+    ; ( "https://masc.example:" ^ github
+      , Printf.sprintf "github redirect not read: %S" ("https://masc.example:" ^ github) )
+    ; ( "https://masc.example:99999999999999999999" ^ github
+      , Printf.sprintf
+          "github redirect not read: %S"
+          ("https://masc.example:99999999999999999999" ^ github) )
+    ; ( "https://person@masc.example" ^ github
+      , Printf.sprintf "github redirect not read: %S" ("https://person@masc.example" ^ github) )
+    ; ( "https://masc.example/%61uth/github/callback"
+      , "github redirect on /%61uth/github/callback, the callback is " ^ github )
+    ; ( "https://masc.example/auth/%2e%2e/auth/github/callback"
+      , "github redirect on /auth/%2e%2e/auth/github/callback, the callback is " ^ github )
+    ; ( "https://masc.example/auth/github/c%41llback"
+      , "github redirect on /auth/github/c%41llback, the callback is " ^ github )
+    ; ( "https://masc.example/Auth/github/callback"
+      , "github redirect on /Auth/github/callback, the callback is " ^ github )
+    ; ( "https://masc.example/" ^ github
+      , "github redirect on /" ^ github ^ ", the callback is " ^ github )
+    ; ( "https://masc.example" ^ github ^ "\n"
+      , "github redirect on " ^ github ^ "\n, the callback is " ^ github )
+    ; "https://masc.example" ^ github ^ "?", "github client refused: the redirect is not https"
+    ; "https://masc.example" ^ github ^ "#", "github client refused: the redirect is not https"
+    ];
+  List.iter
+    (fun (redirect_uri, expected) ->
+      Alcotest.(check string)
+        (Printf.sprintf "the Google redirect %S" redirect_uri)
+        expected
+        (outcome_of { Read.google = member redirect_uri; github = None }))
+    [ "https://masc.example" ^ google, "compared"
+    ; "https://Masc.Example:443" ^ google, "compared"
+    ; ( "https://masc.example/auth/oidc/%63allback"
+      , "google redirect on /auth/oidc/%63allback, the callback is " ^ google )
+    ; ( "https://masc.example:" ^ google
+      , Printf.sprintf "google redirect not read: %S" ("https://masc.example:" ^ google) )
+    ]
 ;;
 
 let test_compares_a_redirect_with_the_base_url () =
@@ -870,6 +994,21 @@ let test_serves_its_table_alone () =
         ; "GET", "/ws"
         ; "GET", "/api/v1/keepers"
         ];
+      (* The callback of the client of config.json is found by the bytes of
+         its path. A path that decodes or resolves to it is not in the table,
+         which is why the boot reads the path of a redirect as it is written
+         ([test_reads_a_redirect_as_it_is_written]). *)
+      Alcotest.(check bool)
+        ("GET " ^ Server_login_http.github_callback_path ^ " is in the table")
+        true
+        (fst (request ~net ~port ~meth:"GET" Server_login_http.github_callback_path) <> 404);
+      List.iter
+        (fun path ->
+          Alcotest.(check int) ("GET " ^ path) 404 (fst (request ~net ~port ~meth:"GET" path)))
+        [ "/%61uth/github/callback"
+        ; "/auth%2Fgithub/callback"
+        ; "/auth/../auth/github/callback"
+        ];
       (* The MCP endpoint of a person takes one message for one answer: the
          table holds no stream and no session to close on its path. *)
       List.iter
@@ -1207,6 +1346,10 @@ let () =
             "the boot stops before it announces when the trust policy refuses"
             `Quick
             test_stops_before_it_announces_when_the_trust_policy_refuses
+        ; Alcotest.test_case
+            "a redirect is read as it is written"
+            `Quick
+            test_reads_a_redirect_as_it_is_written
         ; Alcotest.test_case "it serves its table alone" `Quick test_serves_its_table_alone
         ] )
     ]

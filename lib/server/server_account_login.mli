@@ -27,6 +27,14 @@ type refusal =
       }
       (** The provider would send the browser back to an origin that is not
           the one the operator configured as the base URL of this server. *)
+  | Redirect_not_read of
+      { provider : Login_routes.provider
+      ; redirect_uri : string  (** The [redirect_uri] of the member, as written. *)
+      }
+      (** What stands before the path of the [redirect_uri] is not an origin
+          {!Server_request_authority.parse_serialized_origin} reads: it holds
+          a userinfo, an empty port or one above 65535, or a byte no host
+          holds. *)
 
 (** Names the provider, and the variable, the field or the path that was
     refused. The value of a secret is in no refusal. *)
@@ -45,7 +53,19 @@ type clients =
     ({!Server_login_http.google_callback_path},
     {!Server_login_http.github_callback_path}). The origin of the redirect is
     compared by {!redirects_on_the_server}, once the server knows its own
-    address. A member that is there and whose client is refused stops the boot:
+    address.
+
+    HIGH-RISK-UNREVIEWED: the redirect is read as the operator wrote it, an
+    origin and a path, because the provider is sent that text and the router
+    of this server finds a route by the bytes of the path of a request. Of
+    the equivalences of RFC 3986 section 6, the origin takes the case of the
+    scheme and of the host (6.2.2.1) and the default port, [:443] for
+    [https] (6.2.3); an empty port ([host:]) is refused and not read as the
+    default one. The path takes none: a percent-encoded octet, in either
+    case of its digits (6.2.2.1, 6.2.2.2), a dot segment (6.2.2.3), another
+    case of a letter, a doubled or a trailing [/] and an empty path are each
+    another path than the callback, and a percent-encoded octet of the host
+    is another host. A member that is there and whose client is refused stops the boot:
     a server that left it out would answer 404 on a login the operator
     configured. A member that is not there gives [None], and its routes
     answer 404 ({!Login_routes.t}). The Google client gets an empty cache of

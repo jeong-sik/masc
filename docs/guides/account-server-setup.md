@@ -72,6 +72,13 @@ there:
   an https URL with a host and no query or fragment, when its path is not
   the callback of its provider, or when its origin is not that of
   `MASC_HTTP_BASE_URL` (when that is set).
+- A redirect is read as it is written. The path has to be the callback
+  byte for byte: `/%61uth/github/callback` or `/auth/../auth/github/callback`
+  stops the boot, because the server answers 404 on a path that only decodes
+  or resolves to the callback. The scheme and the host may be in another
+  case, and `:443` may be written out. A redirect with a userinfo
+  (`https://name@<host>/…`), an empty port (`https://<host>:/…`) or a port
+  above 65535 stops the boot.
 
 ## 2. Activate the workspace and invite the first Admin
 

@@ -391,6 +391,28 @@ let keeper_conversation t ~base_path request reqd =
             ~query:(query_of request)))
 ;;
 
+(* A deletion removes a conversation recorded under the namespace of the
+   person, so the gate that gives it judges the request, as for a new
+   conversation. It asks the vendor CLI to drop its copy and calls no model,
+   so the token is not read. The body is not read either. *)
+let delete_keeper_conversation t ~env ~base_path request reqd =
+  with_entry ~prefix:Auth_preview_keeper.conversation_entry_prefix request reqd (fun conversation_id ->
+    as_gated
+      t
+      ~gate:Auth_preview.keeper_turn_caller
+      request
+      reqd
+      (fun (_ : Authz_state.t) { Auth_preview.person; pat = (_ : Authz_types.Pat_binding.t) } ->
+         with_body reqd (fun (_ : string) ->
+           respond
+             reqd
+             (Server_preview_keeper_conversation.delete
+                ~env
+                ~person:(person_of t person)
+                ~base_path
+                ~conversation_id))))
+;;
+
 (* A turn starts the client of the person's account on a home under their
    namespace, inside the scope of the token that authenticated the request,
    so its gate gives both. *)
@@ -450,6 +472,10 @@ let add_person_routes t ~env ~base_path router =
        Auth_preview_keeper.conversation_path
        (new_keeper_conversation t ~env ~base_path)
   |> Server_route.get access Auth_preview_keeper.conversation_path (keeper_conversation t ~base_path)
+  |> Server_route.prefix_delete
+       access
+       Auth_preview_keeper.conversation_entry_prefix
+       (delete_keeper_conversation t ~env ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
   |> Server_route.post mcp_access Server_person_mcp.path (person_mcp t ~env ~base_path)

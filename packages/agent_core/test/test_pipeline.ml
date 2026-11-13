@@ -2001,6 +2001,215 @@ let test_trace_finalization_preserves_committed_success diagnostic_fault () =
       (List.length tail.events)
 ;;
 
+(* Where the optional raw trace stops accepting writes while the run is still
+   doing real work.  Each site makes the trace path a directory from inside the
+   very callback whose fact the trace records next. *)
+type trace_write_fault =
+  | Trace_fails_under_provider_response
+  | Trace_fails_under_tool_effect
+  | Trace_fails_under_allowing_hook
+  | Trace_fails_under_blocking_hook
+
+let test_trace_write_failure_keeps_execution fault () =
+  with_execution_test_dir "agent_core-trace-midrun-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let trace_path = Filename.temp_file "agent_core-midrun-observer-" ".jsonl" in
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.is_directory trace_path then Unix.rmdir trace_path else Sys.remove trace_path);
+  let trace = unwrap_raw_trace (Raw_trace.create ~path:trace_path ()) in
+  let trace_broken = ref false in
+  let break_trace () =
+    if not !trace_broken
+    then (
+      trace_broken := true;
+      Sys.remove trace_path;
+      Unix.mkdir trace_path 0o700)
+  in
+  let final_text = "answer after the trace stopped" in
+  let responses =
+    ref
+      (match fault with
+       | Trace_fails_under_provider_response ->
+         [ Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 final_text [] ]
+       | Trace_fails_under_tool_effect
+       | Trace_fails_under_allowing_hook
+       | Trace_fails_under_blocking_hook ->
+         [ Provider_mock.tool_use_response
+             ~tool_name:"effect_tool"
+             ~tool_input:(`Assoc [])
+             ()
+             []
+         ; Provider_mock.text_response ~input_tokens:7 ~output_tokens:3 final_text []
+         ])
+  in
+  let provider_calls = ref 0 in
+  let next_response () =
+    incr provider_calls;
+    (match fault with
+     | Trace_fails_under_provider_response -> break_trace ()
+     | Trace_fails_under_tool_effect
+     | Trace_fails_under_allowing_hook
+     | Trace_fails_under_blocking_hook -> ());
+    match !responses with
+    | response :: rest ->
+      responses := rest;
+      Ok response
+    | [] -> Alcotest.fail "provider was asked again after the final answer"
+  in
+  let transport =
+    Llm_provider.Llm_transport.custom
+      { complete_sync =
+          (fun _request ->
+            { Llm_provider.Llm_transport.response = next_response ()
+            ; latency_ms = Some 0
+            })
+      ; complete_stream = (fun ?on_telemetry:_ ~on_event:_ _request -> next_response ())
+      }
+  in
+  let tool_calls = ref 0 in
+  let tool =
+    Tool.create
+      ~name:"effect_tool"
+      ~description:"external effect that must happen at most once"
+      ~parameters:[]
+      (fun _ ->
+         incr tool_calls;
+         (match fault with
+          | Trace_fails_under_tool_effect -> break_trace ()
+          | Trace_fails_under_provider_response
+          | Trace_fails_under_allowing_hook
+          | Trace_fails_under_blocking_hook -> ());
+         Ok { Types.content = "effect settled"; content_blocks = None; _meta = None })
+  in
+  let hooks =
+    match fault with
+    | Trace_fails_under_provider_response | Trace_fails_under_tool_effect -> Hooks.empty
+    | Trace_fails_under_allowing_hook ->
+      { Hooks.empty with
+        pre_tool_use =
+          Some
+            (fun _event ->
+              break_trace ();
+              Hooks.Continue)
+      }
+    | Trace_fails_under_blocking_hook ->
+      { Hooks.empty with
+        pre_tool_use =
+          Some
+            (fun _event ->
+              break_trace ();
+              Hooks.Block "refused by the hook")
+      }
+  in
+  let completion = ref None in
+  let agent =
+    Agent.create
+      ~media_store:(Agent_core.History.Memory_store.create ())
+      ~net:(Eio.Stdenv.net env)
+      ~config:{ (Types.default_config ~model:"test-model") with name = "trace-midrun" }
+      ~tools:[ tool ]
+      ~options:
+        { Agent.default_options with
+          transport = Some transport
+        ; provider_config = Some (Provider_mock.to_provider_config ())
+        ; raw_trace = Some trace
+        ; hooks
+        ; on_run_complete = Some (fun ok -> completion := Some ok)
+        }
+      ()
+  in
+  let terminal_outcome = ref None in
+  let execution_store =
+    Agent.execution_store
+      ~runtime
+      ~dir
+      ~on_scope_ready:(fun _locator -> Ok ())
+      ~on_terminal_disposition:(fun disposition ->
+        terminal_outcome := Some disposition.Agent.outcome;
+        Ok ())
+      ()
+  in
+  let missing_boundaries = ref [] in
+  Log.clear_sinks ();
+  Log.set_global_level Log.Warn;
+  Log.add_sink (fun (record : Log.record) ->
+    if record.module_name = "agent_trace"
+       && record.message = "raw trace record not written"
+    then
+      List.iter
+        (function
+          | Log.S ("trace_boundary", boundary) ->
+            missing_boundaries := boundary :: !missing_boundaries
+          | Log.S _ | Log.I _ | Log.F _ | Log.B _ | Log.J _ | Log.Secret _ -> ())
+        record.fields);
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        Log.clear_sinks ();
+        Log.set_global_level Log.Info)
+      (fun () -> Agent.run ~sw ~execution_store agent "do the work")
+  in
+  Alcotest.(check bool) "the trace was broken during the run" true !trace_broken;
+  (match result with
+   | Ok response ->
+     Alcotest.(check string)
+       "accepted provider answer survives the trace failure"
+       final_text
+       (Types.text_of_response response)
+   | Error error ->
+     Alcotest.failf "trace write failure became a run failure: %s" (Error.to_string error));
+  let expected_provider_calls, expected_tool_calls, expected_boundary =
+    match fault with
+    | Trace_fails_under_provider_response -> 1, 0, "assistant_block"
+    | Trace_fails_under_tool_effect -> 2, 1, "tool_execution_finished"
+    | Trace_fails_under_allowing_hook -> 2, 1, "hook_invocation"
+    | Trace_fails_under_blocking_hook -> 2, 0, "hook_invocation"
+  in
+  Alcotest.(check int) "provider is asked exactly as often" expected_provider_calls !provider_calls;
+  Alcotest.(check int) "tool effect count follows the hook decision" expected_tool_calls !tool_calls;
+  Alcotest.(check bool)
+    "the missing record is reported under its own boundary"
+    true
+    (List.mem expected_boundary !missing_boundaries);
+  let state = Agent.state agent in
+  Alcotest.(check int) "usage of every accepted response is kept" expected_provider_calls
+    state.usage.api_calls;
+  Alcotest.(check int) "input tokens are kept" 7 state.usage.total_input_tokens;
+  let tool_result_contents =
+    List.concat_map
+      (fun (message : Types.message) ->
+         List.filter_map
+           (function
+             | Types.ToolResult { content; _ } -> Some content
+             | _ -> None)
+           message.content)
+      state.messages
+  in
+  (match fault with
+   | Trace_fails_under_provider_response ->
+     Alcotest.(check (list string)) "no tool ran" [] tool_result_contents
+   | Trace_fails_under_tool_effect | Trace_fails_under_allowing_hook ->
+     Alcotest.(check (list string))
+       "the completed tool result stays in the transcript once"
+       [ "effect settled" ]
+       tool_result_contents
+   | Trace_fails_under_blocking_hook ->
+     Alcotest.(check int) "the block is answered once" 1 (List.length tool_result_contents);
+     Alcotest.(check bool)
+       "the blocked call did not get the tool's own result"
+       false
+       (List.mem "effect settled" tool_result_contents));
+  Alcotest.(check bool)
+    "canonical terminal is success"
+    true
+    (!terminal_outcome = Some Agent.Terminal_succeeded);
+  Alcotest.(check (option bool)) "completion callback observes success" (Some true) !completion;
+  match Agent.lifecycle agent with
+  | Some snapshot ->
+    Alcotest.(check bool) "lifecycle is completed" true (snapshot.status = Agent.Completed)
+  | None -> Alcotest.fail "lifecycle missing"
+;;
+
 exception Checkpoint_authority_refused
 
 let test_durable_turn_bus_uses_canonical_facts
@@ -5764,6 +5973,22 @@ let () =
             "completion callback diagnostic preserves committed success"
             `Quick
             (test_trace_finalization_preserves_committed_success Callback_diagnostic_failed)
+        ; Alcotest.test_case
+            "trace write failure keeps an accepted provider response"
+            `Quick
+            (test_trace_write_failure_keeps_execution Trace_fails_under_provider_response)
+        ; Alcotest.test_case
+            "trace write failure keeps a completed tool result"
+            `Quick
+            (test_trace_write_failure_keeps_execution Trace_fails_under_tool_effect)
+        ; Alcotest.test_case
+            "trace write failure keeps an allowing hook decision"
+            `Quick
+            (test_trace_write_failure_keeps_execution Trace_fails_under_allowing_hook)
+        ; Alcotest.test_case
+            "trace write failure keeps a blocking hook decision"
+            `Quick
+            (test_trace_write_failure_keeps_execution Trace_fails_under_blocking_hook)
         ; Alcotest.test_case "durable turn observations keep committed identity" `Quick
             (test_durable_turn_bus_uses_canonical_facts ~caller_checkpoint:false)
         ; Alcotest.test_case "caller-owned checkpoint preserves canonical turn observations" `Quick

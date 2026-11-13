@@ -253,7 +253,7 @@ let stage_collect
         | Some prev when Option.is_some prev.first_progress_at ->
           set_lifecycle agent ~last_progress_at:ts Running
         | _ -> set_lifecycle agent ~first_progress_at:ts ~last_progress_at:ts Running);
-       let* () = trace_assistant_blocks raw_trace_run response.content in
+       trace_assistant_blocks raw_trace_run response.content;
        (* Admission runs after the raw trace and before anything derives from
           the response, because history and tool dispatch read [response.content]
           separately: normalizing only one of them would leave a tool_result

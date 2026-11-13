@@ -102,8 +102,9 @@ let summary = function
          | Some ms -> Printf.sprintf "%.0fms" ms
          | None -> "-")
         (match c.Observer.kt_disposition with
-         | Some (Ok disposition) ->
-             Masc.Tui_decode.keeper_call_disposition_to_string disposition
+         | Some (Ok Masc.Tui_decode.Keeper_call_completed) -> "completed"
+         | Some (Ok Masc.Tui_decode.Keeper_call_deferred) -> "deferred"
+         | Some (Ok Masc.Tui_decode.Keeper_call_failed) -> "failed"
          | Some (Error error) -> "error:" ^ error
          | None -> "-")
   | Observer.Event (Observer.Keeper_turn_complete t) ->

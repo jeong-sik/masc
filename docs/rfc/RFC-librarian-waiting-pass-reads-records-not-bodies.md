@@ -3,7 +3,7 @@ rfc: "librarian-waiting-pass-reads-records-not-bodies"
 title: "기다리는 원본의 pass 는 본문을 다시 읽지 않는다"
 status: Draft
 created: 2026-11-11
-updated: 2026-11-11
+updated: 2026-11-13
 author: claude
 supersedes: []
 superseded_by: null
@@ -12,17 +12,19 @@ related: ["0500", "librarian-history-unknown-resolution", "librarian-durable-mes
 
 # 기다리는 원본의 pass 는 본문을 다시 읽지 않는다
 
-이슈 #51281 의 설계 문서다. 코드 위치는 main `f72bafce9771` 기준이다.
+이슈 #51281 의 설계 문서다. 코드 위치는 main `f72bafce9771` 기준이다. 1.6절, 3.9절, 4.7절은 2026-11-13 에 더했고 main `e3c6ea99989e` 기준이다.
 
 ## 0. 요약
 
 - Keeper 의 durable Librarian pass 는 끝나지 않은 history 원본의 본문을 pass 마다 처음부터 다시 읽고 검증하고 푼다. worker 에 상태를 물을 때 한 번 더 읽고 검증한다. 원본이 기다리는 동안 본문은 바뀌지 않는다.
 - 22.66 MB 본문 하나를 읽고 검증하고 푸는 데 2.8초가 든다(따로 잰 값, 1.2절). 그 Keeper 의 pass 는 로그에서 검증에 중앙값 2.2초를 썼다. 멈춘 원본 둘이 7시간 창의 검증 시간 59% 를 썼다.
 - 기다리는 pass 가 본문에서 실제로 쓰는 값은 작다. 주인, 목적지, 앞선 원본, source 의 경로, Exact 요청의 digest 다.
-- 바꾸는 것은 셋이다.
+- 2026-11-13 에 다시 재니 검증 시간의 84% 가 운영자 해소로 이어진 원본 두 쌍에서 나왔다(1.6절). 그 쌍은 pass 마다 부모 본문을 다섯 번, child 요청을 통째로 담은 resolution 기록을 네 번 읽는다.
+- 바꾸는 것은 넷이다.
   1. 기다리는 길은 본문 없는 기록(`Owner.Record.t`)으로 돈다. 접수 모듈, worker 호출, 진행 기록 저장이 기록을 받는다.
   2. 그 길이 쓰는 값을 기록의 `summary` 에 둔다. 공용 owner 모듈이 그 용도로 둔 칸이고 Curator 가 이미 그렇게 쓴다.
   3. 본문은 쓰는 단계에서 읽고 그때 검증한다. 접수할 때, 답을 확인하고 반영할 때, 거절을 보고할 때다. host 에 실행 증거 파일이 생긴 요청은 그 뒤로 pass 마다 읽는다(3.6절).
+  4. 운영자 해소의 계보는 기록과 `summary` 로 확인한다. resolution 기록은 child 요청을 담지 않고 id 와 digest 로 가리킨다(3.9절). 이 층이 첫 층이다(7절).
 - 근거는 코드에 이미 적힌 원칙이다. 기록은 요청을 digest 로 가리키고, digest 가 같으면 같은 요청이다.
 - history 기록의 모양이 바뀐다. 서버를 멈추고 history 원본과 거기 딸린 기록을 지운 뒤 설치한다(3.7절).
 - 본문 파일이 밖에서 바뀐 것을 잡는 때가 달라진다. 지금은 pass 마다 잡고, 바꾸면 본문을 쓸 때 잡는다(9절).
@@ -140,6 +142,42 @@ related: ["0500", "librarian-history-unknown-resolution", "librarian-durable-mes
 - 멈춘 원본은 풀릴 때까지 pass 마다 같은 검증을 받는다(#50828).
 - 이 문서는 pass 의 수를 줄이지 않는다. 기다리는 pass 하나의 값을 줄인다.
 
+### 1.6 운영자 해소로 이어진 원본 (2026-11-13)
+
+운영자가 멈춘 원본을 해소하면 그 원본에 fence 가 서고, 같은 source 로 child 원본이 새로 만들어진다. child 는 fence 가 선 원본을 앞선 원본으로 가리킨다. 이 문서는 그 둘을 "해소 쌍"이라 부른다.
+
+| 무엇 | 값 | 언제, 어떻게 |
+|---|---|---|
+| 본문 22.66 MB 인 쌍의 Keeper | pass 63번, 검증 시간 합 558.2초, 최장 33.8초 | 2026-11-13 15:30~17:07 KST, build `aa1ff9233691`, 서버 로그의 inventory 줄 |
+| 본문 6.58 MB 인 쌍의 Keeper | pass 56번, 합 206.5초, 최장 17.0초 | 같은 창 |
+| 나머지 Keeper 27명 | pass 410번, 합 146.4초 | 같은 창 |
+| 두 쌍의 몫 | 911.1초 가운데 764.7초, 84% | 계산값 |
+| child 원본의 진행 기록 | 1,944 사건과 1,856 사건. 모두 접수 의도와 `capacity_wait` 거절의 짝이다(972번, 928번) | 17:08 KST, 기록 파일 |
+| child 원본의 기록 파일 | 247 KB, 236 KB. pass 마다 다시 쓴다 | 같은 때 |
+| resolution 기록 파일 | 22.66 MB, 6.58 MB | 같은 때 |
+| fence 파일 | 154 KB, 77 KB | 같은 때 |
+| 살아 있는 history 기록의 교체 의도(`replacement_intended`) | 0개 | 같은 때, 기록 628개의 진행 기록 |
+
+- 두 child 는 2026-11-12 19:13 KST 에 만들어졌고 그 뒤로 접수되지 못했다(#51280).
+- 1.2절의 두 Keeper 와 같은 Keeper 다. 그때는 원본이 worker 에 기록이 없어 멈춰 있었고(#50828), 지금은 그 원본에 fence 가 서고 child 가 기다린다.
+- resolution 기록이 본문만큼 큰 것은 child 요청 전체를 `child_payload` 칸에 담기 때문이다(`lib/keeper/keeper_librarian_history_resolution_intent.ml` 52~53행, 311행).
+- 서버의 major heap 할당 상위 30자리 146 GB 가운데 약 34 GB 가 `history_resolution_lineage`·`history_resolution_intent`·`history_resolution_state` 아래였다. 가동 32분, 표본 누락 72만 건이라 몫은 어림이다(#51281 의 2026-11-13 댓글).
+
+해소 쌍 하나(fence 가 선 부모 P, child C, resolution 기록 R)에 pass 한 번이 본문 크기의 파일을 읽는 자리를 코드에서 셌다. 계측해서 센 값이 아니다.
+
+| 자리 | P 본문 | C 본문 | R |
+|---|---:|---:|---:|
+| `Resolution_work.run_serialized` 가 scope 의 resolution 기록을 모두 푼다(`keeper_librarian_history_resolution_intent.ml` 241~249행). 풀 때마다 child 요청을 타입으로 풀고 digest 를 계산한다(147~148행) | | | 1 |
+| `recover_child` 가 부모를 읽고(`keeper_librarian_history_resolution_work.ml` 81행), child 를 읽고(87행), 계보를 확인한다(100행) | 2 | 1 | 1 |
+| `retain_completion` 이 child 를 읽고 계보를 확인한 뒤에 phase 를 본다(105~122행) | 1 | 1 | 1 |
+| `discover` 가 scope 의 원본을 본문까지 읽는다(`keeper_librarian_durable_owner.ml` 46~56행) | 1 | 1 | |
+| `validate_lineage` 가 child 의 계보를 확인한다(`keeper_librarian_durable_execution.ml` 150행) | 1 | | 1 |
+| 합 | 5 | 3 | 4 |
+
+- 계보 확인 한 번은 부모 본문을 읽어 검증하고 풀고, fence 와 견주려고 부모 source 의 digest 를 계산하고, resolution 기록을 읽어 child 요청을 풀고, 부모 source 에 child 의 현재 Memory 를 얹어 child source 와 글자로 견준다(`lib/keeper/keeper_librarian_history_resolution_lineage.ml` 13~52행).
+- 표 밖에도 source 의 digest 를 계산하는 자리가 있다. fence 가 있는지 볼 때마다 부모 source 전체를 글자로 만들어 digest 를 계산한다(`keeper_librarian_history_resolution_state.ml` 112~118행). pass 한 번에 원본마다 한 번(`keeper_librarian_durable_execution.ml` 368행), child 마다 한 번(148행) 더 돈다.
+- child 가 접수를 기다리는 동안에는 접수 모듈이 child 본문을 한 번 더 읽어 요청 전체를 worker 에 보낸다(#51280).
+
 ## 2. 무엇이 문제인가
 
 - 기다리는 동안 원본에서 달라지는 것은 진행 기록뿐이다. 본문은 retain 때 정해지고 그 뒤로 바뀌지 않는다.
@@ -148,6 +186,8 @@ related: ["0500", "librarian-history-unknown-resolution", "librarian-durable-mes
 - 본문을 읽고 푸는 일은 `Systhread_host` 의 domain 하나를 쓴다. 그 domain 은 다른 파일 작업도 받는다(RFC main-domain-scheduler-latency 7절이 더 옮기는 중이다).
   - 검증 시간 합 3,706초를 창 25,260초로 나누면 0.147 이다. 평균으로 pass 0.147개가 늘 이 구간 안에 있었다.
 - Curator 는 기록의 `summary` 로 훑는다. history 는 그 칸을 비우고 본문으로 훑는다.
+- 해소 쌍의 관계는 child 를 만들 때 한 번 정해진다. `intend_child` 가 두 본문으로 그 관계를 확인하고 resolution 기록에 적는다(`keeper_librarian_history_resolution_intent.ml` 292~313행). pass 는 그 관계를 두 본문과 child 요청의 사본으로 매번 다시 증명한다.
+- child 요청은 디스크에 두 벌 있다. child 의 본문 파일과 resolution 기록 안이다.
 
 ## 3. 제안
 
@@ -175,7 +215,7 @@ related: ["0500", "librarian-history-unknown-resolution", "librarian-durable-mes
   - admission 은 원본을 먼저 만든 뒤에 부른다(129행). 호출 때의 retain 이 원본을 처음 쓰는 호출처는 없다.
   - 지금 retain 은 기록이 없으면 본문과 기록을 `Captured` 로 새로 쓴다(`lane_addon_tool_request_owner.ml` 304~311행). 기록으로는 그렇게 쓸 수 없다. 기록이 없거나 다른 것을 가리키면 `Unavailable` 로 돌려준다. 그 pass 는 worker 에 닿지 못한 대기(`Worker_unreachable`)로 끝난다. 지금 retain 이 실패할 때와 같은 결과다(`lane_addon_runtime.ml` 2482~2483행).
 - Curator 는 이 함수를 쓰지 않는다. 호출마다 원본을 본문까지 읽고 `capture_tool_request_owner` 로 다시 retain 한다(`lib/server/server_workspace_memory_addon.ml` 120~141행). 이 문서는 그 길을 바꾸지 않는다(5절).
-- fence 읽기와 gate 목록 찾기는 scope 와 요청 id 만 쓴다(`keeper_librarian_history_resolution_state.ml` 119~120행, `keeper_librarian_original_gate.ml` 586행). history 가 기록으로 부른다(L2).
+- fence 읽기와 gate 목록 찾기는 scope 와 요청 id 만 쓴다(`keeper_librarian_history_resolution_state.ml` 119~120행, `keeper_librarian_original_gate.ml` 586행). history 가 기록으로 부른다(fence 는 L0, gate 는 L2).
 - 본문을 가진 값에서 기록은 지금도 얻는다(`Owner.listed`, `lane_addon_tool_request_owner.mli` 185~186행).
 
 ### 3.3 `summary` 에 두는 값
@@ -190,6 +230,8 @@ type index = private {
   predecessor : predecessor option;
   runtime_keepers_dir : string;   (* confirm_source_root 이 보는 경로 *)
   exact_digest : string;          (* Lane_addon_exact.digest (request t) *)
+  source_digest : string;         (* fence 의 source_sha256 과 같은 계산. 3.9절 *)
+  source_basis_digest : string;   (* 읽을 때의 Memory 를 뺀 source 의 digest. 3.9절 *)
 }
 val index : t -> (index, string) result   (* Exact 요청을 만드는 일이 실패할 수 있다 *)
 val index_to_json : index -> Yojson.Safe.t
@@ -202,7 +244,7 @@ val index_of_summary : Owner.Record.t -> (index, string) result
 - 기록의 다른 칸이 묶어 주는 값과 아닌 값이 있다.
   - 주인의 경로 셋과 Keeper id 는 scope 로 묶인다. scope 는 그 주소의 sha256 이고(`keeper_librarian_durable_request.ml` 51~59행), 요청 id 가 그 scope 를 담는다(103~112행). `index_of_summary` 는 `summary` 의 주인으로 계산한 scope 가 기록의 scope 와 같은지 확인한다.
   - 목적지의 설치 id, package id, tool 은 기록의 칸과 견준다(235~240행).
-  - Memory epoch, 목적지의 revision 둘, 앞선 원본, runtime 경로, Exact digest 는 `summary` 에만 있다. retain 이 검증한 `t` 에서 한 번 쓰고, 본문을 읽는 자리에서 `load` 가 본문과 견준다(3.4절).
+  - Memory epoch, 목적지의 revision 둘, 앞선 원본, runtime 경로, Exact digest, source 의 digest 둘은 `summary` 에만 있다. retain 이 검증한 `t` 에서 한 번 쓰고, 본문을 읽는 자리에서 `load` 가 본문과 견준다(3.4절).
 - 지금 `t` 를 받는 확인 함수 가운데 기다리는 길이 쓰는 것은 기록과 `index` 를 받게 한다. `confirm_record`, `confirm_source_root`, 주인 확인, 앞선 원본 확인이다.
 - 본문을 쓰는 함수는 그대로 `t` 를 받는다. `request`, `validate_proposal`, `confirm_final`, `source` 다.
 
@@ -215,8 +257,7 @@ val index_of_summary : Owner.Record.t -> (index, string) result
 |---|---|
 | phase 가 `Dispatch_pending` 이다 | 기록의 진행 기록 |
 | gate 준비와 gate 기록이 없다 | 기록의 진행 기록, 요청 id 로 찾은 gate 목록 |
-| 계보에 들어 있지 않다. 앞선 원본이 없고, 다른 원본이 이것을 앞선 원본으로 가리키지 않고, 교체 의도가 없다 | 이 원본과 다른 원본들의 `index`, 기록의 진행 기록 |
-| fence 가 없다 | 요청 id 로 읽는 fence 파일 |
+| 교체 계보에 들어 있지 않다. 진행 기록에 교체 의도가 없고, 앞선 원본이 있으면 그 원본에 fence 가 서 있다 | 이 원본과 다른 원본들의 `index`, 기록의 진행 기록, 요청 id 로 읽는 fence 파일 |
 | host 기록에 결과도 실행 증거도 없다 | 3.6절의 `observe_open` |
 
 - 조건은 모두 타입으로 읽은 값이다. 크기나 시간으로 가르지 않는다.
@@ -242,9 +283,11 @@ val load : store:Lane_addon_store.t -> Owner.Record.t -> Request.index ->
 | `Captured`, `Admission_wait` | 접수한다 | 읽는다. 지금과 같다 |
 | `Judged`, `Committing`, `Commit_unknown` | 반영을 잇는다 | 읽는다. 지금과 같다 |
 | 정리된 원본 | 거절 규칙, floor 후보, 보관 | 읽는다. 지금과 같다 |
-| 계보에 든 원본, fence 가 있는 원본 | source 를 견준다 | 읽는다. 지금과 같다 |
+| fence 가 선 원본 | fence 와 `index` 를 견준다(3.9절). pass 는 이 원본을 더 다루지 않는다 | 안 읽는다 |
+| 해소 쌍의 child | 계보를 기록과 `index` 로 확인한다(3.9절). 그 밖에는 자기 phase 의 줄을 따른다 | 계보 때문에는 안 읽는다 |
+| 교체 계보에 든 원본(충돌한 원본과 그 교체 원본) | source 를 견준다 | 읽는다. 지금과 같다 |
 
-- 달라지는 것은 첫 줄 하나다.
+- 달라지는 것은 첫 줄과 fence·해소 쌍의 두 줄이다.
 - 2026-11-11 08:07Z 에 끝나지 않은 history 원본 26개 가운데 19개가 `Dispatch_pending` 이었다. 마지막 진행 기록이 대기 15, 접수 의도 2, worker 에 기록 없음 2 다. 나머지 7개는 접수 거절이다. 19개가 나머지 조건도 만족하는지는 재지 않았다.
 - 1.2절의 멈춘 원본 둘은 worker 에 기록 없음 2 다.
 
@@ -322,14 +365,14 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
 
 ### 3.7 설치
 
-- L2 부터 `summary` 가 빈 history 기록은 읽지 않는다. 서버를 멈추고 아래를 지우고 설치한다.
+- L0 부터 `summary` 가 빈 history 기록과 `child_payload` 칸이 있는 resolution 기록은 읽지 않는다. 서버를 멈추고 아래를 지우고 설치한다. `index` 는 L0 에서 마지막 모양으로 넣는다. 뒤 층은 지우지 않고 설치한다.
 
 | 지울 것 | 왜 |
 |---|---|
 | history 원본의 scope(`keeper-librarian-history-execution-*`), 기록과 본문 두 곳 | 기록 모양이 바뀐다 |
 | 그 gate 의 scope, 기록과 본문 두 곳 | gate 는 부모 원본을 id 와 digest 로 가리킨다 |
 | floor step 의 scope(`keeper-librarian-floor-step-*`)와 그 gate(`keeper-librarian-floor-step-gate/`), 기록과 본문 두 곳 | floor step 은 history 원본을 id 와 digest 로 가리킨다(`lib/keeper/keeper_librarian_floor_step_request.ml` 97행, 109~111행) |
-| history fence(`keeper-librarian-history-fences`)와 resolution 기록(`keeper-librarian-history-resolutions`) | 원본을 요청 id 로 가리킨다. 원본이 없으면 그 Keeper 의 pass 가 "Resolution original is absent" 로 끝난다(`lib/keeper/keeper_librarian_history_resolution_work.ml` 31~34행, `keeper_librarian_durable_execution.ml` 344~345행) |
+| history fence(`keeper-librarian-history-fences`)와 resolution 기록(`keeper-librarian-history-resolutions`) | resolution 기록의 모양이 바뀐다(3.9절). 둘 다 원본을 요청 id 로 가리킨다. 원본이 없으면 그 Keeper 의 pass 가 "Resolution original is absent" 로 끝난다(`lib/keeper/keeper_librarian_history_resolution_work.ml` 31~34행, `keeper_librarian_durable_execution.ml` 344~345행) |
 
 - 같은 원본과 gate 묶음을 비운 앞선 hard cut 이 있다(#46247). 그때처럼 반영 중인 원본(`Committing`, `Commit_unknown`)이 없을 때 한다. 2026-11-11 07:44Z 와 08:07Z 에 그 phase 의 history 원본은 0개였고 라이브 floor step 기록도 0개였다.
 - 읽은 위치는 원본 밖에 있다. Memory 의 range receipt(`keeper_librarian_durable_commit.ml` 62~81행)와 외부 읽기 cursor 다. 지운 범위는 다음 pass 가 다시 고른다. 요청 id 는 원본마다 새로 만든다(`keeper_librarian_durable_execution.ml` 104행).
@@ -350,6 +393,65 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
 - 선언을 다시 관찰하거나 export 목록이 바뀔 때의 전체 순회는 기록만 먼저 읽는다. history 원본은 `summary` 로 Keeper 를 찾고, admission 과 floor step 원본만 `load_listed` 로 본문을 읽는다.
   - 모든 scope 를 기록만으로 도는 함수가 owner 층에 없다. `fold_all` 과 `discover_all` 은 기록마다 본문을 읽는다(`lane_addon_tool_request_owner.ml` 256~274행). store 층의 `fold_tool_request_owner_inventory_all` 과 `Owner.decode_published` 로 owner 층에 하나를 더한다.
 - floor step 과 admission 이 Keeper 를 찾는 길은 지금 그대로다.
+
+### 3.9 운영자 해소의 계보는 기록과 `index` 로 확인한다
+
+규칙은 하나다. 원본을 가리키는 것은 요청 id 와 digest 로 가리킨다. 요청의 글자는 그 digest 로 이름 붙은 본문 파일 한 곳에만 둔다. 두 원본의 관계는 두 `index` 의 값으로 견주고, `index` 가 본문과 같은지는 본문을 읽는 자리의 `load` 가 확인한다(3.4절). 3.1절의 원칙을 원본 둘 사이로 넓힌 것이다.
+
+**`index` 에 더하는 값 둘**
+
+- `source_digest` 는 `Source.to_json` 을 canonical 로 만든 글자의 sha256 이다. fence 가 `source_sha256` 칸에 적는 값과 같은 계산이다(`keeper_librarian_history_resolution_state.ml` 98행).
+- `source_basis_digest` 는 source 에서 Memory revision 과 input 의 `current` 를 비운 값의 digest 다.
+  - 해소가 child 의 source 를 만드는 함수 `Source.with_current` 는 그 두 칸만 바꾼다(`lib/keeper/keeper_librarian_durable_capture.ml` 522~525행).
+  - 그래서 "child 의 source 는 부모 source 에 child 의 Memory 를 얹은 것과 같다"는 지금의 비교(`keeper_librarian_history_resolution_lineage.ml` 45~48행)는 "두 source 의 basis 가 같다"와 같은 말이다.
+  - `with_current` 는 얹은 결과를 `validate_record` 로 검사한다. child 의 source 는 자기 본문을 풀 때 같은 검사를 받는다(`keeper_librarian_durable_capture.ml` 560행).
+- 두 값은 retain 이 검증한 원본에서 한 번 계산하고, `load` 가 본문에서 다시 계산해 견준다.
+
+**resolution 기록은 child 를 digest 로 가리킨다**
+
+- `child_payload` 칸을 없앤다. phase 의 `child`(`request_id`, `request_digest`)가 child 를 가리킨다.
+- `intend_child` 는 지금처럼 두 본문으로 관계를 확인한다. 그 뒤 `Owner.prepare_successor` 로 child 요청을 본문 파일로 먼저 저장하고, 그 id 와 digest 를 phase 에 적는다.
+  - 공용 owner 모듈에 이미 있는 길이다. 실행 거절의 successor 가 본문을 먼저 저장하고 digest 만 든 의도를 남긴다(`lib/lane_addon/lane_addon_tool_request_owner.ml` 301~313행, `lib/lane_addon/lane_addon_request_progress.mli` 10행의 `successor`).
+  - 본문 파일의 이름은 digest 다(`lib/lane_addon/lane_addon_store.ml` 843~844행). 원본을 retain 할 때 쓰는 파일과 같은 파일이다.
+- child 기록이 아직 없는 `Child_intended` 에서는 `Owner.load_successor_request` 로 그 본문을 읽어 child 를 만든다. 본문이 없거나 digest 가 다르면 오류다. 다시 만들지 않는다.
+- resolution 기록을 풀 때 child 요청을 풀던 검사 셋은 자리를 옮긴다.
+
+| 검사 | 지금 | 바꾼 뒤 |
+|---|---|---|
+| child 가 같은 scope 에 있고 부모와 다른 요청이다 | 풀 때마다 child 요청을 타입으로 푼다(`keeper_librarian_history_resolution_intent.ml` 147~151행) | 풀 때마다 child 의 요청 id 에서 scope 를 읽는다. 요청 id 가 scope 를 담는다 |
+| child 의 앞선 원본이 이 원본이다 | 풀 때마다(152~154행) | `intend_child` 가 쓸 때 한 번, 계보 확인이 child 의 `index` 로 pass 마다 |
+| Memory 반영 영수증이 child 의 범위와 맞다 | 풀 때마다(159~163행) | `observe_memory_commit` 이 쓸 때 한 번. 그 자리는 child 본문을 읽는다 |
+
+- 셋째 줄은 읽을 때의 검사가 하나 빠진다. 밖에서 바뀐 resolution 기록의 영수증이 child 의 범위와 다른 것을 pass 가 잡지 않는다. 영수증이 든 intent 를 읽는 곳은 둘이다. pass 는 그런 intent 를 건너뛰고(253~254행), 운영자 화면은 "Memory 에 반영됨"으로 보여 준다(`keeper_librarian_history_resolution_work.ml` 221~226행). 영수증으로 Memory 를 쓰거나 원본을 움직이는 곳은 없다.
+
+**계보 확인**
+
+`Resolution_lineage.validate` 가 child 하나에 하는 검사를 값으로 옮긴다.
+
+| 검사 | 지금 읽는 것 | 바꾼 뒤 읽는 것 |
+|---|---|---|
+| 부모 기록이 있고 그 digest 가 child 가 가리킨 digest 다 | 부모 기록과 본문 | 부모 기록, child `index.predecessor` |
+| fence 가 부모를 가리킨다 | fence 파일, 부모 기록 | 같다 |
+| fence 의 source 와 주인이 부모의 것이다 | 부모 본문에서 푼 source 의 digest 와 주인 | 부모 `index.source_digest`, `index.owner` |
+| 이 child 를 가리키는 intent 가 있고 phase 가 맞다 | resolution 기록 | 같다. 기록이 작아진다 |
+| intent 가 fence 를 세운 그 관찰·사람·이유다 | resolution 기록, fence | 같다 |
+| child 가 intent 가 적은 요청이다 | intent 안의 child 요청을 canonical 로 만든 digest 와 child 본문 digest | intent 의 `child.request_digest` 와 child 기록의 digest |
+| child 의 source 가 부모 source 에 Memory 만 얹은 것이다 | 두 본문에서 푼 source | 두 `index.source_basis_digest` |
+| 주인이 같다 | 두 본문에서 푼 주인 | 두 `index.owner` |
+| 조상에 순환이 없다 | 요청 id | 같다 |
+
+- 함수는 하나다. `index` 를 주는 reader 를 받는다. Keeper 의 pass 는 `index_of_summary` 로 읽은 값을 넘긴다. host 가 실행 앞에서 하는 확인(`lib/server/server_librarian_addon_validation.ml` 32행, 55행)과 배포 검사(`lib/keeper/keeper_librarian_store_preflight.ml` 46~49행)는 지금처럼 본문을 읽고, 푼 원본에서 `Request.index` 로 만든 값을 넘긴다. host 가 본문으로 확인하는 것은 바꾸지 않는다(3.6절).
+- fence 가 없는 부모는 교체 계보다. 지금 함수(`Request.validate_predecessor_link_payload`)를 그대로 부른다. 본문을 읽는다(5절).
+- `fenced_original` 과 `confirmed_resolution_child` 도 같은 값을 받는다. fence 가 있는지 볼 때 source 의 digest 를 다시 계산하지 않는다.
+
+**pass**
+
+- `discover` 는 기록만 읽고 `index_of_summary` 를 부른다(3.4절).
+- fence 가 선 원본은 `load` 를 부르지 않는다. pass 는 지금도 그 원본을 더 다루지 않는다(`keeper_librarian_durable_execution.ml` 368~370행).
+- `Resolution_work` 의 pass 마다 도는 길도 기록으로 돈다.
+  - `recover_child` 는 child 기록이 있으면 그 id 와 digest 를 intent 와 견주고 계보를 확인한다. 부모 본문을 읽지 않는다.
+  - `find_completed` 는 child 기록의 phase 를 먼저 본다. `Finished` 나 `Conflicted` 가 아니면 거기서 끝난다. 지금은 본문을 읽고 계보를 확인한 뒤에 phase 를 본다(`keeper_librarian_history_resolution_work.ml` 105~130행).
+- 본문을 읽는 자리는 넷이다. child 를 만들 때(`prepare_child` 가 부모 본문을, `intend_child` 가 두 본문을), child 기록이 없어 다시 만들 때, child 가 끝나 Memory 반영을 적을 때, 그리고 child 자신의 phase 가 본문을 쓸 때(3.4절의 표)다.
 
 ## 4. 순서 따라가기
 
@@ -405,15 +507,29 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
 - 요청이 다른 slot 으로 넘어가 오래 걸릴수록 Keeper 는 더 여러 번 기다린다. 실행 증거 파일이 생기기 전까지 그 pass 들이 가벼워진다.
 - 넘어간 slot 이 입력을 받지 못해 호출이 `Input_refused` 로 끝나면 host 기록에 결과가 생긴다. 그 pass 는 본문을 읽어 거절을 보고한다. 지금과 같다.
 
+### 4.7 운영자가 멈춘 원본을 해소한다
+
+| 틱 | 일 | 부모 본문 | child 본문 | resolution 기록 |
+|---|---|---|---|---|
+| N | 운영자가 해소를 요청한다. fence 가 선다. `prepare_child` 가 부모 본문을 읽어 child 의 source 를 만든다. `intend_child` 가 두 본문으로 관계를 확인하고 child 본문을 저장한 뒤 id 와 digest 를 적는다 | 읽는다 | 쓴다 | 쓴다. child 요청을 담지 않는다 |
+| N+1 | child 기록이 없다. 저장해 둔 본문을 읽어 child 를 retain 하고 확인을 적는다 | 안 읽는다 | 한 번 읽는다 | 읽고 쓴다 |
+| N+2 ~ N+k | 부모: 기록, `index`, fence. child: 계보를 기록과 `index` 로 확인하고 자기 phase 의 줄을 따른다 | 안 읽는다 | phase 에 따른다 | 읽는다. 크기가 본문과 무관하다 |
+| N+k+1 | child 가 끝난다. `observe_memory_commit` 이 child 본문을 읽어 영수증을 범위와 견주고 적는다 | 안 읽는다 | 한 번 읽는다 | 읽고 쓴다 |
+
+- N 과 N+1 사이에 서버가 죽으면 child 본문 파일과 `Child_intended` 가 남는다. 다음 pass 가 N+1 을 한다.
+- `intend_child` 가 본문을 저장한 뒤 intent 를 쓰기 전에 죽으면 가리키는 것이 없는 본문 파일이 남는다. 같은 child 를 다시 만들면 요청 id 가 새로 만들어져 다른 파일이 된다. 남은 파일은 기동 때의 본문 목록 관찰이 세고, 지우지는 않는다(`lib/lane_addon/lane_addon_original_body_inventory.mli`).
+- child 가 접수를 기다리는 틱은 child 본문을 읽는다. 접수 모듈이 요청 전체를 worker 에 다시 보내기 때문이다(5절, #51280).
+- 기다리는 동안 부모 본문 파일이 밖에서 바뀌면 pass 는 잡지 않는다. 부모 본문을 다시 쓰는 곳은 없다. host 가 child 를 실행하기 전에 부모 본문까지 읽어 계보를 확인하고, 거기서 오류로 끝난다.
+
 ## 5. 풀지 않는 것
 
 | 무엇 | 지금 | 어디서 다루나 |
 |---|---|---|
-| 접수를 거절당한 원본 | pass 마다 본문을 읽고 요청 전체를 worker 에 다시 보낸다 | #51280. worker 가 바뀌어야 한다 |
+| 접수를 거절당한 원본 | pass 마다 본문을 읽고 요청 전체를 worker 에 다시 보낸다. 1.6절의 두 child 가 지금 이 상태다. 3.9절을 설치해도 그런 child 는 pass 마다 자기 본문을 한 번 읽는다(1.6절의 표에서 P 5·R 4 가 0 이 되고 C 3 이 1 이 된다) | #51280. worker 가 바뀌어야 한다 |
 | host 기록이 요청 전체를 담는다 | Keeper 가 읽을 때마다 그 크기만큼 푼다. 시도가 붙을 때마다 요청째로 다시 쓴다. host 는 요청을 시도할 때마다 통째로 다시 묶는다 | #50762 |
 | host 가 시도마다 원본 본문을 읽는다 | lane 이 받지 않아 미뤄지는 동안 cycle 마다 되풀이된다(`server_librarian_addon_validation.ml` 27~40행) | #50762 와 함께 본다. host 는 실행 권한을 본문으로 확인한다. Keeper 의 pass 와 다른 판단이다 |
 | 실행 증거 파일이 있는 열린 요청 | 증거를 풀려면 요청 전체가 있어야 해서 pass 마다 본문을 읽는다 | 증거의 모양을 바꿔야 한다. 재지 않았다 |
-| 앞선 원본이 있는 원본 | 운영자 해소로 다시 만든 원본은 앞선 원본을 가리킨다. 계보 확인이 본문을 쓰므로 기다리는 내내 pass 마다 본문을 읽는다(3.4절) | 계보 확인을 `index` 로 옮겨야 한다. 지금 그런 원본이 몇 개인지 재지 않았다 |
+| 교체 계보에 든 원본 | 충돌한 원본의 교체 원본은 앞선 원본을 가리키고, 부모의 진행 기록이 교체 요청 전체를 담는다(`Replacement_intended`). 계보 확인이 본문을 쓰므로 pass 마다 본문을 읽는다(3.4절) | 3.9절과 같은 모양으로 풀린다. 교체 의도를 digest 만 든 `successor` 로 바꾸면 된다. 2026-11-13 에 살아 있는 history 기록의 교체 의도는 0개였다(1.6절). 생기면 재고 그때 옮긴다 |
 | Curator 의 worker 호출 | 호출마다 원본을 본문까지 읽고 다시 retain 한다(`server_workspace_memory_addon.ml` 120~141행) | Curator 는 `summary` 로 훑고 손댈 원본만 읽는다. 그 본문의 크기는 재지 않았다 |
 | 정리된 거절 원본 | 그 범위가 아직 유효한 동안 pass 마다 본문을 읽는다 | 이 문서 뒤. `summary` 에 범위를 넣으면 같은 모양으로 풀린다. 재지 않았다 |
 | floor step, admission 의 pass | 같은 모양으로 본문을 읽는다 | L1 의 기록 길은 함께 쓴다. `summary` 는 재지 않아서 넣지 않는다 |
@@ -433,19 +549,27 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
 | host 기록의 `digest` 칸만 믿는다 | 저장된 요청이 그 digest 와 다른 기록을 지금은 거절한다. 그 검사가 빠지면 host 는 cycle 마다 오류를 내고 Keeper 는 끝없이 기다린다 |
 | 본문 파일의 수정 시각이나 크기로 바뀐 것을 잡는다 | 내용을 증명하지 않는다 |
 | N번에 한 번만 검증한다 | 근거 없는 숫자다 |
+| 해소 쌍을 pass 안에서 한 번만 읽는다 | 1.6절의 P 5·C 3·R 4 가 1·1·1 이 된다. 읽는 양은 여전히 본문 크기에 비례하고 pass 마다 되풀이된다. #51667 이 gate chain 에 한 일이다 |
+| resolution 기록은 그대로 두고 계보만 `index` 로 확인한다 | resolution 기록이 child 요청을 담고 있어서 읽을 때마다 본문 크기만큼 푼다. 같은 요청이 디스크에 두 벌 남는다 |
+| child 요청의 사본을 resolution 기록 옆 다른 파일로 뺀다 | 본문 파일이 이미 digest 로 이름 붙은 그 요청이다. 같은 것을 두는 곳이 하나 더 생긴다 |
+| 교체 의도도 지금 digest 로 바꾼다 | 살아 있는 것이 0개라 잰 값이 없다(1.6절). 공용 진행 기록의 사건 모양을 바꾸는 일이라 따로 한다 |
 
 ## 7. 층
 
 | 층 | 바꾸는 것 | 확인 |
 |---|---|---|
+| L0 | `index` 타입과 codec, `retain` 이 `summary` 를 채우기, history 의 `discover` 와 `load`(3.3절). resolution 기록이 child 를 digest 로 가리키기, 계보 확인과 fence 확인을 기록과 `index` 로, `Resolution_work` 의 pass 길(3.9절). fence 가 선 원본은 `load` 를 부르지 않고, 나머지 원본은 이 층에서는 모두 `load` 를 부른다. 설치는 3.7절대로다 | 8절의 계보 시험 |
 | L1 | 기다리는 길을 기록으로(3.2절): 기록을 받는 진행 기록 저장과 다시 묶는 함수, `Submit.resume` 과 결과 타입, `Runtime.call_captured_tool_request`. 접수 모듈이 본문을 읽는 갈래와 worker 답을 두 번에 푸는 일(3.5절). `Lane_addon_exact.identity` 와 `observe_open`(3.6절). 접수 모듈의 소비자 넷과 worker 호출의 호출처 둘을 함께 옮긴다 | 8절의 접수 모듈·host 기록 시험 |
-| L2 | `index` 타입과 codec, `retain` 이 `summary` 를 채우기, history 의 `discover` 와 `load`, fence 와 gate 를 기록으로 찾기(3.3~3.4절). 설치는 3.7절대로다 | 8절의 pass 시험 |
+| L2 | 3.4절의 조건을 만족하는 원본은 `load` 를 부르지 않기, gate 를 기록으로 찾기 | 8절의 pass 시험 |
 | L3 | 기록만으로 모든 scope 를 도는 owner 함수, 결과가 전달될 때 Keeper 를 찾는 길(3.8절) | 8절의 wake 시험 |
 
-- L2 는 L1 뒤에 온다. 접수 모듈과 worker 호출이 본문을 가진 값을 받는 동안에는 기다리는 pass 가 본문을 읽어야 한다.
-- L3 은 L2 뒤에 온다. `summary` 가 채워져 있어야 한다.
-- 세 층 모두 서버 코드다. 선언과 package 는 건드리지 않는다.
-- L1 은 저장된 것을 바꾸지 않는다. L1 만으로 worker 호출 앞의 본문 읽기(1.1절 여섯째 줄)가 history, floor step, admission 에서 없어진다. Curator 는 다른 길로 부르므로 남는다(5절). L2 가 history 원본의 기록 모양을 바꾼다.
+- L0 이 첫 층이다. 2026-11-13 에 잰 검증 시간의 84% 가 해소 쌍에서 나왔기 때문이다(1.6절). L0 은 접수 모듈, worker 호출, `lane_addon_exact.ml` 을 고치지 않는다. L1 에 기대지 않는다.
+- L0 이 history 원본과 resolution 기록의 모양을 바꾼다. 지우고 설치하는 층은 L0 하나다(3.7절).
+- L1 은 저장된 것을 바꾸지 않는다. L1 만으로 worker 호출 앞의 본문 읽기(1.1절 여섯째 줄)가 history, floor step, admission 에서 없어진다. Curator 는 다른 길로 부르므로 남는다(5절).
+- L1 은 `lane_addon_exact.ml` 을 고친다. RFC exact-request-skips-a-slot-that-refused-its-input 의 L2b 가 같은 파일을 고치는 중이라 그 뒤에 쌓는다.
+- L2 는 L0 과 L1 뒤에 온다. `summary` 가 채워져 있어야 하고, 접수 모듈과 worker 호출이 본문을 가진 값을 받는 동안에는 기다리는 pass 가 본문을 읽어야 한다.
+- L3 은 L0 뒤에 온다. `summary` 가 채워져 있어야 한다.
+- 네 층 모두 서버 코드다. 선언과 package 는 건드리지 않는다.
 
 ## 8. 시험
 
@@ -473,10 +597,26 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
   - `summary` 의 목적지 revision 만 바꾸고 host 기록에 답을 넣는다. 본문을 읽은 자리에서 둘이 다르다는 오류로 끝난다.
   - `summary` 가 빈 기록은 `discover` 가 오류로 끝낸다.
   - Memory epoch 를 바꾸면 기다리는 pass 가 지금과 같은 오류로 끝난다.
-  - 계보에 든 원본과 fence 가 있는 원본은 본문 파일을 지우면 오류로 끝난다. 본문을 읽는 길로 갔다는 증명이다.
+  - 교체 계보에 든 원본은 본문 파일을 지우면 오류로 끝난다. 본문을 읽는 길로 갔다는 증명이다.
+- 계보(L0)
+  - 해소 쌍에서 부모의 본문 파일을 지운다. 다음 pass 의 inventory 검증과 계보 확인이 지금과 같은 결과로 끝난다. 부모 본문을 읽지 않았다는 증명이다.
+  - 같은 상태에서 child 가 `Dispatch_pending` 이면 `Resolution_work` 의 pass 길이 child 본문도 읽지 않는다. child 본문 파일을 지워도 그 길은 같은 결과로 끝난다.
+  - 부모 `summary` 의 `source_digest` 를 바꾸면 fence 와 다르다는 오류로 끝난다.
+  - child `summary` 의 `source_basis_digest` 를 바꾸면 계보 오류로 끝난다.
+  - child 기록의 digest 가 intent 의 `child.request_digest` 와 다르면 계보 오류로 끝난다.
+  - child `summary` 의 앞선 원본이 다른 요청이면 계보 오류로 끝난다.
+  - resolution 기록에 `child_payload` 칸이 있으면 모르는 칸 오류로 끝난다.
+  - `Child_intended` 에서 child 기록이 없고 저장한 본문이 있으면 child 가 retain 되고 그 digest 가 intent 와 같다.
+  - 같은 상태에서 저장한 본문을 지우거나 다른 내용으로 바꾸면 오류로 끝나고 child 가 만들어지지 않는다.
+  - Memory 만 다른 두 source 는 `source_basis_digest` 가 같다. 범위, 읽은 위치, counterpart, 바깥 관찰 가운데 하나라도 다르면 다르다.
+  - host 의 실행 앞 확인은 부모 본문 파일을 지우면 오류로 끝난다. host 는 본문을 읽는다는 증명이다.
 - wake
   - history 원본의 본문 파일이 없어도 Keeper 를 찾는다.
 - 변이
+  - 계보 확인이 부모를 본문까지 읽게 하면 "부모의 본문 파일을 지운다" 시험이 실패한다.
+  - 계보 확인에서 `source_basis_digest` 비교를 빼면 그 값을 바꾼 시험이 실패한다.
+  - `load` 에서 `source_digest` 비교를 빼면, 본문과 다른 `source_digest` 를 가진 원본을 접수하는 시험이 실패한다.
+  - `find_completed` 가 phase 를 보기 전에 본문을 읽게 하면 "child 본문 파일을 지워도" 시험이 실패한다.
   - `discover` 가 늘 본문을 읽게 하면 "본문 파일을 지운다" 시험이 실패한다.
   - worker 호출이 다시 본문을 retain 하게 하면 같은 시험이 `Worker_unreachable` 로 실패한다.
   - `load` 에서 digest 검증을 빼면 "본문을 바꾼다" 시험이 실패한다.
@@ -484,28 +624,31 @@ val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity
   - `load` 에서 `index` 비교를 빼면 "`summary` 의 목적지 revision 만 바꾼다" 시험이 실패한다.
   - `observe_open` 에서 저장된 요청의 digest 검사를 빼면 host 기록 시험이 실패한다.
 
-## 9. 정할 것
+## 9. 정한 것
 
-1. **값을 두는 곳.** 추천은 기록의 `summary` 다.
-   - 추천: 공용 owner 모듈이 "요청의 index" 로 둔 칸이고, Curator 가 이미 그 모양으로 훑는다(1.4절). 서버가 다시 떠도 본문을 읽지 않는다. Keeper 를 찾는 서버 쪽 코드도 같은 값을 쓴다(3.8절).
-     - 대가: 서버를 멈추고 history 원본과 gate, floor step, fence, resolution 기록을 지운 뒤 설치한다. 잃는 것 넷과 남는 것 둘은 3.7절에 있다.
-   - 다른 길: 프로세스 안의 표에 둔다. 본문을 한 번 검증해 얻은 값을 요청 id 와 digest 로 찾아 이어 쓴다.
-     - 얻는 것: 저장 모양이 그대로다. 지울 것이 없다.
-     - 대가: `summary` 와 같은 일을 하는 것이 둘이 된다. 서버가 다시 뜰 때마다 원본마다 본문을 한 번 읽는다. 지금 본문 합은 72.9 MB 다. 3.8절은 pass 와 다른 모듈이라 그 표를 쓰지 못한다.
-   - 어느 쪽이든 L1 은 같다.
-2. **본문 파일이 밖에서 바뀐 것을 잡는 때.** 추천은 "본문을 쓸 때"로 옮기는 것이다.
-   - 지금: pass 마다 잡는다. 바뀐 직후의 pass 부터 오류다.
-   - 제안: 접수, 답 확인, 반영, 거절 보고에서 잡는다. 기다리는 동안에는 Keeper 쪽에 드러나지 않는다. host 에 실행 증거 파일이 있는 요청과 계보에 든 원본은 지금처럼 pass 마다 잡는다.
-   - 대가: 4.2절과 4.3절이다. 그 사이에 worker 관찰이 진행 기록에 붙을 수 있고, 본문이 바뀐 사실은 host 쪽 기록으로만 보인다. output schema 검사 둘도 본문을 읽는 자리로 옮겨 간다.
-   - 얻는 것: 기다리는 pass 가 본문 크기와 무관해진다. 1.2절의 멈춘 원본 둘은 측정 창에서 검증 시간의 59% 를 썼다.
-3. **L1 의 범위.** 접수 모듈은 소비자 넷이, worker 호출은 호출처 둘이 함께 쓴다. 이 문서는 한 번에 옮긴다. history 만 따로 옮기면 같은 일을 하는 함수가 둘이 된다.
-   - 대가: 접수 모듈의 인자와 결과 타입이 바뀌어 네 소비자를 함께 고친다. 진행 기록 저장의 호출처 아홉 파일은 그대로다(3.2절).
+운영자가 2026-11-13 에 정했다.
+
+1. **값을 두는 곳은 기록의 `summary` 다.** 서버를 멈추고 history 원본과 gate, floor step, fence, resolution 기록을 지운 뒤 설치한다. 잃는 것 넷과 남는 것 둘은 3.7절에 있다.
+   - 고르지 않은 길은 프로세스 안의 표다. 저장 모양이 그대로라 지울 것이 없다. 대신 `summary` 와 같은 일을 하는 것이 둘이 되고, 서버가 다시 뜰 때마다 원본마다 본문을 한 번 읽고, 3.8절은 pass 와 다른 모듈이라 그 표를 쓰지 못한다.
+2. **운영자 해소의 계보를 첫 층으로 옮긴다(L0, 3.9절).** 이 문서의 처음 판은 그것을 풀지 않는 것으로 두었다. 2026-11-13 에 재니 검증 시간의 84% 가 거기서 나왔다(1.6절).
+
+아래 둘은 운영자가 맡겼고 이 문서가 정했다.
+
+3. **본문 파일이 밖에서 바뀐 것은 본문을 쓸 때 잡는다.** 접수, 답 확인, 반영, 거절 보고, child 를 만들 때와 끝낼 때다. host 에 실행 증거 파일이 있는 요청과 교체 계보에 든 원본은 지금처럼 pass 마다 잡는다.
+   - 이유: pass 마다 잡으려면 pass 마다 본문 전체의 sha256 을 계산해야 한다. 22.66 MB 에 371.8 ms 다(1.2절). 그러면 기다리는 pass 가 본문 크기에 다시 비례한다. 이 문서가 없애려는 것이 그것이다.
+   - 대가: 4.2절, 4.3절, 4.7절이다. 그 사이에 worker 관찰이 진행 기록에 붙을 수 있고, 본문이 바뀐 사실은 host 쪽 기록으로만 보인다. output schema 검사 둘도 본문을 읽는 자리로 옮겨 간다. resolution 기록의 영수증 검사 하나는 쓸 때만 한다(3.9절).
+4. **L1 은 접수 모듈의 소비자 넷과 worker 호출의 호출처 둘을 한 번에 옮긴다.**
+   - 이유: `Submit.resume` 의 인자와 결과 타입이 바뀐다. history 만 옮기려면 옛 타입을 받는 `resume` 을 하나 더 남겨야 하고, 같은 일을 하는 함수가 둘이 된다. 나머지 셋은 이미 가진 본문을 돌려주는 `load` 를 넘기면 되고 저장하는 것은 그대로다(3.5절).
+   - 대가: 네 소비자를 한 PR 에서 함께 고친다. 진행 기록 저장의 호출처 아홉 파일은 그대로다(3.2절).
+   - 범위 밖으로 둔 것: 교체 의도를 digest 로 바꾸는 일, floor step 과 admission 의 `summary`, Curator 의 worker 호출이다. 잰 값이 없거나 0 이다(5절).
 
 ## 10. 관련
 
 - #51281: 이 문서의 이슈다. 측정과 코드 추적이 댓글에 있다.
 - #50828: worker 에 기록이 없어 멈춘 원본. 그 원본이 풀려도 큰 원본이 다시 오래 기다리면 같은 비용이 생긴다.
-- #51280: 접수 거절이 되풀이되어 pass 가 는다.
+- #51280: 접수 거절이 되풀이되어 pass 가 는다. 1.6절의 두 child 가 22시간 동안 972번, 928번 거절됐다.
+- #51655: 서버 전체의 GC 정지와 이 pass 의 할당을 이은 측정이다.
+- RFC exact-request-skips-a-slot-that-refused-its-input: L2b 가 `lane_addon_exact.ml` 을 고친다. 이 문서의 L1 은 그 뒤에 쌓는다.
 - #50762: host 기록에 시도가 쌓이고 그때마다 요청 전체를 다시 쓴다.
 - #51199, #51272: 원본이 오래 기다리는 원인과 그 설계다.
 - #51278: 선언이 교체된 원본을 끝내는 설계다. 그 문서도 접수 모듈의 접수 전 갈래를 바꾼다. 두 문서의 층은 서로 기대지 않는다.

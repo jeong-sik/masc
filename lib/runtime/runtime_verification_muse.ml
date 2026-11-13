@@ -63,7 +63,9 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account ~quota_scope ~c
           | Runtime_muse_serve.Turn_items_read _ | Runtime_muse_serve.Model_call_reported _
           | Runtime_muse_serve.Usage_reported _
           | Runtime_muse_serve.Turn_finished _ -> ())
-        ~storage:(Runtime_muse_serve.Stateless storage_root) ?reasoning_effort ~mcp_servers ~mgr ~clock
+        ~storage:(Runtime_muse_serve.Stateless storage_root) ?reasoning_effort ~mcp_servers
+        (* The workspace is the empty directory made above. *)
+        ~workspace_origin:Runtime_muse_serve.Masc_private ~mgr ~clock
         ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") ~account config
         ~workspace_root:workspace ~prompt ~images:[]
       |> Result.map_error (fun error -> Client_error error))

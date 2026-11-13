@@ -1827,7 +1827,7 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
     let* root = Runtime_muse_home.prepare_native_workspace
         ~runtime_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name ~account_home
       |> Result.map_error (fun error -> config_error (Runtime_muse_home.error_to_string error)) in
-    Ok (root,
+    Ok (root, Runtime_muse_serve.Masc_private,
       "Muse native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned tree. Use MASC tools for that tree; native commands run in the official client's host sandbox.") in
   let shared_workspace profile =
     try
@@ -1841,7 +1841,7 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
       let canonical = Unix.realpath selected in
       if not (String.equal selected canonical)
       then Error (config_error "native workspace must not traverse symbolic links")
-      else Ok (canonical, Printf.sprintf
+      else Ok (canonical, Runtime_muse_serve.Other_tree, Printf.sprintf
         "Muse native tools use host workspace %s, sharing files with MASC tools at %s. Native commands run in the official client's host sandbox, not the Keeper container."
         canonical (Keeper_sandbox.container_root keeper_name))
     with
@@ -3342,7 +3342,7 @@ let run_named
             ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
-          | Ok (workspace_root, native_context) ->
+          | Ok (workspace_root, workspace_origin, native_context) ->
           Keeper_muse_runtime.run ~on_guidance_prepared ~input_source ~media_store
             ~on_model_input_refused:record_refused_model_input
             ?on_native_tool_completion
@@ -3353,6 +3353,7 @@ let run_named
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ~quota_scope:runtime.quota_scope
             ~workspace_root
+            ~workspace_origin
             ~accepts_image_input
             ?required_native_posture
             ~runtime_id:attempt_runtime_id

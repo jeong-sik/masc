@@ -925,7 +925,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
-    ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
+    ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ~workspace_origin ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input
     ~on_model_input_refused ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
@@ -1703,6 +1703,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                     ~account
                     client_config
                     ~workspace_root
+                    ~workspace_origin
                     ~prompt
                     ~images))
             ~watcher:(fun () ->
@@ -2001,7 +2002,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
 
 let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
-    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ?native_workspace_context ~goal
+    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root
+    ?(workspace_origin = Serve.Other_tree) ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~initial_messages ~model_input_projection
@@ -2067,6 +2069,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~pre_tool_rejects
         ~base_path
         ~workspace_root
+        ~workspace_origin
         ~native_workspace_context
         ~goal
         ~goal_blocks

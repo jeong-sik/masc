@@ -424,17 +424,21 @@ let render_code (state : state) =
       match code_listing_view state with
       | Masc_tui_fetched.Stale (_, detail) ->
           status_line
-            ((Theme.bad ()) ^ " Refresh failed, showing the last read: "
+            ((Theme.bad ())
+             ^ ui_text state ~ko:" 새로 고침 실패 · 마지막으로 읽은 목록: "
+                 ~en:" Refresh failed, showing the last read: "
              ^ Terminal_text.single_line detail ^ Ansi.reset)
       | Masc_tui_fetched.Failed detail ->
           status_line
             ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
       | Masc_tui_fetched.Loading ->
-          status_line (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset)
+          status_line
+            (Ansi.dim ^ ui_text state ~ko:" (읽는 중\xe2\x80\xa6)" ~en:" (loading\xe2\x80\xa6)"
+             ^ Ansi.reset)
       | Masc_tui_fetched.Absent ->
           status_line (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
       | Masc_tui_fetched.Ready [] ->
-          status_line (Ansi.dim ^ " (empty directory)" ^ Ansi.reset)
+          status_line (Ansi.dim ^ ui_text state ~ko:" (빈 폴더)" ~en:" (empty directory)" ^ Ansi.reset)
       | Masc_tui_fetched.Ready (_ :: _) -> 0
     in
     let list_rows_budget = max 0 (list_rows_budget - status_rows) in
@@ -554,32 +558,43 @@ let render_code (state : state) =
               state.code_file_hscroll > 0 && not history_showing
               && not diff_showing && not notes_showing
             then
-              Printf.sprintf "%s  (col %d)" path
+              Printf.sprintf
+                (if state.ui_language = Lang_ko then "%s  (%d열부터)" else "%s  (col %d)") path
                 (state.code_file_hscroll + 1)
             else path
           in
           let base =
             if hover_showing then
               (match hover with
-               | Some reading -> Printf.sprintf "hover: %s:%d · %s" path
+               | Some reading ->
+                   Printf.sprintf
+                     (if state.ui_language = Lang_ko then "이름 설명: %s:%d · %s" else "hover: %s:%d · %s")
+                     path
                    reading.chr_query.clq_line
                    (Terminal_text.single_line reading.chr_query.clq_symbol)
                | None -> path)
-            else if draft_showing then "draft: " ^ path
-            else if notes_showing then "notes: " ^ path
+            else if draft_showing then ui_text state ~ko:"초안: " ~en:"draft: " ^ path
+            else if notes_showing then ui_text state ~ko:"메모: " ~en:"notes: " ^ path
             else if diff_showing then
               let basis =
                 match Masc_tui_fetched.current_key state.code_diff with
                 | Some (Diff_commit { commit; _ }) ->
-                    "commit " ^ Terminal_text.single_line commit
+                    ui_text state ~ko:"커밋 " ~en:"commit " ^ Terminal_text.single_line commit
                 | Some (Diff_worktree { base_ref; _ }) ->
                     "vs " ^ Terminal_text.single_line base_ref
                 | None -> "vs HEAD"
               in
-              Printf.sprintf "diff col %d %s: %s"
-                (state.code_diff_hscroll + 1) basis path
-            else if history_showing then "history: " ^ path
-            else path ^ (if Option.is_some (current_code_draft state) then " · draft retained (V)" else "")
+              (if state.ui_language = Lang_ko then
+                 Printf.sprintf "diff %s · %d열부터: %s" basis (state.code_diff_hscroll + 1) path
+               else
+                 Printf.sprintf "diff col %d %s: %s"
+                   (state.code_diff_hscroll + 1) basis path)
+            else if history_showing then ui_text state ~ko:"이력: " ~en:"history: " ^ path
+            else
+              path
+              ^ (if Option.is_some (current_code_draft state) then
+                   ui_text state ~ko:" · 초안 남아 있음 (V)" ~en:" · draft retained (V)"
+                 else "")
           in
           (* The note (a language-server answer, a PR link) rides the title
              in every view: the history's Enter writes one too. *)
@@ -588,13 +603,18 @@ let render_code (state : state) =
               | Some (owner, path) ->
                   let path = Terminal_text.single_line path in
                   Some (match owner.cno_action with
-                    | Return_to_history -> "Returning to " ^ path
-                    | Follow_location -> Printf.sprintf "Opening %s:%d" path
+                    | Return_to_history ->
+                        ui_text state ~ko:"돌아가는 중: " ~en:"Returning to " ^ path
+                    | Follow_location ->
+                        Printf.sprintf (if state.ui_language = Lang_ko then "여는 중: %s:%d" else "Opening %s:%d")
+                          path
                         (owner.cno_destination.cj_cursor + 1))
               | None ->
                   (match code_lsp_pending_query state with
                    | Some query ->
-                       Some (Printf.sprintf "asking %s about %S"
+                       Some (Printf.sprintf
+                         (if state.ui_language = Lang_ko then "언어 서버에 묻는 중: %s %S"
+                          else "asking %s about %S")
                          query.clq_question query.clq_symbol)
                    | None -> state.code_lsp_note) in
             match (if hover_showing then None else note) with
@@ -633,12 +653,13 @@ let render_code (state : state) =
                   in
                   with_note ^ "  "
                   ^ (Theme.accent ())
-                  ^ "memo "
+                  ^ ui_text state ~ko:"메모 " ~en:"memo "
                   ^ Terminal_text.single_line memo.Ide_memo.author
                   ^ kind ^ Ansi.reset ^ " "
                   ^ Terminal_text.single_line memo.Ide_memo.text
               | Some (Masc_tui_memo.Broken_at (_, why)) ->
-                  with_note ^ "  " ^ Theme.bad () ^ "memo unreadable: "
+                  with_note ^ "  " ^ Theme.bad ()
+                  ^ ui_text state ~ko:"메모를 읽을 수 없음: " ~en:"memo unreadable: "
                   ^ Terminal_text.single_line why ^ Ansi.reset
           in
           (* A blame that did not come back has no pane of its own to say so
@@ -652,10 +673,11 @@ let render_code (state : state) =
                with_note ^ "  " ^ Theme.bad () ^ "blame: "
                ^ Terminal_text.single_line detail ^ Ansi.reset
            | Some (_, Masc_tui_fetched.Loading) ->
-               with_note ^ "  " ^ Theme.recede () ^ "blame 읽는 중…" ^ Ansi.reset
+               with_note ^ "  " ^ Theme.recede ()
+               ^ ui_text state ~ko:"blame 읽는 중…" ~en:"reading blame…" ^ Ansi.reset
            | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent))
            | None -> with_note)
-      | None -> "(Enter opens the selected file)"
+      | None -> ui_text state ~ko:"(Enter 로 고른 파일 열기)" ~en:"(Enter opens the selected file)"
     in
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
@@ -681,7 +703,7 @@ let render_code (state : state) =
         match code_diff_viewport state with
         | Some (count, height) when count > height ->
             Some
-              (Masc_tui_scroll.window_reading ~noun:"rows"
+              (Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows")
                  ~scroll:
                    (Masc_tui_scroll.normalize ~count ~height
                       state.code_diff_scroll)
@@ -695,7 +717,7 @@ let render_code (state : state) =
             let total_lines = Array.length file_rows in
             let scroll = file_scroll total_lines in
             Some
-              (Masc_tui_scroll.window_reading ~noun:"lines" ~scroll
+              (Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"lines") ~scroll
                  ~height:content_height total_lines)
         | Some (_, Masc_tui_fetched.Ready _)
         | Some
@@ -713,8 +735,8 @@ let render_code (state : state) =
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
            ("  "
-            ^ Masc_tui_scroll.window_reading ~noun:"rows" ~scroll ~height total
-            ^ " · Esc returns to code");
+            ^ Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows") ~scroll ~height total
+            ^ ui_text state ~ko:" · Esc: 코드로 돌아가기" ~en:" · Esc returns to code");
        let window = Rows.of_list ~first:scroll ~height rendered in
        for index = 0 to height - 1 do
          match Rows.at window (scroll + index) with
@@ -738,7 +760,7 @@ let render_code (state : state) =
        let scroll = max 0 (min state.code_notes_scroll (max 0 (total - height))) in
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           ("  " ^ Masc_tui_scroll.window_reading ~noun:"rows" ~scroll ~height total);
+           ("  " ^ Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows") ~scroll ~height total);
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
@@ -756,7 +778,7 @@ let render_code (state : state) =
            done
        | Some (_, Masc_tui_fetched.Loading) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (reading the tree)" ^ Ansi.reset);
+             (Ansi.dim ^ ui_text state ~ko:"  (트리 읽는 중…)" ~en:"  (reading the tree)" ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
@@ -772,12 +794,18 @@ let render_code (state : state) =
                  ^ (match Masc_tui_fetched.current_key state.code_diff with
                     | Some (Diff_commit _) ->
                         if diff.Masc.Tui_decode.gd_has_changes then
-                          "  (the commit reports a change and sent no lines)"
-                        else "  (this commit changed nothing in this file)"
+                          ui_text state ~ko:"  (커밋에 변경이 있다는데 줄이 오지 않음)"
+                            ~en:"  (the commit reports a change and sent no lines)"
+                        else
+                          ui_text state ~ko:"  (이 커밋은 이 파일을 바꾸지 않음)"
+                            ~en:"  (this commit changed nothing in this file)"
                     | Some (Diff_worktree _) | None ->
                         if diff.Masc.Tui_decode.gd_has_changes then
-                          "  (the tree reports a change and sent no lines)"
-                        else "  (this file matches its last commit)")
+                          ui_text state ~ko:"  (트리에 변경이 있다는데 줄이 오지 않음)"
+                            ~en:"  (the tree reports a change and sent no lines)"
+                        else
+                          ui_text state ~ko:"  (이 파일은 마지막 커밋과 같음)"
+                            ~en:"  (this file matches its last commit)")
                  ^ Ansi.reset);
                for _ = 2 to content_height do
                  box_empty pane_buf pane_cols
@@ -831,7 +859,7 @@ let render_code (state : state) =
        let scroll = Masc_tui_scroll.normalize ~count:total ~height:1 state.code_history_scroll in
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           ("  " ^ Masc_tui_scroll.window_reading ~noun:"rows" ~scroll ~height total);
+           ("  " ^ Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"줄" ~en:"rows") ~scroll ~height total);
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
@@ -853,7 +881,8 @@ let render_code (state : state) =
        match Masc_tui_fetched.current state.code_file with
        | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) -> say (Theme.bad ()) detail
        | Some (path, Masc_tui_fetched.Loading) ->
-           say (Theme.recede ()) (path ^ " 읽는 중…")
+           say (Theme.recede ())
+             (ui_text state ~ko:(path ^ " 읽는 중…") ~en:("reading " ^ path ^ "…"))
        | Some (_, Masc_tui_fetched.Absent) | None ->
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
@@ -862,7 +891,9 @@ let render_code (state : state) =
            (* Its bytes would draw as hundreds of rows of escapes. The title
               already names the file, so the pane says only what it is. *)
            say (Theme.recede ())
-             (Printf.sprintf "바이너리 파일 · %s · 텍스트로 표시하지 않아요"
+             (Printf.sprintf
+                (if state.ui_language = Lang_ko then "바이너리 파일 · %s · 텍스트로 그리지 않음"
+                 else "binary file · %s · not drawn as text")
                 (Masc_tui_context_inspector.format_bytes bytes))
        | Some (open_path, Masc_tui_fetched.Ready { cfd_body = Code_text _; cfd_rows = file_rows; _ }) ->
            let scroll = file_scroll (Array.length file_rows) in

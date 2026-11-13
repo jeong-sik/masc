@@ -518,13 +518,16 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
         let* saved, execution = attempt () in
         (* HIGH-RISK-UNREVIEWED: an attempt refused before dispatch because its
            lookup authority or answer format moved is asked again once in this
-           same processing. Its run row is published as deferred first. The walk
+           same processing. Its run row is published as deferred first, and the
+           refused attempt is no longer the active one: a cancellation before
+           the next attempt is retained leaves that row as published. The walk
            then opens the next attempt with the authority this processing
            prepared, and the worker checks it against that same value. A second
            refusal keeps its own record and waits for the next processing. *)
         let* saved, execution = match execution with
           | Error (Worker.Authority_changed change) ->
             let* () = publish saved (Registry.Deferred {detail=Verifier_review_authority_change.to_string change}) in
+            active := None;
             attempt ()
           | Ok _ | Error (Worker.Store_unavailable _ | Original_invalid _ | Destination_mismatch _
               | Authority_unavailable _ | Question_changed | Execution_pending _) -> Ok (saved, execution) in

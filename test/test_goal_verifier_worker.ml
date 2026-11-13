@@ -739,6 +739,33 @@ let test_moved_authority_is_refused_before_dispatch_and_asked_again () =
   List.iter (fun moved -> exercise ~moved ~operator:false) [`Authority; `Answer_format; `Both];
   exercise ~moved:`Authority ~operator:true
 
+(* A before-dispatch refusal whose change starts at another lookup authority
+   is not this attempt's refusal, so it opens no next attempt. *)
+let test_refusal_from_another_authority_opens_no_attempt () = with_workspace (fun config store _ ->
+  let goal_id = pending config in
+  let authority = get (A.create_goal_review ~config ~goal_id) in
+  let stale = stale_original ~moved:`Authority authority in
+  let request_id = (V.subject stale).request_id in
+  ignore (checked (W.retain ~store ~installation_id ~package_id
+    ~run:{W.run_id="foreign/" ^ request_id; started_at=Time_compat.now ()} stale));
+  let format = V.output_contract stale in
+  let foreign = match get (Change.between ~retained_authority:(String.make 64 'd')
+      ~current_authority:(A.goal_review_authority_binding authority)
+      ~retained_format:format ~current_format:format) with
+    | Some change -> change | None -> Alcotest.fail "the fixture change must move" in
+  let record = match get (Lane_addon_tool_request_owner.load_scope ~store ~scope:W.scope
+      |> Result.map_error Lane_addon_tool_request_owner.error_to_string) with
+    | [record] -> record | _ -> Alcotest.fail "fixture needs one actual owner" in
+  ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:record
+    ~event:(P.Refused {stage=P.Before_dispatch; evidence=Change.to_json foreign})
+    |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+  let allocations = ref 0 in
+  (match W.frontier ~authority:(fun () -> Ok authority) ~store ~installation_id ~package_id
+      ~goal_id ~request_id ~new_run:(fun () -> incr allocations; {W.run_id="never"; started_at=0.}) with
+   | Error (W.Original_invalid _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "a refusal from another authority opened a next attempt");
+  Alcotest.(check int) "a refusal from another authority allocates no run" 0 !allocations)
+
 let test_actual_goal_commit_reply_loss_and_conflict () =
   let exercise conflict = with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
@@ -1758,6 +1785,8 @@ let () = match restart_probe with
     test_moved_authority_is_refused_before_dispatch_and_asked_again;
   Alcotest.test_case "agent asks a moved authority again in one processing" `Quick
     test_agent_asks_a_moved_authority_again_in_one_processing;
+  Alcotest.test_case "refusal from another authority opens no attempt" `Quick
+    test_refusal_from_another_authority_opens_no_attempt;
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;

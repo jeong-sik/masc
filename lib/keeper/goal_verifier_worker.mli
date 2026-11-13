@@ -175,7 +175,9 @@ val request_retry :
     Store the actor/parent
     authorization in the complete staged child before acknowledging it. The
     child asks the parent's question with the lookup authority [authority]
-    prepares now.
+    prepares now. A before-dispatch refusal needs no authorization: its next
+    attempt is staged as a wake stages it, and the request acknowledges that
+    child.
     An ordinary wake or judgment grants no retry. An active or unknown dispatch
     returns [Execution_pending], so the caller cannot report a new retry as
     accepted while its original result is unresolved. *)
@@ -202,7 +204,9 @@ val tool_observations : retained ->
 val observed_receipt : retained -> (receipt option, error) result
 (** Passive receipt restoration including admission and unknown outcomes.
     Unlike [restored_receipt], a returned value need not be a settled review;
-    the caller must use progress for dispatch/commit authority. *)
+    the caller must use progress for dispatch/commit authority. A
+    before-dispatch refusal returns [None], also after an admission wait; that
+    wait stays in the progress events. *)
 
 val record_observer :
   store:Lane_addon_store.t -> retained:retained ->

@@ -95,5 +95,8 @@ val delete
     Each deletion runs inside the call of its account, as the deletion of
     its owner does, and the status is read again there. One whose account
     has a call running is left to the next start or to its owner. What
-    happens goes to the log of the server. *)
+    happens goes to the log of the server. An exception of one deletion goes
+    there too and leaves that deletion as it is: the others go on, and the
+    server keeps serving. Cancellation and the exceptions of a process that
+    cannot go on are raised. *)
 val resume : env:Eio_unix.Stdenv.base -> zone:Authz_zone.t -> base_path:string -> unit

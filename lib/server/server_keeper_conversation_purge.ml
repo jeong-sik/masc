@@ -308,6 +308,22 @@ let resume_one ~env ~zone ~base_path ~owner ~namespace conversation_id =
        Log.Server.warn "The deletion of conversation %s was not resumed" id)
 ;;
 
+(* An exception of one deletion would end the switch of the server, and at
+   each start again, since the record it came from is still there. It goes
+   to the log, and the deletion stays as it is, for the next start or its
+   owner, as the deletions of the other records go on. *)
+let guarded conversation_id f =
+  match f () with
+  | () -> ()
+  | exception ((Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break) as exn) ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exception exn ->
+    Log.Server.warn
+      "The deletion of conversation %s was not resumed: %s"
+      (Conversation_id.to_string conversation_id)
+      (Printexc.to_string exn)
+;;
+
 let resume ~env ~zone ~base_path =
   let state = (Authz_zone.snapshot zone).Authz_zone.state in
   (* An owner wrote [Purge_pending] while active, so with a membership. A
@@ -321,6 +337,7 @@ let resume ~env ~zone ~base_path =
   List.iter
     (fun ((target : Event.target), (status : Purges.status)) ->
        let (Event.Keeper_conversation { owner; conversation_id }) = target in
+       guarded conversation_id @@ fun () ->
        match status, namespace_of owner with
        | Purges.Pending { earlier_vendor_copy = _ }, Some namespace ->
          resume_one ~env ~zone ~base_path ~owner ~namespace conversation_id

@@ -64,17 +64,41 @@ let result_after_activity_projection
          (json_upsert_assoc_field "activity_projection" observation fields) in
        Tool_result.Completed { output with metadata=Some metadata })
 
-(* The post handler returns the created post as its typed data
-   ([Board.post_to_yojson] plus the names no Keeper declares); its id is read
-   from there, not parsed back out of the message text written for the client. *)
-let created_post_id result =
-  Option.map
-    (fun (post : Board.post) -> Board.Post_id.to_string post.id)
-    (Board_tool.post_of_write_data (Tool_result.data result))
+(* The handler reads the request's text once ([body], else [content]) and
+   stores it. What follows a write here -- the SSE notification, the activity
+   record and the mention -- takes the text from the stored row, so it cannot
+   read the request by a different rule than the store did.
+
+   The post handler returns the stored post as its typed data
+   ([Board.post_to_yojson] plus the names no Keeper declares). *)
+let written_post result = Board_tool.post_of_write_data (Tool_result.data result)
+
+type written_comment_unavailable =
+  | No_board_evidence
+  | Board_evidence_unreadable of string
+  | Board_evidence_is_a_reaction
+  | Stored_comment_unreadable of Board.board_error
+
+let written_comment_unavailable_to_string = function
+  | No_board_evidence -> "the result carries no Board evidence"
+  | Board_evidence_unreadable detail -> "the Board evidence does not decode: " ^ detail
+  | Board_evidence_is_a_reaction -> "the Board evidence names a reaction, not a comment"
+  | Stored_comment_unreadable error -> Board_tool.board_error_to_string error
+
+(* The comment handler leaves the text out of its answer
+   ([Board_tool_post.comment_acknowledgement]), so the stored comment is read
+   back by the id in the handler's own write evidence. *)
+let written_comment result =
+  match Board_tool_evidence.of_metadata (Tool_result.metadata result) with
+  | None -> Error No_board_evidence
+  | Some (Error detail) -> Error (Board_evidence_unreadable detail)
+  | Some (Ok (Board_tool_evidence.Reaction_changed _)) -> Error Board_evidence_is_a_reaction
+  | Some (Ok (Board_tool_evidence.Comment_added { comment_id; _ })) ->
+    Board.get_comment (Board_dispatch.backend ()) ~comment_id
+    |> Result.map_error (fun error -> Stored_comment_unreadable error)
 
 module For_testing = struct
   let result_after_activity_projection = result_after_activity_projection
-  let created_post_id = created_post_id
 end
 
 let json_upsert_meta_string_field name value fields =
@@ -213,10 +237,33 @@ let public_comment ~comment_id =
   | Ok comment -> public_post ~post_id:(Board.Post_id.to_string comment.post_id)
   | Error _ -> false
 
+(* The stored post of a successful write, when it is public. *)
 let public_created_post result =
-  match Board_tool.post_of_write_data (Tool_result.data result) with
-  | Some post -> (match post.visibility with Board.Public -> true | Board.Unlisted | Board.Internal | Board.Direct -> false)
-  | None -> false
+  if not (Tool_result.is_success result) then None
+  else
+    match written_post result with
+    | None ->
+      Log.Misc.error "board_post succeeded but its result data is not a post: %s"
+        (Tool_result.message result);
+      None
+    | Some post ->
+      (match post.visibility with
+       | Board.Public -> Some post
+       | Board.Unlisted | Board.Internal | Board.Direct -> None)
+
+(* The stored comment of a successful write, when its post is public. *)
+let public_written_comment result =
+  if not (Tool_result.is_success result) then None
+  else
+    match written_comment result with
+    | Error unavailable ->
+      Log.Misc.error "board_comment succeeded but its stored comment is not available: %s"
+        (written_comment_unavailable_to_string unavailable);
+      None
+    | Ok comment ->
+      if public_post ~post_id:(Board.Post_id.to_string comment.post_id)
+      then Some comment
+      else None
 
 let dispatch ~reader ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~name =
   let arguments = bind_caller_identity ~name ~agent_name arguments in
@@ -225,19 +272,18 @@ let dispatch ~reader ~config ~agent_name ~arguments ~(state : Mcp_server.server_
   | Some Tool_name.Board_name.Board_post ->
       let result_tr = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
-        if Tool_result.is_success result_tr && public_created_post result_tr then begin
+        match public_created_post result_tr with
+        | None -> result_tr
+        | Some post ->
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
-        let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = created_post_id result_tr in
-        if Option.is_none post_id then
-          Log.Misc.error "board_post by %s succeeded but its result data is not a post: %s"
-            author (Tool_result.message result_tr);
+        let content = post.body in
+        let post_id = Board.Post_id.to_string post.id in
         let notification = `Assoc [
           ("type", `String "masc/board_post");
           ("author", `String author);
           ("author_identity", Server_utils.board_actor_identity_json author);
           ("content", `String (board_notification_content content));
-          ("post_id", Json_util.string_opt_to_json post_id);
+          ("post_id", `String post_id);
           ("timestamp", `String (Masc_domain.now_iso ()));
         ] in
         Mcp_server.sse_broadcast state notification;
@@ -250,12 +296,12 @@ let dispatch ~reader ~config ~agent_name ~arguments ~(state : Mcp_server.server_
                  config
                  ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted)
                  ~actor:author
-                 ?subject:(Option.map (Activity_graph.entity ~kind:"post") post_id)
+                 ~subject:(Activity_graph.entity ~kind:"post" post_id)
                  ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Posted ]
                  ~payload:
                    (`Assoc
                      [ ("content", `String content)
-                     ; ("post_id", Json_util.string_opt_to_json post_id)
+                     ; ("post_id", `String post_id)
                      ])
                  ())
         in
@@ -267,18 +313,18 @@ let dispatch ~reader ~config ~agent_name ~arguments ~(state : Mcp_server.server_
                ~target_agent:target ~message:content ()
          | None -> ())
         ; projected_result
-        end
-        else result_tr
       in
       Some result_tr
 
   | Some Tool_name.Board_name.Board_comment ->
       let result_tr = Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client name arguments in
       let result_tr =
-        if Tool_result.is_success result_tr && public_post ~post_id:(Safe_ops.json_string ~default:"" "post_id" arguments) then begin
+        match public_written_comment result_tr with
+        | None -> result_tr
+        | Some comment ->
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
-        let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
+        let content = comment.content in
+        let post_id = Board.Post_id.to_string comment.post_id in
         let notification = `Assoc [
           ("type", `String "board_comment");
           ("author", `String author);
@@ -314,8 +360,6 @@ let dispatch ~reader ~config ~agent_name ~arguments ~(state : Mcp_server.server_
                ~target_agent:target ~message:content ()
          | None -> ())
         ; projected_result
-        end
-        else result_tr
       in
       Some result_tr
 

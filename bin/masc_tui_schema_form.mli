@@ -5,8 +5,9 @@
     A root [{"type":"object","oneOf":[…]}] schema is edited one alternative
     at a time, and only the chosen alternative's fields are shown. With two
     or more alternatives the first slot chooses one with Left/Right; choosing
-    another alternative drops what was typed for the previous one. Any other
-    [oneOf] node stays one JSON field. *)
+    another alternative drops what was typed for the previous one. The value
+    must be one of the chosen alternative. Any other [oneOf] node, including
+    the root of an array item's form, stays one JSON field. *)
 type t
 type event = Updated of t | Submit of Yojson.Safe.t | Cancel
 val create : schema:Yojson.Safe.t -> initial:Yojson.Safe.t -> (t, string) result
@@ -22,8 +23,10 @@ val create_for_row :
     alternative cannot be changed. Each [locked] top-level member is shown
     with its value and reaches the action unchanged: no slot holds it, so no
     key can edit it. The cursor starts on the first member left to fill.
-    Errors when the schema and [branch] disagree about alternatives, or when
-    a locked member is not a member of the alternative or fails its schema. *)
+    Errors when the schema and [branch] disagree about alternatives, when
+    [branch] is negative or past the last alternative, or when a locked
+    member is named twice, is not a member of the alternative or fails its
+    schema. *)
 val insert_text : text:string -> t -> t
 val handle : key:string -> t -> (event, string) result
 val lines : ?show_description:bool -> t -> string list

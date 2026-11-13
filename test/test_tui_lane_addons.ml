@@ -873,6 +873,66 @@ let schema_form_alternatives_and_locked_members () =
   check bool "a single alternative is open without choosing" true
     ((Form.value (Form.create ~schema:one ~initial:(`Assoc []) |> ok) |> ok)=`Assoc ["kind",`String "export"])
 
+(* What a row action form refuses, and what any form sends unchanged. *)
+let schema_form_refuses_and_keeps () =
+  let module Form = Masc_tui_schema_form in
+  let json = Yojson.Safe.from_string in
+  let edit key form = match Form.handle ~key form |> ok with
+    | Form.Updated form -> form | Form.Submit _ | Form.Cancel -> fail "editing must stay in the form" in
+  let submit form = match Form.handle ~key:"enter" (edit "\019" form) |> ok with
+    | Form.Submit json -> json | Form.Updated _ | Form.Cancel -> fail "review Enter submits" in
+  let closed members required = Printf.sprintf
+    {|{"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|}
+    (String.concat "," (List.map (Printf.sprintf {|"%s"|}) required))
+    (String.concat "," (List.map (fun (name,schema) -> Printf.sprintf {|"%s":%s|} name schema) members)) in
+  let text = {|{"type":"string"}|} in
+  let kind value = Printf.sprintf {|{"type":"string","const":"%s"}|} value in
+  let union = json (Printf.sprintf {|{"type":"object","oneOf":[%s,%s]}|}
+    (closed ["kind",kind "a";"note",text] ["kind"]) (closed ["kind",kind "b";"id",text;"note",text] ["kind";"id"])) in
+  let refused label result = check bool label true (Result.is_error result) in
+  refused "a negative alternative" (Form.create_for_row ~schema:union ~branch:(Some (-1)) ~locked:[]);
+  refused "an alternative past the last" (Form.create_for_row ~schema:union ~branch:(Some 2) ~locked:[]);
+  refused "no alternative of a union" (Form.create_for_row ~schema:union ~branch:None ~locked:[]);
+  let flat = json (closed ["kind",kind "b";"id",text;"note",text] ["kind";"id";"note"]) in
+  refused "an alternative of a flat object" (Form.create_for_row ~schema:flat ~branch:(Some 0) ~locked:[]);
+  refused "a schema without members" (Form.create_for_row ~schema:(json text) ~branch:None ~locked:[]);
+  refused "a member locked twice"
+    (Form.create_for_row ~schema:union ~branch:(Some 1) ~locked:["id",`String "1";"id",`String "2"]);
+  let locked = ["kind",`String "b";"id",`String "i1"] in
+  let row = Form.create_for_row ~schema:flat ~branch:None ~locked |> ok
+    |> Form.insert_text ~text:"why" in
+  check bool "a flat object's row action sends its locked and typed members" true
+    (submit row=`Assoc ["id",`String "i1";"kind",`String "b";"note",`String "why"]);
+  let every = json (closed ["kind",kind "b";"id",text] ["kind";"id"]) in
+  check bool "a form with every member locked sends them" true
+    (submit (Form.create_for_row ~schema:every ~branch:None ~locked |> ok)
+     =`Assoc ["id",`String "i1";"kind",`String "b"]);
+  (* Left from no choice is the last alternative. Its required member is
+     unset, so the value is refused instead of read as the first one. *)
+  let short_long = json (Printf.sprintf {|{"type":"object","oneOf":[%s,%s]}|}
+    (closed ["note",text] ["note"]) (closed ["note",text;"extra",text] ["note";"extra"])) in
+  let long = Form.create ~schema:short_long ~initial:(`Assoc []) |> ok |> edit "left" |> edit "tab"
+    |> Form.insert_text ~text:"only note" in
+  refused "a value of another alternative than the chosen one" (Form.value long);
+  (* An array item's form is one JSON field even when its root has
+     alternatives. *)
+  let steps = json (Printf.sprintf
+    {|{"type":"object","additionalProperties":false,"required":["steps"],"properties":{"steps":
+      {"type":"array","items":{"type":"object","oneOf":[%s,%s]}}}}|}
+    (closed ["op",kind "add"] ["op"]) (closed ["op",kind "del"] ["op"])) in
+  let added = Form.create ~schema:steps ~initial:(`Assoc []) |> ok |> edit "\005" |> edit "a" |> edit "\021"
+    |> Form.insert_text ~text:{|{"op":"del"}|} |> edit "\019" |> edit "enter" |> edit "\019" in
+  check bool "an item with alternatives is typed as JSON" true
+    (submit added=`Assoc ["steps",`List [`Assoc ["op",`String "del"]]]);
+  let opened = json (Printf.sprintf {|{"type":"object","oneOf":[%s,{"type":"object","properties":{},"additionalProperties":true}]}|}
+    (closed ["kind",kind "k"] ["kind"])) in
+  check bool "an open alternative keeps the members it was given" true
+    (submit (Form.create ~schema:opened ~initial:(`Assoc ["anything",`Int 1]) |> ok)=`Assoc ["anything",`Int 1]);
+  let meta = json (closed ["kind",kind "m";"meta",{|{"type":"object","properties":{},"additionalProperties":true}|}] ["kind"]) in
+  let given = `Assoc ["kind",`String "m";"meta",`Assoc ["a",`Int 1]] in
+  check bool "an open member object keeps its members" true
+    (submit (Form.create ~schema:meta ~initial:given |> ok)=given)
+
 (* Marked rows are frozen with `e`. The choice of Keeper is made by name from
    the workspace roster; before this prompt the only way to name one was the
    raw `:evidence {...,"keeper_name"}` command. The bundle is preserved either
@@ -1878,6 +1938,7 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;
   test_case "edit object array items through nested schema forms" `Quick object_array_fields;
   test_case "fill one alternative at a time and keep locked members" `Quick schema_form_alternatives_and_locked_members;
+  test_case "a row form refuses bad requests and keeps given values" `Quick schema_form_refuses_and_keeps;
   test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;

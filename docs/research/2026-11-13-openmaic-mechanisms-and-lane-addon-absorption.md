@@ -13,7 +13,7 @@
 - 내구성 장치(체크포인트에서 다음 단계를 정하는 순수 함수, 멱등 명령, worker 를 붙잡지 않는 사람 확인)는 masc Lane Add-on host 와 `operator-quiz` 에 이미 있다. masc 쪽이 더 엄격하다(§3).
 - masc 에 없는 것은 제품 모양 셋이다. 기록에서 수업을 만드는 것, 역할 에이전트가 한 주제를 놓고 번갈아 말하는 것, 프로젝트를 단계별로 확인하며 나아가는 것(§4).
 - 가져오면 안 되는 것이 분명하다. 깨진 모델 출력을 기본값으로 덮는 곳, 손으로 맞춘 숫자 임계값, 키워드 정규식(§5).
-- 가장 빨리 붙일 수 있는 것은 기록에서 수업을 쓰는 패키지다. host 의 기존 요청 종류(`read_records`, `exact_output`, `ask`)만으로 만들 수 있고 core 를 고치지 않는다(§6).
+- 가장 빨리 붙일 수 있는 것은 기록에서 수업을 쓰는 패키지다. host 의 기존 요청 종류(`read_records`, `read_file`, `exact_output`)만으로 만들 수 있고 core 를 고치지 않는다(§6).
 
 ## 1. OpenMAIC 가 하는 일
 
@@ -88,8 +88,8 @@
 | worker 를 붙잡지 않는 사람 확인 | `ask` 의 `awaiting_operator` | OpenMAIC 는 카운트다운 뒤 자동 확인이 있다. masc 는 기한이 없다 |
 | 정답이 선택지를 가리키는지 생성 때 검사 | `operator-quiz` 가 선택지 수·정답 key·인용문 바이트를 검사 | masc 는 인용문이 보존한 기록에 글자 그대로 있는지도 본다 |
 | 서술형 LLM 채점 | `operator-quiz` 의 `grade` 출력 | masc 는 스키마로 받고, 실패는 `invalid_output` 으로 남는다 |
-| 임대 세대 번호로 쓰기 막기 | worker incarnation 과 설치 revision | 같다 |
-| 결과를 모르는 호출은 실패가 아니다 | `outcome_unknown` | 같다 |
+| 임대 세대 번호로 쓰기 막기 | host 는 결과를 전달할 때 worker incarnation 을 본다 | 다르다. 패키지 log 는 쓰는 worker 가 하나라는 전제이고 세대 번호로 막지 않는다(`addons/operator-quiz/quiz_log.py:843`, 보고) |
+| 결과를 모르는 호출을 실패와 구분한다 | `outcome_unknown` | 둘 다 다시 보내지 않는다. 퀴즈는 그 세션을 `author_outcome_unknown` 으로 끝낸다(`addons/operator-quiz/quiz_flow.py:703-704`, 직접) |
 | 틀린 문항 다시 내기 | `operator-quiz` 의 다음 날 이후 다시 묻기와 `quiz/topics` | OpenMAIC 에는 없다 |
 
 이 줄들은 가져올 것이 아니다. OpenMAIC 가 같은 결론에 닿았다는 확인이다.

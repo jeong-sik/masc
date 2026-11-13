@@ -178,7 +178,7 @@ module Ring : sig
   val failed_publication_notifications : unit -> int
 
   val await_newer_than : int -> unit
-  (** [await_newer_than seq] returns once the ring has handed out a sequence
+  (** [await_newer_than seq] returns once the ring holds an entry of a sequence
       above [seq], at once if it already has. It suspends the calling Eio
       fiber; an entry pushed from any domain or systhread wakes it. *)
 

@@ -1,0 +1,7 @@
+### Fixed
+
+- A log read from another domain no longer returns the row from 50,000
+  entries ago in place of an entry that was being written, and a log stream
+  no longer misses that entry. The ring stores an entry before it raises the
+  entry count, and a read leaves out a slot that holds another sequence
+  (#51304).

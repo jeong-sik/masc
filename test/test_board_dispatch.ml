@@ -3102,6 +3102,69 @@ let test_sub_board_post_count_projection () =
 
 (** {1 Test Runner} *)
 
+(* #50878: the process environment names one workspace and the caller asks for
+   another. The store must open on the caller's, and the environment's Board
+   files must stay unread and untouched. *)
+let test_initialization_opens_requested_workspace_not_environment () =
+  let operator = Masc_board_handlers.Board_access.Operator in
+  let environment_store = Board_dispatch.backend () in
+  let environment_root = Board.workspace_masc_dir environment_store in
+  let environment_post =
+    match Board_dispatch.create_post ~author:"agent-a"
+            ~content:"post in the environment workspace"
+            ~post_kind:Board.Human_post () with
+    | Ok post -> Board.Post_id.to_string post.id
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
+  in
+  Board.flush_dirty environment_store;
+  let environment_files () =
+    Sys.readdir environment_root |> Array.to_list |> List.sort String.compare
+    |> List.map (fun name ->
+      let stat = Unix.stat (Filename.concat environment_root name) in
+      Printf.sprintf "%s size=%d mtime=%.6f" name stat.Unix.st_size stat.Unix.st_mtime)
+  in
+  let before = environment_files () in
+  Alcotest.(check bool) "environment workspace holds its post on disk" true
+    (Sys.file_exists (Board.persist_path environment_store));
+  Board_dispatch.reset_for_test ();
+  Board.reset_global_for_test ();
+  let requested_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-board-dispatch-requested-%06x" (Random.bits ()))
+  in
+  Fs_compat.mkdir_p requested_base;
+  let requested_root = Fs_compat.realpath_lenient
+      (Common.masc_dir_from_base_path ~base_path:requested_base) in
+  (match Board_dispatch.init_jsonl ~base_path:requested_base
+           ~recipient_lookup:every_name_declared () with
+   | Ok () -> ()
+   | Error (Board_dispatch.Workspace_mismatch { active_workspace_masc_dir; _ }) ->
+     Alcotest.failf "init opened the environment workspace %s" active_workspace_masc_dir
+   | Error (Board_dispatch.Workspace_binding_refused rejection) ->
+     Alcotest.fail (Board_workspace_binding.rejection_to_string rejection));
+  Alcotest.(check string) "backend store belongs to the requested workspace"
+    requested_root (Board.workspace_masc_dir (Board_dispatch.backend ()));
+  Alcotest.(check bool) "process store is the backend store" true
+    (Board.global () == Board_dispatch.backend ());
+  (match Board_dispatch.get_post ~reader:operator ~post_id:environment_post with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "environment workspace post was loaded");
+  let requested_post =
+    match Board_dispatch.create_post ~author:"agent-b"
+            ~content:"post in the requested workspace"
+            ~post_kind:Board.Human_post () with
+    | Ok post -> Board.Post_id.to_string post.id
+    | Error e -> Alcotest.fail (Board.Post_publication_failure.to_string e)
+  in
+  Board.flush_dirty (Board_dispatch.backend ());
+  let persisted_ids path =
+    Fs_compat.load_jsonl path |> List.filter_map (Safe_ops.json_string_opt "id") in
+  Alcotest.(check (list string)) "requested workspace file holds only its own post"
+    [ requested_post ]
+    (persisted_ids (Filename.concat requested_root "board_posts.jsonl"));
+  Alcotest.(check (list string)) "environment workspace files are untouched"
+    before (environment_files ())
+
 let test_initialization_preserves_captured_workspace_and_lookup () =
   let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
   Fun.protect
@@ -3398,6 +3461,8 @@ let () =
     "Direct access", [Alcotest.test_case "reads, pages and aggregates share readership" `Quick
       (with_eio test_direct_reads_and_aggregates)];
     "backend", [
+      Alcotest.test_case "initialization opens the requested workspace, not the environment's" `Quick
+        (with_eio test_initialization_opens_requested_workspace_not_environment);
       Alcotest.test_case "initialization preserves captured workspace and lookup" `Quick
         test_initialization_preserves_captured_workspace_and_lookup;
       Alcotest.test_case "read-started initialization refuses foreign workspace alias" `Quick

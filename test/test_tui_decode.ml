@@ -8772,6 +8772,7 @@ let picker_default_runtime =
     ; ("declared_reasoning_effort", `String "high")
     ; ("is_local", `Bool false)
     ; ("is_default", `Bool false)
+    ; ("quota_rest", `Null)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
     ; ("failed_attempt", `Null)
@@ -8790,6 +8791,7 @@ let picker_exact_runtime =
     ; ("declared_reasoning_effort", `Null)
     ; ("is_local", `Bool true)
     ; ("is_default", `Bool false)
+    ; ("quota_rest", `Null)
     ; ("rate_limited", `Bool false)
     ; ("rate_limit_resets_at", `Null)
     ; ("failed_attempt", `Null)
@@ -9264,6 +9266,7 @@ let resolved_runtime id provider model =
     ; "declared_reasoning_effort", `Null
     ; "is_local", `Bool false
     ; "is_default", `Bool false
+    ; "quota_rest", `Null
     ; "rate_limited", `Bool false
     ; "rate_limit_resets_at", `Null
     ; "failed_attempt", `Null

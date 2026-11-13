@@ -300,8 +300,8 @@ let test_reports_reach_the_resolved_document () =
    | Error error -> failf "the TUI decoder refuses the server's document: %s" error);
   (* An observation, not a gate: 100 % used leaves the runtime's quota state
      untouched. *)
-  check bool "codex runtime is not held back by a usage report" false
-    Yojson.Safe.Util.(runtime_row after "usage_codex.sol" |> member "quota_exhausted" |> to_bool)
+  check bool "codex runtime is not held back by a usage report" true
+    (Yojson.Safe.Util.(runtime_row after "usage_codex.sol" |> member "quota_rest") = `Null)
 ;;
 
 let test_malformed_window_is_a_typed_error () =

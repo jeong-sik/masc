@@ -25355,7 +25355,7 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
               | Utilization_usd { limit = None; _ } -> false) (first :: rest))
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
-  option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+  Option.is_some option.Tui_decode.ro_quota_rest || option.Tui_decode.ro_rate_limited
   || Option.is_some option.Tui_decode.ro_credential_refused_at
 
 let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
@@ -25371,13 +25371,40 @@ let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
 let toggle_runtime_dim_refusals state =
   state.runtime_dim_refusals <- not state.runtime_dim_refusals
 
+(* What refused, as the quota window recorded it. A payment refusal is the
+   account's balance; the other two are a spent usage window, told apart by
+   whether a refused call or a usage read found it. *)
+let runtime_quota_cause_label ?(ko = false) = function
+  | Runtime_quota_window.Refused Runtime_quota_window.Payment_refused ->
+      if ko then "결제 거절" else "payment refused"
+  | Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused ->
+      if ko then "한도 소진" else "quota exhausted"
+  | Runtime_quota_window.Usage_read ->
+      if ko then "한도 소진 (사용량 조회)" else "quota spent (usage read)"
+
+(* A reset can be days ahead, so the day is part of the time. *)
+let runtime_quota_time at =
+  let tm = Unix.localtime at in
+  Printf.sprintf "%02d-%02d %02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
+    tm.Unix.tm_min
+
+(* When the rest ends. A stated reset is the provider's; without one the
+   time is when this server calls the scope again. *)
+let runtime_quota_end_label ?(ko = false) = function
+  | Runtime_quota_window.Reset_stated at ->
+      Printf.sprintf (if ko then "%s 초기화" else "resets %s") (runtime_quota_time at)
+  | Runtime_quota_window.Observed_until at ->
+      Printf.sprintf
+        (if ko then "초기화 시각 없음, %s 다시 호출" else "no reset stated, called again %s")
+        (runtime_quota_time at)
+
 let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
-  if not runtime.ro_quota_exhausted then None
-  else Some (match runtime.ro_quota_resets_at with
-    | Some at -> let tm = Unix.localtime at in
-        Printf.sprintf (if ko then "쿼터 소진 (%02d:%02d 초기화)" else "quota exhausted (resets %02d:%02d)")
-          tm.Unix.tm_hour tm.Unix.tm_min
-    | None -> if ko then "쿼터 소진 (초기화 시각 없음)" else "quota exhausted (no reset stated)")
+  Option.map
+    (fun (spent : Runtime_quota_window.spent) ->
+      Printf.sprintf "%s (%s)"
+        (runtime_quota_cause_label ~ko spent.cause)
+        (runtime_quota_end_label ~ko spent.rest))
+    runtime.ro_quota_rest
 
 (* The provider refused the credential itself. No wait ends it, so the label
    carries when it was seen instead of when it resets. *)
@@ -25481,11 +25508,14 @@ let runtime_pick_facts = function
     in
     let default = if option.Tui_decode.ro_is_default then [ fact "[default]" ] else [] in
     let refusal =
-      match option.Tui_decode.ro_quota_exhausted, option.Tui_decode.ro_rate_limited with
-      | false, false -> []
-      | true, false -> [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
-      | false, true -> [ { rpf_text = "[rate limited]"; rpf_warn = true } ]
-      | true, true -> [ { rpf_text = "[quota + rate]"; rpf_warn = true } ]
+      let warn text = { rpf_text = Printf.sprintf "[%s]" text; rpf_warn = true } in
+      List.filter_map Fun.id
+        [ Option.map
+            (fun (spent : Runtime_quota_window.spent) ->
+              warn (runtime_quota_cause_label spent.cause))
+            option.Tui_decode.ro_quota_rest
+        ; (if option.Tui_decode.ro_rate_limited then Some (warn "rate limited") else None)
+        ]
     in
     (context :: effort) @ default @ refusal
 

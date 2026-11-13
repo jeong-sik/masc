@@ -18,7 +18,7 @@ request, one JSON answer.
 | `initialize` | The negotiated revision, the server, and the `tools` capability. No `Mcp-Session-Id`. |
 | `server/discover` | The supported revisions, for a client of revision 2026-07-28. |
 | `ping` | An empty result. |
-| `tools/list` | The six tools below, on one page. |
+| `tools/list` | The nine tools below, on one page. |
 | `tools/call` | The result of the tool. |
 | a notification | 202 with no body. |
 
@@ -32,6 +32,7 @@ request, one JSON answer.
 | `masc_my_keeper_turn` | Sends a Keeper a message and returns its answer. The Keeper goes on in its conversation. | `manage_own_keeper`, `invoke_model`, `use_tool` |
 | `masc_my_keeper_conversation_new` | Starts a new conversation of a Keeper. | `manage_own_keeper` |
 | `masc_my_keeper_conversation` | Reads what you asked a Keeper and what it answered. | `manage_own_keeper`, `read_state` |
+| `masc_my_keeper_conversation_delete` | Deletes a conversation of yours, and asks Claude Code to purge what it keeps of it. | `manage_own_keeper` |
 
 Each tool calls the function behind the matching control of the person's
 page (`/`), after the same check. The text of a tool result is the JSON
@@ -145,11 +146,35 @@ what you asked before and what it answered. The answer of
 - **A failed turn is not sent again.** The server does not start the turn
   over, and it starts no new conversation in place of one whose turn
   failed. Send the message again when you want it answered.
+- **Deleting a conversation.** `masc_my_keeper_conversation_delete`
+  removes a conversation of yours from the disk of the server: its turns
+  and the directory its turns ran in. When a turn of it started Claude
+  Code, the server also asks Claude Code to purge what it keeps of that
+  directory on the login of the subscription (`claude purge`, which Claude
+  Code has from 2.1.288). `vendor_copy` in the answer says what became of
+  that copy: `removed`, `none` when no turn of the conversation started
+  Claude Code, or `may_remain` when Claude Code is older, did not purge
+  it, or did not start. From then on no read shows the conversation and
+  no turn goes on in it. A Keeper whose current conversation you deleted
+  has none until its next turn starts one. An earlier conversation does
+  not come back.
+- **What a deletion keeps.** The server keeps that the conversation was
+  there and was deleted: its id, its Keeper, its subscription and when it
+  started, with no message and no answer. When a restore of the server's
+  files brings the conversation back, the server deletes it again at its
+  next start.
+- **A deletion that did not finish.** When the server cannot remove all
+  of the files, the deletion is refused with 503
+  `conversation_not_deleted`. The list shows the conversation with
+  `"deletion": "failed"`, and no read or turn reaches it. Ask again to
+  delete it. A deletion the server stopped in ends when the server starts
+  again, or when you ask again.
 
 ## Error codes of a turn and a conversation
 
-`masc_my_keeper_turn`, `masc_my_keeper_conversation_new` and
-`masc_my_keeper_conversation`, and the routes behind them, refuse with
+`masc_my_keeper_turn`, `masc_my_keeper_conversation_new`,
+`masc_my_keeper_conversation` and `masc_my_keeper_conversation_delete`,
+and the routes behind them, refuse with
 `{"error": <sentence>, "code": <code>}`. Tell the cases apart by `code`;
 the sentence may change. The code of a failed turn is the `failure` the
 read of the conversation shows for that turn.
@@ -163,8 +188,9 @@ read of the conversation shows for that turn.
 | 400 | `account_runtime_invalid` | The runtime of the subscription does not load from the configuration of the server. |
 | 403 | `turn_refused` | The authorization refused the turn, for example for a PAT whose scope does not cover it. |
 | 403 | `native_tools_refused` | The client would start with tools that reach the homes of other people. |
+| 403 | `deletion_refused` | Your account is not active, so it deletes no conversation. |
 | 404 | `unknown_keeper` | No Keeper of yours has this name. |
-| 404 | `unknown_conversation` | The Keeper has no conversation of this id. |
+| 404 | `unknown_conversation` | The Keeper has no conversation of this id, or, for a deletion, you have none. A deleted conversation is one of these. |
 | 404 | `unknown_account` | The subscription of the Keeper's Runtime has no login of yours. |
 | 409 | `keeper_has_no_runtime` | The Keeper has no Runtime. Give it one first. |
 | 409 | `account_call_running` | A turn or a check of the subscription runs. Try again when it ends. |
@@ -180,6 +206,7 @@ read of the conversation shows for that turn.
 | 503 | `answer_unrecorded` | The Keeper answered, and the server could not record the answer. |
 | 503 | `conversation_row_half_written` | A stopped server left the last row of the record half written. A new conversation, or the Keeper's next turn on a Claude Code Runtime, cuts it. |
 | 503 | `conversation_record_unavailable` | The server could not read or write the record of the conversation. |
+| 503 | `conversation_not_deleted` | The server could not remove all the files of the conversation. The list shows it with `"deletion": "failed"`. Ask again to delete it. |
 | 503 | `server_unavailable` | The server cannot decide now. Try again later. |
 | 504 | `silent` | The client sent nothing for 120 seconds. |
 
@@ -194,8 +221,9 @@ Keeper effect, has no `code`.
   request timeout ends the call first; raise that timeout if turns are cut
   off.
 - **One call of a subscription at a time.** A second turn on the same
-  subscription while one runs is refused, and so is a new conversation of
-  a Keeper whose current conversation is on that subscription.
+  subscription while one runs is refused, and so are a new conversation of
+  a Keeper whose current conversation is on that subscription and the
+  deletion of a conversation that began on it.
 - **No OAuth.** A 401 carries no `WWW-Authenticate` challenge and the
   server publishes no protected resource metadata, so a client that
   connects only through MCP OAuth cannot connect. Use a client that sends a

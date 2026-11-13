@@ -24,9 +24,15 @@ type 'kept private_jsonl_rows_read =
 type 'kept private_jsonl_rows_from_cursor =
   { read : 'kept private_jsonl_rows_read
   ; rows : string
-  ; incomplete_tail : string
   ; rows_end : Private_jsonl_cursor.t
   }
+
+(* Where a suffix goes. A JSONL plan writes after the last row: bytes after
+   the last newline are an append that stopped part way, never a row, and are
+   cut first, as [append_private_jsonl_durable_locked_result] cuts them. *)
+type suffix_start =
+  | After_every_byte
+  | After_last_row
 
 (* Where a locked update starts reading, and the decision it hands the bytes
    to. One constructor per start, so a tail read cannot also name a cursor. *)
@@ -117,14 +123,14 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
            in
            (* Where the read starts, whether that byte starts a row, and the
               decision over the bytes read from there. *)
-           let from, starts_at_row, decide =
+           let from, starts_at_row, suffix_start, decide =
              match plan with
-             | Read_whole_file decide -> 0, true, decide
+             | Read_whole_file decide -> 0, true, After_every_byte, decide
              | Read_tail_rows (max_bytes, decide) ->
                let from = Int.max 0 (before_read.Unix.st_size - max_bytes) in
                (* Only a tail read may start inside a row; it drops that
                   fragment. *)
-               from, row_starts_at from, decide
+               from, row_starts_at from, After_every_byte, decide
              | Read_after_cursor (after, decide) ->
                (* A cursor of another file, one past this file's end, or one
                   where no row of this file starts is not the end of rows read
@@ -147,19 +153,17 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
                in
                ( from
                , true
+               , After_last_row
                , fun existing ->
                    let rows_length = private_jsonl_last_complete_row_length existing in
-                   let rows, incomplete_tail =
+                   let rows =
                      if rows_length = String.length existing
-                     then existing, ""
-                     else
-                       ( String.sub existing 0 rows_length
-                       , String.sub existing rows_length (String.length existing - rows_length) )
+                     then existing
+                     else String.sub existing 0 rows_length
                    in
                    decide
                      { read
                      ; rows
-                     ; incomplete_tail
                      ; rows_end =
                          Private_jsonl_cursor.Present
                            { device = before_read.Unix.st_dev
@@ -233,16 +237,43 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
                 result)
             | Some suffix ->
               (* See Unix.lseek: only the file-position side effect is required. *)
-              let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-              append_fd_durable
-                ~io:append_io
-                ~fd
-                ~original_length
-                suffix
-              |> Result.map (fun () ->
-                validate_binding ();
-                if verify_content then verify_bytes (existing ^ suffix);
-                result)))))
+              let file_length = Unix.lseek fd 0 Unix.SEEK_END in
+              let append_from =
+                match suffix_start with
+                | After_every_byte -> Ok file_length
+                | After_last_row ->
+                  let rows_end = from + private_jsonl_last_complete_row_length existing in
+                  if rows_end = file_length
+                  then Ok rows_end
+                  else
+                    let open Result.Syntax in
+                    let failure append_failure = { append_failure; rollback_failures = [] } in
+                    let* () =
+                      run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+                        Unix.ftruncate fd rows_end)
+                      |> Result.map_error failure
+                    in
+                    let* () =
+                      run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)
+                      |> Result.map_error failure
+                    in
+                    Stdlib.Printf.eprintf
+                      "[fs_compat] WARN: cut an incomplete JSONL tail path=%s cut_bytes=%d kept_bytes=%d\n%!"
+                      path
+                      (file_length - rows_end)
+                      rows_end;
+                    Ok rows_end
+              in
+              Result.bind append_from (fun original_length ->
+                append_fd_durable
+                  ~io:append_io
+                  ~fd
+                  ~original_length
+                  suffix
+                |> Result.map (fun () ->
+                  validate_binding ();
+                  if verify_content then verify_bytes (existing ^ suffix);
+                  result))))))
 ;;
 
 type 'a private_file_decision =

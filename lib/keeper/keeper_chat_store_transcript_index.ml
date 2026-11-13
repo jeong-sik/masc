@@ -64,20 +64,16 @@ let index_of_file entry (file : folded Fs_compat.private_jsonl_rows_from_cursor)
   let open Result.Syntax in
   let* rows = scan_transcript_rows ~first_line:(row_count + 1) file.Fs_compat.rows in
   List.iter (add_scanned_provenance index) rows.scanned;
-  let row_count = row_count + rows.newlines in
-  let* tail =
-    scan_transcript_rows ~first_line:(row_count + 1) file.Fs_compat.incomplete_tail
-  in
-  match tail.scanned with
-  | [] ->
-    entry.folded <- Some { rows_end = file.Fs_compat.rows_end; row_count; index };
-    Ok index
-  | _ :: _ ->
-    (* The file ends inside a row that reads as one. The answer counts that
-       row, but [index] then holds a row that ends past [rows_end], so it is
-       not kept. *)
-    List.iter (add_scanned_provenance index) tail.scanned;
-    Ok index
+  (* Bytes after the last newline are an append that stopped part way: its
+     sender got no answer, so they are in no index, and the update cuts them
+     before it writes the row [decide] appends. *)
+  entry.folded
+  <- Some
+       { rows_end = file.Fs_compat.rows_end
+       ; row_count = row_count + rows.newlines
+       ; index
+       };
+  Ok index
 ;;
 
 let update_indexed_transcript path decide =

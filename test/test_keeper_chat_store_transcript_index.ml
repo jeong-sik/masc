@@ -195,16 +195,54 @@ let test_rows_without_provenance_do_not_hide_a_delivery () =
     check_present "the new delivery, asked again" (question "next" ~base_dir))
 ;;
 
-let test_a_last_row_without_its_newline_counts () =
+(* Every line of the transcript, each ending with its newline and reading as
+   one JSON value. *)
+let row_count label ~base_dir =
+  let contents = bytes ~base_dir in
+  check bool (label ^ ": the transcript ends with a newline") true
+    (String.ends_with ~suffix:"\n" contents);
+  let rows = List.filter (fun line -> line <> "") (String.split_on_char '\n' contents) in
+  List.iter
+    (fun row ->
+       match Yojson.Safe.from_string row with
+       | _ -> ()
+       | exception Yojson.Json_error detail -> failf "%s: %S is not one row: %s" label row detail)
+    rows;
+  List.length rows
+;;
+
+(* The row of [question "other"] with its last byte, the newline, missing:
+   what an append leaves when the process dies one byte short. *)
+let other_without_its_newline () =
+  let row = rows_of (question "other") in
+  check bool "the donor row ends with a newline" true (String.ends_with ~suffix:"\n" row);
+  String.sub row 0 (String.length row - 1)
+;;
+
+let test_a_last_row_without_its_newline_is_written_again () =
   with_store (fun base_dir ->
     warm ~base_dir;
-    let row = rows_of (question "other") in
-    check bool "the donor row ends with a newline" true (String.ends_with ~suffix:"\n" row);
-    append_raw ~base_dir (String.sub row 0 (String.length row - 1));
-    let before = bytes ~base_dir in
-    check_present "a delivery whose row has no newline yet" (question "other" ~base_dir);
+    append_raw ~base_dir (other_without_its_newline ());
+    check answer_testable "a delivery whose row has no newline" Appended
+      (question "other" ~base_dir);
+    check int "the two rows of [warm] and one row for it" 3
+      (row_count "after the delivery" ~base_dir);
     check_present "the same delivery, asked again" (question "other" ~base_dir);
-    check string "nothing was written for it" before (bytes ~base_dir))
+    check int "nothing more was written" 3 (row_count "asked again" ~base_dir))
+;;
+
+let test_a_row_is_not_joined_to_a_last_row_without_its_newline () =
+  with_store (fun base_dir ->
+    warm ~base_dir;
+    append_raw ~base_dir (other_without_its_newline ());
+    check answer_testable "another delivery" Appended (question "next" ~base_dir);
+    check int "the two rows of [warm] and the new row" 3
+      (row_count "after another delivery" ~base_dir);
+    check_present "the new delivery, asked again" (question "next" ~base_dir);
+    check_present "a delivery from before the cut" (reply "warm" ~base_dir);
+    check answer_testable "the delivery whose append stopped" Appended
+      (question "other" ~base_dir);
+    check int "one row more" 4 (row_count "after it was sent again" ~base_dir))
 ;;
 
 let test_a_replaced_transcript_is_read_again () =
@@ -338,15 +376,12 @@ let test_an_unreadable_row_refuses_every_delivery () =
     check string "nothing was written" before (bytes ~base_dir))
 ;;
 
-let test_a_torn_tail_is_refused_until_it_is_cut () =
+let test_a_torn_tail_is_cut_by_the_next_delivery () =
   with_store (fun base_dir ->
     warm ~base_dir;
     append_raw ~base_dir {|{"id":"msg-torn","role":"us|};
-    check_refused "a delivery behind a torn row" ~needle:"at line 3" (question "next" ~base_dir);
-    (* An append of a row without provenance cuts the fragment before it
-       writes its own row. *)
-    K.append_assistant_message ~base_dir ~keeper_name ~content:"a row without provenance" ();
-    check answer_testable "after the fragment was cut" Appended (question "next" ~base_dir);
+    check answer_testable "a delivery behind a torn row" Appended (question "next" ~base_dir);
+    check int "the two rows of [warm] and the new row" 3 (row_count "after the cut" ~base_dir);
     check_present "a delivery from before the fragment" (reply "warm" ~base_dir))
 ;;
 
@@ -464,9 +499,13 @@ let () =
             `Quick
             test_rows_without_provenance_do_not_hide_a_delivery
         ; test_case
-            "a last row without its newline counts"
+            "a last row without its newline is written again"
             `Quick
-            test_a_last_row_without_its_newline_counts
+            test_a_last_row_without_its_newline_is_written_again
+        ; test_case
+            "a row is not joined to a last row without its newline"
+            `Quick
+            test_a_row_is_not_joined_to_a_last_row_without_its_newline
         ; test_case
             "tool rows wait for their binding row"
             `Quick
@@ -494,9 +533,9 @@ let () =
             `Quick
             test_an_unreadable_row_refuses_every_delivery
         ; test_case
-            "a torn tail is refused until it is cut"
+            "a torn tail is cut by the next delivery"
             `Quick
-            test_a_torn_tail_is_refused_until_it_is_cut
+            test_a_torn_tail_is_cut_by_the_next_delivery
         ; test_case
             "a refused delivery is asked of the whole file again"
             `Quick

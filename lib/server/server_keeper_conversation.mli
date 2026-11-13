@@ -167,9 +167,11 @@ type listed =
     Keeper starts one. *)
 val current : deleted:(Conversation_id.t -> bool) -> listed list -> conversation option
 
-(** The conversation of the person with this id, of whichever Keeper. It
-    reads the index alone and writes nothing, and a person with no record
-    has none. *)
+(** The conversation of the person with this id, of whichever Keeper, for its
+    deletion. It reads the index alone, and a person with no record has
+    none. A row a stopped server left half written is cut, as the next
+    writer of the index cuts it, so the row does not keep a deletion
+    pending. *)
 val find : root -> Conversation_id.t -> (conversation option, error) result
 
 (** The conversations of the Keeper, in the order they were started. The last
@@ -202,10 +204,20 @@ type recorded =
 
 (** The turns of the conversation in order. An [answered] or a [failed] row
     that does not close the turn of the [asked] row before it is a row that
-    is not understood. It writes nothing. A row a stopped server left half
-    written refuses the read ([Row_half_written]) until the next turn of the
-    conversation, or the {!start} of the one after it, cuts the row. *)
+    is not understood. It writes no row, but the lock it takes on the file
+    makes the directory of the conversation when it is not there: a caller
+    that may meet a deletion reads inside {!reading}. A row a stopped server
+    left half written refuses the read ([Row_half_written]) until the next
+    turn of the conversation, or the {!start} of the one after it, cuts the
+    row. *)
 val turns : root -> conversation -> (recorded list, error) result
+
+(** [reading f] runs [f] while no directory of a conversation is removed
+    ({!remove}). A caller that judges whether the deletion of a conversation
+    began and then reads its {!turns} does both in [f], so a removal comes
+    before the judgment or after the read, and a read does not bring back a
+    directory a deletion removed. *)
+val reading : (unit -> 'a) -> 'a
 
 (** Whether a client of the conversation may have been started with a
     message of it, as its turns file says. *)
@@ -228,8 +240,8 @@ val project_path : root -> conversation -> (string, error) result
 
 (** Remove the directory of the conversation: its turns file and the
     directory its client started in. A link in it is removed, not followed.
-    [Error] is the detail, which can name a path of the server: the
-    directory is still there. *)
+    It waits for the reads in {!reading}. [Error] is the detail, which can
+    name a path of the server: the directory is still there. *)
 val remove : root -> conversation -> (unit, string) result
 
 (** A conversation opened for one turn. *)

@@ -439,6 +439,17 @@ let turns_path root (conversation : conversation) =
     [ Conversation_id.to_string conversation.conversation_id; turns_name ]
 ;;
 
+(* Orders a read of the turns of a conversation with the removal of its
+   directory. The lock a read takes on its file makes the directory of the
+   file when it is not there (Fs_compat), so a read that overlapped a removal
+   would bring the directory back. One server process serves the routes of
+   the persons on a base path and owns its authorization log, so a lock of
+   the process is enough. A reader or a removal that raises leaves the files
+   as they are, so the lock is not poisoned. *)
+let directory_lock = Eio.Mutex.create ()
+
+let reading f = Eio.Mutex.use_ro directory_lock f
+
 (* A conversation with no turn yet has no file. *)
 let turns root conversation =
   let path = turns_path root conversation in
@@ -454,13 +465,17 @@ let find root conversation_id =
   let index = Filename.concat root index_name in
   if Sys.file_exists index
   then
-    Result.map
-      (List.find_map (fun (started : started) ->
-         let conversation = started.listed.conversation in
-         if Conversation_id.equal conversation.conversation_id conversation_id
-         then Some conversation
-         else None))
-      (observed Index started_of index)
+    (* A deletion that finds its conversation cuts a row a stopped server
+       left half written, as the next writer of the index does, so the row
+       does not keep the deletion pending (design 8.5-5). *)
+    Eio.Mutex.use_ro index_lock (fun () ->
+      Result.map
+        (List.find_map (fun (started : started) ->
+           let conversation = started.listed.conversation in
+           if Conversation_id.equal conversation.conversation_id conversation_id
+           then Some conversation
+           else None))
+        (recovered Index started_of index))
   else Ok None
 ;;
 
@@ -505,15 +520,16 @@ let project_path root conversation =
 let remove root conversation =
   let path = directory root conversation in
   let still_there detail = Error (Printf.sprintf "%s: %s" path detail) in
-  match Fs_compat.remove_tree path with
-  | exception Sys_error detail -> still_there detail
-  | exception Unix.Unix_error (error, call, (_ : string)) ->
-    still_there (Printf.sprintf "%s: %s" call (Unix.error_message error))
-  | () ->
-    (match Unix.lstat path with
-     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
-     | exception Unix.Unix_error (error, _, _) -> still_there (Unix.error_message error)
-     | (_ : Unix.stats) -> still_there "it is still there")
+  reading (fun () ->
+    match Fs_compat.remove_tree path with
+    | exception Sys_error detail -> still_there detail
+    | exception Unix.Unix_error (error, call, (_ : string)) ->
+      still_there (Printf.sprintf "%s: %s" call (Unix.error_message error))
+    | () ->
+      (match Unix.lstat path with
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+       | exception Unix.Unix_error (error, _, _) -> still_there (Unix.error_message error)
+       | (_ : Unix.stats) -> still_there "it is still there"))
 ;;
 
 (* The conversation a new one follows gets no turn after it. A row a stopped

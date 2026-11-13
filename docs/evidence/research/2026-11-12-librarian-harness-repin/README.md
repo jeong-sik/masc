@@ -98,7 +98,7 @@ run은 git이 무시하는 `artifacts/tinker/librarian/` 아래에 있다. 모�
 | `e_synth` | 90건, `requests_sha256` `8aa43fde…`, `audit_seed` 20261113, 배치 2개와 감사 3번 |
 | `files_sha256` | 24개. 템플릿은 `575a6849…` |
 | `train_sft.PASS_LINES_SHA256` | `pass_lines.json`의 sha256과 같다 |
-| `prompt_lines.json` | 새 `pass_lines.json`과 고정 템플릿을 가리킨다. 기준선 실행 목록은 비어 있다 |
+| `prompt_lines.json` | 새 `pass_lines.json`과 고정 템플릿을 가리킨다. 기준선 숫자는 [2026-11-13 기준선](../2026-11-13-librarian-pinned-baseline/README.md)에서 고정했다 |
 | 게이트, `choice`, `request`, `e_real` | 바꾸지 않았다 |
 
 ## 명령
@@ -138,4 +138,3 @@ python3 docs/evidence/research/2026-11-12-librarian-harness-repin/repin2.py \
 - 판정자는 한 case를 한 번 판정했다. 판정자 사이의 일치도는 재지 않았다.
 - 배치 2 생성본의 기억 `eval-infra-cost-watch-19`에 본문이 `NaN`인 fact가 하나 있었다. 감사가 그 기억을 뺐다. 생성기는 fact 본문의 길이를 검사하지 않는다.
 - G4(−0.06)와 G5(1.16)는 2026-11-09에 E-real 99건으로 잰 같은 창 퍼짐의 2배다. 지금 E-real은 50건이고, 50건에서의 퍼짐은 아직 재지 않았다.
-- 기준선 실행이 고정되기 전에는 `prompt_compare.py`가 비교를 내지 않는다.

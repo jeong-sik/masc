@@ -1,3 +1,0 @@
-### Fixed
-
-- A request that reuses an already serialized HTTP body is observed before dispatch under its own `capture_id`. The observation used to be the record made when the body was serialized, so a transport wrapper that changed only `capture_id` had its request recorded under the earlier id. The admitted body now holds the bytes, their digest and the streaming flag, and both the sync and the streaming path build the observation when they send (#PENDING).

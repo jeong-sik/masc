@@ -114,12 +114,14 @@ let request_of_body ~request_digest = function
     Domain_pool_ref.submit_cpu_or_inline ~name:"lane-addon-original-request-check" (fun () ->
       check_body ~request_digest bytes)
 (* A record names its request by digest, so equal digests are equal requests;
-   comparing them never walks the request itself. *)
-let same_listed (a : Record.t) (b : Record.t) =
+   comparing them never walks the request itself. The identity is what a
+   record is a record of; its progress is how far that original has gone. *)
+let same_identity (a : Record.t) (b : Record.t) =
   String.equal a.scope b.scope && String.equal a.request_id b.request_id
   && String.equal a.installation_id b.installation_id && String.equal a.package_id b.package_id
   && String.equal a.tool b.tool && String.equal a.request_digest b.request_digest
-  && Yojson.Safe.equal a.summary b.summary && a.progress = b.progress
+  && Yojson.Safe.equal a.summary b.summary
+let same_listed (a : Record.t) (b : Record.t) = same_identity a b && a.progress = b.progress
 let listed (r : retained) : Record.t =
   {scope=r.scope; request_id=r.request_id; installation_id=r.installation_id; package_id=r.package_id;
    tool=r.tool; request_digest=r.request_digest; summary=r.summary; progress=r.progress}
@@ -242,10 +244,16 @@ module Published_reader = struct
     with_request record request
 end
 let unavailable result = Result.map_error (fun detail -> Store_unavailable detail) result
+(* The listing says which originals exist; the record as read now says how
+   far each has gone. Listing, this read and a progress write each hold the
+   scope serializer on their own, so another writer may advance a listed
+   record in between: the same original, further along. A write to a record
+   is compare-and-set against what its writer read of that record, so a write
+   decided on its stale progress is refused. *)
 let load_listed ~store (record : Record.t) =
   let* original = load ~store ~scope:record.scope ~request_id:record.request_id in
   match original with
-  | Some original when same_listed record (listed original) -> Ok original
+  | Some original when same_identity record (listed original) -> Ok original
   | Some _ -> Error (Store_unavailable "an inventoried original changed")
   | None -> Error (Store_unavailable "an inventoried original disappeared")
 (* Retain fixes the digest a record names its body by, so the record of the
@@ -260,11 +268,7 @@ let reload ~store (previous : retained) =
   | None -> Ok None
   | Some json ->
     let* record = decode ~scope:previous.scope ~request_id:previous.request_id json |> unavailable in
-    if String.equal record.request_digest previous.request_digest
-    && String.equal record.installation_id previous.installation_id
-    && String.equal record.package_id previous.package_id
-    && String.equal record.tool previous.tool
-    && Yojson.Safe.equal record.summary previous.summary
+    if same_identity record (listed previous)
     then Ok (Some (with_request record previous.request))
     else Error (Store_unavailable "a reloaded original names another request or binding")
 let load_scope ~store ~scope =

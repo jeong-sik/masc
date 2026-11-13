@@ -22,7 +22,19 @@ val goal_admission_result :
 type error =
   | Store_unavailable of string
   | Original_invalid of string
-  | Authority_changed of string
+  | Destination_mismatch of string
+      (** The record belongs to another installation or package. *)
+  | Authority_unavailable of string
+      (** The current lookup authority could not be prepared, or the next
+          attempt's prompt could not be rendered with it. *)
+  | Question_changed
+      (** The current authority asks another question: Goal, request,
+          criterion, workspace or submitted evidence moved. No next attempt
+          may ask it. *)
+  | Authority_changed of Verifier_review_authority_change.t
+      (** The same question meets another lookup authority or answer format.
+          The attempt is refused before dispatch; its next attempt asks with
+          the current authority. *)
   | Execution_pending of string
 val error_to_string : error -> string
 
@@ -135,6 +147,9 @@ val frontier :
     successor asks the parent's question with the lookup authority [authority]
     prepares; [authority] is forced only to allocate it, and a changed
     question allocates nothing.
+    A before-dispatch refusal whose evidence starts at this original's
+    authority and answer format allocates its next attempt the same way, on a
+    wake or an explicit request alike.
     Restart restores that staged child without calling [new_run], [authority]
     or rendering prompts. Once the parent has observed a successor, its actual
     retained record and progress are required; a missing or different child is an error,
@@ -172,7 +187,8 @@ val destination : retained -> string * string
 val progress : retained -> Lane_addon_request_progress.t
 val restored_receipt : retained -> (receipt option, error) result
 (** A retained judgment/terminal refusal and all actual tool observations, independent
-    of today's lookup availability. Captured/admission/pending returns None. *)
+    of today's lookup availability. Captured/admission/pending returns None,
+    and so does a before-dispatch refusal: it reached no reviewer. *)
 
 val retained_judgment : retained -> (Yojson.Safe.t, error) result
 (** Complete validated stored judgment for the host's commit payload. Returns
@@ -202,8 +218,12 @@ val run :
   authority:Verification_authority_tools.goal_review ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) ->
   unit -> (receipt, error) result
-(** Restore exact prior judgments first. Otherwise confirm original authority
-    and persist dispatch intent before using the actual retained reviewer.
+(** Restore exact prior judgments first. Otherwise check the question first:
+    another one is [Question_changed]. A moved lookup authority or answer
+    format records a before-dispatch refusal holding only what moved and
+    returns [Authority_changed]; called again on that refusal it returns the
+    same. Otherwise persist dispatch intent before using the actual retained
+    reviewer.
     Unknown dispatch/cancellation/exception never redispatches; a proven pre-admission
     refusal may reuse the same original. Persist the structured reply and full
     tool observations atomically before returning control to the Goal host.

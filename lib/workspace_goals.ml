@@ -1016,7 +1016,8 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
               {Goal_verifier_worker.run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()})
           |> Result.map_error (function
             | Goal_verifier_worker.Execution_pending detail -> Refused (refuse Conflict detail)
-            | (Goal_verifier_worker.Store_unavailable _ | Original_invalid _ | Authority_changed _) as error ->
+            | (Goal_verifier_worker.Store_unavailable _ | Original_invalid _ | Destination_mismatch _
+              | Authority_unavailable _ | Question_changed | Authority_changed _) as error ->
               Refused (refuse Internal_error
                 ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
         | (Goal_phase.Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _), _

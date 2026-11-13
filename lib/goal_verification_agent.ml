@@ -168,9 +168,7 @@ module Progress = Lane_addon_request_progress
 module Registry = Goal_verification_run_registry
 open Result.Syntax
 let owner_store config = Lane_addon_store.of_config config
-let worker_detail = function
-  | Worker.Store_unavailable detail | Original_invalid detail | Authority_changed detail
-  | Execution_pending detail -> detail
+let worker_detail = Worker.error_to_string
 
 type original_read_binding = {
   root : string;
@@ -486,7 +484,9 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
       let lookup_authority = Eio.Lazy.from_fun ~cancel:`Record (fun () ->
         Verification_authority_tools.create_goal_review ~config ~goal_id:work.goal_id) in
       let prepare_authority () = Eio.Lazy.force lookup_authority in
-      let operation () =
+      (* One attempt: select or prepare the original, register its run, and
+         execute it unless its result is already retained. *)
+      let attempt () =
         let* selected = Worker.frontier ~authority:prepare_authority ~store
           ~installation_id:Worker.host_installation_id
           ~package_id:Worker.host_package_id ~goal_id:work.goal_id ~request_id ~new_run
@@ -508,11 +508,26 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
           | Some receipt -> Ok receipt
           | None ->
             (match prepare_authority () with
-             | Error detail -> Error (Worker.Authority_changed detail)
+             | Error detail -> Error (Worker.Authority_unavailable detail)
              | Ok authority -> Worker.run ~store ~retained ~authority ~sw
                  ~provider_rest:Verification_retry.provider_rest ()) in
         let* saved = reload_original store retained in
         active := Some saved;
+        Ok (saved, execution) in
+      let operation () =
+        let* saved, execution = attempt () in
+        (* HIGH-RISK-UNREVIEWED: an attempt refused before dispatch because its
+           lookup authority or answer format moved is asked again once in this
+           same processing. Its run row is published as deferred first. The walk
+           then opens the next attempt with the authority this processing
+           prepared, and the worker checks it against that same value. A second
+           refusal keeps its own record and waits for the next processing. *)
+        let* saved, execution = match execution with
+          | Error (Worker.Authority_changed change) ->
+            let* () = publish saved (Registry.Deferred {detail=Verifier_review_authority_change.to_string change}) in
+            attempt ()
+          | Ok _ | Error (Worker.Store_unavailable _ | Original_invalid _ | Destination_mismatch _
+              | Authority_unavailable _ | Question_changed | Execution_pending _) -> Ok (saved, execution) in
         let result = match execution with
           | Error error ->
             let detail = worker_detail error in
@@ -523,7 +538,8 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
                 Ok (Not_reviewed {gate="Original_pending"; detail;
                   evaluator_runtime=Option.map (fun receipt -> receipt.Worker.result.evaluator_runtime) receipt;
                   retryable_runtimes=[]; model_absent_runtimes=[]})
-              | Store_unavailable _ | Original_invalid _ | Authority_changed _ ->
+              | Store_unavailable _ | Original_invalid _ | Destination_mismatch _ | Authority_unavailable _
+              | Question_changed | Authority_changed _ ->
                 Ok (Proof_lookup_unavailable {detail}) in
             let* deferral = deferral in
             Ok (defer ~goal_id:work.goal_id deferral)

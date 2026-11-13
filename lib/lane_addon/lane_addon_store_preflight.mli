@@ -80,6 +80,9 @@ type exact_files =
             deletes it with that record. A link no kept record names is read
             here: whether the Exact scan finds it depends on the other records
             of its declaration. *)
+  ; store : Lane_addon_store.t
+        (** The store the files were read from. A proof decoder compares the
+            root each proof names with its root. *)
   }
 
 type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_files, string) result
@@ -94,9 +97,10 @@ type payload_verdict =
           request bodies. *)
   | Consumer_stops_on_exact of { detail : string; scopes : string list; paths : string list }
       (** The consumer stops on the Exact files the Exact scan leaves. Fresh
-          state deletes every directory of each scope in [scopes] (owner
-          records, request bodies, settled originals) and each path in
-          [paths], below the store root, those that exist. *)
+          state deletes every directory the store names by each scope in
+          [scopes] (owner records, request bodies, settled originals, history
+          fences and resolutions) and each path in [paths], below the store
+          root, those that exist. *)
   | Exact_root_differs of string
       (** The scan stops and prints no fresh-state line. *)
 
@@ -128,10 +132,11 @@ type refusal =
             exist: owner records, request bodies, history fences and history
             resolution records. When the consumer of a tool request owner
             stops on the Exact files the Exact scan leaves, it is the
-            directories of every scope of its owner, settled originals
-            included, and the paths the consumer check names. For an Exact
-            record stored under its own key it is that file, its proof link
-            and the slot observation files of its request, those that exist. *)
+            directories the store names by every scope of its owner, settled
+            originals included, and the paths the consumer check names. For an
+            Exact record stored under its own key it is that file, its proof
+            link and the slot observation files of its request, those that
+            exist. *)
   }
 
 type report =

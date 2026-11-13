@@ -349,7 +349,7 @@ let closure_manifest fixture =
     ~request_id:(Capture.fresh_request_id owner) ~candidates ~originals |> get) in
   owner,manifest
 let closure_preflight fixture = io (fun () ->
-  Lane_addon_store_preflight.scan ~validate_tool_request:Keeper_librarian_store_preflight.validator
+  Lane_addon_store_preflight.scan ~validate_tool_request:Keeper_librarian_store_preflight.preflight
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get)
 let close_member fixture manifest member = io (fun () ->
   Owner.settle ~store:fixture.store ~date:(Closure.date manifest) (Closure.member_record member)
@@ -869,13 +869,15 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     let forest_reads=ref 0 and closure_reads=ref 0 and validated=ref 0 in
     let counting ()=
       let validate=Keeper_librarian_store_preflight.validator () in
-      fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record ->
+      fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_ record ->
         incr validated;
-        validate ~read ~read_body ~read_archive ~read_fence ~read_resolution record
+        match validate ~read ~read_body ~read_archive ~read_fence ~read_resolution record
           ~read_scope:(fun ~scope ->
             if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
             else incr forest_reads;
-            read_scope ~scope) in
+            read_scope ~scope) with
+        | Ok () -> Lane_addon_store_preflight.Payload_valid
+        | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
     let report=io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
       Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
     check int "the preflight refuses none of the owner's real records" 0 (List.length report.refusals);

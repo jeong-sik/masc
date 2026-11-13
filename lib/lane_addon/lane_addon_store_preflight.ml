@@ -57,6 +57,7 @@ type exact_files =
   { record : Yojson.Safe.t option
   ; deleted : deleted_record option
   ; proof : exact_proof
+  ; store : Lane_addon_store.t
   }
 type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_files, string) result
 type payload_verdict =
@@ -488,7 +489,7 @@ let read_exact ~after_read store ~root ~declaration_id request =
         let+ () = same_store store ~path (Exact.proof_store_roots json) in
         Proof json
   in
-  { record; deleted; proof }
+  { record; deleted; proof; store }
 
 let link_name key = Filename.basename (Exact.Retained_key.proof_path key)
 

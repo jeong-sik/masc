@@ -123,9 +123,7 @@ module Response = struct
   let not_found_response =
     static_response ~content_type:text_plain_content_type `Not_found "404 Not Found"
 
-  let method_not_allowed_response =
-    static_response ~content_type:text_plain_content_type `Method_not_allowed
-      "405 Method Not Allowed"
+  let method_not_allowed_body = "405 Method Not Allowed"
 
   let text ?(status = `OK) body reqd =
     Http_reqd.respond_with_string reqd
@@ -420,9 +418,13 @@ module Response = struct
     let response, body = not_found_response in
     Http_reqd.respond_with_string reqd response body
 
-  let method_not_allowed reqd =
-    let response, body = method_not_allowed_response in
-    Http_reqd.respond_with_string reqd response body
+  (* RFC 9110 §15.5.6: a 405 names the methods the resource takes. *)
+  let method_not_allowed ~allow reqd =
+    let allow = String.concat ", " (List.map Httpun.Method.to_string allow) in
+    Http_reqd.respond_with_string reqd
+      (response ~after_headers:[ "allow", allow ] ~content_type:text_plain_content_type
+         `Method_not_allowed method_not_allowed_body)
+      method_not_allowed_body
 
   let internal_error msg reqd =
     text ~status:`Internal_server_error ("500 Internal Server Error: " ^ msg) reqd
@@ -557,7 +559,8 @@ module Router = struct
     put: method_routes;
     delete: method_routes;
     options: method_routes;
-    exact_paths: (string, unit) Hashtbl.t;
+    (* The methods registered for each exact path, in registration order. *)
+    exact_paths: (string, Httpun.Method.t list) Hashtbl.t;
     log: route_log;
   }
 
@@ -618,7 +621,25 @@ module Router = struct
     | `PUT -> Some router.put
     | `DELETE -> Some router.delete
     | `OPTIONS -> Some router.options
-    | _ -> None
+    | `HEAD | `CONNECT | `TRACE | `Other _ -> None
+
+  (* The table a request is looked up in. HEAD has none of its own: it is
+     answered by the GET route, and the response leaves without content
+     ([Http_reqd], RFC 9110 §9.3.2). *)
+  let request_routes router = function
+    | `HEAD -> Some router.get
+    | (`GET | `POST | `PUT | `DELETE | `OPTIONS | `CONNECT | `TRACE | `Other _) as method_ ->
+      method_routes router method_
+
+  (* What a 405 on [path] lists in [Allow]: the methods registered for it as
+     an exact path, with HEAD after GET. *)
+  let allowed_methods router path =
+    Hashtbl.find_opt router.exact_paths path
+    |> Option.value ~default:[]
+    |> List.concat_map (function
+      | `GET -> [ `GET; `HEAD ]
+      | (`HEAD | `POST | `PUT | `DELETE | `OPTIONS | `CONNECT | `TRACE | `Other _) as
+        method_ -> [ method_ ])
 
   let add_to_method_routes kind route method_routes =
     match kind with
@@ -631,7 +652,14 @@ module Router = struct
     let route = { kind; path; methods; handler; access } in
     (match kind with
      | Exact ->
-         Hashtbl.replace router.exact_paths path ();
+         let known = Option.value (Hashtbl.find_opt router.exact_paths path) ~default:[] in
+         let added =
+           List.filter
+             (fun method_ ->
+                Option.is_some (method_routes router method_) && not (List.mem method_ known))
+             methods
+         in
+         Hashtbl.replace router.exact_paths path (known @ added);
          List.iter
            (fun method_ ->
               match method_routes router method_ with
@@ -905,23 +933,18 @@ module Router = struct
   let resolve router request =
     let req_path = Request.path request in
     let req_method = Request.method_ request in
-    match method_routes router req_method with
+    let unmatched () =
+      if Hashtbl.mem router.exact_paths req_path then `Method_not_allowed else `Not_found
+    in
+    match request_routes router req_method with
     | Some routes -> (
         match Hashtbl.find_opt routes.exact_by_path req_path with
         | Some route -> `Matched route
         | None -> (
             match resolve_prefix routes req_path with
             | Some route -> `Matched route
-            | None ->
-                if Hashtbl.mem router.exact_paths req_path then
-                  `Method_not_allowed
-                else
-                  `Not_found))
-    | None ->
-        if Hashtbl.mem router.exact_paths req_path then
-          `Method_not_allowed
-        else
-          `Not_found
+            | None -> unmatched ()))
+    | None -> unmatched ()
 
   let dispatch router request reqd =
     match resolve router request with
@@ -930,5 +953,8 @@ module Router = struct
         | Owner handler | Serving handler -> handler request reqd
         | Ws handler -> handler ~upgrade:(Http_reqd.upgrade reqd) request reqd)
     | `Not_found -> Response.not_found reqd
-    | `Method_not_allowed -> Response.method_not_allowed reqd
+    | `Method_not_allowed ->
+        Response.method_not_allowed
+          ~allow:(allowed_methods router (Request.path request))
+          reqd
 end

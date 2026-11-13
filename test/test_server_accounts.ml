@@ -117,7 +117,7 @@ let status_from_table table ~meth ~path =
     | [] | [ (_ : string) ] -> None)
 ;;
 
-let refused (_ : Httpun.Request.t) reqd = Http_server_eio.Response.method_not_allowed reqd
+let refused (_ : Httpun.Request.t) reqd = Http_server_eio.Response.method_not_allowed ~allow:[] reqd
 
 (* A router is one shared table that a registration changes in place, and the
    registration function can keep the router it was given. The table is a copy

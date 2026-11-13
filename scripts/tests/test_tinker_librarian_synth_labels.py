@@ -28,7 +28,6 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librarian"))
 
-import admission_result as AR
 import admission_validator as AV
 import audit_decisions as D
 import eval_admission as V
@@ -109,7 +108,8 @@ class ContractTest(unittest.TestCase):
                         self.assertEqual(set(got.memory_after) - set(got.added_claims),
                                          {f.claim for f in facts if f.memory_id not in gone})
 
-    def test_masc_refuses_planted_facts_taken_out_without_support(self) -> None:
+    def test_masc_accepts_planted_facts_taken_out_without_support(self) -> None:
+        # RFC-0517 §7.1: a drop needs no supporting candidate.
         req = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT,)))
         [c] = req.candidates
         answer = json.dumps({"memory": {"new_claims": [], "dropped": [{"memory_id": "m4", "reason": "낡은 상태"}],
@@ -118,8 +118,8 @@ class ContractTest(unittest.TestCase):
                                              "memory_claim": None, "reason": "일시 상태"}],
                              "change_support": []}, ensure_ascii=False)
         result = AV.validate(prompt_of(req), answer)
-        assert isinstance(result, AV.Invalid)
-        self.assertEqual([v.kind for v in result.violations], [AR.Kind.CHANGES_WITHOUT_SUPPORT])
+        assert isinstance(result, AV.Valid), result
+        self.assertEqual(result.answer.dropped, ("m4",))
 
 
 def teacher_answer(req: S.SynthRequest, *, absorbs: tuple[str, ...], pair: bool, dropped: tuple[str, ...]) -> str:

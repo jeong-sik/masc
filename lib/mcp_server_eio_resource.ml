@@ -282,15 +282,20 @@ let handle_read_resource_eio state id params =
               ( "text/markdown"
               , Some (run_blocking_resource_io (fun () -> Workspace.status config)) )
           | "status.json" ->
-              let state_json, backlog_json =
+              let state_observation, backlog_json =
                 run_blocking_resource_io (fun () ->
-                  ( Masc_domain.workspace_state_to_yojson (Workspace.read_state config)
+                  ( Workspace.observe_state config
                   , Masc_domain.backlog_to_yojson (Workspace.read_backlog config) ))
+              in
+              let state_json =
+                Masc_domain.workspace_state_to_yojson
+                  (Workspace.state_of_observation state_observation)
               in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
                 ("state", state_json);
+                ("state_read", Workspace.state_observation_to_yojson state_observation);
                 ("backlog", backlog_json);
                 ("connected_agents", `List connected_agents);
               ] in

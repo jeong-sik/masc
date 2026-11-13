@@ -1,0 +1,8 @@
+### Fixed
+
+- Reading the workspace state no longer rewrites a `state.json` that does not
+  decode. The MCP `status` and `status.json` resources read on a system
+  thread, and the repair write there poisoned the store's write lock, so
+  later writes of `state.json` were lost. The status resources and
+  `masc_status` now say that the state was recovered; the next state write
+  replaces the document (#PENDING).

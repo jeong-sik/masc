@@ -568,6 +568,75 @@ function isToolObservation(event: KeeperChatStreamEvent): boolean {
   }
 }
 
+type OperationFrameTarget =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'closed' }
+  | { readonly kind: 'entry'; readonly entry: KeeperConversationEntry; readonly observationOnly: boolean }
+
+/** Which row a frame of one operation belongs to. The operation id on the
+ * row's delivery provenance is the identity; a row id is not, because server
+ * history replaces a client placeholder with a row under a different id. Both
+ * transports resolve through here: the observer broadcast for every frame, the
+ * direct response stream once the placeholder it created is gone. */
+function operationFrameTarget(
+  keeperName: string,
+  operationId: string,
+  event: KeeperChatStreamEvent,
+): OperationFrameTarget {
+  const entries = keeperThreads.value[keeperName] ?? []
+  // A persisted request_failure is a system row. Both the earlier stream
+  // terminal and the Owner's settled_failure close their operation; a late
+  // event cannot reopen it or replace an assistant result delivered earlier.
+  const matched = [...entries].reverse().find(
+    entry =>
+      (entry.role === 'assistant' || entry.delivery === 'request_failure')
+      && (isOperationDeliveryProvenance(
+        entry.deliveryProvenance,
+        operationId,
+        'terminal_result',
+      ) || (entry.delivery === 'request_failure'
+        && entry.deliveryProvenance?.transcript_slot.kind === 'settled_failure'
+        && sameDeliveryKey(entry.deliveryProvenance.delivery_key,
+          { kind: 'operation', operation_id: operationId }))),
+  )
+  if (!matched) return { kind: 'absent' }
+  const outsideLiveDelivery = matched.delivery !== 'queued'
+    && matched.delivery !== 'sending'
+    && matched.delivery !== 'streaming'
+  const observationOnly = outsideLiveDelivery && isToolObservation(event)
+  if (outsideLiveDelivery && matched.delivery !== 'interrupted' && !observationOnly) return { kind: 'closed' }
+  if (observationOnly && matched.role !== 'assistant') return { kind: 'closed' }
+  return { kind: 'entry', entry: matched, observationOnly }
+}
+
+function applyOperationFrameToEntry(
+  keeperName: string,
+  entryId: string,
+  operationId: string,
+  operation: KeeperOperationTurnEvent,
+  observationOnly: boolean,
+): string | null {
+  const error = applyKeeperStreamEvent(
+    keeperName,
+    entryId,
+    operation.event,
+    { kind: 'operation', operationId, sequence: operation.sequence, ...(observationOnly ? { observationOnly: true as const } : {}) },
+  )
+  if (error && observationOnly) {
+    recordStreamProtocolError(keeperName, entryId, error)
+  } else if (error) {
+    finalizeAssistantEntry(keeperName, entryId, {
+      text: `Keeper request failed: ${error}`,
+      rawText: error,
+      delivery: 'error',
+      streamState: null,
+      error,
+      timestamp: new Date().toISOString(),
+    })
+  }
+  return error
+}
+
 /** Apply a server-pushed operation event only to the assistant bubble carrying
  * the exact operation id. Another browser can synthesize the bubble and later
  * fold it into the committed transcript using the same durable identity. */
@@ -598,29 +667,8 @@ export function applyKeeperOperationTurnEvent(
   // streaming itself, so consult that rather than inferring it from state.
   if (liveSendOwnsRequest(operationId)) return null
 
-  const entries = keeperThreads.value[keeperName] ?? []
-  // A persisted request_failure is a system row. Both the earlier stream
-  // terminal and the Owner's settled_failure close their operation; a late
-  // event cannot reopen it or replace an assistant result delivered earlier.
-  const matched = [...entries].reverse().find(
-    entry =>
-      (entry.role === 'assistant' || entry.delivery === 'request_failure')
-      && (isOperationDeliveryProvenance(
-        entry.deliveryProvenance,
-        operationId,
-        'terminal_result',
-      ) || (entry.delivery === 'request_failure'
-        && entry.deliveryProvenance?.transcript_slot.kind === 'settled_failure'
-        && sameDeliveryKey(entry.deliveryProvenance.delivery_key,
-          { kind: 'operation', operation_id: operationId }))),
-  )
-  const outsideLiveDelivery = matched !== undefined
-    && matched.delivery !== 'queued'
-    && matched.delivery !== 'sending'
-    && matched.delivery !== 'streaming'
-  const observationOnly = outsideLiveDelivery && isToolObservation(operation.event)
-  if (outsideLiveDelivery && matched.delivery !== 'interrupted' && !observationOnly) return null
-  if (observationOnly && matched.role !== 'assistant') return null
+  const target = operationFrameTarget(keeperName, operationId, operation.event)
+  if (target.kind === 'closed') return null
   // A protocol-error diagnostic carries no stream content. When it is the
   // only or final frame for an operation this session has no bubble for —
   // e.g. a terminal event rejected as malformed during version skew — there
@@ -629,15 +677,15 @@ export function applyKeeperOperationTurnEvent(
   // phantom in-progress response forever. Record diagnostics only on an
   // already matched operation.
   if (
-    !matched
+    target.kind === 'absent'
     && operation.event.type === 'CUSTOM'
     && operation.event.name === 'KEEPER_STREAM_PROTOCOL_ERROR'
   ) {
     return null
   }
-  const entryId = matched?.id ?? `operation-turn-${operationId}`
+  const entryId = target.kind === 'entry' ? target.entry.id : `operation-turn-${operationId}`
 
-  if (!matched) {
+  if (target.kind === 'absent') {
     appendThreadEntry(keeperName, {
       id: entryId,
       role: 'assistant',
@@ -656,7 +704,7 @@ export function applyKeeperOperationTurnEvent(
       ),
       details: null,
     })
-  } else if (matched.delivery === 'queued') {
+  } else if (target.entry.delivery === 'queued') {
     updateThreadEntry(keeperName, entryId, entry => ({
       ...entry,
       text: '',
@@ -666,25 +714,50 @@ export function applyKeeperOperationTurnEvent(
     }))
   }
 
-  const error = applyKeeperStreamEvent(
-    keeperName,
-    entryId,
-    operation.event,
-    { kind: 'operation', operationId, sequence: operation.sequence, ...(observationOnly ? { observationOnly: true as const } : {}) },
+  return applyOperationFrameToEntry(
+    keeperName, entryId, operationId, operation,
+    target.kind === 'entry' && target.observationOnly,
   )
-  if (error && observationOnly) {
-    recordStreamProtocolError(keeperName, entryId, error)
-  } else if (error) {
-    finalizeAssistantEntry(keeperName, entryId, {
-      text: `Keeper request failed: ${error}`,
-      rawText: error,
-      delivery: 'error',
-      streamState: null,
-      error,
-      timestamp: new Date().toISOString(),
-    })
+}
+
+export const KEEPER_LIVE_SEND_ROW_MISSING = 'Keeper response row is missing for its operation'
+
+/** Apply one frame of the direct response stream of a send this session
+ * issued. The stream writes into the placeholder it created for as long as
+ * that row exists. Server history can replace the placeholder with the stored
+ * row of the same operation while frames are still arriving; live-send
+ * ownership discards the broadcast copy of those frames, so this stream is
+ * their only carrier and the frame goes to the row [operationFrameTarget]
+ * names. A stored row accepts tool observations and stays closed to response
+ * content, exactly as it does for the observer. */
+export function applyKeeperLiveSendEvent(
+  keeperName: string,
+  placeholderEntryId: string,
+  operation: KeeperOperationTurnEvent,
+): string | null {
+  const operationId = operation.operationId
+  const placeholder = (keeperThreads.value[keeperName] ?? []).some(entry => entry.id === placeholderEntryId)
+  if (placeholder) {
+    return applyKeeperStreamEvent(
+      keeperName,
+      placeholderEntryId,
+      operation.event,
+      { kind: 'operation', operationId, sequence: operation.sequence },
+    )
   }
-  return error
+  const target = operationFrameTarget(keeperName, operationId, operation.event)
+  switch (target.kind) {
+    case 'absent': return KEEPER_LIVE_SEND_ROW_MISSING
+    case 'closed': return null
+    case 'entry': {
+      const error = applyOperationFrameToEntry(
+        keeperName, target.entry.id, operationId, operation, target.observationOnly,
+      )
+      // An observation the stored row refuses is recorded on that row. The
+      // turn has already converged, so it does not end the send.
+      return target.observationOnly ? null : error
+    }
+  }
 }
 
 /** Admit a stream frame through the reducer event it maps to. A frame that

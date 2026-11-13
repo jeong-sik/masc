@@ -95,7 +95,14 @@ type dynamic_tool =
 
 val dynamic_tool_bytes : dynamic_tool list -> int
 (** [dynamic_tool_bytes tools] sums the name, description and serialized
-    schema lengths. Bytes this process sends, not provider tokens. *)
+    schema lengths. Bytes this process sends, not provider tokens. It counts
+    [On_demand] tools too, so it bounds what the client holds, not what the
+    model reads from the start: size [upfront_tools] for that. *)
+
+val upfront_tools : dynamic_tool list -> dynamic_tool list
+(** The [Upfront] tools of the list, in their order. A runtime sizes the result
+    with its own [dynamic_tool_bytes], so the upfront share and the total are
+    counted the same way. *)
 
 type content_transport = Codex | Mcp
 

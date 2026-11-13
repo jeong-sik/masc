@@ -57,6 +57,15 @@ let dynamic_tool_bytes tools =
     tools
 ;;
 
+let upfront_tools tools =
+  List.filter
+    (fun tool ->
+       match tool.loading with
+       | Upfront -> true
+       | On_demand -> false)
+    tools
+;;
+
 (* Wire schemas: Codex DynamicToolCallOutputContentItem (inputText/inputImage),
    MCP ImageContent (image/data/mimeType). Both consume the same typed producer
    result; neither may silently turn a non-text result into successful prose. *)

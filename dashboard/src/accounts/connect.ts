@@ -45,11 +45,14 @@ export type ConnectView =
   }
   /** A cancel was taken; the login has not said it stopped yet. */
   | { readonly kind: 'cancelling'; readonly integrationId: string; readonly loginId: string; readonly transcript: string }
-  /** The stream was cut; the receipt of the login is being read. */
+  /** The page no longer reads the stream; the receipt of the login is being read. */
   | { readonly kind: 'checking'; readonly integrationId: string; readonly loginId: string }
-  /** The stream was cut while the client still runs. */
-  | { readonly kind: 'detached'; readonly integrationId: string; readonly loginId: string }
+  /** The page no longer reads the stream of a login, which runs on as far as
+      it knows: its receipt says the client still runs, or `failure` says why
+      the receipt could not be read. */
+  | { readonly kind: 'detached'; readonly integrationId: string; readonly loginId: string; readonly failure: Failure | null }
   | { readonly kind: 'ended'; readonly integrationId: string; readonly ended: Ended }
+  /** A login that did not start, or whose stream named no login before it failed. */
   | { readonly kind: 'failed'; readonly integrationId: string; readonly failure: Failure }
   /** A request found that the session had ended; the browser is on its way to the sign-in page. */
   | { readonly kind: 'leaving' }
@@ -71,7 +74,7 @@ export interface ConnectModel {
   readonly start: (integrationId: string) => Promise<void>
   readonly reply: (input: Reply) => Promise<void>
   readonly cancel: () => Promise<void>
-  /** Reads again how a login whose stream was cut stands. */
+  /** Reads again how a detached login stands. */
   readonly check: () => Promise<void>
   /** Leaves whatever runs behind, for another person is shown now. */
   readonly reset: () => void
@@ -106,30 +109,43 @@ export function createConnect({ send, leave, token, refresh }: ConnectDeps): Con
       case 'ended':
         view.value = { kind: 'ended', integrationId, ended: outcome.end }
         return
-      case 'problem':
-        failed(integrationId, outcome.problem)
+      case 'problem': {
+        // A frame the page cannot read ends the reading, not the login the
+        // stream named: its receipt says how it stands.
+        const at = view.peek()
+        if (at.kind === 'running' || at.kind === 'cancelling') await recheck(mine, integrationId, at.loginId, 0)
+        else failed(integrationId, outcome.problem)
         return
+      }
       case 'cut':
         if (outcome.loginId === null) {
           view.value = { kind: 'ended', integrationId, ended: 'unknown' }
           await refresh()
           return
         }
-        view.value = { kind: 'checking', integrationId, loginId: outcome.loginId }
-        await stand(mine, integrationId, outcome.loginId)
+        await recheck(mine, integrationId, outcome.loginId, 0)
     }
   }
 
-  const stand = async (mine: number, integrationId: string, loginId: string): Promise<void> => {
+  /** Reads the receipt of the login `loginId`, and says meanwhile that it
+      does. `attemptsBefore` readings of it failed in a row before this one. */
+  const recheck = async (mine: number, integrationId: string, loginId: string, attemptsBefore: number): Promise<void> => {
+    view.value = { kind: 'checking', integrationId, loginId }
+    await stand(mine, integrationId, loginId, attemptsBefore)
+  }
+
+  const stand = async (mine: number, integrationId: string, loginId: string, attemptsBefore: number): Promise<void> => {
     const standing = await standingOf(send, loginId, integrationId)
     if (!own(mine)) return
     if (!standing.ok) {
-      failed(integrationId, standing.problem)
+      const problem = standing.problem
+      if (problem.kind === 'signed_out') signedOut()
+      else view.value = { kind: 'detached', integrationId, loginId, failure: { problem, attempts: attemptsBefore + 1 } }
       return
     }
     switch (standing.value.kind) {
       case 'running':
-        view.value = { kind: 'detached', integrationId, loginId }
+        view.value = { kind: 'detached', integrationId, loginId, failure: null }
         return
       case 'linked':
         await settle(mine, integrationId, { kind: 'linked' })
@@ -213,7 +229,7 @@ export function createConnect({ send, leave, token, refresh }: ConnectDeps): Con
     }
     if (now.kind === 'detached') {
       // No stream will say how it stopped: its receipt does.
-      await stand(mine, now.integrationId, now.loginId)
+      await stand(mine, now.integrationId, now.loginId, 0)
       return
     }
     // The stream says how the login stopped. A cancel the server did not take
@@ -225,9 +241,7 @@ export function createConnect({ send, leave, token, refresh }: ConnectDeps): Con
   const check = async (): Promise<void> => {
     const now = view.peek()
     if (now.kind !== 'detached') return
-    const mine = run
-    view.value = { kind: 'checking', integrationId: now.integrationId, loginId: now.loginId }
-    await stand(mine, now.integrationId, now.loginId)
+    await recheck(run, now.integrationId, now.loginId, now.failure === null ? 0 : now.failure.attempts)
   }
 
   return { view, open, close, start, reply, cancel, check, reset }

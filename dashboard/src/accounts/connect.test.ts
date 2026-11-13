@@ -212,7 +212,7 @@ describe('a login whose stream was cut', () => {
     ['still runs', json(200, receipt('running')), 'detached', 0, 0],
     ['linked an account', json(200, receipt('complete', { account: 'linked', authentication: 'credential_captured' })), 'closed', 1, 0],
     ['was interrupted', json(200, receipt('interrupted')), 'ended', 0, 0],
-    ['cannot be read now', json(503, { error: 'the files are being read again' }), 'failed', 0, 0],
+    ['cannot be read now', json(503, { error: 'the files are being read again' }), 'detached', 0, 0],
     ['finds the session ended', noSession(), 'leaving', 0, 1],
   ] as const)('reads how the login stands: one that %s', async (_name, answer, step, refreshed, left) => {
     const stream = live()
@@ -241,6 +241,59 @@ describe('a login whose stream was cut', () => {
     await model.check()
     await model.check()
     expect([model.view.value, sent.filter((one) => one.path === standing).length]).toEqual([{ kind: 'ended', integrationId: 'claude_code', ended: 'failed' }, 2])
+  })
+
+  it('keeps a login whose receipt cannot be read, says why, and counts the readings that failed in a row', async () => {
+    const stream = live()
+    const { model } = connecting({
+      [loginPath]: [stream.response],
+      [standing]: [json(503, { error: 'the files are being read again' }), 'no answer', json(200, receipt('running'))],
+    })
+    model.open()
+    const done = model.start('claude_code')
+    stream.say(started)
+    await flush()
+    stream.drop()
+    await done
+    const failure = (): unknown => {
+      const view = model.view.value
+      return view.kind === 'detached' ? view.failure : view.kind
+    }
+    const first = failure()
+    await model.check()
+    const second = failure()
+    await model.check()
+    expect([first, second, failure()]).toEqual([
+      { problem: { kind: 'refused', status: 503, reason: 'the files are being read again' }, attempts: 1 },
+      { problem: { kind: 'unreachable' }, attempts: 2 },
+      null,
+    ])
+  })
+
+  it.each(['running', 'cancelling'] as const)('reads the receipt of a login whose stream says what the page cannot read while it is %s', async (step) => {
+    const stream = live()
+    const { model } = connecting({ [loginPath]: [stream.response], [cancelled]: [accepted()], [standing]: [json(200, receipt('running'))] })
+    model.open()
+    const done = model.start('claude_code')
+    stream.say(started)
+    await flush()
+    if (step === 'cancelling') await model.cancel()
+    const before = kind(model)
+    stream.say(frame('output', { stream: 'printer', text: '?' }))
+    await done
+    expect([before, model.view.value]).toEqual([step, { kind: 'detached', integrationId: 'claude_code', loginId: id, failure: null }])
+  })
+
+  it('says a login failed when its stream said what the page cannot read before it named the login', async () => {
+    const stream = live()
+    const { model, sent } = connecting({ [loginPath]: [stream.response] })
+    model.open()
+    const done = model.start('claude_code')
+    stream.say(frame('started', { login_id: 'not an id' }))
+    await done
+    expect([model.view.value, sent.length]).toEqual([
+      { kind: 'failed', integrationId: 'claude_code', failure: { problem: { kind: 'unreadable' }, attempts: 1 } }, 1,
+    ])
   })
 })
 

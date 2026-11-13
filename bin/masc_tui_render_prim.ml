@@ -1954,7 +1954,7 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
             if index >= scroll && index < scroll + height then draw_row draw)
           held;
         Option.iter draw_note
-          (Masc_tui_scroll.position_row ~scroll ~height count);
+          (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
         Some (report scroll)
   in
   for _ = !used + 1 to budget do
@@ -4095,7 +4095,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
      the fixed chrome rows above and the reading needs no row of its own. *)
   Option.iter
     (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~scroll ~height:content_height
+    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height
        ~hint:ds.ds_esc_hint total);
   box_bottom buf cols;
   Buffer.add_string buf

@@ -316,7 +316,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     | Some line -> box_line buf cols line
   done;
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~scroll ~height count);
+    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
   box_bottom buf cols;
   scroll, count, height
 ;;
@@ -1274,7 +1274,7 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | Some line -> box_line_styled buf cols ~style:(planning_detail_tone line.Planning_detail.tone) line.text
   done;
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~scroll ~height count);
+    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
   box_bottom buf cols;
   let seen = match confirmation with
     | `Inspect (Masc_tui_fetched.Ready proof) ->
@@ -2275,7 +2275,7 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
     | None -> box_empty buf cols
   done;
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~scroll ~height count);
+    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
   box_bottom buf cols;
   scroll, Masc_tui_scroll.maximum ~count ~height
 ;;

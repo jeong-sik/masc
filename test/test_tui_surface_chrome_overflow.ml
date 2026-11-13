@@ -15,8 +15,12 @@ let terminal_rows = 30
 let cols = 100
 let hints = "zz:probe  Esc:close"
 
+(* The position row's words are the English screen's; the language a fresh
+   state starts in is Korean. *)
 let fresh () =
-  Masc_tui_types.create_state ~workspace:"test" ~port:8935 ()
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
+  state.Masc_tui_types.ui_language <- Masc_tui_types.Lang_en;
+  state
 
 let row_text index = Printf.sprintf "row-%03d" index
 

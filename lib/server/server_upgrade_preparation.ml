@@ -1,9 +1,11 @@
-type error = Invalid_health | Different_workspace | Admin_required | Owner_unavailable
+type error = Invalid_health | Different_workspace | Admin_required | Server_starting
+  | Admin_check_unanswered | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
+type http_answer = (int * string, string) result
 type incumbent = {base_path:string; version:string}
 type phase = Prepared | Requested | Released
 type t = {incumbent:incumbent; observe:unit -> (string,error) result;
-  authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
+  authorize:unit -> (unit,error) result; signal:unit -> (unit,error) result; release:unit -> unit;
   lock:Eio.Mutex.t; mutable phase:phase}
 open Result.Syntax
 let decode_health body =
@@ -31,11 +33,33 @@ let authorize_initial ~base_path ~expected_version ~body ~login =
   let* incumbent = decode ~base_path body in
   if incumbent.version <> expected_version then Error Incumbent_changed
   else if login () then Ok () else Error Admin_required
-let prepare_with ~sw ~base_path ~observe ~authorize ~capture =
+(* Whether the answer of [/health/ready] says the server has not finished
+   starting: the [ready] field the server writes as [false] until its state is
+   published. An answer that cannot be read says nothing either way. *)
+let says_starting : http_answer -> bool = function
+  | Error (_ : string) -> false
+  | Ok ((_ : int), body) ->
+    (match Yojson.Safe.from_string body with
+     | `Assoc fields -> List.assoc_opt "ready" fields = Some (`Bool false)
+     | _ -> false
+     | exception Yojson.Json_error _ -> false)
+(* A server that is still starting answers every route behind a credential
+   with a 503 before it reads the credential, so it is asked for readiness
+   first and the bearer is not sent to it. Of the answers to the bearer, 401
+   and 403 are the server refusing the credential it read; any other status,
+   and no answer, is not a verdict on the credential. *)
+let admin_admission ~readiness ~access =
+  if says_starting (readiness ()) then Error Server_starting else
+  match access () with
+  | Ok (200, (_ : string)) -> Ok ()
+  | Ok ((401 | 403), (_ : string)) -> Error Admin_required
+  | Ok ((_ : int), (_ : string)) | Error (_ : string) -> Error Admin_check_unanswered
+let prepare_with ~sw ~base_path ~observe ~readiness ~access ~capture =
+  let authorize () = admin_admission ~readiness ~access in
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
   let* body = observe () in
   let* incumbent = decode ~base_path body in
-  if not (authorize ()) then Error Admin_required else
+  let* () = authorize () in
   let* signal, raw_release = capture () in
   let released = Atomic.make false in
   let release () = if not (Atomic.exchange released true) then raw_release () in
@@ -58,8 +82,8 @@ let request_termination owner =
       let* body = owner.observe () in
       let* current = decode ~base_path:owner.incumbent.base_path body in
       if current <> owner.incumbent then Error Incumbent_changed
-      else if not (owner.authorize ()) then Error Admin_required
-      else let* () = owner.signal () in owner.phase <- Requested; Ok ())
+      else let* () = owner.authorize () in
+        let* () = owner.signal () in owner.phase <- Requested; Ok ())
 let close owner = Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
   if owner.phase <> Released then (owner.release (); owner.phase <- Released))
 let prepare ~sw ~clock ~headers ~run_dir ~base_path ~port =
@@ -68,14 +92,14 @@ let prepare ~sw ~clock ~headers ~run_dir ~base_path ~port =
   let url path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path in
   let observe () = match Masc_http_client.get_sync ~clock ~url:(url Server_health_paths.full) ~headers:[] () with
     | Ok (200, body) -> Ok body | Ok _ | Error _ -> Error Invalid_health in
-  let authorize () = match Masc_http_client.get_sync ~clock ~url:(url "/api/v1/runtime/config/raw") ~headers () with
-    | Ok (200, _) -> true | Ok _ | Error _ -> false in
+  let readiness () = Masc_http_client.get_sync ~clock ~url:(url Server_health_paths.readiness) ~headers:[] () in
+  let access () = Masc_http_client.get_sync ~clock ~url:(url "/api/v1/runtime/config/raw") ~headers () in
   let capture () = match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
     | Error _ -> Error Owner_unavailable
     | Ok handle -> Ok ((fun () -> Owner_process_identity.request_termination handle
           |> Result.map_error (fun _ -> Owner_unavailable)),
         (fun () -> Owner_process_identity.close handle)) in
-  prepare_with ~sw ~base_path ~observe ~authorize ~capture
+  prepare_with ~sw ~base_path ~observe ~readiness ~access ~capture
 let suggest_loopback_port () =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in

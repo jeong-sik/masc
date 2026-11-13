@@ -1,4 +1,5 @@
-"""Read GitHub JSON; only a server-timed quota response retries an HTTP GET.
+"""Read GitHub JSON; a server-timed quota response, or a transient 5xx that
+announces its own ``retry-after``, retries an HTTP GET.
 
 Writes never pass through this transport. A pause invalidates an admission's
 earlier reads; callers can compare ``pauses`` before committing a decision.
@@ -20,6 +21,11 @@ QUOTA_HEADERS = ('retry-after', 'x-ratelimit-remaining', 'x-ratelimit-reset')
 # visible failure.
 BOUNDARY_RETRIES = 3
 BOUNDARY_PAUSE_SECONDS = 2
+# A transient gateway 5xx announces its own pause with ``retry-after``. A
+# bounded number of retries rides out the blip: each retry waits out the
+# announced pause, and the cap keeps a stuck endpoint visible in red.
+TRANSIENT_STATUSES = (502, 503, 504)
+TRANSIENT_RETRIES = 3
 
 
 class ApiFailure(ValueError):
@@ -50,6 +56,22 @@ class QuotaBoundaryExhausted(ApiFailure):
                          f'{failure.details["message"]} (quota reset boundary: '
                          f'{retries} retries exhausted)')
         self.details = dict(self.details, quota_state=self.STATE, boundary_retries=retries)
+        self.args = (json.dumps(self.details, ensure_ascii=False),)
+
+
+class TransientRetryExhausted(ApiFailure):
+    """The bounded retries for a retry-after 5xx all still failed.
+
+    Its own type and ``retry_state`` mark it, so a run that red after riding
+    out the announced pauses is told apart from a refusal that never retried.
+    """
+    STATE = 'transient_retries_exhausted'
+
+    def __init__(self, failure, retries):
+        super().__init__(failure.path, failure.status, failure.headers,
+                         f'{failure.details["message"]} (transient retry: '
+                         f'{retries} retries exhausted)')
+        self.details = dict(self.details, retry_state=self.STATE, transient_retries=retries)
         self.args = (json.dumps(self.details, ensure_ascii=False),)
 
 
@@ -121,6 +143,7 @@ class Client:
         self.on_quota = on_quota or (lambda failure: None)
         self.pauses = 0
         self.boundary_retries = 0
+        self.transient_retries = 0
         # Latest client-clock time a quota wait may sleep until; None waits
         # out the server time. A caller with its own deadline (follow's wait)
         # sets this so a long quota cannot outlive the handoff.
@@ -149,7 +172,7 @@ class Client:
         return Response(data, status, headers)
 
     def get(self, path):
-        waited, boundary = False, 0
+        waited, boundary, transient = False, 0, 0
         while True:
             try:
                 return self.once(path)
@@ -159,13 +182,51 @@ class Client:
                 self.wait_for_quota(failure)
                 waited = True
             except ApiFailure as failure:
-                if not (waited and self.reset_just_elapsed(failure)):
-                    raise
-                if boundary >= BOUNDARY_RETRIES:
-                    raise QuotaBoundaryExhausted(failure, boundary) from failure
-                boundary += 1
-                self.boundary_retries += 1
-                self.sleep(BOUNDARY_PAUSE_SECONDS)
+                if waited and self.reset_just_elapsed(failure):
+                    if boundary >= BOUNDARY_RETRIES:
+                        raise QuotaBoundaryExhausted(failure, boundary) from failure
+                    boundary += 1
+                    self.boundary_retries += 1
+                    self.sleep(BOUNDARY_PAUSE_SECONDS)
+                    continue
+                pause = self.transient_pause(failure)
+                if pause is not None and transient >= TRANSIENT_RETRIES:
+                    raise TransientRetryExhausted(failure, transient) from failure
+                if pause is not None:
+                    # A bounded, server-announced blip produces no long
+                    # wall-clock gap, so the freshness rule that compares
+                    # ``pauses`` stays tied to quota waits only.
+                    transient += 1
+                    self.transient_retries += 1
+                    if not self.sleep_remaining(self.clock() + pause):
+                        raise ApiFailure(
+                            failure.path, failure.status, failure.headers,
+                            f'{failure.details["message"]} (transient wait cut short at the '
+                            f'caller deadline; {transient} of {TRANSIENT_RETRIES} retries '
+                            f'used)') from failure
+                    continue
+                raise
+
+    def transient_pause(self, failure):
+        """Seconds a transient 5xx's own ``retry-after`` announces; None does not retry.
+
+        Only a parseable pause retries: a 5xx without one, or with a malformed
+        one, stays a visible failure instead of spinning on the same response.
+        """
+        if failure.status not in TRANSIENT_STATUSES:
+            return None
+        retry = failure.headers.get('retry-after')
+        if retry is None:
+            return None
+        try:
+            if retry.isascii() and retry.isdecimal():
+                return max(int(retry), 0)
+            date = parsedate_to_datetime(retry)
+            if date.tzinfo is not None:
+                return max(int(date.timestamp() - self.clock()), 0)
+        except (ValueError, TypeError, OverflowError):
+            pass
+        return None
 
     def reset_just_elapsed(self, failure):
         """A 403/429 whose primary quota is spent and whose reset time has passed."""
@@ -176,15 +237,21 @@ class Client:
 
     def wait_for_quota(self, failure):
         """Honor an observed retry time, including one carried by a receipt."""
-        while (remaining := failure.retry_at - self.clock()) > 0:
+        if not self.sleep_remaining(failure.retry_at):
+            raise QuotaWaitCutShort(
+                failure.path, failure.status, failure.headers,
+                f'{failure.details["message"]} (quota wait cut short; '
+                f'retry at {failure.retry_at})',
+                failure.retry_at) from failure
+
+    def sleep_remaining(self, target):
+        """Sleep toward a client-clock target; False means the deadline cut it."""
+        while (remaining := target - self.clock()) > 0:
             budget = None if self.deadline is None else self.deadline - self.clock()
             if budget is not None and budget <= 0:
-                raise QuotaWaitCutShort(
-                    failure.path, failure.status, failure.headers,
-                    f'{failure.details["message"]} (quota wait cut short; '
-                    f'retry at {failure.retry_at})',
-                    failure.retry_at) from failure
+                return False
             self.sleep(min(remaining, budget) if budget is not None else remaining)
+        return True
 
     def read(self, path):
         return self.get(path).data

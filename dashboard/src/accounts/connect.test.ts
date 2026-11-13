@@ -2,7 +2,7 @@
 // server leads to, and which requests each step sends.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createConnect, transcriptLimit } from './connect'
-import type { ConnectModel } from './connect'
+import type { ConnectModel, Input } from './connect'
 import { loginPath } from './login'
 import type { Send } from './wire'
 
@@ -12,7 +12,8 @@ const receipt = (status: string, more: Readonly<Record<string, unknown>> = {}) =
   ({ login_id: id, integration_id: 'claude_code', status, invocation_verified: false, ...more })
 const started = frame('started', receipt('running'))
 const linked = frame('complete', receipt('complete', { account: 'linked', authentication: 'login_completed' }))
-const asking = frame('input_ready', {})
+/** The client took the last reply. */
+const took = frame('input_ready', {})
 const printed = (text: string): string => frame('output', { stream: 'terminal', text })
 const stopped = (status: string): string => frame('error', { message: 'a sentence for the operator', ...receipt(status) })
 const json = (status: number, body: unknown): Response =>
@@ -40,7 +41,7 @@ function live(): { readonly response: Response; readonly say: (text: string) => 
   }
 }
 
-interface Sent { readonly path: string; readonly method: string }
+interface Sent { readonly path: string; readonly method: string; readonly signal: AbortSignal | null }
 
 /** Requests no answer was scripted for; each test checks at its end that there was none. */
 const unscripted: string[] = []
@@ -51,7 +52,7 @@ function connecting(byPath: Readonly<Record<string, readonly Scripted[]>>, token
   const sent: Sent[] = []
   const left = new Map(Object.entries(byPath).map(([path, answers]) => [path, [...answers]]))
   const send: Send = (path, init) => {
-    sent.push({ path, method: init.method ?? 'GET' })
+    sent.push({ path, method: init.method ?? 'GET', signal: init.signal ?? null })
     const next = left.get(path)?.shift()
     if (next === undefined) {
       unscripted.push(path)
@@ -65,35 +66,54 @@ function connecting(byPath: Readonly<Record<string, readonly Scripted[]>>, token
   return { model, sent, leave, refresh }
 }
 
+/** An answer the test gives when it wants. */
+function held(): { readonly answer: Promise<Response>; readonly give: (response: Response) => void } {
+  const hand: { give: (response: Response) => void } = { give: () => undefined }
+  const answer = new Promise<Response>((resolve) => { hand.give = resolve })
+  return { answer, give: (response) => { hand.give(response) } }
+}
+
 /** Lets the stream reader and the requests in flight go on. */
 async function flush(): Promise<void> {
   for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 const kind = (model: ConnectModel): string => model.view.value.kind
-const runningInput = (model: ConnectModel): string | null => {
+/** The input of a login whose stream the page reads, or the step it is in. */
+const inputOf = (model: ConnectModel): Input | string => {
   const view = model.view.value
-  return view.kind === 'running' ? view.input : null
+  return view.kind === 'running' || view.kind === 'cancelling' ? view.input : view.kind
 }
 
-/** A model whose login runs and whose client waits for a reply. */
-async function asked(more: Readonly<Record<string, readonly Scripted[]>> = {}) {
+/** A model whose login runs. */
+async function following(more: Readonly<Record<string, readonly Scripted[]>> = {}) {
   const stream = live()
   const opened = connecting({ [loginPath]: [stream.response], ...more })
   opened.model.open()
   const done = opened.model.start('claude_code')
-  stream.say(started + asking)
+  stream.say(started)
   await flush()
   return { ...opened, stream, done }
 }
+
+/** A model whose login runs, whose stream then dropped. */
+async function dropped(more: Readonly<Record<string, readonly Scripted[]>>) {
+  const opened = await following(more)
+  opened.stream.drop()
+  await opened.done
+  return opened
+}
+
+const text = { kind: 'text', text: 'code#1' } as const
+const enter = { kind: 'key', key: 'enter' } as const
 
 afterEach(() => {
   expect(unscripted.splice(0), 'requests that no answer was scripted for').toEqual([])
 })
 
 describe('opening and closing', () => {
-  it('opens only when closed, and closes only where nothing runs', async () => {
-    const { model, stream } = await asked()
+  it('opens only when closed, and closes only where no stream is read', async () => {
+    const { model, stream } = await following()
     expect(kind(model)).toBe('running')
     model.close()
     model.open()
@@ -108,6 +128,14 @@ describe('opening and closing', () => {
     model.open()
     expect(kind(model)).toBe('choosing')
   })
+
+  it('closes on a detached login, and leaves it behind', async () => {
+    const { model, sent } = await dropped({ [standing]: [json(503, { error: 'the files are being read again' })] })
+    expect(kind(model)).toBe('detached')
+    model.close()
+    await model.check()
+    expect([model.view.value, sent.length]).toEqual([{ kind: 'closed', linked: false }, 2])
+  })
 })
 
 describe('a login', () => {
@@ -119,13 +147,11 @@ describe('a login', () => {
     expect(kind(model)).toBe('starting')
     stream.say(started)
     await flush()
-    expect(model.view.value).toEqual({ kind: 'running', integrationId: 'claude_code', loginId: id, transcript: '', input: 'not_asked', cancelNotTaken: false })
+    expect(model.view.value).toEqual({ kind: 'running', integrationId: 'claude_code', loginId: id, transcript: '', input: 'ready', cancelNotTaken: false })
     stream.say(printed('주소 ') + printed('https://example.com/x'))
     await flush()
-    stream.say(asking)
-    await flush()
     const view = model.view.value
-    expect(view.kind === 'running' ? [view.transcript, view.input] : view.kind).toEqual(['주소 https://example.com/x', 'asked'])
+    expect(view.kind === 'running' ? view.transcript : view.kind).toBe('주소 https://example.com/x')
     stream.say(linked)
     stream.end()
     await done
@@ -152,7 +178,7 @@ describe('a login', () => {
     ['cancelled', 'cancelled'],
     ['interrupted', 'interrupted'],
     ['running', 'unrecorded'],
-  ] as const)('ends a login whose stream says %s as %s, and starts again from there', async (status, ended) => {
+  ] as const)('ends a login whose stream says %s as %s, reads the subscriptions again, and starts again from there', async (status, ended) => {
     const first = live()
     const second = live()
     const { model, refresh, sent } = connecting({ [loginPath]: [first.response, second.response] })
@@ -161,7 +187,7 @@ describe('a login', () => {
     first.say(started + stopped(status))
     first.end()
     await done
-    expect([model.view.value, refresh.mock.calls.length]).toEqual([{ kind: 'ended', integrationId: 'claude_code', ended }, 0])
+    expect([model.view.value, refresh.mock.calls.length]).toEqual([{ kind: 'ended', integrationId: 'claude_code', ended }, 1])
     void model.start('claude_code')
     second.say(started)
     await flush()
@@ -188,22 +214,29 @@ describe('a login', () => {
     expect([kind(model), leave.mock.calls.length]).toEqual(['leaving', 1])
   })
 
-  it('reads the subscriptions again when the stream was cut before it named the login', async () => {
+  it('says a login failed when its stream was cut before it named the login', async () => {
     const stream = live()
     const { model, refresh } = connecting({ [loginPath]: [stream.response] })
     model.open()
     const done = model.start('claude_code')
     stream.end()
     await done
-    expect([model.view.value, refresh.mock.calls.length]).toEqual([{ kind: 'ended', integrationId: 'claude_code', ended: 'unknown' }, 1])
+    expect([model.view.value, refresh.mock.calls.length]).toEqual([
+      { kind: 'failed', integrationId: 'claude_code', failure: { problem: { kind: 'unreachable' }, attempts: 1 } }, 0,
+    ])
   })
 
-  it('keeps the newest part of what the client printed', async () => {
-    const { model, stream } = await asked()
+  it('keeps the newest part of what the client printed, from a whole character on', async () => {
+    const { model, stream } = await following()
     stream.say(printed('x'.repeat(transcriptLimit)) + printed('y'))
     await flush()
-    const view = model.view.value
-    expect(view.kind === 'running' ? [view.transcript.length, view.transcript.slice(-2)] : view.kind).toEqual([transcriptLimit, 'xy'])
+    const plain = model.view.value
+    expect(plain.kind === 'running' ? [plain.transcript.length, plain.transcript.slice(-2)] : plain.kind).toEqual([transcriptLimit, 'xy'])
+    // Two units a character: the next one printed cuts the first in half.
+    stream.say(printed('z' + '🌐'.repeat(transcriptLimit / 2)) + printed('y'))
+    await flush()
+    const wide = model.view.value
+    expect(wide.kind === 'running' ? [wide.transcript.length, wide.transcript.codePointAt(0)] : wide.kind).toEqual([transcriptLimit - 1, 0x1f310])
   })
 })
 
@@ -211,77 +244,47 @@ describe('a login whose stream was cut', () => {
   it.each([
     ['still runs', json(200, receipt('running')), 'detached', 0, 0],
     ['linked an account', json(200, receipt('complete', { account: 'linked', authentication: 'credential_captured' })), 'closed', 1, 0],
-    ['was interrupted', json(200, receipt('interrupted')), 'ended', 0, 0],
+    ['was interrupted', json(200, receipt('interrupted')), 'ended', 1, 0],
     ['cannot be read now', json(503, { error: 'the files are being read again' }), 'detached', 0, 0],
     ['finds the session ended', noSession(), 'leaving', 0, 1],
   ] as const)('reads how the login stands: one that %s', async (_name, answer, step, refreshed, left) => {
-    const stream = live()
-    const { model, refresh, leave } = connecting({ [loginPath]: [stream.response], [standing]: [answer] })
-    model.open()
-    const done = model.start('claude_code')
-    stream.say(started)
-    await flush()
-    stream.drop()
-    await done
+    const { model, refresh, leave } = await dropped({ [standing]: [answer] })
     expect([kind(model), refresh.mock.calls.length, leave.mock.calls.length]).toEqual([step, refreshed, left])
   })
 
   it('reads a detached login again when asked', async () => {
-    const stream = live()
-    const { model, sent } = connecting({
-      [loginPath]: [stream.response],
-      [standing]: [json(200, receipt('running')), json(200, receipt('failed'))],
-    })
-    model.open()
-    const done = model.start('claude_code')
-    stream.say(started)
-    await flush()
-    stream.drop()
-    await done
-    await model.check()
+    const { model, sent } = await dropped({ [standing]: [json(200, receipt('running')), json(200, receipt('failed'))] })
+    expect(model.view.value).toEqual({ kind: 'detached', integrationId: 'claude_code', loginId: id, known: { kind: 'runs' } })
     await model.check()
     expect([model.view.value, sent.filter((one) => one.path === standing).length]).toEqual([{ kind: 'ended', integrationId: 'claude_code', ended: 'failed' }, 2])
   })
 
   it('keeps a login whose receipt cannot be read, says why, and counts the readings that failed in a row', async () => {
-    const stream = live()
-    const { model } = connecting({
-      [loginPath]: [stream.response],
+    const { model } = await dropped({
       [standing]: [json(503, { error: 'the files are being read again' }), 'no answer', json(200, receipt('running'))],
     })
-    model.open()
-    const done = model.start('claude_code')
-    stream.say(started)
-    await flush()
-    stream.drop()
-    await done
-    const failure = (): unknown => {
+    const known = (): unknown => {
       const view = model.view.value
-      return view.kind === 'detached' ? view.failure : view.kind
+      return view.kind === 'detached' ? view.known : view.kind
     }
-    const first = failure()
+    const first = known()
     await model.check()
-    const second = failure()
+    const second = known()
     await model.check()
-    expect([first, second, failure()]).toEqual([
-      { problem: { kind: 'refused', status: 503, reason: 'the files are being read again' }, attempts: 1 },
-      { problem: { kind: 'unreachable' }, attempts: 2 },
-      null,
+    expect([first, second, known()]).toEqual([
+      { kind: 'unread', failure: { problem: { kind: 'refused', status: 503, reason: 'the files are being read again' }, attempts: 1 } },
+      { kind: 'unread', failure: { problem: { kind: 'unreachable' }, attempts: 2 } },
+      { kind: 'runs' },
     ])
   })
 
   it.each(['running', 'cancelling'] as const)('reads the receipt of a login whose stream says what the page cannot read while it is %s', async (step) => {
-    const stream = live()
-    const { model } = connecting({ [loginPath]: [stream.response], [cancelled]: [accepted()], [standing]: [json(200, receipt('running'))] })
-    model.open()
-    const done = model.start('claude_code')
-    stream.say(started)
-    await flush()
+    const { model, stream, done } = await following({ [cancelled]: [accepted()], [standing]: [json(200, receipt('running'))] })
     if (step === 'cancelling') await model.cancel()
     const before = kind(model)
     stream.say(frame('output', { stream: 'printer', text: '?' }))
     await done
-    expect([before, model.view.value]).toEqual([step, { kind: 'detached', integrationId: 'claude_code', loginId: id, failure: null }])
+    expect([before, model.view.value]).toEqual([step, { kind: 'detached', integrationId: 'claude_code', loginId: id, known: { kind: 'runs' } }])
   })
 
   it('says a login failed when its stream said what the page cannot read before it named the login', async () => {
@@ -298,44 +301,72 @@ describe('a login whose stream was cut', () => {
 })
 
 describe('replies', () => {
-  it('sends a reply only while the client waits for one', async () => {
-    const stream = live()
-    const { model, sent } = connecting({ [loginPath]: [stream.response], [input]: [accepted()] })
-    model.open()
-    void model.start('claude_code')
-    stream.say(started)
+  it('sends a reply while the server holds none, and the next once the client took it', async () => {
+    const { model, stream, sent } = await following({ [input]: [accepted(), accepted()] })
+    expect(inputOf(model)).toBe('ready')
+    const first = model.reply(text)
+    expect(inputOf(model)).toBe('sending')
+    expect(await model.reply(enter)).toBe(false)
+    expect([await first, inputOf(model)]).toEqual([true, 'pending'])
+    expect(await model.reply(enter)).toBe(false)
+    stream.say(took)
     await flush()
-    await model.reply({ kind: 'text', text: 'code#1' })
-    expect(sent.length).toBe(1)
-    stream.say(asking)
-    await flush()
-    const reply = model.reply({ kind: 'text', text: 'code#1' })
-    expect(runningInput(model)).toBe('sending')
-    await model.reply({ kind: 'key', key: 'enter' })
-    await reply
-    expect([runningInput(model), sent.filter((one) => one.path === input).length]).toEqual(['not_asked', 1])
+    expect(inputOf(model)).toBe('ready')
+    expect([await model.reply(enter), sent.filter((one) => one.path === input).length]).toEqual([true, 2])
   })
 
-  it('keeps the client waiting when the server did not take a reply', async () => {
-    const { model, sent } = await asked({ [input]: [json(409, { error: 'An input is still pending.' }), 'no answer', accepted()] })
-    await model.reply({ kind: 'key', key: 'up' })
-    expect(runningInput(model)).toBe('not_taken')
-    await model.reply({ kind: 'key', key: 'up' })
-    expect(runningInput(model)).toBe('not_taken')
-    await model.reply({ kind: 'key', key: 'up' })
-    expect([runningInput(model), sent.filter((one) => one.path === input).length]).toEqual(['not_asked', 3])
+  it('keeps the input ready when the client took a reply before its answer came', async () => {
+    const answer = held()
+    const { model, stream } = await following({ [input]: [answer.answer] })
+    const replying = model.reply(text)
+    stream.say(took)
+    await flush()
+    answer.give(accepted())
+    expect([await replying, inputOf(model)]).toEqual([true, 'ready'])
+  })
+
+  it('lets only the answer to the latest reply move the input', async () => {
+    const first = held()
+    const second = held()
+    const { model, stream } = await following({ [input]: [first.answer, second.answer] })
+    const one = model.reply({ kind: 'key', key: 'down' })
+    stream.say(took)
+    await flush()
+    const two = model.reply(enter)
+    first.give(accepted())
+    await one
+    expect(inputOf(model)).toBe('sending')
+    second.give(json(409, { error: 'The previous login input has not been consumed yet.' }))
+    expect([await two, inputOf(model)]).toEqual([false, 'not_taken'])
+  })
+
+  it('keeps a reply the server did not take ready to send again', async () => {
+    const { model, sent } = await following({ [input]: [json(409, { error: 'An input is still pending.' }), 'no answer', accepted()] })
+    expect([await model.reply(enter), inputOf(model)]).toEqual([false, 'not_taken'])
+    expect([await model.reply(enter), inputOf(model)]).toEqual([false, 'not_taken'])
+    expect([await model.reply(enter), inputOf(model), sent.filter((one) => one.path === input).length]).toEqual([true, 'pending', 3])
   })
 
   it('leaves for the sign-in page when a reply finds the session ended', async () => {
-    const { model, leave } = await asked({ [input]: [noSession()] })
-    await model.reply({ kind: 'text', text: 'code' })
+    const { model, leave } = await following({ [input]: [noSession()] })
+    expect(await model.reply(text)).toBe(false)
+    expect([kind(model), leave.mock.calls.length]).toEqual(['leaving', 1])
+  })
+
+  it('leaves for the sign-in page when a reply finds the session ended after a cancel went out', async () => {
+    const answer = held()
+    const { model, leave } = await following({ [input]: [answer.answer], [cancelled]: [accepted()] })
+    const replying = model.reply(text)
+    await model.cancel()
+    answer.give(noSession())
+    await replying
     expect([kind(model), leave.mock.calls.length]).toEqual(['leaving', 1])
   })
 })
 
 describe('cancelling', () => {
   it('waits for the stream to say how a cancelled login ended', async () => {
-    const { model, stream, done } = await asked({ [cancelled]: [accepted()] })
+    const { model, stream, done } = await following({ [cancelled]: [accepted()] })
     const cancel = model.cancel()
     expect(kind(model)).toBe('cancelling')
     await cancel
@@ -349,49 +380,71 @@ describe('cancelling', () => {
     expect(model.view.value).toEqual({ kind: 'ended', integrationId: 'claude_code', ended: 'cancelled' })
   })
 
-  it('goes back to the login, its transcript kept, when the server did not take a cancel', async () => {
-    const { model, stream } = await asked({ [cancelled]: [json(404, { error: 'No such login.' })] })
+  it('goes back to the login as it stands when the server did not take a cancel', async () => {
+    const answer = held()
+    const refusal = held()
+    const { model, stream } = await following({ [input]: [answer.answer], [cancelled]: [refusal.answer] })
+    const replying = model.reply(text)
+    const cancelling = model.cancel()
     stream.say(printed('안내'))
     await flush()
-    await model.cancel()
+    answer.give(accepted())
+    await replying
+    const taken = inputOf(model)
+    stream.say(took)
+    await flush()
+    refusal.give(json(409, { error: 'The login is not running.' }))
+    await cancelling
     const view = model.view.value
-    expect(view.kind === 'running' ? [view.cancelNotTaken, view.transcript] : view.kind).toEqual([true, '안내'])
+    expect([taken, view.kind === 'running' ? [view.cancelNotTaken, view.transcript, view.input] : view.kind]).toEqual(['pending', [true, '안내', 'ready']])
   })
 
-  it('stops a detached login and reads how it stands', async () => {
-    const stream = live()
-    const { model } = connecting({
-      [loginPath]: [stream.response],
+  it('stops a detached login: says the server took the cancel, and reads how the login ended when asked', async () => {
+    const { model, sent } = await dropped({
       [cancelled]: [accepted()],
       [standing]: [json(200, receipt('running')), json(200, receipt('cancelled'))],
     })
-    model.open()
-    const done = model.start('claude_code')
-    stream.say(started)
-    await flush()
-    stream.drop()
-    await done
     const cancel = model.cancel()
     expect(kind(model)).toBe('checking')
     await cancel
-    expect(model.view.value).toEqual({ kind: 'ended', integrationId: 'claude_code', ended: 'cancelled' })
+    expect(model.view.value).toEqual({ kind: 'detached', integrationId: 'claude_code', loginId: id, known: { kind: 'cancel_taken' } })
+    await model.check()
+    expect([model.view.value, sent.filter((one) => one.path === standing).length]).toEqual([{ kind: 'ended', integrationId: 'claude_code', ended: 'cancelled' }, 2])
+  })
+
+  it.each([
+    ['runs on', json(200, receipt('running')), { kind: 'detached', integrationId: 'claude_code', loginId: id, known: { kind: 'cancel_not_taken', problem: { kind: 'unreachable' } } }],
+    ['stopped', json(200, receipt('interrupted')), { kind: 'ended', integrationId: 'claude_code', ended: 'interrupted' }],
+  ] as const)('says a cancel of a detached login the server did not take, and reads the login, which %s', async (_name, answer, step) => {
+    const { model } = await dropped({ [cancelled]: ['no answer'], [standing]: [json(200, receipt('running')), answer] })
+    await model.cancel()
+    expect(model.view.value).toEqual(step)
   })
 
   it('leaves for the sign-in page when a cancel finds the session ended', async () => {
-    const { model, leave } = await asked({ [cancelled]: [noSession()] })
+    const { model, leave } = await following({ [cancelled]: [noSession()] })
     await model.cancel()
     expect([kind(model), leave.mock.calls.length]).toEqual(['leaving', 1])
+  })
+
+  it('leaves once: nothing the stream says after the session ended changes the step', async () => {
+    const { model, stream, done, leave, refresh } = await following({ [cancelled]: [noSession()] })
+    await model.cancel()
+    stream.say(stopped('cancelled'))
+    stream.end()
+    await done
+    expect([model.view.value, leave.mock.calls.length, refresh.mock.calls.length]).toEqual([{ kind: 'leaving' }, 1, 0])
   })
 })
 
 describe('another person', () => {
-  it('leaves a running login behind: nothing it says later changes the area', async () => {
-    const { model, stream, done, refresh } = await asked()
+  it('leaves a running login behind: closes its stream, and nothing it says later changes the area', async () => {
+    const { model, stream, done, refresh, sent } = await following()
     model.reset()
     stream.say(linked)
     stream.end()
     await done
-    expect([model.view.value, refresh.mock.calls.length]).toEqual([{ kind: 'closed', linked: false }, 0])
+    expect([model.view.value, refresh.mock.calls.length, sent[0]?.signal?.aborted]).toEqual([{ kind: 'closed', linked: false }, 0, true])
   })
 
   it('lets no frame of a login left behind take the place of a new one', async () => {
@@ -410,9 +463,8 @@ describe('another person', () => {
 
   it('lets no reading of a login left behind change the area', async () => {
     const stream = live()
-    const answer: { give: (response: Response) => void } = { give: () => undefined }
-    const pending = new Promise<Response>((resolve) => { answer.give = resolve })
-    const { model } = connecting({ [loginPath]: [stream.response], [standing]: [pending] })
+    const answer = held()
+    const { model } = connecting({ [loginPath]: [stream.response], [standing]: [answer.answer] })
     model.open()
     const done = model.start('claude_code')
     stream.say(started)

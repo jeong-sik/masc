@@ -1,15 +1,16 @@
 // A person's login to a subscription. POST /api/v1/setup/accounts/login
 // answers an event stream (lib/server/server_setup_account_login.ml, `start`):
 // `started` once the official client runs, `output` for what it prints,
-// `input_ready` when it waits for a reply, and last `complete` or `error`.
+// `input_ready` once the client took a reply, and last `complete` or `error`.
 // A person's login always makes a new account, which the authorization log
 // links to them: no frame names an account reference, and the last frame of
 // a login that worked says `"account": "linked"`
 // (lib/runtime/runtime_setup_login_receipt.ml, `to_json`).
 //
 // The stream is read as strictly as wire.ts reads an answer: a frame that is
-// not what the stream promises ends the reading as unreadable. The sentence
-// of an `error` frame is not read: it is written for the server's operator.
+// not what the stream promises, or text after the last frame, ends the
+// reading as unreadable. The sentence of an `error` frame is not read: it is
+// written for the server's operator.
 
 import { isRecord } from '../lib/type-guards'
 import { bodyOf, csrfHeader, deliver, get, problemOf } from './wire'
@@ -21,7 +22,7 @@ export const loginPath = '/api/v1/setup/accounts/login'
 export type LoginProgress =
   | { readonly kind: 'started'; readonly loginId: string }
   | { readonly kind: 'output'; readonly text: string }
-  /** The client waits for a reply: a code, or a key. */
+  /** The client took the last reply: the server takes another. */
   | { readonly kind: 'input_ready' }
 
 /** How a login that made no account stopped, as its receipt keeps it. */
@@ -48,10 +49,14 @@ export type LoginStanding =
   | { readonly kind: 'linked' }
   | { readonly kind: 'ended'; readonly end: Stopped }
 
-/** What a person sends to a client that waits: text, or one of the keys the server takes. */
+/** What a person sends to the client: text, or one of the keys the server takes. */
 export type Reply =
   | { readonly kind: 'text'; readonly text: string }
   | { readonly kind: 'key'; readonly key: 'enter' | 'up' | 'down' | 'tab' | 'eof' }
+
+/** How a receipt says the client of a login was let in
+    (lib/runtime/runtime_setup_login_receipt.ml, `of_json`). */
+const authentications: readonly string[] = ['authenticated', 'login_completed', 'credential_captured']
 
 const loginIdShape = /^[a-f0-9]{64}$/
 const loginIdOf = (value: unknown): string | null => (typeof value === 'string' && loginIdShape.test(value) ? value : null)
@@ -62,10 +67,10 @@ const loginIdOf = (value: unknown): string | null => (typeof value === 'string' 
 function receiptOf(json: unknown, integrationId: string, statuses: readonly string[]): string | null {
   if (!isRecord(json) || json.integration_id !== integrationId || json.invocation_verified !== false) return null
   if (json.account_ref !== undefined || typeof json.status !== 'string' || !statuses.includes(json.status)) return null
-  const linked = json.status === 'complete'
-    ? json.account === 'linked' && typeof json.authentication === 'string' && json.authentication !== ''
+  const fits = json.status === 'complete'
+    ? json.account === 'linked' && typeof json.authentication === 'string' && authentications.includes(json.authentication)
     : json.account === undefined && json.authentication === undefined
-  return linked ? loginIdOf(json.login_id) : null
+  return fits ? loginIdOf(json.login_id) : null
 }
 
 function endOf(status: unknown): LoginEnd | null {
@@ -95,83 +100,93 @@ function frameOf(block: string): Frame | null {
 }
 
 type Reading =
-  | { readonly kind: 'next'; readonly loginId: string | null }
+  | { readonly kind: 'next'; readonly loginId: string }
   | { readonly kind: 'last'; readonly outcome: LoginOutcome }
 
-/** What one frame says, given the login id the stream named so far. */
-function read(frame: Frame, integrationId: string, loginId: string | null, onProgress: (progress: LoginProgress) => void): Reading {
-  const unreadable: Reading = { kind: 'last', outcome: { kind: 'problem', problem: { kind: 'unreadable' } } }
+/** What one frame says, given the login id the stream named so far, or
+    null when the stream does not promise that frame there. */
+function read(frame: Frame, integrationId: string, loginId: string | null, onProgress: (progress: LoginProgress) => void): Reading | null {
   const same = (id: string | null): boolean => id !== null && (loginId === null || id === loginId)
   switch (frame.event) {
     case 'started': {
       const id = receiptOf(frame.data, integrationId, ['running'])
-      if (loginId !== null || id === null) return unreadable
+      if (loginId !== null || id === null) return null
       onProgress({ kind: 'started', loginId: id })
       return { kind: 'next', loginId: id }
     }
     case 'output': {
       const data = frame.data
-      if (loginId === null || !isRecord(data) || typeof data.text !== 'string') return unreadable
-      if (data.stream !== 'stdout' && data.stream !== 'stderr' && data.stream !== 'terminal') return unreadable
+      if (loginId === null || !isRecord(data) || typeof data.text !== 'string') return null
+      if (data.stream !== 'stdout' && data.stream !== 'stderr' && data.stream !== 'terminal') return null
       onProgress({ kind: 'output', text: data.text })
       return { kind: 'next', loginId }
     }
     case 'input_ready':
-      if (loginId === null || !isRecord(frame.data) || Object.keys(frame.data).length !== 0) return unreadable
+      if (loginId === null || !isRecord(frame.data) || Object.keys(frame.data).length !== 0) return null
       onProgress({ kind: 'input_ready' })
       return { kind: 'next', loginId }
     case 'complete':
       return loginId !== null && receiptOf(frame.data, integrationId, ['complete']) === loginId
         ? { kind: 'last', outcome: { kind: 'linked' } }
-        : unreadable
+        : null
     case 'error': {
-      const id = receiptOf(frame.data, integrationId, ['running', 'failed', 'cancelled', 'interrupted'])
-      const end = isRecord(frame.data) ? endOf(frame.data.status) : null
-      return same(id) && end !== null ? { kind: 'last', outcome: { kind: 'ended', end } } : unreadable
+      const data = frame.data
+      const id = receiptOf(data, integrationId, ['running', 'failed', 'cancelled', 'interrupted'])
+      const end = isRecord(data) && typeof data.message === 'string' ? endOf(data.status) : null
+      return same(id) && end !== null ? { kind: 'last', outcome: { kind: 'ended', end } } : null
     }
     default:
-      return unreadable
+      return null
   }
 }
 
 /** Starts a login of `integrationId` and reads its stream to the end. Each
-    step of the client goes to `onProgress` as it comes. */
+    step of the client goes to `onProgress` as it comes. `signal` closes the
+    stream, and the server stops a login whose stream closed. */
 export async function connect(
   to: Send,
   csrfToken: string,
   integrationId: string,
+  signal: AbortSignal,
   onProgress: (progress: LoginProgress) => void,
 ): Promise<LoginOutcome> {
   const response = await deliver(to, loginPath, {
     method: 'POST',
     headers: { accept: 'text/event-stream', 'content-type': 'application/json', [csrfHeader]: csrfToken },
     body: JSON.stringify({ integration_id: integrationId }),
+    signal,
   })
   if (response === null) return { kind: 'problem', problem: { kind: 'unreachable' } }
   if (!response.ok) return { kind: 'problem', problem: await problemOf(response) }
   if (response.body === null) return { kind: 'problem', problem: { kind: 'unreadable' } }
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
+  const unreadable: LoginOutcome = { kind: 'problem', problem: { kind: 'unreadable' } }
   let buffer = ''
   let loginId: string | null = null
+  /** What the last frame said, once it came. The server closes the stream
+      after it, and the reading goes on to that end. */
+  let last: LoginOutcome | null = null
   try {
     for (;;) {
       let chunk: ReadableStreamReadResult<Uint8Array>
       try {
         chunk = await reader.read()
       } catch {
-        return { kind: 'cut', loginId }
+        return last ?? { kind: 'cut', loginId }
       }
       buffer = (buffer + decoder.decode(chunk.value, { stream: !chunk.done })).replace(/\r\n/g, '\n')
       for (let cut = buffer.indexOf('\n\n'); cut >= 0; cut = buffer.indexOf('\n\n')) {
         const frame = frameOf(buffer.slice(0, cut))
         buffer = buffer.slice(cut + 2)
-        const reading: Reading | null = frame === null ? null : read(frame, integrationId, loginId, onProgress)
-        if (reading === null) return { kind: 'problem', problem: { kind: 'unreadable' } }
-        if (reading.kind === 'last') return buffer.trim() === '' ? reading.outcome : { kind: 'problem', problem: { kind: 'unreadable' } }
-        loginId = reading.loginId
+        const reading: Reading | null = frame === null || last !== null ? null : read(frame, integrationId, loginId, onProgress)
+        if (reading === null) return unreadable
+        if (reading.kind === 'last') last = reading.outcome
+        else loginId = reading.loginId
       }
-      if (chunk.done) return buffer.trim() === '' ? { kind: 'cut', loginId } : { kind: 'problem', problem: { kind: 'unreadable' } }
+      if (last !== null && buffer.trim() !== '') return unreadable
+      // A stream that ends inside a frame was cut there.
+      if (chunk.done) return last ?? { kind: 'cut', loginId }
     }
   } finally {
     await reader.cancel().catch(() => undefined)

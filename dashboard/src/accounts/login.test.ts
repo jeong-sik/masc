@@ -60,17 +60,21 @@ const only = (sent: readonly Sent[]): Sent => {
 
 const ignore = (): void => undefined
 
+/** The signal of a stream nothing closes. */
+const kept = (): AbortSignal => new AbortController().signal
+
 describe('connect', () => {
   it('reads a login that links an account, frame by frame as the bytes come', async () => {
     const { send, sent } = sending(streamed(started + frame('output', { stream: 'terminal', text: '주소 https://example.com/x 🌐' })
       + frame('input_ready', {}) + linked))
     const progress: LoginProgress[] = []
-    expect(await connect(send, 'csrf', 'claude_code', (one) => progress.push(one))).toEqual({ kind: 'linked' })
+    const signal = kept()
+    expect(await connect(send, 'csrf', 'claude_code', signal, (one) => progress.push(one))).toEqual({ kind: 'linked' })
     expect(progress).toEqual([{ kind: 'started', loginId: id }, { kind: 'output', text: '주소 https://example.com/x 🌐' }, { kind: 'input_ready' }])
     const request = only(sent)
     const headers = new Headers(request.init.headers)
-    expect([request.path, request.init.method, request.init.credentials, request.init.body]).toEqual(
-      [loginPath, 'POST', 'same-origin', JSON.stringify({ integration_id: 'claude_code' })])
+    expect([request.path, request.init.method, request.init.credentials, request.init.body, request.init.signal]).toEqual(
+      [loginPath, 'POST', 'same-origin', JSON.stringify({ integration_id: 'claude_code' }), signal])
     expect([headers.get(csrfHeader), headers.get('authorization')]).toEqual(['csrf', null])
   })
 
@@ -81,13 +85,13 @@ describe('connect', () => {
     ['running', 'unrecorded'],
   ] as const)('reads a login whose receipt says %s as ended %s', async (status, end) => {
     const { send } = sending(streamed(started + frame('error', { message: 'a sentence for the operator', ...receipt(status) })))
-    expect(await connect(send, 'csrf', 'claude_code', ignore)).toEqual({ kind: 'ended', end })
+    expect(await connect(send, 'csrf', 'claude_code', kept(), ignore)).toEqual({ kind: 'ended', end })
   })
 
   it('reads a login that ended before its client ran', async () => {
     const progress: LoginProgress[] = []
     const { send } = sending(streamed(frame('error', { message: 'a sentence', ...receipt('failed') })))
-    expect(await connect(send, 'csrf', 'claude_code', (one) => progress.push(one))).toEqual({ kind: 'ended', end: 'failed' })
+    expect(await connect(send, 'csrf', 'claude_code', kept(), (one) => progress.push(one))).toEqual({ kind: 'ended', end: 'failed' })
     expect(progress).toEqual([])
   })
 
@@ -95,8 +99,14 @@ describe('connect', () => {
     ['after its client ran', streamed(started), id],
     ['before anything came', streamed(''), null],
     ['by a dropped connection', broken(started), id],
+    ['inside a frame after its client ran', streamed(`${started}event: outp`), id],
+    ['inside its first frame', streamed('event: sta'), null],
   ] as const)('says a stream that stopped %s was cut, with the login it named', async (_name, answer, loginId) => {
-    expect(await connect(sending(answer).send, 'csrf', 'claude_code', ignore)).toEqual({ kind: 'cut', loginId })
+    expect(await connect(sending(answer).send, 'csrf', 'claude_code', kept(), ignore)).toEqual({ kind: 'cut', loginId })
+  })
+
+  it('keeps what the last frame said when the connection drops after it', async () => {
+    expect(await connect(sending(broken(started + linked)).send, 'csrf', 'claude_code', kept(), ignore)).toEqual({ kind: 'linked' })
   })
 
   it.each([
@@ -104,7 +114,7 @@ describe('connect', () => {
     ['an ended session', json(401, { error: 'no session' }), { kind: 'signed_out' }],
     ['no answer', 'no answer', { kind: 'unreachable' }],
   ] as const)('gives the problem of %s before any stream', async (_name, answer, problem) => {
-    expect(await connect(sending(answer).send, 'csrf', 'claude_code', ignore)).toEqual({ kind: 'problem', problem })
+    expect(await connect(sending(answer).send, 'csrf', 'claude_code', kept(), ignore)).toEqual({ kind: 'problem', problem })
   })
 
   it.each([
@@ -117,17 +127,26 @@ describe('connect', () => {
     ['output of no known stream', started + frame('output', { stream: 'tty', text: 'x' })],
     ['a wait that carries data', started + frame('input_ready', { text: 'x' })],
     ['an end with no linked account', started + frame('complete', receipt('complete', { authentication: 'login_completed' }))],
+    ['an end whose authentication no receipt says', started + frame('complete', receipt('complete', { account: 'linked', authentication: 'guessed' }))],
     ['an end that names an account reference', started + frame('complete', receipt('complete', { account: 'linked', account_ref: otherId, authentication: 'authenticated' }))],
     ['an end of another login', started + frame('complete', { ...receipt('complete', { account: 'linked', authentication: 'authenticated' }), login_id: otherId })],
     ['an error of another login', started + frame('error', { ...receipt('failed'), login_id: otherId })],
+    ['an error with no sentence', started + frame('error', receipt('failed'))],
     ['an error that says the login is complete', started + frame('error', receipt('complete', { account: 'linked', authentication: 'authenticated' }))],
     ['an event this console does not know', started + frame('progress', {})],
     ['a frame with a comment line', `: keep-alive\r\n${started}`],
     ['a frame with a second data line', `${started}event: input_ready\r\ndata: {}\r\ndata: {}\r\n\r\n`],
     ['a frame whose data is not JSON', 'event: started\r\ndata: {\r\n\r\n'],
-    ['text after the last frame', `${started}${linked}event: output\r\n`],
   ])('refuses %s', async (_name, body) => {
-    expect(await connect(sending(streamed(body)).send, 'csrf', 'claude_code', ignore)).toEqual({ kind: 'problem', problem: { kind: 'unreadable' } })
+    expect(await connect(sending(streamed(body)).send, 'csrf', 'claude_code', kept(), ignore)).toEqual({ kind: 'problem', problem: { kind: 'unreadable' } })
+  })
+
+  // Sizes that end a piece at the end of the last frame, before it and after it.
+  it.each([1, 2, 7, linked.length, 4096])('refuses text after the last frame when the bytes come %i at a time', async (size) => {
+    for (const after of [frame('output', { stream: 'stdout', text: 'x' }), 'event: outp']) {
+      const answer = streamed(started + linked + after, size)
+      expect(await connect(sending(answer).send, 'csrf', 'claude_code', kept(), ignore)).toEqual({ kind: 'problem', problem: { kind: 'unreadable' } })
+    }
   })
 })
 

@@ -14247,8 +14247,8 @@ let connectors_read_notice state =
   | Waiting_after_write ->
       Some (if server_authority_ready state
         then (if ko then "연결 재확인 대기 · r:재시도" else "Binding recheck pending · r:retry")
-        else (if ko then "연결 재확인 대기 · 작업 공간 확인을 기다리는 중"
-              else "Binding recheck pending · waiting for workspace confirmation"))
+        else (if ko then "연결 재확인 대기 · " else "Binding recheck pending · ")
+             ^ Masc_tui_words.workspace_identity_unconfirmed ~ko)
   | Failed_to_start ->
       Some (if ko then "커넥터 읽기를 시작하지 못했습니다" else "Connector read could not start")
 

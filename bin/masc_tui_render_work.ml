@@ -1175,7 +1175,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
     let rows =
       if not (server_authority_ready state) then
-        field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (text "작업 공간 권한 미확인" "workspace authority unavailable")
+        field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (workspace_identity_unconfirmed ~ko)
       else match reading with
       | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet (text "Candle" "Candle") (text "미조회" "not read")
       | Loading -> field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")

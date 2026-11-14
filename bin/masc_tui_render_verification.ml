@@ -359,12 +359,14 @@ let verification_evidence_index state request ~width observation =
         (fit_width (Terminal_text.single_line (evidence_name item)) (max 1 (width - 9)))) items in
     let rows = if state.verification_evidence_index_open then rows
       else Option.to_list (List.nth_opt rows index) in
-    let location = Printf.sprintf
-      (if state.ui_language = Lang_ko then
-         "  원본 참조는 제출자 %s의 작업 공간 기준입니다. 여기서는 제출 시 저장한 사본을 읽습니다."
-       else
-         "  Original references are relative to submitter %s's workspace; this view reads the snapshot saved at submission.")
-      request.vr_submitted_by in
+    let location =
+      let ko = state.ui_language = Lang_ko in
+      Printf.sprintf
+        (if ko then
+           "  원본 참조는 제출자 %s의 %s 기준입니다. 여기서는 제출 시 저장한 사본을 읽습니다."
+         else
+           "  Original references are relative to submitter %s's %s; this view reads the snapshot saved at submission.")
+        request.vr_submitted_by (workspace_name ~ko) in
     judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf "  증거 %d / %d · e/E 다음/이전 · i 목록 · o 열기 · s 저장" (if count = 0 then 0 else index + 1) count]
       @ rows @ [Theme.recede (), location]
       @ List.filter_map (fun (key, saved_index, progress) ->

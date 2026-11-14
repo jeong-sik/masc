@@ -1,0 +1,8 @@
+### Fixed
+
+- The keeper config panel's `runtime_id` picker lists the declared
+  `[runtime.lanes.<id>]` lanes in their own group beside the runtimes, so a
+  keeper can be assigned a lane (RFC-0457) from the dashboard and the save
+  sends the lane id as `runtime_id`. The keeper config snapshot carries the
+  lanes as `execution.lane_options`, and a keeper already on a lane no longer
+  has that lane's id listed in `execution.runtime_options` (#PENDING).

@@ -1186,6 +1186,31 @@ function dedupeStrings(values: readonly string[]): string[] {
   return next
 }
 
+/** What the runtime_id select offers, split by kind. A keeper assignment names
+ *  a declared lane or a runtime (RFC-0457) and the server resolves a lane
+ *  first, so an id that is a declared lane is offered once, under lanes. The
+ *  draft and the server's current value stay under runtimes when they are not
+ *  lanes, so the select never shows another id in their place. */
+export interface RuntimeAssignmentChoices {
+  lanes: string[]
+  runtimes: string[]
+}
+
+export function runtimeAssignmentChoices(
+  draftRuntimeId: string,
+  execution: KeeperConfig['execution'],
+): RuntimeAssignmentChoices {
+  const lanes = dedupeStrings(execution.lane_options)
+  const laneIds = new Set(lanes)
+  const runtimes = dedupeStrings([
+    draftRuntimeId,
+    execution.selected_runtime_id ?? '',
+    execution.selected_runtime_canonical ?? '',
+    ...(execution.runtime_options ?? []),
+  ]).filter(id => !laneIds.has(id))
+  return { lanes, runtimes }
+}
+
 function runtimeCatalogRuntimeKey(entry: DashboardRuntimeProviderSnapshot): string {
   return entry.runtime_id?.trim() || entry.provider.trim()
 }
@@ -1665,9 +1690,14 @@ function InlineControlError(message: string | null) {
   `
 }
 
+export interface InlineSelectGroup {
+  label: string
+  options: readonly string[]
+}
+
 /** A labelled `<select>` over a closed option list.
  *
- *  When `value` is not one of `options`, a disabled placeholder option carrying
+ *  When `value` is not one of `options` or `groups`, a disabled placeholder option carrying
  *  that value is rendered first and stays selected. Without it the browser
  *  selects index 0, so a keeper whose sandbox_profile could not be read was
  *  displayed as 'docker' — and 'docker' was then unpickable, because selecting
@@ -1678,6 +1708,7 @@ export function InlineSelectRow({
   label,
   value,
   options,
+  groups = [],
   optionLabel,
   placeholder,
   onChange,
@@ -1687,13 +1718,17 @@ export function InlineSelectRow({
   label: string
   value: string
   options: readonly string[]
+  /** Rendered as `<optgroup>`s after `options`; an empty group is left out. */
+  groups?: readonly InlineSelectGroup[]
   optionLabel?: (value: string) => string
   placeholder?: string
   onChange: (v: string) => void
   dirty?: boolean
   tone?: 'neutral' | 'warn'
 }) {
-  const valueIsListed = options.includes(value)
+  const shownGroups = groups.filter(group => group.options.length > 0)
+  const valueIsListed =
+    options.includes(value) || shownGroups.some(group => group.options.includes(value))
   const controlClass =
     tone === 'warn'
       ? 'kcf-inline-control text-sm bg-[var(--warn-10)] border border-[var(--warn-20)] rounded-[var(--r-1)] px-3 py-1.5 text-[var(--color-status-warn)] font-semibold'
@@ -1711,6 +1746,11 @@ export function InlineSelectRow({
           ? null
           : html`<option value=${value} disabled>${placeholder ?? '(고르지 않음)'}</option>`}
         ${options.map(option => html`<option value=${option}>${optionLabel ? optionLabel(option) : option}</option>`)}
+        ${shownGroups.map(group => html`
+          <optgroup key=${group.label} label=${group.label}>
+            ${group.options.map(option => html`<option value=${option}>${optionLabel ? optionLabel(option) : option}</option>`)}
+          </optgroup>
+        `)}
       </select>
     </div>
   `
@@ -1907,13 +1947,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ? Object.keys(runtimePayloadResult.payload).length > 0
       : Object.values(dirtyFlags).some(flag => flag === true)
     : false
-  const runtimeOptions = rd
-    ? dedupeStrings([
-        rd.runtime_id,
-        c.execution.selected_runtime_id ?? '',
-        c.execution.selected_runtime_canonical ?? '',
-        ...(c.execution.runtime_options ?? []),
-      ])
+  const runtimeChoices = rd ? runtimeAssignmentChoices(rd.runtime_id, c.execution) : null
+  const runtimeGroups: readonly InlineSelectGroup[] = runtimeChoices
+    ? [
+        { label: '레인', options: runtimeChoices.lanes },
+        { label: '런타임', options: runtimeChoices.runtimes },
+      ]
     : []
   const runtimeCatalog = runtimeCatalogState.value
   const selectedRuntimeId = rd?.runtime_id || (c.execution.selected_runtime_id ?? '')
@@ -2307,7 +2346,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${InlineSelectRow}
           label="runtime_id"
           value=${rd.runtime_id}
-          options=${runtimeOptions}
+          options=${[]}
+          groups=${runtimeGroups}
           onChange=${(value: string) => updateRuntimeDraft('runtime_id', value)}
           dirty=${dirtyFlags.runtime_id}
         />

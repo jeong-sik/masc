@@ -413,7 +413,6 @@ function runtimeParameterDetailRows(
     detailRow('request', 'thinking', onOffText(request?.enable_thinking)),
     detailRow('request', 'preserve thinking', onOffText(request?.preserve_thinking)),
     detailRow('request', 'reasoning effort', request?.resolved_reasoning_effort),
-    detailRow('request', 'glm replay', boolText(request?.glm_replay_reasoning)),
     detailRow('request', 'tool stream', onOffText(request?.tool_stream)),
     detailRow('request', 'tool choice', runtimeRequestToolChoiceText(provider)),
     detailRow('request', 'parallel tool use', request?.disable_parallel_tool_use ? 'disabled' : null),

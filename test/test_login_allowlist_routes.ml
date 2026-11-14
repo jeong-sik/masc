@@ -292,19 +292,23 @@ let an_admin_lists_every_entry () =
       match List.assoc_opt id entries with
       | None -> Alcotest.failf "%s: not listed" label
       | Some fields ->
-        let text name =
-          match List.assoc_opt name fields with
-          | Some (`String value) -> Some value
-          | Some other -> Some (Yojson.Safe.to_string other)
-          | None -> None
-        in
-        Alcotest.(check (option string)) (label ^ ": identity") (Some identity) (text "identity");
-        Alcotest.(check (option string)) (label ^ ": status") (Some status) (text "status");
-        Alcotest.(check (option string))
+        (* Compared as JSON, so a member of another type fails. *)
+        let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal in
+        let field name = List.assoc_opt name fields in
+        let text value = Some (`String value) in
+        Alcotest.(check (option json))
+          (label ^ ": identity")
+          (Some (Yojson.Safe.from_string identity))
+          (field "identity");
+        Alcotest.(check (option json)) (label ^ ": status") (text status) (field "status");
+        Alcotest.(check (option json))
           (label ^ ": registrar")
-          (Some (User_id.to_string t.admin_id))
-          (text "registrar");
-        Alcotest.(check (option string)) (label ^ ": the principal it made") user_id (text "user_id");
+          (text (User_id.to_string t.admin_id))
+          (field "registrar");
+        Alcotest.(check (option json))
+          (label ^ ": the principal it made")
+          (Option.bind user_id text)
+          (field "user_id");
         Alcotest.(check int) (label ^ ": members") (if Option.is_some user_id then 5 else 4) (List.length fields)
     in
     Alcotest.(check int) "three entries" 3 (List.length entries);

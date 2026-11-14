@@ -255,3 +255,17 @@ val run :
     A [Start] is unchanged: the system prompt file carries the Keeper prompt
     and every System message, and the prompt carries the history and the
     goal. *)
+
+(** [project_messages messages] splits a Start's messages the way its first
+    prompt carries them: each System message as encoded text for the system
+    prompt file, every other role as one
+    {!Keeper_official_client_context_codec.to_json} entry of the history, both
+    in order. Exposed so the replayed-result-age eval renders history through
+    the same projection (RFC replayed-tool-results-carry-their-time §6.1). *)
+val project_messages :
+  Agent_core.Types.message list -> (string list * Yojson.Safe.t list, 'e) result
+
+(** [initial_turn_prompt ~history ~goal] is the envelope a Start sends after
+    the composed start context: [goal] alone when [history] is empty,
+    otherwise the [masc.claude-code.initial-turn] object holding both. *)
+val initial_turn_prompt : history:Yojson.Safe.t list -> goal:string -> string

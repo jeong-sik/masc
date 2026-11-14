@@ -83,12 +83,15 @@ let references ~original progress =
     | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _ -> Ok refs) (Ok []) (P.events progress) in
   Ok (List.rev refs)
 
+type no_verdict_cause = No_settled_report | Answer_format_moved
+
 type observation =
   | Awaiting
   | Repair_required of string
   | No_verdict of
       { first : string * Verifier_review_ending.t
       ; later : (string * Verifier_review_ending.t) list
+      ; cause : no_verdict_cause
       }
   | Verdict of AR.review_result
 
@@ -158,8 +161,6 @@ let verdict_of_report (report : Agent.Execution_projection.settled_tool_invocati
       Error "settled report does not satisfy the original verdict protocol"
 
 let observe ~base_path ~original progress =
-  let* () = if V.output_contract original = V.canonical_output_contract () then Ok ()
-    else Error "original output contract differs from the review protocol" in
   let* references = references ~original progress in
   let* readings = List.fold_left (fun acc reference ->
     let* readings = acc in
@@ -176,6 +177,14 @@ let observe ~base_path ~original progress =
       | Call_awaiting | Call_repair _ -> None) readings with
     | [] -> Ok (Repair_required "historical original has no durable execution locator")
     | first :: later as ended ->
+      let ending call = call.reference.runtime_id,call.ending in
+      (* A report answers the answer format its original asked for. Once that
+         format is no longer the review protocol, a report the run left
+         behind is not read: the attempt ends as one without a verdict, and
+         its next attempt asks with the current format. *)
+      if not (String.equal (V.output_contract original) (V.canonical_output_contract ()))
+      then Ok (No_verdict {first=ending first;later=List.map ending later;cause=Answer_format_moved})
+      else
       (* Report calls are counted over the whole attempt. A requested report
          that was never settled recorded nothing: with no settled report it
          leaves the attempt without a verdict, and beside a settled one it
@@ -183,9 +192,8 @@ let observe ~base_path ~original progress =
       let settled = List.concat_map (fun call ->
         List.map (fun report -> call.reference,report) call.reports) ended in
       let requested = List.fold_left (fun total call -> total + call.requested_reports) 0 ended in
-      let ending call = call.reference.runtime_id,call.ending in
       match settled,requested with
-      | [],_ -> Ok (No_verdict {first=ending first;later=List.map ending later})
+      | [],_ -> Ok (No_verdict {first=ending first;later=List.map ending later;cause=No_settled_report})
       | [reference,report],1 ->
         (match verdict_of_report report with
          | Error detail -> Ok (Repair_required detail)

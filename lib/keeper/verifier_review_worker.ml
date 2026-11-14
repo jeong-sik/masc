@@ -53,10 +53,11 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     match observation with
     | Verifier_review_execution.Awaiting -> Error (Execution_pending "original execution has no terminal observation")
     | Repair_required detail -> Error (Execution_repair_required detail)
-    | No_verdict {first;later} ->
-      (* The journals settle every effect and hold no report, so this attempt
-         produced no verdict and the refusal is definite. What the walk left
-         says which runtimes may review the same original again. *)
+    | No_verdict {first;later;cause} ->
+      (* The journals settle every effect and no report is read: none settled,
+         or the original's answer format is no longer the review protocol. So
+         this attempt produced no verdict and the refusal is definite. What the
+         walk left says which runtimes may review the same original again. *)
       let endings = first :: later in
       let* walk = Walk_result.read (O.progress retained)
         |> Result.map_error (fun detail -> Execution_repair_required detail) in
@@ -77,7 +78,12 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
          refuse ~candidate_observations:[] {AR.verdict=None;evaluator_runtime=last;
            generator_runtime=V.generator_runtime original;evaluator_execution=None;
            gate=AR.Evaluator_unavailable;
-           fallback_reason=Some "the review walk ended before it retained a result, and no execution reported a verdict";
+           fallback_reason=Some (match cause with
+             | Verifier_review_execution.No_settled_report ->
+               "the review walk ended before it retained a result, and no execution reported a verdict"
+             | Answer_format_moved ->
+               "the review walk ended before it retained a result, and the original asked for an answer \
+                format this build no longer reads");
            retryable_runtimes=executed;model_absent_runtimes=[]}
        | Walk_result.Walk_result {candidates;result} ->
          let* walked = O.result_of_json result
@@ -108,7 +114,11 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
            | AR.Reviews_again when not (List.mem candidate.runtime_id runtimes) ->
              runtimes @ [candidate.runtime_id]
            | Reviews_again | Model_absent | Producer_must_act -> runtimes) [] candidates in
-         refuse ~candidate_observations {walked with AR.retryable_runtimes=retryable})
+         let fallback_reason = match cause with
+           | Verifier_review_execution.No_settled_report -> walked.AR.fallback_reason
+           | Answer_format_moved ->
+             Some "the original asked for an answer format this build no longer reads, so its reports were not read" in
+         refuse ~candidate_observations {walked with AR.retryable_runtimes=retryable; fallback_reason})
     | Verdict result ->
       let* _ = retain_judgment retained result in
       Ok result in

@@ -992,6 +992,215 @@ let test_probe_output_shapes () =
   Alcotest.check scopes "and names no scopes" None plain.scopes
 ;;
 
+(* The device-flow login as the dashboard runs it, on a lane whose stages the
+   test holds. [closed] stands for the response: the operator closing the
+   window turns it true, as [Server_sse_response.is_closed] does. *)
+type login_stage =
+  | Shaping
+  | Login
+  | Securing
+  | Observation
+
+let login_stage_name = function
+  | Shaping -> "lane shaping"
+  | Login -> "login process"
+  | Securing -> "securing"
+  | Observation -> "observation"
+;;
+
+let login_stage_testable =
+  Alcotest.testable
+    (fun fmt stage -> Format.pp_print_string fmt (login_stage_name stage))
+    ( = )
+;;
+
+let unauthenticated : Github.auth_result =
+  { authenticated = false; login = None; scopes = None; error = None }
+;;
+
+let observation_fixture keeper : Github.observation =
+  { keeper
+  ; hostname = Github.default_hostname
+  ; config_dir = "/endpoint/github-cli"
+  ; projected_token_env_names = []
+  ; stored = unauthenticated
+  ; effective = unauthenticated
+  ; effective_probe_scope = `Endpoint_process_only
+  ; checked_at_unix = 0.0
+  }
+;;
+
+(* Bounds a test that would otherwise hang on a stage nothing stops. It is a
+   fixture bound, not a login policy. *)
+let login_patience_sec = 5.0
+
+let with_login_clock run =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+    (fun () -> run (Eio.Stdenv.clock env))
+;;
+
+(* The stages a closed response stops, with every stage that has run once the
+   stopped one started. Securing is not among them: see the next test. *)
+type watched_stage =
+  | Watched_shaping
+  | Watched_login
+  | Watched_observation
+
+let stages_run_until = function
+  | Watched_shaping -> [ Shaping ]
+  | Watched_login -> [ Shaping; Login ]
+  | Watched_observation -> [ Shaping; Login; Securing; Observation ]
+;;
+
+let login_stage_of_watched = function
+  | Watched_shaping -> Shaping
+  | Watched_login -> Login
+  | Watched_observation -> Observation
+;;
+
+(* #32910: on a Remote_ssh lane every stage before and after the login process
+   is a round trip to the endpoint that holds one of its sessions. A response
+   closed during any of them has to stop that stage, and nothing after it may
+   start. *)
+let test_closed_response_stops_the_running_stage () =
+  with_temp_base
+  @@ fun _ config ->
+  List.iter
+    (fun watched ->
+       let blocked = login_stage_of_watched watched in
+       let name = login_stage_name blocked in
+       with_login_clock
+       @@ fun clock ->
+       let closed = ref false in
+       let blocked_started, signal_blocked_started = Eio.Promise.create () in
+       let blocked_cancelled = ref false in
+       let ran = ref [] in
+       let events = ref [] in
+       let stage current result =
+         ran := current :: !ran;
+         if current = blocked
+         then (
+           Eio.Promise.resolve signal_blocked_started ();
+           try Eio.Fiber.await_cancel () with
+           | Eio.Cancel.Cancelled _ as exn ->
+             blocked_cancelled := true;
+             raise exn)
+         else result
+       in
+       let keeper_name = "closed-response" in
+       let lane : Github.login_lane =
+         { run_login =
+             (fun ~scopes:_ ~on_stdout_chunk:_ ~on_stderr_chunk:_ ->
+               stage Login (Unix.WEXITED 0, "", ""))
+         ; run_login_with_token =
+             (fun ~token:_ -> Alcotest.fail "a device-flow login sent a token")
+         ; secure_after_login = (fun () -> stage Securing (Ok ()))
+         ; observe_after_login =
+             (fun () -> stage Observation (Ok (observation_fixture keeper_name)))
+         }
+       in
+       let outcome =
+         Eio.Time.with_timeout clock login_patience_sec (fun () ->
+           let result, () =
+             Eio.Fiber.pair
+               (fun () ->
+                  Github.stream_login
+                    ~config
+                    ~keeper_name
+                    ~scopes:[]
+                    ~make_lane:(fun () -> stage Shaping (Ok lane))
+                    ~is_closed:(fun () -> !closed)
+                    ~send_event:(fun event _ -> events := event :: !events))
+               (fun () ->
+                  Eio.Promise.await blocked_started;
+                  closed := true)
+           in
+           Ok result)
+       in
+       match outcome with
+       | Error `Timeout ->
+         Alcotest.failf "closing the response left the %s running" name
+       | Ok result ->
+         Alcotest.(check (result unit string))
+           (name ^ ": a closed response ends the login quietly")
+           (Ok ())
+           result;
+         Alcotest.(check bool) (name ^ ": the running stage was cancelled") true
+           !blocked_cancelled;
+         Alcotest.(check (list login_stage_testable))
+           (name ^ ": nothing after the running stage started")
+           (stages_run_until watched)
+           (List.rev !ran);
+         Alcotest.(check (list string)) (name ^ ": no event reached a closed response")
+           []
+           !events)
+    [ Watched_shaping; Watched_login; Watched_observation ]
+;;
+
+(* Longer than the response's watch takes to see a close, as the endpoint's
+   chmod round trips are. *)
+let securing_round_trip_sec = 0.5
+
+(* A login that exited 0 has written its credential. The operator leaving
+   while it is secured must not leave it unsecured, and the observation that
+   only the operator would read is not taken. *)
+let test_closed_response_still_secures_a_finished_login () =
+  with_temp_base
+  @@ fun _ config ->
+  with_login_clock
+  @@ fun clock ->
+  let closed = ref false in
+  let ran = ref [] in
+  let events = ref [] in
+  let keeper_name = "secured-after-close" in
+  let lane : Github.login_lane =
+    { run_login =
+        (fun ~scopes:_ ~on_stdout_chunk:_ ~on_stderr_chunk:_ ->
+          ran := Login :: !ran;
+          Unix.WEXITED 0, "", "")
+    ; run_login_with_token =
+        (fun ~token:_ -> Alcotest.fail "a device-flow login sent a token")
+    ; secure_after_login =
+        (fun () ->
+          closed := true;
+          Eio.Time.sleep clock securing_round_trip_sec;
+          ran := Securing :: !ran;
+          Ok ())
+    ; observe_after_login =
+        (fun () ->
+          ran := Observation :: !ran;
+          Ok (observation_fixture keeper_name))
+    }
+  in
+  match
+    Eio.Time.with_timeout clock login_patience_sec (fun () ->
+      Ok
+        (Github.stream_login
+           ~config
+           ~keeper_name
+           ~scopes:[]
+           ~make_lane:(fun () -> Ok lane)
+           ~is_closed:(fun () -> !closed)
+           ~send_event:(fun event _ -> events := event :: !events)))
+  with
+  | Error `Timeout -> Alcotest.fail "a login closed while it was secured did not end"
+  | Ok result ->
+    Alcotest.(check (result unit string)) "the login ends quietly" (Ok ()) result;
+    Alcotest.(check (list login_stage_testable))
+      "securing finished and the observation was not taken"
+      [ Login; Securing ]
+      (List.rev !ran);
+    Alcotest.(check (list string)) "no event reached a closed response" [] !events
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -1111,6 +1320,16 @@ let () =
             "persistent container commits under the keeper name with login"
             `Quick
             test_persistent_container_commits_under_the_keeper_name_with_login
+        ] )
+    ; ( "login stream"
+      , [ Alcotest.test_case
+            "a closed response stops the running stage"
+            `Quick
+            test_closed_response_stops_the_running_stage
+        ; Alcotest.test_case
+            "a closed response still secures a finished login"
+            `Quick
+            test_closed_response_still_secures_a_finished_login
         ] )
     ]
 ;;

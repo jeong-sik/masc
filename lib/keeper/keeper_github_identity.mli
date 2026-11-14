@@ -302,8 +302,14 @@ val stream_login :
     [make_lane] is called after the caller has opened its response, so a lane
     that reaches another machine to shape itself does not delay the reply, and
     a lane that cannot be shaped is reported as an [error] event. Closing the
-    response
-    cancels and reaps the process. The login runs under {!login_timeout_sec},
+    response cancels whichever stage is running -- [make_lane], the login
+    process (its wait for a session slot included), or [observe_after_login]
+    -- and reaps what that stage started. [secure_after_login] is the one
+    stage a close does not stop: it runs only after a login exited 0, when the
+    credential is already written. A close is seen through [is_closed], which
+    is read while a stage runs, so a transport that learns of a closed client
+    only from a failed write has to keep writing for a quiet login to see it.
+    The login runs under {!login_timeout_sec},
     which on a lane whose machine caps concurrent sessions starts once a
     session slot is free: a login queued behind a busy endpoint waits for the
     slot first, and that wait carries no ceiling of its own. The caller must

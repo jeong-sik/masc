@@ -236,7 +236,8 @@ class LeftoverLinkedIssues(unittest.TestCase):
             'issues': [{'pr': 101, 'issue': LINKED.url(7), 'closed': True}]})
         self.assertEqual(github.closes, ['I_7'])
 
-    def test_a_stack_layer_closes_its_issue_only_when_its_merge_commit_is_on_main(self):
+    def test_an_issue_of_a_stack_layer_also_closes_when_its_merge_commit_is_on_main(self):
+        """A layer merges into its parent branch; one whose merge is not on main stays open."""
         github = Repository(
             [open_issue(7, closer(102)), open_issue(8, closer(103))],
             (102, LINKED.pull(102, LINKED.issue(7), base='feat/parent')),

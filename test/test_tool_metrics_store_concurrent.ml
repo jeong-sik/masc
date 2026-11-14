@@ -56,7 +56,7 @@ let test_inserts_on_a_cold_store_both_succeed () =
     let asked_when_served = ref [] in
     let insert record_id =
       incr asked;
-      let result = Tool_metrics_store.insert ~masc_root ~result_bytes:0 (row ~record_id) in
+      let result = Tool_metrics_store.insert ~masc_root ~result_bytes:0 ~failure_class:None (row ~record_id) in
       asked_when_served := !asked :: !asked_when_served;
       result
     in
@@ -80,7 +80,7 @@ let test_another_masc_root_waits_instead_of_raising () =
     let results =
       Eio.Fiber.List.map
         (fun (masc_root, record_id) ->
-          Tool_metrics_store.insert ~masc_root ~result_bytes:0 (row ~record_id))
+          Tool_metrics_store.insert ~masc_root ~result_bytes:0 ~failure_class:None (row ~record_id))
         [ root_a, "row-in-a"; root_b, "row-in-b" ]
     in
     List.iter (get_ok "insert into its own root") results;
@@ -97,7 +97,7 @@ let test_reset_waits_for_an_open_in_flight () =
     let finished = ref [] in
     Eio.Fiber.both
       (fun () ->
-        Tool_metrics_store.insert ~masc_root ~result_bytes:0 (row ~record_id:"row-before-reset")
+        Tool_metrics_store.insert ~masc_root ~result_bytes:0 ~failure_class:None (row ~record_id:"row-before-reset")
         |> get_ok "insert while the store opens";
         finished := "insert" :: !finished)
       (fun () ->
@@ -119,7 +119,7 @@ let test_store_works_outside_eio () =
     (fun () ->
       Tool_metrics_store.reset_for_testing ();
       let masc_root = Filename.concat base ".masc" in
-      Tool_metrics_store.insert ~masc_root ~result_bytes:0 (row ~record_id:"row-outside-eio")
+      Tool_metrics_store.insert ~masc_root ~result_bytes:0 ~failure_class:None (row ~record_id:"row-outside-eio")
       |> get_ok "insert outside Eio";
       check (list string) "the row is readable" [ "row-outside-eio" ]
         (record_ids ~masc_root))

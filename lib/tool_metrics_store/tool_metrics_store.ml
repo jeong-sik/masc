@@ -151,6 +151,19 @@ CREATE TABLE IF NOT EXISTS tool_metric_result_sizes (
 ) WITHOUT ROWID
 |}
 
+(* The class of a failed call. Like the size, it is a table of its own: the
+   rows written before it existed, and a failure that carried no class, have no
+   row here, and a failure without a row is an unclassified failure. The column
+   holds [Tool_result.tool_failure_class_to_string] and is parsed back strictly
+   when read, so a database never carries a second copy of the set of classes. *)
+let failure_classes_schema_sql =
+  {|
+CREATE TABLE IF NOT EXISTS tool_metric_failure_classes (
+  record_id TEXT PRIMARY KEY NOT NULL,
+  failure_class TEXT NOT NULL CHECK (failure_class <> '')
+) WITHOUT ROWID
+|}
+
 let busy_timeout_ms = 5000
 let busy_timeout_sql = Printf.sprintf "PRAGMA busy_timeout=%d" busy_timeout_ms
 
@@ -177,6 +190,12 @@ let configure db =
           db
           ~operation:"create tool metric result size table"
           result_sizes_schema_sql
+      in
+      let* () =
+        exec
+          db
+          ~operation:"create tool metric failure class table"
+          failure_classes_schema_sql
       in
       exec
         db
@@ -272,7 +291,7 @@ let in_transaction db ~operation f =
     rollback ();
     raise exn
 
-let insert ~masc_root ~result_bytes row =
+let insert ~masc_root ~result_bytes ~failure_class row =
   if result_bytes < 0
   then Error (Printf.sprintf "tool metric %s has a negative result size" row.record_id)
   else
@@ -300,25 +319,50 @@ let insert ~masc_root ~result_bytes row =
               in
               expect_done store.db statement ~operation:"insert tool metric")
         in
-        with_statement
-          store.db
-          ~operation:"insert tool metric result size"
-          "INSERT OR IGNORE INTO tool_metric_result_sizes (record_id, result_bytes) \
-           VALUES (?1, ?2)"
-          (fun statement ->
-            let* () =
-              bind_all
+        let* () =
+          with_statement
+            store.db
+            ~operation:"insert tool metric result size"
+            "INSERT OR IGNORE INTO tool_metric_result_sizes (record_id, result_bytes) \
+             VALUES (?1, ?2)"
+            (fun statement ->
+              let* () =
+                bind_all
+                  store.db
+                  statement
+                  ~operation:"bind tool metric result size"
+                  [ Sqlite3.Data.TEXT row.record_id
+                  ; Sqlite3.Data.INT (Int64.of_int result_bytes)
+                  ]
+              in
+              expect_done
                 store.db
                 statement
-                ~operation:"bind tool metric result size"
-                [ Sqlite3.Data.TEXT row.record_id
-                ; Sqlite3.Data.INT (Int64.of_int result_bytes)
-                ]
-            in
-            expect_done
-              store.db
-              statement
-              ~operation:"insert tool metric result size")))
+                ~operation:"insert tool metric result size")
+        in
+        match failure_class with
+        | None -> Ok ()
+        | Some failure_class ->
+          with_statement
+            store.db
+            ~operation:"insert tool metric failure class"
+            "INSERT OR IGNORE INTO tool_metric_failure_classes \
+             (record_id, failure_class) VALUES (?1, ?2)"
+            (fun statement ->
+              let* () =
+                bind_all
+                  store.db
+                  statement
+                  ~operation:"bind tool metric failure class"
+                  [ Sqlite3.Data.TEXT row.record_id
+                  ; Sqlite3.Data.TEXT
+                      (Tool_result.tool_failure_class_to_string failure_class)
+                  ]
+              in
+              expect_done
+                store.db
+                statement
+                ~operation:"insert tool metric failure class")))
 
 let prune ~masc_root ~retention_days =
   if retention_days <= 0
@@ -346,6 +390,12 @@ let prune ~masc_root ~retention_days =
           delete
             ~operation:"prune tool metric result sizes"
             "DELETE FROM tool_metric_result_sizes WHERE record_id IN \
+             (SELECT record_id FROM tool_metric_events WHERE ts < ?1)"
+        in
+        let* _classes =
+          delete
+            ~operation:"prune tool metric failure classes"
+            "DELETE FROM tool_metric_failure_classes WHERE record_id IN \
              (SELECT record_id FROM tool_metric_events WHERE ts < ?1)"
         in
         delete
@@ -502,9 +552,11 @@ let fold_statement db statement ~operation ~f =
 ;;
 
 let series_select =
-  "SELECT e.ts, e.tool_name, e.disposition, e.duration_ms, s.result_bytes \
+  "SELECT e.ts, e.tool_name, e.disposition, e.duration_ms, s.result_bytes, \
+   c.failure_class \
    FROM tool_metric_events e \
    LEFT JOIN tool_metric_result_sizes s ON s.record_id = e.record_id \
+   LEFT JOIN tool_metric_failure_classes c ON c.record_id = e.record_id \
    WHERE e.ts >= ?1 AND e.ts < ?2"
 ;;
 
@@ -526,12 +578,25 @@ let sample_of_statement statement =
       Error
         ("tool metric result size is not an integer: " ^ Sqlite3.Data.to_string_debug other)
   in
+  (* NULL is a failure whose class was not recorded, or a call that did not fail. *)
+  let* failure_class =
+    match Sqlite3.column statement 5 with
+    | Sqlite3.Data.NULL -> Ok None
+    | Sqlite3.Data.TEXT text ->
+      (match Tool_result.tool_failure_class_of_string text with
+       | Some failure_class -> Ok (Some failure_class)
+       | None -> Error ("unknown persisted tool metric failure class: " ^ text))
+    | (Sqlite3.Data.NONE | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _ | Sqlite3.Data.BLOB _) as other ->
+      Error
+        ("tool metric failure class is not text: " ^ Sqlite3.Data.to_string_debug other)
+  in
   Ok
     { Tool_metrics_series.ts = Sqlite3.column_double statement 0
     ; tool_name = Sqlite3.column_text statement 1
     ; disposition
     ; duration_ms = Sqlite3.column_double statement 3
     ; result_bytes
+    ; failure_class
     }
 ;;
 

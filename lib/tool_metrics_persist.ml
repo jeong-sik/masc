@@ -40,7 +40,12 @@ let enqueue ~base_path (result : Tool_result.result) =
      [result_bytes] is this same message's length. *)
   let result_bytes = String.length (Tool_result.message result) in
   let result = Fun.protect ~finally:(fun () -> announce_written ~base_path)
-      (fun () -> Tool_metrics_store.insert ~masc_root ~result_bytes row) in
+      (fun () ->
+        Tool_metrics_store.insert
+          ~masc_root
+          ~result_bytes
+          ~failure_class:(Tool_result.failure_class result)
+          row) in
   (* An SQLite I/O failure can follow a visible commit. A read invalidation
      conveys no invented success and must not replace the write outcome. *)
   match result with

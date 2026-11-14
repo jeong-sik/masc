@@ -14,10 +14,19 @@ type summary = {
 }
 
 val database_path : masc_root:string -> string
-val insert : masc_root:string -> result_bytes:int -> row -> (unit, string) result
-(** [insert ~masc_root ~result_bytes row] stores the call and the size of the
-    result it returned in one transaction. A [record_id] already stored is left
-    as it is, size included. It returns [Error] for a negative [result_bytes]. *)
+val insert :
+  masc_root:string ->
+  result_bytes:int ->
+  failure_class:Tool_result.tool_failure_class option ->
+  row ->
+  (unit, string) result
+(** [insert ~masc_root ~result_bytes ~failure_class row] stores the call, the
+    size of the result it returned and, for a failed call, its failure class in
+    one transaction. A [record_id] already stored is left as it is, size and
+    class included. [failure_class] is [None] for a call that did not fail and
+    for a failure that carried no class. A class belongs to a failed call only;
+    {!Tool_metrics_series.add} refuses a sample that breaks that. It returns
+    [Error] for a negative [result_bytes]. *)
 val prune : masc_root:string -> retention_days:int -> (int, string) result
 
 val iter_all :
@@ -42,7 +51,9 @@ val read_series :
 (** Groups stored calls in [window], optionally filtered by tool. A missing
     database gives an empty series. A call stored without a size, as every
     call was before sizes were kept, is counted as a call and adds nothing to
-    the byte totals. The sizes live in a table that opening the store through
+    the byte totals. A failure stored without a class is counted as a failure
+    and adds to no class. The sizes and classes live in tables that opening the
+    store through
     {!insert}, {!prune} or {!iter_all} creates, so a database file that this
     version has not opened yet cannot be read here. Uses a private read-only
     connection, without taking the writer lock. Month-long scans may take

@@ -124,6 +124,10 @@ def measure(args):
             observed = http_json(url + '/health?full=1')
         except OSError:
             return False
+        # Until the server has published its workspace, /health answers
+        # everyone the public probe, which has no `startup` section: not ready yet.
+        if 'startup' not in observed:
+            return False
         actual = observed.get('paths', {}).get('effective_base_path')
         if not isinstance(actual, str) or Path(actual).resolve() != base:
             raise RuntimeError('server health belongs to a different workspace')

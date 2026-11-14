@@ -2704,9 +2704,13 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
               | None -> ()
               | Some sw ->
                   Eio.Fiber.fork ~sw (fun () ->
+                      (* The liveness probe says "the accept loop answers" to
+                         everyone and judges no credential, so a bearer the
+                         started server refuses cannot make it look absent. *)
                       let health_ok () =
                         match
-                          Masc_tui_http.http_get ~host ~port ~path:"/health"
+                          Masc_tui_http.http_get ~host ~port
+                            ~path:Server_health_paths.liveness
                         with
                         | Ok (200, _) -> true
                         | Ok _ | Error _ -> false

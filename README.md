@@ -329,6 +329,11 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
   | jq '.paths | {effective_base_path, effective_masc_root, roots_diverge}'
 ```
 
+This works as written on the default loopback server. A server that requires
+a token (`MASC_HTTP_AUTH_STRICT`, or a bind host or base URL that is not
+loopback) answers a request without a credential with a short public probe
+that has no `paths`. Add `-H "Authorization: Bearer $MASC_TOKEN"` there.
+
 Apart from authored configuration and skills, `.masc/` is runtime-owned.
 Use MASC's tools to change tasks, records and approval state.
 

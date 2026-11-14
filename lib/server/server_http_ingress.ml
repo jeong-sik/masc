@@ -4,9 +4,21 @@ module Transport = Server_mcp_transport_http
 
 (* Issue #8403: derive probe exemptions from Server_health_paths SSOT so a
    renamed probe stays exempt from rate limits without a separate manual edit
-   here. *)
+   here. This path-only rule is for a table whose [/health] reads no
+   credential (the account server) and for the agent bucket. *)
 let is_rate_limit_exempt path =
   String.equal path Server_health_paths.health || Server_health_paths.is_public path
+;;
+
+(* HIGH-RISK-UNREVIEWED [H6]: a probe is exempt from the per-client limit
+   while answering it reads no credential. [/health/live] and [/health/ready]
+   never read one. The single-user [/health] reads the one a request carries
+   ([Server_routes_http_runtime.health_handler]), so that request is counted
+   like every other request that makes the server check one. *)
+let health_probe_exempt ~path request =
+  Server_health_paths.is_public path
+  || (String.equal path Server_health_paths.health
+      && not (Server_auth.request_carries_auth_credential request))
 ;;
 
 let charges_agent_bucket (request : Httpun.Request.t) =
@@ -39,8 +51,8 @@ let respond_rate_limited reqd ~body ~rl_headers ~scope =
 
 (* True when the client address is over its limit and the request was refused
    with a 429 on [reqd]. *)
-let try_client_rate_limit_block ~path ~client_addr reqd =
-  if is_rate_limit_exempt path
+let try_client_rate_limit_block ~exempt ~client_addr reqd =
+  if exempt
   then false
   else (
     let rl_key = Rate_limit.key_of_sockaddr client_addr in
@@ -57,9 +69,10 @@ let try_client_rate_limit_block ~path ~client_addr reqd =
 
 (* True when the request was refused with a 429 on [reqd]. *)
 let try_rate_limit_block ~path ~client_addr ~request reqd =
-  if try_client_rate_limit_block ~path ~client_addr reqd
+  let exempt = health_probe_exempt ~path request in
+  if try_client_rate_limit_block ~exempt ~client_addr reqd
   then true
-  else if is_rate_limit_exempt path || not (charges_agent_bucket request)
+  else if exempt || not (charges_agent_bucket request)
   then false
   else (
     match Server_auth.auth_token_from_request request with
@@ -237,7 +250,7 @@ let table_internal_error = "internal error"
 let admitted_to_table ~table ~client_addr ~request_authority request reqd =
   Server_request_authority.with_current request_authority (fun () ->
     let path = Http.Request.path request in
-    if try_client_rate_limit_block ~path ~client_addr reqd
+    if try_client_rate_limit_block ~exempt:(is_rate_limit_exempt path) ~client_addr reqd
     then ()
     else
       answering_failures

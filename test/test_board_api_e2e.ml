@@ -93,16 +93,18 @@ let find_free_port () =
           end
       | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
 
+(* Readiness is the status of the readiness probe. It is the same answer for
+   every requester, so the wait does not depend on the auth posture this
+   process inherited from the shell. *)
 let wait_for_health ~port ~timeout_s =
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
     if Unix.gettimeofday () > deadline then
       false
     else
-      let res = run_curl ~port ~path:"/health" () in
+      let res = run_curl ~port ~path:"/health/ready" () in
       match res.status with
-      | Some 200
-        when String_util.contains_substring res.body "\"state_ready\":true" -> true
+      | Some 200 -> true
       | _ ->
           Unix.sleepf 0.1;
           loop ()

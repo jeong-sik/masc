@@ -5467,11 +5467,21 @@ let decode_server_identity json =
     | Some _ | None -> None
   in
   let sid_state_ready =
-    (* Three-valued like the worktree verdict: [None] is a probe without a
-       startup section, so the TUI neither waits on it nor calls it ready. *)
-    match Option.map (member "state_ready") startup with
-    | Some (`Bool value) -> Some value
-    | Some _ | None -> None
+    (* One server build answers [/health] in two shapes. The reader's body
+       carries a startup section and its [state_ready]. The public probe,
+       which is also what every requester gets before the workspace is
+       published, carries no startup section and says [ready] at the top
+       level. Three-valued like the worktree verdict: [None] is an answer
+       with neither, so the TUI neither waits on it nor calls it ready. *)
+    match startup with
+    | Some startup ->
+      (match member "state_ready" startup with
+       | `Bool value -> Some value
+       | _ -> None)
+    | None ->
+      (match member "ready" json with
+       | `Bool value -> Some value
+       | _ -> None)
   in
   let sid_uptime =
     match member "uptime" json with

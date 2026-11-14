@@ -6,7 +6,8 @@
 
     A client that addresses one workspace sends both headers, each holding the
     absolute, canonical path it expects -- the [paths.effective_base_path] and
-    [paths.effective_masc_root] that [/health] reports. The server compares
+    [paths.effective_masc_root] that the reader's [/health] reports, the body
+    the server gives a requester that may read its state. The server compares
     them as strings with the paths it serves, resolved for that request the
     way [/health] resolves them. A path spelled another way (a trailing slash,
     a symlink) is a different workspace. A request without either header is

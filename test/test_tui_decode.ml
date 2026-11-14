@@ -9807,6 +9807,48 @@ let test_decode_server_identity_reads_the_startup_readiness () =
       "no startup section is unknown, not booting" None
       identity.Tui_decode.sid_state_ready
 
+(* Before the workspace is published, and to a requester without a read, the
+   server answers the public probe. The boot display depends on its [ready]. *)
+let test_the_public_probe_tells_the_tui_whether_the_server_is_ready () =
+  let public_probe ready =
+    `Assoc
+      [ ("server", `String "masc");
+        ("version", `String "1.2.3");
+        ("live", `Bool true);
+        ("ready", `Bool ready);
+        ("phase", `String (if ready then "ready" else "blocking"));
+      ]
+  in
+  let decoded json =
+    match Tui_decode.decode_server_identity json with
+    | Error detail -> Alcotest.fail detail
+    | Ok identity -> identity
+  in
+  let booting = decoded (public_probe false) in
+  Alcotest.(check (option bool)) "a public probe that is not ready is booting"
+    (Some false) booting.Tui_decode.sid_state_ready;
+  Alcotest.(check string) "the version is read" "1.2.3" booting.Tui_decode.sid_version;
+  Alcotest.(check string) "no base path" ""
+    (Tui_decode.Canonical_path.to_string booting.Tui_decode.sid_base_path);
+  Alcotest.(check string) "no masc root" ""
+    (Tui_decode.Canonical_path.to_string booting.Tui_decode.sid_masc_root);
+  Alcotest.(check (option bool)) "a ready public probe says so" (Some true)
+    (decoded (public_probe true)).Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool))
+    "the startup section still decides when it is there" (Some false)
+    (decoded (`Assoc [ ("startup", `Assoc [ ("state_ready", `Bool false) ]) ]))
+      .Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool))
+    "the startup section wins over a top-level ready" (Some false)
+    (decoded
+       (`Assoc
+          [ ("ready", `Bool true);
+            ("startup", `Assoc [ ("state_ready", `Bool false) ]);
+          ]))
+      .Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool)) "neither is unknown" None
+    (decoded (`Assoc [ ("status", `String "ok") ])).Tui_decode.sid_state_ready
+
 let test_decode_server_identity_reads_the_worktree_verdict () =
   let with_flag value =
     `Assoc [ ("build", `Assoc [ ("executable_in_worktree", `Bool value) ]) ]
@@ -14547,6 +14589,8 @@ let () =
           test_decode_server_identity_reads_the_worktree_verdict;
         Alcotest.test_case "reads the startup readiness" `Quick
           test_decode_server_identity_reads_the_startup_readiness;
+        Alcotest.test_case "reads the public probe's readiness" `Quick
+          test_the_public_probe_tells_the_tui_whether_the_server_is_ready;
         Alcotest.test_case "reads telemetry" `Quick
           test_decode_server_identity_reads_telemetry;
       ] );

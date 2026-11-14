@@ -200,7 +200,10 @@ def main():
         return json.loads(next((line for line in lines if '"id"' in line), raw))
 
     def check_health(*, expected_commit=None, expected_binary_sha256=None):
-        health = request('/health?full=1')
+        return checked_identity(request('/health?full=1'), expected_commit=expected_commit,
+                                expected_binary_sha256=expected_binary_sha256)
+
+    def checked_identity(health, *, expected_commit=None, expected_binary_sha256=None):
         if health['build']['binary_commit'] != (expected_commit or args.expected_commit) or Path(health['paths']['effective_base_path']).resolve() != base:
             raise ValueError('Running binary/base identity mismatch')
         if expected_binary_sha256 is not None and health['build']['executable_sha256'] != expected_binary_sha256:
@@ -281,8 +284,10 @@ def main():
             if process.poll() is not None:
                 raise RuntimeError('Owned server exited before health; inspect private log')
             try:
-                health = check_health()
-                if health['startup']['state_ready']:
+                health = request('/health?full=1')
+                # Until the server has published its workspace, /health answers
+                # everyone the public probe, which has no `startup` section: not ready yet.
+                if 'startup' in health and checked_identity(health)['startup']['state_ready']:
                     break
             except OSError:
                 pass

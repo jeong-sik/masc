@@ -117,6 +117,15 @@ let production ~sw ~clock = Server_routes_http.make_routes ~port:0 ~host:"127.0.
 let strict value run =
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" value run
 
+(* The three inputs strict auth is read from, pinned together: the health
+   route answers by posture, so a setting inherited from the shell must not
+   decide which body a test sees. *)
+let health_posture ~strict run =
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT"
+    (Some (if strict then "true" else "false")) @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HOST" (Some "127.0.0.1") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1:8935") run
+
 (* A browser fetches discovery over its HTTPS/h2 connection before opening
    the separate HTTP/1.1 WebSocket. This does not request RFC 8441 CONNECT. *)
 let test_https_websocket_discovery () =
@@ -854,12 +863,61 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
    This exchange is HTTP/2, so the body says so; the table's handler once
    answered "http/1.1" for both protocols. *)
 let test_health_names_the_h2_listener () =
+  health_posture ~strict:false @@ fun () ->
   with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     let code, body = request ~meth:`GET client "/health" in
     check int "health answers" 200 code;
     check string "the body names h2" "h2"
       Yojson.Safe.Util.(
         Yojson.Safe.from_string body |> member "protocol" |> member "listener" |> to_string))
+
+(* HTTP/2 runs the same table, so the health route splits its requesters the
+   same way: without a credential under strict auth the public probe, a
+   verified reader the body that names the listener, and a credential that
+   may not read state its refusal. *)
+let test_health_over_h2_follows_the_same_split () =
+  health_posture ~strict:true @@ fun () ->
+  with_gateway ~make_routes:production (fun ~player ~reader client ->
+    let code, body = request ~meth:`GET client "/health" in
+    check int "no credential is answered" 200 code;
+    check (list string) "with the public probe and no other key"
+      [ "live"; "phase"; "ready"; "server"; "version" ]
+      (Yojson.Safe.from_string body |> Yojson.Safe.Util.keys |> List.sort String.compare);
+    let code, body = request ~token:reader ~meth:`GET client "/health" in
+    check int "a reader is answered" 200 code;
+    check string "with the body that names the listener" "h2"
+      Yojson.Safe.Util.(
+        Yojson.Safe.from_string body |> member "protocol" |> member "listener" |> to_string);
+    check int "a credential that may not read state is refused" 403
+      (status ~token:player ~meth:`GET client "/health"))
+
+(* A method other than GET runs no health handler, so it cannot carry either
+   body. The production table has no HEAD route: it resolves HEAD on the three
+   paths to "method not allowed" before any handler. OPTIONS is answered by
+   the ingress before the table. HEAD is read from the table and not over the
+   connection because the h2 client rejects the text body of that refusal;
+   [test_server_runtime_bootstrap] sends HEAD over HTTP/1.1 and reads the 405. *)
+let test_other_methods_reach_no_health_handler () =
+  health_posture ~strict:true @@ fun () ->
+  let captured = ref None in
+  with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:production
+    (fun ~player:_ ~reader:_ client ->
+      let code, body = request ~meth:`OPTIONS client Server_health_paths.health in
+      check int "OPTIONS is answered" 204 code;
+      check string "without a body" "" body);
+  let routes = match !captured with Some routes -> routes | None -> fail "no routes" in
+  List.iter
+    (fun path ->
+      check bool (path ^ " has no HEAD handler") true
+        (match
+           Masc.Http_server_eio.Router.resolve routes (Httpun.Request.create `HEAD path)
+         with
+         | `Method_not_allowed -> true
+         | `Matched (_ : Masc.Http_server_eio.Router.route) | `Not_found -> false))
+    [ Server_health_paths.health
+    ; Server_health_paths.liveness
+    ; Server_health_paths.readiness
+    ]
 
 (* Strict auth opens a request without a credential only when the route it
    reaches asks for none: [Always_public] or [Public_read Open_when_strict].
@@ -926,6 +984,10 @@ let () =
         ; test_case "a path the router lacks is not found" `Quick
             test_a_path_the_router_lacks_is_not_found
         ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
+        ; test_case "health follows the same split over h2" `Quick
+            test_health_over_h2_follows_the_same_split
+        ; test_case "other methods reach no health handler" `Quick
+            test_other_methods_reach_no_health_handler
         ; test_case "a route failure follows the response state" `Quick
             test_route_failure_follows_the_response_state
         ; test_case "a cut request body reaches no route" `Quick

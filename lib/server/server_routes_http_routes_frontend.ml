@@ -129,6 +129,10 @@ let websocket_handler ?clock ~upgrade request reqd =
 
 let add_routes ?clock router =
   router
+  (* HIGH-RISK-UNREVIEWED [H5]: [Always_public] hands the handler over bare
+     and reads no credential, so anyone gets an answer on these three paths.
+     [health_handler] is the only gate on the body a reader of the server's
+     state gets; the two sibling handlers say the same to everyone. *)
   |> Server_route.get Server_route.Always_public Server_health_paths.health health_handler
   (* Liveness says the accept loop runs, so it is answered on the
      connection's domain and does not wait for the main one. It reads the

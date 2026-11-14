@@ -854,15 +854,15 @@ let test_get_sync_on_a_connection_the_peer_closed () =
     stats.closed_after_reuse.request_failed
 ;;
 
-(* The second answer on a parked connection stops two bytes short of its
-   length and the peer closes. The reused connection ends as transport ended,
-   which RFC-0492 §6 counts apart from a new connection's. *)
-let test_a_reused_connection_cut_short_counts_as_reused () =
+(* The second answer on a parked connection declares no length, so the
+   peer's close is its end (RFC 9112 §6.3 rule 8). The reused connection ends
+   as transport ended, which RFC-0492 §6 counts apart from a new connection's. *)
+let test_a_reused_connection_the_close_ends_counts_as_reused () =
   with_cache_switch
   @@ fun ~sw ~env ~cache ->
   let url, _ =
     start_raw_server ~sw ~net:env#net
-      ~cut_second:"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nok"
+      ~cut_second:"HTTP/1.1 200 OK\r\n\r\nok"
       "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
   in
   get_ok ~sw ~net:env#net ~cache url;
@@ -874,46 +874,101 @@ let test_a_reused_connection_cut_short_counts_as_reused () =
     stats.closed_after_reuse.transport_ended
 ;;
 
-(* The peer closes before the five bytes its header promised. cohttp ends the
-   body at the close without an error, so the request answers with what
-   arrived (#48910). The transport ended, so the connection is not parked. *)
-let test_get_sync_does_not_park_a_body_the_peer_cut_short () =
+let expect_peer_close label = function
+  | Error (Http_client.NetworkError { kind = Http_client.End_of_file; _ }) -> ()
+  | Ok (response : Http_client.raw_sync_response) ->
+    Alcotest.failf "%s: answered %d/%S" label response.status response.body
+  | Error _ -> Alcotest.failf "%s: expected the peer's close as a network error" label
+;;
+
+(* The peer closes before the body its framing promised has arrived: two of
+   five bytes, or a chunk without the zero-sized chunk that ends the coding.
+   The body is incomplete (RFC 9112 §8), so the request fails and what
+   arrived is not handed over as the answer. *)
+let test_get_sync_fails_on_a_body_the_peer_cut_short () =
+  List.iter
+    (fun (label, response) ->
+       with_cache_switch
+       @@ fun ~sw ~env ~cache ->
+       let url, _ = start_raw_server ~close_after_first:true ~sw ~net:env#net response in
+       expect_peer_close
+         (label ^ ", cached")
+         (Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] ());
+       let stats = Http_client.cache_stats cache in
+       Alcotest.(check int) (label ^ ": nothing parked") 0 stats.total_idle;
+       Alcotest.(check int)
+         (label ^ ": closed as a failed request")
+         1
+         stats.closed_total.request_failed;
+       expect_peer_close
+         (label ^ ", no cache")
+         (Http_client.get_sync ~sw ~net:env#net ~url ~headers:[] ()))
+    [ "Content-Length", "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nok"
+    ; "chunked", "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nok"
+    ]
+;;
+
+(* A response that declares neither a length nor the chunked coding ends
+   where the server closes the connection (RFC 9112 §6.3 rule 8), so the
+   close is the body's end and not a cut. *)
+let test_get_sync_reads_a_body_the_close_ends () =
   with_cache_switch
   @@ fun ~sw ~env ~cache ->
   let url, _ =
-    start_raw_server ~close_after_first:true ~sw ~net:env#net
-      "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nok"
+    start_raw_server ~close_after_first:true ~sw ~net:env#net "HTTP/1.1 200 OK\r\n\r\nok"
   in
-  (match Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] () with
-   | Ok _ -> ()
-   | Error _ -> Alcotest.fail "cohttp answers a body cut short");
+  get_ok ~sw ~net:env#net ~cache url;
   let stats = Http_client.cache_stats cache in
   Alcotest.(check int) "nothing parked" 0 stats.total_idle;
   Alcotest.(check int) "closed as transport ended" 1 stats.closed_total.transport_ended
 ;;
 
-(* cohttp returns the first status line and does not skip an interim answer
-   (#48910), so the final answer is still on the connection. Parking it would
-   hand that answer to the next request. *)
-let test_get_sync_does_not_park_an_interim_answer () =
+(* The peer closes without answering. Without a cache the close used to leave
+   [get_sync], [post_sync] and [delete_sync] as cohttp's [Failure]. *)
+let test_sync_without_a_cache_on_a_peer_that_closes () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = env#net in
+    let url, _ = start_raw_server ~close_after_first:true ~sw ~net "" in
+    let request label call =
+      match call () with
+      | result -> expect_peer_close label result
+      | exception exn ->
+        Alcotest.failf "%s: the peer's close escaped as %s" label (Printexc.to_string exn)
+    in
+    request "get_sync" (fun () -> Http_client.get_sync ~sw ~net ~url ~headers:[] ());
+    request "delete_sync" (fun () -> Http_client.delete_sync ~sw ~net ~url ~headers:[] ());
+    request "post_sync" (fun () ->
+      Http_client.post_sync ~sw ~net ~url ~headers:[] ~body:"" ());
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+let interim_then_final =
+  "HTTP/1.1 100 Continue\r\n\r\n\
+   HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n\
+   HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+;;
+
+(* Interim 1xx responses come before the final one (RFC 9110 §15.2). The
+   request answers with the final response, and the connection, read to that
+   response's end, is parked and reused. *)
+let test_get_sync_reads_past_interim_answers () =
   with_cache_switch
   @@ fun ~sw ~env ~cache ->
-  let url, accepted =
-    start_raw_server ~sw ~net:env#net
-      "HTTP/1.1 103 Early Hints\r\nLink: </style.css>\r\n\r\n\
-       HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
-  in
-  let request () =
-    match Http_client.get_sync ~cache ~sw ~net:env#net ~url ~headers:[] () with
-    | Ok _ -> ()
-    | Error _ -> Alcotest.fail "the interim answer is read as a response"
-  in
-  request ();
-  let stats = Http_client.cache_stats cache in
-  Alcotest.(check int) "nothing parked" 0 stats.total_idle;
-  Alcotest.(check int) "closed as not persistent" 1 stats.closed_total.not_persistent;
-  request ();
-  Alcotest.(check int) "the second request opened its own connection" 2 !accepted
+  let url, accepted = start_raw_server ~sw ~net:env#net interim_then_final in
+  get_ok ~sw ~net:env#net ~cache url;
+  Alcotest.(check int) "parked" 1 (Http_client.cache_stats cache).total_idle;
+  get_ok ~sw ~net:env#net ~cache url;
+  Alcotest.(check int) "the second request reused the connection" 1 !accepted;
+  match Http_client.get_sync ~sw ~net:env#net ~url ~headers:[] () with
+  | Ok { status = 200; body = "ok"; _ } -> ()
+  | Ok { status; body; _ } -> Alcotest.failf "no cache: got %d/%S" status body
+  | Error _ -> Alcotest.fail "no cache: expected the final response"
 ;;
 
 let test_stream_connection_close_does_not_park () =
@@ -1258,21 +1313,47 @@ let expect_raw_ok label = function
   | Error _ -> Alcotest.fail (label ^ " expected raw 200 response")
 ;;
 
-(* The peer closes before the five bytes its header promised; cohttp answers
-   with what arrived (#48910). Neither connection is parked. *)
-let test_one_dispatch_body_cut_short_is_not_parked () =
+(* The peer closes before the five bytes its header promised. The status
+   line arrived, so each request fails as a response whose body was cut. *)
+let test_one_dispatch_fails_on_a_body_cut_short () =
   let (first, second, stats), _posts =
     exercise_raw_one_dispatch_cache
       ~response_headers:(fun _ -> [ "Content-Length: 5" ])
       ~keep_connection:false
       ()
   in
-  (match first, second with
-   | Ok _, Ok _ -> ()
-   | (Ok _ | Error _), _ -> Alcotest.fail "cohttp answers a body cut short");
+  let expect_cut label = function
+    | Error
+        (Http_client.Response_received_error
+          { status = 200
+          ; error = Http_client.NetworkError { kind = Http_client.End_of_file; _ }
+          }) -> ()
+    | Ok _ | Error _ -> Alcotest.fail (label ^ " expected a response whose body was cut")
+  in
+  expect_cut "first" first;
+  expect_cut "second" second;
   Alcotest.(check int) "nothing parked" 0 stats.Http_client.total_idle;
   Alcotest.(check int) "each request opened a connection" 2 stats.create_count_total;
-  Alcotest.(check int) "both closed as transport ended" 2 stats.closed_total.transport_ended
+  Alcotest.(check int) "both closed as failed requests" 2 stats.closed_total.request_failed
+;;
+
+(* The stream and one-dispatch paths read past interim answers as [get_sync]
+   does. *)
+let test_post_reads_past_interim_answers () =
+  with_cache_switch
+  @@ fun ~sw ~env ~cache ->
+  let net = env#net in
+  let url, _ = start_raw_server ~sw ~net interim_then_final in
+  (match
+     Http_client.with_post_stream ~cache ~net ~url ~headers:[] ~body:"{}"
+       ~f:(fun ~pre_header_elapsed_s:_ reader -> Eio.Buf_read.take_all reader)
+       ()
+   with
+   | Ok body -> Alcotest.(check string) "stream body" "ok" body
+   | Error _ -> Alcotest.fail "stream: the interim answer was read as the response");
+  expect_raw_ok
+    "one dispatch"
+    (Http_client.post_sync_once ~cache ~net ~url ~headers:[] ~body:"{}" ())
 ;;
 
 (* A refusal read to its end on a persistent connection is parked like an
@@ -1738,14 +1819,20 @@ let () =
             test_get_sync_closes_a_failed_request
         ; Alcotest.test_case "get_sync on a connection the peer closed" `Quick
             test_get_sync_on_a_connection_the_peer_closed
-        ; Alcotest.test_case "get_sync does not park a body cut short" `Quick
-            test_get_sync_does_not_park_a_body_the_peer_cut_short
-        ; Alcotest.test_case "a reused connection cut short counts as reused" `Quick
-            test_a_reused_connection_cut_short_counts_as_reused
-        ; Alcotest.test_case "get_sync does not park an interim answer" `Quick
-            test_get_sync_does_not_park_an_interim_answer
-        ; Alcotest.test_case "one dispatch does not park a body cut short" `Quick
-            test_one_dispatch_body_cut_short_is_not_parked
+        ; Alcotest.test_case "get_sync fails on a body cut short" `Quick
+            test_get_sync_fails_on_a_body_the_peer_cut_short
+        ; Alcotest.test_case "get_sync reads a body the close ends" `Quick
+            test_get_sync_reads_a_body_the_close_ends
+        ; Alcotest.test_case "sync without a cache on a peer that closes" `Quick
+            test_sync_without_a_cache_on_a_peer_that_closes
+        ; Alcotest.test_case "a reused connection the close ends counts as reused" `Quick
+            test_a_reused_connection_the_close_ends_counts_as_reused
+        ; Alcotest.test_case "get_sync reads past interim answers" `Quick
+            test_get_sync_reads_past_interim_answers
+        ; Alcotest.test_case "one dispatch fails on a body cut short" `Quick
+            test_one_dispatch_fails_on_a_body_cut_short
+        ; Alcotest.test_case "POST reads past interim answers" `Quick
+            test_post_reads_past_interim_answers
         ; Alcotest.test_case "a stream refusal read to its end is parked" `Quick
             test_stream_refusal_read_to_its_end_is_parked
         ; Alcotest.test_case "get_sync reuses a persistent response" `Quick

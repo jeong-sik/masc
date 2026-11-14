@@ -106,6 +106,15 @@ val fold_all :
     passing one restored original at a time to [f] so callers do not retain
     every original request body in memory simultaneously. Any scope, record or
     body error rejects the whole fold without returning partial results. *)
+val fold_all_records :
+  store:Lane_addon_store.t ->
+  init:'a ->
+  f:('a -> Record.t -> ('a, error) result) ->
+  ('a, error) result
+(** The same all-scope directory and record validation as {!fold_all}, passing
+    each record without its body. A caller that needs one original's request
+    reads it with {!load_listed} inside [f]; an error [f] returns rejects the
+    whole fold. Bodies [f] does not read are not validated. *)
 val load_scope : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
 (** Discover record identities, then strictly load each original whose
     identity is unchanged ({!load_listed}). A missing record or a changed
@@ -181,6 +190,9 @@ module For_testing : sig
   val fold_all : store:Lane_addon_store.t -> after_inventory:(unit -> unit) ->
     init:'a -> f:('a -> retained -> 'a) -> ('a, error) result
   (** Invoke the hook after inventory and before restoring the listed records. *)
+  val fold_all_records : store:Lane_addon_store.t -> after_inventory:(unit -> unit) ->
+    init:'a -> f:('a -> Record.t -> ('a, error) result) -> ('a, error) result
+  (** {!fold_all_records} with the same hook. *)
   val advance_events :
     save:(Lane_addon_store.t -> scope:string -> request_id:string -> Yojson.Safe.t ->
       (unit, string) result) ->

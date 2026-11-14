@@ -2015,9 +2015,9 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   refuse_fenced_resume fixture original request;
   no_memory fixture;
   (* The pass reads a fenced original with no predecessor as its record and
-     index. Without its body file the inventory still lists it. The host's
-     wake still reads every body of the scope, so the file is back before
-     any dispatch; the pass itself is run without the file below. *)
+     index. Without its body file the inventory still lists it. The file
+     is back before any dispatch, whose host-side check reads it; the pass
+     itself is run without the file below. *)
   let body=Filename.concat (Store.root fixture.store)
     (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
   let bytes=io (fun () -> In_channel.with_open_bin body In_channel.input_all) in
@@ -2028,6 +2028,23 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   check int "the inventory lists the original without its body" 1 (List.length listed);
   check bool "reading that original's body fails" true
     (Result.is_error (memory_action fixture (fun () -> Durable_owner.load ~store:fixture.store (List.hd listed))));
+  (* The host's wake finds a history original's Keeper from the record. *)
+  let wake event=io (fun () -> Server_librarian_addon_wake.For_testing.discover ~config:fixture.config
+    ~store:fixture.store ~after_inventory:(fun () -> ())
+    ~on_original:(fun _ -> fail "the wake read a history original's body") ~event) in
+  (match wake Runtime.Configuration_observed with
+   | Ok (_,refusals,original_keepers) ->
+     check (list string) "a configuration scan finds the Keeper without the body" [keeper_name] original_keepers;
+     check (list string) "and refuses nothing" [] refusals
+   | Error detail -> fail detail);
+  (match wake (Runtime.Exact_result_delivered {installation_id=(Capture.destination request).installation_id;
+     instance_id="fixture-instance";request_id=original.request_id}) with
+   | Ok (keepers,_,_) -> check (list string) "a result hint finds the Keeper without the body" [keeper_name] keepers
+   | Error detail -> fail detail);
+  check bool "a result hint from another installation is refused for its installation" true
+    (wake (Runtime.Exact_result_delivered {installation_id="another-installation";
+      instance_id="fixture-instance";request_id=original.request_id})
+     =Error "Librarian result hint belongs to a different original installation");
   io (fun () -> write body bytes);
   drive_advanced fixture;
   check int "only the newly captured original reaches the provider" 1 (F.post_count fixture.server);

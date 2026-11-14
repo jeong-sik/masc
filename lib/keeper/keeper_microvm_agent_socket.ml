@@ -1,6 +1,14 @@
 module Plan = Keeper_microvm_boot_plan
 
-let guest_path = "/run/masc-agent/agent.sock"
+(* apple/container's vminitd (1.6.1) connects to the agent at
+   [/run/container/<guest name>/rootfs] followed by this path, as written.
+   Linux holds 107 bytes and a NUL in [sun_path], and a guest name has at
+   most 63 characters ({!Keeper_sandbox_container_name}), which leaves this
+   path at most 22 bytes. Past that, vminitd logs
+   "is too long for a Unix Domain Socket path" and the host sees each
+   connection end with no hello. The directory is the agent's own; the file
+   name is what stays short. *)
+let guest_path = "/run/masc-agent/sock"
 
 (* 64 bits of the guest name's digest: two guests of one base path do not
    meet by chance, and the path stays far below the socket limit. *)

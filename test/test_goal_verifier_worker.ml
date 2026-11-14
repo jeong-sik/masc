@@ -370,7 +370,7 @@ let test_unknown_and_cancellation_never_redispatch () =
          Alcotest.(check int) "retryable refusal advances to the successor attempt" 1
            (V.attempt (W.original restored))
        | None -> Alcotest.fail "retryable refusal disappeared from frontier");
-      Alcotest.(check int) "retryable refusal prepares its successor authority" 1 !authority_calls);
+      Alcotest.(check int) "retryable refusal prepares its successor authority" 1 !authority_calls));
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
     let calls = ref 0 in

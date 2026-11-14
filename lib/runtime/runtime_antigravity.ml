@@ -77,6 +77,33 @@ let empty_success_detail ~model ~tool_steps stderr =
   else
     Printf.sprintf "%s (model=%s, tool_steps=%d, stderr tail: %s)"
       empty_success_detail_prefix model tool_steps stderr_tail
+
+(* A refusal's stderr is read from its first words: agy's closing sentence
+   opens by naming what was refused and why, and anything it printed about
+   the refused call comes before that sentence. The empty-success suffix cut
+   that opening off (#50291), so a refusal keeps both ends of the retained
+   stderr and counts the bytes it leaves out of the middle. The tail budget
+   holds the closing sentence whole; the one measured on 2026-11-09 is 298
+   bytes. *)
+let denied_stderr_head_bytes = 512
+let denied_stderr_tail_bytes = 1024
+
+let denied_stderr_excerpt stderr =
+  let redacted = redact_stderr_tail (String.trim stderr) in
+  (* The retained stderr is the end of a byte ring and may begin inside a
+     character; [utf8_suffix] drops those leading continuation bytes. *)
+  let text = String_util.utf8_suffix ~max_bytes:(String.length redacted) redacted in
+  if String.length text <= denied_stderr_head_bytes + denied_stderr_tail_bytes
+  then text
+  else (
+    let head = String_util.utf8_prefix ~max_bytes:denied_stderr_head_bytes text in
+    let tail = String_util.utf8_suffix ~max_bytes:denied_stderr_tail_bytes text in
+    Printf.sprintf "%s ... [%d bytes omitted] ... %s"
+      head
+      (String.length text - String.length head - String.length tail)
+      tail)
+;;
+
 let max_wire_line_bytes = 8 * 1024 * 1024
 
 (* [--print-timeout] is a wall-clock deadline owned by agy, not an idle
@@ -1183,7 +1210,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
            { conversation_id = terminal.conversation_id; model = terminal.model
            ; denied; response = terminal.response; num_turns = terminal.num_turns
            ; usage = terminal.usage; tool_steps = terminal.tool_steps
-           ; stderr_tail = diagnostic_stderr_tail stderr })
+           ; stderr_tail = denied_stderr_excerpt stderr })
      | Success, None ->
          if deliverable then complete terminal ~trajectory_error:None
          else Error (Turn_failed

@@ -210,7 +210,9 @@ type denied_result =
 (** A SUCCESS or ERROR result that named refusals. Print mode cannot ask for
     approval, so agy refuses the action and ends the run; [response] is only
     the text written before the refused call. [stderr_tail] is the redacted
-    end of the CLI's stderr, cut at a UTF-8 boundary. *)
+    stderr the adapter retained: all of it when it fits the refusal budget,
+    otherwise its first and last characters around a count of the omitted
+    bytes, so the sentence that names the refusal is never cut at its head. *)
 
 type error =
   | Invalid_config of string

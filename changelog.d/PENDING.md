@@ -1,0 +1,3 @@
+### Internal
+
+- Tests: `test_server_runtime_bootstrap` fails when a spawned `main_eio` exits while starting or is still not answering at the deadline, and names which of the two happened with the exit status. Five cases used to end in a skip on both, so a server that crashed at boot read as a passing run (#48992, #PENDING)

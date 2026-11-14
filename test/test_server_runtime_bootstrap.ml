@@ -664,28 +664,79 @@ let curl_request_capture ?(headers = []) ~output_dir ~name ~method_ ~url ?payloa
   | Unix.WSTOPPED signal ->
       Alcotest.failf "curl %s stopped %d" name signal
 
-let process_alive pid =
-  match Unix.waitpid [Unix.WNOHANG] pid with
-  | 0, _ -> true
-  | _ -> false
-  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> false
+(* What the kernel says about a child this test spawned. [Reaped] is a child
+   whose exit status an earlier poll already collected. *)
+type child_state =
+  | Running
+  | Exited of Unix.process_status
+  | Reaped
 
-let wait_for_health ~pid ~port ~timeout_s =
+let poll_child pid =
+  match Unix.waitpid [Unix.WNOHANG] pid with
+  | 0, _ -> Running
+  | _, status -> Exited status
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> Reaped
+
+let process_alive pid =
+  match poll_child pid with
+  | Running -> true
+  | Exited _ | Reaped -> false
+
+(* How a wait on a spawned server ended. A server that died while starting and
+   a server that is still starting are different findings, and neither one is
+   "this machine cannot run the test" (#48992). *)
+type server_wait =
+  | Reached
+  | Died of Unix.process_status
+  | Gone
+  | Timed_out
+
+let wait_for_server ~pid ~timeout_s ~interval_s reached =
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
-    match curl_health_status ~port with
-    | Some 200 -> true
-    | _ ->
-      if not (process_alive pid) then
-        false
-      else if Unix.gettimeofday () >= deadline then
-        false
-      else begin
-        Unix.sleepf 0.1;
-        loop ()
-      end
+    if reached () then Reached
+    else
+      match poll_child pid with
+      | Exited status -> Died status
+      | Reaped -> Gone
+      | Running ->
+        if Unix.gettimeofday () >= deadline then Timed_out
+        else begin
+          Unix.sleepf interval_s;
+          loop ()
+        end
   in
   loop ()
+
+let wait_for_health ~pid ~port ~timeout_s =
+  wait_for_server ~pid ~timeout_s ~interval_s:0.1 (fun () ->
+    match curl_health_status ~port with
+    | Some 200 -> true
+    | Some _ | None -> false)
+
+let describe_process_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exited with status %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "was killed by signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "was stopped by signal %d" signal
+
+(* A spawned server that did not reach [what] fails the test. [wait] is one of
+   the waits above without its [~timeout_s]. The log is printed with the
+   failure because the temp dir is removed when the test returns. *)
+let require_server_reached ~what ~timeout_s ~log_file wait =
+  match wait ~timeout_s with
+  | Reached -> ()
+  | Died status ->
+    Alcotest.failf "%s was not reached: the server %s.\nlog:\n%s" what
+      (describe_process_status status)
+      (read_file log_file)
+  | Gone ->
+    Alcotest.failf
+      "%s was not reached: the server is no longer a child of this test, so its exit \
+       status was already collected.\nlog:\n%s"
+      what (read_file log_file)
+  | Timed_out ->
+    Alcotest.failf "%s was not reached: the server was still running after %.0fs.\nlog:\n%s"
+      what timeout_s (read_file log_file)
 
 let wait_for_process_exit ~pid ~timeout_s =
   let deadline = Unix.gettimeofday () +. timeout_s in
@@ -702,38 +753,16 @@ let wait_for_process_exit ~pid ~timeout_s =
   loop ()
 
 let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
-  let deadline = Unix.gettimeofday () +. timeout_s in
-  let rec loop () =
+  wait_for_server ~pid ~timeout_s ~interval_s:0.2 (fun () ->
     match curl_health_json ~port with
+    | None -> false
     | Some json -> (
-        let phase =
-          match Yojson.Safe.Util.member "startup" json with
-          | `Assoc _ as startup ->
-              Yojson.Safe.Util.(startup |> member "phase" |> to_string_option)
-          | _ -> None
-        in
-        match phase with
-        | Some phase when String.equal phase expected_phase -> true
-        | _ ->
-            if not (process_alive pid) then
-              false
-            else if Unix.gettimeofday () >= deadline then
-              false
-            else begin
-              Unix.sleepf 0.2;
-              loop ()
-            end)
-    | None ->
-        if not (process_alive pid) then
-          false
-        else if Unix.gettimeofday () >= deadline then
-          false
-        else begin
-          Unix.sleepf 0.2;
-          loop ()
-        end
-  in
-  loop ()
+        match Yojson.Safe.Util.member "startup" json with
+        | `Assoc _ as startup -> (
+            match Yojson.Safe.Util.(startup |> member "phase" |> to_string_option) with
+            | Some phase -> String.equal phase expected_phase
+            | None -> false)
+        | _ -> false))
 
 (* These fixtures reach runtime catalog admission, rather than failing the
    TOML parser or exercising retired profile/route syntax. The optional model
@@ -5621,13 +5650,8 @@ let test_main_eio_serves_health_before_lazy_startup () =
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end))
+          require_server_reached ~what:"main_eio /health" ~timeout_s:5.0 ~log_file
+            (wait_for_health ~pid ~port)))
 
 let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
   with_temp_dir "startup-fresh-boot-e2e" (fun dir ->
@@ -5713,11 +5737,9 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
-            Alcotest.failf
-              "main_eio fresh boot did not reach startup.phase=ready within timeout.\nlog:\n%s"
-              (read_file log_file)
-          end;
+          require_server_reached ~what:"main_eio fresh boot startup.phase=ready"
+            ~timeout_s:10.0 ~log_file
+            (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready");
           let health_headers, health_body =
             curl_request_capture ~output_dir:dir ~name:"health" ~method_:"GET"
               ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
@@ -5894,13 +5916,9 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio codex token preserve test did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end;
+          require_server_reached ~what:"main_eio codex token preserve startup.phase=ready"
+            ~timeout_s:10.0 ~log_file
+            (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready");
           let preserved_raw = String.trim (read_file token_path) in
           let preserved_mode = (Unix.stat token_path).Unix.st_perm land 0o777 in
           Alcotest.(check string) "startup preserves unmanaged client token file"
@@ -6298,14 +6316,9 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
            | None -> ());
           stop_process primary_pid)
         (fun () ->
-          if not (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:5.0)
-          then begin
-            prerr_endline
-              (Printf.sprintf
-                 "primary main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                 (read_file primary_log));
-            Alcotest.skip ()
-          end;
+          require_server_reached ~what:"primary main_eio /health" ~timeout_s:5.0
+            ~log_file:primary_log
+            (wait_for_health ~pid:primary_pid ~port:primary_port);
           let run_dir =
             match
               Server_startup_takeover.lease_run_dir
@@ -6369,8 +6382,9 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
           Alcotest.(check bool) "secondary log mentions recorded primary pid" true
             (String_util.contains_substring secondary_text
               (Printf.sprintf "The lease records PID %d;" primary_pid));
-          Alcotest.(check bool) "primary server stays healthy" true
-            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0);
+          require_server_reached ~what:"primary main_eio stays healthy" ~timeout_s:1.0
+            ~log_file:primary_log
+            (wait_for_health ~pid:primary_pid ~port:primary_port);
           (* A command line asks the kernel, not the server, which process
              serves the workspace (#51075). The primary served /health, so it
              passed the announcement of its boot. *)
@@ -6489,10 +6503,8 @@ let main_eio_stops_when_its_port_cannot_be_announced ~serving_domain () =
                false)))
 
 let require_startup_ready ~pid ~port ~log_file =
-  if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then
-    Alcotest.failf
-      "main_eio did not reach startup.phase=ready; startup failure is not a skip.\nlog:\n%s"
-      (read_file log_file)
+  require_server_reached ~what:"main_eio startup.phase=ready" ~timeout_s:10.0 ~log_file
+    (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready")
 
 let read_startup_health ~output_dir ~port =
   let headers, body =
@@ -6721,21 +6733,15 @@ let test_main_eio_start_does_not_record_default_without_flag () =
           Fun.protect
             ~finally:(fun () -> stop_process pid)
             (fun () ->
-              if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
-                prerr_endline
-                  (Printf.sprintf
-                     "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                     (read_file log_file));
-                Alcotest.skip ()
-              end else begin
-                let record_file =
-                  Filename.concat (Filename.concat config_home "masc") "default-base-path"
-                in
-                Alcotest.(check bool)
-                  "default-base-path record does not exist without --record-default"
-                  false
-                  (Sys.file_exists record_file)
-              end)))
+              require_server_reached ~what:"main_eio start /health" ~timeout_s:5.0 ~log_file
+                (wait_for_health ~pid ~port);
+              let record_file =
+                Filename.concat (Filename.concat config_home "masc") "default-base-path"
+              in
+              Alcotest.(check bool)
+                "default-base-path record does not exist without --record-default"
+                false
+                (Sys.file_exists record_file))))
 
 let test_main_eio_start_records_default_with_flag () =
   with_temp_dir "start-with-record-default" (fun dir ->
@@ -6775,40 +6781,34 @@ let test_main_eio_start_records_default_with_flag () =
           Fun.protect
             ~finally:(fun () -> stop_process pid)
             (fun () ->
-              if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
-                prerr_endline
-                  (Printf.sprintf
-                     "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                     (read_file log_file));
-                Alcotest.skip ()
-              end else begin
-                let record_file =
-                  Filename.concat (Filename.concat config_home "masc") "default-base-path"
-                in
-                (* /health is available during initialization. Recording waits
-                   until both the owner and its listener are ready. *)
-                let deadline = Unix.gettimeofday () +. 10.0 in
-                let rec await_record () =
-                  if Sys.file_exists record_file then true
-                  else if not (process_alive pid) || Unix.gettimeofday () >= deadline
-                  then false
-                  else (Unix.sleepf 0.1; await_record ())
-                in
-                Alcotest.(check bool)
-                  "default-base-path record exists with --record-default"
-                  true
-                  (await_record ());
-                let recorded = String.trim (read_file record_file) in
-                let expected =
-                  match Unix.realpath dir with
-                  | canonical -> canonical
-                  | exception _ -> dir
-                in
-                Alcotest.(check string)
-                  "recorded path matches workspace base path"
-                  expected
-                  recorded
-              end)))
+              require_server_reached ~what:"main_eio start /health" ~timeout_s:5.0 ~log_file
+                (wait_for_health ~pid ~port);
+              let record_file =
+                Filename.concat (Filename.concat config_home "masc") "default-base-path"
+              in
+              (* /health is available during initialization. Recording waits
+                 until both the owner and its listener are ready. *)
+              let deadline = Unix.gettimeofday () +. 10.0 in
+              let rec await_record () =
+                if Sys.file_exists record_file then true
+                else if not (process_alive pid) || Unix.gettimeofday () >= deadline
+                then false
+                else (Unix.sleepf 0.1; await_record ())
+              in
+              Alcotest.(check bool)
+                "default-base-path record exists with --record-default"
+                true
+                (await_record ());
+              let recorded = String.trim (read_file record_file) in
+              let expected =
+                match Unix.realpath dir with
+                | canonical -> canonical
+                | exception _ -> dir
+              in
+              Alcotest.(check string)
+                "recorded path matches workspace base path"
+                expected
+                recorded)))
 
 let test_main_eio_failed_start_preserves_default () =
   with_temp_dir "failed-start-record-default" (fun dir ->

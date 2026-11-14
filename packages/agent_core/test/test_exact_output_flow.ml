@@ -470,9 +470,9 @@ let with_server
 ;;
 
 (* Send an informational response while the first request is still awaiting
-   its final response. A later connection can answer a successor if the flow
-   incorrectly advances. *)
-let with_interim_server ~status_line f =
+   its final response, then [final_body] as that response. A later connection
+   can answer a successor if the flow incorrectly advances. *)
+let with_interim_server ~status_line ~final_body f =
   let posts = Atomic.make 0 in
   let result =
     Eio_main.run @@ fun env ->
@@ -503,10 +503,9 @@ let with_interim_server ~status_line f =
         if index = 0 then (
           Eio.Flow.copy_string ("HTTP/1.1 " ^ status_line ^ "\r\n\r\n") flow;
           Eio.Time.sleep clock 0.25);
-        let body = {|{"status":"completed","output":[]}|} in
         Eio.Flow.copy_string
           (Printf.sprintf "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
-             (String.length body) body) flow
+             (String.length final_body) final_body) flow
       with End_of_file | Eio.Io _ | Unix.Unix_error _ -> ()
     in
     Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -4633,10 +4632,13 @@ let test_guarded_flow_stops_after_unobserved_response () =
   run ~abort_completion:true EO.Response_headers_unobserved
 ;;
 
-let test_guarded_flow_holds_interim_responses () =
+(* 101 ends HTTP on its connection, so no final response follows it and the
+   attempt stays unresolved. *)
+let test_guarded_flow_holds_a_protocol_switch () =
   List.iter (fun (status, status_line) ->
     let result, posts =
-      with_interim_server ~status_line @@ fun ~net ~clock ~base_url ->
+      with_interim_server ~status_line ~final_body:{|{"status":"completed","output":[]}|}
+      @@ fun ~net ~clock ~base_url ->
       with_catalog (List.map (fun id ->
         catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
         ["first";"second"])
@@ -4653,7 +4655,30 @@ let test_guarded_flow_holds_interim_responses () =
         (EO.generation_receipt_snapshot_http_status unresolved.observation);
       check_guarded_observation "interim" unresolved.candidate unresolved.observation unresolved.evidence
     | EO.Guarded_finished _ -> fail "interim response was treated as a final result")
-    [100, "100 Continue"; 103, "103 Early Hints"]
+    [101, "101 Switching Protocols"]
+;;
+
+(* An interim response comes before the final one (RFC 9110 §15.2): the
+   attempt is decided on the final response, on the same dispatch. *)
+let test_guarded_flow_reads_past_interim_responses () =
+  let completed={|{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"name\":\"accepted\"}"}]}]}|} in
+  List.iter (fun status_line ->
+    let result, posts =
+      with_interim_server ~status_line ~final_body:completed @@ fun ~net ~clock ~base_url ->
+      with_catalog (List.map (fun id ->
+        catalog_entry ~id ~base_url ~request_path:"/v1/responses" ~native:true ~json:true ())
+        ["first";"second"])
+      @@ fun snapshot ->
+      let flow = start_flow (frozen_flow snapshot ["first";"second"]) in
+      guarded_flow ~net ~clock
+        ~before_advance:(fun ~failed:_ ~next:_ -> fail "final response after an interim one advanced")
+        ~validate:(fun _ -> EO.Accept ()) flow in
+    check int "one dispatch" 1 posts;
+    match result with
+    | EO.Guarded_finished (Ok _) -> ()
+    | EO.Guarded_finished (Error _) | EO.Guarded_unresolved _ ->
+      fail (status_line ^ ": the final response was not read"))
+    ["100 Continue"; "103 Early Hints"]
 ;;
 
 let test_guarded_flow_holds_nonfinal_success_status () =
@@ -6443,9 +6468,13 @@ let () =
             `Quick
             test_guarded_flow_stops_after_unobserved_response
         ; test_case
-            "guarded flow holds interim HTTP responses"
+            "guarded flow holds a protocol switch"
             `Quick
-            test_guarded_flow_holds_interim_responses
+            test_guarded_flow_holds_a_protocol_switch
+        ; test_case
+            "guarded flow reads past interim HTTP responses"
+            `Quick
+            test_guarded_flow_reads_past_interim_responses
         ; test_case
             "guarded flow holds 202 and 206 Responses"
             `Quick

@@ -41,24 +41,54 @@ type section = {
   empty_msg: string;
 }
 
-(* The [scope] enum in config/tools/masc_dashboard.toml spells this same
-   vocabulary. test_tools_coverage checks the two against each other (#27069). *)
-type scope =
-  | Dashboard_scope_all
-  | Dashboard_scope_current
+(* What [masc_dashboard] takes: one optional boolean. The parameter name and
+   its default are declared a second time in config/tools/masc_dashboard.toml,
+   which is what the model reads; test_tools_coverage checks that file against
+   [compact_argument] and [default_view]. *)
+type view =
+  | Full
+  | Compact
 
-let scope_to_string = function
-  | Dashboard_scope_all -> "all"
-  | Dashboard_scope_current -> "current"
+let compact_argument = "compact"
+let default_view = Full
 
-let scope_of_string_opt = function
-  | "all" -> Some Dashboard_scope_all
-  | "current" -> Some Dashboard_scope_current
-  | _ -> None
+let view_of_compact = function
+  | true -> Compact
+  | false -> Full
 
-(* Order is the enum order in the published schema. *)
-let valid_scope_strings =
-  List.map scope_to_string [ Dashboard_scope_all; Dashboard_scope_current ]
+let compact_of_view = function
+  | Compact -> true
+  | Full -> false
+
+type argument_error =
+  | Arguments_not_an_object
+  | Undeclared_arguments of string list
+  | Compact_not_a_boolean
+
+let view_of_arguments : Yojson.Safe.t -> (view, argument_error) result = function
+  | `Assoc fields ->
+    let undeclared =
+      List.filter_map
+        (fun (name, _) -> if String.equal name compact_argument then None else Some name)
+        fields
+    in
+    (match undeclared, List.assoc_opt compact_argument fields with
+     | _ :: _, _ -> Error (Undeclared_arguments undeclared)
+     | [], None -> Ok default_view
+     | [], Some (`Bool compact) -> Ok (view_of_compact compact)
+     | [], Some _ -> Error Compact_not_a_boolean)
+  | _ -> Error Arguments_not_an_object
+
+let argument_error_message ~tool_name = function
+  | Arguments_not_an_object -> Printf.sprintf "%s arguments must be an object" tool_name
+  | Undeclared_arguments names ->
+    Printf.sprintf
+      "%s does not accept arguments: %s (accepted: %s)"
+      tool_name
+      (String.concat ", " names)
+      compact_argument
+  | Compact_not_a_boolean ->
+    Printf.sprintf "%s: %s must be true or false" tool_name compact_argument
 
 (** Re-export shared types from Dashboard_labels to avoid breaking existing callers *)
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
@@ -435,7 +465,7 @@ let render_within ~limit ~row_count render =
   let full = render None in
   if String.length full <= limit then full else fit (row_count - 1)
 
-let generate ?(scope = Dashboard_scope_all) ?max_bytes (config : Workspace_utils.config) : string =
+let generate ?max_bytes (config : Workspace_utils.config) : string =
   let now = Time_compat.now () in
   let timestamp =
     let tm = Unix.localtime now in
@@ -443,7 +473,6 @@ let generate ?(scope = Dashboard_scope_all) ?max_bytes (config : Workspace_utils
       (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
   in
-  let _scope = scope in
   let snapshots = [ workspace_snapshot config ] in
   let workspace_id = active_workspace_id in
   let all_agents = List.concat_map (fun s -> s.agents) snapshots in
@@ -494,8 +523,7 @@ let generate ?(scope = Dashboard_scope_all) ?max_bytes (config : Workspace_utils
   | None -> render None
   | Some limit -> render_within ~limit ~row_count:(List.length task_row_list) render
 
-let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.config) : string =
-  let _scope = scope in
+let generate_compact (config : Workspace_utils.config) : string =
   let now = Time_compat.now () in
   let snapshots = [ workspace_snapshot config ] in
   let workspace_id = active_workspace_id in
@@ -593,29 +621,18 @@ let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.co
 let () =
   Tool_misc.register_dashboard_handler (fun ~tool_name:tool_name_arg ~start_time ctx args ->
     let open Tool_result in
-    let compact =
-      match Json_util.assoc_member_opt "compact" args with
-      | Some (`Bool b) -> b
-      | _ -> false
-    in
-    let scope_arg =
-      match Json_util.assoc_member_opt "scope" args with
-      | Some (`String s) -> String.lowercase_ascii s
-      | _ -> "all"
-    in
-    match scope_of_string_opt scope_arg with
-    | None ->
+    match view_of_arguments args with
+    | Error error ->
         make_err
           ~tool_name:tool_name_arg
           ~class_:Workflow_rejection
           ~start_time
-          (Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
-             scope_arg
-             (String.concat " | " valid_scope_strings))
-    | Some scope ->
+          (argument_error_message ~tool_name:tool_name_arg error)
+    | Ok view ->
         let output =
-          if compact then generate_compact ~scope ctx.config
-          else generate ~scope ~max_bytes:Common.max_tool_result_wire_bytes ctx.config
+          match view with
+          | Compact -> generate_compact ctx.config
+          | Full -> generate ~max_bytes:Common.max_tool_result_wire_bytes ctx.config
         in
         make_ok ~tool_name:tool_name_arg ~start_time ~data:(`String output) ()
   )

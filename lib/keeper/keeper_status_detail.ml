@@ -585,17 +585,52 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            meta counters were non-zero, so a keeper that used a tool once and
            then had its log rotate away read as "0 calls" rather than as
            unmeasured. *)
-        let tool_audit_snapshot =
+        let tool_audit_fields =
+          let read_state state =
+            tool_audit_read_field, `String (tool_audit_read_state_to_wire state)
+          in
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
-          | Some snapshot ->
-              {
-                snapshot with
-                tool_audit_at =
-                  (match snapshot.tool_audit_source, snapshot.tool_audit_at with
-                   | Some _, None -> Some m.updated_at
-                   | (Some _ | None), Some _ | None, None -> snapshot.tool_audit_at);
-              }
-          | None -> empty_tool_audit_snapshot
+          | Ok latest ->
+              let snapshot =
+                match latest with
+                | Some snapshot ->
+                    {
+                      snapshot with
+                      tool_audit_at =
+                        (match snapshot.tool_audit_source, snapshot.tool_audit_at with
+                         | Some _, None -> Some m.updated_at
+                         | (Some _ | None), Some _ | None, None -> snapshot.tool_audit_at);
+                    }
+                | None -> empty_tool_audit_snapshot
+              in
+              [
+                ("latest_tool_names",
+                  Json_util.json_string_list snapshot.latest_tool_names);
+                ("latest_tool_call_count",
+                  Json_util.int_opt_to_json snapshot.latest_tool_call_count);
+                ("latest_action_source",
+                  Json_util.string_opt_to_json snapshot.latest_action_source);
+                ("tool_audit_source",
+                  Json_util.string_opt_to_json snapshot.tool_audit_source);
+                ("tool_audit_at",
+                  Json_util.string_opt_to_json snapshot.tool_audit_at);
+                read_state Tool_audit_read;
+                (tool_audit_read_error_field, `Null);
+              ]
+          (* An unread store says nothing about the Keeper's tool calls, so
+             the audit values are null, not the empty audit of a store that
+             holds no turn. *)
+          | Error error ->
+              [
+                ("latest_tool_names", `Null);
+                ("latest_tool_call_count", `Null);
+                ("latest_action_source", `Null);
+                ("tool_audit_source", `Null);
+                ("tool_audit_at", `Null);
+                read_state Tool_audit_unreadable;
+                ( tool_audit_read_error_field,
+                  `String (Dated_jsonl.read_error_to_string error) );
+              ]
         in
          let registry_entry = Keeper_registry.get ~base_path:config.base_path m.name in
          let keeper_last_error =
@@ -701,16 +736,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("keeper_last_error",
              Json_util.string_opt_to_json keeper_last_error);
            ("sandbox_live", sandbox_live);
-           ("latest_tool_names",
-             Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
-           ("latest_tool_call_count",
-             Json_util.int_opt_to_json tool_audit_snapshot.latest_tool_call_count);
-           ("latest_action_source",
-             Json_util.string_opt_to_json tool_audit_snapshot.latest_action_source);
-           ("tool_audit_source",
-             Json_util.string_opt_to_json tool_audit_snapshot.tool_audit_source);
-           ("tool_audit_at",
-             Json_util.string_opt_to_json tool_audit_snapshot.tool_audit_at);
+         ] @ tool_audit_fields @ [
            ("lifecycle", `Assoc [
              ("created_at", `String m.created_at);
              ("updated_at", `String m.updated_at);

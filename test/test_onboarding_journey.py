@@ -1190,6 +1190,88 @@ class Journey(StepByStep):
         doctor.assert_called_once_with('/bin/masc', '/saved')
         sandbox.assert_called_once_with('/bin/masc', '/saved', 9123, refresh_owner=True)
 
+    UNKNOWN_MODE = ('config.json account_mode is "multi_account"; it must be the string '
+                    '"Single_user" or "Multi_account"')
+
+    def test_an_account_mode_the_boot_refuses_ends_the_journey_before_anything_is_run(self):
+        # No boot runs a server on this workspace. The journey says why and
+        # stops with an error: it asks nothing, checks nothing, initializes
+        # nothing and reads no port, with bare `masc` and `masc setup` alike,
+        # for the workspace named first and for one chosen on the way.
+        refused = observation('/broken', [('workspace', 'satisfied', 'Workspace found.'),
+                                          ('unknown_account_mode', 'invalid', self.UNKNOWN_MODE)],
+                              opening='refused_by_boot')
+        for resume in (True, False):
+            with self.subTest(resume=resume), \
+                    patch.object(SETUP, 'onboarding_status', return_value=refused), \
+                    patch.object(SETUP, 'workspace_port') as connection, \
+                    patch.object(SETUP.subprocess, 'run') as run, \
+                    patch.object(SETUP, 'pick') as picker, \
+                    patch.object(SETUP, 'workspace_check') as preflight, \
+                    patch.object(SETUP, 'wizard') as models, \
+                    patch.object(SETUP, 'open_workspace') as opened, \
+                    contextlib.redirect_stderr(io.StringIO()) as printed:
+                self.assertEqual(SETUP.journey('/bin/masc', '/broken', None, 10, resume=resume), 1)
+                for untouched in (connection, run, picker, preflight, models, opened):
+                    untouched.assert_not_called()
+                self.assertIn(self.UNKNOWN_MODE, printed.getvalue())
+                self.assertNotIn('Welcome', printed.getvalue())
+        with patch.object(SETUP, 'onboarding_status', return_value=refused), \
+                patch.object(SETUP.subprocess, 'run') as run, \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(SETUP.account_installation_at('/bin/masc', '/broken', None), 1)
+            run.assert_not_called()
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_unknown_account_mode_is_refused_and_left_uninitialized(self):
+        # The real doctor, the real setup-server and the shipped journey, on a
+        # workspace whose config holds an account mode the boot does not know.
+        with tempfile.TemporaryDirectory() as home:
+            home = str(Path(home).resolve())
+            unknown = '{"enabled":true,"require_token":true,"account_mode":"multi_account"}'
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb')
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                port = listener.getsockname()[1]
+            for name, where in (('broken', ['--base-path']), ('MASC', None)):
+                base = Path(home, name)
+                config = base / '.masc/auth/config.json'
+                config.parent.mkdir(parents=True)
+                config.write_text(unknown)
+                where = [] if where is None else where + [str(base)]
+                doctor = subprocess.run([BINARY, 'doctor', '--json', '--base-path', str(base)], env=environment,
+                                        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+                self.assertEqual(doctor.returncode, 0, doctor.stderr)
+                document = json.loads(doctor.stdout)
+                self.assertEqual(document['opening'], 'refused_by_boot')
+                self.assertEqual([(check['id'], check['condition']) for check in document['checks']],
+                                 [('workspace', 'satisfied'), ('unknown_account_mode', 'invalid')])
+                self.assertIn(self.UNKNOWN_MODE, document['checks'][1]['message'])
+                server = subprocess.run([BINARY, 'setup-server', '--base-path', str(base), '--port', str(port)],
+                                        env=environment, capture_output=True, text=True, timeout=60,
+                                        stdin=subprocess.DEVNULL)
+                self.assertEqual(server.returncode, 1, server.stderr)
+                unread = json.loads(server.stdout)
+                self.assertEqual(unread['schema'], 'masc.setup_server_unread.v1')
+                self.assertNotIn('status', unread)
+                self.assertIn(self.UNKNOWN_MODE, unread['error'])
+                for arguments in (['--journey', '--resume'], ['--journey']):
+                    with self.subTest(name=name, arguments=arguments):
+                        journey = subprocess.run(
+                            [sys.executable, '-B', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', BINARY,
+                             *arguments, *where, '--port', str(port)],
+                            env=environment, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+                        self.assertEqual(journey.returncode, 1, journey.stderr)
+                        self.assertIn(self.UNKNOWN_MODE, journey.stderr)
+                        self.assertNotIn('Welcome', journey.stderr)
+                # Nothing was initialized, no port was saved and no lease was
+                # made: the config is the one file under the directory.
+                self.assertEqual(sorted(str(path.relative_to(base)) for path in base.rglob('*')),
+                                 ['.masc', '.masc/auth', '.masc/auth/config.json'])
+                self.assertEqual(config.read_text(), unknown)
+
     @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
     def test_native_account_installation_is_reported_and_left_uninitialized(self):
         # The real doctor, the real setup-server and the shipped journey, on a

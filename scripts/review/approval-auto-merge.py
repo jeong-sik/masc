@@ -42,6 +42,14 @@ REQUIRED_APPROVALS = 2  # Operator-requested distinct GitHub accounts.
 # same request (HTTP 409) instead of submitting another.
 WAIT_SECONDS = 600
 POLL_SECONDS = 10
+# The sweep kills this worker at its own 300-second budget (#51479 family 2).
+# It passes that budget through, and this much is always left for the
+# hand-off dispatch and the outcome emit: the receipt survives only if the
+# cleanup completes inside the window.
+CLEANUP_RESERVE_SECONDS = 15
+# Set by main() when the sweep budget is known: the follow loop skips its
+# next poll once this moment has passed, so the cleanup keeps its reserve.
+_FOLLOW_DEADLINE = None
 # A run that outlives its wait hands the receipt to a fresh run of the same
 # workflow instead of ending the follow-up. There is no elapsed-time cutoff:
 # the chain ends only on a terminal answer (landed, failed, request gone, a
@@ -64,6 +72,10 @@ CHECK_RUN_PAGE = 100
 COMPARE_FILE_LIMIT = 300
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
+# A pull request that touches workflow files cannot be merged by this token:
+# GitHub refuses the arming itself. The refusal names itself at the start of
+# its message (#51452 family 3).
+WORKFLOW_REFUSAL = re.compile(r'refusing to allow .+ to create or update workflow', re.I)
 
 
 def source_patterns():
@@ -224,7 +236,16 @@ def auto_merge_default(repo, number):
         return {'status': 'merged', 'pr': selected, 'merge_commit_sha': after['merge_commit_sha']}
     if after.get('auto_merge') is None:
         if attempt is not None and attempt.returncode:
-            raise ValueError(attempt.stderr.strip() or 'gh could not enable auto-merge')
+            reason = attempt.stderr.strip() or 'gh could not enable auto-merge'
+            # A workflow-file pull request cannot be merged by this token at
+            # all: GitHub refuses the arming itself. The refusal is final for
+            # a bot path — the human merge path owns the scope — so it is a
+            # distinct answer, not an exception the next sweep re-runs
+            # (#51452 family 3).
+            if WORKFLOW_REFUSAL.search(reason):
+                return {'status': 'workflow_merge_needs_human', 'pr': selected,
+                        'head': head, 'reason': reason[:300]}
+            raise ValueError(reason)
         raise ValueError('GitHub has not confirmed auto-merge is enabled')
     return {'status': 'auto_merge_enabled', 'pr': selected, 'head': after['head']['sha'],
             'auto_merge': after['auto_merge']}
@@ -392,7 +413,13 @@ def follow(repo, result_endpoint, receipt, scope):
     goes out before the server time.
     """
     deadline = time.monotonic() + WAIT_SECONDS
-    CLIENT.deadline = CLIENT.clock() + WAIT_SECONDS
+    if _FOLLOW_DEADLINE is not None:
+        # The sweep budget: quota waits keep their reserve for the cleanup.
+        deadline = min(deadline, _FOLLOW_DEADLINE)
+        CLIENT.deadline = CLIENT.clock() + min(WAIT_SECONDS,
+                                               max(0.0, deadline - time.monotonic()))
+    else:
+        CLIENT.deadline = CLIENT.clock() + WAIT_SECONDS
     receipt = dict(receipt)
     retry_at = receipt.pop('retry_at', None)
     try:
@@ -407,6 +434,11 @@ def follow(repo, result_endpoint, receipt, scope):
                 return dict(receipt, status='observation_unavailable', error=str(failure),
                             retry_at=failure.retry_at, observation=observation, member_states=states)
         while True:
+            # The sweep budget is spent: skip the poll so the hand-off
+            # dispatch and the outcome emit keep their reserve (#51479
+            # family 2). The receipt is already emitted and never resubmitted.
+            if _FOLLOW_DEADLINE is not None and time.monotonic() >= _FOLLOW_DEADLINE:
+                break
             try:
                 observation = read(result_endpoint)
                 status = observation['status']
@@ -748,7 +780,7 @@ def emit(result):
 
 
 def main():
-    global WAIT_SECONDS
+    global WAIT_SECONDS, _FOLLOW_DEADLINE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dry-run', action='store_true', help='read admission without merging')
     parser.add_argument('--hand-off-now', action='store_true',
@@ -765,6 +797,12 @@ def main():
         _ADMISSION['ends_at_quota'] = not args.dry_run
         if args.hand_off_now:
             WAIT_SECONDS = 0
+            # The sweep's kill budget: keep the hand-off dispatch and the
+            # outcome emit inside it (#51479 family 2).
+            budget = os.environ.get('DISPATCH_WORKER_BUDGET_SECONDS')
+            if budget:
+                _FOLLOW_DEADLINE = (time.monotonic() +
+                                    max(0.0, float(budget) - CLEANUP_RESERVE_SECONDS))
         number = requested_pr()
         raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
         if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':

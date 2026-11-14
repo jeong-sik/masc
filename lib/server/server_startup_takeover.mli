@@ -99,8 +99,11 @@ type base_path_lock_rejection =
 type base_path_owner =
   | Owner_this_process of int
       (** This process already holds the lease. A second acquisition in the
-          same process would take the same kernel lock, which is why the
-          in-process table is consulted first. *)
+          same process would take the same kernel lock, and closing its
+          descriptor would drop the lock of the first, which is why the
+          in-process table is consulted first. The table is asked by the
+          (st_dev, st_ino) of the file the lease path names, so the answer is
+          the same under every spelling of that path. *)
   | Owner_recorded of int
       (** A number recorded in the lease, with no verified PID namespace or
           current-holder identity. It may be stale or identify another process. *)
@@ -179,6 +182,11 @@ type base_path_wait_refusal =
     asked to stop, as [masc restart] does. A lease this process already holds
     is still [Base_path_already_owned].
 
+    A process that took the lease and then exec'd holds the kernel lock and
+    finds its own PID in the lease file. It takes no waiter slot and commits
+    on the one descriptor it opens: no descriptor of the lease file is closed
+    on the way, so the lock is never dropped to a process sleeping on it.
+
     [on_wait] runs while this module's process-wide lease mutex is held, so
     it must not call back into this module. *)
 val acquire_base_path_lock_after_owner_exits :
@@ -244,7 +252,9 @@ val capture_existing_owner :
     For the account server of a multi-account installation it is the
     authority of the host, the effective UID that could open this private
     lease ({!Server_upgrade_preparation.stop_account_server}). Does not close
-    this process's own lease. *)
+    this process's own lease: a lease file this process holds is
+    [Current_process_owner] under every spelling of [run_dir] and
+    [base_path], and is not opened. *)
 
 val lease_file_present :
   Host_config.base_path_lease_root -> base_path:string -> (bool, base_path_lock_rejection) result
@@ -261,7 +271,12 @@ val lease_file_present :
     follows refuses such an entry in its own words. After a [true] the
     capture finds nothing left to make. An [Error] when an entry could not be
     read. The path is the one {!lease_run_dir} and the capture spell, and
-    nothing of an entry is judged here. *)
+    nothing of an entry is judged here.
+
+    The answer is of the moment it was read, and no lock is held over it. A
+    lease file made after a [false] is not seen: the caller reads no owner and
+    answers that once that nobody holds the BasePath
+    ({!Server_upgrade_preparation.holder}). The next ask finds the file. *)
 
 (** {1 The port announcements}
 

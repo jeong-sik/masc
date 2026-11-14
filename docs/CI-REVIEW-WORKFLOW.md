@@ -196,14 +196,19 @@ inside the timed alias. These per-test aliases have existed since Dune
 [Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
 For a Python suite declared as
 `(rule (alias runtest-NAME) (deps ...) (action ...))`, the runner reads that
-rule's `(deps ...)` and any `%{exe:...}` its action names, and builds those
-before the alias timeout starts; the alias itself still runs inside the timeout.
+rule's `(deps ...)` and any `%{exe:...}` or `%{dep:...}` its action names, and
+builds those before the alias timeout starts; the alias itself still runs inside
+the timeout.
 A suite whose body really hangs therefore still ends as `TIMEOUT`, and one whose
 body only needed compiling reaches `Ran N tests` instead of spending the whole
 budget on the build. If the reader fails, the run names the alias, prints the
-reason and falls back to building the alias inside its budget.
+reason and falls back to building the alias inside its budget. A name that no
+rule carries is such a failure; it is not read as a rule without deps. If the
+preparation build itself fails, the run ends non-zero and every alias still
+runs inside its own budget.
 To check this runner boundary without an OCaml build, run
 `python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
+The Test workflow runs it after checkout, before the toolchain is set up.
 Its shell-runner fixture substitutes the build command; it is not a product
 test result. Keep this focused CI self-check separate from product behavior
 suites. The RC nightly cut gate has the same shape of suite: run

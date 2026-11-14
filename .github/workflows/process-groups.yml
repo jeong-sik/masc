@@ -35,10 +35,11 @@ jobs:
         with:
           install-flags: --with-test
       - name: Build lifecycle suites
-        run: opam exec -- dune build test/test_posix_spawn_process_mgr.exe test/test_process_eio_coverage.exe
+        run: opam exec -- dune build test/test_posix_spawn_process_mgr.exe test/test_process_eio_coverage.exe test/test_spawn_descriptor_mapping.exe
       - name: Run native and Unix fallback lifecycle suites
         env:
           ALCOTEST_VERBOSE: '1'
         run: |
           _build/default/test/test_posix_spawn_process_mgr.exe
           _build/default/test/test_process_eio_coverage.exe
+          _build/default/test/test_spawn_descriptor_mapping.exe

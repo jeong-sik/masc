@@ -54,10 +54,11 @@ let test_actual_package_requires_both_routes () =
 let test_invalid_configuration_and_deselection_are_distinct () =
   let issue : Lane_addon_config.issue =
     {source_path="/memory-test/broken.toml";id=None;message="invalid declaration"} in
-  let declarations={ (snapshot []) with complete=false;issues=[issue] } in
+  let declarations={ (snapshot []) with complete=false;issues=[issue];paths=[issue.source_path] } in
   let values=A.observe ~setting:Env_config_keeper.KeeperMemoryOs.Enabled
       ~declarations ~route:(fun _ -> fail "unreadable configuration admitted a route") ~mode:A.Preflight in
-  unavailable (A.Configuration_unreadable [issue]) (state C.Admission values);
+  unavailable (A.Configuration_unreadable [{source=A.Declaration_file "broken.toml";issue}])
+    (state C.Admission values);
   let deselected=declaration ~extra:"exact_outputs=[]" () in
   unavailable (A.Output_not_selected "durable")
     (state C.Durable (observe ~mode:A.Preflight [deselected]));
@@ -91,7 +92,21 @@ let test_real_manifest_parse_error_stays_in_authenticated_diagnostics () =
     let operation=member "operations" public |> Yojson.Safe.Util.to_list |> List.hd in
     let issue=member "detail" operation |> Yojson.Safe.Util.to_list |> List.hd in
     check string "public failure retains the declaration identity" "unrelated" (text "installation_id" issue);
-    check string "public failure is a fixed category" "declaration_unavailable" (text "reason" issue))
+    check string "public failure is a fixed category" "declaration_unavailable" (text "reason" issue);
+    check string "public failure names the declaration file inside the Lane directory" "unrelated.toml"
+      (text "declaration_file" issue);
+    (* A Lane directory that cannot be listed has no file to name. *)
+    let unlistable=Filename.concat root "not-a-directory" in
+    write unlistable "a file";
+    let public=A.observe ~setting:Env_config_keeper.KeeperMemoryOs.Enabled
+      ~declarations:(Lane_addon_config.load ~directory:unlistable)
+      ~route:(fun _ -> fail "invalid configuration cannot admit routes") ~mode:A.Preflight |> A.to_json in
+    check bool "private source paths are not public health" false
+      (Astring.String.is_infix ~affix:root (Yojson.Safe.to_string public));
+    let issue=member "operations" public |> Yojson.Safe.Util.to_list |> List.hd
+      |> member "detail" |> Yojson.Safe.Util.to_list |> List.hd in
+    check string "a directory failure says so" "lane_directory" (text "source" issue);
+    check bool "and names no file" true (member "declaration_file" issue = `Null))
 
 let test_starting_failed_and_conflict_are_not_absent () =
   let d=declaration () in

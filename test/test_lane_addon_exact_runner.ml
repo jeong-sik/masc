@@ -197,9 +197,8 @@ let test_original_response_observations_are_bound_to_each_visit () =
           if key="response_observations" then None
           else Some (key,if key="version" then `Int 1 else value)) fields)
       | _ -> fail "original receipt is not an object" in
-    let old=match Receipt.of_json legacy with Ok old -> old | Error detail -> fail detail in
-    check bool "v1 remains v1 and has no invented observations" true
-      (Receipt.response_observations old=None && Yojson.Safe.equal (Receipt.to_json old) legacy);
+    check bool "a version 1 receipt is refused, since no proof holds one" true
+      (Result.is_error (Receipt.of_json legacy));
     let change_observations f = match wire with
       | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
           key,if key="response_observations" then f value else value) fields)
@@ -236,7 +235,7 @@ let test_original_response_observations_are_bound_to_each_visit () =
     let float_ordinal=first_attempt (change_field "visit" (change_field "ordinal" (fun _ -> `Float 1.0))) in
     List.iter (fun original -> List.iter (fun alter ->
       check bool "integer fields refuse integral JSON floats" true (Result.is_error (Receipt.of_json (alter original))))
-      [float_version;float_dispatch;float_ordinal]) [legacy;wire];
+      [float_version;float_dispatch;float_ordinal]) [wire];
     let float_observation=change_observations (function
       | `List (first::rest) -> `List (change_field "visit" (change_field "ordinal" (fun _ -> `Float 1.0)) first::rest)
       | _ -> fail "actual observations are missing") in
@@ -1413,7 +1412,7 @@ let test_cli_stop_before_dispatch_receipt () =
   let module Receipt = Keeper_exact_walk_receipt in
   let failed=Keeper_lane_cli_oneshot.Unknown_runtime {runtime_id="unresolved"} in
   let make ~visited ~dispatched ~stopped =
-    Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli:["unresolved";"stopped";"later"]
+    Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:["unresolved";"stopped";"later"]
       ~http:(Receipt.http_not_started ~detail:"explicit synthetic CLI trace")
       ~cli:(Receipt.cli ~visited ~dispatched ~failures:[failed] ~result:(Receipt.Stopped_before_dispatch stopped)) in
   (match make ~visited:["unresolved";"stopped"] ~dispatched:[] ~stopped:"stopped" with
@@ -1534,7 +1533,7 @@ let test_original_undispatched_cli_visit_order () =
     ["unresolved-b";"unresolved-a"] in
   let cli=Receipt.cli ~visited:["unresolved-b";"unresolved-a"] ~dispatched:[]
     ~failures ~result:Receipt.Exhausted in
-  let original=match Receipt.make ~declared_http:[] ~excluded_http:[]
+  let original=match Receipt.make_v2 ~declared_http:[] ~excluded_http:[]
       ~declared_cli:["unresolved-a";"unresolved-b"]
       ~http:(Receipt.http_not_started ~detail:"explicit synthetic CLI trace") ~cli with
     | Ok receipt -> receipt | Error detail -> fail detail in
@@ -1601,6 +1600,20 @@ let test_a_settled_curator_original_leaves_its_exact_files_to_the_sweep () =
       (Result.is_error (sweep ~store curator_package));
     check (pair int int) "a refused sweep deletes nothing" (1,2) (files records,files links);
     Sys.remove misnamed;
+    let stored=Filename.concat link_dir link in
+    let wire=In_channel.with_open_bin stored In_channel.input_all in
+    let renamed=match Yojson.Safe.from_string wire with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,match key,value with
+          | "executions",`List (`Assoc first::rest) ->
+            `List (`Assoc (List.map (fun (key,value) ->
+              key,if key="digest" then `String (String.make 64 'f') else value) first)::rest)
+          | _ -> value) fields)
+      | _ -> fail "an execution link is an object" in
+    Out_channel.with_open_bin stored (fun channel ->
+      Out_channel.output_string channel (Yojson.Safe.to_string renamed));
+    check bool "a link whose first proof names another digest refuses the sweep" true
+      (Result.is_error (sweep ~store curator_package));
+    Out_channel.with_open_bin stored (fun channel -> Out_channel.output_string channel wire);
     let settled=swept curator_package in
     check (pair int int) "the sweep deletes the unowned link and record" (1,1)
       (settled.removed_proofs,settled.removed_exact_records);

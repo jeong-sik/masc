@@ -114,6 +114,14 @@ jobs:
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
 
+      # The targeted runner and its stanza reader decide which suites the Test
+      # step below builds and what a failed preparation means. Their boundary
+      # suite stubs opam and timeout, builds nothing and takes a few seconds,
+      # so it runs here, before the toolchain is set up: a run whose runner
+      # fails its own check stops before it reports a suite verdict.
+      - name: Check the targeted runner boundary
+        run: python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py
+
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 

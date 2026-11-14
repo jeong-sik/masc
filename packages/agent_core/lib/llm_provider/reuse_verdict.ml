@@ -47,8 +47,8 @@ let persistent ~request_headers response =
     || Option.is_some (Http.Header.get response_headers "upgrade")
     || header_has_token response_headers "connection" "upgrade"
   in
-  (* cohttp returns the first status line it reads and does not skip an
-     interim 1xx response, so the final response is still on the connection. *)
+  (* An interim 1xx response is not the final one: the final response that
+     follows it is still on the connection. *)
   let is_interim = status >= 100 && status < 200 in
   let response_has_no_body = status = 204 || status = 304 in
   let response_framing =

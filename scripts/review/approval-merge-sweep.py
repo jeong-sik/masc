@@ -41,6 +41,11 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         number isDraft mergeable isCrossRepository
         baseRefName headRefName headRefOid
+        statusCheckRollup { state }
+        files(first: 100) {
+          totalCount
+          nodes { path }
+        }
         autoMergeRequest { enabledAt }
         latestOpinionatedReviews(first: 20) {
           nodes { state author { login } commit { oid } }
@@ -192,12 +197,32 @@ def clean_branches(repo, started, dry_run):
     return record
 
 
+DECISIVE_CHECK_FAILURES = frozenset({'FAILURE', 'ERROR'})
+
+
 def ready(row):
     """Two accounts approve the current head and nothing certainly blocks it."""
     reviews = row['latestOpinionatedReviews']['nodes']
     approvers = {review['author']['login'] for review in reviews
                  if review['state'] == 'APPROVED' and review['author'] is not None and
                  review['commit'] is not None and review['commit']['oid'] == row['headRefOid']}
+    # A completed FAILURE or ERROR check is a merge refusal GitHub has
+    # already decided; selecting the pull request again spends a worker run
+    # on the same answer every 30 minutes (#51479 family 1). Pending and
+    # expected rolls stay selectable — the worker still holds on them, but a
+    # later run can see them pass without new evidence.
+    if any(check.get('state') in DECISIVE_CHECK_FAILURES
+           for check in row.get('statusCheckRollup') or []):
+        return False
+    # Workflow-file pull requests cannot be merged by this token at all
+    # (#51452 family 3): GitHub refuses the arming itself, and only the human
+    # merge path owns them. Selecting one again spends a worker run on the
+    # same refusal every 30 minutes. The listing is capped at 100 paths; a
+    # truncated scope falls through and the worker's distinct refusal answer
+    # still records the case.
+    if any((changed.get('path') or '').startswith('.github/workflows/')
+           for changed in (row.get('files', {}).get('nodes') or [])):
+        return False
     return (row['isDraft'] is False and not row['headRefName'].startswith('release/') and
             row['mergeable'] != 'CONFLICTING' and len(approvers) >= REQUIRED_APPROVALS and
             not any(review['state'] == 'CHANGES_REQUESTED' for review in reviews))
@@ -274,7 +299,10 @@ def main():
         return 1
     report.update(open=len(rows), candidates=candidates, runs=[], not_reached=[])
     worker = Path(__file__).with_name('approval-auto-merge.py')
-    environment = dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', DISPATCH_RECEIPT='')
+    environment = dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', DISPATCH_RECEIPT='',
+                       # The worker's kill budget, so its cleanup keeps a
+                       # reserve inside it (#51479 family 2).
+                       DISPATCH_WORKER_BUDGET_SECONDS=str(WORKER_TIMEOUT_SECONDS))
     environment.pop('GITHUB_STEP_SUMMARY', None)  # one summary for the sweep, not one per run
     stop = 'dry run' if dry_run else None
     for number in candidates:

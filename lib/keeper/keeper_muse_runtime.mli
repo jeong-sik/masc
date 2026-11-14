@@ -68,6 +68,7 @@ val run :
   base_path:string ->
   outbox_viewer:Keeper_client_tool_outbox.viewer ->
   workspace_root:string ->
+  ?workspace_origin:Runtime_muse_serve.workspace_origin ->
   ?native_workspace_context:string ->
   goal:string ->
   goal_blocks:Agent_core.Types.content_block list option ->
@@ -114,6 +115,10 @@ val run :
 (** Inference values and [quota_scope] come from the selected runtime snapshot;
     this adapter does not re-resolve its id after hooks or effects.
     [workspace_root] is an explicitly selected absolute native directory.
+    [workspace_origin] says what MASC knows of it and defaults to
+    {!Runtime_muse_serve.other_tree}; only a [Masc_private] workspace can have
+    its host started to connect the MASC tools
+    ({!Runtime_muse_serve.trusts_workspace}).
     The caller owns selecting the Keeper's workspace and authorizing its
     account: [account] is the declared home the access allowed for this
     attempt. The adapter prepares a managed profile and credential generation

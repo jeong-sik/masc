@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 //
-// jest-axe coverage for VirtualList. Two render paths: below-threshold
-// (≤40 items, no virtualization, plain pass-through) and
+// jest-axe coverage for VirtualList. Two layouts of the same DOM:
+// below-threshold (≤40 items, every row drawn in normal flow) and
 // above-threshold (windowed render with translateY offset). Both
 // must axe-clean — virtualized rendering must not break list semantics
 // for AT (rows still discoverable in the DOM, even if windowed).
@@ -35,6 +35,7 @@ describe('VirtualList a11y', () => {
           itemHeight=${24}
           renderItem=${renderItem}
           getKey=${(x: string) => x}
+          scrollBox="self"
         />
       </div>`,
       container,
@@ -51,6 +52,7 @@ describe('VirtualList a11y', () => {
           itemHeight=${20}
           renderItem=${renderItem}
           getKey=${(x: string) => x}
+          scrollBox="self"
         />
       </div>`,
       container,
@@ -68,6 +70,7 @@ describe('VirtualList a11y', () => {
           overscan=${3}
           renderItem=${renderItem}
           getKey=${(x: string) => x}
+          scrollBox="self"
         />
       </div>`,
       container,
@@ -83,6 +86,7 @@ describe('VirtualList a11y', () => {
           itemHeight=${24}
           renderItem=${renderItem}
           getKey=${(x: string) => x}
+          scrollBox="self"
         />
       </div>`,
       container,
@@ -104,6 +108,7 @@ describe('VirtualList a11y', () => {
             estimatedItemHeight=${24}
             renderItem=${dynamicRenderItem}
             getKey=${(x: string) => x}
+            scrollBox="self"
           />
         </div>`,
         container,
@@ -121,6 +126,7 @@ describe('VirtualList a11y', () => {
             overscan=${3}
             renderItem=${dynamicRenderItem}
             getKey=${(x: string) => x}
+            scrollBox="self"
           />
         </div>`,
         container,

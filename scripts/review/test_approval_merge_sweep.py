@@ -56,6 +56,31 @@ class Selection(unittest.TestCase):
                 refused, row(9, isCrossRepository=True)]
         self.assertEqual(SWEEP.select(rows, never), [])
 
+    def test_a_decisively_failed_check_stops_repeated_entry(self):
+        failed = row(11, statusCheckRollup=[{'state': 'FAILURE'}])
+        errored = row(12, statusCheckRollup=[{'state': 'SUCCESS'}, {'state': 'ERROR'}])
+        self.assertEqual(SWEEP.select([failed, errored], never), [])
+
+    def test_a_pending_or_expected_rollup_stays_selectable(self):
+        pending = row(13, statusCheckRollup=[{'state': 'PENDING'}])
+        expected = row(14, statusCheckRollup=[{'state': 'EXPECTED'}])
+        passed = row(15, statusCheckRollup=[{'state': 'SUCCESS'}])
+        self.assertEqual(SWEEP.select([pending, expected, passed], never), [13, 14, 15])
+
+    def test_a_row_without_a_rollup_stays_selectable(self):
+        self.assertEqual(SWEEP.select([row(1)], never), [1])
+
+    def test_a_workflow_file_pull_request_is_left_to_the_human_path(self):
+        touched = row(16, files={'totalCount': 1,
+                                 'nodes': [{'path': '.github/workflows/ci.yml'}]})
+        source = row(17, files={'totalCount': 1,
+                                'nodes': [{'path': 'lib/keeper/keeper_loop.ml'}]})
+        self.assertEqual(SWEEP.select([touched, source], never), [17])
+
+    def test_a_truncated_workflow_listing_falls_through_to_the_worker(self):
+        truncated = row(18, files={'totalCount': 300, 'nodes': []})
+        self.assertEqual(SWEEP.select([truncated], never), [18])
+
     def test_a_reserved_pull_request_is_left_to_github(self):
         self.assertEqual(SWEEP.select([row(1, autoMergeRequest={'enabledAt': 't'})], never), [])
 
@@ -251,6 +276,22 @@ class Sweeping(unittest.TestCase):
         spec.loader.exec_module(worker)
         self.assertEqual(SWEEP.QUOTA_EXIT, worker.QUOTA_EXIT)
         self.assertEqual(SWEEP.REQUIRED_APPROVALS, worker.REQUIRED_APPROVALS)
+
+    def test_the_worker_run_carries_its_kill_budget(self):
+        seen = {}
+        def run(command, **kwargs):
+            seen.update(kwargs['env'])
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(SWEEP, 'open_pulls', return_value=[row(1)]), \
+             patch.object(SWEEP, 'quota', return_value=None), \
+             patch.object(SWEEP, 'clean_branches', return_value={'found': 0}), \
+             patch.object(SWEEP.subprocess, 'run', side_effect=run), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}), \
+             patch.object(SWEEP.sys, 'argv', ['sweep']), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(SWEEP.main(), 0)
+        self.assertEqual(seen.get('DISPATCH_WORKER_BUDGET_SECONDS'),
+                         str(SWEEP.WORKER_TIMEOUT_SECONDS))
 
 
 if __name__ == '__main__':

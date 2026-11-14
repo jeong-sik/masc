@@ -109,28 +109,26 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
         | Some state -> (Mcp_server.workspace_config state).base_path
         | None -> Server_mcp_transport_http.default_base_path ());
     get_server_state = current_server_state_opt;
+    (* HIGH-RISK-UNREVIEWED: the four verdicts below are passed on as they
+       are; only the error is mapped to the transport's failure (#51752). *)
     verify_mcp_auth =
       (fun ~base_path request ->
         verify_mcp_auth ~base_path request
-        |> Result.map (fun _ -> ())
         |> Result.map_error
              Server_mcp_transport_http_types.auth_failure_of_masc_error);
     verify_mcp_observer_stream_auth =
       (fun ~base_path request ->
         verify_mcp_observer_stream_auth ~base_path request
-        |> Result.map (fun _ -> ())
         |> Result.map_error
              Server_mcp_transport_http_types.auth_failure_of_masc_error);
     verify_operator_mcp_auth =
       (fun ~base_path request ->
         verify_operator_mcp_auth ~base_path request
-        |> Result.map (fun _ -> ())
         |> Result.map_error
              Server_mcp_transport_http_types.auth_failure_of_masc_error);
     verify_seat_mcp_auth =
       (fun ~base_path request ->
         verify_seat_mcp_auth ~base_path request
-        |> Result.map (fun _ -> ())
         |> Result.map_error
              Server_mcp_transport_http_types.auth_failure_of_masc_error);
   }

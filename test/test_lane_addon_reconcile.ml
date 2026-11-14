@@ -397,6 +397,38 @@ let test_install_idempotence_rename_and_public_detach () =
     check int "removed declaration is not silently reattached" 1 (List.length (starts state));
     check (list string) "owned worker stopped exactly once" [id] (stops state))
 
+(* Detach deletes the declaration that wanted the worker. The reply says so and
+   names the file, and a Detach that leaves the directory alone says that too. *)
+let test_detach_reply_names_the_declaration_it_removed () =
+  with_fixture (fun env _ config directory packages _ ->
+    let clock = Eio.Stdenv.clock env in
+    let manifest = package packages "ready" in
+    let path = Filename.concat directory "observer.toml" in
+    let bytes = declaration ~id:"observer" ~manifest () in
+    write path bytes;
+    ignore (reconcile config directory);
+    let first = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config first;
+    let reply = dispatch config Runtime.Detach ["instance_id", `String first] in
+    check string "the reply says the declaration was removed" "removed"
+      (reply |> member "declaration" |> text "outcome");
+    check string "the reply names the deleted file" path
+      (reply |> member "declaration" |> text "path");
+    check bool "that file is gone" false (Sys.file_exists path);
+    await_detached clock config first;
+    write path bytes;
+    ignore (reconcile config directory);
+    let second = declared_instance config "observer" |> text "instance_id" in
+    await_ready clock config second;
+    let repeated = dispatch config Runtime.Detach ["instance_id", `String first] in
+    check string "a repeated Detach of the ended instance keeps the declaration" "kept"
+      (repeated |> member "declaration" |> text "outcome");
+    check string "and says why" "instance_already_detached"
+      (repeated |> member "declaration" |> text "reason");
+    check string "the new instance's declaration is untouched" bytes
+      (In_channel.with_open_bin path In_channel.input_all);
+    detach clock config second)
+
 let test_changed_binding_retires_before_replacement () =
   with_fixture (fun env _ config directory packages state ->
     let clock = Eio.Stdenv.clock env in
@@ -2143,6 +2175,8 @@ let test_inventory_keeps_the_original_application_observation () =
     check bool "metadata reading starts and stops no worker" true (!(state.events)=before))
 
 let () = run "Lane Add-on TOML reconciliation" ["declarative optional extension", [
+  test_case "Detach reply names the declaration file it removed" `Quick
+    test_detach_reply_names_the_declaration_it_removed;
   test_case "inventory keeps original reconciled application" `Quick test_inventory_keeps_the_original_application_observation;
   test_case "persistent runtime switch preserves old state and requires new installation" `Quick
     test_persistent_runtime_switch_requires_new_installation;

@@ -15,6 +15,9 @@ not run, because its verdicts look real.
     stanza_env.py <suite>          KEY=VALUE per line, for `env`
     stanza_env.py --deps <suite>   dune targets to build first, from the root
     stanza_env.py --action-alias <suite>   custom named-test action alias, if any
+    stanza_env.py --alias-deps <suite>     dune targets the rule carrying
+                                           (alias runtest-<suite>) needs built;
+                                           exit 1 when no rule carries it
 
 The action-alias query does not evaluate an action's variables or arguments.
 Dune 3.20+ generates runtest-NAME for named tests; the repository requires 3.22.
@@ -309,11 +312,12 @@ def collect_rule_alias_deps(text: str, alias: str, suite_dir: str) -> list[str] 
             [field for field in form[1:] if isinstance(field, list) and field and field[0] == "deps"],
             suite_dir,
         )
-        # %{exe:PATH} inside the action is a build target as well, and six
-        # rules declare no (deps ...) at all -- they name only the executable
-        # the action runs. Without these the alias still compiles inside the
-        # budget, which is the outcome this reader exists to prevent.
-        for path in _exe_targets(form):
+        # %{exe:PATH} and %{dep:PATH} inside the action are build targets as
+        # well, and some rules declare no (deps ...) at all -- they name the
+        # binary only where the action passes it. Without these the alias
+        # still compiles inside the budget, which is the outcome this reader
+        # exists to prevent.
+        for path in _action_targets(form):
             target = literal_target(path, suite_dir)
             if target is not None and target not in deps:
                 deps.append(target)
@@ -321,12 +325,16 @@ def collect_rule_alias_deps(text: str, alias: str, suite_dir: str) -> list[str] 
     return None
 
 
-def rule_alias_deps(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> list[str]:
+def rule_alias_deps(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> list[str] | None:
     """Find the rule that declares runtest-SUITE anywhere the dune file includes.
 
     A per-suite include is read first, then the dune file with every literal
     include it pulls in -- an alias rule is often declared in a shared include
     rather than in a file named after the suite.
+
+    None means no rule carries the alias. That is not the empty list of a rule
+    that needs nothing built: the caller would skip the preparation for both
+    and could not tell a misread name from a rule without deps.
     """
     path = os.path.join(stanza_dir(suite_dir), f"{suite}.inc")
     sources: list[tuple[str, bool]] = []
@@ -340,19 +348,19 @@ def rule_alias_deps(suite: str, suite_dir: str = DEFAULT_SUITE_DIR) -> list[str]
         deps = collect_rule_alias_deps(text, f"runtest-{suite}", suite_dir)
         if deps is not None:
             return deps
-    return []
+    return None
 
 
-def _exe_targets(form) -> list[str]:
-    """Paths named by %{exe:PATH} anywhere in a form."""
+def _action_targets(form) -> list[str]:
+    """Paths named by %{exe:PATH} or %{dep:PATH} anywhere in a form."""
     found: list[str] = []
     if isinstance(form, str):
-        for match in re.finditer(r"%\{exe:([^}]+)\}", form):
+        for match in re.finditer(r"%\{(?:exe|dep):([^}]+)\}", form):
             found.append(match.group(1))
         return found
     if isinstance(form, list):
         for item in form:
-            found.extend(_exe_targets(item))
+            found.extend(_action_targets(item))
     return found
 
 
@@ -562,7 +570,13 @@ def main(argv: list[str]) -> int:
         if want_alias_deps:
             # Same normalisation as --deps: a stanza writes paths relative to
             # its own directory, dune build takes targets from the repo root.
-            for dep in rule_alias_deps(suite, suite_dir):
+            alias_deps = rule_alias_deps(suite, suite_dir)
+            if alias_deps is None:
+                raise StanzaError(
+                    f"no (rule (alias runtest-{suite}) ...) in {suite_dir}/dune, "
+                    f"its includes or {suite_dir}/stanzas/{suite}.inc"
+                )
+            for dep in alias_deps:
                 print(os.path.normpath(os.path.join(suite_dir, dep)))
             return 0
         if want_action_alias:

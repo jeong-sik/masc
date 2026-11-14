@@ -72,8 +72,8 @@ let reconcile_message_seq config path =
        swallow this repo models in TLA+ as CancelledAbsorbed. *)
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception _ ->
-      (* Unreadable state is [read_state]'s to repair; it has the typed
-         recovery and this does not. *)
+      (* Unreadable state is [Workspace_state.update_state]'s to replace; it
+         has the typed recovery and this does not. *)
       ()
     | `Assoc fields as json ->
       (match workspace_state_of_yojson json with

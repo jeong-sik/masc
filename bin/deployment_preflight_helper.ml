@@ -822,25 +822,33 @@ module Tool_request_consumer = Server_tool_request_consumer
 
 (* Each check is the decoding that consumer's own reader applies, so a hard
    cut of its records stops the install instead of stopping that consumer on
-   its first pass after the deploy (#49587). *)
+   its first pass after the deploy (#49587). A Librarian original is also
+   checked against the Exact files its consumer reads. *)
 let validate_tool_request () =
-  let librarian = Masc.Keeper_librarian_store_preflight.validator () in
-  fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution (record : Masc.Lane_addon_tool_request_owner.retained) ->
+  let librarian = Masc.Keeper_librarian_store_preflight.preflight () in
+  let decoded = function
+    | Ok () -> L.Payload_valid
+    | Error detail -> L.Payload_invalid detail
+  in
+  fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
+    (record : Masc.Lane_addon_tool_request_owner.retained) ->
     match Tool_request_consumer.of_scope record.scope with
     | Some (Tool_request_consumer.Librarian (_ : Masc.Keeper_librarian_store_preflight.purpose)) ->
-      librarian ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record
+      librarian ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
+        record
     | Some (Tool_request_consumer.One_scope Tool_request_consumer.Workspace_curator) ->
-      Masc.Workspace_memory_execution_capture.check_retained record
+      decoded (Masc.Workspace_memory_execution_capture.check_retained record)
     | Some (Tool_request_consumer.One_scope Tool_request_consumer.Completion_review) ->
-      Masc.Verifier_review_owner.check_retained record
+      decoded (Masc.Verifier_review_owner.check_retained record)
     | Some (Tool_request_consumer.One_scope Tool_request_consumer.Goal_proof_review) ->
-      Masc.Goal_verifier_worker.check_retained record
+      decoded (Masc.Goal_verifier_worker.check_retained record)
     (* Candle reads its originals back by request ID and decodes nothing of
        the owner record past what the scan's owner reader already checked. *)
-    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Candle_appraisal) -> Ok ()
+    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Candle_appraisal) ->
+      L.Payload_valid
     (* No reader of this build reads this scope, so fresh state deletes it. *)
     | None ->
-      Error
+      L.Payload_invalid
         (Printf.sprintf
            "no consumer of this build reads tool request originals of this scope; with \
             the server stopped, delete the folder %s under tool-request-owners, \
@@ -1060,7 +1068,14 @@ let validate_stores_cmd =
            cmdliner_result
              (if jobs < 1
               then errorf "--jobs must be at least 1, got %d" jobs
-              else validate_stores ~jobs base_path))
+              else
+                (* The scans read the workspace the server serves. The server
+                   resolves its path with [Workspace_root] through symlinks,
+                   and Exact proof links and slot observations name the store
+                   root below it. *)
+                match Workspace_root.resolve_current ~flag:(Some base_path) with
+                | Error error -> errorf "%s" (Workspace_root.error_message error)
+                | Ok workspace -> validate_stores ~jobs workspace.Workspace_root.root))
          $ base_path
          $ scan_jobs))
 ;;

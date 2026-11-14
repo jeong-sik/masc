@@ -11,7 +11,7 @@ let executed outcome =
     | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
     | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
     | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
-  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+  let receipt = match Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli
       ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
       ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
     | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in
@@ -540,70 +540,78 @@ let proof_address original =
   tuple [`String "exact-original-execution";`String declaration_id],
   tuple [`String "original-request";`String original.Exact.request_id;`String (Exact.digest original)]
 
-let test_v1_and_v2_original_proofs_remain_distinct () =
+(* A proof names its request by request_id and digest and holds no request
+   body (RFC exact-request-skips-a-slot-that-refused-its-input, section 3.3).
+   It is read only as version 2, with its integer fields as stored. *)
+let test_a_proof_holds_no_request_body_and_is_read_as_version_2 () =
   with_root (fun root ->
-    let module Receipt=Masc.Keeper_exact_walk_receipt in
     let store=Store.create ~root in
-    let original=request "mixed-version-originals" in
-    let busy=Exact.Provider_unavailable {detail="synthetic first refusal"} in
-    let first,_,_=counting_runner store (ref [Refused busy]) in
-    ignore (run_request store first original);
-    let instance_id,request_id=proof_address original in
-    let read_link ()=Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
-    let prior=match Yojson.Safe.Util.member "executions" (read_link ()) with
-      | `List [one] -> one | _ -> fail "expected one v1 original proof" in
-    let runner ~before_dispatch:_ ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
-      Ok (fun ~validate ->
-        let output=require (validate question) in
-        let cli=Receipt.cli ~visited:["s"] ~dispatched:["s"] ~failures:[] ~result:(Receipt.Answered "s") in
-        let receipt=require (Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:["s"]
-          ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture") ~cli) in
-        {Exact.outcome=Exact.Call_ended (Exact.Answered {output;slot="s";usage=None});receipt}) in
-    check bool "a later v2 fixture publishes the original answer" true
-      (answered_with question (run_request store runner original));
-    (match Yojson.Safe.Util.member "executions" (read_link ()) with
-     | `List [unchanged;newer] ->
-       check bool "earlier v1 proof is preserved exactly" true (Yojson.Safe.equal prior unchanged);
-       check int "earlier receipt remains version 1" 1
-         Yojson.Safe.Util.(unchanged |> member "receipt" |> member "version" |> to_int);
-       check int "later receipt uses version 2" 2
-         Yojson.Safe.Util.(newer |> member "receipt" |> member "version" |> to_int)
-     | _ -> fail "expected both ordered original proofs");
+    let busy=Exact.Provider_unavailable {detail="synthetic refusal"} in
+    let refuse original=
+      let runner,_,_=counting_runner store (ref [Refused busy]) in
+      ignore (run_request store runner original) in
+    let link original=
+      let instance_id,request_id=proof_address original in
+      Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
+    let link_bytes original=
+      let instance_id,request_id=proof_address original in
+      In_channel.with_open_bin
+        (Filename.concat (Store.root store) (Store.host_result_path ~instance_id ~request_id))
+        In_channel.input_all |> String.length in
+    let short=request ~message:"Q" "proof-body-a" in
+    let long=request ~message:(String.make 100_000 'q') "proof-body-b" in
+    refuse short;
+    refuse long;
+    let proofs original=match Yojson.Safe.Util.member "executions" (link original) with
+      | `List proofs -> proofs
+      | _ -> fail "a proof link lists its proofs" in
+    List.iter (fun proof ->
+      check bool "a proof holds no request body" true (Yojson.Safe.Util.member "request" proof=`Null);
+      check int "a proof is version 2" 2 Yojson.Safe.Util.(proof |> member "version" |> to_int))
+      (proofs short @ proofs long);
+    check int "the stored link does not grow with the request body" (link_bytes short) (link_bytes long);
     let reopened=Store.create ~root in
-    (match require (original_execution reopened original),require (original_execution reopened ~attempt_ordinal:2 original) with
-     | Exact.Completed_original {receipt=old;_},Exact.Completed_original {receipt=newer;_} ->
-       check bool "v1 has no invented response observations" true (Receipt.response_observations old=None);
-       check bool "v2 keeps its empty synthetic HTTP walk" true (Receipt.response_observations newer=Some [])
-     | _ -> fail "mixed original proofs did not reopen");
+    check bool "the stored proof reads" true
+      (match original_execution reopened short with
+       | Ok (Exact.Completed_original _) -> true
+       | Ok Exact.No_completed_original | Error _ -> false);
+    let instance_id,request_id=proof_address short in
+    let stored=link short in
+    let unused,sends,_=counting_runner store (ref []) in
+    let refused reason value=
+      require (Store.save_host_result store ~instance_id ~request_id value);
+      check bool reason true (Result.is_error (original_execution reopened short));
+      check bool "and the run stops on it" true
+        (Result.is_error (Exact.run ~authorize_request ~store:reopened ~declaration_id ~package ~runner:unused short)) in
     let replace field transform = function
       | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key=field then transform value else value) fields)
-      | _ -> fail "expected an original proof object" in
-    let original_link=read_link () in
-    let historical_wrapper=original_link |> replace "executions" (function
-      | `List [first;second] -> `List [first
-          |> replace "version" (fun _ -> `Float 1.0)
-          |> replace "attempt_ordinal" (fun _ -> `Float 1.0)
-          |> replace "receipt" (replace "version" (fun _ -> `Float 1.0));second]
-      | _ -> fail "expected mixed original proofs") in
-    require (Store.save_host_result store ~instance_id ~request_id historical_wrapper);
-    check bool "historical v1 wrapper retains its prior canonical reading" true
-      (match original_execution reopened original with Ok (Exact.Completed_original _) -> true
+      | _ -> fail "expected a JSON object" in
+    let first transform=stored |> replace "executions" (function
+      | `List (proof::rest) -> `List (transform proof::rest)
+      | _ -> fail "a proof link lists its proofs") in
+    let other=request ~message:"Another body" short.Exact.request_id in
+    refused "a proof that names another request's digest is refused"
+      (first (replace "digest" (fun _ -> `String (Exact.digest other))));
+    refused "a version 1 proof with its request body is refused" (first (fun proof ->
+      match replace "version" (fun _ -> `Int 1) proof with
+      | `Assoc fields -> `Assoc (("request",Exact.request_to_json short)::fields)
+      | _ -> fail "expected a proof object"));
+    refused "an integral float version is refused" (first (replace "version" (fun _ -> `Float 2.0)));
+    refused "an integral float attempt ordinal is refused"
+      (first (replace "attempt_ordinal" (fun _ -> `Float 1.0)));
+    refused "an integral float receipt version is refused"
+      (first (replace "receipt" (replace "version" (fun _ -> `Float 2.0))));
+    refused "a version 1 receipt is refused" (first (replace "receipt" (function
+      | `Assoc fields -> `Assoc (List.filter_map (fun (key,value) ->
+          if key="response_observations" then None
+          else Some (key,if key="version" then `Int 1 else value)) fields)
+      | _ -> fail "expected a receipt object")));
+    require (Store.save_host_result store ~instance_id ~request_id stored);
+    check bool "the restored proof reads again" true
+      (match original_execution reopened short with
+       | Ok (Exact.Completed_original _) -> true
        | Ok Exact.No_completed_original | Error _ -> false);
-    require (Store.save_host_result store ~instance_id ~request_id original_link);
-    let alter_second transform = original_link |> replace "executions" (function
-      | `List [first;second] -> `List [first;transform second]
-      | _ -> fail "expected mixed original proofs") in
-    let unused,sends,_=counting_runner store (ref []) in
-    List.iter (fun malformed ->
-      require (Store.save_host_result store ~instance_id ~request_id malformed);
-      check bool "stored v2 proof rejects a float before wrapper normalization" true
-        (Result.is_error (original_execution reopened ~attempt_ordinal:2 original));
-      check bool "malformed original proof cannot recover or dispatch" true
-        (Result.is_error (Exact.run ~authorize_request ~store:reopened ~declaration_id ~package ~runner:unused original)))
-      [alter_second (replace "receipt" (replace "version" (fun _ -> `Float 2.0)));
-       alter_second (replace "attempt_ordinal" (fun _ -> `Float 2.0));
-       alter_second (replace "version" (fun _ -> `Float 1.0))];
-    check int "malformed proof caused no new call" 0 !sends)
+    check int "no refused proof sent a call" 0 !sends)
 
 let test_original_execution_is_bound_to_one_attempt () =
   with_root (fun root ->
@@ -1397,12 +1405,12 @@ let test_host_record_hard_cut_and_attempt_order ()=with_root (fun root ->
   let cut=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut) in
   let raised=`Assoc ["status",`String "outcome_unknown";"cause",`String "raised";"exception",`String "original error"] in
   List.iter (fun wire -> check bool "preflight decoder accepts new host attempt shapes" true
-    (Result.is_ok (Exact.check_retained_record wire)))
+    (Result.is_ok (Exact.check_retained_record ~store ~first:wire ~proof:None ~second:wire)))
     [record [other_process_marker] `Null;record [interrupted] unknown;record [cut] unknown;record [raised] unknown];
   let answered=Yojson.Safe.Util.member "final" base in
   List.iter (fun wire ->
     check bool "preflight decoder rejects old or inconsistent attempt evidence" true
-      (Result.is_error (Exact.check_retained_record wire));
+      (Result.is_error (Exact.check_retained_record ~store ~first:wire ~proof:None ~second:wire));
     require (Store.save_exact_request store ~declaration_id ~request_id:original.request_id wire);
     check bool "read-only host observation refuses the same malformed record" true
       (Result.is_error (observe store original)))
@@ -1413,6 +1421,347 @@ let test_host_record_hard_cut_and_attempt_order ()=with_root (fun root ->
      record [`Assoc ["status",`String "outcome_unknown";"cause",`String "raised"]] unknown;
      record [`Assoc ["status",`String "outcome_unknown";"cause",`String "raised";"exception",`String " "]] unknown;
      record [`Assoc ["status",`String "outcome_unknown";"cause",`String "cut";"exception",`String "not raised"]] unknown])
+
+(* The deploy preflight reads a record with its proof link the way [run] does
+   (RFC exact-request-skips-a-slot-that-refused-its-input 3.3). [run] writes
+   each store below the workspace the preflight is pointed at. *)
+module Preflight = Masc.Lane_addon_store_preflight
+module Observation = Masc.Lane_addon_exact_observation
+
+let with_workspace f =
+  let base = Filename.temp_file "lane-exact-preflight-" ".fixture" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree base) (fun () ->
+    Eio_main.run (fun _env ->
+      (* The store creates its own root, not the workspace's .masc directory
+         above it. *)
+      let masc_dir = Common.masc_dir_from_base_path ~base_path:base in
+      Unix.mkdir masc_dir 0o700;
+      let root = Store.directory ~masc_dir in
+      f ~base (Store.create ~root)))
+
+let answered store id =
+  let original = request id in
+  let runner,_,_ = counting_runner store (ref [Answer question]) in
+  ignore (run_request store runner original);
+  original
+
+let record_file store original =
+  Filename.concat (Store.root store)
+    (Store.exact_request_path ~declaration_id ~request_id:original.Exact.request_id)
+
+let link_file store original =
+  let instance_id,request_id = proof_address original in
+  Filename.concat (Store.root store) (Store.host_result_path ~instance_id ~request_id)
+
+let read_bytes path = In_channel.with_open_bin path In_channel.input_all
+let write_bytes path bytes = Out_channel.with_open_bin path (fun out -> output_string out bytes)
+
+let preflight ?(after_read=ignore) base =
+  match Preflight.For_testing.scan ~after_read Preflight.Store.Exact_requests ~base_path:base with
+  | Ok report -> report
+  | Error detail -> fail detail
+
+let refused (report : Preflight.report) =
+  List.map (fun (refusal : Preflight.refusal) -> refusal.path, refusal.delete) report.Preflight.refusals
+
+let readers (report : Preflight.report) =
+  List.map (fun (refusal : Preflight.refusal) -> Preflight.decoder_name refusal.decoder) report.Preflight.refusals
+
+let test_preflight_deletes_a_refused_record_with_its_link_and_observations () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-refused" in
+    ignore (answered store "preflight-kept");
+    let link = link_file store original in
+    let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file link) with
+      | `List [proof] -> proof
+      | _ -> fail "expected one original proof" in
+    require (Observation.retain ~store ~declaration_id ~request_id:original.Exact.request_id
+      ~attempt_ordinal:1 ~proof []);
+    let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+    let observed = Sys.readdir observations |> Array.to_list |> List.map (Filename.concat observations) in
+    let record = record_file store original in
+    (* An old null marker: [run] refuses the record, whose ids stay readable. *)
+    (match Yojson.Safe.from_file record with
+     | `Assoc fields ->
+       Yojson.Safe.to_file record
+         (`Assoc (("attempts",`List [`Null])::("final",`Null)::
+                  (fields |> List.remove_assoc "attempts" |> List.remove_assoc "final")))
+     | _ -> fail "original Exact object expected");
+    let report = preflight base in
+    check int "both records and the observation file are read" 3 report.Preflight.rows;
+    check (list (pair string (list string))) "fresh state deletes the record with its link and observation"
+      [record, record :: link :: observed] (refused report);
+    check (list string) "the record reader refuses it"
+      [Preflight.decoder_name Preflight.Exact_record] (readers report))
+
+(* A version 1 proof holds its request body. [run] refuses to read it, so
+   the preflight refuses its record with the proof and the request's slot
+   observations (RFC exact-request-skips-a-slot-that-refused-its-input,
+   sections 5 and 6). *)
+let test_preflight_refuses_a_record_with_a_version_1_proof () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-version-1" in
+    let link = link_file store original in
+    let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file link) with
+      | `List [proof] -> proof
+      | _ -> fail "expected one original proof" in
+    require (Observation.retain ~store ~declaration_id ~request_id:original.Exact.request_id
+      ~attempt_ordinal:1 ~proof []);
+    let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+    let observed = Sys.readdir observations |> Array.to_list |> List.map (Filename.concat observations) in
+    let version_1 = function
+      | `Assoc entry ->
+        `Assoc (("request",Exact.request_to_json original)
+                :: List.map (fun (name,value) ->
+                    if String.equal name "version" then name,`Int 1 else name,value) entry)
+      | _ -> fail "original proof object expected" in
+    (match Yojson.Safe.from_file link with
+     | `Assoc fields ->
+       Yojson.Safe.to_file link (`Assoc (List.map (fun (name,value) -> match name,value with
+         | "executions",`List entries -> name,`List (List.map version_1 entries)
+         | _ -> name,value) fields))
+     | _ -> fail "original execution link object expected");
+    let record = record_file store original in
+    let report = preflight base in
+    check (list (pair string (list string))) "fresh state deletes the record with its proof and observation"
+      [record, record :: link :: observed] (refused report);
+    check (list string) "the record reader refuses it"
+      [Preflight.decoder_name Preflight.Exact_record] (readers report))
+
+(* A proof of attempt 2 in a link whose record holds attempt 1 only. *)
+let renumbered link = match Yojson.Safe.from_file link with
+  | `Assoc fields ->
+    let renumber = function
+      | `Assoc entry -> `Assoc (List.map (fun (name,value) ->
+          if String.equal name "attempt_ordinal" then name,`Int 2 else name,value) entry)
+      | entry -> entry in
+    Yojson.Safe.to_file link (`Assoc (List.map (fun (name,value) -> match name,value with
+      | "executions",`List entries -> name,`List (List.map renumber entries)
+      | _ -> name,value) fields))
+  | _ -> fail "original execution link object expected"
+
+let test_preflight_reads_the_proof_link_with_its_record () =
+  List.iter (fun (label,damage,at_link,decoder) -> with_workspace (fun ~base store ->
+    let original = answered store "preflight-link" in
+    let record = record_file store original and link = link_file store original in
+    damage link;
+    let report = preflight base in
+    check (list (pair string (list string))) label
+      [(if at_link then link else record), [record; link]] (refused report);
+    check (list string) (label ^ ": refusing reader") [Preflight.decoder_name decoder] (readers report)))
+    [ "a link that is not JSON is refused with its record",(fun link -> write_bytes link "{"),true,Preflight.Json
+    ; "a proof of an attempt the record lacks refuses the record with its link",renumbered,false,Preflight.Exact_record ]
+
+let test_preflight_refuses_a_misfiled_record_alone () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-filed" in
+    let record = record_file store original in
+    let misfiled = Filename.concat (Store.root store)
+        (Store.exact_request_path ~declaration_id ~request_id:"preflight-elsewhere") in
+    write_bytes misfiled (read_bytes record);
+    let report = preflight base in
+    check int "both files are read" 2 report.Preflight.rows;
+    check (list (pair string (list string))) "a record under another request's key is deleted alone"
+      [misfiled, [misfiled]] (refused report))
+
+let test_preflight_refuses_a_link_no_record_names () =
+  with_workspace (fun ~base store ->
+    let orphaned = answered store "preflight-orphaned" in
+    ignore (answered store "preflight-named");
+    let link = link_file store orphaned in
+    Sys.remove (record_file store orphaned);
+    let report = preflight base in
+    check (list (pair string (list string))) "the link without its record is deleted alone"
+      [link, [link]] (refused report);
+    check (list string) "no record names it"
+      [Preflight.decoder_name Preflight.Exact_proof_link] (readers report))
+
+let test_preflight_skips_an_unnamed_link_removed_before_it_is_refused () =
+  with_workspace (fun ~base store ->
+    let orphaned = answered store "preflight-orphan-removed" in
+    let kept = answered store "preflight-orphan-kept" in
+    let link = link_file store orphaned and record = record_file store kept in
+    Sys.remove (record_file store orphaned);
+    (* The kept record is read, read again with its link, and read a third
+       time after the links are listed. *)
+    let reads = ref 0 in
+    let after_read path =
+      if String.equal path record then (
+        incr reads;
+        (* The server removes the unnamed link after the check listed it. *)
+        if !reads = 3 then Sys.remove link) in
+    let report = preflight ~after_read base in
+    check int "the kept record is read before and after the links are listed" 3 !reads;
+    check (list (pair string (list string))) "the removed link is not named" [] (refused report))
+
+(* One request id answered for two bodies, so two digests and two links. The
+   record and link of the second body are kept as bytes and removed, so the
+   store holds the first body's record and link. *)
+let rewritten store id =
+  let other = request ~message:"Write another question." id in
+  let runner,_,_ = counting_runner store (ref [Answer question]) in
+  ignore (run_request store runner other);
+  let record = record_file store other and other_link = link_file store other in
+  let other_record = read_bytes record and other_link_bytes = read_bytes other_link in
+  Sys.remove record;
+  Sys.remove other_link;
+  let original = answered store id in
+  record, link_file store original, other_record, other_link, other_link_bytes
+
+let test_preflight_reads_a_kept_record_again_for_its_new_link () =
+  with_workspace (fun ~base store ->
+    let record, link, other_record, other_link, other_link_bytes =
+      rewritten store "preflight-rewritten-kept" in
+    (* The check binds the record to its link. Then the startup sweep removes
+       the link and the server writes the request again with another body. *)
+    let reads = ref 0 in
+    let after_read path =
+      if String.equal path record then (
+        incr reads;
+        if !reads = 2 then (
+          Sys.remove link;
+          write_bytes record other_record;
+          write_bytes other_link other_link_bytes)) in
+    let report = preflight ~after_read base in
+    check int "the record is read before and after the links are listed" 3 !reads;
+    check (list (pair string (list string))) "the record read again names its new link" []
+      (refused report))
+
+let test_preflight_lets_no_refused_record_keep_a_link () =
+  with_workspace (fun ~base store ->
+    let record, link, other_record, other_link, other_link_bytes =
+      rewritten store "preflight-rewritten-refused" in
+    (* The startup sweep removes the link and the server writes the request
+       again with another body, after the check first read the record. The
+       second read then holds another request, so the record is refused. *)
+    let rewrote = ref false in
+    let after_read path =
+      if String.equal path record && not !rewrote then (
+        rewrote := true;
+        Sys.remove link;
+        write_bytes record other_record;
+        write_bytes other_link other_link_bytes) in
+    let report = preflight ~after_read base in
+    check bool "the server wrote during the check" true !rewrote;
+    check (list (pair string (list string))) "fresh state deletes the record and the link it leaves"
+      [record, [record]; other_link, [other_link]] (refused report))
+
+let test_preflight_names_a_link_written_after_the_listing () =
+  with_workspace (fun ~base store ->
+    let listed = answered store "preflight-listed" in
+    let later = request "preflight-later" in
+    let runner,_,_ = counting_runner store (ref [Answer question]) in
+    let record = record_file store listed in
+    (* The server answers another request after the check listed the records
+       and before it lists the proof links. *)
+    let wrote = ref false in
+    let after_read path =
+      if String.equal path record && not !wrote then (
+        wrote := true;
+        ignore (run_request store runner later)) in
+    let report = preflight ~after_read base in
+    check bool "the server wrote during the check" true !wrote;
+    check bool "the later request has its link" true (Sys.file_exists (link_file store later));
+    check (list (pair string (list string))) "the record listed again names the later link" []
+      (refused report))
+
+let test_preflight_names_only_the_files_left_when_it_refuses () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-removed" in
+    let record = record_file store original and link = link_file store original in
+    renumbered link;
+    (* The server removes the link after the check read it and before the
+       check refuses the record. *)
+    let removed = ref false in
+    let after_read path =
+      if String.equal path link && not !removed then (
+        removed := true;
+        Sys.remove link) in
+    let report = preflight ~after_read base in
+    check bool "the link was removed during the check" true !removed;
+    check (list (pair string (list string))) "fresh state names the record alone"
+      [record, [record]] (refused report))
+
+let test_preflight_refuses_a_slot_observation_the_sweep_cannot_read () =
+  with_workspace (fun ~base store ->
+    ignore (answered store "preflight-observed");
+    let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+    Unix.mkdir observations 0o700;
+    let unreadable = Filename.concat observations "unreadable.json" in
+    write_bytes unreadable {|{"version":1}|};
+    let report = preflight base in
+    check (list (pair string (list string))) "the observation file is deleted alone"
+      [unreadable, [unreadable]] (refused report);
+    check (list string) "the sweep's read refuses it"
+      [Preflight.decoder_name Preflight.Exact_slot_observation] (readers report))
+
+let test_preflight_stops_on_another_store_root () =
+  with_workspace (fun ~base store ->
+    ignore (answered store "preflight-moved");
+    let alias = Filename.temp_file "lane-exact-preflight-alias-" ".fixture" in
+    Sys.remove alias;
+    Unix.symlink base alias;
+    Fun.protect ~finally:(fun () -> Sys.remove alias) (fun () ->
+      match Preflight.For_testing.scan ~after_read:ignore Preflight.Store.Exact_requests ~base_path:alias with
+      | Ok _ -> fail "a link written under another store root must stop the check"
+      | Error detail ->
+        check bool ("the stop names both roots: " ^ detail) true
+          (Astring.String.is_infix ~affix:(Store.root store) detail
+           && Astring.String.is_infix ~affix:alias detail)))
+
+let test_preflight_stops_on_an_observation_of_another_store_root () =
+  with_workspace (fun ~base store ->
+    let original = answered store "preflight-observed-moved" in
+    let proof = match Yojson.Safe.Util.member "executions" (Yojson.Safe.from_file (link_file store original)) with
+      | `List [proof] -> proof
+      | _ -> fail "expected one original proof" in
+    require (Observation.retain ~store ~declaration_id ~request_id:original.Exact.request_id
+      ~attempt_ordinal:1 ~proof []);
+    let observations = Filename.concat (Store.root store) (Observation.directory ~declaration_id) in
+    (* The root the store had in a workspace that was moved here. *)
+    let moved = Filename.concat (Filename.dirname base) "moved-workspace/.masc/lane-addons" in
+    Sys.readdir observations |> Array.iter (fun name ->
+      let path = Filename.concat observations name in
+      match Yojson.Safe.from_file path with
+      | `Assoc fields ->
+        Yojson.Safe.to_file path
+          (`Assoc (List.map (fun (field,value) ->
+             if String.equal field "store_root" then field,`String moved else field,value) fields))
+      | _ -> fail "slot observation object expected");
+    match Preflight.For_testing.scan ~after_read:ignore Preflight.Store.Exact_requests ~base_path:base with
+    | Ok _ -> fail "an observation written under another store root must stop the check"
+    | Error detail ->
+      check bool ("the stop names both roots: " ^ detail) true
+        (Astring.String.is_infix ~affix:moved detail
+         && Astring.String.is_infix ~affix:(Store.root store) detail))
+
+let test_preflight_binds_a_link_written_between_its_reads () =
+  with_workspace (fun ~base store ->
+    let original = request "preflight-appended" in
+    let busy = Exact.Provider_unavailable {detail="synthetic first refusal"} in
+    let runner,_,_ = counting_runner store (ref [Refused busy; Answer question]) in
+    let record = record_file store original and link = link_file store original in
+    ignore (run_request store runner original);
+    let first_record = read_bytes record and first_link = read_bytes link in
+    ignore (run_request store runner original);
+    let second_record = read_bytes record and second_link = read_bytes link in
+    write_bytes record first_record;
+    write_bytes link first_link;
+    (* The server writes attempt 2 to the record, then proof 2, while the
+       check is between its first read of the record and its read of the link. *)
+    let appended = ref false in
+    let after_read path =
+      if String.equal path record && not !appended then (
+        appended := true;
+        write_bytes record second_record;
+        write_bytes link second_link) in
+    let report = preflight ~after_read base in
+    check bool "the server wrote after the first read" true !appended;
+    check int "the record is read" 1 report.Preflight.rows;
+    check (list (pair string (list string))) "the link is bound to the record read after it" []
+      (refused report))
 
 let () =
   run "lane add-on exact requests"
@@ -1459,7 +1808,8 @@ let () =
         ; test_case "publication recovery preserves an unproven original" `Quick
             test_publication_recovery_preserves_unproven_original
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
-        ; test_case "v1 and v2 original proofs remain distinct" `Quick test_v1_and_v2_original_proofs_remain_distinct
+        ; test_case "a proof holds no request body and is read as version 2" `Quick
+            test_a_proof_holds_no_request_body_and_is_read_as_version_2
         ; test_case "latest original evidence cannot borrow a previous attempt" `Quick test_latest_execution_never_borrows_an_earlier_proof
         ; test_case "proof failure leaves uncertainty without exposing an answer" `Quick test_proof_publication_failure_never_exposes_an_answer
         ; test_case "malformed proof refuses local recovery without provider replay" `Quick test_malformed_proof_refuses_publication_recovery
@@ -1488,4 +1838,30 @@ let () =
         ; test_case "an unowned request ends as not_allowed" `Quick test_an_unowned_request_ends_as_not_allowed
         ; test_case "an unowned retained answer is refused and kept" `Quick test_an_unowned_retained_answer_is_refused_and_kept
         ; test_case "execution authority does not gate retained local delivery" `Quick test_execution_guard_is_not_retained_delivery_authority
-        ; test_case "worker wire cannot select admission policy" `Quick test_worker_cannot_select_admission_policy ] ) ]
+        ; test_case "worker wire cannot select admission policy" `Quick test_worker_cannot_select_admission_policy ] )
+    ; ( "deploy preflight"
+      , [ test_case "a refused record is deleted with its link and observations" `Quick
+            test_preflight_deletes_a_refused_record_with_its_link_and_observations
+        ; test_case "the proof link is read with its record" `Quick
+            test_preflight_reads_the_proof_link_with_its_record
+        ; test_case "a record with a version 1 proof is refused" `Quick
+            test_preflight_refuses_a_record_with_a_version_1_proof
+        ; test_case "a misfiled record is refused alone" `Quick test_preflight_refuses_a_misfiled_record_alone
+        ; test_case "a link no record names is refused" `Quick test_preflight_refuses_a_link_no_record_names
+        ; test_case "a link no record names is not refused once removed" `Quick
+            test_preflight_skips_an_unnamed_link_removed_before_it_is_refused
+        ; test_case "a kept record read again names its new link" `Quick
+            test_preflight_reads_a_kept_record_again_for_its_new_link
+        ; test_case "a refused record keeps no link" `Quick
+            test_preflight_lets_no_refused_record_keep_a_link
+        ; test_case "a link written after the listing is not refused" `Quick
+            test_preflight_names_a_link_written_after_the_listing
+        ; test_case "a refused record names only the files left" `Quick
+            test_preflight_names_only_the_files_left_when_it_refuses
+        ; test_case "a slot observation the sweep cannot read is refused" `Quick
+            test_preflight_refuses_a_slot_observation_the_sweep_cannot_read
+        ; test_case "another store root stops the check" `Quick test_preflight_stops_on_another_store_root
+        ; test_case "an observation of another store root stops the check" `Quick
+            test_preflight_stops_on_an_observation_of_another_store_root
+        ; test_case "a link written between the reads is bound to the second read" `Quick
+            test_preflight_binds_a_link_written_between_its_reads ] ) ]

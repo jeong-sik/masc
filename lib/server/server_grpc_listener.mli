@@ -24,7 +24,13 @@ val serve_socket :
   Grpc_eio.Server.t ->
   unit
 (** Serve an already bound socket. Connection/stream failures stay within
-    their own scope; listener failures propagate to the socket owner. *)
+    their own scope; listener failures propagate to the socket owner.
+
+    An accepted connection has the bounds of {!Server_connection_socket}, as
+    on the HTTP listeners (RFC-0518 D4, D6): a peer that sends no byte within
+    the preparation bound is cut, and so is one that does not take a piece of
+    what the server writes within the write bound. The bounds are measured on
+    [clock]. *)
 
 val serve :
   env:Eio_unix.Stdenv.base ->

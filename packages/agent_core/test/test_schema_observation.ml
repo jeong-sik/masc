@@ -9,9 +9,15 @@ exception Product_failure of int ref
 let check_bool label expected actual = Alcotest.(check bool) label expected actual
 let check_int label expected actual = Alcotest.(check int) label expected actual
 
+(* Each call returns a record of its own: the cases below tell two equal
+   schemas apart by physical identity and expect one to be collected. A record
+   built from constants alone is one shared static value once the compiler
+   inlines across modules, as it does outside the dev profile, so the name
+   passes through [Sys.opaque_identity] and the record is allocated per
+   call. *)
 let schema () =
   Types.tool_schema_of_params
-    ~name:"schema-observation-fixture"
+    ~name:(Sys.opaque_identity "schema-observation-fixture")
     ~description:"A real SDK schema with UTF-8: 관측"
     ~parameters:[]
     ()

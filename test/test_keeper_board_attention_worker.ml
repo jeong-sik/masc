@@ -1734,8 +1734,9 @@ let drain ~base_path =
 ;;
 
 (* The wake's ordering property after a full consume/drain/settle overlap:
-   the post-prune read sees an empty candidate ledger over a settled
-   receipt, and root minting over that pair appends nothing. This pins the
+   the consumed row survives until the wake after the settlement, the read
+   after that wake's prunes sees an empty candidate ledger, and root minting
+   over either read appends nothing. This pins the
    shipped order's outcome directly (the #41506 tripwire lives in the next
    test, which drives the settlement through the seam's hook). *)
 let test_drain_then_settle_does_not_mint_a_ready_root () =
@@ -1761,17 +1762,34 @@ let test_drain_then_settle_does_not_mint_a_ready_root () =
           ~base_path
           ~keeper_name:"alpha"
           (load_one_partition ~base_path)));
-  let candidates, partitions = read_candidate_and_roots ~base_path in
+  let only_settled label =
+    List.iter
+      (fun (partition : P.t) ->
+         match partition.state with
+         | P.Settled _ -> ()
+         | _ -> Alcotest.failf "%s: the settlement minted a fresh Ready partition" label)
+      (ok "load partitions after minting" (P.load ~base_path ~keeper_name:"alpha"))
+  in
+  (* The drain above ran while the partition was still Completed, and a prune
+     keeps a Consumed row whose partition has not settled. The row therefore
+     outlives the settlement by one wake; minting over it must add nothing. *)
+  let candidates, _ = read_candidate_and_roots ~base_path in
   ignore
     (ok "mint roots after settlement"
        (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
+  (match candidates with
+   | [ { A.status = A.Consumed _; candidate_id; _ } ] ->
+     Alcotest.(check string) "the row kept for one wake is the consumed candidate"
+       kept.candidate_id candidate_id
+   | _ -> Alcotest.fail "expected exactly the consumed row before the next wake");
+  only_settled "before the next wake";
+  drain ~base_path;
+  let candidates, _ = read_candidate_and_roots ~base_path in
+  ignore
+    (ok "mint roots after the next wake"
+       (P.ensure_roots ~base_path ~keeper_name:"alpha" candidates));
   Alcotest.(check int) "the consumed row was pruned" 0 (List.length candidates);
-  List.iter
-    (fun (partition : P.t) ->
-       match partition.state with
-       | P.Settled _ -> ()
-       | _ -> Alcotest.fail "the settlement minted a fresh Ready partition")
-    partitions
+  only_settled "after the next wake"
 ;;
 
 (* The owner settlement, which runs without the worker lock, is landed in

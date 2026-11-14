@@ -1682,11 +1682,17 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
          ~developer_context
          ~on_undelivered_tool_result:
            (fun (receipt : Runtime_codex_app_server.undelivered_tool_result) ->
+             (* Every later request re-reads a retained receipt until a
+                completed turn acknowledges it, so it names large bytes by blob
+                address, as a host receipt does. *)
+             let* response = Keeper_client_tool_outbox.codex_response ~base_path
+                 ~min_result_bytes:Keeper_turn_driver_try_provider.aged_result_min_bytes
+                 receipt.response in
              let receipt : Keeper_client_tool_outbox.receipt =
                {thread_id=receipt.thread_id;turn_id=receipt.turn_id;call_id=receipt.call_id;
                 tool_name=receipt.tool_name;
                 arguments=Keeper_client_tool_outbox.Known receipt.arguments;
-                response=receipt.response} in
+                response} in
              let* () = Keeper_client_tool_outbox.retain ~base_path ~keeper_name receipt in
              (* The receipt is committed even if notification cannot commit.
                 Startup and the existing maintenance pulse rediscover it. *)

@@ -21909,25 +21909,16 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
   let unanswered result = Result.map_error (fun text -> Keeper_control.No_answer text) result in
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
-        (match expected_workspace with
-         | None -> Error Keeper_control.Workspace_unbound
-         | Some expected_workspace ->
-           unanswered
-             (Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
-                ~action:lifecycle_action ~expected_workspace))
+        unanswered
+          (Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
+             ~action:lifecycle_action ~expected_workspace)
     | Keeper_control.Directive directive_action ->
-        (match expected_workspace with
-         | None -> Error Keeper_control.Workspace_unbound
-         | Some expected_workspace ->
-           unanswered
-             (Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-                ~action:directive_action ~operator_operation_id ~expected_workspace))
+        unanswered
+          (Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+             ~action:directive_action ~operator_operation_id ~expected_workspace)
     | Keeper_control.Purge ->
-        (match expected_workspace with
-         | None -> Error Keeper_control.Workspace_unbound
-         | Some expected_workspace ->
-           unanswered
-             (Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace))
+        unanswered
+          (Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace)
   in
   let rec walk ~recovery_available last_outcome steps =
     match steps with
@@ -22012,10 +22003,14 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
   launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
-  if not (server_authority_ready state) then begin
+  let refuse () =
     state.keeper_action_pending <- None;
-    report_kept_back state workspace_identity_unconfirmed Nothing_kept
-  end else
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept in
+  (* The requests carry the identity this admission confirmed. *)
+  match state.server_identity with
+  | None -> refuse ()
+  | Some _ when not (server_authority_ready state) -> refuse ()
+  | Some expected_workspace ->
   let origin = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -22039,7 +22034,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     let result =
       try
         run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-          ~operator_operation_id ~expected_workspace:identity action
+          ~operator_operation_id ~expected_workspace action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
@@ -22052,7 +22047,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       let result =
         try
           run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-            ~operator_operation_id ~expected_workspace:identity action
+            ~operator_operation_id ~expected_workspace action
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
         | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))

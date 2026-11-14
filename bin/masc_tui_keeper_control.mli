@@ -294,8 +294,6 @@ val classify_purge_response : keeper_name:string -> status:int -> body:string ->
     case carries was written outside this screen; {!failure_text} writes the
     words around it in the screen language. *)
 type failure =
-  | Workspace_unbound
-      (** No workspace identity to bind a request to. Nothing was sent. *)
   | Empty_plan
       (** {!plan} gave no step. It never does; an empty walk is still not a
           success. *)

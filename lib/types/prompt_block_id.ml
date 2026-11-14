@@ -99,29 +99,34 @@ let cache_rank = function
      then the independently versioned Librarian index. *)
   | Memory_os_recall -> 3
   | Librarian_working_context -> 4
-  | Active_goals | Direct_input_source -> 5
+  | Active_goals -> 5
+  (* The source of the admitted direct operation is issued right behind the
+     Goal snapshot (see the mli). Its bytes are the same for every request of
+     one operation and change when another operation is admitted. How often
+     that is has not been measured. *)
+  | Direct_input_source -> 6
   (* RFC-0491 §3.3: the ids of the Goals in [Verifying]. Its text changes when
      a Goal is asked to complete or the verifier refutes the proof: after
      10-30 the two came 12 to 20 minutes apart. A Task decision is new on the
      turn it lands and gone on the next, so this block sits just in front of
      [Completion_authority]. *)
-  | Goals_awaiting_proof -> 6
-  | Completion_authority -> 7
+  | Goals_awaiting_proof -> 7
+  | Completion_authority -> 8
   (* The two recall blocks are placed before their first measurement (RFC
      keeper-recall-reaches-the-turn, section 4.4). The body changes only when
      the set of carried memories does, so it is in front of the context that
      changes on nearly every turn. The status line names the turn, so it
      changes every turn and sits behind that context and in front of the
      clock. The canary measures how often each really changes. *)
-  | Recalled_memory -> 8
-  | Dynamic_context -> 9
-  | Recalled_memory_status -> 10
-  | Temporal_summary -> 11
+  | Recalled_memory -> 9
+  | Dynamic_context -> 10
+  | Recalled_memory_status -> 11
+  | Temporal_summary -> 12
   (* A queue row that arrived while the turn ran is news about the world and
      comes in front of an operator speaking, who stays the newest thing in the
      assembly and the newest instruction in a post-tool round. *)
-  | Arrived_stimuli -> 12
-  | Operator_note -> 13
+  | Arrived_stimuli -> 13
+  | Operator_note -> 14
 ;;
 
 (* See the mli. [Keeper_instructions] never enters the extra-context

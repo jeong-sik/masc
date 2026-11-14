@@ -23,12 +23,11 @@ split: after the other facts, the model restates one durable fact of the
 planned category with the duplicate's own marks, near the length of that fact.
 The model writes only text: role material, a world sheet, category names, a
 goal, and claims; a claim whose marks differ from its plan, a claim that copies
-a fact of its memory or an earlier candidate, a fact shorter than
-FACT_LENGTH_FLOOR of its plan, or a candidate or duplicate whose length leaves
-its band, is not kept. A facts answer whose items are not one text claim per
-slot is refused whole and asked again: its claims cannot be matched to the
-slots by position. summary.json counts the refused facts answers and the facts
-left out, by reason. Every model call is cached in
+a fact of its memory or an earlier candidate, or a candidate or duplicate whose
+length leaves its band, is not kept. A facts answer whose items are not one
+text claim per slot is refused whole and asked again: its claims cannot be
+matched to the slots by position. summary.json counts the refused facts
+answers and the facts left out, by reason. Every model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request per line; `synth_rows.label_of_row` reads its label) and <out>/summary.json.
@@ -61,6 +60,7 @@ import synth_candidate_plan as C
 import synth_prompts as P
 import synth_rows as RW
 import synth_spec as S
+from ocaml_text import ocaml_trim
 from tinker_oai import Call, Caller
 
 MODEL = "thinkingmachines/Inkling-2-Small"
@@ -78,13 +78,6 @@ FACTS_PER_CALL = 6
 LENGTH_ASK = 1.7
 # Share of a call's durable slots whose claims must come back with their marks.
 DURABLE_KEEP_SHARE = 0.7
-# A fact is kept only when it is at least this share of its planned length. The call logs of the
-# training split (seed 20261114) and the second eval batch (seed 20261113), replayed: of 7,565
-# claims written to a plan, p1 was 0.41 to 0.44 of the plan and the median 1.12 to 1.14. The
-# shortest was "NaN", 3 chars for 470 (#51430); the next, a whole sentence, 0.117 (209 for 1,780).
-# CANDIDATE_LENGTH_BAND would have left out 54 to 56 percent. No ceiling: the longest was 6,228
-# bytes, under the 16,000 the librarian's absorb gate judges (keeper_librarian_absorb_gate.ml).
-FACT_LENGTH_FLOOR = 0.1
 EFFORT = {"profile": "medium", "facts": "low", "duplicate": "medium", "candidate": "medium"}
 MAX_TOKENS = {"profile": 8192, "facts": 16384, "duplicate": 4096, "candidate": 4096}
 # Measured role material: p10 716, p50 1,144, p90 2,684 chars.
@@ -260,7 +253,9 @@ class AnswerFault(Enum):
 
     NOT_FACTS = "not_facts"  # not a JSON object holding a list under "facts"
     COUNT = "count"  # the list holds another number of items than the slots asked for
-    CLAIM_NOT_TEXT = "claim_not_text"  # an item is not an object whose "claim" is a non-blank string
+    # an item is not an object whose "claim" is a string with text left after `String.trim`, the
+    # librarian's own test for a memory claim (keeper_memory_os_types.ml `non_empty_string`)
+    CLAIM_NOT_TEXT = "claim_not_text"
 
 
 class ClaimMiss(Enum):
@@ -268,7 +263,6 @@ class ClaimMiss(Enum):
 
     COPY = "copy"  # the text of a fact already written, or of an earlier claim of the answer
     MARKS = "marks"  # its date, time or number differs from its slot's surface
-    SHORT = "short"  # under FACT_LENGTH_FLOOR of its slot's planned length
 
 
 type Refusal = AnswerFault | ClaimMiss
@@ -298,9 +292,9 @@ def answer_object(text: str) -> dict[str, object] | None:
 
 
 def parse_facts(answer: str, n: int) -> FactClaims:
-    """The n claims of a facts answer in slot order, each stripped, or why the answer does not read
-    as one text claim per slot. An item left out or not text would shift every later claim onto
-    the slot before its own."""
+    """The n claims of a facts answer in slot order, each trimmed as `String.trim` trims, or why the
+    answer does not read as one text claim per slot. An item left out or not text would shift
+    every later claim onto the slot before its own."""
     obj = answer_object(answer)
     raw = obj.get("facts") if obj is not None else None
     if not isinstance(raw, list):
@@ -311,9 +305,9 @@ def parse_facts(answer: str, n: int) -> FactClaims:
     claims: list[str] = []
     for item in items:
         claim = cast(dict[str, object], item).get("claim") if isinstance(item, dict) else None
-        if not isinstance(claim, str) or not claim.strip():
+        if not isinstance(claim, str) or not ocaml_trim(claim):
             return AnswerFault.CLAIM_NOT_TEXT
-        claims.append(claim.strip())
+        claims.append(ocaml_trim(claim))
     return tuple(claims)
 
 
@@ -323,8 +317,6 @@ def claim_miss(claim: str, slot: FactSlot, texts: Set[str]) -> ClaimMiss | None:
         return ClaimMiss.COPY
     if not S.surface_holds(claim, slot.surface):
         return ClaimMiss.MARKS
-    if len(claim) < FACT_LENGTH_FLOOR * slot.length:
-        return ClaimMiss.SHORT
     return None
 
 
@@ -361,7 +353,7 @@ def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactS
                 claims = parsed
             case _:
                 assert_never(parsed)
-        texts = {c.strip() for c in (*same, *others)}
+        texts = {ocaml_trim(c) for c in (*same, *others)}
         kept: list[tuple[FactSlot, str]] = []
         for slot, claim in zip(slots, claims, strict=True):
             miss = claim_miss(claim, slot, texts)

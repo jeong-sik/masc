@@ -149,10 +149,9 @@ def stale_copies_first(model: FakeModel, n: int) -> list[str]:
     return claims
 
 
-def second_nan_text(model: FakeModel, n: int) -> list[str]:
-    """Batch 2 of #51430: one claim was the three letters "NaN"."""
+def second_blank(model: FakeModel, n: int) -> list[str]:
     claims = fresh_facts(model, n)
-    claims[1] = "NaN"
+    claims[1] = " \t\n"
     return claims
 
 
@@ -333,17 +332,11 @@ class MemoryTest(unittest.TestCase):
             assert got.value is not None
             self.assertEqual([plan.slots.index(slot) for slot, _ in got.value], [1, 2, 3, 4, 5])
 
-    def test_a_fact_far_shorter_than_its_plan_stays_out_of_the_memory(self) -> None:
-        model = FakeModel(facts=(second_nan_text,))
-        got = G.build_memory(model, durable_plan(3))
-        assert got.value is not None
-        self.assertEqual([f.claim for f in got.value], [model.written[0], model.written[2]])
-        self.assertEqual(got.refused, (G.ClaimMiss.SHORT,))
-
     def test_an_answer_that_is_not_one_text_claim_per_slot_is_asked_again(self) -> None:
-        # Matched by position, either answer would put its third claim on the second slot, and two
+        # Matched by position, each answer would put its third claim on the second slot, and two
         # durable facts of three would keep the attempt.
-        for reply, fault in ((second_skipped, G.AnswerFault.COUNT), (second_bare_nan, G.AnswerFault.CLAIM_NOT_TEXT)):
+        for reply, fault in ((second_skipped, G.AnswerFault.COUNT), (second_bare_nan, G.AnswerFault.CLAIM_NOT_TEXT),
+                             (second_blank, G.AnswerFault.CLAIM_NOT_TEXT)):
             model = FakeModel(facts=(reply, fresh_facts))
             got = G.claims_for(model, durable_plan(3), "topic_0", durable_plan(3).slots, [], [])
             assert got.value is not None

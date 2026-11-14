@@ -296,8 +296,12 @@ let keeper_next_action_path ~(health_state : keeper_health) ~quiet_reason =
   (* Probe: read the latest runtime error first. The Failing phase says turns
      are failing, not that a restart fixes them; a provider that refuses the
      request refuses the restarted keeper too. The phase keeps probing on its
-     own: a clean turn returns it to Running, and past its failure threshold it
-     becomes Crashed, which the supervisor restarts. The ladder below would
+     own: once turns and heartbeats are both healthy it returns to Running.
+     No failure count moves it anywhere else: [Turn_failed]'s [consecutive]
+     is an observation, and besides that recovery, only a stop or pause
+     request or the fiber's death leaves Failing
+     ([Keeper_state_machine.derive_phase]). A refusal that repeats every turn
+     keeps the keeper Failing. The ladder below would
      answer Direct_message, and a message only queues one more turn behind the
      failing ones. A restart stays the operator's call: see
      [keeper_recoverable]. *)

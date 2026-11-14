@@ -12,7 +12,8 @@ open Workspace_backlog
 let status config =
   ensure_initialized config;
 
-  let state = read_state config in
+  let observation = observe_state config in
+  let state = state_of_observation observation in
   let backlog = read_backlog config in
   let prepared = prepare_backlog backlog in
   let active_assignees_by_task_id = prepared.active_assignees_by_task_id in
@@ -20,6 +21,14 @@ let status config =
   let max_active_tasks_display = 30 in
 
   let buf = Buffer.create 256 in
+  (match observation with
+   | State_absent _ | State_decoded _ -> ()
+   | State_recovered { state = _; fault } ->
+     Printf.bprintf
+       buf
+       "⚠ state.json did not decode (%s). Project and message count below are \
+        recovered values, not what is stored.\n"
+       (state_read_fault_to_string fault));
   Printf.bprintf buf "Project: %s\n" state.project;
   Buffer.add_string buf "📍 Workspace: root\n";
   Printf.bprintf buf "📁 Path: %s\n" config.base_path;

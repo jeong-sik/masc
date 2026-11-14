@@ -384,6 +384,7 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             receipt = json.loads(stopped.stdout)
             self.assertEqual(receipt['schema'], 'masc.setup_server_error.v1')
             self.assertIs(receipt['termination_requested'], False)
+            self.assertEqual(receipt['refusal'], 'precondition_unmet')
             self.assertIn('No process holds the lease', receipt['error'])
             self.assertEqual(sorted(path.name for path in workspace.iterdir()), [])
 

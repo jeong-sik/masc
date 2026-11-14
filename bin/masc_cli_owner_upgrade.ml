@@ -10,7 +10,14 @@ type observation =
   | Unknown_server
   | Account_server of { port : int; health : account_health }
 let error_message = function
-  | Upgrade.Admin_required -> "The running workspace rejected local operator access. Sign in before restarting it."
+  | Upgrade.Sign_in_failed ->
+    "This MASC got no local operator credential to send: signing in to the workspace failed \
+     (its reason is printed above), or the credential it wrote could not be read back. No \
+     credential was sent to the running server."
+  | Admin_required ->
+    "The running server refused (401 or 403) the operator credential that this MASC had just \
+     checked or written for the workspace. This MASC accepts that credential and the server \
+     does not; signing in again only writes another one this MASC accepts."
   | Server_starting -> "The running workspace is still starting. Try again once it is ready; signing in does not change this."
   | Admin_check_unanswered -> "The running workspace did not answer the local operator access check. Try again."
   | Different_workspace -> "This server belongs to another workspace. Choose a different port."
@@ -36,12 +43,6 @@ let port_free port =
     Fun.protect ~finally:(fun () -> Unix.close socket) (fun () ->
       Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback,port)); true)
   with Unix.Unix_error _ -> false
-(* The owner is found through the lease root of its BasePath. A root that
-   cannot be made holds no lease to find, as a lease that cannot be read. *)
-let owner_lease_run_dir ~base_path =
-  Server_startup_takeover.lease_run_dir (Host_config.host ()).base_path_lease_root ~base_path
-  |> Result.map_error (fun (_ : Server_startup_takeover.base_path_lock_rejection) ->
-    Upgrade.Owner_unavailable)
 (* What the kernel shows of the process that holds a workspace, read without
    making anything ([Upgrade.holder]). *)
 let holder ~base_path ~port =
@@ -137,21 +138,57 @@ let with_selected_owner ~sw ~clock ~listener ~agent ~expected_version ~login use
         ~login:(fun () -> login () = 0)
     | Ok _ | Error _ -> Error Upgrade.Invalid_health in
   let* token = match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
-    | None -> Error Upgrade.Admin_required | Some token -> Ok token in
+    | None -> Error Upgrade.Sign_in_failed | Some token -> Ok token in
   let* owner = Upgrade.prepare ~sw ~clock ~listener ~token ~agent in
   Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
     if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed
     else use owner)
 type request_phase = Request_not_confirmed | Request_confirmed
 type stop_refusal =
-  | Owner_not_stopped of Upgrade.error
+  | Owner_unverified
+      (* The lease root could not be made, or a file or socket call raised
+         before the stop was requested. Which step raised is not known, so
+         the sentence names none. *)
+  | Owner_not_stopped of { pid : int; error : Upgrade.error }
+      (* A refusal the stop returned after the kernel named [pid] as the
+         owner that listens on the port. *)
   | Owner_unread of { base_path : string; reason : string }
   | Nobody_holds_workspace
   | Account_server_holds_workspace
   | Owner_listener_unconfirmed of
       { base_path : string; port : int; refusal : Upgrade.listener_refusal }
+(* HIGH-RISK-UNREVIEWED: the receipt tells the setup journey whether the
+   running server itself refused the operator credential (#36877). Only
+   [Admin_required] is that: the server answered 401 or 403 to a credential
+   this MASC accepts, and the journey stops offering that server another
+   stop. Every other refusal is another check of the stop that failed:
+   nothing was sent, the server gave no verdict, or the server accepted the
+   credential and a later check (incumbent, owner capture) failed. *)
+let refusal_code = function
+  | Owner_not_stopped { pid = (_ : int); error = Upgrade.Admin_required } -> "credential_refused"
+  | Owner_not_stopped
+      { pid = (_ : int);
+        error =
+          ( Upgrade.Invalid_health | Different_workspace | Sign_in_failed | Server_starting
+          | Admin_check_unanswered | Owner_unavailable | Incumbent_changed | Already_requested
+          | Closed | Port_unavailable ) }
+  | Owner_unverified | Owner_unread { base_path = (_ : string); reason = (_ : string) }
+  | Nobody_holds_workspace | Account_server_holds_workspace
+  | Owner_listener_unconfirmed
+      { base_path = (_ : string); port = (_ : int); refusal = (_ : Upgrade.listener_refusal) } ->
+    "precondition_unmet"
 let stop_refusal_message = function
-  | Owner_not_stopped error -> error_message error
+  | Owner_unverified -> error_message Upgrade.Owner_unavailable
+  | Owner_not_stopped { pid; error = Upgrade.Admin_required } ->
+    Printf.sprintf "%s No server was stopped. To replace it, stop pid %d yourself (send it \
+                    SIGTERM and wait for it to exit), then run masc setup again."
+      (error_message Upgrade.Admin_required) pid
+  | Owner_not_stopped
+      { pid = (_ : int);
+        error =
+          ( Upgrade.Invalid_health | Different_workspace | Sign_in_failed | Server_starting
+          | Admin_check_unanswered | Owner_unavailable | Incumbent_changed | Already_requested
+          | Closed | Port_unavailable ) as error } -> error_message error
   | Owner_unread { base_path; reason } -> owner_unread ~base_path reason
   | Nobody_holds_workspace ->
     "No process holds the lease this MASC reads for this workspace, so no server was signed in \
@@ -161,6 +198,12 @@ let stop_refusal_message = function
      masc restart stops and replaces it."
   | Owner_listener_unconfirmed { base_path; port; refusal } ->
     listener_refusal_message ~base_path ~port refusal ^ " No server was changed."
+(* The owner is found through the lease root of its BasePath. A root that
+   cannot be made holds no lease to find, as a lease that cannot be read. *)
+let owner_lease_run_dir ~base_path =
+  Server_startup_takeover.lease_run_dir (Host_config.host ()).base_path_lease_root ~base_path
+  |> Result.map_error (fun (_ : Server_startup_takeover.base_path_lock_rejection) ->
+    Owner_unverified)
 (* The stop below signs a local operator in and sends its bearer to the port.
    The kernel is asked first, as [masc restart] asks it, and before anything
    is made: where nothing holds the lease, what answers on the port is not
@@ -179,19 +222,18 @@ let stoppable ~base_path ~port =
   | Ok (Upgrade.Held_by_account_server { port = (_ : int) }) -> Error Account_server_holds_workspace
   | Ok Upgrade.Held_without_announcement ->
     let unconfirmed refusal = Owner_listener_unconfirmed { base_path; port; refusal } in
-    (match owner_lease_run_dir ~base_path with
-     | Error (error : Upgrade.error) -> Error (Owner_not_stopped error)
-     | Ok run_dir ->
-       Upgrade.single_user_listener ~run_dir ~base_path ~port |> Result.map_error unconfirmed)
+    Result.bind (owner_lease_run_dir ~base_path) (fun run_dir ->
+      Upgrade.single_user_listener ~run_dir ~base_path ~port |> Result.map_error unconfirmed)
 let stop ~base_path ~port ~agent ~expected_version ~login =
   let phase = ref Request_not_confirmed in
-  let not_stopped answer = Result.map_error (fun error -> Owner_not_stopped error) answer in
   let result = try
     let base_path = Unix.realpath (Env_config.normalize_masc_base_path_input base_path) in
     with_http (fun sw clock ->
       let open Result.Syntax in
       let* listener = stoppable ~base_path ~port in
-      let* run_dir = not_stopped (owner_lease_run_dir ~base_path) in
+      let pid = Upgrade.listener_pid listener in
+      let not_stopped answer = Result.map_error (fun error -> Owner_not_stopped { pid; error }) answer in
+      let* run_dir = owner_lease_run_dir ~base_path in
       not_stopped @@
       with_selected_owner ~sw ~clock ~listener ~agent ~expected_version ~login (fun owner ->
         match Upgrade.request_termination_and_observe owner ~observe:(fun () ->
@@ -210,11 +252,12 @@ let stop ~base_path ~port ~agent ~expected_version ~login =
         | Requested observation -> Ok observation))
     with Unix.Unix_error _ | Sys_error _ ->
       (match !phase with
-       | Request_not_confirmed -> Error (Owner_not_stopped Upgrade.Owner_unavailable)
+       | Request_not_confirmed -> Error Owner_unverified
        | Request_confirmed -> Ok (Error Upgrade.Owner_unavailable)) in
   match result with
   | Error refusal -> emit (`Assoc ["schema", `String "masc.setup_server_error.v1";
-    "termination_requested", `Bool false; "error", `String (stop_refusal_message refusal)]); 1
+    "termination_requested", `Bool false; "refusal", `String (refusal_code refusal);
+    "error", `String (stop_refusal_message refusal)]); 1
   | Ok observation ->
     let readiness, detail = match observation with
       | Ok Upgrade.Owner_draining -> "owner_draining", []

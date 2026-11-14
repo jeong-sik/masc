@@ -1,5 +1,5 @@
-type error = Invalid_health | Different_workspace | Admin_required | Server_starting
-  | Admin_check_unanswered | Owner_unavailable
+type error = Invalid_health | Different_workspace | Sign_in_failed | Admin_required
+  | Server_starting | Admin_check_unanswered | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
 type http_answer = (int * string, string) result
 type incumbent = {base_path:string; version:string}
@@ -29,10 +29,12 @@ let decode_health body =
 let decode ~base_path body =
   let* incumbent = decode_health body in
   if incumbent.base_path = base_path then Ok incumbent else Error Different_workspace
+(* A failed login is this command's own: the running server has not seen a
+   credential yet, so it has refused none (#36877). *)
 let authorize_initial ~base_path ~expected_version ~body ~login =
   let* incumbent = decode ~base_path body in
   if incumbent.version <> expected_version then Error Incumbent_changed
-  else if login () then Ok () else Error Admin_required
+  else if login () then Ok () else Error Sign_in_failed
 (* Whether the answer of [/health/ready] says the server has not finished
    starting: the [ready] field the server writes as [false] until its state is
    published. An answer that cannot be read says nothing either way. *)
@@ -235,6 +237,7 @@ let single_user_listener ~run_dir ~base_path ~port =
            Error (Owner_announces_no_port { pid })))
 let listener_port (listener : single_user_listener) = listener.port
 let listener_base_path (listener : single_user_listener) = listener.base_path
+let listener_pid (listener : single_user_listener) = listener.pid
 (* HIGH-RISK-UNREVIEWED: the only place that puts the bearer of the operator
    in a request (#51321). The port is the one inside [listener], so no port
    that the kernel did not confirm can be named here. The confirmation is

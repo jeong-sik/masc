@@ -4,9 +4,13 @@ type t
 type error =
   | Invalid_health
   | Different_workspace
+  | Sign_in_failed
+      (** The local sign-in of this command failed or left no credential it
+          could read. Nothing was sent to the running server. *)
   | Admin_required
-      (** The local sign-in failed or left no credential, or the running
-          server read the credential and refused it (401 or 403). *)
+      (** The running server answered 401 or 403 to the operator credential
+          that this command had just checked or written for the workspace:
+          this MASC accepts the credential and the server does not. *)
   | Server_starting
       (** [/health/ready] of the running server says it is not ready yet. It
           was not asked about the credential. Signing in does not change
@@ -22,7 +26,8 @@ val decode_health : string -> (incumbent, error) result
 
 val authorize_initial : base_path:string -> expected_version:string -> body:string ->
   login:(unit -> bool) -> (unit, error) result
-(** Validates workspace and selected version before invoking the login callback. *)
+(** Validates workspace and selected version before invoking the login
+    callback. A login that fails is [Sign_in_failed]. *)
 
 val incumbent : t -> incumbent
 val request_termination : t -> (unit, error) result
@@ -156,6 +161,8 @@ val single_user_listener :
 
 val listener_port : single_user_listener -> int
 val listener_base_path : single_user_listener -> string
+val listener_pid : single_user_listener -> int
+(** The pid of the owner the kernel showed on the port at the read. *)
 
 val prepare :
   sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t ->

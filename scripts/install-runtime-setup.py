@@ -2359,8 +2359,17 @@ def account_installation_at(binary, base, port):
     return None
 
 
+# Why `masc setup-stop-previous-owner` sent no stop, as its receipt names it.
+# `credential_refused`: the running server answered 401 or 403 to an operator
+# credential this MASC accepts. `precondition_unmet`: another check of the
+# stop failed, and the server did not refuse the credential.
+STOP_REFUSALS = ('credential_refused', 'precondition_unmet')
+
+
 def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
     termination_requested = False
+    # The version of the server that refused the credential on this port.
+    refused_by = None
     while True:
         try:
             observed = setup_server_observation(binary, base_path, port)
@@ -2389,6 +2398,11 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                 print('This terminal has refreshed Docker access. The existing server keeps its earlier account groups; restart it to prepare the sandbox in this session.', file=sys.stderr)
                 choices = [('stop', 'Restart this workspace server with the refreshed Docker access'),
                            ('later', 'Finish later and keep the existing server')]
+            elif refused_by == server_version:
+                # The same server answers. The binary's reason is on screen
+                # and names how to stop it by hand; only what still works
+                # here is offered.
+                choices = [choice for choice in choices if choice[0] != 'stop']
             elif server_version != observed['installed_version']:
                 choices[0], choices[1] = choices[1], choices[0]
             selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
@@ -2403,11 +2417,20 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                                     env=workspace_child_env())
             try:
                 receipt = json.loads(result.stdout)
+                if not isinstance(receipt, dict):
+                    raise ValueError('invalid receipt')
                 if result.returncode:
                     if (receipt.get('schema') == 'masc.setup_server_error.v1'
-                            and receipt.get('termination_requested') is False):
+                            and receipt.get('termination_requested') is False
+                            and receipt.get('refusal') in STOP_REFUSALS
+                            and isinstance(receipt.get('error'), str)):
                         print(terminal_text(receipt['error']), file=sys.stderr)
-                        return None
+                        if receipt['refusal'] == 'precondition_unmet' or require_new_owner:
+                            return None
+                        # The server still serves this workspace: go back to
+                        # the choice, without a stop for this server.
+                        refused_by = server_version
+                        continue
                     raise ValueError('invalid error')
                 if (receipt.get('schema') != 'masc.setup_server_shutdown.v1'
                         or receipt.get('termination_requested') is not True
@@ -2449,6 +2472,7 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
             raise SetupError('setup paused; existing services were preserved')
         port = suggested
         termination_requested = False
+        refused_by = None
 SANDBOX_NAMES = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
                  'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
 

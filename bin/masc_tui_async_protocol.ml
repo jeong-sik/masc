@@ -471,14 +471,15 @@ type workspace_msg =
 
 type schedule_msg =
   | Schedule_form_authority_refused of
-      { action : string; detail : string; workspace : workspace_input_identity option }
+      { change : schedule_change; refusal : workspace_refusal
+        ; workspace : workspace_input_identity option }
   | Schedules_loaded of schedule_page_request * (schedule_snapshot, string) result
   (* Carries the schedule it was asked about: the reader can step to the next
      row or close the detail while a load is in flight, and an answer that did
      not say whose it was would be filed under whoever is open when it lands. *)
   | Schedule_wake_history_loaded of
       string * (schedule_wake_history, string) result
-  | Schedule_cancel_done of string * (string, string) result
+  | Schedule_cancel_done of string * (string, request_failure) result
 
 type lane_msg =
   | Lane_package_catalog_loaded of int * string option * (Yojson.Safe.t, string) result

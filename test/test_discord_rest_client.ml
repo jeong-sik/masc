@@ -78,6 +78,33 @@ let test_build_request_allows_only_explicit_users () =
   check bool "broad parse modes absent" true
     (allowed |> member "parse" = `Null)
 
+(* Discord dedupes a repeated create-message request only when the body names
+   a nonce of at most 25 characters and sets enforce_nonce. *)
+let test_build_request_nonce_asks_discord_to_dedupe () =
+  let nonce = R.fresh_nonce () in
+  let _, _, body =
+    R.build_request ~token:"t" ~channel_id:(sf "1") ~content:"." ~nonce ()
+  in
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string body in
+  let sent = json |> member "nonce" |> to_string in
+  check string "nonce is sent as given" (R.nonce_to_string nonce) sent;
+  check bool "nonce fits Discord's 25-character limit" true
+    (String.length sent <= 25);
+  check bool "enforce_nonce is set" true
+    (json |> member "enforce_nonce" |> to_bool)
+
+let test_nonce_decoder_holds_the_discord_length_limit () =
+  (match R.nonce_of_string (String.make 25 'a') with
+   | Ok _ -> ()
+   | Error message -> failf "rejected a 25-character nonce: %s" message);
+  List.iter
+    (fun value ->
+      match R.nonce_of_string value with
+      | Ok _ -> failf "accepted an invalid Discord nonce %S" value
+      | Error _ -> ())
+    [ ""; String.make 26 'a' ]
+
 let test_build_typing_request_url_targets_channel () =
   let url, _, body =
     R.build_typing_request ~token:"abc" ~channel_id:(sf "1234567890") ()
@@ -500,6 +527,9 @@ let () =
     [ ( "snowflake"
       , [ test_case "rejects non-decimal IDs" `Quick
             test_snowflake_decoder_rejects_non_decimal_ids ] )
+    ; ( "nonce"
+      , [ test_case "holds the 25-character limit" `Quick
+            test_nonce_decoder_holds_the_discord_length_limit ] )
     ; ( "build_request"
       , [ test_case "URL targets channel" `Quick
             test_build_request_url_targets_channel
@@ -511,6 +541,8 @@ let () =
             test_build_request_body_is_content_object
         ; test_case "only explicit user mentions are allowed" `Quick
             test_build_request_allows_only_explicit_users
+        ; test_case "nonce asks Discord to dedupe" `Quick
+            test_build_request_nonce_asks_discord_to_dedupe
         ; test_case "typing URL targets channel" `Quick
             test_build_typing_request_url_targets_channel
         ; test_case "typing Authorization uses Bot scheme" `Quick

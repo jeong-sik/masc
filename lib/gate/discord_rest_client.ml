@@ -37,6 +37,30 @@ let snowflake_of_string value =
 
 let snowflake_to_string (Snowflake value) = value
 
+type nonce = Nonce of string
+
+(* Discord Create Message: nonce is "up to 25 characters". Accepting only
+   visible ASCII (no spaces or control bytes) makes the byte count the
+   character count, so the limit is checked exactly. *)
+let nonce_max_length = 25
+
+let nonce_of_string value =
+  let length = String.length value in
+  if length = 0 || length > nonce_max_length then
+    Error
+      (Printf.sprintf "Discord nonce must be 1 to %d characters"
+         nonce_max_length)
+  else if not (String.for_all (fun c -> c > ' ' && c <= '~') value) then
+    Error "Discord nonce must be visible ASCII"
+  else Ok (Nonce value)
+
+let nonce_to_string (Nonce value) = value
+
+(* 12 random bytes are 24 hex characters, inside [nonce_max_length]. *)
+let nonce_random_bytes = 12
+
+let fresh_nonce () = Nonce (Random_id.hex ~bytes:nonce_random_bytes)
+
 (* Discord text-message content limit, in Unicode scalar units.
    Messages longer than this must be split into multiple payloads. *)
 let message_content_limit = 2000
@@ -66,7 +90,7 @@ let allowed_mentions_json user_ids =
       [ "users", `List (List.map (fun id -> `String (snowflake_to_string id)) user_ids) ]
 
 let build_request ~token ~channel_id ~content ?reply_to_message_id
-    ?(allowed_user_mentions = []) () =
+    ?(allowed_user_mentions = []) ?nonce () =
   let url =
     Printf.sprintf
       "%s/channels/%s/messages"
@@ -79,6 +103,17 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id
     [ "content", `String content
     ; "allowed_mentions", allowed_mentions_json allowed_user_mentions
     ]
+  in
+  (* Discord checks a nonce for uniqueness only when enforce_nonce is true;
+     without it the nonce only reappears in the Message Create event. *)
+  let fields =
+    match nonce with
+    | None -> fields
+    | Some nonce ->
+        fields
+        @ [ "nonce", `String (nonce_to_string nonce)
+          ; "enforce_nonce", `Bool true
+          ]
   in
   let fields =
     match reply_to_message_id with
@@ -256,7 +291,7 @@ let parse_empty_response ?request_id ~status ~body () =
 
 let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id ~content ?reply_to_message_id
-    ?(allowed_user_mentions = []) () =
+    ?(allowed_user_mentions = []) ?nonce () =
   match snowflake_of_string channel_id with
   | Error message -> Error (Network message)
   | Ok channel_id ->
@@ -277,7 +312,7 @@ let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout
         | Ok reply_to_message_id ->
           let (url, headers, body) =
             build_request ~token ~channel_id ~content ~reply_to_message_id
-              ~allowed_user_mentions ()
+              ~allowed_user_mentions ?nonce ()
           in
           (match
              Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body
@@ -289,7 +324,8 @@ let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout
                ()))
      | None ->
        let (url, headers, body) =
-          build_request ~token ~channel_id ~content ~allowed_user_mentions ()
+          build_request ~token ~channel_id ~content ~allowed_user_mentions
+            ?nonce ()
        in
        (match
           Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body ()

@@ -70,6 +70,8 @@
   masc_core
   masc.time_codec
   masc.crypto_rng
+  ; Create Message nonces use the shared random-id generator.
+  masc.masc_random_id
   masc.http_client
   masc.masc_log
   otel_metric_store

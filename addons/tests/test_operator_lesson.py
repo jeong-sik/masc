@@ -94,7 +94,10 @@ class Base(unittest.TestCase):
         self.temporary.cleanup()
 
     def compose(self, action="act-1", scenes=3, binding=BINDING):
-        return self.flow.compose(action, scenes, binding, float(len(self.flow.sessions())))
+        # A session opens on the same clock the host delivers on, as in the
+        # worker, where both are the time of the call.
+        self.host.clock += 1
+        return self.flow.compose(action, scenes, binding, self.host.clock)
 
     def session(self, session_id) -> l.Session:
         return next(s for s in self.flow.sessions() if s.session_id == session_id)
@@ -445,7 +448,7 @@ class Rows(Base):
         self.assertEqual(fields["scenes"], {"requested": 3, "outlined": 2, "written": 1, "rejected": 1, "waiting": 0})
         self.assertEqual(rows[p.MEASURES]["fields"],
                          {"sessions": {"reading": 0, "writing": 0, "written": 1, "failed": 0, "superseded": 0},
-                          "scenes_written": 1, "shown_session": session_id,
+                          "scenes_written": 1, "shown_sessions": [session_id],
                           "rejected_entries": {"incomplete": 1},
                           "rejected_scenes": {"outcome_unknown": 1}, "failed_sessions": {}})
         self.assertEqual(p.observation(self.flow.sessions(), 5.0), output)
@@ -459,21 +462,44 @@ class Rows(Base):
         scenes = [row["fields"]["session_id"] for row in output["rows"] if row["lane_id"] == p.SCENES]
         self.assertEqual(scenes, [second.session_id])
         measures = next(row for row in output["rows"] if row["lane_id"] == p.MEASURES)["fields"]
-        self.assertEqual((measures["scenes_written"], measures["shown_session"]), (4, second.session_id))
+        self.assertEqual((measures["scenes_written"], measures["shown_sessions"]), (4, [second.session_id]))
         self.assertEqual(len([row for row in output["rows"] if row["lane_id"] == p.SESSIONS]), 2)
 
-    def test_an_earlier_lesson_that_writes_later_is_the_one_shown(self):
-        sessions = self.flow.sessions()
-        self.assertIsNone(p.shown(sessions))
+    def test_a_lesson_that_writes_after_the_newest_opened_is_shown_with_it(self):
+        self.assertEqual(p.shown(self.flow.sessions()), ())
         first = self.lesson("act-1")
         self.host.board.append(post(4, "a lane rests until its slot answers"))
         second = self.lesson("act-2")
+        ids = lambda shown: [session.session_id for session in shown]  # noqa: E731
+        # One scene of the first lesson came after the second opened, as
+        # when its scene slot rested and both wrote in one host cycle.
         late = dataclasses.replace(first.written[0], written_at=second.written[0].written_at + 1)
         earlier = dataclasses.replace(first, outcomes=(late, *first.outcomes[1:]))
-        self.assertEqual(p.shown([earlier, second]).session_id, first.session_id)
-        same = dataclasses.replace(first.written[0], written_at=second.written[0].written_at)
-        tied = dataclasses.replace(first, outcomes=(same,))
-        self.assertEqual(p.shown([tied, second]).session_id, second.session_id)
+        self.assertEqual(ids(p.shown([earlier, second])), [first.session_id, second.session_id])
+        between = dataclasses.replace(first.written[0], written_at=second.opened_at)
+        self.assertEqual(ids(p.shown([dataclasses.replace(first, outcomes=(between,)), second])),
+                         [first.session_id, second.session_id])
+        tied = dataclasses.replace(first.written[0], written_at=second.written[0].written_at)
+        self.assertEqual(ids(p.shown([dataclasses.replace(first, outcomes=(tied,)), second])),
+                         [first.session_id, second.session_id])
+        # The order of the sessions given does not decide.
+        self.assertEqual(ids(p.shown([second, earlier])), [second.session_id, first.session_id])
+        self.assertEqual(ids(p.shown([second, first])), [second.session_id])
+
+    def test_two_lessons_that_write_in_one_host_cycle_are_both_shown(self):
+        self.host.outline = one_entry_per_record
+        self.host.scene = lambda payload: None  # the scene slot rests
+        first = self.compose("act-1", scenes=2)
+        self.host.run(self.flow)
+        self.host.board.append(post(4, "a lane rests until its slot answers"))
+        second = self.compose("act-2", scenes=1)
+        self.host.run(self.flow)
+        self.assertEqual((self.session(first).state, self.session(second).state), (l.WRITING, l.WRITING))
+        self.host.scene = quoting
+        self.host.run(self.flow)
+        output = p.observation(self.flow.sessions(), 999.0)
+        scenes = [row["fields"]["session_id"] for row in output["rows"] if row["lane_id"] == p.SCENES]
+        self.assertEqual(scenes, [first, first, second])
 
 
 class Worker:

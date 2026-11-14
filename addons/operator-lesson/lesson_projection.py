@@ -71,25 +71,35 @@ def by_kind(reasons: list[dict]) -> dict:
     return {kind: kinds.count(kind) for kind in sorted(set(kinds))}
 
 
-def shown(sessions: list[l.Session]) -> l.Session | None:
-    """The session whose scenes are rows: the one that wrote the newest
-    scene, and of two written at the same time the one opened later. Every
-    scene ever written does not fit one reply for long (#51941), and a
-    scene just written is always in its own session, so each scene is a row
-    in at least the observation that follows it. Earlier lessons are read
-    from an export."""
+def shown(sessions: list[l.Session]) -> tuple[l.Session, ...]:
+    """The sessions whose scenes are rows, in the order given. Every scene
+    ever written does not fit one reply for long (#51941), so earlier
+    lessons are read from an export.
+
+    The host commits this package's output once at the end of a host cycle,
+    and one cycle can write scenes of two sessions: one left writing while
+    its scene slot rested, and the one composed after it. So the rows are
+    not the newest session's alone. They are the scenes of every session
+    that wrote a scene at or after the opening of the newest session that
+    wrote one. A lesson whose scenes all came before that opening was shown
+    by the observation that ended its own cycle, or by the compose that
+    opened the newer session. Only clock values decide; the order of
+    [sessions] does not."""
     wrote = [session for session in sessions if session.written]
-    # max keeps the first of equals, so the later session is offered first.
-    return max(reversed(wrote), key=lambda session: max(scene.written_at for scene in session.written),
-               default=None)
+    if not wrote:
+        return ()
+    latest = max(scene.written_at for session in wrote for scene in session.written)
+    since = max(session.opened_at for session in wrote
+                if any(scene.written_at == latest for scene in session.written))
+    return tuple(session for session in wrote if any(scene.written_at >= since for scene in session.written))
 
 
-def measures_row(sessions: list[l.Session], lesson: l.Session | None, observed_at: float,
+def measures_row(sessions: list[l.Session], lessons: tuple[l.Session, ...], observed_at: float,
                  evidence: list | None) -> dict:
     states = [session.state for session in sessions]
     fields = {"sessions": {state: states.count(state) for state in STATES},
               "scenes_written": sum(len(session.written) for session in sessions),
-              "shown_session": lesson.session_id if lesson else None,
+              "shown_sessions": [lesson.session_id for lesson in lessons],
               "rejected_entries": by_kind([l.entry_rejection_to_json(r.reason)
                                            for session in sessions for r in session.rejected]),
               "rejected_scenes": by_kind([l.scene_rejection_to_json(r.reason)
@@ -102,13 +112,13 @@ def measures_row(sessions: list[l.Session], lesson: l.Session | None, observed_a
 def observation(sessions: list[l.Session], now: float, export: dict | None = None) -> dict:
     """The output for one observation. [export] is the log artifact of an
     export action, referenced from the measures row."""
-    lesson = shown(sessions)
-    rows = [scene_row(scene) for scene in lesson.written] if lesson else []
+    lessons = shown(sessions)
+    rows = [scene_row(scene) for lesson in lessons for scene in lesson.written]
     rows += [session_row(session) for session in sessions]
     # Without an export the row times come from the log, so an observation
     # with nothing new gives the same rows.
     observed_at = now if export else max((r["observed_at"] for r in rows), default=now)
-    rows.append(measures_row(sessions, lesson, observed_at, [{"artifact_id": export["id"]}] if export else None))
+    rows.append(measures_row(sessions, lessons, observed_at, [{"artifact_id": export["id"]}] if export else None))
     output: dict = {"rows": rows, "coverage": []}
     if export:
         output["artifacts"] = [export]

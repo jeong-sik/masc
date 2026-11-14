@@ -2754,6 +2754,7 @@
 (include stanzas/test_execute_shell_host_admission.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 (include stanzas/test_log_file_writer.inc)
+(include stanzas/test_start_log_dir_refusal.inc)
 
 (include stanzas/test_artifacts_upload.inc)
 

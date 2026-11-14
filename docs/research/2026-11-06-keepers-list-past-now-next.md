@@ -74,10 +74,12 @@ the group and the colour ignore it.
 
 The server's hint does not separate rows either. `kr_next_action` is a hint for
 the operator, and for every failing Keeper it is `Probe`
-(`lib/keeper/keeper_status_runtime.ml:297`, `KH_failing -> Probe`). The same
-file explains why: the phase keeps probing on its own, a clean turn returns it
-to `Running`, and past its failure threshold it becomes `Crashed`, which the
-supervisor restarts.
+(`lib/keeper/keeper_status_runtime.ml`, `keeper_next_action_path`,
+`KH_failing -> Probe`). The same file explains why: the phase keeps probing on
+its own, and once turns and heartbeats are both healthy it returns to
+`Running`. No failure count moves it anywhere else; besides that recovery, only
+a stop or pause request or the fiber's death leaves `Failing`
+(`lib/keeper_registry/keeper_state_machine.ml`, `derive_phase`).
 
 ## What one live snapshot shows
 

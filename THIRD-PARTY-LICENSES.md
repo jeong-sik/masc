@@ -17,6 +17,26 @@ copyright metadata in the bundled fonts on 2026-09-08, with trailing whitespace
 normalized. Font subset filenames
 and CSS weights do not change their license.
 
+## Statically linked OCaml libraries
+
+The server, TUI and companion executables of a release link the OCaml runtime,
+its standard library and opam packages statically. Each
+`masc-runtime-<platform>.tar.gz` carries their notice files under
+`licenses/ocaml/<package>/`, copied byte for byte from the top of its exact
+source and from the files the package installed in the opam switch's doc
+directory. A notice deeper in the source ships when it covers code vendored
+into a linked library, such as libyaml in `yaml`. `licenses/ocaml/packages.json`
+records each package's version, pinned commit, the SHA-256 of each file, where
+it came from, and the nested notices left out with the reason.
+
+`scripts/collect-ocaml-notices.py` takes the package set from dune's link rule
+for each of those executables, so the set follows the build without a
+hand-kept list. A linked package without a notice file stops the release, and
+so does a nested notice that its `NESTED_NOTICES` table neither ships nor
+excludes. The exceptions are the exact versions named in that script's
+`NO_UPSTREAM_NOTICE`, whose upstream source has no such file; `packages.json`
+lists them with that reason and no file.
+
 ## alphaTex terminal companion
 
 `scripts/install-alphatex.sh` installs locked npm packages with their notices:

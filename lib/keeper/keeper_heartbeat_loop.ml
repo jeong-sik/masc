@@ -82,24 +82,41 @@ let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
 (** Run keeper cycle with holder diagnostics. *)
 let run_keeper_cycle = Cycle.run_keeper_cycle
 
-(* T6 audit: outcome of one keepalive cycle evaluation.
+(* What one keepalive cycle did with a turn. The status says whether a turn
+   ran in this cycle and how it ended; the stored failure streak takes no part
+   in it. A cycle that ran no turn has a status of its own, so the first cycle
+   of a fiber that inherited a nonzero streak cannot report a failed turn
+   (#34673).
 
-   [cycle_crashed = true] means either the catch-all in
-   [run_keepalive_unified_turn] swallowed an exception to keep the
-   keeper fiber alive, or event-queue work did not complete. The failure has
-   already been recorded via
-   [Keeper_registry.increment_turn_failures] (the same counter the
-   unified-turn failure path in [Keeper_unified_turn_failure] uses),
-   so the caller reads a non-zero [turn_fail_count] and dispatches
-   [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
-   NOT refresh the work-as-heartbeat lease; the count is observation and never
-   terminates the Keeper lane. *)
+   [Turn_cycle_turn_succeeded] / [Turn_cycle_turn_failed]: the turn ran and
+   ended that way.
+   [Turn_cycle_without_turn]: the cycle ran and no turn did (warmup not
+   elapsed, nothing scheduled, phase gate skipped or cancelled the turn, or
+   the Owner is shutting down).
+   [Turn_cycle_lifecycle_blocked]: lifecycle admission denied intake before
+   the cycle body.
+   [Turn_cycle_owner_rejected]: the Owner registry refused the autonomous
+   turn outside shutdown. No turn ran and no failure was added to the streak.
+   [Turn_cycle_crashed] (T6 audit): the catch-all in
+   [run_keepalive_unified_turn] swallowed an exception to keep the keeper
+   fiber alive, or event-queue work did not complete. That failure was
+   recorded through [Keeper_turn_failure_streak.increment], the same streak
+   [Keeper_unified_turn_failure] advances. Such a cycle must NOT refresh the
+   work-as-heartbeat lease. *)
 type keepalive_cycle_status =
-  | Turn_cycle_completed
+  | Turn_cycle_turn_succeeded
+  | Turn_cycle_turn_failed
+  | Turn_cycle_without_turn
+  | Turn_cycle_lifecycle_blocked
+  | Turn_cycle_owner_rejected
   | Turn_cycle_interrupted
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
   | Turn_cycle_rested
+
+type cycle_turn_result =
+  | Cycle_turn_succeeded
+  | Cycle_turn_failed
 
 type work_heartbeat_action =
   | Refresh_work_heartbeat
@@ -108,24 +125,32 @@ type work_heartbeat_action =
 type keepalive_cycle_action =
   | Defer_autonomous_work of Keeper_owner.autonomous_block
   | Skip_interrupted_turn
-  | Record_turn_status of work_heartbeat_action
-  | Rest_without_turn_status
+  | Skip_unadmitted_cycle
+  | Record_turn_status of cycle_turn_result * work_heartbeat_action
+  | Refresh_without_turn_status
 
 let decide_keepalive_cycle_action = function
-  | Turn_cycle_completed -> Record_turn_status Refresh_work_heartbeat
+  | Turn_cycle_turn_succeeded ->
+    Record_turn_status (Cycle_turn_succeeded, Refresh_work_heartbeat)
+  | Turn_cycle_turn_failed ->
+    Record_turn_status (Cycle_turn_failed, Refresh_work_heartbeat)
+  | Turn_cycle_without_turn | Turn_cycle_rested -> Refresh_without_turn_status
+  | Turn_cycle_lifecycle_blocked | Turn_cycle_owner_rejected ->
+    Skip_unadmitted_cycle
   | Turn_cycle_interrupted -> Skip_interrupted_turn
-  | Turn_cycle_crashed -> Record_turn_status Preserve_work_heartbeat
+  | Turn_cycle_crashed ->
+    Record_turn_status (Cycle_turn_failed, Preserve_work_heartbeat)
   | Turn_cycle_busy block -> Defer_autonomous_work block
-  | Turn_cycle_rested -> Rest_without_turn_status
 ;;
 
 (* Which cycle status an Owner-registry rejection of the autonomous turn
    records. The Owner stopping and its inventory stopping are the same
-   shutdown boundary: the turn was never admitted, so the cycle completes
-   without a turn and nothing is a crash. Every other rejection is a crash of
-   the cycle. Both sums are closed and matched in full, so a new constructor
-   is named here at compile time instead of falling into the crash arm
-   (audit S9: [Inventory_stopping] was logged at ERROR and counted as a
+   shutdown boundary: the turn was never admitted, so the cycle ends without
+   a turn. Every other rejection is [Turn_cycle_owner_rejected]: it is logged
+   at ERROR and leaves the work-health lease alone, and it is not a failed
+   turn, because no turn ran and nothing advanced the streak. Both sums are
+   closed and matched in full, so a new constructor is named here at compile
+   time (audit S9: [Inventory_stopping] was logged at ERROR and counted as a
    crash once per Keeper per shutdown, 39 times in five days). *)
 let owner_turn_rejection_cycle_status
     (error : Keeper_owner_registry.command_error)
@@ -134,7 +159,7 @@ let owner_turn_rejection_cycle_status
   match error with
   | Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping
   | Keeper_owner_registry.Command_lookup_failed
-      Keeper_owner_registry.Inventory_stopping -> Turn_cycle_completed
+      Keeper_owner_registry.Inventory_stopping -> Turn_cycle_without_turn
   | Keeper_owner_registry.Command_lookup_failed
       ( Keeper_owner_registry.Inventory_not_installed _
       | Keeper_owner_registry.Owner_not_found _
@@ -145,7 +170,7 @@ let owner_turn_rejection_cycle_status
       ( Keeper_owner.Reducer_rejected _
       | Keeper_owner.Operation_rejected _
       | Keeper_owner.Store_unavailable _
-      | Keeper_owner.Owner_closed ) -> Turn_cycle_crashed
+      | Keeper_owner.Owner_closed ) -> Turn_cycle_owner_rejected
 ;;
 
 (* What a failed cycle leaves the next one (RFC-provider-path-rest). A rest
@@ -824,13 +849,15 @@ let hitl_selection_has_recorded_continuation ~projections
 ;;
 
 
-(* Pure: post-turn status event derived from the registry turn-failure
-   counter. Extracted from the loop body so the crashed-cycle ->
-   [Turn_failed] mapping is unit-testable. *)
-let turn_status_event ~turn_fail_count : Keeper_state_machine.event =
-  if turn_fail_count > 0
-  then Keeper_state_machine.Turn_failed { consecutive = turn_fail_count }
-  else Keeper_state_machine.Turn_succeeded
+(* Pure: the status event for a turn that ran in this cycle. The cycle's own
+   result chooses the event; the stored streak only fills [consecutive]. *)
+let turn_status_event ~turn_fail_count (result : cycle_turn_result)
+  : Keeper_state_machine.event
+  =
+  match result with
+  | Cycle_turn_succeeded -> Keeper_state_machine.Turn_succeeded
+  | Cycle_turn_failed ->
+    Keeper_state_machine.Turn_failed { consecutive = turn_fail_count }
 ;;
 
 let failure_reason_after_turn_status ~turn_fail_count current =
@@ -971,7 +998,7 @@ let run_keepalive_unified_turn
   if not proactive_warmup_elapsed
   then (
     { meta = meta_after_triage
-    ; cycle_status = Turn_cycle_completed
+    ; cycle_status = Turn_cycle_without_turn
     ; stimuli_acked = false
     ; after_failure = None
     })
@@ -1416,11 +1443,11 @@ let run_keepalive_unified_turn
              | Some
                  ( Cycle.Completed _
                  | Cycle.Checkpointed _
-                 | Cycle.Input_required _
-                 | Cycle.Cancelled _
-                 | Cycle.Skipped _
-                 | Cycle.Failed _ )
-             | None -> Turn_cycle_completed)
+                 | Cycle.Input_required _ ) -> Turn_cycle_turn_succeeded
+             | Some (Cycle.Failed _) -> Turn_cycle_turn_failed
+             (* The phase gate ended the cycle before a turn ran. *)
+             | Some (Cycle.Cancelled _ | Cycle.Skipped _)
+             | None -> Turn_cycle_without_turn)
       ; stimuli_acked = !stimuli_acked
       ; after_failure =
           after_failure_of_cycle_outcome
@@ -1476,12 +1503,14 @@ let run_keepalive_unified_turn
   | Error error ->
     let cycle_status = owner_turn_rejection_cycle_status error in
     (match cycle_status with
-     | Turn_cycle_crashed ->
+     | Turn_cycle_owner_rejected ->
        Log.Keeper.error
          ~keeper_name:meta_after_triage.name
          "keeper owner rejected autonomous turn: %s"
          (Keeper_owner_registry.command_error_to_string error)
-     | Turn_cycle_completed | Turn_cycle_interrupted | Turn_cycle_busy _
+     | Turn_cycle_turn_succeeded | Turn_cycle_turn_failed
+     | Turn_cycle_without_turn | Turn_cycle_lifecycle_blocked
+     | Turn_cycle_interrupted | Turn_cycle_crashed | Turn_cycle_busy _
      | Turn_cycle_rested -> ());
     { meta = meta_after_triage
     ; cycle_status
@@ -1675,11 +1704,6 @@ let run_heartbeat_loop
           | Intake_admitted -> true
           | Intake_lifecycle_blocked _ -> false
         in
-        let lifecycle_blocked =
-          match intake_admission with
-          | Intake_lifecycle_blocked _ -> true
-          | Intake_admitted -> false
-        in
         (match intake_admission with
          | Intake_admitted -> ()
          | Intake_lifecycle_blocked denial ->
@@ -1737,7 +1761,7 @@ let run_heartbeat_loop
           if not admitted_turn
           then (
             { meta = meta_current
-            ; cycle_status = Turn_cycle_completed
+            ; cycle_status = Turn_cycle_lifecycle_blocked
             ; stimuli_acked = false
             ; after_failure = None
             })
@@ -1801,22 +1825,27 @@ let run_heartbeat_loop
              ~keeper_name:m.name
              "%s: operator-interrupted cycle records no turn status or work-health refresh"
              m.name
-         | Rest_without_turn_status ->
-           (* The provider stated when its quota resets and the turn had no
-              effect: neither [Turn_succeeded] nor [Turn_failed] is true of
-              it, so the Keeper's phase and failure cause stay as they were.
-              The cycle itself ran, so it renews the work-health lease. *)
+         | Skip_unadmitted_cycle ->
+           (* Lifecycle admission or the Owner registry refused the cycle
+              where it arose, and that site logged it. No turn ran, so the
+              cycle records no turn status and leaves the work-health lease
+              as it was. *)
+           ()
+         | Refresh_without_turn_status ->
+           (* No turn ran in this cycle, or the provider stated when its
+              quota resets and the turn had no effect: neither
+              [Turn_succeeded] nor [Turn_failed] is true of it, so the
+              Keeper's phase and failure cause stay as they were. The cycle
+              itself ran, so it renews the work-health lease. *)
            refresh_work_as_heartbeat
              ~ctx
              ~meta_after_proactive
              ~proactive_warmup_elapsed
              ~work_as_hb
              ~consecutive_failures
-         | Record_turn_status _ when lifecycle_blocked -> ()
-         | Record_turn_status work_heartbeat_action ->
-             (* The registry tracks failure count as observation. A
-                lifecycle-blocked cycle did not run a turn and must not emit a
-                false [Turn_succeeded]. *)
+         | Record_turn_status (turn_result, work_heartbeat_action) ->
+             (* The registry streak is observation: it fills [consecutive]
+                and the failure cause, and does not choose the event. *)
              let turn_fail_count =
                Keeper_registry.get_turn_failures
                  ~base_path:ctx.config.base_path
@@ -1826,11 +1855,13 @@ let run_heartbeat_loop
              Keeper_keepalive_signal.dispatch_keepalive_event
                ~ctx
                ~keeper_name:m.name
-               (turn_status_event
-                  ~turn_fail_count);
-             refresh_failure_reason_after_turn
-               ~registry_entry
-               ~turn_fail_count;
+               (turn_status_event ~turn_fail_count turn_result);
+             (match turn_result with
+              | Cycle_turn_failed ->
+                refresh_failure_reason_after_turn
+                  ~registry_entry
+                  ~turn_fail_count
+              | Cycle_turn_succeeded -> ());
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                 On success: reset consecutive_failures.

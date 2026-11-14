@@ -453,7 +453,7 @@ let test_delete_is_confirmed_and_irreversible () =
   Alcotest.(check string) "delete takes x" "x"
     (Control.action_key Control.Delete);
   Alcotest.(check bool) "and the arm has a list to name" true
-    (List.length Control.purge_artifacts > 0)
+    (List.length (Control.purge_artifacts ~ko:false) > 0)
 
 (* Delete remains a confirmed action and delegates live-lane shutdown to the
    durable server operation. An unread roster still offers confirmed deletion. *)

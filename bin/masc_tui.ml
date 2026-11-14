@@ -21777,6 +21777,16 @@ let handle_ask_submit state ~mailbox =
                 ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
                 ~answered_label ~answers ~mailbox))
 
+(* Said by the action gates (the keeper actions and the schedule cancel)
+   while the workspace identity is not confirmed. *)
+let workspace_unread_refusal ~ko =
+  if ko then "공간 미조회 · 동작 불가"
+  else "Workspace identity has not been read; action unavailable"
+
+let workspace_unconfirmed_refusal ~ko =
+  if ko then "공간 확인 대기 · 동작 불가"
+  else "Workspace identity is unconfirmed; action unavailable"
+
 (* Run one lifecycle action's steps against the server.
 
    The steps come from [Keeper_control.plan]; this only performs them and
@@ -21788,24 +21798,30 @@ let handle_ask_submit state ~mailbox =
    recovery itself is the operator's to read. *)
 let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_operation_id
     ~expected_workspace action =
+  (* The workspace check and the transport answer in text, not HTTP; what
+     they say is carried as it came. *)
+  let unanswered result = Result.map_error (fun text -> Keeper_control.No_answer text) result in
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
         (match expected_workspace with
-         | None -> Error "Workspace identity is unavailable; Keeper lifecycle action was not sent"
+         | None -> Error Keeper_control.Workspace_unbound
          | Some expected_workspace ->
-           Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
-             ~action:lifecycle_action ~expected_workspace)
+           unanswered
+             (Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
+                ~action:lifecycle_action ~expected_workspace))
     | Keeper_control.Directive directive_action ->
         (match expected_workspace with
-         | None -> Error "Workspace identity is unavailable; Keeper directive was not sent"
+         | None -> Error Keeper_control.Workspace_unbound
          | Some expected_workspace ->
-           Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-             ~action:directive_action ~operator_operation_id ~expected_workspace)
+           unanswered
+             (Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+                ~action:directive_action ~operator_operation_id ~expected_workspace))
     | Keeper_control.Purge ->
         (match expected_workspace with
-         | None -> Error "Workspace identity is unavailable; Keeper purge was not sent"
+         | None -> Error Keeper_control.Workspace_unbound
          | Some expected_workspace ->
-           Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace)
+           unanswered
+             (Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace))
   in
   let rec walk ~recovery_available last_outcome steps =
     match steps with
@@ -21815,12 +21831,10 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
         | None ->
             (* [plan] never returns an empty step list; if it ever did, an
                empty walk must not read as success. *)
-            Error
-              (Printf.sprintf "%s has no request to send"
-                 (Keeper_control.action_label ~ko:false action)))
+            Error Keeper_control.Empty_plan)
     | step :: rest -> (
-        match Result.bind (check_request ()) (fun () -> perform step) with
-        | Error transport -> Error transport
+        match Result.bind (unanswered (check_request ())) (fun () -> perform step) with
+        | Error failure -> Error failure
         | Ok (status, body) -> (
             let outcome = match step with
               | Keeper_control.Purge -> Keeper_control.classify_purge_response ~keeper_name ~status ~body
@@ -21831,11 +21845,7 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
             | Keeper_control.Committed_followup_failed detail as outcome -> (
                 match rest with
                 | _ :: _ -> walk ~recovery_available (Some outcome) rest
-                | [] ->
-                    Error
-                      (Printf.sprintf
-                         "durable pause cleared, but live resume failed: %s"
-                         detail))
+                | [] -> Error (Keeper_control.Followup_failed detail))
             | Keeper_control.Paused_owner_conflict detail -> (
                 match
                   ( recovery_available
@@ -21843,30 +21853,33 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
                 with
                 | true, Some recovery_steps ->
                     walk ~recovery_available:false last_outcome recovery_steps
-                | true, None | false, _ -> Error detail)
+                | true, None | false, _ ->
+                    Error (Keeper_control.Refused { status; detail }))
             | Keeper_control.Rejected { status; detail } ->
-                Error (Printf.sprintf "HTTP %d: %s" status detail)))
+                Error (Keeper_control.Refused { status; detail })))
   in
   walk ~recovery_available:true None (Keeper_control.plan action)
 
-(* WORKAROUND: the keeper action notices are English sentences, so their
-   action words are English (~ko:false). Root fix: the notices take the
-   screen language, with the action steps' errors as typed values. *)
 let apply_keeper_action_result state ~base_path ~mailbox keeper_name action result =
   state.keeper_action_inflight <- None;
+  let ko = state.ui_language = Lang_ko in
+  let label = Keeper_control.action_label ~ko action in
   (match result with
    | Ok (Keeper_control.Purge_accepted { operation_id }) ->
        report_action state "system"
-         (Printf.sprintf "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed"
+         (Printf.sprintf
+            (if ko then "%s 삭제 접수됨 (요청 %s) · 종료와 정리는 아직 확인 전"
+             else "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed")
             keeper_name operation_id)
    | Ok (Keeper_control.Accepted { already_live = true }) ->
        report_action state "system"
-         (Printf.sprintf "%s was already running; woke it instead of starting a second fiber"
+         (Printf.sprintf
+            (if ko then "%s 이미 실행 중 · 새로 띄우지 않고 깨움"
+             else "%s was already running; woke it instead of starting a second fiber")
             keeper_name)
    | Ok (Keeper_control.Accepted { already_live = false }) ->
        report_action state "system"
-         (Printf.sprintf "%s %s accepted" keeper_name
-            (Keeper_control.action_label ~ko:false action))
+         (Printf.sprintf (if ko then "%s %s 접수됨" else "%s %s accepted") keeper_name label)
    | Ok (Keeper_control.Paused_owner_conflict detail)
    | Ok (Keeper_control.Committed_followup_failed detail)
    | Ok (Keeper_control.Rejected { detail; _ }) ->
@@ -21874,12 +21887,12 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
           branch exhaustive rather than wildcarded means a future outcome
           member has to be answered here too. *)
        report_action state "error"
-         (Printf.sprintf "%s %s refused: %s" keeper_name
-            (Keeper_control.action_label ~ko:false action) detail)
-   | Error detail ->
+         (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
+            keeper_name label detail)
+   | Error failure ->
        report_action state "error"
-         (Printf.sprintf "%s %s failed: %s" keeper_name
-            (Keeper_control.action_label ~ko:false action) detail));
+         (Printf.sprintf (if ko then "%s %s 실패: %s" else "%s %s failed: %s")
+            keeper_name label (Keeper_control.failure_text ~ko failure)));
   (* The accepted action may change Keeper metadata and release Task work.
      Each local source starts a fresh owned read; the HTTP roster refresh is
      independent and no directory scan runs in this result handler. *)
@@ -21889,7 +21902,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   if not (server_authority_ready state) then begin
     state.keeper_action_pending <- None;
     report_action state "error"
-      "Cannot change Keeper state: workspace identity is unverified"
+      (workspace_unconfirmed_refusal ~ko:(state.ui_language = Lang_ko))
   end else
   let origin = state.server_identity in
   let enqueue_async = workspace_enqueue state in
@@ -21898,7 +21911,10 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
   report_action ~show_in_footer:false state "system"
-    (Printf.sprintf "%s %s" (Keeper_control.action_gerund ~ko:false action) keeper_name);
+    (let ko = state.ui_language = Lang_ko in
+     let gerund = Keeper_control.action_gerund ~ko action in
+     if ko then Printf.sprintf "%s %s" keeper_name gerund
+     else Printf.sprintf "%s %s" gerund keeper_name);
   let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
@@ -21914,7 +21930,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
           ~operator_operation_id ~expected_workspace:identity action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
     in
     enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
   in
@@ -21927,7 +21943,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
             ~operator_operation_id ~expected_workspace:identity action
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
 
@@ -22196,9 +22212,11 @@ let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
 let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_action state "error" "Workspace identity has not been read; action unavailable"
+      report_action state "error"
+        (workspace_unread_refusal ~ko:(state.ui_language = Lang_ko))
   | Workspace_identity_match_unconfirmed _ ->
-      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
+      report_action state "error"
+        (workspace_unconfirmed_refusal ~ko:(state.ui_language = Lang_ko))
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
   let check = capture_workspace_check state ~mailbox in
@@ -22767,7 +22785,9 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
 (* Said by every keypress gate that finds nothing under the cursor. One name
    rather than the sentence written twice: the two gates have to answer the
    same way, and a test can ask whether each of them reaches this. *)
-let no_keeper_under_cursor = "no keeper under the cursor; r to reload the roster"
+let no_keeper_under_cursor ~ko =
+  if ko then "커서 아래 키퍼 없음 · r 로 목록 다시 읽기"
+  else "no keeper under the cursor; r to reload the roster"
 
 (* The keypress path. The reading decides which actions exist at all, so a key
    that names an action the reading does not offer says why instead of sending
@@ -22775,9 +22795,11 @@ let no_keeper_under_cursor = "no keeper under the cursor; r to reload the roster
 let handle_keeper_action state ~base_path ~mailbox action =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_action state "error" "Workspace identity has not been read; action unavailable"
+      report_action state "error"
+        (workspace_unread_refusal ~ko:(state.ui_language = Lang_ko))
   | Workspace_identity_match_unconfirmed _ ->
-      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
+      report_action state "error"
+        (workspace_unconfirmed_refusal ~ko:(state.ui_language = Lang_ko))
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
@@ -22785,25 +22807,21 @@ let handle_keeper_action state ~base_path ~mailbox action =
        reads as a key that does not exist. The comment above already holds
        this rule for the next gate -- an action the reading does not offer
        says why -- and this gate is the one the operator reaches first. *)
-    report_action state "system" no_keeper_under_cursor
+    report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
   | Some keeper ->
       let reading = keeper_reading state keeper in
+      let ko = state.ui_language = Lang_ko in
+      let label = Keeper_control.action_label ~ko action in
       if not (List.mem action (Keeper_control.available reading)) then
         report_action state "system"
-          (Printf.sprintf "%s cannot %s right now (%s)" keeper.k_name
-             (Keeper_control.action_label ~ko:false action)
-             (match reading.Keeper_control.liveness with
-              | Keeper_control.Invalid detail -> detail
-              | Keeper_control.Unobserved ->
-                  "the live roster has not been read"
-              | Keeper_control.Absent | Keeper_control.Present _ ->
-                  (if reading.Keeper_control.paused then "paused, "
-                   else "")
-                  (* The notice is an English sentence as a whole, so its
-                     health word stays English with it until the notice takes
-                     the screen language. *)
-                  ^ Keeper_control.health_label ~ko:false reading
-                  ^ " keeper"))
+          (Printf.sprintf
+             (if ko then "%s 지금 %s 불가 (%s)" else "%s cannot %s right now (%s)")
+             keeper.k_name label
+             (Keeper_control.status_label ~ko reading
+              ^ (match reading.Keeper_control.liveness with
+                 | Keeper_control.Invalid detail -> ": " ^ detail
+                 | Keeper_control.Unobserved | Keeper_control.Absent
+                 | Keeper_control.Present _ -> "")))
       else
         match
           Keeper_control.gate_transition
@@ -22811,21 +22829,23 @@ let handle_keeper_action state ~base_path ~mailbox action =
             ~pending:state.keeper_action_pending ~keeper:keeper.k_name action
         with
         | Keeper_control.Gate_blocked_inflight ->
-            report_action state "system" "A keeper action is already in progress"
+            report_action state "system"
+              (if ko then "키퍼 동작 이미 진행 중" else "A keeper action is already in progress")
         | Keeper_control.Gate_arm pending ->
             state.keeper_action_pending <- Some pending;
+            let key = Keeper_control.action_key action in
             report_action ~show_in_footer:false state "system"
-              (Printf.sprintf "Press %s again to %s %s"
-                 (Keeper_control.action_key action)
-                 (Keeper_control.action_label ~ko:false action) keeper.k_name);
+              (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key keeper.k_name label
+               else Printf.sprintf "Press %s again to %s %s" key label keeper.k_name);
 
             (* Shutdown is undone by a boot. Delete is not undone at all, so
                the arm names what goes -- the same list the dashboard shows
                before its own purge. *)
             if action = Keeper_control.Delete then
               report_action state "system"
-                ("Delete stops the Keeper and waits for lane shutdown before removing: "
-                 ^ String.concat ", " Keeper_control.purge_artifacts)
+                ((if ko then "삭제하면 키퍼를 멈추고 lane 종료를 기다린 뒤 지움: "
+                  else "Delete stops the Keeper and waits for lane shutdown before removing: ")
+                 ^ String.concat ", " (Keeper_control.purge_artifacts ~ko))
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
@@ -32287,7 +32307,7 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_keeper_settings_edit ~format () =
     match selected_keeper state with
-    | None -> report_action state "system" no_keeper_under_cursor
+    | None -> report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
     | Some _ ->
       (match Masc_tui_editor.editor_command () with
        | None -> report_action state "error"
@@ -42885,7 +42905,8 @@ Use relative paths for resources already held in the package. -->
                       ~mailbox:async_messages action
                 | Some None ->
                     report_action state "system"
-                      "No lifecycle action applies to this keeper yet"
+                      (if state.ui_language = Lang_ko then "이 키퍼에 아직 쓸 수 있는 동작 없음"
+                       else "No lifecycle action applies to this keeper yet")
                 | None -> ())
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes

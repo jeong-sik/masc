@@ -27,11 +27,12 @@ Keeper 턴이 Muse 로 갈 때 MASC 는 턴마다 loopback MCP bridge 를 띄우
 
 bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting_initialize`, `Awaiting_initialized`, `Ready` 세 단계다. 이 값을 읽는 production 코드가 없다.
 
-이 RFC 는 세 가지를 정한다.
+이 RFC 는 네 가지를 정한다.
 
 1. bridge 가 자기 단계를 production 값으로 내준다(D1).
 2. Muse host 가 완료했다고 알린 턴은 bridge 가 `Ready` 일 때만 성공이다. 아니면 이름 있는 실패다(D2).
 3. 그 실패가 났을 때 턴이 한 일은 RFC-0509 판정을 그대로 따른다(D3).
+4. 그 턴의 Muse 세션은 다음 턴이 이어 쓰지 않는다(D4).
 
 ## 1. 결정
 
@@ -64,6 +65,14 @@ bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting
 
 `Agent_core.Error.Config (InvalidConfig _)` 로 만들지 않는다. `provider_attempt_dispatch` 는 요청이 나가지 않은 `InvalidConfig` 를 `Rejected_before_dispatch` 로 읽는다(`keeper_turn_driver.ml`). 이 실패는 요청이 나간 뒤라 그 뜻과 맞지 않는다.
 
+### D4. 도구 없이 돈 턴의 Muse 세션은 이어 쓰지 않는다
+
+지금 완료된 턴은 `Session_store.settle_completed_holding` 으로 세션을 정리하고, 다음 턴이 그 세션을 재개한다. `session_mcp_not_connected` 턴은 이 정리를 하지 않는다. 세션 저장소의 실패 종류는 `Provider_rejected` 로 둔다.
+
+- `Provider_rejected` 의 처분은 `Fatal` 이다(`failure_disposition`). 실패가 기록되고, 다음 claim 이 새 세션으로 대체한다(`keeper_official_client_session_store.mli`: `Input_rejected` 가 아닌 실패는 다음 claim 이 fresh session 으로 대체).
+- 그래서 모델이 도구 없이 답한 턴이 다음 턴의 대화 기록에 남지 않는다.
+- 새 실패 종류를 더하지 않는다. host 가 요청한 조건(필수 서버)을 채우지 않은 것이라 「provider 가 거절했다」와 같은 처분이면 충분하다.
+
 ## 2. 지금 모습
 
 - `keeper_muse_runtime.ml`: `Mcp_http.start` 로 bridge 를 띄우고 `mcp_servers_of_bridge` 가 `required = true` 로 싣는다. 턴이 끝난 뒤 bridge 에서 읽는 것은 `await_host_stop` 뿐이다.
@@ -88,7 +97,7 @@ bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting
 1. **토큰은 한 번 쓰인다.** 판정이 턴 뒤라 그 턴의 모델 호출은 이미 끝났다. 이 RFC 는 잘못된 성공 기록을 없애고, 낭비를 막지는 못한다.
 2. **같은 실패가 턴마다 되풀이된다.** 턴을 넘어 후보를 쉬게 하는 장치는 둘뿐이다. quota 창(`Runtime_quota_window`, `HardQuota`·402 가 쓴다)과 rate limit backpressure(429 가 쓴다)다. `ProviderReportedError` 는 아무것도 남기지 않는다(`keeper_turn_driver.ml` 의 `Provider_reported_failure` 경로). 그래서 다음 턴도 같은 Muse runtime 을 먼저 부르고, 턴마다 Muse 한 턴의 토큰을 쓴 뒤 다음 후보로 넘어간다. 로그인이 풀린 계정(`AuthError`)도 지금 같은 식으로 턴마다 다시 불린다.
    이 RFC 는 새 「쉬게 하는 상태」를 더하지 않는다. quota 창에 적으면 사실과 다른 원인을 적게 된다. 새 상태는 운영자가 lane 을 고칠 때까지 후보를 막는 Gate 가 되고, 그 Gate 없이도 기록은 정확하다. 되풀이를 끝내는 방법은 운영자가 lane 에서 그 runtime 을 빼거나 host 설정을 고치는 것이다.
-3. **세션 재개.** 도구 없이 돈 턴이 Muse 세션 기록에 남는다. 다음 턴이 그 세션을 재개할지 새로 시작할지는 정하지 않았다.
+3. **세션 정리는 2층에서 시험으로 확인한다.** D4 가 고른 `Provider_rejected` 가 같은 턴 안의 다음 후보 진행을 막지 않는지는 코드로만 읽었다. 2층의 Keeper Muse 시험이 이 경로를 돌려 확인한다.
 4. **재개 세션의 접속 시점.** 탐침은 `session/start` 만 봤다. `session/resume` 에서도 턴 전에 접속하는지는 확인하지 않았다.
 5. **1.4.15 시작 추정.** 접속이 끊긴 버전은 로그 시각으로 추정했다. 1.4.14 바이너리로 비교하지 않았다.
 
@@ -111,4 +120,4 @@ bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting
 |---|---|
 | L0 | 이 RFC |
 | L1 | D1: `client_phase` 와 시험 |
-| L2 | D2·D3: `session_mcp_not_connected` 와 Keeper Muse 시험 |
+| L2 | D2·D3·D4: `session_mcp_not_connected` 와 Keeper Muse 시험 |

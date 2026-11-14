@@ -10,7 +10,7 @@ import { signal, type ReadonlySignal } from '@preact/signals'
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
-import { ProblemNote, Retry, idTail, slowAfterMs } from './notes'
+import { Callout, ProblemNote, Retry, idTail, slowAfterMs } from './notes'
 import type { Failure, Next, Shown } from './notes'
 import { KeepersPanel } from './keeper-rows'
 import type { KeepersModel } from './keepers'
@@ -204,10 +204,8 @@ function Body({ view, subscriptions, keepers, onRetry }: {
       `
     case 'changed':
       return html`
-        <div class="callout" role="alert">
-          <p class="callout-title">다른 탭에서 계정이 바뀌었어요</p>
-          <p>이 브라우저에는 지금 다른 계정이 로그인되어 있어요. 이 화면은 그 계정을 불러오기 전에는 아무것도 보내지 않아요.</p>
-        </div>
+        <${Callout} title="다른 탭에서 계정이 바뀌었어요" reason=${null} attempts=${1}
+          lines=${['이 브라우저에는 지금 다른 계정이 로그인되어 있어요. 이 화면은 그 계정을 불러오기 전에는 아무것도 보내지 않아요.']} />
         <${Retry} label="지금 계정 불러오기" next=${view.next} onRetry=${onRetry} />
       `
     case 'signed_in':

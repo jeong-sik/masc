@@ -8,7 +8,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
-import { ProblemNote, idTail, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, idTail, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
 import type { CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, ProviderAccount, Runtime } from './wire'
 
@@ -200,26 +200,15 @@ function Models({ runtimes }: { readonly runtimes: readonly Runtime[] }): VNode 
 
 /** The alert of a call of a model that did not pass. */
 function FailedNote({ check }: { readonly check: Extract<Check, { kind: 'failed' }> }): VNode {
-  return html`
-    <div class="callout" role="alert">
-      <p class="callout-title">${check.model} 모델을 확인하지 못했어요</p>
-      <p>${checkFailureWords(check.failure)}</p>
-      ${check.reason === null ? null : html`<p class="hint">서버가 알려 준 이유: <span lang="en">${check.reason}</span></p>`}
-      ${check.attempts > 1 ? html`<p class="hint">${check.attempts}번 시도했어요.</p>` : null}
-    </div>
-  `
+  return html`<${Callout} title=${`${check.model} 모델을 확인하지 못했어요`} lines=${[checkFailureWords(check.failure)]}
+    reason=${check.reason} attempts=${check.attempts} />`
 }
 
 /** The alert of a check whose answer did not come or could not be read. */
 function UnknownNote({ check }: { readonly check: Extract<Check, { kind: 'unknown' }> }): VNode {
-  return html`
-    <div class="callout" role="alert">
-      <p class="callout-title">${check.model} 모델을 확인했는지 알 수 없어요</p>
-      <p>${check.problem.kind === 'unreachable' ? '서버의 답을 받지 못했어요.' : '서버의 답을 읽지 못했어요.'} 서버가 확인을 했을 수도 있어요.</p>
-      <p>조금 뒤 다시 확인해 주세요. 확인이 끝났다면 위 모델 목록에도 나와요.</p>
-      ${check.attempts > 1 ? html`<p class="hint">${check.attempts}번 시도했어요.</p>` : null}
-    </div>
-  `
+  const heard = check.problem.kind === 'unreachable' ? '서버의 답을 받지 못했어요.' : '서버의 답을 읽지 못했어요.'
+  return html`<${Callout} title=${`${check.model} 모델을 확인했는지 알 수 없어요`} reason=${null} attempts=${check.attempts}
+    lines=${[`${heard} 서버가 확인을 했을 수도 있어요.`, '조금 뒤 다시 확인해 주세요. 확인이 끝났다면 위 모델 목록에도 나와요.']} />`
 }
 
 /** The models of the subscription of an account, the button that checks the
@@ -278,8 +267,7 @@ function AccountRow({ facts, checks }: { readonly facts: AccountFacts; readonly 
   useEffect(() => {
     const before = couldCheck.current
     couldCheck.current = checkable
-    const fell = document.activeElement === null || document.activeElement === document.body
-    if (before && !checkable && fell) title.current?.focus()
+    if (before && !checkable && fell()) title.current?.focus()
   }, [checkable])
   const titleId = `row-title-${account.id}`
   const accountLine = `row-account-${account.id}`

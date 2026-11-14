@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { ConnectModel, ConnectView, Input, Known } from './connect'
 import type { LoginEnd } from './login'
-import { ProblemNote, sessionEndedWords } from './notes'
+import { ProblemNote, fell, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
 import type { Integration } from './wire'
 
@@ -254,8 +254,7 @@ export function ConnectArea(props: AreaProps): VNode {
   useEffect(() => {
     const from = before.current
     before.current = view.kind
-    const fell = document.activeElement === null || document.activeElement === document.body
-    if (from === view.kind || !fell) return
+    if (from === view.kind || !fell()) return
     if (view.kind === 'closed') toggle.current?.focus()
     else heading.current?.focus()
   }, [view.kind])

@@ -57,21 +57,34 @@ function nextWords(next: Next): string {
   }
 }
 
-/** What went wrong, and the sentence of the server under it as it came. The
-    sentence is English, so it says so. A failure after the first says how
-    many there were, so a second failure for the same reason still changes
-    what the page says. */
-export function ProblemNote({ title, failure }: { readonly title: string; readonly failure: Failure }): VNode {
-  const { problem, attempts } = failure
-  const reason = problem.kind === 'refused' ? problem.reason : null
+/** Whether the focus is on nothing: the control that held it went away. */
+export const fell = (): boolean => document.activeElement === null || document.activeElement === document.body
+
+/** An alert with a title and lines, and the sentence of the server under
+    them as it came. The sentence is English, so it says so. A failure after
+    the first says how many there were; the caller also makes each one anew
+    (its key is the count), so a screen reader says the second as it said
+    the first. */
+export function Callout({ title, lines, reason, attempts }: {
+  readonly title: string
+  readonly lines: readonly string[]
+  readonly reason: string | null
+  readonly attempts: number
+}): VNode {
   return html`
     <div class="callout" role="alert">
       <p class="callout-title">${title}</p>
-      <p>${problemWords(problem)}</p>
+      ${lines.map((line) => html`<p>${line}</p>`)}
       ${reason === null ? null : html`<p class="hint">서버가 알려 준 이유: <span lang="en">${reason}</span></p>`}
       ${attempts > 1 ? html`<p class="hint">${attempts}번 시도했어요.</p>` : null}
     </div>
   `
+}
+
+/** What went wrong, in the words shared by every part of the console. */
+export function ProblemNote({ title, failure }: { readonly title: string; readonly failure: Failure }): VNode {
+  const { problem, attempts } = failure
+  return html`<${Callout} title=${title} lines=${[problemWords(problem)]} reason=${problem.kind === 'refused' ? problem.reason : null} attempts=${attempts} />`
 }
 
 /** A button that reads again, and the line that says what it does. Each

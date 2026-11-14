@@ -2343,7 +2343,16 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
     Alcotest.(check int)
       "context status counts only target facts"
       1
-      (int_field "memory_facts_total" status))
+      (int_field "memory_facts_total" status);
+    Alcotest.(check string)
+      "context status leaves repository checkouts uninspected"
+      "not_inspected"
+      Yojson.Safe.Util.(
+        status
+        |> member "sandbox_live"
+        |> member "repository_checkouts"
+        |> member "state"
+        |> to_string))
 ;;
 
 (* The source parser sits behind Safe_ops.json_string, which returns its

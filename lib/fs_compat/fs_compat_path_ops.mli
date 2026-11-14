@@ -10,6 +10,15 @@ module Optional_read_for_testing :
     val load_file_opt : before_read:(unit -> 'a) -> string -> string option
   end
 
+type regular_file_read_error =
+  | Not_a_regular_file of Unix.file_kind
+  | Regular_file_unreadable of string
+
+val regular_file_read_error_to_string : regular_file_read_error -> string
+
+val load_regular_file_opt :
+  string -> (string option, regular_file_read_error) result
+
 val file_size : string -> int option
 
 val exchange_paths : string -> string -> unit

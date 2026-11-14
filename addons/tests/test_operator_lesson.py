@@ -3,6 +3,7 @@ it lists, what it writes for each result, the rows, and the worker over
 stdio."""
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 import subprocess
@@ -444,9 +445,35 @@ class Rows(Base):
         self.assertEqual(fields["scenes"], {"requested": 3, "outlined": 2, "written": 1, "rejected": 1, "waiting": 0})
         self.assertEqual(rows[p.MEASURES]["fields"],
                          {"sessions": {"reading": 0, "writing": 0, "written": 1, "failed": 0, "superseded": 0},
-                          "scenes_written": 1, "rejected_entries": {"incomplete": 1},
+                          "scenes_written": 1, "shown_session": session_id,
+                          "rejected_entries": {"incomplete": 1},
                           "rejected_scenes": {"outcome_unknown": 1}, "failed_sessions": {}})
         self.assertEqual(p.observation(self.flow.sessions(), 5.0), output)
+
+    def test_only_the_lesson_that_wrote_the_newest_scene_has_scene_rows(self):
+        first = self.lesson("act-1")
+        self.host.board.append(post(4, "a lane rests until its slot answers"))
+        second = self.lesson("act-2")
+        self.assertEqual((len(first.written), len(second.written)), (3, 1))
+        output = p.observation(self.flow.sessions(), 999.0)
+        scenes = [row["fields"]["session_id"] for row in output["rows"] if row["lane_id"] == p.SCENES]
+        self.assertEqual(scenes, [second.session_id])
+        measures = next(row for row in output["rows"] if row["lane_id"] == p.MEASURES)["fields"]
+        self.assertEqual((measures["scenes_written"], measures["shown_session"]), (4, second.session_id))
+        self.assertEqual(len([row for row in output["rows"] if row["lane_id"] == p.SESSIONS]), 2)
+
+    def test_an_earlier_lesson_that_writes_later_is_the_one_shown(self):
+        sessions = self.flow.sessions()
+        self.assertIsNone(p.shown(sessions))
+        first = self.lesson("act-1")
+        self.host.board.append(post(4, "a lane rests until its slot answers"))
+        second = self.lesson("act-2")
+        late = dataclasses.replace(first.written[0], written_at=second.written[0].written_at + 1)
+        earlier = dataclasses.replace(first, outcomes=(late, *first.outcomes[1:]))
+        self.assertEqual(p.shown([earlier, second]).session_id, first.session_id)
+        same = dataclasses.replace(first.written[0], written_at=second.written[0].written_at)
+        tied = dataclasses.replace(first, outcomes=(same,))
+        self.assertEqual(p.shown([tied, second]).session_id, second.session_id)
 
 
 class Worker:

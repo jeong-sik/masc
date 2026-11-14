@@ -366,6 +366,20 @@ CAMLprim value masc_process_exited_without_reaping(value v_pid)
   CAMLreturn(Val_bool(info.si_pid != 0));
 }
 
+/* Observe only: whether SIGCHLD has a handler, read from the kernel's
+   disposition. The runtime installs its own C handler for every OCaml
+   handler and restores SIG_DFL or SIG_IGN for the other two behaviours, so
+   the disposition says which of the three is set without touching the
+   runtime's handler table. */
+CAMLprim value masc_process_sigchld_has_handler(value v_unit)
+{
+  CAMLparam1(v_unit);
+  struct sigaction current;
+  memset(&current, 0, sizeof(current));
+  if (sigaction(SIGCHLD, NULL, &current) < 0) uerror("sigaction", Nothing);
+  CAMLreturn(Val_bool(current.sa_handler != SIG_DFL && current.sa_handler != SIG_IGN));
+}
+
 /* Observe only: the members of process group [pgid] as
    (pid, parent pid, zombie, exiting) rows. [exiting] is P_WEXIT, which
    sysctl reports for a member whose exit has begun (P_LEXIT); a zombie

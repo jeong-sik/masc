@@ -605,6 +605,53 @@ let test_v1_and_v2_original_proofs_remain_distinct () =
        alter_second (replace "version" (fun _ -> `Float 1.0))];
     check int "malformed proof caused no new call" 0 !sends)
 
+(* #46399: the Exact record already holds the request. The execution link
+   names that request by ID and digest, so a large prompt is stored once
+   however many attempts complete. *)
+let test_execution_link_names_its_request_without_holding_it () =
+  with_root (fun root ->
+    let store=Store.create ~root in
+    let prompt_bytes=200_000 in
+    let original=request ~message:(String.make prompt_bytes 'p') "large-prompt-original" in
+    let busy=Exact.Provider_unavailable {detail="synthetic first refusal"} in
+    let runner,sends,_=counting_runner store (ref [Refused busy;Answer question]) in
+    ignore (run_request store runner original);
+    check bool "the second attempt answers" true (answered_with question (run_request store runner original));
+    let instance_id,request_id=proof_address original in
+    let link=Option.get (require (Store.load_host_result store ~instance_id ~request_id)) in
+    check int "both completed attempts are retained" 2
+      (List.length Yojson.Safe.Util.(link |> member "executions" |> to_list));
+    check bool "two completed attempts do not hold the prompt even once" true
+      (String.length (Yojson.Safe.to_string link) < prompt_bytes);
+    let file_name=Filename.basename (Store.host_result_path ~instance_id ~request_id) in
+    check bool "the sweep reads the request ID the link is named by" true
+      (Exact.proof_request_id ~declaration_id ~file_name link=Ok original.request_id);
+    check bool "the sweep refuses the link under another request's name" true
+      (Result.is_error
+         (Exact.proof_request_id ~declaration_id ~file_name:(String.make 64 '0' ^ ".json") link));
+    let reopened=Store.create ~root in
+    check bool "a reopened Store reads the answer through the record's request" true
+      (match original_execution reopened ~attempt_ordinal:2 original with
+       | Ok (Exact.Completed_original {outcome=Exact.Call_ended (Exact.Answered _);_}) -> true
+       | Ok (Exact.Completed_original _ | Exact.No_completed_original) | Error _ -> false);
+    (* A link written before this change also holds the request. It is refused
+       as evidence, not read as an absence and not run again. *)
+    let with_request=match link with
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,
+          if key="executions" then (match value with
+            | `List executions -> `List (List.map (function
+                | `Assoc execution -> `Assoc (("request",Exact.request_to_json original)::execution)
+                | _ -> fail "expected an original proof object") executions)
+            | _ -> fail "expected original attempts") else value) fields)
+      | _ -> fail "expected original execution link" in
+    require (Store.save_host_result store ~instance_id ~request_id with_request);
+    check bool "a link that holds its request is refused" true
+      (Result.is_error (original_execution reopened ~attempt_ordinal:2 original));
+    let unused,unused_sends,_=counting_runner store (ref []) in
+    check bool "the refused link neither recovers nor dispatches" true
+      (Result.is_error (Exact.run ~authorize_request ~store:reopened ~declaration_id ~package ~runner:unused original));
+    check (pair int int) "no call follows the refused link" (2,0) (!sends,!unused_sends))
+
 let test_original_execution_is_bound_to_one_attempt () =
   with_root (fun root ->
     let store=Store.create ~root in
@@ -1460,6 +1507,8 @@ let () =
             test_publication_recovery_preserves_unproven_original
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt
         ; test_case "v1 and v2 original proofs remain distinct" `Quick test_v1_and_v2_original_proofs_remain_distinct
+        ; test_case "execution link names its request without holding it" `Quick
+            test_execution_link_names_its_request_without_holding_it
         ; test_case "latest original evidence cannot borrow a previous attempt" `Quick test_latest_execution_never_borrows_an_earlier_proof
         ; test_case "proof failure leaves uncertainty without exposing an answer" `Quick test_proof_publication_failure_never_exposes_an_answer
         ; test_case "malformed proof refuses local recovery without provider replay" `Quick test_malformed_proof_refuses_publication_recovery

@@ -1,0 +1,11 @@
+### Fixed
+
+- An Exact original execution link under `host-results/` no longer holds the
+  request it belongs to. Each completed attempt names the request by its ID and
+  digest, and the Exact record under `exact-requests/` stays the one place that
+  holds the prompt. Before, every completed attempt wrote the whole prompt into
+  the link again, so a Librarian pass stored it once more per attempt. A link
+  written before this change still holds its request and is refused as
+  malformed evidence: running that request again or reading its original
+  execution ends in an error, and nothing is sent again. The unowned Exact
+  sweep still removes such a link once its original settles (#46399, #PENDING).

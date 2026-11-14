@@ -3086,6 +3086,7 @@
 (include stanzas/test_tui_observer_reopen_revalidate.inc)
 (include stanzas/test_tui_preference.inc)
 (include stanzas/test_tui_chat_owed_history.inc)
+(include stanzas/test_tui_chat_history_timeout.inc)
 (include stanzas/test_tui_chat_memory_journal_signal.inc)
 (include stanzas/test_tui_keeper_composite_signal.inc)
 (include stanzas/test_tui_planning_goal_signal.inc)

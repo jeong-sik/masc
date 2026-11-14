@@ -1,5 +1,5 @@
 id = "operator-lesson"
-revision = "0.1.0"
+revision = "0.2.0"
 title = "Operator lesson"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
@@ -20,6 +20,10 @@ schema = "schemas/scene.json"
 
 [world.outputs.lesson]
 lanes = ["lesson/scenes", "lesson/sessions", "lesson/measures"]
+
+# The scenes alone, for an installation that reads what the lesson cited.
+[world.outputs.scenes]
+lanes = ["lesson/scenes"]
 
 [resources]
 cpus = 0.5

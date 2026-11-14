@@ -349,10 +349,6 @@ function runtimeParameterDetailRows(
   const declaredCaps = declaredModel?.capabilities
   const binding = spec?.binding
   const caps = provider.effective_capabilities
-  let replayOnToolCall: string | null = null
-  if (policy) {
-    replayOnToolCall = policy.requires_reasoning_replay_on_tool_call ? 'required' : 'not required'
-  }
   const requestSampling = request
     ? textList([
         typeof request.temperature === 'number' ? `temp ${request.temperature}` : null,
@@ -400,7 +396,6 @@ function runtimeParameterDetailRows(
   return [
     detailRow('policy', 'reasoning wire', policy?.reasoning_toggle_wire),
     detailRow('policy', 'replay policy', policy?.reasoning_replay_policy),
-    detailRow('policy', 'replay on tool call', replayOnToolCall),
     detailRow('policy', 'ignored sampling', stringArrayText(policy?.ignored_sampling_params)),
     detailRow('policy', 'always ignored', stringArrayText(policy?.always_ignored_sampling_params)),
     detailRow('request', 'source', request?.source),

@@ -75,7 +75,6 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
     parameter_policy: {
       reasoning_toggle_wire: 'responses.reasoning',
       reasoning_replay_policy: 'preserve',
-      requires_reasoning_replay_on_tool_call: true,
       ignored_sampling_params: ['top_k'],
       always_ignored_sampling_params: ['min_p'],
     },
@@ -688,7 +687,7 @@ describe('RuntimeLensSection', () => {
     expect(catalog).toHaveTextContent('source:agent-core-provider-config-model')
     expect(catalog).toHaveTextContent('input:multimodal,image,audio')
     expect(catalog).toHaveTextContent('wire:responses.reasoning')
-    expect(catalog).toHaveTextContent('tool-call-replay:required')
+    expect(catalog).toHaveTextContent('replay:preserve')
     expect(catalog).toHaveTextContent('responses-api')
     expect(catalog).toHaveTextContent('declared')
     expect(catalog).toHaveTextContent('api:responses')

@@ -307,7 +307,6 @@ describe('KeeperWorkspaceRail', () => {
           parameter_policy: {
             reasoning_toggle_wire: 'chat_template_kwargs',
             reasoning_replay_policy: 'preserve_always',
-            requires_reasoning_replay_on_tool_call: true,
             ignored_sampling_params: ['temperature', 'top_p'],
             always_ignored_sampling_params: ['temperature'],
           },

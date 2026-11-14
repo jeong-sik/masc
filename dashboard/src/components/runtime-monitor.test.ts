@@ -101,7 +101,6 @@ describe('RuntimeMonitor', () => {
           parameter_policy: {
             reasoning_toggle_wire: 'chat_template_kwargs',
             reasoning_replay_policy: 'preserve_always',
-            requires_reasoning_replay_on_tool_call: true,
             ignored_sampling_params: ['temperature', 'top_p'],
             always_ignored_sampling_params: ['temperature'],
           },
@@ -493,8 +492,8 @@ describe('RuntimeMonitor', () => {
     )
 
     expect(container.querySelector('[aria-label="runtime parameter detail"]')).not.toBeNull()
-    expect(container.textContent).toContain('policy · replay on tool call')
-    expect(container.textContent).toContain('required')
+    expect(parameterValue(container, 'policy · replay policy')).toBe('preserve_always')
+    expect(parameterValue(container, 'effective · reasoning replay')).toBe('preserve-always')
     expect(container.textContent).toContain('request · source')
     expect(container.textContent).toContain('agent-core-provider-config')
     expect(container.textContent).toContain('request · system prompt')

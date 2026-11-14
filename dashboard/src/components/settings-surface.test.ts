@@ -1630,7 +1630,6 @@ describe('SettingsSurface', () => {
           parameter_policy: {
             reasoning_toggle_wire: 'chat-template-kwargs',
             reasoning_replay_policy: 'preserve-always',
-            requires_reasoning_replay_on_tool_call: true,
             ignored_sampling_params: ['temperature'],
             always_ignored_sampling_params: ['top_p'],
           },

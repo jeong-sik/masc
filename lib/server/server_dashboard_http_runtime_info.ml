@@ -1593,7 +1593,6 @@ let runtime_parameter_policy_json (rt : Runtime_instance.t) =
     `Assoc
     [ "reasoning_toggle_wire", `String (RD.toggle_wire_to_string dialect.toggle_wire)
     ; "reasoning_replay_policy", `String (RD.replay_policy_to_string dialect.replay_policy)
-    ; "requires_reasoning_replay_on_tool_call", `Bool (RD.requires_reasoning_replay_on_tool_call dialect)
     ; "ignored_sampling_params", sampling_parameter_json_list ignored_sampling_params
     ; ( "always_ignored_sampling_params"
       , sampling_parameter_json_list always_ignored_sampling_params )

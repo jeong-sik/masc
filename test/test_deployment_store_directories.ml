@@ -70,6 +70,48 @@ let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
   check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
+(* #51587: #51429 moved a receipt's [arguments] to [{"known": _}] or
+   [{"unknown": true}] and the deploy check did not read the outbox, so an
+   install passed with receipts whose [arguments] is the bare call arguments,
+   and every request of their Keepers failed after the start. *)
+let test_tool_outbox_receipts exe () = with_workspace (fun root _keepers _traces ->
+  let module Codec = Keeper_client_tool_outbox_codec in
+  let directory =
+    match Keeper_official_client_paths.outbox_dir ~base_path:root ~keeper_name:"keeper" with
+    | Ok directory -> directory
+    | Error detail -> fail detail in
+  Fs_compat.mkdir_p directory;
+  let call_arguments = `Assoc ["command", `String "ls"] in
+  let put json =
+    let path = Filename.concat directory (Codec.filename json) in
+    write path (Yojson.Safe.to_string json);
+    path in
+  let readable = put (Codec.to_json
+    { Codec.thread_id = "thread"; turn_id = "turn"; call_id = "call-current"
+    ; tool_name = "Execute"; arguments = Codec.Known call_arguments
+    ; response = `Assoc ["outcome", `String "completed"] }) in
+  let status, output = invoke exe root in
+  check bool ("receipts this build reads do not stop deployment: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool ("the outbox is counted: " ^ output) true
+    (String_util.contains_substring output "keeper tool outbox receipts rows=1 refused=0");
+  let earlier = `Assoc
+    [ "thread_id", `String "thread"; "turn_id", `String "turn"
+    ; "call_id", `String "call-earlier"; "tool_name", `String "Execute"
+    ; "arguments", call_arguments
+    ; "response", `Assoc ["outcome", `String "completed"] ] in
+  let refused = put earlier in
+  let status, output = invoke exe root in
+  check bool ("a receipt this build cannot read stops deployment: " ^ output) true
+    (status <> Unix.WEXITED 0);
+  check bool ("both receipts are counted and one is refused: " ^ output) true
+    (String_util.contains_substring output "keeper tool outbox receipts rows=2 refused=1");
+  check bool ("the refusal names the file and the cause: " ^ output) true
+    (String_util.contains_substring output (refused ^ ": invalid tool outbox arguments"));
+  check string "the refused receipt is left as it was" (Yojson.Safe.to_string earlier)
+    (read refused);
+  check bool "the readable receipt is still there" true (Sys.file_exists readable))
+
 (* The logger stamps a line with the second it was written, and a second run
    starts a second later. *)
 let without_log_stamp line =
@@ -1029,6 +1071,8 @@ let () =
       test_case "the number of scan jobs does not change the report" `Quick
         (test_scan_jobs_do_not_change_the_report exe);
       test_case "zero scan jobs are refused" `Quick (test_zero_scan_jobs_are_refused exe);
+      test_case "tool outbox receipts are read before rollout" `Quick
+        (test_tool_outbox_receipts exe);
       test_case "transcript inventory failure stops deployment" `Quick
         (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);

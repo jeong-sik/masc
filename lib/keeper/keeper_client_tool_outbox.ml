@@ -280,7 +280,9 @@ let retain_confirmed_calls snapshot ~call_ids =
     | _ -> false in
   { snapshot with entries = List.filter is_confirmed snapshot.entries }
 
-let load_committed ~base_path ~keeper_name =
+(* Every entry of the outbox directory is a receipt: staging and producer
+   leases live in sibling directories. *)
+let committed_paths ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
   let* names =
     match Fs_compat.path_kind ~follow:false directory with
@@ -290,6 +292,26 @@ let load_committed ~base_path ~keeper_name =
       |> Result.map (List.sort String.compare)
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
     | Fs_compat.Other -> Error "tool outbox is not a directory" in
+  Ok (directory, List.map (Filename.concat directory) names)
+
+let read_committed path =
+  let* json = read path in
+  match json with
+  | None -> Error "tool outbox receipt disappeared during load"
+  | Some json ->
+    let* () = validate path json in
+    Ok json
+
+let inspect_committed ~base_path ~keeper_name =
+  let* _directory, paths = committed_paths ~base_path ~keeper_name in
+  Ok
+    (List.map
+       (fun path ->
+          path, Result.map (fun (_ : Yojson.Safe.t) -> ()) (read_committed path))
+       paths)
+
+let load_committed ~base_path ~keeper_name =
+  let* directory, paths = committed_paths ~base_path ~keeper_name in
   let inactive_producers = ref Producer_map.empty in
   let producer_inactive json =
     match json with
@@ -313,16 +335,11 @@ let load_committed ~base_path ~keeper_name =
             Ok inactive)
        | Some _ -> Error "invalid host result producer identity")
     | _ -> Error "tool result receipt must be an object" in
-  let* entries = List.fold_left (fun acc name ->
+  let* entries = List.fold_left (fun acc path ->
     let* acc = acc in
-    let path = Filename.concat directory name in
-    let* json = read path in
-    match json with
-    | None -> Error "tool outbox receipt disappeared during load"
-    | Some json ->
-      let* () = validate path json in
-      let* inactive = producer_inactive json in
-      if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) names in
+    let* json = read_committed path in
+    let* inactive = producer_inactive json in
+    if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) paths in
   Ok {directory; entries = List.rev entries}
 
 (* A receipt with no [call_id] names no request, so no execution owns it. *)

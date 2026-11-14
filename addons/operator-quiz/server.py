@@ -82,6 +82,8 @@ class Worker:
         self.flow = f.Flow(state, prompts, self.fits)
         self.binding: dict | None = None
         self.zone: ZoneInfo | None = None
+        self.follows = False
+        self.lesson: dict | None = None
         self.context: dict | None = None
 
     def fits(self, request: dict) -> bool:
@@ -102,7 +104,8 @@ class Worker:
             raise InvalidInput("no observation has given this worker its binding yet")
         sessions = self.flow.sessions()
         scopes = {session.session_id: self.flow.history_scope(session) for session in sessions}
-        return p.observation(sessions, scopes, self.zone, time.time(), export)
+        lesson = p.lesson_measures(sessions, self.flow.log.read(), self.lesson) if self.follows else None
+        return p.observation(sessions, scopes, self.zone, time.time(), export, lesson)
 
     def observe(self, args) -> dict:
         args = exact(args, {"context", "binding", "sources"}, "observe arguments")
@@ -119,7 +122,16 @@ class Worker:
             raise InvalidInput(str(error)) from error
         except (ZoneInfoNotFoundError, ValueError) as error:
             raise InvalidInput("binding.timezone must name an IANA time zone, such as Asia/Seoul") from error
+        if not isinstance(args["sources"], list):
+            raise InvalidInput("sources must be an array")
+        try:
+            lesson = self.flow.see_lesson(binding, args["sources"])
+        except (f.InvalidBinding, f.InvalidResult, q.LogError) as error:
+            raise InvalidInput(str(error)) from error
         self.binding, self.zone = binding, zone
+        # What the host said of the lesson source is not a fact of the log:
+        # it is shown as of the latest observation and kept nowhere.
+        self.follows, self.lesson = lesson is not None, lesson
         try:
             return self.observation()
         except q.LogError as error:
@@ -152,7 +164,8 @@ class Worker:
                     if set(action) != {"kind", "questions"} or isinstance(questions, bool) \
                             or not isinstance(questions, int) or questions < 1:
                         return self.refuse(request_id, "compose names how many questions to write")
-                    session_id = self.flow.compose(request_id, questions, self.binding, time.time())
+                    session_id = self.flow.compose(request_id, questions, self.binding, time.time(),
+                                                   lesson=f.lesson_source_of_binding(self.binding))
                     # The session is open now; a projection that cannot be read
                     # does not undo that, so the receipt still says confirmed.
                     try:
@@ -214,9 +227,10 @@ class Worker:
 
 
 TOOLS = [
-    {"name": "lane_observe", "description": "Publish the quiz sessions, reveals, topics, items and measures.",
+    {"name": "lane_observe", "description": "Publish the quiz sessions, reveals, topics, items and measures. "
+                                            "An installation bound to a lesson also keeps what that lesson cited.",
      "inputSchema": OBSERVE_SCHEMA, "outputSchema": OUTPUT_SCHEMA,
-     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
                      "openWorldHint": False}},
     {"name": "lane_act", "description": "compose: start a quiz session; dispute: grade one answered question "
                                         "again with a note; export: return the whole log.",

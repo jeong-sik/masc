@@ -401,8 +401,91 @@ class Disputed:
 
 Grading = Union[GradeRequested, Judged, GradeFailed, Disputed]
 
+
+# -- What a bound lesson taught (RFC operator-quiz-follows-lesson §3). -------
+
+@dataclass(frozen=True, slots=True)
+class Cite:
+    """A record a lesson scene quoted. Two cites name the same record only
+    when all three are equal: a repository pin does not say which repository."""
+    kind: str
+    source_id: str
+    pin: str
+
+    def to_json(self) -> dict:
+        return {"kind": self.kind, "source_id": self.source_id, "pin": self.pin}
+
+    @staticmethod
+    def of_json(value: Any) -> "Cite":
+        fields = _exact(value, {"kind", "source_id", "pin"}, "cite")
+        kind, pin = _text(fields["kind"], "cite.kind"), _text(fields["pin"], "cite.pin")
+        parse_pin(kind, pin)
+        return Cite(kind, _text(fields["source_id"], "cite.source_id"), pin)
+
+
+@dataclass(frozen=True, slots=True)
+class Scene:
+    session_id: str  # the lesson's session, not one of this log's
+    entry_id: str
+    cites: tuple[Cite, ...]
+
+    def to_json(self) -> dict:
+        return {"session_id": self.session_id, "entry_id": self.entry_id,
+                "cites": [cite.to_json() for cite in self.cites]}
+
+    @staticmethod
+    def of_json(value: Any) -> "Scene":
+        fields = _exact(value, {"session_id", "entry_id", "cites"}, "scene")
+        if not isinstance(fields["cites"], list) or not fields["cites"]:
+            raise LogError("a scene cites at least one record")
+        return Scene(_text(fields["session_id"], "scene.session_id"), _text(fields["entry_id"], "scene.entry_id"),
+                     tuple(Cite.of_json(cite) for cite in fields["cites"]))
+
+
+@dataclass(frozen=True, slots=True)
+class LessonSeen:
+    """One completed output of the bound lesson, read whole at an
+    observation. [sha256] is the evidence the host retained for it and
+    [rows] the digest of each row's lane and fields: the lesson is observed
+    far more often than it writes, so an output whose rows were already
+    recorded is not recorded again."""
+    instance_id: str
+    observation_seq: int
+    sha256: str
+    rows: str
+    scenes: tuple[Scene, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LessonUnreadable:
+    """One completed output of the bound lesson with a row this package does
+    not read as a scene. None of its rows count."""
+    instance_id: str
+    observation_seq: int
+    sha256: str
+    rows: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class FollowsLesson:
+    """Written with session_opened when the binding names a lesson source:
+    the session's new questions come only from records a lesson cited."""
+    session_id: str
+    source_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class LessonScopeApplied:
+    """Written with an author request of a session that follows a lesson:
+    the records its material holds, which are the cited ones among those read."""
+    session_id: str
+    request_id: str
+    kept: tuple[Cite, ...]
+
 Event = Union[SessionOpened, MaterialRead, ExactRequested, AuthorContextRecorded, Posed, DraftRejected, SessionFailed, AnswerReceived,
-              GradeRequested, Judged, GradeFailed, Disputed]
+              GradeRequested, Judged, GradeFailed, Disputed, LessonSeen, LessonUnreadable, FollowsLesson,
+              LessonScopeApplied]
 
 
 def event_to_json(event: Event) -> dict:
@@ -445,6 +528,17 @@ def event_to_json(event: Event) -> dict:
         case Disputed(ask_id, question_id, note, action_request_id):
             return {"event": "disputed", "ask_id": ask_id, "question_id": question_id, "note": note,
                     "action_request_id": action_request_id}
+        case LessonSeen(instance_id, observation_seq, sha256, rows, scenes):
+            return {"event": "lesson_seen", "instance_id": instance_id, "observation_seq": observation_seq,
+                    "sha256": sha256, "rows": rows, "scenes": [scene.to_json() for scene in scenes]}
+        case LessonUnreadable(instance_id, observation_seq, sha256, rows, reason):
+            return {"event": "lesson_unreadable", "instance_id": instance_id, "observation_seq": observation_seq,
+                    "sha256": sha256, "rows": rows, "reason": reason}
+        case FollowsLesson(session_id, source_id):
+            return {"event": "follows_lesson", "session_id": session_id, "source_id": source_id}
+        case LessonScopeApplied(session_id, request_id, kept):
+            return {"event": "lesson_scope_applied", "session_id": session_id, "request_id": request_id,
+                    "kept": [cite.to_json() for cite in kept]}
 
 
 def event_of_json(value: Any) -> Event:
@@ -524,6 +618,29 @@ def event_of_json(value: Any) -> Event:
             f = _exact(value, {"event", "ask_id", "question_id", "note", "action_request_id"}, "disputed")
             return Disputed(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
                             _text(f["note"], "note"), _text(f["action_request_id"], "action_request_id"))
+        case "lesson_seen":
+            f = _exact(value, {"event", "instance_id", "observation_seq", "sha256", "rows", "scenes"}, "lesson_seen")
+            if not isinstance(f["scenes"], list):
+                raise LogError("lesson_seen.scenes must be an array")
+            return LessonSeen(_text(f["instance_id"], "instance_id"), _count(f["observation_seq"], "observation_seq"),
+                              _text(f["sha256"], "sha256"), _text(f["rows"], "rows"),
+                              tuple(Scene.of_json(scene) for scene in f["scenes"]))
+        case "lesson_unreadable":
+            f = _exact(value, {"event", "instance_id", "observation_seq", "sha256", "rows", "reason"},
+                       "lesson_unreadable")
+            return LessonUnreadable(_text(f["instance_id"], "instance_id"),
+                                    _count(f["observation_seq"], "observation_seq"),
+                                    _text(f["sha256"], "sha256"), _text(f["rows"], "rows"),
+                                    _text(f["reason"], "reason"))
+        case "follows_lesson":
+            f = _exact(value, {"event", "session_id", "source_id"}, "follows_lesson")
+            return FollowsLesson(_text(f["session_id"], "session_id"), _text(f["source_id"], "source_id"))
+        case "lesson_scope_applied":
+            f = _exact(value, {"event", "session_id", "request_id", "kept"}, "lesson_scope_applied")
+            if not isinstance(f["kept"], list):
+                raise LogError("lesson_scope_applied.kept must be an array")
+            return LessonScopeApplied(_text(f["session_id"], "session_id"), _text(f["request_id"], "request_id"),
+                                      tuple(Cite.of_json(cite) for cite in f["kept"]))
         case other:
             raise LogError(f"event {other!r} is not an event of this package")
 
@@ -567,6 +684,9 @@ class Session:
     answer: AnswerReceived | None
     grading: tuple[Grading, ...]  # in log order
     history_scope: str | None  # None means no domain context was recorded; never infer it from request wire.
+    follows: str | None  # the lesson source this session follows, from follows_lesson
+    scopes: tuple[LessonScopeApplied, ...]  # one per author request of a session that follows a lesson
+    taught: frozenset[str]  # question ids whose source a lesson seen before the question had cited
 
     @property
     def ask_id(self) -> str | None:
@@ -594,6 +714,8 @@ def fold(events: list[Event]) -> list[Session]:
     sessions: dict[str, dict] = {}
     order: list[str] = []
     by_ask: dict[str, str] = {}
+    outputs: set[tuple[type, str]] = set()
+    cited: set[tuple[str, str, str]] = set()
     grade_requests: set[str] = set()
     disputes: set[str] = set()
 
@@ -622,8 +744,31 @@ def fold(events: list[Event]) -> list[Session]:
                                         "questions": questions, "grants": grants, "language": language,
                                         "opened_at": opened_at, "state": "writing", "failure": None,
                                         "superseded_by": None, "material": [], "requests": [], "rejected": [],
-                                        "posed": [], "answer": None, "grading": [], "history_scope": None}
+                                        "posed": [], "answer": None, "grading": [], "history_scope": None,
+                                        "follows": None, "scopes": [], "taught": set()}
                 order.append(session_id)
+            case LessonSeen(rows=rows) | LessonUnreadable(rows=rows):
+                # Rows recorded as unreadable may be recorded as seen later,
+                # by a revision that reads them; neither is recorded twice.
+                if (type(event), rows) in outputs or (LessonSeen, rows) in outputs:
+                    raise LogError(f"the lesson output with rows {rows} was recorded twice")
+                outputs.add((type(event), rows))
+                if isinstance(event, LessonSeen):
+                    cited.update((cite.kind, cite.source_id, cite.pin) for scene in event.scenes for cite in scene.cites)
+            case FollowsLesson(session_id=session_id, source_id=source_id):
+                current = writing(session_id, "follows_lesson")
+                if current["follows"] is not None or current["material"] or current["requests"]:
+                    raise LogError(f"follows_lesson for session {session_id} does not come with its opening")
+                current["follows"] = source_id
+            case LessonScopeApplied(session_id=session_id, request_id=request_id):
+                current = writing(session_id, "lesson_scope_applied")
+                latest = current["requests"][-1] if current["requests"] else None
+                if current["follows"] is None or latest is None or latest.request_id != request_id \
+                        or latest.output != "author":
+                    raise LogError("lesson scope does not name the latest author request of a session that follows")
+                if any(scope.request_id == request_id for scope in current["scopes"]):
+                    raise LogError(f"lesson scope of {request_id} was recorded twice")
+                current["scopes"].append(event)
             case MaterialRead(session_id=session_id):
                 writing(session_id, "material_read")["material"].append(event)
             case ExactRequested(session_id=session_id):
@@ -653,6 +798,8 @@ def fold(events: list[Event]) -> list[Session]:
                 if any(p.question_id == question_id for p in current["posed"]):
                     raise LogError(f"question {question_id} was posed twice in session {session_id}")
                 current["posed"].append(event)
+                if any((source.kind, source.source_id, source.pin) in cited for source in event.sources):
+                    current["taught"].add(question_id)
             case SessionFailed(session_id=session_id, reason=reason):
                 # An asked session fails when the host refuses its ask by rule.
                 current = session(session_id, "session_failed")
@@ -708,5 +855,12 @@ def fold(events: list[Event]) -> list[Session]:
     return [Session(s["session_id"], s["action_request_id"], s["questions"], s["grants"], s["language"],
                     s["opened_at"], s["state"], s["failure"],
                     s["superseded_by"], tuple(s["material"]), tuple(s["requests"]), tuple(s["rejected"]),
-                    tuple(s["posed"]), s["answer"], tuple(s["grading"]), s["history_scope"])
+                    tuple(s["posed"]), s["answer"], tuple(s["grading"]), s["history_scope"], s["follows"],
+                    tuple(s["scopes"]), frozenset(s["taught"]))
             for s in (sessions[session_id] for session_id in order)]
+
+
+def cited(events: list[Event]) -> frozenset[Cite]:
+    """Every record a lesson output read so far cited."""
+    return frozenset(cite for event in events if isinstance(event, LessonSeen)
+                     for scene in event.scenes for cite in scene.cites)

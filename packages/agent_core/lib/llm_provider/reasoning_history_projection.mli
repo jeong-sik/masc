@@ -104,6 +104,23 @@ type replay_continuity_admission =
   ; disposition : replay_disposition
   }
 
+(** One admitted source change as its boundary saw it: which boundary
+    admitted it, the target the history is bound for, and each excluded
+    message's canonical index with the reason and, for a foreign producer,
+    that producer. It carries no reasoning content. At [Checkpoint_restore]
+    the entries are provisional; at [Provider_dispatch] they are what this
+    process left off the wire. Neither says the provider accepted the
+    request. *)
+type replay_exclusion =
+  { boundary : continuity_boundary
+  ; target : Types.Reasoning_source.t
+  ; drops : reasoning_replay_drop list
+  }
+
+(** The record form of {!replay_exclusion}: boundary, target identity, and
+    per message its index, reason and stored producer or replay policy. *)
+val replay_exclusion_to_json : replay_exclusion -> Yojson.Safe.t
+
 val validate_replay_continuity_for_provider_config
   :  ?source_change_policy:source_change_policy
   -> boundary:continuity_boundary

@@ -1,0 +1,9 @@
+### Changed
+
+- An admitted reasoning source change is recorded per excluded message at
+  both boundaries. The dispatch stage hands its typed exclusion (boundary,
+  target, message index, reason and stored producer) to the agent, and
+  checkpoint restore keeps the same value in `Rebound_pending_dispatch`; the
+  agent writes one `reasoning_replay_exclusion` log field from it. The earlier
+  lines carried only `excluded_message_count` and `pending_message_count`
+  (#46153, #PENDING).

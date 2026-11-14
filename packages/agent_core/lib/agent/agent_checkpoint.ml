@@ -25,7 +25,7 @@ type binding_disposition =
   | Rebound_without_replay_loss
   | Replay_disabled_by_caller
   | Rebound_pending_dispatch of
-      Llm_provider.Reasoning_history_projection.reasoning_replay_drop list
+      Llm_provider.Reasoning_history_projection.replay_exclusion
 
 let binding_disposition_to_string = function
   | Unconfigured_target -> "unconfigured_target"
@@ -93,7 +93,9 @@ let build_resume ~(checkpoint : Checkpoint.t)
       let capability = admission.capability in
       let disposition = match admission.disposition, checkpoint.provider_binding with
         | Llm_provider.Reasoning_history_projection.Caller_excluded_reasoning, _ -> Replay_disabled_by_caller
-        | Source_change_admitted drops, _ -> Rebound_pending_dispatch drops
+        | Source_change_admitted drops, _ ->
+          Rebound_pending_dispatch
+            { boundary = Checkpoint_restore; target = capability.target; drops }
         | Preserve_reasoning, None -> Unrecorded_producer
         | Preserve_reasoning, Some stored ->
           if Reasoning_source.equal stored capability.target then Identical_source

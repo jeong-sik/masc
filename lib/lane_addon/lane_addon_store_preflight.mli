@@ -93,8 +93,8 @@ type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_
 type payload_verdict =
   | Payload_valid
   | Payload_invalid of string
-      (** Fresh state deletes the record's scope: its owner records and
-          request bodies. *)
+      (** Fresh state deletes the record's scope: its owner records,
+          request bodies, history fences and history resolution records. *)
   | Consumer_stops_on_exact of { detail : string; scopes : string list; paths : string list }
       (** The consumer stops on the Exact files the Exact scan leaves. Fresh
           state deletes every directory the store names by each scope in

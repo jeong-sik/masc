@@ -261,7 +261,12 @@ val lease_file_present :
     follows refuses such an entry in its own words. After a [true] the
     capture finds nothing left to make. An [Error] when an entry could not be
     read. The path is the one {!lease_run_dir} and the capture spell, and
-    nothing of an entry is judged here. *)
+    nothing of an entry is judged here.
+
+    The answer is of the moment it was read, and no lock is held over it. A
+    lease file made after a [false] is not seen: the caller reads no owner and
+    answers that once that nobody holds the BasePath
+    ({!Server_upgrade_preparation.holder}). The next ask finds the file. *)
 
 (** {1 The port announcements}
 

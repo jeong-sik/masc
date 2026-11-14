@@ -1892,5 +1892,66 @@ class SweepBudgetCleanup(unittest.TestCase):
         run.assert_not_called()
 
 
+class QuotaRedispatchOnFailure(unittest.TestCase):
+    '''task-3633: a quota failure re-dispatches a fresh run for the same PR.'''
+
+    def run_main(self, quota_retry=0, retry_at=None, hand_off_now=False, dry_run=False):
+        sleeps = []
+        commands = []
+        printed = io.StringIO()
+        failure = MERGE.GET.QuotaWaitCutShort('repos/owner/repo/pulls/101', 403, {},
+                                              'API rate limit exceeded', retry_at)
+        done = subprocess.CompletedProcess([], 0, '', '')
+        argv = ['approval-auto-merge']
+        if hand_off_now:
+            argv.append('--hand-off-now')
+        if dry_run:
+            argv.append('--dry-run')
+        with patch.object(MERGE, 'auto_merge_default', side_effect=failure), \
+             patch.object(MERGE, 'requested_quota_retry', return_value=quota_retry), \
+             patch.dict(os.environ, {'GITHUB_REPOSITORY': REPO,
+                                     'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                                     'DISPATCH_PR': '101'}), \
+             patch.object(MERGE.time, 'time', return_value=1_000_000.0), \
+             patch.object(MERGE.time, 'sleep',
+                          side_effect=lambda seconds: sleeps.append(seconds)), \
+             patch.object(MERGE.subprocess, 'run',
+                          side_effect=lambda command, **kwargs:
+                          commands.append(command) or done), \
+             patch.object(MERGE.sys, 'argv', argv), \
+             redirect_stdout(printed):
+            code = MERGE.main()
+        return code, sleeps, commands, printed.getvalue()
+
+    def test_a_sane_retry_at_sleeps_and_redispatches_a_fresh_run(self):
+        code, sleeps, commands, _printed = self.run_main(quota_retry=0, retry_at=1_000_090.0)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 90.0)
+        self.assertIn('approval-merge-sweep.yml', commands[0])
+        self.assertIn('pr=101', commands[0])
+        self.assertIn('quota_retry=1', commands[0])
+
+    def test_a_retry_count_over_the_cap_stops_with_the_reason_recorded(self):
+        code, sleeps, commands, printed = self.run_main(quota_retry=2, retry_at=1_000_090.0)
+        self.assertEqual(code, MERGE.QUOTA_EXIT)
+        self.assertEqual(sleeps, [])
+        self.assertEqual(commands, [])
+        self.assertIn('quota_retries_exhausted', printed)
+
+    def test_a_far_future_retry_at_keeps_the_old_exit(self):
+        code, sleeps, commands, _printed = self.run_main(quota_retry=0, retry_at=1_007_200.0)
+        self.assertEqual(code, MERGE.QUOTA_EXIT)
+        self.assertEqual(sleeps, [])
+        self.assertEqual(commands, [])
+
+    def test_the_sweep_hand_off_budget_skips_the_wait(self):
+        code, sleeps, commands, _printed = self.run_main(quota_retry=0, retry_at=1_000_090.0,
+                                                         hand_off_now=True)
+        self.assertEqual(code, MERGE.QUOTA_EXIT)
+        self.assertEqual(sleeps, [])
+        self.assertEqual(commands, [])
+
+
 if __name__ == '__main__':
     unittest.main()

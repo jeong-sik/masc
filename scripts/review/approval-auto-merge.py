@@ -48,6 +48,14 @@ POLL_SECONDS = 10
 # hand-off dispatch and the outcome emit: the receipt survives only if the
 # cleanup completes inside the window.
 CLEANUP_RESERVE_SECONDS = 15
+# task-3633: a quota failure used to end the run with nobody re-running it,
+# leaving an approved pull request stranded until the next review event.
+# Outside the sweep the worker owns the quota window: it sleeps until
+# retry_at and dispatches a fresh run for the same pull request. The
+# dispatch count rides the event payload; a count over the cap, or an
+# unusable retry_at, falls back to the old exit.
+MAX_QUOTA_RETRIES = 2
+MAX_QUOTA_WAIT_SECONDS = 3600
 # Set by main() when the sweep budget is known: the follow loop skips its
 # next poll once this moment has passed, so the cleanup keeps its reserve.
 _FOLLOW_DEADLINE = None
@@ -793,6 +801,28 @@ def requested_pr():
     return REVIEWS.positive_id(request['pr'], 'PR number')
 
 
+def requested_quota_retry():
+    """How many quota re-dispatches already ran for this pull request (0 = fresh).
+
+    The count rides the quota re-dispatch payload, so it survives across the
+    fresh runs without touching any workflow file (#51452).
+    """
+    path = os.environ.get('GITHUB_EVENT_PATH', '')
+    if not path or not os.path.exists(path):
+        return 0
+    with open(path, encoding='utf-8') as source:
+        payload = json.load(source)
+    inputs = payload.get('inputs') or payload.get('client_payload') or {}
+    raw = inputs.get('quota_retry', 0)
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        if not isinstance(raw, str) or not raw.isascii() or not raw.isdecimal():
+            raise ValueError('quota retry count must be a non-negative integer')
+        raw = int(raw)
+    if raw < 0:
+        raise ValueError('quota retry count must be a non-negative integer')
+    return raw
+
+
 def emit(result):
     if _WAKE['enabled'] and reports_a_completed_merge(result):
         numbers = merged_numbers(result)
@@ -831,6 +861,7 @@ def main():
                 _FOLLOW_DEADLINE = (time.monotonic() +
                                     max(0.0, float(budget) - CLEANUP_RESERVE_SECONDS))
         number = requested_pr()
+        quota_retries = requested_quota_retry()
         raw_receipt = os.environ.get('DISPATCH_RECEIPT', '')
         if raw_receipt and os.environ['GITHUB_EVENT_NAME'] == 'workflow_dispatch':
             receipt = parse_receipt(raw_receipt)
@@ -866,6 +897,39 @@ def main():
         # `on_quota` already emitted status=rate_limited with retry_at.
         print(f'approval-auto-merge: ended at a quota during admission, no merge was '
               f'requested: {error}', file=sys.stderr)
+        # task-3633: outside the sweep the worker owns the quota window — it
+        # sleeps until retry_at and dispatches a fresh run for the same pull
+        # request. The fresh run re-reads approvals and checks in full, so no
+        # approval condition is bypassed by the re-dispatch. Under the sweep
+        # (--hand-off-now) the 300-second budget cannot afford the wait, and
+        # an unusable or exhausted retry keeps the old exit.
+        retry_at = getattr(error, 'retry_at', None)
+        delay = (retry_at - time.time()) if isinstance(retry_at, (int, float)) else None
+        if (not args.hand_off_now and not args.dry_run and
+                isinstance(delay, (int, float)) and 0 < delay <= MAX_QUOTA_WAIT_SECONDS and
+                quota_retries < MAX_QUOTA_RETRIES):
+            emit({'status': 'quota_wait_scheduled', 'pr': number,
+                  'retry_at': retry_at, 'delay_seconds': round(delay, 1),
+                  'attempt': quota_retries + 1})
+            time.sleep(delay)
+            dispatched = subprocess.run(['gh', 'workflow', 'run', 'approval-merge-sweep.yml',
+                                         '--repo', repo, '--ref', 'main',
+                                         '-f', f'pr={number}',
+                                         '-f', f'quota_retry={quota_retries + 1}'],
+                                        capture_output=True, text=True, check=False)
+            if dispatched.returncode == 0:
+                print(f'approval-auto-merge: quota window opened - dispatched a fresh run '
+                      f'for pull request {number} '
+                      f'(attempt {quota_retries + 1} of {MAX_QUOTA_RETRIES})',
+                      file=sys.stderr)
+                return 0
+            print(f'approval-auto-merge: quota re-dispatch failed '
+                  f'({dispatched.stderr.strip()[:300]})', file=sys.stderr)
+        elif (not args.hand_off_now and not args.dry_run and
+              quota_retries >= MAX_QUOTA_RETRIES):
+            emit({'status': 'quota_retries_exhausted', 'pr': number,
+                  'attempts': quota_retries,
+                  'reason': f'max {MAX_QUOTA_RETRIES} quota re-dispatches'})
         return QUOTA_EXIT
     except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         print(f'approval-auto-merge: cannot establish or submit merge: {error}', file=sys.stderr)

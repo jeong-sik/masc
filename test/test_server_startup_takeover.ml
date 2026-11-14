@@ -2357,7 +2357,181 @@ let test_a_process_announces_one_port_per_lease_whatever_the_kind () =
           Alcotest.(check bool) "the account server file holds no lock" false
             (byte_is_held_in_the_kernel (announcement_path ~run_dir base_path) ~port:(port + 1))))
 
+(* #51285. A POSIX lock belongs to the process, and closing any descriptor of
+   the file drops it. The table of this process is keyed by the lease file it
+   holds, not by the string it took the lease under: asked under the other
+   spelling of the lease root, the owner opens no second descriptor on its
+   own lease file. A host with one spelling has nothing to ask here. *)
+let test_owner_keeps_its_lease_when_asked_under_another_spelling () =
+  with_base_and_run "startup-takeover-lease-spelling" (fun ~base_path ~run_dir ->
+    match second_realpath_spelling (Unix.realpath run_dir) with
+    | None -> Alcotest.skip ()
+    | Some other_spelling ->
+      (match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+       | Server_startup_takeover.Base_path_already_owned _
+       | Server_startup_takeover.Base_path_rejected _ ->
+         Alcotest.fail "the lease was not acquired"
+       | Server_startup_takeover.Base_path_acquired lease ->
+         Fun.protect
+           ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+           (fun () ->
+             (match
+                Server_startup_takeover.capture_existing_owner
+                  ~run_dir:other_spelling
+                  ~base_path
+              with
+              | Error Server_startup_takeover.Current_process_owner -> ()
+              | Error other ->
+                Alcotest.failf
+                  "under the other spelling the owner was not this process: %s"
+                  (Server_startup_takeover.owner_capture_error_to_string other)
+              | Ok _ -> Alcotest.fail "under the other spelling another owner was captured");
+             Alcotest.(check bool) "the capture did not drop the lease" true
+               (lease_is_held_in_the_kernel ~run_dir base_path);
+             (match
+                Server_startup_takeover.acquire_base_path_lock
+                  ~run_dir:other_spelling
+                  base_path
+              with
+              | Server_startup_takeover.Base_path_already_owned
+                  { owner = Server_startup_takeover.Owner_this_process _; _ } -> ()
+              | Server_startup_takeover.Base_path_already_owned _ ->
+                Alcotest.fail "under the other spelling the owner was not this process"
+              | Server_startup_takeover.Base_path_acquired second ->
+                Server_startup_takeover.release_base_path_lease second;
+                Alcotest.fail "the other spelling acquired a second lease for one file"
+              | Server_startup_takeover.Base_path_rejected rejection ->
+                Alcotest.failf
+                  "the other spelling was rejected: %s"
+                  (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
+             Alcotest.(check bool) "the second acquisition did not drop the lease" true
+               (lease_is_held_in_the_kernel ~run_dir base_path))))
+
+(* The role of this executable after an exec, named by the environment: the
+   image is new and its lease table is empty, and the process still holds the
+   lock it took before the exec. It asks for the lease as [masc start] does
+   after its exec and says how that ended in its exit status. *)
+let lease_after_exec_variable = "MASC_TEST_LEASE_AFTER_EXEC"
+
+let lease_after_exec_role workspace =
+  match String.split_on_char '\n' workspace with
+  | [ run_dir; base_path ] ->
+    let status =
+      match
+        Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+          ~run_dir
+          ~on_wait:(fun (_ : Server_startup_takeover.base_path_owner) -> ())
+          base_path
+      with
+      | Ok (Server_startup_takeover.Base_path_acquired _) -> 0
+      | Ok (Server_startup_takeover.Base_path_already_owned _) -> 4
+      | Ok (Server_startup_takeover.Base_path_rejected _) -> 5
+      | Error (Server_startup_takeover.Another_replacement_waits _) -> 6
+      | exception _ -> 9
+    in
+    Unix._exit status
+  | _ -> Unix._exit 8
+
+(* #51285. [masc start] takes the lease, execs itself and takes the lease
+   again in the new image. The lock crosses the exec with the process. A
+   second process sleeps in [lockf] on the same lease file meanwhile. Were
+   the new image to open the lease file and close that descriptor, the kernel
+   would drop the lock and hand it to the sleeper, and the process that had
+   won would be told the lease is owned. The sleeper is given a moment to
+   reach the kernel; a host that is slower than that moment lets this case
+   pass without asking, and never fails it. *)
+let test_lease_is_kept_across_exec_while_another_process_waits () =
+  with_base_and_run "startup-takeover-lease-exec" (fun ~base_path ~run_dir ->
+    let ready_read, ready_write = Unix.pipe () in
+    let go_read, go_write = Unix.pipe () in
+    match Unix.fork () with
+    | 0 ->
+      close_quietly ready_read;
+      close_quietly go_write;
+      (match
+         Server_startup_takeover.acquire_base_path_lock_after_owner_exits
+           ~run_dir
+           ~on_wait:(fun (_ : Server_startup_takeover.base_path_owner) -> ())
+           base_path
+       with
+       | Ok (Server_startup_takeover.Base_path_acquired lease) ->
+         (match Server_startup_takeover.prepare_base_path_lease_exec_handoff lease with
+          | Error (_ : Server_startup_takeover.base_path_lock_rejection) -> Unix._exit 3
+          | Ok () ->
+            ignore (Unix.write_substring ready_write "1" 0 1 : int);
+            let buffer = Bytes.create 1 in
+            ignore (Unix.read go_read buffer 0 1 : int);
+            (try
+               Unix.execve
+                 Sys.executable_name
+                 [| Sys.executable_name |]
+                 (Array.append
+                    (Unix.environment ())
+                    [| Printf.sprintf "%s=%s\n%s" lease_after_exec_variable run_dir base_path |])
+             with
+             | Unix.Unix_error _ -> Unix._exit 7))
+       | Ok
+           ( Server_startup_takeover.Base_path_already_owned _
+           | Server_startup_takeover.Base_path_rejected _ )
+       | Error (Server_startup_takeover.Another_replacement_waits _) -> Unix._exit 2)
+    | owner_pid ->
+      close_quietly ready_write;
+      close_quietly go_read;
+      let sleeping_read, sleeping_write = Unix.pipe () in
+      let buffer = Bytes.create 1 in
+      Fun.protect
+        ~finally:(fun () ->
+          close_quietly ready_read;
+          close_quietly go_write;
+          close_quietly sleeping_read;
+          close_quietly sleeping_write;
+          if process_alive owner_pid then stop_process owner_pid)
+        (fun () ->
+          Alcotest.(check int) "the owner holds the lease and is ready to exec" 1
+            (Unix.read ready_read buffer 0 1);
+          let lease_path =
+            Server_startup_takeover.For_testing.lease_path
+              ~run_dir:(Unix.realpath run_dir)
+              ~canonical_base_path:(Unix.realpath base_path)
+          in
+          let sleeper_pid =
+            match Unix.fork () with
+            | 0 ->
+              close_quietly ready_read;
+              close_quietly go_write;
+              close_quietly sleeping_read;
+              let fd = Unix.openfile lease_path [ Unix.O_RDWR ] 0o600 in
+              ignore (Unix.write_substring sleeping_write "S" 0 1 : int);
+              (match Unix.lockf fd Unix.F_LOCK 0 with
+               | () -> Unix._exit 0
+               | exception Unix.Unix_error _ -> Unix._exit 1)
+            | sleeper_pid ->
+              close_quietly sleeping_write;
+              sleeper_pid
+          in
+          Fun.protect
+            ~finally:(fun () -> if process_alive sleeper_pid then stop_process sleeper_pid)
+            (fun () ->
+              Alcotest.(check int) "the sleeper opened the lease file" 1
+                (Unix.read sleeping_read buffer 0 1);
+              Unix.sleepf 0.2;
+              ignore (Unix.write_substring go_write "1" 0 1 : int);
+              match waitpid_nointr owner_pid with
+              | Some (_, Unix.WEXITED 0) -> ()
+              | Some (_, Unix.WEXITED code) ->
+                Alcotest.failf
+                  "the owner lost its lease across exec: exit %d (4 means the lease was \
+                   handed to the sleeper)"
+                  code
+              | Some (_, Unix.WSIGNALED signal) ->
+                Alcotest.failf "the owner died on signal %d" signal
+              | Some (_, Unix.WSTOPPED _) | None ->
+                Alcotest.fail "the owner did not exit on its own")))
+
 let () =
+  match Sys.getenv_opt lease_after_exec_variable with
+  | Some workspace -> lease_after_exec_role workspace
+  | None ->
   Alcotest.run "Server_startup_takeover"
     [
       ( "temp directory cleanup",
@@ -2384,6 +2558,14 @@ let () =
             `Quick test_base_path_lock_reports_a_recorded_owner_that_is_gone;
           Alcotest.test_case "stale base-path owner is reclaimed" `Quick
             test_base_path_lock_reclaims_stale_pid_file;
+          Alcotest.test_case
+            "the owner keeps its lease when asked under another spelling"
+            `Quick
+            test_owner_keeps_its_lease_when_asked_under_another_spelling;
+          Alcotest.test_case
+            "the lease is kept across exec while another process waits"
+            `Quick
+            test_lease_is_kept_across_exec_while_another_process_waits;
           Alcotest.test_case "same-process symlink alias is rejected" `Quick
             test_base_path_lock_rejects_same_process_symlink_alias;
           Alcotest.test_case

@@ -4735,7 +4735,9 @@ let render_keeper_message (state : state) =
            | Some owed -> (
                match owed.kho_read with
                | Masc_tui_owed_read.Waiting _ -> true
-               | _ -> false)
+               | Masc_tui_owed_read.Settled
+               | Masc_tui_owed_read.Owed _
+               | Masc_tui_owed_read.Reading _ -> false)
            | None -> false
          in
          if retrying then

@@ -134,6 +134,10 @@ def question_rows(session: q.Session) -> list[dict]:
                   "disputes": [{"note": d.note, "action_request_id": d.action_request_id}
                                for d in session.disputes_of(posed.question_id)],
                   "sources": [source.to_json() for source in posed.sources]}
+        # The presentation's dispute row action reads these two values, so a
+        # row carries them exactly when the flow would take the dispute.
+        if isinstance(session.dispute_standing(posed.question_id), q.Disputable):
+            fields["dispute"] = {"ask_id": posed.ask_id, "question_id": posed.question_id}
         title = {g.CORRECT: "맞음", g.INCORRECT: "틀림", g.SKIPPED: "건너뜀",
                  g.AWAITING_JUDGMENT: "채점 대기", g.VOID: "무효"}[verdict]
         out.append(row(QUESTIONS, f"{session.session_id}/{posed.question_id}",

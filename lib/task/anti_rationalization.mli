@@ -106,6 +106,10 @@ type gate =
 
 val gate_to_string : gate -> string
 
+val gate_of_string : string -> (gate, string) result
+(** The inverse of {!gate_to_string}. A name no constructor writes is an
+    [Error] naming it. *)
+
 type review_result =
   { verdict : verdict option
   ; evaluator_runtime : string

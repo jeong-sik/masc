@@ -8,7 +8,8 @@ import unittest
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/install.sh'
 NAMES = ('masc', 'masc-tui', 'masc-deployment-preflight-helper',
          'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap',
-         'masc-antigravity-path-hook')
+         'masc-antigravity-path-hook', 'masc-native-addon-launcher',
+         'masc-browser-addon-worker')
 
 
 class Uninstall(unittest.TestCase):

@@ -6668,10 +6668,14 @@ type metrics_section =
   | Section_resources
   | Section_tools
 
-let metrics_section_label = function
-  | Section_fleet -> "Engine & Scheduler"
-  | Section_resources -> "Work & Outcomes"
-  | Section_tools -> "Memory & Gate Safety"
+let metrics_section_label ~ko = function
+  | Section_fleet -> if ko then "엔진·스케줄러" else "Engine & Scheduler"
+  | Section_resources -> if ko then "작업·결과" else "Work & Outcomes"
+  | Section_tools -> if ko then "기억·Gate 안전" else "Memory & Gate Safety"
+
+(* The row above a Metrics body that ends in the connection rows, which the
+   End key reaches. Usage and Telemetry both draw it. *)
+let metrics_status_at_end ~ko = if ko then "End: 연결 상태" else "End: status"
 
 (* What the [:] palette is for right now. A jump lists every destination
    the strip and roster offer; a choice lists the names on the Code
@@ -9756,8 +9760,12 @@ type state = {
   mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
      a different process on the same endpoint replaces this projection, while
-     a failed probe returns the display to unread rather than showing stale. *)
+     a failed probe clears it rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
+  (* The loader's sentence for the probe that cleared [server_identity], so a
+     surface with nothing to draw tells a failed read from one not made yet.
+     [store_server_identity_reading] writes the two together. *)
+  mutable server_identity_error: string option;
   local_base_path: string;
   (* [local_base_path] and its MASC root, resolved when this state is made;
      [None] when no base path is set. Workspace checks compare these with
@@ -15561,6 +15569,15 @@ let remember_identity_login_expectation (state : state) expectation =
   state.identity_login_expectations <-
     expectation :: state.identity_login_expectations
 
+(* A confirmed probe replaces the identity and the reason it is missing
+   together, so a failed read is not left drawn as one not made yet. *)
+let store_server_identity_reading (state : state) reading =
+  state.server_identity <- server_identity_of_refresh reading;
+  state.server_identity_error <-
+    (match reading with
+     | Ok _ -> None
+     | Error detail -> Some detail)
+
 let reconcile_detail_intent_origins (state : state) reading =
   match reading with
   | Error _ -> ()
@@ -20465,6 +20482,7 @@ let create_state
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
   server_identity = None;
+  server_identity_error = None;
   local_base_path;
   local_workspace_paths = local_workspace_paths_of_base_path local_base_path;
   workspace_authority = Workspace_authority 0;

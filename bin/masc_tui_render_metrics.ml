@@ -4,11 +4,13 @@ module Decode = Masc.Tui_decode
 module Chart = Masc_tui_chart
 module Layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
+module Count = Masc_tui_value.Count
+module Unknown = Masc_tui_value.Unknown
 
 module Task_flow = Masc_tui_task_flow
 
-(* Every row of this screen is written in English only, so the fleet and
-   probe words drawn inside its sentences are asked for in English too. *)
+(* The Work & Outcomes section is written in English only, so the fleet words
+   drawn inside its sentences are asked for in English too. *)
 let fleet_words_in_korean = false
 
 type turn_counts = { running : int; idle : int; unavailable : int }
@@ -60,34 +62,25 @@ let held_observation (state : state) =
   observe_source ~observed:state.keeper_tool_approvals_observed
     ~error:state.keeper_tool_approvals_error state.keeper_tool_approvals
 
-(* The word for a source nothing has come back from, in one place. The three
-   sources that carry a bare option rather than an {!observation} -- the GC,
-   the scheduler and the transport -- spelled it by hand, and the pulse card
-   and the section under it did not agree: of the same [sid_gc] being [None]
-   the card said "GC not observed" and the section "GC telemetry not
-   observed", and of the same [sid_scheduler] the card said "Lag not
-   observed" and the section "Scheduler telemetry not observed". Both pairs
-   were on screen together. *)
-let not_observed = "not observed"
-
-(* What a state is called, once. The pulse row and the section row below it
-   draw the same observation of the same source -- "Gate ..." on one and
-   "Pending Gate Calls: ..." on the other -- so a state named twice is a state
-   the reader has to match up by position. [Not_observed] was "unread" on the
-   pulse and "not observed" in the section. *)
+(* What a state is called in a section row, which has room for the reason
+   after it. The card above the section draws the same observation as a
+   mark ({!observation_count}). *)
 let observation_name = function
   | Current _ -> ""
-  | Not_observed -> not_observed
-  (* One word where a number goes: the cell has no room for the reason, and
-     both states are the same answer to "how many" -- none that was read. *)
+  | Not_observed -> "not observed"
   | Read_failed _ | Unavailable _ -> "unavailable"
   | Stale _ -> "stale"
 
+(* A count in a card, or the mark for why there is none (RFC
+   tui-one-screen-grammar section 6.4). [Unavailable] is a source the server
+   could not read from its own store, so it is no more read than a request
+   that failed; a refresh that failed draws as failed too, not as the count
+   an earlier read left behind. *)
 let observation_count observation =
   match observation with
-  | Current rows -> string_of_int (List.length rows)
-  | Not_observed | Read_failed _ | Unavailable _ | Stale _ ->
-      observation_name observation
+  | Current rows -> Count.grouped (List.length rows)
+  | Not_observed -> Unknown.(glyph Unread)
+  | Read_failed _ | Unavailable _ | Stale _ -> Unknown.(glyph Read_failed)
 
 (* The name, then the reason the source gave for it; [current] says what a
    current reading reads as. *)
@@ -160,24 +153,39 @@ let scheduler_probe_word ~ko = function
   | Decode.Probe_reported Scheduler_lag.Cancelled -> if ko then "취소됨" else "cancelled"
   | Decode.Probe_unknown word -> "? " ^ Terminal_text.single_line word
 
-let scheduler_probe_text = function
-  | None -> "unreported"
-  | Some probe -> scheduler_probe_word ~ko:fleet_words_in_korean probe
+let scheduler_probe_text ~ko = function
+  | None -> Unknown.(glyph Unreported)
+  | Some probe -> scheduler_probe_word ~ko probe
 
 let pulse_line ~cols (state : state) kpis =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let inner_width = max 10 (framed_inner_width cols) in
+  (* A count with no reading behind it draws the mark of why (RFC
+     tui-one-screen-grammar section 6.4). *)
   let turns = match kpis.turns with
-    | None -> "Turn observation unavailable"
-    | Some count -> Printf.sprintf "Turns: %d running · %d idle · %d unavailable"
-        count.running count.idle count.unavailable
+    | None ->
+      say "턴 " "Turns "
+      ^ Unknown.glyph
+          (match state.keeper_turns_error with
+           | Some _ -> Unknown.Read_failed
+           | None -> Unknown.Unread)
+    | Some count ->
+      Printf.sprintf
+        (if ko then "턴: 실행 중 %s · 대기 중 %s · 확인 불가 %s"
+         else "Turns: %s running · %s idle · %s unavailable")
+        (Count.grouped count.running) (Count.grouped count.idle)
+        (Count.grouped count.unavailable)
   in
   let roster =
     match state.local_keepers, state.keepers_error with
-    | (Local_workspace_unread | Local_workspace_failed _), _
-    | Local_workspace_read, Some _ -> "roster unavailable"
     | Local_workspace_read, None ->
-      Printf.sprintf "%d configured · %d paused" kpis.total_keepers
-        kpis.paused_keepers
+      Printf.sprintf (if ko then "키퍼 %s · 일시정지 %s" else "%s configured · %s paused")
+        (Count.grouped kpis.total_keepers) (Count.grouped kpis.paused_keepers)
+    | Local_workspace_unread, None -> say "키퍼 " "roster " ^ Unknown.(glyph Unread)
+    | (Local_workspace_unread | Local_workspace_read | Local_workspace_failed _), Some _
+    | Local_workspace_failed _, None ->
+      say "키퍼 " "roster " ^ Unknown.(glyph Read_failed)
   in
   let text = Printf.sprintf "  %s%s%s  %s| %s%s"
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in
@@ -190,9 +198,17 @@ let pulse_line ~cols (state : state) kpis =
    wrote each name a second time beside [metrics_section_label], and was cut
    before the third name at 150 columns beside the Activity pane. The order is
    the order 1, 2 and 3 select. *)
-let section_pills_line ~cols ~(active : metrics_section) : string =
+(* Why the server identity has no GC or scheduler block to draw: none has
+   been read yet, the last read failed, or the one read did not carry it. *)
+let identity_gap (state : state) =
+  match state.server_identity, state.server_identity_error with
+  | Some _, (None | Some _) -> Unknown.Unreported
+  | None, Some _ -> Unknown.Read_failed
+  | None, None -> Unknown.Unread
+
+let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
   let inner_width = max 10 (framed_inner_width cols) in
-  let tab section = (metrics_section_label section, active = section, section) in
+  let tab section = (metrics_section_label ~ko section, active = section, section) in
   let line =
     "  "
     ^ tab_strip
@@ -206,6 +222,8 @@ let section_pills_line ~cols ~(active : metrics_section) : string =
   else line
 
 let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
   let card_w = max 18 ((inner_width - 10) / 4) in
   (* Reserve readable text cells inside the border and padding. Below this
@@ -235,36 +253,55 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     | Some { sid_scheduler = Some s; _ } -> Some s
     | _ -> None
   in
+  let identity_gap = identity_gap state in
   let domains = match sched_opt with
-    | Some { ssch_pool_domains = Some count; _ } -> string_of_int count
-    | Some { ssch_pool_domains = None; _ } | None -> Masc_tui_theme.Glyph.no_value
+    | Some { ssch_pool_domains = Some count; _ } -> Count.grouped count
+    | Some { ssch_pool_domains = None; _ } -> Unknown.(glyph Unreported)
+    | None -> Unknown.glyph identity_gap
   in
   let c1_l1, c1_l2 = match gc_opt with
     | Some gc ->
-      (Printf.sprintf "Heap %s / live %s"
+      (Printf.sprintf (if ko then "힙 %s · 사용 중 %s" else "Heap %s · live %s")
          (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words),
-       Printf.sprintf "%s workers · minor %s" domains (format_words gc.sgc_minor_heap_size))
-    | None -> "GC " ^ not_observed, "Workers " ^ domains
+       Printf.sprintf (if ko then "워커 %s · 마이너 힙 %s" else "%s workers · minor %s")
+         domains (format_words gc.sgc_minor_heap_size))
+    | None -> say "힙 " "Heap " ^ Unknown.glyph identity_gap, say "워커 " "Workers " ^ domains
   in
   let c2_l1, c2_l2, c2_tone = match sched_opt with
     | Some s when s.ssch_samples <= 0 ->
-      "No latency samples", "Probe: " ^ scheduler_probe_text s.ssch_probe, Theme.recede ()
+      ( say "지연 표본 없음" "No latency samples",
+        say "프로브: " "Probe: " ^ scheduler_probe_text ~ko s.ssch_probe,
+        Theme.recede () )
     | Some s ->
-      (Printf.sprintf "p95 %.3fms · max %.3fms" s.ssch_p95_ms s.ssch_max_ms,
-       Printf.sprintf "%d samples · %d stalls" s.ssch_samples s.ssch_stalls,
+      (Printf.sprintf (if ko then "p95 %.3fms · 최대 %.3fms" else "p95 %.3fms · max %.3fms")
+         s.ssch_p95_ms s.ssch_max_ms,
+       Printf.sprintf (if ko then "표본 %s · 정체 %s" else "%s samples · %s stalls")
+         (Count.grouped s.ssch_samples) (Count.grouped s.ssch_stalls),
        if s.ssch_stalls > 0 then Theme.warn () else Theme.recede ())
     (* One condition -- no scheduler reading at all -- so both halves of the
-       card name it the same way. *)
-    | None -> "Lag " ^ not_observed, "Probe " ^ not_observed, Theme.recede ()
+       card draw the same mark. *)
+    | None ->
+      let mark = Unknown.glyph identity_gap in
+      "p95 " ^ mark, say "표본 " "Samples " ^ mark, Theme.recede ()
   in
   let c3_l1, c3_l2 = match kpis.tasks with
     | Some count ->
-      (Printf.sprintf "%d open · %d verifying" (Task_flow.open_count count) count.awaiting_verification,
-       Printf.sprintf "%d done · %d cancelled" count.completed count.cancelled)
-    | None -> "Task snapshot unavailable", "No outcome count inferred"
+      (Printf.sprintf (if ko then "열린 작업 %s · 검증 대기 %s" else "%s open · %s verifying")
+         (Count.grouped (Task_flow.open_count count))
+         (Count.grouped count.awaiting_verification),
+       Printf.sprintf (if ko then "완료 %s · 취소 %s" else "%s done · %s cancelled")
+         (Count.grouped count.completed) (Count.grouped count.cancelled))
+    | None ->
+      let mark =
+        Unknown.glyph
+          (match state.tasks_error with
+           | Some _ -> Unknown.Read_failed
+           | None -> Unknown.Unread)
+      in
+      say "열린 작업 " "Open " ^ mark, say "완료 " "Done " ^ mark
   in
   let c4_l1 = "Gate " ^ observation_count (gate_observation state) in
-  let c4_l2 = "Tool holds " ^ observation_count (held_observation state) in
+  let c4_l2 = say "보류된 호출 " "Tool holds " ^ observation_count (held_observation state) in
   let c4_tone = match kpis.gate_pending_count, kpis.held_approvals_count with
     | Some 0, Some 0 -> Theme.recede ()
     | _ -> Theme.warn () in
@@ -282,85 +319,131 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   in
   if card_w - 4 >= minimum_card_text_cells then
     combine
-      (format_card "ENGINE" c1_l1 c1_l2 (Theme.info ()))
-      (format_card "SCHEDULER LAG" c2_l1 c2_l2 c2_tone)
-      (format_card "TASK SNAPSHOT" c3_l1 c3_l2 (Theme.info ()))
-      (format_card "ATTENTION" c4_l1 c4_l2 c4_tone)
+      (format_card (say "엔진" "ENGINE") c1_l1 c1_l2 (Theme.info ()))
+      (format_card (say "스케줄러 지연" "SCHEDULER LAG") c2_l1 c2_l2 c2_tone)
+      (format_card (say "작업 현황" "TASK SNAPSHOT") c3_l1 c3_l2 (Theme.info ()))
+      (format_card (say "확인 필요" "ATTENTION") c4_l1 c4_l2 c4_tone)
   else
-    [ Printf.sprintf "  %s[ENGINE]%s %s · %s[SCHED]%s %s"
-        (Theme.info ()) Ansi.reset c1_l1
-        c2_tone Ansi.reset c2_l1
-    ; Printf.sprintf "  %s[TASKS]%s %s"
-        (Theme.info ()) Ansi.reset c3_l1
-    ; Printf.sprintf "  %s[HOLDS]%s %s · %s"
-        c4_tone Ansi.reset c4_l1 c4_l2
+    [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
+        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_l1
+        c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
+    ; Printf.sprintf "  %s[%s]%s %s"
+        (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1
+    ; Printf.sprintf "  %s[%s]%s %s · %s"
+        c4_tone (say "확인" "HOLDS") Ansi.reset c4_l1 c4_l2
     ]
     |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
 
 let render_section_fleet ?session_rows ~cols (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
   let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
+  (* Why a block the server identity holds has nothing in it. Not read yet is
+     said in the word every surface uses for a reading not loaded; a failed
+     read is the loader's own sentence, as the transport block draws it. *)
+  let identity_gap =
+    match state.server_identity, state.server_identity_error with
+    | Some _, (None | Some _) -> say "서버가 보고하지 않음" "not reported by the server"
+    | None, Some error -> Terminal_text.single_line error
+    | None, None -> field_unread ~ko
+  in
+  let reported_count =
+    Option.fold ~none:Unknown.(glyph Unreported) ~some:Count.grouped
+  in
   let gc_lines = match gc with
-    | None -> [ "    " ^ not_observed ]
+    | None -> [ "    " ^ identity_gap ]
     | Some gc ->
-      [ Printf.sprintf "    Heap %s · live %s · configured minor heap %s"
+      [ Printf.sprintf
+          (if ko then "    힙 %s · 사용 중 %s · 마이너 힙 설정 %s"
+           else "    Heap %s · live %s · configured minor heap %s")
           (format_words gc.sgc_heap_words) (format_words gc.sgc_live_words)
           (format_words gc.sgc_minor_heap_size)
-      ; Printf.sprintf "    Collections: minor %d · major %d · forced %d · compactions %d"
-          gc.sgc_minor_collections gc.sgc_major_collections
-          gc.sgc_forced_major_collections gc.sgc_compactions
-      ; Printf.sprintf "    Allocation totals: minor %s · promoted %s · major %s"
+      ; Printf.sprintf
+          (if ko then "    수거: 마이너 %s · 메이저 %s · 강제 메이저 %s · 압축 %s"
+           else "    Collections: minor %s · major %s · forced %s · compactions %s")
+          (Count.grouped gc.sgc_minor_collections) (Count.grouped gc.sgc_major_collections)
+          (Count.grouped gc.sgc_forced_major_collections) (Count.grouped gc.sgc_compactions)
+      ; Printf.sprintf
+          (if ko then "    할당 누계: 마이너 %s · 승격 %s · 메이저 %s"
+           else "    Allocation totals: minor %s · promoted %s · major %s")
           (format_megawords gc.sgc_minor_words) (format_megawords gc.sgc_promoted_words)
           (format_megawords gc.sgc_major_words) ]
   in
   let scheduler_lines = match scheduler with
-    | None -> [ "    " ^ not_observed ]
+    | None -> [ "    " ^ identity_gap ]
     | Some sched when sched.ssch_samples <= 0 ->
-      [ "    No latency samples in the producer window"
-      ; Printf.sprintf "    Probe %s · worker domains %s"
-          (scheduler_probe_text sched.ssch_probe)
-          (Option.fold ~none:"unreported" ~some:string_of_int sched.ssch_pool_domains) ]
+      [ say "    서버 표본 구간에 지연 표본 없음" "    No latency samples in the producer window"
+      ; Printf.sprintf
+          (if ko then "    프로브 %s · 워커 도메인 %s" else "    Probe %s · worker domains %s")
+          (scheduler_probe_text ~ko sched.ssch_probe)
+          (reported_count sched.ssch_pool_domains) ]
     | Some sched ->
-      [ Printf.sprintf "    p50 %.3f ms · p95 %.3f ms · p99 %.3f ms"
+      [ Printf.sprintf "    p50 %.3fms · p95 %.3fms · p99 %.3fms"
           sched.ssch_p50_ms sched.ssch_p95_ms sched.ssch_p99_ms
-      ; Printf.sprintf "    Maximum %.3f ms · mean %.3f ms · %d samples"
-          sched.ssch_max_ms sched.ssch_mean_ms sched.ssch_samples
-      ; Printf.sprintf "    Producer-reported stalls %d · probe %s · worker domains %s"
-          sched.ssch_stalls
-          (scheduler_probe_text sched.ssch_probe)
-          (Option.fold ~none:"unreported" ~some:string_of_int sched.ssch_pool_domains)
-      ; "    Scheduler delay measures runtime responsiveness, not task output." ]
+      ; Printf.sprintf
+          (if ko then "    최대 %.3fms · 평균 %.3fms · 표본 %s"
+           else "    Maximum %.3fms · mean %.3fms · %s samples")
+          sched.ssch_max_ms sched.ssch_mean_ms (Count.grouped sched.ssch_samples)
+      ; Printf.sprintf
+          (if ko then "    서버가 센 정체 %s · 프로브 %s · 워커 도메인 %s"
+           else "    Producer-reported stalls %s · probe %s · worker domains %s")
+          (Count.grouped sched.ssch_stalls)
+          (scheduler_probe_text ~ko sched.ssch_probe)
+          (reported_count sched.ssch_pool_domains)
+      ; say "    스케줄러 지연은 런타임 응답 속도이며 작업 결과가 아닙니다."
+          "    Scheduler delay measures runtime responsiveness, not task output." ]
   in
-  let transport_lines = match state.transport with
-    | None -> [ "    " ^ not_observed ]
-    | Some transport ->
-      [ Printf.sprintf "    Primary path %s · gRPC %s"
-          (Masc.Transport_metrics.primary_path_kind_to_string transport.th_primary_path)
-          (Option.fold ~none:"off" ~some:(Printf.sprintf ":%d") transport.th_grpc_port)
-      ; Printf.sprintf "    SSE sessions %d · WebSocket sessions %s · dropped events %d"
-          transport.th_sse_sessions
-          (Option.fold ~none:"unreported" ~some:string_of_int transport.th_websocket_sessions)
-          transport.th_events_dropped
-      ; "    Queue pressure: " ^ Masc.Transport_metrics.queue_pressure_kind_to_string transport.th_queue_pressure ]
+  let path_word = function
+    | Masc.Transport_metrics.Grpc_subscribe -> say "gRPC 구독" "gRPC subscribe"
+    | Websocket -> "WebSocket"
+    | Sse -> "SSE"
+    | Streamable_http -> "Streamable HTTP"
+  in
+  let pressure_word = function
+    | Masc.Transport_metrics.Steady -> say "안정" "steady"
+    | Watch -> say "주의" "watch"
+    | High -> say "높음" "high"
+  in
+  (* A failed read is the loader's own sentence, which names its subject and
+     its verdict, so it is not drawn as a read not made yet. *)
+  let transport_lines = match state.transport, state.transport_error with
+    | Some transport, _ ->
+      [ Printf.sprintf
+          (if ko then "    주 경로 %s · gRPC %s" else "    Primary path %s · gRPC %s")
+          (path_word transport.th_primary_path)
+          (Option.fold ~none:(say "꺼짐" "off") ~some:(Printf.sprintf ":%d")
+             transport.th_grpc_port)
+      ; Printf.sprintf
+          (if ko then "    SSE 세션 %s · WebSocket 세션 %s · 버린 이벤트 %s"
+           else "    SSE sessions %s · WebSocket sessions %s · dropped events %s")
+          (Count.grouped transport.th_sse_sessions)
+          (reported_count transport.th_websocket_sessions)
+          (Count.grouped transport.th_events_dropped)
+      ; say "    큐 압력: " "    Queue pressure: " ^ pressure_word transport.th_queue_pressure ]
+    | None, Some error -> [ "    " ^ Terminal_text.single_line error ]
+    | None, None -> [ "    " ^ field_unread ~ko ]
   in
   (* This TUI's own subscription to the runtime event feed. The count sits
      straight after the state word in both states, the way the Activity
      status row puts it, so a closed feed's number reads as the frames it
      carried. *)
   let feed_line =
-    "    Runtime event feed: "
+    say "    런타임 이벤트 수신: " "    Runtime event feed: "
     ^
     match state.observer with
-    | Observer_off -> "off"
-    | Observer_opening -> "opening"
-    | Observer_live { events; _ } -> Printf.sprintf "live %d" events
+    | Observer_off -> say "꺼짐" "off"
+    | Observer_opening -> say "연결 중" "opening"
+    | Observer_live { events; _ } ->
+        Printf.sprintf (if ko then "수신 중 %s" else "live %s") (Count.grouped events)
     | Observer_closed_after_live { events; reason; _ } ->
-        Printf.sprintf "closed %d (%s)" events (Terminal_text.single_line reason)
+        Printf.sprintf (if ko then "닫힘 %s · %s" else "closed %s · %s")
+          (Count.grouped events) (Terminal_text.single_line reason)
     | Observer_closed_before_answer { reason; _ } ->
-        Printf.sprintf "failed to open (%s)" (Terminal_text.single_line reason)
+        say "시작 실패 · " "failed to open · " ^ Terminal_text.single_line reason
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
      newest line is last. The log holds eleven lines ([add_event]); a run of
@@ -370,7 +453,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
      earlier ones it left out, so the newest line is never below the fold. *)
   let session_lines =
     match state.events with
-    | [] -> [ "    (no events yet)" ]
+    | [] -> [ say "    (아직 이벤트 없음)" "    (no events yet)" ]
     | events ->
       let rows =
         Masc_tui_render_schedule.collapse_consecutive
@@ -399,7 +482,8 @@ let render_section_fleet ?session_rows ~cols (state : state) =
        | Some room when count > room && room >= 2 ->
          (* One row goes to the count of what was left out. *)
          let earlier = count - (room - 1) in
-         (Printf.sprintf "    %s+%d earlier%s" Ansi.dim earlier Ansi.reset)
+         (Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
+            Ansi.dim (Count.grouped earlier) Ansi.reset)
          :: List.filteri (fun index _ -> index >= earlier) rows
        | Some room when count > room ->
          (* No room for the count as well: the newest row alone. *)
@@ -407,10 +491,11 @@ let render_section_fleet ?session_rows ~cols (state : state) =
        | Some _ | None -> rows)
   in
   List.map clip
-    ([ title "TUI session" ] @ session_lines
-     @ [ ""; title "Engine memory" ] @ gc_lines
-     @ [ ""; title "Scheduler lag (producer sample window)" ] @ scheduler_lines
-     @ [ ""; title "Transport delivery" ] @ transport_lines @ [ feed_line ])
+    ([ title (say "TUI 세션" "TUI session") ] @ session_lines
+     @ [ ""; title (say "엔진 메모리" "Engine memory") ] @ gc_lines
+     @ [ ""; title (say "스케줄러 지연 (서버 표본 구간)" "Scheduler lag (producer sample window)") ]
+     @ scheduler_lines
+     @ [ ""; title (say "전송" "Transport delivery") ] @ transport_lines @ [ feed_line ])
 
 let timestamp_utc at =
   let tm = Unix.gmtime at in
@@ -744,10 +829,11 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     ~push_selected:_
     ~(push_divider : unit -> unit)
     ~(push_empty : unit -> unit) : unit =
+  let ko = state.ui_language = Lang_ko in
   let kpis = calculate_kpis state in
   let pulse = pulse_line ~cols state kpis in
   push pulse;
-  let pills = section_pills_line ~cols ~active:state.metrics_section in
+  let pills = section_pills_line ~ko ~cols ~active:state.metrics_section in
   push pills;
   push_divider ();
   let card_lines = render_kpi_cards ~cols state kpis in
@@ -758,7 +844,7 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     else card_lines, [] in
   List.iter push pinned_cards;
   if suffix_lines = [] then push_divider ()
-  else push_styled ~style:(Theme.recede ()) "End: status";
+  else push_styled ~style:(Theme.recede ()) (metrics_status_at_end ~ko);
   let fixed_rows = 1 + 1 + 1 + List.length pinned_cards + 1 in
   let room = max 0 (budget - fixed_rows) in
   let section_lines =
@@ -797,14 +883,13 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     | None -> push_empty ()
   done;
   if hint_rows > 0 then
-    let inner_width = max 20 (framed_inner_width cols) in
-    let hint_text =
-      Printf.sprintf "  [rows %s · j/k to scroll · 1-3 to switch section · Esc:Dashboard]"
-        (Masc_tui_scroll.window_text ~scroll ~height:available total_lines)
-    in
-    let clipped =
-      if Layout.display_width hint_text > inner_width then
-        Layout.take_cells hint_text inner_width
-      else hint_text
-    in
-    push_styled ~style:(Theme.recede ()) clipped
+    (* Where the window stands. The keys that move it are the footer's. *)
+    match Masc_tui_scroll.position_row ~ko ~scroll ~height:available total_lines with
+    | None -> push_empty ()
+    | Some row ->
+      let inner_width = max 20 (framed_inner_width cols) in
+      let clipped =
+        if Layout.display_width row > inner_width then Layout.take_cells row inner_width
+        else row
+      in
+      push_styled ~style:(Theme.recede ()) clipped

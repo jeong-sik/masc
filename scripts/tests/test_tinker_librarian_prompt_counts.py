@@ -15,6 +15,7 @@ import json
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -40,6 +41,10 @@ from tinker_librarian_prompt_fixtures import (
 NO_CALL = "holds a row that does not name its call's key and the time it was sent"
 
 
+def parsed[R: C.Row](rows: list[Row], parse: Callable[[C.Fields, Path], R]) -> list[R]:
+    return [parse(C.Fields(row, "rows.jsonl"), Path("run")) for row in rows]
+
+
 class CountsTest(unittest.TestCase):
     def test_rates_match_the_verdicts_numbers(self) -> None:
         rows = [synth_row("m1-01", valid=False, candidates=3, correct=3, state_correct=1, planted=2, planted_dropped=1,
@@ -48,7 +53,7 @@ class CountsTest(unittest.TestCase):
                           dropped_expected=1),
                 synth_row("m2-01", candidates=2, state_correct=1, planted=0)]
         merges: dict[str, object] = {"absorbs": 4, "absorbs_mergeable": 3, "merges": 5, "merges_mergeable": 2}
-        got = C.synth_counts(rows, 1, merges)
+        got = C.synth_counts(parsed(rows, C.synth_row_of), 1, merges)
         want = cast(dict[str, object], V.summarize("synth", rows, {"base": 1})["base"])
         for metric, key in ((C.Metric.SYNTH_VALID, "valid_rate"), (C.Metric.MEMORY_STATE, "memory_state_accuracy"),
                             (C.Metric.STALE_RECALL, "stale_drop_recall"), (C.Metric.DROP_PRECISION, "drop_precision")):
@@ -58,7 +63,7 @@ class CountsTest(unittest.TestCase):
     def test_the_real_record_counts_valid_answers_only(self) -> None:
         rows = [real_row("e1", agree=2, candidates=3, dropped_not_in_live=["m1"]),
                 real_row("e2", valid=False, agree=0, candidates=5, dropped_not_in_live=["m4", "m5"])]
-        self.assertEqual(C.real_record(rows), C.RealRecord(2, 3, 1))
+        self.assertEqual(C.real_record(parsed(rows, C.real_row_of)), C.RealRecord(2, 3, 1))
 
     def test_runs_sum_metric_by_metric(self) -> None:
         got = C.summed([measured(DRAFT_T, hits={"stale_drop_recall": (1, 3)}),
@@ -74,7 +79,10 @@ class CountsTest(unittest.TestCase):
     def test_a_run_of_another_shape_is_refused(self) -> None:
         cases: list[object] = [{"synth": "s"}, {"real": "r"}, {"synth": "s", "real": 7}, {"synth": None, "real": "r"},
                                {"synth": "s", "real": "r", "drops": 7}, {"synth": "s", "real": "r", "merges": ["m"]},
-                               {"synth": "s", "real": "r", "base": []}, ["s", "r"], "s"]
+                               {"synth": "s", "real": "r", "base": []}, ["s", "r"], "s",
+                               # An empty name is the working directory, read as the run's folder.
+                               {"synth": "", "real": "r"}, {"synth": "s", "real": ""},
+                               {"synth": "s", "real": "r", "drops": ""}, {"synth": "s", "real": "r", "merges": ""}]
         for raw in cases:
             with self.subTest(raw=raw):
                 with self.assertRaises(SystemExit) as caught:
@@ -258,6 +266,147 @@ class MeasureTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as caught:
             self.measure(self.one_item_run(synth_row("m1-01", dropped=1, dropped_off_label=["m9"])), (1, 1))
         self.assertIn("no drop judge's folder", str(caught.exception))
+
+
+class RunFolderTest(unittest.TestCase):
+    """`measure` over a run folder whose summary.json or rows.jsonl is not what a finished run writes:
+    cut short, written by hand, or named wrong. Each ends in one line that names the file and the field."""
+
+    SUMMARY_FIELDS = ("set", "pass_lines_sha256", "template_sha256", "provider", "targets", "stopped")
+    ROW_FIELDS = ("target", "item", "valid", "candidates")
+    SYNTH_FIELDS = (*ROW_FIELDS, "state_correct", "planted", "planted_dropped", "dropped", "dropped_expected",
+                    "merges", "dropped_off_label", "dropped_unmerged", "absorbs", "merges_absorbed")
+    REAL_FIELDS = (*ROW_FIELDS, "agree", "dropped_not_in_live")
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def refusal(self, synth_rows: list[Row] | None = None, real_rows: list[Row] | None = None,
+                change: Callable[[Path, Path], None] | None = None) -> str:
+        """What `measure` ends in over a fresh run of one item per set, its rows as given and its
+        folders changed by `change(synth, real)`."""
+        self.tearDown()
+        self.setUp()
+        synth = write_run(self.root, "synth", "synth", synth_rows or [synth_row("m1-01")])
+        real = write_run(self.root, "real", "real", real_rows or [real_row("e1")])
+        if change is not None:
+            change(synth, real)
+        with self.assertRaises(SystemExit) as caught:
+            C.measure(C.Run(synth, real, None, None), provider="tinker", model="inkling-model", pin=PIN, items=(1, 1))
+        return str(caught.exception)
+
+    def without(self, row: Row, field: str) -> Row:
+        return {k: v for k, v in row.items() if k != field}
+
+    def test_a_summary_that_leaves_a_field_out_is_refused_by_the_fields_name(self) -> None:
+        for kind in ("synth", "real"):
+            for field in self.SUMMARY_FIELDS:
+                with self.subTest(kind=kind, field=field):
+                    def leave_out(synth: Path, real: Path, kind: str = kind, field: str = field) -> None:
+                        path = (synth if kind == "synth" else real) / "summary.json"
+                        held = cast(Row, json.loads(path.read_text(encoding="utf-8")))
+                        path.write_text(json.dumps(self.without(held, field)), encoding="utf-8")
+                    self.assertEqual(self.refusal(change=leave_out),
+                                     f"{self.root / kind / 'summary.json'}: `{field}` is missing")
+
+    def test_a_summary_field_of_another_type_is_refused(self) -> None:
+        # `targets` as a list of names would send the model under no name; a `stopped` of false is
+        # not the null of a run that reached its last item.
+        cases: list[tuple[str, object, str]] = [
+            ("set", None, "a string"), ("pass_lines_sha256", 7, "a string"), ("template_sha256", None, "a string"),
+            ("provider", ["tinker"], "a string"), ("targets", ["base"], "an object of strings"),
+            ("targets", {"base": None}, "an object of strings"), ("stopped", False, "a string or null"),
+            ("stopped", 0, "a string or null")]
+        for field, value, want in cases:
+            with self.subTest(field=field, value=value):
+                def put(synth: Path, real: Path, field: str = field, value: object = value) -> None:
+                    path = synth / "summary.json"
+                    held = cast(Row, json.loads(path.read_text(encoding="utf-8")))
+                    path.write_text(json.dumps(held | {field: value}), encoding="utf-8")
+                self.assertEqual(self.refusal(change=put),
+                                 f"{self.root / 'synth' / 'summary.json'}: `{field}` is not {want}")
+
+    def test_a_row_that_leaves_a_field_out_is_refused_by_its_line_and_the_fields_name(self) -> None:
+        # The second line is the short one, and it is another target's: every row of the folder is parsed.
+        for field in self.SYNTH_FIELDS:
+            with self.subTest(kind="synth", field=field):
+                short = self.without(synth_row("m2-01", target="other", call_key="key-other"), field)
+                self.assertEqual(self.refusal(synth_rows=[synth_row("m1-01"), short]),
+                                 f"{self.root / 'synth' / 'rows.jsonl'} line 2: `{field}` is missing")
+        for field in self.REAL_FIELDS:
+            with self.subTest(kind="real", field=field):
+                short = self.without(real_row("e2", target="other", call_key="key-other"), field)
+                self.assertEqual(self.refusal(real_rows=[real_row("e1"), short]),
+                                 f"{self.root / 'real' / 'rows.jsonl'} line 2: `{field}` is missing")
+
+    def test_a_row_field_of_another_type_is_refused_where_it_would_count_wrong(self) -> None:
+        # Each of these was counted before: "false" as a valid answer, true as one, a name's letters
+        # as that many dropped memories, a minus count off the sum.
+        number, names = "a whole number of at least zero", "a list of strings"
+        synth: list[tuple[str, object, str]] = [
+            ("valid", "false", "true or false"), ("valid", 1, "true or false"), ("state_correct", True, number),
+            ("candidates", 2.0, number), ("planted", "1", number), ("dropped", -1, number), ("merges", None, number),
+            ("dropped_off_label", "m9", names), ("dropped_unmerged", [7], names),
+            ("absorbs", ["m3"], "an object of strings"), ("absorbs", {"m3": 1}, "an object of strings"),
+            ("merges_absorbed", ["m1"], "a list of lists of strings"),
+            ("merges_absorbed", [["m1"], [1]], "a list of lists of strings"),
+            ("target", None, "a string"), ("item", 3, "a string")]
+        for field, value, want in synth:
+            with self.subTest(kind="synth", field=field, value=value):
+                self.assertEqual(self.refusal(synth_rows=[synth_row("m1-01") | {field: value}]),
+                                 f"{self.root / 'synth' / 'rows.jsonl'} line 1: `{field}` is not {want}")
+        real: list[tuple[str, object, str]] = [
+            ("valid", "true", "true or false"), ("agree", True, number), ("candidates", "2", number),
+            ("dropped_not_in_live", "m7", names)]
+        for field, value, want in real:
+            with self.subTest(kind="real", field=field, value=value):
+                self.assertEqual(self.refusal(real_rows=[real_row("e1") | {field: value}]),
+                                 f"{self.root / 'real' / 'rows.jsonl'} line 1: `{field}` is not {want}")
+
+    def test_a_file_that_is_not_there_or_is_not_json_is_refused_by_its_path(self) -> None:
+        # None takes the file away. The rows cut short are a run stopped while it wrote a line.
+        row = json.dumps(real_row("e1")).encode()
+        cases: list[tuple[str, bytes | None, str, str]] = [
+            ("synth/summary.json", None, "", "cannot be read: No such file or directory"),
+            ("real/summary.json", None, "", "cannot be read: No such file or directory"),
+            ("synth/rows.jsonl", None, "", "cannot be read: No such file or directory"),
+            ("real/rows.jsonl", None, "", "cannot be read: No such file or directory"),
+            ("real/summary.json", b"{", "", "is not JSON"),
+            ("synth/summary.json", b"[]", "", "is not a JSON object"),
+            ("synth/summary.json", b"\xff\xfe{}", "", "is not UTF-8 text"),
+            ("real/rows.jsonl", row + b"\n" + row[:-10], " line 2", "is not JSON"),
+            ("synth/rows.jsonl", b"7\n", " line 1", "is not a JSON object"),
+        ]
+        for name, written, line, want in cases:
+            with self.subTest(name=name, written=written):
+                def change(synth: Path, real: Path, name: str = name, written: bytes | None = written) -> None:
+                    path = synth.parent / name
+                    if written is None:
+                        path.unlink()
+                    else:
+                        path.write_bytes(written)
+                self.assertEqual(self.refusal(change=change), f"{self.root / name}{line} {want}")
+
+    def test_a_folder_that_is_not_there_is_refused_by_its_name(self) -> None:
+        # A run folder's name mistyped in runs.json.
+        real = write_run(self.root, "real", "real", [real_row("e1")])
+        with self.assertRaises(SystemExit) as caught:
+            C.measure(C.Run(self.root / "synht", real, None, None), provider="tinker", model="inkling-model", pin=PIN,
+                      items=(1, 1))
+        self.assertEqual(str(caught.exception),
+                         f"{self.root / 'synht' / 'summary.json'} cannot be read: No such file or directory")
+
+    def test_a_folder_of_the_other_set_is_refused_before_its_rows_are_read(self) -> None:
+        # An E-real folder listed as the run's E-synth folder holds no E-synth row field. The summary
+        # says which set it is, so the refusal names the set, not a row field.
+        def swap(synth: Path, real: Path) -> None:
+            (synth / "rows.jsonl").write_bytes((real / "rows.jsonl").read_bytes())
+            (synth / "summary.json").write_bytes((real / "summary.json").read_bytes())
+        self.assertIn("synth is not an E-synth run on tinker", self.refusal(change=swap))
 
 
 class JudgedMeasureTest(unittest.TestCase):

@@ -7343,6 +7343,8 @@
 
 (include stanzas/test_runtime_model_label_binding.inc)
 
+(include stanzas/test_runtime_verify_discovered_row.inc)
+
 
 
 (include stanzas/test_keeper_direct_goal_provider_wire.inc)

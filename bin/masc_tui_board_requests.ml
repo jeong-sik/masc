@@ -11,9 +11,9 @@ type 'a launch =
   (unit -> ('a, string) result) -> unit
 
 (* Kept back before it starts, because the workspace is not confirmed. *)
-let refuse_unconfirmed state ~report kept =
+let refuse_unconfirmed state ~report ~request kept =
   let ko = state.ui_language = Lang_ko in
-  let detail = kept_back ~ko (workspace_identity_unconfirmed ~ko) kept in
+  let detail = kept_back ~ko ~request (workspace_identity_unconfirmed ~ko) kept in
   state.board_post_error <- Some detail;
   report "error" detail
 
@@ -45,7 +45,7 @@ type 'authority post_phase =
 let start_board_post state ~host ~results ~admit ~report
     ~(title : string) ~(body : string) ?hearth () =
   if state.workspace_identity <> Workspace_identity_match then
-    refuse_unconfirmed state ~report Draft_kept
+    refuse_unconfirmed state ~report ~request:Kept_request.Board_post Draft_kept
   else begin
   state.board_post_error <- None;
   let ko = state.ui_language = Lang_ko in
@@ -131,7 +131,7 @@ let start_board_post state ~host ~results ~admit ~report
 let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : string)
     ~(content : string) =
   if state.workspace_identity <> Workspace_identity_match then
-    refuse_unconfirmed state ~report Draft_kept
+    refuse_unconfirmed state ~report ~request:Kept_request.Board_comment Draft_kept
   else begin
   state.board_post_error <- None;
   let ko = state.ui_language = Lang_ko in
@@ -145,7 +145,7 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
-        | None -> Error (kept_back ~ko (workspace_identity_unread ~ko) Draft_kept) in
+        | None -> Error (kept_back ~ko ~request:Kept_request.Board_comment (workspace_identity_unread ~ko) Draft_kept) in
       match Masc_tui_http.post_board_comment ~expected_workspace ~host ~port ~post_id ~content with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json );
@@ -160,7 +160,7 @@ let start_board_comment state ~host ~request_id ~launch ~report ~(post_id : stri
    carries the target back, so it can refresh the reading it lands on. *)
 let start_vote state ~launch ~report ~target ~(up : bool) ~send =
   if state.workspace_identity <> Workspace_identity_match then
-    refuse_unconfirmed state ~report Nothing_kept
+    refuse_unconfirmed state ~report ~request:Kept_request.Board_vote Nothing_kept
   else begin
   let ko = state.ui_language = Lang_ko in
   let direction = Masc_tui_board_vote.direction ~ko ~up in
@@ -176,7 +176,7 @@ let start_vote state ~launch ~report ~target ~(up : bool) ~send =
       let open Result.Syntax in
       let* expected_workspace = match expected_workspace with
         | Some identity -> Ok identity
-        | None -> Error (kept_back ~ko (workspace_identity_unread ~ko) Nothing_kept) in
+        | None -> Error (kept_back ~ko ~request:Kept_request.Board_vote (workspace_identity_unread ~ko) Nothing_kept) in
       match send ~expected_workspace ~port with
       | Error err -> Error err
       | Ok json -> Masc.Tui_decode.tool_envelope_outcome json )

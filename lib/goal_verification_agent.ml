@@ -460,17 +460,20 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
       | Ok false -> committed, failed
       | Ok true ->
         active := Some retained;
-        (match Progress.phase (Worker.progress retained) with
-         | Judged _ | Committing _ | Commit_unknown _ | Finished _ ->
+        (match Goal_verifier_refusal.view (Progress.phase (Worker.progress retained)) with
+         | Goal_verifier_refusal.Judged _ | Goal_verifier_refusal.Committing _
+         | Goal_verifier_refusal.Commit_unknown _ | Goal_verifier_refusal.Finished _ ->
            (match commit retained with
             | Committed -> true, failed
             | Superseded -> committed, failed
             | Deferred deferral -> committed, Some (deferral_detail deferral))
-         | Conflicted _ ->
+         | Goal_verifier_refusal.Conflicted _ ->
            (match conflict_outcome retained "original proof conflicted with a later Goal state" with
             | Committed | Superseded -> committed, failed
             | Deferred deferral -> committed, Some (deferral_detail deferral))
-         | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+         | Goal_verifier_refusal.Captured | Goal_verifier_refusal.Admission_wait _
+         | Goal_verifier_refusal.Dispatch_pending _ | Goal_verifier_refusal.Rejected _
+         | Goal_verifier_refusal.Subdividing _ | Goal_verifier_refusal.Subdivided _ ->
            (match publish retained (Registry.Deferred {detail="retained original review has no settled Goal proof"}) with
             | Ok () -> committed, failed | Error detail -> committed, Some detail)))
       (false,None) rows in

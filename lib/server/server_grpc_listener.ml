@@ -37,6 +37,8 @@ let with_listener ~listen ~serve =
       Transport_metrics.set_grpc_listener_state (Failed kind);
       Error { kind; cause }
 
+let listener_tag = "grpc"
+
 let serve_socket ~sw ~clock ~socket server =
   let rec accept () =
     Eio.Net.accept_fork socket ~sw
@@ -46,17 +48,33 @@ let serve_socket ~sw ~clock ~socket server =
             Log.Server.warn "gRPC connection failed: %s" (Printexc.to_string exn))
       (fun flow peer ->
         Eio.Switch.run (fun conn_sw ->
-          Server_bootstrap_http.serve_h2_connection
-            ~clock
-            ~sw:conn_sw
-            ~h2_request_handler:(fun ~stream_end _peer reqd ->
-              Grpc_eio.Server.request_handler
-                ~sw:(Http_h2_stream.Stream_end.switch stream_end)
+          (* RFC-0518 D4, D6: the bounds of the HTTP listeners. A peer that
+             sends nothing, or stops taking what the server writes, is cut. *)
+          let connection =
+            Server_connection_socket.wrap ~sw:conn_sw ~clock ~listener_tag peer flow
+          in
+          match
+            Server_connection_socket.prepare connection (fun () ->
+              Server_connection_socket.await_first_bytes connection)
+          with
+          | None ->
+              Log.Server.debug "[%s] %s sent nothing within %.0fs: connection closed"
+                listener_tag
+                (Format.asprintf "%a" Eio.Net.Sockaddr.pp peer)
+                Server_connection_socket.preparation_bound_s
+          | Some () ->
+              Server_bootstrap_http.serve_h2_connection
                 ~clock
-                server
-                reqd)
-            ~h2_error_handler:Grpc_eio.Server.error_handler
-            peer flow));
+                ~sw:conn_sw
+                ~h2_request_handler:(fun ~stream_end _peer reqd ->
+                  Grpc_eio.Server.request_handler
+                    ~sw:(Http_h2_stream.Stream_end.switch stream_end)
+                    ~clock
+                    server
+                    reqd)
+                ~h2_error_handler:Grpc_eio.Server.error_handler
+                peer
+                (Server_connection_socket.socket connection)));
     accept ()
   in
   accept ()

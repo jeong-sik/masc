@@ -1,0 +1,9 @@
+### Fixed
+
+- The gRPC listener gives an accepted connection the bounds the HTTP
+  listeners have (RFC-0518 D4, D6), through the same
+  `Server_connection_socket`. A peer that sends no byte within 30 seconds is
+  closed, and a peer that takes no piece of what the server writes for 90
+  seconds is cut with a `[grpc]` warn line. Such a peer used to hold its
+  connection and the server's writer for as long as it stayed
+  (#50487, #PENDING).

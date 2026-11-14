@@ -556,7 +556,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
      working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
   let variables =
-    Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
+    Masc.Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] ~continuity:half input |> get in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
@@ -2167,7 +2167,7 @@ let test_cached_fit_refusal_reaches_its_original_message_floor () =
      current=Option.map (fun (memory : Masc.Keeper_memory_os_current.t) -> {K.facts=memory.facts}) current;
      working_context=Masc.Keeper_librarian_context.empty;messages=P.messages half;
      tool_observations=[];counterpart_observations=[]} in
-  let variables = Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
+  let variables = Masc.Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] ~continuity:half input |> get in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
     ~schema:Masc.Keeper_structured_output_schema.librarian_continuity_output_schema

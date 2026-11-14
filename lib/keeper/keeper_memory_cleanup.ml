@@ -45,6 +45,10 @@ let run_with ~execute ~base_path ~keeper_name =
         | Error detail | Ok (_, Keeper_meta_store.Meta_not_current detail) -> Unavailable detail
         | Ok (_, Keeper_meta_store.Meta_absent) -> Unavailable "Keeper metadata is absent"
         | Ok (keeper_id, Keeper_meta_store.Meta_present meta) ->
+          match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id:keeper_name) with
+          | Error detail -> Unavailable detail
+          | Ok source_lines ->
             let input : Keeper_librarian.input =
               { keeper_id
               ; turn_ref = Ids.Turn_ref.make
@@ -65,7 +69,7 @@ let run_with ~execute ~base_path ~keeper_name =
               (Yojson.Safe.to_string
                 (`Assoc
                   [ "variables", `Assoc (List.map (fun (name, value) -> name, `String value)
-                      (Keeper_librarian.prompt_variables input))
+                      (Keeper_librarian.prompt_variables ~source_lines input))
                   ; "template", `String (Prompt_registry.get_prompt Prompt_names.librarian)
                   ; "context_rule", `String
                       (Prompt_registry.get_prompt Prompt_names.librarian_working_contexts_rule)

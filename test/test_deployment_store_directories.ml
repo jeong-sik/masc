@@ -901,7 +901,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
     working_context=Keeper_librarian_context.empty;messages=[];tool_observations=[];counterpart_observations=[]} in
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   let retirement=Keeper_memory_admission_judgment.Available [] in
-  let preparation=Keeper_librarian_runtime.prepare_admission ~batch ~retirement input |> require in
+  let preparation=Keeper_librarian_runtime.prepare_admission ~source_lines:[] ~batch ~retirement input |> require in
   let destination:Admission.destination={installation_id=Original.installation_id (Original.Configuration "librarian");
     package_id=Admission.package_id;tool=Admission.tool;source_revision="source";configuration_revision="configuration"} in
   let capture=Admission.create ~request_id:(Admission.fresh_request_id owner) ~parent_part_id:"part"

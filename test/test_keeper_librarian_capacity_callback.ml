@@ -264,7 +264,7 @@ let test_prefit_real_continuity ~base_path () =
      server limit, including template, current facts, continuity and schema. *)
   let rendered prepared input =
     let variables =
-      Keeper_librarian_runtime.librarian_prompt_variables ~continuity:prepared input |> get in
+      Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] ~continuity:prepared input |> get in
     let _, prompt = Prompt_registry.resolve_and_render_prompt_template
       Prompt_names.librarian variables |> get in
     let requirement = Agent_core.Exact_output.make_output_requirement
@@ -408,7 +408,7 @@ let test_prefit_real_continuity ~base_path () =
       (P.memory_committed ~config ~keeper_name:keeper_id prepared |> get);
     Alcotest.(check string) "continuity leaves pending context bytes unchanged"
       context_before (Fs_compat.load_file_opt context_path |> some) in
-  let fit prepared = Runtime.fit_continuity ~capacity ~base_path ~keeper_id
+  let fit prepared = Runtime.fit_continuity ~source_lines:[] ~capacity ~base_path ~keeper_id
       ~input_for:(fun candidate -> Ok (input candidate)) prepared |> get |> some in
   let first = fit full in
   Alcotest.(check int) "measured bound selects first two whole atoms" 2 (P.end_atom first);

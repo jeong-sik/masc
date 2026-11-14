@@ -9,6 +9,10 @@ let fields expected = function
 let value name fields = List.assoc name fields
 let text = function `String value -> Ok value | _ -> Error "Original history request expects text"
 let integer = function `Int value -> Ok value | _ -> Error "Original history request expects an integer"
+let texts = function
+  | `List values ->
+    List.fold_right (fun value acc -> let* rest=acc in let+ line=text value in line::rest) values (Ok [])
+  | _ -> Error "Original history request expects a list of text"
 let hash text = Agent_core_sha256.(to_hex (digest_string text))
 let prompt_json = Prompt_registry.prompt_resolution_to_yojson
 let prompt_of_json json =
@@ -19,8 +23,9 @@ type frozen = {parsing_now:float;policy:Runtime.durable_policy;rule_prompt:Promp
    rendered again on restore; the digest names the prompt the host was sent. *)
 let to_json (p:Runtime.durable_preparation) = `Assoc [
   "parsing_now",`Float p.parsing_now;
-  "policy",`Assoc ["facts_max_bytes",`Int p.policy.facts_max_bytes;"category_cap",`Int p.policy.category_cap;
-    "facts_per_category_cap",`Int p.policy.facts_per_category_cap];
+  "policy",`Assoc ["facts_max_bytes",`Int p.policy.facts_max_bytes;
+    "facts_source_lines",`List (List.map (fun line -> `String line) p.policy.facts_source_lines);
+    "category_cap",`Int p.policy.category_cap;"facts_per_category_cap",`Int p.policy.facts_per_category_cap];
   "rule_prompt",prompt_json p.rule_prompt;"prompt",prompt_json p.prompt;
   "rendered_prompt_sha256",`String (hash p.rendered_prompt);"output_schema",p.output_schema]
 let of_json json =
@@ -28,11 +33,13 @@ let of_json json =
   let* parsing_now=match value "parsing_now" f with
     | `Float time when Float.is_finite time -> Ok time | `Int time -> Ok (float_of_int time)
     | _ -> Error "Original history parse time is not finite" in
-  let* limits=fields ["facts_max_bytes";"category_cap";"facts_per_category_cap"] (value "policy" f) in
+  let* limits=fields ["facts_max_bytes";"facts_source_lines";"category_cap";"facts_per_category_cap"]
+    (value "policy" f) in
   let* facts_max_bytes=integer (value "facts_max_bytes" limits) in
+  let* facts_source_lines=texts (value "facts_source_lines" limits) in
   let* category_cap=integer (value "category_cap" limits) in
   let* facts_per_category_cap=integer (value "facts_per_category_cap" limits) in
-  let policy : Runtime.durable_policy = {facts_max_bytes;category_cap;facts_per_category_cap} in
+  let policy : Runtime.durable_policy = {facts_max_bytes;facts_source_lines;category_cap;facts_per_category_cap} in
   let* rule_prompt=prompt_of_json (value "rule_prompt" f) in
   let* prompt=prompt_of_json (value "prompt" f) in
   let+ rendered_prompt_sha256=text (value "rendered_prompt_sha256" f) in

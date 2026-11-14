@@ -121,7 +121,8 @@ let run () =
            ~role:Agent_core.Types.User [Agent_core.Types.Text text]) case.messages;
          historical_task_contexts=[]; goal_context=Keeper_librarian.No_task;
          tool_observations=[]; counterpart_observations=[]} in
-      let* variables = Keeper_librarian_runtime.librarian_prompt_variables inp in
+      (* A case holds ordinary facts only; it has no file-source memory. *)
+      let* variables = Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] inp in
       let* _, prompt = Prompt_registry.resolve_and_render_prompt_template "librarian" variables in
       let+ rest = prepare rest in (case, prompt) :: rest in
   let* requests = prepare cases in

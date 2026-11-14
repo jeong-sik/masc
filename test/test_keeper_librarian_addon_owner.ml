@@ -1545,7 +1545,7 @@ let test_retirement_policy_is_required_only_for_its_suffix ()=with_fixture (fun 
   and unrelated=retirement_record (fact "An unrelated archived identity.") in
   List.iter (fun empty -> with_retirement_guidance_gap ~empty (fun () ->
     List.iter (fun (retirement,needed) ->
-      match Keeper_librarian_runtime.prepare_admission ~batch ~retirement input with
+      match Keeper_librarian_runtime.prepare_admission ~source_lines:[] ~batch ~retirement input with
       | Error detail ->
         check bool "only a needed retirement suffix refuses missing policy" true needed;
         check bool "the error names the retirement policy" true
@@ -1570,7 +1570,7 @@ let test_used_retirement_policy_survives_current_policy_changes ()=with_fixture 
     let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
     let batch=Capture.batch capture and input=Capture.input capture in
     let retirement=Keeper_memory_admission_judgment.Unavailable "original archive read failed" in
-    let preparation=Keeper_librarian_runtime.prepare_admission ~batch ~retirement input |> get in
+    let preparation=Keeper_librarian_runtime.prepare_admission ~source_lines:[] ~batch ~retirement input |> get in
     let unavailable=Capture.create ~request_id:(Capture.fresh_request_id owner)
       ~parent_part_id:(Capture.parent_part_id capture) ~owner ~destination:(Capture.destination capture)
       ~batch ~input ~expected_revision:(Capture.expected_revision capture) ~now:(Capture.now capture)

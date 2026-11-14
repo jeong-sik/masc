@@ -95,7 +95,7 @@ let question_over (source : Librarian.input) =
   ask (Machine.start ~transaction_id:"floor-step-test" ~plan read |> ok)
 
 let prepare (question : Machine.question) =
-  Runtime.prepare_durable_step ~now:1_000_000.
+  Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000.
     ~context:{ Runtime.previous_state = question.previous_state; unread_messages = question.unread_messages }
     question.input |> ok
 
@@ -367,7 +367,7 @@ let test_links_and_positions_are_checked_when_a_step_is_made () =
   let wrong_input =
     { chain.first_question.input with Librarian.keeper_instructions = "instructions the question did not carry" } in
   let altered =
-    Runtime.prepare_durable_step ~now:1_000_000.
+    Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000.
       ~context:{ Runtime.previous_state = chain.first_question.previous_state
                ; unread_messages = chain.first_question.unread_messages }
       wrong_input |> ok in
@@ -375,7 +375,7 @@ let test_links_and_positions_are_checked_when_a_step_is_made () =
     (Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination ~transaction_id ~range:chain.range
        ~previous:None ~question:chain.first_question ~step:altered ());
   let other_context =
-    Runtime.prepare_durable_step ~now:1_000_000.
+    Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000.
       ~context:{ Runtime.previous_state = Some "a state the question did not carry"
                ; unread_messages = chain.first_question.unread_messages }
       chain.first_question.input |> ok in

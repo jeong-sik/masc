@@ -598,6 +598,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
     let inputs = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let open Result.Syntax in
       let* current = Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+      let* source_lines = Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id:keeper_name in
       let input : Keeper_librarian.input =
         { turn_ref = P.turn_ref prepared; historical_task_contexts = []; goal_context = Keeper_librarian.No_task;
           keeper_id;
@@ -611,7 +612,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         | Some _ when by_message -> Ok (Some prepared)
         | None -> Ok (Some prepared)
         | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
-            ~keeper_id:keeper_name ~input_for:(memory_input input) prepared in
+            ~keeper_id:keeper_name ~source_lines ~input_for:(memory_input input) prepared in
       let selected = match fitted with
         | Some fitted -> fitted
         | None ->
@@ -634,10 +635,10 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         | Some (cursor,through) ->
           Keeper_external_read_cursor.prepare ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name cursor
             ~through ~atom:(Some range_id) ~official:None in
-      Ok (current, memory_committed, range_id, selected, input)) in
+      Ok (current, memory_committed, range_id, selected, input, source_lines)) in
     match inputs with
     | Error detail -> report O.Input_unavailable O.Input_build_failed detail
-    | Ok (current, memory_committed, range_id, selected, input) ->
+    | Ok (current, memory_committed, range_id, selected, input, source_lines) ->
       if P.end_atom selected <> P.end_atom prepared then
         Log.Keeper.info ~keeper_name
           "continuity input fitted before dispatch; end_atom=%d -> %d"
@@ -751,7 +752,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            knows that something was too large, steps down once and waits. *)
         let fitted = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Runtime.fit_continuity ~capacity:observed ~base_path
-            ~keeper_id:keeper_name ~input_for:(memory_input input) selected) in
+            ~keeper_id:keeper_name ~source_lines ~input_for:(memory_input input) selected) in
         (match fitted with
          | Error detail -> report O.Input_unavailable O.Input_build_failed detail
          | Ok None when not memory_committed ->

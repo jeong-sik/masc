@@ -1,0 +1,29 @@
+### Fresh state required
+
+- The captured policy of a Librarian original now holds
+  `facts_source_lines`, the file-source memory lines its facts budget
+  counted, and a restored original renders its prompt again from them. A
+  completed-history request, a message-floor step or an admission capture
+  written before this change does not decode. For fresh state, stop every
+  server and other writer for the workspace, run the candidate's
+  `validate-stores`, delete every path its `fresh state` lines print, run it
+  again until every store passes, then install and start the server. See [the
+  stored-state
+  guide](../docs/guides/DURABLE-STORE-HARD-CUT.md#lane-add-on-tool-request-owners)
+  (#44521, #PENDING).
+
+### Fixed
+
+- The Librarian prompt's facts budget shows the total the Memory commit
+  measures: the current ordinary facts joined with the file-source memory
+  lines, then each part. The prompt, the no-change preflight and the commit
+  take the number from one measurement, so an answer that keeps memory the
+  prompt showed within the budget is no longer refused at commit for source
+  lines the prompt left out. A Keeper without file-source memory sees the same
+  text as before (#44521, #PENDING).
+
+### Changed
+
+- A Memory pass reads the file-source store once before it renders the
+  prompt. When that store cannot be read, the pass stops before it asks the
+  model; the commit refused such a pass after the answer (#44521, #PENDING).

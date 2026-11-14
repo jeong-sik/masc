@@ -66,10 +66,12 @@ type simulated_provider_outcome =
 (** {1 Result rows} *)
 
 (** What an engine wrote in a result row's text field. Each engine's
-    parser names it from the field that engine documents: Ollama
-    [content] and Exa [text] are [Engine_text]; SearXNG [content], Brave
-    [description], Tavily [content], Bing [snippet] and z.ai [content] are
-    [Engine_summary]. A missing field is an empty text of the same kind. *)
+    parser names it from the field that engine documents as text from the
+    page: Ollama [content], Tavily [content] (at the requested depth) and
+    Exa [text] are [Engine_text]. SearXNG [content], Brave [description],
+    Bing [snippet] and z.ai [content] are not documented as page text and
+    are [Engine_summary]. A missing field is an empty text of the same
+    kind. *)
 type row_text =
   | Engine_summary of string  (** the engine's own preview of the result *)
   | Engine_text of string     (** text the engine took from the result's page *)

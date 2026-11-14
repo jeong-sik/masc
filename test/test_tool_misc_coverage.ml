@@ -1418,7 +1418,7 @@ let () = test "parse_official_provider_json_payloads" (fun () ->
   in
   let open Tool_misc_web_search in
   assert (brave = Ok [ ("Brave title", "https://example.com/brave", Engine_summary "Brave snippet") ]);
-  assert (tavily = Ok [ ("Tavily title", "https://example.com/tavily", Engine_summary "Tavily snippet") ]);
+  assert (tavily = Ok [ ("Tavily title", "https://example.com/tavily", Engine_text "Tavily snippet") ]);
   assert (exa = Ok [ ("Exa title", "https://example.com/exa", Engine_text "Exa snippet") ]);
   assert (bing = Ok [ ("Bing title", "https://example.com/bing", Engine_summary "Bing snippet") ])
 )

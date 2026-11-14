@@ -199,13 +199,18 @@ let parse_brave_json payload =
        | Some _ -> Error (Parse "provider web field is not an object"))
   | _ -> Error (Parse "provider response is not a JSON object")
 
-(* Tavily's [content] is "A short description of the search result"; the
-   page itself is [raw_content], sent only when the request asks for it,
-   and [fetch_tavily] does not.
+(* At the [search_depth] [fetch_tavily] asks for, Tavily's [content] is
+   "multiple semantically relevant snippets per URL": chunks of about 500
+   characters "pulled directly from the source", joined as
+   "<chunk 1> [...] <chunk 2>". The whole page is [raw_content], sent only
+   when the request asks for it, and [fetch_tavily] does not. Only the
+   [ultra-fast] depth answers with "one NLP summary per URL".
    https://docs.tavily.com/documentation/api-reference/endpoint/search *)
+let tavily_search_depth = "basic"
+
 let parse_tavily_json payload =
   parse_json_search_results ~results_path:["results"]
-    ~title_field:"title" ~text_field:"content" ~text:summary payload
+    ~title_field:"title" ~text_field:"content" ~text:engine_text payload
 
 (* Ollama's [content] is "relevant content snippet from the web page": text
    taken from the page, not the page's main content, which [web_fetch]
@@ -215,7 +220,8 @@ let parse_ollama_search_json payload =
     ~title_field:"title" ~text_field:"content" ~text:engine_text payload
 
 (* Exa's [text] is "The full content text of the search result", sent when
-   the request asks for text contents.
+   the request asks for it with [contents.text]. [fetch_exa] does not ask,
+   so its rows carry no [text] today.
    https://github.com/exa-labs/openapi-spec (SearchResultOutput.text) *)
 let parse_exa_json payload =
   parse_json_search_results ~results_path:["results"]
@@ -547,7 +553,7 @@ let fetch_tavily ~host ~timeout_sec ~query ~limit =
             ("api_key", `String api_key);
             ("query", `String query);
             ("max_results", `Int limit);
-            ("search_depth", `String "basic");
+            ("search_depth", `String tavily_search_depth);
           ]
         |> Yojson.Safe.to_string
       in

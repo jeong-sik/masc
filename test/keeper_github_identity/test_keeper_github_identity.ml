@@ -1201,6 +1201,99 @@ let test_closed_response_still_secures_a_finished_login () =
     Alcotest.(check (list string)) "no event reached a closed response" [] !events
 ;;
 
+(* Where a close lands on a login whose gh exits 0. An HTTP/2 stream reset
+   cancels the whole fiber the response runs in, as well as turning the
+   response closed; an HTTP/1.1 close found by a keepalive only turns it
+   closed. *)
+type close_at_exit =
+  | Reset_while_securing
+  | Reset_as_login_exits
+  | Output_after_close
+
+let close_at_exit_name = function
+  | Reset_while_securing -> "stream reset while securing"
+  | Reset_as_login_exits -> "stream reset as gh exits 0"
+  | Output_after_close -> "gh output after the close"
+;;
+
+exception Stream_reset_fixture
+
+(* A login that exited 0 has written its credential, wherever the close lands
+   and whichever transport carried it: securing runs to its end, and the
+   observation that only the operator would read is not taken. *)
+let test_close_never_skips_securing_an_exit_zero () =
+  with_temp_base
+  @@ fun _ config ->
+  List.iter
+    (fun close_at ->
+       let name = close_at_exit_name close_at in
+       with_login_clock
+       @@ fun clock ->
+       let closed = ref false in
+       let ran = ref [] in
+       let events = ref [] in
+       let keeper_name = "closed-at-exit" in
+       let result =
+         Eio.Time.with_timeout clock login_patience_sec (fun () ->
+           Eio.Cancel.sub (fun response_fiber ->
+             let reset () =
+               closed := true;
+               Eio.Cancel.cancel response_fiber Stream_reset_fixture
+             in
+             let lane : Github.login_lane =
+               { run_login =
+                   (fun ~scopes:_ ~on_stdout_chunk ~on_stderr_chunk:_ ->
+                     ran := Login :: !ran;
+                     (match close_at with
+                      | Reset_as_login_exits -> reset ()
+                      | Output_after_close ->
+                        closed := true;
+                        on_stdout_chunk "Logged in as octocat\n"
+                      | Reset_while_securing -> ());
+                     Unix.WEXITED 0, "", "")
+               ; run_login_with_token =
+                   (fun ~token:_ -> Alcotest.fail "a device-flow login sent a token")
+               ; secure_after_login =
+                   (fun () ->
+                     (match close_at with
+                      | Reset_while_securing -> reset ()
+                      | Reset_as_login_exits | Output_after_close -> ());
+                     Eio.Time.sleep clock securing_round_trip_sec;
+                     ran := Securing :: !ran;
+                     Ok ())
+               ; observe_after_login =
+                   (fun () ->
+                     ran := Observation :: !ran;
+                     Ok (observation_fixture keeper_name))
+               }
+             in
+             Ok
+               (Github.stream_login
+                  ~config
+                  ~keeper_name
+                  ~scopes:[]
+                  ~make_lane:(fun () -> Ok lane)
+                  ~is_closed:(fun () -> !closed)
+                  ~send_event:(fun event _ -> events := event :: !events))))
+       in
+       match result with
+       | Error `Timeout -> Alcotest.failf "%s: the login did not end" name
+       | Ok result ->
+         Alcotest.(check (result unit string))
+           (name ^ ": the login ends quietly")
+           (Ok ())
+           result;
+         Alcotest.(check (list login_stage_testable))
+           (name ^ ": securing finished and the observation was not taken")
+           [ Login; Securing ]
+           (List.rev !ran);
+         Alcotest.(check (list string))
+           (name ^ ": no event reached a closed response")
+           []
+           !events)
+    [ Reset_while_securing; Reset_as_login_exits; Output_after_close ]
+;;
+
 let () =
   Alcotest.run
     "keeper GitHub identity"
@@ -1330,6 +1423,10 @@ let () =
             "a closed response still secures a finished login"
             `Quick
             test_closed_response_still_secures_a_finished_login
+        ; Alcotest.test_case
+            "no close skips securing a login that exited 0"
+            `Quick
+            test_close_never_skips_securing_an_exit_zero
         ] )
     ]
 ;;

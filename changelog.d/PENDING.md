@@ -9,5 +9,8 @@
   `gh auth login` and its endpoint session stayed until the 600-second login
   timeout. The login stream now sends an SSE keepalive comment every 30
   seconds. The cancelled request ends its ssh process, and the endpoint's
-  shim stops `gh` when that channel closes. Securing a credential that a
-  finished login wrote still runs to the end (#32910, #PENDING).
+  shim stops `gh` when that channel closes. Once `gh` is seen to exit 0, securing
+  the credential it wrote runs to the end even if the window closes at that
+  moment, its last output arrives after the close, or an HTTP/2 stream reset
+  cancels the whole response. Before, each of those skipped securing
+  (#32910, #PENDING).

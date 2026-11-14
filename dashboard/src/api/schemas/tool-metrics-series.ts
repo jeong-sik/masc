@@ -58,6 +58,11 @@ const ToolMetricsSeriesToolSchema = Schema.Struct({
   ...SeriesStatFields,
 })
 
+const ToolMetricsSeriesCallerSchema = Schema.Struct({
+  caller: Schema.String,
+  ...SeriesStatFields,
+})
+
 const ToolMetricsSeriesResponseSchema = Schema.Struct({
   generated_at: Schema.Finite,
   window: Schema.Struct({
@@ -73,6 +78,10 @@ const ToolMetricsSeriesResponseSchema = Schema.Struct({
   total: Schema.Struct(SeriesStatFields),
   buckets: Schema.Array(ToolMetricsSeriesBucketSchema),
   top_by_time: Schema.Array(ToolMetricsSeriesToolSchema),
+  /** The Keepers whose calls failed most, most failures first. */
+  by_caller: Schema.Array(ToolMetricsSeriesCallerSchema),
+  /** Calls with no recorded caller: stored before callers were kept, or made outside any Keeper. */
+  caller_unobserved_count: Schema.Finite,
 })
 
 export type ToolMetricsFailureClassCounts = Schema.Schema.Type<typeof FailureClassCountsSchema>

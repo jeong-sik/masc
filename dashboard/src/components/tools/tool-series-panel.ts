@@ -141,6 +141,17 @@ export const FAILURE_CLASS_LINES: readonly FailureClassLine[] = [
 
 const UNCLASSIFIED_LINE_NAME = '종류 미기록'
 
+/** The failures of one row by class, such as `외부 의존 불가 2 · 내부 오류 1`; `-` when none failed. */
+export function formatFailureClasses(stat: ToolMetricsSeriesResponse['total']): string {
+  const parts = [
+    ...FAILURE_CLASS_LINES.map(line => [line.name, stat.failure_classes[line.key]] as const),
+    [UNCLASSIFIED_LINE_NAME, stat.failure_unclassified_count] as const,
+  ]
+    .filter(([, count]) => count > 0)
+    .map(([name, count]) => `${name} ${formatCount(count)}`)
+  return parts.length === 0 ? '-' : parts.join(' · ')
+}
+
 /**
  * Failed calls per bucket, one line for each class they recorded and a dashed
  * line for the failures that recorded none. Together the lines add up to the
@@ -319,6 +330,46 @@ function ToolSeriesTable({ series, tool, onTool }: {
   `
 }
 
+function ToolSeriesCallerTable({ series }: { series: ToolMetricsSeriesResponse }) {
+  const unobserved = series.caller_unobserved_count
+  if (series.by_caller.length === 0 && unobserved === 0) return null
+  return html`
+    <div class="flex flex-col gap-1">
+      ${series.by_caller.length === 0 ? null : html`
+        <div class="overflow-auto">
+          <table class="w-full text-left tabular-nums text-2xs">
+            <caption class="text-left mb-1 text-[var(--color-fg-muted)]">Keeper별 호출과 실패 (실패가 많은 순)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Keeper</th><th scope="col">호출</th><th scope="col">실패</th>
+                <th scope="col">실패 종류</th><th scope="col">시간 합계</th>
+                <th scope="col">p50</th><th scope="col">p95</th><th scope="col">최대</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${series.by_caller.map(row => html`
+                <tr key=${row.caller}>
+                  <td class="font-mono">${row.caller}</td>
+                  <td>${row.call_count.toLocaleString()}</td>
+                  <td>${row.failure_count.toLocaleString()}</td>
+                  <td>${formatFailureClasses(row)}</td>
+                  <td>${formatTotalTime(row.total_ms)}</td>
+                  <td>${formatMsCompact(row.p50_ms, '-')}</td>
+                  <td>${formatMsCompact(row.p95_ms, '-')}</td>
+                  <td>${formatMsCompact(row.max_ms, '-')}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      `}
+      ${unobserved > 0
+        ? html`<p class="text-2xs text-[var(--color-fg-muted)]">호출 ${unobserved.toLocaleString()}건은 부른 Keeper를 기록하지 않아 이 표에 없어요. 기록을 시작하기 전의 호출과 Keeper 밖에서 부른 호출이에요.</p>`
+        : null}
+    </div>
+  `
+}
+
 export function ToolSeriesView({ series, loading, error, windowKey, tool, onWindow, onTool }: ToolSeriesViewProps) {
   // The series of the previous tool filter stays on screen, dimmed, until the
   // series of the picked one arrives.
@@ -339,6 +390,7 @@ export function ToolSeriesView({ series, loading, error, windowKey, tool, onWind
             <div class="flex flex-col gap-3 ${settling ? 'opacity-60' : ''}" aria-busy=${settling}>
               <${ToolSeriesCharts} series=${series} />
               <${ToolSeriesTable} series=${series} tool=${tool} onTool=${onTool} />
+              <${ToolSeriesCallerTable} series=${series} />
             </div>
           `}
     </div>

@@ -213,25 +213,25 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
           Ok [ { Actions.turn_id = 27486
             ; calls =
                 [ { Actions.tool = "keeper_board_post"
-                  ; input = {|{"title":"status"}|}
+                  ; input = Actions.Arguments {|{"title":"status"}|}
                   ; source_position = 0
                   ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Ok_call
                   }
                 ; { Actions.tool = "keeper_broadcast"
-                  ; input = "{}"
+                  ; input = Actions.Arguments "{}"
                   ; source_position = 1
                   ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Failed_call (Some {|"message": MISSING|})
                   }
                 ; { Actions.tool = "keeper_task_release"
-                  ; input = {|{"task":"t-1"}|}
+                  ; input = Actions.Arguments {|{"task":"t-1"}|}
                   ; source_position = 2
                   ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Unrecorded_call
                   }
                 ; { Actions.tool = "keeper_task_claim"
-                  ; input = {|{"task":"t-2"}|}
+                  ; input = Actions.Arguments {|{"task":"t-2"}|}
                   ; source_position = 3
                   ; provenance = {task_id=None; trace_id=None}
                   ; outcome = Actions.Deferred_call
@@ -274,7 +274,7 @@ let turn_with_a_large_refusal turn_id =
   { Actions.turn_id
   ; calls =
       [ { Actions.tool = "keeper_board_post"
-        ; input = large_refusal_input turn_id
+        ; input = Actions.Arguments (large_refusal_input turn_id)
         ; source_position = turn_id
         ; provenance = {task_id=None; trace_id=None}
         ; outcome = Actions.Failed_call (Some "too large")
@@ -319,6 +319,7 @@ let log_row ~keeper ?turn ~tool ~success () =
     ([ "keeper", `String keeper
      ; "tool", `String tool
      ; "input", `Assoc [ "arg", `String tool ]
+     ; Masc.Keeper_tool_call_log.input_form_field (`Assoc [ "arg", `String tool ])
      ; "disposition", `String (if success then "completed" else "failed")
      ; "wire_outcome", `String (if success then "ok" else "error")
      ; "output", `String (if success then "ok" else "Error: refused")
@@ -335,6 +336,7 @@ let test_live_log_rows_keep_the_outcome_they_record () =
        ; "keeper_turn_id", `Int 7
        ; "tool", `String tool
        ; "input", `Assoc [ "arg", `String tool ]
+       ; Masc.Keeper_tool_call_log.input_form_field (`Assoc [ "arg", `String tool ])
        ; "output", `String ("out:" ^ tool)
        ]
        @ outcome_fields)

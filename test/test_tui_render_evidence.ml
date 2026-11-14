@@ -71,7 +71,7 @@ let section ?(width = 80) ?(content_height = 40) ?(display = kitty) ?(task_id = 
     | Some (id,Ok value) when String.equal id task_id -> Masc_tui_fetched.Ready value
     | Some (id,Error error) when String.equal id task_id -> Masc_tui_fetched.Failed error
     | Some _ | None -> Masc_tui_fetched.Absent in
-  Section.section ~selection:None ~evidence:observation ~in_flight:false ~workspace_confirmed:true
+  Section.section ~ko:false ~selection:None ~evidence:observation ~in_flight:false ~workspace_confirmed:true
     ~width ~content_height ~display
 
 let texts rows = List.map snd rows
@@ -151,14 +151,14 @@ let test_an_image_that_is_not_shown_says_so_and_reserves_nothing () =
       (Decode.Withheld_over_delivery_ceiling { bytes = 512000; ceiling = 200000 })
   in
   Alcotest.(check bool) "the rows state the cause, numbers included" true
-    (contains ~needle:(Picture.cause_text cause) item)
+    (contains ~needle:(Picture.cause_text ~ko:false cause) item)
 
 let test_a_binary_artifact_that_is_not_an_image_is_one_plain_row () =
   let rows, pictures = section (evidence [ binary ~reference:"artifact:r.pdf" Picture.Binary_only ]) in
   Alcotest.(check int) "no picture" 0 (List.length pictures);
   let line = snd (List.nth rows (index_of ~needle:"artifact:r.pdf" rows)) in
   Alcotest.(check bool) "and states no cause, because there is none" false
-    (contains ~needle:(Picture.cause_text (Picture.Withheld Decode.Withheld_not_image_format)) line)
+    (contains ~needle:(Picture.cause_text ~ko:false (Picture.Withheld Decode.Withheld_not_image_format)) line)
 
 let test_a_picture_taller_than_the_pane_leaves_a_caption () =
   let rows, pictures = section ~content_height:View.min_pixel_rows (fixture ()) in

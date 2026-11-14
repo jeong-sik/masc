@@ -278,7 +278,7 @@ let test_editor_roundtrip_preserves_exact_source () =
         original.text) in
     (match result with
      | Ok text -> check string "editor returns exact replacement bytes" candidate text
-     | Error abort -> fail (Editor.abort_detail abort));
+     | Error abort -> fail (Editor.abort_detail ~ko:false abort));
     check string "editor receives exact original bytes" original.text (read_bytes submitted);
     check (list string) "terminal ownership brackets the child" ["reenter"; "restore"] !calls;
     check bool "owned source temporary file is removed" false (Sys.file_exists (read_bytes temporary)))

@@ -29,27 +29,42 @@ let run_editor editor path =
 (* Why the form came back with nothing in it. All three used to be [None],
    so a caller could only say "cancelled" -- and an editor that never started
    read to the operator as a decision they had made. *)
+type unavailable =
+  | Unset
+  (* Neither [$EDITOR] nor [$VISUAL] names a command. *)
+  | Command_not_found of string
+  (* /bin/sh answers 127 for a command it cannot find, which is what an
+     [$EDITOR] naming a binary that is not installed looks like from here. *)
+  | Stopped_by_signal of { editor : string; signal : int }
+
 type abort =
   | Cancelled
   (* The editor ran and exited non-zero: [:cq] and its equivalents, which is
      the operator saying no. *)
-  | Editor_unavailable of string
-  (* The command never ran, or died on a signal. /bin/sh answers 127 for a
-     command it cannot find, which is what an [$EDITOR] naming a binary that
-     is not installed looks like from here. *)
+  | Editor_unavailable of unavailable
+  (* The command never ran, or died on a signal. *)
   | Form_unreadable of string
 (* The temp file could not be written or read back. Nothing to do with the
    editor or the operator. *)
 
-let abort_detail = function
-  | Cancelled -> "cancelled"
-  | Editor_unavailable detail -> detail
+let abort_detail ~ko = function
+  | Cancelled -> if ko then "취소" else "cancelled"
+  | Editor_unavailable Unset ->
+      if ko then "$EDITOR 와 $VISUAL 이 비어 있음 · EDITOR 를 설정하세요"
+      else "no $EDITOR or $VISUAL is set · export EDITOR to edit here"
+  | Editor_unavailable (Command_not_found editor) ->
+      editor ^ (if ko then ": 명령을 찾을 수 없음" else ": command not found")
+  | Editor_unavailable (Stopped_by_signal { editor; signal }) ->
+      Printf.sprintf
+        (if ko then "%s: 신호 %d 받고 멈춤" else "%s was stopped by signal %d")
+        editor signal
+  (* The system's own words for what went wrong with the file. *)
   | Form_unreadable detail -> detail
 
 let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string)
   : (string, abort) result =
   match editor_command () with
-  | None -> Error (Editor_unavailable "no $EDITOR or $VISUAL is set")
+  | None -> Error (Editor_unavailable Unset)
   | Some editor ->
     try
       let path = Filename.temp_file "masc-editor" suffix in
@@ -66,10 +81,10 @@ let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string)
             let channel = open_in_bin path in
             Fun.protect ~finally:(fun () -> close_in_noerr channel)
               (fun () -> Ok (really_input_string channel (in_channel_length channel)))
-          | Unix.WEXITED 127 -> Error (Editor_unavailable (editor ^ ": command not found"))
+          | Unix.WEXITED 127 -> Error (Editor_unavailable (Command_not_found editor))
           | Unix.WEXITED _ -> Error Cancelled
           | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-            Error (Editor_unavailable (Printf.sprintf "%s was stopped by signal %d" editor signal)))
+            Error (Editor_unavailable (Stopped_by_signal { editor; signal })))
     with
     | Sys_error detail -> Error (Form_unreadable detail)
     | Unix.Unix_error _ as exn -> Error (Form_unreadable (Printexc.to_string exn))

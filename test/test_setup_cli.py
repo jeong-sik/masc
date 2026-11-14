@@ -356,6 +356,28 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                              ['.masc', '.masc/auth', '.masc/auth/config.json'])
             self.assertEqual(config.read_text(), asked)
 
+    def test_scripted_setup_stops_before_initializing_a_workspace_whose_account_mode_no_boot_accepts(self):
+        # A boot of this workspace stops on the account mode. Setup stops on
+        # it too, in the words of the boot, before the initialization.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-setup-unknown-mode-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            config = workspace / '.masc/auth/config.json'
+            config.parent.mkdir(parents=True)
+            unknown = '{"enabled":true,"require_token":true,"account_mode":"multi_account"}'
+            config.write_text(unknown)
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            result = subprocess.run([BINARY, 'setup', '--base-path', str(workspace), '--no-tui', '--port', '1'],
+                                    env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn('config.json account_mode is "multi_account"; it must be the string '
+                          '"Single_user" or "Multi_account"', result.stderr)
+            self.assertIn('No workspace files were changed and no server was started.', result.stderr)
+            self.assertEqual(sorted(str(path.relative_to(workspace)) for path in workspace.rglob('*')),
+                             ['.masc', '.masc/auth', '.masc/auth/config.json'])
+            self.assertEqual(config.read_text(), unknown)
+
     @staticmethod
     def unused_port():
         with socket.socket() as listener:

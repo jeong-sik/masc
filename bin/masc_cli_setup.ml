@@ -159,12 +159,18 @@ let require_compatible_workspace base_path =
 (* Setup prepares imp for the server of a single user: it initializes the
    workspace, calls the model as the operator of the host, and starts a server
    that it expects to name its workspace. Where the config asks for accounts
-   no boot runs that server, so setup stops before the first of them. *)
+   no boot runs that server, and where it holds an account mode the boot does
+   not know no boot runs any, so setup stops before the first of them. *)
 let require_single_user_workspace base_path =
-  if Authz_boot_mode_read.asks_for_multi_account ~base_path then
+  match Authz_boot_mode_read.asked ~base_path with
+  | Ok Authz_boot_mode.Asks_single_user -> ()
+  | Ok Authz_boot_mode.Asks_multi_account ->
     fail (Authz_boot_mode_read.account_installation_line ~base_path
       ^ ". Setup prepares imp for the server of a single user, so it does not run here. \
          No workspace files were changed and no server was started.")
+  | Error refusal ->
+    fail (Authz_boot_mode_read.refused_line ~base_path refusal
+      ^ ". No workspace files were changed and no server was started.")
 
 (* Waiting belongs to the PID already spawned. EINTR only interrupts the
    syscall: it must not rerun the command or turn a successful build into a

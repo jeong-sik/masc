@@ -11,11 +11,12 @@ type check_id =
   | Sandbox
   | Keeper_persistence
   | Multi_account_request
+  | Unknown_account_mode
   | Person_account_homes
 
 type role = Required_to_open | Advisory
 
-type opening = Open_existing_history | Needs_journey | Account_installation
+type opening = Open_existing_history | Needs_journey | Account_installation | Refused_by_boot
 
 type check =
   { id : check_id
@@ -57,6 +58,7 @@ let check_id_name = function
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
   | Multi_account_request -> "multi_account_request"
+  | Unknown_account_mode -> "unknown_account_mode"
   | Person_account_homes -> "person_account_homes"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
@@ -68,11 +70,13 @@ let check_id_name = function
    sandbox concern the Keeper the journey creates: the server skips an imp it
    cannot load and boots every other Keeper, so a workspace whose history
    belongs to other Keepers opens and reports them beside it. A request for
-   accounts decides which server boots at all, so it is not advisory. Runtime
+   accounts decides which server boots at all, and an account mode the boot
+   does not know means none boots, so neither is advisory. Runtime
    roots that persons left behind stop the turns that use a CLI's native tools,
    not the server or its history, so they are advisory. *)
 let role = function
-  | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request ->
+  | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request
+  | Unknown_account_mode ->
     Required_to_open
   | Model_connection | Keeper_declaration | Sandbox | Person_account_homes -> Advisory
 
@@ -84,6 +88,7 @@ let opening_name = function
   | Open_existing_history -> "open_existing_history"
   | Needs_journey -> "needs_journey"
   | Account_installation -> "account_installation"
+  | Refused_by_boot -> "refused_by_boot"
 
 let check id condition message actions = { id; condition; message; actions }
 
@@ -284,7 +289,16 @@ let inspected ~sandbox ~base_path =
           [Initialize_workspace; Choose_workspace]] }
     else
       let workspace_found = check Workspace Satisfied "Workspace found." [Choose_workspace] in
-      if Authz_boot_mode_read.asks_for_multi_account ~base_path then
+      match Authz_boot_mode_read.asked ~base_path with
+      | Error refusal ->
+        (* No boot runs on this config, so nothing a server would run on is
+           read or probed. The sentence is the one the boot stops with. *)
+        { base_path = Some base_path; selected_runtime = None; selected_model = None;
+          checks = [workspace_found;
+                    check Unknown_account_mode Invalid
+                      (Authz_boot_mode_read.refused_line ~base_path refusal ^ ".")
+                      [Inspect_configuration]] }
+      | Ok Authz_boot_mode.Asks_multi_account ->
         (* imp's model, declaration, sandbox and history are what the server
            of a single user runs on, and no such server boots here. They are
            not read, so no sandbox is probed either. Whether the workspace is
@@ -296,7 +310,7 @@ let inspected ~sandbox ~base_path =
                       (Authz_boot_mode_read.account_installation_line ~base_path
                        ^ ". Whether the workspace is activated is judged by a boot, not here.")
                       []] }
-      else
+      | Ok Authz_boot_mode.Asks_single_user ->
       let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
@@ -327,6 +341,7 @@ let opening t =
   in
   match t.base_path with
   | None -> Needs_journey
+  | Some _ when List.exists (fun c -> c.id = Unknown_account_mode) t.checks -> Refused_by_boot
   | Some _ when List.exists (fun c -> c.id = Multi_account_request) t.checks ->
     Account_installation
   | Some _ ->
@@ -351,6 +366,7 @@ let to_json t =
 let heading t =
   match opening t with
   | Account_installation -> "MASC — a workspace that asks for accounts"
+  | Refused_by_boot -> "MASC — a workspace whose account mode no boot accepts"
   | Open_existing_history | Needs_journey -> "MASC — you and imp"
 
 let to_text t =

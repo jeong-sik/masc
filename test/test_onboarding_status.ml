@@ -247,7 +247,8 @@ let only_shared_checks_hold_history_closed () =
   (* Exhaustive, so a new check id does not compile here until its role is
      decided in this test too. *)
   let expected : Onboarding_status.check_id -> Onboarding_status.role = function
-    | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request ->
+    | Workspace | Runtime_configuration | Keeper_persistence | Multi_account_request
+    | Unknown_account_mode ->
       Required_to_open
     | Model_connection | Keeper_declaration | Sandbox | Person_account_homes -> Advisory
   in
@@ -256,7 +257,7 @@ let only_shared_checks_hold_history_closed () =
         (Onboarding_status.role id = expected id))
     Onboarding_status.[ Workspace; Runtime_configuration; Keeper_persistence;
                         Model_connection; Keeper_declaration; Sandbox;
-                        Multi_account_request; Person_account_homes ];
+                        Multi_account_request; Unknown_account_mode; Person_account_homes ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (inspect ~base_path:None)
      = Onboarding_status.Needs_journey)
@@ -337,7 +338,38 @@ let a_workspace_that_asks_for_accounts_is_an_account_installation () =
      check bool "the document names the opening" true
        (List.assoc_opt "opening" fields = Some (`String "account_installation"))
    | _ -> fail "the document is an object");
-  check string "the config is left as it was" multi_account (read config)
+  check string "the config is left as it was" multi_account (read config);
+  (* An account mode the boot does not know: the boot of this workspace stops,
+     so the doctor says so in the words of the boot and offers no journey. *)
+  let unknown = {|{"enabled":true,"require_token":true,"account_mode":"multi_account"}|} in
+  write config unknown;
+  let asked = List.length (calls ()) in
+  let observed = inspect () in
+  check bool "an unknown account mode is refused, not a journey" true
+    (Onboarding_status.opening observed = Onboarding_status.Refused_by_boot);
+  check (list string) "the workspace and the refusal are its checks"
+    [ "workspace"; "unknown_account_mode" ]
+    (ids observed);
+  check bool "the refusal is invalid" true
+    (condition Onboarding_status.Unknown_account_mode observed = Onboarding_status.Invalid);
+  (* The refusal a boot of this file gives (test_authz_boot_mode_read pins
+     that the boot decides it), in the boot's words. *)
+  let boot_sentence =
+    Authz_boot_mode.refusal_to_string (Authz_boot_mode.Unknown_account_mode {|"multi_account"|})
+  in
+  check bool "with the sentence the boot stops with" true
+    (String.starts_with ~prefix:boot_sentence
+       (message Onboarding_status.Unknown_account_mode observed));
+  check int "no command is issued for it" asked (List.length (calls ()));
+  check bool "the inspection of a server answers the same" true
+    (Onboarding_status.opening (Onboarding_status.inspect_loaded ~base_path:(Some base))
+     = Onboarding_status.Refused_by_boot);
+  (match Onboarding_status.to_json observed with
+   | `Assoc fields ->
+     check bool "the document names the opening" true
+       (List.assoc_opt "opening" fields = Some (`String "refused_by_boot"))
+   | _ -> fail "the document is an object");
+  check string "the config is left as it was" unknown (read config)
 
 let microvm_imp backend =
   Printf.sprintf

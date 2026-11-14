@@ -15,12 +15,19 @@ type check_id =
   | Keeper_persistence
   | Multi_account_request
       (** [config.json] of the workspace asks for [Multi_account]
-          ({!Authz_boot_mode_read.asks_for_multi_account}). It is the one
+          ({!Authz_boot_mode_read.asked}). It is the one
           check of such a workspace beside [Workspace]: a boot runs the
           account server there, so imp's model, declaration, sandbox and
           history, which the server of a single user runs on, are not read.
           It is [Needs_verification]: whether the workspace is activated is
           judged by a boot, under the lease. *)
+  | Unknown_account_mode
+      (** [config.json] of the workspace holds an [account_mode] the boot
+          does not know ({!Authz_boot_mode_read.asked}). It is the one check
+          of such a workspace beside [Workspace], and it is [Invalid] with
+          the sentence a boot refuses with
+          ({!Authz_boot_mode.refusal_to_string}): no server boots there, so
+          nothing a server runs on is read. *)
   | Person_account_homes
       (** A single-user workspace keeps [.masc/accounts], the runtime roots
           that persons left when its accounts were turned off or their log
@@ -36,15 +43,19 @@ type check_id =
     metadata the boot admits. [Advisory] checks — imp's model binding,
     declaration and sandbox, and runtime roots that persons left behind — are
     reported but never send the operator back into setup. A request for accounts is
-    [Required_to_open]: it decides which server boots. *)
+    [Required_to_open]: it decides which server boots. So is an account mode
+    the boot does not know: no server boots on it. *)
 type role = Required_to_open | Advisory
 
 (** What a bare [masc] does with this observation: open the workspace's
     persisted Keeper history, walk the setup journey, or do neither because
     the workspace asks for accounts. The journey prepares the server of a
     single user and the history is what that server serves, so for an
-    [Account_installation] it reports the account server and stops. *)
-type opening = Open_existing_history | Needs_journey | Account_installation
+    [Account_installation] it reports the account server and stops. For
+    [Refused_by_boot] it reports the refusal and stops before it initializes
+    anything: the config holds an account mode on which no boot runs a
+    server. *)
+type opening = Open_existing_history | Needs_journey | Account_installation | Refused_by_boot
 
 type check =
   { id : check_id
@@ -81,7 +92,8 @@ type sandbox_observation =
     backend's inventory and, for Apple Container, Rosetta and kernel settings),
     at most seven per inspection. A workspace with no readable imp declaration
     issues none, and neither does one that asks for accounts
-    ([Multi_account_request]). *)
+    ([Multi_account_request]) or holds an account mode the boot does not know
+    ([Unknown_account_mode]). *)
 val inspect : sandbox:sandbox_observation -> base_path:string option -> t
 
 (** {!inspect} for a running server. It never probes the sandbox
@@ -110,7 +122,9 @@ val role : check_id -> role
     history, never about a running Keeper, model or sandbox.
     [Account_installation] is a workspace that holds a
     [Multi_account_request] check, whatever else it holds: a statement about
-    what its config asks for, never about an account server that runs. *)
+    what its config asks for, never about an account server that runs.
+    [Refused_by_boot] is a workspace that holds an [Unknown_account_mode]
+    check, whatever else it holds. *)
 val opening : t -> opening
 val to_json : t -> Yojson.Safe.t
 val to_text : t -> string

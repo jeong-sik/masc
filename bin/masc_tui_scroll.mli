@@ -23,6 +23,8 @@ module Position : sig
       preserves that selection; only navigation or a new reading releases it. *)
   type t
   type movement = First | Last | By of int | Page_down | Page_up
+  (** The window height is [Page_down]'s and [Page_up]'s share, taken through
+      {!page_step}; [By] is only for a line count the caller has decided. *)
   val first : t
   val is_end : t -> bool
   val at : int -> t

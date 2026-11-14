@@ -417,12 +417,17 @@ let restored_receipt retained =
        let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
      | View.Before_dispatch, View.Authority_moved _ ->
        let* _ = moved_authority retained (View.evidence_json refusal) in Ok None
-     | _ -> invalid "Goal refusal evidence does not match its refusal stage")
+     | (View.Execution,
+        (View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _))
+     | (View.Before_dispatch,
+        (View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _)) ->
+       invalid "Goal refusal evidence does not match its refusal stage")
   | View.Subdividing (refusal,_) | View.Subdivided (refusal,_) ->
     (match refusal with
      | View.Reviewer_refused r ->
        let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
-     | _ -> invalid "Goal refusal evidence does not match its refusal stage")
+     | View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _ ->
+       invalid "Goal refusal evidence does not match its refusal stage")
   | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ -> Ok None
 
 let retained_judgment retained =
@@ -455,12 +460,12 @@ let observed_receipt retained =
     | View.Captured | View.Dispatch_pending None
     | View.Dispatch_pending (Some (View.Outcome_unknown _ | View.Waiting _ | View.Absent _))
     | View.Rejected {stage=View.Before_dispatch; _}
-    | View.Subdividing ({stage=View.Before_dispatch; _}, _)
-    | View.Subdivided ({stage=View.Before_dispatch; _}, _) -> Ok None
+    | View.Subdividing (View.Authority_moved _, _)
+    | View.Subdivided (View.Authority_moved _, _) -> Ok None
     | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
     | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
-    | View.Subdividing ({stage=View.Execution; _}, _)
-    | View.Subdivided ({stage=View.Execution; _}, _) ->
+    | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
+    | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
 
 let tool_observations retained =
@@ -487,14 +492,14 @@ let tool_observations retained =
        | _ -> invalid "Goal unknown observation is malformed")
     | View.Captured | View.Admission_wait _ | View.Dispatch_pending None
     | View.Rejected {stage=View.Before_dispatch; _}
-    | View.Subdividing ({stage=View.Before_dispatch; _}, _)
-    | View.Subdivided ({stage=View.Before_dispatch; _}, _) -> Ok []
+    | View.Subdividing (View.Authority_moved _, _)
+    | View.Subdivided (View.Authority_moved _, _) -> Ok []
     | View.Dispatch_pending (Some (View.Waiting _ | View.Absent _)) ->
       invalid "Goal dispatch observation has no retained tool receipt"
     | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
     | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
-    | View.Subdividing ({stage=View.Execution; _}, _)
-    | View.Subdivided ({stage=View.Execution; _}, _) ->
+    | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
+    | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
 
 let advance ~store retained event =

@@ -3,6 +3,8 @@
    phase above. Layer 1 decoding is total and behavior-preserving: it
    re-labels existing evidence, it never validates, rejects or rewrites it. *)
 
+open Result.Syntax
+
 type run_identity = { run_id : string; started_at : float }
 
 type observation = Waiting of Yojson.Safe.t | Outcome_unknown of Yojson.Safe.t

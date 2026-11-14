@@ -89,6 +89,11 @@ let snapshot t =
       }))
 ;;
 
+let client_phase t =
+  Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+    (Runtime_official_client_mcp.snapshot_session t.session).Runtime_official_client_mcp.phase)
+;;
+
 type endpoint =
   { url : string
   ; headers : (string * string) list

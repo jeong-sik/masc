@@ -174,6 +174,9 @@ let test_turn_scoped_capability_and_protocol () =
       ()
   in
   let endpoint, authorization = config_fields bridge in
+  check bool "a bridge no client reached awaits initialize" true
+    (Runtime_official_client_mcp_http.client_phase bridge
+     = Runtime_official_client_mcp.Awaiting_initialize);
   let protocol_version = "2025-11-25" in
   let initialize =
     json_request
@@ -400,6 +403,8 @@ let test_turn_scoped_capability_and_protocol () =
     "ready"
     true
     (snapshot.phase = Runtime_official_client_mcp.Ready);
+  check bool "the production reading agrees" true
+    (Runtime_official_client_mcp_http.client_phase bridge = Runtime_official_client_mcp.Ready);
   check int "authenticated requests" 11 snapshot.authenticated_requests;
   check int "rejected requests" 8 snapshot.rejected_requests;
   check int "measured tool calls" 1 snapshot.tool_calls;

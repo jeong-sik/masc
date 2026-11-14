@@ -59,6 +59,12 @@ val await_host_stop : t -> Runtime_official_client_tool.host_stop
     outranks an earlier successful/deferred stop. Waiting holds no dispatch lock.
     A failed-write boundary never certifies response delivery or consumption. *)
 
+val client_phase : t -> Runtime_official_client_mcp.phase
+(** How far the client has come on this bridge (RFC-0520 D1). [Ready] means it
+    finished [initialize] and [notifications/initialized]; before that the
+    bridge refuses [tools/list] and [tools/call], so no tool has been listed
+    or called. A client that never connects leaves [Awaiting_initialize]. *)
+
 val endpoint : t -> endpoint
 (** The single source of the bridge's URL and header. {!mcp_config_json}
     builds from it, and so does a client that takes its MCP servers as typed

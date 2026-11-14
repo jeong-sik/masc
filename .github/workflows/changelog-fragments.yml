@@ -9,6 +9,8 @@ on:
     paths:
       - "changelog.d/**"
       - "scripts/changelog-fragments.py"
+      - "scripts/bump-version.sh"
+      - "scripts/tests/test_bump_version_fold_base.py"
 
 permissions:
   contents: read
@@ -51,3 +53,5 @@ jobs:
       - name: Check every fragment cites its own pull request
         if: github.event_name == 'workflow_dispatch'
         run: python3 scripts/changelog-fragments.py check --dir changelog.d
+      - name: Check the release bump scans from the last release's fold
+        run: python3 -m unittest scripts.tests.test_bump_version_fold_base

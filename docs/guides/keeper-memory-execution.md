@@ -25,7 +25,7 @@ Each operation names its tool, output, installation and exact route table.
 | --- | --- |
 | `addon_unattached` | No valid declaration for this package exists. |
 | `addon_off`, `disabled`, `output_not_selected` | The operator disabled the installation, Memory Librarian, output or route. No automatic repair is requested. |
-| `configuration_unreadable`, `invalid_setting` | Configuration could not be interpreted; this is not an empty installation set. |
+| `configuration_unreadable`, `invalid_setting` | Configuration could not be interpreted; this is not an empty installation set. For `configuration_unreadable`, each `detail` entry names the declaration's file inside the Lane directory (`declaration_file`), or says the directory itself could not be read (`source: lane_directory`). The reader's message and the full path stay in the authenticated Lane inventory. |
 | `multiple_installations`, `export_conflict`, `wrong_package`, `manual_installation` | There is no unique declared owner for the required tool. |
 | `route_unavailable` | The exact installation/output route is missing, off, has no admitted slots, or its registry is unavailable; `detail.reason` distinguishes them. |
 | `configuration_admitted` | Preflight found the package contract and admitted routes. No worker or provider was exercised. |

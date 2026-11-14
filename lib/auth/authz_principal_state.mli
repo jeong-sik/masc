@@ -47,6 +47,10 @@ type t
 val empty : t
 val find : t -> Authz_types.User_id.t -> principal option
 
+(** Every principal with its id, in the order of the ids. A deleted principal
+    is in none ({!is_deleted}). *)
+val bindings : t -> (Authz_types.User_id.t * principal) list
+
 (** The principal an identity is bound to. *)
 val find_identity : t -> Authz_external_identity.t -> Authz_types.User_id.t option
 
@@ -70,6 +74,10 @@ val is_active : t -> Authz_types.User_id.t -> bool
 (** Whether the principal is [Active] and has an Admin assignment in force. A
     disabled Admin keeps the assignment and does not act. *)
 val is_admin : t -> Authz_types.User_id.t -> bool
+
+(** Whether the principal has an Admin assignment in force, active or not:
+    the role, where {!is_admin} is the role that acts. *)
+val has_admin_assignment : t -> Authz_types.User_id.t -> bool
 
 type refusal =
   | Author_is_not_the_person of

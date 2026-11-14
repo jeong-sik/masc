@@ -12,10 +12,19 @@ let status_name = function
   | P.Disabled -> "disabled"
 ;;
 
+(* Each kind of reduction of a principal is its own change in the store
+   (Revoke for the end of an Admin assignment, Disable, Delete), and a change
+   made again closes the holds of that change only, so the list names them. *)
 let held state user_id =
-  match S.revocation state (Authz_records.Subject.Principal (Authz_types.Principal.Human user_id)) with
-  | Authz_records.Revocation_state.Pending -> true
-  | Authz_records.Revocation_state.Not_pending -> false
+  let subject = Authz_records.Subject.Principal (Authz_types.Principal.Human user_id) in
+  List.sort_uniq
+    String.compare
+    (List.filter_map
+       (fun (held : S.held) ->
+         if Authz_records.Subject.equal held.subject subject
+         then Some (Authz_external_store.Change.authz_event_label held.event)
+         else None)
+       state.S.revocation_pending)
 ;;
 
 let member state (user_id, (principal : P.principal)) =
@@ -33,7 +42,7 @@ let member state (user_id, (principal : P.principal)) =
           ; "identity", Authz_body.to_yojson identity
           ; "role", `String (Authz_invite_event.role_label role)
           ; "status", `String (status_name principal.status)
-          ; "revocation_pending", `Bool (held state user_id)
+          ; "held", `List (List.map (fun label -> `String label) (held state user_id))
           ])
 ;;
 

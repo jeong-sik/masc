@@ -73,6 +73,9 @@ module Change : sig
         }
 
   val authz_events : authz_event list
+
+  (** The label of the event in the store, which {!Change} reads back. *)
+  val authz_event_label : authz_event -> string
   val mode_events : mode_event list
   val equal : t -> t -> bool
 

@@ -19,9 +19,12 @@ val path : string
     [identity] (the identity it is bound to, in the body shape of
     {!Login_allowlist_routes.register}), [role] (["admin"] while an Admin
     assignment is in force, which a disabled Admin keeps, or ["member"]),
-    [status] (["active"] or ["disabled"]) and [revocation_pending]: [true]
-    while the external store holds a reduction of the principal that the log
-    did not record (design 8.3). Such a principal does not act, whatever
-    [status] says, and the same change made again closes the hold. A
-    principal that is not an Admin gets a 403. *)
+    [status] (["active"] or ["disabled"]) and [held]: the reductions of the
+    principal that the log did not record and the external store holds
+    (design 8.3), by the label of their change in the store, sorted, each
+    once: ["revoke"] (the end of an Admin assignment), ["disable"],
+    ["delete"]. While [held] is not empty the principal does not act,
+    whatever [status] says ({!Authz_state.revocation}). The same reduction
+    made again closes the holds of its own change only. A principal that is
+    not an Admin gets a 403. *)
 val list : Login_routes.t -> Authz_browser_request.request -> Login_routes.answer

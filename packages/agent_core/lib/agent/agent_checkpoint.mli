@@ -23,7 +23,7 @@ type binding_disposition =
   | Rebound_without_replay_loss
   | Replay_disabled_by_caller
   | Rebound_pending_dispatch of
-      Llm_provider.Reasoning_history_projection.reasoning_replay_drop list
+      Llm_provider.Reasoning_history_projection.replay_exclusion
 
 val binding_disposition_to_string : binding_disposition -> string
 

@@ -189,6 +189,43 @@ type replay_continuity_admission =
   ; disposition : replay_disposition
   }
 
+type replay_exclusion =
+  { boundary : continuity_boundary
+  ; target : Types.Reasoning_source.t
+  ; drops : reasoning_replay_drop list
+  }
+
+let reasoning_replay_drop_to_json { message_index; reason } =
+  let reason_fields =
+    match reason with
+    | Replay_policy_excluded replay_policy ->
+      [ "reason", `String "replay_policy_excluded"
+      ; "replay_policy", Reasoning_replay_contract.replay_policy_to_yojson replay_policy
+      ]
+    | Missing_reasoning_source -> [ "reason", `String "missing_reasoning_source" ]
+    | Incompatible_reasoning_source stored ->
+      [ "reason", `String "incompatible_reasoning_source"
+      ; "stored", Types.Reasoning_source.to_yojson stored
+      ]
+    | Reasoning_on_non_assistant -> [ "reason", `String "reasoning_on_non_assistant" ]
+  in
+  `Assoc (("message_index", `Int message_index) :: reason_fields)
+;;
+
+let replay_exclusion_to_json { boundary; target; drops } =
+  let boundary_fields =
+    match boundary with
+    | Checkpoint_restore -> [ "boundary", `String "checkpoint_restore" ]
+    | Provider_dispatch { tools_present } ->
+      [ "boundary", `String "provider_dispatch"; "tools_present", `Bool tools_present ]
+  in
+  `Assoc
+    (boundary_fields
+     @ [ "target", Types.Reasoning_source.to_yojson target
+       ; "drops", `List (List.map reasoning_replay_drop_to_json drops)
+       ])
+;;
+
 
 let content_has_tool_use content =
   List.exists (function

@@ -19,6 +19,7 @@ type call = expected:Request.destination -> original:Owner.retained -> arguments
 type outcome = Pending of wait * Owner.retained | Publication_waiting of string
   | Refused of Exact.final * Owner.retained | Finished of Owner.retained
   | Basis_superseded of Owner.retained
+type listed = Owner.Record.t * Request.index
 let io work = Systhread_host.run work
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
@@ -47,15 +48,27 @@ let retain ~store request =
   let* ()=check_request request record in Ok record
 let discover ~store ~base_path ~keepers_dir ~keeper_id =
   let* scope=io (fun () -> Request.discovery_scope ~base_path ~keepers_dir ~keeper_id) |> rejected in
-  let* records=io (fun () -> Owner.load_scope ~store ~scope) |> owned in
+  let* records=io (fun () -> Owner.discover ~store ~scope) |> owned in
   let rec restore found = function
     | [] -> Ok (List.rev found)
     | record::rest ->
-      let* owner=io (fun () -> Request.observe_record_owner ~base_path ~keepers_dir record) |> rejected in
+      let* index,owner=io (fun () ->
+        let* index=Request.index_of_summary record in
+        let* owner=Request.observe_index_owner ~base_path ~keepers_dir index in
+        let+ ()=Request.confirm_index_source_root index in index,owner) |> rejected in
       let* ()=require (Request.keeper_id owner=keeper_id) "History inventory includes another Keeper" in
-      let* request=io (fun () -> Request.restore ~owner record) |> rejected in
-      restore ((record,request)::found) rest in
+      restore ((record,index)::found) rest in
   restore [] records
+let load ~store (record,(index:Request.index)) =
+  let* original=io (fun () -> Owner.load_listed ~store record) |> owned in
+  let* request=io (fun () ->
+    let* request=Request.restore ~owner:index.owner original in
+    (* [restore] bound the summary of the record it read to the body. That
+       record was read after [discover]; its summary must be the same index. *)
+    let* stored=Request.index_of_summary (Owner.listed original) in
+    if stored=index then Ok request
+    else Error "Original history index changed after its inventory was read") |> rejected in
+  Ok (original,request)
 let original_judgment (record:Owner.retained) =
   match Progress.phase record.progress with
   | Progress.Judged judgment -> Ok judgment

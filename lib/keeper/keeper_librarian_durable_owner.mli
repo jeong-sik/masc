@@ -38,12 +38,19 @@ val retain : store:Lane_addon_store.t -> Keeper_librarian_durable_request.t ->
     serializer; this port alone grants no live configuration authority. A write
     failure never proves absence or permits a replacement request ID. A linked
     replacement must match its predecessor's complete publication intent. *)
+type listed = Lane_addon_tool_request_owner.Record.t * Keeper_librarian_durable_request.index
 val discover : store:Lane_addon_store.t -> base_path:string -> keepers_dir:string ->
-  keeper_id:string ->
-  ((Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t) list, error) result
-(** Strictly restore the entire physical scope before a fresh source selector.
-    Any malformed original/owner/epoch refuses the inventory. Finished originals
+  keeper_id:string -> (listed list, error) result
+(** Every original of the physical scope as its record and the index in that
+    record's summary, before a fresh source selector. No body is read. Any
+    record whose summary is not its index, or whose owner, epoch or source
+    root is not the live one, refuses the inventory. Finished originals
     remain observations; only active originals should block or drive new work. *)
+val load : store:Lane_addon_store.t -> listed ->
+  (Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t, error) result
+(** Read and strictly restore one discovered original's body. The record read
+    with the body must still hold the discovered index, and
+    [Keeper_librarian_durable_request.restore] binds that index to the body. *)
 val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
   original:Lane_addon_tool_request_owner.retained -> request:Keeper_librarian_durable_request.t ->
   call:call -> publish:publish -> wake:(unit -> unit) -> (outcome, error) result

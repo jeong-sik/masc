@@ -58,6 +58,8 @@ let claims keepers_dir=match current keepers_dir with None -> [] | Some snapshot
 let originals_for ~keeper_name base_path keepers_dir store =
   Durable_owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name
   |> Result.map_error Durable_owner.error_to_string |> get
+  |> List.map (fun listed -> Durable_owner.load ~store listed
+    |> Result.map_error Durable_owner.error_to_string |> get)
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
   "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]
@@ -2012,6 +2014,21 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
       ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
   refuse_fenced_resume fixture original request;
   no_memory fixture;
+  (* The pass reads a fenced original with no predecessor as its record and
+     index. Without its body file the inventory still lists it. The host's
+     wake still reads every body of the scope, so the file is back before
+     any dispatch; the pass itself is run without the file below. *)
+  let body=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+  let bytes=io (fun () -> In_channel.with_open_bin body In_channel.input_all) in
+  io (fun () -> Sys.remove body);
+  let listed=memory_action fixture (fun () -> Durable_owner.discover ~store:fixture.store
+    ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)
+    |> Result.map_error Durable_owner.error_to_string |> get in
+  check int "the inventory lists the original without its body" 1 (List.length listed);
+  check bool "reading that original's body fails" true
+    (Result.is_error (memory_action fixture (fun () -> Durable_owner.load ~store:fixture.store (List.hd listed))));
+  io (fun () -> write body bytes);
   drive_advanced fixture;
   check int "only the newly captured original reaches the provider" 1 (F.post_count fixture.server);
   check bool "the next history pass actually commits Memory" true
@@ -2023,8 +2040,21 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   refuse_fenced_resume fixture original request;
   let path=Filename.concat (Store.root fixture.store)
     (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+  let honest_fence=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in
   io (fun () -> write path "{unreadable fence");
-  check bool "an unreadable fence still stops inventory" true (Result.is_error (run_worker fixture)))
+  check bool "an unreadable fence still stops inventory" true (Result.is_error (run_worker fixture));
+  io (fun () -> write path honest_fence);
+  (* With the Add-on detached a pass dispatches nothing and stops after its
+     inventory and lineage. It stops the same way without the fenced
+     original's body file. *)
+  set_enabled fixture false;
+  let stopped ()=match run_worker fixture with
+    | Error error -> Consumer.error_to_string error
+    | Ok _ -> fail "a pass without its Add-on did not stop" in
+  let with_body=stopped () in
+  assert_unattached (run_worker fixture);
+  io (fun () -> Sys.remove body);
+  check string "a pass ends the same without the fenced original's body" with_body (stopped ()))
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in

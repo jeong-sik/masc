@@ -776,6 +776,7 @@ let test_success_is_accepted () =
   | Control.Accepted { already_live } ->
       Alcotest.(check bool) "not already live" false already_live
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _
   | Control.Rejected _ ->
@@ -789,6 +790,7 @@ let test_already_live_is_carried () =
   | Control.Accepted { already_live } ->
       Alcotest.(check bool) "already live" true already_live
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _
   | Control.Rejected _ ->
@@ -807,6 +809,7 @@ let test_committed_followup_failed_is_distinguished_from_accepted () =
         detail
   | Control.Accepted _
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Paused_owner_conflict _
   | Control.Rejected _ ->
       Alcotest.fail "202 committed_followup_failed must not be classified as Accepted"
@@ -822,7 +825,7 @@ let test_conflict_is_its_own_outcome () =
         "detail is the server's" true
         (String.length detail > 0
         && not (String.equal detail "HTTP 409"))
-  | Control.Accepted _ | Control.Purge_accepted _
+  | Control.Accepted _ | Control.Purge_accepted _ | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _ ->
       Alcotest.fail "409 is not an acceptance"
   | Control.Rejected _ -> Alcotest.fail "409 has its own outcome"
@@ -838,6 +841,7 @@ let test_workspace_conflict_is_rejected_not_paused_owner () =
       Alcotest.(check string) "detail" "workspace precondition failed" detail
   | Control.Accepted _
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _ ->
       Alcotest.fail "workspace mismatch 409 must not trigger paused-owner recovery"
@@ -856,6 +860,7 @@ let test_boot_phase_conflict_is_rejected_not_paused_owner () =
         detail
   | Control.Accepted _
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _ ->
       Alcotest.fail "boot phase conflict 409 must not trigger paused-owner recovery"
@@ -875,6 +880,7 @@ let test_rejection_prose_does_not_become_a_conflict () =
         (String.length detail > 0 && not (String.equal detail "HTTP 400"))
   | Control.Accepted _
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _ ->
       Alcotest.fail "400 is a rejection"
@@ -889,6 +895,7 @@ let test_non_json_error_keeps_its_text () =
         "text survives" "upstream closed the connection" detail
   | Control.Accepted _
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _ ->
       Alcotest.fail "502 is a rejection"
@@ -899,6 +906,7 @@ let test_empty_error_body_names_the_status () =
       Alcotest.(check string) "status stands in" "HTTP 503" detail
   | Control.Accepted _
   | Control.Purge_accepted _
+  | Control.Unbound_purge_receipt _
   | Control.Committed_followup_failed _
   | Control.Paused_owner_conflict _ ->
       Alcotest.fail "503 is a rejection"
@@ -1577,7 +1585,7 @@ let test_purge_response_binds_exact_operation () =
    | _ -> Alcotest.fail "valid purge receipt rejected");
   List.iter (fun raw ->
     match Control.classify_purge_response ~keeper_name:"alpha" ~status:202 ~body:raw with
-    | Control.Rejected _ -> ()
+    | Control.Unbound_purge_receipt _ -> ()
     | _ -> Alcotest.fail "unbound purge receipt accepted")
     ["{}"; "{not-json"; body "another" "operation-alpha"; body "alpha" ""]
 

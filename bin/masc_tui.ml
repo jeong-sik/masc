@@ -4706,6 +4706,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
   | Some generation ->
     let host, port = server_peer_host, state.port in
     let run () =
+      let ko = state.ui_language = Lang_ko in
       let result =
         try
           let open Result.Syntax in
@@ -4729,7 +4730,9 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                 try
                   match identity with
                   | None ->
-                    Error "Workspace identity is unavailable; Keeper deletion retry was not sent"
+                    Error
+                      (if ko then "공간 정보 없음 · 삭제 재시도를 보내지 않음"
+                       else "Workspace identity is unavailable; Keeper deletion retry was not sent")
                   | Some expected_workspace ->
                     let* status, body =
                       Masc_tui_http.post_keeper_deletion_retry ~host ~port ~path
@@ -4739,7 +4742,12 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                      | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
                      | Rejected { detail; _ } | Paused_owner_conflict detail
                      | Committed_followup_failed detail -> Error detail
-                     | Accepted _ | Purge_accepted _ -> Error "deletion retry response did not identify the requested operation")
+                     | Unbound_purge_receipt { status } ->
+                       Error (Keeper_control.failure_text ~ko (Keeper_control.Unbound_receipt status))
+                     | Accepted _ | Purge_accepted _ ->
+                       Error
+                         (if ko then "삭제 재시도 응답이 요청 ID 를 밝히지 않음"
+                          else "deletion retry response did not identify the requested operation"))
                 with Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn -> Error (Printexc.to_string exn)
               in
@@ -12767,7 +12775,8 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          | Keeper_control.Committed_followup_failed detail
          | Keeper_control.Rejected {detail;_}
          | Keeper_control.Paused_owner_conflict detail -> Error detail
-         | Keeper_control.Purge_accepted _ -> Error "Unexpected purge response to queue directive")
+         | Keeper_control.Purge_accepted _ | Keeper_control.Unbound_purge_receipt _ ->
+             Error "Unexpected purge response to queue directive")
       | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
         let fields = ["schema", `String "keeper_event_queue.operator.request.v2";
           "source_ref", `String reference; "source_incarnation", `String (Int64.to_string incarnation)] in
@@ -21856,7 +21865,9 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
                 | true, None | false, _ ->
                     Error (Keeper_control.Refused { status; detail }))
             | Keeper_control.Rejected { status; detail } ->
-                Error (Keeper_control.Refused { status; detail })))
+                Error (Keeper_control.Refused { status; detail })
+            | Keeper_control.Unbound_purge_receipt { status } ->
+                Error (Keeper_control.Unbound_receipt status)))
   in
   walk ~recovery_available:true None (Keeper_control.plan action)
 
@@ -21889,6 +21900,11 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
        report_action state "error"
          (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
             keeper_name label detail)
+   | Ok (Keeper_control.Unbound_purge_receipt { status }) ->
+       report_action state "error"
+         (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
+            keeper_name label
+            (Keeper_control.failure_text ~ko (Keeper_control.Unbound_receipt status)))
    | Error failure ->
        report_action state "error"
          (Printf.sprintf (if ko then "%s %s 실패: %s" else "%s %s failed: %s")
@@ -22843,7 +22859,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
                before its own purge. *)
             if action = Keeper_control.Delete then
               report_action state "system"
-                ((if ko then "삭제하면 키퍼를 멈추고 lane 종료를 기다린 뒤 지움: "
+                ((if ko then "삭제하면 키퍼를 멈추고 레인 종료를 기다린 뒤 지움: "
                   else "Delete stops the Keeper and waits for lane shutdown before removing: ")
                  ^ String.concat ", " (Keeper_control.purge_artifacts ~ko))
         | Keeper_control.Gate_submit ->
@@ -25252,9 +25268,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_owed_board_post state ~mailbox
       end
   | Keeper_msg (Keeper_deletion_retry_done (operation_id, result)) ->
+      let ko = state.ui_language = Lang_ko in
       let message = match result with
-        | Ok () -> Printf.sprintf "Deletion retry %s accepted; refreshing inventory." operation_id
-        | Error detail -> Printf.sprintf "Deletion retry %s not confirmed: %s. Refresh inventory before retrying." operation_id detail in
+        | Ok () ->
+          Printf.sprintf
+            (if ko then "삭제 재시도 %s 접수됨 · 목록 다시 조회 중"
+             else "Deletion retry %s accepted; refreshing inventory.")
+            operation_id
+        | Error detail ->
+          Printf.sprintf
+            (if ko then "삭제 재시도 %s 확인 안 됨: %s · 목록을 다시 조회한 뒤 재시도"
+             else "Deletion retry %s not confirmed: %s. Refresh inventory before retrying.")
+            operation_id detail in
       state.keeper_deletions_retry_receipt <- Some (state.keeper_deletions_generation, message);
       report_action state (if Result.is_ok result then "system" else "error") message
   | Keeper_msg (Keeper_deletions_loaded (generation, result)) ->
@@ -25491,7 +25516,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ( Keeper_control.Purge_accepted _
             | Keeper_control.Committed_followup_failed _
             | Keeper_control.Paused_owner_conflict _
-            | Keeper_control.Rejected _ )
+            | Keeper_control.Rejected _
+            | Keeper_control.Unbound_purge_receipt _ )
          | Error _) ->
            ()
        | (Keeper_control.Resume | Keeper_control.Boot),
@@ -25502,7 +25528,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ( Keeper_control.Purge_accepted _
             | Keeper_control.Committed_followup_failed _
             | Keeper_control.Paused_owner_conflict _
-            | Keeper_control.Rejected _ )
+            | Keeper_control.Rejected _
+            | Keeper_control.Unbound_purge_receipt _ )
          | Error _)
        | (Keeper_control.Wakeup | Keeper_control.Delete), _ ->
            ());

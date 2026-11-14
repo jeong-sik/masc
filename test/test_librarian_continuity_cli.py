@@ -209,6 +209,10 @@ def main() -> None:
         dataset = root / "synthetic.json"
         dataset.write_text(json.dumps({"provenance": ["Synthetic"], "cases": cases}))
         env = dict(os.environ, TYPESAFEAI_API_KEY="synthetic-fixture-key")
+        # The blob store writes only under a base path that already exists,
+        # as the runbook's existing-workspace example does.
+        publish_base = root / "published"
+        publish_base.mkdir(exist_ok=True)
         command = [
             str(args.binary.resolve()),
             "--base-path",
@@ -222,7 +226,7 @@ def main() -> None:
             "--runtime",
             "ollama_cloud.deepseek-v4.1-flash",
             "--publish-base-path",
-            str(root / "published"),
+            str(publish_base),
         ]
         try:
             # An ambient account workspace must refuse before either HTTP
@@ -404,7 +408,7 @@ def main() -> None:
         )
         assert provided["judgment"]["request"]["question"] == provided_question
         digest = hashlib.sha256(output.read_bytes()).hexdigest()
-        blob = root / "published" / ".masc" / "tool_blobs" / digest[:2] / digest
+        blob = publish_base / ".masc" / "tool_blobs" / digest[:2] / digest
         assert blob.read_bytes() == output.read_bytes()
         print(
             json.dumps(

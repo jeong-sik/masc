@@ -10,7 +10,14 @@
     builds one [Httpun.Response.t] and the handle translates it where the
     wire format differs. On HTTP/2 the handle lowercases header names, drops
     the connection-specific fields of RFC 9113 §8.2.2 and converts the status
-    code. *)
+    code.
+
+    Whether a response carries content is decided here, for every function
+    that answers (RFC 9110 §6.4.1). A response to a HEAD request and a 304
+    go out with the fields the handler gave and without the body. A 1xx and
+    a 204 go out without the body and without [content-length] (§8.6). For
+    those, {!respond_with_streaming} sends the head and returns a writer
+    that is already closed. *)
 
 type t
 

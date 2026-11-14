@@ -82,19 +82,37 @@ let recover_child ~config ~keeper_name ~store intent =
   let* fence=io (fun () -> Lineage.fenced_original ~store ~request:parent_request ~original:parent) |> unavailable in
   let* fence=Option.to_result ~none:(Intent.Unavailable "Resolution fence disappeared") fence in
   let* ()=fence_matches intent fence |> unavailable in
-  let* intended=Option.to_result ~none:(Intent.Unavailable "Resolution child intent disappeared") (Intent.intended_child intent) in
-  let* request=io (fun () -> Request.of_json ~owner:(Request.physical_owner parent_request) intended.request) |> unavailable in
+  let* intended=Option.to_result ~none:(Intent.Conflict "Resolution has no child publication intent") (Intent.child intent) in
+  let owner=Request.physical_owner parent_request in
   let* observed=io (fun () -> Owner.load ~store ~scope:intent.scope ~request_id:intended.request_id
     |> Result.map_error Owner.error_to_string) |> unavailable in
-  let* child=match observed,intent.phase with
-    | None,Intent.Child_intended _ -> Durable_owner.retain ~store request |> Result.map_error (fun error -> Intent.Unavailable (Durable_owner.error_to_string error))
-    | Some child,(Child_intended _ | Child_confirmed _) -> Ok child
+  let* child,request=match observed,intent.phase with
+    | None,Intent.Child_intended _ ->
+      (* The intent staged this body before it named the child. A missing or
+         changed body is an error; the child is never made again. *)
+      let* request=io (fun () ->
+        let* json=Owner.load_successor_request ~store ~scope:intent.scope
+          {Progress.request_id=intended.request_id;request_digest=intended.request_digest}
+          |> Result.map_error Owner.error_to_string in
+        Request.of_json ~owner json) |> unavailable in
+      let+ child=Durable_owner.retain ~store request
+        |> Result.map_error (fun error -> Intent.Unavailable (Durable_owner.error_to_string error)) in
+      child,request
+    | Some child,(Child_intended _ | Child_confirmed _) ->
+      let+ request=io (fun () -> Request.restore ~owner child) |> unavailable in child,request
     | None,Child_confirmed _ -> Error (Intent.Unavailable "Acknowledged resolution child disappeared")
     | (None | Some _),(Requested | Refused _ | Fenced) -> Error (Intent.Conflict "Resolution has no child publication intent") in
   let* ()=io (fun () ->
     let* ()=Request.confirm_record request child in
-    require (Request.request_id request=intended.request_id)
-      "Published resolution child differs from its full intent") |> unavailable in
+    let* ()=require (Request.request_id request=intended.request_id && child.request_digest=intended.request_digest)
+      "Published resolution child differs from its durable intent" in
+    (* The record names a child only by ID and digest, so the child itself
+       says whose child it is. *)
+    match Request.predecessor request with
+    | Some predecessor ->
+      require (predecessor.request_id=parent.request_id && predecessor.request_digest=parent.request_digest)
+        "Resolution child has another original predecessor"
+    | None -> Error "Resolution child has no original predecessor") |> unavailable in
   match intent.phase with
   | Child_intended _ -> io (fun () -> Intent.confirm_child ~store ~expected:intent child) |> Result.map (fun _ -> ())
   | Child_confirmed _ -> io (fun () -> Lineage.confirm_predecessor ~store ~require_confirmed:true request) |> unavailable
@@ -110,6 +128,9 @@ let find_completed ~config ~keeper_name ~store ~child_id =
       let* owner=Request.observe_record_owner ~base_path:config.base_path ~keepers_dir record in
       let* ()=require (Request.keeper_id owner=keeper_name) "Resolution child belongs to another Keeper" in
       let+ request=Request.restore ~owner record in record,request) in
+    (* Every original the descent reaches has its lineage confirmed here,
+       fenced or not. *)
+    let* ()=io (fun () -> Lineage.confirm_predecessor ~store ~require_confirmed:true request) in
     let* fence=io (fun () -> Lineage.fenced_original ~store ~request ~original:record) in
     match fence with
     | Some _ ->
@@ -117,7 +138,6 @@ let find_completed ~config ~keeper_name ~store ~child_id =
       (match next with None -> Ok None | Some next -> descend (id::seen) next)
     | None ->
     let* frontier=io (fun () ->
-      let* ()=Lineage.confirm_predecessor ~store ~require_confirmed:true request in
       Keeper_librarian_durable_commit.validate ~store ~request ~record) in
     match Progress.phase record.progress,frontier with
     | Progress.Finished _,Keeper_librarian_durable_commit.Settled -> Ok (Some (record,request))

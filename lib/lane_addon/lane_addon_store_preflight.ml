@@ -21,6 +21,7 @@ type decoder =
   | Tool_request_inventory
   | Tool_request_owner
   | Tool_request_payload
+  | History_resolution
 
 let decoder_name = function
   | Json -> "Yojson.Safe.from_string"
@@ -33,6 +34,7 @@ let decoder_name = function
   | Tool_request_inventory -> "Lane_addon_store.tool_request_owner_entry"
   | Tool_request_owner -> "Lane_addon_tool_request_owner.Published_reader.read"
   | Tool_request_payload -> "consumer original request payload"
+  | History_resolution -> "consumer history resolution record"
 
 type tool_request_reader = scope:string -> request_id:string ->
   (Lane_addon_tool_request_owner.retained option, string) result
@@ -42,6 +44,7 @@ type tool_request_scope_reader = scope:string ->
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
 type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
+type history_resolution_validator = group:string -> name:string -> Yojson.Safe.t -> (unit, string) result
 type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
   read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
@@ -276,7 +279,8 @@ let scan_native_claims root =
        empty
        names)
 
-let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ _ -> Ok ())) ~after_read store ~base_path =
+let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ ~read_archive:_ ~read_fence:_ ~read_resolution:_ _ -> Ok ()))
+    ?(validate_history_resolution=(fun ~group:_ ~name:_ _ -> Ok ())) ~after_read store ~base_path =
   let root = Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path) in
   let report =
     match store with
@@ -316,12 +320,26 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
       let read_fence=read_sidecar Lane_addon_store.history_fence_path in
       let read_resolution=read_sidecar Lane_addon_store.history_resolution_path in
       (* Discovery reads a scope as a whole and fails it on one record it
-         cannot read, so fresh state deletes the scope: its owner records and
-         its request bodies. *)
-      let scope_directories ~group ~group_dir _ =
-        group_dir
-        :: List.filter exists
-             [ Filename.concat root (Filename.concat Lane_addon_store.tool_request_bodies_directory group) ] in
+         cannot read, so fresh state deletes the scope: its owner records, its
+         request bodies, and the history fences and resolution records that
+         name those originals. A resolution record left behind names an
+         original that is gone, and stops every pass of its Keeper. *)
+      let scope_directories ~group ~group_dir:_ _ =
+        List.filter exists
+          (List.map (fun namespace -> Filename.concat root (Filename.concat namespace group))
+             [ Lane_addon_store.tool_request_owners_directory
+             ; Lane_addon_store.tool_request_bodies_directory
+             ; Lane_addon_store.history_fences_directory
+             ; Lane_addon_store.history_resolutions_directory ]) in
+      (* A pass decodes every resolution record of its scope, also one whose
+         original has no record left, so they are read from their own
+         directory and not through the originals. *)
+      let* resolutions =
+        scan_grouped ~after_read ~delete:scope_directories root
+          Lane_addon_store.history_resolutions_directory ~entry:tool_request_owner_entry
+          (fun ~group ~name ~path:_ json ->
+             validate_history_resolution ~group ~name json |> decoded History_resolution) in
+      let+ originals =
       scan_grouped ~after_read ~delete:scope_directories root
         Lane_addon_store.tool_request_owners_directory ~entry:tool_request_owner_entry
         (fun ~group ->
@@ -370,7 +388,8 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
               |> decoded Tool_request_owner in
             validate_tool_request ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record |> Result.map_error (fun detail ->
               Tool_request_payload, Printf.sprintf "scope=%S request_id=%S request_digest=%s: %s"
-                record.scope record.request_id record.request_digest detail))
+                record.scope record.request_id record.request_digest detail)) in
+      { rows = originals.rows + resolutions.rows; refusals = originals.refusals @ resolutions.refusals }
   in
   Result.map finish report
 

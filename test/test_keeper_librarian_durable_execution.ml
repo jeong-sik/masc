@@ -2090,7 +2090,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     Resolution_intent.confirm_fence ~store:fixture.store ~expected:submission.intent fence
       |> Result.map_error Resolution_intent.error_to_string |> get)) in
   check bool "the interruption is after fence but before any child intent" true
-    (fenced.phase=Resolution_intent.Fenced && Resolution_intent.intended_child fenced=None);
+    (fenced.phase=Resolution_intent.Fenced && Resolution_intent.child fenced=None);
   let owner=Capture.physical_owner request in
   let cursor_path=Keeper_external_read_cursor.path_for_keepers_dir
     ~keepers_dir:(Capture.runtime_keepers_dir owner) ~keeper_id:keeper_name in
@@ -2110,7 +2110,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     (match (last request).phase with Refused (No_longer_eligible _) -> true
      | Requested | Refused Observation_changed | Fenced | Child_intended _ | Child_confirmed _ -> false);
   check bool "terminal refusal has no child or claimed Memory receipt" true
-    (Resolution_intent.intended_child (last request)=None && (read request).completion=Resolution_work.Not_observed);
+    (Resolution_intent.child (last request)=None && (read request).completion=Resolution_work.Not_observed);
   check bool "refusal does not move the externally observed cursor" true
     (io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Capture.runtime_keepers_dir owner)
       ~keeper_name |> get)=cursor);
@@ -2168,6 +2168,81 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     (match List.rev (observe ()).intents with
      | {Resolution_intent.phase=Child_confirmed child;_}::_ -> child.request_id=child_id && F.post_count fixture.server=0
      | _ -> false);
+  (* The resolution record names its child by ID and digest. The child's
+     request is the body file that digest names, and nowhere else. *)
+  let resolution_json ()=io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> get |> Option.get) in
+  let child_digest=match List.rev prepared.intents with
+    | {Resolution_intent.phase=Child_confirmed child;_}::_ -> child.request_digest
+    | _ -> fail "resolution did not durably acknowledge its child" in
+  let root=Store.root fixture.store in
+  let child_body=Filename.concat root (Store.tool_request_body_path ~scope:original.scope ~request_digest:child_digest) in
+  let child_record=Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest child_id ^ ".json"))) in
+  let body_bytes=io (fun () -> In_channel.with_open_bin child_body In_channel.input_all) in
+  check bool "the resolution record carries no copy of the child request" true
+    (String.length (Yojson.Safe.to_string (resolution_json ())) < String.length body_bytes);
+  (* A crash after the intent and before the child record: the next wake
+     retains the child from the staged body. *)
+  let unacknowledge ()=
+    let stored=resolution_json () in
+    io (fun () ->
+    let rec rewrite = function
+      | `Assoc fields -> `Assoc (List.map (fun (name,value) -> match name,value with
+          | "kind",`String "child_confirmed" -> name,`String "child_intended"
+          | _ -> name,rewrite value) fields)
+      | `List values -> `List (List.map rewrite values)
+      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as leaf -> leaf in
+    (match Store.publish_history_resolution fixture.store ~scope:original.scope ~request_id:original.request_id
+       ~expected:(Some stored) ~next:(rewrite stored) |> get with
+     | Store.History_resolution_stored -> ()
+     | History_resolution_changed | History_resolution_unconfirmed _ -> fail "fixture could not rewind the resolution phase");
+    Sys.remove child_record) in
+  unacknowledge ();
+  run_resolution ();
+  check bool "a lost child record is retained again from the staged body" true
+    (match List.rev (observe ()).intents with
+     | {Resolution_intent.phase=Child_confirmed child;_}::_ ->
+       child.request_id=child_id && child.request_digest=child_digest && Sys.file_exists child_record
+     | _ -> false);
+  (* Without the staged body the child is not made again. *)
+  unacknowledge ();
+  io (fun () -> Sys.remove child_body);
+  check bool "a lost staged body stops the resolution" true
+    (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
+     | Error (Resolution_intent.Unavailable _) -> not (Sys.file_exists child_record)
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  io (fun () -> write child_body body_bytes);
+  run_resolution ();
+  (* The record names a child by ID and digest only. A record made to name
+     another original of the scope is refused by that original's own
+     predecessor. *)
+  let stranger_request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id (Capture.physical_owner request))
+    ~owner:(Capture.physical_owner request) ~destination:(Capture.destination request)
+    ~source:(Capture.source request) ~preparation:(Capture.preparation request) ()) |> get in
+  let stranger=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store stranger_request)
+    |> Result.map_error Durable_owner.error_to_string |> get in
+  let original_resolution=Filename.concat root (Store.history_resolution_path ~scope:original.scope ~request_id:original.request_id) in
+  let honest=io (fun () -> In_channel.with_open_bin original_resolution In_channel.input_all) in
+  let rec rebind = function
+    | `Assoc fields when List.assoc_opt "kind" fields=Some (`String "child_confirmed") ->
+      `Assoc (List.map (fun (name,value) -> match name with
+        | "child" -> name,`Assoc ["request_id",`String stranger.request_id;"request_digest",`String stranger.request_digest]
+        | _ -> name,value) fields)
+    | `Assoc fields -> `Assoc (List.map (fun (name,value) -> name,rebind value) fields)
+    | `List values -> `List (List.map rebind values)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as leaf -> leaf in
+  let rebound=Yojson.Safe.to_string (rebind (Yojson.Safe.from_string honest)) in
+  check bool "the fixture rebinds the child" true (rebound<>honest);
+  io (fun () -> write original_resolution rebound);
+  check bool "a record naming an original that is not its child stops the resolution" true
+    (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
+     | Error (Resolution_intent.Unavailable detail) -> detail="Resolution child has no original predecessor"
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  io (fun () -> write original_resolution honest;
+    Sys.remove (Filename.concat root (Filename.concat Store.tool_request_owners_directory
+      (Filename.concat (Store.digest original.scope) (Store.digest stranger.request_id ^ ".json")))));
+  run_resolution ();
   let load_child id=io (fun () ->
     let record=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:id |> owned |> Option.get in
     let request=Capture.restore ~owner:(Capture.physical_owner request) record |> get in record,request) in
@@ -2190,6 +2265,32 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     ~validate_tool_request:Keeper_librarian_store_preflight.validator
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
   check int "strict preflight reads the real fenced-parent child link" 0 (List.length preflight.refusals);
+  (* A pass decodes every resolution record of its scope. Preflight refuses
+     one of another schema that no original leads to, and fresh state deletes
+     the scope it stops. *)
+  let scan ()=io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    ~validate_history_resolution:Resolution_intent.check_published_file
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
+  check int "preflight reads every current resolution record" 0 (List.length (scan ()).refusals);
+  let scope_group=Store.digest original.scope in
+  let absent_id=Capture.fresh_request_id (Capture.physical_owner request) in
+  let stray=Filename.concat root (Store.history_resolution_path ~scope:original.scope ~request_id:absent_id) in
+  io (fun () -> write stray (Yojson.Safe.to_string (`Assoc ["schema",`String "keeper.librarian.history-resolution.v1";
+    "scope",`String original.scope;"request_id",`String absent_id;"intents",`List []])));
+  let scope_directory namespace=Filename.concat root (Filename.concat namespace scope_group) in
+  check bool "preflight refuses a resolution record of another schema whose original has no record" true
+    (match (scan ()).refusals with
+     | [refusal] -> refusal.path=stray && refusal.decoder=Lane_addon_store_preflight.History_resolution
+       && List.for_all (fun namespace -> List.mem (scope_directory namespace) refusal.delete)
+         [Store.tool_request_owners_directory;Store.tool_request_bodies_directory;
+          Store.history_fences_directory;Store.history_resolutions_directory]
+     | [] | _::_::_ -> false);
+  check bool "that record stops the Keeper's resolution pass" true
+    (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
+     | Error (Resolution_intent.Unavailable _) -> true
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  io (fun () -> Sys.remove stray);
   let resume_descendant ()=
     let original,request=load_child descendant_id in
     memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config

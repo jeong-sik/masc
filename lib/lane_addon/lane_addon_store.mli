@@ -178,6 +178,8 @@ type history_fence_publication =
   | History_fence_unconfirmed of string
 val load_history_fence : t -> scope:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
+val history_fences_directory : string
+val history_resolutions_directory : string
 val history_fence_path : scope:string -> request_id:string -> string
 val publish_history_fence : t -> scope:string -> request_id:string ->
   expected_owner:Yojson.Safe.t -> fence:Yojson.Safe.t ->

@@ -1,0 +1,219 @@
+{
+ "key": "sandbox-microvm-ssh",
+ "findings": [
+  {
+   "id": "sandbox-microvm-ssh-01",
+   "claim": "Claude Code 내장 sandbox 는 셸 명령만 가둔다. Read 도구·hook·MCP 서버는 밖에서 돌고 `denyRead` 는 Read 도구를 못 막는다. 프로세스 전체를 가두는 것은 `srt claude`(beta research preview)다.",
+   "src": "Claude Code Docs — Sandboxing; Sandbox environments | https://code.claude.com/docs/en/sandboxing.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "`Runtime_account_access.authorize_native` 가 다계정에서 `Native_none` 만 통과시키는 판정의 근거다. `read`·`full` 을 열 후보는 프로세스 전체를 OS 로 가둔 구성이고, 다른 사람 home 의 표식 파일 읽기 거절을 도구 경로별로 재야 한다. 진행 중 다계정 캠페인(#51072·#51074)의 입력이다.",
+   "caveat": "문서 서술이다. MASC 계정 home 배치에서 재지 않았다. `srt` 설정 형식은 바뀔 수 있다고 적혀 있다. 설정 경로에 쓰기를 주면 다음 실행에 sandbox 밖 hook 을 심을 수 있다.",
+   "check": "verified sandboxing.md 11·42줄, sandbox-environments.md 24·83·121줄에 그대로 있음. 같은 표가 dev container·VM 도 프로세스 전체 경계로 적으므로 `srt` 가 유일한 길은 아님."
+  },
+  {
+   "id": "sandbox-microvm-ssh-02",
+   "claim": "Codex 권한 프로필의 `deny` 는 Seatbelt 또는 bubblewrap+seccomp 로 spawn 된 명령까지 강제된다. macOS 에서 강제하지 못하면 실행을 거절한다. Linux 의 glob deny 는 프로세스 시작 때 한 번 펼친다. MCP 서버는 프로필 밖이다.",
+   "src": "Codex Docs — Permissions | https://learn.chatgpt.com/docs/permissions",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "RFC-0390 의 Codex posture(`:read-only`, `:workspace`)에 다른 사람 계정 home 을 정확한 경로 `deny` 로 넣은 프로필이 brief 2절 11번의 증명 대상 후보다. 측정 뒤에만 연다. 진행 중 다계정 캠페인에 넘긴다.",
+   "caveat": "재지 않았다. 저장소 README 예시는 `none`, 문서는 `deny` 로 철자가 다르다. user namespace 를 막는 Linux 호스트에서는 이 정책을 못 돌린다.",
+   "check": "verified Permissions 쪽에 deny 우선, Seatbelt, bubblewrap+seccomp, macOS 거절, glob 시작 시 열거, MCP 별도 통제가 있음. 'spawned commands' 문장은 Sandboxing 쪽에 있음. 주소는 ChatGPT Learn 으로 열림."
+  },
+  {
+   "id": "sandbox-microvm-ssh-03",
+   "claim": "Landlock 은 권한과 user namespace 없이 프로세스를 가둔다. 도메인이 다르면 ptrace 가 막히고, ABI 6 은 신호와 abstract Unix socket 을 도메인 안으로 좁힌다. 경로 이름 Unix socket 은 ABI 9(메인라인 7.1)부터다. 규칙은 허용 목록뿐이다.",
+   "src": "Linux kernel documentation — Landlock: unprivileged access control; landlock(7) | https://docs.kernel.org/userspace-api/landlock.html",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "열린 이슈 #38895(선언 루트를 shim Landlock 으로)의 입력이다. 같은 Unix 계정을 쓰는 Keeper 사이에는 OS 가 강제하는 읽기 경계가 없다. 좁히려면 끝점이 읽기 뿌리를 선언해야 한다.",
+   "caveat": "MASC 게스트 커널은 6.18(ABI 7)이라 경로 Unix socket 은 seccomp 로 계속 막아야 한다. ABI 10~12 의 커널 판은 확인하지 못했다. 좁힌 허용 목록에서 빌드·git 이 도는지 재지 않았다.",
+   "check": "verified kernel 문서(2026-10)와 landlock(7) 표(ABI 9=7.1)에 있음. ptrace 제한은 가둔 쪽이 추적자일 때 얘기라, 안 가둔 같은 계정 프로세스가 추적하는 것은 못 막음. 커널 판은 참고용이라고 원문이 적음."
+  },
+  {
+   "id": "sandbox-microvm-ssh-04",
+   "claim": "OpenSSH `authorized_keys` 의 `restrict,command=\"...\"` 는 그 키로 한 명령만 돌게 하고 forwarding·PTY 를 끈다. 클라이언트가 준 명령은 `SSH_ORIGINAL_COMMAND` 로만 넘어온다. 10.5 와 10.6 이 `restrict` 의 tunnel forwarding 누락을 고쳤다.",
+   "src": "OpenSSH sshd(8) AUTHORIZED_KEYS FILE FORMAT; OpenSSH Release Notes 10.5, 10.6 | https://man.openbsd.org/sshd.8",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "끝점을 붙이는 신원과 명령을 실행하는 신원이 나뉘지 않는다(sandbox-remote-03). 나누는 방법은 RFC 로 갈 일이다.",
+   "caveat": "`PermitTunnel` 을 켠 10.6 미만 sshd 에서는 `restrict` 가 tunnel 을 다 막지 못한다.",
+   "check": "verified sshd(8) 의 command·restrict·SSH_ORIGINAL_COMMAND 문장과 release notes 10.5(2026-08-11)·10.6(2026-10-06) 항목이 그대로 있음. 두 수정 모두 PermitTunnel(기본 꺼짐) 경우임."
+  },
+  {
+   "id": "sandbox-microvm-ssh-05",
+   "claim": "요청마다 새 연결을 여는 쪽에 걸리는 sshd 상한은 `MaxStartups`(기본 10:30:100, 인증 전 연결 수, 서버 전체)와 기본으로 켜진 `PerSourcePenalties` 다. `MaxSessions` 는 연결 하나 안의 세션 수다.",
+   "src": "OpenSSH sshd_config(5) | https://man.openbsd.org/sshd_config.5",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`config/runtime.toml:221-223` 주석이 `ControlMaster`·`MaxSessions` 를 말하는데 코드는 `ControlMaster=no` 다(`lib/keeper/keeper_sandbox_remote.ml:401`). 주석을 고친다. 메모리 예산 RFC Q6 의 호스트 전체 상한은 끝점 sshd 가 이미 갖고 있고 넘으면 확률로 끊긴다.",
+   "caveat": "공유 끝점에서 실제로 끊기는 빈도는 재지 않았다. 저장소 측정은 같은 Mac 게스트 sshd 로 20개 동시 1회(실패 0)와 순차 100회(p50/p90 98/129 ms)뿐이다.",
+   "check": "overstated 매뉴얼 수치·정의는 맞음. 그러나 MaxStartups 는 인증 전 연결만 세므로 'Q6 의 호스트 전체 동시 접속 상한을 sshd 가 이미 가진다'는 적용은 원문보다 셈. PerSourcePenalties 는 상한이 아니라 실패한 출발지 벌점임."
+  },
+  {
+   "id": "sandbox-microvm-ssh-06",
+   "claim": "Apple `container` 문서는 중첩 가상화를 지원한다고 적는다. 조건은 Apple Silicon M3 이상, macOS 15 이상, `CONFIG_KVM=y` 커널이다. 기본 커널은 지원하지 않는다. `container run --virtualization` 과 `container machine create --virtualization` 이 있다.",
+   "src": "apple/container docs — container-machine.md, command-reference.md | https://github.com/apple/container/blob/main/docs/container-machine.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "`docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md` 35줄, 425~426줄의 '중첩 가상화 없음' 전제가 낡았다. `nerdctl_kata` 와 Linux 쪽 `microsandbox` 를 이 Mac 의 게스트 안에서 잴 길이 문서상 열렸다(RFC-0405 211줄).",
+   "caveat": "이 M3 Max 에서 재지 않았다. KVM 을 켠 커널을 따로 준비해야 한다. `container machine` 자체는 home 을 읽기·쓰기로 마운트하므로 Keeper 게스트로 쓰지 않는다.",
+   "check": "verified container-machine.md 86~91줄, command-reference.md 79·247·1123줄에 그대로 있음. 1.7.1 태그 문서도 같음. Containerization README 는 Linux 통합 시험을 `container run --virtualization` VM 안에서 돌린다고 적음."
+  },
+  {
+   "id": "sandbox-microvm-ssh-07",
+   "claim": "Firecracker(free page reporting, developer preview), Cloud Hypervisor(`free_page_reporting=on`), libkrun(free-page reporting 만)은 게스트가 놓은 메모리를 호스트로 돌려주는 장치를 문서로 적는다. Apple `container` 문서는 1.7.1 에서도 돌려주지 않는다고 적는다.",
+   "src": "Firecracker docs/ballooning.md; Cloud Hypervisor docs/balloon.md; apple/container technical-overview.md | https://github.com/firecracker-microvm/firecracker/blob/main/docs/ballooning.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "메모리 예산 RFC 196줄의 '원격 Linux/KVM' 선택지를 받치는 1차 근거다. 기존 경로로는 `nerdctl_kata` + Cloud Hypervisor(`lib/keeper/keeper_microvm_kata_vmm.mli:11-14`)가 닿는다. 선택지 순서를 바꾸기 전에 작업 뒤 VMM RSS 감소를 잰다.",
+   "caveat": "어느 문서도 돌아오는 양을 수치로 적지 않는다. Kata 설정으로 켤 수 있는지 확인하지 않았다. MASC 작업으로 잰 값이 없다.",
+   "check": "verified 네 문서에 있음. 단 Firecracker ballooning.md 의 Developer Preview 표시는 free page hinting 에 붙어 있고, reporting 이 preview 라는 말은 CHANGELOG·release notes 1.14.0 에만 있음. 회수량 수치는 어느 문서에도 없음."
+  },
+  {
+   "id": "sandbox-microvm-ssh-08",
+   "claim": "microsandbox 는 0.7.14 다. 문서에 `msb ls --label`, `--security restricted`, `--no-net` 이 있고 Linux 에서 `/dev/kvm` 은 `kvm` 그룹으로 연다고 적는다. `--cap-drop`·`--read-only` 는 여전히 없다. libkrun 은 VM 경계가 장치로 내준 호스트 자원을 막지 않는다고 적는다.",
+   "src": "microsandbox docs — CLI reference, security/isolation; libkrun docs/security-model.md | https://docs.microsandbox.dev",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`docs/MICROVM-REMOTE-RUNBOOK.md` 32줄과 RFC-0405 211줄·264줄은 0.6.16 기준이라 낡았다. 거절 사유 `microvm_constraint_unexpressible` 와 `policy` 거절은 유지가 맞다. 지금 판으로 다시 잰 값으로 서술을 바꾼다.",
+   "caveat": "저자 문서이고 beta 라고 스스로 적는다. MASC 아래에서 0.7.14 를 띄워 보지 않았다. README 의 부팅 100 ms 는 방법이 없어 쓰지 않는다.",
+   "check": "verified 0.7.14(2026-11-08) 최신 확인. `msb ls --label`, `--no-net`, `--security restricted`, kvm 그룹 문장이 문서에 있음. run 표는 전체 목록이 아니라서 v0.7.14 CLI 소스로 `--cap-drop`·읽기 전용 루트 플래그 없음을 따로 확인함."
+  },
+  {
+   "id": "sandbox-microvm-ssh-09",
+   "claim": "Firecracker 명세: InstanceStart 에서 게스트 init 까지 125 ms 이하, VMM overhead 5 MiB 이하(M5D.metal, 최소 커널·rootfs, serial 끔, 자체 통합 시험). 장치는 여섯 개뿐이라 virtio-fs 가 없고, 네트워크 필터가 없으며, 운영에서는 jailer 와 인스턴스별 uid 를 권한다.",
+   "src": "Firecracker SPECIFICATION.md (14~45줄), docs/design.md, FAQ.md | https://github.com/firecracker-microvm/firecracker/blob/main/SPECIFICATION.md",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "`lib/keeper/keeper_microvm_kata_vmm.mli` 와 RFC-0405 229줄의 제외 판단을 유지한다. MASC 게스트의 읽기 전용 공유 마운트(설정·identity·shim)를 옮길 수 없다. `config/runtime.toml:226-227` 의 예약 표식 `firecracker` 를 열 때 쓸 제약 목록이다.",
+   "caveat": "수치는 저자 조건의 값이고 Keeper 이미지 부팅 시간이 아니다. CPU 95% 항목은 시험 대기 중이라고 적혀 있다. NSDI '20 논문은 원문 미직독이다.",
+   "check": "verified SPECIFICATION 14~45줄 수치와 조건이 맞음(M6G.metal 도 포함). FAQ 의 '6개 장치'는 같은 저장소 device-api.md(rng·pmem·mem·vhost-user-block 포함 10종)보다 낡음. virtio-fs 없음, 필터 없음, jailer·uid 권고는 그대로."
+  },
+  {
+   "id": "sandbox-microvm-ssh-10",
+   "claim": "cgroup v2 는 위임받은 하위 트리 안에서만 프로세스를 옮기게 한다. systemd 는 service·scope 에만 위임을 허용하고 사용자 관리자에 `pids memory cpu` 를 위임한다. `memory.oom.group` 은 cgroup 을 통째로 죽이고 `cgroup.kill` 은 트리 전체를 죽인다.",
+   "src": "Linux kernel documentation — Control Group v2; systemd CGROUP_DELEGATION.md | https://docs.kernel.org/admin-guide/cgroup-v2.html",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "메모리 예산 RFC Q9 의 답 일부다. SSH 세션의 권한 없는 shim 은 자기 scope 한도를 못 건다. `lib/endpoint_process_gate` 의 root 제어 + cgroup 이 맞는 모양이고, systemd 호스트에서는 그 부모가 `Delegate=` 를 켠 unit 이어야 한다.",
+   "caveat": "사용자 관리자를 거치는 권한 없는 경로가 SSH 세션에서 되는지 재지 않았다. `IPAddressDeny=` 는 cgroup eBPF 가 없으면 오류 없이 안 걸린다.",
+   "check": "verified cgroup-v2 Delegation·cgroup.kill·memory.oom.group 절과 systemd CGROUP_DELEGATION.md, user@.service.in(`Delegate=pids memory cpu`)에 그대로 있음. oom.group 은 oom_score_adj -1000 작업을 예외로 둠."
+  },
+  {
+   "id": "sandbox-microvm-ssh-11",
+   "claim": "E2B·Modal 의 도메인 허용 목록은 SNI·Host 로 판정하고 DNS 를 따로 열어 둔다(E2B 는 `8.8.8.8` 로 가는 모든 트래픽). `ssh` 와 JVM 은 프록시 환경 변수를 읽지 않고 Node 내장 fetch 는 `NODE_USE_ENV_PROXY=1` 이 있어야 읽는다.",
+   "src": "E2B Docs — Internet access; Modal Docs — Sandbox networking; sandbox-runtime README | https://docs.e2b.dev/sandbox/internet-access",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "MASC 의 CONNECT + `--no-dns` 는 이름 해석이 matcher 뒤 한 곳이라 그대로 둔다. `docs/operations/egress-policy-runbook.md` 137~138줄의 Java 서술을 고치고 한계 절에 ssh·JVM·Node 를 적는다. #32799 와 같은 뿌리다.",
+   "caveat": "JVM 서술은 sandbox-runtime README 와 Java SE 21 문서로 확인했다. MASC 게스트에서 Gradle·Maven 을 돌려 보지는 않았다.",
+   "check": "verified E2B 주소는 /network/internet-access 로 옮겨짐, 문장은 같음. 8.8.8.8 전체 허용은 기본값이고 `dnsServers: []` 로 닫는 길이 문서에 있음. Modal 은 SNI 만 봄(Host 안 봄). ssh·JVM·Node 문장은 sandbox-runtime README 에 있음."
+  },
+  {
+   "id": "sandbox-microvm-ssh-12",
+   "claim": "Apple Containerization 에 Linux backend(cloud-hypervisor + KVM, 같은 `vminitd` 계약)가 생겼다. `container` 1.3.1·1.4.1·1.5.0·1.6.0 이 보안 권고를 고쳤고 최신은 1.7.1 이다. `container machine` 은 home 을 읽기·쓰기로 마운트하고 `SSH_AUTH_SOCK` 을 넘긴다.",
+   "src": "apple/containerization README; apple/container release notes | https://github.com/apple/containerization",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "MASC 런북이 적은 `container` 하한이 이 수정들을 덮는지 확인한다. 하한을 올릴지 운영자가 정한다. Linux backend 는 라이브러리 수준이라 `container` CLI 를 부르는 MASC 에는 아직 닿지 않는다.",
+   "caveat": "어느 권고가 MASC 사용 방식에 닿는지 따지지 않았다. README 의 'sub-second start' 는 조건이 없어 수치로 쓰지 않는다.",
+   "check": "verified README Backends 절과 releases 쪽에 그대로 있음. 1.3.1(6건)·1.4.1(2건)·1.5.0(1건)·1.6.0(2건), 최신 1.7.1(11-06). container-machine.md 가 home 읽기·쓰기 마운트와 SSH_AUTH_SOCK 전달을 적음."
+  },
+  {
+   "id": "sandbox-microvm-ssh-13",
+   "claim": "mosh 는 번호 붙은 상태 사이의 diff 를 idempotent 하게 보내 3G 망에서 키 입력 지연 중앙값 5 ms 미만(SSH 503 ms)을 쟀다. Eternal Terminal 은 다시 붙을 때 마지막 sequence number 를 주고받고 빠진 패킷만 다시 보낸다.",
+   "src": "Winstein & Balakrishnan, Mosh: An Interactive Remote Shell for Mobile Clients (USENIX ATC 2012), 초록·§2.2·§4 | https://mosh.org/mosh-paper.pdf",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "`lib/endpoint_job_output` 의 offset spool 과 `RFC-keeper-async-fleet-continuity.md`(Draft, #36941)가 같은 원리다. 새로 만들 것은 없다. 수락 기준에 '마지막 offset 뒤만 보내고 같은 요청을 두 번 보내도 결과가 같다'가 있는지 확인한다.",
+   "caveat": "mosh 측정은 사용자 6명의 대화형 터미널이다. MASC 의 요청·응답 프레임과 작업이 다르다. 전송 자체는 들여오지 않는다.",
+   "check": "overstated 인용과 수치는 원문과 같음. 그러나 중앙값 5 ms 미만은 idempotent diff 가 아니라 예측 local echo(약 70% 즉시 표시) 효과임. 평균은 173 ms 대 515 ms. 이어 보내기 원리의 측정 근거로는 못 씀. ET 문장은 맞음."
+  },
+  {
+   "id": "sandbox-microvm-ssh-14",
+   "claim": "VS Code Remote-SSH 문서는 여러 사용자가 같이 쓰는 호스트에서 서버를 loopback TCP 포트 대신 사용자에게 잠긴 Unix socket 으로 띄우라고 권한다. 기본은 무작위 포트 + 사용자만 읽는 키이고 `/version` 은 인증 없이 열린다.",
+   "src": "VS Code Docs — Remote Development using SSH; Remote Development Tips and Tricks | https://code.visualstudio.com/docs/remote/troubleshooting",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "한 기기에 여러 사람이 붙는 모양에서 loopback 은 사람 사이 경계가 아니다. MASC 가 loopback 에 여는 경로도 같은 문제를 안는다. 다계정 캠페인의 '모든 경로에 인증' 작업에 넘긴다.",
+   "caveat": "MASC 에서 다른 Unix 계정이 닿는 listener 를 다 세지 않았다. socket 방식은 sshd 의 `AllowStreamLocalForwarding` 이 필요하다.",
+   "check": "verified ssh 문서 51줄과 troubleshooting 199~203줄에 있음. 원문 말투는 'Optional … consider enabling' 임. socket 방식은 연결 다중화를 끄고 sshd 의 AllowStreamLocalForwarding 이 필요함."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "SSH `ControlMaster` 로 연결을 재사용해 요청별 인증 지연 줄이기",
+   "why_not": "RFC-0395 42줄 결정과 어긋난다. 뒤 세션은 master 연결을 새 인증 없이 쓰므로 자격 파일 교체가 바로 적용되지 않는다. OpenSSH 10.6 은 multiplex 채널 사이 압축 사전 공유로 생기는 평문 유출 때문에 LZ77 압축을 껐다."
+  },
+  {
+   "idea": "mosh 나 Eternal Terminal 을 MASC 의 원격 전송으로 쓰기",
+   "why_not": "둘 다 대화형 터미널 화면을 잇는 도구다. MASC 는 바이트가 그대로여야 하는 요청·응답 프레임을 보낸다. UDP 포트나 TCP 2022 상주 서비스가 필요해 RFC-0395 의 'sshd 만 쓴다'와 어긋난다. mosh 마지막 release 는 2022-10 이다."
+  },
+  {
+   "idea": "VS Code Server 를 원격 에이전트로 재사용",
+   "why_not": "VS Code FAQ 가 다른 클라이언트용으로 허가되지 않았고 그 위에 공개·상용 서비스를 만들 수 없다고 적는다."
+  },
+  {
+   "idea": "hypervisor 메모리 snapshot·resume 으로 Keeper 이어가기(Devin, E2B pause, Firecracker snapshot, msb fork)",
+   "why_not": "MASC 는 이어갈 사실을 Ledger 에 둔다. VM 메모리를 또 하나의 진실로 두면 brief 2절 2번과 어긋난다. Firecracker 문서는 같은 snapshot 을 두 번 resume 하면 안전하지 않다고 적는다. Cognition 은 1년 넘는 hypervisor 작업이 들었다고 적는다."
+  },
+  {
+   "idea": "gVisor 를 `Micro_vm` backend 로 추가",
+   "why_not": "gVisor 문서가 스스로 VM 과 다르다고 구분한다. 가상화 하드웨어와 게스트 커널에 기대지 않는다. `--rootless` 는 netstack 과 create 가 없다. 넣는다면 Docker 프로필의 runtime 인데 Docker 는 맨 뒤 순위다."
+  },
+  {
+   "idea": "Apple `container machine` 을 Keeper 게스트로 쓰기",
+   "why_not": "Apple 문서가 격리를 많이 내준다고 경고한다. macOS home 을 읽기·쓰기로 마운트하고 `SSH_AUTH_SOCK` 을 넘기고 비밀번호 없는 sudo 를 건다. Keeper 격리 계약과 반대다. 중첩 가상화 시험용 그릇으로만 본다."
+  },
+  {
+   "idea": "Firecracker 를 직접 backend 로 넣기",
+   "why_not": "API socket 모델이라 argv builder 에 안 맞는다(RFC-0405 229줄). virtio-fs 가 없어 지금의 읽기 전용 공유 마운트를 못 옮긴다. jailer 는 root 가 필요하고 Kata 조합은 devmapper snapshotter 를 요구한다."
+  },
+  {
+   "idea": "TLS 를 끊고 자리표시자를 진짜 비밀로 바꾸는 프록시(microsandbox secrets, srt tlsTerminate)",
+   "why_not": "RFC-0415 103~106줄이 TLS 투명 종단과 자격증명 주입을 범위 밖으로 뒀다. 게스트 신뢰 저장소에 CA 를 심어야 한다. 다시 열려면 그 RFC 를 고치는 일이다."
+  },
+  {
+   "idea": "bubblewrap 을 Linux 끝점의 기본 격리 도구로 쓰기",
+   "why_not": "0.12.0 부터 setuid 방식이 없어 user namespace 가 있어야만 돈다. Ubuntu 기본 설정은 AppArmor profile 을 따로 올려야 한다. README 가 완성된 정책이 아니라고 적는다. shim 에 Landlock 호출이 이미 있다."
+  },
+  {
+   "idea": "DNS 는 열어 두고 SNI·Host 로만 도메인을 판정하는 egress(E2B, Modal 방식)",
+   "why_not": "지금 MASC 의 CONNECT + `--no-dns` 보다 약하다. E2B 문서가 `8.8.8.8` 로 가는 모든 트래픽이 열린다고 스스로 적는다. Modal 은 DNS 를 제한 없이 연다."
+  },
+  {
+   "idea": "Claude Code 내장 Bash sandbox 를 켜는 것으로 다계정 `read`·`full` posture 열기",
+   "why_not": "공식 문서상 Read 도구, hook, MCP 서버가 sandbox 밖에서 돈다. sandbox 를 쓸 수 없으면 기본이 sandbox 없이 실행이다. brief 2절 11번의 '증명된 posture'를 채우지 못한다."
+  },
+  {
+   "idea": "systemd `IPAddressDeny=` 하나로 끝점 egress 를 강제했다고 보기",
+   "why_not": "systemd 문서가 cgroup eBPF 지원이 없으면 아무 효과가 없다고 적는다. 오류도 없다. 쓰려면 걸렸는지 먼저 확인하고 안 걸리면 거절해야 한다."
+  },
+  {
+   "idea": "Keeper 프롬프트에 '네트워크가 닫혀 있다' 같은 문장 넣기",
+   "why_not": "brief 2절 1번이 프롬프트 문장과 강제 제약 제안을 막는다. 닫힌 사실은 도구 결과의 typed 맥락으로 준다. 이슈 #32799 의 범위다."
+  }
+ ],
+ "unknowns": [
+  "LAN·WAN 끝점에서 요청마다 새로 인증하는 SSH 의 지연. 저장소에는 같은 Mac 게스트 sshd 로 잰 값(p50/p90 98/129 ms)만 있다.",
+  "공유 끝점에서 MASC 의 동시 연결이 sshd `MaxStartups` 확률 차단이나 `PerSourcePenalties` 를 실제로 맞는 빈도.",
+  "이 M3 Max 에서 `--virtualization` 게스트 안에 `/dev/kvm` 이 뜨고 그 안에서 Kata·microsandbox 게스트가 부팅하는지. 문서만 읽었다.",
+  "microsandbox 0.7.14 가 MASC 의 격리 요구(capability 제거, 읽기 전용 루트)를 다른 플래그 조합으로 표현할 수 있는지.",
+  "Apple `container` 게스트의 payload 가 네트워크 정책이 보지 않는 통로로 호스트 쪽 서비스에 닿는지.",
+  "`srt` 로 감싼 Claude Code 와 `deny` 프로필의 Codex 가 MASC 의 계정별 설정 디렉터리 배치에서 로그인·토큰 갱신까지 도는지, 다른 사람 home 읽기가 모든 도구 경로에서 거절되는지.",
+  "`--tools \"\"` 인 Claude Code 가 입력 글 안의 파일 참조를 스스로 펼치는지(#51072, 열림).",
+  "Landlock ABI 10·11·12 가 들어간 커널 판. landlock(7) 표는 ABI 9 까지다.",
+  "Kata + Cloud Hypervisor 게스트에서 free page reporting 이 MASC 작업 뒤 실제로 돌려주는 메모리 양과, Kata 설정으로 켤 수 있는지.",
+  "권한 없는 계정이 SSH 세션에서 systemd 사용자 관리자를 통해 명령별 `MemoryMax` 를 걸 수 있는 조건.",
+  "Codex 프로필의 `none` 과 `deny` 중 현재 판이 받는 철자.",
+  "Apple `container` 1.3.1~1.6.0 의 보안 권고 가운데 MASC 사용 방식에 실제로 닿는 것.",
+  "원문 미직독: Firecracker NSDI '20 논문(주소 404), 'Crossing the Streams' 논문(OpenSSH release notes 서술만 읽음), Cloud Hypervisor 공식 부팅 시간 수치, Daytona 의 격리 기술.",
+  "Keeper 에게 GitHub 자격을 건네는 경로가 일에 필요한 범위보다 넓은 권한을 주는지.",
+  "brief 는 #50589 를 Draft 로 적었는데 11-12 조회에서는 MERGED 다. 다른 진행 중 캠페인 상태도 brief 작성 뒤 바뀌었을 수 있다."
+ ],
+ "conflicts_with_brief": [
+  "sandbox-microvm-ssh-12: brief 2절 4번(결정을 올릴 때 정석 쪽을 근거·측정·대가와 함께 적는다). 적용이 '`container` 하한을 올릴지 운영자가 정한다'로 결정만 넘기고 권고와 대가를 안 적었다. 어느 권고가 MASC 사용 방식에 닿는지도 따지지 않았다. 형식 문제이고 내용 충돌은 아니다."
+ ]
+}

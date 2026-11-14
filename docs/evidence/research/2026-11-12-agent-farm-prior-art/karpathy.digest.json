@@ -1,0 +1,233 @@
+{
+ "key": "karpathy",
+ "findings": [
+  {
+   "id": "karpathy-01",
+   "claim": "평가를 고정하고 숫자 하나와 손댈 범위를 주면 에이전트 루프가 사람 없이 개선을 쌓는다. autoresearch 1차는 약 700개 시도에서 약 20개를 남겨 nanochat Time to GPT-2 를 2.02h 에서 1.80h 로, 2차 뒤 1.65h 로 줄였다. 평가할 수 없는 일에는 안 통한다고 본인이 말한다.",
+   "src": "X 2026-03-09 autoresearch 1차 결과 글, karpathy/autoresearch README·program.md, nanochat README leaderboard | https://x.com/karpathy/status/2031135152349524125",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "구조는 이미 있다: Goal metric·target_value(lib/goal/goal_store.mli:43-44), Goal_measurement 행(lib/goal/goal_measurement.mli:4-17), Verifier 증명(constitution.xml:66). 더할 것은 Goal 별 측정 evidence 종류(artifact·note·board·fusion) projection 하나. 새 필드·Gate 없음.",
+   "caveat": "한 사람, 한 저장소, 5분짜리 평가가 있는 학습 튜닝이다. 본인 측정이고 독립 재현을 찾지 못했다. 큰 모델로 옮겨도 되는지는 사람이 확인했다. 5분 예산과 NEVER STOP 문장은 옮기지 않는다.",
+   "check": "verified 글과 nanochat README 20-22행에서 ~20/약 700, 2.02→1.80→1.65 확인. 한계 발언은 No Priors 24:05. 1.80 은 사람이 d24 에 쌓아 잰 값. x.com 직접 열기는 402, 뒷부분은 거울 한 곳."
+  },
+  {
+   "id": "karpathy-02",
+   "claim": "신뢰도는 9를 하나씩 더하는 일이고 9 하나마다 드는 일이 비슷하다(march of nines). 90% 되는 데모는 첫 9일 뿐이다. Tesla 5년에 9 둘이나 셋을 지났다고 한다. 대본 01:43:11~01:46:25, P545~P547.",
+   "src": "Dwarkesh Patel 인터뷰 대본 (2025-10-17) | https://www.dwarkesh.com/p/andrej-karpathy",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "Gate 2 의 54번 연속 성공(docs/PRODUCTION-READINESS-GATES.md:43-46)은 턴 성공률 95% 하한 0.946 까지만 보인다(내 계산). 9 둘은 299번이 든다. Gate 를 올리지 말고, typed receipt 에서 성공 수·시도 수·하한을 Runtime·tool 별 projection 으로 낸다.",
+   "caveat": "9마다 같은 일이라는 말은 체감이고 수치 근거가 없다. 하한 계산은 이 보고서의 것이며 턴이 독립이라고 가정해 낙관적이다. 이 값으로 Keeper 행동을 막으면 budget_gate 위반이다.",
+   "check": "verified 대본 01:43:11~01:46:25 에 그대로 있음. 'maybe three nines or two nines. I don't know what it is' 로 본인이 흐리게 말함. 수치 근거 없는 체감."
+  },
+  {
+   "id": "karpathy-03",
+   "claim": "코딩 에이전트는 틀린 가정으로 내달리고, 묻지 않고, 반대하지 않고, 코드를 부풀린다. CLAUDE.md 에 지시를 적어도 그대로였다고 2026-01-26 글에 썼다. 만드는 능력과 가려내는 능력은 다르다고 한다.",
+   "src": "X 2026-01-26 글 (80% 에이전트로 옮긴 뒤의 관찰) | https://x.com/karpathy/status/2015883857489522876",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "사용자 결정 1(프롬프트 문장·강제 규칙 금지)을 받치는 1차 경험담으로 쓴다. 고칠 자리는 검증 구조다: Task AwaitingVerification(constitution.xml:90), report_review_verdict 로만 나는 판정(lib/task/anti_rationalization.mli:1-4). 더할 코드는 없다.",
+   "caveat": "본인 작업의 관찰이고 시도는 'a few simple attempts' 였다. 지시문을 공들여도 안 된다는 측정은 아니다. Keeper 가 사람에게 묻는 경로의 비용은 확인 필요.",
+   "check": "overstated 실패 목록은 그대로. 원문은 'a few simple attempts' 이고 plan mode 에서 나아진다고 함. generation/discrimination 문장은 'in the brain', 본인 손코딩 퇴화 얘기이지 에이전트 능력 얘기가 아님."
+  },
+  {
+   "id": "karpathy-04",
+   "claim": "LLM 판정자의 점수를 오래 최적화하면 판정자를 속이는 답이 나온다. 뜻 없는 글자열이 100% 보상을 받은 예를 든다. 10~20걸음은 버텨도 100~1000걸음은 못 버틴다고 한다. 대본 00:45:29~00:48:22.",
+   "src": "Dwarkesh Patel 인터뷰 대본 (2025-10-17) | https://www.dwarkesh.com/p/andrej-karpathy",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "판정 점수를 Keeper 가 되풀이해 올리는 목표로 쓰지 않는 지금 구조를 유지한다. 결정 10(지급 규칙 비공개)과 같은 쪽이다. Candle 로 살 것을 넓히는 일은 헌법 candle 절을 고칠 때 따로 다룬다.",
+   "caveat": "강화학습으로 가중치를 고치는 맥락의 말이다. 문맥 안에서 일하는 Keeper 에 옮긴 것은 이 보고서의 해석이고 MASC 에서 잰 것이 아니다.",
+   "check": "verified 대본 00:45:29~00:48:22 에 그대로 있음. 맥락은 LLM judge 보상에 대고 가중치를 강화학습할 때이고 '걸음'은 학습 step. Keeper 로 옮긴 것은 조사자 해석."
+  },
+  {
+   "id": "karpathy-05",
+   "claim": "그의 평가는 13달 사이에 바뀌었다. 2025-10 에이전트는 net unhelpful, 2026-01 코딩의 80% 가 에이전트, 2026-02 orchestrator Claws 가 가장 큰 상. 병렬 협업 구조는 2026-03 에도 만족하는 것이 없다고 했다. 2026-05-19 부터 Anthropic 직원이다.",
+   "src": "X 2026-05-19 Anthropic 합류 글과 날짜가 찍힌 본인 글·발표 11건 | https://x.com/karpathy/status/2056753169888334312",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "코드가 아니라 문서 습관에 적용한다. docs/research 와 RFC 에 그의 주장을 옮길 때 날짜·근거 종류·소속을 같이 적는다. agent swarm 이 된다는 근거로 인용하지 않는다. 원문 URL 없는 인용은 버린다.",
+   "caveat": "2026-06-09 와 2026-10-31 사이 X 글은 훑지 못했다. 2026-11-06 harness engineering 글이라는 것은 원문을 못 찾아 쓰지 않았다.",
+   "check": "overstated 인용은 다 실재. 'net unhelpful' 은 nanochat 한정 답글, 03-20 발언은 본인 병렬 autoresearch 설계 얘기이고 03-09 글은 swarm 이 'going to work' 라 함. 나열 날짜는 5~7달. 합류 확인, 퇴사 보도 없음."
+  },
+  {
+   "id": "karpathy-06",
+   "claim": "에이전트 위에 조율·일정·문맥·지속을 맡는 층(Claws)이 생겼다. 개인 데이터와 열쇠를 400K 줄 코드에 맡기기 꺼려진다고 하며 노출된 인스턴스, RCE, 공급망, 악성 skill 을 든다. 약 4000줄 core 와 기본 컨테이너 격리를 좋게 본다.",
+   "src": "X 2026-02-20 Claws 글 | https://x.com/karpathy/status/2024987174077432126",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "lib+bin 은 1,357,332줄이다(측정). 적용은 셋: microVM·RemoteSSH 기본 격리(결정 13), 밖에서 오는 Skill·MCP server 출처 고정(builtin 은 SHA-256 있음, lib/server/builtin_skill_revision.mli:7-14), 비밀값·권한 모듈을 한 번 세어 지도로 남기기.",
+   "caveat": "400K 와 4000 은 그가 든 대략의 수이고 작으면 안전하다는 측정은 없다. 줄 수 상한을 CI 에 넣으면 결정 5 위반이다. 다계정 권한과 microvm_delivery 는 in_flight.",
+   "check": "verified 원문 그대로(embed 앞부분 일치, 뒷부분은 거울). 꺼림은 OpenClaw 한정이고 이유에 'vibe coded', 'actively attacked at scale' 이 붙음. NanoClaw 평가는 'on a quick skim'."
+  },
+  {
+   "id": "karpathy-07",
+   "claim": "에이전트가 만들고 사람이 검증한다. 병목은 사람이다. GUI 로 검증을 빠르게 하고, 한 번에 내놓는 양을 감사할 수 있는 중간 산출물로 묶는다(keep the AI on the leash). 코드 밖 산출물은 diff 를 보일 도구부터 만들어야 한다.",
+   "src": "YC AI Startup School 발표 Software Is Changing (Again) 19:53~25:31 | https://www.youtube.com/watch?v=LCEmiRjPEtQ",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "Keeper 수를 늘리기 전에 사람 확인 한 건의 시간을 줄인다. wiki·Artifact 변경을 보이는 화면과 사람 확인 대기열(수·나이) projection 이 후보다. dashboard/src 의 ts·tsx 1,758개에 wiki 는 0건이다.",
+   "caveat": "사람 한 명에 에이전트 다섯·열이라는 수는 그림이고 본인도 흔들렸다. 화면 문구·배치 시험은 만들지 않는다(결정 7). TUI 화면 문법 #51624 는 in_flight. 자막은 자동 생성이다.",
+   "check": "verified 독립 전사본과 자동 자막에서 19:53~25:31 문장 확인. 'Someone has to build it' 는 Dwarkesh 01:14:13 것이고 YC 에서는 질문형. 자막 직접 내려받기는 429 로 실패."
+  },
+  {
+   "id": "karpathy-08",
+   "claim": "context engineering: 다음 한 걸음에 맞는 정보로 context window 를 채운다. 모자라면 성능이 안 나오고, 넘치거나 무관하면 비용이 오르고 성능이 떨어질 수 있다. LLM 은 CPU, context window 는 memory 라는 비유와 짝이다.",
+   "src": "X 2025-06-25 context engineering 글 | https://x.com/karpathy/status/1937902205765607626",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "이미 타입으로 있다: layer 22개와 ordered(lib/keeper/keeper_context_layers.mli:15, 51), resend_on_resume(:78-91), receipt_to_json(:122). 넘치는 쪽 수치: glossary 447,081 bytes(36일에 1.5배), docs 2,612개. Draft glossary RFC 의 근거로 덧붙인다.",
+   "caveat": "정의와 권고이고 얼마부터 넘치는지 수치는 없다. layer 별 byte 통계로 임계값을 만들면 결정 3 위반이다. 그 통계 projection 이 이미 있는지는 확인 필요.",
+   "check": "verified 글 문장 그대로이고 'might' 도 유지됨. CPU·memory 비유는 이 글이 아니라 YC 발표 10:15 에 있음."
+  },
+  {
+   "id": "karpathy-09",
+   "claim": "제품에는 autonomy slider 가 있어야 한다. 모델은 기본값이 너무 agentic 하므로 요청마다 'just have a quick look' 부터 'come back when absolutely certain' 까지 의도와 무게를 알릴 방법이 필요하다.",
+   "src": "X 2025-08-09 글, YC 발표 18:22~21:24·27:34~28:35 | https://x.com/karpathy/status/1954224651443544436",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "Keeper 단위 손잡이는 있다(keeper_activation_mode.mli:4, keeper_lifecycle_gate.mli:15-18). 요청 단위 깊이는 provider 별 타입뿐이다(runtime_antigravity.mli:7, runtime_muse_msp.mli:111). System-One·Two 설계에서 깊이는 요청자가 선언한 값으로 받는다.",
+   "caveat": "바람이고 측정이 없다. docs/external-comparison-and-positioning.md:30 의 네 phase 이름은 지금 코드에서 못 찾았다. provider 중립 타입이 이미 있는지는 확인 필요.",
+   "check": "verified X 글과 YC 'there should be an autonomy slider in your product' 확인. 원문은 'a little too agentic by default, a little beyond my average use case' 로 claim 보다 약함."
+  },
+  {
+   "id": "karpathy-10",
+   "claim": "에이전트는 정보를 읽고 조작하는 새 사용자다. 문서는 markdown, 조작은 CLI·API·MCP 로 낸다. 문서가 '클릭하라'고 하면 에이전트는 못 쓴다. 2026 목록: structured logs, schema, 복사해 붙일 지시문, 안전한 권한, 감사 가능한 행동.",
+   "src": "Sequoia Ascent 2026 정리 글 10절, YC 발표 33:17~38:00 | https://karpathy.bearblog.dev/sequoia-ascent-2026/",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "MCP resource(config/mcp/resources.toml:15, 86, 100)와 tool 정의 225개가 이미 있다. 셀 수 있는 점검 하나: Dashboard·TUI 의 쓰기 조작 중 MCP tool·CLI 로 못 하는 것의 수(목표 0). 한 번 세는 감사이고 CI 검사가 아니다.",
+   "caveat": "권고이고 llms.txt 가 읽힌다는 측정은 없다. 저장소에 llms.txt 는 0건이며 그대로 추가하는 것은 권하지 않는다. Sequoia 글은 AI 가 만든 요약·대본을 본인이 읽은 것이다.",
+   "check": "verified Sequoia 글 10절 목록 열 항목 그대로. 그 글은 Codex 5.5 가 만든 요약을 본인이 읽고 올린 것. YC 의 'docs say click, this is bad' 도 확인."
+  },
+  {
+   "id": "karpathy-11",
+   "claim": "한 모델에 같은 것을 되풀이해 물으면 답이 모인다(silently collapsed). 열 번 물으면 다 같고 농담은 셋뿐이라고 한다. llm-council 은 서로의 답을 익명으로 심사시키고 의장 모델이 합친다.",
+   "src": "Dwarkesh 인터뷰 00:50:17~00:54:25, karpathy/llm-council README:9-11 | https://www.dwarkesh.com/p/andrej-karpathy",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "Fusion 자리는 후보를 차례로 시도해 답한 runtime 을 남긴다(lib/fusion/fusion_seat.mli:1-9, 30-35). 모든 자리가 한 runtime 으로 모인 run 을 projection 에서 가려 보인다. 강제하지 않는다.",
+   "caveat": "붕괴는 관찰담이고 모델을 섞으면 낫다는 측정은 없다. 서로 다른 모델 강제는 constitution.xml:190(cap 없음)과 failover 를 깬다. judge 가 답의 출처를 보는지는 확인 필요.",
+   "check": "verified 대본 00:50:17~00:54:25 와 llm-council README 9-11행 그대로. 붕괴 발언은 합성 데이터 학습 맥락. README 는 '99% vibe coded' 라 적고 효과 측정은 없음."
+  },
+  {
+   "id": "karpathy-12",
+   "claim": "지금 쓸 수 있는 기억은 가중치가 아니라 글이다. 본인 wiki 는 약 100편 40만 단어이고 index 파일만으로 버텼다고 한다. 가중치로 옮기는 길은 further exploration, not a fully developed science 라고 한다.",
+   "src": "X 2026-04-02 LLM Knowledge Bases 글, LLM Wiki gist | https://x.com/karpathy/status/2039805659525644595",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "wiki·index·log·lint 는 RFC 셋이 이미 반영했다. 더할 사실만: 살아 있는 wiki 는 항목 22개라 index 로 버티는 범위 안이고 masc_wiki_search 가 있다. librarian SFT 학습 단계를 닫은 결정과 어긋나지 않는다.",
+   "caveat": "한 사람의 wiki 하나이고 측정이 아니다. 저장소 RFC 도 '근거가 아니라 틀'이라고 적었다. 오래된 것을 가라앉히는 note 규칙은 최근성 대리 지표라 옮기지 않는다.",
+   "check": "overstated ~100 articles·~400K words, 'Further explorations', No Priors 32:17 'not a fully developed science' 확인. 글은 'index files and brief summaries' 이고 큰 질의용 검색 도구도 만들었다고 적음. '만으로'는 과함."
+  },
+  {
+   "id": "karpathy-13",
+   "claim": "에이전트 조직은 역할과 연결을 적은 markdown 파일 묶음으로 쓸 수 있고 그 묶음이 최적화 대상이 된다. 일은 큐 하나에서 worker 가 꺼내 시도하고 되는 것만 feature branch 에 올린다.",
+   "src": "No Priors 0:20:20~0:22:53 (2026-03-20) | https://www.youtube.com/watch?v=kwSVtQ7dziU",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "요구 14·15 에 닿는다. 세계관 묶음의 단위를 역할·연결을 적은 text 파일 묶음(config/prompts/keeper.md, Keeper 별 TOML)으로 잡는다. 묶음을 바꿔 끼우는 기능은 고정된 비교 측정과 같이 낸다.",
+   "caveat": "조직 파일을 바꿔 가며 잰 결과는 공개되지 않았다. 묶음에 금지·필수 규칙을 넣으면 결정 1 위반이다. 자막은 자동 생성이라 낱말 오류가 있다.",
+   "check": "verified 독립 대본 20:15~22:26 에서 확인. 원문은 'research organization' 이고 지시문 최적화는 'you can imagine' 수준의 구상. 측정 없음. 영상 자막은 직접 못 받음."
+  },
+  {
+   "id": "karpathy-14",
+   "claim": "만들기는 비싸고 확인은 싼 일이면 믿지 못하는 worker 가 낸 결과도 받을 수 있다. 확인은 믿는 쪽 worker 가 한다. 남이 보낸 코드를 그냥 돌리는 것은 very sketchy 라고 한다.",
+   "src": "No Priors 0:33:38~0:36:41 (2026-03-20) | https://www.youtube.com/watch?v=kwSVtQ7dziU",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "다계정·RemoteSSH 에서 남이 낸 결과를 받는 기준으로 쓴다: 확인이 생산보다 훨씬 쌀 때만 받고, 아니면 믿는 lane 에서 다시 한다. 코드를 돌려 확인할 때는 격리 안에서(lib/exec/sandbox_target.mli:114-115).",
+   "caveat": "블록체인에 빗댄 구상이고 구현도 측정도 없다. 같은 자리에서 아직 만족하는 구조가 없다고 했다. 다계정 권한(authz S1b, #51635, #51604)은 in_flight 라 다시 제안하지 않는다.",
+   "check": "verified 독립 대본 33:48~35:44 에서 확인('sketchy and dodgy'). 본인도 아직 'super happy' 한 설계가 없다고 하고, 확인에도 'a lot of work' 가 든다고 덧붙임."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "program.md 의 NEVER STOP·LOOP FOREVER 같은 명령문을 Keeper 지시문에 넣기",
+   "why_not": "결정 1. Keeper 지시문은 평서문이고 금지·필수 규칙을 넣지 않는다. 계속 도는 일은 Schedule·Proactive·queue 가 맡는다."
+  },
+  {
+   "idea": "5분 같은 고정 시간 예산으로 Keeper 턴을 자르기",
+   "why_not": "budget_gate(constitution.xml:464). autoresearch 의 5분은 실험끼리 비교하려는 평가 조건이고 에이전트를 묶는 장치가 아니다."
+  },
+  {
+   "idea": "leash 를 diff 줄 수나 chunk 크기 상한으로 구현하기",
+   "why_not": "magic_number(constitution.xml:446), 결정 3·5. 그가 든 다른 방법인 감사할 수 있는 중간 산출물을 쓴다."
+  },
+  {
+   "idea": "감사하기 쉽게 코드 줄 수 상한을 CI·lint 에 넣기",
+   "why_not": "결정 5. 비밀값·권한 모듈의 크기는 한 번 재서 지도로 남기는 데까지만 한다."
+  },
+  {
+   "idea": "NanoClaw 식으로 설정 파일 대신 Skill 이 코드를 고치게 하고 fork 하기 쉬운 저장소로 만들기",
+   "why_not": "요구 15(설정은 TOML·Markdown 외부화)와 success_bar(constitution.xml:260)에 어긋난다. 여러 사람이 쓰는 서버는 사람마다 fork 할 수 없다."
+  },
+  {
+   "idea": "append-and-review note 의 '오래된 것은 가라앉는다'를 기억 정리 규칙으로 쓰기",
+   "why_not": "결정 3. 최근성 대리 지표 위에 세운 설계다."
+  },
+  {
+   "idea": "wiki 로 합성 데이터를 만들어 fine-tuning 하거나 RL 환경·cognitive core 를 만들기",
+   "why_not": "MASC 는 Provider·Model Free 하네스다(constitution.xml:19). 사용자가 librarian SFT 학습 단계를 닫았고 그도 미성숙한 분야라고 한다."
+  },
+  {
+   "idea": "Software 3.0 을 '신경망이 다 한다'로 읽고 Ledger·Gate 를 LLM 판단으로 바꾸기",
+   "why_not": "Ledger 는 결정론인 evidence authority 다(결정 2). 그의 말도 기능마다 1.0·2.0·3.0 을 고르라는 것이다(YC 05:39~06:09)."
+  },
+  {
+   "idea": "Karpathy 를 agent swarm 이 된다는 근거로 인용하기",
+   "why_not": "그는 2026-01 'too much for right now', 2026-03 '만족하는 구조가 없다'고 했다. 여러 에이전트 조직은 2025-10 에도 설득력 있는 것을 못 봤다고 했다."
+  },
+  {
+   "idea": "아첨·성격 문제를 Keeper 프롬프트 문장으로 조정하기",
+   "why_not": "결정 1. 그도 지시 파일로 못 고쳤다고 적었다."
+  },
+  {
+   "idea": "'autocomplete 가 최적'(2025-10)을 근거로 Keeper 자율을 줄이기",
+   "why_not": "본인이 2026-01 에 코딩의 80% 를 에이전트로 한다고 뒤집었다. 낡은 주장이다."
+  },
+  {
+   "idea": "PR 마다 에이전트 여럿이 깨 보는 검사를 CI 에 넣기(Sequoia 글의 채용 시험에서 따온 것)",
+   "why_not": "결정 6. PR·병합 수에 비례하는 CI 비용이 생긴다."
+  },
+  {
+   "idea": "저장소에 llms.txt 를 글자 그대로 추가하기",
+   "why_not": "웹 문서를 긁어 읽는 LLM 용 관례다. MASC 에 붙는 에이전트는 MCP resource 와 masc://tool-help-index 로 들어온다. 이득을 잰 자료가 없다."
+  },
+  {
+   "idea": "Fusion 자리에 서로 다른 모델을 강제하기",
+   "why_not": "constitution.xml:190(cap 없음)과 failover 를 깬다. 섞으면 낫다는 측정도 없다. 한 runtime 으로 모인 run 을 보이는 데까지만 한다."
+  },
+  {
+   "idea": "'사람 1명에 에이전트 5' 같은 비율을 설계 상수로 쓰기",
+   "why_not": "측정이 아니라 그림이고 본인도 흔들렸다. magic_number 다."
+  },
+  {
+   "idea": "Gate 2 의 연속 성공 54번을 9 둘·셋 수준으로 올리기",
+   "why_not": "실패 없이 9 둘을 보이려면 299번, 셋은 2,995번이 든다. 시험 비용이 크다. 운영 receipt 를 표본으로 쓰는 projection 이 맞다."
+  }
+ ],
+ "unknowns": [
+  "2026-06-09 와 2026-10-31 사이의 X 글을 훑지 못했다. timeline endpoint 가 옛 인기 글만 돌려줬다. 블로그 색인에는 그 사이 글이 없다.",
+  "2026-11-06 'harness engineering' 글, 2026-11-07 'TristanTube', 2026-07 'live session' 인용은 2차 요약에서만 봤고 원문을 찾지 못해 쓰지 않았다.",
+  "autoresearch 수치(2.02h→1.80h→1.65h, 약 700개 중 약 20개)를 다른 사람이 재현했는지 모른다.",
+  "긴 X 글의 뒷부분은 api.fxtwitter.com 거울에서만 확인했다. 공식 embed 앞부분과는 24개 중 23개가 일치했다. 불일치한 2017703360393318587 은 근거로 쓰지 않았다.",
+  "자막은 자동 생성이라 시각이 30초 단위이고 낱말 오류가 있다. dwarkesh.com 시각은 YouTube 장 시각보다 약 48초 이르다.",
+  "안 읽은 것: Dwarkesh 인터뷰 교육 절(01:56:20 뒤), 블로그 power-to-the-people, llm-council 의 CLAUDE.md, Latent Space 대본(유료).",
+  "그의 Anthropic 팀이 낸 결과물에 대한 공개 1차 자료를 찾지 못했다.",
+  "확인 필요: 성공조건 변경 기록이 검증과 사람 확인 화면에 어떻게 보이는지.",
+  "확인 필요: provider 중립인 요청 단위 깊이 타입이 있는지. rg 로는 provider 별 타입 둘(runtime_antigravity.mli:7, runtime_muse_msp.mli:111)만 찾았다.",
+  "확인 필요: judge 가 Fusion panel 답의 출처 runtime 을 보는지. lib/fusion/*.mli 에서 자리끼리 다른 runtime 을 요구하는 계약은 못 찾았다.",
+  "확인 필요: Dashboard·TUI 에 wiki·Artifact 변경을 보이는 화면이 있는지. dashboard/src 의 ts·tsx 1,758개에 wiki 는 0건이다.",
+  "확인 필요: 밖에서 설치하는 Skill·MCP server 의 출처가 builtin 처럼 digest 로 고정되는지.",
+  "확인 필요: docs/external-comparison-and-positioning.md:23, 30 의 문장이 지금 Keeper_lifecycle_gate 타입(Reactive·Proactive·Autonomous)과 맞는지.",
+  "확인 필요: layer 별 byte 통계 projection 이 있는지, Keeper 가 사람에게 묻는 tool 의 비용, prompt 비교 도구(#51611)의 범위.",
+  "조사 중 checkout HEAD 가 다른 세션의 pull 로 efe98ca792c2 에서 77f7bec3039f 로 움직였다. 인용한 파일은 그 사이 바뀌지 않았다(git diff --name-only 0건). 줄 수는 77f7bec3039f 에서 다시 셌다."
+ ],
+ "conflicts_with_brief": [
+  "karpathy-14 (조건부): '확인이 생산보다 훨씬 쌀 때만 받는다'를 런타임 수락 규칙으로 구현하면 비용 비교 게이트가 된다 — forbidden#magic_number·#budget_gate, 결정 3, 결정 2(새 Gate, Keeper 간 재실행 의무), gates/order. 운영자 판단 기준으로만 쓰면 충돌 없음.",
+  "karpathy-09 (조건부): 요청 단위 깊이를 선언값으로 받는 것은 결정 3 과 맞지만, turn·time·token 상한으로 내리면 forbidden#budget_gate·결정 3 위반이고 Ledger 필드로 두면 결정 2 검토 대상이다. provider effort 로만 내리면 충돌 없음.",
+  "karpathy-06 (조건부): 밖에서 오는 Skill·MCP server '출처 고정'을 고정 안 된 것의 로드 거절로 구현하면 새 하드 게이트다 — gates/default·gates/order(success_bar 도달 뒤 하나씩), 결정 2. digest 기록·표시까지면 충돌 없음."
+ ]
+}

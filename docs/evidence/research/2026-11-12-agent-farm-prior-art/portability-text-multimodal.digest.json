@@ -1,0 +1,222 @@
+{
+ "key": "portability-text-multimodal",
+ "findings": [
+  {
+   "id": "portability-text-multimodal-01",
+   "claim": "Dream 은 템플릿 파일을 dune rule 로 OCaml 소스로 바꾸고, 끼우는 값에 Printf 변환 지정자로 타입을 준다. 템플릿을 파일에 두고도 호출부를 컴파일 때 검사하는 선례다. OCaml 표준 `Scanf.format_from_string` 은 읽어 온 문자열의 format 타입을 실행 중에 맞춰 본다.",
+   "src": "Dream example 7-template README (보조: OCaml 5.5 manual Scanf, Askama README) | https://github.com/aantron/dream/tree/master/example/7-template",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`lib/embedded_config/dune` 옆 dune rule 로 `config/prompts` 의 `template_variables`·`(vars: …)` 선언에서 labelled 함수 모듈을 생성한다. `Prompt_names` 373개와 render 호출 108곳(lib·bin)이 대상이다. 변수 오타와 빠진 변수가 기존 type-check 에서 걸리고 CI 실행은 늘지 않는다.",
+   "caveat": "Dream 은 템플릿이 곧 소스라 운영자 override 가 없다. MASC 는 서명만 생성하고 본문은 실행 중에 읽어야 한다. 선언 밖 변수를 쓴 override 는 `set_override` 가 계속 막는다. 변수 값은 전부 string 이다. Askama 는 WebFetch 요약으로 읽었다.",
+   "check": "verified README 의 dune rule, `<%s param %>` Printf 지정자, Scanf `format_from_string` 의 Scan_failure, Askama 'compile time' 문장이 원문 그대로다. 호출부 컴파일 검사는 코드 생성에서 끌어낸 추론이다. 저장소는 camlworks/dream 으로 옮겨졌다."
+  },
+  {
+   "id": "portability-text-multimodal-02",
+   "claim": "OpenClaw 는 미디어 해석기를 종류별 목록(provider 또는 CLI 항목)으로 선언하고, 오류·시간 초과·크기 초과면 다음 항목으로 넘어간다. 첨부마다 닫힌 처리 결과 하나를 남기고, 뽑아낸 글은 외부 내용 표지로 감싸며, 일부만 읽었으면 표시한다.",
+   "src": "OpenClaw docs — Media understanding | https://docs.openclaw.ai/nodes/media-understanding",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "코드에 고정된 `Keeper_media_reading.production_reader`(음성 STT, PDF Poppler, 그 외 `no_document_reader`)를 `runtime.toml` 의 종류별 reader 목록으로 바꾼다. 항목은 닫힌 합(내장, MCP 도구, runtime)이고 실패 이유는 string 대신 variant 로 남긴다. H5 범위를 넓히므로 RFC 가 먼저다.",
+   "caveat": "측정이 아니라 제품 문서다. 숫자 기본값(500자, 첨부 1개, 표지 5개)의 근거가 없어 가져오지 않는다. 성공한 설명이 원본 픽셀을 대신하는 동작도 H5 원칙과 반대라 가져오지 않는다.",
+   "check": "misquoted 원문은 'one capability-tagged model list'(36행)다. 항목마다 capabilities 태그를 단 목록 하나이고 종류별 목록이 아니다. 다음 항목 넘어감(27행), 닫힌 disposition(281행), 외부 내용 표지(270행), Partial 표지(280행)는 맞다."
+  },
+  {
+   "id": "portability-text-multimodal-03",
+   "claim": "MCP 2026-07-28 은 Sampling 을 deprecated 로 내리고 LLM provider API 에 직접 붙으라고 적는다. 도구 결과 블록은 text, image, audio, resource_link, embedded resource 다섯이고 annotations 와 structuredContent 가 붙는다. video 종류는 없다.",
+   "src": "Model Context Protocol specification 2026-07-28 — Changelog, Tools, Sampling | https://modelcontextprotocol.io/specification/2026-07-28/changelog",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "외부 해석기는 MCP 도구나 MASC runtime 으로 붙이고 Sampling 은 설계에서 뺀다. `Mcp_client.text_of_content` 가 비텍스트 블록을 `[image]` 로 바꾸는 자리에서 `ToolResult.content_blocks` 로 decode 하고, 모델이 못 받는 종류는 H5 projection 이 읽기로 바꾼다.",
+   "caveat": "`docs/research/2026-10-27-mcp-2026-07-28-parity.md` 가 multimodal 검증을 이미 open 으로 적었고 MRTR 은 그 문서의 범위다. video 는 `resource_link` 로만 들어온다. Keeper 호출부는 지금 `Mcp_client.model_text` 만 쓴다.",
+   "check": "verified changelog §Deprecated 1 이 Sampling 을 내리고 'integrate directly with LLM provider APIs' 라고 적는다. tools 의 다섯 종류·annotations·structuredContent, schema.ts ContentBlock 합에 video 없음을 확인했다. 2026-07-28 이 지금 판이다."
+  },
+  {
+   "id": "portability-text-multimodal-04",
+   "claim": "같은 Agent Spec 정의를 runtime 넷에서 돌리자 점수가 달랐다. τ²-Bench Pass^1 은 GPT-4.1 에서 62.5~73.5(Table 5), SimpleQA F1 은 Llama 3.3 70B 에서 54.9~82.3(Table 3)이다. 저자는 runtime 이 system prompt 를 감싸는 방식 차이를 원인으로 든다.",
+   "src": "Open Agent Specification (Agent Spec): A Unified Representation for AI Agents, arXiv:2510.04173v4 | https://arxiv.org/abs/2510.04173",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "`Prompt_preset.capture` 는 `default_revisions` 는 적지만 기본 runtime, sandbox·network 설정, skill 은 적지 않는다. 이것을 묶음에 기록하고 restore 때 지금 값과의 차이를 `default_comparison` 처럼 관측으로만 보여 준다. 복원을 막지 않는다.",
+   "caveat": "저자가 명세를 만든 팀이고 결과를 'consistent behavior' 로 요약한다. 점수의 반복 분산이 표에 없다. BIRD-SQL 은 0.6점 차이(Table 4)라 과제에 따라 다르다.",
+   "check": "overstated Table 3·5 수치는 v4(최신)와 같다. 'wrap the system prompt' 설명은 τ²-Bench 에만 붙고 도구 요청 방식 차이도 원인으로 든다. SimpleQA 의 AutoGen 54.9 는 non-native tool calling 미지원 탓이다. 저자는 'consistent behavior' 로 요약한다."
+  },
+  {
+   "id": "portability-text-multimodal-05",
+   "claim": "Hermes distribution 은 묶음 소유(SOUL, mcp.json, skills, cron)와 사용자 소유(memories, sessions, auth.json, .env)를 가르고 update 때 앞쪽만 교체한다. 묶음이 가져온 cron job 은 멈춘 채 설치된다. Letta `.af` 와 Agent Spec 도 비밀값을 싣지 않는다.",
+   "src": "Hermes Agent docs — Profile distributions (보조: Letta agent-file README, Agent Spec 26.3.1) | https://hermes-agent.nousresearch.com/docs/user-guide/profile-distributions",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "세계 묶음의 범위를 variant(지시문, prompt override, runtime 배정, lane)로 선언하고 import 는 그 범위만 바꾼다. 비밀값·기억·원장은 variant 에 자리가 없다. 덮어쓰기냐 교체냐, 밖에서 온 autonomous Keeper 를 바로 띄울지는 사용자 결정으로 올린다.",
+   "caveat": "Hermes 는 서명·lockfile·dry-run 이 아직 없다고 스스로 적는다. Letta `.af` 와 Hermes `/export` 는 기억을 싣는 통째 옮기기라 요구 20 쪽이다. keeper TOML 에 비밀값 필드가 있는지는 확인하지 않았다.",
+   "check": "overstated 소유 구분, cron 'installed paused', Letta null, Agent Spec 비밀값 제외는 맞다. 다만 update 는 통째 교체가 아니다. skills 는 항목별 병합, cron/jobs.json 은 job id 별 병합(로컬 job 유지), config.yaml 은 기본 보존이다."
+  },
+  {
+   "id": "portability-text-multimodal-06",
+   "claim": "OmniDocBench Table 3 에서 문서 reader 의 순위가 문서 종류에 따라 뒤집힌다. 편집 거리 기준 MinerU 는 논문 0.025, 노트 0.984 이고 Qwen2-VL-72B 는 0.085 와 0.168 이다. 신문은 GPT4o 0.751, MinerU 0.171 이다.",
+   "src": "OmniDocBench: Benchmarking Diverse PDF Document Parsing with Comprehensive Annotations, arXiv:2412.07626v2 | https://arxiv.org/abs/2412.07626",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "reader 를 하나로 고정하지 않고 종류별 목록으로 선언한다. 읽기 기록에 reader id 를 남겨 어느 reader 가 무엇을 읽었는지 비교할 수 있게 한다. 지금 기록은 `reader_version` 만 있고 H5 설계 문서의 `reader = {id; version}` 과 어긋난다.",
+   "caveat": "영어·중국어 981쪽이고 한국어 수치는 없다. 2024년 12월 논문의 도구 버전이다. Docling Table 1 은 225쪽에 6.20 GB 를 쓴다고 적어 sandbox 자원 경계가 필요하다.",
+   "check": "outdated 수치는 arXiv v2 Table 3 과 같다. 벤치마크는 2025-09-25 v1.5 에서 노트·신문 그림을 72→200 DPI 로 올리고 374쪽을 더했다. 지금은 v1.7 이다. 인용한 노트·신문 값은 고치기 전 데이터다."
+  },
+  {
+   "id": "portability-text-multimodal-07",
+   "claim": "Whisper API 로 13,140개 음성 구간을 전사하자 1.4% 구간에서 원본에 없는 문장이 나왔다(§3). 지어낸 글의 38% 가 해로운 유형이고, 말이 없는 구간이 길수록 더 자주 나왔다(§4.2).",
+   "src": "Careless Whisper: Speech-to-Text Hallucination Harms, arXiv:2402.08021v2 | https://arxiv.org/abs/2402.08021",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "전사문을 파생 주장으로 다룬다. `Keeper_media_reading` 기록의 `text` 한 덩어리를 구간 목록(시간 범위, 쪽 번호)으로 바꿔 의심 대목을 원본에서 다시 확인할 수 있게 한다. 원본 보존과 'derived' 표시는 H5 가 이미 한다.",
+   "caveat": "2023년 4~5월의 Whisper API 와 미국 영어 화자다. 한국어와 지금 MASC 의 STT endpoint 에서의 비율은 모른다. endpoint 가 구간 시각을 돌려주는지도 확인하지 않았다.",
+   "check": "verified 13,140 구간, 1.4%(§1·§3), 지어낸 전사의 38% 해로운 유형(§3), §4.2 Table 2 의 긴 무음과의 연관이 v2(최신)에 있다. 초록은 'roughly 1%'. 2023년 Whisper API, 실어증 연구의 영어 화자 자료다."
+  },
+  {
+   "id": "portability-text-multimodal-08",
+   "claim": "Character Card V2 는 `extensions` 의 모르는 키를 지우지 말라고 한다. V3 는 PNG tEXt·JSON·CHARX(zip) 세 운반 형식, 덧붙이기만 하는 `source` 이력, 모르는 `spec_version` 도 거절하지 말라는 규칙을 둔다.",
+   "src": "Character Card V3 Specification (보조: Character Card V2 Specification) | https://github.com/kwaroran/character-card-spec-v3/blob/main/SPEC_V3.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "가져올 것은 둘이다. 묶음 manifest 에 덧붙이기만 하는 `source` 이력을 두고, 디렉터리와 압축 파일 하나가 같은 manifest 를 쓴다. 버전은 `Prompt_preset` 의 `schema_version` 정확히 일치를 유지한다.",
+   "caveat": "앱이 여럿인 생태계의 호환 규칙이다. 모르는 필드 무시와 lorebook 의 keyword·regex 활성화는 `strict_parse_no_default`·`string_matching` 과 반대라 가져오지 않는다. V3 는 605줄 중 앞 425줄쯤 읽었다.",
+   "check": "verified V2 extensions 'MUST NOT destroy unknown key-value pairs', V3 의 PNG tEXt·JSON·CHARX, source 덧붙이기, spec_version 'SHOULD NOT reject' 가 원문에 있다. 둘 다 SHOULD 이고 해로운 source 항목은 지울 수 있다."
+  },
+  {
+   "id": "portability-text-multimodal-09",
+   "claim": "같은 내용을 plain text·Markdown·JSON·YAML 로 바꾸자 GPT-3.5-turbo 의 코드 번역 성능이 최대 40% 달라졌다(초록). 잘 맞는 서식의 모델 계열 간 겹침(IoU)은 흔히 0.2 미만이었다(§5). GPT-4-turbo 는 덜 민감했다.",
+   "src": "Does Prompt Formatting Have Any Impact on LLM Performance?, arXiv:2411.10541v1 (보조: TOML 1.0.0 명세) | https://arxiv.org/abs/2411.10541",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "글을 코드에서 파일로 옮기는 PR 은 렌더한 프롬프트의 SHA-256 을 앞뒤로 비교해 본문에 적는다. `default_revisions` 해시를 그대로 쓰고 CI 는 더하지 않는다. 산문은 Markdown, 구조는 TOML 에 둔다. TOML 의 세 겹 큰따옴표 문자열은 escape 를 처리한다.",
+   "caveat": "GPT 계열만 쟀고 2024년 모델이다. 지금 MASC 가 쓰는 모델에서의 크기는 모른다. keeper TOML 에 backslash 줄은 0개라 TOML escape 위험은 아직 일어나지 않았다.",
+   "check": "verified 초록 'up to 40%', §5 'IoU often below 0.2'(다른 계열 사이), §1 GPT-4-turbo 'greater resilience' 가 원문에 있다. OpenAI GPT 4종만 쟀다. TOML 1.0.0 의 세 겹 큰따옴표 escape 처리도 맞다."
+  },
+  {
+   "id": "portability-text-multimodal-10",
+   "claim": "gettext 는 원문 문자열이 식별자라 원문을 고치면 번역이 전부 fuzzy 가 된다. Fluent 는 개발자가 식별자를 정한다. MessageFormat 2 는 오류를 알리되 fallback 값으로 결과를 내도록 요구한다.",
+   "src": "Project Fluent wiki — Fluent vs gettext (보조: MessageFormat 2 spec/errors.md) | https://github.com/projectfluent/fluent/wiki/Fluent-vs-gettext",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "`ui_text ~ko ~en`(lib·bin 34개 파일, `~ko:` 1,442번)을 파일로 뺀다면 catalog 에서 OCaml 을 생성해 언어 누락과 placeholder 불일치를 빌드 오류로 만든다. 진행 중인 TUI 화면 문법 캠페인에 넘길 입력이고 따로 제안하지 않는다.",
+   "caveat": "Fluent 쪽이 쓴 비교다. UI 는 fallback 이 맞지만 모델용 프롬프트는 실패를 드러내야 한다. 지금 인라인 형태는 두 언어를 다 써야 컴파일되므로 외부화하면 잃는 보장이 있다. gettext c-format 쪽은 원문 미직독이다.",
+   "check": "verified gettext 식별자는 원문, 'any change to the source string invalidate all translations'(fuzzy), Fluent 는 개발자 식별자, MF2 는 오류 발견 MUST 와 유효 메시지 결과 MUST(fallback 'might include')다. 비교 글은 Fluent 쪽이 썼다."
+  },
+  {
+   "id": "portability-text-multimodal-11",
+   "claim": "영상을 구간 캡션으로 바꿔 LLM 이 글만 보고 답하게 하면 캡션 도구가 정확도를 정한다. EgoSchema Subset 에서 LLaVA 45.2, LaViLa 55.2, 사람 캡션 66.0 이다(Table 1). 질문을 알고 요약하면 55.2 에서 58.8 로 오른다(Table 5).",
+   "src": "A Simple LLM Framework for Long-Range Video Question-Answering (LLoVi), arXiv:2312.17235v3 | https://arxiv.org/abs/2312.17235",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "영상 읽기는 음성 트랙 전사와, Keeper 가 sha256·시간 범위를 주면 그 구간 프레임을 돌려주는 도구로 나눈다. 당겨 오는 방식이라 누적 상한이 필요 없다. content block 에 Video 가 없으므로 Board `Video` 첨부의 입력 경로부터 확인한다.",
+   "caveat": "2023~2024 모델과 1인칭 영상 데이터다. Gemini 문서의 Agentic 모드 효율 수치(88%, 7%)는 벤더 주장이고 평가 방법이 없다. MASC 에 영상 입력 경로가 있는지 확인하지 않았다.",
+   "check": "verified Table 1(LLaVA 45.2, LaViLa 55.2, Oracle 66.0)과 Table 5(55.2→58.8)가 v3(최신)에 있다. LLM 도 정확도를 바꾼다(Table 2: 50.8~61.2). '정한다'보다 '크게 좌우한다'가 원문에 가깝다."
+  },
+  {
+   "id": "portability-text-multimodal-12",
+   "claim": "provider 가 문서를 직접 받을 때 처리가 다르다. Anthropic 은 PDF 쪽마다 이미지와 추출 글을 같이 주고 최대 600쪽이다. OpenAI 는 vision 모델에서 PDF 의 글과 쪽 이미지를 주고, PDF 가 아닌 문서는 글만, 스프레드시트는 시트당 1,000행만 준다.",
+   "src": "Anthropic docs — PDF support (보조: OpenAI File inputs guide, Anthropic Citations) | https://platform.claude.com/docs/en/build-with-claude/pdf-support",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "failover 뒤에도 같은 사실을 유지할 공통 형식은 MASC 의 읽기 기록이다. H5 처럼 candidate 가 못 받을 때만 읽기를 넣는다. 구간 타입은 Citations 의 쪽·글자 범위·블록 번호 구분을 선례로 삼는다.",
+   "caveat": "한도와 동작은 2026-11-12 문서 기준이고 바뀐다. document 라우팅이 `supports_multimodal_inputs` 를 보고 직렬화가 `supports_document_input` 을 보는 어긋남의 결과는 확인하지 않았다.",
+   "check": "verified Anthropic 쪽 이미지와 추출 글, 최대 600쪽(context 1M 미만이면 100쪽), OpenAI vision 모델의 PDF 글과 쪽 이미지, 다른 문서는 글만, 시트당 첫 1,000행과 요약이 원문에 있다. Citations 위치 세 종류도 맞다."
+  },
+  {
+   "id": "portability-text-multimodal-13",
+   "claim": "Claude Code plugin 의 version 은 manifest, marketplace 항목 순으로 읽고 둘 다 없으면 commit SHA 나 archive SHA-256 을 12자로 줄여 계산한다. manifest 에 version 을 고정하면 저자가 문자열을 바꿀 때까지 사용자는 옛 사본에 머문다. `sha256` pin 과 다르면 받기를 거절한다.",
+   "src": "Claude Code docs — plugin loading (보조: marketplace reference, plugins reference) | https://code.claude.com/docs/en/plugins/loading",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "세계 묶음의 id 는 내용의 SHA-256 으로 하고 사람이 올리는 version 은 표시용으로 둔다. 원격에서 받을 때 기대 해시와 다르면 설치하지 않는다. `default_revisions` 가 이미 같은 해시를 쓴다.",
+   "caveat": "모르는 최상위 키를 떼어 내고 경고만 하는 정책은 MASC 의 strict parse 와 반대라 가져오지 않는다. 묶음을 주고받는 일은 다계정 캠페인 뒤에야 실제로 필요해진다.",
+   "check": "verified manifest, marketplace 항목, source 계산(commit SHA·archive SHA-256 12자) 순서, 고정 version 이 옛 사본에 묶는 문장, sha256 불일치 거절이 원문에 있다. npm·로컬 디렉터리는 unknown, command 는 늘 hash 다."
+  },
+  {
+   "id": "portability-text-multimodal-14",
+   "claim": "Agent Skills 명세에는 버전 필드가 없고 client guide 는 느슨한 검증(경고하되 로드)과 `.agents/skills` 공용 경로를 권한다. AGENTS.md 는 필수 필드가 없고 디렉터리 tree 에서 가장 가까운 파일이 우선한다.",
+   "src": "Agent Skills Specification (보조: client implementation guide, agents.md) | https://agentskills.io/specification",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "Codex 같은 공식 클라이언트 runtime 의 Keeper 는 cwd 의 `AGENTS.md` 와 `.agents/skills` 도 읽는다(`lib/keeper/keeper_codex_runtime.ml:942`). 묶음은 이것을 복사하지 않고 skill 이름·해시와 `AGENTS.md` 유무만 기록해 두 base path 의 차이가 보이게 한다.",
+   "caveat": "느슨한 로더와 깨진 YAML 고쳐 읽기는 `strict_parse_no_default` 와 반대라 가져오지 않는다. 명세 자체는 `docs/research/2026-11-01-skills-authoring-and-observation.md` 가 이미 인용한다.",
+   "check": "verified 명세에 버전 필드 없음(metadata.version 예시), guide 'Warn on issues but still load', .agents/skills 공용 관례, AGENTS.md 필수 필드 없음과 가까운 파일 우선이 원문에 있다. 코드 주석은 base_path 를 cwd 로 쓰지 않는다고 적는다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "lorebook 식 keyword·regex 활성화(Character Card `keys`, `use_regex`, decorator)로 조건부 맥락 넣기",
+   "why_not": "헌법 `string_matching` 금지에 걸린다. 조건에 따라 맥락을 넣어야 하면 `when_stuck` 대로 Lane 판정을 쓴다."
+  },
+  {
+   "idea": "느슨한 로더: 모르는 필드 무시, 다른 버전도 수용, 깨진 YAML 고쳐 읽기(Agent Skills client guide, Character Card V3)",
+   "why_not": "`strict_parse_no_default` 와 반대다. `Prompt_preset` 은 `schema_version` 이 다르면 거절한다(`lib/prompt_preset.ml:359-366`). 고쳐서 읽기는 repair 라 워크어라운드 거부 기준에도 걸린다."
+  },
+  {
+   "idea": "version 필드가 없으면 최신으로 읽기, 1년 deprecation cycle 과 schema migration(Agent Spec, Letta roadmap)",
+   "why_not": "모르는 값을 기본값으로 바꾸는 모양이다. hard cut 은 지우고 설치다(brief §2.8, 헌법 `legacy_residue`). 호환 reader 와 migration 을 만들지 않는다."
+  },
+  {
+   "idea": "묶음이 기본 system prompt 를 통째로 대체(Character Card `system_prompt` 와 `{{original}}`)",
+   "why_not": "managed prompt 는 부팅 때 바이너리에서 다시 동기화되고 세계는 keeper instructions 로만 표현한다(`docs/design/world-presets.md:273-274`). 기본 프롬프트까지 바꾸면 세계 비교의 통제가 깨진다."
+  },
+  {
+   "idea": "MCP Sampling 으로 외부 서버가 MASC 의 모델을 빌려 미디어를 해석",
+   "why_not": "MCP 2026-07-28 이 Sampling 을 deprecated 로 내리고 새 구현은 채택하지 말라고 적는다. 해석기는 도구나 MASC runtime 으로 붙인다."
+  },
+  {
+   "idea": "OpenClaw 의 숫자 기본값 복사(maxChars 500, 첨부 1개, 건너뜀 표지 5개)",
+   "why_not": "문서에 근거가 없다. 헌법 `magic_number` 에 걸린다. 숫자는 payload 크기와 deadline 같은 자원 경계에만 둔다."
+  },
+  {
+   "idea": "성공한 읽기(설명·전사)로 원본 블록을 대신하기",
+   "why_not": "OpenClaw 문서 스스로 화면·UI 검토에는 쓰지 말라고 적는다. H5 는 원본을 이력에 남기고 candidate 가 못 받을 때만 읽기를 넣는다. Whisper 전사는 1.4% 구간에서 지어냈다."
+  },
+  {
+   "idea": "`uri` 를 받아 스스로 가져오는 범용 변환 도구(MarkItDown MCP 등)를 Keeper 권한으로 연결",
+   "why_not": "H5 가 `Url`·`File_id` 를 가져오지 않기로 정했다. MarkItDown 은 현재 프로세스 권한으로 I/O 하고 로컬의 믿는 agent 용이라고 적는다. reader 에는 bytes 만 준다."
+  },
+  {
+   "idea": "Jinja 기본 `Undefined`(빈 문자열)나 BAML 의 JSON 자동 교정 같은 조용한 치환·repair",
+   "why_not": "저장소가 이미 겪은 실패다. `test/test_prompt_templates_render.ml:1-14` 가 조용히 짧아진 프롬프트를 적는다. 쓸 때 검증하고 읽을 때 거부한다."
+  },
+  {
+   "idea": "가져온 지시문을 prompt injection 패턴 문자열 검사로 막기(Hermes SOUL.md 방식)",
+   "why_not": "`string_matching` 금지에 걸린다. import 전 차이 보여 주기와 사람의 확인으로 하고, 판정이 필요하면 Lane 을 쓴다."
+  },
+  {
+   "idea": "PR 마다 프롬프트 평가(eval)를 CI 로 돌려 외부화 회귀를 잡기",
+   "why_not": "PR 수에 비례하는 CI 비용을 늘린다(brief §2.6). 헌법은 PR push 로 자동 CI 를 시작하지 않는다. 렌더 결과 SHA 비교 한 번으로 대신한다."
+  },
+  {
+   "idea": "PNG tEXt chunk(초상화 그림)에 세계를 실어 주 운반 형식으로 쓰기",
+   "why_not": "초상화 장신구 codec 은 그림 설명이지 소유 권한이 아니다(`lib/keeper_portrait/keeper_portrait_equipment.mli:1-2`). 그림에 설정 authority 를 실으면 Candle 절과 섞인다. 세계 이름을 보여 주는 projection 까지만 가능하다."
+  },
+  {
+   "idea": "`extensions` 가방(모르는 키 보존)을 지금 manifest 에 넣기",
+   "why_not": "두 번째 생산자가 없다. 지금 넣으면 부르는 곳 없는 층이다. 필요해지면 선언된 불투명 필드로 넣는다."
+  },
+  {
+   "idea": "gettext 식으로 원문 문자열을 식별자로 쓰는 UI catalog",
+   "why_not": "원문을 조금만 고쳐도 번역이 전부 fuzzy 가 된다(Fluent wiki). 식별자는 개발자가 정한 variant 로 둔다."
+  }
+ ],
+ "unknowns": [
+  "세계를 갈아 끼운 뒤 이어받은 공식 클라이언트 세션(Codex, Claude Code, Muse)이 옛 지시문을 기억한 채 도는지. `docs/design/world-presets.md:149` 는 다음 up 에서 반영이라고만 적는다. 확인 필요.",
+  "서식 민감도가 지금 MASC 가 쓰는 모델에서 얼마나 큰지. 읽은 연구는 2023~2024 모델이고 GPT 계열 중심이다.",
+  "`otoml` 이 TOML 1.1 문법을 어디까지 읽는지. README 에서 확인하지 못했다.",
+  "BAML v1 이 템플릿 변수 참조를 컴파일 때 검사하는지. 읽은 문서는 v0 legacy 로 표시돼 있고 그런 문장을 찾지 못했다.",
+  "Dotprompt 가 입력이 `input.schema` 와 다를 때 무엇을 하는지. reference 쪽에 없다.",
+  "gettext `c-format` 쪽 원문. HTTP 429 로 원문 미직독이다.",
+  "Gemini Agentic 영상 처리 모드의 88%·7% 수치가 어떤 평가에서 나왔는지. 문서에 방법이 없다.",
+  "한국어 문서와 한국어 음성에서의 reader 품질. OmniDocBench 는 영어·중국어, Careless Whisper 는 미국 영어다.",
+  "Letta `.af` 가 schema 가 다른 파일을 지금 어떻게 다루는지. README 는 migration 을 roadmap 미완료로 둔다.",
+  "`supports_multimodal_inputs` 와 `supports_document_input` 이 어긋나는 capability row 에서 문서 블록이 어떻게 되는지(`lib/runtime/runtime_agent.ml:420` 대 `capabilities.mli:201-206`).",
+  "Board `Video` 첨부가 Keeper 턴 입력으로 들어오는 경로가 있는지. content block 과 요구 modality 에는 video 가 없다.",
+  "모델에 나가는 문장이 코드에 남은 곳의 전체 수. `lib/keeper/keeper_media_reading.ml:211-250` 한 곳만 확인했다.",
+  "keeper TOML 에 비밀값이 들어갈 수 있는 필드가 있는지. 있으면 seed 프리셋의 파일 통째 복사를 필드 단위 내보내기로 바꿔야 한다.",
+  "내장 STT endpoint 가 구간 시각을 돌려주는지. 읽기 기록에 시간 범위를 넣으려면 필요하다.",
+  "Agent Spec 논문 점수의 반복 실행 분산. Table 3~5 에는 시간에만 ± 가 있어 runtime 사이 차이가 잡음보다 큰지 표만으로는 모른다.",
+  "seed 프리셋을 운영 중에 `/preset restore` 로 갈아 끼우는 경로가 있는지. `Prompt_preset` 은 `manifest.json` 을 읽고 seed 는 `manifest.txt` 를 쓴다. 경로를 찾지 못했다."
+ ],
+ "conflicts_with_brief": []
+}

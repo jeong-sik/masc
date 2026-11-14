@@ -27,6 +27,7 @@ type t =
 
 let empty = { by_id = Registration_map.empty; open_by_identity = Identity_map.empty }
 let find t registration_id = Registration_map.find_opt registration_id t.by_id
+let bindings t = Registration_map.bindings t.by_id
 
 let find_open t identity =
   match Identity_map.find_opt identity t.open_by_identity with

@@ -134,6 +134,15 @@ val acting
   -> Authz_browser_request.request
   -> (Authz_browser_session.Cookie.t * Authz_browser_session.signed_in, answer) result
 
+(** For a route that reads the state of an installation for an Admin (the
+    allowlist of plan L2d): the state of the snapshot that judged the session
+    of [request], once the principal of that session is an Admin in the same
+    snapshot. A read that allows something without a commit reads a trusted
+    snapshot ({!Authz_zone.read}), and the session, the role and what the
+    route answers then agree. The error is the refusal of {!acting}, or a 403
+    JSON [{"error": ...}] for a principal that is not an Admin. *)
+val admin_reading : t -> Authz_browser_request.request -> (Authz_state.t, answer) result
+
 (** A JSON object answer with [cache-control: no-store]. *)
 val json : status -> (string * Yojson.Safe.t) list -> answer
 

@@ -721,12 +721,15 @@ let validate_execution (execution : execution_result) =
   | (Call_ended (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Call_refused _), Some _ ->
       Error "original failure cannot retain a successful execution receipt"
 
+(* A proof names its request by [request_id] and [digest] and does not hold
+   it. The Exact record is the one place that holds the request, and every
+   reader below is given that request by its caller. *)
 let proof_to_json ~store ~declaration_id bound ~schema ~attempt_ordinal execution =
   let request = Digested.request bound in
   `Assoc ["version", `Int 1; "kind", `String "exact-original-execution";
     "store_root", `String (Lane_addon_store.root store); "declaration_id", `String declaration_id;
     "request_id", `String request.request_id; "digest", `String (Digested.digest bound);
-    "request", request_to_json request; "schema", schema; "attempt_ordinal", `Int attempt_ordinal;
+    "schema", schema; "attempt_ordinal", `Int attempt_ordinal;
     "outcome", outcome_to_json execution.outcome;
     "receipt", Keeper_exact_walk_receipt.to_json execution.receipt]
 
@@ -812,21 +815,22 @@ let load_proofs ~store ~declaration_id bound =
   decode_proofs ~store ~declaration_id bound wire
 
 let proof_request_id ~declaration_id ~file_name json =
-  let* request = match json with
+  let* request_id, digest = match json with
     | `Assoc fields -> (match List.assoc_opt "executions" fields with
         | Some (`List (`Assoc first :: _)) ->
-          (match List.assoc_opt "request" first with
-           | Some request -> request_of_json request
-           | None -> Error "missing original execution request")
+          (match List.assoc_opt "request_id" first, List.assoc_opt "digest" first with
+           | Some (`String request_id), Some (`String digest) -> Ok (request_id, digest)
+           | (Some _ | None), (Some _ | None) ->
+             Error "original execution link names no request ID and digest")
         | Some _ | None -> Error "original execution link requires nonempty completed attempts")
     | _ -> Error "original execution link must be an object" in
   (* The sweep binds this file to no caller's request. It only checks that the
-     file holds the request its name says. *)
-  let request_key = proof_request_key ~request_id:request.request_id ~digest:(digest request) in
+     file is stored under the request ID and digest it names. *)
+  let request_key = proof_request_key ~request_id ~digest in
   if String.equal file_name
       (Filename.basename (Lane_addon_store.host_result_path
         ~instance_id:(proof_instance_id ~declaration_id) ~request_id:request_key))
-  then Ok request.request_id
+  then Ok request_id
   else Error "original execution link is stored under another request's name"
 
 let selected_proof ~attempt_ordinal proofs =

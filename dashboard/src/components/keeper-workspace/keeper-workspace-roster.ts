@@ -794,6 +794,7 @@ export function KeeperWorkspaceRoster({
               items=${items}
               estimatedItemHeight=${ROSTER_ROW_ESTIMATED_HEIGHT}
               className="kw-roster-list roster-list"
+              scrollBox="self"
               renderItem=${renderItem}
               getKey=${getKey}
             />`

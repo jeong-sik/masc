@@ -17,8 +17,8 @@ import { VirtualList } from '../common/virtual-list'
 const LIST_LABEL = '대기 나이순 작업 흐름'
 
 /** Height the list assumes for a row it has not measured yet. A collapsed row
- *  with its gap is 40.25px under the app's full style set, and the list keeps
- *  measured heights in whole pixels; this is the next whole pixel above both.
+ *  with its gap is 40.25px under the app's full style set; this is the next
+ *  whole pixel above it.
  *  The list replaces the estimate once a row mounts. An estimate above the
  *  real height shrinks the list under a jump to its end, which leaves the jump
  *  at the end; one below it grows the list and leaves the jump short of it. */
@@ -117,6 +117,7 @@ export function KeeperLaneInventoryWindow({ rows, renderRow }: Props): VNode {
         renderItem=${renderItem}
         estimatedItemHeight=${COLLAPSED_ROW_PITCH_PX}
         className="max-h-[30rem] overflow-y-auto"
+        scrollBox="self"
         tabIndex=${-1}
         ariaLabel=${LIST_LABEL}
       />

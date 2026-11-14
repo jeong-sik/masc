@@ -1,7 +1,7 @@
 // Full inventory view with filters, search, and virtual list
 
 import { html } from 'htm/preact'
-import { useEffect, useRef, useCallback } from 'preact/hooks'
+import { useEffect, useState, useCallback } from 'preact/hooks'
 import { ActionButton } from '../common/button'
 import { VirtualList } from '../common/virtual-list'
 import { EmptyState } from '../common/feedback-state'
@@ -47,7 +47,9 @@ export function FullInventoryView({
   loading: boolean
   error: string | null
 }) {
-  const listContainerRef = useRef<HTMLDivElement>(null)
+  // The box that scrolls the tool list. It is state, not a ref: the list reads
+  // its scroll position from this element and so renders once it exists.
+  const [listContainer, setListContainer] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (route.value.tab !== 'lab' || route.value.params.section !== 'tools') return
@@ -55,23 +57,24 @@ export function FullInventoryView({
     searchQuery.value = q ?? ''
   }, [route.value.tab, route.value.params.section, route.value.params.q])
 
-  const handleScroll = useCallback(() => {
-    const el = listContainerRef.current
-    if (!el) return
-    showBackToTop.value = el.scrollTop > 500
-  }, [])
-
   useEffect(() => {
-    const el = listContainerRef.current
-    if (!el) return
-    el.addEventListener('scroll', handleScroll, { passive: true })
-    return () => el.removeEventListener('scroll', handleScroll)
-  }, [handleScroll])
+    if (!listContainer) return
+    const handleScroll = () => {
+      showBackToTop.value = listContainer.scrollTop > 500
+    }
+    listContainer.addEventListener('scroll', handleScroll, { passive: true })
+    return () => listContainer.removeEventListener('scroll', handleScroll)
+  }, [listContainer])
 
   const scrollToTop = useCallback(() => {
-    const el = listContainerRef.current
-    if (el) el.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [])
+    listContainer?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [listContainer])
+
+  // The list measures the element around a row, so the room between two cards
+  // is that element's padding.
+  const renderRow = (item: DashboardToolInventoryItem, index: number) => html`
+    <div class=${index === 0 ? undefined : 'pt-3'}><${InventoryRow} item=${item} /></div>
+  `
 
   const categories = Array.from(new Set(inventory.map(item => item.category))).sort((left, right) => left.localeCompare(right))
   const filtered = inventory.filter(item => {
@@ -189,16 +192,18 @@ export function FullInventoryView({
 
     ${error ? html`<${ErrorState} message=${error} class="mt-2" />` : null}
 
-    <div ref=${listContainerRef} class="overflow-y-auto max-h-[calc(100vh-420px)] min-h-75">
-      ${filtered.length > 0
-        ? html`<${VirtualList}
-            items=${filtered}
-            estimatedItemHeight=${180}
-            renderItem=${(item: DashboardToolInventoryItem) => html`<${InventoryRow} item=${item} />`}
-            getKey=${(item: DashboardToolInventoryItem) => item.name}
-            className="flex flex-col gap-3"
-          />`
-        : html`<${EmptyState} message="조건에 맞는 도구 없음" compact />`}
+    <div ref=${setListContainer} class="overflow-y-auto max-h-[calc(100vh-420px)] min-h-75">
+      ${filtered.length === 0
+        ? html`<${EmptyState} message="조건에 맞는 도구 없음" compact />`
+        : listContainer
+          ? html`<${VirtualList}
+              items=${filtered}
+              estimatedItemHeight=${180}
+              renderItem=${renderRow}
+              getKey=${(item: DashboardToolInventoryItem) => item.name}
+              scrollBox=${listContainer}
+            />`
+          : null}
     </div>
 
     <button type="button"

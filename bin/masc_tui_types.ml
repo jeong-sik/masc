@@ -3469,23 +3469,115 @@ type runtime_lane_write =
          list launched after it reads current execution state; the receipt
          independently says whether the saved configuration was applied. *)
 
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
+type runtime_pick_refusal =
+  | No_output_schema_channel
+  | No_exact_body_deadline
+  | Wrong_candidate_group
+
+(* The sentence Enter on a refused row draws. *)
+let runtime_pick_refusal_text ~ko refusal (runtime : Tui_decode.runtime_option) =
+  match refusal with
+  | No_output_schema_channel ->
+    if ko then runtime.Tui_decode.ro_id ^ ": 출력 스키마 채널이 없습니다"
+    else runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+  | No_exact_body_deadline ->
+    (* One notice row: the table to fix and the key come first and, with the
+       notice prefix and a typical provider id, fit in about 85 columns. *)
+    Printf.sprintf
+      (if ko then "[providers.%s] 에 exact-body-timeout-s 가 필요합니다"
+       else "[providers.%s] needs exact-body-timeout-s for exact lanes")
+      runtime.Tui_decode.ro_provider_id
+  | Wrong_candidate_group ->
+    if ko then "같은 HTTP 또는 CLI 그룹의 모델을 고르세요. 그룹을 바꾸려면 후보를 추가하세요"
+    else "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
+
+(* Why the lane editor refused a key or a write. The notice keeps the reason
+   and [runtime_lane_notice_text] picks the words when it draws it, so the
+   sentence follows the screen language, also for a notice already on screen
+   when the language changes. *)
+type runtime_lane_refusal =
+  | Lane_list_may_be_stale
+  | No_lane_row_under_cursor
+  | Slot_editor_not_open
+  | No_slot_under_cursor
+  | Already_at_edge of { item : string; move : runtime_lane_move; place : string }
+  | Runtime_is_not_a_declared_lane of string
+  | Last_exact_slot of { slot : string; lane : string }
+  | Reorder_across_slot_groups
+  | Already_a_candidate of { runtime_id : string; lane : string }
+  | Runtime_pick_refused of runtime_pick_refusal * Tui_decode.runtime_option
+  | Refused_by_server of string
+      (* The server's own sentence, drawn as it came. *)
+
 (* What the lane editor says about its last key or write. Both the Runtime
    and the Lanes view draw it, and a new view, a moved cursor or a newly
    opened field ends it. *)
 type runtime_lane_notice =
-  | Lane_write_refused of string
+  | Lane_write_refused of runtime_lane_refusal
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
   | Lane_write_committed of Masc_tui_runtime_config_receipt.t
       (* File commit and application facts, not inferred from a list GET. *)
 
-let runtime_lane_notice_text = function
-  | Lane_write_refused detail -> "lane write refused: " ^ detail
+let runtime_lane_refusal_text ~ko = function
+  | Lane_list_may_be_stale ->
+    if ko then "레인 목록이 오래됐을 수 있습니다. 후보를 바꾸기 전에 목록을 다시 읽으세요"
+    else "the lane list may be stale; reload it before changing candidates"
+  | No_lane_row_under_cursor ->
+    if ko then "커서 위치에 레인 행이 없습니다" else "no lane row is under the cursor"
+  | Slot_editor_not_open ->
+    if ko then "슬롯 편집기가 열려 있지 않습니다" else "the slot editor is not open"
+  | No_slot_under_cursor ->
+    if ko then "커서 위치에 슬롯이 없습니다" else "no slot is under the cursor"
+  | Already_at_edge { item; move; place } ->
+    if ko then
+      Printf.sprintf "%s: %s 안에서 이미 %s입니다" item place
+        (match move with Move_down -> "맨 끝" | Move_up -> "맨 앞")
+    else
+      Printf.sprintf "%s is already %s in %s" item
+        (match move with Move_down -> "last" | Move_up -> "first") place
+  | Runtime_is_not_a_declared_lane lane ->
+    if ko then
+      Printf.sprintf "%s: 선언된 레인이 아니라 런타임입니다. 제거할 테이블이 없습니다" lane
+    else
+      Printf.sprintf
+        "%s is a runtime, not a declared lane; there is no table to remove" lane
+  | Last_exact_slot { slot; lane } ->
+    if ko then
+      Printf.sprintf
+        "%s: %s 의 마지막 슬롯입니다. exact 출력 레인에는 슬롯이 하나 이상 있어야 합니다"
+        slot lane
+    else
+      Printf.sprintf
+        "%s is the last slot of %s; an exact-output lane needs at least one" slot lane
+  | Reorder_across_slot_groups ->
+    if ko then
+      "HTTP 슬롯을 먼저 시도하고 CLI 슬롯은 HTTP 슬롯을 모두 시도한 뒤에 씁니다. 같은 그룹 안에서만 순서를 바꾸세요"
+    else
+      "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group"
+  | Already_a_candidate { runtime_id; lane } ->
+    if ko then Printf.sprintf "%s: 이미 %s 의 후보입니다" runtime_id lane
+    else Printf.sprintf "%s is already a candidate on %s" runtime_id lane
+  | Runtime_pick_refused (refusal, runtime) -> runtime_pick_refusal_text ~ko refusal runtime
+  | Refused_by_server detail -> detail
+
+let runtime_lane_notice_text ~ko = function
+  | Lane_write_refused refusal ->
+    (if ko then "레인 쓰기 거부: " else "lane write refused: ")
+    ^ runtime_lane_refusal_text ~ko refusal
   | Lane_write_committed receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
   | Lane_write_pending ->
-    "lane write refused: the previous lane change is still being written; \
-     press again once the list reloads"
+    if ko then
+      "레인 쓰기 거부: 이전 레인 변경을 아직 쓰는 중입니다. 목록을 다시 읽은 뒤 다시 누르세요"
+    else
+      "lane write refused: the previous lane change is still being written; \
+       press again once the list reloads"
 
 (* The refusal detail is the server's own message and can carry its line
    breaks (the exact-lane save refusal names the [providers.<id>] table and the
@@ -3508,15 +3600,15 @@ let lanes_action_error_row_count ~cols = function
 (* The lane notice's own rows, without the divider the runtime listing adds.
    The lanes overview and the exact picker draw the notice with
    [box_lines_styled] and no divider, so they count these. *)
-let runtime_lane_notice_lines ~cols = function
+let runtime_lane_notice_lines ~ko ~cols = function
   | None -> 0
-  | Some notice -> boxed_row_count ~cols (runtime_lane_notice_text notice)
+  | Some notice -> boxed_row_count ~cols (runtime_lane_notice_text ~ko notice)
 
 (* The runtime listing draws the notice's lines plus a divider, so it counts
    one more row than [runtime_lane_notice_lines]. *)
-let runtime_lane_notice_row_count ~cols = function
+let runtime_lane_notice_row_count ~ko ~cols = function
   | None -> 0
-  | Some notice -> 1 + runtime_lane_notice_lines ~cols (Some notice)
+  | Some notice -> 1 + runtime_lane_notice_lines ~ko ~cols (Some notice)
 
 (* Whether a list on screen carries the last lane write. It is not about a
    key, so it is kept apart from the notice: only a load of that list sets it.
@@ -5557,6 +5649,7 @@ let runtime_listing_chrome
       ?(stale_rows = 0)
       ?(route_rows = 0)
       ?(editor_rows = None)
+      ~ko
       ~cols
       ~authority_rows
       ~error
@@ -5566,7 +5659,7 @@ let runtime_listing_chrome
       ()
   =
   listing_chrome ~error + 1 + max 1 authority_rows
-  + runtime_lane_notice_row_count ~cols action_error
+  + runtime_lane_notice_row_count ~ko ~cols action_error
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + route_rows
@@ -24230,16 +24323,6 @@ let lane_picker_existing_slots (state : state) = function
        the one thing the reader wants to know before replacing it. *)
     Option.to_list state.runtime_catalog_default_route
 
-(* Why a pick cannot land on its target. A client with no output-schema
-   channel fits no exact lane: every exact-output call hands its client a JSON
-   Schema to answer to, and the runtime writer refuses it. The picker draws
-   such a candidate below every one that can land, with the reason at the
-   front of its row, and Enter on it sends nothing. *)
-type runtime_pick_refusal =
-  | No_output_schema_channel
-  | No_exact_body_deadline
-  | Wrong_candidate_group
-
 type runtime_pick_availability =
   | Pick_available
   | Pick_refused of runtime_pick_refusal
@@ -24273,19 +24356,6 @@ let runtime_pick_refusal_tag ~ko refusal =
   | No_exact_body_deadline, true -> "exact-body-timeout-s 없음"
   | Wrong_candidate_group, false -> "different candidate group"
   | Wrong_candidate_group, true -> "다른 후보 그룹"
-
-(* The sentence Enter on a refused row draws. *)
-let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
-  match refusal with
-  | No_output_schema_channel ->
-    runtime.Tui_decode.ro_id ^ " has no output-schema channel"
-  | No_exact_body_deadline ->
-    (* One notice row: the table to fix and the key come first and, with the
-       notice prefix and a typical provider id, fit in about 85 columns. *)
-    Printf.sprintf "[providers.%s] needs exact-body-timeout-s for exact lanes"
-      runtime.Tui_decode.ro_provider_id
-  | Wrong_candidate_group ->
-    "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
@@ -24435,7 +24505,9 @@ let runtime_picker_catalogue_notices (state : state) =
    the following refusal or read error disappear from the title's count. *)
 let runtime_picker_notices (state : state) =
   runtime_picker_catalogue_notices state
-  @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+  @ Option.to_list
+      (Option.map (runtime_lane_notice_text ~ko:(state.ui_language = Lang_ko))
+         state.runtime_lane_notice)
   @ runtime_lane_stale_lines state
   @ Option.to_list state.runtime_surface_error
 
@@ -24466,7 +24538,8 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
       lanes_action_error_row_count ~cols state.lanes_action_error
-      + runtime_lane_notice_lines ~cols state.runtime_lane_notice
+      + runtime_lane_notice_lines ~ko:(state.ui_language = Lang_ko) ~cols
+          state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + (match state.runtime_lane_write with
         | Lane_write_idle -> 0
@@ -24594,7 +24667,9 @@ let lanes_overview_projection (state : state) ~rows ~cols =
     |> boxed_row_count ~cols in
   let full_tail_rows = Option.fold ~none:0 ~some:safe_boxed_rows state.lanes_action_error
       + Option.fold ~none:0 ~some:(fun notice ->
-          safe_boxed_rows (runtime_lane_notice_text notice)) state.runtime_lane_notice
+          safe_boxed_rows
+            (runtime_lane_notice_text ~ko:(state.ui_language = Lang_ko) notice))
+        state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + lanes_overview_picker_rows state in
   let panel_edges = 2 in
@@ -24620,7 +24695,9 @@ let lanes_overview_projection (state : state) ~rows ~cols =
            ^ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
                picker.rlp_catalog_reading] in
     let failures = Option.to_list state.lanes_action_error
-      @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+      @ Option.to_list
+          (Option.map (runtime_lane_notice_text ~ko:(state.ui_language = Lang_ko))
+             state.runtime_lane_notice)
       @ runtime_lane_stale_lines state in
     (* The picker owns Enter while open. Its selected action target survives
        even when only one body row fits; with another row the feature list
@@ -24750,9 +24827,7 @@ let runtime_lane_candidate_write_refusal (state : state) =
     match state.runtime_surface_lane_freshness with
     | Lane_list_read -> None
     | Lane_list_unread _ ->
-      Some
-        (Lane_write_refused
-           "the lane list may be stale; reload it before changing candidates")
+      Some (Lane_write_refused Lane_list_may_be_stale)
 
 let runtime_lane_list_generation (state : state) = function
   | Runtime_surface_list -> state.runtime_surface_generation
@@ -24774,7 +24849,7 @@ let settle_runtime_lane_write (state : state) ~written = function
     state.runtime_lane_write <-
       Lane_write_rereading (written, runtime_lane_list_generation state written, receipt)
   | Error detail ->
-    state.runtime_lane_notice <- Some (Lane_write_refused detail);
+    state.runtime_lane_notice <- Some (Lane_write_refused (Refused_by_server detail));
     state.runtime_lane_write <- Lane_write_idle
 
 (* A load of [list] with [generation] landed. Any load of it that comes back
@@ -24828,7 +24903,7 @@ let plan_runtime_lane_edit (state : state) = function
         List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor)
     in
     (match row with
-     | None -> Refuse_lane_edit (Lane_write_refused "no lane row is under the cursor")
+     | None -> Refuse_lane_edit (Lane_write_refused No_lane_row_under_cursor)
      | Some row ->
        let lane = row.Tui_decode.rcr_lane_id in
        let position = row.Tui_decode.rcr_position in
@@ -24855,24 +24930,17 @@ let plan_runtime_lane_edit (state : state) = function
                (List.filter (fun id -> not (String.equal id runtime_id)) order))
             ~cursor_after
         | Move_candidate move, None ->
-          let by, edge =
-            match move with
-            | Move_down -> 1, "last"
-            | Move_up -> -1, "first"
-          in
+          let by = match move with Move_down -> 1 | Move_up -> -1 in
           (match swap_candidates order (position - 1) (position - 1 + by) with
            | None ->
              Refuse_lane_edit
                (Lane_write_refused
-                  (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
+                  (Already_at_edge { item = runtime_id; move; place = lane }))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
         | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
           Refuse_lane_edit
-            (Lane_write_refused
-               (Printf.sprintf
-                  "%s is a runtime, not a declared lane; there is no table to remove"
-                  lane))
+            (Lane_write_refused (Runtime_is_not_a_declared_lane lane))
         | Rename_lane, _ ->
           if runtime_lane_write_busy state then
             Refuse_lane_edit Lane_write_pending
@@ -25029,7 +25097,7 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
     let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
     let notices =
       Option.to_list (Option.map
-        (fun notice -> Some notice, runtime_lane_notice_text notice) state.runtime_lane_notice)
+        (fun notice -> Some notice, runtime_lane_notice_text ~ko notice) state.runtime_lane_notice)
       @ List.map (fun line -> None, line) (runtime_lane_stale_lines state)
       @ List.map (fun line -> None, line) (Option.to_list state.runtime_surface_error)
       @ List.map (fun line -> None, line) (runtime_picker_catalogue_notices state)
@@ -25141,13 +25209,13 @@ type slot_edit_plan =
 
 let plan_slot_edit (state : state) edit =
   match state.slot_editor with
-  | None -> Refuse_slot_edit (Lane_write_refused "the slot editor is not open")
+  | None -> Refuse_slot_edit (Lane_write_refused Slot_editor_not_open)
   | Some editor ->
     let rows = slot_editor_rows state in
     let count = List.length rows in
     let order = List.map (fun row -> row.sr_slot) rows in
     (match slot_editor_selection state with
-     | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
+     | None -> Refuse_slot_edit (Lane_write_refused No_slot_under_cursor)
      | Some (cursor, row) ->
        let target = editor.se_target in
        let name = slot_editor_target_name target in
@@ -25176,11 +25244,7 @@ let plan_slot_edit (state : state) edit =
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)
            Refuse_slot_edit
-             (Lane_write_refused
-                (Printf.sprintf
-                   "%s is the last slot of %s; an exact-output lane needs at least one"
-                   slot
-                   name))
+             (Lane_write_refused (Last_exact_slot { slot; lane = name }))
          | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
              { target; slot; request = Drop_declared_slot }
@@ -25195,18 +25259,17 @@ let plan_slot_edit (state : state) edit =
                    (List.filteri (fun index _ -> index <> cursor) order)
              }
          | _, Move_slot move ->
-           let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
+           let by = match move with Move_down -> 1 | Move_up -> -1 in
            let moved_to = cursor + by in
            if moved_to < 0 || moved_to >= count
            then
              Refuse_slot_edit
-               (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+               (Lane_write_refused
+                  (Already_at_edge { item = slot; move; place = name }))
            else if target <> Media_failover_slots
                    && row.sr_kind <> (List.nth rows moved_to).sr_kind
            then
-             Refuse_slot_edit
-               (Lane_write_refused
-                  "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group")
+             Refuse_slot_edit (Lane_write_refused Reorder_across_slot_groups)
            else (
              let request =
                match target with
@@ -25924,6 +25987,7 @@ let runtime_selection_summary_lines ~cols state =
 
 let runtime_surface_base_chrome_with ~cols state ~route_rows =
   runtime_listing_chrome
+    ~ko:(state.ui_language = Lang_ko)
     ~cols
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error

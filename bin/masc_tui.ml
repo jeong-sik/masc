@@ -11462,7 +11462,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     state.runtime_lane_notice <-
       Some
         (Masc_tui_types.Lane_write_refused
-           (Masc_tui_types.runtime_pick_refusal_text refusal runtime))
+           (Masc_tui_types.Runtime_pick_refused (refusal, runtime)))
   | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
@@ -11502,7 +11502,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
           state.runtime_lane_notice <-
             Some
               (Masc_tui_types.Lane_write_refused
-                 (runtime_id ^ " is already a candidate on " ^ lane))
+                 (Masc_tui_types.Already_a_candidate { runtime_id; lane }))
         else
           launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
             match pick with

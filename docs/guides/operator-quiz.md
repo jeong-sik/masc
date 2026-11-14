@@ -19,7 +19,7 @@
 ### 1. 이미지 만들기
 
 ```sh
-docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.1.0 addons
+docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.0 addons
 ```
 
 설치 조정(reconcile)은 이미지를 만들지 않는다. MASC 가 쓰는 엔진에 먼저 올려 둔다.
@@ -107,8 +107,8 @@ max_output_tokens = 2048
 ## 설치본 갱신과 출제 복구
 
 저장소 소스가 바뀌어도 실행 중인 설치 패키지는 자동으로 바뀌지 않는다. 패키지의
-`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.3.3` 이고,
-이미지 `0.1.0` 은 Python 과 공용 protocol 모듈을 담는 실행 환경이다. worker 코드는
+`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.4.0` 이고,
+이미지 `0.2.0` 은 Python 과 공용 모듈 둘(`protocol.py`, `records.py`)을 담는 실행 환경이다. worker 코드는
 설치한 패키지 폴더를 `/addon` 에 읽기 전용으로 붙여 실행한다. `0.3.0` 은 관측 row 에
 `quiz/scorecard` 와 `quiz/review` 를 더했을 뿐 `log.jsonl` 의 모양은 그대로라, 아래
 갱신 절차대로 올려도 log 를 옮기지 않는다. `0.3.1` 은 Results 에 보이는 값의 선언만
@@ -117,6 +117,9 @@ max_output_tokens = 2048
 있는 질문 row 에 `dispute` 칸을 더해 Results 에서 바로 이의를 걸게 했다. log 는 그대로다.
 `0.3.3` 의 행 동작 선언(presentation `actions`)은 그것을 아는 서버와 TUI 만 읽는다. 옛 서버는
 패키지를 거절하고, 옛 TUI 는 lane 화면을 읽지 못한다. 서버와 TUI 를 먼저 올린 뒤 패키지를 올린다.
+`0.4.0` 은 기록 읽기와 log 파일 코드를 공용 모듈 `records.py` 로
+옮겼다. row 와 log 는 그대로지만 이미지 `0.2.0` 이 있어야 뜬다. 이미지 `0.1.0` 에는
+`records.py` 가 없어 worker 가 시작하지 못한다. 이미지를 먼저 만들고 설치본을 갱신한다.
 
 1. 원본 로그와 요청 blob, 설치 선언 및 현재 instance/volume 식별자를 보관한다.
 2. 검증한 패키지를 새 불변 경로에 설치한다. 실행 중인 패키지 폴더를 덮어쓰지 않는다.
@@ -232,7 +235,7 @@ Results 에 일곱 lane 이 나온다.
 
    ```sh
    docker inspect <container_id> --format '{{range .Mounts}}{{.Name}} {{end}}'
-   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.1.0 /state/operator-quiz /state/operator-quiz-<날짜>
+   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.2.0 /state/operator-quiz /state/operator-quiz-<날짜>
    ```
 
 4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.

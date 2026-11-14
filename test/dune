@@ -6530,7 +6530,7 @@
        ../addons/fusion-compute/lane.toml ../addons/fusion-report/lane.toml
        (glob_files ../docs/examples/lane-addons/fusion-compute/*.toml)
        ; The operator quiz case loads its declaration and runs its worker.
-       ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py
+       ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py ../addons/records.py
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)
        (glob_files ../addons/operator-quiz/prompts/*.md))

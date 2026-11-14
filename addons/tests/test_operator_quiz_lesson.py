@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import test_operator_quiz_flow as t  # noqa: E402
 from test_operator_quiz_flow import BINDING, Base, answering, f, first_quote, g, post, q  # noqa: E402
 from test_operator_quiz_worker import BINDING as WORKER_BINDING, CONTEXT, Worker  # noqa: E402
 
@@ -118,6 +119,16 @@ class Seeing(Base):
                          {"complete": False, "detail": "the host supplied no source of this name"})
         self.assertEqual(self.flow.log.read(), [])
 
+    def test_rows_once_unreadable_are_kept_when_they_can_be_read(self):
+        output = lesson_output(1, scene_row("e1", cite("p-1")))
+        key = f.digest([[row["lane_id"], row["fields"]] for row in output["observations"][0]["output"]["rows"]])
+        # What an earlier revision that could not read these rows left behind.
+        self.flow.log.append([q.LessonUnreadable(INSTANCE, 1, f"{1:064x}", key, "a kind it did not know")])
+        self.flow.see_lesson(FOLLOWING, [output])
+        self.flow.see_lesson(FOLLOWING, [output])
+        self.assertEqual([type(event) for event in self.seen()], [q.LessonUnreadable, q.LessonSeen])
+        self.assertEqual(len(q.cited(q.Log(self.state).read())), 1)
+
     def test_an_output_of_a_failing_lesson_is_still_kept(self):
         status = self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-1")), complete=False)])
         self.assertEqual(status["complete"], False)
@@ -193,6 +204,34 @@ class Following(Base):
         (payload,) = seen
         self.assertEqual((payload["material"], len(payload["items"])), ([], 1))
 
+    def test_a_request_of_history_alone_that_does_not_fit_fails_the_session(self):
+        plain = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.answer(plain, q.Chose(("b",)))
+        self.flow.fits = lambda request: request["kind"] != "exact_output"
+        session_id = self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        self.host.run(self.flow)
+        self.assertIsInstance(self.session(session_id).failure, q.AuthorRequestExceedsFrame)
+
+    def test_a_compose_sent_again_completes_an_opening_cut_before_follows_lesson(self):
+        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson="lesson")
+        log = self.state / "operator-quiz" / "log.jsonl"
+        opened, follows = log.read_text().splitlines()
+        log.write_text(opened + "\n" + follows[:10])
+        cut = f.Flow(self.state, self.flow.prompts, lambda request: True)
+        self.assertIsNone(next(s for s in cut.sessions() if s.session_id == session_id).follows)
+        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson="lesson"), session_id)
+        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson="lesson"), session_id)
+        self.assertEqual([type(event) for event in cut.log.read()], [q.SessionOpened, q.FollowsLesson])
+        # A session that has read already is left as it is.
+        other = self.compose("act-2")
+        self.host.author = lambda payload: None
+        self.host.run(self.flow)
+        before = q.Log(self.state).read()
+        self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        self.assertEqual((q.Log(self.state).read(), self.session(other).follows), (before, None))
+
     def test_a_question_is_taught_only_if_the_lesson_was_seen_before_it(self):
         session_id = self.compose("act-1")
         self.host.author = answering(first_quote)
@@ -261,7 +300,25 @@ class Rows(Base):
         self.assertEqual(measures["lesson"], lesson)
         unbound = p.observation(sessions, scopes, ZoneInfo("Asia/Seoul"), 99.0)
         self.assertNotIn("lesson", next(row for row in unbound["rows"] if row["lane_id"] == p.MEASURES)["fields"])
+        self.assertFalse(any("taught" in row["fields"] for row in unbound["rows"]))
         self.assertEqual(g.items(sessions)[0].latest, g.INCORRECT)
+
+
+    def test_the_first_attempt_of_an_item_is_its_first_answer(self):
+        early = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        item = self.session(early).posed[0].item_id
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-1")))])
+        self.host.author = answering(lambda payload: t.draft(
+            {"kind": "board_post", "source_id": "board", "pin": "p-1"}, "the ledg", reask=(item,)))
+        late = self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(late).taught, frozenset({"q1"}))
+        self.answer(late, q.Chose(("a",)), at=10.0)
+        self.answer(early, q.Chose(("b",)), at=20.0)
+        measures = p.lesson_measures(self.flow.sessions(), self.flow.log.read(), None)
+        self.assertEqual(measures["first_attempt"], {"taught": p.fraction(1, 1), "other": p.fraction(0, 0)})
 
 
 class Served(unittest.TestCase):

@@ -92,6 +92,10 @@ let answered_pid body =
 let stop_error_message = function
   | Upgrade.Admin_required ->
     "the running server refused local operator access; sign in and run restart again"
+  | Server_starting ->
+    "the running server is still starting; run restart again once it is ready"
+  | Admin_check_unanswered ->
+    "the running server did not answer the local operator access check; run restart again"
   | Different_workspace -> "the server on this port serves another workspace"
   | Incumbent_changed -> "the running server changed while restart was checking it; run restart again"
   | Owner_unavailable -> "the workspace owner could not be verified"

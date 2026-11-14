@@ -11,6 +11,8 @@ type observation =
   | Account_server of { port : int; health : account_health }
 let error_message = function
   | Upgrade.Admin_required -> "The running workspace rejected local operator access. Sign in before restarting it."
+  | Server_starting -> "The running workspace is still starting. Try again once it is ready; signing in does not change this."
+  | Admin_check_unanswered -> "The running workspace did not answer the local operator access check. Try again."
   | Different_workspace -> "This server belongs to another workspace. Choose a different port."
   | Incumbent_changed -> "The running server changed after inspection. Refresh setup before restarting it."
   | Owner_unavailable -> "The running workspace owner could not be verified."

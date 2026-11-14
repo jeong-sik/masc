@@ -22,9 +22,25 @@ let provenance_to_json ~current_task_id provenance =
           "task_id", optional provenance.task_id;
           "trace_id", optional provenance.trace_id]
 
+type input =
+  | Arguments of string
+  | Artifact_reference
+  | Unstated_input
+
+let compare_input left right =
+  match left, right with
+  | Arguments l, Arguments r -> String.compare l r
+  | Arguments _, (Artifact_reference | Unstated_input) -> -1
+  | Artifact_reference, Arguments _ -> 1
+  | Artifact_reference, Artifact_reference -> 0
+  | Artifact_reference, Unstated_input -> -1
+  | Unstated_input, (Arguments _ | Artifact_reference) -> 1
+  | Unstated_input, Unstated_input -> 0
+;;
+
 type call =
   { tool : string
-  ; input : string
+  ; input : input
   ; provenance : provenance
   ; source_position : int
   ; outcome : outcome
@@ -85,17 +101,33 @@ let outcome_of_row json =
   | Tool_result.Recorded_unsettled | Tool_result.Recorded_malformed -> Unrecorded_call
 ;;
 
+(* The request history stores an earlier call's arguments as the reserved
+   [_blob] reference, and a model that copies that object into a new call is
+   refused before the handler runs (2026-11-02: 377 calls). Replaying the object
+   on the refusal row teaches the same shape again, so the form the writer
+   recorded decides, and a reference is carried as a variant, never as
+   argument text. *)
+(* A row that does not state its form (an earlier build's, or a damaged one)
+   cannot be told from a reference: its persisted input may be a preview
+   string. It is neither read as arguments nor dropped, which would leave its
+   turn rendered with a call missing; it stays as [Unstated_input]. *)
+let input_of_row json =
+  match Keeper_tool_call_log.recorded_input_form json with
+  | Some Keeper_tool_call_log.Artifact_reference_input -> Artifact_reference
+  | None -> Unstated_input
+  | Some Keeper_tool_call_log.Arguments_input ->
+    Arguments
+      (match Json_util.assoc_member_opt "input" json with
+       | None | Some `Null -> "{}"
+       | Some (`String s) -> s
+       | Some value -> Yojson.Safe.to_string value)
+;;
+
 let call_of_row ~source_position json =
   match string_field "tool" json with
   | None -> None
   | Some tool ->
-    let input =
-      match Json_util.assoc_member_opt "input" json with
-      | None | Some `Null -> "{}"
-      | Some (`String s) -> s
-      | Some value -> Yojson.Safe.to_string value
-    in
-    Some { tool; input; provenance = provenance_of_row json;
+    Some { tool; input = input_of_row json; provenance = provenance_of_row json;
            source_position; outcome = outcome_of_row json }
 ;;
 
@@ -133,14 +165,14 @@ let compare_provenance (left : provenance) (right : provenance) =
 ;;
 
 module Failure_key_map = Map.Make (struct
-    type t = string * string * provenance * int option
+    type t = string * input * provenance * int option
 
     let compare (tool_l, input_l, prov_l, turn_l) (tool_r, input_r, prov_r, turn_r) =
       let c = String.compare tool_l tool_r in
       if c <> 0
       then c
       else (
-        let c = String.compare input_l input_r in
+        let c = compare_input input_l input_r in
         if c <> 0
         then c
         else (
@@ -246,7 +278,7 @@ let turns_of_rows ~keeper_name ~max_turns ~window_saturated rows =
    (tool, input, provenance), counted, with the newest refusal's detail. *)
 type failure_digest =
   { failure_tool : string
-  ; failure_input : string
+  ; failure_input : input
   ; failure_count : int
   ; failure_detail : string option
   ; failure_provenance : provenance
@@ -255,7 +287,7 @@ type failure_digest =
 
 type failure_accumulator =
   { acc_tool : string
-  ; acc_input : string
+  ; acc_input : input
   ; acc_provenance : provenance
   ; acc_count : int
   ; acc_detail : string option
@@ -366,11 +398,15 @@ let externalize_failures ~base_path ~keeper_name ~tools turns =
     let failed = ref 0 in
     let turns = List.map (fun (turn : turn) ->
       let calls = List.map (fun (call : call) ->
-        match call.outcome with
-        | Ok_call | Deferred_call | Unrecorded_call -> call
-        | Failed_call detail ->
+        match call.outcome, call.input with
+        | (Ok_call | Deferred_call | Unrecorded_call),
+          (Arguments _ | Artifact_reference | Unstated_input) -> call
+        (* Neither such an input nor its refusal text is rendered, so nothing
+           is stored for them. *)
+        | Failed_call _, (Artifact_reference | Unstated_input) -> call
+        | Failed_call detail, Arguments text ->
           (try
-             let input = externalize call.input in
+             let input = Arguments (externalize text) in
              let detail = Option.map externalize detail in
              {call with input; outcome=Failed_call detail}
            with Sys_error _ -> incr failed; call)) turn.calls in

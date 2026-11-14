@@ -477,6 +477,12 @@ Your own tool-call history could not be read this turn ({{detail}}). Do not trea
 ### world.own_recent_actions.turn_rejected_detail_row (vars: provenance, turn_id, tool, input, detail)
 - [turn {{turn_id}}] {{tool}} {{input}} -> REJECTED: {{detail}} [provenance: {{provenance}}]
 
+### world.own_recent_actions.turn_rejected_artifact_reference_row (vars: provenance, turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> REJECTED: its input carried the reserved `_blob` key, which stores an earlier call and is no tool's argument [provenance: {{provenance}}]
+
+### world.own_recent_actions.turn_rejected_unstated_input_row (vars: provenance, turn_id, tool)
+- [turn {{turn_id}}] {{tool}} -> REJECTED (input and reason not shown: this record does not say what form the input had) [provenance: {{provenance}}]
+
 ### world.own_recent_actions.turn_deferred_row (vars: provenance, turn_id, tool)
 - [turn {{turn_id}}] {{tool}} -> deferred (not done yet) [provenance: {{provenance}}]
 
@@ -553,6 +559,12 @@ Rejected already — do not repeat these calls unchanged:
 
 ### observation.rejected_digest_row (vars: provenance, tool, input, count, last_turn, detail_suffix)
 - {{tool}} {{input}} ×{{count}} (last turn {{last_turn}}){{detail_suffix}} [provenance: {{provenance}}]
+
+### observation.rejected_digest_artifact_reference_row (vars: provenance, tool, count, last_turn)
+- {{tool}} with the reserved `_blob` key in its input ×{{count}} (last turn {{last_turn}}) — a `_blob` object is how an earlier call was stored, not a way to call a tool; send only the arguments the tool's schema asks for [provenance: {{provenance}}]
+
+### observation.rejected_digest_unstated_input_row (vars: provenance, tool, count, last_turn)
+- {{tool}} ×{{count}} (last turn {{last_turn}}) — input and reason not shown: these records do not say what form the input had [provenance: {{provenance}}]
 
 ### gate_replay.evidence.applied (vars: evidence_json)
 Host Gate replay completed before this model turn.

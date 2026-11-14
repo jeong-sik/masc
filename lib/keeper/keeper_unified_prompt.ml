@@ -153,24 +153,42 @@ let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_ac
   |> List.map (fun (call : Keeper_own_recent_actions.call) ->
     let provenance = Keeper_own_recent_actions.provenance_to_json
       ~current_task_id call.provenance |> Yojson.Safe.to_string in
-    match call.outcome with
-    | Keeper_own_recent_actions.Ok_call ->
+    let open Keeper_own_recent_actions in
+    match call.outcome, call.input with
+    | Ok_call, (Arguments _ | Artifact_reference | Unstated_input) ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_ok_row
         [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
-    | Keeper_own_recent_actions.Failed_call None ->
+    (* The record does not say whether the input was arguments or a stored
+       reference, so neither the input nor the refusal text that may print it
+       back is shown; the row says that instead of guessing. *)
+    | Failed_call (None | Some _), Unstated_input ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_rejected_unstated_input_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+    (* The refusal text is left off too, whichever stage refused. Before
+       execution it prints the argument object back
+       (Agent_core.Tool_input_validation.format_errors_inline), which would put
+       the reference on this row again; after execution it is the tool's own
+       text about input that was not arguments, and the row already names
+       that cause. *)
+    | Failed_call (None | Some _), Artifact_reference ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_rejected_artifact_reference_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+    | Failed_call None, Arguments input ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_rejected_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", call.input ]
-    | Keeper_own_recent_actions.Failed_call (Some detail) ->
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", input ]
+    | Failed_call (Some detail), Arguments input ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_rejected_detail_row
-        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", call.input; "detail", detail ]
-    | Keeper_own_recent_actions.Deferred_call ->
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", input; "detail", detail ]
+    | Deferred_call, (Arguments _ | Artifact_reference | Unstated_input) ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_deferred_row
         [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
-    | Keeper_own_recent_actions.Unrecorded_call ->
+    | Unrecorded_call, (Arguments _ | Artifact_reference | Unstated_input) ->
       render_fragment
         Prompt_names.keeper_world_own_recent_actions_turn_unrecorded_row
         [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
@@ -1419,36 +1437,66 @@ let format_recent_actions_section ~current_task_id own_recent_actions
        then Buffer.add_string ubuf (heading ^ "\n");
        List.iter
          (fun (digest : Keeper_own_recent_actions.failure_digest) ->
-           let detail_suffix =
-             match digest.failure_detail with
-             | None -> ""
-             | Some detail -> " — " ^ detail
-           in
            let provenance = Keeper_own_recent_actions.provenance_to_json
              ~current_task_id digest.failure_provenance |> Yojson.Safe.to_string in
            let count = string_of_int digest.failure_count in
            let last_turn = string_of_int digest.failure_last_turn in
-           let input = rejected_digest_input digest.failure_input in
            let row =
-             render
-               Prompt_names.keeper_observation_rejected_digest_row
-               [ "provenance", provenance
-               ; "tool", digest.failure_tool
-               ; "input", input
-               ; "count", count
-               ; "last_turn", last_turn
-               ; "detail_suffix", detail_suffix
-               ]
-               ~fallback:
-                 (String.concat
-                    " "
-                    [ "-"
-                    ; digest.failure_tool
-                    ; input
-                    ; "×" ^ count
-                    ; "@" ^ last_turn ^ detail_suffix
-                    ; provenance
-                    ])
+             match digest.failure_input with
+             (* No input and no refusal text, for the reason the turn row
+                gives: either one would print the reference back. *)
+             | Keeper_own_recent_actions.Artifact_reference ->
+               render
+                 Prompt_names.keeper_observation_rejected_digest_artifact_reference_row
+                 [ "provenance", provenance
+                 ; "tool", digest.failure_tool
+                 ; "count", count
+                 ; "last_turn", last_turn
+                 ]
+                 ~fallback:
+                   (String.concat
+                      " "
+                      [ "-"; digest.failure_tool; "×" ^ count; "@" ^ last_turn; provenance ])
+             (* No input and no refusal text here either: the record does not
+                say what the input was. *)
+             | Keeper_own_recent_actions.Unstated_input ->
+               render
+                 Prompt_names.keeper_observation_rejected_digest_unstated_input_row
+                 [ "provenance", provenance
+                 ; "tool", digest.failure_tool
+                 ; "count", count
+                 ; "last_turn", last_turn
+                 ]
+                 ~fallback:
+                   (String.concat
+                      " "
+                      [ "-"; digest.failure_tool; "×" ^ count; "@" ^ last_turn; provenance ])
+             | Keeper_own_recent_actions.Arguments input ->
+               let detail_suffix =
+                 match digest.failure_detail with
+                 | None -> ""
+                 | Some detail -> " — " ^ detail
+               in
+               let input = rejected_digest_input input in
+               render
+                 Prompt_names.keeper_observation_rejected_digest_row
+                 [ "provenance", provenance
+                 ; "tool", digest.failure_tool
+                 ; "input", input
+                 ; "count", count
+                 ; "last_turn", last_turn
+                 ; "detail_suffix", detail_suffix
+                 ]
+                 ~fallback:
+                   (String.concat
+                      " "
+                      [ "-"
+                      ; digest.failure_tool
+                      ; input
+                      ; "×" ^ count
+                      ; "@" ^ last_turn ^ detail_suffix
+                      ; provenance
+                      ])
            in
            Buffer.add_string ubuf (row ^ "\n"))
          failures);

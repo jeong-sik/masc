@@ -934,7 +934,7 @@ let composer_row state ~rows ~cols =
     | false, None -> prompt ^ draft
     | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
-  let body=match Composer.reading_note ~ko composer.Composer.reading with
+  let body=match Composer.row_note ~ko composer with
     | None -> body
     | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
   (* The key that opens the row sits at the right end, one cell in from the

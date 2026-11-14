@@ -246,10 +246,13 @@ let engine_of_info runtime raw : (Lane_addon_lifecycle.engine, Lane_addon_lifecy
         unreadable "engine ID contains whitespace or control characters"
       else Ok (Lane_addon_lifecycle.Docker_engine id)
   | Apple_container ->
+      (* Since container 1.4.1 (apple/container#1769) the status JSON keeps the
+         application root under [paths]. An older CLI prints it at the top
+         level and reads as no root. *)
       (match parse raw with
        | Error detail -> unreadable detail
        | Ok value ->
-           (match member "status" value, member "appRoot" value with
+           (match member "status" value, path ["paths"; "appRoot"] value with
             | Some (`String "running"), Some (`String root)
               when String.trim root <> "" && not (Filename.is_relative root) ->
                 Ok (Lane_addon_lifecycle.Apple_app_root root)

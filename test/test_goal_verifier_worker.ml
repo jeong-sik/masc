@@ -1725,7 +1725,7 @@ let test_caught_reviewer_exit_retains_actual_refusal_receipt () = with_workspace
   let original = W.original retained in
   let calls = ref 0 in
   with_reviewer (reviewer_exit_after_actual_lookup calls) (fun () ->
-    let receipt = checked (run store retained authority) in
+    ignore (checked (run store retained authority));
     let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
     let restored = host_load restored_store original in
     let receipt = match checked (W.restored_receipt restored) with

@@ -194,9 +194,12 @@ references of each pull request it sees merged, and records the outcome as
 its merge commit is on that branch, so a layer of a landed native stack counts
 although its base stays the parent branch.
 
-A merge closes its issues once. An issue that was reopened after the merge
-stays open, whoever reopened it. A recheck of a merged pull request closes
-every other open issue the pull request links: one whose close failed, one a
+Within one run, a merge closes each linked issue once. An issue stays open
+when that run's check saw it reopened at or after the merge. Runs are not
+serialized with each other: a run that checked before the reopening still
+closes the issue (#51614), and the merge of a later pull request that links
+the issue closes it again. A recheck of a merged pull request closes every
+other open issue the pull request links: one whose close failed, one a
 run left behind when it died before this step, and one that was never closed
 because the pull request merged before the worker had this step. GitHub's
 record does not tell the last kind from an issue left open on purpose. A

@@ -79,7 +79,9 @@ await fetch("/api/v1/auth/invites/" + issued.invite_id, {
 
 ## What is not there yet
 
-- No route lists the open invitations. Keep the `invite_id` of the answer
-  if the invitation may have to be revoked.
+- No screen lists the invitations. `GET /api/v1/auth/invites` from an
+  Admin's browser session does, with the `invite_id`, role, issuer, expiry
+  and status of each and no token (see
+  [Account server setup](account-server-setup.md), "Who is in").
 - No screen calls the routes.
 - An invitation has no other lifetime than 24 hours.

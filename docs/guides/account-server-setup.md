@@ -142,6 +142,16 @@ signs in through an Admin invitation becomes an Admin.
   A GitHub login can change, so the key is the numeric user id:
   `gh api users/<login> --jq .id`. The answer names a `registration_id`;
   `DELETE /api/v1/auth/allowlist/<registration_id>` removes the entry.
+- **Who is in.** An Admin's browser session reads three lists, with no
+  CSRF token: `GET /api/v1/auth/allowlist` (`{"registrations": [...]}`),
+  `GET /api/v1/auth/invites` (`{"invites": [...]}`, with no token) and
+  `GET /api/v1/auth/members` (`{"members": [...]}`). Each item has a
+  `status`. An entry that is `removal_pending`, an invitation that is
+  `revocation_pending` and a member whose `held` is not empty carry a
+  change the log did not record: the store holds it, nobody joins or acts
+  through it, and making the same change again closes it (for a member,
+  `held` names which: `revoke`, `disable` or `delete`). Anyone else gets
+  403.
 
 ## 6. Declare what people connect
 
@@ -201,8 +211,8 @@ base path.
 ## What is not there yet
 
 - The TUI and the operator's dashboard do not connect to the account server.
-- No screen issues invitations or edits the allowlist. An Admin calls the
-  routes from the browser console of the page at `/`.
+- No screen issues invitations, edits the allowlist or shows the lists. An
+  Admin calls the routes from the browser console of the page at `/`.
 - `masc auth invite` writes Admin invitations only, and no command revokes
   one.
 - A workspace whose accounts were turned off is not activated again.

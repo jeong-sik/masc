@@ -448,6 +448,17 @@ let a_browser_signs_in_acts_and_signs_out () =
     in
     Alcotest.(check int) ("removed: " ^ removed.body) 204 removed.status;
     Alcotest.(check int) "the removed identity does not join" 403 (sign_in t (fresh_browser ()) ~user_id:8).status;
+    (* A list is a read from this origin with no CSRF token. *)
+    let listed path name =
+      let reply = send admin t.router ~meth:"GET" ~path ~headers:(changing ()) in
+      Alcotest.(check int) (path ^ ": " ^ reply.body) 200 reply.status;
+      match member name reply with
+      | Some (`List items) -> List.length items
+      | _ -> Alcotest.failf "%s: no %s in %S" path name reply.body
+    in
+    Alcotest.(check int) "the spent and the removed entry" 2 (listed "/api/v1/auth/allowlist" "registrations");
+    Alcotest.(check int) "the first Admin's invitation" 1 (listed "/api/v1/auth/invites" "invites");
+    Alcotest.(check int) "the Admin and the Member" 2 (listed "/api/v1/auth/members" "members");
     let old = { cookies = admin.cookies } in
     let out = send admin t.router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
@@ -1671,9 +1682,12 @@ let the_route_table () =
     Alcotest.(check (list string))
       "the paths"
       [ "/api/v1/auth/allowlist"
+      ; "/api/v1/auth/allowlist"
       ; "/api/v1/auth/allowlist/"
       ; "/api/v1/auth/invites"
+      ; "/api/v1/auth/invites"
       ; "/api/v1/auth/invites/"
+      ; "/api/v1/auth/members"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats/"

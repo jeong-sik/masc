@@ -30,8 +30,11 @@ val max_request_bytes : int
     - [POST /auth/oidc/start] and [GET /auth/oidc/callback] (Google)
     - [POST /auth/github/start] and [GET /auth/github/callback]
     - [POST /auth/logout] and [GET /auth/session]
-    - [POST /api/v1/auth/allowlist] and [DELETE /api/v1/auth/allowlist/<id>]
-    - [POST /api/v1/auth/invites] and [DELETE /api/v1/auth/invites/<id>]
+    - [POST] and [GET /api/v1/auth/allowlist], and
+      [DELETE /api/v1/auth/allowlist/<id>]
+    - [POST] and [GET /api/v1/auth/invites], and
+      [DELETE /api/v1/auth/invites/<id>]
+    - [GET /api/v1/auth/members]
     - [POST] and [GET /api/v1/auth/pats], and [DELETE /api/v1/auth/pats/<id>]
 
     A form or a query is read as pairs in order, so a field that comes twice

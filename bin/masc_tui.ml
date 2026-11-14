@@ -108,12 +108,12 @@ let report_editor_unset state ~form =
   report_editor_abort state ~form
     (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset)
 
-(* An operator request the TUI kept back, said on the action line: why, that
-   nothing was sent, and what stayed. *)
 (* A chat command that names no Keeper sends nothing; its line stays. *)
 let select_keeper_first ~ko =
   if ko then "먼저 키퍼를 고르세요" else "Select a Keeper first"
 
+(* An operator request the TUI kept back, said on the action line: why, that
+   nothing was sent, and what stayed. *)
 let report_kept_back state reason kept =
   let ko = state.ui_language = Lang_ko in
   report_action state "error" (kept_back ~ko (reason ~ko) kept)

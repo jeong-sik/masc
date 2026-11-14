@@ -211,8 +211,14 @@ def ready(row):
     # on the same answer every 30 minutes (#51479 family 1). Pending and
     # expected rolls stay selectable — the worker still holds on them, but a
     # later run can see them pass without new evidence.
-    if any(check.get('state') in DECISIVE_CHECK_FAILURES
-           for check in row.get('statusCheckRollup') or []):
+    roll = row.get('statusCheckRollup') or []
+    if isinstance(roll, dict):
+        # GitHub can collapse a single-member rollup to the object itself
+        # (run 43618358575): iterating that object yields its keys, not the
+        # checks — wrap it so the members stay dicts.
+        roll = [roll]
+    if any(isinstance(check, dict) and check.get('state') in DECISIVE_CHECK_FAILURES
+           for check in roll):
         return False
     # Workflow-file pull requests cannot be merged by this token at all
     # (#51452 family 3): GitHub refuses the arming itself, and only the human

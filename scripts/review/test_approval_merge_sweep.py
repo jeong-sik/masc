@@ -70,6 +70,16 @@ class Selection(unittest.TestCase):
     def test_a_row_without_a_rollup_stays_selectable(self):
         self.assertEqual(SWEEP.select([row(1)], never), [1])
 
+    def test_a_single_object_rollup_does_not_crash_the_selection(self):
+        # GitHub can collapse a single-member statusCheckRollup to the object
+        # itself (run 43618358575): its keys must not be mistaken for checks.
+        collapsed = row(19, statusCheckRollup={'state': None})
+        self.assertEqual(SWEEP.select([collapsed], never), [19])
+
+    def test_a_collapsed_decisive_rollup_still_stops_entry(self):
+        collapsed = row(20, statusCheckRollup={'state': 'FAILURE'})
+        self.assertEqual(SWEEP.select([collapsed], never), [])
+
     def test_a_workflow_file_pull_request_is_left_to_the_human_path(self):
         touched = row(16, files={'totalCount': 1,
                                  'nodes': [{'path': '.github/workflows/ci.yml'}]})

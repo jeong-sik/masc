@@ -2,19 +2,23 @@
 // Runtimes made on them, and whether a Keeper may run on each here. A
 // person learns before pressing anything what an account cannot do.
 //
-// `createSubscriptions` reads them for the person the console shows;
+// `createSubscriptions` reads them for the person the console shows and
+// holds the person's connecting of a subscription (connect.ts);
 // `SubscriptionsPanel` draws whatever state it is given.
 
 import { effect, signal, type ReadonlySignal } from '@preact/signals'
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
+import { createConnect } from './connect'
+import type { ConnectModel } from './connect'
+import { ConnectArea } from './connect-area'
 import type { View } from './console'
 import { ProblemNote, Retry, idTail, sessionEndedWords, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
-import { integrations as readIntegrations, owned as readOwned } from './wire'
+import { integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
 import type {
-  CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, Problem, ProviderAccount, Runtime, Send,
+  CallRefusal, Integration, IntegrationUnread, ModelUnread, Owned, Problem, ProviderAccount, Runtime, Send, Session,
 } from './wire'
 
 export type PanelView =
@@ -35,13 +39,16 @@ export interface PanelDeps {
 
 export interface SubscriptionsModel {
   readonly view: ReadonlySignal<PanelView>
-  /** Reads what the person `userId` connected and what the server offers. A
-      call for the person the panel already shows does nothing and settles at
-      once, even after a failure: `retry` reads again. A call for another
-      person starts over, and what was read for the first is dropped. */
-  readonly load: (userId: string) => Promise<void>
+  /** Reads what the person of `session` connected and what the server
+      offers. A call for the person the panel already shows only keeps their
+      newest session and settles at once, even after a failure: `retry` reads
+      again. A call for another person starts over: what was read for the
+      first is dropped, and a login they started is left behind. */
+  readonly load: (session: Session) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
   readonly retry: () => Promise<void>
+  /** The connecting of a subscription by the person the panel shows. */
+  readonly connecting: ConnectModel
 }
 
 type Found =
@@ -65,6 +72,8 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
   /** The reading whose answer the panel takes. A later one, a retry or the
       reading for another person signed in meanwhile, replaces it. */
   let latest = 0
+  /** The session of the person the panel shows. A login sends its token. */
+  let session: Session | null = null
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
     latest += 1
@@ -91,13 +100,25 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     view.value = { kind: 'failed', forUser, failure: { problem: found.problem, attempts: attemptsBefore + 1 }, next: 'idle' }
   }
 
+  /** Reads again what the panel shows, which stays on the page meanwhile. A
+      panel that shows no reading has nothing to read again: its own reading
+      or retry is under way, or the browser is leaving. */
+  const refresh = (): Promise<void> => {
+    const now = view.peek()
+    return now.kind === 'read' ? read(now.forUser, 0) : Promise.resolve()
+  }
+
+  const connecting = createConnect({ send, leave, token: () => session?.csrfToken ?? null, refresh })
+
   // The methods read the state with peek(): a caller inside an effect does
   // not come to depend on the panel's state.
-  const load = (userId: string): Promise<void> => {
+  const load = (next: Session): Promise<void> => {
     const now = view.peek()
-    if (now.kind !== 'waiting' && now.forUser === userId) return Promise.resolve()
-    view.value = { kind: 'reading', forUser: userId, slow: false }
-    return read(userId, 0)
+    session = next
+    if (now.kind !== 'waiting' && now.forUser === next.userId) return Promise.resolve()
+    connecting.reset()
+    view.value = { kind: 'reading', forUser: next.userId, slow: false }
+    return read(next.userId, 0)
   }
 
   const retry = (): Promise<void> => {
@@ -107,7 +128,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     return read(now.forUser, now.failure.attempts)
   }
 
-  return { view, load, retry }
+  return { view, load, retry, connecting }
 }
 
 /** Reads the subscriptions of each person the console comes to show
@@ -115,7 +136,7 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
 export function follow(frame: ReadonlySignal<View>, panel: SubscriptionsModel): () => void {
   return effect(() => {
     const now = frame.value
-    if (now.kind === 'signed_in') void panel.load(now.session.userId)
+    if (now.kind === 'signed_in') void panel.load(now.session)
   })
 }
 
@@ -180,9 +201,6 @@ function subscriptionName(account: ProviderAccount, offered: Integration | null)
   if (!account.integration.read) return '어떤 구독인지 알 수 없는 계정'
   return offered === null ? account.integration.value : integrationName(offered)
 }
-
-const integrationName = (integration: Integration): string =>
-  integration.displayName === '' ? integration.id : integration.displayName
 
 function integrationUnreadWords(unread: IntegrationUnread | 'unrecognised'): string {
   switch (unread) {
@@ -290,7 +308,11 @@ function Read({ integrations, owned }: { readonly integrations: readonly Integra
   `
 }
 
-function PanelBody({ view, onRetry }: { readonly view: PanelView; readonly onRetry: () => void }): VNode {
+function PanelBody({ view, connecting, onRetry }: {
+  readonly view: PanelView
+  readonly connecting: ConnectModel
+  readonly onRetry: () => void
+}): VNode {
   switch (view.kind) {
     case 'waiting':
       return html`<p class="hint" role="status"></p>`
@@ -306,6 +328,7 @@ function PanelBody({ view, onRetry }: { readonly view: PanelView; readonly onRet
     case 'read':
       return html`
         <${Offer} integrations=${view.integrations} />
+        ${view.integrations.length === 0 ? null : html`<${ConnectArea} model=${connecting} integrations=${view.integrations} />`}
         <${Read} integrations=${view.integrations} owned=${view.owned} />
         <p class="hint" role="status"></p>
       `
@@ -316,19 +339,22 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
   const view = model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
   const shown = useRef(view.kind)
-  // A retry that read takes the pressed button away. The focus then goes to
+  // A retry that read takes the pressed button away, and a reading that
+  // failed after a login takes the connect area away. The focus then goes to
   // the heading of the panel, not to the body of the page; a focus the person
-  // moved elsewhere meanwhile stays.
+  // moved elsewhere meanwhile stays. The first reading takes nothing away.
   useEffect(() => {
-    const fell = document.activeElement === null || document.activeElement === document.body
-    if (shown.current === 'failed' && view.kind === 'read' && fell) heading.current?.focus()
+    const before = shown.current
     shown.current = view.kind
+    const fell = document.activeElement === null || document.activeElement === document.body
+    const hadControls = before === 'failed' || before === 'read'
+    if (before !== view.kind && hadControls && fell) heading.current?.focus()
   }, [view.kind])
   return html`
     <section aria-labelledby="subscriptions-heading">
       <h2 id="subscriptions-heading" ref=${heading} tabindex="-1">구독</h2>
       <p class="hint">내 Keeper는 내가 연결한 구독으로 일해요. 다른 구성원은 내 구독을 쓸 수 없어요.</p>
-      <${PanelBody} view=${view} onRetry=${() => { void model.retry() }} />
+      <${PanelBody} view=${view} connecting=${model.connecting} onRetry=${() => { void model.retry() }} />
     </section>
   `
 }

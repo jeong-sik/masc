@@ -13,7 +13,7 @@ main { width: 100%; max-width: var(--column); margin: 0 auto; padding: 24px var(
    after the margin reset of the base, so it wins by its place and any rule
    below changes a margin. It names the boxes whose children stand one under
    another: the line of who is signed in is a row, and is not one of them. */
-:where(main, section, .callout) > * + * { margin-top: 16px; }
+:where(main, section, .callout, .connect, .connect-steps, .connect-form) > * + * { margin-top: 16px; }
 
 /* Who is signed in and the way out sit at the end of the line that names the
    place. On a narrow window they move under it together. The line is as tall
@@ -51,3 +51,23 @@ button[aria-disabled="true"] { opacity: 0.5; cursor: progress; }
 .chip-todo { border-style: dashed; }
 .models { margin: 0; padding-left: 20px; }
 .mono { font-family: var(--mono); }
+
+/* Connecting a subscription: the steps under the button that opens them. */
+.connect-steps > h3 { margin: 0; font-size: 1rem; color: var(--text-bright); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+legend { margin-bottom: 8px; padding: 0; color: var(--text-bright); font-weight: 600; }
+/* Each subscription is a row the whole of which picks it. The base gives a
+   field the full width and the height of a button; a radio button keeps a
+   size of its own, the least a target may be. */
+.choices { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.choice { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-m); overflow-wrap: anywhere; cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--accent); }
+.choice input { flex: none; width: 24px; height: 24px; min-height: 0; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
+.choice-title { color: var(--text-bright); font-weight: 600; }
+/* What the login client printed: its lines as it wrote them, and a long
+   address broken where it must, under a height it scrolls within. */
+.transcript { max-height: 20rem; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--bg-field); font-family: var(--mono); font-size: 0.875rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The code goes in a field with its button beside it. */
+.reply { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.reply label { grid-column: 1 / -1; }

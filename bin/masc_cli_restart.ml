@@ -21,6 +21,7 @@ type refusal =
   | Account_server_on_another_port of { pid : int; port : int }
   | Account_server_without_answer of { pid : int }
   | Owner_unverifiable of string
+  | Owner_listener_unconfirmed of Upgrade.listener_refusal
   | Stop_refused of Upgrade.error
   | Log_unopenable of { path : string; reason : string }
   | Spawn_failed of string
@@ -183,6 +184,9 @@ let refusal_message ~base_path ~port = function
   | Owner_unverifiable reason ->
     Printf.sprintf "The owner of %s could not be checked (%s). Nothing was stopped or started."
       base_path reason
+  | Owner_listener_unconfirmed refusal ->
+    Masc_cli_owner_upgrade.listener_refusal_message ~base_path ~port refusal
+    ^ " Nothing was stopped or started."
   | Stop_refused error ->
     Printf.sprintf "The stop request was not sent: %s." (stop_error_message error)
   | Log_unopenable { path; reason } ->
@@ -323,8 +327,15 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
       Printf.printf "No server holds %s; starting one on port %d.\n%!" base_path port;
       Ok []
     | This_workspace { version; pid } ->
+      (* What answered [/health] as this workspace gets the sign-in and the
+         bearer only once the kernel shows the owner of the lease on this
+         port. *)
+      let* listener =
+        Upgrade.single_user_listener ~run_dir ~base_path ~port
+        |> Result.map_error (fun refusal -> Owner_listener_unconfirmed refusal)
+      in
       let* () =
-        Masc_cli_owner_upgrade.with_selected_owner ~sw ~clock ~base_path ~port ~agent
+        Masc_cli_owner_upgrade.with_selected_owner ~sw ~clock ~listener ~agent
           ~expected_version:version ~login Upgrade.request_termination
         |> Result.map_error (fun error -> Stop_refused error)
       in

@@ -2429,7 +2429,7 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
      one of another schema that no original leads to, and fresh state deletes
      the scope it stops. *)
   let scan ()=io (fun () -> Lane_addon_store_preflight.scan
-    ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
     ~validate_history_resolution:Resolution_intent.check_published_file
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
   check int "preflight reads every current resolution record" 0 (List.length (scan ()).refusals);

@@ -10,10 +10,12 @@ where the worker would certainly hold; admission stays in the worker.
 One GraphQL walk of the open pull requests feeds the selection, so its cost
 grows with pages of 100, not with pull requests.
 
-It also deletes the branches merges left behind (see `merged_leftovers`).
+It also deletes the branches merges left behind (see `merged_leftovers`) and
+closes the issues they left open (see `close_merged_issues`).
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -67,8 +69,36 @@ query($owner: String!, $name: String!, $cursor: String) {
   }
 }
 '''
+OPEN_ISSUES = '''
+query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(states: OPEN, first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number url
+        closedByPullRequestsReferences(first: 20, includeClosedPrs: true) {
+          totalCount
+          nodes { number merged repository { nameWithOwner } }
+        }
+      }
+    }
+  }
+}
+'''
 PUSH_TIMEOUT_SECONDS = 120
 MERGER = 'github-actions'  # the account the merge worker's token merges as
+
+
+def sibling(name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + '.py'))
+    if spec is None or spec.loader is None:
+        raise ImportError(f'cannot load review helper {name}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ISSUES = sibling('linked-issues')
 
 
 def gh(arguments):
@@ -84,19 +114,27 @@ def gh(arguments):
     return json.loads(operation.stdout)
 
 
+def graphql(document, **variables):
+    """Run one GraphQL document and return its data.
+
+    A call gh refuses and an answer that carries errors are a ValueError.
+    """
+    arguments = ['api', 'graphql', '-f', f'query={document}']
+    for key, value in variables.items():
+        arguments += ['-f', f'{key}={value}']
+    answer = gh(arguments)
+    if answer.get('errors'):
+        raise ValueError(json.dumps(answer['errors'])[:ERROR_CHARACTERS])
+    return answer['data']
+
+
 def walk(repo, document, connection):
     """Every node of one repository connection, 100 to a GraphQL call."""
     owner, name = repo.split('/')
     rows, cursor = [], None
     while True:
-        arguments = ['api', 'graphql', '-f', f'query={document}',
-                     '-f', f'owner={owner}', '-f', f'name={name}']
-        if cursor is not None:
-            arguments += ['-f', f'cursor={cursor}']
-        answer = gh(arguments)
-        if answer.get('errors'):
-            raise ValueError(json.dumps(answer['errors'])[:ERROR_CHARACTERS])
-        page = answer['data']['repository'][connection]
+        after = {} if cursor is None else {'cursor': cursor}
+        page = graphql(document, owner=owner, name=name, **after)['repository'][connection]
         rows.extend(page['nodes'])
         if not page['pageInfo']['hasNextPage']:
             return rows
@@ -189,6 +227,64 @@ def clean_branches(repo, started, dry_run):
             record['deleted'] += 1
         else:
             record['refused'].append({'branch': name, 'reason': refusal})
+    return record
+
+
+def merged_closers(repo, issues):
+    """The merged pull requests of `repo` that open issues name as closing.
+
+    Returns their numbers and one record per issue whose closing pull
+    requests were not all read. Whether a merge landed on the default branch
+    and whether the issue was reopened after it is left to linked-issues: a
+    layer of a native stack merges into its parent branch and lands on main
+    only with the stack. A pull request of another repository is not passed,
+    because linked-issues reads a number in `repo`.
+    """
+    numbers, records = set(), []
+    for issue in issues:
+        closers = issue['closedByPullRequestsReferences']
+        nodes = closers['nodes']
+        if closers['totalCount'] > len(nodes):
+            records.append({'issue': issue['url'], 'closed': False,
+                            'reason': f'{closers["totalCount"]} closing pull requests; only '
+                                      f'the first {len(nodes)} were read'})
+        # The schema lets an entry of the list be null, as for a pull request
+        # of a repository the token cannot read.
+        unreadable = sum(1 for node in nodes if node is None)
+        if unreadable:
+            records.append({'issue': issue['url'], 'closed': False,
+                            'reason': f'{unreadable} closing pull requests are not readable'})
+        numbers.update(node['number'] for node in nodes
+                       if node is not None and node['merged'] is True and
+                       node['repository']['nameWithOwner'] == repo)
+    return sorted(numbers), records
+
+
+def close_merged_issues(repo, started, dry_run):
+    """Close the issues that merged pull requests left open (#52092).
+
+    The worker closes them when it sees the merge. A pull request it only
+    reserves for GitHub's auto-merge is merged later with the Actions token,
+    which starts no workflow, so no run sees that merge. On 2026-11-15, 31
+    of 600 open issues were left open this way. They are found by their
+    state, with no time window, so a sweep that missed one leaves it to the
+    next. Never part of the sweep's verdict: every failure is a record.
+    """
+    try:
+        numbers, records = merged_closers(repo, walk(repo, OPEN_ISSUES, 'issues'))
+    except (ValueError, KeyError, TypeError) as error:
+        return {'error': str(error)}
+    record = {'pull_requests': numbers, 'not_reached': 0, 'issues': records}
+    if dry_run or time.monotonic() - started >= SWEEP_SECONDS:
+        record['not_reached'] = len(numbers)
+    elif numbers:
+        try:
+            record['issues'] += ISSUES.close_linked_issues(repo, numbers, graphql)
+        except (ValueError, KeyError, TypeError) as error:
+            # Only the read of linked-issues raises, and it raises before any close.
+            record['issues'].append({
+                'prs': numbers, 'closed': False,
+                'reason': f'{type(error).__name__}: {error}'[:ERROR_CHARACTERS]})
     return record
 
 
@@ -297,6 +393,7 @@ def main():
             stop = 'quota reached'
     report['stopped'] = stop
     report['merged_branches'] = clean_branches(repo, started, dry_run)
+    report['linked_issues'] = close_merged_issues(repo, started, dry_run)
     report['quota_after'] = quota()
     output = json.dumps(report, ensure_ascii=False, indent=2)
     print(output, flush=True)

@@ -75,11 +75,9 @@ let () =
       in
       assert (Keeper_event_queue.is_empty restored);
 
-      (* 4) With the process pool installed, the snapshot is rendered in a
-         pool job. The bytes on disk are still the printed, sanitized JSON of
-         the state the owner reads back. *)
-      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-      Domain_pool_ref.set pool;
+      (* 4) With the snapshot encoder's pool installed, the snapshot is
+         rendered in a pool job. The bytes on disk are still the compact,
+         sanitized JSON of the state the owner reads back. *)
       let revision_on_disk () =
         match
           Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name
@@ -87,7 +85,8 @@ let () =
         | Error detail -> failwith detail
         | Ok state -> state, Keeper_event_queue_state.revision state
       in
-      Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+      Eio.Switch.run (fun pool_sw ->
+        Keeper_event_queue_snapshot_codec.install ~sw:pool_sw (Eio.Stdenv.domain_mgr env);
         let _, before = revision_on_disk () in
         Keeper_event_queue_persistence.persist ~base_path ~keeper_name queue;
         match revision_on_disk () with
@@ -97,7 +96,7 @@ let () =
           let expected =
             Keeper_event_queue_state.to_yojson state
             |> Safe_ops.sanitize_json_utf8
-            |> Yojson.Safe.pretty_to_string
+            |> Yojson.Safe.to_string
           in
           assert (String.equal expected (In_channel.with_open_bin path In_channel.input_all))));
 

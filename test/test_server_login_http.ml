@@ -1499,7 +1499,7 @@ let a_stopped_zone_answers_no_person () =
          ~meth:"POST"
          ~path:Masc.Auth_preview_keeper.keepers_path
          ~headers:(changing ~csrf () @ [ "Content-Type", "application/json" ])
-         ~body:{|{"keeper_id":"sangsu"}|});
+         ~body:{|{"keeper_id":"keeper-1"}|});
     unavailable
       "the sign-out"
       (send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()));

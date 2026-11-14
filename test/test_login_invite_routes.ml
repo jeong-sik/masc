@@ -36,7 +36,9 @@ type installation =
   { routes : R.t
   ; zone : Z.t
   ; admin : Bs.Cookie.t
+  ; admin_id : User_id.t
   ; log_path : string
+  ; store_path : string
   }
 
 let fresh = ref 0
@@ -110,11 +112,12 @@ let with_installation f =
            with
            | Ok (_ : Z.committed) -> ()
            | Error error -> Alcotest.failf "invitation refused: %s" (Z.error_detail error));
-          let admin =
+          let admin_id =
             match sign_in zone ~invite:(E.Token_digest.of_token admin_token) (google "111") with
-            | Ok (Authz_login.Admitted { user_id; _ }) -> session_for zone user_id
+            | Ok (Authz_login.Admitted { user_id; _ }) -> user_id
             | Ok (Authz_login.Signed_in _) | Error _ -> Alcotest.fail "the first Admin did not join"
           in
+          let admin = session_for zone admin_id in
           let routes =
             { R.zone
             ; transactions = Oidc_login_transaction.create ()
@@ -126,7 +129,7 @@ let with_installation f =
             ; draw
             }
           in
-          f { routes; zone; admin; log_path }))
+          f { routes; zone; admin; admin_id; log_path; store_path = store }))
 ;;
 
 let request ?(origin = Q.Same_origin) ?(csrf = true) cookie =
@@ -141,6 +144,9 @@ let request ?(origin = Q.Same_origin) ?(csrf = true) cookie =
   ; csrf = (if csrf then Option.map Bs.csrf_token cookie else None)
   }
 ;;
+
+(* A read as a browser sends it: a GET with no CSRF token. *)
+let read ?(origin = Q.Same_origin) cookie = { (request ~origin ~csrf:false cookie) with Q.method_ = Q.Safe }
 
 let code (answer : R.answer) = R.status_code answer.status
 
@@ -195,6 +201,50 @@ let contains ~part text =
   in
   from 0
 ;;
+
+(* The invitations of a 200 list, each by its id. *)
+let listed (answer : R.answer) =
+  Alcotest.(check int) ("listed: " ^ answer.body) 200 (code answer);
+  Alcotest.(check (list string))
+    "not cached"
+    [ "no-store" ]
+    (List.assoc_opt "cache-control" answer.headers |> Option.to_list);
+  match member "invites" answer with
+  | Some (`List invites) ->
+    List.map
+      (function
+        | `Assoc fields ->
+          (match List.assoc_opt "invite_id" fields with
+           | Some (`String id) -> id, fields
+           | _ -> Alcotest.failf "an invitation with no id in %S" answer.body)
+        | _ -> Alcotest.failf "an invitation that is not an object in %S" answer.body)
+      invites
+  | _ -> Alcotest.failf "no invites in %S" answer.body
+;;
+
+let text_of name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Some value
+  | Some other -> Some (Yojson.Safe.to_string other)
+  | None -> None
+;;
+
+let status_of id invitations =
+  match List.assoc_opt id invitations with
+  | None -> Alcotest.failf "%s is not listed" id
+  | Some fields ->
+    (match text_of "status" fields with
+     | Some status -> status
+     | None -> Alcotest.failf "%s has no status" id)
+;;
+
+let at_ms ms =
+  match Ptime.of_float_s (Float.of_int ms /. 1000.) with
+  | Some instant -> instant
+  | None -> Alcotest.fail "the clock left the range of Ptime"
+;;
+
+let skip_for_superuser () = if Unix.geteuid () = 0 then Alcotest.skip ()
 
 (* ---- the cases ---- *)
 
@@ -294,6 +344,138 @@ let a_request_that_is_refused () =
     check "a path segment" (I.revoke t.routes (request admin) ~invite_id:"..") 400)
 ;;
 
+(* The ids are drawn counting down, so the order of the ids is the reverse of
+   the order the invitations were issued in. *)
+let an_admin_lists_every_invitation () =
+  with_installation (fun t ->
+    let countdown = ref 0x1000 in
+    let routes =
+      { t.routes with
+        R.draw =
+          (fun () ->
+            decr countdown;
+            Printf.sprintf "%064x" !countdown)
+      }
+    in
+    let t = { t with routes } in
+    let admin = Some t.admin in
+    let issue role = issued ~role (I.issue t.routes (request admin) ~body:(body role)) in
+    let spent = issue "member" in
+    let joined =
+      match joins t.zone ~token:spent.token (github 583231) with
+      | Some (user_id, (_ : E.role)) -> user_id
+      | None -> Alcotest.fail "the holder of the link did not join"
+    in
+    let revoked = issue "member" in
+    Alcotest.(check int) "revoked" 204 (code (I.revoke t.routes (request admin) ~invite_id:revoked.invite_id));
+    let open_admin = issue "admin" in
+    let invitations = listed (I.list t.routes (read admin)) in
+    let by_admin = Some (Printf.sprintf {|{"kind":"admin","user_id":%S}|} (User_id.to_string t.admin_id)) in
+    let expect label id ~role ~issuer ~status ~user_id =
+      match List.assoc_opt id invitations with
+      | None -> Alcotest.failf "%s: not listed" label
+      | Some fields ->
+        Alcotest.(check (option string)) (label ^ ": role") (Some role) (text_of "role" fields);
+        Alcotest.(check (option string)) (label ^ ": issuer") issuer (text_of "issuer" fields);
+        Alcotest.(check (option string)) (label ^ ": status") (Some status) (text_of "status" fields);
+        Alcotest.(check (option string)) (label ^ ": the principal it made") user_id (text_of "user_id" fields);
+        Alcotest.(check (list string))
+          (label ^ ": the members, and no token")
+          ([ "invite_id"; "role"; "issuer"; "expires_at_ms"; "status" ]
+           @ if Option.is_some user_id then [ "user_id" ] else [])
+          (List.map fst fields)
+    in
+    Alcotest.(check (list string))
+      "in the order of the ids, the first Admin's last"
+      [ open_admin.invite_id; revoked.invite_id; spent.invite_id; "invite-admin" ]
+      (List.map fst invitations);
+    expect
+      "the first Admin's"
+      "invite-admin"
+      ~role:"admin"
+      ~issuer:(Some {|{"kind":"local_operator"}|})
+      ~status:"consumed"
+      ~user_id:(Some (User_id.to_string t.admin_id));
+    expect
+      "spent"
+      spent.invite_id
+      ~role:"member"
+      ~issuer:by_admin
+      ~status:"consumed"
+      ~user_id:(Some (User_id.to_string joined));
+    expect "revoked" revoked.invite_id ~role:"member" ~issuer:by_admin ~status:"revoked" ~user_id:None;
+    expect "open" open_admin.invite_id ~role:"admin" ~issuer:by_admin ~status:"open" ~user_id:None;
+    Alcotest.(check (option string))
+      "the expiry it was issued with"
+      (Some (string_of_int open_admin.expires_at_ms))
+      (Option.bind (List.assoc_opt open_admin.invite_id invitations) (text_of "expires_at_ms"));
+    let at ms = listed (I.list { t.routes with R.now = (fun () -> at_ms ms) } (read admin)) in
+    Alcotest.(check string)
+      "a millisecond before it expires"
+      "open"
+      (status_of open_admin.invite_id (at (open_admin.expires_at_ms - 1)));
+    Alcotest.(check string)
+      "when it expires"
+      "expired"
+      (status_of open_admin.invite_id (at open_admin.expires_at_ms));
+    Alcotest.(check string)
+      "a spent one does not expire"
+      "consumed"
+      (status_of spent.invite_id (at open_admin.expires_at_ms)))
+;;
+
+let a_member_does_not_list_invitations () =
+  with_installation (fun t ->
+    let spent = issued ~role:"member" (I.issue t.routes (request (Some t.admin)) ~body:(body "member")) in
+    let a_member =
+      match joins t.zone ~token:spent.token (github 7) with
+      | Some (user_id, (_ : E.role)) -> session_for t.zone user_id
+      | None -> Alcotest.fail "the Member did not join"
+    in
+    let answer = I.list t.routes (read (Some a_member)) in
+    Alcotest.(check int) "a Member lists" 403 (code answer);
+    Alcotest.(check bool) "no invitations" true (Option.is_none (member "invites" answer));
+    Alcotest.(check int) "no session" 401 (code (I.list t.routes (read None)));
+    Alcotest.(check int) "another origin" 403 (code (I.list t.routes (read ~origin:Q.Other_origin (Some t.admin))));
+    Alcotest.(check int) "a navigation" 200 (code (I.list t.routes (read ~origin:Q.No_origin (Some t.admin)))))
+;;
+
+(* A revocation whose record cannot be appended: the log is read-only while
+   the zone writes it. The next start reads the given-up intent and holds the
+   invitation (design 8.3). It is listed as held, not as open, its link lets
+   no one in, and a revocation made again closes it. *)
+let a_held_revocation_is_not_listed_as_open () =
+  skip_for_superuser ();
+  with_installation (fun t ->
+    let admin = Some t.admin in
+    let held = issued ~role:"member" (I.issue t.routes (request admin) ~body:(body "member")) in
+    Unix.chmod t.log_path 0o400;
+    Fun.protect
+      ~finally:(fun () -> Unix.chmod t.log_path 0o600)
+      (fun () ->
+        let answer = I.revoke t.routes (request admin) ~invite_id:held.invite_id in
+        Alcotest.(check int) ("a revocation the log does not take: " ^ answer.R.body) 503 (code answer));
+    let zone =
+      match Z.open_at_start ~now_ms:(fun () -> start_ms) ~log_path:t.log_path ~store_path:t.store_path with
+      | Ok zone -> zone
+      | Error error -> Alcotest.failf "zone not reopened: %s" (Z.open_error_to_string error)
+    in
+    let routes = { t.routes with R.zone } in
+    Alcotest.(check string)
+      "held"
+      "revocation_pending"
+      (status_of held.invite_id (listed (I.list routes (read admin))));
+    Alcotest.(check string)
+      "held after it expires too"
+      "revocation_pending"
+      (status_of
+         held.invite_id
+         (listed (I.list { routes with R.now = (fun () -> at_ms held.expires_at_ms) } (read admin))));
+    Alcotest.(check bool) "its link lets no one in" true (Option.is_none (joins zone ~token:held.token (github 31)));
+    Alcotest.(check int) "revoked again" 204 (code (I.revoke routes (request admin) ~invite_id:held.invite_id));
+    Alcotest.(check string) "revoked" "revoked" (status_of held.invite_id (listed (I.list routes (read admin)))))
+;;
+
 let () =
   Alcotest.run
     "login_invite_routes"
@@ -301,6 +483,9 @@ let () =
       , [ Alcotest.test_case "an Admin issues and revokes" `Quick an_admin_issues_and_revokes
         ; Alcotest.test_case "a Member does not" `Quick a_member_does_not_invite
         ; Alcotest.test_case "refused" `Quick a_request_that_is_refused
+        ; Alcotest.test_case "an Admin lists every invitation" `Quick an_admin_lists_every_invitation
+        ; Alcotest.test_case "a Member does not list" `Quick a_member_does_not_list_invitations
+        ; Alcotest.test_case "a held revocation is not open" `Quick a_held_revocation_is_not_listed_as_open
         ] )
     ]
 ;;

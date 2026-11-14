@@ -17,3 +17,17 @@ val empty : t
 val of_binding_headers : (string * string) list -> t
 
 val to_list : t -> (string * string) list
+
+(** The header list of one exact-output request that carries [body]: the auth
+    headers, then the binding's declared headers, then the [Content-Type] and
+    [Content-Length] of [body]. An Anthropic request also gets the beta
+    headers its body requires.
+
+    The generation request and the count-tokens request sent before it are
+    both written here, so they differ only in what follows from their bodies. *)
+val request_headers
+  :  kind:Provider_config.provider_kind
+  -> auth_headers:(string * string) list
+  -> body:string
+  -> t
+  -> (string * string) list

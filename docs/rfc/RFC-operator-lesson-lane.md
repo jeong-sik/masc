@@ -244,10 +244,14 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 이 RFC 는 뽑는 쪽을 따른다(§9 D1). 퀴즈 타입과 얽힌 정도가 달라서 셋으로 나뉜다.
 
-- 그대로 옮기는 것: `Grant`, pin 과 `parse_pin`, `Source`, `reads`, `material`, `InvalidResult`.
-- 인자를 받게 고쳐 옮기는 것: `Log` 와 `Blobs`. 지금은 폴더 이름 `operator-quiz` 와 퀴즈 사건 codec 이 박혀 있다(`addons/operator-quiz/quiz_log.py:832, 910`). 폴더 이름과 codec 을 받게 한다.
-- 함수로 떼어 옮기는 것: 인용문 검사. 지금은 `check_draft` 안에서 다시 묻기 출처와 섞여 있다(`quiz_flow.py:288-301`).
-- 옮기지 않는 것: cursor 와 읽기 진행. 퀴즈는 `Posed` 로, 수업은 `Outlined` 로 옮기므로(§4.8) 각자 쓴다. 퀴즈의 세션·채점·투영도 퀴즈에 남는다.
+- 그대로 옮기는 것: `Grant` 와 `grants_of_binding`, pin 과 `parse_pin`, `Source`, `reads`, `material`, `summary`, `digest`, `InvalidResult`, `InvalidBinding`, log 값을 엄격하게 읽는 함수들.
+- 인자를 받게 고쳐 옮기는 것: `Log` 와 `Blobs`. 폴더 이름 `operator-quiz` 와 퀴즈 사건 codec 이 박혀 있었다. 폴더와 codec 을 받는다.
+- 함수로 떼어 옮기는 것:
+  - 인용문 검사. `check_draft` 안에서 다시 묻기 출처와 섞여 있었다. `cited_record` 와 `holds_quote` 로 뗐다.
+  - 다음에 읽을 요청(`next_read`). 권한의 첫 페이지가 어디서 시작하는지만 패키지가 준다.
+  - 앞 세션이 멈춘 자리(`last_cursor`). 어느 세션이 cursor 를 옮기는지만 패키지가 준다. 퀴즈는 `Posed` 가 있는 세션, 수업은 `Outlined` 가 있는 세션이다(§4.8). host 가 거절한 cursor 를 건너뛰는 규칙은 하나다.
+  - 읽은 결과의 요약을 메모리에 두는 부분(`Pages`).
+- 옮기지 않는 것: 사건, 세션과 그 fold, 읽은 결과를 받아 사건으로 쓰는 일, 채점, 투영. 패키지마다 쓴다.
 
 `quiz_log` 와 `quiz_flow` 는 옮긴 이름을 공용 모듈에서 가져와 지금 이름 그대로 둔다. 시험은 `q.Log`, `q.Grant`, `f.material` 같은 지금 이름으로 부른다(`addons/tests/test_operator_quiz_flow.py:18`).
 
@@ -269,7 +273,7 @@ Native stack 이다. 층마다 PR 하나와 changelog 조각 하나다.
 | 층 | 종류 | 내용 | 시험 |
 | --- | --- | --- | --- |
 | L0 | 문서 | 조사 문서와 이 RFC | `scripts/rfc-generate-index.py --check` |
-| L1 | 패키지 | `addons/records.py` 로 뽑기(§5). 퀴즈가 그것을 쓴다. 퀴즈 이미지 `0.2.0`, revision `0.4.0` | 기존 `test_operator_quiz_*.py` 가 본문을 고치지 않고 통과한다. 시험이 `addons/` 를 import 경로에 넣는 줄만 더한다 |
+| L1 | 패키지 | `addons/records.py` 로 뽑기(§5). 퀴즈가 그것을 쓴다. 퀴즈 이미지 `0.2.0`, revision `0.4.0` | 기존 `test_operator_quiz_*.py` 116개가 본문을 고치지 않고 통과한다. 시험 파일 셋이 `addons/` 를 import 경로에 넣는 줄만 더한다 |
 | L2 | 패키지 | `addons/operator-lesson`: manifest, 스키마 둘, 프롬프트 둘, log, flow, 투영, worker | 가짜 host 로: `Exact_requested` 가 나열보다 먼저 디스크에 있다. 읽지 않은 pin 의 항목은 버려진다. 인용문이 없는 장면은 `quote_not_in_record` 다. 장면 하나의 `invalid_output` 이 다른 장면을 막지 않는다. 다시 뜬 worker 가 같은 digest 의 요청을 나열한다. 새 `compose` 가 `reading` 세션을 대체하고 `writing` 세션은 그대로 둔다. 첫 세션이 binding 의 `since` 부터 읽고, 다음 세션이 `Outlined` 세션의 cursor 부터 읽는다. `scenes` 를 넘는 항목은 `beyond_requested_scenes` 다. `not_allowed` 로 끝난 scene 이 `Scene_rejected` 가 된다. 읽을 수 없는 log 는 쓰기를 거절한다 |
 | L3 | 문서 | `docs/guides/operator-lesson.md`, 예제 선언, `runtime.toml` 표, `addons/README.md` 한 줄 | `test_lane_addon_config` 가 예제 선언을 검사한다 |
 

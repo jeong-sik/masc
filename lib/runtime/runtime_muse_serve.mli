@@ -123,6 +123,37 @@ type mcp_server =
   ; tool_names : string list
   }
 
+(** What MASC knows about the session's workspace directory. Only
+    {!origin_of_masc_directory} makes [Masc_private]. *)
+type workspace_origin = private
+  | Masc_private
+      (** MASC made the directory for this client, puts nothing in it, and
+          found it holding no entry when the turn read it. *)
+  | Other_tree
+      (** Any other directory: a Keeper's shared tree, or a directory MASC
+          made that holds files, such as ones an earlier session with native
+          writes left. *)
+
+val other_tree : workspace_origin
+
+val origin_of_masc_directory : string -> (workspace_origin, string) result
+(** Reads a directory MASC made for the client. [Masc_private] when it holds
+    no entry, [Other_tree] when it holds any. Error with the system's message
+    when it cannot be read. Blocking: run it off the Eio scheduler. *)
+
+val trusts_workspace
+  :  config
+  -> workspace_origin:workspace_origin
+  -> mcp_servers:mcp_server list
+  -> bool
+(** Whether the host starts with [--trust-workspace], which makes it load the
+    workspace's skills and rules. Muse Code connects a session's MCP servers
+    only on a host started that way. True only when [mcp_servers] is not
+    empty, the workspace is [Masc_private], and [config.native] disables
+    native writes and shell, so the session cannot write a skill or a rule
+    into the directory. In every other case the host starts without the flag and
+    the session's MCP servers get no request. *)
+
 type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
@@ -370,6 +401,7 @@ val run_turn
   :  storage:storage
   -> ?session_mode:session_mode
   -> ?mcp_servers:mcp_server list
+  -> ?workspace_origin:workspace_origin
   -> ?reasoning_effort:Runtime_muse_msp.reasoning_effort
   -> ?on_session_ready:(session_id:string -> last_turn:ended_turn option -> (unit, string) result)
   -> ?on_prompt_sent:(unit -> unit)
@@ -399,7 +431,9 @@ val run_turn
     [workspace_root] is the absolute directory the session works in.
     [mcp_servers] are added to this session only. A non-empty list requests
     [sessionMcp] at the handshake and fails with {!Capability_not_granted}
-    when the host withholds it.
+    when the host withholds it. [workspace_origin] defaults to {!other_tree};
+    {!trusts_workspace} decides from it whether the host is started to
+    connect them.
 
     The returned workspace must match the request on both start and resume,
     and a start must report the explicitly selected model. A resumed session

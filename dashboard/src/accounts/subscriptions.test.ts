@@ -8,13 +8,17 @@ import { signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
+import { checkPath, createChecks } from './check'
+import type { ChecksModel } from './check'
 import { createConnect } from './connect'
 import type { ConnectModel } from './connect'
 import type { View } from './console'
 import { loginPath } from './login'
 import { slowAfterMs } from './notes'
-import { SubscriptionsPanel, accountFacts, createSubscriptions, follow, runnable } from './subscriptions'
-import type { AccountFacts, PanelView, SubscriptionsModel } from './subscriptions'
+import { accountFacts, runnable } from './account-rows'
+import type { AccountFacts } from './account-rows'
+import { SubscriptionsPanel, createSubscriptions, follow } from './subscriptions'
+import type { PanelView, SubscriptionsModel } from './subscriptions'
 import { csrfHeader, paths } from './wire'
 import type { Integration, Send, Session } from './wire'
 
@@ -56,6 +60,9 @@ const json = (status: number, body: unknown): Response =>
 /** A connecting no test here drives: the frame and the panel only need one to be there. */
 const idleConnect = (): ConnectModel =>
   createConnect({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
+/** Checks no test here drives: the panel only needs them to be there. */
+const idleChecks = (): ChecksModel =>
+  createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
 
 const loginId = 'a'.repeat(64)
 const frame = (event: string, data: unknown): string => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -249,7 +256,7 @@ describe('following the console', () => {
       view: signal<PanelView>({ kind: 'waiting' }),
       load: vi.fn((_session: Session) => Promise.resolve()),
       retry: vi.fn(() => Promise.resolve()),
-      connecting: idleConnect(),
+      connecting: idleConnect(), checking: idleChecks(),
     } satisfies SubscriptionsModel
     const stop = follow(frame, panel)
     frame.value = { kind: 'signed_in', session, who, signOut: { kind: 'idle' } }
@@ -335,6 +342,45 @@ describe('connecting a subscription from the panel', () => {
     stream.give(linking())
     await login
     expect([kept, left, kind(panel), sent.length]).toEqual(['starting', { kind: 'closed', linked: false }, `read for ${other}`, 5])
+  })
+})
+
+describe('checking a model from the panel', () => {
+  const passedCall = (): Response => json(200, {
+    verification: { schema: 'masc.runtime_verification.v1', status: 'verified', failure: null },
+    runtime: { runtime_id: 'acct_1.claude-sonnet-5', record: 'made' },
+  })
+  const checkTokens = (sent: readonly Sent[]): Array<string | null> =>
+    sent.filter((one) => one.path === checkPath).map((one) => new Headers(one.init.headers).get(csrfHeader))
+
+  it('checks with the token of the newest session, and reads the subscriptions again once the call passed', async () => {
+    const { panel, sent } = start({
+      [paths.integrations]: [offered(), offered(), offered()],
+      [paths.owned]: [ownedNothing(), ownedOne(), ownedOne()],
+      [checkPath]: [passedCall(), passedCall()],
+    })
+    await panel.load(sessionOf(person, 'first'))
+    await panel.checking.check('acct_1', 'claude-sonnet-5')
+    const view = panel.view.value
+    await panel.load(sessionOf(person, 'second'))
+    await panel.checking.check('acct_1', 'claude-sonnet-5')
+    expect([checkTokens(sent), view.kind === 'read' ? view.owned.runtimes.length : view.kind]).toEqual([['first', 'second'], 1])
+  })
+
+  it('forgets the checks of one person once it shows another', async () => {
+    const call = later()
+    const { panel, sent } = start({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedOne(), ownedNothing()],
+      [checkPath]: [call.answer],
+    })
+    await panel.load(sessionOf(person))
+    const run = panel.checking.check('acct_1', 'claude-sonnet-5')
+    await panel.load(sessionOf(other))
+    call.give(passedCall())
+    await run
+    const ownedReadings = sent.filter((one) => one.path === paths.owned).length
+    expect([panel.checking.checks.value.size, kind(panel), ownedReadings]).toEqual([0, `read for ${other}`, 2])
   })
 })
 
@@ -447,7 +493,7 @@ describe('the panel', () => {
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
     const model = {
-      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(),
+      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(),
     } satisfies SubscriptionsModel
     return { container: render(html`<${SubscriptionsPanel} model=${model} />`).container, model }
   }
@@ -473,7 +519,14 @@ describe('the panel', () => {
 
   it('offers to connect a subscription only once it read some the server offers', () => {
     expect(count('button[aria-controls=connect-steps]')).toEqual(named(...connectable))
-    expect(count('button')).toEqual(named('a reading that failed', 'a retry under way', 'a retry that found no session', ...connectable))
+    // The card of an account has a button of its own, counted below.
+    const checks = count('.check button')
+    expect(count('button').map(([name, all], at) => [name, Number(all) - Number(checks[at]?.[1])])).toEqual(named('a reading that failed', 'a retry under way', 'a retry that found no session', ...connectable))
+  })
+
+  it('offers to check a model only on an account of a subscription a Keeper may run on', () => {
+    expect(count('.check button')).toEqual(named('accounts of each kind'))
+    expect(count('.check select')).toEqual(named('accounts of each kind'))
   })
 
   it('has a row for each account', () => {
@@ -501,6 +554,32 @@ describe('the panel', () => {
     await act(() => panel.retry())
     const second = container.querySelector('[role=alert]')
     expect([first === null, second === null, second === first]).toEqual([false, false, false])
+  })
+
+  it('keeps the focus on the check button through the reading after a check passed', async () => {
+    const call = later()
+    const { panel, container } = live({
+      [paths.integrations]: [offered(), offered()],
+      [paths.owned]: [ownedOne(), ownedOne()],
+      [checkPath]: [call.answer],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    const button = container.querySelector<HTMLButtonElement>('.check button')
+    const form = container.querySelector('form.check')
+    if (button === null || form === null) throw new Error('no check in the card')
+    button.focus()
+    const before = panel.view.value
+    await act(() => { fireEvent.submit(form) })
+    await act(async () => {
+      call.give(json(200, {
+        verification: { schema: 'masc.runtime_verification.v1', status: 'verified', failure: null },
+        runtime: { runtime_id: 'acct_1.claude-sonnet-5', record: 'existing' },
+      }))
+      // The panel reads the subscriptions again once the check passed.
+      await vi.waitFor(() => { expect(panel.view.value).not.toBe(before) })
+    })
+    expect([panel.checking.checks.value.get('acct_1')?.kind, container.querySelector('.check button') === button, document.activeElement === button])
+      .toEqual(['passed', true, true])
   })
 
   it('moves the focus to the heading of the panel when a retry reads', async () => {

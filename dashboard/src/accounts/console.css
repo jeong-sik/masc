@@ -68,6 +68,9 @@ legend { margin-bottom: 8px; padding: 0; color: var(--text-bright); font-weight:
 /* What the login client printed: its lines as it wrote them, and a long
    address broken where it must, under a height it scrolls within. */
 .transcript { max-height: 20rem; overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--bg-field); font-family: var(--mono); font-size: 0.875rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* The code goes in a field with its button beside it. */
-.reply { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
-.reply label { grid-column: 1 / -1; }
+/* The code goes in a field with its button beside it, and so does the
+   model to check in the card of an account. A model id is a few words, so
+   its field stops growing on a wide window and keeps its button near. */
+.reply, .check { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.check { grid-template-columns: minmax(0, 32rem) auto; justify-content: start; }
+.reply label, .check label { grid-column: 1 / -1; }

@@ -1,3 +1,0 @@
-### Documentation
-
-- The Tools efficiency report no longer says `scripts/tla-check.sh` leaves `specs/bug-models/` out. Automatic pull request checks run no TLA+ model; the manually dispatched `model-check.yml` runs that script, which runs the clean and the buggy cfg of every bug model, `KeeperReceiptWait` included (#PENDING).

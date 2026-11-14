@@ -36,6 +36,14 @@ type instance = {
   host_requests : (host_requests, string) result option;
       (** [None]: the Inspect row carries none (a retained run). An unreadable
           value is [Error] for this field alone, so the rest still shows. *)
+  row_actions : Masc.Lane_addon_row_action.verdict list option;
+      (** The host's verdict on each of [display.actions], in the same order.
+          [None] until the host has judged them against an advertised
+          action schema. *)
+  action_tool : string option;
+      (** The package's action tool name. The host checks every send under
+          it, so the screen checks presets, row values and sends under it
+          too. *)
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
@@ -64,10 +72,24 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
   | Subscriptions of Yojson.Safe.t
+(** A row action as a row's action list shows it: its place in
+    [display.actions], its label, and what the row gives it or why it
+    cannot. *)
+type row_entry = {
+  index : int; label : string;
+  filled : (Masc.Lane_addon_row_action.filled, Masc.Lane_addon_row_action.unfilled list) result;
+}
+(** A menu opened from a row. [Row_list] shows the row's actions and, last,
+    the instance's other actions. [Row_form] fills one of them; [locked] is
+    what the row gave it when opened, and sending reads the row again. *)
+type row_stage =
+  | Row_list of { row_id : string; row_title : string; entries : row_entry list }
+  | Row_form of { row_id : string; index : int; label : string; locked : (string * Yojson.Safe.t) list }
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
-  schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  tool_name : string; schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
   form : Masc_tui_schema_form.t option;
+  row : row_stage option;
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
@@ -266,9 +288,22 @@ val declaration_entry_standing : t -> declaration -> Masc_tui_lane_standing.t
 val action_json : action_request -> Yojson.Safe.t
 val action_receipt : action_request -> Yojson.Safe.t -> (Action.receipt, string) result
 
+val row_action_entries : instance -> Row.row -> row_entry list
+(** The row actions [instance] declares for the lane of [row], in declaration
+    order, each with what the row gives it. Empty until the host has judged
+    them. *)
 val open_actions : request_id:string -> t -> (t, string) result
+(** In an instance's details, a selected row whose lane declares row actions
+    opens that row's list, aimed at the instance that produced the row.
+    Otherwise the selected instance's actions open. *)
 val move_action : t -> int -> t
+val enter_action : t -> (t * action_request option, string) result
+(** Enter on a menu without a form: in a row's list it opens the chosen row
+    action's form, or the instance's other actions from the last line; on a
+    preset it returns the request to send. *)
 val submit_action : t -> (action_request, string) result
+(** A row action is refused when its row left the snapshot or now gives other
+    values than when the form opened. *)
 val pending_action : t -> action_request option
 
 val paste_action : text:string -> t -> t

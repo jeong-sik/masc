@@ -1,5 +1,4 @@
-(* Keeper_turn_runtime_budget — runtime execution types,
-   context overflow observation, Keeper lifecycle
+(* Keeper_turn_runtime_budget — runtime execution types, Keeper lifecycle
    sync, and context budget resolution.
 
    Public sub-module included by [Keeper_unified_turn]. *)
@@ -30,20 +29,6 @@ val merge_turn_event_bus_summary :
 
 val summarize_turn_event_bus :
   Agent_core.Event_bus.event list -> turn_event_bus_summary
-
-type capacity_refusal =
-  | Provider_context_window of { limit_tokens : int option }
-  | Provider_request_body_refusal of { status : int }
-(** Why a target refused to serve a request for its size. The closed set keeps
-    measured token and byte bounds separate from a provider refusal whose only
-    typed evidence is an HTTP status. Missing measurements are never invented. *)
-
-val capacity_refusal_of_error :
-  Agent_core.Error.t ->
-  capacity_refusal option
-(** Total classifier over typed agent-core errors onto the token/byte refusal
-    axes. This function does not inspect rendered error prose and does not
-    select a provider, model, or failover. *)
 
 val resolved_max_context_for_turn
   :  meta:keeper_meta

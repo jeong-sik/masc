@@ -1,0 +1,11 @@
+### Internal
+
+- `Keeper_turn_runtime_budget` no longer exports `capacity_refusal` or
+  `capacity_refusal_of_error`. Nothing read the context-window limit or the
+  request-body HTTP status that type carried, and its only caller folded it
+  into two outcomes. The lane failure classifier in
+  `Keeper_unified_turn_execution` now matches the typed agent-core error
+  directly: a typed context overflow is a provider context overflow, and every
+  other error, including the provider's refusal of the request body, exhausts
+  the declared lane. A reported limit still reaches the cascade resolution's
+  error message (#43007, #PENDING).

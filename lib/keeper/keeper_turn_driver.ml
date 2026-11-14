@@ -1827,7 +1827,21 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
     let* root = Runtime_muse_home.prepare_native_workspace
         ~runtime_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name ~account_home
       |> Result.map_error (fun error -> config_error (Runtime_muse_home.error_to_string error)) in
-    Ok (root, Runtime_muse_serve.Masc_private,
+    (* The Keeper's session claim admits one turn at a time, so no other
+       session of this Keeper writes the directory between this read and the
+       host's start. *)
+    let* origin =
+      Eio_guard.run_in_systhread ~label:"muse-native-workspace-read" (fun () ->
+        Runtime_muse_serve.origin_of_masc_directory root)
+      |> Result.map_error config_error in
+    (match origin with
+     | Runtime_muse_serve.Masc_private -> ()
+     | Runtime_muse_serve.Other_tree ->
+       Log.Keeper.warn ~keeper_name
+         "Muse private workspace %s holds files, so the host starts without \
+          workspace trust and does not connect the MASC tools"
+         root);
+    Ok (root, origin,
       "Muse native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned tree. Use MASC tools for that tree; native commands run in the official client's host sandbox.") in
   let shared_workspace profile =
     try
@@ -1841,7 +1855,7 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
       let canonical = Unix.realpath selected in
       if not (String.equal selected canonical)
       then Error (config_error "native workspace must not traverse symbolic links")
-      else Ok (canonical, Runtime_muse_serve.Other_tree, Printf.sprintf
+      else Ok (canonical, Runtime_muse_serve.other_tree, Printf.sprintf
         "Muse native tools use host workspace %s, sharing files with MASC tools at %s. Native commands run in the official client's host sandbox, not the Keeper container."
         canonical (Keeper_sandbox.container_root keeper_name))
     with

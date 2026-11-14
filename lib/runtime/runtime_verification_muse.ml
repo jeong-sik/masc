@@ -26,9 +26,11 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account ~quota_scope ~c
               let storage_root = Filename.concat root "native" in
               Unix.mkdir workspace 0o700;
               Runtime_muse_serve.ensure_storage_dirs storage_root;
-              Ok (workspace, storage_root)
+              (match Runtime_muse_serve.origin_of_masc_directory workspace with
+               | Ok origin -> Ok (workspace, storage_root, origin)
+               | Error _ -> Error Private_workspace_unavailable)
             with Unix.Unix_error _ -> Error Private_workspace_unavailable))) in
-      let* workspace, storage_root = prepared in
+      let* workspace, storage_root, workspace_origin = prepared in
       let bridge = Runtime_official_client_mcp_http.start ~sw ~net ~secure_random
         ~server_name:"masc"
         ~tool_specs:(fun () -> [`Assoc [
@@ -64,8 +66,8 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account ~quota_scope ~c
           | Runtime_muse_serve.Usage_reported _
           | Runtime_muse_serve.Turn_finished _ -> ())
         ~storage:(Runtime_muse_serve.Stateless storage_root) ?reasoning_effort ~mcp_servers
-        (* The workspace is the empty directory made above. *)
-        ~workspace_origin:Runtime_muse_serve.Masc_private ~mgr ~clock
+        (* The workspace is the directory made above, read right after. *)
+        ~workspace_origin ~mgr ~clock
         ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") ~account config
         ~workspace_root:workspace ~prompt ~images:[]
       |> Result.map_error (fun error -> Client_error error))

@@ -544,39 +544,75 @@ let probe_mcp_server =
   }
 ;;
 
+(* A directory MASC made, read as [Serve.origin_of_masc_directory] reads it.
+   [left] names the files an earlier session left there. *)
+let with_masc_directory ?(left = []) f =
+  let dir = Filename.temp_dir "masc-muse-workspace-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
+    List.iter
+      (fun name ->
+         Out_channel.with_open_bin (Filename.concat dir name) (fun output ->
+           output_string output "left by an earlier session"))
+      left;
+    match Serve.origin_of_masc_directory dir with
+    | Ok origin -> f origin
+    | Error detail -> fail detail)
+;;
+
+let test_only_an_empty_masc_directory_is_masc_private () =
+  with_masc_directory (fun origin ->
+    check bool "empty" true (origin = Serve.Masc_private));
+  (* A session with native writes may have left a skill or a rule. *)
+  with_masc_directory ~left:[ "SKILL.md" ] (fun origin ->
+    check bool "holds a file" true (origin = Serve.Other_tree));
+  with_masc_directory ~left:[ ".muse" ] (fun origin ->
+    check bool "holds a dot file" true (origin = Serve.Other_tree));
+  match Serve.origin_of_masc_directory "/nonexistent/masc-muse-workspace" with
+  | Error _ -> ()
+  | Ok _ -> fail "an unreadable directory has no origin"
+;;
+
 (* Muse Code connects a session's MCP servers only on a host started with
    [--trust-workspace], which also makes it load the workspace's skills and
-   rules. Only a directory MASC made, that no session can write, is trusted. *)
+   rules. Only an empty directory MASC made, used by a session that cannot
+   write it, is trusted. *)
 let test_trust_needs_a_masc_workspace_no_session_can_write () =
-  List.iter
-    (fun (workspace_origin, native, mcp_servers, expected) ->
-       check bool "workspace trust" expected
-         (Serve.trusts_workspace (config ~native ()) ~workspace_origin ~mcp_servers))
-    [ Serve.Masc_private, Runtime_native_tools.Native_read, [ probe_mcp_server ], true
-    ; Serve.Masc_private, Runtime_native_tools.Native_none, [ probe_mcp_server ], true
-    ; Serve.Masc_private, Runtime_native_tools.Native_read, [], false
-    ; Serve.Masc_private, Runtime_native_tools.Native_full, [ probe_mcp_server ], false
-    ; Serve.Other_tree, Runtime_native_tools.Native_read, [ probe_mcp_server ], false
-    ; Serve.Other_tree, Runtime_native_tools.Native_none, [ probe_mcp_server ], false
-    ; Serve.Other_tree, Runtime_native_tools.Native_full, [ probe_mcp_server ], false
-    ]
+  with_masc_directory (fun masc_private ->
+    List.iter
+      (fun (workspace_origin, native, mcp_servers, expected) ->
+         check bool "workspace trust" expected
+           (Serve.trusts_workspace (config ~native ()) ~workspace_origin ~mcp_servers))
+      [ masc_private, Runtime_native_tools.Native_read, [ probe_mcp_server ], true
+      ; masc_private, Runtime_native_tools.Native_none, [ probe_mcp_server ], true
+      ; masc_private, Runtime_native_tools.Native_read, [], false
+      ; masc_private, Runtime_native_tools.Native_full, [ probe_mcp_server ], false
+      ; Serve.other_tree, Runtime_native_tools.Native_read, [ probe_mcp_server ], false
+      ; Serve.other_tree, Runtime_native_tools.Native_none, [ probe_mcp_server ], false
+      ; Serve.other_tree, Runtime_native_tools.Native_full, [ probe_mcp_server ], false
+      ])
 ;;
 
 (* The host that withholds sessionMcp ends the turn after the launch check,
    so a wrong argument list shows as an exited process instead. *)
+let launch_arguments_are workspace_origin arguments =
+  run_scripted ~workspace_origin ~mcp_servers:[ probe_mcp_server ]
+    [ Expect_arguments arguments; Read; Write (init_frame ~granted:[]) ]
+    (fun result _ ->
+       match result with
+       | Error (Serve.Capability_not_granted Msp.Session_mcp) -> ()
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "a host that withholds sessionMcp must fail the turn")
+;;
+
 let test_launch_arguments_follow_workspace_trust () =
-  List.iter
-    (fun (workspace_origin, arguments) ->
-       run_scripted ~workspace_origin ~mcp_servers:[ probe_mcp_server ]
-         [ Expect_arguments arguments; Read; Write (init_frame ~granted:[]) ]
-         (fun result _ ->
-            match result with
-            | Error (Serve.Capability_not_granted Msp.Session_mcp) -> ()
-            | Error error -> fail (Serve.error_to_string error)
-            | Ok _ -> fail "a host that withholds sessionMcp must fail the turn"))
-    [ Serve.Masc_private, [ "--disable-write"; "--disable-shell"; "--trust-workspace" ]
-    ; Serve.Other_tree, [ "--disable-write"; "--disable-shell" ]
-    ]
+  let read_only = [ "--disable-write"; "--disable-shell" ] in
+  with_masc_directory (fun origin ->
+    launch_arguments_are origin (read_only @ [ "--trust-workspace" ]));
+  launch_arguments_are Serve.other_tree read_only;
+  (* A native-full session wrote here; the read-only turn after it is not
+     trusted with what it left. *)
+  with_masc_directory ~left:[ "SKILL.md" ] (fun origin ->
+    launch_arguments_are origin read_only)
 ;;
 
 let test_native_none_is_config_error () =
@@ -1954,6 +1990,8 @@ let () =
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
+        ; test_case "only an empty MASC directory is masc private" `Quick
+            test_only_an_empty_masc_directory_is_masc_private
         ; test_case "trust needs a MASC workspace no session can write" `Quick
             test_trust_needs_a_masc_workspace_no_session_can_write
         ; test_case "launch arguments follow workspace trust" `Quick

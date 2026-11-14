@@ -130,6 +130,17 @@ type workspace_origin =
   | Masc_private
   | Other_tree
 
+let other_tree = Other_tree
+
+(* Blocking; callers run it off the Eio scheduler. [Sys.readdir] leaves out
+   "." and "..". *)
+let origin_of_masc_directory path =
+  match Sys.readdir path with
+  | [||] -> Ok Masc_private
+  | _ -> Ok Other_tree
+  | exception Sys_error detail -> Error detail
+;;
+
 type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
@@ -651,8 +662,11 @@ let login_argv ~cli_path = [ cli_path; "login" ]
    MCP servers only on a host started with it (observed on 1.4.18: without the
    flag a [required] server gets no request and the turn still runs). The flag
    is given only when all three hold: the session has MCP servers to connect,
-   MASC made the directory, and the posture disables native writes and shell,
-   so no session can put a skill or a rule there. *)
+   the directory MASC made held no entry when the turn read it
+   ([origin_of_masc_directory]), and the posture disables native writes and
+   shell, so this session cannot put a skill or a rule there either. An
+   earlier session with native writes may have used the same directory; what
+   it left makes the directory [Other_tree]. *)
 let trusts_workspace config ~workspace_origin ~mcp_servers =
   match workspace_origin, config.native, mcp_servers with
   | Masc_private, (Runtime_native_tools.Native_read | Runtime_native_tools.Native_none), _ :: _
@@ -1924,7 +1938,7 @@ let run_turn
       ~storage
       ?(session_mode = Start)
       ?(mcp_servers = [])
-      ?(workspace_origin = Other_tree)
+      ?(workspace_origin = other_tree)
       ?reasoning_effort
       ?(on_session_ready = fun ~session_id:_ ~last_turn:_ -> Ok ())
       ?(on_prompt_sent = fun () -> ())

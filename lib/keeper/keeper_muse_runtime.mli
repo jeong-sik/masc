@@ -115,8 +115,8 @@ val run :
 (** Inference values and [quota_scope] come from the selected runtime snapshot;
     this adapter does not re-resolve its id after hooks or effects.
     [workspace_root] is an explicitly selected absolute native directory.
-    [workspace_origin] says who made it and defaults to
-    [Runtime_muse_serve.Other_tree]; only a [Masc_private] workspace can have
+    [workspace_origin] says what MASC knows of it and defaults to
+    {!Runtime_muse_serve.other_tree}; only a [Masc_private] workspace can have
     its host started to connect the MASC tools
     ({!Runtime_muse_serve.trusts_workspace}).
     The caller owns selecting the Keeper's workspace and authorizing its

@@ -79,14 +79,20 @@ val play_page_path : string
 val agent_from_request : Httpun.Request.t -> string option
 (** Caller-declared agent name from the request (header / query). *)
 
-(** {1 MCP / observer / operator verification} *)
+(** {1 MCP / observer / operator verification}
+
+    HIGH-RISK-UNREVIEWED: each verdict is [Ok ()] or a refusal. [Ok ()] says
+    the request is admitted; it does not say a credential was checked, since a
+    workspace with auth off or [require_token = false] admits a request that
+    carries none. A caller that has to tell the two apart needs a closed
+    variant here, not a header probe (#51752). *)
 
 val verify_mcp_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Bearer token check for the [/mcp] endpoint. *)
 
 val verify_seat_mcp_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Bearer token check for the seat door [/mcp/play]: the same as
     {!verify_mcp_auth} but asking [CanPlayMachine], which an invite's
     [Player] credential holds (RFC play-link-for-the-shared-machine §2.7). *)
@@ -95,17 +101,17 @@ val verify_mcp_auth_for_authority :
   base_path:string ->
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
-  ('a option, Masc_domain.masc_error) result
+  (unit, Masc_domain.masc_error) result
 (** Bearer token check using an explicitly admitted authority.  Entry points
     that already carry the typed authority should use this instead of
     rebuilding a fiber-local dependency. *)
 
 val verify_mcp_observer_stream_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Variant for the observer SSE stream (allows query token). *)
 
 val verify_operator_mcp_auth :
-  base_path:string -> Httpun.Request.t -> ('a option, Masc_domain.masc_error) result
+  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
 (** Variant for [/mcp/operator] (admin-tier). *)
 
 (** {1 Dashboard actor identification} *)

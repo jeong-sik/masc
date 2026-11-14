@@ -2,7 +2,7 @@ name = "masc_lane_detach"
 description = """
 Detach an optional Add-on instance: stop its worker and, when a lane declaration file keeps the instance wanted, delete that file after cleanup is confirmed.
 
-The declaration is checked before anything stops: one that changed, became invalid or is ambiguous is refused while the worker still runs, and a cleanup that fails leaves the file in place. Preserve recorded evidence and existing Keeper/game/browser ownership. Already submitted Keeper work follows its existing lifecycle. Inspect to confirm worker cleanup."""
+The declaration is checked before anything stops: one that changed, became invalid or is ambiguous is refused while the worker still runs, and a cleanup that fails leaves the file in place. Preserve recorded evidence and existing Keeper/game/browser ownership. Already submitted Keeper work follows its existing lifecycle. The reply's `declaration` object says what happened to that file: `removed` with the deleted `path`, `absent` when no file declared the instance any more, `kept` with a `reason` (`instance_already_detached`, `applied_by_another_instance`), or `not_declared` for an instance attached by request. Inspect to confirm worker cleanup."""
 additional_properties = false
 defer_loading = true
 

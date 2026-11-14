@@ -3678,10 +3678,32 @@ let removable_declaration ~directory (owner : configuration_owner) =
 let check_configuration_removable ~directory owner =
   Result.map (fun (_ : string option) -> ()) (removable_declaration ~directory owner)
 
+(* What one Detach did to the declaration that wanted its worker. Deleting the
+   file edits the operator's configuration, so the answer names the file. *)
+type declaration_kept = Instance_already_detached | Applied_by_another_instance
+type declaration_outcome =
+  | Not_declared  (* attached by request; no declaration wanted it *)
+  | Declaration_removed of string  (* this Detach deleted the file at this path *)
+  | Declaration_absent  (* declared, but no file declares it any more *)
+  | Declaration_kept of declaration_kept
+(* Decided before anything stops: the declaration to delete once the cleanup
+   is confirmed, or why this Detach leaves the directory as it is. *)
+type declaration_plan = Remove_declaration of configuration_owner | Leave_declaration of declaration_outcome
+
+let declaration_outcome_json outcome =
+  `Assoc (match outcome with
+    | Not_declared -> ["outcome", `String "not_declared"]
+    | Declaration_removed path -> ["outcome", `String "removed"; "path", `String path]
+    | Declaration_absent -> ["outcome", `String "absent"]
+    | Declaration_kept Instance_already_detached ->
+        ["outcome", `String "kept"; "reason", `String "instance_already_detached"]
+    | Declaration_kept Applied_by_another_instance ->
+        ["outcome", `String "kept"; "reason", `String "applied_by_another_instance"])
+
 let remove_configuration_file ~directory (owner : configuration_owner) =
     let* path = removable_declaration ~directory owner in
     match path with
-    | None -> Ok ()
+    | None -> Ok Declaration_absent
     | Some path ->
         (* Take ownership of the directory entry before validating the bytes
            to remove. An editor can replace it while the inventory is read.
@@ -3701,11 +3723,11 @@ let remove_configuration_file ~directory (owner : configuration_owner) =
            Unix.rename path staged;
            match Lane_addon_config.load_file ~path:staged with
            | Ok current when current.id = owner.id && current.revision = owner.revision ->
-               Unix.unlink staged; Ok ()
+               Unix.unlink staged; Ok (Declaration_removed path)
            | Ok _ -> restore "Lane configuration changed during removal; detach was not applied"
            | Error message -> restore ("Lane declaration could not be verified during removal: " ^ message)
          with
-         | Unix.Unix_error (Unix.ENOENT, _, _) when not (Sys.file_exists staged) -> Ok ()
+         | Unix.Unix_error (Unix.ENOENT, _, _) when not (Sys.file_exists staged) -> Ok Declaration_absent
          | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
 let retained_action_unlocked m ~instance_id ~request_id =
@@ -4245,25 +4267,38 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
            returns the failure. *)
         let check owner = runtime_result (offload (fun () -> check_configuration_removable ~directory owner)) in
         let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~directory owner)) in
+        (* The reply carries what happened to the declaration; the server log
+           repeats a deletion for whoever looks for the file later. *)
+        let answer ~instance_id fields outcome =
+          (match outcome with
+           | Declaration_removed path ->
+               Log.Misc.warn "Lane Add-on Detach of instance %s removed its declaration file %s" instance_id path
+           | Not_declared | Declaration_absent | Declaration_kept _ -> ());
+          `Assoc (fields @ ["declaration", declaration_outcome_json outcome]) in
         match Hashtbl.find_opt m.entries id with
         | None ->
             let* fields = persisted_binding m id in
             let* state = runtime_result (lifecycle_of_fields fields) in
             let* owner = runtime_result (configuration_of_fields fields) in
             let removing = match state, owner with
-              | (Lifecycle.Detached _, _) | (Lifecycle.Attached, None) | (Lifecycle.Observing, None)
-              | (Lifecycle.Failed _, None) | (Lifecycle.Detaching _, None) -> None
+              | (Lifecycle.Detached _, None) | (Lifecycle.Attached, None) | (Lifecycle.Observing, None)
+              | (Lifecycle.Failed _, None) | (Lifecycle.Detaching _, None) -> Leave_declaration Not_declared
+              | (Lifecycle.Detached _, Some _) -> Leave_declaration (Declaration_kept Instance_already_detached)
               | (Lifecycle.Attached, Some owner) | (Lifecycle.Observing, Some owner)
               | (Lifecycle.Failed _, Some owner) | (Lifecycle.Detaching _, Some owner) ->
                   let another_owner = List.exists (fun e -> match e.configuration with
                     | Some current -> current.id = owner.id | None -> false) (entries m) in
-                  if another_owner then None else Some owner in
-            let* () = match removing with None -> Ok () | Some owner -> check owner in
+                  if another_owner then Leave_declaration (Declaration_kept Applied_by_another_instance)
+                  else Remove_declaration owner in
+            let* () = match removing with Leave_declaration _ -> Ok () | Remove_declaration owner -> check owner in
             let* detaching, outcome = runtime_result (historical_detach ~sw ~wait:true m fields) in
-            let remove_declaration () = match removing with None -> Ok () | Some owner -> remove owner in
+            let remove_declaration () = match removing with
+              | Leave_declaration untouched -> Ok untouched | Remove_declaration owner -> remove owner in
             (match outcome with
              | Already_detached | Finished (Lifecycle.Detached _) ->
-                 let* () = remove_declaration () in Ok detaching
+                 let* outcome = remove_declaration () in
+                 let* detaching = runtime_result (object_ detaching) in
+                 Ok (answer ~instance_id:id detaching outcome)
              | Finished (Lifecycle.Failed failed) ->
                  Error (Runtime_failed (Lifecycle.failed_to_string failed))
              | Finished (Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _) | Started ->
@@ -4274,8 +4309,8 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
             let* () = match e.configuration with None -> Ok () | Some owner -> check owner in
             let* _ = runtime_result (detach_entry ~sw m e) in
             let* () = runtime_result (await_settled e) in
-            let* () = match e.configuration with None -> Ok () | Some owner -> remove owner in
-            Ok (entry_json e)))
+            let* outcome = match e.configuration with None -> Ok Not_declared | Some owner -> remove owner in
+            Ok (answer ~instance_id:e.instance_id (entry_fields e) outcome)))
 
 let retain_configured_document_owner m (d : Lane_addon_config.declaration) visibility =
   match visibility with

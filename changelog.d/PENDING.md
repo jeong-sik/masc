@@ -1,3 +1,0 @@
-### Changed
-
-- The deployment preflight (`masc-deployment-preflight-helper validate-runtime-config`) publishes the access of a host tool before it checks the exact-output registry, as boot does. A process that published nothing has every runtime table with an API provider refused as not published. The change shipped with #50875 and was left out of its entry (#50875, #PENDING).

@@ -21,7 +21,7 @@
     and an answer streamed past the timeout is lost with its request.
 
     Internal: ~50+ helpers + internal types stay private —
-    [normalized_hit] / [provider] (8-variant) /
+    [provider] (8-variant) /
     [grounded_source] / [grounded_context] / [search_payload] /
     [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
@@ -52,14 +52,41 @@
     simulates a successful response with no hits; [`Error msg]
     simulates a transport-layer failure; [`Brave_body body] feeds
     [body] as a Brave HTTP 200 response through the same parse path
-    as the real Brave provider. *)
+    as the real Brave provider, and [`Ollama_body body] does the same
+    for the Ollama provider. [`Hits] rows are {!Engine_summary} rows. *)
 type simulated_provider_outcome =
   [ `Error of string
   | `Empty
   | `Hits of (string * string * string) list
   | `Grounded of (string * string * string list) list
   | `Brave_body of string
+  | `Ollama_body of string
   ]
+
+(** {1 Result rows} *)
+
+(** What an engine wrote in a result row's text field. Each engine's
+    parser names it from the field that engine documents: Ollama
+    [content] and Exa [text] are [Engine_text]; SearXNG [content], Brave
+    [description], Tavily [content], Bing [snippet] and z.ai [content] are
+    [Engine_summary]. A missing field is an empty text of the same kind. *)
+type row_text =
+  | Engine_summary of string  (** the engine's own preview of the result *)
+  | Engine_text of string     (** text the engine took from the result's page *)
+
+(** One served result row, read-only outside this module so no caller
+    builds a half-formed row. [snippet] is the cleaned preview, bounded
+    to 1 KiB. [engine_text] is an [Engine_text] row's text, whole and
+    trimmed; [None] for an [Engine_summary] row or an empty text. *)
+type normalized_hit = private {
+  title : string;
+  url : string;
+  snippet : string;
+  engine_text : string option;
+  source : string;
+  rank : int;
+  published_at : string option;
+}
 
 (** {1 Provider fallback plan} *)
 
@@ -110,7 +137,7 @@ val provider_error_to_string : provider_error -> string
 
 (** {1 Provider parsers}
 
-    Each parser returns [Ok] with [(title, url, snippet)] triples filtered
+    Each parser returns [Ok] with [(title, url, text)] triples filtered
     by {!valid_search_result_url} and non-empty title.  Used
     internally by {!handle}'s fetch pipeline; exposed for unit
     tests so per-provider payload parsing can be exercised
@@ -118,27 +145,27 @@ val provider_error_to_string : provider_error -> string
     nonempty arrays with no usable entries return [Error (Parse _)]. Only an
     explicit empty array returns [Ok []]. *)
 
-val parse_searxng_json : string -> ((string * string * string) list, provider_error) result
+val parse_searxng_json : string -> ((string * string * row_text) list, provider_error) result
 (** Parse SearxNG JSON response from
     [{ "results": \[{title, url, content}, ...\] }]. *)
 
-val parse_brave_json : string -> ((string * string * string) list, provider_error) result
+val parse_brave_json : string -> ((string * string * row_text) list, provider_error) result
 (** Parse Brave Search JSON response from
     [{ "web": { "results": \[{title, url, description}, ...\] } }]. *)
 
-val parse_tavily_json : string -> ((string * string * string) list, provider_error) result
+val parse_tavily_json : string -> ((string * string * row_text) list, provider_error) result
 (** Parse Tavily JSON response from
     [{ "results": \[{title, url, content}, ...\] }]. *)
 
-val parse_exa_json : string -> ((string * string * string) list, provider_error) result
+val parse_exa_json : string -> ((string * string * row_text) list, provider_error) result
 (** Parse Exa JSON response from
-    [{ "results": \[{title, url, snippet}, ...\] }]. *)
+    [{ "results": \[{title, url, text}, ...\] }]. *)
 
-val parse_bing_search_json : string -> ((string * string * string) list, provider_error) result
+val parse_bing_search_json : string -> ((string * string * row_text) list, provider_error) result
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
 
-val parse_zai_search_text : string -> ((string * string * string) list, provider_error) result
+val parse_zai_search_text : string -> ((string * string * row_text) list, provider_error) result
 (** Parse the text block z.ai's [web_search_prime] tool answers with: a JSON
     string whose content is [\[{title, link, content, refer}, ...\]], or that
     array itself. Entries without a title or an http(s) [link] are dropped; a
@@ -171,7 +198,7 @@ val search_via_zai_for_test :
     [web_search_prime], parse the answer, keep [limit] rows. [post] is the
     transport, so a test answers the three requests of the session itself. *)
 
-val parse_ollama_search_json : string -> ((string * string * string) list, provider_error) result
+val parse_ollama_search_json : string -> ((string * string * row_text) list, provider_error) result
 (** Parse an Ollama web-search response from
     [{ "results": \[{title, url, content}, ...\] }]. *)
 
@@ -197,11 +224,12 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
-    The misc facade also accepts [includeContent=true] to best-effort fetch
-    each result page via [WebFetch] and add a top-level keeper-readable
-    [content_text] rendering (fetched bodies ride only there — the
-    [results] hits keep title/url/snippet), plus optional [contentMaxChars]
-    and [contentTimeout] controls. This module remains the search-provider
+    [Tool_misc_web_enrichment.handle] also accepts [includeContent=true] to
+    best-effort fetch each result page via [WebFetch] and add a top-level
+    keeper-readable [content_text] rendering (fetched bodies ride only
+    there — the [results] hits keep title/url/snippet), plus optional
+    [contentMaxChars] and [contentTimeout] controls. It reads the rows
+    through {!handle_with_rows}. This module remains the search-provider
     boundary to avoid depending on fetch.
 
     On success [data] is the typed search result envelope. When the
@@ -220,6 +248,18 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
       of its host, and no provider of the order needs none. SearXNG needs
       none, so it still searches there; a provider with a key fails in the
       chain with an [account:] error. *)
+
+val handle_with_rows :
+  on_rows:(normalized_hit list -> Yojson.Safe.t -> Yojson.Safe.t) ->
+  tool_name:string ->
+  start_time:Tool_timing.started ->
+  Yojson.Safe.t ->
+  Tool_result.result
+(** [handle_with_rows ~on_rows] is {!handle}, except that a served answer
+    with result rows reaches the caller as [on_rows rows data]: the typed
+    rows the envelope's [results] were rendered from, in the same order,
+    and the envelope. A cache hit keeps its rows. A grounded answer has no
+    rows and is served as it is; a failure never reaches [on_rows]. *)
 
 val addon_search_runner :
   query:string -> limit:int option -> (Lane_addon_search_result.result, string) result

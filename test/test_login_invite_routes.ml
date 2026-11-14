@@ -421,7 +421,34 @@ let an_admin_lists_every_invitation () =
     Alcotest.(check string)
       "a spent one does not expire"
       "consumed"
-      (status_of spent.invite_id (at open_admin.expires_at_ms)))
+      (status_of spent.invite_id (at open_admin.expires_at_ms));
+    Alcotest.(check string)
+      "nor a revoked one"
+      "revoked"
+      (status_of revoked.invite_id (at open_admin.expires_at_ms)))
+;;
+
+(* The clock of the server is set back after a record. An admission is
+   refused before the latest time of the log, so an invitation that has
+   expired by that time lets no one in, and is listed as expired though the
+   clock is before its expiry. *)
+let a_clock_set_back_does_not_reopen_an_invitation () =
+  with_installation (fun t ->
+    let admin = Some t.admin in
+    let lost = issued ~role:"member" (I.issue t.routes (request admin) ~body:(body "member")) in
+    let reopen ms =
+      match Z.open_at_start ~now_ms:(fun () -> ms) ~log_path:t.log_path ~store_path:t.store_path with
+      | Ok zone -> zone
+      | Error error -> Alcotest.failf "zone not reopened: %s" (Z.open_error_to_string error)
+    in
+    let ahead = { t.routes with R.zone = reopen lost.expires_at_ms; now = (fun () -> at_ms lost.expires_at_ms) } in
+    let (_ : issued) = issued ~role:"member" (I.issue ahead (request admin) ~body:(body "member")) in
+    let back = reopen start_ms in
+    Alcotest.(check string)
+      "expired by the latest time of the log"
+      "expired"
+      (status_of lost.invite_id (listed (I.list { t.routes with R.zone = back } (read admin))));
+    Alcotest.(check bool) "and no one joins through it" true (Option.is_none (joins back ~token:lost.token (github 41))))
 ;;
 
 let a_member_does_not_list_invitations () =
@@ -486,6 +513,7 @@ let () =
         ; Alcotest.test_case "an Admin lists every invitation" `Quick an_admin_lists_every_invitation
         ; Alcotest.test_case "a Member does not list" `Quick a_member_does_not_list_invitations
         ; Alcotest.test_case "a held revocation is not open" `Quick a_held_revocation_is_not_listed_as_open
+        ; Alcotest.test_case "a clock set back" `Quick a_clock_set_back_does_not_reopen_an_invitation
         ] )
     ]
 ;;

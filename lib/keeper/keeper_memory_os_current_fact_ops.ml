@@ -360,14 +360,15 @@ let journal_projection_identity ~keeper_id line_offset =
 
 let read_journal_tail_projection ~keepers_dir ~keeper_id ~limit =
   read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit
-  |> List.map (fun (line_offset, result) ->
-       match Journal_codec.journal_line_to_json result with
-       | `Assoc fields ->
-         `Assoc
-           (( "structural_id"
-            , `String (journal_projection_identity ~keeper_id line_offset) )
-            :: fields)
-       | json -> json)
+  |> Result.map
+       (List.map (fun (line_offset, result) ->
+          match Journal_codec.journal_line_to_json result with
+          | `Assoc fields ->
+            `Assoc
+              (( "structural_id"
+               , `String (journal_projection_identity ~keeper_id line_offset) )
+               :: fields)
+          | json -> json))
 ;;
 
 (* Boot-time twin of the writer's quarantine above: the same decoder, the

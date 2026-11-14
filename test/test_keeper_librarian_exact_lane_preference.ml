@@ -218,6 +218,12 @@ let test_keeper_preference_reorders_the_librarian_lane () =
   | Error detail -> fail detail
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 (* Working-context organization must survive an independent Memory OS store
    failure. A directory at the snapshot path deterministically rejects the
    memory read/write even when the test runs with elevated filesystem access. *)
@@ -312,7 +318,7 @@ let test_context_commits_when_memory_store_fails () =
   check bool "memory snapshot was not written over the invalid path" true
     (Sys.is_directory memory_path && Sys.file_exists blocker);
   let journal =
-    Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+    readable_journal_tail ~keepers_dir ~keeper_id ~limit:10
   in
   check bool "the memory failure is recorded" true
     (List.exists

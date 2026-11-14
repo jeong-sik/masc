@@ -516,6 +516,12 @@ val map_tail_rows : string -> max_lines:int -> f:(tail_row -> 'a) -> 'a list
     domain between the read and the parse. [f] must not touch state owned by
     the calling fiber. *)
 
+val map_tail_rows_result :
+  string -> max_lines:int -> f:(tail_row -> 'a) -> ('a list, read_error) result
+(** {!map_tail_rows} with open and read failures as values. A missing file is
+    [Ok []]. A path that cannot be opened, is not a regular file once opened,
+    or cannot be read is [Error]. *)
+
 module For_testing : sig
   val cross_context_mutex : t -> Cross_context_mutex.t
   (** Expose the internal mutex so tests can verify sharing. *)

@@ -26,4 +26,5 @@ val handle_journal_get :
     cannot decode. With [activity=1], also return a bounded, read-only change
     projection, including committed absorption/revision endpoints. Ordinary
     journal reads do not read the absorption archive. An invalid keeper name
-    answers 400. *)
+    answers 400. A journal that exists and cannot be read answers 500 with
+    [read_error]. *)

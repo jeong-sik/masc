@@ -14,6 +14,10 @@ let keeper : Tui_types.keeper =
 
 let state () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
+  (* The expected reasons below are the English sentences, so the screen
+     language is English; the default is Korean. Which keeper the composer
+     names and whether it may send does not depend on the language. *)
+  state.ui_language <- Tui_types.Lang_en;
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.local_keepers <- Tui_types.Local_workspace_read;
   state

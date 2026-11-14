@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import { useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
-import { ProblemNote, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, sessionEndedWords } from './notes'
 import type { Act, Step, TalkModel, TalkView } from './talk'
 import { messageLimitBytes } from './talk-wire'
 import type { TalkRefusal, TalkShown, Unsendable } from './talk-wire'
@@ -105,25 +105,6 @@ function actWords(act: Act): string {
     case 'unknown':
       return ''
   }
-}
-
-/** An alert with a title and lines, and the sentence of the server under
-    them as it came. The caller makes each one anew (its key is the count),
-    so a screen reader says the second as it said the first. */
-export function Callout({ title, lines, reason, attempts }: {
-  readonly title: string
-  readonly lines: readonly string[]
-  readonly reason: string | null
-  readonly attempts: number
-}): VNode {
-  return html`
-    <div class="callout" role="alert">
-      <p class="callout-title">${title}</p>
-      ${lines.map((line) => html`<p>${line}</p>`)}
-      ${reason === null ? null : html`<p class="hint">서버가 알려 준 이유: <span lang="en">${reason}</span></p>`}
-      ${attempts > 1 ? html`<p class="hint">${attempts}번 시도했어요.</p>` : null}
-    </div>
-  `
 }
 
 /** A request that came to nothing. */

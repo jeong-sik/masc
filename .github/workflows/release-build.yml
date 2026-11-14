@@ -155,7 +155,9 @@ jobs:
             bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe \
             bin/masc_exec_ssh_bootstrap.exe \
-            bin/masc_antigravity_path_hook.exe
+            bin/masc_antigravity_path_hook.exe \
+            bin/masc_native_addon_launcher.exe \
+            bin/masc_browser_addon_worker.exe
 
       # Built in a container whose glibc is the support floor, not on the
       # runner. A binary records the oldest glibc that provides each symbol it
@@ -311,6 +313,10 @@ jobs:
             dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}
           cp "$MASC_BIN_DIR"/masc_antigravity_path_hook.exe \
             dist/masc-antigravity-path-hook-${{ matrix.arch }}
+          cp "$MASC_BIN_DIR"/masc_native_addon_launcher.exe \
+            dist/masc-native-addon-launcher-${{ matrix.arch }}
+          cp "$MASC_BIN_DIR"/masc_browser_addon_worker.exe \
+            dist/masc-browser-addon-worker-${{ matrix.arch }}
           cp scripts/check-runtime-deployment-preflight.sh \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
           chmod +x dist/masc-${{ matrix.arch }}
@@ -319,7 +325,9 @@ jobs:
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }} \
             dist/masc-exec-ssh-bootstrap-${{ matrix.arch }} \
-            dist/masc-antigravity-path-hook-${{ matrix.arch }}
+            dist/masc-antigravity-path-hook-${{ matrix.arch }} \
+            dist/masc-native-addon-launcher-${{ matrix.arch }} \
+            dist/masc-browser-addon-worker-${{ matrix.arch }}
 
       # The build step enforces the floor on what it produced; this enforces it
       # on what actually ships. The two differ if a copy goes wrong, if a step
@@ -340,7 +348,9 @@ jobs:
             dist/masc-tui-${{ matrix.arch }} \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-exec-ssh-bootstrap-${{ matrix.arch }} \
-            dist/masc-antigravity-path-hook-${{ matrix.arch }}
+            dist/masc-antigravity-path-hook-${{ matrix.arch }} \
+            dist/masc-native-addon-launcher-${{ matrix.arch }} \
+            dist/masc-browser-addon-worker-${{ matrix.arch }}
 
       - name: Bundle relocatable macOS libraries and Python
         if: runner.os == 'macOS'
@@ -370,6 +380,8 @@ jobs:
             --companion masc-tui "dist/masc-tui-${{ matrix.arch }}" \
             --companion masc-exec-ssh-bootstrap "dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}" \
             --companion masc-antigravity-path-hook "dist/masc-antigravity-path-hook-${{ matrix.arch }}" \
+            --companion masc-native-addon-launcher "dist/masc-native-addon-launcher-${{ matrix.arch }}" \
+            --companion masc-browser-addon-worker "dist/masc-browser-addon-worker-${{ matrix.arch }}" \
             --companion masc-deployment-preflight-helper "dist/masc-deployment-preflight-helper-${{ matrix.arch }}" \
             --companion masc-check-runtime-deployment-preflight "dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}" \
             ${runtime_args[@]+"${runtime_args[@]}"}
@@ -539,6 +551,8 @@ jobs:
               "masc-check-runtime-deployment-preflight-$arch" \
               "masc-exec-ssh-bootstrap-$arch" \
               "masc-antigravity-path-hook-$arch" \
+              "masc-native-addon-launcher-$arch" \
+              "masc-browser-addon-worker-$arch" \
               "masc-dashboard-$arch.tar.gz" \
               "masc-release-dashboard-bundle-$arch.py"; do
               if [ ! -f "dist/$asset" ]; then

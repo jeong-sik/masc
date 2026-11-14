@@ -34,7 +34,9 @@ jobs:
               dist.mkdir()
               # Only the Python bytes are native evidence in this fixture. The
               # release workflow repeats packaging with actual MASC executables.
-              for name in ('masc','masc-tui','masc-deployment-preflight-helper','masc-check-runtime-deployment-preflight','masc-exec-ssh-bootstrap'):
+              # The packager copies every name it ships, so the fixture stages
+              # exactly the packager's own list.
+              for name in runpy.run_path('scripts/package-macos-runtime.py')['NAMES']:
                   path = dist/(name+'-'+platform)
                   path.write_text('#!/bin/sh\nprintf "%s\\n" '+commit+'\n')
                   path.chmod(0o755)

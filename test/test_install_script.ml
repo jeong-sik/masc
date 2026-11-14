@@ -430,6 +430,12 @@ let stage_release_mirror base_path =
   let antigravity_hook = Filename.concat dir ("masc-antigravity-path-hook-" ^ suffix) in
   unlink_if_exists antigravity_hook;
   Unix.symlink (Unix.realpath (real_masc_binary ())) antigravity_hook;
+  let addon_launcher = Filename.concat dir ("masc-native-addon-launcher-" ^ suffix) in
+  unlink_if_exists addon_launcher;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) addon_launcher;
+  let browser_addon_worker = Filename.concat dir ("masc-browser-addon-worker-" ^ suffix) in
+  unlink_if_exists browser_addon_worker;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) browser_addon_worker;
   (* The installer places but does not execute the guest shim. As with the
      companion fixtures, reuse the test binary bytes and retain the production
      asset name so missing-shim failures cannot hide wizard behavior. *)
@@ -510,7 +516,9 @@ with tarfile.open(archive, 'w:gz') as output:
       ; "masc-deployment-preflight-helper", helper
       ; "masc-check-runtime-deployment-preflight", gate
       ; "masc-exec-ssh-bootstrap", ssh_bootstrap
-      ; "masc-antigravity-path-hook", antigravity_hook ]
+      ; "masc-antigravity-path-hook", antigravity_hook
+      ; "masc-native-addon-launcher", addon_launcher
+      ; "masc-browser-addon-worker", browser_addon_worker ]
   in
   let package_command =
     String.concat " "
@@ -577,7 +585,9 @@ let install_real_masc_binary prefix mirror_dir =
     ; "masc-check-runtime-deployment-preflight",
       "masc-check-runtime-deployment-preflight-" ^ suffix
     ; "masc-exec-ssh-bootstrap", "masc-exec-ssh-bootstrap-" ^ suffix
-    ; "masc-antigravity-path-hook", "masc-antigravity-path-hook-" ^ suffix ]
+    ; "masc-antigravity-path-hook", "masc-antigravity-path-hook-" ^ suffix
+    ; "masc-native-addon-launcher", "masc-native-addon-launcher-" ^ suffix
+    ; "masc-browser-addon-worker", "masc-browser-addon-worker-" ^ suffix ]
     |> List.map (fun (name, asset) -> (name, Filename.concat mirror_tag_dir asset))
   in
   let companion_args =

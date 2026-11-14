@@ -55,6 +55,7 @@ jobs:
           opam exec -- dune build --profile release \
             bin/main_eio.exe bin/masc_tui.exe \
             bin/masc_antigravity_path_hook.exe \
+            bin/masc_native_addon_launcher.exe bin/masc_browser_addon_worker.exe \
             bin/deployment_preflight_helper.exe bin/masc_exec_ssh_bootstrap.exe test/test_lane_addon.exe \
             test/test_lane_addon_worker.exe test/test_lane_addon_sources.exe \
             test/test_lane_addon_surface.exe test/test_lane_addon_store_query.exe \
@@ -99,6 +100,8 @@ jobs:
           cp _build/default/bin/deployment_preflight_helper.exe dist/masc-deployment-preflight-helper-macos-arm64
           cp _build/default/bin/masc_exec_ssh_bootstrap.exe dist/masc-exec-ssh-bootstrap-macos-arm64
           cp _build/default/bin/masc_antigravity_path_hook.exe dist/masc-antigravity-path-hook-macos-arm64
+          cp _build/default/bin/masc_native_addon_launcher.exe dist/masc-native-addon-launcher-macos-arm64
+          cp _build/default/bin/masc_browser_addon_worker.exe dist/masc-browser-addon-worker-macos-arm64
           cp scripts/check-runtime-deployment-preflight.sh dist/masc-check-runtime-deployment-preflight-macos-arm64
           python3 scripts/package-macos-runtime.py --dist dist \
             --stage "$RUNNER_TEMP/masc-lane-runtime" --platform macos-arm64 \

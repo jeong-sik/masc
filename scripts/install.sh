@@ -1112,7 +1112,7 @@ uninstall_masc() {
     die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
   fi
   local targets=()
-  for name in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap masc-antigravity-path-hook; do
+  for name in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap masc-antigravity-path-hook masc-native-addon-launcher masc-browser-addon-worker; do
     target="$uninstall_prefix/$name"
     [ ! -d "$target" ] || [ -L "$target" ] || die "refusing to remove unexpected executable directory: $target"
     targets+=("$target")
@@ -1309,6 +1309,8 @@ PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
 SSH_BOOTSTRAP_ASSET="masc-exec-ssh-bootstrap-$PLATFORM_SUFFIX"
 ANTIGRAVITY_HOOK_ASSET="masc-antigravity-path-hook-$PLATFORM_SUFFIX"
+ADDON_LAUNCHER_ASSET="masc-native-addon-launcher-$PLATFORM_SUFFIX"
+BROWSER_ADDON_WORKER_ASSET="masc-browser-addon-worker-$PLATFORM_SUFFIX"
 DASHBOARD_ASSET="masc-dashboard-$PLATFORM_SUFFIX.tar.gz"
 BUNDLE_HELPER_ASSET="masc-release-dashboard-bundle-$PLATFORM_SUFFIX.py"
 log "platform: $ASSET"
@@ -1442,6 +1444,8 @@ PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 SSH_BOOTSTRAP_DEST="$PREFIX/masc-exec-ssh-bootstrap"
 ANTIGRAVITY_HOOK_DEST="$PREFIX/masc-antigravity-path-hook"
+ADDON_LAUNCHER_DEST="$PREFIX/masc-native-addon-launcher"
+BROWSER_ADDON_WORKER_DEST="$PREFIX/masc-browser-addon-worker"
 
 model_catalog_env_value() {
   if [ -n "${AGENT_CORE_MODEL_CATALOG:-}" ]; then
@@ -1564,6 +1568,11 @@ install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 install_release_companion "$SSH_BOOTSTRAP_ASSET" "$SSH_BOOTSTRAP_DEST"
 install_release_companion "$ANTIGRAVITY_HOOK_ASSET" "$ANTIGRAVITY_HOOK_DEST"
+# Every browser route runs in the browser Add-on. The server finds the worker
+# on its PATH and the launcher beside masc or on PATH, so both land in the
+# prefix with masc. `masc browser-lane-setup` declares the Add-on.
+install_release_companion "$ADDON_LAUNCHER_ASSET" "$ADDON_LAUNCHER_DEST"
+install_release_companion "$BROWSER_ADDON_WORKER_ASSET" "$BROWSER_ADDON_WORKER_DEST"
 
 # The guest exec shim (RFC-0427 B-2). The release ships one static Linux
 # binary per guest architecture; the guest is arm64 on an Apple Silicon host

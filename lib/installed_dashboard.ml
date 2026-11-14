@@ -65,7 +65,8 @@ let parse_companions = function
       | `String digest when hex 64 digest
           && List.mem name ["masc-tui";
                "masc-deployment-preflight-helper"; "masc-check-runtime-deployment-preflight";
-               "masc-exec-ssh-bootstrap"; "masc-antigravity-path-hook"] ->
+               "masc-exec-ssh-bootstrap"; "masc-antigravity-path-hook";
+               "masc-native-addon-launcher"; "masc-browser-addon-worker"] ->
         Ok ((name, digest) :: acc)
       | _ -> Error Invalid_receipt) (Ok []) items
   | _ -> Error Invalid_receipt

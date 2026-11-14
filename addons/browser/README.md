@@ -16,10 +16,12 @@ including when started by a service manager. `--skip-build --build-dir DIR`
 requires both executable inputs alongside the ordinary installer inputs;
 missing or non-executable inputs are refused before installed programs or guest
 shims change. `--no-browser-addon` leaves the two programs out and the
-workspace's Add-ons as they are; without them no browser route works. The release
-download installer does not supply these programs.
+workspace's Add-ons as they are; without them no browser route works. The
+release installer, `scripts/install.sh`, installs both programs from the same
+release into its prefix beside masc. It does not declare the Add-on; a
+`browser-lane-setup` run does, as below.
 
-masc carries these packages. After installing, the script runs
+masc carries these packages. After installing, `install-local-build.sh` runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
 `browser-lane-setup` mode does the same, when `runtime.toml` has
 `[browser.live.ego]` or the run writes it. The source is declared once its

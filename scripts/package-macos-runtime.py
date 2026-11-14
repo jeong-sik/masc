@@ -15,7 +15,8 @@ import zipfile
 
 NAMES = ('masc', 'masc-tui', 'masc-deployment-preflight-helper',
          'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap',
-         'masc-antigravity-path-hook')
+         'masc-antigravity-path-hook', 'masc-native-addon-launcher',
+         'masc-browser-addon-worker')
 MACH = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'}
 
 # The interpreter's OpenSSL reads only /private/etc/ssl, the operating system's

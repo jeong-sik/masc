@@ -202,7 +202,9 @@ class Distribution(unittest.TestCase):
         for name in [self.asset, "masc-tui-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
                      "masc-check-runtime-deployment-preflight-" + self.arch,
                      "masc-exec-ssh-bootstrap-" + self.arch,
-                     "masc-antigravity-path-hook-" + self.arch]:
+                     "masc-antigravity-path-hook-" + self.arch,
+                     "masc-native-addon-launcher-" + self.arch,
+                     "masc-browser-addon-worker-" + self.arch]:
             shutil.copy2(self.binary, mirror / name)
         companions = [(name, self.binary) for name in sorted(bundle.COMPANIONS)]
         runtime = None
@@ -320,6 +322,12 @@ class Distribution(unittest.TestCase):
         installed = (self.prefix / "masc").resolve()
         self.assertEqual((self.prefix / "masc-exec-ssh-bootstrap").read_bytes(),
                          (mirror / ("masc-exec-ssh-bootstrap-" + self.arch)).read_bytes())
+        # The browser Add-on runs the worker found on PATH and the launcher found
+        # beside the real masc first, then on PATH (#45119): both land in the
+        # prefix, and the launcher sits beside the installed release's masc.
+        for program in ("masc-native-addon-launcher", "masc-browser-addon-worker"):
+            self.assertTrue(os.access(self.prefix / program, os.X_OK), program)
+            self.assertEqual((self.prefix / program).resolve().parent, installed.parent, program)
         bundle.verify_tree(installed.parent, self.asset)
         command = next(line.strip() for line in result.stdout.splitlines()
                        if line.startswith('  env '))

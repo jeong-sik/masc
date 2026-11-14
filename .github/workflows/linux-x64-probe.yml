@@ -360,7 +360,8 @@ jobs:
           opam exec -- dune build --release \
             bin/main_eio.exe bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe bin/masc_exec_ssh_bootstrap.exe \
-            bin/masc_antigravity_path_hook.exe
+            bin/masc_antigravity_path_hook.exe \
+            bin/masc_native_addon_launcher.exe bin/masc_browser_addon_worker.exe
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git diff --exit-code HEAD --
       - name: Bundle relocatable runtime with release filenames
@@ -371,6 +372,8 @@ jobs:
           cp _build/default/bin/deployment_preflight_helper.exe "$PROBE_OUT/masc-deployment-preflight-helper-macos-arm64"
           cp _build/default/bin/masc_exec_ssh_bootstrap.exe "$PROBE_OUT/masc-exec-ssh-bootstrap-macos-arm64"
           cp _build/default/bin/masc_antigravity_path_hook.exe "$PROBE_OUT/masc-antigravity-path-hook-macos-arm64"
+          cp _build/default/bin/masc_native_addon_launcher.exe "$PROBE_OUT/masc-native-addon-launcher-macos-arm64"
+          cp _build/default/bin/masc_browser_addon_worker.exe "$PROBE_OUT/masc-browser-addon-worker-macos-arm64"
           cp scripts/check-runtime-deployment-preflight.sh "$PROBE_OUT/masc-check-runtime-deployment-preflight-macos-arm64"
           python3 scripts/package-macos-runtime.py --dist "$PROBE_OUT" \
             --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$SOURCE_SHA"

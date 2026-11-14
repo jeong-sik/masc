@@ -74,6 +74,46 @@ let with_boot_override name value_opt f =
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None f
 
+(* Every variable a web search reads to choose a provider or to admit one.
+   The credential names come from [Web_search_provider.all], which is
+   generated, so a provider added later is closed here too. *)
+let web_search_env_names =
+  [ "MASC_WEB_SEARCH_PROVIDER"
+  ; "MASC_WEB_SEARCH_PROVIDER_ORDER"
+  ; "MASC_WEB_SEARCH_FALLBACKS"
+  ]
+  @ List.concat_map Web_search_provider.credential_env_names Web_search_provider.all
+
+let with_each_env names value_of f =
+  List.fold_right (fun name inner () -> with_env name (value_of name) inner) names f ()
+
+(* No provider named and no credential, whatever the shell exports. A
+   credential left in the shell joins the default order behind the provider a
+   case names, and the search then goes to that provider's endpoint (#50914).
+   Every case starts here; a case sets back only what it checks. *)
+let with_closed_web_search_env f =
+  with_each_env web_search_env_names (fun _ -> None) f
+
+(* A developer shell that exports a credential for every provider. The keys
+   belong to no account and the SearXNG address is the discard port of this
+   host, so a case that fails to close them reaches no provider. *)
+let with_every_web_search_credential_exported f =
+  let value provider =
+    match (provider : Web_search_provider.t) with
+    | Searxng -> "http://127.0.0.1:9"
+    | Brave | Brave_llm_context | Tavily | Exa | Bing_api | Ollama | Zai ->
+      "test-key-of-no-account"
+  in
+  List.fold_right
+    (fun provider inner () ->
+      with_each_env
+        (Web_search_provider.credential_env_names provider)
+        (fun _ -> Some (value provider))
+        inner)
+    Web_search_provider.all
+    f
+    ()
+
 (* Test registry — each [test] call appends; final [let ()] dispatches
    via Alcotest.run.  Per-test Eio scope for code paths that use Eio.Mutex. *)
 let test_cases : (string * (unit -> unit)) list ref = ref []
@@ -82,7 +122,7 @@ let test name f =
   test_cases := (name, fun () ->
     Eio_main.run (fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      with_isolated_runtime_env f)) :: !test_cases
+      with_isolated_runtime_env (fun () -> with_closed_web_search_env f))) :: !test_cases
 
 (* Create test context *)
 let test_counter = ref 0
@@ -348,103 +388,64 @@ let () = test "parse_searxng_json_malformed" (fun () ->
 )
 
 let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun () ->
-  with_env "OLLAMA_API_KEY" None (fun () ->
   with_env "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
-    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
-      with_env "TAVILY_API_KEY" None (fun () ->
-        with_env "EXA_API_KEY" None (fun () ->
-          with_env "BING_SEARCH_API_KEY" None (fun () ->
-            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                    assert
-                      (Tool_misc.web_search_provider_plan ()
-                       = [ "searxng" ])))))))))))
+    assert (Tool_misc.web_search_provider_plan () = [ "searxng" ]))
 )
 
 let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
-  with_env "OLLAMA_API_KEY" None (fun () ->
   with_unset_env "MASC_SEARXNG_URL" (fun () ->
     with_boot_override "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
-      with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
-        with_env "TAVILY_API_KEY" None (fun () ->
-          with_env "EXA_API_KEY" None (fun () ->
-            with_env "BING_SEARCH_API_KEY" None (fun () ->
-              with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-                with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                    with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                      assert
-                        (Tool_misc.web_search_provider_plan ()
-                         = [ "searxng" ]))))))))))))
+      assert (Tool_misc.web_search_provider_plan () = [ "searxng" ])))
 )
 
 (* Feature contract: with zero credentials the plan is empty and the
    search boundary reports the configuration failure with its remedy —
    never an empty success. *)
 let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
-  with_env "OLLAMA_API_KEY" None (fun () ->
-  with_env "MASC_SEARXNG_URL" None (fun () ->
-    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
-      with_env "TAVILY_API_KEY" None (fun () ->
-        with_env "EXA_API_KEY" None (fun () ->
-          with_env "BING_SEARCH_API_KEY" None (fun () ->
-            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                    assert (Tool_misc.web_search_provider_plan () = []);
-                    let result =
-                      Tool_misc.web_search_simulate_for_test
-                        ~query:"ocaml eio" ~limit:3 []
-                    in
-                    assert (not (Tool_result.is_success result));
-                    (* Nothing was called, so nothing crashed: what is
-                       missing is configuration. Reported as a fault, the
-                       bridge lowers it to [Unknown] and the model retries a
-                       call no retry can fix. *)
-                    assert
-                      (Tool_result.failure_class result
-                       = Some Tool_result.Dependency_unavailable);
-                    assert
-                      (str_contains
-                         (Tool_result.message result)
-                         "no web search provider is configured");
-                    (* Exercise the dispatch boundary as well as the shared
-                       provider chain. With an empty plan the chain ends
-                       before any HTTP call and failures are never cached. *)
-                    let ctx = make_test_ctx () in
-                    (match
-                       Tool_misc.dispatch ctx ~name:"masc_web_search"
-                         ~args:(`Assoc [ ("query", `String "empty chain probe") ])
-                     with
-                     | Some dispatched ->
-                         assert (not (Tool_result.is_success dispatched));
-                         assert
-                           (Tool_result.failure_class dispatched
-                            = Some Tool_result.Dependency_unavailable);
-                         assert
-                           (str_contains
-                              (Tool_result.message dispatched)
-                              "no web search provider is configured")
-                     | None -> failwith "masc_web_search was not dispatched")))))))))))
+  assert (Tool_misc.web_search_provider_plan () = []);
+  let result =
+    Tool_misc.web_search_simulate_for_test
+      ~query:"ocaml eio" ~limit:3 []
+  in
+  assert (not (Tool_result.is_success result));
+  (* Nothing was called, so nothing crashed: what is
+     missing is configuration. Reported as a fault, the
+     bridge lowers it to [Unknown] and the model retries a
+     call no retry can fix. *)
+  assert
+    (Tool_result.failure_class result
+     = Some Tool_result.Dependency_unavailable);
+  assert
+    (str_contains
+       (Tool_result.message result)
+       "no web search provider is configured");
+  (* Exercise the dispatch boundary as well as the shared
+     provider chain. With an empty plan the chain ends
+     before any HTTP call and failures are never cached. *)
+  let ctx = make_test_ctx () in
+  (match
+     Tool_misc.dispatch ctx ~name:"masc_web_search"
+       ~args:(`Assoc [ ("query", `String "empty chain probe") ])
+   with
+   | Some dispatched ->
+       assert (not (Tool_result.is_success dispatched));
+       assert
+         (Tool_result.failure_class dispatched
+          = Some Tool_result.Dependency_unavailable);
+       assert
+         (str_contains
+            (Tool_result.message dispatched)
+            "no web search provider is configured")
+   | None -> failwith "masc_web_search was not dispatched")
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->
-  with_env "OLLAMA_API_KEY" None (fun () ->
-  with_env "MASC_SEARXNG_URL" None (fun () ->
-    with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
-      with_env "TAVILY_API_KEY" None (fun () ->
-        with_env "EXA_API_KEY" None (fun () ->
-          with_env "BING_SEARCH_API_KEY" None (fun () ->
-            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-              with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
-                with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "tavily,exa") (fun () ->
-                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                    assert
-                      (Tool_misc.web_search_provider_plan ()
-                       = [ "brave"; "tavily"; "exa" ])))))))))))
+  with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
+      with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "tavily,exa") (fun () ->
+        assert
+          (Tool_misc.web_search_provider_plan ()
+           = [ "brave"; "tavily"; "exa" ]))))
 )
 
 let () = test "parse_brave_llm_context_json" (fun () ->
@@ -781,57 +782,42 @@ let () = test "the zai transport drops the content type and carries the answer" 
      = Error "curl exit code 28")
 )
 
+(* #50914: the shell this ran in exported OLLAMA_API_KEY. The case blanked
+   only ZAI_API_KEY, so Ollama joined the chain behind the named provider and
+   the search went to ollama.com. The shell is reproduced here with a
+   credential for every provider; the plan is read before the dispatch, so a
+   provider that would be called fails the case before anything is sent. *)
 let () = test "dispatch names zai without a key and reaches no network" (fun () ->
-  with_env "ZAI_API_KEY" None (fun () ->
-    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
-      with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-        with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-          with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "0") (fun () ->
-            let ctx = make_test_ctx () in
-            let args = `Assoc [ ("query", `String "zai without a key") ] in
-            match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
-            | Some result ->
-              assert (not (Tool_result.is_success result));
-              assert (str_contains (Tool_result.message result) "zai");
-              assert (str_contains (Tool_result.message result) "missing ZAI_API_KEY")
-            | None -> failwith "masc_web_search was not dispatched")))))
+  with_every_web_search_credential_exported (fun () ->
+    with_closed_web_search_env (fun () ->
+      with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+        with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" (Some "0") (fun () ->
+          assert (Tool_misc.web_search_provider_plan () = [ "zai" ]);
+          let ctx = make_test_ctx () in
+          let args = `Assoc [ ("query", `String "zai without a key") ] in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+            assert (not (Tool_result.is_success result));
+            assert (str_contains (Tool_result.message result) "zai");
+            assert (str_contains (Tool_result.message result) "missing ZAI_API_KEY")
+          | None -> failwith "masc_web_search was not dispatched"))))
 )
 
 let () = test "zai is a provider only when it is named" (fun () ->
   assert (Web_search_provider.of_label "ZAI" = Some Web_search_provider.Zai);
   assert (Web_search_provider.of_label " z.ai " = Some Web_search_provider.Zai);
   assert (not (List.mem Web_search_provider.Zai Web_search_provider.default_order));
-  with_env "MASC_SEARXNG_URL" None (fun () ->
-    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
-      with_env "TAVILY_API_KEY" None (fun () ->
-        with_env "EXA_API_KEY" None (fun () ->
-          with_env "BING_SEARCH_API_KEY" None (fun () ->
-            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-              with_env "OLLAMA_API_KEY" None (fun () ->
-                with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                    with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                      with_env "ZAI_API_KEY" (Some "zai-key") (fun () ->
-                        (* The key is on every install that talks to GLM, so
-                           it must not make a search start spending the plan. *)
-                        assert (Tool_misc.web_search_provider_plan () = []);
-                        with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
-                          assert (Tool_misc.web_search_provider_plan () = [ "zai" ])))))))))))))
+  with_env "ZAI_API_KEY" (Some "zai-key") (fun () ->
+    (* The key is on every install that talks to GLM, so
+       it must not make a search start spending the plan. *)
+    assert (Tool_misc.web_search_provider_plan () = []);
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "zai") (fun () ->
+      assert (Tool_misc.web_search_provider_plan () = [ "zai" ])))
 )
 
 let () = test "web_search_provider_plan_admits_ollama_with_key" (fun () ->
-  with_env "MASC_SEARXNG_URL" None (fun () ->
-    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
-      with_env "TAVILY_API_KEY" None (fun () ->
-        with_env "EXA_API_KEY" None (fun () ->
-          with_env "BING_SEARCH_API_KEY" None (fun () ->
-            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                    with_env "OLLAMA_API_KEY" (Some "ollama-key") (fun () ->
-                      assert
-                        (Tool_misc.web_search_provider_plan () = [ "ollama" ])))))))))))
+  with_env "OLLAMA_API_KEY" (Some "ollama-key") (fun () ->
+    assert (Tool_misc.web_search_provider_plan () = [ "ollama" ]))
 )
 
 let () = test "parse_brave_llm_context_json_malformed" (fun () ->
@@ -840,23 +826,13 @@ let () = test "parse_brave_llm_context_json_malformed" (fun () ->
 )
 
 let () = test "web_search_provider_plan_admits_brave_llm_context_only_explicitly" (fun () ->
-  with_env "OLLAMA_API_KEY" None (fun () ->
-  with_env "MASC_SEARXNG_URL" None (fun () ->
-    with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
-      with_env "TAVILY_API_KEY" None (fun () ->
-        with_env "EXA_API_KEY" None (fun () ->
-          with_env "BING_SEARCH_API_KEY" None (fun () ->
-            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
-              with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
-                with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
-                  with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
-                    (* Default order never contains the grounded provider. *)
-                    assert (Tool_misc.web_search_provider_plan () = [ "brave" ]));
-                  with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave_llm_context")
-                    (fun () ->
-                      assert
-                        (Tool_misc.web_search_provider_plan ()
-                         = [ "brave_llm_context"; "brave" ])))))))))))
+  with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+    (* Default order never contains the grounded provider. *)
+    assert (Tool_misc.web_search_provider_plan () = [ "brave" ]);
+    with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave_llm_context") (fun () ->
+      assert
+        (Tool_misc.web_search_provider_plan ()
+         = [ "brave_llm_context"; "brave" ])))
 )
 
 (* Feature contract: a grounded provider answer flows through dispatch as

@@ -110,6 +110,10 @@ let report_editor_unset state ~form =
 
 (* An operator request the TUI kept back, said on the action line: why, that
    nothing was sent, and what stayed. *)
+(* A chat command that names no Keeper sends nothing; its line stays. *)
+let select_keeper_first ~ko =
+  if ko then "먼저 키퍼를 고르세요" else "Select a Keeper first"
+
 let report_kept_back state reason kept =
   let ko = state.ui_language = Lang_ko in
   report_action state "error" (kept_back ~ko (reason ~ko) kept)
@@ -15987,7 +15991,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Queue input ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
-       | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
+       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | _, Error detail -> notice ~kind:Notice_failure detail
        | _, Ok (Masc_tui_queue_inspection.Inspect_peers _) ->
          assert false (* [parse] never creates a roster read. *)
@@ -16062,7 +16066,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Run_next ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
-       | None -> notice ~kind:Notice_failure "Select a Keeper first"
+       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some name ->
          if List.mem_assoc name state.keeper_chat_control_pending then
            notice ~kind:Notice_failure "Wait for the pending stop or resume before run-next"
@@ -16133,7 +16137,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Answer_tool_approval allow ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
-       | None -> notice ~kind:Notice_reply "Select a Keeper first"
+       | None -> notice ~kind:Notice_reply (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some target ->
          match inflight_for_keeper state target with
          | Some entry ->
@@ -16245,12 +16249,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          ^ " (Ctrl-N or /memory to cycle)")
   | Masc_tui_command.Memory_status ->
       (match target with
-       | None -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some _ when not (server_authority_ready state) ->
-         notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 조회하세요."
+         notice ~kind:Notice_failure
+           (let ko = (state.ui_language = Lang_ko) in
+            kept_back ~ko (workspace_identity_unconfirmed ~ko) Draft_kept)
        | Some keeper ->
          Masc_tui_message_input.clear state.msg_input;
-         notice ~kind:Notice_reply (keeper ^ ": 메모리 처리 상태 조회 중");
+         notice ~kind:Notice_reply
+           (keeper ^ ": " ^ ui_text state ~ko:"메모리 처리 상태 조회 중"
+              ~en:"loading memory processing status");
          let ticket = ref () in
          state.chat_command_reads <-
            (ticket, state.workspace_read_authority, "/memory status") :: state.chat_command_reads;
@@ -16272,12 +16280,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              else Masc_tui_http.Catch_up_not_sent detail in
            let message outcome =
              Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) in
+           let changed =
+             ui_text state ~ko:"워크스페이스 연결이 바뀜" ~en:"workspace connection changed" in
            Masc_tui_message_input.clear state.msg_input;
-           notice ~kind:Notice_reply (keeper ^ ": 메모리 따라잡기 요청 중");
+           notice ~kind:Notice_reply
+             (keeper ^ ": " ^ ui_text state ~ko:"메모리 따라잡기 요청 중"
+                ~en:"requesting memory catch-up");
            (* Keep this original operation receipt through workspace withdrawal.
               Its delivery grants no read or retry authority in a successor. *)
            Masc_tui_workspace_result.launch state ~results:mailbox.workspace_results
-             ~cancelled_by:(fun () -> message (interrupted "작업 공간 연결이 변경되었습니다."))
+             ~cancelled_by:(fun () -> message (interrupted changed))
              ~boundary_error:interrupted
              ~deliver:(fun result -> message (match result with Ok outcome | Error outcome -> outcome))
              (fun () ->
@@ -16287,9 +16299,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
                  Atomic.set posting true;
                  Ok (Masc_tui_http.post_keeper_memory_catch_up ~expected_workspace:workspace
                    ~host ~port ~keeper_name:keeper))
-       | None, _ -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some _, (None | Some _) ->
-           notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 요청하세요.")
+           notice ~kind:Notice_failure
+           (let ko = (state.ui_language = Lang_ko) in
+            kept_back ~ko (workspace_identity_unconfirmed ~ko) Draft_kept))
   | Masc_tui_command.Open_fleet_memory ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Memory;
@@ -25587,21 +25601,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) ->
       let original_is_current = authority = state.workspace_authority
         && same_workspace_identity (Some workspace) state.server_identity in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
+      let status_hint = say "처리 상태: /memory status" "status: /memory status" in
       let kind, detail = match outcome with
         | Masc_tui_http.Catch_up_submitted ->
-          Notice_reply, "메모리 따라잡기 요청 접수. 처리 상태는 /memory status로 조회하세요."
+          Notice_reply, say "메모리 따라잡기 접수" "memory catch-up accepted" ^ " · " ^ status_hint
         | Catch_up_coalesced ->
-          Notice_reply, "대기 중인 따라잡기 요청에 합쳤습니다. 처리 상태는 /memory status로 조회하세요."
-        | Catch_up_not_sent detail -> Notice_failure, "요청을 전송하지 못했습니다: " ^ detail
-        | Catch_up_refused detail -> Notice_failure, "서버가 요청을 거절했습니다: " ^ detail
+          Notice_reply, say "대기 중인 따라잡기에 합침" "joined the pending catch-up" ^ " · " ^ status_hint
+        | Catch_up_not_sent detail -> Notice_failure, not_sent ~ko ^ ": " ^ detail
+        | Catch_up_refused detail -> Notice_failure, say "서버가 거절함: " "server refused: " ^ detail
         | Catch_up_unconfirmed detail ->
-          Notice_failure, "접수 결과 미확인: " ^ detail ^ " · 원래 작업 공간에서 /memory status로 확인하세요." in
+          Notice_failure,
+          say "접수 미확인: " "acceptance unconfirmed: " ^ detail ^ " · "
+          ^ say "원래 워크스페이스에서 /memory status 로 확인하세요"
+              "check /memory status in the original workspace" in
       if original_is_current then
         chat_notice state ~keeper_name:(Some keeper) ~kind (keeper ^ ": " ^ detail)
       else
         report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system")
-          (Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path
-           ^ "의 원래 요청 · " ^ keeper ^ ": " ^ detail)
+          (let path = Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path in
+           say (path ^ "의 원래 요청") ("original request in " ^ path)
+           ^ " · " ^ keeper ^ ": " ^ detail)
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
@@ -29068,31 +29089,44 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Row_health_read _ | Fleet_health_read _ -> ()
        | Command_health_read _ ->
          let notice = chat_notice state ~keeper_name:(Some keeper) in
+         let ko = state.ui_language = Lang_ko in
+         let say korean english = if ko then korean else english in
          match result with
-         | Error detail -> notice ~kind:Notice_failure (keeper ^ ": 상태 조회 실패 · " ^ detail)
+         | Error detail ->
+           notice ~kind:Notice_failure
+             (keeper ^ ": " ^ say "상태 " "status " ^ field_failed ~ko ^ " · " ^ detail)
          | Ok {mhr_keeper = Row_absent; _} ->
-           notice ~kind:Notice_failure (keeper ^ ": 메모리 관측 행이 없습니다.")
+           notice ~kind:Notice_failure
+             (keeper ^ ": " ^ say "메모리 관측 없음" "no memory observation")
          | Ok {mhr_keeper = Row_refused refusal; _} ->
-           notice ~kind:Notice_failure (keeper ^ ": 상태를 읽지 못했습니다 · " ^ refusal.mkr_reason)
+           notice ~kind:Notice_failure
+             (keeper ^ ": " ^ say "상태 조회 거절" "status refused" ^ " · " ^ refusal.mkr_reason)
          | Ok {mhr_keeper = Row_present row; mhr_generated_at} ->
            let librarian = row.mkh_librarian in
            let pass = match librarian.mlh_state with
-             | None -> "이번 서버에서 처리 결과 미관측"
-             | Some state -> Masc_tui_keeper_memory_reading.pass_word state in
+             | None -> say "이번 서버에서 처리 결과 미관측" "no pass observed on this server"
+             | Some ending -> memory_pass_text ~ko ending in
            let lag = match Masc_tui_keeper_memory_reading.unread_lag librarian with
-             | None -> "미처리 턴 미관측"
-             | Some count -> Printf.sprintf "미처리 %d턴" count in
+             | None -> say "미처리 턴 미관측" "unprocessed turns not observed"
+             | Some count ->
+               if ko then Printf.sprintf "미처리 %d턴" count
+               else Printf.sprintf "%d turns unprocessed" count in
            let measured = match librarian.mlh_measured_at with
-             | None -> "처리 관측 시각 없음"
-             | Some at -> "처리 관측 " ^ Masc_tui_message_layout.span_text
-                 (max 0. (Unix.gettimeofday () -. at)) ^ " 전" in
+             | None -> say "처리 관측 시각 없음" "no pass time observed"
+             | Some at ->
+               say "처리 관측 " "pass observed "
+               ^ span_ago ~ko
+                   (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. at))) in
            let cause = Option.bind librarian.mlh_state
              Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
            let admission = Option.map (fun admission ->
-             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.admission_description admission)
+             say "명시적 메모리 후보: " "explicit memory candidate: "
+             ^ Masc.Keeper_librarian_pending.admission_description admission)
              librarian.mlh_admission_wait in
-           let reading_age = "상태 조회 " ^ Masc_tui_message_layout.span_text
-             (max 0. (Unix.gettimeofday () -. mhr_generated_at)) ^ " 전" in
+           let reading_age =
+             say "상태 조회 " "status loaded "
+             ^ span_ago ~ko
+                 (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. mhr_generated_at))) in
            notice ~kind:Notice_reply (String.concat " · "
              ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it

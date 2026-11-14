@@ -370,7 +370,7 @@ let age_text ~now at =
 
 let ago_text ~ko ~now at =
   match Layout.elapsed_text (now -. at) with
-  | Some text -> text ^ say ko " 전" " ago"
+  | Some text -> Masc_tui_words.span_ago ~ko text
   | None -> Masc_tui_theme.Glyph.no_value
 
 let last_event_text ~ko ~now at =

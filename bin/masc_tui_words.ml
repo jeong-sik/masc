@@ -33,6 +33,10 @@ let title_failed ~ko = "(" ^ field_failed ~ko ^ ")"
    it; the fleet line still spells the same pair itself. *)
 let field_stale ~ko = if ko then "이전 관측" else "stale"
 
+(* A span that has passed, after its value: "3m 전", "3m ago" (RFC section
+   6.2). *)
+let span_ago ~ko span = span ^ if ko then " 전" else " ago"
+
 (* The workspace the server serves, named where the TUI cannot confirm it:
    the identity was not read, the latest read did not match again, or the
    server is not ready to say ([server_authority_ready]). A request that

@@ -88,7 +88,8 @@ let briefing_word = "briefing"
 let building_word = "building"
 let read_failed_word ~ko = if ko then "읽기 실패" else "read failed"
 (* The Work screen words an unconfirmed workspace the same way. *)
-let suspended_word ~ko = if ko then "작업 공간 미확인" else "workspace unconfirmed"
+let suspended_word ~ko =
+  Masc_tui_words.workspace_name ~ko ^ " " ^ Masc_tui_words.field_unconfirmed ~ko
 let no_ledger_word ~ko = if ko then "장부 없음" else "no ledger"
 let label ~ko = if ko then "월드:" else "World:"
 

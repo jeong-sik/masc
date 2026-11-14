@@ -555,7 +555,7 @@ let test_retained_source_root_alias () = with_fixture ~history_kind:Official (fu
     let record=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store capture)
       |> Result.map_error Durable_owner.error_to_string |> get in
     let preflight ()=io (fun () -> Lane_addon_store_preflight.scan
-      ~validate_tool_request:Keeper_librarian_store_preflight.validator
+      ~validate_tool_request:Keeper_librarian_store_preflight.preflight
       Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
     check int "the retained alias passes current payload preflight" 0 (List.length (preflight ()).refusals);
     let restored=io (fun () -> Capture.restore ~owner record) |> get in
@@ -673,6 +673,35 @@ let test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing () = with_f
     (evidence (refused Invalid_request)=Keeper_exact_walk_failure.empty);
   check bool "an outcome that is not a refusal shows nothing" true
     (evidence Lane_addon_exact.Outcome_unknown=Keeper_exact_walk_failure.empty))
+(* History builds the evidence of a body refusal from the final alone
+   (Final.refusal_evidence) and reads no size evidence through the record, so
+   the deploy check passes the original when the Exact check deletes that
+   record (RFC exact-request-skips-a-slot-that-refused-its-input, section 5). *)
+let test_preflight_passes_a_history_body_refusal_whose_record_goes () = with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun _ -> `Request_entity_too_large,
+    {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+  let deliveries= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:deliveries;
+  ignore (run_worker fixture);
+  let refused,capture=only_original fixture in
+  check bool "the host's body refusal ends the original at execution" true
+    (match Progress.phase refused.progress with
+     | Progress.Rejected {stage=Progress.Execution;_} -> true
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+       false);
+  let request=Capture.request capture |> get in
+  let proof_path=Filename.concat (Store.root fixture.store) (Lane_addon_exact.Retained_key.proof_path
+    (Lane_addon_exact.Retained_key.of_request ~declaration_id:"librarian" request)) in
+  let refusals ()=(io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get).refusals in
+  check int "the refusal passes while its record and proof are kept" 0 (List.length (refusals ()));
+  (* A proof link that is not JSON: the Exact check deletes the record with it. *)
+  io (fun () -> write proof_path "{");
+  check int "the final alone gives history its evidence, so the original passes" 0
+    (List.length (refusals ())))
 (* The Librarian worker's declared reply frame is 4 MiB; a request whose host
    listing cannot fit is refused by the worker before the host retains it. *)
 let oversized_turn_bytes = 4_500_000
@@ -827,7 +856,7 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
     | [gate] -> gate
     | [] | _::_::_ -> fail "expected the retained gate for the original answer" in
   let report=io (fun () -> Lane_addon_store_preflight.scan
-    ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
   check bool "preflight examined the parent and gate" true (report.rows>=2);
   check int "preflight reads the host-shaped original parent and gate" 0 (List.length report.refusals);
@@ -2072,6 +2101,29 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   assert_unattached (run_worker fixture);
   io (fun () -> Sys.remove body);
   check string "a pass ends the same without the fenced original's body" with_body (stopped ()))
+(* The deploy check reads no Exact file of a fenced original, as resume reads
+   none (RFC exact-request-skips-a-slot-that-refused-its-input, section 6, L2b-2). *)
+let test_preflight_reads_no_exact_file_of_a_fenced_original () = with_fixture (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let exact=Capture.request request |> get in
+  let record_path=Filename.concat (Store.root fixture.store)
+    (Store.exact_request_path ~declaration_id:"librarian" ~request_id:exact.request_id) in
+  let refusals ()=(io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get).refusals in
+  (* A record the Exact check cannot read: resume stops on it. *)
+  io (fun () -> write record_path "{");
+  check bool "an unfenced original whose record the Exact check deletes is refused" true
+    (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+       refusal.decoder=Lane_addon_store_preflight.Tool_request_exact_reads) (refusals ()));
+  io (fun () -> Sys.remove record_path);
+  let preview=fence_preview fixture request in
+  ignore (memory_action fixture (fun () -> io (fun () ->
+    Resolution.fence_serialized ~config:fixture.config ~keeper_name ~request_id:original.request_id
+      ~expected:preview.expected ~actor:"operator" ~reason:"the original's Exact record is gone"
+      ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
+  io (fun () -> write record_path "{");
+  check int "a fenced original is read by no consumer" 0 (List.length (refusals ())))
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in
@@ -2370,14 +2422,14 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     | {Resolution_intent.phase=Child_confirmed child;_}::_ -> child.request_id
     | _ -> fail "nested resolution did not acknowledge its exact child" in
   let preflight=io (fun () -> Lane_addon_store_preflight.scan
-    ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
   check int "strict preflight reads the real fenced-parent child link" 0 (List.length preflight.refusals);
   (* A pass decodes every resolution record of its scope. Preflight refuses
      one of another schema that no original leads to, and fresh state deletes
      the scope it stops. *)
   let scan ()=io (fun () -> Lane_addon_store_preflight.scan
-    ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    ~validate_tool_request:Keeper_librarian_store_preflight.preflight
     ~validate_history_resolution:Resolution_intent.check_published_file
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
   check int "preflight reads every current resolution record" 0 (List.length (scan ()).refusals);
@@ -3782,6 +3834,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_worker_body_refusal_ends_the_original;
   test_case "a retained provider body refusal shows descent from its receipt" `Quick
     test_retained_body_refusal_shows_descent_from_its_receipt;
+  test_case "the deploy check passes a history body refusal whose record goes" `Quick
+    test_preflight_passes_a_history_body_refusal_whose_record_goes;
   test_case "a refusal the latest execution did not end in shows nothing" `Quick
     test_a_refusal_the_latest_execution_did_not_end_in_shows_nothing;
   test_case "actual original reaches Memory and source ACK" `Quick test_actual_completed_history_path;
@@ -3832,6 +3886,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_history_fence_retains_unknown_and_blocks_late_observations;
   test_case "a fenced unknown original does not block the next history pass" `Quick
     test_history_fence_allows_the_next_history_pass;
+  test_case "the deploy check reads no Exact file of a fenced original" `Quick
+    test_preflight_reads_no_exact_file_of_a_fenced_original;
   test_case "a post-fence cursor change terminates only its continuation" `Quick
     (test_fenced_resolution_survives_cursor_advance ~nested:false);
   test_case "a refused nested continuation does not block its ancestor or fresh history" `Quick

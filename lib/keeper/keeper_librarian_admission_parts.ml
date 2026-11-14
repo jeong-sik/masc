@@ -220,11 +220,28 @@ let completion_candidates inventory =
 let declaration_id (destination:Capture.destination) =
   let* installation=Owner.installation_of_id destination.installation_id in
   match installation with Owner.Configuration id -> Ok id | Owner.Manual _ -> Error "Original size proof has manual destination"
-let original_capture ~store ~owner ~inventory ~(parent:part) execution_id =
+(* How one reading of a forest reaches an original execution: its record in
+   the owner's execution scope, the latest attempt its host evidence shows,
+   and the confirmation of a final against that evidence. The runtime reads
+   the store ([store_reads]); the deploy check reads the files the Exact check
+   leaves (Keeper_librarian_store_preflight). *)
+type execution_reads = {
+  load : request_id:string -> (Owner.retained option, string) result;
+  read_latest : declaration_id:string -> schema:Yojson.Safe.t -> Exact.request ->
+    (Exact.latest_original_execution, string) result;
+  confirm : Capture.t -> Exact.final -> (unit, string) result;
+}
+let store_reads ~store ~owner = {
+  load=(fun ~request_id -> Owner.load ~store ~scope:(Capture.scope owner) ~request_id |> owner_error);
+  read_latest=(fun ~declaration_id ~schema request ->
+    Exact.read_latest_original_execution ~store ~declaration_id ~schema request);
+  confirm=Capture.confirm_final ~store;
+}
+let original_capture ~(reads:execution_reads) ~owner ~inventory ~(parent:part) execution_id =
   let* current=find inventory ~part_id:parent.id in
   let* ()=equal (to_json current) (to_json parent) "Original size-evidence parent changed" in
   let* ()=Capture.owner_matches_json owner (Capture.owner_to_json parent.owner) in
-  let* original=Owner.load ~store ~scope:(Capture.scope owner) ~request_id:execution_id |> owner_error in
+  let* original=reads.load ~request_id:execution_id in
   let* original=match original with Some original -> Ok original | None -> Error "Original parent execution is missing" in
   let* capture=Capture.restore ~owner ~load_parent:(load_parent inventory) original in
   let* ()=require (Capture.parent_part_id capture=parent.id) "Size proof belongs to another candidate part" in
@@ -238,20 +255,20 @@ let original_capture ~store ~owner ~inventory ~(parent:part) execution_id =
    execution is answered from this one reading. *)
 type observed_execution = {record:Owner.retained;capture:Capture.t;request:Exact.request;
   schema:Yojson.Safe.t;latest:Exact.latest_original_execution}
-let observe_execution ~store ~owner ~inventory ~parent execution_id =
-  let* record,capture,request,schema,declaration_id=original_capture ~store ~owner ~inventory ~parent execution_id in
-  let+ latest=Exact.read_latest_original_execution ~store ~declaration_id ~schema request in
+let observe_execution ~(reads:execution_reads) ~owner ~inventory ~parent execution_id =
+  let* record,capture,request,schema,declaration_id=original_capture ~reads ~owner ~inventory ~parent execution_id in
+  let+ latest=reads.read_latest ~declaration_id ~schema request in
   {record;capture;request;schema;latest}
-let confirmed_execution ~store (observed:observed_execution) =
+let confirmed_execution ~(reads:execution_reads) (observed:observed_execution) =
   let* ordinal,execution=match observed.latest with
     | Exact.No_completed_latest -> Error "Original latest execution proof is incomplete"
     | Exact.Completed_latest {attempt_ordinal;execution} -> Ok (attempt_ordinal,execution) in
   let* ()=match execution.Exact.outcome with
-    | Exact.Call_ended final -> Capture.confirm_final ~store observed.capture (Exact.Call_final final)
+    | Exact.Call_ended final -> reads.confirm observed.capture (Exact.Call_final final)
     | Call_refused _ -> Error "Original refused execution cannot prove an admission terminal" in
   Ok (ordinal,execution)
-let size_evidence_of ~store ~(parent:part) source ({request;schema;_} as observed:observed_execution) =
-  let* ordinal,(execution:Exact.execution_result)=confirmed_execution ~store observed in
+let size_evidence_of ~reads ~(parent:part) source ({request;schema;_} as observed:observed_execution) =
+  let* ordinal,(execution:Exact.execution_result)=confirmed_execution ~reads observed in
   let* outcome=match source,execution.outcome with
     | Exact_source _,Exact.Call_ended (Exact.Input_refused (Input_capacity | Context_overflow | Request_body_refused) as final) ->
       let failure=Keeper_exact_walk_receipt.failure_evidence execution.receipt in
@@ -268,12 +285,12 @@ let size_evidence_of ~store ~(parent:part) source ({request;schema;_} as observe
     "schema",schema;"attempt_ordinal",`Int ordinal;
     "receipt",Keeper_exact_walk_receipt.to_json execution.receipt;"outcome",outcome] in
   Ok {parent_id=parent.id;source;proof}
-let check_size ~store ~owner ~inventory ~(parent:part) source =
+let check_size ~reads ~owner ~inventory ~(parent:part) source =
   let execution_id=match source with Exact_source id -> id in
-  let* observed=observe_execution ~store ~owner ~inventory ~parent execution_id in
-  size_evidence_of ~store ~parent source observed
+  let* observed=observe_execution ~reads ~owner ~inventory ~parent execution_id in
+  size_evidence_of ~reads ~parent source observed
 let execution_size_evidence ~store ~owner ~inventory ~parent ~execution_id =
-  check_size ~store ~owner ~inventory ~parent (Exact_source execution_id)
+  check_size ~reads:(store_reads ~store ~owner) ~owner ~inventory ~parent (Exact_source execution_id)
 let partition_json ~owner ~id ~parent_id ~(left:part) ~(right:part) ~(evidence:size_evidence) : Yojson.Safe.t =
   `Assoc ["schema",`Int 1;"kind",`String "two_child_partition";"partition_id",`String id;
     "owner",Capture.owner_to_json owner;"parent_part_id",`String parent_id;
@@ -379,12 +396,12 @@ let original_judgment (record:Owner.retained) = match Progress.phase record.prog
   | Progress.Judged judgment -> Some judgment
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Some commit.judgment
   | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ -> None
-let answered_original ~store ({record;capture;latest;_}:observed_execution) =
+let answered_original ~(reads:execution_reads) ({record;capture;latest;_}:observed_execution) =
   let* final,authority=match latest with
     | Exact.No_completed_latest -> Error "Original terminal judgment has no completed latest host proof"
     | Completed_latest {attempt_ordinal;execution={outcome=Exact.Call_ended call_final;receipt}} ->
       let final=Exact.Call_final call_final in
-      let* ()=Capture.confirm_final ~store capture final in
+      let* ()=reads.confirm capture final in
       let* ()=match original_judgment record with
         | None -> Ok ()
         | Some raw -> equal raw (Exact.final_to_json final) "Original judgment differs from confirmed host execution" in
@@ -398,22 +415,22 @@ let answered_original ~store ({record;capture;latest;_}:observed_execution) =
     record,capture,proposal,authority
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Original frontier requires a completed semantic answer"
-let terminal_witness ~store ~owner ~inventory ~committed reference =
+let terminal_witness ~reads ~owner ~inventory ~committed reference =
   let id=terminal_part reference in
   let* parent=find inventory ~part_id:id in
   let* ()=eligible inventory [] parent in
   let singleton=List.length (Queue.candidates parent.original_batch)=1 in
   let* capture,kind,authority=match reference with
     | Original_execution {execution_id;_} ->
-      let* observed=observe_execution ~store ~owner ~inventory ~parent execution_id in
+      let* observed=observe_execution ~reads ~owner ~inventory ~parent execution_id in
       (match observed.latest with
        | Exact.Completed_latest {execution={outcome=Exact.Call_ended (Input_refused _);_};_} ->
          let* ()=require singleton "A divisible size frontier must retain its original two-child partition" in
-         let+ evidence=size_evidence_of ~store ~parent (Exact_source execution_id) observed in
+         let+ evidence=size_evidence_of ~reads ~parent (Exact_source execution_id) observed in
          observed.capture,"singleton_capacity",evidence.proof
        | Completed_latest {execution={outcome=Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _)
            | Call_refused _;_};_} | No_completed_latest ->
-         let* record,capture,proposal,authority=answered_original ~store observed in
+         let* record,capture,proposal,authority=answered_original ~reads observed in
          match proposal with
          | Keeper_librarian_runtime.Deferred -> Ok (capture,"semantic_deferred",authority)
          | Accepted accepted ->
@@ -479,6 +496,12 @@ let check_pending owner expected =
   | Some pending -> equal (Queue.batch_to_json pending) (Queue.batch_to_json expected) "Current full pending batch differs from captured replacement"
 let frontier_ids frontier = List.map (fun (witness:terminal_witness) -> terminal_part witness.reference) frontier
 type reconsideration = Changed_frontier | Unchanged_frontier
+(* The capture behind one retained frontier witness, once the witness its
+   execution shows now equals the retained one. *)
+let witnessed_capture ~reads ~owner ~inventory ~committed (witness:terminal_witness) =
+  let* actual,capture=terminal_witness ~reads ~owner ~inventory ~committed witness.reference in
+  let+ ()=equal actual.evidence witness.evidence "Original terminal frontier evidence changed" in
+  capture
 let check_replacement ~store ~owner ~inventory (proof:supersession_proof) =
   let* predecessors=traverse (fun id -> let* part=find inventory ~part_id:id in
     let+ ()=require (part.predecessor=None) "Frontier predecessor is not an original root" in part) proof.predecessors in
@@ -504,9 +527,9 @@ let check_replacement ~store ~owner ~inventory (proof:supersession_proof) =
   let* ()=require (List.for_all (fun (id:Current.explicit_candidate_id) -> id.sequence>through &&
     not (List.exists (candidate_collision id) ids)) fresh) "Replacement introduces reused or non-tail input" in
   let new_tail=fresh<>[] in
+  let reads=store_reads ~store ~owner in
   let* eligible=traverse (fun (witness:terminal_witness) ->
-    let* actual,capture=terminal_witness ~store ~owner ~inventory ~committed:proof.committed witness.reference in
-    let* ()=equal actual.evidence witness.evidence "Original terminal frontier evidence changed" in
+    let* capture=witnessed_capture ~reads ~owner ~inventory ~committed:proof.committed witness in
     let* part=find inventory ~part_id:(terminal_part witness.reference) in
     let has_gap=List.exists (fun id -> not (List.mem id proof.committed)) (Queue.candidate_ids part.original_batch) in
     let+ unchanged=same (facts_json proof.memory.facts) (facts_json (original_facts capture)) in
@@ -586,18 +609,38 @@ let validate_forest_structure inventory =
       let* ()=require (not (List.exists conflict ids)) "Original roots overlap candidate ownership" in
       root_ids (ids@seen) rest in
   root_ids [] (roots inventory)
-let validate_payload_forest ~read_scope ~owner =
+let payload_inventory ~read_scope ~owner =
   let* raw_parts=read_scope ~scope:(scope owner) in
   let* parts=traverse (decode_record ~owner) raw_parts in
   let* raw_partitions=read_scope ~scope:(partition_scope owner) in
   let* partitions=traverse (decode_partition ~owner) raw_partitions in
-  validate_forest_structure {parts;partitions}
+  let inventory={parts;partitions} in
+  let+ ()=validate_forest_structure inventory in inventory
+let validate_payload_forest ~read_scope ~owner =
+  let+ _=payload_inventory ~read_scope ~owner in ()
+(* A partition's retained size proof against the one its source execution
+   shows now. *)
+let partition_proof ~reads ~owner ~inventory (partition:partition_record) =
+  let* parent=find inventory ~part_id:partition.parent_id in
+  let* actual=check_size ~reads ~owner ~inventory ~parent partition.evidence.source in
+  equal actual.proof partition.evidence.proof "Original subdivision proof changed"
+let check_partition_proof ~reads ~owner ~inventory record =
+  let* partition=decode_partition ~owner record in
+  let* inventory=inventory () in
+  partition_proof ~reads ~owner ~inventory partition
+(* Discovery checks the frontier witnesses of every root that replaces an
+   earlier frontier ([validate_forest]). *)
+let check_frontier_evidence ~reads ~owner ~inventory record =
+  let* part=decode_record ~owner record in
+  match part.predecessor,part.supersession with
+  | Some _,_ | None,None -> Ok ()
+  | None,Some proof ->
+    let* inventory=inventory () in
+    let+ _=traverse (witnessed_capture ~reads ~owner ~inventory ~committed:proof.committed) proof.frontier in ()
 let validate_forest ~store ~owner inventory =
   let* ()=validate_forest_structure inventory in
-  let* _=traverse (fun (partition:partition_record) ->
-    let* parent=find inventory ~part_id:partition.parent_id in
-    let* actual=check_size ~store ~owner ~inventory ~parent partition.evidence.source in
-    equal actual.proof partition.evidence.proof "Original subdivision proof changed") inventory.partitions in
+  let reads=store_reads ~store ~owner in
+  let* _=traverse (partition_proof ~reads ~owner ~inventory) inventory.partitions in
   let* ()=validate_execution_inventory ~store ~owner inventory in
   let+ _=traverse (fun (part:part) -> match part.supersession with
     | None -> Ok ()
@@ -647,8 +690,9 @@ let prove_supersession ~store ~owner ~inventory ~batch ~frontier =
   let* ()=check_pending owner batch in
   let* memory=read_memory owner in
   let* committed=read_committed ~owner (root_candidates active) in
+  let reads=store_reads ~store ~owner in
   let* witnesses=traverse (fun reference -> let+ witness,_capture=
-    terminal_witness ~store ~owner ~inventory:fresh ~committed reference in witness) frontier in
+    terminal_witness ~reads ~owner ~inventory:fresh ~committed reference in witness) frontier in
   let proof={predecessors=List.map (fun (p:part) -> p.id) active |> List.sort String.compare;
     frontier=witnesses;pending=batch;memory;committed} in
   let* qualification=check_replacement ~store ~owner ~inventory:fresh proof in
@@ -714,7 +758,7 @@ let partition ~store ~owner ~(parent:part) ~(evidence:size_evidence) ~partition_
   let* ()=require (List.exists (fun (part:part) -> part.id=parent.id) (runnable inventory))
     "Superseded or non-runnable history cannot publish a new partition" in
   let* ()=require (evidence.parent_id=parent.id) "Size proof belongs to another parent" in
-  let* fresh_evidence=check_size ~store ~owner ~inventory ~parent evidence.source in
+  let* fresh_evidence=check_size ~reads:(store_reads ~store ~owner) ~owner ~inventory ~parent evidence.source in
   let* ()=equal evidence.proof fresh_evidence.proof "Original size proof changed before partition" in
   let* left_batch,right_batch=match Queue.split parent.original_batch with
     | Some pair -> Ok pair | None -> Error "Singleton original part cannot split" in

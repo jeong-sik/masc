@@ -638,6 +638,14 @@ let unreadable result =
 let invalid result =
   Result.map_error (fun detail -> Recovery_invalid detail) result
 
+(* What the original's record shows: [wire] is the JSON it holds, [None] when
+   there is no record, and [schema] the one [original_schema] checked. *)
+let observation ~declaration_id ~schema bound = function
+  | None -> Ok Retained_absent
+  | Some wire ->
+    let* record = bound_record ~declaration_id bound wire in
+    validate_record ~request:(Digested.request bound) ~schema:(Some schema) record
+
 let observe_retained_classified ~store ~declaration_id ~schema bound =
   let request = Digested.request bound in
   (* [original_schema] reads no record: it validates the caller's own schema and
@@ -647,15 +655,15 @@ let observe_retained_classified ~store ~declaration_id ~schema bound =
   let* schema = invalid (original_schema ~declaration_id ~schema request) in
   let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
     ~request_id:request.request_id) in
-  match wire with
-  | None -> Ok Retained_absent
-  | Some wire ->
-    let* record = invalid (bound_record ~declaration_id bound wire) in
-    invalid (validate_record ~request ~schema:(Some schema) record)
+  invalid (observation ~declaration_id ~schema bound wire)
 
 let observe_retained ~store ~declaration_id ~schema request =
   Result.map_error describe_recovery_error
     (observe_retained_classified ~store ~declaration_id ~schema (Digested.make request))
+
+let observe_record ~declaration_id ~schema request record =
+  let* schema = original_schema ~declaration_id ~schema request in
+  observation ~declaration_id ~schema (Digested.make request) record
 
 (* The host link belongs to the original request owner, not to a worker
    evidence address. Canonical tagged tuples keep both ID spaces unambiguous. *)
@@ -863,11 +871,21 @@ module Retained_key = struct
       Ok { declaration_id; request_id; digest }
     | _ -> Error "record must be an object"
 
+  let of_request ~declaration_id (request : request) =
+    { declaration_id; request_id = request.request_id; digest = digest request }
+
+  let equal left right =
+    String.equal left.declaration_id right.declaration_id
+    && String.equal left.request_id right.request_id
+    && String.equal left.digest right.digest
+
   let proof_path key =
     Lane_addon_store.host_result_path
       ~instance_id:(proof_instance_id ~declaration_id:key.declaration_id)
       ~request_id:(proof_request_key ~request_id:key.request_id ~digest:key.digest)
 end
+
+let retained_final json = Result.map (fun record -> record.final) (record_of_json json)
 
 let proof_store_roots = function
   | `Assoc fields ->
@@ -970,19 +988,24 @@ type latest_original_execution =
   | No_completed_latest
   | Completed_latest of { attempt_ordinal : int; execution : execution_result }
 
-let read_latest_bound ~store ~declaration_id ~schema bound =
+(* The latest completed attempt the original's record and proof link show,
+   with the schema [original_schema] checked. [proof] reads the link. It is
+   called after the record checks, which is when a store read reads it. *)
+let latest_bound ~store ~declaration_id ~schema bound ~record ~proof =
   let request = Digested.request bound in
-  let* schema=original_schema ~declaration_id ~schema request in
-  let* wire=Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
-  match wire with
+  let proofs () =
+    let* wire=proof () in
+    decode_proofs ~store ~declaration_id bound wire in
+  match record with
   | None ->
-    let* proofs=load_proofs ~store ~declaration_id bound in
+    let* proofs=proofs () in
     if proofs=[] then Ok No_completed_latest
     else Error "original execution proof has no original Exact request"
   | Some wire ->
     let* record=bound_record ~declaration_id bound wire in
     let* _=validate_record ~request ~schema:None record in
-    let* proofs=bound_proofs ~store ~declaration_id bound record in
+    let* proofs=proofs () in
+    let* ()=bind_proofs record proofs in
     let rec last_execution_ordinal ordinal = function
       | Delivery_refused _ :: earlier -> last_execution_ordinal (ordinal - 1) earlier
       | [] | (Started _ | Deferred _ | Completed_call _ | Unknown_interrupted
@@ -998,8 +1021,20 @@ let read_latest_bound ~store ~declaration_id ~schema bound =
       if Yojson.Safe.equal schema retained_schema then Ok (Completed_latest {attempt_ordinal;execution})
       else Error "original execution proof differs from the supplied original schema"
 
+let read_latest_bound ~store ~declaration_id ~schema bound =
+  let request = Digested.request bound in
+  let* schema=original_schema ~declaration_id ~schema request in
+  let* record=Lane_addon_store.load_exact_request store ~declaration_id ~request_id:request.request_id in
+  latest_bound ~store ~declaration_id ~schema bound ~record
+    ~proof:(fun () -> load_proof_wire ~store ~declaration_id bound)
+
 let read_latest_original_execution ~store ~declaration_id ~schema request =
   read_latest_bound ~store ~declaration_id ~schema (Digested.make request)
+
+let latest_of_files ~store ~declaration_id ~schema request ~record ~proof =
+  let* schema=original_schema ~declaration_id ~schema request in
+  latest_bound ~store ~declaration_id ~schema (Digested.make request) ~record
+    ~proof:(fun () -> Ok proof)
 
 let read_latest_slot_observations ~store ~declaration_id ~schema request =
   let bound = Digested.make request in
@@ -1031,6 +1066,49 @@ let finish_record prior = function
   | Call_refused refusal ->
       {prior with attempts=prior.attempts @ [Deferred (Provider_refused refusal)]}
 
+type recovery =
+  | Recovered of retained_observation
+  | Finish_from_proof of record
+
+(* What recovery does with the original's record and proof link, with the
+   schema [original_schema] checked. [proof] reads the link after the record
+   checks, and [invalid_error] names a record or link that can never become a
+   trustworthy original. An open record whose latest started attempt has a
+   completed proof is finished from that proof. *)
+let recovery ~store ~declaration_id ~schema ~invalid_error bound ~record ~proof =
+  let request = Digested.request bound in
+  let invalid result = Result.map_error invalid_error result in
+  let proofs () =
+    let* wire = proof () in
+    invalid (decode_proofs ~store ~declaration_id bound wire) in
+  match record with
+  | None ->
+      let* proofs = proofs () in
+      if proofs = [] then Ok (Recovered Retained_absent)
+      else invalid (Error "original execution proof has no original Exact request")
+  | Some wire ->
+      let* record = invalid (bound_record ~declaration_id bound wire) in
+      let* observed = invalid (validate_record ~request ~schema:(Some schema) record) in
+      let* proofs = proofs () in
+      let* () = invalid (bind_proofs record proofs) in
+      match record.final, List.rev record.attempts with
+      | None, Started _ :: earlier ->
+          (match selected_proof ~attempt_ordinal:(List.length record.attempts) proofs with
+           | None -> Ok (Recovered observed)
+           | Some (retained_schema, execution) ->
+               if not (Yojson.Safe.equal schema retained_schema) then
+                 invalid (Error "original execution proof differs from the supplied original schema")
+               else
+                 (match execution.outcome with
+                  | Call_refused _ -> Ok (Recovered observed)
+                  | Call_ended _ ->
+                      Ok (Finish_from_proof
+                            (finish_record {record with attempts=List.rev earlier} execution.outcome))))
+      | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
+          | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
+      | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->
+          Ok (Recovered observed)
+
 let recover_retained ~store ~declaration_id ~schema request =
   (* Same split as [observe_retained]: the schema is the caller's own, so a
      mismatch is permanent. *)
@@ -1041,44 +1119,29 @@ let recover_retained ~store ~declaration_id ~schema request =
      is forwarded unchanged instead of being folded into one class. *)
   if not (claim key) then observe_retained_classified ~store ~declaration_id ~schema bound
   else Fun.protect ~finally:(fun () -> release key) (fun () ->
-    let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+    let* record = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
       ~request_id:request.request_id) in
     (* The proof link is read from disk and then decoded. A read that fails may
        succeed later; a link that decodes to something else never will. *)
-    let proofs () =
-      let* wire = unreadable (load_proof_wire ~store ~declaration_id bound) in
-      invalid (decode_proofs ~store ~declaration_id bound wire) in
-    match wire with
-    | None ->
-        let* proofs = proofs () in
-        if proofs = [] then Ok Retained_absent
-        else Error (Recovery_invalid "original execution proof has no original Exact request")
-    | Some wire ->
-        let* record = invalid (bound_record ~declaration_id bound wire) in
-        let* observed = invalid (validate_record ~request ~schema:(Some schema) record) in
-        let* proofs = proofs () in
-        let* () = invalid (bind_proofs record proofs) in
-        match record.final, List.rev record.attempts with
-        | None, Started _ :: earlier ->
-            (match selected_proof ~attempt_ordinal:(List.length record.attempts) proofs with
-             | None -> Ok observed
-             | Some (retained_schema, execution) ->
-                 if not (Yojson.Safe.equal schema retained_schema) then
-                   Error (Recovery_invalid "original execution proof differs from the supplied original schema")
-                 else
-                   (match execution.outcome with
-                    | Call_refused _ -> Ok observed
-                    | Call_ended _ ->
-                        let finished = finish_record
-                          {record with attempts=List.rev earlier} execution.outcome in
-                        let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
-                          ~request_id:request.request_id
-                          (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
-                        observe_retained_classified ~store ~declaration_id ~schema bound))
-        | None, ([] | (Deferred _ | Completed_call _ | Unknown_interrupted | Unknown_cut
-            | Unknown_raised _ | Delivery_refused _ | Reused) :: _)
-        | Some (Call_final _ | Outcome_unknown | Not_allowed _ | Request_id_reused), _ ->
-            Ok observed)
+    let* recovered = recovery ~store ~declaration_id ~schema
+        ~invalid_error:(fun detail -> Recovery_invalid detail) bound ~record
+        ~proof:(fun () -> unreadable (load_proof_wire ~store ~declaration_id bound)) in
+    match recovered with
+    | Recovered observed -> Ok observed
+    | Finish_from_proof finished ->
+        let* () = unreadable (Lane_addon_store.save_exact_request store ~declaration_id
+          ~request_id:request.request_id
+          (record_to_json ~declaration_id ~request_id:request.request_id finished)) in
+        observe_retained_classified ~store ~declaration_id ~schema bound)
+
+let recovery_of_files ~store ~declaration_id ~schema request ~record ~proof =
+  let* schema = original_schema ~declaration_id ~schema request in
+  let+ recovered = recovery ~store ~declaration_id ~schema ~invalid_error:Fun.id
+      (Digested.make request) ~record ~proof:(fun () -> Ok proof) in
+  match recovered with
+  | Recovered _ -> record
+  | Finish_from_proof finished ->
+      Some (record_to_json ~declaration_id ~request_id:request.request_id finished)
 
 (* Created once before the first started marker, shared by all roots and
    domains in this process. The lock guards only this short initialization;

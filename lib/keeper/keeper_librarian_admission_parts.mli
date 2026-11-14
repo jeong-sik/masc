@@ -53,6 +53,39 @@ val load_parent_payload :
     explicit read-only original-record port. Does not inspect current Memory,
     supersession receipt status, live ownership or perform recovery. This is
     insufficient authority for execution; runtime uses {!discover}. *)
+val payload_inventory :
+  read_scope:(scope:string -> (Lane_addon_tool_request_owner.retained list, string) result) ->
+  owner:Keeper_librarian_admission_capture.owner -> (inventory, string) result
+(** The forest {!validate_payload_forest} checks, once it passes. *)
+
+(** How a forest reading reaches an original execution. {!discover} reads the
+    store; the deploy check reads the files the Exact check leaves. *)
+type execution_reads = {
+  load : request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result;
+      (** The original execution record of this ID in the owner's execution
+          scope. *)
+  read_latest : declaration_id:string -> schema:Yojson.Safe.t -> Lane_addon_exact.request ->
+    (Lane_addon_exact.latest_original_execution, string) result;
+      (** The latest attempt the execution's host evidence shows, as
+          {!Lane_addon_exact.read_latest_original_execution} answers. *)
+  confirm : Keeper_librarian_admission_capture.t -> Lane_addon_exact.final -> (unit, string) result;
+      (** {!Keeper_librarian_admission_capture.confirm_final} of the final. *)
+}
+val check_partition_proof : reads:execution_reads ->
+  owner:Keeper_librarian_admission_capture.owner ->
+  inventory:(unit -> (inventory, string) result) ->
+  Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** The check {!discover} applies to this partition record: the size proof it
+    retains must equal the one its source execution shows through [reads].
+    [inventory] is called once the record decodes. *)
+val check_frontier_evidence : reads:execution_reads ->
+  owner:Keeper_librarian_admission_capture.owner ->
+  inventory:(unit -> (inventory, string) result) ->
+  Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** The check {!discover} applies to the frontier witnesses of this part
+    record when it is a root that replaces an earlier frontier: each retained
+    witness must equal the one its execution shows through [reads]. Any other
+    part passes without calling [inventory]. *)
 
 val discover : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner ->

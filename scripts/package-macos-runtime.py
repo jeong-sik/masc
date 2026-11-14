@@ -23,6 +23,7 @@ MACH = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xf
 # runtime ships the pinned Mozilla bundle and makes it the default, unless the
 # user names a certificate file or directory.
 CA_BUNDLE = PurePosixPath('python/ssl/cacert.pem')
+OCAML_NOTICES = PurePosixPath('licenses/ocaml')
 SITECUSTOMIZE = '''"""MASC portable runtime: trust the CA bundle shipped with this Python.
 
 The interpreter's OpenSSL otherwise reads only the operating system's static
@@ -150,6 +151,44 @@ def stage_ca_bundle(stage, pinned):
         path.chmod(0o644)
 
 
+def stage_ocaml_notices(stage, notices):
+    # The OCaml libraries are linked into the executables, so their notices
+    # come from scripts/collect-ocaml-notices.py, run where they were built.
+    # Its directory ships unchanged; packages.json there names every file and
+    # its sha256, and the directory must hold exactly those.
+    manifest = notices / 'packages.json'
+    if not manifest.is_file():
+        raise ValueError('OCaml notice manifest missing: ' + str(manifest)
+                         + '; scripts/collect-ocaml-notices.py printed why it did not write it')
+    expected = {notice['file']: notice['sha256'] for package in json.loads(manifest.read_text())['packages']
+                for notice in package['notices']}
+    files = []
+    for source in sorted(notices.rglob('*')):
+        if source.is_symlink() or not (source.is_file() or source.is_dir()):
+            raise ValueError('OCaml notice is not a regular file: ' + str(source))
+        if source.is_file() and source != manifest:
+            files.append(source)
+    found = {source.relative_to(notices).as_posix(): sha(source) for source in files}
+    differing = sorted({path for path, _ in set(found.items()) ^ set(expected.items())})
+    if differing:
+        raise ValueError('OCaml notices differ from ' + str(manifest) + ': ' + ', '.join(differing))
+    for source in files + [manifest]:
+        dest = stage / OCAML_NOTICES / source.relative_to(notices)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, dest)
+        dest.chmod(0o644)
+
+
+def add_ocaml_notice_arguments(parser):
+    # Every caller says whether this runtime carries the notices, so a release
+    # cannot lose them by leaving a flag out.
+    notices = parser.add_mutually_exclusive_group(required=True)
+    notices.add_argument('--ocaml-notices', type=Path,
+                         help='directory written by scripts/collect-ocaml-notices.py (release)')
+    notices.add_argument('--without-ocaml-notices', action='store_true',
+                         help='probe or fixture runtime that is never published')
+
+
 def audit_macho_tree(stage):
     # Verify every Mach-O, including Python extensions, after materialization.
     for binary in sorted(stage.rglob('*')):
@@ -219,7 +258,7 @@ def freeze_python_bytecode(stage):
                     '-p', '', str(python.resolve())], check=True)
 
 
-def package(dist, stage, platform, commit, lock_path):
+def package(dist, stage, platform, commit, lock_path, ocaml_notices):
     if stage.exists():
         raise ValueError('runtime stage must be new')
     stage.mkdir(parents=True)
@@ -237,6 +276,8 @@ def package(dist, stage, platform, commit, lock_path):
         unpack_python(Path(archive.name), stage)
     ca_pinned = lock['ca_bundle']
     stage_ca_bundle(stage, ca_pinned)
+    if ocaml_notices is not None:
+        stage_ocaml_notices(stage, ocaml_notices)
     sources = {}
     for name in NAMES:
         shutil.copy2(dist / (name + '-' + platform), stage / name)
@@ -329,5 +370,6 @@ if __name__ == '__main__':
     parser.add_argument('--platform', choices=['macos-arm64', 'macos-x64'], required=True)
     parser.add_argument('--source-commit', required=True)
     parser.add_argument('--python-lock', type=Path, default=Path(__file__).with_name('portable-python-runtime.lock.json'))
+    add_ocaml_notice_arguments(parser)
     args = parser.parse_args()
-    package(args.dist, args.stage, args.platform, args.source_commit, args.python_lock)
+    package(args.dist, args.stage, args.platform, args.source_commit, args.python_lock, args.ocaml_notices)

@@ -42,6 +42,10 @@
 #                      container (release.yml asks for this on one arch)
 #   --lifecycle-out DIR run the full lifecycle matrix in the builder and export
 #                      its source-bound bundle and logs for host verification
+#   --notices-out DIR  export the notice files of the opam packages linked into
+#                      the binaries (scripts/collect-ocaml-notices.py); DIR
+#                      must not exist yet. A refused collection leaves DIR
+#                      absent without failing the build
 #   --print-binaries   list the binaries this script produces, then exit
 #   --print-floor      print the glibc floor this script builds at, then exit
 #                      (release.yml re-checks the packaged assets at it, so the
@@ -90,10 +94,12 @@ jobs=""
 keep=0
 run_contract_test=0
 lifecycle_out=""
+notices_out=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --lifecycle-out) lifecycle_out="${2:?--lifecycle-out needs a directory}"; shift 2 ;;
+    --notices-out) notices_out="${2:?--notices-out needs a directory}"; shift 2 ;;
     --out) out_dir="${2:?--out needs a directory}"; shift 2 ;;
     --floor) floor="${2:?--floor needs a version}"; shift 2 ;;
     --image) image="${2:?--image needs an image}"; shift 2 ;;
@@ -107,7 +113,7 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     --print-floor) printf '%s\n' "$floor"; exit 0 ;;
-    -h|--help) sed -n '2,55p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,59p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "build-linux-release: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -126,6 +132,13 @@ esac
 
 out_dir="${out_dir:-$repo_root/artifacts/linux-$arch_label}"
 container="masc-linux-release-build-$$"
+
+# docker cp nests the tree inside a directory that already exists, so only a
+# fresh path receives exactly what the collector wrote. Checked before the build.
+if [ -n "$notices_out" ] && [ -e "$notices_out" ]; then
+  echo "build-linux-release: --notices-out $notices_out already exists" >&2
+  exit 2
+fi
 
 # Only tracked files are copied into the container, so /src has no .git and the
 # probe in lib/build_commit/ finds no checkout to ask. Left alone it embeds
@@ -332,6 +345,29 @@ for binary in "${release_binaries[@]}"; do
   chmod +x "$out_dir/$name"
   echo "== exported $name ($(wc -c < "$out_dir/$name" | tr -d ' ') bytes)"
 done
+
+# The opam switch that linked the binaries lives only in this container, so
+# the notices of the packages in them are read here (masc#39934), after the
+# export. A refusal prints its reasons and leaves --notices-out absent without
+# failing this script: the workflow still records the probe binaries, and the
+# runtime packager then stops on the missing directory.
+if [ -n "$notices_out" ]; then
+  echo "== OCaml dependency notices"
+  notices_status=0
+  docker exec "$container" bash -lc '
+    set -e
+    cd /src
+    # --set-switch: the opam commands the collector runs read this switch too.
+    eval "$(opam env --switch=masc --set-switch)"
+    python3 scripts/collect-ocaml-notices.py --out /tmp/masc-ocaml-notices '"${release_binaries[*]}"'
+  ' || notices_status=$?
+  if [ "$notices_status" -eq 0 ]; then
+    mkdir -p "$(dirname "$notices_out")"
+    docker cp "$container:/tmp/masc-ocaml-notices" "$notices_out"
+  else
+    echo "build-linux-release: notice collection exited $notices_status; $notices_out not written" >&2
+  fi
+fi
 
 # The checked release binaries have already been exported. Dune lifecycle
 # aliases may rebuild their dependencies in the dev profile; those bytes must

@@ -59,6 +59,11 @@ jobs:
       # builds in place; Linux builds in a container and exports here, so the
       # steps below must not name dune's output directory directly.
       MASC_BIN_DIR: _build/default/bin
+      # The executables the macOS build links; its notice step reads the same
+      # list. scripts/build-linux-release.sh keeps the Linux one.
+      MASC_MACOS_EXECUTABLES: >-
+        bin/main_eio.exe bin/masc_tui.exe bin/deployment_preflight_helper.exe
+        bin/masc_exec_ssh_bootstrap.exe bin/masc_antigravity_path_hook.exe
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,6 +88,7 @@ jobs:
           "$installer_python" test/test_installer_upgrade.py
           "$installer_python" test/test_installer_uninstall.py
           "$installer_python" test/test_package_macos_runtime.py
+          "$installer_python" scripts/tests/test_collect_ocaml_notices.py
           "$installer_python" test/test_installer_dependencies.py
 
       # Linux builds inside a container (see the Build step), so only the
@@ -150,12 +156,8 @@ jobs:
       - name: Build (macOS)
         if: runner.os == 'macOS'
         run: |
-          opam exec -- dune build --release \
-            bin/main_eio.exe \
-            bin/masc_tui.exe \
-            bin/deployment_preflight_helper.exe \
-            bin/masc_exec_ssh_bootstrap.exe \
-            bin/masc_antigravity_path_hook.exe
+          read -ra binaries <<< "$MASC_MACOS_EXECUTABLES"
+          opam exec -- dune build --release "${binaries[@]}"
 
       # Built in a container whose glibc is the support floor, not on the
       # runner. A binary records the oldest glibc that provides each symbol it
@@ -178,7 +180,8 @@ jobs:
           # toolchain, so anywhere else leaves start-masc.sh trying to build
           # from source and exiting "dune not found".
           scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" \
-            --lifecycle-out "$RUNNER_TEMP/masc-release-lifecycle" $contract_test
+            --lifecycle-out "$RUNNER_TEMP/masc-release-lifecycle" \
+            --notices-out "$RUNNER_TEMP/masc-ocaml-notices" $contract_test
 
       # Manual branch runs also serve isolated runtime/TUI experiments. Keep
       # their compiled bytes even when a later unrelated release check fails.
@@ -215,6 +218,17 @@ jobs:
           path: runtime-probe/
           if-no-files-found: error
           retention-days: 7
+
+      # The OCaml libraries are linked into the executables, so their notices
+      # ship in the runtime archive (masc#39934). Read from the switch that
+      # linked them, after the probe upload so a refusal here keeps the probe
+      # binaries. Linux reads them inside its build container.
+      - name: Collect OCaml dependency notices (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          read -ra binaries <<< "$MASC_MACOS_EXECUTABLES"
+          opam exec -- python3 scripts/collect-ocaml-notices.py \
+            --out "$RUNNER_TEMP/masc-ocaml-notices" "${binaries[@]}"
 
       - name: Runtime setup validates each supported connection
         run: python3 test/test_install_runtime_setup.py --binary "$MASC_BIN_DIR"/main_eio.exe
@@ -347,14 +361,16 @@ jobs:
         run: |
           python3 scripts/package-macos-runtime.py --dist dist \
             --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
-            --source-commit "$(git rev-parse HEAD)"
+            --source-commit "$(git rev-parse HEAD)" \
+            --ocaml-notices "$RUNNER_TEMP/masc-ocaml-notices"
 
       - name: Bundle Linux Python
         if: runner.os == 'Linux'
         run: |
           python3 scripts/package-linux-runtime.py --dist dist \
             --stage "$RUNNER_TEMP/masc-portable-stage" --platform "${{ matrix.arch }}" \
-            --source-commit "$(git rev-parse HEAD)"
+            --source-commit "$(git rev-parse HEAD)" \
+            --ocaml-notices "$RUNNER_TEMP/masc-ocaml-notices"
 
       - name: Package binary-matched dashboard distribution
         run: |

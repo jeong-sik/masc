@@ -441,43 +441,44 @@ let private_jsonl_append_error_to_string = function
 ;;
 
 (* A final fragment with no '\n' is what an append leaves when the process
-   dies part way through it, so it is never a row. The caller holds the path
-   mutex, which the other appenders here also take ([append_file],
-   [append_jsonl], [update_private_file_durable_locked_result]), and the
-   exclusive [lockf], which every durable writer in another process takes. No
-   such writer is in the file while it is cut back to the last '\n' and
+   dies part way through it, so it is never a row. The rows end right after
+   the last '\n'. Called under the append lock. *)
+let read_jsonl_rows_end fd =
+  match
+    (* See Unix.lseek: only the file-position side effect is required. *)
+    ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+    read_fd_chunks fd
+  with
+  | bytes ->
+    Ok
+      (match String.rindex_opt bytes '\n' with
+       | Some newline -> newline + 1
+       | None -> 0)
+  | exception Unix.Unix_error (error, function_name, argument) ->
+    Error
+      (unix_failure ~operation:Incomplete_tail_read error function_name argument)
+;;
+
+(* The caller holds the path mutex, which the other appenders here also take
+   ([append_file], [append_jsonl], [update_private_file_durable_locked_result]),
+   and the exclusive [lockf], which every durable writer in another process
+   takes. No such writer is in the file while it is cut back to [rows_end] and
    fsynced; a writer in another process that takes neither lock is not
    excluded. Returns the length the append then starts from. *)
-let truncate_incomplete_jsonl_tail ~path ~fd ~end_offset =
-  let read_rows_end () =
-    match
-      (* See Unix.lseek: only the file-position side effect is required. *)
-      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-      read_fd_chunks fd
-    with
-    | bytes ->
-      Ok
-        (match String.rindex_opt bytes '\n' with
-         | Some newline -> newline + 1
-         | None -> 0)
-    | exception Unix.Unix_error (error, function_name, argument) ->
-      Error
-        (unix_failure ~operation:Incomplete_tail_read error function_name argument)
-  in
-  Result.bind (read_rows_end ()) (fun rows_end ->
-    Result.bind
-      (run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
-         Unix.ftruncate fd rows_end))
-      (fun () ->
-         Result.map
-           (fun () ->
-              Stdlib.Printf.eprintf
-                "[fs_compat] WARN: cut an incomplete JSONL tail path=%s cut_bytes=%d kept_bytes=%d\n%!"
-                path
-                (end_offset - rows_end)
-                rows_end;
-              rows_end)
-           (run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd))))
+let cut_incomplete_jsonl_tail ~path ~fd ~end_offset ~rows_end =
+  Result.bind
+    (run_unix_io ~operation:Incomplete_tail_truncate (fun () ->
+       Unix.ftruncate fd rows_end))
+    (fun () ->
+       Result.map
+         (fun () ->
+            Stdlib.Printf.eprintf
+              "[fs_compat] WARN: cut an incomplete JSONL tail path=%s cut_bytes=%d kept_bytes=%d\n%!"
+              path
+              (end_offset - rows_end)
+              rows_end;
+            rows_end)
+         (run_unix_io ~operation:Incomplete_tail_fsync (fun () -> Unix.fsync fd)))
 ;;
 
 (* Called under the append lock; stops after the first row without loading the
@@ -606,12 +607,6 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                           |> Result.map_error (fun detail -> Existing_jsonl_refused detail)))
                   in
                   Result.bind validation (fun original_length ->
-                  match expected_end_offset with
-                  | Some expected when expected <> original_length ->
-                    Error
-                      (End_offset_mismatch
-                         { expected; actual = original_length })
-                  | _ ->
                     let tail_is_complete =
                       if original_length = 0
                       then true
@@ -628,22 +623,42 @@ let append_private_jsonl_durable_locked_with_expected_end_offset_with_io
                         in
                         read_tail ())
                     in
-                    (* An offset-checked caller conditioned its write on the
-                       length it observed, fragment included, so only an
-                       append without that condition cuts the fragment. *)
+                    (* An offset names where the rows the caller read end. A
+                       fragment after the last '\n' was never a row, so a
+                       caller that stopped at that '\n' read every row there
+                       is and its append cuts the fragment, as the append
+                       without an offset does. A caller that counted the
+                       fragment in its offset read something that is not a
+                       row, and is refused with the file left as it is. *)
                     let append_from =
-                      if tail_is_complete
-                      then Ok original_length
-                      else (
-                        match expected_end_offset with
-                        | Some _ -> Error Incomplete_jsonl_tail
-                        | None ->
-                          truncate_incomplete_jsonl_tail
-                            ~path
-                            ~fd
-                            ~end_offset:original_length
-                          |> Result.map_error (fun failure ->
-                            Incomplete_jsonl_tail_truncate_failed failure))
+                      let truncate_failed failure =
+                        Incomplete_jsonl_tail_truncate_failed failure
+                      in
+                      match tail_is_complete, expected_end_offset with
+                      | true, Some expected when expected <> original_length ->
+                        Error
+                          (End_offset_mismatch
+                             { expected; actual = original_length })
+                      | true, (Some _ | None) -> Ok original_length
+                      | false, Some expected when expected = original_length ->
+                        Error Incomplete_jsonl_tail
+                      | false, (Some _ | None) ->
+                        Result.bind
+                          (read_jsonl_rows_end fd
+                           |> Result.map_error truncate_failed)
+                          (fun rows_end ->
+                             match expected_end_offset with
+                             | Some expected when expected <> rows_end ->
+                               Error
+                                 (End_offset_mismatch
+                                    { expected; actual = original_length })
+                             | Some _ | None ->
+                               cut_incomplete_jsonl_tail
+                                 ~path
+                                 ~fd
+                                 ~end_offset:original_length
+                                 ~rows_end
+                               |> Result.map_error truncate_failed)
                     in
                     (match append_from with
                      | Error _ as error -> error

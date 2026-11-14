@@ -59,17 +59,16 @@ let read_start =
   testable pp ( = )
 ;;
 
-let check_read label (file : read) ~read ~rows ~incomplete_tail =
+let check_read label (file : read) ~read ~rows =
   check read_start (label ^ ": where the read started") read file.Fs_compat.read;
-  check string (label ^ ": rows") rows file.Fs_compat.rows;
-  check string (label ^ ": incomplete tail") incomplete_tail file.Fs_compat.incomplete_tail
+  check string (label ^ ": rows") rows file.Fs_compat.rows
 ;;
 
 let test_without_a_cursor_every_row_is_read () =
   with_store (fun path ->
     append_raw path "a\nb\n";
     let file = update path ~after:None in
-    check_read "no cursor" file ~read:Fs_compat.Rows_from_start ~rows:"a\nb\n" ~incomplete_tail:"")
+    check_read "no cursor" file ~read:Fs_compat.Rows_from_start ~rows:"a\nb\n")
 ;;
 
 let test_only_the_rows_after_the_cursor_are_read () =
@@ -82,23 +81,20 @@ let test_only_the_rows_after_the_cursor_are_read () =
       "the row the first update appended"
       second
       ~read:(Fs_compat.Rows_after_cursor "first")
-      ~rows:"c\n"
-      ~incomplete_tail:"";
+      ~rows:"c\n";
     append_raw path "d\ne\n";
     let third = update path ~after:(after second ~kept:"second") in
     check_read
       "the rows of another writer"
       third
       ~read:(Fs_compat.Rows_after_cursor "second")
-      ~rows:"d\ne\n"
-      ~incomplete_tail:"";
+      ~rows:"d\ne\n";
     let fourth = update path ~after:(after third ~kept:"third") in
     check_read
       "nothing new"
       fourth
       ~read:(Fs_compat.Rows_after_cursor "third")
-      ~rows:""
-      ~incomplete_tail:"";
+      ~rows:"";
     check string "the file" "a\nb\nc\nd\ne\n" (read_all path))
 ;;
 
@@ -112,8 +108,7 @@ let test_the_append_lands_after_every_row () =
       "the rows after the cursor"
       second
       ~read:(Fs_compat.Rows_after_cursor "first")
-      ~rows:"b\n"
-      ~incomplete_tail:"";
+      ~rows:"b\n";
     check string "the file" "a\nb\nc\n" (read_all path))
 ;;
 
@@ -131,8 +126,7 @@ let test_a_replaced_file_is_read_from_its_start () =
       "a cursor of the file that was there before"
       second
       ~read:Fs_compat.Rows_from_start
-      ~rows:"x\ny\nz\n"
-      ~incomplete_tail:"")
+      ~rows:"x\ny\nz\n")
 ;;
 
 let test_a_shortened_file_is_read_from_its_start () =
@@ -145,8 +139,7 @@ let test_a_shortened_file_is_read_from_its_start () =
       "a cursor past the end of the file"
       second
       ~read:Fs_compat.Rows_from_start
-      ~rows:"a\n"
-      ~incomplete_tail:"")
+      ~rows:"a\n")
 ;;
 
 let test_a_cursor_inside_a_row_is_read_from_the_start () =
@@ -163,44 +156,47 @@ let test_a_cursor_inside_a_row_is_read_from_the_start () =
       "a cursor where no row starts"
       second
       ~read:Fs_compat.Rows_from_start
-      ~rows:"abcdef\ng\n"
-      ~incomplete_tail:"")
+      ~rows:"abcdef\ng\n")
 ;;
 
-let test_an_incomplete_tail_is_kept_apart () =
+let test_an_incomplete_tail_is_not_a_row () =
   with_store (fun path ->
     append_raw path "a\nb";
     let first = update path ~after:None in
-    check_read "the whole file" first ~read:Fs_compat.Rows_from_start ~rows:"a\n" ~incomplete_tail:"b";
+    check_read "the whole file" first ~read:Fs_compat.Rows_from_start ~rows:"a\n";
     (* The cursor stands after the last whole row, so the tail is read again. *)
     let second = update path ~after:(after first ~kept:"first") in
-    check_read
-      "the same tail"
-      second
-      ~read:(Fs_compat.Rows_after_cursor "first")
-      ~rows:""
-      ~incomplete_tail:"b";
+    check_read "the same tail" second ~read:(Fs_compat.Rows_after_cursor "first") ~rows:"";
+    check string "an update that appends nothing leaves the tail" "a\nb" (read_all path);
     append_raw path "c\nd";
     let third = update path ~after:(after second ~kept:"second") in
-    check_read
-      "the tail became a row"
-      third
-      ~read:(Fs_compat.Rows_after_cursor "second")
-      ~rows:"bc\n"
-      ~incomplete_tail:"d")
+    check_read "the tail became a row" third ~read:(Fs_compat.Rows_after_cursor "second") ~rows:"bc\n")
+;;
+
+let test_an_append_cuts_the_incomplete_tail () =
+  with_store (fun path ->
+    append_raw path "a\nb";
+    let first = update path ~after:None ~append:"c\n" in
+    check_read "the whole file" first ~read:Fs_compat.Rows_from_start ~rows:"a\n";
+    check string "the suffix follows the last row" "a\nc\n" (read_all path);
+    append_raw path "d";
+    let second = update path ~after:(after first ~kept:"first") ~append:"e\n" in
+    check_read "the appended row" second ~read:(Fs_compat.Rows_after_cursor "first") ~rows:"c\n";
+    check string "the suffix follows the last row again" "a\nc\ne\n" (read_all path);
+    let third = update path ~after:(after second ~kept:"second") in
+    check_read "the cursor still stands" third ~read:(Fs_compat.Rows_after_cursor "second") ~rows:"e\n")
 ;;
 
 let test_a_missing_file_is_created_empty () =
   with_store (fun path ->
     let first = update path ~after:None ~append:"a\n" in
-    check_read "a new file" first ~read:Fs_compat.Rows_from_start ~rows:"" ~incomplete_tail:"";
+    check_read "a new file" first ~read:Fs_compat.Rows_from_start ~rows:"";
     let second = update path ~after:(after first ~kept:"first") in
     check_read
       "its first row"
       second
       ~read:(Fs_compat.Rows_after_cursor "first")
-      ~rows:"a\n"
-      ~incomplete_tail:"")
+      ~rows:"a\n")
 ;;
 
 let () =
@@ -213,7 +209,8 @@ let () =
             `Quick
             test_only_the_rows_after_the_cursor_are_read
         ; test_case "the append lands after every row" `Quick test_the_append_lands_after_every_row
-        ; test_case "an incomplete tail is kept apart" `Quick test_an_incomplete_tail_is_kept_apart
+        ; test_case "an incomplete tail is not a row" `Quick test_an_incomplete_tail_is_not_a_row
+        ; test_case "an append cuts the incomplete tail" `Quick test_an_append_cuts_the_incomplete_tail
         ; test_case "a missing file is created empty" `Quick test_a_missing_file_is_created_empty
         ] )
     ; ( "a cursor that is not the end of rows of the file"

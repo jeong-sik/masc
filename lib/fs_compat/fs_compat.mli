@@ -1980,9 +1980,9 @@ type 'kept private_jsonl_rows_read =
 type 'kept private_jsonl_rows_from_cursor =
   { read : 'kept private_jsonl_rows_read
   ; rows : string
-    (** The bytes read, up to and including their last newline. *)
-  ; incomplete_tail : string
-    (** The bytes after that newline; [""] when the file ends with a row. *)
+    (** The bytes read, up to and including their last newline. Bytes after
+        it are an append that stopped part way and not a row: [decide] does
+        not receive them. *)
   ; rows_end : Private_jsonl_cursor.t
     (** This file at the end of [rows]. *)
   }
@@ -2000,6 +2000,11 @@ type 'kept private_jsonl_rows_from_cursor =
     replaced, shortened or rewritten across that offset does not describe this
     one. When the caller has taken [rows] into what it keeps, it passes
     [rows_end] with that as [after] next time.
+
+    A suffix [decide] returns is written after the last row. Bytes after the
+    file's last newline are cut and the cut fsynced before the suffix goes in,
+    as {!append_private_jsonl_durable_locked_result} cuts them; an update
+    whose [decide] returns no suffix leaves them where they are.
 
     Of the bytes before the cursor, only the last is read. A change below it
     that keeps the device, the inode, at least the length and a row start at

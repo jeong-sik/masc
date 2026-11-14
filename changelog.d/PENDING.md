@@ -1,0 +1,3 @@
+### Internal
+
+- Tests: `@runtest` runs the seven `ManagedBuildCleanup` cases of `test_keeper_vm_build_cleanup.py` next to `LiveProcesses`, and the rule stops when no `dune` is on `PATH` instead of letting the class skip itself. `GuestCleanup` and `test_keeper_build_cleanup_transport.py` stay outside CI: they sweep the real `/proc` and pass only where the user running them can inspect every process outside the first process's session (#50014, #PENDING)

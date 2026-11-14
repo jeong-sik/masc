@@ -22,7 +22,8 @@ type refusal =
   | Account_server_without_answer of { pid : int }
   | Owner_unverifiable of string
   | Owner_listener_unconfirmed of Upgrade.listener_refusal
-  | Stop_refused of Upgrade.error
+  | Stop_refused of { pid : int; error : Upgrade.error }
+      (* [pid] is the process the stop was for, as the kernel names it. *)
   | Log_unopenable of { path : string; reason : string }
   | Spawn_failed of string
 
@@ -91,8 +92,13 @@ let answered_pid body =
   | _ -> None
 
 let stop_error_message = function
-  | Upgrade.Admin_required ->
-    "the running server refused local operator access; sign in and run restart again"
+  | Upgrade.Sign_in_failed ->
+    "this MASC got no local operator credential to send: signing in to the workspace failed \
+     (its reason is printed above), or the credential it wrote could not be read back"
+  | Admin_required ->
+    "the running server refused (401 or 403) the operator credential that this MASC had just \
+     checked or written for the workspace; this MASC accepts that credential and the server \
+     does not, and signing in again only writes another one this MASC accepts"
   | Server_starting ->
     "the running server is still starting; run restart again once it is ready"
   | Admin_check_unanswered ->
@@ -187,7 +193,16 @@ let refusal_message ~base_path ~port = function
   | Owner_listener_unconfirmed refusal ->
     Masc_cli_owner_upgrade.listener_refusal_message ~base_path ~port refusal
     ^ " Nothing was stopped or started."
-  | Stop_refused error ->
+  | Stop_refused { pid; error = Upgrade.Admin_required } ->
+    Printf.sprintf "The stop request was not sent: %s. Stop pid %d yourself (send it SIGTERM \
+                    and wait for it to exit), then run `masc start`."
+      (stop_error_message Upgrade.Admin_required) pid
+  | Stop_refused
+      { pid = (_ : int);
+        error =
+          ( Upgrade.Invalid_health | Different_workspace | Sign_in_failed | Server_starting
+          | Admin_check_unanswered | Owner_unavailable | Incumbent_changed | Already_requested
+          | Closed | Port_unavailable ) as error } ->
     Printf.sprintf "The stop request was not sent: %s." (stop_error_message error)
   | Log_unopenable { path; reason } ->
     Printf.sprintf "The log file %s could not be opened (%s). A server named above as asked \
@@ -337,7 +352,8 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
       let* () =
         Masc_cli_owner_upgrade.with_selected_owner ~sw ~clock ~listener ~agent
           ~expected_version:version ~login Upgrade.request_termination
-        |> Result.map_error (fun error -> Stop_refused error)
+        |> Result.map_error (fun error ->
+          Stop_refused { pid = Upgrade.listener_pid listener; error })
       in
       let named = match pid with Some pid -> Printf.sprintf " (pid %d)" pid | None -> "" in
       Printf.printf "Asked masc %s%s on port %d to stop.\n%!" version named port;
@@ -345,7 +361,7 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
     | This_account_server { version; pid } ->
       let* () =
         Upgrade.stop_account_server ~run_dir ~base_path ~port
-        |> Result.map_error (fun error -> Stop_refused error)
+        |> Result.map_error (fun error -> Stop_refused { pid; error })
       in
       let named = match version with Some version -> " masc " ^ version | None -> "" in
       Printf.printf "Asked the account server%s (pid %d) on port %d to stop.\n%!" named pid port;

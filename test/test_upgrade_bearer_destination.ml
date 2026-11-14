@@ -188,6 +188,7 @@ let refusal_label = function
 let error_label = function
   | Upgrade.Invalid_health -> "invalid health"
   | Different_workspace -> "different workspace"
+  | Sign_in_failed -> "sign-in failed"
   | Admin_required -> "admin required"
   | Server_starting -> "server starting"
   | Admin_check_unanswered -> "admin check unanswered"

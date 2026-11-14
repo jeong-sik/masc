@@ -22,6 +22,11 @@ BINARY = None
 if len(sys.argv) > 2 and sys.argv[1] == '--binary':
     BINARY = str(Path(sys.argv.pop(2)).resolve())
     sys.argv.pop(1)
+# The lease owner test/setup_stop_owner_fixture.ml builds, for the stop.
+STOP_FIXTURE = None
+if len(sys.argv) > 2 and sys.argv[1] == '--stop-fixture':
+    STOP_FIXTURE = str(Path(sys.argv.pop(2)).resolve())
+    sys.argv.pop(1)
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('setup', ROOT / 'scripts/install-runtime-setup.py')
 SETUP = importlib.util.module_from_spec(SPEC)
@@ -185,6 +190,134 @@ class Journey(StepByStep):
                     with self.assertRaisesRegex(SETUP.SetupError, 'shutdown result was not confirmed'):
                         SETUP.select_setup_server('/owned/masc', '/saved', 9123, require_new_owner=True)
                 self.assertEqual(run.call_count, 2)
+
+    # The server answered 401 or 403 to a credential this MASC accepts
+    # (#36877). The choice comes back without a stop for that server, and the
+    # reason the binary gave is on screen.
+    REFUSED = ('The running server refused (401 or 403) the operator credential that this MASC had just '
+               'checked or written for the workspace. This MASC accepts that credential and the server '
+               'does not; signing in again only writes another one this MASC accepts. No server was '
+               'stopped. To replace it, stop pid 4242 yourself (send it SIGTERM and wait for it to exit), '
+               'then run masc setup again.')
+
+    @staticmethod
+    def stop_refused(refusal, error=REFUSED):
+        return subprocess.CompletedProcess([], 1, json.dumps(dict(
+            schema='masc.setup_server_error.v1', termination_requested=False, refusal=refusal, error=error)))
+
+    @staticmethod
+    def running(server_version='0.35.17'):
+        return subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
+            status='same_workspace', read_only=True, installed_version='0.35.19', server_version=server_version)))
+
+    def test_a_refused_credential_offers_the_running_workspace_instead_of_another_stop(self):
+        for second, outcome in ((0, 19400), (1, 'setup paused')):
+            with self.subTest(second=second), \
+                    patch.object(SETUP.subprocess, 'run',
+                                 side_effect=[self.running(), self.stop_refused('credential_refused'),
+                                              self.running()]) as run, \
+                    patch.object(SETUP, 'pick', side_effect=[[0], [second]]) as pick, \
+                    contextlib.redirect_stderr(io.StringIO()) as printed:
+                if isinstance(outcome, int):
+                    self.assertEqual(SETUP.select_setup_server('/bin/masc', '/workspace', 19400), outcome)
+                else:
+                    with self.assertRaisesRegex(SETUP.SetupError, outcome):
+                        SETUP.select_setup_server('/bin/masc', '/workspace', 19400)
+            self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                             ['setup-server', 'setup-stop-previous-owner', 'setup-server'])
+            self.assertTrue(pick.call_args_list[0].args[1][0].startswith('Stop this server'))
+            self.assertEqual(pick.call_args_list[1].args[1],
+                             ['Continue with this running workspace', 'Finish later'])
+            self.assertIn('stop pid 4242 yourself', printed.getvalue())
+
+    def test_a_server_of_another_version_after_a_refusal_is_offered_the_stop_again(self):
+        # Another version answers on the port, so it is not the server that
+        # refused: it was restarted, and its answer is not known yet.
+        with patch.object(SETUP.subprocess, 'run',
+                          side_effect=[self.running(), self.stop_refused('credential_refused'),
+                                       self.running('0.35.18')]), \
+                patch.object(SETUP, 'pick', side_effect=[[0], [2]]) as pick, \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaisesRegex(SETUP.SetupError, 'setup paused'):
+            SETUP.select_setup_server('/bin/masc', '/workspace', 19400)
+        self.assertTrue(pick.call_args_list[1].args[1][0].startswith('Stop this server'))
+
+    def test_a_refused_credential_ends_a_restart_that_needs_a_new_owner(self):
+        # Keeping the server would keep its earlier account groups, which is
+        # what this restart is for; the binary's reason says how to stop it.
+        with patch.object(SETUP.subprocess, 'run',
+                          side_effect=[self.running('0.35.19'), self.stop_refused('credential_refused')]) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as pick, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            self.assertIsNone(SETUP.select_setup_server('/bin/masc', '/workspace', 19400, require_new_owner=True))
+        self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server', 'setup-stop-previous-owner'])
+        self.assertEqual(pick.call_count, 1)
+        self.assertIn('stop pid 4242 yourself', printed.getvalue())
+
+    def test_a_stop_that_met_no_precondition_ends_with_the_reason_of_the_binary(self):
+        reason = 'No process holds the lease this MASC reads for this workspace, so no server was signed in to or stopped.'
+        with patch.object(SETUP.subprocess, 'run',
+                          side_effect=[self.running(), self.stop_refused('precondition_unmet', reason)]) as run, \
+                patch.object(SETUP, 'pick', return_value=[0]) as pick, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            self.assertIsNone(SETUP.select_setup_server('/bin/masc', '/workspace', 19400))
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(pick.call_count, 1)
+        self.assertIn(reason, printed.getvalue())
+
+    def test_a_refusal_without_its_closed_reason_is_not_read(self):
+        for receipt in (dict(schema='masc.setup_server_error.v1', termination_requested=False, error='x'),
+                        dict(schema='masc.setup_server_error.v1', termination_requested=False,
+                             refusal='admin_required', error='x'),
+                        dict(schema='masc.setup_server_error.v1', termination_requested=False,
+                             refusal='credential_refused'),
+                        None, []):
+            with self.subTest(receipt=receipt), \
+                    patch.object(SETUP.subprocess, 'run',
+                                 side_effect=[self.running(), subprocess.CompletedProcess([], 1, json.dumps(receipt))]), \
+                    patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaisesRegex(SETUP.SetupError, 'shutdown result was not confirmed'):
+                SETUP.select_setup_server('/bin/masc', '/workspace', 19400)
+
+    @unittest.skipUnless(BINARY and STOP_FIXTURE, 'requires the CI-built native executable and stop fixture')
+    def test_the_binary_and_the_journey_read_the_same_refusal(self):
+        # The real stop against an owner whose server answers the bearer with
+        # 401, then with 500. The journey reads the receipt the binary writes
+        # (a code it does not know would end in "not confirmed"), and the
+        # owner is sent no signal either way.
+        for status in ('401', '500'):
+            with self.subTest(status=status), tempfile.TemporaryDirectory(prefix='masc-refused-') as home:
+                base = Path(home, 'workspace')
+                base.mkdir()
+                run_dir = Path(home, 'run')
+                run_dir.mkdir()
+                base, run_dir = base.resolve(), run_dir.resolve()
+                owner = subprocess.Popen([STOP_FIXTURE, str(base), str(run_dir), '0.0.0-fixture', status],
+                                         stdout=subprocess.PIPE, text=True)
+                try:
+                    port, pid = map(int, owner.stdout.readline().split())
+                    environment = {key: value for key, value in os.environ.items()
+                                   if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+                    environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb',
+                                       MASC_BASE_PATH_LEASE_DIR=str(run_dir))
+                    with patch.dict(os.environ, environment, clear=True), \
+                            patch.object(SETUP, 'pick', side_effect=[[0], [0]]) as pick, \
+                            contextlib.redirect_stderr(io.StringIO()) as printed:
+                        selected = SETUP.select_setup_server(BINARY, str(base), port)
+                    self.assertIsNone(owner.poll(), 'the owner was stopped')
+                finally:
+                    owner.kill()
+                    owner.wait()
+                    owner.stdout.close()
+                self.assertTrue(pick.call_args_list[0].args[1][0].startswith('Stop this server'))
+                if status == '401':
+                    self.assertEqual(selected, port)
+                    self.assertEqual(pick.call_args_list[1].args[1],
+                                     ['Continue with this running workspace', 'Finish later'])
+                    self.assertIn('stop pid ' + str(pid) + ' yourself', printed.getvalue())
+                else:
+                    self.assertIsNone(selected)
+                    self.assertEqual(pick.call_count, 1)
+                    self.assertIn('did not answer the local operator access check', printed.getvalue())
 
     def test_group_session_owner_pause_never_prepares_or_reselects_models(self):
         with patch.object(SETUP, 'select_setup_server', return_value=None) as owner, \
@@ -1293,6 +1426,7 @@ class Journey(StepByStep):
                 self.assertEqual(stopped.returncode, 1, stopped.stderr)
                 receipt = json.loads(stopped.stdout)
                 self.assertIs(receipt['termination_requested'], False)
+                self.assertEqual(receipt['refusal'], 'precondition_unmet')
                 self.assertIn('held by its account server', receipt['error'])
                 os.kill(server, 0)  # It still runs.
             finally:

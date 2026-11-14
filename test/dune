@@ -6353,6 +6353,12 @@
  (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.fs_compat
   masc.http_client masc.masc_eio_context))
 
+; The lease owner test_onboarding_journey.py runs the setup stop against (#36877).
+(executable
+ (name setup_stop_owner_fixture)
+ (modules setup_stop_owner_fixture)
+ (libraries unix yojson ipaddr masc.server))
+
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
 

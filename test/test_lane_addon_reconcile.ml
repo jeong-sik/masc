@@ -1178,7 +1178,11 @@ let test_disabled_cleanup_failure_remains_owned_until_retry () =
     check int "reenable cannot overlap unconfirmed cleanup" 1 (List.length (starts state));
     state.cleanup_available := true;
     advance_until (fun () -> List.length (starts state) = 2);
-    await_detached real_clock config id;
+    (* The replacement supersedes the released instance, so a configuration
+       pass removes its record: the old id leaves Inspect instead of staying
+       there as detached history. *)
+    advance_until (fun () ->
+      not (List.exists (fun value -> text "instance_id" value = id) (instances config)));
     let replacement = declared_instance config "observer" |> text "instance_id" in
     await_ready real_clock config replacement;
     check int "one replacement after confirmed cleanup" 2 (List.length (starts state));

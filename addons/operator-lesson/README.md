@@ -21,6 +21,8 @@ The package asks the operator nothing and calls no Keeper.
 - `lesson_flow.py`: the listing and the consumption of each result, including
   the quote check of every paragraph against the record bytes the host retained.
 - `lesson_projection.py`: the rows of `lesson/scenes`, `lesson/sessions` and `lesson/measures`.
+  `lesson/scenes` holds the scenes of recent lessons only (#51941): every lesson that wrote a scene
+  since the newest one opened, so lessons written in one host cycle are all shown.
 - `server.py`: the MCP worker; it reads `max_reply_bytes` from `lane.toml`.
 
 Reading records, pins and the log file are the shared `../records.py`, which

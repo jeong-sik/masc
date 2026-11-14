@@ -1412,7 +1412,7 @@ let test_superseded_review_keeps_the_evaluated_original_criterion () =
   List.iter scenario [ false; true ]
 ;;
 
-let test_wake_after_deferred_persist_survives_active_scan ~same_request () =
+let test_wake_after_deferred_persist_survives_active_scan () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Wake retained across worker release" in
@@ -1442,14 +1442,12 @@ let test_wake_after_deferred_persist_survives_active_scan ~same_request () =
         (* This notification runs after the old worker computed Deferred and
            persisted it, but before its in-flight claim is released. *)
         injected := true;
-        if not same_request then ignore (must_succeed "edit after terminal observation"
-          (dispatch ctx ~name:"masc_goal_upsert" ["id", `String goal_id; "target_value", `String "4"]));
-        ignore (must_succeed "new request during old claim"
+        ignore (must_succeed "repeated request during old claim"
           (transition ctx goal_id "request_complete"));
         let new_request, _ = pending_identity config goal_id in
-        check bool "request identity follows the explicit edit" same_request (String.equal old_request new_request);
+        check bool "a repeated request keeps its identity" true (String.equal old_request new_request);
         Atomic.set AR.run_llm_reviewer_fn
-          (recording_reviewer calls ["verifier-a", Stub_approve "new target measured"]);
+          (recording_reviewer calls ["verifier-a", Stub_approve "target measured"]);
         check bool "scan ran against real active runtime" true (Agent.scan_active_once ());
         scanned_while_active := true;
         check int "active claim prevented second review during scan" 1 (List.length !calls))
@@ -1473,14 +1471,35 @@ let test_wake_after_deferred_persist_survives_active_scan ~same_request () =
 ;;
 
 (* A verifier lane that never answers must not keep its slot or the Goal's
-   claim once the operator takes the Goal out of verifying. The first review
-   hangs; Reopen cancels it and frees the claim, and the next request is
-   reviewed and committed without any other wake. *)
+   claim once the Goal can no longer take that review's verdict. The first
+   review hangs; [leave] takes the Goal back to executing, which cancels it and
+   frees the claim, and the next request is reviewed and committed without any
+   other wake. *)
 (* Upper bound on the wait for the next review to commit. Every step is local
    and stubbed, so reaching it means the cancel never happened. *)
 let hung_review_wait_s = 30.0
 
-let test_reopen_from_verifying_cancels_a_hung_review () =
+let leave_by_reopen ctx goal_id =
+  ignore (must_succeed "reopen from verifying" (transition ctx goal_id "reopen"))
+;;
+
+let leave_by_criterion_edit ctx goal_id =
+  ignore
+    (must_succeed "edit the target during the review"
+       (dispatch ctx ~name:"masc_goal_upsert"
+          [ "id", `String goal_id; "target_value", `String "4" ]))
+;;
+
+(* A review bound before a pause may still commit while the Goal is paused, so
+   the pause leaves it running. The criterion edit during the pause is what
+   strands it. *)
+let leave_by_criterion_edit_while_paused ctx goal_id =
+  ignore (must_succeed "pause during the review" (transition ctx goal_id "pause"));
+  leave_by_criterion_edit ctx goal_id;
+  ignore (must_succeed "resume after the edit" (transition ctx goal_id "resume"))
+;;
+
+let test_leaving_verifying_cancels_a_hung_review ~leave () =
   with_workspace @@ fun config ->
   let ctx = workspace_ctx config in
   let goal_id = create_goal ctx "Verifier never answers" in
@@ -1519,9 +1538,9 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
             Goal_verification_agent.start ~sw ~clock:(Option.get !workspace_clock) ~config;
             Eio.Promise.await entered;
             Atomic.set AR.run_llm_reviewer_fn
-              (recording_reviewer calls ["verifier-a", Stub_approve "measured after reopen"]);
-            let reopened = must_succeed "reopen from verifying" (transition ctx goal_id "reopen") in
-            check string "reopen leaves verifying" "executing" (json_state reopened [ "goal"; "phase" ]);
+              (recording_reviewer calls ["verifier-a", Stub_approve "measured after leaving verifying"]);
+            leave ctx goal_id;
+            check string "the Goal left verifying" "executing" (stored_phase config goal_id);
             ignore (must_succeed "new request" (transition ctx goal_id "request_complete"));
             let clock = match !workspace_clock with
               | Some clock -> clock
@@ -1531,8 +1550,8 @@ let test_reopen_from_verifying_cancels_a_hung_review () =
             | Ok () -> ()
             | Error `Timeout ->
               fail (Printf.sprintf
-                "no committed review %.0fs after reopen: the hung review was not \
-                 cancelled or its claim was not released" hung_review_wait_s))));
+                "no committed review %.0fs after leaving verifying: the hung review \
+                 was not cancelled or its claim was not released" hung_review_wait_s))));
   let runs = reviews_of_goal registry goal_id in
   check bool "the hung review was cancelled" true
     (List.exists (fun (run : Goal_verification_run_registry.run) ->
@@ -2593,10 +2612,8 @@ let () =
             test_daemon_shows_an_early_original_failure_until_repair
         ; test_case "original failure projection binds exact request and workspace" `Quick
             test_original_failure_projection_is_bound_to_request_and_workspace
-        ; test_case "wake after deferred persistence survives active scan" `Quick
-            (test_wake_after_deferred_persist_survives_active_scan ~same_request:false)
         ; test_case "same-request explicit wake precedes retry timer" `Quick
-            (test_wake_after_deferred_persist_survives_active_scan ~same_request:true)
+            test_wake_after_deferred_persist_survives_active_scan
         ; test_case "deferred review waits for a request" `Quick
             test_deferred_review_waits_for_a_request
         ; test_case "raised review ends raised" `Quick
@@ -2604,7 +2621,12 @@ let () =
         ; test_case "pending before phase waits for explicit retry" `Quick
             test_pending_before_phase_waits_for_explicit_request
         ; test_case "reopen from verifying cancels a hung review" `Quick
-            test_reopen_from_verifying_cancels_a_hung_review
+            (test_leaving_verifying_cancels_a_hung_review ~leave:leave_by_reopen)
+        ; test_case "criterion edit from verifying cancels a hung review" `Quick
+            (test_leaving_verifying_cancels_a_hung_review ~leave:leave_by_criterion_edit)
+        ; test_case "criterion edit while paused cancels a hung review" `Quick
+            (test_leaving_verifying_cancels_a_hung_review
+               ~leave:leave_by_criterion_edit_while_paused)
         ; test_case "new request rejects an old answer for identical criteria" `Quick
             test_new_request_rejects_old_answer_for_same_criterion
         ; test_case "proof pending drains to awaiting confirmation" `Quick

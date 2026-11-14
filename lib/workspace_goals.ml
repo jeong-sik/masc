@@ -233,8 +233,9 @@ let notify_goal_verification_pending (ctx : context) ~goal_id =
       (Printexc.to_string exn)
 ;;
 
-(* An operator Drop or Reopen moved the Goal. A verifier review still running
-   for it can no longer commit, so the lane cancels it and frees its slot. *)
+(* A Drop, a Reopen or a criterion edit moved the Goal. A verifier review still
+   running for it can no longer commit, so the lane cancels it and frees its
+   slot. *)
 let notify_goal_verification_abandoned (ctx : context) ~goal_id =
   try
     (Atomic.get Workspace_hooks.goal_verification_abandoned_fn) ctx.config ~goal_id
@@ -245,6 +246,29 @@ let notify_goal_verification_abandoned (ctx : context) ~goal_id =
       "goal verification abandon failed after the phase write goal_id=%s detail=%s"
       goal_id
       (Printexc.to_string exn)
+;;
+
+(* Phases in which the Goal still takes the verdict of a review bound to its
+   pending request: Verifying, and a pause or block that resumes into it (a
+   bound review may commit while the Goal is suspended, see
+   [commit_verifier_decision]). An update that leaves this set strands the
+   running review. *)
+let admits_bound_review_verdict = function
+  | Goal_phase.Verifying
+  | Goal_phase.Paused Goal_phase.Resume_verifying
+  | Goal_phase.Blocked Goal_phase.Resume_verifying -> true
+  | Goal_phase.Executing | Awaiting_confirmation | Completed | Dropped
+  | Paused (Resume_executing | Resume_awaiting_confirmation)
+  | Blocked (Resume_executing | Resume_awaiting_confirmation) -> false
+;;
+
+(* A criterion edit sends a verifying Goal back to Executing, or a suspended
+   one back to Resume_executing ([Goal_phase.criterion_changed]). Edits that
+   keep the criterion keep the phase and the running review. *)
+let upsert_strands_running_review ~(previous : Goal_store.goal)
+    ~(goal : Goal_store.goal) =
+  admits_bound_review_verdict previous.phase
+  && not (admits_bound_review_verdict goal.phase)
 ;;
 
 (* What a list row carries. A short row names the Goal and says where it
@@ -428,6 +452,11 @@ let handle_goal_upsert_validated ~tool_name ~start_time (ctx : context) args : T
           error_result_typed ~tool_name ~start_time ~code:Internal_error
             (Goal_store.write_error_to_string error)
         | Ok (goal, action, events) ->
+          (match action with
+           | `created -> ()
+           | `updated previous ->
+             if upsert_strands_running_review ~previous ~goal
+             then notify_goal_verification_abandoned ctx ~goal_id:goal.id);
           let criterion_review = Goal_criterion_review.request
             ~expected_criterion:(Goal_store.criterion_of_goal goal)
             ctx.config ~goal_id:goal.id ~actor:ctx.agent_name ~retry:true in

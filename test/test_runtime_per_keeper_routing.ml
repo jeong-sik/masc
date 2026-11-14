@@ -935,6 +935,136 @@ let test_runtime_assignment_writer_clears_assignment () =
       (Runtime.runtime_id_for_keeper "routingtest"))
 ;;
 
+(* #46981 -- [runtime] written as an inline table, the way an operator may
+   write it by hand. The fixture's two runtime tables are swapped for the
+   inline spelling; everything below them is the same file. *)
+let runtime_tables_of_fixture =
+  {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[runtime.assignments]
+routingtest = "openai.gpt"
+budgettest = "openai.gpt"
+|}
+;;
+
+let runtime_config_with_runtime_written_as runtime_tables =
+  let length = String.length runtime_tables_of_fixture in
+  if not (String.equal (String.sub runtime_config 0 length) runtime_tables_of_fixture)
+  then Alcotest.fail "the fixture no longer opens with its two runtime tables";
+  runtime_tables ^ String.sub runtime_config length (String.length runtime_config - length)
+;;
+
+let with_runtime_text content f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+       with_temp_dir "runtime-per-keeper-routing-inline" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path content;
+       (match Runtime.init_default ~config_path:path with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "the server must load this file as written: %s" msg);
+       f path)
+;;
+
+(* What a strict TOML 1.0 reader makes of the file, which is the reader the
+   issue's offline collector was. *)
+let check_no_table_is_defined_twice label path =
+  match Toml_table_redefinition.violations (read_file path) with
+  | Ok [] -> ()
+  | Ok (_ :: _ as found) ->
+    Alcotest.failf "%s: %s" label
+      (String.concat "; " (List.map Toml_table_redefinition.to_string found))
+  | Error unreadable ->
+    Alcotest.failf "%s: %s" label (Toml_table_redefinition.unreadable_to_string unreadable)
+;;
+
+let test_an_assignment_under_an_inline_runtime_table_is_refused_without_a_write () =
+  with_runtime_text
+    (runtime_config_with_runtime_written_as "runtime = { default = \"runpod_mtp.qwen\" }\n")
+    (fun path ->
+       let before = read_file path in
+       (match
+          Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest"
+            ~runtime_id:"openai.gpt" ()
+        with
+        | Ok _ -> Alcotest.fail "the save appended a header under a closed inline table"
+        | Error detail ->
+          Alcotest.(check bool) ("the refusal names the inline table: " ^ detail) true
+            (string_contains detail "inline table" && string_contains detail "line 1"));
+       Alcotest.(check string) "the operator's file is byte-for-byte what it was" before
+         (read_file path);
+       Alcotest.(check (option string)) "the running process does not claim the assignment" None
+         (Runtime.runtime_id_for_keeper "routingtest");
+       (* The lane writer opens [runtime.lanes.<id>] the same way. *)
+       (match
+          Runtime.create_runtime_lane ~runtime_config_path:path ~lane_id:"coding"
+            ~runtime_ids:[ "openai.gpt" ] ()
+        with
+        | Ok _ -> Alcotest.fail "the lane save appended a header under a closed inline table"
+        | Error detail ->
+          Alcotest.(check bool) ("the lane refusal names the inline table: " ^ detail) true
+            (string_contains detail "inline table"));
+       Alcotest.(check string) "still untouched after the lane refusal" before (read_file path);
+       check_no_table_is_defined_twice "the file a strict reader gets" path)
+;;
+
+let test_an_assignment_held_in_an_inline_table_is_not_reported_removed () =
+  with_runtime_text
+    (runtime_config_with_runtime_written_as
+       "\n[runtime]\ndefault = \"runpod_mtp.qwen\"\nassignments = { routingtest = \"openai.gpt\" }\n")
+    (fun path ->
+       let before = read_file path in
+       Alcotest.(check (option string)) "the loader reads the inline assignment"
+         (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest");
+       (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest" () with
+        | Ok _ -> Alcotest.fail "a clear that removed nothing was reported as done"
+        | Error detail ->
+          Alcotest.(check bool) ("the refusal says the keeper stays assigned: " ^ detail) true
+            (string_contains detail "routingtest" && string_contains detail "openai.gpt"));
+       (match
+          Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
+            ~keeper_name:"routingtest" Runtime.commit_keeper_removal
+        with
+        | Ok { value = Ok _; _ } -> Alcotest.fail "a removal that removed nothing was reported as done"
+        | Ok { value = Error _; _ } | Error _ -> ());
+       Alcotest.(check string) "the file is byte-for-byte what it was" before (read_file path);
+       Alcotest.(check (option string)) "the keeper keeps the route the file gives it"
+         (Some "openai.gpt") (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+(* The save judges what it adds. A file that already carries the header an
+   older build appended keeps accepting edits under that header, and dotted
+   keys for [runtime] leave [runtime.assignments] free to be opened. *)
+let test_a_save_is_not_refused_for_what_the_file_already_has () =
+  let assign path =
+    match
+      Runtime.set_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"budgettest"
+        ~runtime_id:"openai.gpt" ()
+    with
+    | Ok _ -> ()
+    | Error detail -> Alcotest.failf "the assignment must be saved: %s" detail
+  in
+  with_runtime_text
+    (runtime_config_with_runtime_written_as
+       "runtime = { default = \"runpod_mtp.qwen\" }\n\n[runtime.assignments]\nroutingtest = \"openai.gpt\"\n")
+    (fun path ->
+       assign path;
+       Alcotest.(check (option string)) "an edit under the header the file already has"
+         (Some "openai.gpt") (Runtime.runtime_id_for_keeper "budgettest"));
+  with_runtime_text
+    (runtime_config_with_runtime_written_as "runtime.default = \"runpod_mtp.qwen\"\n")
+    (fun path ->
+       assign path;
+       Alcotest.(check (option string)) "a sub-table of a table dotted keys define"
+         (Some "openai.gpt") (Runtime.runtime_id_for_keeper "budgettest");
+       check_no_table_is_defined_twice "the file a strict reader gets" path)
+;;
+
 let test_runtime_and_egress_change_share_the_published_revision () =
   with_runtime_file (fun path ->
     let written = match Runtime.with_keeper_assignment_transaction ~runtime_config_path:path
@@ -4334,6 +4464,12 @@ let () =
             test_runtime_assignment_writer_clears_assignment
         ; test_case "runtime and egress publish one final revision" `Quick
             test_runtime_and_egress_change_share_the_published_revision
+        ; test_case "an assignment under an inline runtime table is refused without a write"
+            `Quick test_an_assignment_under_an_inline_runtime_table_is_refused_without_a_write
+        ; test_case "an assignment held in an inline table is not reported removed" `Quick
+            test_an_assignment_held_in_an_inline_table_is_not_reported_removed
+        ; test_case "a save is not refused for what the file already has" `Quick
+            test_a_save_is_not_refused_for_what_the_file_already_has
         ; test_case "deleted Keeper loses assignment and egress together" `Quick
             test_deleted_keeper_loses_assignment_and_egress_together
         ; Alcotest.test_case

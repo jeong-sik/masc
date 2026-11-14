@@ -1679,7 +1679,7 @@
 (test
  (name test_runtime_per_keeper_routing)
  (modules test_runtime_per_keeper_routing)
- (libraries masc_test_deps unix))
+ (libraries masc_test_deps unix masc.toml_line_editor))
 
 ; Product-neutral private-key material redaction.
 

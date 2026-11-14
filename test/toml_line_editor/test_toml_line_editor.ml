@@ -1083,6 +1083,83 @@ let test_nested_bool_preserves_binding_layouts () =
      "dotted existing false", "[account]\nold.price-input = 0.075\nold.wizard-default = false", ["account"; "old"], Some 0.075;
      "implicit model-set binding", "[providers.account]\nmodel-set = \"shared\"", ["account"; "old"], None]
 
+(* #46981 -- declarations TOML 1.0 forbids and Otoml merges. Each text below
+   parses with Otoml, which is why the loader kept working while a strict
+   reader refused the file. *)
+module Redefinition = Toml_table_redefinition
+
+let redefinitions text =
+  (match Otoml.Parser.from_string_result text with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.failf "the case is about a text Otoml reads, got: %s" detail);
+  match Redefinition.violations text with
+  | Ok found -> List.map (fun (found : Redefinition.located) -> found.line, found.violation) found
+  | Error unreadable -> Alcotest.fail (Redefinition.unreadable_to_string unreadable)
+;;
+
+let inline_extended ~inline_table by = Redefinition.Inline_table_extended { inline_table; by }
+
+let check_redefinitions label expected text =
+  Alcotest.(check bool) label true (redefinitions text = expected)
+;;
+
+let test_a_header_under_an_inline_table_is_reported () =
+  check_redefinitions "the header the assignment writer appended"
+    [ 2, inline_extended ~inline_table:[ "runtime" ] (Redefinition.Header [ "runtime"; "assignments" ]) ]
+    "runtime = { default = \"a.b\" }\n[runtime.assignments]\n\"k\" = \"a.b\"\n";
+  check_redefinitions "an array of tables under it is the same"
+    [ 2, inline_extended ~inline_table:[ "runtime" ] (Redefinition.Header [ "runtime"; "lanes" ]) ]
+    "runtime = { default = \"a.b\" }\n[[runtime.lanes]]\nid = \"x\"\n";
+  check_redefinitions "an inline table inside a section is addressed from its header"
+    [ 4, inline_extended ~inline_table:[ "egress"; "keepers" ]
+           (Redefinition.Header [ "egress"; "keepers"; "alder" ]) ]
+    "[egress]\nkeepers = { beta = { allow = [] } }\n\n[egress.keepers.alder]\nallow = []\n";
+  check_redefinitions "a dotted key reaching into it"
+    [ 2, inline_extended ~inline_table:[ "runtime" ] (Redefinition.Dotted_key [ "runtime" ]) ]
+    "runtime = { default = \"a.b\" }\nruntime.fallback = \"c.d\"\n"
+;;
+
+let test_a_header_over_dotted_keys_is_reported () =
+  check_redefinitions "the table the dots define"
+    [ 3, Redefinition.Dotted_table_reopened [ "runtime" ] ]
+    "runtime.default = \"a.b\"\n\n[runtime]\nfallback = \"c.d\"\n";
+  check_redefinitions "a dotted key inside a section"
+    [ 4, Redefinition.Dotted_table_reopened [ "runtime"; "assignments" ] ]
+    "[runtime]\nassignments.k = \"a.b\"\n\n[runtime.assignments]\nj = \"a.b\"\n"
+;;
+
+let test_declarations_toml_allows_are_not_reported () =
+  check_redefinitions "a sub-table of a table dotted keys define" []
+    "runtime.default = \"a.b\"\n\n[runtime.assignments]\nk = \"a.b\"\n";
+  check_redefinitions "an inline table nobody adds to" []
+    "runtime = { default = \"a.b\", assignments = { k = \"a.b\" } }\n\n[egress.keepers.k]\nallow = []\n";
+  check_redefinitions "a header spelled inside a multi-line string is data" []
+    "runtime = { default = \"a.b\" }\n[autonomous]\nwake_prompt = \"\"\"\n[runtime.assignments]\nk = \"a.b\"\n\"\"\"\n";
+  check_redefinitions "each entry of an array of tables is its own scope" []
+    "[[providers]]\nid = \"a\"\nlimits = { rpm = 1 }\ncaps.tools = true\n\n[[providers]]\nid = \"b\"\n\n[providers.limits]\nrpm = 2\n\n[providers.caps]\ntools = false\n";
+  check_redefinitions "a CRLF file reads the same" []
+    "[runtime]\r\ndefault = \"a.b\"\r\nmedia_failover = [\r\n  \"a.b\",\r\n]\r\n"
+;;
+
+let test_the_same_declaration_is_recognised_after_its_line_moves () =
+  let located text =
+    match Redefinition.violations text with
+    | Ok [ found ] -> found
+    | Ok _ | Error _ -> Alcotest.fail "expected one declaration"
+  in
+  let before = located "runtime = { default = \"a.b\" }\n[runtime.assignments]\nk = \"a.b\"\n" in
+  let moved =
+    located "# a note\n\nruntime = { default = \"a.b\" }\n[runtime.assignments]\nk = \"c.d\"\n"
+  in
+  let other = located "runtime = { default = \"a.b\" }\n[runtime.lanes.x]\ncandidates = []\n" in
+  Alcotest.(check bool) "the same header two lines down" true
+    (Redefinition.same_violation before moved);
+  Alcotest.(check bool) "another header under the same inline table" false
+    (Redefinition.same_violation before other);
+  Alcotest.(check (pair int int)) "the report names both lines" (4, 3)
+    (moved.line, moved.first_defined_at)
+;;
+
 let () =
   Alcotest.run "toml_line_editor"
     [ ( "comment-preserving edits"
@@ -1213,6 +1290,16 @@ let () =
             `Quick test_rename_table_refuses_table_array_and_inline_key_conflicts
         ; Alcotest.test_case "rename_table refuses duplicate source tables"
             `Quick test_rename_table_refuses_duplicate_source_tables
+        ] )
+    ; ( "tables defined twice for a strict reader"
+      , [ Alcotest.test_case "a header under an inline table is reported" `Quick
+            test_a_header_under_an_inline_table_is_reported
+        ; Alcotest.test_case "a header over dotted keys is reported" `Quick
+            test_a_header_over_dotted_keys_is_reported
+        ; Alcotest.test_case "declarations TOML allows are not reported" `Quick
+            test_declarations_toml_allows_are_not_reported
+        ; Alcotest.test_case "the same declaration is recognised after its line moves" `Quick
+            test_the_same_declaration_is_recognised_after_its_line_moves
         ] )
     ; ( "keys the writer has to quote"
       , [ Alcotest.test_case "a key that is not bare is quoted" `Quick

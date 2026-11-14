@@ -2372,9 +2372,9 @@ let flow_external_inputs binding =
     | S.Fusion_run {id;run_id} -> Some (id ^ " · Fusion run " ^ run_id)
     | S.Msx_capture {id} -> Some (id ^ " · MSX capture")
     | S.Dos_capture {id} -> Some (id ^ " · DOS capture")
-    | S.Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
-        Some (Printf.sprintf "%s · Browser %s · tab %d · target %s · %s · request %s"
-          id (S.browser_selection_lane selection) tab_id target_id environment request_id)) sources)
+    | S.Browser_document {id;installation_id;selection;tab_id;target_id;environment;request_id} ->
+        Some (Printf.sprintf "%s · Browser %s %s · tab %d · target %s · %s · request %s"
+          id installation_id (S.browser_selection_lane selection) tab_id target_id environment request_id)) sources)
 
 let flow_worker_state (worker : instance) =
   let result = if worker.observation_seq=0 then "no completed observation received"

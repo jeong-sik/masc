@@ -1616,6 +1616,78 @@ let test_config_snapshot_exposes_sandbox_image () =
   | `OK, json -> Alcotest.(check (option string)) "effective config image"
       (Some "documents") (json_string_field "sandbox_image" json)
 
+(* #38866: an assignment may name a declared lane (RFC-0457), but the snapshot
+   carried runtime ids only, and a keeper already on a lane had that lane's id
+   mixed into [runtime_options]. The lanes travel as their own list. *)
+let runtime_toml_with_lane ~keeper_name =
+  Printf.sprintf
+    {|
+[runtime]
+default = "primary.test_model"
+
+[runtime.lanes.resilient]
+candidates = [ "primary.test_model", "fallback.test_model" ]
+
+[runtime.assignments]
+%s = "resilient"
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.test_model]
+max-concurrent = 1
+|}
+    keeper_name
+
+let test_config_snapshot_offers_declared_lanes_apart_from_runtimes () =
+  with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "lane-assigned" in
+  let runtime_path = Filename.concat config_dir "runtime.toml" in
+  write_file runtime_path (runtime_toml_with_lane ~keeper_name:name);
+  Fun.protect ~finally:init_runtime_default_for_tests @@ fun () ->
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e);
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"lane fixture\"\n";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let strings key json =
+    match json_field key json with
+    | Some (`List items) ->
+      List.map (function `String s -> s | _ -> Alcotest.failf "%s holds a non-string" key) items
+    | Some _ | None -> Alcotest.failf "execution omitted %s" key
+  in
+  match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+  | `Not_found, _ -> Alcotest.fail "missing config snapshot"
+  | `OK, json ->
+    let execution = json_assoc_field "execution" json in
+    Alcotest.(check (option string)) "the keeper is on the lane" (Some "resilient")
+      (json_string_field "selected_runtime_id" execution);
+    Alcotest.(check (list string)) "declared lanes are offered" [ "resilient" ]
+      (strings "lane_options" execution);
+    Alcotest.(check (list string)) "runtimes are offered without the lane"
+      [ "fallback.test_model"; "primary.test_model" ]
+      (strings "runtime_options" execution)
+
 let test_config_snapshot_does_not_fallback_to_raw_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "bad-config-snapshot" in
@@ -2169,6 +2241,8 @@ let () =
             "config snapshot never falls back to raw effective fields"
             `Quick test_config_snapshot_does_not_fallback_to_raw_meta;
         Alcotest.test_case "config snapshot exposes sandbox image" `Quick test_config_snapshot_exposes_sandbox_image;
+          Alcotest.test_case "config snapshot offers declared lanes apart from runtimes" `Quick
+            test_config_snapshot_offers_declared_lanes_apart_from_runtimes;
           Alcotest.test_case
             "config snapshot prompt is nested only"
             `Quick test_config_snapshot_prompt_is_nested_only;

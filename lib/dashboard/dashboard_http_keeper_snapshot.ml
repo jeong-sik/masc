@@ -310,6 +310,11 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
         ]
       in
       let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
+      (* RFC-0457: an assignment names a declared [runtime.lanes.<id>] lane or
+         a runtime, and [Runtime.resolve_assignment] tries the lanes first.
+         They are two different things to pick, so they travel as two lists:
+         a route that is a declared lane is never carried as a runtime. *)
+      let lane_options = List.map Runtime_lane.id (Runtime.lanes ()) in
       let runtime_options =
         let catalog =
           Runtime.get_runtime_ids ()
@@ -317,7 +322,9 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
           |> List.filter (fun id -> id <> "")
         in
         let with_current =
-          if List.mem runtime_id catalog then catalog else runtime_id :: catalog
+          if List.mem runtime_id catalog || List.mem runtime_id lane_options
+          then catalog
+          else runtime_id :: catalog
         in
         List.sort_uniq String.compare with_current
       in
@@ -338,6 +345,8 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             selected_runtime_canonical_json );
           ( "runtime_options",
             `List (List.map (fun id -> `String id) runtime_options) );
+          ( "lane_options",
+            `List (List.map (fun id -> `String id) lane_options) );
           ("models", `List []);
           ("active_model", `Null);
           ("active_model_label", `Null);

@@ -3844,6 +3844,7 @@ describe('fetchKeeperConfig', () => {
         selected_runtime_id: 'keeper_unified',
         selected_runtime_canonical: 'keeper_unified',
         runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
+        lane_options: ['resilient'],
       },
       skills: {
         names: ['ocaml-coding', 'proof-harness'],
@@ -3922,6 +3923,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
+    expect(result.execution.lane_options).toEqual(['resilient'])
     expect(result.workspace.board_interests).toEqual([])
     expect(result.skills.names).toEqual(['ocaml-coding', 'proof-harness'])
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')

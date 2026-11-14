@@ -521,6 +521,24 @@ class DefaultAutoMergeReservation(unittest.TestCase):
                     MERGE.auto_merge_default(REPO, 101)
                 self.assertEqual(github.mutations, [])
 
+    def test_a_workflow_file_refusal_is_a_distinct_answer_not_an_exception(self):
+        class WorkflowRefusalGitHub(FakeGitHub):
+            def run(self, command, **kwargs):
+                if command[:3] == ['gh', 'pr', 'merge'] and '--auto' in command:
+                    self.mutations.append(command)
+                    return subprocess.CompletedProcess(command, 1, '',
+                        'refusing to allow a GitHub App to create or update workflow '
+                        '`scripts/review/approval-merge-sweep.yml` without `workflow` scope')
+                return super().run(command, **kwargs)
+
+        with WorkflowRefusalGitHub() as github, redirect_stdout(io.StringIO()):
+            github.reviews[101] = []
+            result = MERGE.auto_merge_default(REPO, 101)
+        assert result is not None
+        self.assertEqual(result['status'], 'workflow_merge_needs_human')
+        self.assertIn('create or update workflow', result['reason'])
+        self.assertEqual(result['pr'], 101)
+
 
 class AutomaticMergeReceipts(unittest.TestCase):
     def setUp(self):
@@ -1564,6 +1582,41 @@ class ClosingLinkedIssues(unittest.TestCase):
                                  [([101, 102], False)])
         with patch.object(MERGE, 'graphql', side_effect=ValueError('rate limited')):
             self.assertIn('rate limited', MERGE.close_linked_issues(REPO, [101])[0]['reason'])
+
+
+class SweepBudgetCleanup(unittest.TestCase):
+    '''The sweep budget protects the outcome emit and the hand-off (#51479 family 2).'''
+
+    def test_an_exhausted_budget_skips_the_poll_and_still_hands_off(self):
+        receipt = {'uuid': 'u1', 'pr': 101, 'head': sha(101), 'members': [101],
+                   'since': 1.0, 'status': 'submitted'}
+        reads = []
+        done = subprocess.CompletedProcess([], 0, '', '')
+        with patch.object(MERGE, 'read', side_effect=lambda path: reads.append(path) or {}), \
+             patch.object(MERGE.time, 'monotonic', return_value=10 ** 9), \
+             patch.object(MERGE.subprocess, 'run', return_value=done), \
+             patch.object(MERGE, '_FOLLOW_DEADLINE', 10 ** 9 - 1):
+            result = MERGE.resume('owner/repo', dict(receipt), dispatch=True)
+        self.assertEqual(reads, [])
+        self.assertEqual(result['status'], 'resume_dispatched')
+
+    def test_without_a_budget_the_poll_reads_the_request_and_the_members(self):
+        receipt = {'uuid': 'u1', 'pr': 101, 'head': sha(101), 'members': [101],
+                   'since': 1.0, 'status': 'submitted'}
+        reads = []
+        def fake_read(path):
+            reads.append(path)
+            if path.endswith('/merge-async/u1'):
+                return {'status': 'merged'}
+            return {'merged': True, 'state': 'closed', 'merge_commit_sha': 'c1'}
+        with patch.object(MERGE, 'read', side_effect=fake_read), \
+             patch.object(MERGE, 'open_pulls', return_value=[]), \
+             patch.object(MERGE.subprocess, 'run') as run:
+            result = MERGE.resume('owner/repo', dict(receipt), dispatch=False)
+        self.assertEqual(reads, ['repos/owner/repo/pulls/101/merge-async/u1',
+                                 'repos/owner/repo/pulls/101'])
+        self.assertEqual(result['status'], 'merged')
+        run.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -1,10 +1,20 @@
 module Validation = Masc.Lane_addon_action
 type field = {path:string list; schema:Yojson.Safe.t; required:bool; value:Yojson.Safe.t option}
-type t = {schema:Yojson.Safe.t;fields:field list;cursor:int;draft:string option;reviewing:bool;
+(* A root {"type":"object","oneOf":[…]} is edited one alternative at a time.
+   [fields] always belong to the chosen alternative alone. [Fixed] is a lone
+   alternative or a row action's: it is chosen and cannot change. *)
+type union =
+  | Choosable of {alternatives:Yojson.Safe.t list; chosen:(int * Yojson.Safe.t) option}
+  | Fixed of {count:int; index:int; alternative:Yojson.Safe.t}
+type t = {schema:Yojson.Safe.t;union:union option;locked:(string * Yojson.Safe.t) list;
+          fields:field list;cursor:int;draft:string option;reviewing:bool;
           array_editor:array_editor option}
 and array_editor = {item_schema:Yojson.Safe.t;items:Yojson.Safe.t list;item_cursor:int;
                     child:(int option * t) option}
 type event = Updated of t | Submit of Yojson.Safe.t | Cancel
+(* The cursor walks these slots. A locked member is never a slot, so no key
+   can reach it. *)
+type slot = Choice | Input of int
 open Result.Syntax
 let member key = function `Assoc fields -> List.assoc_opt key fields | _ -> None
 let rec at path value = match path with
@@ -15,17 +25,71 @@ let choices schema = match member "const" schema,member "enum" schema with
 let rec fields ~initial ~required path schema =
   match choices schema,member "type" schema,member "properties" schema with
   | None,Some (`String "object"),Some (`Assoc properties) when properties<>[] ->
-      let names = match member "required" schema with Some (`List names) -> names | _ -> [] in
-      List.concat_map (fun (key,schema) -> fields ~initial
-        ~required:(required && List.mem (`String key) names) (path @ [key]) schema) properties
+      members ~initial ~required path schema properties
   | _ ->
       let value = match at path initial with
         | Some value -> Some value | None -> if required then member "const" schema else None in
       [{path;schema;required;value}]
-let create ~schema ~initial =
+and members ~initial ~required path schema properties =
+  let names = match member "required" schema with Some (`List names) -> names | _ -> [] in
+  List.concat_map (fun (key,schema) -> fields ~initial
+    ~required:(required && List.mem (`String key) names) (path @ [key]) schema) properties
+(* Only a form's own root is edited by alternative. An array item's form and
+   every other oneOf node stay one JSON field, as before. *)
+let alternatives schema =
+  match member "type" schema,member "properties" schema,member "oneOf" schema with
+  | Some (`String "object"),None,Some (`List (_ :: _ as alternatives)) -> Some alternatives
+  | _ -> None
+(* [List.nth_opt] raises on a negative index, and a decoded index can be one. *)
+let nth list index = if index<0 then None else List.nth_opt list index
+let opened ~schema ~union ~locked fields =
+  {schema;union;locked;fields;cursor=0;draft=None;reviewing=false;array_editor=None}
+let create_item ~schema ~initial =
   let* () = Validation.validate_value_schema schema in
-  let fields = fields ~initial ~required:true [] schema in
-  Ok {schema;fields;cursor=0;draft=None;reviewing=false;array_editor=None}
+  Ok (opened ~schema ~union:None ~locked:[] (fields ~initial ~required:true [] schema))
+let create ~schema ~initial =
+  match alternatives schema with
+  | None -> create_item ~schema ~initial
+  | Some [alternative] ->
+      let* () = Validation.validate_value_schema schema in
+      Ok (opened ~schema ~union:(Some (Fixed {count=1;index=0;alternative})) ~locked:[]
+        (fields ~initial ~required:true [] alternative))
+  | Some alternatives ->
+      let* () = Validation.validate_value_schema schema in
+      (* [initial] opens the one alternative it is a value of. Otherwise nothing
+         is chosen, and an alternative chosen later starts empty. *)
+      let accepting = List.filter (fun (_,alternative) ->
+          Result.is_ok (Validation.validate_value ~schema:alternative ~name:"Lane input" initial))
+        (List.mapi (fun index alternative -> index,alternative) alternatives) in
+      let chosen,fields = match accepting with
+        | [(_,alternative) as chosen] -> Some chosen,fields ~initial ~required:true [] alternative
+        | [] | _ :: _ :: _ -> None,[] in
+      Ok (opened ~schema ~union:(Some (Choosable {alternatives;chosen})) ~locked:[] fields)
+let create_for_row ~schema ~branch ~locked =
+  let* () = Validation.validate_value_schema schema in
+  let* union,alternative = match alternatives schema,branch with
+    | None,None -> Ok (None,schema)
+    | Some alternatives,Some index -> (match nth alternatives index with
+        | Some alternative ->
+            Ok (Some (Fixed {count=List.length alternatives;index;alternative}),alternative)
+        | None -> Error "The row action names an alternative the schema does not have")
+    | None,Some _ -> Error "The row action names an alternative of a schema without alternatives"
+    | Some _,None -> Error "The row action names no alternative of a schema with alternatives" in
+  let* properties = match member "properties" alternative with
+    | Some (`Assoc properties) -> Ok properties
+    | Some _ | None -> Error "The row action alternative declares no members" in
+  let names = List.map fst locked in
+  let* () = if List.length (List.sort_uniq String.compare names)=List.length names then Ok ()
+    else Error "The row action locks a member twice" in
+  let* () = List.fold_left (fun checked (name,value) -> let* () = checked in
+      match List.assoc_opt name properties with
+      | Some schema -> Result.map ignore (Validation.validate_value ~schema ~name value)
+      | None -> Error ("The row action alternative has no member " ^ name))
+    (Ok ()) locked in
+  (* Each free member is flattened on its own, so no field can stand for the
+     whole object and overwrite a locked member. *)
+  let free = List.filter (fun (name,_) -> not (List.mem_assoc name locked)) properties in
+  Ok (opened ~schema ~union ~locked (members ~initial:(`Assoc []) ~required:true [] alternative free))
 let rec put path value root = match path with
   | [] -> value
   | key :: rest ->
@@ -33,12 +97,14 @@ let rec put path value root = match path with
       let child = Option.value ~default:(`Assoc []) (List.assoc_opt key fields) in
       `Assoc ((key,put rest value child) :: List.remove_assoc key fields)
 (* Populate required structure only inside objects already present. Optional
-   objects become present through explicit field input, never a nested const. *)
+   objects become present through explicit field input, never a nested const.
+   Members the schema does not declare stay, so an open object keeps them and
+   a closed one refuses them at validation instead of losing them here. *)
 let rec complete schema input =
   match member "const" schema,member "type" schema,member "properties" schema,input with
   | None,Some (`String "object"),Some (`Assoc properties),`Assoc values ->
       let required = match member "required" schema with Some (`List names) -> names | _ -> [] in
-      `Assoc (List.filter_map (fun (key,child) ->
+      let declared = List.filter_map (fun (key,child) ->
         let value = match List.assoc_opt key values with
           | Some value -> Some value
           | None when List.mem (`String key) required ->
@@ -47,11 +113,35 @@ let rec complete schema input =
                | None when member "type" child=Some (`String "object") -> Some (`Assoc [])
                | None -> None)
           | None -> None in
-        Option.map (fun value -> key,complete child value) value) properties)
+        Option.map (fun value -> key,complete child value) value) properties in
+      `Assoc (declared @ List.filter (fun (key,_) -> not (List.mem_assoc key properties)) values)
   | _ -> input
-let replace form value = {form with fields=List.mapi (fun i (field : field) ->
-  if i=form.cursor then {field with value} else field) form.fields;draft=None;reviewing=false}
-let commit form = match form.draft,List.nth_opt form.fields form.cursor with
+let slots form =
+  (match form.union with Some (Choosable _) -> [Choice] | Some (Fixed _) | None -> [])
+  @ List.mapi (fun index _ -> Input index) form.fields
+let focus form = List.nth_opt (slots form) form.cursor
+let selected_field form = match focus form with
+  | Some (Input index) -> List.nth_opt form.fields index
+  | Some Choice | None -> None
+let replace form value = match focus form with
+  | Some (Input index) -> {form with fields=List.mapi (fun i (field : field) ->
+      if i=index then {field with value} else field) form.fields;draft=None;reviewing=false}
+  | Some Choice | None -> form
+(* Another alternative gets fields built from it alone, so nothing typed for
+   the previous alternative reaches the action. *)
+let choose form delta = match form.union with
+  | Some (Choosable {alternatives;chosen}) ->
+      let count = List.length alternatives in
+      let next = match chosen with
+        | None -> if delta<0 then count-1 else 0
+        | Some (index,_) -> (index+delta+count) mod count in
+      (match nth alternatives next with
+       | Some alternative when Option.map fst chosen<>Some next ->
+           {form with union=Some (Choosable {alternatives;chosen=Some (next,alternative)});
+             fields=fields ~initial:(`Assoc []) ~required:true [] alternative;draft=None;reviewing=false}
+       | Some _ | None -> form)
+  | Some (Fixed _) | None -> form
+let commit form = match form.draft,selected_field form with
   | None,_ -> Ok form
   | Some draft,Some field ->
       let* value = if member "type" field.schema=Some (`String "string") then Ok (`String draft)
@@ -62,9 +152,20 @@ let commit form = match form.draft,List.nth_opt form.fields form.cursor with
 let value form =
   let* () = if Option.is_some form.array_editor then Error "Finish or cancel the array editor first" else Ok () in
   let* form = commit form in
+  let* branch = match form.union with
+    | None -> Ok None
+    | Some (Fixed {alternative;_} | Choosable {chosen=Some (_,alternative);_}) -> Ok (Some alternative)
+    | Some (Choosable {chosen=None;_}) -> Error "Choose an alternative first (Left/Right)" in
   let result = List.fold_left (fun root (field : field) ->
     Option.fold ~none:root ~some:(fun value -> put field.path value root) field.value)
-      (`Assoc []) form.fields |> complete form.schema in
+      (`Assoc []) form.fields |> complete (Option.value ~default:form.schema branch) in
+  (* Locked members go in after [complete], which could otherwise reshape them. *)
+  let result = List.fold_left (fun root (name,value) -> put [name] value root) result form.locked in
+  (* The value must be one of the alternative the screen shows, not only of
+     some alternative of the root. *)
+  let* _ = match branch with
+    | None -> Ok result
+    | Some alternative -> Validation.validate_value ~schema:alternative ~name:"Lane input" result in
   Validation.validate_value ~schema:form.schema ~name:"Lane input" result
 let editable (field : field) = match field.value with
   | None -> "" | Some (`String text) -> text | Some value -> Yojson.Safe.to_string value
@@ -88,7 +189,7 @@ let rec insert_text ~text form =
   | Some ({child=Some (index,child);_} as editor) ->
       {form with array_editor=Some {editor with child=Some (index,insert_text ~text child)}}
   | Some _ -> form
-  | None -> match List.nth_opt form.fields form.cursor with
+  | None -> match selected_field form with
     | None -> form
     | Some field when Option.is_some (choices field.schema) -> form
     | Some field ->
@@ -98,7 +199,7 @@ let rec handle ~key form =
   | Some editor -> handle_array ~key form editor
   | None -> handle_field ~key form
 and handle_field ~key form =
-  let selected = List.nth_opt form.fields form.cursor in
+  let selected = selected_field form in
   match key with
   | "esc" when form.reviewing -> Ok (Updated {form with reviewing=false})
   | "esc" -> Ok Cancel
@@ -107,7 +208,7 @@ and handle_field ~key form =
   | _ when form.reviewing -> Ok (Updated form)
   | "\005" ->
       let* form = commit form in
-      (match List.nth_opt form.fields form.cursor with
+      (match selected_field form with
        | Some field ->
            (match object_items field.schema with
             | None -> Error "This field uses direct text or JSON input"
@@ -119,7 +220,9 @@ and handle_field ~key form =
   | "tab" | "\t" | "down" | "up" | "\r" | "\n" | "enter" ->
       let* form = commit form in
       let delta = if key="up" then -1 else 1 in
-      Ok (Updated {form with cursor=max 0 (min (List.length form.fields-1) (form.cursor+delta))})
+      Ok (Updated {form with cursor=max 0 (min (List.length (slots form)-1) (form.cursor+delta))})
+  | "left" | "right" when focus form=Some Choice ->
+      Ok (Updated (choose form (if key="left" then -1 else 1)))
   | "left" | "right" ->
       (match selected with
        | None -> Ok (Updated form)
@@ -163,12 +266,12 @@ and handle_array ~key form editor =
   | None ->
       match key with
       | "esc" -> Ok (Updated {form with array_editor=None})
-      | "a" -> let* child = create ~schema:editor.item_schema ~initial:(`Assoc []) in
+      | "a" -> let* child = create_item ~schema:editor.item_schema ~initial:(`Assoc []) in
           update {editor with child=Some (None,child)}
       | "e" | "enter" | "\r" | "\n" ->
           (match List.nth_opt editor.items editor.item_cursor with
            | None -> Error "Add an item first (a)"
-           | Some initial -> let* child = create ~schema:editor.item_schema ~initial in
+           | Some initial -> let* child = create_item ~schema:editor.item_schema ~initial in
                update {editor with child=Some (Some editor.item_cursor,child)})
       | "d" ->
           let items = List.filteri (fun index _ -> index<>editor.item_cursor) editor.items in
@@ -177,15 +280,44 @@ and handle_array ~key form editor =
           let delta = if key="j" || key="down" then 1 else -1 in
           update {editor with item_cursor=max 0 (min (List.length editor.items-1) (editor.item_cursor+delta))}
       | "\019" ->
-          let* field = match List.nth_opt form.fields form.cursor with Some field -> Ok field
+          let* field = match selected_field form with Some field -> Ok field
             | None -> Error "No selected array field" in
           let* value = Validation.validate_value ~schema:field.schema ~name:(String.concat "." field.path) (`List editor.items) in
           Ok (Updated (replace {form with array_editor=None} (Some value)))
       | _ -> update editor
+(* Same order as the dashboard binding form: title, description, constant
+   members, position. *)
+let alternative_label index schema =
+  let text key = match member key schema with
+    | Some (`String text) when String.trim text<>"" -> Some text | Some _ | None -> None in
+  match text "title",text "description" with
+  | Some title,_ -> title
+  | None,Some description -> description
+  | None,None ->
+      let constants = match member "properties" schema with
+        | Some (`Assoc properties) -> List.filter_map (fun (key,child) -> Option.map (fun value ->
+            key ^ ": " ^ Yojson.Safe.to_string value) (member "const" child)) properties
+        | Some _ | None -> [] in
+      if constants=[] then Printf.sprintf "Alternative %d" (index+1) else String.concat " · " constants
+let locked_lines form = List.map (fun (name,value) ->
+  "  " ^ name ^ ": " ^ Yojson.Safe.to_string value ^ " · locked") form.locked
+let union_lines form =
+  let chosen index count alternative =
+    Printf.sprintf "%s (%d/%d)" (alternative_label index alternative) (index+1) count in
+  match form.union with
+  | None -> []
+  | Some (Fixed {count;index;alternative}) ->
+      ["  Alternative: " ^ chosen index count alternative ^ " · locked"]
+  | Some (Choosable {alternatives;chosen=choice}) ->
+      let count = List.length alternatives in
+      let label = match choice with
+        | Some (index,alternative) -> chosen index count alternative
+        | None -> Printf.sprintf "none of %d chosen" count in
+      [(if focus form=Some Choice then "> " else "  ") ^ "Alternative: " ^ label]
 let rec lines ?(show_description=false) form =
   match form.array_editor with
   | Some editor ->
-      let name = match List.nth_opt form.fields form.cursor with
+      let name = match selected_field form with
         | Some field -> String.concat "." field.path | None -> "Array" in
       (match editor.child with
        | Some (index,child) ->
@@ -203,7 +335,7 @@ let rec lines ?(show_description=false) form =
     ["Review input · Enter:submit once · Esc:edit · PageUp/PageDown:scroll"] @
       (match value form with Ok value -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string value) | Error error -> [error])
   else
-    let selected = List.nth_opt form.fields form.cursor in
+    let selected = selected_field form in
     let array_hint = match selected with
       | Some field when Option.is_some (object_items field.schema) -> " · Ctrl-E:array items"
       | Some _ | None -> "" in
@@ -212,13 +344,19 @@ let rec lines ?(show_description=false) form =
           | Some (`String description) when description <> "" -> [description]
           | Some _ | None -> [])
       | false, _ | true, None -> [] in
+    let position = match focus form with
+      | Some (Input index) -> Printf.sprintf "Field %d/%d" (index+1) (List.length form.fields)
+      | Some Choice -> "Alternative"
+      | None -> "No field to fill" in
     ["Tab/Up/Down:field · Left/Right:choice" ^ array_hint ^ " · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
-        Printf.sprintf "Field %d/%d · PageUp/PageDown:scroll" (form.cursor+1) (List.length form.fields)] @
-    List.filter_map (fun (index,(field : field)) -> if index<>form.cursor then None else Some (
-      let name = match member "title" field.schema with Some (`String title) -> title
-        | _ -> String.concat "." field.path in
-      (if index=form.cursor then "> " else "  ") ^ name ^ (if field.required then " *" else "") ^ ": " ^
-      (match form.draft with
-       | Some draft when index=form.cursor -> display_draft field draft
-       | _ -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)))
-      (List.mapi (fun index (field : field) -> index,field) form.fields) @ description
+        position ^ " · PageUp/PageDown:scroll"] @ locked_lines form @ union_lines form @
+    (match selected with
+     | None -> []
+     | Some field ->
+         let name = match member "title" field.schema with Some (`String title) -> title
+           | _ -> String.concat "." field.path in
+         ["> " ^ name ^ (if field.required then " *" else "") ^ ": " ^
+          (match form.draft with
+           | Some draft -> display_draft field draft
+           | None -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)])
+    @ description

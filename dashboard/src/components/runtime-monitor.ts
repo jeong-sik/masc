@@ -34,7 +34,7 @@ import {
 } from '../lib/runtime-provider-summary'
 import { OfficialClientSessionPanel } from './official-client-session-panel'
 import { OfficialClientLoginProbe } from './official-client-login-probe'
-import { useModelMetrics } from '../lib/use-model-metrics'
+import { useModelMetrics, type ModelMetricsReading } from '../lib/use-model-metrics'
 
 /**
  * Filters model metrics by case-insensitive substring match against
@@ -797,6 +797,14 @@ function metricCoverageText(metric: DashboardRuntimeModelMetric): string | null 
   return parts.length > 0 ? parts.join(' · ') : null
 }
 
+function modelMetricsReadFailure(reading: ModelMetricsReading): string | null {
+  switch (reading.kind) {
+    case 'loading': return null
+    case 'error': return reading.message
+    case 'ready': return reading.readError
+  }
+}
+
 export function RuntimeMonitor() {
   const resource = useManagedAsyncResource<RuntimeData>()
   const windowMinutes = useSignal(30)
@@ -820,8 +828,7 @@ export function RuntimeMonitor() {
   const providers = current.data?.providers ?? null
   const metrics = metricsQuery.state.kind === 'ready' ? metricsQuery.state.value : null
   const loading = current.loading || metricsQuery.state.kind === 'loading'
-  const error = current.error ?? (metricsQuery.state.kind === 'error' ? metricsQuery.state.message
-    : metricsQuery.state.kind === 'ready' ? metricsQuery.state.readError : null)
+  const error = current.error ?? modelMetricsReadFailure(metricsQuery.state)
   const probe = current.data?.probe ?? null
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)

@@ -13,7 +13,7 @@ import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
 import type { DashboardConfigResolution, DashboardRuntimeResolution } from '../types'
 import type { DashboardRuntimeProbeResponse } from './schemas/runtime-probe'
-import { parsePromptAuthoringIssues, type PromptAuthoringIssue } from './schemas/prompt-authoring'
+import type { PromptAuthoringIssue } from './schemas/prompt-authoring'
 import {
   parseToolMetricsSeriesResponse,
   seriesAnswerMismatch,
@@ -2138,6 +2138,7 @@ interface PromptMutationResponse {
 
 export async function fetchDashboardPrompts(): Promise<DashboardPromptsResponse> {
   const response = await get<DashboardPromptsResponse>('/api/v1/prompts')
+  const { parsePromptAuthoringIssues } = await import('./schemas/prompt-authoring')
   return {
     ...response,
     prompts: response.prompts.map(prompt => ({

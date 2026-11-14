@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 //
 // Reachability, not shape. #27547 counted 23 routable sections with no
-// rendered link; the Monitor strip closed 19 of them and left 4, all on the
-// two other tabs that carry more than one visible section:
+// rendered link; the Monitor strip closed 19 of them. Two of the rest are
+// still sections, on the two other tabs that carry more than one visible
+// section:
 //
-//   workspace/verification, lab/performance,
-//   lab/keeper-memory-health
+//   workspace/verification, lab/keeper-memory-health
 //
 // Every pure-function test over the section table passed the whole time. The
 // registry always knew those sections existed — what was missing was a
@@ -63,13 +63,12 @@ for (const { tab, name, landing, Surface } of SURFACES) {
   })
 }
 
-// Named rather than derived: the point is that these four specific sections
+// Named rather than derived: the point is that these specific sections
 // were unreachable, and a loop over the registry would keep passing if one of
 // them were quietly dropped from it.
 describe('sections that #27547 left unreachable', () => {
   const ORPHANS: Array<[TabId, string, string, unknown]> = [
     ['workspace', 'verification', 'work', Work],
-    ['lab', 'performance', 'tools', Lab],
     ['lab', 'keeper-memory-health', 'tools', Lab],
   ]
 

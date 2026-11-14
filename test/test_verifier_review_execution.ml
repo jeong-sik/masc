@@ -475,6 +475,8 @@ let check_retryable label expected = function
     Alcotest.(check (list string)) label expected retryable_runtimes
   | Ok _ -> Alcotest.fail "rereading returned a verdict or another gate"
   | Error W.Original_not_found -> Alcotest.fail "rereading found no original"
+  | Error W.Question_changed -> Alcotest.fail "rereading found another question"
+  | Error (W.Authority_changed _) -> Alcotest.fail "rereading found a before-dispatch refusal"
   | Error (W.Original_corrupt detail | Authority_unavailable detail | Grants_mismatch detail
     | Execution_pending detail | Execution_repair_required detail | Persistence_unavailable detail) ->
     Alcotest.failf "rereading retained no refusal: %s" detail

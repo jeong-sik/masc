@@ -332,6 +332,20 @@ let retry_result evidence =
   | _::_ -> Ok ()
   | [] -> Error "original refusal has no typed safe retry"
 
+(* A successor needs a refusal that authorizes one: an execution refusal that
+   names a runtime to review again, or a before-dispatch refusal whose closed
+   evidence says what moved away from this original. The stage decides which
+   evidence to read. *)
+let successor_authorized original (refusal : Progress.refusal) =
+  match refusal.stage with
+  | Progress.Execution -> retry_result refusal.evidence
+  | Progress.Before_dispatch ->
+    let* change = Verifier_review_authority_change.of_json refusal.evidence in
+    if Verifier_review_authority_change.begins_at ~authority:(V.authority_binding original)
+        ~answer_format:(V.output_contract original) change
+    then Ok ()
+    else Error "before-dispatch refusal names another original's authority or answer format"
+
 (* Routing metadata proves only which verification owns these immutable bytes.
    It never constructs an Original or grants execution of an unsupported body. *)
 let routing_verification (record : Owner.retained) =
@@ -435,10 +449,18 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
       | V.Question_changed -> Question_changed
       | V.Prompt_unavailable detail -> Lookup_unavailable ("review prompt unavailable: " ^ detail)
       | V.Successor_unavailable detail -> corrupt detail) in
+  let allocate parent =
+    let* child=successor_of parent in
+    let* request_id=attempt_request_id ~verification_id ~attempt:(V.attempt child)
+      |> Result.map_error corrupt in
+    let* successor=Owner.prepare_successor ~store ~scope ~request_id ~request:(V.to_json child)
+      |> Result.map_error (fun e -> Load (Load_store_unavailable (Owner.error_to_string e))) in
+    let* parent=advance ~store parent (Progress.Successor_intended successor) |> loaded in
+    let* child=retain_child parent successor child |> loaded in Ok (V.attempt child.original) in
   let rec walk parent rest =
     match Progress.phase parent.record.progress,rest with
     | (Progress.Subdividing (refusal,successor) | Subdivided (refusal,successor)),_ ->
-      let* () = retry_result refusal.evidence |> Result.map_error corrupt in
+      let* () = successor_authorized parent.original refusal |> Result.map_error corrupt in
       let* child = loaded (match rest with
         | child::_ -> Ok child.original
         | [] -> let* json = Owner.load_successor_request ~store ~scope successor
@@ -456,17 +478,15 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
       let* refused = terminal_review_result evidence |> Result.map_error corrupt in
       (match refused.AR.retryable_runtimes with
        | [] -> Ok (V.attempt parent.original)
-       | _ :: _ ->
-         let* child=successor_of parent in
-         let* request_id=attempt_request_id ~verification_id ~attempt:(V.attempt child)
-           |> Result.map_error corrupt in
-         let* successor=Owner.prepare_successor ~store ~scope ~request_id ~request:(V.to_json child)
-           |> Result.map_error (fun e -> Load (Load_store_unavailable (Owner.error_to_string e))) in
-         let* parent=advance ~store parent (Progress.Successor_intended successor) |> loaded in
-         let* child=retain_child parent successor child |> loaded in Ok (V.attempt child.original))
+       | _ :: _ -> allocate parent)
+    | Progress.Rejected ({stage=Progress.Before_dispatch;_} as refusal),[] ->
+      (* HIGH-RISK-UNREVIEWED: the same question met another lookup authority
+         or answer format before dispatch. The next attempt asks it again with
+         the current authority, whatever the refused attempt held. *)
+      let* () = successor_authorized parent.original refusal |> Result.map_error corrupt in
+      allocate parent
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _
-      | Rejected {stage=Progress.Before_dispatch;_}),[] -> Ok (V.attempt parent.original)
+      | Commit_unknown _ | Finished _ | Conflicted _),[] -> Ok (V.attempt parent.original)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
       | Commit_unknown _ | Finished _ | Conflicted _
       | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}),_::_ ->

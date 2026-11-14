@@ -5,6 +5,7 @@ module V = Verifier_review_original
 module Authority = Verification_authority_tools
 module Progress = Lane_addon_request_progress
 module Walk_result = Verifier_review_walk_result
+module Change = Verifier_review_authority_change
 open Result.Syntax
 
 type error =
@@ -12,6 +13,8 @@ type error =
   | Original_corrupt of string
   | Authority_unavailable of string
   | Grants_mismatch of string
+  | Question_changed
+  | Authority_changed of Change.t
   | Execution_pending of string
   | Execution_repair_required of string
   | Persistence_unavailable of string
@@ -109,16 +112,22 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
     | Verdict result ->
       let* _ = retain_judgment retained result in
       Ok result in
-  let restore_refusal evidence = match evidence with
-    | `Assoc fields -> (match List.assoc_opt "result" fields with
+  (* The stage says which evidence a refusal holds: an execution refusal keeps
+     the reviewer's exact result, a before-dispatch refusal only what moved. *)
+  let restore_refusal (refusal : Progress.refusal) = match refusal.stage, refusal.evidence with
+    | Progress.Before_dispatch, evidence ->
+      (match Change.of_json evidence with
+       | Ok change -> Error (Authority_changed change)
+       | Error detail -> Error (Original_corrupt detail))
+    | Progress.Execution, `Assoc fields -> (match List.assoc_opt "result" fields with
         | Some json -> O.result_of_json json |> Result.map_error (fun detail -> Original_corrupt detail)
         | None -> Error (Original_corrupt "retained reviewer refusal has no exact result"))
-    | _ -> Error (Original_corrupt "retained reviewer refusal is malformed") in
+    | Progress.Execution, _ -> Error (Original_corrupt "retained reviewer refusal is malformed") in
   let* result = match Progress.phase (O.progress retained) with
   | Progress.Judged json -> restored json
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
     restored commit.judgment
-  | Rejected refusal | Subdividing (refusal,_) | Subdivided (refusal,_) -> restore_refusal refusal.evidence
+  | Rejected refusal | Subdividing (refusal,_) | Subdivided (refusal,_) -> restore_refusal refusal
   | Dispatch_pending _ -> observe_pending retained
   | Captured | Admission_wait _ ->
   let* ()=match Progress.phase (O.progress retained) with
@@ -142,14 +151,27 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
       && String.equal subject.task_id req.AR.task_id
       && String.equal subject.worker req.agent_name
       && String.equal (V.question_binding original) current.V.question_digest
-      && String.equal (V.authority_binding original) current.V.authority_digest
-      && V.lookup_schemas original = current.V.granted_tools
-    then Ok () else Error (Grants_mismatch "retained subject or lookup authority differs") in
+    then Ok () else Error Question_changed in
   let* () = Authority.validate_task_review authority
-    |> Result.map_error (fun detail -> Grants_mismatch detail) in
+    |> Result.map_error (fun detail -> Authority_unavailable detail) in
+  (* HIGH-RISK-UNREVIEWED: a retained attempt whose lookup authority or answer
+     format is not the current one is refused before dispatch. The refusal
+     keeps only what moved; the next attempt asks the same question with the
+     current authority, so the old grants never reach a reviewer. *)
+  let* moved = Change.between ~retained_authority:(V.authority_binding original)
+      ~current_authority:current.V.authority_digest
+      ~retained_format:(V.output_contract original) ~current_format:(V.canonical_output_contract ())
+    |> Result.map_error (fun detail -> Original_corrupt detail) in
   let* () =
-    if String.equal (V.output_contract original) (V.canonical_output_contract ()) then Ok ()
-    else Error (Original_corrupt "retained output contract differs from the review protocol") in
+    match moved with
+    | Some change ->
+      let* _ = save retained (Progress.Refused {stage=Progress.Before_dispatch;evidence=Change.to_json change}) in
+      Error (Authority_changed change)
+    | None ->
+      (* The same authority digest names the same tools, so other names mean
+         the retained original disagrees with its own digest. *)
+      if V.lookup_schemas original = current.V.granted_tools then Ok ()
+      else Error (Original_corrupt "retained lookup tools differ from their authority digest") in
 
     let* dispatching = save retained Progress.Dispatch_intended in
     let current = ref dispatching in

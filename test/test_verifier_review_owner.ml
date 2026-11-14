@@ -413,7 +413,98 @@ let test_intended_successor_is_restored_without_preparing_authority () =
   let restored = loaded_or_fail (O.load ~store ~verification_id:"vrf-cut" ~attempt:1) in
   assert (Yojson.Safe.equal (V.to_json restored) (V.to_json child))
 
+module Change = Masc.Verifier_review_authority_change
+
+(* The worker recorded a before-dispatch refusal and the process stopped before
+   any successor intent. *)
+let refused_before_dispatch ~store ~verification_id evidence =
+  let original = make_original ~verification_id ~attempt:0 in
+  (match O.retain ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p" original with
+   | Ok () -> ()
+   | Error err -> failwith ("retain failed: " ^ string_of_retain_error err));
+  let retained = loaded_or_fail
+    (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  ignore (loaded_or_fail (O.advance ~store retained
+    (Progress.Refused { stage = Progress.Before_dispatch; evidence })));
+  original
+
+(* The evidence the worker records when an attempt that held [from] meets the
+   current lookup authority under an unchanged answer format. *)
+let authority_moved ?(from = sample_lookup.authority_digest) () =
+  let format = V.canonical_output_contract () in
+  match Change.between ~retained_authority:from ~current_authority:current_lookup.authority_digest
+      ~retained_format:format ~current_format:format with
+  | Ok (Some change) -> Change.to_json change
+  | Ok None | Error _ -> failwith "the change fixture moved nothing"
+
+let test_before_dispatch_refusal_opens_the_next_attempt_with_current_lookup () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  let parent = refused_before_dispatch ~store ~verification_id:"vrf-moved" (authority_moved ()) in
+  assert (next_with ~lookup:(fun () -> Ok current_lookup) store "vrf-moved" = Ok 1);
+  let child = loaded_or_fail (O.load ~store ~verification_id:"vrf-moved" ~attempt:1) in
+  assert (V.is_successor_of ~parent child);
+  assert (String.equal (V.authority_binding child) current_lookup.authority_digest);
+  assert (V.lookup_schemas child = current_lookup.granted_tools);
+  let refused = loaded_or_fail
+    (O.load_retained ~store ~verification_id:"vrf-moved" ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  (match Progress.phase (O.progress refused) with
+   | Progress.Subdivided ({ stage = Progress.Before_dispatch; _ }, _) -> ()
+   | _ -> failwith "the refused attempt must link its next attempt");
+  assert (next_with ~lookup:must_not_prepare store "vrf-moved" = Ok 1)
+
+let test_unreadable_before_dispatch_refusal_opens_nothing () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (refused_before_dispatch ~store ~verification_id:"vrf-unread"
+    (`Assoc [ "reason", `String "no closed change" ]));
+  (match next_with ~lookup:(fun () -> Ok current_lookup) store "vrf-unread" with
+   | Error (O.Load (O.Corrupt_original _)) -> ()
+   | Ok _ | Error (O.Load (O.Not_found | O.Load_store_unavailable _) | O.Lookup_unavailable _
+     | O.Question_changed) ->
+     failwith "an unreadable before-dispatch refusal must not open the next attempt");
+  match O.load ~store ~verification_id:"vrf-unread" ~attempt:1 with
+  | Error O.Not_found -> ()
+  | Ok _ | Error _ -> failwith "no next attempt may be retained for an unreadable refusal"
+
+let test_before_dispatch_refusal_from_another_original_opens_nothing () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (refused_before_dispatch ~store ~verification_id:"vrf-foreign"
+    (authority_moved ~from:(String.make 64 'e') ()));
+  (match next_with ~lookup:(fun () -> Ok current_lookup) store "vrf-foreign" with
+   | Error (O.Load (O.Corrupt_original _)) -> ()
+   | Ok _ | Error (O.Load (O.Not_found | O.Load_store_unavailable _) | O.Lookup_unavailable _
+     | O.Question_changed) ->
+     failwith "a refusal that starts at another original must not open the next attempt");
+  match O.load ~store ~verification_id:"vrf-foreign" ~attempt:1 with
+  | Error O.Not_found -> ()
+  | Ok _ | Error _ -> failwith "no next attempt may be retained for another original's refusal"
+
+let test_intended_successor_after_a_before_dispatch_refusal_is_restored () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  let parent = refused_before_dispatch ~store ~verification_id:"vrf-cut-moved" (authority_moved ()) in
+  (* The process stopped after the refused attempt recorded its successor
+     intent and before the child was retained. *)
+  let child = match V.successor ~lookup:current_lookup parent with
+    | Ok child -> child
+    | Error _ -> failwith "successor fixture failed" in
+  let request_id = fixture_get (O.attempt_request_id ~verification_id:"vrf-cut-moved" ~attempt:1) in
+  let successor = fixture_get
+    (Raw_owner.prepare_successor ~store ~scope:O.scope ~request_id ~request:(V.to_json child)) in
+  let retained = loaded_or_fail
+    (O.load_retained ~store ~verification_id:"vrf-cut-moved" ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  ignore (loaded_or_fail (O.advance ~store retained (Progress.Successor_intended successor)));
+  assert (next_with ~lookup:must_not_prepare store "vrf-cut-moved" = Ok 1);
+  let restored = loaded_or_fail (O.load ~store ~verification_id:"vrf-cut-moved" ~attempt:1) in
+  assert (Yojson.Safe.equal (V.to_json restored) (V.to_json child))
+
 let () =
+  test_before_dispatch_refusal_opens_the_next_attempt_with_current_lookup ();
+  test_unreadable_before_dispatch_refusal_opens_nothing ();
+  test_before_dispatch_refusal_from_another_original_opens_nothing ();
+  test_intended_successor_after_a_before_dispatch_refusal_is_restored ();
   test_retry_successor_asks_with_current_lookup ();
   test_retry_with_a_changed_question_opens_nothing ();
   test_retry_without_lookup_authority_opens_nothing ();

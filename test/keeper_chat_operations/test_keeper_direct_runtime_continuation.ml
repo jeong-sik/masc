@@ -101,12 +101,11 @@ let test_interrupted_resumed_effects_are_not_replayed () = with_path (fun path -
     ignore (claim store);
     Store.resume_direct_runtime_retry store ~now:13. ~operation_id ~observed:retry |> ok);
   with_open path (fun store ->
-    check int "execution without a new checkpoint fails" 1 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:20. |> ok));
+    check int "execution without a new checkpoint needs reconciliation" 1 (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart store ~now:20. |> ok));
     check bool "no blind queue replay" true ((Store.claim_next store ~now:21. |> ok) = None);
-    check bool "the execution settles failed with its operation" true (match (current store).state, (execution store).phase with
-      | Operation.Failed {failure; _}, Semantic.Settled (Semantic.Failed detail) -> String.equal failure.detail detail
-      | _ -> false);
-    check bool "settlement released the semantic input" true ((execution store).input = None)))
+    check bool "original semantic input remains for reconciliation" true ((execution store).input = Some input);
+    check bool "typed interrupted origin" true (match (execution store).phase with
+      | Semantic.Recovering {origin = Semantic.Interrupted_execution; _} -> true | _ -> false)))
 
 let test_binding_and_edit_refusal () = with_path (fun path -> with_open path (fun store ->
   let original = admitted store in

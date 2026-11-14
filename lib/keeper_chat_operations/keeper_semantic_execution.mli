@@ -165,8 +165,9 @@ type t = private
           is owned by one execution at a time. [Settle] empties the list in the
           same transition, whatever its terminal, and so does a
           [Require_reconciliation] that leaves a running execution in
-          [Interrupted_execution], which no action resumes. No other action
-          removes an entry. A settled or interrupted record holds none. *)
+          [Interrupted_execution], which no action resumes: a restart that
+          fails the operation ends here. No other action removes an entry. A
+          settled or interrupted record holds none. *)
   ; sources : source_member list
   ; current_sources : source_member list
   ; frame : Keeper_repetition_snapshot.t

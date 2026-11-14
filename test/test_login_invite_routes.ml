@@ -222,20 +222,18 @@ let listed (answer : R.answer) =
   | _ -> Alcotest.failf "no invites in %S" answer.body
 ;;
 
-let text_of name fields =
-  match List.assoc_opt name fields with
-  | Some (`String value) -> Some value
-  | Some other -> Some (Yojson.Safe.to_string other)
-  | None -> None
-;;
+(* Values are compared as JSON, so a member of another type fails. *)
+let json = Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal
+let field name fields = List.assoc_opt name fields
+let text value = Some (`String value)
 
 let status_of id invitations =
   match List.assoc_opt id invitations with
   | None -> Alcotest.failf "%s is not listed" id
   | Some fields ->
-    (match text_of "status" fields with
-     | Some status -> status
-     | None -> Alcotest.failf "%s has no status" id)
+    (match field "status" fields with
+     | Some (`String status) -> status
+     | _ -> Alcotest.failf "%s has no status" id)
 ;;
 
 let at_ms ms =
@@ -370,15 +368,18 @@ let an_admin_lists_every_invitation () =
     Alcotest.(check int) "revoked" 204 (code (I.revoke t.routes (request admin) ~invite_id:revoked.invite_id));
     let open_admin = issue "admin" in
     let invitations = listed (I.list t.routes (read admin)) in
-    let by_admin = Some (Printf.sprintf {|{"kind":"admin","user_id":%S}|} (User_id.to_string t.admin_id)) in
+    let by_admin = Some (`Assoc [ "kind", `String "admin"; "user_id", `String (User_id.to_string t.admin_id) ]) in
     let expect label id ~role ~issuer ~status ~user_id =
       match List.assoc_opt id invitations with
       | None -> Alcotest.failf "%s: not listed" label
       | Some fields ->
-        Alcotest.(check (option string)) (label ^ ": role") (Some role) (text_of "role" fields);
-        Alcotest.(check (option string)) (label ^ ": issuer") issuer (text_of "issuer" fields);
-        Alcotest.(check (option string)) (label ^ ": status") (Some status) (text_of "status" fields);
-        Alcotest.(check (option string)) (label ^ ": the principal it made") user_id (text_of "user_id" fields);
+        Alcotest.(check (option json)) (label ^ ": role") (text role) (field "role" fields);
+        Alcotest.(check (option json)) (label ^ ": issuer") issuer (field "issuer" fields);
+        Alcotest.(check (option json)) (label ^ ": status") (text status) (field "status" fields);
+        Alcotest.(check (option json))
+          (label ^ ": the principal it made")
+          (Option.bind user_id text)
+          (field "user_id" fields);
         Alcotest.(check (list string))
           (label ^ ": the members, and no token")
           ([ "invite_id"; "role"; "issuer"; "expires_at_ms"; "status" ]
@@ -393,7 +394,7 @@ let an_admin_lists_every_invitation () =
       "the first Admin's"
       "invite-admin"
       ~role:"admin"
-      ~issuer:(Some {|{"kind":"local_operator"}|})
+      ~issuer:(Some (`Assoc [ "kind", `String "local_operator" ]))
       ~status:"consumed"
       ~user_id:(Some (User_id.to_string t.admin_id));
     expect
@@ -405,10 +406,10 @@ let an_admin_lists_every_invitation () =
       ~user_id:(Some (User_id.to_string joined));
     expect "revoked" revoked.invite_id ~role:"member" ~issuer:by_admin ~status:"revoked" ~user_id:None;
     expect "open" open_admin.invite_id ~role:"admin" ~issuer:by_admin ~status:"open" ~user_id:None;
-    Alcotest.(check (option string))
+    Alcotest.(check (option json))
       "the expiry it was issued with"
-      (Some (string_of_int open_admin.expires_at_ms))
-      (Option.bind (List.assoc_opt open_admin.invite_id invitations) (text_of "expires_at_ms"));
+      (Some (`Int open_admin.expires_at_ms))
+      (Option.bind (List.assoc_opt open_admin.invite_id invitations) (field "expires_at_ms"));
     let at ms = listed (I.list { t.routes with R.now = (fun () -> at_ms ms) } (read admin)) in
     Alcotest.(check string)
       "a millisecond before it expires"

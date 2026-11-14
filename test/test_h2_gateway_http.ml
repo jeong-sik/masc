@@ -992,33 +992,31 @@ let test_health_over_h2_follows_the_same_split () =
     check int "a credential that may not read state is refused" 403
       (status ~token:player ~meth:`GET client "/health"))
 
-(* A method other than GET runs no health handler, so it cannot carry either
-   body. The production table has no HEAD route: it resolves HEAD on the three
-   paths to "method not allowed" before any handler. OPTIONS is answered by
-   the ingress before the table. HEAD is read from the table and not over the
-   connection because the h2 client rejects the text body of that refusal;
-   [test_server_runtime_bootstrap] sends HEAD over HTTP/1.1 and reads the 405. *)
-let test_other_methods_reach_no_health_handler () =
+(* A method other than GET carries neither health body. OPTIONS is answered
+   by the ingress before the table. HEAD runs the GET route of the path
+   (#51921) and is answered with the status of GET and no content, so neither
+   the public probe nor the reader's body goes out with it.
+   [test_server_runtime_bootstrap] reads the same over HTTP/1.1. *)
+let test_other_methods_carry_no_health_body () =
   health_posture ~strict:true @@ fun () ->
-  let captured = ref None in
-  with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:production
-    (fun ~player:_ ~reader:_ client ->
-      let code, body = request ~meth:`OPTIONS client Server_health_paths.health in
-      check int "OPTIONS is answered" 204 code;
-      check string "without a body" "" body);
-  let routes = match !captured with Some routes -> routes | None -> fail "no routes" in
-  List.iter
-    (fun path ->
-      check bool (path ^ " has no HEAD handler") true
-        (match
-           Masc.Http_server_eio.Router.resolve routes (Httpun.Request.create `HEAD path)
-         with
-         | `Method_not_allowed -> true
-         | `Matched (_ : Masc.Http_server_eio.Router.route) | `Not_found -> false))
-    [ Server_health_paths.health
-    ; Server_health_paths.liveness
-    ; Server_health_paths.readiness
-    ]
+  with_gateway ~make_routes:production (fun ~player:_ ~reader client ->
+    let code, body = request ~meth:`OPTIONS client Server_health_paths.health in
+    check int "OPTIONS is answered" 204 code;
+    check string "without a body" "" body;
+    List.iter
+      (fun (who, token) ->
+        List.iter
+          (fun path ->
+            let name = Printf.sprintf "HEAD %s, %s" path who in
+            let get_code = status ?token ~meth:`GET client path in
+            let code, body = request ?token ~meth:`HEAD client path in
+            check int (name ^ ": the status of GET") get_code code;
+            check string (name ^ ": no body") "" body)
+          [ Server_health_paths.health
+          ; Server_health_paths.liveness
+          ; Server_health_paths.readiness
+          ])
+      [ "no credential", None; "a reader", Some reader ])
 
 (* Strict auth opens a request without a credential only when the route it
    reaches asks for none: [Always_public] or [Public_read Open_when_strict].
@@ -1087,8 +1085,8 @@ let () =
         ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
         ; test_case "health follows the same split over h2" `Quick
             test_health_over_h2_follows_the_same_split
-        ; test_case "other methods reach no health handler" `Quick
-            test_other_methods_reach_no_health_handler
+        ; test_case "other methods carry no health body" `Quick
+            test_other_methods_carry_no_health_body
         ; test_case "a route failure follows the response state" `Quick
             test_route_failure_follows_the_response_state
         ; test_case "the HTTP/1.1 error handler answers a fixed body" `Quick

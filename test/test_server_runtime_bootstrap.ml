@@ -5528,10 +5528,10 @@ let test_the_sibling_probes_say_the_same_to_everyone () =
     ]
 ;;
 
-(* HEAD has no route on the three paths, so the table refuses it before any
-   health handler: the answer is the table's fixed refusal, for a reader too,
-   and carries neither body. *)
-let test_head_on_a_health_route_runs_no_handler () =
+(* HEAD runs the GET route of each of the three paths (#51921) and is
+   answered with the status of GET and no content, so it carries neither the
+   public probe nor the reader's body, nor the body of a refusal. *)
+let test_head_on_a_health_route_carries_no_body () =
   both_postures @@ fun ~strict ->
   with_health_routes ~strict @@ fun routes ->
   List.iter
@@ -5539,13 +5539,18 @@ let test_head_on_a_health_route_runs_no_handler () =
        List.iter
          (fun (who, headers) ->
             let name = Printf.sprintf "%s, %s, HEAD %s" (posture_name ~strict) who path in
+            let get_status, (_ : (string * string) list), (_ : string) =
+              health_answer ~headers routes.health_router path
+            in
             let status, (_ : (string * string) list), body =
               health_answer ~meth:"HEAD" ~headers routes.health_router path
             in
-            Alcotest.(check int) (name ^ ": status") 405 status;
-            Alcotest.(check bool) (name ^ ": no body or the fixed refusal") true
-              (List.mem body [ ""; "405 Method Not Allowed" ]))
-         [ "no credential", []; "an admin bearer", bearer routes.admin_token ])
+            Alcotest.(check int) (name ^ ": the status of GET") get_status status;
+            Alcotest.(check string) (name ^ ": no body") "" body)
+         [ "no credential", []
+         ; "an admin bearer", bearer routes.admin_token
+         ; "an unknown bearer", bearer "no-such-token"
+         ])
     [ Server_health_paths.health; Server_health_paths.liveness; Server_health_paths.readiness ]
 ;;
 
@@ -7857,8 +7862,8 @@ let () =
             test_health_refuses_a_credential_it_cannot_accept;
           Alcotest.test_case "the sibling probes say the same to everyone" `Quick
             test_the_sibling_probes_say_the_same_to_everyone;
-          Alcotest.test_case "HEAD on a health route runs no handler" `Quick
-            test_head_on_a_health_route_runs_no_handler;
+          Alcotest.test_case "HEAD on a health route carries no body" `Quick
+            test_head_on_a_health_route_carries_no_body;
           Alcotest.test_case
             "health before the workspace is published is the public probe" `Quick
             test_health_before_the_workspace_is_published_is_the_public_probe;

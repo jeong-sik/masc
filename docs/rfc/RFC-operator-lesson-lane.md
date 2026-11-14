@@ -174,11 +174,12 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 | 사건 | 담는 것 |
 | --- | --- |
-| `Session_opened` | 세션 id, action 요청 id, 장면 수, 권한, 언어, 연 시각 |
+| `Session_opened` | 세션 id, action 요청 id, 장면 수, 권한, 언어, binding 의 `since`, 연 시각 |
 | `Material_read` | 세션 id, 요청 id, 보관한 요청·결과의 digest |
-| `Exact_requested` | 세션 id, 요청 id, 출력 이름, 요청 digest. 본문은 먼저 `requests/<digest>.json` 에 있다 |
-| `Outlined` | 세션 id, outline 요청 id, 통과한 항목(id, 제목, 요점, pin) |
+| `Outline_requested` | 세션 id, 요청 id, 요청 digest. 본문은 먼저 `requests/<digest>.json` 에 있다 |
 | `Entry_rejected` | 세션 id, outline 요청 id, 항목 index, 이유 |
+| `Outlined` | 세션 id, outline 요청 id, 통과한 항목(id, 제목, 요점, pin) |
+| `Scene_requested` | 세션 id, 항목 id, 요청 id, 요청 digest. `Outlined` 와 같은 쓰기에 들어간다 |
 | `Scene_written` | 세션 id, 항목 id, scene 요청 id, 쓴 시각, 제목, 문단과 출처(pin, 인용문, 그 기록을 담은 보존 페이지의 SHA-256) |
 | `Scene_rejected` | 세션 id, 항목 id, scene 요청 id, 이유 |
 | `Session_failed` | 세션 id, 이유 |
@@ -195,9 +196,13 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 `Session_failed` 의 이유(닫힌 집합): `not_allowed {request_id, reason}`, `outline_invalid_output`, `outline_input_refused`, `outline_outcome_unknown`, `outline_request_exceeds_frame`, `result_exceeds_frame`, `no_material`, `no_entry_passed`.
 
-`Entry_rejected` 의 이유(닫힌 집합): `source_not_read {source}`, `duplicate_entry_id`, `beyond_requested_scenes`.
+`Entry_rejected` 의 이유(닫힌 집합): `source_not_read {source}`, `duplicate_entry_id`, `beyond_requested_scenes`, `incomplete`, `not_recordable {detail}`.
 
-`Scene_rejected` 의 이유(닫힌 집합): `not_allowed {reason}`, `invalid_output`, `input_refused`, `outcome_unknown`, `request_exceeds_frame`, `result_exceeds_frame`, `quote_not_in_record {paragraph, source}`, `source_not_in_entry {paragraph, source}`, `paragraph_without_source {paragraph}`.
+`Scene_rejected` 의 이유(닫힌 집합): `not_allowed {reason}`, `invalid_output`, `input_refused`, `outcome_unknown`, `request_exceeds_frame`, `result_exceeds_frame`, `quote_not_in_record {paragraph, source}`, `source_not_in_entry {paragraph, source}`, `paragraph_without_source {paragraph}`, `incomplete`, `not_recordable {detail}`.
+
+- `incomplete` 는 공백뿐인 id·제목·요점·문단이거나, 요점·출처·문단이 하나도 없는 경우다. 스키마가 `minItems` 를 쓰지 않아서 빈 배열은 패키지가 거른다.
+- `not_recordable` 은 log 가 다시 읽지 못할 글(UTF-8 로 쓸 수 없는 글자 등)이다. 그 항목이나 장면 하나만 버린다. 퀴즈가 문항 하나를 버리는 것과 같다.
+- 요청이 둘로 나뉜 이유: outline 요청은 `reading` 세션에, scene 요청은 항목에 붙는다. fold 가 "항목마다 요청 하나, 결과 하나"를 사건 이름으로 검사한다.
 
 - host 의 최종 결과는 이렇게 받는다. `output_limit_reached` 는 `invalid_output` 으로, `request_id_reused` 는 `not_allowed` 로 적는다. 퀴즈가 받는 방식과 같다(`addons/operator-quiz/quiz_flow.py:701-708`). 설치 선언이 `exact_outputs = ["outline"]` 만 고르면 장면은 모두 `not_allowed` 로 끝난다.
 - 새 `compose` 는 `reading` 세션만 대체한다. `writing` 세션은 건드리지 않고, 그 장면 요청은 계속 나열된다. 퀴즈가 `asked` 세션을 건드리지 않는 것과 같다. 대체하면 `scene` lane 이 묶이지 않았거나 쉬는 동안 compose 마다 outline 만 받고 장면은 하나도 나오지 않는다. 대가: `scene` lane 이 오래 막혀 있으면 `writing` 세션이 compose 마다 하나씩 쌓이고, lane 이 열릴 때 한꺼번에 쓰인다. `lesson/sessions` 가 그 수를 보여 준다.

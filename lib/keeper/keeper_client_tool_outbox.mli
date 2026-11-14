@@ -128,6 +128,26 @@ val host_response :
     inside receipt payloads too. A failed blob write returns [Error], and
     nothing is written to the outbox. *)
 
+val codex_response :
+  base_path:string -> min_result_bytes:int -> Yojson.Safe.t ->
+  (Yojson.Safe.t, string) result
+(** The [response] of one Codex receipt, from the response frame that was
+    written, or would have been written, to the vendor. Its
+    [result.contentItems] follow the rules of {!host_response}, with the same
+    blob writes and the same forms:
+
+    - An [inputImage] whose [imageUrl] is a base64 [data:] URL
+      ({!Keeper_client_tool_outbox_media.codex_items}) becomes
+      [{"type":"image","media_type":_,"artifact":_}], or keeps an undecodable
+      payload under [undecodable_base64]. An [imageUrl] that names a URL stays.
+    - When the [inputText] items carry at least [min_result_bytes] bytes of
+      text together, each [text] that is shorter as its blob marker becomes
+      that marker.
+
+    Every other value stays, including a response with no
+    [result.contentItems]. The frame sent to the vendor is not changed. A
+    failed blob write returns [Error], and the caller writes no receipt. *)
+
 val load : base_path:string -> keeper_name:string -> viewer:viewer -> (snapshot, string) result
 (** Read exact committed results, excluding host producers whose kernel lease
     is still held. Vendor receipts remain independent. An unavailable/missing

@@ -13,12 +13,19 @@
 #      session routes, so a browser can show the console of a signed-in
 #      person without a GitHub login;
 #   5. runs ux-measure3.mjs over every state and stops everything it started.
-# usage: console-layer.sh BIN LABEL OUT PORT ASSETS
+# usage: console-layer.sh BIN LABEL OUT PORT ASSETS [SET]
 #   PORT..PORT+2 are used. ASSETS is the directory that holds dashboard/, as
 #   the assets directory of a checkout whose dashboard was built does.
+#   SET picks the states of a signed-in person: `frame` (the default; the
+#   frame of the console, console/README.md and frame/README.md) or `panel`
+#   (the subscriptions panel, panel/README.md).
 #   UX_SPACE names the task space of the browser (default: masc account pages ux).
 set -u
-BIN="$1"; LABEL="$2"; OUT="$3"; PORT="$4"; ASSETS="$5"
+BIN="$1"; LABEL="$2"; OUT="$3"; PORT="$4"; ASSETS="$5"; SET="${6:-frame}"
+case "$SET" in
+  frame|panel) ;;
+  *) echo "SET is frame or panel, not $SET" >&2; exit 2 ;;
+esac
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="$OUT/run"
 REAL="http://127.0.0.1:$PORT"
@@ -55,19 +62,30 @@ MOCK_PID=$!
 n=0
 until curl -s -m 2 -o /dev/null "$MOCK/" || [ "$n" -ge 20 ]; do n=$((n + 1)); perl -e 'select(undef, undef, undef, 0.25)'; done
 
-STATES=$(python3 - "$REAL" "$NOBUNDLE" "$MOCK" <<'PY'
+STATES=$(python3 - "$REAL" "$NOBUNDLE" "$MOCK" "$SET" <<'PY'
 import json, sys
-real, nobundle, mock = sys.argv[1:4]
+real, nobundle, mock, which = sys.argv[1:5]
 console = "/accounts/console"
+signed_in = {
+    "frame": [
+        ["console_member", mock, "member", console],
+        ["console_admin", mock, "admin", console],
+        ["console_session_unread", mock, "session_unread", console],
+        ["console_account_changed", mock, "account_changed", console],
+        ["control_no_style_source", mock, "member", console + "?control"],
+    ],
+    "panel": [
+        ["panel_none", mock, "member_panel_none", console],
+        ["panel_each", mock, "member_panel_each", console],
+        ["panel_each_admin", mock, "admin_panel_each", console],
+        ["panel_unread", mock, "member_panel_unread", console],
+        ["control_no_style_source", mock, "member_panel_each", console + "?control"],
+    ],
+}
 print(json.dumps([
     ["console_signed_out", real, None, console],
     ["console_no_bundle", nobundle, None, console],
-    ["console_member", mock, "member", console],
-    ["console_admin", mock, "admin", console],
-    ["console_session_unread", mock, "session_unread", console],
-    ["console_account_changed", mock, "account_changed", console],
-    ["control_no_style_source", mock, "member", console + "?control"],
-]))
+] + signed_in[which]))
 PY
 )
 python3 "$HERE/ux-run.py" "${UX_SPACE:-masc account pages ux}" "$LABEL" "$OUT" "$STATES" > "$T/run.mjs"

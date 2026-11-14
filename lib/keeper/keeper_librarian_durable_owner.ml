@@ -36,8 +36,10 @@ let retain ~store request =
   let* ()=check_predecessor ~store ~dispatch:false request in
   let destination=Request.destination request in
   let scope=Request.scope (Request.physical_owner request) and request_id=Request.request_id request in
+  let* index=io (fun () -> Request.index request) |> rejected in
   let* ()=io (fun () -> Owner.retain ~store ~scope ~request_id
-    ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool ~summary:`Null
+    ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
+    ~summary:(Request.index_to_json index)
     ~request:(Request.to_json request)) |> owned in
   let* record=io (fun () -> Owner.load ~store ~scope ~request_id) |> owned in
   let* record=match record with Some record -> Ok record

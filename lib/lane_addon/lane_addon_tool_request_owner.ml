@@ -271,6 +271,12 @@ let reload ~store (previous : retained) =
     if same_identity record (listed previous)
     then Ok (Some (with_request record previous.request))
     else Error (Store_unavailable "a reloaded original names another request or binding")
+let load_record ~store ~scope ~request_id =
+  let* () = validate_identity ["scope", scope; "request_id", request_id] in
+  let* json = Lane_addon_store.load_tool_request_owner store ~scope ~request_id |> unavailable in
+  match json with
+  | None -> Ok None
+  | Some json -> decode ~scope ~request_id json |> unavailable |> Result.map Option.some
 let load_scope ~store ~scope =
   let* records = discover ~store ~scope in
   let rec restore found = function

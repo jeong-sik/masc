@@ -132,6 +132,10 @@ let preparation_of_json ~source_input json =
   let+ ()=Question.rendered_matches frozen p in p
 
 type predecessor = {request_id:string;request_digest:string}
+(* Declared before [t] so that [t]'s fields are the ones a bare field name
+   means below. *)
+type index = {owner:owner;destination:destination;predecessor:predecessor option;
+  runtime_keepers_dir:string;exact_digest:string;source_digest:string;source_basis_digest:string}
 (* [digest] names the canonical bytes of [to_json]: the record's digest for a
    restored original, computed once for a new or freestanding one. Equal
    digests are equal requests, so a re-check of the same record compares this
@@ -200,6 +204,65 @@ let create ?predecessor ~request_id ~owner ~destination ~source ~(preparation:Ru
   let* ()=validate capture in
   let* ()=confirm_source_root capture in
   let+ digest=Owner.request_digest (to_json capture) in {capture with digest}
+let request capture = Question.request ~request_id:capture.id capture.preparation
+
+(* What a reader of the record alone needs of the request. [retain] writes it
+   as the record's summary from a verified request; a reader of the body
+   compares the two. *)
+let json_digest json =
+  let+ canonical=Lane_addon_action.canonical json in hash (Yojson.Safe.to_string canonical)
+let exact_digest capture = let+ exact=request capture in Exact.digest exact
+let index (capture:t) : (index,string) result =
+  let* exact_digest=exact_digest capture in
+  let* source_digest=json_digest (Source.to_json capture.source) in
+  let+ source_basis_digest=json_digest (Source.basis_json capture.source) in
+  ({owner=capture.owner;destination=capture.destination;predecessor=capture.predecessor;
+   runtime_keepers_dir=Source.runtime_keepers_dir capture.source;exact_digest;source_digest;source_basis_digest}:index)
+let source_basis_digest capture = json_digest (Source.basis_json capture.source)
+let index_to_json (index:index) = `Assoc ["schema",`Int 1;"owner",owner_to_json index.owner;
+  "destination",Destination.to_json index.destination;"predecessor",predecessor_json index.predecessor;
+  "runtime_keepers_dir",`String index.runtime_keepers_dir;"exact_digest",`String index.exact_digest;
+  "source_digest",`String index.source_digest;"source_basis_digest",`String index.source_basis_digest]
+let index_of_summary record =
+  let module Record=Owner.Record in
+  let sha json =
+    let* value=text json in
+    let+ ()=require (String_util.is_lowercase_sha256_hex value) "Original history index digest is invalid" in value in
+  let* f=fields ["schema";"owner";"destination";"predecessor";"runtime_keepers_dir";"exact_digest";
+    "source_digest";"source_basis_digest"] (Record.summary record)
+    |> Result.map_error (fun _ -> "Original history record summary is not its index") in
+  let* ()=require (value "schema" f=`Int 1) "Unknown original history index schema" in
+  let* owner=owner_of_json (value "owner" f) in
+  let* destination=destination_of_json (value "destination" f) in
+  let* predecessor=predecessor_of_json (value "predecessor" f) in
+  let* runtime_keepers_dir=nonblank (value "runtime_keepers_dir" f) in
+  let* exact_digest=sha (value "exact_digest" f) in
+  let* source_digest=sha (value "source_digest" f) in
+  let* source_basis_digest=sha (value "source_basis_digest" f) in
+  let* id_scope=scope_of_request_id (Record.request_id record) in
+  let+ ()=require (Record.scope record=scope owner && id_scope=scope owner
+    && Record.installation_id record=destination.installation_id
+    && Record.package_id record=destination.package_id && Record.tool record=destination.tool)
+    "Original history index belongs to another scope or host binding" in
+  ({owner;destination;predecessor;runtime_keepers_dir;exact_digest;source_digest;source_basis_digest}:index)
+let confirm_index_source_root (index:index) =
+  let* actual=Fs_compat.with_owned_inventory_root index.runtime_keepers_dir
+    (fun root -> Ok (physical root)) |> owned in
+  require (actual=index.owner.runtime)
+    "Original history source came from another physical runtime/output root"
+(* The index values that cost a pass over the source are compared only where
+   something reads them: an original with a predecessor here, a fenced
+   original where its fence is confirmed ([confirm_index]). *)
+let confirm_index_binding (capture:t) (stored:index) =
+  let* exact_digest=exact_digest capture in
+  require (stored.owner=capture.owner && stored.destination=capture.destination
+    && stored.predecessor=capture.predecessor
+    && stored.runtime_keepers_dir=Source.runtime_keepers_dir capture.source
+    && stored.exact_digest=exact_digest) "Original history index differs from its request"
+let confirm_index (capture:t) record =
+  let* stored=index_of_summary record in
+  let* actual=index capture in
+  require ((stored:index)=actual) "Original history index differs from its request"
 let decode ~owner ~digest json =
   let* f=header_fields json in
   let* ()=require (value "schema" f=`Int 2 && value "kind" f=`String "completed-history-execution")
@@ -228,7 +291,13 @@ let restore_payload ~owner (record:Owner.retained) =
   let* ()=require (record.scope=scope owner && record.request_id=id
     && record.installation_id=destination.installation_id && record.package_id=destination.package_id
     && record.tool=destination.tool) "Original history host binding differs" in
-  let+ ()=equal record.request (to_json capture) "Original history request encoding differs" in capture
+  let* ()=equal record.request (to_json capture) "Original history request encoding differs" in
+  let+ ()=match capture.predecessor with
+    | Some _ -> confirm_index capture (Owner.listed record)
+    | None ->
+      let* stored=index_of_summary (Owner.listed record) in
+      confirm_index_binding capture stored in
+  capture
 let restore ~owner record =
   let* capture=restore_payload ~owner record in
   let+ ()=confirm_source_root capture in capture
@@ -287,7 +356,6 @@ let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
     "Original history host record belongs to another scope" in
   let* current=observe_owner ~base_path ~keepers_dir ~keeper_id:original.keeper_id in
   let+ ()=owner_matches_json current (value "owner" f) in current
-let request capture = Question.request ~request_id:capture.id capture.preparation
 let confirm_owner capture =
   let* current=observe_owner ~base_path:capture.owner.workspace.path ~keepers_dir:capture.owner.keepers.path
     ~keeper_id:capture.owner.keeper_id in

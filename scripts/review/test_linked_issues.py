@@ -330,6 +330,22 @@ class ClosingLinkedIssues(unittest.TestCase):
                 self.assertIn('could not check', records[1]['reason'])
                 self.assertEqual(github.closes, [])
 
+    def test_a_reopening_history_that_is_not_a_list_closes_nothing(self):
+        """`nodes: null` is an unreadable answer, not a history of no reopening."""
+        good = FakeGitHub((101, pull(101, issue(7), issue(8))))(
+            ISSUES.check_query([], 2), i0='I_7', i1='I_8')
+        assert isinstance(good, dict)
+        for name, shape in {'null': None, 'a dict': {'I_7': None}}.items():
+            with self.subTest(name):
+                answer = copy.deepcopy(good)
+                answer['i0']['timelineItems']['nodes'] = shape
+                records, github = close((101, pull(101, issue(7), issue(8))), check=answer)
+                self.assertEqual(decisions(records),
+                                 [(101, url(7), False), (101, url(8), False)])
+                self.assertIn('could not check', records[0]['reason'])
+                self.assertIn('TypeError', records[0]['reason'])
+                self.assertEqual(github.closes, [])
+
     def test_a_list_longer_than_one_page_is_reported_and_the_page_still_closes(self):
         records, github = close((101, pull(101, issue(7), total=ISSUES.LINKED_ISSUE_PAGE + 1)))
         self.assertEqual(decisions(records), [(101, None, False), (101, url(7), True)])

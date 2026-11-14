@@ -21817,7 +21817,7 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
                empty walk must not read as success. *)
             Error
               (Printf.sprintf "%s has no request to send"
-                 (Keeper_control.action_label action)))
+                 (Keeper_control.action_label ~ko:false action)))
     | step :: rest -> (
         match Result.bind (check_request ()) (fun () -> perform step) with
         | Error transport -> Error transport
@@ -21849,6 +21849,9 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
   in
   walk ~recovery_available:true None (Keeper_control.plan action)
 
+(* WORKAROUND: the keeper action notices are English sentences, so their
+   action words are English (~ko:false). Root fix: the notices take the
+   screen language, with the action steps' errors as typed values. *)
 let apply_keeper_action_result state ~base_path ~mailbox keeper_name action result =
   state.keeper_action_inflight <- None;
   (match result with
@@ -21863,7 +21866,7 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
    | Ok (Keeper_control.Accepted { already_live = false }) ->
        report_action state "system"
          (Printf.sprintf "%s %s accepted" keeper_name
-            (Keeper_control.action_label action))
+            (Keeper_control.action_label ~ko:false action))
    | Ok (Keeper_control.Paused_owner_conflict detail)
    | Ok (Keeper_control.Committed_followup_failed detail)
    | Ok (Keeper_control.Rejected { detail; _ }) ->
@@ -21872,11 +21875,11 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
           member has to be answered here too. *)
        report_action state "error"
          (Printf.sprintf "%s %s refused: %s" keeper_name
-            (Keeper_control.action_label action) detail)
+            (Keeper_control.action_label ~ko:false action) detail)
    | Error detail ->
        report_action state "error"
          (Printf.sprintf "%s %s failed: %s" keeper_name
-            (Keeper_control.action_label action) detail));
+            (Keeper_control.action_label ~ko:false action) detail));
   (* The accepted action may change Keeper metadata and release Task work.
      Each local source starts a fresh owned read; the HTTP roster refresh is
      independent and no directory scan runs in this result handler. *)
@@ -21895,7 +21898,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
   report_action ~show_in_footer:false state "system"
-    (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
+    (Printf.sprintf "%s %s" (Keeper_control.action_gerund ~ko:false action) keeper_name);
   let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
@@ -22788,7 +22791,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
       if not (List.mem action (Keeper_control.available reading)) then
         report_action state "system"
           (Printf.sprintf "%s cannot %s right now (%s)" keeper.k_name
-             (Keeper_control.action_label action)
+             (Keeper_control.action_label ~ko:false action)
              (match reading.Keeper_control.liveness with
               | Keeper_control.Invalid detail -> detail
               | Keeper_control.Unobserved ->
@@ -22814,7 +22817,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
             report_action ~show_in_footer:false state "system"
               (Printf.sprintf "Press %s again to %s %s"
                  (Keeper_control.action_key action)
-                 (Keeper_control.action_label action) keeper.k_name);
+                 (Keeper_control.action_label ~ko:false action) keeper.k_name);
 
             (* Shutdown is undone by a boot. Delete is not undone at all, so
                the arm names what goes -- the same list the dashboard shows

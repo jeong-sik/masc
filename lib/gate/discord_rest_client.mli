@@ -49,6 +49,17 @@ type snowflake
 val snowflake_of_string : string -> (snowflake, string) result
 val snowflake_to_string : snowflake -> string
 
+type nonce
+(** Validated Create Message nonce: 1 to 25 visible ASCII characters
+    (Discord: "up to 25 characters"). *)
+
+val nonce_of_string : string -> (nonce, string) result
+val nonce_to_string : nonce -> string
+
+val fresh_nonce : unit -> nonce
+(** A random nonce (24 hex characters) from the process cryptographic
+    random source. *)
+
 val pp_error : Format.formatter -> error -> unit
 
 val send_message :
@@ -59,6 +70,7 @@ val send_message :
   content:string ->
   ?reply_to_message_id:string ->
   ?allowed_user_mentions:string list ->
+  ?nonce:nonce ->
   unit ->
   (string, error) result
 (** [send_message ~token ~channel_id ~content ?reply_to_message_id ()]
@@ -68,6 +80,14 @@ val send_message :
     contains the only user snowflakes Discord may notify; when omitted or
     empty, user, role, and everyone mentions are all suppressed. Returns the
     created message id on [Ok].
+
+    With [nonce] the request also carries [enforce_nonce = true]. When this
+    bot created a message with the same nonce "in the past few minutes",
+    Discord answers with that message and creates no new one. Repeating a
+    request whose outcome is unknown with the same nonce therefore returns
+    the message the first request created, if it did, holding the first
+    request's content. Discord states neither the window's exact length nor
+    the HTTP status of that answer; this client reads it like any 2xx.
 
     Works for guild text channels, DM channels, and threads.
 
@@ -232,6 +252,7 @@ val build_request :
   content:string ->
   ?reply_to_message_id:snowflake ->
   ?allowed_user_mentions:snowflake list ->
+  ?nonce:nonce ->
   unit ->
   string * (string * string) list * string
 (** [(url, headers, body) = build_request ~token ~channel_id ~content
@@ -239,7 +260,8 @@ val build_request :
     scheme), Content-Type, a fail-closed [allowed_mentions] object, and a
     Discord-required User-Agent. When
     [reply_to_message_id] is provided, the body includes a
-    [message_reference] field so Discord threads the reply. *)
+    [message_reference] field so Discord threads the reply. When [nonce] is
+    provided, the body includes [nonce] and [enforce_nonce = true]. *)
 
 val build_typing_request :
   token:string ->

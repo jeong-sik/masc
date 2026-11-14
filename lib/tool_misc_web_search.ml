@@ -1,9 +1,21 @@
 open Tool_args
 
+(* What an engine wrote in a result row's text field. The engine's own
+   parser names it from the field that engine documents, so the meaning
+   is fixed where the field is read, never guessed later from the engine's
+   name. A missing field is read as an empty text of the same kind. *)
+type row_text =
+  | Engine_summary of string  (* the engine's own preview of the result *)
+  | Engine_text of string     (* text the engine took from the result's page *)
+
+(* [snippet] is the preview of either kind, cleaned and bounded.
+   [engine_text] keeps an [Engine_text] whole, trimmed only, so a page
+   that cannot be fetched still has the text the engine gave for it. *)
 type normalized_hit = {
   title : string;
   url : string;
   snippet : string;
+  engine_text : string option;
   source : string;
   rank : int;
   published_at : string option;
@@ -72,6 +84,7 @@ type simulated_provider_outcome =
   | `Hits of (string * string * string) list
   | `Grounded of (string * string * string list) list
   | `Brave_body of string
+  | `Ollama_body of string
   ]
 
 let whitespace_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
@@ -126,20 +139,24 @@ let string_field item key =
   | Some (`String value) -> String_util.trim_nonempty value
   | _ -> None
 
-let parse_json_search_results ?(url_field = "url") ~results_path ~title_field ~snippet_field
-    payload =
+let summary text = Engine_summary text
+let engine_text text = Engine_text text
+
+(* [text] names what the engine puts in [text_field]. *)
+let parse_json_search_results ?(url_field = "url") ~results_path ~title_field ~text_field
+    ~text payload =
   let* items = parse_result_array ~path:results_path payload in
   let parsed =
     List.filter_map
       (fun item ->
         match string_field item title_field, string_field item url_field with
         | Some title, Some url when valid_search_result_url url ->
-            let snippet =
-              match string_field item snippet_field with
+            let row_text =
+              match string_field item text_field with
               | Some value -> value
               | None -> ""
             in
-            Some (title, url, snippet)
+            Some (title, url, text row_text)
         | _ -> None)
       items
   in
@@ -147,7 +164,7 @@ let parse_json_search_results ?(url_field = "url") ~results_path ~title_field ~s
 
 let parse_searxng_json payload =
   let* hits = parse_json_search_results ~results_path:["results"]
-      ~title_field:"title" ~snippet_field:"content" payload in
+      ~title_field:"title" ~text_field:"content" ~text:summary payload in
   match hits with
   | _ :: _ -> Ok hits
   | [] ->
@@ -174,7 +191,7 @@ let parse_brave_json payload =
       (match Json_util.assoc_member_opt "web" root with
        | Some (`Assoc _) ->
            parse_json_search_results ~results_path:["web"; "results"]
-             ~title_field:"title" ~snippet_field:"description" payload
+             ~title_field:"title" ~text_field:"description" ~text:summary payload
        | None | Some `Null ->
            (match Json_util.assoc_member_opt "type" root with
             | Some (`String "search") -> Ok []
@@ -182,17 +199,33 @@ let parse_brave_json payload =
        | Some _ -> Error (Parse "provider web field is not an object"))
   | _ -> Error (Parse "provider response is not a JSON object")
 
+(* At the [search_depth] [fetch_tavily] asks for, Tavily's [content] is
+   "multiple semantically relevant snippets per URL": chunks of about 500
+   characters "pulled directly from the source", joined as
+   "<chunk 1> [...] <chunk 2>". The whole page is [raw_content], sent only
+   when the request asks for it, and [fetch_tavily] does not. Only the
+   [ultra-fast] depth answers with "one NLP summary per URL".
+   https://docs.tavily.com/documentation/api-reference/endpoint/search *)
+let tavily_search_depth = "basic"
+
 let parse_tavily_json payload =
   parse_json_search_results ~results_path:["results"]
-    ~title_field:"title" ~snippet_field:"content" payload
+    ~title_field:"title" ~text_field:"content" ~text:engine_text payload
 
+(* Ollama's [content] is "relevant content snippet from the web page": text
+   taken from the page, not the page's main content, which [web_fetch]
+   answers with. https://docs.ollama.com/capabilities/web-search *)
 let parse_ollama_search_json payload =
   parse_json_search_results ~results_path:["results"]
-    ~title_field:"title" ~snippet_field:"content" payload
+    ~title_field:"title" ~text_field:"content" ~text:engine_text payload
 
+(* Exa's [text] is "The full content text of the search result", sent when
+   the request asks for it with [contents.text]. [fetch_exa] does not ask,
+   so its rows carry no [text] today.
+   https://github.com/exa-labs/openapi-spec (SearchResultOutput.text) *)
 let parse_exa_json payload =
   parse_json_search_results ~results_path:["results"]
-    ~title_field:"title" ~snippet_field:"text" payload
+    ~title_field:"title" ~text_field:"text" ~text:engine_text payload
 
 (* z.ai's search tool answers with one text block, and that text is the
    result array serialised twice: a JSON string whose content is the array.
@@ -202,7 +235,7 @@ let parse_exa_json payload =
 let parse_zai_search_text text =
   let rows payload =
     parse_json_search_results ~url_field:"link" ~results_path:[] ~title_field:"title"
-      ~snippet_field:"content" payload
+      ~text_field:"content" ~text:summary payload
   in
   match Yojson.Safe.from_string text with
   | exception Yojson.Json_error _ -> Error (Parse "provider returned invalid JSON")
@@ -212,7 +245,7 @@ let parse_zai_search_text text =
 
 let parse_bing_search_json payload =
   parse_json_search_results ~results_path:["webPages"; "value"]
-    ~title_field:"name" ~snippet_field:"snippet" payload
+    ~title_field:"name" ~text_field:"snippet" ~text:summary payload
 
 let parse_brave_llm_context_json payload =
   let* items = parse_result_array ~path:["grounding"; "generic"] payload in
@@ -330,12 +363,12 @@ let take_results limit hits =
   in
   loop limit [] hits
 
-(* A snippet is the preview a caller picks results by. Ollama sends page
-   text in the field read as the snippet. The bound sits above the longest
-   snippet an engine writes itself, so those pass whole and only page text
-   is cut. It counts bytes, marker included, so a CJK snippet is cut at
-   about a third as many characters.
-   Page text is what [includeContent] fetches, capped by [contentMaxChars]. *)
+(* A snippet is the preview a caller picks results by. An [Engine_text] is
+   read as the snippet too. The bound sits above the longest snippet an
+   engine writes itself, so those pass whole and only engine text is cut.
+   It counts bytes, marker included, so a CJK snippet is cut at about a
+   third as many characters. The whole engine text stays on the hit for
+   [includeContent], capped there by [contentMaxChars]. *)
 let snippet_max_bytes = 1024
 let snippet_cut_marker = "…"
 
@@ -343,14 +376,20 @@ let bound_snippet snippet =
   String_util.utf8_safe ~max_bytes:snippet_max_bytes ~suffix:snippet_cut_marker snippet
   |> String_util.to_string
 
-let normalize_hits ~source tuples =
-  tuples
-  |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
-  |> List.mapi (fun idx (title, url, snippet) ->
+let normalize_hits ~source rows =
+  rows
+  |> List.filter (fun (title, url, _text) -> not (String.equal title "") && valid_search_result_url url)
+  |> List.mapi (fun idx (title, url, text) ->
+         let preview, engine_text =
+           match text with
+           | Engine_summary summary -> (summary, None)
+           | Engine_text page_text -> (page_text, String_util.trim_nonempty page_text)
+         in
          {
            title;
            url;
-           snippet = clean_search_text snippet |> bound_snippet;
+           snippet = clean_search_text preview |> bound_snippet;
+           engine_text;
            source;
            rank = idx + 1;
            published_at = None;
@@ -514,7 +553,7 @@ let fetch_tavily ~host ~timeout_sec ~query ~limit =
             ("api_key", `String api_key);
             ("query", `String query);
             ("max_results", `Int limit);
-            ("search_depth", `String "basic");
+            ("search_depth", `String tavily_search_depth);
           ]
         |> Yojson.Safe.to_string
       in
@@ -600,6 +639,13 @@ let fetch_brave_llm_context ~host ~timeout_sec ~query ~limit =
                      { source_url = url; source_title = title; snippets }) parsed
                })
 
+(* One path from an Ollama 200 body to a response, shared by [fetch_ollama]
+   and the simulator's [`Ollama_body] outcome so tests exercise the real
+   parse. *)
+let ollama_response_of_body ~search_url ~limit payload =
+  let* parsed = parse_ollama_search_json payload in
+  response_of_parsed Ollama ~search_url ~limit parsed
+
 (* Contract: https://docs.ollama.com/capabilities/web-search
    POST /api/web_search with {query, max_results (default 5, max 10)}
    answers {results: [{title, url, content}]}. *)
@@ -620,9 +666,7 @@ let fetch_ollama ~host ~timeout_sec ~query ~limit =
           ]
         ~url:search_url
         ~body_json ()
-      |> settle_provider_response ~on_ok:(fun payload ->
-             let* parsed = parse_ollama_search_json payload in
-             response_of_parsed Ollama ~search_url ~limit parsed)
+      |> settle_provider_response ~on_ok:(ollama_response_of_body ~search_url ~limit)
 
 (* z.ai's Web Search MCP server: streamable HTTP, the key as a Bearer token,
    one tool. The tool's own description (tools/list, measured 2026-10-14)
@@ -808,12 +852,14 @@ let cache_key ~query ~limit =
 (* One answered search, shaped once for both callers. [data] is the tool
    envelope [handle] returns. The Lane Add-on port reads the other fields, so
    a cache hit and a fresh answer carry the same serving provider, failures
-   and search data. *)
+   and search data. [payload] is what [data] was rendered from; a cache hit
+   keeps it, so the rows' engine text survives the cache. *)
 type answer = {
   data : Yojson.Safe.t;
   serving_provider : string;
   failures : provider_failure list;
   search : Yojson.Safe.t;
+  payload : search_payload;
 }
 
 let answer_of ~query (payload, failures) =
@@ -841,7 +887,7 @@ let answer_of ~query (payload, failures) =
     | _, [] -> envelope
     | _, _ :: _ -> envelope
   in
-  { data; serving_provider; failures; search }
+  { data; serving_provider; failures; search; payload }
 
 type cache_entry = {
   answer : answer;
@@ -966,15 +1012,23 @@ let with_search_impl_for_test impl f =
 
 let simulated_search_impl ~outcomes ~query:_ ~limit =
   search_chain outcomes ~fetch:(fun (provider_name, outcome) ->
-    let hits_payload tuples =
+    let hits_payload rows =
       Hits
         { engine = provider_name
         ; search_url = "test://" ^ provider_name
-        ; hits = tuples |> take_results limit |> normalize_hits ~source:provider_name
+        ; hits = rows |> take_results limit |> normalize_hits ~source:provider_name
         }
     in
+    let parsed_body response_of_body body =
+      response_of_body ~search_url:("test://" ^ provider_name) ~limit body
+      |> Result.map (fun response -> Hits response)
+      |> Result.map_error (fun error ->
+          { provider = provider_name; detail = provider_error_to_string error })
+    in
     match outcome with
-    | `Hits hits -> Ok (hits_payload hits)
+    | `Hits hits ->
+        Ok (hits_payload
+              (List.map (fun (title, url, snippet) -> (title, url, Engine_summary snippet)) hits))
     | `Empty -> Ok (hits_payload [])
     | `Grounded entries ->
         Ok (Grounded
@@ -982,11 +1036,8 @@ let simulated_search_impl ~outcomes ~query:_ ~limit =
           ; items = List.map (fun (url, title, snippets) ->
                 { source_url = url; source_title = title; snippets }) entries
           })
-    | `Brave_body body ->
-        brave_response_of_body ~search_url:("test://" ^ provider_name) ~limit body
-        |> Result.map (fun response -> Hits response)
-        |> Result.map_error (fun error ->
-            { provider = provider_name; detail = provider_error_to_string error })
+    | `Brave_body body -> parsed_body brave_response_of_body body
+    | `Ollama_body body -> parsed_body ollama_response_of_body body
     | `Error message -> Error { provider = provider_name; detail = message })
 
 let with_simulated_search_for_test ~outcomes f =
@@ -1052,7 +1103,14 @@ let failure_result ~tool_name ~start_time failure =
       Tool_result.error ~failure_class:Tool_result.Policy_rejection ~tool_name ~start_time
         message
 
-let handle ~tool_name ~start_time args : Tool_result.result =
+(* The served envelope, after [on_rows] has read the rows it was rendered
+   from. A grounded answer has no rows and is served as it is. *)
+let served_data ~on_rows answer =
+  match answer.payload with
+  | Hits response -> on_rows response.hits answer.data
+  | Grounded _ -> answer.data
+
+let handle_with_rows ~on_rows ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   match validate_query query with
   | Error message -> workflow_err ~tool_name ~start_time message
@@ -1061,14 +1119,17 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       let now = Unix.gettimeofday () in
       let key = cache_key ~query ~limit in
       match cache_lookup key now with
-      | Some cached -> data_ok ~tool_name ~start_time cached.data
+      | Some cached -> data_ok ~tool_name ~start_time (served_data ~on_rows cached)
       | None ->
         (match (current_search_impl ()) ~query ~limit with
          | Ok response ->
            let answer = answer_of ~query response in
            cache_store key answer now;
-           data_ok ~tool_name ~start_time answer.data
+           data_ok ~tool_name ~start_time (served_data ~on_rows answer)
          | Error failure -> failure_result ~tool_name ~start_time failure)
+
+let handle ~tool_name ~start_time args =
+  handle_with_rows ~on_rows:(fun _rows data -> data) ~tool_name ~start_time args
 
 (* Lane Add-on web-search port (task-2527 E11): the secret-free projection of
    the same chain the tool dispatches. Validation, cache identity/window and

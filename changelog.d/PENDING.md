@@ -1,0 +1,12 @@
+### Fixed
+
+- The installer no longer says `Setup finished` when the setup journey
+  stopped at a workspace whose `.masc/auth/config.json` asks for
+  `Multi_account`. The journey prepares no model or sandbox there and now
+  exits with status 3 instead of 0. `scripts/install.sh` reads that status,
+  says the workspace asks for accounts, and prints the `masc restart` command
+  that starts or replaces its account server. Bare `masc` and `masc setup` on
+  a terminal exit 3 for such a workspace as well. The journey also prints
+  `Checking whether an account server runs for this workspace…` before it
+  asks `masc setup-server`, which waits for an announced account server that
+  does not answer (#51362, #PENDING).

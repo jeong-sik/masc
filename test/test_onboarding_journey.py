@@ -924,7 +924,9 @@ class Journey(StepByStep):
                     patch.object(SETUP, 'wizard') as models, \
                     patch.object(SETUP, 'open_workspace') as opened, \
                     contextlib.redirect_stderr(io.StringIO()) as printed:
-                self.assertEqual(SETUP.journey('/bin/masc', None, None, 10, resume=resume), 0)
+                # Not the 0 of a journey that prepared imp: the installer reads this status.
+                self.assertEqual(SETUP.journey('/bin/masc', None, None, 10, resume=resume),
+                                 SETUP.ACCOUNT_INSTALLATION_EXIT)
                 doctor.assert_called_once_with('/bin/masc', None)
                 self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
                 # The port is resolved, never saved.
@@ -968,12 +970,32 @@ class Journey(StepByStep):
                     patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(**fields)), \
                     patch.object(SETUP, 'pick') as picker, \
                     contextlib.redirect_stderr(io.StringIO()) as printed:
-                self.assertEqual(SETUP.account_installation('/bin/masc', self.account_observation(), None), 0)
+                self.assertEqual(SETUP.account_installation('/bin/masc', self.account_observation(), None),
+                                 SETUP.ACCOUNT_INSTALLATION_EXIT)
                 self.assertIn(said, printed.getvalue())
                 self.assertNotIn(unsaid, printed.getvalue())
                 # A port is suggested for another service; here none is offered.
                 self.assertNotIn('19999', printed.getvalue())
                 picker.assert_not_called()
+
+    def test_an_account_installation_says_what_it_waits_on_before_the_server_is_read(self):
+        # `masc setup-server` waits for an announced account server that does
+        # not answer, so the screen is not blank during that read: the line is
+        # there when the read starts, not only after it.
+        on_screen = []
+
+        def read_server(argv, **options):
+            on_screen.append(printed.getvalue())
+            return self.server_observation(**self.account_server(answers=False))
+
+        with patch.object(SETUP, 'workspace_port', return_value=19400), \
+                patch.object(SETUP.subprocess, 'run', side_effect=read_server), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.account_installation('/bin/masc', self.account_observation(), None)
+        self.assertEqual(len(on_screen), 1)
+        self.assertIn('Checking whether an account server runs for this workspace', on_screen[0])
+        self.assertNotIn('did not answer', on_screen[0])
+        self.assertIn('did not answer', printed.getvalue())
 
     def test_an_account_installation_never_reports_an_answer_it_cannot_read(self):
         # The observation is read whole where it arrives: a document that
@@ -1071,7 +1093,7 @@ class Journey(StepByStep):
                         patch.object(SETUP.subprocess, 'run',
                                      return_value=self.server_observation(status='free')) as run, \
                         contextlib.redirect_stderr(io.StringIO()) as printed:
-                    self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), 0)
+                    self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), SETUP.ACCOUNT_INSTALLATION_EXIT)
                     self.assertEqual([call.args for call in doctor.call_args_list],
                                      [('/bin/masc', None), ('/bin/masc', chosen)])
                     self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
@@ -1118,7 +1140,7 @@ class Journey(StepByStep):
                 patch.object(SETUP, 'workspace_port', return_value=19400), \
                 patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(status='free')) as run, \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
-            self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), 0)
+            self.assertEqual(SETUP.journey('/bin/masc', None, None, 10), SETUP.ACCOUNT_INSTALLATION_EXIT)
         self.assertEqual([call.args for call in doctor.call_args_list], [('/bin/masc', None), ('/bin/masc', default)])
         self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
         for untouched in (plan, picker, preflight):
@@ -1180,6 +1202,8 @@ class Journey(StepByStep):
                 patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(status='free')) as run, \
                 patch.object(SETUP, 'sandbox_journey') as sandbox, \
                 contextlib.redirect_stderr(io.StringIO()):
+            # The group-session handoff that runs this step reads every status
+            # but 0 as a session that has to sign in again.
             self.assertEqual(SETUP.sandbox_step('/bin/masc', '/accounts', 19400), 0)
         doctor.assert_called_once_with('/bin/masc', '/accounts')
         self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
@@ -1224,7 +1248,7 @@ class Journey(StepByStep):
                             [sys.executable, '-B', str(ROOT / 'scripts/install-runtime-setup.py'), '--binary', BINARY,
                              *arguments, *where, '--port', str(port)],
                             env=environment, capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
-                        self.assertEqual(journey.returncode, 0, journey.stderr)
+                        self.assertEqual(journey.returncode, SETUP.ACCOUNT_INSTALLATION_EXIT, journey.stderr)
                         self.assertIn(str(config) + ' asks for Multi_account', journey.stderr)
                         self.assertIn(self.UNANNOUNCED, journey.stderr)
                         self.assertNotIn('Welcome', journey.stderr)
@@ -1286,7 +1310,7 @@ class Journey(StepByStep):
                         self.assertEqual(document['server_version'], document['installed_version'])
                         self.assertNotIn('suggested_port', document)
                         told = journey(asked)
-                        self.assertEqual(told.returncode, 0, told.stderr)
+                        self.assertEqual(told.returncode, SETUP.ACCOUNT_INSTALLATION_EXIT, told.stderr)
                         self.assertIn('The account server is running on port ' + port, told.stderr)
                 stopped = masc('setup-stop-previous-owner', '--port', port,
                                '--expected-version', document['installed_version'])

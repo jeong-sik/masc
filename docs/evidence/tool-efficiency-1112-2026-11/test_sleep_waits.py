@@ -173,6 +173,40 @@ class LoopPollTest(unittest.TestCase):
             [{"keeper": "a", "direct": 1, "autonomous": 1}],
         )
 
+    def test_loop_polls_are_split_by_what_gh_reads(self) -> None:
+        checks = "for i in 1 2 3 4 5 6; do gh pr checks 5; sleep 30; done"
+        rows = [
+            in_kind(execute("a", "1", 1, 180, LOOP), "direct"),
+            in_kind(execute("a", "2", 2, 180, LOOP), "autonomous"),
+            in_kind(execute("b", "3", 3, 180, checks), "autonomous"),
+            in_kind(execute("b", "4", 4, 300, f"sleep 290; {RUN}"), "direct"),
+        ]
+        self.assertEqual(
+            sw.kinds_of(rows)["loop_sleep_gh_calls_by_what_gh_reads"],
+            {"actions run": 2, "check-runs/pr checks": 1},
+        )
+
+
+class ScheduleKindsTest(unittest.TestCase):
+    def test_schedule_creates_and_their_watches_are_split_by_turn_kind(self) -> None:
+        rows = [
+            in_kind(schedule("a", "1", 1, "until_github_run"), "autonomous"),
+            in_kind(schedule("a", "2", 2, "until_github_checks"), "direct"),
+            in_kind({"tool": "masc_schedule_create", "keeper": "a", "keeper_turn_id": "3", "ts": 3,
+                     "input": {"message": "later", "due_in_sec": 60}}, "autonomous"),
+        ]
+        result = sw.kinds_of(rows)
+        self.assertEqual(result["schedule_create_calls_by_turn_kind"], {"autonomous": 2, "direct": 1})
+        self.assertEqual(result["until_github_schedule_create_calls_by_turn_kind"], {"autonomous": 1, "direct": 1})
+        self.assertEqual(result["execute_calls_by_turn_kind"], {})
+
+    def test_an_update_that_sets_a_watch_is_not_a_create(self) -> None:
+        row: Row = {"tool": "masc_schedule_update", "keeper": "a", "keeper_turn_id": "1", "ts": 1,
+                    "input": {"schedule_id": "s", "until_github_run": "https://github.com/o/r/actions/runs/1"}}
+        result = sw.kinds_of([in_kind(row, "autonomous")])
+        self.assertEqual(result["schedule_create_calls_by_turn_kind"], {})
+        self.assertEqual(result["until_github_schedule_create_calls_by_turn_kind"], {})
+
 
 class ShareTest(unittest.TestCase):
     def test_counts(self) -> None:
@@ -247,6 +281,67 @@ class TurnsTest(unittest.TestCase):
         rows = [{"tool": "masc_schedule_create", "keeper": "a", "keeper_turn_id": "1", "ts": 1,
                  "input": {"message": "later", "due_in_sec": 60}}]
         self.assertEqual(sw.turns_of(rows)["until_github_schedules_created"], 0)
+
+
+def only_keeper(rows: list[Row]) -> dict[str, object]:
+    return sw.turns_of(rows)["by_keeper"][0]  # type: ignore[index]
+
+
+class LiteralSleepTest(unittest.TestCase):
+    def test_percentiles_are_nearest_rank_over_the_sleep_gh_calls(self) -> None:
+        rows = [execute("a", str(i), 1000 * i, 100 * i + 5, f"sleep {100 * i}; {RUN}") for i in range(1, 11)]
+        self.assertEqual(only_keeper(rows)["literal_sleep_s"], {"p10": 100, "p50": 500, "p90": 900})
+
+    def test_each_percentile_is_a_value_some_call_had(self) -> None:
+        rows = [execute("a", str(i), 1000 * i, 100 * i + 5, f"sleep {100 * i}; {RUN}") for i in range(1, 5)]
+        self.assertEqual(only_keeper(rows)["literal_sleep_s"], {"p10": 100, "p50": 200, "p90": 400})
+
+    def test_the_sleeps_of_one_call_add_up_and_other_calls_are_left_out(self) -> None:
+        rows = [
+            execute("a", "1", 1, 120, f"sleep 40; sleep 40; {RUN}"),
+            execute("a", "1", 2, 300, "sleep 290; echo done"),
+            execute("a", "1", 3, 300, f"sleep 10; {RUN}"),
+        ]
+        self.assertEqual(only_keeper(rows)["literal_sleep_s"], {"p10": 80, "p50": 80, "p90": 80})
+
+
+class BusiestTurnTest(unittest.TestCase):
+    def test_the_span_runs_from_the_first_call_start_to_the_last_call_end(self) -> None:
+        rows = [
+            execute("a", "7", 360, 360, f"sleep 350; {RUN}"),
+            execute("a", "7", 3000, 5, "git status"),
+            execute("a", "7", 7200, 720, f"sleep 710; {RUN}"),
+            execute("a", "7", 14400, 1800, f"sleep 1790; {RUN}"),
+            execute("a", "7", 18000, 5, "git push origin x"),
+            execute("a", "8", 30000, 120, f"sleep 100; {RUN}"),
+        ]
+        self.assertEqual(
+            only_keeper(rows)["busiest_turn"],
+            {"keeper_turn_id": "7", "sleep_gh_calls": 3, "first_to_last_hours": 4.0, "call_hours": 0.8},
+        )
+
+    def test_of_turns_with_as_many_calls_the_one_with_more_call_time_wins(self) -> None:
+        rows = [
+            execute("a", "1", 1000, 100, f"sleep 90; {RUN}"),
+            execute("a", "1", 2000, 100, f"sleep 90; {RUN}"),
+            execute("a", "2", 3000, 200, f"sleep 190; {RUN}"),
+            execute("a", "2", 4000, 200, f"sleep 190; {RUN}"),
+            execute("a", "3", 9000, 900, f"sleep 890; {RUN}"),
+        ]
+        self.assertEqual(
+            only_keeper(rows)["busiest_turn"],
+            {"keeper_turn_id": "2", "sleep_gh_calls": 2, "first_to_last_hours": 0.33, "call_hours": 0.11},
+        )
+
+    def test_of_two_equal_turns_the_one_the_ledger_holds_first_wins(self) -> None:
+        rows = [
+            execute("a", "9", 1000, 100, f"sleep 90; {RUN}"),
+            execute("a", "3", 2000, 100, f"sleep 90; {RUN}"),
+        ]
+        self.assertEqual(
+            only_keeper(rows)["busiest_turn"],
+            {"keeper_turn_id": "9", "sleep_gh_calls": 1, "first_to_last_hours": 0.03, "call_hours": 0.03},
+        )
 
 
 if __name__ == "__main__":

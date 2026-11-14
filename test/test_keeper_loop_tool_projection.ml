@@ -238,6 +238,9 @@ let test_missing_or_changed_preparation_drops_only_projection () =
     expect_binding_drop (persist missing ~base_dir);
     List.iter (fun mutate ->
       let t = prepared ~base_dir () in
+      (* The first boundary only opens attempt 0; turn ordinals restart at the
+         next one, so the second attempt's turn 0 is not a resealing. *)
+      P.on_tool_stream_observation t (attempt_started ~lane_attempt_index:0);
       feed_one_sealed_call t;
       mutate t;
       P.on_tool_stream_observation t (attempt_started ~lane_attempt_index:1);

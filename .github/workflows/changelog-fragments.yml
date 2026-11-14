@@ -1,14 +1,14 @@
 name: Changelog fragments
 
-# Pull requests that touch a fragment are checked on every push. The whole
-# directory is checked only when explicitly requested: scripts/bump-version.sh
-# runs the same check before it assembles a release.
+# The whole directory is checked only when explicitly requested:
+# scripts/bump-version.sh runs the same check before it assembles a release.
+# The fragments a pull request changes are checked by the required `changes`
+# job of pr-type-check.yml, where a failure blocks the merge. A pull request
+# that touches the release bump script runs only that script's test here.
 on:
   workflow_dispatch: {}
   pull_request:
     paths:
-      - "changelog.d/**"
-      - "scripts/changelog-fragments.py"
       - "scripts/bump-version.sh"
       - "scripts/tests/test_bump_version_fold_base.py"
 
@@ -22,34 +22,6 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # A pull_request checkout is its synthetic merge; keep its base tree.
-          fetch-depth: 2
-      - name: Check the fragments this pull request changes
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          # The first parent is this PR's actual base, including lower stack
-          # layers. Treat renames as delete/add and skip removed paths, so only
-          # surviving destinations are checked. Keep filenames NUL-delimited
-          # until they become individual checker arguments.
-          python3 - <<'PY'
-          import os
-          import subprocess
-          import sys
-
-          changed = subprocess.check_output([
-              "git", "diff", "--name-only", "-z", "--no-renames",
-              "--diff-filter=d", "HEAD^1", "HEAD", "--", "changelog.d/",
-          ])
-          files = [
-              os.fsdecode(path) for path in changed.split(b"\0")
-              if path and path != b"changelog.d/README.md"
-          ]
-          subprocess.run([
-              sys.executable, "scripts/changelog-fragments.py", "check-files", *files,
-          ], check=True)
-          PY
       - name: Check every fragment cites its own pull request
         if: github.event_name == 'workflow_dispatch'
         run: python3 scripts/changelog-fragments.py check --dir changelog.d

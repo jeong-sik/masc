@@ -92,6 +92,8 @@ class Sources(unittest.TestCase):
             ".github/workflows/pr-type-check.yml",
             "scripts/ci/pr_source_changes.py",
             "scripts/ci/test_pr_source_changes.py",
+            "scripts/ci/pr_changelog_fragments.py",
+            "scripts/ci/test_pr_changelog_fragments.py",
             # Inputs of build rules that are not OCaml (#51595).
             "lib/auth/account_page.css",
             "lib/exec/parser/bash_subset.mly",

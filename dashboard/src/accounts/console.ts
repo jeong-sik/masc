@@ -217,7 +217,7 @@ function Body({ view, subscriptions, keepers, onRetry }: {
           : null}
         <${SubscriptionsPanel} model=${subscriptions} />
         <${KeepersPanel} model=${keepers} subscriptions=${subscriptions} />
-        <p>Keeper에게 말 걸기와 토큰은 아직 처음 화면에서 해요.</p>
+        <p>토큰은 아직 처음 화면에서 만들어요.</p>
         <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `

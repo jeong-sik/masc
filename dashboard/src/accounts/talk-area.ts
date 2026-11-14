@@ -8,6 +8,7 @@ import type { VNode } from 'preact'
 import { ProblemNote, sessionEndedWords } from './notes'
 import type { Next } from './notes'
 import type { TalkFailure, TalkModel, TalkView } from './talk'
+import { Callout, SayPart } from './talk-say'
 import type { Conversation, Outcome, TalkRefusal, Turn, TurnFailure } from './talk-wire'
 
 /** Whether the focus is on nothing: the control that held it went away. */
@@ -45,7 +46,7 @@ function refusalWords(code: TalkRefusal): string | null {
     case 'conversation_record_unavailable': return '서버가 대화 기록을 지금 읽지 못했어요. 잠시 뒤 다시 해 주세요.'
     case 'conversation_row_not_understood': return '대화 기록에 서버가 읽지 못하는 줄이 있어요. 이 서버를 운영하는 사람에게 알려 주세요.'
     case 'conversation_row_half_written':
-      return '서버가 멈추면서 대화 기록의 마지막 줄을 다 쓰지 못했어요. 이 서버를 운영하는 사람에게 알려 주세요.'
+      return '서버가 멈추면서 대화 기록의 마지막 줄을 다 쓰지 못했어요. 아래에서 새 대화를 시작하면 정리돼요.'
     case 'invalid_request':
     case 'message_too_long':
     case 'message_blank':
@@ -81,14 +82,7 @@ function ReadNote({ failure }: { readonly failure: TalkFailure }): VNode {
   const { problem, attempts } = failure
   const words = problem.kind === 'refused' ? refusalWords(problem.code) : null
   if (problem.kind !== 'refused' || words === null) return html`<${ProblemNote} title=${failedTitle} failure=${failure} />`
-  return html`
-    <div class="callout" role="alert">
-      <p class="callout-title">${failedTitle}</p>
-      <p>${words}</p>
-      ${problem.reason === null ? null : html`<p class="hint">서버가 알려 준 이유: <span lang="en">${problem.reason}</span></p>`}
-      ${attempts > 1 ? html`<p class="hint">${attempts}번 시도했어요.</p>` : null}
-    </div>
-  `
+  return html`<${Callout} title=${failedTitle} lines=${[words]} reason=${problem.reason} attempts=${attempts} />`
 }
 
 /** What the line says under a reading that failed, as its retry goes. */
@@ -206,6 +200,7 @@ export function TalkPart({ keeperId, card, talk }: { readonly keeperId: string; 
           `
         : null}
       ${view.kind === 'read' ? html`<${Read} conversation=${view.conversation} said=${said} />` : null}
+      ${view.kind === 'closed' ? null : html`<${SayPart} talk=${talk} view=${view} card=${card} />`}
     </div>
   `
 }

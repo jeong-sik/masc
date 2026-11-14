@@ -1235,6 +1235,12 @@ let test_vector_character_presentation_is_bounded () =
       check int "character conversion never uses the unbounded runner" 0 !unbounded_calls;
       check bool "conversion failure releases the physical worker" false (Work.is_busy worker))
 
+(* Deadline for a child that a passing run ends some other way: by exiting on
+   its own, by cancellation, or by process shutdown. It is not the behavior
+   under test. Reaching it means the run is stuck, so it stays far above the
+   start-up delay of a child on a loaded host. *)
+let hang_detector_deadline_seconds = 30.
+
 let test_board_pele_deadline () =
   let directory=Filename.temp_dir "board pele test " "" in
   let executable=Filename.concat directory "masc-pele" in
@@ -1263,7 +1269,7 @@ let test_board_pele_deadline () =
     let first,pid=match Masc_tui_browser.spawn_url "image with spaces.png" with
       | Ok started -> started | Error error -> fail error in
     check bool "first opener failure is observable" true
-      (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:0.2 pid with
+      (match Masc_tui_image_cache.wait_bounded ~deadline_seconds:hang_detector_deadline_seconds pid with
        | Unix.WEXITED 3 -> true | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false);
     let second,pid=match Masc_tui_browser.spawn_url ~after:first "image with spaces.png" with
       | Ok started -> started | Error error -> fail error in
@@ -1277,7 +1283,7 @@ let test_board_pele_deadline () =
     let cancelled=Atomic.make false and status=ref None in
     let thread=Thread.create (fun () ->
       status := Some (Masc_tui_image_cache.wait_bounded
-        ~cancelled:(fun () -> Atomic.get cancelled) ~deadline_seconds:30. pid)) () in
+        ~cancelled:(fun () -> Atomic.get cancelled) ~deadline_seconds:hang_detector_deadline_seconds pid)) () in
     Atomic.set cancelled true;
     Thread.join thread;
     check bool "shutdown cancellation kills and reaps the opener" true
@@ -1346,7 +1352,7 @@ let renderer_shutdown_probe executable marker =
     Masc_tui_image_cache.stop_subprocesses ();
     Masc_tui_board_preview_work.await_stopped worker);
   let runner ~input:_ ~output:_ ~errors:_ =
-    Masc_tui_image_cache.run_bounded ~deadline_seconds:30. (Filename.quote executable) in
+    Masc_tui_image_cache.run_bounded ~deadline_seconds:hang_detector_deadline_seconds (Filename.quote executable) in
   let scene=Masc_tui_pele.scene ~format:Mermaid ~max_width:100 ~font_size:12
     ~now_ms:0L ~colors:None "graph TD; A-->B" in
   let _thread=Thread.create (fun () ->

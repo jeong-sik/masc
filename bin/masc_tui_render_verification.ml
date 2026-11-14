@@ -446,7 +446,8 @@ let verification_detail_pane (state : state) ~rows ~cols
     let in_flight = Masc_tui_fetched.in_flight state.verification_evidence
       && (match Masc_tui_fetched.current_key state.verification_evidence with
           | Some current -> equal_verification_evidence_key current key | None -> false) in
-    Masc_tui_render_evidence.section ~selection:(Some selected_index)
+    Masc_tui_render_evidence.section ~ko:(state.ui_language = Lang_ko)
+      ~selection:(Some selected_index)
       ~evidence:observation
       ~in_flight ~workspace_confirmed:(server_authority_ready state) ~width ~content_height
       ~display:(Masc_tui_portrait_view.current_display ())

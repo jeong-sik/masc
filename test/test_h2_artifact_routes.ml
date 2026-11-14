@@ -470,17 +470,25 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
     check (option string) "304 retains validator" (Some etag) (header "etag" reply);
     check (option string) "304 remains private no-store" (Some "private, no-store") (header "cache-control" reply))
     [cached_h1; cached_h2];
+  (* A token is metered per agent: [Env_config.Rate_bucket.agent_burst]
+     requests at once, refilled over time. As one operator this case sends
+     more than that and was answered 429 whenever it ran fast enough. The
+     requests that are refused before they reach a store therefore go out as
+     two further Admins, so no operator reaches the burst however fast the
+     case runs. *)
+  let parser_admin = token base_path ~actor:"parser-admin" ~role:Masc_domain.Admin in
+  let refused_admin = token base_path ~actor:"refused-admin" ~role:Masc_domain.Admin in
   let write_paths = [list; drafts; checkpoints; "/api/v1/artifact-draft-presence"] in
   List.iter (fun path ->
     List.iter (fun (label, token, expected) ->
       pair_status (path ^ " " ^ label) expected (both gateway ?token ~meth:`POST ~body:"{}" path))
-      ["Admin reaches parser", Some admin, 400; "Worker", Some worker, 403; "Player", Some player, 403;
+      ["Admin reaches parser", Some parser_admin, 400; "Worker", Some worker, 403; "Player", Some player, 403;
        "anonymous", None, 401; "invalid", Some "invalid", 401]) write_paths;
   List.iter (fun path ->
     List.iter (fun (label, token, expected) ->
       pair_status (path ^ " " ^ label) expected (both gateway ?token ~meth:`POST ~body:"{}" path))
       ["Worker", Some worker, 403; "Player", Some player, 403;
-       "anonymous", None, 401; "Admin reaches parser", Some admin, 400]) [checks; shares];
+       "anonymous", None, 401; "Admin reaches parser", Some parser_admin, 400]) [checks; shares];
   let draft_path = drafts ^ "/" ^ id in
   List.iter (fun (label, token, expected) -> pair_status label expected (both gateway ?token draft_path))
     ["Admin reaches draft store", Some admin, 404; "Worker draft", Some worker, 403; "Player draft", Some player, 403;
@@ -498,7 +506,7 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
     "{\"target\":" ^ target_text ^ ",\"expected_sequence\":9007199254740992,\"revision\":1}";
     "{\"target\":" ^ target_text ^ ",\"expected_sequence\":0,\"revision\":1.0}"] in
   List.iter (fun invalid ->
-    let rejected = both gateway ~token:admin ~meth:`POST ~body:invalid checkpoints in
+    let rejected = both gateway ~token:refused_admin ~meth:`POST ~body:invalid checkpoints in
     pair_status "checkpoint validates its exact fields and safe integers" 400 rejected;
     pair_code "checkpoint validation code" "invalid_artifact_draft" rejected) invalid_bodies;
   let valid_checkpoint = body ["target", target; "expected_sequence", `Int 0; "revision", `Int 1] in
@@ -589,7 +597,7 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
       [bound_h1; bound_h2];
     let check_ingress_refusal label ~status ~code ~retry_after headers =
       List.iter (fun (origin, allowed) ->
-        let replies = both gateway ~token:admin ~meth:`POST ~body:update
+        let replies = both gateway ~token:refused_admin ~meth:`POST ~body:update
           ~headers:(("origin", origin) :: headers) list in
         pair_status label status replies;
         pair_code label code replies;
@@ -638,14 +646,14 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
     [list; checks; draft_path];
   let incomplete_query = both gateway ~token:admin (doc ^ "?expected_base_path=" ^ encode expected.base_path) in
   pair_status "incomplete GET workspace query" 400 incomplete_query;
-  let no_draft_foreign = both gateway ~token:admin ~meth:`POST ~headers:foreign_headers ~body:valid_checkpoint checkpoints in
+  let no_draft_foreign = both gateway ~token:refused_admin ~meth:`POST ~headers:foreign_headers ~body:valid_checkpoint checkpoints in
   pair_status "foreign checkpoint refused before store" 409 no_draft_foreign;
   let foreign_workspace = `Assoc ["base_path", `String "/foreign-workspace"; "masc_root", `String expected.masc_root] in
   let with_foreign body_text = match Yojson.Safe.from_string body_text with
     | `Assoc fields -> body (("expected_workspace", foreign_workspace) :: fields)
     | _ -> fail "expected test object" in
   List.iter (fun (path, text) ->
-    let rejected = both gateway ~token:admin ~meth:`POST ~body:(with_foreign text) path in
+    let rejected = both gateway ~token:refused_admin ~meth:`POST ~body:(with_foreign text) path in
     pair_status "body workspace rejects mutation on both transports" 409 rejected;
     pair_code "body workspace rejection code" "workspace_precondition_failed" rejected)
     [list, update; drafts, body ["action", `String "open"; "artifact_id", `String id; "revision", `Int 1];

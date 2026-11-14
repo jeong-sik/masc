@@ -47,10 +47,6 @@ type phase =
    scope keeps the worker's existing "goal-proof-reviews" field errors. *)
 let scope = "goal-proof-reviews"
 let text key fields = Json_util.require_field_string ~surface:scope key fields
-let field key fields =
-  match List.assoc_opt key fields with
-  | Some value -> Ok value
-  | None -> Error (scope ^ "." ^ key ^ " is required")
 let object_fields allowed = function
   | `Assoc fields ->
     let* () = Json_util.reject_unknown_fields ~surface:scope ~allowed fields in

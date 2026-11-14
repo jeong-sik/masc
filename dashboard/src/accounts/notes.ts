@@ -62,9 +62,9 @@ export const fell = (): boolean => document.activeElement === null || document.a
 
 /** An alert with a title and lines, and the sentence of the server under
     them as it came. The sentence is English, so it says so. A failure after
-    the first says how many there were; the caller also makes each one anew
-    (its key is the count), so a screen reader says the second as it said
-    the first. */
+    the first says how many there were. A caller that shows a failure again
+    in the same place keys the alert by that count, so a screen reader says
+    the second as it said the first. */
 export function Callout({ title, lines, reason, attempts }: {
   readonly title: string
   readonly lines: readonly string[]

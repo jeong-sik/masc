@@ -2,8 +2,10 @@
 # Bind both outputs in runtime.toml before the first compose
 # ([runtime.addon_exact_lanes.operator-lesson.outline] and
 # [runtime.addon_exact_lanes.operator-lesson.scene]).
+# The quiz example shares this run_id, so a quiz may bind this installation's
+# scenes output (docs/guides/operator-quiz.md).
 id = "operator-lesson"
-run_id = "operator-lesson"
+run_id = "operator-study"
 manifest_path = "../../../addons/operator-lesson/lane.toml"
 
 [binding]

@@ -358,8 +358,10 @@ let test_unknown_and_cancellation_never_redispatch () =
             Alcotest.fail "unknown certainty no longer ends the walk as unknown")
        | [] | _::_::_ -> Alcotest.fail "observation did not retain the one original");
       (match run store retained authority with
-       | Error (W.Original_invalid _) -> ()
-       | Ok _ | Error (W.Execution_pending _) | Error _ ->
+       | Ok replayed ->
+         Alcotest.(check bool) "replay returns the retained refusal without verdict" true
+           (replayed.result.verdict = None)
+       | Error (W.Execution_pending _) | Error _ ->
          Alcotest.fail "refused Goal original replayed without its refusal");
       let authority_calls, current_authority = counted_authority authority in
       (match checked (W.frontier ~authority:current_authority ~store ~installation_id ~package_id
@@ -1523,8 +1525,8 @@ let test_actual_explicit_retry_after_provider_failure () =
       let result = Workspace_goals.handle_goal_transition ~tool_name:"goal_transition"
           ~start_time:(Tool_timing.start ()) ctx
           (`Assoc ["goal_id", `String subject.goal_id; "action", `String "request_complete"]) in
-      Alcotest.(check bool) (kind ^ " refusal answers an explicit retry") true
-        (Tool_result.is_success result);
+      if Tool_result.is_success result then ()
+      else Alcotest.fail (kind ^ " explicit retry failed: " ^ Tool_result.message result);
       Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
       drain config;
       Alcotest.(check int) (kind ^ " retry reviews the successor once") 2 !calls;
@@ -1749,8 +1751,10 @@ let test_caught_reviewer_exit_retains_actual_refusal_receipt () = with_workspace
        Alcotest.(check bool) "caught error publishes its actual tools as deferred" true (observed=tools)
      | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "caught error observation is absent");
     (match run restored_store restored authority with
-     | Error (W.Original_invalid _) -> ()
-     | Ok _ | Error (W.Execution_pending _) | Error _ ->
+     | Ok replayed ->
+       Alcotest.(check bool) "replay returns the retained refusal without verdict" true
+         (replayed.result.verdict = None)
+     | Error (W.Execution_pending _) | Error _ ->
        Alcotest.fail "caught reviewer error redispatched its refused original");
     Alcotest.(check int) "caught reviewer is never replayed" 1 !calls))
 

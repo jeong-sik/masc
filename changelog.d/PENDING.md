@@ -1,0 +1,9 @@
+### Documentation
+
+- The Keeper recall research note (r2) quotes the Zep LongMemEval scores
+  from Table 2 (p. 7) of arXiv 2501.13956: full context 55.4% with
+  gpt-4o-mini and 60.2% with gpt-4o, Zep 63.8% and 71.2%. It no longer
+  concludes that full history catches up with retrieval as the answer model
+  gets stronger; inside the Zep experiment the gap grew from 8.4 to 11.0
+  points. The sandbox audit says the Execute output stream asks for a read
+  credential only under strict HTTP auth (#46746, #PENDING).

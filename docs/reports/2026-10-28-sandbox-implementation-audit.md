@@ -66,9 +66,14 @@ is open (`dashboard/src/api/execute-output.ts:66-116`,
 `dashboard/src/components/ide/execute-output-drawer.ts:289-350`). In the
 Dashboard IDE, opening **Terminal** for a Keeper enables this subscription
 (`dashboard/src/components/ide/ide-shell.ts:935-968,1208-1215`). The endpoint
-requires control-plane authentication: an unauthenticated read-only local probe
-returned `missing_token`, and the actual Dashboard also presented `Login
-required`. No authenticated live event or paint was observed.
+is a public read (`lib/server/server_routes_http_routes_dashboard.ml:121-122`):
+it asks for a read credential only when strict HTTP auth is on, that is when
+`MASC_HTTP_AUTH_STRICT` is set, the bind host is not loopback, or
+`MASC_HTTP_BASE_URL` names a non-loopback host
+(`lib/server/server_auth.ml:23-26,1308-1317`). Otherwise it streams without a
+token. An unauthenticated read-only local probe returned `missing_token`, which
+this route answers only under strict auth, and the actual Dashboard also
+presented `Login required`. No authenticated live event or paint was observed.
 
 This is a real-time **web Dashboard terminal**, not a separate interactive PTY
 or a native-TUI stream viewer. The native TUI has no consumer for this endpoint

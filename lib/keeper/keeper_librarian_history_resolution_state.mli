@@ -32,6 +32,10 @@ val read : store:Lane_addon_store.t -> scope:string -> request_id:string ->
 val confirm_binding : request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained -> t -> (unit, string) result
 (** Immutable identity/source binding only; never grants the old effect. *)
+val confirm_binding_index : index:Keeper_librarian_durable_request.index ->
+  original:Lane_addon_tool_request_owner.Record.t -> t -> (unit, string) result
+(** {!confirm_binding} from the record and its index: the fence's source
+    digest is the index's, its owner the index's. Reads no body. *)
 val check_unfenced : store:Lane_addon_store.t ->
   request:Keeper_librarian_durable_request.t ->
   original:Lane_addon_tool_request_owner.retained -> (unit, string) result

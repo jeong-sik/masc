@@ -145,13 +145,7 @@ let claude_failure : Runtime_claude_code.error -> Conversation.failure = functio
    to the log as the detail of a client failure does. *)
 let record_error ~keeper_id (failure : Conversation.error) =
   logged ~keeper_id (Conversation.error_to_string failure);
-  match failure with
-  | Conversation.Row_not_understood _ -> E.Conversation_row_not_understood
-  | Conversation.Row_half_written _ -> E.Conversation_row_half_written
-  | Conversation.Not_read _ | Conversation.Not_written _ -> E.Conversation_record_unavailable
-  | Conversation.Id_not_drawn _ ->
-    (* The id is drawn by {!Auth.generate_token}, whose hex is an id. *)
-    E.Internal "The record of this conversation could not be given an id."
+  E.of_record_error failure
 ;;
 
 (* A spent subscription reaches Codex as a refused turn that names
@@ -231,13 +225,19 @@ type answered =
    session lies in the home of that account. The client starts in the
    directory of the conversation and resumes the session of its last answered
    turn. The [asked] row is written before the client starts, and the turn
-   ends in an [answered] or a [failed] row. *)
+   ends in an [answered] or a [failed] row.
+
+   A conversation the person began to delete is not the current one, so the
+   turn starts another (plan S1b-3c). The turn runs inside the call of its
+   account, and so does a deletion of a conversation that began on it, so a
+   deletion does not begin between this judgment and the end of the turn. *)
 let call_claude
       ~env
       ~keeper_id
       ~(execution : Runtime_execution.claude_code)
       ~account
       ~records
+      ~deleted
       ~provider_account_id
       ~message
   =
@@ -246,7 +246,8 @@ let call_claude
   let draw = Auth.generate_token in
   let recorded result = Result.map_error (record_error ~keeper_id) result in
   let* conversation =
-    Conversation.current_or_start records keeper_id provider_account_id ~draw ~now_ms |> recorded
+    Conversation.current_or_start records keeper_id provider_account_id ~deleted ~draw ~now_ms
+    |> recorded
   in
   let* () =
     if
@@ -395,6 +396,7 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
             ~execution
             ~account
             ~records:(Conversation.root ~base_path ~namespace:person.namespace)
+            ~deleted:(Server_keeper_conversation_purge.deletion_began person)
             ~provider_account_id
             ~message)
       | Runtime_execution.Codex_app_server execution ->

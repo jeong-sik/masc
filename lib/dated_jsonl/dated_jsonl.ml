@@ -870,8 +870,10 @@ let set_append_guard guard = Atomic.set append_guard guard
 
    [f] runs outside the parse [try] on purpose: the reader swallows
    [Yojson.Json_error] to skip malformed rows, and a caller's decoder must not
-   inherit that swallow. *)
-let filter_map_recent ?(offset=0) t n ~f =
+   inherit that swallow.
+
+   [before_read] sees each day file's path just before that file is read. *)
+let filter_map_recent_reading ?(offset=0) t n ~f ~before_read =
   if n <= 0 then []
   else begin
     let skip = ref offset in
@@ -897,6 +899,7 @@ let filter_map_recent ?(offset=0) t n ~f =
               and read the file again until it yields [need] parsed rows or
               runs out of lines. A file with no malformed rows settles on
               the first round, which is every call this had before. *)
+           before_read path;
            let parsed_newest_first =
              off_fiber ~name:(job_name t) (fun () ->
                let rec read_widening window =
@@ -945,6 +948,74 @@ let filter_map_recent ?(offset=0) t n ~f =
      with Done -> ());
     !collected
   end
+
+let filter_map_recent ?offset t n ~f =
+  filter_map_recent_reading ?offset t n ~f ~before_read:ignore
+
+(* A recent read kept per store until the store's files change. Day files
+   only grow by appending and leave by whole-file removal (the count cache
+   below rests on the same rule), so the newest [n] parsed rows are a
+   function of the day-file list and the sizes of the files the read opened.
+   When both match the previous read, its answer is the answer.
+
+   The list and each size are taken before the bytes are read. A row
+   appended during the read leaves the recorded size behind the bytes the
+   answer saw, so the next call reads again; every race costs one more read,
+   never a stale answer. When a file's size cannot be taken, the answer is
+   not kept. *)
+type 'a recent_answer =
+  { ra_day_files : string list
+  ; ra_read_sizes : (string * int) list
+  ; ra_values : 'a list
+  }
+
+type 'a recent_view =
+  { rv_rows : int
+  ; rv_project : Yojson.Safe.t -> 'a option
+  ; rv_mu : Stdlib.Mutex.t
+  ; rv_answers : (string, 'a recent_answer) Hashtbl.t
+  }
+
+let recent_view n ~f =
+  { rv_rows = n
+  ; rv_project = f
+  ; rv_mu = Stdlib.Mutex.create ()
+  ; rv_answers = Hashtbl.create 64
+  }
+
+let size_if_present path =
+  match Unix.stat path with
+  | stats -> Some stats.Unix.st_size
+  | exception Unix.Unix_error _ -> None
+
+let recent_answer_is_current answer ~day_files =
+  List.equal String.equal answer.ra_day_files day_files
+  && List.for_all
+       (fun (path, size) -> Option.equal Int.equal (size_if_present path) (Some size))
+       answer.ra_read_sizes
+
+let read_recent_view view t =
+  let day_files = List.map snd (day_file_paths_oldest_first t.base_dir) in
+  let kept =
+    Stdlib.Mutex.protect view.rv_mu (fun () ->
+      Hashtbl.find_opt view.rv_answers t.base_dir)
+  in
+  match kept with
+  | Some answer when recent_answer_is_current answer ~day_files -> answer.ra_values
+  | Some _ | None ->
+    let read_sizes = ref [] and every_size_taken = ref true in
+    let values =
+      filter_map_recent_reading t view.rv_rows ~f:view.rv_project
+        ~before_read:(fun path ->
+          match size_if_present path with
+          | Some size -> read_sizes := (path, size) :: !read_sizes
+          | None -> every_size_taken := false)
+    in
+    if !every_size_taken then
+      Stdlib.Mutex.protect view.rv_mu (fun () ->
+        Hashtbl.replace view.rv_answers t.base_dir
+          { ra_day_files = day_files; ra_read_sizes = !read_sizes; ra_values = values });
+    values
 
 (* [n] counts the values [f] produced, where [filter_map_recent]'s [n] counts
    rows visited. Each day file is scanned backwards in 8 KB chunks through the

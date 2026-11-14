@@ -271,6 +271,12 @@ let reload ~store (previous : retained) =
     if same_identity record (listed previous)
     then Ok (Some (with_request record previous.request))
     else Error (Store_unavailable "a reloaded original names another request or binding")
+let load_record ~store ~scope ~request_id =
+  let* () = validate_identity ["scope", scope; "request_id", request_id] in
+  let* json = Lane_addon_store.load_tool_request_owner store ~scope ~request_id |> unavailable in
+  match json with
+  | None -> Ok None
+  | Some json -> decode ~scope ~request_id json |> unavailable |> Result.map Option.some
 let load_scope ~store ~scope =
   let* records = discover ~store ~scope in
   let rec restore found = function
@@ -279,7 +285,7 @@ let load_scope ~store ~scope =
       let* original = load_listed ~store record in
       restore (original::found) rest in
   restore [] records
-let fold_all_with ~after_inventory ~store ~init ~f =
+let fold_all_records_with ~after_inventory ~store ~init ~f =
   let* records_rev =
     Lane_addon_store.fold_tool_request_owner_inventory_all store ~init:[]
       ~f:(fun records ~directory_name ~file_name json ->
@@ -288,12 +294,18 @@ let fold_all_with ~after_inventory ~store ~init ~f =
     |> unavailable
   in
   after_inventory ();
-  let rec restore acc = function
+  let rec visit acc = function
     | [] -> Ok acc
     | record::rest ->
-      let* original = load_listed ~store record in
-      restore (f acc original) rest in
-  restore init (List.rev records_rev)
+      let* acc = f acc record in
+      visit acc rest in
+  visit init (List.rev records_rev)
+let fold_all_records ~store ~init ~f =
+  fold_all_records_with ~after_inventory:(fun () -> ()) ~store ~init ~f
+let fold_all_with ~after_inventory ~store ~init ~f =
+  fold_all_records_with ~after_inventory ~store ~init ~f:(fun acc record ->
+    let* original = load_listed ~store record in
+    Ok (f acc original))
 let fold_all ~store ~init ~f = fold_all_with ~after_inventory:(fun () -> ()) ~store ~init ~f
 let discover_all ~store =
   let* records = fold_all ~store ~init:[] ~f:(fun records original -> original::records) in
@@ -373,6 +385,8 @@ let advance ~store ~expected ~event =
 module For_testing = struct
   let fold_all ~store ~(after_inventory : unit -> unit) ~init ~f =
     fold_all_with ~after_inventory ~store ~init ~f
+  let fold_all_records ~store ~(after_inventory : unit -> unit) ~init ~f =
+    fold_all_records_with ~after_inventory ~store ~init ~f
   let advance_events = advance_events_with
 end
 type settle_error = Settle_unavailable of string | Settle_changed

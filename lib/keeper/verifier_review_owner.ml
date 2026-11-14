@@ -332,6 +332,20 @@ let retry_result evidence =
   | _::_ -> Ok ()
   | [] -> Error "original refusal has no typed safe retry"
 
+(* A successor needs a refusal that authorizes one: an execution refusal that
+   names a runtime to review again, or a before-dispatch refusal whose closed
+   evidence says what moved away from this original. The stage decides which
+   evidence to read. *)
+let successor_authorized original (refusal : Progress.refusal) =
+  match refusal.stage with
+  | Progress.Execution -> retry_result refusal.evidence
+  | Progress.Before_dispatch ->
+    let* change = Verifier_review_authority_change.of_json refusal.evidence in
+    if Verifier_review_authority_change.begins_at ~authority:(V.authority_binding original)
+        ~answer_format:(V.output_contract original) change
+    then Ok ()
+    else Error "before-dispatch refusal names another original's authority or answer format"
+
 (* Routing metadata proves only which verification owns these immutable bytes.
    It never constructs an Original or grants execution of an unsupported body. *)
 let routing_verification (record : Owner.retained) =
@@ -380,7 +394,12 @@ let selected_records ~store ~selection =
       Ok (if owner = verification_id then record :: selected else selected)) (Ok []) records in
     Ok (List.rev selected)
 
-let next_attempt ~store ~verification_id ~installation_id ~package_id =
+type next_attempt_error =
+  | Load of load_error
+  | Lookup_unavailable of string
+  | Question_changed
+
+let related_attempts ~store ~verification_id ~installation_id ~package_id =
   let* records = selected_records ~store ~selection:(Verification verification_id) in
   let* related = List.fold_left (fun acc (record:Owner.retained) ->
     let* acc = acc in
@@ -395,13 +414,20 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id =
     else if record.installation_id<>installation_id || record.package_id<>package_id
       then Error (Corrupt_original "verifier inventory belongs to another destination")
     else Ok ({record;original}::acc)) (Ok []) records in
-  let related = List.sort (fun left right -> Int.compare (V.attempt left.original) (V.attempt right.original)) related in
+  Ok (List.sort (fun left right -> Int.compare (V.attempt left.original) (V.attempt right.original)) related)
+
+let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
+  let loaded result = Result.map_error (fun error -> Load error) result in
+  let corrupt detail = Load (Corrupt_original detail) in
+  let* related = related_attempts ~store ~verification_id ~installation_id ~package_id |> loaded in
+  (* The parent's [Successor_intended] digest pins the child's whole body, so
+     its lookup grants are the ones the successor was prepared with. Here the
+     child must also ask the parent's question as its next attempt. *)
   let retain_child parent successor child =
-    let* expected = V.successor parent.original |> Result.map_error (fun d -> Corrupt_original d) in
     let* digest = V.digest child |> Result.map_error (fun d -> Corrupt_original d) in
-    if not (Yojson.Safe.equal (V.to_json expected) (V.to_json child))
+    if not (V.is_successor_of ~parent:parent.original child)
       || successor.Progress.request_digest<>digest then
-      Error (Corrupt_original "verifier successor changed its frozen semantic input")
+      Error (Corrupt_original "verifier successor changed its question or intended input")
     else
       let* () = retain ~store ~verification_id ~attempt:(V.attempt child)
         ~installation_id ~package_id child |> Result.map_error (function
@@ -413,46 +439,62 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id =
         | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ ->
           Error (Corrupt_original "verifier successor lacks original terminal authorization") in
       load_retained ~store ~verification_id ~attempt:(V.attempt child) ~installation_id ~package_id in
+  (* HIGH-RISK-UNREVIEWED: a new attempt asks the parent's question with the
+     lookup authority prepared now. [lookup] is forced only here, when a new
+     identity is allocated; restoring an intended successor never prepares
+     authority again. A changed question allocates nothing. *)
+  let successor_of parent =
+    let* current = lookup () |> Result.map_error (fun detail -> Lookup_unavailable detail) in
+    V.successor ~lookup:current parent.original |> Result.map_error (function
+      | V.Question_changed -> Question_changed
+      | V.Prompt_unavailable detail -> Lookup_unavailable ("review prompt unavailable: " ^ detail)
+      | V.Successor_unavailable detail -> corrupt detail) in
+  let allocate parent =
+    let* child=successor_of parent in
+    let* request_id=attempt_request_id ~verification_id ~attempt:(V.attempt child)
+      |> Result.map_error corrupt in
+    let* successor=Owner.prepare_successor ~store ~scope ~request_id ~request:(V.to_json child)
+      |> Result.map_error (fun e -> Load (Load_store_unavailable (Owner.error_to_string e))) in
+    let* parent=advance ~store parent (Progress.Successor_intended successor) |> loaded in
+    let* child=retain_child parent successor child |> loaded in Ok (V.attempt child.original) in
   let rec walk parent rest =
     match Progress.phase parent.record.progress,rest with
     | (Progress.Subdividing (refusal,successor) | Subdivided (refusal,successor)),_ ->
-      let* () = retry_result refusal.evidence |> Result.map_error (fun d -> Corrupt_original d) in
-      let* child = match rest with
+      let* () = successor_authorized parent.original refusal |> Result.map_error corrupt in
+      let* child = loaded (match rest with
         | child::_ -> Ok child.original
         | [] -> let* json = Owner.load_successor_request ~store ~scope successor
             |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
-          V.of_json json |> Result.map_error (fun d -> Corrupt_original d) in
+          V.of_json json |> Result.map_error (fun d -> Corrupt_original d)) in
       let* expected_key=attempt_request_id ~verification_id ~attempt:(V.attempt child)
-        |> Result.map_error (fun d -> Corrupt_original d) in
+        |> Result.map_error corrupt in
       let* ()=if expected_key=successor.request_id then Ok ()
-        else Error (Corrupt_original "verifier successor key differs") in
-      let* child=retain_child parent successor child in
+        else Error (corrupt "verifier successor key differs") in
+      let* child=retain_child parent successor child |> loaded in
       walk child (match rest with [] -> [] | _::tail -> tail)
     | Progress.Rejected ({stage=Progress.Execution;evidence} as _refusal),[] ->
       (* A refusal that cannot be read is an error; one that names no runtime
          to review again leaves the next move to a producer or an operator. *)
-      let* refused = terminal_review_result evidence |> Result.map_error (fun d -> Corrupt_original d) in
+      let* refused = terminal_review_result evidence |> Result.map_error corrupt in
       (match refused.AR.retryable_runtimes with
        | [] -> Ok (V.attempt parent.original)
-       | _ :: _ ->
-         let* child=V.successor parent.original |> Result.map_error (fun d -> Corrupt_original d) in
-         let* request_id=attempt_request_id ~verification_id ~attempt:(V.attempt child)
-           |> Result.map_error (fun d -> Corrupt_original d) in
-         let* successor=Owner.prepare_successor ~store ~scope ~request_id ~request:(V.to_json child)
-           |> Result.map_error (fun e -> Load_store_unavailable (Owner.error_to_string e)) in
-         let* parent=advance ~store parent (Progress.Successor_intended successor) in
-         let* child=retain_child parent successor child in Ok (V.attempt child.original))
+       | _ :: _ -> allocate parent)
+    | Progress.Rejected ({stage=Progress.Before_dispatch;_} as refusal),[] ->
+      (* HIGH-RISK-UNREVIEWED: the same question met another lookup authority
+         or answer format before dispatch. The next attempt asks it again with
+         the current authority, whatever the refused attempt held. *)
+      let* () = successor_authorized parent.original refusal |> Result.map_error corrupt in
+      allocate parent
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _
-      | Rejected {stage=Progress.Before_dispatch;_}),[] -> Ok (V.attempt parent.original)
+      | Commit_unknown _ | Finished _ | Conflicted _),[] -> Ok (V.attempt parent.original)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
       | Commit_unknown _ | Finished _ | Conflicted _
       | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}),_::_ ->
-      Error (Corrupt_original "verifier child exists without its original successor intent") in
+      Error (corrupt "verifier child exists without its original successor intent") in
   match related with
   | [] -> Ok 0
   | first::rest when V.attempt first.original=0 -> walk first rest
-  | _::_ -> Error (Corrupt_original "verifier inventory is missing its original first attempt")
+  | _::_ -> Error (corrupt "verifier inventory is missing its original first attempt")
 
 let retained_commits ~store ~selection ~installation_id ~package_id =
   let* records = selected_records ~store ~selection in

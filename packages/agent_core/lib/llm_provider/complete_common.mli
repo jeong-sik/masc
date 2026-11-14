@@ -179,16 +179,6 @@ val observe_pre_dispatch_serialization
   -> Request_wire_observer.observation
   -> unit
 
-val observe_request_wire
-  :  ?request_wire_observer:Request_wire_observer.try_observe
-  -> capture_id:string option
-  -> config:Provider_config.t
-  -> http_codec:Provider_http_codec.t
-  -> stream:bool
-  -> body:string
-  -> unit
-  -> unit
-
 val sanitize_url_for_log : string -> string
 
 val http_error_diagnostic_body

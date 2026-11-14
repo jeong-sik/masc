@@ -851,7 +851,10 @@ let validate_tool_request () =
 let run_scan ~base_path = function
   | Durable_scan (_, scan) -> Durable_outcome (D.run scan ~base_path)
   | Lane_addon_scan store ->
-    Lane_addon_outcome (L.scan ~validate_tool_request store ~base_path)
+    Lane_addon_outcome
+      (L.scan ~validate_tool_request
+         ~validate_history_resolution:Masc.Keeper_librarian_history_resolution_intent.check_published_file
+         store ~base_path)
 ;;
 
 (* A scan whose process ended without an answer failed: the store was not read. *)

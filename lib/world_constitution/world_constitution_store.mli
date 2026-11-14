@@ -39,8 +39,9 @@ val append_at :
   expected_end_offset:int ->
   World_constitution_types.entry ->
   (unit, append_error) result
-(** Record one move, provided the ledger still ends where the caller's
-    {!load} left it. Whether the world agreed is settled on the board before
+(** Record one move, provided the ledger's complete lines still end where
+    the caller's {!load} left them. An unterminated last line after that
+    point is cut before the move is written. Whether the world agreed is settled on the board before
     anyone calls this; the ledger writes what it is told and judges nothing.
 
     The offset is what makes a read-then-decide safe. Two keepers that both
@@ -51,7 +52,9 @@ val append_at :
 
 (** Whether a newline follows the line. Every append writes one, so the one
     line that can lack it is the last line of the file: an append that stopped
-    before its newline, or a hand edit. *)
+    before its newline, or a hand edit. That line is not a move, whatever its
+    bytes read as: it is reported in [rejected], folds into nothing, and the
+    next {!append_at} cuts it. *)
 type line_end =
   | Newline_terminated
   | Unterminated_final_line
@@ -79,8 +82,10 @@ type isolated_line = {
 
 type ledger = {
   end_offset : int;
-      (** Bytes the ledger held when this was read. Pass it to {!append_at} so
-          a write built on this read cannot land on a different ledger. *)
+      (** Where the ledger's complete lines ended when this was read: the byte
+          after the last newline. An unterminated last line lies past it. Pass
+          it to {!append_at} so a write built on this read cannot land on a
+          different ledger. *)
   articles : World_constitution_types.t list;
       (** The norms the world currently holds, in the order they were first
           written. An article written, removed and written again returns at the
@@ -143,7 +148,8 @@ val load_articles :
     keeps no isolated-line report, so a roster change that newly isolates a
     line surfaces through the tool read, not here. *)
 
-(** Which ledger bytes a read folded: their length and SHA-256. *)
+(** Which ledger bytes a read folded: the length and SHA-256 of its complete
+    lines. An unterminated last line is in neither. *)
 type position = {
   end_offset : int;
   digest : string;

@@ -752,7 +752,7 @@ let with_held_api_slot ~sw ~net ~clock ~cli_slot_ids f =
     : Runtime_exact_output_registry.t);
   Runtime_quota_window.reset_for_testing ();
   Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
-    Runtime_quota_window.note_exhausted ~scope ~resets_at:(Unix.gettimeofday () +. 3600.0);
+    Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope ~resets_at:(Unix.gettimeofday () +. 3600.0);
     f server)
 ;;
 

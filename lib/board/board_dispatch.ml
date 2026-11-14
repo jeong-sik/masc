@@ -323,12 +323,25 @@ let validate_workspace requested (store : Board.store) =
 let check_store_workspace ~base_path store =
   validate_workspace (Board_workspace_binding.capture ~base_path) store
 
+(* A claim reads no Board file, so this comparison decides whether the process
+   store may be opened for [requested] before any source lock or load. *)
+let claim_matches requested requested_observation claim =
+  let open Result.Syntax in
+  let claimed = Board_store_lifecycle.claimed_binding claim in
+  let* claimed_observation = workspace_result (Board_workspace_binding.observe claimed) in
+  if Board_workspace_binding.same_root claimed_observation requested_observation then Ok ()
+  else
+    Error (Workspace_mismatch
+      { active_workspace_masc_dir = Board_workspace_binding.workspace_masc_dir claimed
+      ; requested_workspace_masc_dir = Board_workspace_binding.workspace_masc_dir requested })
+
 let init_jsonl ~base_path ~recipient_lookup () =
   let open Result.Syntax in
   let requested = Board_workspace_binding.capture ~base_path in
-  (* Refuse an invalid incoming root before forcing global or starting actors.
-     Global loading can create metadata, so each attempt observes it anew. *)
-  let* _ = workspace_result (Board_workspace_binding.observe requested) in
+  (* Refuse an invalid incoming root before claiming the store or starting
+     actors. Loading can create metadata, so each attempt observes it anew. *)
+  let* requested_observation =
+    workspace_result (Board_workspace_binding.observe requested) in
   let installed = Lookup_installed recipient_lookup in
   let rec install () =
     match Atomic.get backend_state with
@@ -350,7 +363,11 @@ let init_jsonl ~base_path ~recipient_lookup () =
               Ok ())
             else install ()))
     | Uninitialized ->
-      let store = Board.global () in
+      (* The store opens on the requested BasePath. A store somebody claimed
+         earlier for another root is refused here, unopened. *)
+      let claim = Board_store_lifecycle.claim_global requested in
+      let* () = claim_matches requested requested_observation claim in
+      let store = Board_store_lifecycle.open_claim claim in
       (match validate_workspace requested store with
        | Error _ as error -> error
        | Ok () ->

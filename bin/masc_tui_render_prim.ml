@@ -584,10 +584,11 @@ let search_marker_styled (state : state) =
         marker Ansi.reset
 
 let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
+  let ko = state.ui_language = Lang_ko in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
     [ Masc_tui_footer.Keeper_action_running
-        { gerund = Keeper_control.action_gerund action
+        { gerund = Keeper_control.action_gerund ~ko action
         ; keeper = Terminal_text.single_line keeper_name
         }
     ]
@@ -595,7 +596,7 @@ let keeper_action_status (state : state) : Masc_tui_footer.status_item list =
     [ Masc_tui_footer.Keeper_action_armed
         { key = Keeper_control.action_key pending.Keeper_control.pending_action
         ; action =
-            Keeper_control.action_label pending.Keeper_control.pending_action
+            Keeper_control.action_label ~ko pending.Keeper_control.pending_action
         ; keeper =
             Terminal_text.single_line pending.Keeper_control.pending_keeper
         }
@@ -840,7 +841,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
-    ~help_key_answers:door_answers
+    ~help_key_answers:door_answers ~ko:(state.ui_language = Lang_ko)
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status
@@ -933,7 +934,7 @@ let composer_row state ~rows ~cols =
     | false, None -> prompt ^ draft
     | false, Some line -> prompt ^ draft ^ "   " ^ line
   in
-  let body=match Composer.reading_note ~ko composer.Composer.reading with
+  let body=match Composer.row_note ~ko composer with
     | None -> body
     | Some note -> body ^ "  · " ^ Terminal_text.single_line note in
   (* The key that opens the row sits at the right end, one cell in from the
@@ -1054,10 +1055,11 @@ let compact_connection_state (state : state) =
    the full badge beside it whatever the spelling. *)
 let compact_connection_wording ~ko compact =
   let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
+  let spelled whole state = [ whole ~ko, false; state ~ko, true ] in
   match compact with
-  | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
-  | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
-  | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
+  | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, spelled workspace_mismatch field_mismatch, true
+  | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, spelled workspace_identity_unconfirmed field_unconfirmed, true
+  | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, spelled workspace_identity_unread field_unread, true
   | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
   | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
   | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
@@ -2006,10 +2008,10 @@ let refresh_progress_pieces (state : state) =
     | Account_emails -> "계정" | Tool_series -> "도구 호출" in
   let source_name source = if not ko then Http_refresh_progress.source_name source else
     match source with
-    | Http_refresh_progress.Identity_before -> "작업 공간"
+    | Http_refresh_progress.Identity_before -> workspace_name ~ko
     | Approvals -> "승인" | Questions -> "질문" | Keepers -> "Keeper"
     | Surface_data source -> surface_name source
-    | Identity_after -> "작업 공간 확인" in
+    | Identity_after -> workspace_name ~ko ^ " 확인" in
   let component_name component = if not ko then Http_refresh_progress.component_name component else
     match component with
     | Http_refresh_progress.Runtime_catalogue -> "런타임 목록" | Provider_windows -> "제공자 한도"
@@ -2454,11 +2456,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
       | Some keeper ->
           let reading = keeper_reading state keeper in
           let ko = state.ui_language = Lang_ko in
-          let health = Keeper_control.health_label ~ko reading in
-          let status =
-            if reading.paused then (if ko then "일시정지 · " else "paused · ") ^ health
-            else health
-          in
+          let status = Keeper_control.status_label ~ko reading in
           let runtime = match reading.liveness with
             | Keeper_control.Present runtime -> runtime.kr_runtime_id
             | Unobserved | Absent | Invalid _ ->
@@ -3490,17 +3488,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
-  (* The English word is the one the notices about the action use. *)
-  let action_word action =
-    let english = Keeper_control.action_label action in
-    match action with
-    | Keeper_control.Pause -> say "일시 정지" english
-    | Keeper_control.Resume -> say "재개" english
-    | Keeper_control.Boot -> say "올리기" english
-    | Keeper_control.Shutdown -> say "내리기" english
-    | Keeper_control.Wakeup -> say "깨우기" english
-    | Keeper_control.Delete -> say "삭제" english
-  in
+  let action_word = Keeper_control.action_label ~ko in
   (* An action that ends a fiber is toned apart from the reversible ones, so the
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =
@@ -4155,16 +4143,6 @@ let render_repository_changes_diff (state : state) ~path =
     ; ds_clamped = (fun scroll -> Repository_changes_diff_scroll scroll)
     }
 
-
-(* Quota life state beside dispatchability: a dispatchable runtime whose
-   provider side is refusing work for quota is "alive on paper" and the
-   operator asked to see that distinction (2026-09-12). [resets_at] is the
-   provider-stated deadline; its absence means a hard-quota rejection that
-   claimed no reset -- it rests until the fallback cap after it was noted,
-   and the next success on the scope clears it sooner. *)
-let runtime_quota_badge ~ko (runtime : Masc.Tui_decode.runtime_option) =
-  Option.map (fun label -> Theme.warn () ^ label ^ Ansi.reset)
-    (runtime_quota_label ~ko runtime)
 
 (* The other half of "alive on paper": this process saw a 429 on the runtime
    whose provider wait has not ended and no successful answer has cleared.
@@ -6393,41 +6371,31 @@ let context_split_pane_height ~content_height ~common_len =
 ;;
 
 let keeper_deletions_lines (state : state) ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let receipt = Option.fold ~none:[] ~some:(fun (_, message) -> [message])
       state.keeper_deletions_retry_receipt in
   let lines = match state.keeper_deletions with
-    | None -> ["삭제 기록을 불러오는 중입니다."]
-    | Some (Error detail) -> ["삭제 기록 조회 실패: " ^ detail]
+    | None -> [ say "삭제 기록 조회 중…" "Loading deletion records…" ]
+    | Some (Error detail) ->
+      [ say "삭제 기록 조회 실패: " "Deletion records load failed: " ^ detail ]
     | Some (Ok inventory) ->
-      let errors = List.map (fun error -> "종료 기록 오류: " ^ error) inventory.errors in
+      let errors =
+        List.map
+          (fun error -> say "종료 기록 오류: " "Shutdown record error: " ^ error)
+          inventory.errors in
       let selected = List.nth_opt inventory.operations state.keeper_deletions_cursor in
       errors @ (match selected with
-        | None -> ["저장된 키퍼 삭제 기록이 없습니다."]
+        | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
         | Some row ->
-          let status = match row.Keeper_control.operation with
-            | Keeper_control.Configuration_removal receipt ->
-              let label = match receipt.state with
-                | Masc.Keeper_configuration_removal.Prepared -> "설정 삭제 접수"
-                | Cleanup_required detail -> "설정 정리 실패: " ^ detail
-                | Artifacts_removed -> "설정 파일 제거 대기"
-                | Removed -> "설정 삭제 및 정리 완료" in
-              Option.fold ~none:label ~some:(fun error -> label ^ ": " ^ error) receipt.last_error
-            | Runtime_shutdown operation ->
-              let open Masc.Keeper_shutdown_types in
-              match operation.phase with
-              | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
-                "파일·설정 정리 실패: " ^ detail
-              | Finalized { completion = Completion_pending _; _ } -> "파일·설정 정리 대기"
-              | Blocked failure -> "종료 작업 중단: " ^ failure.detail
-              | Reconciliation_required _ -> "진행 중이던 도구 실행 결과 확인 필요"
-              | Finalized { completion = (Completion_not_requested | Completion_delivered _);_}
-              | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
-              | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ -> if row.completed then "삭제·정리 완료" else phase_to_string operation.phase in
           [Printf.sprintf "%d / %d · %s · %s"
              (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row) status]
-          @ (if row.can_retry then [] else ["이 단계는 정리 재시도 대상이 아닙니다."])
-          @ ["종료 원장 원문 (설정·파일 정리 실패 원인 포함):"]
+             (Keeper_control.deletion_keeper_name row)
+             (Keeper_control.deletion_status ~ko row)]
+          @ (if row.Keeper_control.can_retry then []
+             else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
+          @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"
+                "Shutdown ledger record (including cleanup failure causes):" ]
           @ String.split_on_char '\n'
               (Yojson.Safe.pretty_to_string (Keeper_control.deletion_json row)))
   in
@@ -6450,13 +6418,14 @@ let keeper_deletions_hints (state : state) ~scrollable =
         | None -> false )
     | Some (Error _) | None -> (0, false)
   in
+  let say korean english = if state.ui_language = Lang_ko then korean else english in
   String.concat "  "
-    ((if operations > 1 then [ "j/k:작업" ] else [])
-     @ (if scrollable then [ "J/K/PgUp/PgDn:원문" ] else [])
-     @ [ "r:조회" ]
+    ((if operations > 1 then [ say "j/k:기록" "j/k:record" ] else [])
+     @ (if scrollable then [ say "J/K/PgUp/PgDn:원문" "J/K/PgUp/PgDn:raw" ] else [])
+     @ [ say "r:다시 읽기" "r:reload" ]
      @ (if can_retry && Option.is_none state.keeper_deletions_retry_receipt
-        then [ "t:정리 재시도" ] else [])
-     @ [ "Esc:닫기" ])
+        then [ say "t:정리 재시도" "t:retry cleanup" ] else [])
+     @ [ say "Esc:닫기" "Esc:close" ])
 
 ;;
 

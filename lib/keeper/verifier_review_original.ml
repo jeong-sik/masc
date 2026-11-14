@@ -4,7 +4,7 @@ module AR = Task.Anti_rationalization
 
 open Result.Syntax
 
-let schema = "verifier_review_original/v3"
+let schema = "verifier_review_original/v4"
 
 (* Strict JSON decoding helpers. A decoder that reads a required key with a
    bare [List.assoc] leaks [Not_found] out of the [result] on a missing key,
@@ -77,50 +77,88 @@ let system_prompt ~lookup_schemas ~question ~lookup_root req =
   AR.build_prompt ~question ~lookup ~lookup_root req
 ;;
 
+type lookup =
+  { granted_root : AR.lookup_root
+  ; granted_tools : string list
+  ; question_digest : string
+  ; authority_digest : string
+  }
+
+let lookup_of_authority authority =
+  { granted_root = Verification_authority_tools.task_review_root authority
+  ; granted_tools =
+      List.map
+        (fun (tool : Types_core.tool_schema) -> tool.name)
+        (Verification_authority_tools.schemas
+           (Verification_authority_tools.task_review_tools authority))
+  ; question_digest = Verification_authority_tools.task_review_question_binding authority
+  ; authority_digest = Verification_authority_tools.task_review_authority_binding authority
+  }
+;;
+
 type t =
   { verification_id : string
   ; attempt : int
   ; review_request : AR.review_request
   ; generator_runtime : string option
   ; question : AR.verdict_question
+  ; question_binding : string
   ; lookup_root : AR.lookup_root
   ; lookup_schemas : string list
-  ; lookup_binding : string
+  ; authority_binding : string
   ; system_prompt : string
   ; system_instructions : string
   ; output_contract : string
   }
 
-let prepare ~generator_runtime ~verification_id ~attempt ~question ~lookup_root ~lookup_schemas ~lookup_binding req =
+(* A refused input and a prompt template that cannot be rendered now are
+   different failures: the second says nothing about the inputs. *)
+type preparation_error =
+  | Invalid_input of string
+  | Prompt_render of string
+
+let prepare_checked ~generator_runtime ~verification_id ~attempt ~question ~lookup req =
   if Option.fold ~none:false ~some:(fun runtime -> String.trim runtime = "") generator_runtime
-  then Error "verifier review original generator_runtime must be non-blank when present"
+  then Error (Invalid_input "verifier review original generator_runtime must be non-blank when present")
   else if String.trim verification_id = ""
-  then Error "verifier review original requires a non-blank verification_id"
+  then Error (Invalid_input "verifier review original requires a non-blank verification_id")
   else if attempt < 0
-  then Error "verifier review original attempt must be a non-negative integer"
-  else if not (String_util.is_lowercase_sha256_hex lookup_binding)
-  then Error "verifier review original requires a canonical authority digest"
-  else if lookup_schemas = []
-  then Error "verifier review original requires the reviewer's lookup tool names"
+  then Error (Invalid_input "verifier review original attempt must be a non-negative integer")
+  else if not (String_util.is_lowercase_sha256_hex lookup.question_digest)
+  then Error (Invalid_input "verifier review original requires a canonical question digest")
+  else if not (String_util.is_lowercase_sha256_hex lookup.authority_digest)
+  then Error (Invalid_input "verifier review original requires a canonical authority digest")
+  else if lookup.granted_tools = []
+  then Error (Invalid_input "verifier review original requires the reviewer's lookup tool names")
   else (
     let* system_prompt =
-      system_prompt ~lookup_schemas ~question ~lookup_root req
-      |> Result.map_error (fun detail -> "verifier review prompt unavailable: " ^ detail)
+      system_prompt ~lookup_schemas:lookup.granted_tools ~question
+        ~lookup_root:lookup.granted_root req
+      |> Result.map_error (fun detail -> Prompt_render ("verifier review prompt unavailable: " ^ detail))
     in
-    let* system_instructions=Prompt_registry.render_prompt_template Prompt_names.verification_system [] in
+    let* system_instructions =
+      Prompt_registry.render_prompt_template Prompt_names.verification_system []
+      |> Result.map_error (fun detail -> Prompt_render detail)
+    in
     Ok
       { verification_id
       ; attempt
       ; review_request = req
       ; generator_runtime
       ; question
-      ; lookup_root
-      ; lookup_schemas
-      ; lookup_binding
+      ; question_binding = lookup.question_digest
+      ; lookup_root = lookup.granted_root
+      ; lookup_schemas = lookup.granted_tools
+      ; authority_binding = lookup.authority_digest
       ; system_prompt
       ; system_instructions
       ; output_contract = canonical_output_contract ()
       })
+;;
+
+let prepare ~generator_runtime ~verification_id ~attempt ~question ~lookup req =
+  prepare_checked ~generator_runtime ~verification_id ~attempt ~question ~lookup req
+  |> Result.map_error (function Invalid_input detail | Prompt_render detail -> detail)
 ;;
 
 let verification_id t = t.verification_id
@@ -128,9 +166,10 @@ let attempt t = t.attempt
 let review_request t = t.review_request
 let generator_runtime t = t.generator_runtime
 let question t = t.question
+let question_binding t = t.question_binding
 let lookup_root t = t.lookup_root
 let lookup_schemas t = t.lookup_schemas
-let lookup_binding t = t.lookup_binding
+let authority_binding t = t.authority_binding
 let system_prompt_text t = t.system_prompt
 let system_instructions t = t.system_instructions
 let output_contract t = t.output_contract
@@ -368,12 +407,13 @@ let lookup_schemas_of_json (json : Yojson.Safe.t) : (string list, string) result
 
 let field_names =
   [ "attempt"
+  ; "authority_binding"
   ; "generator_runtime"
-  ; "lookup_binding"
   ; "lookup_root"
   ; "lookup_schemas"
   ; "output_contract"
   ; "question"
+  ; "question_binding"
   ; "review_request"
   ; "schema"
   ; "system_instructions"
@@ -390,9 +430,10 @@ let to_json t =
     ; "generator_runtime", Json_util.string_opt_to_json t.generator_runtime
     ; "review_request", review_request_to_json t.review_request
     ; "question", verdict_question_to_json t.question
+    ; "question_binding", `String t.question_binding
     ; "lookup_root", lookup_root_to_json t.lookup_root
     ; "lookup_schemas", lookup_schemas_to_json t.lookup_schemas
-    ; "lookup_binding", `String t.lookup_binding
+    ; "authority_binding", `String t.authority_binding
     ; "system_instructions", `String t.system_instructions
     ; "system_prompt", `String t.system_prompt
     ; "output_contract", `String t.output_contract
@@ -423,10 +464,12 @@ let of_json json =
         else Error "verifier review original has an unknown schema"
       in
       let* verification_id = text "verification_id" in
-      let* lookup_binding = text "lookup_binding" in
-      let* () =
-        if String_util.is_lowercase_sha256_hex lookup_binding then Ok ()
-        else Error "verifier review original authority digest is invalid" in
+      let digest_field key what =
+        let* value = text key in
+        if String_util.is_lowercase_sha256_hex value then Ok value
+        else Error (Printf.sprintf "verifier review original %s digest is invalid" what) in
+      let* question_binding = digest_field "question_binding" "question" in
+      let* authority_binding = digest_field "authority_binding" "authority" in
       let* system_prompt = text "system_prompt" in
       let* system_instructions = text "system_instructions" in
       let* output_contract = text "output_contract" in
@@ -460,9 +503,10 @@ let of_json json =
           ; review_request
           ; generator_runtime
           ; question
+          ; question_binding
           ; lookup_root
           ; lookup_schemas
-          ; lookup_binding
+          ; authority_binding
           ; system_prompt
           ; system_instructions
           ; output_contract
@@ -475,6 +519,47 @@ let digest t =
   Ok (Lane_addon_store.digest (Yojson.Safe.to_string canonical))
 ;;
 
-let successor original =
-  if original.attempt = Int.max_int then Error "verifier attempt identity exhausted"
-  else Ok {original with attempt=original.attempt + 1}
+type successor_error =
+  | Question_changed
+  | Prompt_unavailable of string
+  | Successor_unavailable of string
+
+(* HIGH-RISK-UNREVIEWED: the next attempt takes the reviewer's lookup grants,
+   prompt, instructions and answer format from [lookup], the authority current
+   at that attempt, instead of copying the parent's. Only the question
+   travels: subject, question, captured producer runtime and question digest
+   come from the parent. A [lookup] built for another question is refused,
+   never adopted. *)
+let successor ~lookup parent =
+  if not (String.equal lookup.question_digest parent.question_binding)
+  then Error Question_changed
+  else if parent.attempt = Int.max_int
+  then Error (Successor_unavailable "verifier attempt identity exhausted")
+  else
+    prepare_checked
+      ~generator_runtime:parent.generator_runtime
+      ~verification_id:parent.verification_id
+      ~attempt:(parent.attempt + 1)
+      ~question:parent.question
+      ~lookup
+      parent.review_request
+    |> Result.map_error (function
+      | Invalid_input detail -> Successor_unavailable detail
+      | Prompt_render detail -> Prompt_unavailable detail)
+;;
+
+let question_projection t =
+  `Assoc
+    [ "verification_id", `String t.verification_id
+    ; "generator_runtime", Json_util.string_opt_to_json t.generator_runtime
+    ; "review_request", review_request_to_json t.review_request
+    ; "question", verdict_question_to_json t.question
+    ; "question_binding", `String t.question_binding
+    ]
+;;
+
+let is_successor_of ~parent child =
+  parent.attempt < Int.max_int
+  && child.attempt = parent.attempt + 1
+  && Yojson.Safe.equal (question_projection parent) (question_projection child)
+;;

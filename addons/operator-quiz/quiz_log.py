@@ -550,6 +550,27 @@ class Blobs(records.Blobs):
 #    answered session's verdicts. -------------------------------------------
 
 @dataclass(frozen=True, slots=True)
+class Disputable:
+    """A question the operator may dispute now, with what a grade request reads."""
+    posed: Posed
+    answer: AnswerReceived
+
+
+@dataclass(frozen=True, slots=True)
+class NotAnswered:
+    """The session has no answer, or did not pose the question."""
+
+
+@dataclass(frozen=True, slots=True)
+class GradeWaiting:
+    """A grade request for the question has no result yet."""
+    request_id: str
+
+
+DisputeStanding = Union[Disputable, NotAnswered, GradeWaiting]
+
+
+@dataclass(frozen=True, slots=True)
 class Session:
     session_id: str
     action_request_id: str
@@ -585,6 +606,18 @@ class Session:
         """The grade request for this question that has no result yet."""
         events = self.grading_of(question_id)
         return events[-1] if events and isinstance(events[-1], GradeRequested) else None
+
+    def dispute_standing(self, question_id: str) -> DisputeStanding:
+        """Whether the operator may dispute this question's grade (RFC §6.4).
+        The flow takes a dispute and the projection offers one by this rule
+        alone, so a row never offers a dispute the flow refuses."""
+        posed = next((p for p in self.posed if p.question_id == question_id), None)
+        if self.state != "answered" or self.answer is None or posed is None:
+            return NotAnswered()
+        waiting = self.outstanding_grade(question_id)
+        if waiting is not None:
+            return GradeWaiting(waiting.request_id)
+        return Disputable(posed, self.answer)
 
 
 def fold(events: list[Event]) -> list[Session]:

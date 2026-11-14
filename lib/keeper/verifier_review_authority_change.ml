@@ -1,0 +1,123 @@
+(** What moved between a retained review original and the current authority. *)
+
+open Result.Syntax
+
+type pair = { before : string; after : string }
+
+type t =
+  | Authority of pair
+  | Output_contract of pair
+  | Both of { authority : pair; output_contract : pair }
+
+let schema = "verifier_review_authority_change/v1"
+
+let answer_format_digest = Lane_addon_store.digest
+
+let moved pair = not (String.equal pair.before pair.after)
+
+let between ~retained_authority ~current_authority ~retained_format ~current_format =
+  if not (String_util.is_lowercase_sha256_hex retained_authority
+          && String_util.is_lowercase_sha256_hex current_authority)
+  then Error "lookup authority values are not digests"
+  else (
+    let authority = { before = retained_authority; after = current_authority } in
+    let output_contract =
+      { before = answer_format_digest retained_format; after = answer_format_digest current_format }
+    in
+    Ok
+      (match moved authority, moved output_contract with
+       | true, true -> Some (Both { authority; output_contract })
+       | true, false -> Some (Authority authority)
+       | false, true -> Some (Output_contract output_contract)
+       | false, false -> None))
+;;
+
+let begins_at ~authority ~answer_format t =
+  let from_authority pair = String.equal pair.before authority in
+  let from_format pair = String.equal pair.before (answer_format_digest answer_format) in
+  match t with
+  | Authority pair -> from_authority pair
+  | Output_contract pair -> from_format pair
+  | Both { authority = moved_authority; output_contract } ->
+    from_authority moved_authority && from_format output_contract
+;;
+
+let pair_to_json pair = `Assoc [ "before", `String pair.before; "after", `String pair.after ]
+
+let to_json t =
+  let authority, output_contract =
+    match t with
+    | Authority authority -> pair_to_json authority, `Null
+    | Output_contract output_contract -> `Null, pair_to_json output_contract
+    | Both { authority; output_contract } -> pair_to_json authority, pair_to_json output_contract
+  in
+  `Assoc
+    [ "schema", `String schema
+    ; "authority", authority
+    ; "output_contract", output_contract
+    ]
+;;
+
+let exact_keys ~what expected fields =
+  let keys = List.map fst fields in
+  if List.length keys = List.length (List.sort_uniq String.compare keys)
+     && List.sort String.compare keys = List.sort String.compare expected
+  then Ok ()
+  else Error (Printf.sprintf "%s has an unexpected field set" what)
+;;
+
+let field ~what key fields =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s has no %s" what key)
+;;
+
+(* An absent pair is [None]; a present one must hold two digests that differ,
+   because an unmoved pair is not evidence of a change. *)
+let pair_of_json ~what = function
+  | `Null -> Ok None
+  | `Assoc fields ->
+    let* () = exact_keys ~what [ "before"; "after" ] fields in
+    let* before = field ~what "before" fields in
+    let* after = field ~what "after" fields in
+    (match before, after with
+     | `String before, `String after
+       when String_util.is_lowercase_sha256_hex before
+            && String_util.is_lowercase_sha256_hex after ->
+       if String.equal before after
+       then Error (Printf.sprintf "%s did not move" what)
+       else Ok (Some { before; after })
+     | _ -> Error (Printf.sprintf "%s values are not digests" what))
+  | _ -> Error (Printf.sprintf "%s must be an object or null" what)
+;;
+
+let of_json = function
+  | `Assoc fields ->
+    let what = "verifier review authority change" in
+    let* () = exact_keys ~what [ "schema"; "authority"; "output_contract" ] fields in
+    let* () =
+      match field ~what "schema" fields with
+      | Ok (`String name) when String.equal name schema -> Ok ()
+      | Ok _ | Error _ -> Error (what ^ " has an unknown schema")
+    in
+    let* authority =
+      let* json = field ~what "authority" fields in
+      pair_of_json ~what:"authority change" json
+    in
+    let* output_contract =
+      let* json = field ~what "output_contract" fields in
+      pair_of_json ~what:"answer format change" json
+    in
+    (match authority, output_contract with
+     | Some authority, Some output_contract -> Ok (Both { authority; output_contract })
+     | Some authority, None -> Ok (Authority authority)
+     | None, Some output_contract -> Ok (Output_contract output_contract)
+     | None, None -> Error (what ^ " names nothing that moved"))
+  | _ -> Error "verifier review authority change must be an object"
+;;
+
+let to_string = function
+  | Authority _ -> "the lookup authority changed before dispatch"
+  | Output_contract _ -> "the answer format changed before dispatch"
+  | Both _ -> "the lookup authority and the answer format changed before dispatch"
+;;

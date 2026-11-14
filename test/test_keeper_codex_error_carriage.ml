@@ -203,7 +203,7 @@ let test_usage_limit_routes_to_hard_quota () =
       error
   with
   | Keeper_runtime_failure_route.Retry_after_observed
-      { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = None } -> ()
+      { retry_class = Keeper_runtime_failure_route.Hard_quota _; retry_after = None } -> ()
   | Keeper_runtime_failure_route.Retry_after_observed _
   | Keeper_runtime_failure_route.Rotate_now _
   | Keeper_runtime_failure_route.Exhausted_visible_alive _ ->

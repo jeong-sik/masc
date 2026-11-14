@@ -657,8 +657,9 @@ let note_cut_document ~bytes = function
         | Stopped_by_host _ | Quota_blocked _ | Process_exited _
         | Unhandled_exception _ | Timeout _ ) ) as result -> result
 
-(* HIGH-RISK-UNREVIEWED: puts an account's login status in a private
-   temporary file for the length of one probe.
+(* HIGH-RISK-UNREVIEWED: puts what the CLI prints for an account -- its login
+   status, its version, or what a purge deleted -- in a private temporary file
+   for the length of one call.
 
    Claude Code exits before a write to a non-blocking pipe drains. On macOS
    (Claude Code 2.1.318, 2026-11-06) its [--help] reached a pipe as 1024 or
@@ -3368,6 +3369,112 @@ let probe_subscription ~mgr ~clock ~cwd ~account config =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Idle_timeout seconds -> Error (Timeout seconds)
   | Eio.Time.Timeout as exn -> raise exn
+;;
+
+(* Claude Code 2.1.288 gave [claude project purge] the name [claude purge]
+   (https://code.claude.com/docs/en/cli-reference). An older CLI is asked
+   under neither name. *)
+let purge_minimum_version = 2, 1, 288
+
+type project_purge =
+  | Project_purged
+  | Project_not_purged of string
+
+let version_label (major, minor, patch) = Printf.sprintf "%d.%d.%d" major minor patch
+
+(* [claude --version] printed "2.1.322 (Claude Code)" on 2026-11-13: the
+   version is its first word. *)
+let cli_version printed =
+  let decimal part =
+    if String.equal part "" || not (String.for_all (fun c -> c >= '0' && c <= '9') part)
+    then None
+    else int_of_string_opt part
+  in
+  match String.split_on_char ' ' (String.trim printed) with
+  | [] -> None
+  | word :: (_ : string list) ->
+    (match String.split_on_char '.' word with
+     | [ major; minor; patch ] ->
+       (match decimal major, decimal minor, decimal patch with
+        | Some major, Some minor, Some patch -> Some (major, minor, patch)
+        | _, _, _ -> None)
+     | _ -> None)
+;;
+
+let at_least (major, minor, patch) (least_major, least_minor, least_patch) =
+  if major <> least_major
+  then major > least_major
+  else if minor <> least_minor
+  then minor > least_minor
+  else patch >= least_patch
+;;
+
+(* The CLI reads an empty stdin, so a prompt it should not show ends at once
+   instead of reading the server's terminal, and what it prints goes to a
+   private file, as the probe's does ([open_stdout_capture]). *)
+let run_to_file ~mgr ~cwd ~env ~stderr_buf argv =
+  Eio.Switch.run (fun sw ->
+    let reader, writer = open_stdout_capture ~sw ~cwd in
+    Eio.Process.run
+      mgr
+      ~cwd
+      ~stdin:(Eio.Flow.string_source "")
+      ~stdout:writer
+      ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+      ~env
+      argv;
+    Eio.Buf_read.parse_exn ~max_size:max_int Eio.Buf_read.take_all reader)
+;;
+
+(* The exit status decides, never the words the CLI prints: 2.1.322 exits 1
+   both for a path it holds no state of and for an option it does not know
+   (measured 2026-11-13), so only 0 says that the copy went. *)
+let purge_project ~mgr ~clock ~cwd ~account ~cli_path ~timeout_s ~project =
+  let env = client_environment account in
+  let stderr_buf = Buffer.create 256 in
+  let with_stderr detail =
+    match subscription_stderr_excerpt stderr_buf with
+    | None -> detail
+    | Some text -> detail ^ "; stderr: " ^ text
+  in
+  let run argv = run_to_file ~mgr ~cwd ~env ~stderr_buf argv in
+  try
+    with_idle_timeout clock timeout_s (fun () ->
+      let printed = run [ cli_path; "--version" ] in
+      match cli_version printed with
+      | None ->
+        Project_not_purged
+          (Printf.sprintf
+             "claude --version printed %S, which does not start with MAJOR.MINOR.PATCH"
+             (String_util.utf8_prefix ~max_bytes:subscription_stderr_limit (String.trim printed)))
+      | Some version when not (at_least version purge_minimum_version) ->
+        Project_not_purged
+          (Printf.sprintf
+             "Claude Code %s is older than %s, the first to name claude purge"
+             (version_label version)
+             (version_label purge_minimum_version))
+      | Some (_ : int * int * int) ->
+        let (_ : string) =
+          run
+            [ cli_path
+            ; Runtime_native_tools.claude_setting_sources_arg
+            ; "purge"
+            ; "--yes"
+            ; project
+            ]
+        in
+        Project_purged)
+  with
+  | (Eio.Cancel.Cancelled _ | Eio.Time.Timeout | Out_of_memory | Stack_overflow | Sys.Break) as
+    exn -> raise exn
+  | Idle_timeout seconds ->
+    Project_not_purged (Printf.sprintf "claude did not end within %.0f s" seconds)
+  | Eio.Exn.Io (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
+    Project_not_purged (Printf.sprintf "executable %S was not found" executable)
+  | Eio.Exn.Io (Eio.Process.E (Eio.Process.Child_error status), _) ->
+    Project_not_purged
+      (with_stderr (Format.asprintf "claude ended with %a" Eio.Process.pp_status status))
+  | exn -> Project_not_purged (with_stderr (Printexc.to_string exn))
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)

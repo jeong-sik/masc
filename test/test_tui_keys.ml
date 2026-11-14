@@ -210,7 +210,9 @@ let test_modify_leaves_an_unnamed_status_to_the_server () =
 let update_form row =
   match Masc_tui_types.schedule_update_form_json row with
   | Ok json -> Yojson.Safe.from_string json
-  | Error reason -> Alcotest.fail ("modify refused: " ^ reason)
+  | Error reason ->
+    Alcotest.fail
+      ("modify refused: " ^ Masc_tui_types.schedule_modify_refusal_text ~ko:false reason)
 
 let test_schedule_update_form_preserves_exact_editable_definition () =
   let open Yojson.Safe.Util in

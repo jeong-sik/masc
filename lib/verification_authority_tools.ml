@@ -745,7 +745,8 @@ type task_review =
   ; subject : Workspace_verification_store.request_header
   ; layout : Task.Anti_rationalization.lookup_root
   ; route : Yojson.Safe.t
-  ; binding : string
+  ; question_binding : string
+  ; authority_binding : string
   }
 
 let keeper_review_route (meta : Keeper_meta_contract.keeper_meta) route =
@@ -781,6 +782,10 @@ let captured_review_route t =
   | (Workspace_producer | Keeper_producer _), None -> review_route t
   | Workspace_producer, Some _ -> Error "workspace producer cannot own a Keeper endpoint"
 
+let projection_digest projection =
+  let open Result.Syntax in
+  let* canonical = Lane_addon_action.canonical projection in
+  Ok (Lane_addon_store.digest (Yojson.Safe.to_string canonical))
 
 let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_access =
   let open Result.Syntax in
@@ -799,20 +804,23 @@ let create_task_review ~config ~verification_id ~task_id ~producer ~evidence_acc
       let tool_json (tool : Types_core.tool_schema) =
         `Assoc ["name", `String tool.name; "description", `String tool.description;
           "input_schema", tool.input_schema] in
-      let projection = `Assoc ["purpose", `String "task_review";
+      (* The question is what the producer submitted. The authority is how a
+         reviewer may look at it now. A later attempt keeps the question and
+         takes the authority current at that attempt. *)
+      let* question_binding = projection_digest (`Assoc ["purpose", `String "task_review_question";
         "subject", Workspace_verification_store.request_header_to_yojson request;
         "base_path", `String config.Workspace.base_path;
+        "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)]) in
+      let* authority_binding = projection_digest (`Assoc ["purpose", `String "task_review_authority";
         "ownership_root", `String review_tools.ownership_root;
         "route", route;
         "read_authority", (match review_tools.read_authority with None -> `Null
           | Some authority -> Keeper_sandbox_remote_lane.read_authority_identity authority);
-        "schemas", `List (List.map tool_json (schemas review_tools));
-        "submitted_evidence", `List (List.map Workspace_verification_store.submitted_evidence_item_to_yojson items)] in
-      let* canonical = Lane_addon_action.canonical projection in
-      let binding = Lane_addon_store.digest (Yojson.Safe.to_string canonical) in
-      Ok {review_tools; subject=request; layout; route; binding}
+        "schemas", `List (List.map tool_json (schemas review_tools))]) in
+      Ok {review_tools; subject=request; layout; route; question_binding; authority_binding}
 
-let task_review_binding t = t.binding
+let task_review_question_binding t = t.question_binding
+let task_review_authority_binding t = t.authority_binding
 let task_review_base_path t = t.review_tools.config.base_path
 let task_review_root t = t.layout
 let task_review_tools t = t.review_tools
@@ -844,7 +852,8 @@ type goal_review = {
   goal_subject : goal_subject;
   goal_measurement : Goal_measurement.observation;
   goal_layout : string list;
-  goal_binding : string;
+  goal_question_binding : string;
+  goal_authority_binding : string;
 }
 
 let create_goal_review ~config ~goal_id =
@@ -860,25 +869,29 @@ let create_goal_review ~config ~goal_id =
     let tool_json (tool : Types_core.tool_schema) =
       `Assoc ["name", `String tool.name; "description", `String tool.description;
         "input_schema", tool.input_schema] in
-    let projection = `Assoc ["purpose", `String "goal_proof_review";
+    (* The question is the pending proof the Goal asks to have checked. The
+       authority is how a reviewer may look at it now. A later attempt keeps
+       the question and takes the authority current at that attempt. *)
+    let* goal_question_binding = projection_digest (`Assoc ["purpose", `String "goal_proof_review_question";
       "goal_id", `String subject.goal_id; "request_id", `String subject.request_id;
       "criterion", Goal_store.criterion_to_yojson subject.criterion;
       "base_path", `String config.Workspace.base_path;
-      "ownership_root", `String goal_tools.ownership_root;
-      "schemas", `List (List.map tool_json (schemas goal_tools));
       "submitted_evidence", `List (List.map
-        Workspace_verification_store.submitted_evidence_item_to_yojson submitted_evidence)] in
-    let* canonical = Lane_addon_action.canonical projection in
-    let goal_binding = Lane_addon_store.digest (Yojson.Safe.to_string canonical) in
-    (* The report is context, not a grant. Its bytes enter the retained
-       original prompt; an updated report cannot revoke that original's
-       unchanged subject, submitted snapshot or read-only lookup authority. *)
-    Ok {goal_tools; goal_subject=subject; goal_measurement; goal_layout; goal_binding}
+        Workspace_verification_store.submitted_evidence_item_to_yojson submitted_evidence)]) in
+    let* goal_authority_binding = projection_digest (`Assoc ["purpose", `String "goal_proof_review_authority";
+      "ownership_root", `String goal_tools.ownership_root;
+      "schemas", `List (List.map tool_json (schemas goal_tools))]) in
+    (* The report is context, not a grant. A retained original keeps the
+       report it was asked with; an updated report cannot revoke that
+       original's subject, submitted snapshot or read-only lookup authority. *)
+    Ok {goal_tools; goal_subject=subject; goal_measurement; goal_layout;
+      goal_question_binding; goal_authority_binding}
 
 let goal_review_subject t = t.goal_subject
 let goal_review_measurement t = t.goal_measurement
 let goal_review_evidence t = t.goal_tools.submitted_evidence
-let goal_review_binding t = t.goal_binding
+let goal_review_question_binding t = t.goal_question_binding
+let goal_review_authority_binding t = t.goal_authority_binding
 let goal_review_root_layout t = t.goal_layout
 let goal_review_base_path t = t.goal_tools.config.base_path
 let goal_review_lookup t : Task.Anti_rationalization.lookup_surface =

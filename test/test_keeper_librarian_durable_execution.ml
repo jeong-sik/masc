@@ -58,6 +58,8 @@ let claims keepers_dir=match current keepers_dir with None -> [] | Some snapshot
 let originals_for ~keeper_name base_path keepers_dir store =
   Durable_owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name
   |> Result.map_error Durable_owner.error_to_string |> get
+  |> List.map (fun listed -> Durable_owner.load ~store listed
+    |> Result.map_error Durable_owner.error_to_string |> get)
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
   "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]
@@ -2012,6 +2014,38 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
       ~now:(Time_compat.now ()) |> Result.map_error Resolution.error_to_string |> get)));
   refuse_fenced_resume fixture original request;
   no_memory fixture;
+  (* The pass reads a fenced original with no predecessor as its record and
+     index. Without its body file the inventory still lists it. The file
+     is back before any dispatch, whose host-side check reads it; the pass
+     itself is run without the file below. *)
+  let body=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+  let bytes=io (fun () -> In_channel.with_open_bin body In_channel.input_all) in
+  io (fun () -> Sys.remove body);
+  let listed=memory_action fixture (fun () -> Durable_owner.discover ~store:fixture.store
+    ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name)
+    |> Result.map_error Durable_owner.error_to_string |> get in
+  check int "the inventory lists the original without its body" 1 (List.length listed);
+  check bool "reading that original's body fails" true
+    (Result.is_error (memory_action fixture (fun () -> Durable_owner.load ~store:fixture.store (List.hd listed))));
+  (* The host's wake finds a history original's Keeper from the record. *)
+  let wake event=io (fun () -> Server_librarian_addon_wake.For_testing.discover ~config:fixture.config
+    ~store:fixture.store ~after_inventory:(fun () -> ())
+    ~on_original:(fun _ -> fail "the wake read a history original's body") ~event) in
+  (match wake Runtime.Configuration_observed with
+   | Ok (_,refusals,original_keepers) ->
+     check (list string) "a configuration scan finds the Keeper without the body" [keeper_name] original_keepers;
+     check (list string) "and refuses nothing" [] refusals
+   | Error detail -> fail detail);
+  (match wake (Runtime.Exact_result_delivered {installation_id=(Capture.destination request).installation_id;
+     instance_id="fixture-instance";request_id=original.request_id}) with
+   | Ok (keepers,_,_) -> check (list string) "a result hint finds the Keeper without the body" [keeper_name] keepers
+   | Error detail -> fail detail);
+  check bool "a result hint from another installation is refused for its installation" true
+    (wake (Runtime.Exact_result_delivered {installation_id="another-installation";
+      instance_id="fixture-instance";request_id=original.request_id})
+     =Error "Librarian result hint belongs to a different original installation");
+  io (fun () -> write body bytes);
   drive_advanced fixture;
   check int "only the newly captured original reaches the provider" 1 (F.post_count fixture.server);
   check bool "the next history pass actually commits Memory" true
@@ -2023,8 +2057,21 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   refuse_fenced_resume fixture original request;
   let path=Filename.concat (Store.root fixture.store)
     (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+  let honest_fence=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in
   io (fun () -> write path "{unreadable fence");
-  check bool "an unreadable fence still stops inventory" true (Result.is_error (run_worker fixture)))
+  check bool "an unreadable fence still stops inventory" true (Result.is_error (run_worker fixture));
+  io (fun () -> write path honest_fence);
+  (* With the Add-on detached a pass dispatches nothing and stops after its
+     inventory and lineage. It stops the same way without the fenced
+     original's body file. *)
+  set_enabled fixture false;
+  let stopped ()=match run_worker fixture with
+    | Error error -> Consumer.error_to_string error
+    | Ok _ -> fail "a pass without its Add-on did not stop" in
+  let with_body=stopped () in
+  assert_unattached (run_worker fixture);
+  io (fun () -> Sys.remove body);
+  check string "a pass ends the same without the fenced original's body" with_body (stopped ()))
 let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let source = Capture.source request in
@@ -2090,7 +2137,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     Resolution_intent.confirm_fence ~store:fixture.store ~expected:submission.intent fence
       |> Result.map_error Resolution_intent.error_to_string |> get)) in
   check bool "the interruption is after fence but before any child intent" true
-    (fenced.phase=Resolution_intent.Fenced && Resolution_intent.intended_child fenced=None);
+    (fenced.phase=Resolution_intent.Fenced && Resolution_intent.child fenced=None);
   let owner=Capture.physical_owner request in
   let cursor_path=Keeper_external_read_cursor.path_for_keepers_dir
     ~keepers_dir:(Capture.runtime_keepers_dir owner) ~keeper_id:keeper_name in
@@ -2110,7 +2157,7 @@ let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fu
     (match (last request).phase with Refused (No_longer_eligible _) -> true
      | Requested | Refused Observation_changed | Fenced | Child_intended _ | Child_confirmed _ -> false);
   check bool "terminal refusal has no child or claimed Memory receipt" true
-    (Resolution_intent.intended_child (last request)=None && (read request).completion=Resolution_work.Not_observed);
+    (Resolution_intent.child (last request)=None && (read request).completion=Resolution_work.Not_observed);
   check bool "refusal does not move the externally observed cursor" true
     (io (fun () -> Keeper_external_read_cursor.observe ~runtime_keepers_dir:(Capture.runtime_keepers_dir owner)
       ~keeper_name |> get)=cursor);
@@ -2168,10 +2215,146 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     (match List.rev (observe ()).intents with
      | {Resolution_intent.phase=Child_confirmed child;_}::_ -> child.request_id=child_id && F.post_count fixture.server=0
      | _ -> false);
+  (* The resolution record names its child by ID and digest. The child's
+     request is the body file that digest names, and nowhere else. *)
+  let resolution_json ()=io (fun () -> Store.load_history_resolution fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> get |> Option.get) in
+  let child_digest=match List.rev prepared.intents with
+    | {Resolution_intent.phase=Child_confirmed child;_}::_ -> child.request_digest
+    | _ -> fail "resolution did not durably acknowledge its child" in
+  let root=Store.root fixture.store in
+  let child_body=Filename.concat root (Store.tool_request_body_path ~scope:original.scope ~request_digest:child_digest) in
+  let child_record=Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest child_id ^ ".json"))) in
+  let body_bytes=io (fun () -> In_channel.with_open_bin child_body In_channel.input_all) in
+  check bool "the resolution record carries no copy of the child request" true
+    (String.length (Yojson.Safe.to_string (resolution_json ())) < String.length body_bytes);
+  (* A crash after the intent and before the child record: the next wake
+     retains the child from the staged body. *)
+  let unacknowledge ()=
+    let stored=resolution_json () in
+    io (fun () ->
+    let rec rewrite = function
+      | `Assoc fields -> `Assoc (List.map (fun (name,value) -> match name,value with
+          | "kind",`String "child_confirmed" -> name,`String "child_intended"
+          | _ -> name,rewrite value) fields)
+      | `List values -> `List (List.map rewrite values)
+      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as leaf -> leaf in
+    (match Store.publish_history_resolution fixture.store ~scope:original.scope ~request_id:original.request_id
+       ~expected:(Some stored) ~next:(rewrite stored) |> get with
+     | Store.History_resolution_stored -> ()
+     | History_resolution_changed | History_resolution_unconfirmed _ -> fail "fixture could not rewind the resolution phase");
+    Sys.remove child_record) in
+  unacknowledge ();
+  run_resolution ();
+  check bool "a lost child record is retained again from the staged body" true
+    (match List.rev (observe ()).intents with
+     | {Resolution_intent.phase=Child_confirmed child;_}::_ ->
+       child.request_id=child_id && child.request_digest=child_digest && Sys.file_exists child_record
+     | _ -> false);
+  (* Without the staged body the child is not made again. *)
+  unacknowledge ();
+  io (fun () -> Sys.remove child_body);
+  check bool "a lost staged body stops the resolution" true
+    (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
+     | Error (Resolution_intent.Unavailable _) -> not (Sys.file_exists child_record)
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  io (fun () -> write child_body body_bytes);
+  run_resolution ();
+  (* The record names a child by ID and digest only. A record made to name
+     another original of the scope is refused by that original's own
+     predecessor. *)
+  let stranger_request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id (Capture.physical_owner request))
+    ~owner:(Capture.physical_owner request) ~destination:(Capture.destination request)
+    ~source:(Capture.source request) ~preparation:(Capture.preparation request) ()) |> get in
+  let stranger=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store stranger_request)
+    |> Result.map_error Durable_owner.error_to_string |> get in
+  let original_resolution=Filename.concat root (Store.history_resolution_path ~scope:original.scope ~request_id:original.request_id) in
+  let honest=io (fun () -> In_channel.with_open_bin original_resolution In_channel.input_all) in
+  let rec rebind = function
+    | `Assoc fields when List.assoc_opt "kind" fields=Some (`String "child_confirmed") ->
+      `Assoc (List.map (fun (name,value) -> match name with
+        | "child" -> name,`Assoc ["request_id",`String stranger.request_id;"request_digest",`String stranger.request_digest]
+        | _ -> name,value) fields)
+    | `Assoc fields -> `Assoc (List.map (fun (name,value) -> name,rebind value) fields)
+    | `List values -> `List (List.map rebind values)
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as leaf -> leaf in
+  let rebound=Yojson.Safe.to_string (rebind (Yojson.Safe.from_string honest)) in
+  check bool "the fixture rebinds the child" true (rebound<>honest);
+  io (fun () -> write original_resolution rebound);
+  check bool "a record naming an original that is not its child stops the resolution" true
+    (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
+     | Error (Resolution_intent.Unavailable detail) -> detail="Resolution child has no original predecessor"
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  io (fun () -> write original_resolution honest;
+    Sys.remove (Filename.concat root (Filename.concat Store.tool_request_owners_directory
+      (Filename.concat (Store.digest original.scope) (Store.digest stranger.request_id ^ ".json")))));
+  run_resolution ();
   let load_child id=io (fun () ->
     let record=Owner.load ~store:fixture.store ~scope:original.scope ~request_id:id |> owned |> Option.get in
     let request=Capture.restore ~owner:(Capture.physical_owner request) record |> get in record,request) in
   let child,child_request=load_child child_id in
+  (* The Keeper's lineage check reads the fenced parent as its record and
+     the index in that record's summary. *)
+  let module Lineage=Keeper_librarian_history_resolution_lineage in
+  let record_path id=Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest id ^ ".json"))) in
+  let parent_body=Filename.concat root (Store.tool_request_body_path ~scope:original.scope
+    ~request_digest:original.request_digest) in
+  let parent_bytes=io (fun () -> In_channel.with_open_bin parent_body In_channel.input_all) in
+  let lineage ()=io (fun () -> Lineage.confirm_predecessor ~store:fixture.store ~require_confirmed:true child_request) in
+  io (fun () -> Sys.remove parent_body);
+  check (result unit string) "lineage of a resolution child passes without the parent's body" (Ok ()) (lineage ());
+  check bool "the host's lineage check still reads the parent's body" true
+    (Result.is_error (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store
+      ~require_confirmed:true child_request)));
+  io (fun () -> write parent_body parent_bytes);
+  check (result unit string) "the host's lineage check passes with the parent's body" (Ok ())
+    (io (fun () -> Lineage.confirm_predecessor_by_body ~store:fixture.store ~require_confirmed:true child_request));
+  let with_summary_json id name value f=
+    let path=record_path id in
+    let honest=io (fun () -> In_channel.with_open_bin path In_channel.input_all) in
+    let changed=match Yojson.Safe.from_string honest with
+      | `Assoc fields -> `Assoc (List.map (fun (field,stored) -> match field,stored with
+          | "summary",`Assoc summary -> field,`Assoc (List.map (fun (key,old) ->
+              if key=name then key,value else key,old) summary)
+          | _ -> field,stored) fields)
+      | _ -> fail "original record is not an object" in
+    let changed=Yojson.Safe.to_string changed in
+    check bool ("the fixture changes the index value "^name) true (changed<>honest);
+    io (fun () -> write path changed);
+    let result=f () in
+    io (fun () -> write path honest);
+    result in
+  let with_summary_value id name value f=with_summary_json id name (`String value) f in
+  (* The resolution pass reads a waiting pair as two records and their
+     indexes, and neither body. *)
+  let resolution_pass ()=memory_action fixture (fun () -> Resolution_work.run_serialized
+    ~config:fixture.config ~keeper_name) |> Result.map_error Resolution_intent.error_to_string in
+  io (fun () -> Sys.remove parent_body;Sys.remove child_body);
+  check (result unit string) "the resolution pass reads neither body of a waiting pair" (Ok ()) (resolution_pass ());
+  io (fun () -> write parent_body parent_bytes;write child_body body_bytes);
+  check (result unit string) "a parent index with another source digest differs from its fence"
+    (Error "History fence immutable binding differs; publication remains blocked")
+    (with_summary_value original.request_id "source_digest" (String.make 64 '0') resolution_pass);
+  check (result unit string) "a child index naming another predecessor digest stops the resolution"
+    (Error "Resolution child has another original predecessor")
+    (with_summary_json child_id "predecessor" (`Assoc ["request_digest",`String (String.make 64 '0');
+      "request_id",`String original.request_id]) resolution_pass);
+  check (result unit string) "a child index with another source basis breaks the lineage the pass confirms"
+    (Error "History resolution child changed its original source or owner")
+    (with_summary_value child_id "source_basis_digest" (String.make 64 '0') resolution_pass);
+  check (result unit string) "the unchanged pair passes again" (Ok ()) (resolution_pass ());
+  check (result unit string) "a parent index with another source basis breaks the lineage"
+    (Error "History resolution child changed its original source or owner")
+    (with_summary_value original.request_id "source_basis_digest" (String.make 64 '0') lineage);
+  check (result unit string) "the unchanged parent index passes again" (Ok ()) (lineage ());
+  check bool "a record whose index differs from its body is refused where the body is read" true
+    (with_summary_value child_id "exact_digest" (String.make 64 '0') (fun () -> io (fun () ->
+      match Owner.load ~store:fixture.store ~scope:original.scope ~request_id:child_id with
+      | Ok (Some record) -> Capture.restore ~owner:(Capture.physical_owner request) record
+        =Error "Original history index differs from its request"
+      | Ok None | Error _ -> false)));
   let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
     | Ok (Owner.Stored child | Already_stored child) -> child
     | Ok (Unconfirmed detail) -> fail detail
@@ -2190,6 +2373,32 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
     ~validate_tool_request:Keeper_librarian_store_preflight.validator
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
   check int "strict preflight reads the real fenced-parent child link" 0 (List.length preflight.refusals);
+  (* A pass decodes every resolution record of its scope. Preflight refuses
+     one of another schema that no original leads to, and fresh state deletes
+     the scope it stops. *)
+  let scan ()=io (fun () -> Lane_addon_store_preflight.scan
+    ~validate_tool_request:Keeper_librarian_store_preflight.validator
+    ~validate_history_resolution:Resolution_intent.check_published_file
+    Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path |> get) in
+  check int "preflight reads every current resolution record" 0 (List.length (scan ()).refusals);
+  let scope_group=Store.digest original.scope in
+  let absent_id=Capture.fresh_request_id (Capture.physical_owner request) in
+  let stray=Filename.concat root (Store.history_resolution_path ~scope:original.scope ~request_id:absent_id) in
+  io (fun () -> write stray (Yojson.Safe.to_string (`Assoc ["schema",`String "keeper.librarian.history-resolution.v1";
+    "scope",`String original.scope;"request_id",`String absent_id;"intents",`List []])));
+  let scope_directory namespace=Filename.concat root (Filename.concat namespace scope_group) in
+  check bool "preflight refuses a resolution record of another schema whose original has no record" true
+    (match (scan ()).refusals with
+     | [refusal] -> refusal.path=stray && refusal.decoder=Lane_addon_store_preflight.History_resolution
+       && List.for_all (fun namespace -> List.mem (scope_directory namespace) refusal.delete)
+         [Store.tool_request_owners_directory;Store.tool_request_bodies_directory;
+          Store.history_fences_directory;Store.history_resolutions_directory]
+     | [] | _::_::_ -> false);
+  check bool "that record stops the Keeper's resolution pass" true
+    (match memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name) with
+     | Error (Resolution_intent.Unavailable _) -> true
+     | Ok () | Error (Invalid _ | Conflict _ | Publication_uncertain _) -> false);
+  io (fun () -> Sys.remove stray);
   let resume_descendant ()=
     let original,request=load_child descendant_id in
     memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config

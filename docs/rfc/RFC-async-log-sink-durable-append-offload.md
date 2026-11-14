@@ -27,7 +27,7 @@ fiber), and the mutex additionally serializes concurrent producers. This is a
 latent throughput bottleneck for **all 644+ `Log.{Runtime,Keeper,Mcp}.{warn,error}`
 call sites**, not any one subsystem.
 
-It became load-bearing when #25162 (`Oas_diag_sink`) added a new high-rate
+It became load-bearing when #25162 (`Provider_diag_log_sink`) added a new high-rate
 producer: agent_core `Llm_provider.Diag.warn/error` now route into `Log.Runtime`, so a
 provider 4xx/429 storm (observed: deepseek-v4-flash ~78% 4xx) fires one
 synchronous durable flush per rejected request, serializing provider fibers on
@@ -70,7 +70,7 @@ gives the load the queue must take:
   and drop-with-a-counter is the manifest's telemetry-as-fix signature.
 - Changing what is logged, the log format, or the in-memory ring buffer
   (`buf`) that the dashboard reads. Only the file append is deferred.
-- A per-producer bound at `Oas_diag_sink` (rejected: see §6).
+- A per-producer bound at `Provider_diag_log_sink` (rejected: see §6).
 
 ## 3. Design: a backpressured queue drained by one OS writer thread
 
@@ -159,9 +159,9 @@ nobody drains.
    the record being written. The queue is normally empty within one write;
    its depth bounds the loss.
 
-## 6. Alternative rejected: bound at `Oas_diag_sink`
+## 6. Alternative rejected: bound at `Provider_diag_log_sink`
 
-Dedupe/sample/rate-bound the `agent_core:*` warns at `oas_diag_sink.ml:24-48`. Rejected
+Dedupe/sample/rate-bound the `agent_core:*` warns at `provider_diag_log_sink.ml:24-48`. Rejected
 as a standalone fix: (a) it quiets only the one new producer while the other
 644+ warn/error sites keep hitting the same synchronous flush; (b) cap / cooldown
 / dedup / sample is an explicit manifest workaround-rejection signature requiring

@@ -162,6 +162,11 @@ val health_label : ko:bool -> reading -> string
     without the keeper means no fiber is running it. Every keeper surface
     names these readings with this label. *)
 
+val status_label : ko:bool -> reading -> string
+(** A keeper's status in words: ["paused · "] (일시정지 · ) when the operator
+    paused it, then {!health_label}. The selected-keeper panel and the action
+    notices say this. *)
+
 (** A lifecycle action the operator can take on one keeper.
 
     The pairs are deliberate. [Pause] and [Resume] move a live lane in and out
@@ -183,18 +188,21 @@ type action =
 val action_key : action -> string
 (** The single key that submits the action on the Keepers surface. *)
 
-val action_label : action -> string
+val action_label : ko:bool -> action -> string
+(** The word for an action, Korean when [ko]. The key hints, the footer's
+    armed item and the notices about the action say this word. *)
 
-val action_gerund : action -> string
-(** Present-tense label for an action already in flight ("pausing"). *)
+val action_gerund : ko:bool -> action -> string
+(** Present-tense label for an action already in flight ("pausing",
+    "일시 정지하는 중"). *)
 
-val purge_artifacts : string list
+val purge_artifacts : ko:bool -> string list
 (** What the server's purge plan removes, in the order it removes it
-    ([Keeper_shutdown_types.dashboard_purge_artifact_plan]). The confirmation
-    line lists these, so an operator reads what goes before pressing again --
-    the web dashboard shows the same list from its own copy
-    (dashboard/src/api/keeper-lifecycle.ts). Drift between the three is a
-    confirmation that understates what it confirms. *)
+    ([Keeper_shutdown_types.dashboard_purge_artifact_plan]), Korean when
+    [ko]. The confirmation line lists these, so an operator reads what goes
+    before pressing again -- the web dashboard shows the same list from its
+    own copy (dashboard/src/api/keeper-lifecycle.ts). Drift between the three
+    is a confirmation that understates what it confirms. *)
 
 val requires_confirmation : action -> bool
 (** True for the actions that end a fiber, and for [Delete], which has no
@@ -266,6 +274,9 @@ type outcome =
       (** 409 — the durable owner state refuses this step. For [Boot] this is
           the answer {!recovers_from_conflict} exists for. *)
   | Rejected of { status : int; detail : string }
+  | Unbound_purge_receipt of { status : int }
+      (** A 2xx purge answer that does not name the exact keeper and a
+          durable operation. Nothing confirms what it accepted. *)
 
 val classify_response : status:int -> body:string -> outcome
 
@@ -276,6 +287,32 @@ val classify_purge_response : keeper_name:string -> status:int -> body:string ->
     pausing is still a rejection. A body that is not the [{ok, error}] shape
     degrades to its own text rather than to silence: the operator needs to see
     what the server said even when it said it in an unexpected shape. *)
+
+(** {1 Action failure} *)
+
+(** Why an action's requests ended without an accepted answer. The text a
+    case carries was written outside this screen; {!failure_text} writes the
+    words around it in the screen language. *)
+type failure =
+  | Empty_plan
+      (** {!plan} gave no step. It never does; an empty walk is still not a
+          success. *)
+  | Followup_failed of string
+      (** The last step answered {!Committed_followup_failed}: the durable
+          pause cleared and the live resume did not. Carries the server's
+          detail. *)
+  | Refused of { status : int; detail : string }
+      (** The server refused a step, including a 409 that no recovery
+          follows. Carries the status and the server's detail. *)
+  | Unbound_receipt of int
+      (** The purge answered {!Unbound_purge_receipt} with this status. *)
+  | No_answer of string
+      (** No HTTP answer was read: the workspace check withdrew the request,
+          the transport failed, or an exception escaped. Carries that text. *)
+
+val failure_text : ko:bool -> failure -> string
+(** The words a notice puts after "<keeper> <action> failed:", Korean when
+    [ko]. Carried text is written as it came. *)
 
 (** {1 Confirmation gate} *)
 
@@ -341,3 +378,9 @@ val decode_deletion_inventory : Yojson.Safe.t -> (deletion_inventory, string) re
 val deletion_keeper_name : deletion_row -> string
 val deletion_operation_id : deletion_row -> Masc.Keeper_shutdown_types.Operation_id.t
 val deletion_json : deletion_row -> Yojson.Safe.t
+
+val deletion_status : ko:bool -> deletion_row -> string
+(** Where a deletion record stands, in words, Korean when [ko]. A shutdown
+    phase is named by meaning, not by its wire spelling; the words follow the
+    web dashboard's (dashboard/src/api/keeper-lifecycle.ts). A failure or a
+    configuration error carries its detail after [": "]. *)

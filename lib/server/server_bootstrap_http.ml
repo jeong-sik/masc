@@ -24,24 +24,23 @@ let bind_address_error_to_string = function
       Masc_network_defaults.masc_http_default_host
 ;;
 
+let advertised_base_url ~address ~port =
+  Masc_network_defaults.http_origin
+    ~address:(Masc_network_defaults.advertised_bind_address address)
+    ~port
+;;
+
 let make_http_config ~address ~port : Http.config =
   let config = { Http.default_config with port; host = Ipaddr.to_string address } in
-  let advertised_host =
-    if Server_auth.is_unspecified_host config.host
-    then Masc_network_defaults.masc_http_default_host
-    else config.host
-  in
+  let base_url = advertised_base_url ~address ~port in
   Unix.putenv Env_config_core.host_env_key config.host;
   Unix.putenv Env_config_core.http_port_env_key (string_of_int config.port);
   Unix.putenv
     Env_config_core.mcp_url_env_key
-    (Printf.sprintf "http://%s:%d/mcp" advertised_host config.port);
+    (base_url ^ "/mcp");
   (match Sys.getenv_opt Env_config_core.http_base_url_env_key with
    | Some existing when String.trim existing <> "" -> ()
-   | _ ->
-     Unix.putenv
-       Env_config_core.http_base_url_env_key
-       (Printf.sprintf "http://%s:%d" advertised_host config.port));
+   | _ -> Unix.putenv Env_config_core.http_base_url_env_key base_url);
   config
 ;;
 
@@ -89,7 +88,10 @@ let print_startup_banner
       ~masc_dir
       ~path_diagnostics
   =
-  Printf.printf "MASC MCP Server listening on http://%s:%d\n%!" config.host config.port;
+  Printf.printf
+    "MASC MCP Server listening on http://%s:%d\n%!"
+    Masc_network_defaults.(url_host_to_string (url_host_of_string config.host))
+    config.port;
   Printf.printf "   Base path: %s\n%!" resolved_base;
   if resolved_base <> base_path
   then Printf.printf "   Base path (input): %s\n%!" base_path;
@@ -195,13 +197,27 @@ let h1_request_handler request_handler client_addr (reqd : Httpun.Reqd.t Gluten.
   with_request_lane (Httpun.Reqd.request reqd.Gluten.Reqd.reqd).meth (fun () ->
     request_handler client_addr reqd)
 
+(* The body is a fixed sentence: an exception's text can name a file of the
+   server, so it goes to the log. httpun calls this handler only for a
+   request with no response yet, and nothing else logs that failure
+   ([Http_reqd.report_exn] logs the ones this handler is not called for).
+   httpun answers a request it could not parse here too; that is the
+   client's error and stays at debug. *)
 let h1_error_handler _client_addr ?request:_ error respond =
   let msg =
     match error with
-    | `Exn exn -> Printexc.to_string exn
-    | `Bad_request -> "Bad request"
-    | `Bad_gateway -> "Bad gateway"
-    | `Internal_server_error -> "Internal server error"
+    | `Exn exn ->
+      Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
+      Http_error_body.internal_server_error
+    | `Internal_server_error ->
+      Log.Http.error "[http] request failed: %s" Http_error_body.internal_server_error;
+      Http_error_body.internal_server_error
+    | `Bad_gateway ->
+      Log.Http.error "[http] request failed: %s" Http_error_body.bad_gateway;
+      Http_error_body.bad_gateway
+    | `Bad_request ->
+      Log.Http.debug "[http] request refused: %s" Http_error_body.bad_request;
+      Http_error_body.bad_request
   in
   let body = respond (Httpun.Headers.of_list [ "content-type", "text/plain" ]) in
   Httpun.Body.Writer.write_string body msg;
@@ -233,7 +249,8 @@ let record_cleartext_accept ~mode latency_s =
    is followed by a backoff sleep; [on_stop ()] runs once when the loop ends
    by cancellation. [serve_connection ~conn_sw client_addr connection] runs
    in a fiber of its own whose release records the close and closes the
-   accepted flow. [connection] is that flow with the connection's bounds
+   accepted flow. A failure of that connection's switch, from any of its
+   fibers, is logged and ends with the connection. [connection] is that flow with the connection's bounds
    (RFC-0518 D4, D6): no listener reads or writes the flow itself. *)
 let run_accept_loop
       ~sw
@@ -255,16 +272,30 @@ let run_accept_loop
       disable_nagle flow;
       record_accept (Unix.gettimeofday () -. accept_start);
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Switch.run ~name:listener_tag (fun conn_sw ->
-          on_connection_release conn_sw ~record_closed ~listener_tag flow;
-          let connection =
-            Server_connection_socket.wrap ~sw:conn_sw ~clock ~listener_tag client_addr flow
-          in
-          try serve_connection ~conn_sw client_addr connection with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Misc.error "[%s] connection error: %s"
-              listener_tag (Printexc.to_string exn)));
+        try
+          Eio.Switch.run ~name:listener_tag (fun conn_sw ->
+            on_connection_release conn_sw ~record_closed ~listener_tag flow;
+            let connection =
+              Server_connection_socket.wrap ~sw:conn_sw ~clock ~listener_tag client_addr flow
+            in
+            try serve_connection ~conn_sw client_addr connection with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Misc.error "[%s] connection error: %s"
+                listener_tag (Printexc.to_string exn))
+        with
+        | exn ->
+          (* The connection's switch failed: a fiber or daemon on [conn_sw]
+             other than [serve_connection] raised, and [Eio.Switch.run] raises
+             it again here. An exception that leaves this fiber fails [sw],
+             the listener's switch. [Eio.Fiber.check] raises when this fiber's
+             own context, the listener's, is cancelled, so the listener's end
+             goes on as it does. Otherwise the failure is this connection's,
+             whatever the exception is: a [Cancelled] that a connection fiber
+             carried out of some other scope does not cancel the listener. *)
+          Eio.Fiber.check ();
+          Log.Misc.error "[%s] connection failed: %s"
+            listener_tag (Printexc.to_string exn));
       accept_loop 0.05
     with
     | Eio.Cancel.Cancelled _ as e ->

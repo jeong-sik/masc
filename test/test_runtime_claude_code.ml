@@ -817,6 +817,38 @@ let test_dynamic_tool_bytes_counts_meta () =
     (Option.fold ~none:0 ~some:(fun m -> String.length (Yojson.Safe.to_string m)) spec_meta)
 ;;
 
+(* The turn log reports the [Upfront] share beside the total, because the total
+   also counts the tools behind Claude Code's tool search. The share is sized
+   by the same function as the total, so the two parts add up to it. *)
+let test_upfront_tools_split_the_surface_bytes () =
+  let tool name loading =
+    { Runtime_claude_code.name
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  let first = tool "a" Runtime_official_client_tool.Upfront in
+  let deferred = tool "bb" Runtime_official_client_tool.On_demand in
+  let last = tool "ccc" Runtime_official_client_tool.Upfront in
+  let tools = [ first; deferred; last ] in
+  let upfront = Runtime_official_client_tool.upfront_tools tools in
+  check (list string) "only Upfront tools, in order" [ "a"; "ccc" ]
+    (List.map (fun (t : Runtime_claude_code.dynamic_tool) -> t.name) upfront);
+  check int "upfront and on-demand bytes add up to the total"
+    (Runtime_claude_code.dynamic_tool_bytes tools)
+    (Runtime_claude_code.dynamic_tool_bytes upfront
+     + Runtime_claude_code.dynamic_tool_bytes [ deferred ]);
+  check int "no tools gives no upfront tools" 0
+    (List.length (Runtime_official_client_tool.upfront_tools []))
+;;
+
 (* A result-only aggregate is the turn's spend. No assistant frame reported
    usage, so no request's occupancy is known. *)
 let test_result_usage_is_carried () =
@@ -5019,6 +5051,10 @@ let () =
             "dynamic tool bytes counts _meta"
             `Quick
             test_dynamic_tool_bytes_counts_meta
+        ; test_case
+            "upfront tools split the surface bytes"
+            `Quick
+            test_upfront_tools_split_the_surface_bytes
         ; test_case
             "partial usage does not fail the turn"
             `Quick

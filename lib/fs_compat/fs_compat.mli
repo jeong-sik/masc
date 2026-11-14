@@ -1431,8 +1431,9 @@ end
 (** Read a private JSONL store through the writer's own framing rule (a tail
     without ['\n'] is not a row: {!append_private_jsonl_durable_locked_result}
     cuts it before writing, and
-    {!append_private_jsonl_durable_locked_at_end_offset_result} refuses to
-    append after it), while holding the same per-path in-process mutex and
+    {!append_private_jsonl_durable_locked_at_end_offset_result} cuts it for
+    a caller whose offset stops before it), while holding the same per-path
+    in-process mutex and
     a shared cross-process lock the durable writer takes exclusively — so no
     append is in progress while the bytes are read, and the read runs in a
     systhread when the caller is an Eio fiber. The complete rows come back
@@ -1979,9 +1980,9 @@ type 'kept private_jsonl_rows_read =
 type 'kept private_jsonl_rows_from_cursor =
   { read : 'kept private_jsonl_rows_read
   ; rows : string
-    (** The bytes read, up to and including their last newline. *)
-  ; incomplete_tail : string
-    (** The bytes after that newline; [""] when the file ends with a row. *)
+    (** The bytes read, up to and including their last newline. Bytes after
+        it are an append that stopped part way and not a row: [decide] does
+        not receive them. *)
   ; rows_end : Private_jsonl_cursor.t
     (** This file at the end of [rows]. *)
   }
@@ -1999,6 +2000,11 @@ type 'kept private_jsonl_rows_from_cursor =
     replaced, shortened or rewritten across that offset does not describe this
     one. When the caller has taken [rows] into what it keeps, it passes
     [rows_end] with that as [after] next time.
+
+    A suffix [decide] returns is written after the last row. Bytes after the
+    file's last newline are cut and the cut fsynced before the suffix goes in,
+    as {!append_private_jsonl_durable_locked_result} cuts them; an update
+    whose [decide] returns no suffix leaves them where they are.
 
     Of the bytes before the cursor, only the last is read. A change below it
     that keeps the device, the inode, at least the length and a row start at
@@ -2111,8 +2117,8 @@ val rewrite_private_file_durable_locked_result :
 
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
-      (** The file ends with a row that has no ['\n'] and the caller asked for
-          an exact end offset. *)
+      (** The file ends with a row that has no ['\n'] and the caller's end
+          offset counts that row in. *)
   | Incomplete_jsonl_tail_truncate_failed of durable_append_failure
       (** Reading the file to find the last ['\n'], cutting the final row that
           has none, or fsyncing the cut failed. The suffix was not written. *)
@@ -2147,13 +2153,17 @@ val append_private_jsonl_durable_locked_with_end_offset_result :
   string ->
   (int, private_jsonl_append_error) private_file_transaction_outcome
 
-(** Append only when the file's locked byte length is exactly
-    [expected_end_offset]. A stale writer receives [End_offset_mismatch] and
-    writes no bytes. A file that ends without ['\n'] is refused with
-    [Incomplete_jsonl_tail] and left as it is: the caller's condition is the
-    length it observed, so cutting bytes under it would change what that
-    condition meant. The successful result is the committed newline-end byte
-    offset. *)
+(** Append only when the file's rows end at [expected_end_offset] under the
+    lock: the byte after the last ['\n']. A stale writer receives
+    [End_offset_mismatch] and writes no bytes. Bytes after the last ['\n'] are
+    an append a crash cut short and were never a row, so when
+    [expected_end_offset] names that ['\n'] boundary they are cut exactly as
+    {!append_private_jsonl_durable_locked_with_end_offset_result} cuts them,
+    and the append writes from the boundary; the bytes the caller read are
+    not touched. A caller whose offset is the full length of such a file
+    counted the fragment as a row: it is refused with [Incomplete_jsonl_tail]
+    and the file is left as it is. The successful result is the committed
+    newline-end byte offset. *)
 val append_private_jsonl_durable_locked_at_end_offset_result :
   string ->
   expected_end_offset:int ->

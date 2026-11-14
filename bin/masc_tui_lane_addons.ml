@@ -37,6 +37,8 @@ type instance = {
   installation_id : string option; source_path : string option; configuration_revision : string option; binding : Yojson.Safe.t; outputs : Row.output_ports;
   skills_directory : string option; ui_category : Masc.Lane_addon_category.t option; incarnation : string; action_schema : Yojson.Safe.t option; binding_schema : Yojson.Safe.t option; display : Masc.Lane_addon_presentation.t;
   host_requests : (host_requests, string) result option;
+  row_actions : Masc.Lane_addon_row_action.verdict list option;
+  action_tool : string option;
 }
 type declaration_origin = Parsed_declaration | Issue_only
 type declaration = {
@@ -57,10 +59,18 @@ type request = Inspect | Attach of Yojson.Safe.t | Observe of string | Detach of
   | Slice of (string * string) list | Evidence of Yojson.Safe.t
   | Act of action_request | Action_status of action_request
   | Subscriptions of Yojson.Safe.t
+type row_entry = {
+  index : int; label : string;
+  filled : (Masc.Lane_addon_row_action.filled, Masc.Lane_addon_row_action.unfilled list) result;
+}
+type row_stage =
+  | Row_list of { row_id : string; row_title : string; entries : row_entry list }
+  | Row_form of { row_id : string; index : int; label : string; locked : (string * Yojson.Safe.t) list }
 type action_menu = {
   target_id : string; target_incarnation : string; target_title : string; request_id : string;
-  schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
+  tool_name : string; schema : Yojson.Safe.t; choices : Yojson.Safe.t list; cursor : int;
   form : Masc_tui_schema_form.t option;
+  row : row_stage option;
 }
 type focus = Timeline | Connections | Configurations | Instances | Rows
 type presentation = Summary | Technical | Flow
@@ -264,6 +274,7 @@ let instance json =
   let* package = field "package" json in
   let* outputs = get output_ports "outputs" package in
   let* skills_directory = optional "skills_directory" text package in
+  let* action_tool = optional "action_tool" text package in
   let* ui_category = match package with `Assoc fields -> ui_category_of fields | _ -> Error "expected package object" in
   let* incarnation = get text "incarnation" json in
   let* action_schema = optional "action_schema" (function `Assoc _ as schema -> Ok schema | _ -> Error "expected action schema") json in
@@ -278,9 +289,20 @@ let instance json =
   let host_requests = match json with
     | `Assoc fields -> Option.map host_requests (List.assoc_opt "host_requests" fields)
     | _ -> None in
+  (* The host writes [row_actions] only for a package that declares row
+     actions; one verdict stands for each declared action, in order. *)
+  let* row_actions = match json with
+    | `Assoc fields -> (match List.assoc_opt "row_actions" fields with
+        | None -> Ok None
+        | Some value -> Masc.Lane_addon_row_action.snapshot_of_json value)
+    | _ -> Error "expected instance object" in
+  let* () = match row_actions with
+    | Some verdicts when List.length verdicts <> List.length display.Masc.Lane_addon_presentation.actions ->
+        Error "row action verdicts do not match the declared row actions"
+    | Some _ | None -> Ok () in
   Ok { id; run_id; addon_id; title; revision; phase; runtime_presence; observation_seq; rows_count;
     installation_id;source_path;configuration_revision;binding;outputs;skills_directory;ui_category;incarnation;action_schema;binding_schema;display;
-    host_requests }
+    host_requests; row_actions; action_tool }
 let output json =
   let* rows = field "rows" json in
   let* coverage = field "coverage" json in
@@ -1285,57 +1307,142 @@ let overview_hints view =
       "D:raw  J/K:scroll"
       ^ (if view.loading then "  Reading …" else "  r:refresh")
 
-let open_actions ~request_id view =
-  let* instance = match action_target view with
-    | Some instance -> Ok instance
-    | None -> Error "Selected installation or event has no available worker; select an instance explicitly" in
+(* The advertised lane action tool, its name and its [action] property, the
+   part the operator fills. The host checks a send under the package's tool
+   name, so the screen checks under the same one. *)
+let advertised_action (instance : instance) =
   let* () = if can_observe instance then Ok () else Error "This instance is unavailable for actions; D shows its state and retained evidence." in
-  let* schema = match instance.action_schema with
-    | Some schema -> Ok schema
-    | None -> Error "This Plugin provides observations only. Press o to observe." in
+  let* tool_name,schema = match instance.action_tool,instance.action_schema with
+    | Some tool_name,Some schema -> Ok (tool_name,schema)
+    | Some _,None | None,(Some _ | None) -> Error "This Plugin provides observations only. Press o to observe." in
   let* () = Action.validate_schema schema in
   let* action_schema =
     let* properties = field "properties" schema in
     field "action" properties in
+  Ok (tool_name,schema,action_schema)
+
+(* Installation details can own a worker independently of the overview
+   cursor. The menu and the list it returns to keep that exact worker. *)
+let with_menu view (instance : instance) menu =
+  let view = select_overview_anchor (set_presentation view Summary)
+      (Some (Worker_anchor (instance.id, instance.incarnation))) in
+  {view with action_menu=Some menu;scroll=0;error=None}
+
+let instance_menu ~request_id view (instance : instance) =
+  let* tool_name,schema,action_schema = advertised_action instance in
   let* choices,form = match finite_values action_schema with
     | Some (_::_ as choices) -> Ok (choices,None)
     | Some [] | None ->
         let* form = Masc_tui_schema_form.create ~schema:action_schema ~initial:(`Assoc []) in
         Ok ([],Some form) in
   let choices = List.filter (fun action ->
-    Result.is_ok (Action.validate ~schema ~name:"lane_act"
+    Result.is_ok (Action.validate ~schema ~name:tool_name
       (Action.arguments ~instance_id:instance.id ~request_id ~action))) choices in
   if choices=[] && Option.is_none form then Error "The advertised schema has no valid preset action. D shows details."
-  else
-    (* Installation details can own a worker independently of the overview
-       cursor. The menu and the list it returns to keep that exact worker. *)
-    let view = select_overview_anchor (set_presentation view Summary)
-        (Some (Worker_anchor (instance.id, instance.incarnation))) in
-    Ok {view with action_menu=Some {
+  else Ok (with_menu view instance {
       target_id=instance.id;target_incarnation=instance.incarnation;target_title=instance.title;request_id;
-      schema;choices;form;cursor=0};scroll=0;error=None}
+      tool_name;schema;choices;form;cursor=0;row=None})
+
+(* RFC lane-row-offers-actions-filled-from-its-own-fields §2.6: the actions the
+   row's lane declares, each with what this row gives it. Screens read this
+   value; an unfillable action stays in it with its reasons. *)
+let row_action_entries (instance : instance) (row : Row.row) =
+  let rec pairs actions verdicts = match actions,verdicts with
+    | action :: actions,verdict :: verdicts -> (action,verdict) :: pairs actions verdicts
+    | [],_ | _,[] -> [] in
+  match instance.action_tool,instance.action_schema,instance.row_actions with
+  | Some tool_name,Some tool_schema,Some verdicts ->
+      List.concat (List.mapi (fun index ((action : Masc.Lane_addon_presentation.row_action),verdict) ->
+        if String.equal row.lane_id (instance.id ^ "/" ^ action.lane_id) then
+          [{index;label=action.label;
+            filled=Masc.Lane_addon_row_action.fill ~tool_name ~tool_schema verdict action (`Assoc row.fields)}]
+        else []) (pairs instance.display.Masc.Lane_addon_presentation.actions verdicts))
+  | Some _,Some _,None | Some _,None,(Some _ | None) | None,(Some _ | None),(Some _ | None) -> []
+
+(* In an instance's details j/k choose a row, so [a] offers that row's actions
+   to the instance that produced it. Elsewhere [a] acts on the selected
+   instance as before. *)
+let row_menu view = match view.screen,view.snapshot,selected_row view with
+  | Detail _,Some snapshot,Some row ->
+      Option.bind (row_owner snapshot.instances row) (fun owner ->
+        match row_action_entries owner row with
+        | [] -> None
+        | entries -> Some (owner,row,entries))
+  | (Overview | Detail _),_,_ -> None
+
+let open_actions ~request_id view =
+  match row_menu view with
+  | Some (owner,row,entries) ->
+      let* tool_name,schema,_ = advertised_action owner in
+      Ok (with_menu view owner {
+        target_id=owner.id;target_incarnation=owner.incarnation;target_title=owner.title;request_id;
+        tool_name;schema;choices=[];form=None;cursor=0;
+        row=Some (Row_list {row_id=row.id;row_title=row.title;entries})})
+  | None ->
+      let* instance = match action_target view with
+        | Some instance -> Ok instance
+        | None -> Error "Selected installation or event has no available worker; select an instance explicitly" in
+      instance_menu ~request_id view instance
 
 let move_action view delta =
   {view with scroll=0;action_menu=Option.map (fun menu ->
-    {menu with cursor=max 0 (min (List.length menu.choices - 1) (menu.cursor+delta))}) view.action_menu}
+    let count = match menu.row with
+      | Some (Row_list {entries;_}) -> List.length entries + 1
+      | Some (Row_form _) | None -> List.length menu.choices in
+    {menu with cursor=max 0 (min (count - 1) (menu.cursor+delta))}) view.action_menu}
+
+let unfilled_text : Masc.Lane_addon_row_action.unfilled -> string = function
+  | Not_offered refusal -> (match refusal with
+      | Schema_shape_unsupported -> "the action schema has a shape row actions cannot use"
+      | No_branch_accepts -> "no alternative of the action schema takes it"
+      | Several_branches_accept branches ->
+          "alternatives " ^ String.concat ", " (List.map (fun branch -> string_of_int (branch+1)) branches)
+          ^ " all take it"
+      | Member_not_in_branch member -> "the action has no member " ^ member
+      | Fixed_value_rejected member -> "the action refuses the package value of " ^ member)
+  | Row_value_absent {member;path} -> "this row has no " ^ String.concat "." path ^ " for " ^ member
+  | Row_value_wrong_shape {member;path} -> "this row's " ^ String.concat "." path ^ " cannot give " ^ member
+  | Row_value_rejected {member;detail} -> member ^ ": " ^ detail
+
+(* Sending reads the row again. A row that left the snapshot, or now gives
+   other values, does not send what the operator reviewed. *)
+let row_still_gives snapshot (instance : instance) ~tool_name ~tool_schema ~row_id ~index ~locked =
+  match List.find_opt (fun (row : Row.row) -> String.equal row.id row_id) snapshot.output.rows with
+  | None -> Error "The row is gone. Open its action again."
+  | Some row ->
+      let verdict = Option.bind instance.row_actions (fun verdicts -> List.nth_opt verdicts index) in
+      (match List.nth_opt instance.display.Masc.Lane_addon_presentation.actions index,verdict with
+       | Some action,Some verdict ->
+           (match Masc.Lane_addon_row_action.fill ~tool_name ~tool_schema verdict action (`Assoc row.fields) with
+            | Ok filled when filled.Masc.Lane_addon_row_action.locked=locked -> Ok ()
+            | Ok _ | Error _ -> Error "The row changed. Open its action again.")
+       | Some _,None | None,(Some _ | None) -> Error "The row changed. Open its action again.")
 
 let submit_action view =
   let* menu = match view.action_menu with
     | Some menu -> Ok menu | None -> Error "Choose an action first." in
-  let* instance = match Option.bind view.snapshot (fun snapshot ->
-    List.find_opt (fun instance -> String.equal instance.id menu.target_id
+  let changed = "The selected Plugin changed. Refresh and choose its action again." in
+  let* snapshot = Option.to_result ~none:changed view.snapshot in
+  let* instance = match List.find_opt (fun instance -> String.equal instance.id menu.target_id
       && String.equal instance.incarnation menu.target_incarnation
-      && instance.action_schema=Some menu.schema) snapshot.instances) with
+      && instance.action_tool=Some menu.tool_name
+      && instance.action_schema=Some menu.schema) snapshot.instances with
     | Some instance -> Ok instance
-    | None -> Error "The selected Plugin changed. Refresh and choose its action again." in
+    | None -> Error changed in
   let* () = if can_observe instance then Ok ()
     else Error "The selected worker is no longer available for actions." in
+  let* () = match menu.row with
+    | None -> Ok ()
+    | Some (Row_list _) -> Error "Choose one of the row's actions first."
+    | Some (Row_form {row_id;index;locked;_}) ->
+        row_still_gives snapshot instance ~tool_name:menu.tool_name ~tool_schema:menu.schema
+          ~row_id ~index ~locked in
   let* action = match menu.form with
     | Some form -> Masc_tui_schema_form.value form
     | None -> (match List.nth_opt menu.choices menu.cursor with
       | Some action -> Ok action | None -> Error "No selected action.") in
   let* action = Action.canonical action in
-  let* _ = Action.validate ~schema:menu.schema ~name:"lane_act"
+  let* _ = Action.validate ~schema:menu.schema ~name:menu.tool_name
       (Action.arguments ~instance_id:instance.id ~request_id:menu.request_id ~action) in
   Ok {instance_id=instance.id;incarnation=instance.incarnation;request_id=menu.request_id;action}
 
@@ -1353,6 +1460,36 @@ let edit_action ~key view =
   | Masc_tui_schema_form.Cancel -> Ok ({view with action_menu=None;error=None;scroll=0},None)
   | Updated form -> Ok ({view with action_menu=Some {menu with form=Some form};error=None;scroll=0},None)
   | Submit _ -> let* request = submit_action view in Ok (view,Some request)
+
+(* Enter on a menu without a form. In a row's list it opens the chosen row
+   action, or the instance's other actions from the last line; an unfillable
+   action says why and stays. A preset action is sent. *)
+let enter_action view =
+  match view.action_menu with
+  | Some ({row=Some (Row_list {row_id;entries;_});_} as menu) ->
+      (match List.nth_opt entries menu.cursor with
+       | Some {filled=Ok filled;index;label} ->
+           let* action_schema =
+             let* properties = field "properties" menu.schema in
+             field "action" properties in
+           let locked = filled.Masc.Lane_addon_row_action.locked in
+           let* form = Masc_tui_schema_form.create_for_row ~schema:action_schema
+               ~branch:filled.Masc.Lane_addon_row_action.branch ~locked in
+           Ok ({view with action_menu=Some {menu with cursor=0;form=Some form;
+               row=Some (Row_form {row_id;index;label;locked})};scroll=0;error=None},None)
+       | Some {filled=Error unfilled;label;_} ->
+           Ok ({view with error=Some (Input_failure (label ^ " is unavailable: "
+               ^ String.concat "; " (List.map unfilled_text unfilled)))},None)
+       | None ->
+           let target = Option.bind view.snapshot (fun snapshot ->
+             List.find_opt (fun (instance : instance) -> String.equal instance.id menu.target_id
+               && String.equal instance.incarnation menu.target_incarnation) snapshot.instances) in
+           (match target with
+            | Some instance ->
+                let* view = instance_menu ~request_id:menu.request_id view instance in Ok (view,None)
+            | None -> Error "The selected Plugin changed. Refresh and choose its action again."))
+  | Some {row=Some (Row_form _) | None;_} | None ->
+      let* request = submit_action view in Ok (view,Some request)
 
 let open_records view =
   let* session = match selected_document view with
@@ -1530,15 +1667,20 @@ let value_row_spans ~width (row : value_row) =
        | None -> Span.empty) ] in
   led_rows ~width ~lead ~text_style:Span.plain row.text
 
+let reading_refusal_text : Masc.Lane_addon_presentation.reading_refusal -> string = function
+  | Field_absent -> "field unavailable"
+  | Field_wrong_shape -> "field path does not address an object"
+  | Format_mismatch -> "field does not match declared display format"
+
 let reading_spans ~width ((reading : Masc.Lane_addon_presentation.reading), value) =
   let unit = Option.fold ~none:"" ~some:(fun unit -> " " ^ unit) reading.unit in
   let label = Span.text (label_style ()) (Masc.Tui_terminal_text.sanitize_terminal_text reading.label) in
   let beside text = led_rows ~width ~lead:(Span.concat [ label; Span.text Span.plain "  " ])
       ~text_style:Span.plain (text ^ unit) in
   match value with
-  | Error detail ->
+  | Error refusal ->
       led_rows ~width ~lead:(Span.concat [ label; Span.text Span.plain "  " ])
-        ~text_style:(muted_style ()) ("unavailable · " ^ detail)
+        ~text_style:(muted_style ()) ("unavailable · " ^ reading_refusal_text refusal)
   | Ok value ->
       let outline () =
         Span.concat [ label; Span.text (muted_style ()) unit ]
@@ -2408,17 +2550,38 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
   | None,Some menu,_ ->
-      (["Run action on " ^ menu.target_title]
-       @ diagnostic_lines view
-       @ (match menu.form with
-       | Some form -> Masc_tui_schema_form.lines ~show_description:true form
-       | None -> [
-        Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
-          (menu.cursor+1) (List.length menu.choices);
-        "J/K:scroll action details"]
-       @ (match List.nth_opt menu.choices menu.cursor with
-          | Some action -> action_fields "" action
-          | None -> ["No selected action"])))
+      (match menu.row with
+       | Some (Row_list {row_title;entries;_}) ->
+           (* The title names the chosen row and the instance that produced
+              it; an action the row cannot fill stays listed with why. *)
+           [Printf.sprintf "Actions for %s · %s" row_title menu.target_title]
+           @ diagnostic_lines view
+           @ ["Up/Down:choose · Enter:open · Esc:cancel"]
+           @ List.mapi (fun position (entry : row_entry) ->
+               (if position=menu.cursor then "> " else "  ") ^ entry.label
+               ^ (match entry.filled with
+                  | Ok _ -> ""
+                  | Error unfilled ->
+                      " · unavailable: " ^ String.concat "; " (List.map unfilled_text unfilled))) entries
+           @ [(if menu.cursor=List.length entries then "> " else "  ") ^ "Other action"]
+       | Some (Row_form {label;_}) ->
+           (* One sentence for what sending does: which instance receives
+              which action. *)
+           [Printf.sprintf "Sends \"%s\" to %s" label menu.target_title]
+           @ diagnostic_lines view
+           @ Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines ~show_description:true) menu.form
+       | None ->
+           ["Run action on " ^ menu.target_title]
+           @ diagnostic_lines view
+           @ (match menu.form with
+           | Some form -> Masc_tui_schema_form.lines ~show_description:true form
+           | None -> [
+            Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
+              (menu.cursor+1) (List.length menu.choices);
+            "J/K:scroll action details"]
+           @ (match List.nth_opt menu.choices menu.cursor with
+              | Some action -> action_fields "" action
+              | None -> ["No selected action"])))
       |> List.concat_map (document_rows ~width)
   | _,_,Some overlay ->
       (diagnostic_lines view @ Masc_tui_lane_records.lines overlay)

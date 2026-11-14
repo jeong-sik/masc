@@ -111,7 +111,7 @@ let installation_inspect ?(host_requests = `Null) ~runtime () =
                               "revision", `String "r1"];
     "binding", `Assoc ["sources", `List []];
     "package", `Assoc ["outputs", `Assoc ["quiz", `Assoc ["lanes", `List [`String "quiz/sessions"]]];
-                       "skills_directory", `Null]]
+                       "skills_directory", `Null; "action_tool", `Null]]
     @ (if host_requests = `Null then [] else ["host_requests", host_requests])) in
   `Assoc ["instances", `List [instance]; "rows", `List []; "coverage", `List [];
           "configuration", `Assoc ["directory", `String "/c"; "complete", `Bool true; "declarations", `List [];
@@ -216,7 +216,7 @@ let configuration_and_ports () =
       "incarnation":"actual-1","action_schema":null,
       "configuration":{"id":"custom","source_path":"/config/lane-addons/custom.toml","revision":"applied"},
       "binding":{"sources":[{"kind":"lane_output","id":"input","installation_id":"upstream","output_id":"frames"}]},
-      "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
+      "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills","action_tool":null}}],
     "configuration":{"directory":"/config/lane-addons","complete":false,
       "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
         "enabled":true,"source_revision":"source-1","application":{"kind":"starting"},"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
@@ -379,7 +379,7 @@ let guided_actions () =
     addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
     skills_directory=None;ui_category=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
-    host_requests=None} in
+    host_requests=None;row_actions=None;action_tool=Some "lane_act"} in
   let snapshot : UI.snapshot = {instances=[instance];configuration=None;
     output={rows=[];coverage=[]};complete=Some true} in
   let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> ok in
@@ -537,7 +537,7 @@ let context_flow_uses_declared_connections () =
     addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
     outputs=["events",UI.Row.All_lanes];skills_directory=None;ui_category=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
-    host_requests=None} in
+    host_requests=None;row_actions=None;action_tool=None} in
   let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
     installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
     binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
@@ -824,6 +824,170 @@ let object_array_fields () =
   check bool "primitive array JSON remains valid" true
     ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
 
+(* RFC lane-row-offers-actions §2.5: a oneOf root is filled one alternative at a
+   time, and a row action's locked members reach the action as they were given. *)
+let schema_form_alternatives_and_locked_members () =
+  let module Form = Masc_tui_schema_form in
+  let schema = Yojson.Safe.from_string {|{"type":"object","oneOf":[
+    {"type":"object","title":"Compose","additionalProperties":false,"required":["kind","note"],
+     "properties":{"kind":{"type":"string","const":"compose"},"note":{"type":"string","minLength":1}}},
+    {"type":"object","title":"Dispute","additionalProperties":false,
+     "required":["kind","ask_id","question_id","note"],
+     "properties":{"kind":{"type":"string","const":"dispute"},"ask_id":{"type":"string"},
+       "question_id":{"type":"string"},"note":{"type":"string","minLength":1}}},
+    {"type":"object","title":"Export","additionalProperties":false,"required":["kind"],
+     "properties":{"kind":{"type":"string","const":"export"},"note":{"type":"string"}}}]}|} in
+  let edit key form = match Form.handle ~key form |> ok with
+    | Form.Updated form -> form | Form.Submit _ | Form.Cancel -> fail "editing must stay in the form" in
+  let submit form = match Form.handle ~key:"enter" (edit "\019" form) |> ok with
+    | Form.Submit json -> json | Form.Updated _ | Form.Cancel -> fail "review Enter submits" in
+  let empty = Form.create ~schema ~initial:(`Assoc []) |> ok in
+  check bool "an empty initial value chooses no alternative" true (Result.is_error (Form.value empty));
+  let compose = empty |> edit "right" |> edit "tab" |> edit "tab"
+    |> Form.insert_text ~text:"typed for compose" in
+  check bool "the chosen alternative sends what was typed for it" true
+    ((Form.value compose |> ok)=`Assoc ["kind",`String "compose";"note",`String "typed for compose"]);
+  let export = compose |> edit "up" |> edit "up" |> edit "right" |> edit "right" in
+  check bool "another alternative drops what was typed for the previous one" true
+    (submit export=`Assoc ["kind",`String "export"]);
+  let dispute = `Assoc ["ask_id",`String "a1";"kind",`String "dispute";"note",`String "wrong key";
+    "question_id",`String "q1"] in
+  check bool "an initial value opens its own alternative and is sent unchanged" true
+    (submit (Form.create ~schema ~initial:dispute |> ok)=dispute);
+  let locked = ["kind",`String "dispute";"ask_id",`String "a1";"question_id",`String "q1"] in
+  let row = Form.create_for_row ~schema ~branch:(Some 1) ~locked |> ok in
+  let press form key = match Form.handle ~key form with
+    | Ok (Form.Updated form) -> form | Ok (Form.Submit _ | Form.Cancel) | Error _ -> form in
+  let pressed = List.fold_left press row
+      ["up";"left";"right";"\021";"backspace";"\005";"x";"tab";"right";"down";"\021";"enter";"up"]
+    |> Form.insert_text ~text:"\"compose\"" |> edit "\021" |> Form.insert_text ~text:"grade missed it" in
+  check bool "no editing key reaches a locked member" true
+    (submit pressed=`Assoc ["ask_id",`String "a1";"kind",`String "dispute";"note",`String "grade missed it";
+      "question_id",`String "q1"]);
+  check bool "a locked member outside the alternative is refused" true
+    (Result.is_error (Form.create_for_row ~schema ~branch:(Some 1) ~locked:(("questions",`List [])::locked)));
+  check bool "a locked value its member schema rejects is refused" true
+    (Result.is_error (Form.create_for_row ~schema ~branch:(Some 1) ~locked:["kind",`String "compose"]));
+  let one = Yojson.Safe.from_string {|{"type":"object","oneOf":[{"type":"object","additionalProperties":false,
+    "required":["kind"],"properties":{"kind":{"type":"string","const":"export"}}}]}|} in
+  check bool "a single alternative is open without choosing" true
+    ((Form.value (Form.create ~schema:one ~initial:(`Assoc []) |> ok) |> ok)=`Assoc ["kind",`String "export"])
+
+(* What a row action form refuses, and what any form sends unchanged. *)
+let schema_form_refuses_and_keeps () =
+  let module Form = Masc_tui_schema_form in
+  let json = Yojson.Safe.from_string in
+  let edit key form = match Form.handle ~key form |> ok with
+    | Form.Updated form -> form | Form.Submit _ | Form.Cancel -> fail "editing must stay in the form" in
+  let submit form = match Form.handle ~key:"enter" (edit "\019" form) |> ok with
+    | Form.Submit json -> json | Form.Updated _ | Form.Cancel -> fail "review Enter submits" in
+  let closed members required = Printf.sprintf
+    {|{"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|}
+    (String.concat "," (List.map (Printf.sprintf {|"%s"|}) required))
+    (String.concat "," (List.map (fun (name,schema) -> Printf.sprintf {|"%s":%s|} name schema) members)) in
+  let text = {|{"type":"string"}|} in
+  let kind value = Printf.sprintf {|{"type":"string","const":"%s"}|} value in
+  let union = json (Printf.sprintf {|{"type":"object","oneOf":[%s,%s]}|}
+    (closed ["kind",kind "a";"note",text] ["kind"]) (closed ["kind",kind "b";"id",text;"note",text] ["kind";"id"])) in
+  let refused label result = check bool label true (Result.is_error result) in
+  refused "a negative alternative" (Form.create_for_row ~schema:union ~branch:(Some (-1)) ~locked:[]);
+  refused "an alternative past the last" (Form.create_for_row ~schema:union ~branch:(Some 2) ~locked:[]);
+  refused "no alternative of a union" (Form.create_for_row ~schema:union ~branch:None ~locked:[]);
+  let flat = json (closed ["kind",kind "b";"id",text;"note",text] ["kind";"id";"note"]) in
+  refused "an alternative of a flat object" (Form.create_for_row ~schema:flat ~branch:(Some 0) ~locked:[]);
+  refused "a schema without members" (Form.create_for_row ~schema:(json text) ~branch:None ~locked:[]);
+  refused "a member locked twice"
+    (Form.create_for_row ~schema:union ~branch:(Some 1) ~locked:["id",`String "1";"id",`String "2"]);
+  let locked = ["kind",`String "b";"id",`String "i1"] in
+  let row = Form.create_for_row ~schema:flat ~branch:None ~locked |> ok
+    |> Form.insert_text ~text:"why" in
+  check bool "a flat object's row action sends its locked and typed members" true
+    (submit row=`Assoc ["id",`String "i1";"kind",`String "b";"note",`String "why"]);
+  let every = json (closed ["kind",kind "b";"id",text] ["kind";"id"]) in
+  check bool "a form with every member locked sends them" true
+    (submit (Form.create_for_row ~schema:every ~branch:None ~locked |> ok)
+     =`Assoc ["id",`String "i1";"kind",`String "b"]);
+  (* Left from no choice is the last alternative. Its required member is
+     unset, so the value is refused instead of read as the first one. *)
+  let short_long = json (Printf.sprintf {|{"type":"object","oneOf":[%s,%s]}|}
+    (closed ["note",text] ["note"]) (closed ["note",text;"extra",text] ["note";"extra"])) in
+  let long = Form.create ~schema:short_long ~initial:(`Assoc []) |> ok |> edit "left" |> edit "tab"
+    |> Form.insert_text ~text:"only note" in
+  refused "a value of another alternative than the chosen one" (Form.value long);
+  (* An array item's form is one JSON field even when its root has
+     alternatives. *)
+  let steps = json (Printf.sprintf
+    {|{"type":"object","additionalProperties":false,"required":["steps"],"properties":{"steps":
+      {"type":"array","items":{"type":"object","oneOf":[%s,%s]}}}}|}
+    (closed ["op",kind "add"] ["op"]) (closed ["op",kind "del"] ["op"])) in
+  let added = Form.create ~schema:steps ~initial:(`Assoc []) |> ok |> edit "\005" |> edit "a" |> edit "\021"
+    |> Form.insert_text ~text:{|{"op":"del"}|} |> edit "\019" |> edit "enter" |> edit "\019" in
+  check bool "an item with alternatives is typed as JSON" true
+    (submit added=`Assoc ["steps",`List [`Assoc ["op",`String "del"]]]);
+  let opened = json (Printf.sprintf {|{"type":"object","oneOf":[%s,{"type":"object","properties":{},"additionalProperties":true}]}|}
+    (closed ["kind",kind "k"] ["kind"])) in
+  check bool "an open alternative keeps the members it was given" true
+    (submit (Form.create ~schema:opened ~initial:(`Assoc ["anything",`Int 1]) |> ok)=`Assoc ["anything",`Int 1]);
+  let meta = json (closed ["kind",kind "m";"meta",{|{"type":"object","properties":{},"additionalProperties":true}|}] ["kind"]) in
+  let given = `Assoc ["kind",`String "m";"meta",`Assoc ["a",`Int 1]] in
+  check bool "an open member object keeps its members" true
+    (submit (Form.create ~schema:meta ~initial:given |> ok)=given)
+
+(* RFC lane-row-offers-actions §2.6 and §5: a chosen row offers the actions its
+   lane declares, fills them from its own fields for the instance that produced
+   it, and does not send once the row has changed. *)
+let row_actions_fill_from_the_row () =
+  let tool_schema = Yojson.Safe.from_string {|{
+    "type":"object","required":["context","request_id","action"],"additionalProperties":false,
+    "properties":{
+      "context":{"type":"object","required":["instance_id","incarnation"],"additionalProperties":false,
+        "properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}}},
+      "request_id":{"type":"string","minLength":36},
+      "action":{"type":"object","oneOf":[
+        {"type":"object","title":"Compose","additionalProperties":false,"required":["kind","topic"],
+         "properties":{"kind":{"type":"string","const":"compose"},"topic":{"type":"string"}}},
+        {"type":"object","title":"Dispute","additionalProperties":false,
+         "required":["kind","ask_id","question_id","note"],
+         "properties":{"kind":{"type":"string","const":"dispute"},"ask_id":{"type":"string"},
+           "question_id":{"type":"string"},"note":{"type":"string","minLength":1}}}]}}}|} in
+  let display = match Masc.Lane_addon_presentation.of_json (Yojson.Safe.from_string
+      {|{"actions":[{"lane_id":"quiz/questions","label":"Dispute this grade","fixed":{"kind":"dispute"},
+        "from_row":{"ask_id":["dispute","ask_id"],"question_id":["dispute","question_id"]}}]}|}) with
+    | Ok display -> display | Error detail -> fail detail in
+  let verdicts = List.map (Masc.Lane_addon_row_action.judge ~tool_name:"lane_act" ~tool_schema)
+      display.Masc.Lane_addon_presentation.actions in
+  let instance : UI.instance = {id="quiz";incarnation="quiz-1";run_id="run";addon_id="operator-quiz";
+    title="Operator quiz";revision="1";phase=UI.Row.Attached;runtime_presence=UI.Live_entry;
+    observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;
+    binding=`Assoc [];outputs=[];skills_directory=None;ui_category=None;action_schema=Some tool_schema;
+    binding_schema=None;display;host_requests=None;row_actions=Some verdicts;action_tool=Some "lane_act"} in
+  let question ask_id : UI.Row.row = {id="question-1";lane_id="quiz/quiz/questions";kind=UI.Row.Event;
+    title="Question 1";observed_at=1.;subject_id="session";clock=None;actor=None;
+    fields=["dispute",`Assoc ["ask_id",`String ask_id;"question_id",`String "q1"]];
+    evidence=[];related_ids=[]} in
+  let snapshot rows : UI.snapshot = {instances=[instance];configuration=None;
+    output={rows;coverage=[]};complete=Some true} in
+  let detail = UI.open_selected_instance {UI.initial with snapshot=Some (snapshot [question "a1"])} in
+  let listed = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" detail |> ok in
+  (match listed.action_menu with
+   | Some {UI.row=Some (UI.Row_list {row_id;entries=[{UI.filled=Ok _;_}];_});target_id;_} ->
+       check string "the list is for the chosen row" "question-1" row_id;
+       check string "aimed at the instance that produced the row" "quiz" target_id
+   | Some _ | None -> fail "a row with a declared action opens its list");
+  let form = match UI.enter_action listed |> ok with
+    | view,None -> view | _,Some _ -> fail "choosing a row action opens its form" in
+  let reviewed = UI.paste_action ~text:"the key was wrong" form |> UI.edit_action ~key:"\019" |> ok |> fst in
+  let sent = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _,None -> fail "review Enter sends the action" in
+  check string "the row's instance receives it" "quiz" sent.instance_id;
+  check bool "package and row values with the typed note" true
+    (sent.action=`Assoc ["ask_id",`String "a1";"kind",`String "dispute";
+      "note",`String "the key was wrong";"question_id",`String "q1"]);
+  check bool "a row that now gives other values is not sent" true
+    (Result.is_error (UI.edit_action ~key:"enter" {reviewed with snapshot=Some (snapshot [question "a2"])}));
+  check bool "a row that left the snapshot is not sent" true
+    (Result.is_error (UI.edit_action ~key:"enter" {reviewed with snapshot=Some (snapshot [])}))
+
 (* Marked rows are frozen with `e`. The choice of Keeper is made by name from
    the workspace roster; before this prompt the only way to name one was the
    raw `:evidence {...,"keeper_name"}` command. The bundle is preserved either
@@ -836,7 +1000,7 @@ let evidence_export_chooses_a_keeper_by_name () =
     addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
-    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+    display=Masc.Lane_addon_presentation.empty;host_requests=None;row_actions=None;action_tool=None} in
   let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
     output={rows=[row ~owner:"worker" "chosen";row ~owner:"worker" "second";row ~owner:"other" "foreign"];coverage=[]};
     complete=Some true;configuration=None} in
@@ -903,7 +1067,7 @@ let refresh_preserves_operator_target () =
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
     outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
-    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+    display=Masc.Lane_addon_presentation.empty;host_requests=None;row_actions=None;action_tool=None} in
   let declaration id : UI.declaration = {source_path=id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
     instance_id=Some id;issues=[];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
@@ -951,7 +1115,7 @@ let detail_keeps_installation_ownership () =
     addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
-    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None;row_actions=None;action_tool=None} in
   let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
     installation_id=Some id;desired=Some "1";applied=Some "1";
     instance_id=Some id;issues=[];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
@@ -1020,7 +1184,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
     addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
     runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
-    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;display;host_requests=None} in
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;display;host_requests=None;row_actions=None;action_tool=None} in
   let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
     title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
     fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
@@ -1034,7 +1198,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let value_texts value = List.map (fun (row : UI.value_row) -> row.text) (UI.value_rows ~depth:0 value) in
   let reading_texts row = List.map (fun (_, value) -> match value with
     | Ok value -> value_texts value
-    | Error detail -> fail detail) (UI.result_readings worker row) in
+    | Error _ -> fail "a declared reading is unavailable") (UI.result_readings worker row) in
   check (option string) "opening selects the declared report" (Some row.id) (selected_id detail);
   check (list (list string)) "a text value keeps its written lines as rows, not escaped JSON"
     [["First finding"; "Second finding"]; ["false"]; ["not attempted"]] (reading_texts row);
@@ -1194,7 +1358,7 @@ let current_installations_and_grouped_history_keep_exact_targets () =
     id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
     revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=Some "1";installation_id=Option.map (fun _ -> addon) source_path;source_path;
     binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
-    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None;row_actions=None;action_tool=None} in
   let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
   let current = worker "live-a" "project" "analysis" UI.Row.Attached (Some "/config/a.toml") in
   let old_two = {old with id="old-a-two";incarnation="old-a-two"} in
@@ -1612,7 +1776,7 @@ let current_category_requires_exact_id_and_path () =
     source_path=Some "/config/worker.toml";configuration_revision=Some "r1";
     binding=`Assoc [];outputs=[];skills_directory=None;
     ui_category=Some Category.Browser;action_schema=None;binding_schema=None;
-    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+    display=Masc.Lane_addon_presentation.empty;host_requests=None;row_actions=None;action_tool=None} in
   let declaration ?(path="/config/worker.toml") ?(id="worker") category : UI.declaration = {
     source_path=path;installation_id=Some id;ui_category=Some category;
     desired=Some "r1";applied=Some "r1";instance_id=Some id;issues=[];enabled=Some true;
@@ -1674,7 +1838,7 @@ let role_refresh_keeps_original_action_and_installation () =
     installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
     configuration_revision=Some "r1";binding=`Assoc [];outputs=[];skills_directory=None;
     ui_category=Some category;action_schema=Some schema;binding_schema=None;
-    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+    display=Masc.Lane_addon_presentation.empty;host_requests=None;row_actions=None;action_tool=Some "lane_act"} in
   let declaration id category : UI.declaration = {
     source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
     desired=Some "r1";applied=Some "r1";instance_id=Some id;issues=[];enabled=Some true;
@@ -1828,6 +1992,9 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
   test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;
   test_case "edit object array items through nested schema forms" `Quick object_array_fields;
+  test_case "fill one alternative at a time and keep locked members" `Quick schema_form_alternatives_and_locked_members;
+  test_case "a row form refuses bad requests and keeps given values" `Quick schema_form_refuses_and_keeps;
+  test_case "a row's action is filled from it and aimed at its instance" `Quick row_actions_fill_from_the_row;
   test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;

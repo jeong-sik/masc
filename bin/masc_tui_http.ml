@@ -367,9 +367,7 @@ let json_headers headers =
   ("Content-Type", "application/json") :: headers
 
 let host_for_url host =
-  if String.contains host ':' && not (String.starts_with ~prefix:"[" host) then
-    "[" ^ host ^ "]"
-  else host
+  Masc_network_defaults.(url_host_to_string (url_host_of_string host))
 
 let url_of ~(host : string) ~(port : int) ~(path : string) =
   Printf.sprintf "http://%s:%d%s" (host_for_url host) port path

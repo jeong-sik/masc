@@ -864,8 +864,10 @@ let render_keeper_deletions (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"keeper-deletions"
     ~frame:Chrome_overlay
     ~title:
-      (screen_title " 키퍼 삭제 기록"
-       ^ (if state.keeper_deletions_loading then " · 조회/재시도 중" else ""))
+      (let ko = state.ui_language = Lang_ko in
+       screen_title (if ko then " 키퍼 삭제 기록" else " Keeper deletion records")
+       ^ (if not state.keeper_deletions_loading then ""
+          else if ko then " · 조회/재시도 중" else " · loading/retrying"))
     ~hints:(keeper_deletions_hints state ~scrollable:(count > height))
     (* [keeper_deletions_viewport] rather than the budget it is derived from:
        the keypress bounds the scroll against that pair. *)

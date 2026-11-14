@@ -599,6 +599,7 @@ interface FleetFsmMatrixProps {
 export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const fetcher = props.fetcher
   const shared = useFleetComposite(fetcher === undefined)
+  const refreshShared = shared.refresh
   const [privateData, setData] = useState<FleetCompositeSnapshot | null>(null)
   const [privateError, setError] = useState<string | null>(null)
   const [privateLoading, setLoading] = useState<boolean>(true)
@@ -653,11 +654,11 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   }, [props.onRequestRuntimeAssist])
 
   const refreshFleetComposite = useCallback(async (keeperName?: string) => {
-    if (fetcher === undefined) { await shared.refresh(keeperName); return }
+    if (fetcher === undefined) { await refreshShared(keeperName); return }
     const owner = captureDashboardObservationOwner()
     const snap = await fetcher()
     if (dashboardObservationOwnerIsCurrent(owner)) applySnapshot(snap)
-  }, [applySnapshot, fetcher, shared.refresh])
+  }, [applySnapshot, fetcher, refreshShared])
 
   const runRuntimeAction = useCallback(async (
     keeperName: string,

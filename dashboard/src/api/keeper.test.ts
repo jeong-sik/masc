@@ -63,6 +63,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.clearAllMocks()
   vi.unstubAllGlobals()
+  window.history.replaceState({}, '', '/')
   try {
     window.localStorage?.removeItem?.('masc_dashboard_agent_name')
   } catch {
@@ -328,8 +329,10 @@ describe('streamKeeperMessage', () => {
       },
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
+    // A selected operator without a token is not given the local dashboard
+    // credential, so the stream request is the only call.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(JSON.parse(String(init.body))).toEqual({
       request_id: 'kmsg-stream-direct',
@@ -337,8 +340,8 @@ describe('streamKeeperMessage', () => {
       message: 'ping',
     })
     const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
-    expect(actorHeader).toBe('dashboard')
-    expect(actorHeader).not.toContain('%')
+    expect(actorHeader).toBe('dashboard-eager-manta')
+    expect(headers.Authorization).toBeUndefined()
     expect(events).toEqual(['RUN_FINISHED'])
   })
 

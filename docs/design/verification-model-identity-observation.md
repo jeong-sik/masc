@@ -72,17 +72,20 @@ worker-mismatched metadata. The completion authority treats such diagnostics
 as unknown observation; they do not block Task review or approve/reject it.
 
 The retained Task verifier original currently uses schema
-`verifier_review_original/v3`. It freezes the submitting runtime name when
+`verifier_review_original/v4`. It freezes the submitting runtime name when
 available, but does not bind the full `producer_execution` identity. A
 request file read by a later wake is therefore not proof of the exact identity
 associated with that original, even if its actor and runtime name match.
-Every newly written v3 Task calibration verdict row records
+Every newly written Task calibration verdict row records
 `producer_execution: null`, including a fresh review, to avoid assigning an
 unbound identity. This is an observation loss for all such new rows, not a
 claim that the original submission lacked an identity. The retained original's
 `generator_runtime` and the request file's captured identity remain in place.
-A v4 original or other durable binding of the full submitting identity has not
-been implemented.
+A durable binding of the full submitting identity has not been implemented.
+v4 splits the earlier single digest into a question digest and a lookup
+authority digest. Its next attempt also renders the prompt, instructions and
+answer format again with the authority current at that attempt. Neither change
+binds the submitting identity.
 
 The reviewer hook in `workspace_metric_hooks.ml` freezes
 `evaluator_execution` exactly when `report_review_verdict` records its single
@@ -112,7 +115,7 @@ pair can count. Missing or malformed identity data never becomes a measured
 zero. The dashboard projects the ledger observation directly and exports no
 raw provider/model identity in its overview.
 
-A new v3 Task row is counted as producer-unobserved when a valid, matching
+A new Task row is counted as producer-unobserved when a valid, matching
 evaluator identity is present, or both-unobserved when that identity is absent
 or invalid. It is excluded from the complete-pair denominator; the retained
 runtime-name comparison is not a substitute for model identity. Earlier rows

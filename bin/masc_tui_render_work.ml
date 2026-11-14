@@ -162,6 +162,7 @@ let work_task_rows_complete state =
   work_task_rows_current state && Option.is_none state.tasks_error
 
 let work_task_scope (state : state) =
+  let ko = state.ui_language = Lang_ko in
   let text ko en = ui_text state ~ko ~en in
   let current = work_task_rows_current state in
   let partial = Option.is_some state.tasks_error in
@@ -175,8 +176,8 @@ let work_task_scope (state : state) =
         let reason = match state.local_workspace with
           | Local_workspace_failed detail ->
               text "새 조회 실패: " "Refresh failed: " ^ Terminal_text.single_line detail
-          | Local_workspace_unread -> text "로컬 작업 공간 미조회" "Local workspace not read"
-          | Local_workspace_read -> text "작업 공간 식별 미확인" "Workspace identity unconfirmed" in
+          | Local_workspace_unread -> text "로컬 워크스페이스 " "Local workspace " ^ field_unread ~ko
+          | Local_workspace_read -> String.capitalize_ascii (workspace_identity_unconfirmed ~ko) in
         text "이전 작업 관측 · " "Previous Task reading · " ^ reason
     | Rows_unread -> text "작업 미조회 · 남은 줄은 이전 관측" "Tasks not read · the rows shown are a previous reading"
     | Rows_unavailable detail ->
@@ -544,7 +545,8 @@ let planning_proof_detail ~ko (goal : planning_goal) =
 let planning_stale_notice_rows (state : state) ~cols =
   let ko = state.ui_language = Lang_ko in
   let notice = match state.workspace_identity, state.planning_error with
-    | Workspace_identity_match_unconfirmed detail, _ -> Some ((if ko then "작업 공간 미확인" else "Workspace unconfirmed"), detail)
+    | Workspace_identity_match_unconfirmed detail, _ ->
+        Some (String.capitalize_ascii (workspace_identity_unconfirmed ~ko), detail)
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), Some error ->
         Some ((if ko then "새로고침 실패" else "Refresh failed"), error)
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), None -> None
@@ -581,7 +583,8 @@ let planning_summary_reading ~cols (state : state) =
   let warning =
     (match state.workspace_identity with
      | Workspace_identity_match_unconfirmed detail ->
-         [text "작업 공간 미확인: " "Workspace unconfirmed: " ^ Terminal_text.single_line detail]
+         [String.capitalize_ascii (workspace_identity_unconfirmed ~ko) ^ ": "
+          ^ Terminal_text.single_line detail]
      | Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _ -> [])
     @ Option.to_list (Option.map (fun detail ->
         text "조회 실패: " "Read failed: " ^ Terminal_text.single_line detail) state.planning_error)
@@ -906,16 +909,19 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                   ; tasks ]))
 
 let planning_confirmation_view (state : state) ~goal_id =
+  let ko = state.ui_language = Lang_ko in
   let text ko en = ui_text state ~ko ~en in
   match state.goal_confirmation with
   | Planning_detail.Inspecting read ->
       let view = Planning_detail.confirmation_view_for read ~goal_id in
       let view = match view with
         | (Ready _ | Stale _ | Failed _) when state.workspace_identity <> Workspace_identity_match ->
-            Masc_tui_fetched.Failed (text "작업 공간 미확인 · 근거를 다시 조회하세요" "Workspace identity is unconfirmed; read the proof again")
+            Masc_tui_fetched.Failed
+              (String.capitalize_ascii (workspace_identity_unconfirmed ~ko)
+               ^ text " · 근거를 다시 조회하세요" " · read the proof again")
         | (Ready confirmation | Stale (confirmation, _))
           when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
-            Masc_tui_fetched.Failed (text "인증 정보 변경 · 근거를 다시 조회하세요" "Credential changed; read the proof again")
+            Masc_tui_fetched.Failed (text "인증 정보 변경 · 근거를 다시 조회하세요" "Credential changed · read the proof again")
         | (Ready confirmation | Stale (confirmation, _))
           when not (Option.exists (fun identity -> identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
             Masc_tui_fetched.Failed (text "서버 변경 · 근거를 다시 조회하세요" "Server changed; read the proof again")
@@ -1169,7 +1175,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
     let rows =
       if not (server_authority_ready state) then
-        field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (text "작업 공간 권한 미확인" "workspace authority unavailable")
+        field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (workspace_identity_unconfirmed ~ko)
       else match reading with
       | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet (text "Candle" "Candle") (text "미조회" "not read")
       | Loading -> field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
@@ -1539,10 +1545,11 @@ let schedule_list_freshness (state : state) =
    warning. *)
 let schedule_form_refusal_rows (state : state) ~cols =
   match state.schedule_form_refusal with
-  | Some { sfr_action; sfr_detail; sfr_at; sfr_workspace = _ }
+  | Some ({ sfr_at; _ } as refusal)
     when Unix.gettimeofday () -. sfr_at <= Masc_tui_types.last_action_window_s ->
       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
-        (Terminal_text.single_line (sfr_action ^ ": " ^ sfr_detail))
+        (Terminal_text.single_line
+           (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) refusal))
   | Some _ | None -> []
 
 (* Rows the Schedules page spends around its list, counted once so the
@@ -1857,9 +1864,8 @@ let render_schedule_list (state : state) =
          (match state.schedule_cancel_armed with
           | Some schedule_id ->
               c.push
-                ((Theme.warn ())
-                ^ Printf.sprintf
-                    "  armed: cancel %s -- same key again to send"
+                ((Theme.warn ()) ^ "  "
+                ^ schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko)
                     (Terminal_text.single_line schedule_id)
                 ^ Ansi.reset)
           | None -> ());
@@ -1867,7 +1873,11 @@ let render_schedule_list (state : state) =
           | Some (schedule_id, err) ->
               c.push
                 ((Theme.bad ()) ^ "  "
-                ^ fit_width (Terminal_text.single_line (schedule_id ^ ": " ^ err)) (framed_inner_width cols - 4)
+                ^ fit_width
+                    (Terminal_text.single_line
+                       (schedule_id ^ ": "
+                        ^ request_failure_text ~ko:(state.ui_language = Lang_ko) err))
+                    (framed_inner_width cols - 4)
                 ^ Ansi.reset)
           | None -> ())
        end))
@@ -2207,7 +2217,9 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
        Source freshness still has its fixed summary outside this document. *)
     (match state.schedule_cancel_error with
      | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
-         [Theme.bad (), ui_text state ~ko:"취소 오류: " ~en:"Cancel error: " ^ wire error]
+         [ Theme.bad ()
+         , ui_text state ~ko:"취소 오류: " ~en:"Cancel error: "
+           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko) error) ]
      | Some _ | None -> [])
     @ (match schedule_source_warning state with
        | None -> []
@@ -2216,9 +2228,7 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
        | None -> []
        | Some id ->
            [ Theme.warn ()
-           , if state.ui_language = Lang_ko then
-               "취소 준비됨: " ^ wire id ^ " \xc2\xb7 x 를 한 번 더 누르면 보냄"
-             else "Armed: cancel " ^ wire id ^ " -- press x again to submit" ]) in
+           , schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko) (wire id) ]) in
   let fields = schedule_detail_lines ~ko:(state.ui_language = Lang_ko) ~width
       ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history

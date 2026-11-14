@@ -1319,11 +1319,17 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
        ~1,094,432 tokens - the rest is system prompt, tool definitions, and
        attachment content" (#27427). Recording the half this process controls
        is what lets that sentence be checked against a number rather than
-       believed. Sizes are bytes this process holds, not provider tokens. *)
+       believed. Sizes are bytes this process holds, not provider tokens.
+
+       [tool_surface_bytes] counts every declared tool, including those behind
+       Claude Code's tool search ([ENABLE_TOOL_SEARCH=true]), so it is an upper
+       bound on what the model reads. [upfront_*] is the share declared
+       [Upfront], which Claude Code keeps in context from the start. *)
+    let upfront_tools = Runtime_official_client_tool.upfront_tools dynamic_tools in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
-       tools=%d tool_surface_bytes=%d"
+       tools=%d tool_surface_bytes=%d upfront_tools=%d upfront_bytes=%d"
       runtime_label
       (match session_mode with
        | Runtime_claude_code.Start -> "start"
@@ -1331,7 +1337,9 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       (String.length prompt)
       (Option.fold ~none:0 ~some:String.length client_config.Runtime_claude_code.system_prompt)
       (List.length dynamic_tools)
-      (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
+      (Runtime_claude_code.dynamic_tool_bytes dynamic_tools)
+      (List.length upfront_tools)
+      (Runtime_claude_code.dynamic_tool_bytes upfront_tools);
     let started_at = Time_compat.now () in
     let settle_host_stop ~latest_request_input stop =
       match (!session_state).Session_store.phase with

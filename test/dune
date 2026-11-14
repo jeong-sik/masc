@@ -155,6 +155,7 @@
 (include stanzas/test_fusion_judge_response_evidence_walk.inc)
 (include stanzas/test_keeper_trust_disposition.inc)
 (include stanzas/test_keeper_attention_reason.inc)
+(include stanzas/test_keeper_trust_disposition_reason.inc)
 (include stanzas/test_play_room.inc)
 (include stanzas/test_server_play_room_events.inc)
 (include stanzas/test_h2_play_room.inc)
@@ -1364,7 +1365,7 @@
 (test
  (name test_server_request_authority)
  (modules test_server_request_authority)
- (libraries alcotest masc_test_deps eio_main h2))
+ (libraries alcotest masc_test_deps eio_main h2 ipaddr))
 
 (include stanzas/test_request_workspace_precondition.inc)
 
@@ -2353,12 +2354,6 @@
  (modules test_keeper_no_request_body_gate)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
-; The resolved stream idle bound reaches a run_named turn that named none.
-(test
- (name test_keeper_stream_idle_floor)
- (modules test_keeper_stream_idle_floor)
- (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
-
 ; A run_named turn queued behind a held admission permit ends as Queue at the
 ; keeper's deadline: the admission bound ends the wait and the watchdog stands
 ; down for it. Slow: the deadline's declared minimum is thirty seconds.
@@ -2373,6 +2368,13 @@
 (test
  (name test_keeper_attempt_without_clock)
  (modules test_keeper_attempt_without_clock)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
+; The operator snapshot's inference_inflight counts a run_named turn while the
+; provider holds its request, and reads 0 again once the turn ended.
+(test
+ (name test_keeper_inference_inflight_turn)
+ (modules test_keeper_inference_inflight_turn)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 ; The operator's body-timeout override reaches a non-streaming run_named turn
@@ -2753,6 +2755,7 @@
 (include stanzas/test_execute_shell_host_admission.inc)
 (include stanzas/test_lane_cli_probe_args.inc)
 (include stanzas/test_log_file_writer.inc)
+(include stanzas/test_start_log_dir_refusal.inc)
 
 (include stanzas/test_artifacts_upload.inc)
 
@@ -4757,7 +4760,8 @@
   masc_tui_render_metrics
   masc_tui_render_prim
   masc_tui_theme
-  masc_tui_types))
+  masc_tui_types
+  masc_tui_value))
 
 (test
  (name test_tui_memory_usage)
@@ -6404,6 +6408,11 @@
  (name test_lane_addon_sources)
  (modules test_lane_addon_sources)
  (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.msx_tool masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
+
+(test
+ (name test_lane_addon_row_actions)
+ (modules test_lane_addon_row_actions)
+ (libraries alcotest yojson masc))
 
 (test
  (name test_lane_addon_surface)

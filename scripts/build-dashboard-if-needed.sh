@@ -237,20 +237,18 @@ needs_rebuild() {
   fi
   [ "$invalid" = "1" ] && return 0
 
-  # Any .ts/.tsx/.css/.html source newer than stamp → rebuild
-  if [[ -n "$(find "$DASHBOARD_DIR/src" \
-       -newer "$STAMP" \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.html' \) \
-       -print -quit 2>/dev/null)" ]]; then
-    return 0
-  fi
-
-  # Root index.html newer than stamp → rebuild
-  if [ "$DASHBOARD_DIR/index.html" -nt "$STAMP" ]; then
-    return 0
-  fi
-
-  # package.json changed → rebuild (deps may have changed)
-  if [ "$DASHBOARD_DIR/package.json" -nt "$STAMP" ]; then
+  # Every file of the dashboard workspace is a build input: the Vite configs,
+  # the lockfile, .env*, public/ and the folders src imports from are all read
+  # by `run build`, and a list of them kept here falls behind the build.
+  # Left out are node_modules (installed from the lockfile, which is seen) and
+  # hidden entries other than .env* (scratch of tools, not read by the build).
+  # A file seen here that the build does not read costs one rebuild, once.
+  local newer_input=""
+  newer_input="$(find "$DASHBOARD_DIR" \
+    \( -name node_modules -o \( -name '.*' ! -name '.env*' \) \) -prune \
+    -o -type f -newer "$STAMP" -print -quit)"
+  if [ -n "$newer_input" ]; then
+    echo "[dashboard] ${newer_input#"$REPO_ROOT"/} is newer than the last build." >&2
     return 0
   fi
 

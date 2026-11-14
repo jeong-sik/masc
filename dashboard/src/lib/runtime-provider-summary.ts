@@ -135,7 +135,6 @@ export function runtimeCatalogRequestConfig(item: DashboardRuntimeProviderSnapsh
     typeof request.enable_thinking === 'boolean' ? `think:${request.enable_thinking ? 'on' : 'off'}` : null,
     typeof request.preserve_thinking === 'boolean' ? `preserve:${request.preserve_thinking ? 'on' : 'off'}` : null,
     request.resolved_reasoning_effort ? `effort:${request.resolved_reasoning_effort}` : null,
-    request.glm_replay_reasoning ? 'glm:replay' : null,
     typeof request.tool_stream === 'boolean' ? `tool-stream:${request.tool_stream ? 'on' : 'off'}` : null,
     toolChoice ? `tool:${toolChoice}` : null,
     request.disable_parallel_tool_use ? 'parallel:off' : null,

@@ -4787,9 +4787,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        surface you are on. Bold and underline said it alone before, so the
        answer was gone from a monochrome terminal, from one that drops
        underline, and from every text capture -- a frame dump, a screenshot
-       pasted into an issue, the keyboard-input fixtures. Info's own body
-       opens with a section called "Identity", which is also the name of
-       another tab, so a reader with no mark had a wrong guess waiting.
+       pasted into an issue, the keyboard-input fixtures.
 
        Drawn through [tab_strip] with the row's width: ten tabs are wider
        than the row beside the roster pane, and cut from the right the mark

@@ -5,8 +5,11 @@ module Layout = Masc_tui_message_layout
 module Render_metrics = Masc_tui_render_metrics
 module Render_prim = Masc_tui_render_prim
 
+(* The assertions read English; the TUI opens in Korean. *)
 let make_state () =
-  Types.create_state ~workspace:"" ~port:0 ()
+  let state = Types.create_state ~workspace:"" ~port:0 () in
+  state.Types.ui_language <- Types.Lang_en;
+  state
 ;;
 
 let test_compact_connection_priority () =
@@ -200,18 +203,46 @@ let test_calculate_kpis_empty () =
     (contains output "Engine memory");
   check bool "missing scheduler is visible" true
     (contains output "Scheduler lag");
-  (* Three blocks -- the GC, the scheduler and the transport -- each saying
-     the state under its own heading, in the one word. [clip] puts a reset on
-     the end of every line, so the block is matched by its indent and phrase
-     rather than by a whole-line compare. *)
-  check int "each unread block says so, and says it the one way" 3
-    (List.length
-       (List.filter
-          (fun line -> contains line "    not observed")
-          (String.split_on_char '\n' output)));
   check bool "no fabricated heap" false (contains output "42.5");
   check bool "no fabricated latency" false (contains output "0.82")
 ;;
+
+let identity_without_blocks () =
+  { Decode.sid_version = "0.0.0"
+  ; sid_binary_commit = "deadbeef"
+  ; sid_binary_commit_age_s = None; sid_runtime_instance_id = None
+  ; sid_base_path = Masc.Tui_decode.Canonical_path.of_path "/tmp"
+  ; sid_masc_root = Masc.Tui_decode.Canonical_path.of_path "/tmp"
+  ; sid_executable_in_worktree = None
+  ; sid_state_ready = None
+  ; sid_uptime = None
+  ; sid_sse_clients = None
+  ; sid_gc = None
+  ; sid_scheduler = None
+  ; sid_operator_action = None
+  }
+
+(* The cards say why the server identity gave them nothing: no probe has
+   answered, the probe failed, or it answered without the GC and scheduler
+   blocks. Each probe is stored the way a refresh stores it. *)
+let test_identity_gap_tells_a_failed_probe_from_one_not_made () =
+  let unknown =
+    testable
+      (fun ppf gap -> Format.pp_print_string ppf (Masc_tui_value.Unknown.glyph gap))
+      ( = )
+  in
+  let state = make_state () in
+  let gap () = Render_metrics.identity_gap state in
+  check unknown "no probe yet" Masc_tui_value.Unknown.Unread (gap ());
+  Types.store_server_identity_reading state
+    (Error "server identity load failed: connection refused");
+  check unknown "failed probe" Masc_tui_value.Unknown.Read_failed (gap ());
+  Types.store_server_identity_reading state (Ok (identity_without_blocks ()));
+  check unknown "probe without the blocks" Masc_tui_value.Unknown.Unreported (gap ());
+  Types.store_server_identity_reading state
+    (Error "server identity load failed: timed out");
+  check unknown "a later failure replaces the earlier reading"
+    Masc_tui_value.Unknown.Read_failed (gap ())
 
 (* The fleet row draws how many keepers are configured and how many are
    paused. It used to draw the unpaused ones and leave the reader to
@@ -293,7 +324,14 @@ let test_retained_task_outcomes () =
   let kpis = Render_metrics.calculate_kpis state in
   check int "active-only list does not erase completed outcomes" 2 (Option.get kpis.tasks).completed;
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
-  check bool "snapshot window is explicit" true (contains output "2026-09-06 12:00 UTC");
+  (* The window is drawn in the operator's zone, so the expected start is
+     drawn by the same notation rather than spelled in UTC. *)
+  let window_start =
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+      ~now:(Unix.gettimeofday ()) flow.window_started_at
+  in
+  check bool "snapshot window is explicit" true
+    (contains output ("Window: " ^ window_start ^ " to "));
   check bool "source warning does not erase known counts" true (contains output "New tasks 3 · Done 1 · Cancelled 1");
   check bool "source warning is visible" true (contains output "goal links unavailable");
   check bool "old glow cache is not presented as history" false (contains output "Heatmap")
@@ -436,7 +474,7 @@ let test_assignee_rows_capped () =
   state.task_flow <- Some flow;
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
   check bool "the tail is reported rather than dropped" true
-    (contains output "3 further assignees not listed")
+    (contains output "    3 more")
 ;;
 
 let test_approval_source_observations () =
@@ -448,7 +486,7 @@ let test_approval_source_observations () =
   check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
   let governance () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
   let output = governance () in
-  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not observed");
+  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not loaded");
   check bool "unread queues cannot claim empty" false (contains output "no active pending");
   state.gate_snapshot_observed <- true;
   state.keeper_tool_approvals_observed <- true;
@@ -470,7 +508,7 @@ let test_approval_source_observations () =
   check (option int) "rules failure does not hide ready queue" (Some 1)
     (Render_metrics.calculate_kpis state).gate_pending_count;
   let output = governance () in
-  check bool "partial store error is visible" true (contains output "Standing Rules: unavailable: rules-store-offline");
+  check bool "partial store error is visible" true (contains output "Standing Rules: load failed: rules-store-offline");
   check bool "available tool is charted" true (contains output "bash")
 ;;
 
@@ -521,7 +559,7 @@ let test_the_fleet_section_escapes_the_probe_word () =
       ; sid_gc = None
       ; sid_scheduler =
           Some
-            { Decode.ssch_probe = "running" ^ escape
+            { Decode.ssch_probe = Some (Decode.Probe_unknown ("running" ^ escape))
             ; ssch_samples = 0
             ; ssch_p50_ms = 0.
             ; ssch_p95_ms = 0.
@@ -546,6 +584,8 @@ let () =
             test_metrics_scroll_tracks_card_reflow ] )
     ; ( "kpis"
       , [ test_case "calculate_kpis_empty" `Quick test_calculate_kpis_empty
+        ; test_case "a failed identity probe is not drawn as one not made" `Quick
+            test_identity_gap_tells_a_failed_probe_from_one_not_made
         ; test_case "calculate_kpis_populated" `Quick test_calculate_kpis_populated
         ; test_case "a declared keeper is not counted as paused" `Quick
             test_a_declared_keeper_is_not_counted_as_paused

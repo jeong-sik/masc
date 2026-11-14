@@ -40,21 +40,40 @@ let test_the_host_path_is_named_by_the_guest () =
      && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
           (Filename.chop_suffix name ".sock"))
 
-(* The longest guest name a keeper can have, under a home directory base
-   path: a name spelled into the path would pass macOS's limit. *)
+(* The longest guest name a keeper can have: the name module cuts a long
+   keeper name to its limit. *)
+let longest_guest_name ~base_path =
+  Masc.Keeper_sandbox_container_name.(
+    make
+      (Micro_vm_persistent
+         { keeper_name = String.make 200 'k'
+         ; network_mode = Keeper_types_profile_sandbox.Network_inherit
+         ; base_path })
+    |> to_string)
+
+(* Under a home directory base path: a name spelled into the path would pass
+   macOS's limit. *)
 let test_the_longest_guest_name_fits_the_socket_limit () =
   let base_path = "/Users/a-rather-long-account-name/me" in
-  let longest =
-    Masc.Keeper_sandbox_container_name.(
-      make
-        (Micro_vm_persistent
-           { keeper_name = String.make 200 'k'
-           ; network_mode = Keeper_types_profile_sandbox.Network_inherit
-           ; base_path })
-      |> to_string) in
-  let path = Agent.host_path ~base_path ~guest_name:longest in
+  let path = Agent.host_path ~base_path ~guest_name:(longest_guest_name ~base_path) in
   check bool "the plan's socket path check accepts it" true
     (Plan.validate (plan_publishing path) = Ok ())
+
+(* Linux's [sun_path] holds 108 bytes, the last a NUL. *)
+let linux_socket_path_limit = 107
+
+(* apple/container 1.6.1's vminitd connects to a published guest socket under
+   the guest's root as it sees it, and refuses a path past the limit with "is
+   too long for a Unix Domain Socket path". *)
+let vminitd_path ~guest_name = "/run/container/" ^ guest_name ^ "/rootfs" ^ Agent.guest_path
+
+let test_vminitd_reaches_the_agent_of_the_longest_guest_name () =
+  let guest_name = longest_guest_name ~base_path:"/Users/keeper/me" in
+  let path = vminitd_path ~guest_name in
+  check bool
+    (Printf.sprintf "%d bytes fit the socket path" (String.length path))
+    true
+    (String.length path <= linux_socket_path_limit)
 
 let test_a_base_path_too_long_for_a_socket_is_refused () =
   let path = Agent.host_path ~base_path:("/" ^ String.make 90 'b') ~guest_name:"masc-keeper-vm-fixture" in
@@ -240,6 +259,8 @@ let () =
     [ "host path",
       [ test_case "named by the guest" `Quick test_the_host_path_is_named_by_the_guest
       ; test_case "the longest guest name fits" `Quick test_the_longest_guest_name_fits_the_socket_limit
+      ; test_case "vminitd reaches the agent of the longest name" `Quick
+          test_vminitd_reaches_the_agent_of_the_longest_guest_name
       ; test_case "a base path too long is refused" `Quick test_a_base_path_too_long_for_a_socket_is_refused ]
     ; "plan",
       [ test_case "the agent starts as root" `Quick test_the_agent_plan_starts_the_agent_as_root

@@ -28,19 +28,107 @@ let with_async_switch state ~action start =
   | Some sw -> start sw
   | None -> report_action state "error" (action ^ ": asynchronous runtime unavailable")
 
-(* One place decides how an aborted $EDITOR form reads. Only the cancel
-   differs by caller, because only the action's own name belongs in it; an
-   editor that never ran and a temp file that could not be read are the same
-   fact wherever they happen, and neither is the operator saying no. *)
-let report_editor_abort state ~action ?cancelled (abort : Masc_tui_editor.abort)
-  =
+(* The forms an $EDITOR round trip fills, each named once in both languages
+   for the notices about it. *)
+type connector_change = Channel_bind | Channel_unbind | Channel_binding_edit
+
+type editor_form =
+  | Board_draft
+  | Code_draft
+  | Gate_rejection
+  | Connector_form of connector_change
+  | Harness_overrule
+  | Verification_rejection
+  | Task_cancellation
+  | Runtime_config_text
+  | Skill_creation
+  | Original_request_lookup
+  | Skill_source of string
+  | Prompt_text of string
+  | Keeper_settings of string
+  | Keeper_creation
+  | Repository_addition
+  | Schedule_form of schedule_change
+
+let editor_form_name ~ko = function
+  | Board_draft -> if ko then "글쓰기" else "Board compose"
+  | Code_draft -> if ko then "코드 초안" else "Code draft"
+  | Gate_rejection -> if ko then "Gate 거절" else "Gate rejection"
+  | Connector_form Channel_bind -> if ko then "채널 연결" else "bind"
+  | Connector_form Channel_unbind -> if ko then "채널 연결 해제" else "unbind"
+  | Connector_form Channel_binding_edit -> if ko then "채널 연결 편집" else "edit binding"
+  | Harness_overrule -> if ko then "판정 뒤집기" else "overrule"
+  | Verification_rejection -> if ko then "검증 거절" else "reject"
+  | Task_cancellation -> if ko then "작업 취소" else "cancel"
+  | Runtime_config_text -> "runtime.toml"
+  | Skill_creation -> if ko then "Skill 만들기" else "Skill creation"
+  | Original_request_lookup ->
+    if ko then "원래 비동기 요청 찾기" else "Original async request lookup"
+  | Skill_source name -> name ^ (if ko then " 편집" else " edit")
+  | Prompt_text key -> key ^ (if ko then " 프롬프트" else " prompt")
+  | Keeper_settings keeper -> keeper ^ (if ko then " 설정" else " settings")
+  | Keeper_creation -> if ko then "Keeper 만들기" else "create"
+  | Repository_addition -> if ko then "저장소 등록" else "add"
+  | Schedule_form change -> schedule_change_name ~ko change
+
+(* What quitting the editor leaves. Four forms say what stayed as it was; the
+   rest name themselves as called off. The task cancel form says the task
+   stays, because "작업 취소 취소" reads as undoing itself. *)
+let editor_form_left_alone ~ko form =
+  match form with
+  | Board_draft -> if ko then "초안 그대로" else "Board draft unchanged"
+  | Runtime_config_text ->
+    if ko then "runtime.toml 그대로 · 앞서 쓴 초안 남아 있음"
+    else "runtime.toml unchanged · any earlier draft is retained"
+  | Prompt_text key -> key ^ (if ko then ": 프롬프트 그대로" else ": prompt unchanged")
+  | Keeper_settings keeper ->
+    keeper ^ (if ko then ": 설정 그대로" else ": settings unchanged")
+  | Task_cancellation -> if ko then "작업 취소 안 함" else "task not cancelled"
+  | Code_draft | Gate_rejection | Connector_form _ | Harness_overrule
+  | Verification_rejection | Skill_creation | Original_request_lookup
+  | Skill_source _ | Keeper_creation | Repository_addition | Schedule_form _ ->
+    editor_form_name ~ko form ^ (if ko then " 취소" else " cancelled")
+
+(* One place decides how an aborted $EDITOR form reads: the form's name, then
+   what happened. An editor that never ran and a temp file that could not be
+   read are the same fact wherever they happen, and neither is the operator
+   saying no. *)
+let report_editor_abort state ~form (abort : Masc_tui_editor.abort) =
+  let ko = state.ui_language = Lang_ko in
   match abort with
   | Masc_tui_editor.Cancelled ->
-    report_action state "system"
-      (match cancelled with Some text -> text | None -> action ^ " cancelled")
+    report_action state "system" (editor_form_left_alone ~ko form)
   | Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ ->
     report_action state "error"
-      (action ^ ": " ^ Masc_tui_editor.abort_detail abort)
+      (editor_form_name ~ko form ^ ": " ^ Masc_tui_editor.abort_detail ~ko abort)
+
+(* No editor is set. Said before a form opens, where the check saves a read
+   or a stem, in the words the round trip itself would use. *)
+let report_editor_unset state ~form =
+  report_editor_abort state ~form
+    (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset)
+
+(* A chat command that names no Keeper sends nothing; its line stays. *)
+let select_keeper_first ~ko =
+  if ko then "먼저 키퍼를 고르세요" else "Select a Keeper first"
+
+(* An operator request the TUI kept back, said on the action line: why, that
+   nothing was sent, and what stayed. *)
+let report_kept_back state reason kept =
+  let ko = state.ui_language = Lang_ko in
+  report_action state "error" (kept_back ~ko (reason ~ko) kept)
+
+(* Kept back until the server says again which workspace it serves, which a
+   reconnect brings. *)
+let kept_back_until_reconnect ~ko =
+  kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept
+  ^ " · " ^ (if ko then "다시 연결한 뒤 다시 시도하세요" else "retry after reconnecting")
+
+(* Opening a file needs a Neovim to talk to or an editor to hand the terminal
+   to. *)
+let editor_jump_unset state =
+  ui_text state ~ko:"편집기 없음 · Neovim 안에서 실행하거나 $EDITOR 를 설정하세요"
+    ~en:"no editor · run this inside Neovim, or set $EDITOR"
 
 module Code_results = Masc_tui_code_results
 module Context_results = Masc_tui_context_results
@@ -1882,11 +1970,15 @@ let wrap_original answer =
   match Original_results.answer_kind answer with
   | Original_results.Read -> Original_msg answer
 
-let check_workspace_request ?schedule_form_action ?refresh_ticket
+(* Whether a request captured under [authority] for [identity] may still go
+   out. The guard withdraws it when the workspace moved, when the server
+   identity is not confirmed, or when the server, asked again just before
+   sending, names another workspace or none. *)
+let admit_workspace_request ?schedule_form_change ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
   let refresh_ticket = Option.value refresh_ticket ~default:state.http_refresh_order in
-  if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
-  else if not (server_authority_ready state) then Error "Workspace identity is unconfirmed"
+  if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
+  else if not (server_authority_ready state) then Error Workspace_identity_not_confirmed
   else
     let reading_authority = state.workspace_read_authority in
     (* Health observes the endpoint identity; the comparison below decides
@@ -1894,27 +1986,35 @@ let check_workspace_request ?schedule_form_action ?refresh_ticket
        neither require a health receipt nor erase a foreign observation. *)
     let reading = Masc_tui_workspace_read.without_binding (fun () ->
       Masc_tui_loader.load_server_identity ~host ~port) in
-    if authority <> state.workspace_authority then Error "Workspace authority withdrawn"
+    if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
     else if reading_authority != state.workspace_read_authority || not (server_authority_ready state)
-    then Error "Workspace identity is unconfirmed"
+    then Error Workspace_identity_not_confirmed
     else if Masc_tui_types.server_workspace_matches ~expected:identity reading then Ok ()
     else begin
-      let detail = "Workspace identity changed or is unavailable; request withdrawn" in
+      let refusal = Workspace_identity_changed in
       (* The form refusal is a receipt; the observed identity is a separately
          stamped read. A newer refresh can retire the latter alone. *)
-      Option.iter (fun action ->
+      Option.iter (fun change ->
         enqueue_async mailbox
           (Workspace_scoped (authority, None,
             Schedule_msg (Schedule_form_authority_refused
-              { action; detail; workspace = workspace_input_identity_of_server identity }))))
-        schedule_form_action;
+              { change; refusal; workspace = workspace_input_identity_of_server identity }))))
+        schedule_form_change;
       if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
         enqueue_async mailbox
           (Workspace_scoped (authority, Some reading_authority,
             Workspace_msg (Workspace_identity_unconfirmed
-              { detail; latest = reading; prior_contact; refresh_ticket })));
-      Error detail
+              { detail = workspace_refusal_text ~ko:false refusal; latest = reading
+              ; prior_contact; refresh_ticket })));
+      Error refusal
     end
+
+(* The guard's refusal in English, for the surfaces whose other sentences are
+   still English. A surface that moves to the screen language takes
+   [admit_workspace_request] and says the refusal with [workspace_refusal_text]. *)
+let check_workspace_request ?refresh_ticket ?prior_contact state ~mailbox ~authority ~identity ~host ~port () =
+  admit_workspace_request ?refresh_ticket ?prior_contact state ~mailbox ~authority ~identity ~host ~port ()
+  |> Result.map_error (workspace_refusal_text ~ko:false)
 
 (* The server this screen reads. It runs on this machine, so the address is
    loopback and there is nothing to configure.
@@ -1936,17 +2036,26 @@ let server_peer_host = Masc_network_defaults.masc_http_loopback_peer
 
 (* One request chain retains the fact that an earlier identity probe reached
    its endpoint. A later probe failure does not erase that contact. *)
-let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
+let workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port =
   let prior_contact = ref Masc_tui_server_lifecycle.Nothing_answered in
   fun () ->
-    let result = check_workspace_request ~prior_contact:!prior_contact
+    let result = admit_workspace_request ~prior_contact:!prior_contact
         state ~mailbox ~authority ~identity ~host ~port () in
     (match result with
      | Ok () -> prior_contact := Masc_tui_server_lifecycle.Server_reached
      | Error _ -> ());
     result
 
+(* The same chain with the refusal in English; see [check_workspace_request]. *)
+let workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port =
+  let admit = workspace_admission_sequence state ~mailbox ~authority ~identity ~host ~port in
+  fun () -> Result.map_error (workspace_refusal_text ~ko:false) (admit ())
+
 (* Capture the endpoint authority before an extracted request can suspend. *)
+let capture_workspace_admission state ~mailbox =
+  workspace_admission_sequence state ~mailbox ~authority:state.workspace_authority
+    ~identity:state.server_identity ~host:server_peer_host ~port:state.port
+
 let capture_workspace_check state ~mailbox =
   workspace_check_sequence state ~mailbox ~authority:state.workspace_authority
     ~identity:state.server_identity ~host:server_peer_host ~port:state.port
@@ -2231,7 +2340,7 @@ let launch_artifact_check_change state ~mailbox =
   | (None | Some (Masc_tui_resource_catalog.Mcp _)), _ ->
     report_action state "error" "Select a published report revision to check or uncheck"
   | Some (Report _), None ->
-    report_action state "error" "Workspace identity is unavailable"
+    report_kept_back state workspace_identity_unread Nothing_kept
   | Some (Report report), Some expected_workspace ->
     match Masc_tui_resources_updates.begin_check state ~report with
     | Error detail -> report_action state "error" detail
@@ -2922,9 +3031,9 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   (* Answering a held tool call mutates server state over one round trip, like
      the Gate and operator-confirm decisions beside it. Take the same
@@ -3625,9 +3734,9 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
@@ -3673,9 +3782,9 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   match pending.gp_retry_request with
   | None ->
@@ -3845,9 +3954,9 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
@@ -4568,9 +4677,9 @@ let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
 let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   if state.workspace_identity <> Workspace_identity_match
      || authority <> state.workspace_authority then
-    report_action state "error" "Cannot cancel task: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match identity with
-  | None -> report_action state "error" "Cannot cancel task: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
@@ -4706,6 +4815,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
   | Some generation ->
     let host, port = server_peer_host, state.port in
     let run () =
+      let ko = state.ui_language = Lang_ko in
       let result =
         try
           let open Result.Syntax in
@@ -4729,7 +4839,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                 try
                   match identity with
                   | None ->
-                    Error "Workspace identity is unavailable; Keeper deletion retry was not sent"
+                    Error (kept_back ~ko (workspace_identity_unread ~ko) Nothing_kept)
                   | Some expected_workspace ->
                     let* status, body =
                       Masc_tui_http.post_keeper_deletion_retry ~host ~port ~path
@@ -4739,7 +4849,12 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                      | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
                      | Rejected { detail; _ } | Paused_owner_conflict detail
                      | Committed_followup_failed detail -> Error detail
-                     | Accepted _ | Purge_accepted _ -> Error "deletion retry response did not identify the requested operation")
+                     | Unbound_purge_receipt { status } ->
+                       Error (Keeper_control.failure_text ~ko (Keeper_control.Unbound_receipt status))
+                     | Accepted _ | Purge_accepted _ ->
+                       Error
+                         (if ko then "삭제 재시도 응답이 요청 ID 를 밝히지 않음"
+                          else "deletion retry response did not identify the requested operation"))
                 with Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn -> Error (Printexc.to_string exn)
               in
@@ -4851,7 +4966,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
        | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
        | Login.Close | Login.Nothing | Login.Refresh_saved _ | Login.Select_existing _
        | Login.Start _ | Login.Input (_, _) | Login.Prepare _ | Login.Save _
-       | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.notice <- "Workspace identity is unconfirmed; account action was not sent.")
+       | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
+         view.notice <-
+           (let ko = state.ui_language = Lang_ko in
+            kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept))
     end
   end
   else begin
@@ -5292,7 +5410,7 @@ let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also
 
 let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
   if not (server_authority_ready state) then
-    report_action state "error" (label ^ " waits for confirmed workspace identity; retry after reconnecting")
+    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
     let ticket = ref () in
     state.chat_command_reads <- (ticket, state.workspace_read_authority, label) :: state.chat_command_reads;
@@ -6173,7 +6291,7 @@ let launch_lane_subscriptions state ~mailbox request =
 
 let launch_lane_addons ?target state ~mailbox request =
   if not (server_authority_ready state) then
-    report_action state "error" "Lane request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
@@ -10496,8 +10614,7 @@ let settle_retired_chat_copy state =
 
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
   if not (server_authority_ready state) then
-    report_action state "error"
-      "/copy cannot read chat history while workspace identity is unconfirmed; retry after reconnecting"
+    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
   let enqueue_async = workspace_enqueue state in
   state.msg_copy_generation <- state.msg_copy_generation + 1;
@@ -11462,7 +11579,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
     state.runtime_lane_notice <-
       Some
         (Masc_tui_types.Lane_write_refused
-           (Masc_tui_types.runtime_pick_refusal_text refusal runtime))
+           (Masc_tui_types.Runtime_pick_refused (refusal, runtime)))
   | Masc_tui_types.Pick_available ->
   if Masc_tui_types.runtime_lane_write_busy state then
     (* A conversation lane's write is [existing] plus the pick, and
@@ -11502,7 +11619,7 @@ let launch_runtime_lane_pick state ~mailbox ~(pick : Masc_tui_types.runtime_lane
           state.runtime_lane_notice <-
             Some
               (Masc_tui_types.Lane_write_refused
-                 (runtime_id ^ " is already a candidate on " ^ lane))
+                 (Masc_tui_types.Already_a_candidate { runtime_id; lane }))
         else
           launch_runtime_lane_write state ~mailbox ~written (fun ~host ~port ->
             match pick with
@@ -11961,8 +12078,7 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
   match target with
   | None -> report_action state "error" "/steer needs a Keeper selected"
   | Some _ when state.workspace_identity <> Workspace_identity_match ->
-      report_action state "error"
-        "Cannot steer: workspace identity is unverified · draft retained"
+      report_kept_back state workspace_identity_unconfirmed Draft_kept
   | Some keeper_name when not (keeper_available_for_new_message state keeper_name) ->
       report_action state "error"
         (Printf.sprintf "Cannot steer: Keeper %s is unavailable"
@@ -12053,8 +12169,7 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
       (* Unread and mismatched workspaces refuse. An unconfirmed match keeps
          the last confirmed match, so the line queues and waits for the
          resume that a confirming read runs. *)
-      report_action state "error"
-        "Cannot send: workspace identity is unverified · draft retained"
+      report_kept_back state workspace_identity_unconfirmed Draft_kept
   | Some target when Option.is_some state.keepers_error
                      && not (keeper_available_for_new_message state target) ->
       report_action state "error"
@@ -12621,8 +12736,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:(if failure then Notice_failure else Notice_reply) text) in
   if not (server_authority_ready state) then
-    panel_notice ~failure:true
-      "/queue request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+    panel_notice ~failure:true (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -12767,7 +12881,8 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          | Keeper_control.Committed_followup_failed detail
          | Keeper_control.Rejected {detail;_}
          | Keeper_control.Paused_owner_conflict detail -> Error detail
-         | Keeper_control.Purge_accepted _ -> Error "Unexpected purge response to queue directive")
+         | Keeper_control.Purge_accepted _ | Keeper_control.Unbound_purge_receipt _ ->
+             Error "Unexpected purge response to queue directive")
       | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
         let fields = ["schema", `String "keeper_event_queue.operator.request.v2";
           "source_ref", `String reference; "source_incarnation", `String (Int64.to_string incarnation)] in
@@ -15024,7 +15139,9 @@ let listen_newest_media ?(destination=Listen_player) state ~mailbox =
         ^ " attachment in this conversation")
   | Some keeper, Some media ->
       if not (server_authority_ready state) then
-        notice ~kind:Notice_failure (command ^ ": waiting for confirmed workspace identity")
+        notice ~kind:Notice_failure
+          (let ko = state.ui_language = Lang_ko in
+           kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept)
       else begin
         let request = begin_chat_listen ~destination state ~keeper media in
         let host = server_peer_host and port = state.port in
@@ -15874,7 +15991,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Queue input ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
-       | None, _ -> notice ~kind:Notice_failure "Select a Keeper first"
+       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | _, Error detail -> notice ~kind:Notice_failure detail
        | _, Ok (Masc_tui_queue_inspection.Inspect_peers _) ->
          assert false (* [parse] never creates a roster read. *)
@@ -15944,11 +16061,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Run_next
     when state.workspace_identity <> Workspace_identity_match ->
       notice ~kind:Notice_failure
-        "Cannot run next: workspace identity is unverified · queued input retained"
+        (let ko = state.ui_language = Lang_ko in
+         kept_back ~ko (workspace_identity_unconfirmed ~ko) Queued_input_kept)
   | Masc_tui_command.Run_next ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
-       | None -> notice ~kind:Notice_failure "Select a Keeper first"
+       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some name ->
          if List.mem_assoc name state.keeper_chat_control_pending then
            notice ~kind:Notice_failure "Wait for the pending stop or resume before run-next"
@@ -16019,7 +16137,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Answer_tool_approval allow ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
-       | None -> notice ~kind:Notice_reply "Select a Keeper first"
+       | None -> notice ~kind:Notice_reply (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some target ->
          match inflight_for_keeper state target with
          | Some entry ->
@@ -16103,7 +16221,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            Masc_tui_message_input.clear state.msg_input;
            open_chat_call_reader state ~mailbox keeper_name
        | Some _ | None ->
-           notice ~kind:Notice_failure "Workspace identity must be confirmed before reading original calls")
+           notice ~kind:Notice_failure
+             (let ko = state.ui_language = Lang_ko in
+              kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept))
   | Masc_tui_command.Set_tools mode ->
       Masc_tui_message_input.clear state.msg_input;
       state.msg_tool_visibility <-
@@ -16129,12 +16249,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          ^ " (Ctrl-N or /memory to cycle)")
   | Masc_tui_command.Memory_status ->
       (match target with
-       | None -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some _ when not (server_authority_ready state) ->
-         notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 조회하세요."
+         notice ~kind:Notice_failure
+           (let ko = (state.ui_language = Lang_ko) in
+            kept_back ~ko (workspace_identity_unconfirmed ~ko) Draft_kept)
        | Some keeper ->
          Masc_tui_message_input.clear state.msg_input;
-         notice ~kind:Notice_reply (keeper ^ ": 메모리 처리 상태 조회 중");
+         notice ~kind:Notice_reply
+           (keeper ^ ": " ^ ui_text state ~ko:"메모리 처리 상태 조회 중"
+              ~en:"loading memory processing status");
          let ticket = ref () in
          state.chat_command_reads <-
            (ticket, state.workspace_read_authority, "/memory status") :: state.chat_command_reads;
@@ -16156,12 +16280,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              else Masc_tui_http.Catch_up_not_sent detail in
            let message outcome =
              Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) in
+           let changed =
+             ui_text state ~ko:"워크스페이스 연결이 바뀜" ~en:"workspace connection changed" in
            Masc_tui_message_input.clear state.msg_input;
-           notice ~kind:Notice_reply (keeper ^ ": 메모리 따라잡기 요청 중");
+           notice ~kind:Notice_reply
+             (keeper ^ ": " ^ ui_text state ~ko:"메모리 따라잡기 요청 중"
+                ~en:"requesting memory catch-up");
            (* Keep this original operation receipt through workspace withdrawal.
               Its delivery grants no read or retry authority in a successor. *)
            Masc_tui_workspace_result.launch state ~results:mailbox.workspace_results
-             ~cancelled_by:(fun () -> message (interrupted "작업 공간 연결이 변경되었습니다."))
+             ~cancelled_by:(fun () -> message (interrupted changed))
              ~boundary_error:interrupted
              ~deliver:(fun result -> message (match result with Ok outcome | Error outcome -> outcome))
              (fun () ->
@@ -16171,9 +16299,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
                  Atomic.set posting true;
                  Ok (Masc_tui_http.post_keeper_memory_catch_up ~expected_workspace:workspace
                    ~host ~port ~keeper_name:keeper))
-       | None, _ -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some _, (None | Some _) ->
-           notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 요청하세요.")
+           notice ~kind:Notice_failure
+           (let ko = (state.ui_language = Lang_ko) in
+            kept_back ~ko (workspace_identity_unconfirmed ~ko) Draft_kept))
   | Masc_tui_command.Open_fleet_memory ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Memory;
@@ -16214,8 +16344,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Preset_save { name; description } ->
       if not (server_authority_ready state) then
         notice ~kind:Notice_failure
-          (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
-             ~en:"Confirm the workspace before saving · input retained")
+          (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
       else if (state.preset_busy || workspace_preset_save_pending state <> [])
               && not (preset_save_is_pending state name) then
         notice ~kind:Notice_failure
@@ -16224,8 +16353,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       else if preset_save_is_unconfirmed state name && not (preset_save_is_pending state name) then
         (match workspace_input_identity_of_server state.server_identity with
          | None -> notice ~kind:Notice_failure
-             (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
-                ~en:"Confirm the workspace before saving · input retained")
+             (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
          | Some _ when state.preset_busy || Option.is_some state.preset_save_draft ->
            notice ~kind:Notice_failure
              (ui_text state ~ko:"기존 프리셋 입력을 마친 뒤 다시 제출하세요 · 채팅 입력 유지"
@@ -18445,7 +18573,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
   Masc_tui_types.reconcile_detail_intent_origins state reading;
   let previous = state.workspace_identity in
   let chat_workspace = chat_input_workspace state in
-  state.server_identity <- Masc_tui_types.server_identity_of_refresh reading;
+  Masc_tui_types.store_server_identity_reading state reading;
   state.workspace_identity <-
     Masc_tui_types.workspace_identity_of_refresh
       ~local_paths:state.local_workspace_paths reading;
@@ -21292,7 +21420,7 @@ let start_approval_decision state approval decision ~mailbox =
   let identity = state.server_identity in
   let reading = Some state.workspace_read_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
@@ -21387,7 +21515,9 @@ let toggle_selected_ask_origin state =
 
 let inspect_selected_ask_origin state ~mailbox =
   if not (server_authority_ready state) then
-    report_action state "system" "Confirm the workspace identity before reading the question source"
+    report_action state "system"
+      (let ko = state.ui_language = Lang_ko in
+       kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept)
   else match selected_ask_origin state with
   | None -> report_action state "system" "No question source is available"
   | Some origin ->
@@ -21660,7 +21790,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
     as_authority = authority; as_reading = reading; as_asker = asker;
     as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
+    report_kept_back state workspace_identity_unconfirmed Draft_kept
   else begin
   supersede_home_decision_receipt state;
 
@@ -21728,7 +21858,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
 
 let handle_ask_submit state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
+    report_kept_back state workspace_identity_unconfirmed Draft_kept
   else
   match state.asks_error with
   | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
@@ -21788,24 +21918,21 @@ let handle_ask_submit state ~mailbox =
    recovery itself is the operator's to read. *)
 let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_operation_id
     ~expected_workspace action =
+  (* The workspace check and the transport answer in text, not HTTP; what
+     they say is carried as it came. *)
+  let unanswered result = Result.map_error (fun text -> Keeper_control.No_answer text) result in
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
-        (match expected_workspace with
-         | None -> Error "Workspace identity is unavailable; Keeper lifecycle action was not sent"
-         | Some expected_workspace ->
-           Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
+        unanswered
+          (Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
              ~action:lifecycle_action ~expected_workspace)
     | Keeper_control.Directive directive_action ->
-        (match expected_workspace with
-         | None -> Error "Workspace identity is unavailable; Keeper directive was not sent"
-         | Some expected_workspace ->
-           Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
+        unanswered
+          (Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
              ~action:directive_action ~operator_operation_id ~expected_workspace)
     | Keeper_control.Purge ->
-        (match expected_workspace with
-         | None -> Error "Workspace identity is unavailable; Keeper purge was not sent"
-         | Some expected_workspace ->
-           Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace)
+        unanswered
+          (Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace)
   in
   let rec walk ~recovery_available last_outcome steps =
     match steps with
@@ -21815,12 +21942,10 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
         | None ->
             (* [plan] never returns an empty step list; if it ever did, an
                empty walk must not read as success. *)
-            Error
-              (Printf.sprintf "%s has no request to send"
-                 (Keeper_control.action_label action)))
+            Error Keeper_control.Empty_plan)
     | step :: rest -> (
-        match Result.bind (check_request ()) (fun () -> perform step) with
-        | Error transport -> Error transport
+        match Result.bind (unanswered (check_request ())) (fun () -> perform step) with
+        | Error failure -> Error failure
         | Ok (status, body) -> (
             let outcome = match step with
               | Keeper_control.Purge -> Keeper_control.classify_purge_response ~keeper_name ~status ~body
@@ -21831,11 +21956,7 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
             | Keeper_control.Committed_followup_failed detail as outcome -> (
                 match rest with
                 | _ :: _ -> walk ~recovery_available (Some outcome) rest
-                | [] ->
-                    Error
-                      (Printf.sprintf
-                         "durable pause cleared, but live resume failed: %s"
-                         detail))
+                | [] -> Error (Keeper_control.Followup_failed detail))
             | Keeper_control.Paused_owner_conflict detail -> (
                 match
                   ( recovery_available
@@ -21843,27 +21964,35 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
                 with
                 | true, Some recovery_steps ->
                     walk ~recovery_available:false last_outcome recovery_steps
-                | true, None | false, _ -> Error detail)
+                | true, None | false, _ ->
+                    Error (Keeper_control.Refused { status; detail }))
             | Keeper_control.Rejected { status; detail } ->
-                Error (Printf.sprintf "HTTP %d: %s" status detail)))
+                Error (Keeper_control.Refused { status; detail })
+            | Keeper_control.Unbound_purge_receipt { status } ->
+                Error (Keeper_control.Unbound_receipt status)))
   in
   walk ~recovery_available:true None (Keeper_control.plan action)
 
 let apply_keeper_action_result state ~base_path ~mailbox keeper_name action result =
   state.keeper_action_inflight <- None;
+  let ko = state.ui_language = Lang_ko in
+  let label = Keeper_control.action_label ~ko action in
   (match result with
    | Ok (Keeper_control.Purge_accepted { operation_id }) ->
        report_action state "system"
-         (Printf.sprintf "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed"
+         (Printf.sprintf
+            (if ko then "%s 삭제 접수됨 (요청 %s) · 종료와 정리는 아직 확인 전"
+             else "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed")
             keeper_name operation_id)
    | Ok (Keeper_control.Accepted { already_live = true }) ->
        report_action state "system"
-         (Printf.sprintf "%s was already running; woke it instead of starting a second fiber"
+         (Printf.sprintf
+            (if ko then "%s 이미 실행 중 · 새로 띄우지 않고 깨움"
+             else "%s was already running; woke it instead of starting a second fiber")
             keeper_name)
    | Ok (Keeper_control.Accepted { already_live = false }) ->
        report_action state "system"
-         (Printf.sprintf "%s %s accepted" keeper_name
-            (Keeper_control.action_label action))
+         (Printf.sprintf (if ko then "%s %s 접수됨" else "%s %s accepted") keeper_name label)
    | Ok (Keeper_control.Paused_owner_conflict detail)
    | Ok (Keeper_control.Committed_followup_failed detail)
    | Ok (Keeper_control.Rejected { detail; _ }) ->
@@ -21871,23 +22000,31 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
           branch exhaustive rather than wildcarded means a future outcome
           member has to be answered here too. *)
        report_action state "error"
-         (Printf.sprintf "%s %s refused: %s" keeper_name
-            (Keeper_control.action_label action) detail)
-   | Error detail ->
+         (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
+            keeper_name label detail)
+   | Ok (Keeper_control.Unbound_purge_receipt { status }) ->
        report_action state "error"
-         (Printf.sprintf "%s %s failed: %s" keeper_name
-            (Keeper_control.action_label action) detail));
+         (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
+            keeper_name label
+            (Keeper_control.failure_text ~ko (Keeper_control.Unbound_receipt status)))
+   | Error failure ->
+       report_action state "error"
+         (Printf.sprintf (if ko then "%s %s 실패: %s" else "%s %s failed: %s")
+            keeper_name label (Keeper_control.failure_text ~ko failure)));
   (* The accepted action may change Keeper metadata and release Task work.
      Each local source starts a fresh owned read; the HTTP roster refresh is
      independent and no directory scan runs in this result handler. *)
   launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
-  if not (server_authority_ready state) then begin
+  let refuse () =
     state.keeper_action_pending <- None;
-    report_action state "error"
-      "Cannot change Keeper state: workspace identity is unverified"
-  end else
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept in
+  (* The requests carry the identity this admission confirmed. *)
+  match state.server_identity with
+  | None -> refuse ()
+  | Some _ when not (server_authority_ready state) -> refuse ()
+  | Some expected_workspace ->
   let origin = state.server_identity in
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -21895,7 +22032,10 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
   report_action ~show_in_footer:false state "system"
-    (Printf.sprintf "%s %s" (Keeper_control.action_gerund action) keeper_name);
+    (let ko = state.ui_language = Lang_ko in
+     let gerund = Keeper_control.action_gerund ~ko action in
+     if ko then Printf.sprintf "%s %s" keeper_name gerund
+     else Printf.sprintf "%s %s" gerund keeper_name);
   let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
@@ -21908,10 +22048,10 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
     let result =
       try
         run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-          ~operator_operation_id ~expected_workspace:identity action
+          ~operator_operation_id ~expected_workspace action
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
+      | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
     in
     enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
   in
@@ -21921,10 +22061,10 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
       let result =
         try
           run_keeper_action_steps ~check_request ~host ~port ~keeper_name
-            ~operator_operation_id ~expected_workspace:identity action
+            ~operator_operation_id ~expected_workspace action
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
+        | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
       in
       enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
 
@@ -21978,13 +22118,13 @@ let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string
       end
   | ( Workspace_identity_match | Workspace_identity_mismatch _
     | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
-      report_action state "error" "Cannot change goal: workspace identity is unverified"
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
 
 (* Confirmation uses the operator route and the exact proof read here, never
    the public MCP action set or a proof obtained at the second keypress. *)
 let handle_goal_confirmation_key state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot confirm goal: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else
   match state.planning_mode with
   | Planning_list -> ()
@@ -22181,11 +22321,13 @@ let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
           send_board_vote state ~mailbox ~up target
       | Masc_tui_board_vote.Arm (target, up) ->
           state.board_vote_armed <- Some (target, up);
+          let ko = state.ui_language = Lang_ko in
+          let key = if up then "v" else "V" in
+          let direction = Masc_tui_board_vote.direction ~ko ~up in
+          let target_text = Masc_tui_board_vote.describe ~ko target in
           report_action state "system"
-            (Printf.sprintf "press %s again to vote %s on %s"
-               (if up then "v" else "V")
-               (if up then "up" else "down")
-               (Masc_tui_board_vote.describe target)))
+            (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key target_text direction
+             else Printf.sprintf "press %s again to vote %s on %s" key direction target_text))
 
 (* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
    the other writes; the server's store rules decide whether the row is still
@@ -22193,23 +22335,28 @@ let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
 let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_action state "error" "Workspace identity has not been read; action unavailable"
+      report_kept_back state workspace_identity_unread Nothing_kept
   | Workspace_identity_match_unconfirmed _ ->
-      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
-  let check = capture_workspace_check state ~mailbox in
+  let admit = capture_workspace_admission state ~mailbox in
   state.schedule_cancel_error <- None;
   report_action state "system"
-    (Printf.sprintf "cancelling schedule %s" schedule_id);
+    (if state.ui_language = Lang_ko then Printf.sprintf "일정 %s 취소 보내는 중" schedule_id
+     else Printf.sprintf "cancelling schedule %s" schedule_id);
   let host = server_peer_host in
   let port = state.port in
   let run_cancel () =
     let result =
-      match Result.bind (check ())
-        (fun () -> Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id) with
-      | Error err -> Error err
-      | Ok json -> Masc.Tui_decode.tool_envelope_outcome json
+      match admit () with
+      | Error refusal -> Error (Request_withdrawn refusal)
+      | Ok () ->
+        (match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
+         | Error detail -> Error (Request_failed detail)
+         | Ok json ->
+           Result.map_error (fun detail -> Request_failed detail)
+             (Masc.Tui_decode.tool_envelope_outcome json))
     in
     enqueue_async mailbox (Schedule_msg (Schedule_cancel_done (schedule_id, result)))
   in
@@ -22241,7 +22388,8 @@ let handle_schedule_cancel_key state ~mailbox =
           state.schedule_cancel_armed <- Some row.sch_schedule_id;
           state.schedule_cancel_error <- None;
           report_action state "system"
-            (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
+            (schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko)
+               row.sch_schedule_id))
 
 (* Send the operator's verdict through the verification route. Same
    fiber-and-mailbox shape as the other writes; whether the task still awaits
@@ -22491,9 +22639,12 @@ let handle_verification_approve_key state ~mailbox =
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
   | None ->
-      state.board_post_error <- Some "no $EDITOR set; export EDITOR to edit draft";
+      state.board_post_error <-
+        Some
+          (Masc_tui_editor.abort_detail ~ko:(state.ui_language = Lang_ko)
+             (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset));
       state.board_compose_armed <- false;
-      report_action state "error" "no $EDITOR set; export EDITOR to edit draft"
+      report_editor_unset state ~form:Board_draft
   | Some _ -> (
       let current_draft = Buffer.contents state.board_draft in
       let stem =
@@ -22507,23 +22658,29 @@ let open_board_composer_editor state ~restore ~reenter =
         Masc_tui_editor.roundtrip ~restore ~reenter ~suffix:".md" stem
       with
       | Error abort ->
-          report_editor_abort state ~action:"Board compose"
-            ~cancelled:"Board draft unchanged" abort;
+          report_editor_abort state ~form:Board_draft abort;
           state.board_compose_armed <- false
       | Ok edited ->
           let trimmed = String.trim edited in
           if Board_composer.is_untouched_template ~draft:trimmed
              && String.length (String.trim current_draft) = 0 then begin
             state.board_compose_armed <- false;
-            report_action state "system" "Board compose cancelled (empty draft)"
+            report_action state "system"
+              (ui_text state ~ko:"글쓰기 취소 · 빈 초안"
+                 ~en:"Board compose cancelled · empty draft")
           end else begin
             Buffer.clear state.board_draft;
             Buffer.add_string state.board_draft trimmed;
             state.board_compose_armed <- false;
             state.board_post_error <- None;
-            report_action state "system" "Board draft updated from editor"
+            report_action state "system"
+              (ui_text state ~ko:"편집기로 초안을 고침" ~en:"Board draft updated from editor")
           end )
 ;;
+
+(* The attach path input closed with nothing staged: Esc, or Enter on an
+   empty path. *)
+let attach_cancelled state = ui_text state ~ko:"첨부 취소" ~en:"attach cancelled"
 
 (* Stage one local file for the post. Its kind comes from the file's name:
    the store keeps nothing that says what a file is, so the extension is the
@@ -22541,22 +22698,26 @@ let stage_board_compose_path state raw =
         Filename.concat home (String.sub typed 2 (String.length typed - 2))
     | Some _ | None -> typed
   in
+  let ko = state.ui_language = Lang_ko in
   if String.equal path "" then begin
     state.board_compose_attach_input <- None;
     state.board_post_error <- None;
-    report_action state "system" "attach cancelled"
+    report_action state "system" (attach_cancelled state)
   end
   else if
     List.exists
       (fun (staged : board_staged_attachment) -> String.equal staged.sa_path path)
       state.board_compose_attachments
-  then state.board_post_error <- Some "that file is already attached"
+  then
+    state.board_post_error <-
+      Some (if ko then "이미 첨부한 파일" else "that file is already attached")
   else
     match
       Masc_tui_board_upload.attachable
         ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path
     with
-    | Error reason -> state.board_post_error <- Some reason
+    | Error refusal ->
+        state.board_post_error <- Some (Masc_tui_board_upload.refusal_text ~ko refusal)
     | Ok () ->
         let sa_kind = upload_kind_of_path path in
         state.board_compose_attachments <-
@@ -22565,10 +22726,12 @@ let stage_board_compose_path state raw =
         state.board_compose_attach_input <- None;
         state.board_post_error <- None;
         report_action state "system"
-          (Printf.sprintf "attached %s (%s) — %d staged for the post"
+          (Printf.sprintf
+             (if ko then "%s (%s) 첨부 준비 · 글에 붙일 파일 %s개"
+              else "attached %s (%s) · %s staged for the post")
              (Filename.basename path)
              (board_upload_kind_to_wire sa_kind)
-             (List.length state.board_compose_attachments))
+             (Masc_tui_value.Count.grouped (List.length state.board_compose_attachments)))
 ;;
 
 (* While the attach path is being typed it owns the compose keys: Enter
@@ -22582,7 +22745,7 @@ let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool
   | "esc" ->
       state.board_compose_attach_input <- None;
       state.board_post_error <- None;
-      report_action state "system" "attach cancelled";
+      report_action state "system" (attach_cancelled state);
       true
   | "\127" | "\b" ->
       let next =
@@ -22598,6 +22761,14 @@ let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool
       true
   | _ -> true
 ;;
+
+(* A second send while one is out is refused; the draft stays. *)
+let send_in_flight state =
+  ui_text state ~ko:"이미 보내는 중" ~en:"a send is already in flight"
+
+(* Without the terminal hand-off pair the editor cannot take the screen. *)
+let editor_not_here state =
+  ui_text state ~ko:"여기서는 편집기를 열 수 없음" ~en:"external editor not available here"
 
 (* Compose-mode keys. Sending is armed rather than pressed: esc offers
    send-or-discard, so a stray key during writing cannot publish. Returns
@@ -22623,7 +22794,8 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
       match state.board_compose_reply_to with
       | Some _ ->
           report_action state "system"
-            "attachments are sent with new posts; a comment carries text only";
+            (ui_text state ~ko:"첨부는 새 글에만 · 댓글은 글자만"
+               ~en:"attachments go with new posts · a comment carries text only");
           true
       | None ->
           state.board_compose_attach_input <- Some (Buffer.create 128);
@@ -22635,7 +22807,7 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           open_board_composer_editor state ~restore:r ~reenter:re;
           true
       | _ ->
-          state.board_post_error <- Some "external editor not available here";
+          state.board_post_error <- Some (editor_not_here state);
           true )
   | "e" | "E" when state.board_compose_armed -> (
       match restore, reenter with
@@ -22643,17 +22815,19 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           open_board_composer_editor state ~restore:r ~reenter:re;
           true
       | _ ->
-          state.board_post_error <- Some "external editor not available here";
+          state.board_post_error <- Some (editor_not_here state);
           true )
   | "h" | "H" when state.board_compose_armed && Option.is_none state.board_compose_reply_to ->
       state.board_compose_hearth <-
         Board_hearth.next ~current:state.board_compose_hearth
           ~census:(board_census_values state);
       (* Keep armed so the operator can continue cycling hearths or press 's' to send *)
+      (* The pane's own label for the hearth, with the value it now holds. *)
       report_action state "system"
-        (match state.board_compose_hearth with
-         | Some h -> "Board target hearth set to #" ^ h
-         | None -> "Board target hearth set to default");
+        (ui_text state ~ko:"게시판: " ~en:"hearth: "
+         ^ (match state.board_compose_hearth with
+            | Some h -> "#" ^ h
+            | None -> ui_text state ~ko:"기본" ~en:"default"));
       true
   | "esc" ->
       state.board_compose_armed <- not state.board_compose_armed;
@@ -22666,11 +22840,12 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           let content = Buffer.contents state.board_draft in
           if String.equal (String.trim content) "" then begin
             state.board_compose_armed <- false;
-            state.board_post_error <- Some "the comment is empty";
+            state.board_post_error <-
+              Some (ui_text state ~ko:"댓글이 비어 있음" ~en:"the comment is empty");
             true
           end else if board_write_inflight state.board_write then begin
             state.board_compose_armed <- false;
-            state.board_post_error <- Some "a send is already in flight";
+            state.board_post_error <- Some (send_in_flight state);
             true
           end else begin
             state.board_compose_armed <- false;
@@ -22681,7 +22856,10 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
                 { request_id
                 ; post_id
                 ; sent_draft
-                ; result = Error "Board comment interrupted; outcome unknown; check the thread before retrying"
+                ; result =
+                    Error
+                      (Masc_tui_board_updates.comment_outcome_unknown
+                         ~ko:(state.ui_language = Lang_ko))
                 })
             in
             let on_not_run () =
@@ -22709,11 +22887,14 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           match String.split_on_char '\n' (String.trim title) with
           | [] | [ "" ] ->
               state.board_compose_armed <- false;
-              state.board_post_error <- Some "the first line (title) is empty";
+              state.board_post_error <-
+                Some
+                  (ui_text state ~ko:"첫 줄(제목)이 비어 있음"
+                     ~en:"the first line (title) is empty");
               true
           | _ when board_write_inflight state.board_write ->
               state.board_compose_armed <- false;
-              state.board_post_error <- Some "a send is already in flight";
+              state.board_post_error <- Some (send_in_flight state);
               true
           | _ ->
               state.board_compose_armed <- false;
@@ -22764,7 +22945,9 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
 (* Said by every keypress gate that finds nothing under the cursor. One name
    rather than the sentence written twice: the two gates have to answer the
    same way, and a test can ask whether each of them reaches this. *)
-let no_keeper_under_cursor = "no keeper under the cursor; r to reload the roster"
+let no_keeper_under_cursor ~ko =
+  if ko then "커서 아래 키퍼 없음 · r 로 목록 다시 읽기"
+  else "no keeper under the cursor; r to reload the roster"
 
 (* The keypress path. The reading decides which actions exist at all, so a key
    that names an action the reading does not offer says why instead of sending
@@ -22772,9 +22955,9 @@ let no_keeper_under_cursor = "no keeper under the cursor; r to reload the roster
 let handle_keeper_action state ~base_path ~mailbox action =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_action state "error" "Workspace identity has not been read; action unavailable"
+      report_kept_back state workspace_identity_unread Nothing_kept
   | Workspace_identity_match_unconfirmed _ ->
-      report_action state "error" "Workspace identity is unconfirmed; action unavailable"
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
@@ -22782,25 +22965,21 @@ let handle_keeper_action state ~base_path ~mailbox action =
        reads as a key that does not exist. The comment above already holds
        this rule for the next gate -- an action the reading does not offer
        says why -- and this gate is the one the operator reaches first. *)
-    report_action state "system" no_keeper_under_cursor
+    report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
   | Some keeper ->
       let reading = keeper_reading state keeper in
+      let ko = state.ui_language = Lang_ko in
+      let label = Keeper_control.action_label ~ko action in
       if not (List.mem action (Keeper_control.available reading)) then
         report_action state "system"
-          (Printf.sprintf "%s cannot %s right now (%s)" keeper.k_name
-             (Keeper_control.action_label action)
-             (match reading.Keeper_control.liveness with
-              | Keeper_control.Invalid detail -> detail
-              | Keeper_control.Unobserved ->
-                  "the live roster has not been read"
-              | Keeper_control.Absent | Keeper_control.Present _ ->
-                  (if reading.Keeper_control.paused then "paused, "
-                   else "")
-                  (* The notice is an English sentence as a whole, so its
-                     health word stays English with it until the notice takes
-                     the screen language. *)
-                  ^ Keeper_control.health_label ~ko:false reading
-                  ^ " keeper"))
+          (Printf.sprintf
+             (if ko then "%s 지금 %s 불가 (%s)" else "%s cannot %s right now (%s)")
+             keeper.k_name label
+             (Keeper_control.status_label ~ko reading
+              ^ (match reading.Keeper_control.liveness with
+                 | Keeper_control.Invalid detail -> ": " ^ detail
+                 | Keeper_control.Unobserved | Keeper_control.Absent
+                 | Keeper_control.Present _ -> "")))
       else
         match
           Keeper_control.gate_transition
@@ -22808,21 +22987,23 @@ let handle_keeper_action state ~base_path ~mailbox action =
             ~pending:state.keeper_action_pending ~keeper:keeper.k_name action
         with
         | Keeper_control.Gate_blocked_inflight ->
-            report_action state "system" "A keeper action is already in progress"
+            report_action state "system"
+              (if ko then "키퍼 동작 이미 진행 중" else "A keeper action is already in progress")
         | Keeper_control.Gate_arm pending ->
             state.keeper_action_pending <- Some pending;
+            let key = Keeper_control.action_key action in
             report_action ~show_in_footer:false state "system"
-              (Printf.sprintf "Press %s again to %s %s"
-                 (Keeper_control.action_key action)
-                 (Keeper_control.action_label action) keeper.k_name);
+              (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key keeper.k_name label
+               else Printf.sprintf "Press %s again to %s %s" key label keeper.k_name);
 
             (* Shutdown is undone by a boot. Delete is not undone at all, so
                the arm names what goes -- the same list the dashboard shows
                before its own purge. *)
             if action = Keeper_control.Delete then
               report_action state "system"
-                ("Delete stops the Keeper and waits for lane shutdown before removing: "
-                 ^ String.concat ", " Keeper_control.purge_artifacts)
+                ((if ko then "삭제하면 키퍼를 멈추고 레인 종료를 기다린 뒤 지움: "
+                  else "Delete stops the Keeper and waits for lane shutdown before removing: ")
+                 ^ String.concat ", " (Keeper_control.purge_artifacts ~ko))
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
@@ -23640,12 +23821,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~before:authority;
       report_action state "error" detail
       end
-  | Schedule_msg (Schedule_form_authority_refused {action; detail; workspace}) ->
+  | Schedule_msg (Schedule_form_authority_refused {change; refusal; workspace}) ->
       (* Identity observation is delivered separately under its read epoch. *)
-      state.schedule_form_refusal <- Some
-        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
-        ; sfr_workspace = workspace };
-      report_action state "error" (action ^ ": " ^ detail)
+      let form_refusal =
+        { sfr_change = change; sfr_reason = Schedule_form_request (Request_withdrawn refusal)
+        ; sfr_at = Unix.gettimeofday (); sfr_workspace = workspace } in
+      state.schedule_form_refusal <- Some form_refusal;
+      report_action state "error"
+        (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) form_refusal)
   | Lane_msg (Lane_package_catalog_loaded (generation,directory,result)) ->
       map_lane_addons state (fun view ->
         if view.generation<>generation then view else
@@ -25229,9 +25412,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         launch_owed_board_post state ~mailbox
       end
   | Keeper_msg (Keeper_deletion_retry_done (operation_id, result)) ->
+      let ko = state.ui_language = Lang_ko in
       let message = match result with
-        | Ok () -> Printf.sprintf "Deletion retry %s accepted; refreshing inventory." operation_id
-        | Error detail -> Printf.sprintf "Deletion retry %s not confirmed: %s. Refresh inventory before retrying." operation_id detail in
+        | Ok () ->
+          Printf.sprintf
+            (if ko then "삭제 재시도 %s 접수됨 · 목록 다시 조회 중"
+             else "Deletion retry %s accepted; refreshing inventory.")
+            operation_id
+        | Error detail ->
+          Printf.sprintf
+            (if ko then "삭제 재시도 %s 확인 안 됨: %s · 목록을 다시 조회한 뒤 재시도"
+             else "Deletion retry %s not confirmed: %s. Refresh inventory before retrying.")
+            operation_id detail in
       state.keeper_deletions_retry_receipt <- Some (state.keeper_deletions_generation, message);
       report_action state (if Result.is_ok result then "system" else "error") message
   | Keeper_msg (Keeper_deletions_loaded (generation, result)) ->
@@ -25409,21 +25601,28 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) ->
       let original_is_current = authority = state.workspace_authority
         && same_workspace_identity (Some workspace) state.server_identity in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
+      let status_hint = say "처리 상태: /memory status" "status: /memory status" in
       let kind, detail = match outcome with
         | Masc_tui_http.Catch_up_submitted ->
-          Notice_reply, "메모리 따라잡기 요청 접수. 처리 상태는 /memory status로 조회하세요."
+          Notice_reply, say "메모리 따라잡기 접수" "memory catch-up accepted" ^ " · " ^ status_hint
         | Catch_up_coalesced ->
-          Notice_reply, "대기 중인 따라잡기 요청에 합쳤습니다. 처리 상태는 /memory status로 조회하세요."
-        | Catch_up_not_sent detail -> Notice_failure, "요청을 전송하지 못했습니다: " ^ detail
-        | Catch_up_refused detail -> Notice_failure, "서버가 요청을 거절했습니다: " ^ detail
+          Notice_reply, say "대기 중인 따라잡기에 합침" "joined the pending catch-up" ^ " · " ^ status_hint
+        | Catch_up_not_sent detail -> Notice_failure, not_sent ~ko ^ ": " ^ detail
+        | Catch_up_refused detail -> Notice_failure, say "서버가 거절함: " "server refused: " ^ detail
         | Catch_up_unconfirmed detail ->
-          Notice_failure, "접수 결과 미확인: " ^ detail ^ " · 원래 작업 공간에서 /memory status로 확인하세요." in
+          Notice_failure,
+          say "접수 미확인: " "acceptance unconfirmed: " ^ detail ^ " · "
+          ^ say "원래 워크스페이스에서 /memory status 로 확인하세요"
+              "check /memory status in the original workspace" in
       if original_is_current then
         chat_notice state ~keeper_name:(Some keeper) ~kind (keeper ^ ": " ^ detail)
       else
         report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system")
-          (Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path
-           ^ "의 원래 요청 · " ^ keeper ^ ": " ^ detail)
+          (let path = Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path in
+           say (path ^ "의 원래 요청") ("original request in " ^ path)
+           ^ " · " ^ keeper ^ ": " ^ detail)
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
@@ -25468,7 +25667,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ( Keeper_control.Purge_accepted _
             | Keeper_control.Committed_followup_failed _
             | Keeper_control.Paused_owner_conflict _
-            | Keeper_control.Rejected _ )
+            | Keeper_control.Rejected _
+            | Keeper_control.Unbound_purge_receipt _ )
          | Error _) ->
            ()
        | (Keeper_control.Resume | Keeper_control.Boot),
@@ -25479,7 +25679,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ( Keeper_control.Purge_accepted _
             | Keeper_control.Committed_followup_failed _
             | Keeper_control.Paused_owner_conflict _
-            | Keeper_control.Rejected _ )
+            | Keeper_control.Rejected _
+            | Keeper_control.Unbound_purge_receipt _ )
          | Error _)
        | (Keeper_control.Wakeup | Keeper_control.Delete), _ ->
            ());
@@ -26867,7 +27068,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Ok message ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- None;
-          report_action state "system" ("Schedule: " ^ message);
+          report_action state "system"
+            (ui_text state ~ko:"일정: " ~en:"Schedule: " ^ message);
           (* The row shown still carries the old status until a read lands; a
              cancelled row that reads "scheduled" invites a second cancel. The
              server announces [schedule_store_invalidated] for this write too, so the
@@ -28887,31 +29089,44 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Row_health_read _ | Fleet_health_read _ -> ()
        | Command_health_read _ ->
          let notice = chat_notice state ~keeper_name:(Some keeper) in
+         let ko = state.ui_language = Lang_ko in
+         let say korean english = if ko then korean else english in
          match result with
-         | Error detail -> notice ~kind:Notice_failure (keeper ^ ": 상태 조회 실패 · " ^ detail)
+         | Error detail ->
+           notice ~kind:Notice_failure
+             (keeper ^ ": " ^ say "상태 " "status " ^ field_failed ~ko ^ " · " ^ detail)
          | Ok {mhr_keeper = Row_absent; _} ->
-           notice ~kind:Notice_failure (keeper ^ ": 메모리 관측 행이 없습니다.")
+           notice ~kind:Notice_failure
+             (keeper ^ ": " ^ say "메모리 관측 없음" "no memory observation")
          | Ok {mhr_keeper = Row_refused refusal; _} ->
-           notice ~kind:Notice_failure (keeper ^ ": 상태를 읽지 못했습니다 · " ^ refusal.mkr_reason)
+           notice ~kind:Notice_failure
+             (keeper ^ ": " ^ say "상태 조회 거절" "status refused" ^ " · " ^ refusal.mkr_reason)
          | Ok {mhr_keeper = Row_present row; mhr_generated_at} ->
            let librarian = row.mkh_librarian in
            let pass = match librarian.mlh_state with
-             | None -> "이번 서버에서 처리 결과 미관측"
-             | Some state -> Masc_tui_keeper_memory_reading.pass_word state in
+             | None -> say "이번 서버에서 처리 결과 미관측" "no pass observed on this server"
+             | Some ending -> memory_pass_text ~ko ending in
            let lag = match Masc_tui_keeper_memory_reading.unread_lag librarian with
-             | None -> "미처리 턴 미관측"
-             | Some count -> Printf.sprintf "미처리 %d턴" count in
+             | None -> say "미처리 턴 미관측" "unprocessed turns not observed"
+             | Some count ->
+               if ko then Printf.sprintf "미처리 %d턴" count
+               else Printf.sprintf "%d turns unprocessed" count in
            let measured = match librarian.mlh_measured_at with
-             | None -> "처리 관측 시각 없음"
-             | Some at -> "처리 관측 " ^ Masc_tui_message_layout.span_text
-                 (max 0. (Unix.gettimeofday () -. at)) ^ " 전" in
+             | None -> say "처리 관측 시각 없음" "no pass time observed"
+             | Some at ->
+               say "처리 관측 " "pass observed "
+               ^ span_ago ~ko
+                   (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. at))) in
            let cause = Option.bind librarian.mlh_state
              Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
            let admission = Option.map (fun admission ->
-             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.admission_description admission)
+             say "명시적 메모리 후보: " "explicit memory candidate: "
+             ^ Masc.Keeper_librarian_pending.admission_description admission)
              librarian.mlh_admission_wait in
-           let reading_age = "상태 조회 " ^ Masc_tui_message_layout.span_text
-             (max 0. (Unix.gettimeofday () -. mhr_generated_at)) ^ " 전" in
+           let reading_age =
+             say "상태 조회 " "status loaded "
+             ^ span_ago ~ko
+                 (Masc_tui_message_layout.span_text (max 0. (Unix.gettimeofday () -. mhr_generated_at))) in
            notice ~kind:Notice_reply (String.concat " · "
              ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it
@@ -30467,23 +30682,21 @@ let main
       let suffix = if String.equal suffix "" then ".txt" else suffix in
       (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
           ~suffix (Masc_tui_code_draft.text draft) with
-       | Error abort -> report_editor_abort state ~action:"Code draft" abort
+       | Error abort -> report_editor_abort state ~form:Code_draft abort
        | Ok text -> match Code_results.edit_draft state draft text with
          | Ok () -> report_action state "system" "Draft retained in this session; S explicitly saves to the server"
          | Error detail -> report_action state "error" detail)
   in
   let reject_gate_approval (pending : Tui_decode.gate_pending) =
     match Masc_tui_editor.editor_command () with
-    | None ->
-      report_action state "error"
-        "no $EDITOR set; export EDITOR to reject this Gate approval"
+    | None -> report_editor_unset state ~form:Gate_rejection
     | Some _ -> (
       let stem = "{\n  \"reason\": \"\"\n}\n" in
       match
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action:"Gate rejection" abort
+      | Error abort -> report_editor_abort state ~form:Gate_rejection abort
       | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error error ->
@@ -30965,21 +31178,23 @@ let main
   (* Connector bind/unbind: the highlighted transport owns the route. The
      form edits only the route body, so its visible selection and mutation
      target cannot disagree. *)
-  let handle_connector_form ?fixed_channel_id ~action ~connector
+  let handle_connector_form ?fixed_channel_id ~change ~connector
       ~required_fields ~stem ~post () =
+    let form = Connector_form change in
+    (* The form's other notices are still English; they move with the
+       connector screen's own sentences. *)
+    let action = editor_form_name ~ko:false form in
     let authority = state.workspace_authority in
     let identity = state.server_identity in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
-    | None ->
-      report_action state "error"
-        ("no $EDITOR set; export EDITOR to " ^ action ^ " here")
+    | None -> report_editor_unset state ~form
     | Some _ -> (
       match
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action abort
+      | Error abort -> report_editor_abort state ~form abort
       | Ok body -> (
         match Yojson.Safe.from_string body with
         | exception Yojson.Json_error e ->
@@ -31045,7 +31260,7 @@ let main
     match selected_connector () with
     | None -> report_action state "error" "bind: select a transport first"
     | Some selected ->
-        handle_connector_form ~action:"bind" ~connector:selected.cn_id
+        handle_connector_form ~change:Channel_bind ~connector:selected.cn_id
           ~required_fields:[ "channel_id"; "keeper_name" ]
           ~stem:
             (Yojson.Safe.pretty_to_string
@@ -31068,7 +31283,7 @@ let main
     | None -> report_action state "error" "unbind: select a transport first"
     | Some selected ->
         let submit ?fixed_channel_id channel_id =
-          handle_connector_form ?fixed_channel_id ~action:"unbind"
+          handle_connector_form ?fixed_channel_id ~change:Channel_unbind
             ~connector:selected.cn_id ~required_fields:[ "channel_id" ]
             ~stem:
               (Yojson.Safe.pretty_to_string
@@ -31231,7 +31446,7 @@ let main
          | None -> report_action state "error" "edit: select a binding with J/K"
          | Some binding ->
              handle_connector_form ~fixed_channel_id:binding.cb_channel_id
-               ~action:"edit binding" ~connector:connector.cn_id
+               ~change:Channel_binding_edit ~connector:connector.cn_id
                ~required_fields:[ "channel_id"; "keeper_name" ]
                ~stem:
                  (Yojson.Safe.pretty_to_string
@@ -31313,15 +31528,14 @@ let main
     | Some row -> (
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_action state "error"
-              "no $EDITOR set; export EDITOR to overrule here"
+            report_editor_unset state ~form:Harness_overrule
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
               Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                 ~reenter:take_back_terminal stem
             with
-            | Error abort -> report_editor_abort state ~action:"overrule" abort
+            | Error abort -> report_editor_abort state ~form:Harness_overrule abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -31364,15 +31578,14 @@ let main
         let task_id = row.Masc.Tui_decode.vr_task_id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_action state "error"
-              "no $EDITOR set; export EDITOR to reject here"
+            report_editor_unset state ~form:Verification_rejection
         | Some _ -> (
             let stem = "{\n  \"reason\": \"\"\n}\n" in
             match
               Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                 ~reenter:take_back_terminal stem
             with
-            | Error abort -> report_editor_abort state ~action:"reject" abort
+            | Error abort -> report_editor_abort state ~form:Verification_rejection abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -31407,8 +31620,7 @@ let main
         let task_id = task.id in
         match Masc_tui_editor.editor_command () with
         | None ->
-            report_action state "error"
-              "no $EDITOR set; export EDITOR to cancel here"
+            report_editor_unset state ~form:Task_cancellation
         | Some _ -> (
             let stem =
               Yojson.Safe.pretty_to_string
@@ -31419,7 +31631,7 @@ let main
               Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                 ~reenter:take_back_terminal stem
             with
-            | Error abort -> report_editor_abort state ~action:"cancel" abort
+            | Error abort -> report_editor_abort state ~form:Task_cancellation abort
             | Ok body -> (
                 match Yojson.Safe.from_string body with
                 | exception Yojson.Json_error e ->
@@ -31490,8 +31702,10 @@ let main
          | Some session ->
              match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
                ~reenter:take_back_terminal ~suffix:".toml" session.text with
+             (* The lane add-ons pane is still English, so the reason in it is
+                too; the pane's own layer moves both. *)
              | Error abort -> map_lane_addons state (fun view ->
-                 {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail abort ^ "; TOML draft retained")})
+                 {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail ~ko:false abort ^ "; TOML draft retained")})
              | Ok text -> map_lane_addons state (fun view ->
                  Addons.put_document {view with error=None;scroll=0}
                    {session with text;message=Some "Draft edited; s saves through the shared TOML owner"}))
@@ -31543,8 +31757,7 @@ let main
       let session = runtime_config_working_session reading in
       (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal ~suffix:".toml" session.text with
-       | Error abort -> report_editor_abort state ~action:"runtime.toml"
-           ~cancelled:"runtime.toml unchanged; any earlier draft is retained" abort
+       | Error abort -> report_editor_abort state ~form:Runtime_config_text abort
        | Ok edited ->
          if String.equal edited session.base.source_text then begin
            release_runtime_document_recovery state ~workspace ~path:session.base.path;
@@ -31835,11 +32048,11 @@ Use relative paths for resources already held in the package. -->
       | Some draft -> draft.scd_source_text
       | None -> skill_template ~composition in
     match Masc_tui_editor.editor_command () with
-    | None -> report_action state "error" "Set $EDITOR to author a Skill document"
+    | None -> report_editor_unset state ~form:Skill_creation
     | Some _ ->
       (match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
           ~suffix:".md" source_text with
-       | Error abort -> report_editor_abort state ~action:"Skill creation" abort
+       | Error abort -> report_editor_abort state ~form:Skill_creation abort
        | Ok source_text ->
          state.tools_skill_create_drafts <-
            { scd_source_id = source_id; scd_composition = composition; scd_source_text = source_text; scd_origin = origin }
@@ -31930,7 +32143,7 @@ Use relative paths for resources already held in the package. -->
       | None -> `Assoc ["submitted_by",`String "";"request_id",`String "";"keeper_name",`String ""] in
     match Masc_tui_editor.roundtrip ~restore:hand_off_terminal ~reenter:take_back_terminal
         ~suffix:".json" (Yojson.Safe.pretty_to_string target ^ "\n") with
-    | Error abort -> report_editor_abort state ~action:"Original async request lookup" abort
+    | Error abort -> report_editor_abort state ~form:Original_request_lookup abort
     | Ok text ->
       let decoded = match Yojson.Safe.from_string text with
         | json -> Masc.Tui_decode_async_request.target_of_json json
@@ -32001,7 +32214,7 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_skill_evidence () =
     if not (server_authority_ready state) then
-      report_action state "error" "Workspace identity is unconfirmed; Skill evidence unavailable"
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
     else match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
@@ -32039,7 +32252,7 @@ Use relative paths for resources already held in the package. -->
        | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
          (match Masc_tui_editor.editor_command () with
           | None ->
-            report_action state "error" "no $EDITOR set; export EDITOR to edit Skills"
+            report_editor_unset state ~form:(Skill_source name)
           | Some _ ->
             (match
                Masc_tui_editor.roundtrip
@@ -32049,7 +32262,7 @@ Use relative paths for resources already held in the package. -->
                  loaded.sel_source_text
              with
              | Error abort ->
-               report_editor_abort state ~action:(name ^ " edit") abort
+               report_editor_abort state ~form:(Skill_source name) abort
              | Ok edited when String.equal edited loaded.sel_source_text ->
                report_action state "system" (name ^ " unchanged")
              | Ok edited ->
@@ -32177,18 +32390,14 @@ Use relative paths for resources already held in the package. -->
     | Some row -> (
       match Masc_tui_editor.editor_command () with
       | None ->
-        report_action state "error"
-          "no $EDITOR set; export EDITOR to edit prompts here"
+        report_editor_unset state ~form:(Prompt_text row.Tui_decode.pr_key)
       | Some _ -> (
         match
           Masc_tui_editor.roundtrip ~restore:hand_off_terminal
             ~reenter:take_back_terminal row.Tui_decode.pr_effective
         with
         | Error abort ->
-          report_editor_abort state
-            ~action:(row.Tui_decode.pr_key ^ " prompt")
-            ~cancelled:(row.Tui_decode.pr_key ^ ": prompt unchanged")
-            abort
+          report_editor_abort state ~form:(Prompt_text row.Tui_decode.pr_key) abort
         | Ok edited ->
           (match
              Result.bind (check ()) (fun () ->
@@ -32240,10 +32449,7 @@ Use relative paths for resources already held in the package. -->
           ~reenter:take_back_terminal ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
       with
       | Error abort ->
-          report_editor_abort state
-            ~action:(keeper_name ^ " settings")
-            ~cancelled:(keeper_name ^ ": settings unchanged")
-            abort
+          report_editor_abort state ~form:(Keeper_settings keeper_name) abort
       | Ok edited ->
         let reopen reason =
           if String.equal edited stem then
@@ -32284,11 +32490,10 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_keeper_settings_edit ~format () =
     match selected_keeper state with
-    | None -> report_action state "system" no_keeper_under_cursor
-    | Some _ ->
+    | None -> report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
+    | Some keeper ->
       (match Masc_tui_editor.editor_command () with
-       | None -> report_action state "error"
-           "no $EDITOR set; export EDITOR to edit keeper settings here"
+       | None -> report_editor_unset state ~form:(Keeper_settings keeper.k_name)
        | Some _ ->
          match Masc_tui_types.begin_keeper_settings_editor state
              ~format
@@ -32318,12 +32523,12 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     if state.workspace_identity <> Workspace_identity_match then
-      report_action state "error" "Cannot create: workspace identity is unverified; declaration retained"
+      report_kept_back state workspace_identity_unconfirmed Draft_kept
     else
     let return_to = Option.value state.keeper_creation_return ~default:return_to in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_action state "error" "no $EDITOR set; export EDITOR to create a keeper here"
+      report_editor_unset state ~form:Keeper_creation
     | Some _ -> (
       (* Which fields a creation cannot omit is [parse]'s business, so the
          stem comes from there rather than being restated here. Restating it
@@ -32340,7 +32545,7 @@ Use relative paths for resources already held in the package. -->
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action:"create" abort
+      | Error abort -> report_editor_abort state ~form:Keeper_creation abort
       | Ok declaration -> (
         state.keeper_creation_draft <- Some declaration;
         state.keeper_creation_draft_owner <- ref ();
@@ -32396,8 +32601,7 @@ Use relative paths for resources already held in the package. -->
     let check = capture_workspace_check state ~mailbox:async_messages in
     match Masc_tui_editor.editor_command () with
     | None ->
-      report_action state "error"
-        "no $EDITOR set; export EDITOR to add a repository here"
+      report_editor_unset state ~form:Repository_addition
     | Some _ -> (
       let stem =
         String.concat "\n"
@@ -32414,7 +32618,7 @@ Use relative paths for resources already held in the package. -->
         Masc_tui_editor.roundtrip ~restore:hand_off_terminal
           ~reenter:take_back_terminal stem
       with
-      | Error abort -> report_editor_abort state ~action:"add" abort
+      | Error abort -> report_editor_abort state ~form:Repository_addition abort
       | Ok declaration -> (
         let declared field =
           match Yojson.Safe.from_string declaration with
@@ -32443,58 +32647,63 @@ Use relative paths for resources already held in the package. -->
             owe_repositories_read state
           | Error detail -> report_action state "error" detail))
   in
-  let handle_schedule_form ~action ~stem ~post =
+  let handle_schedule_form ~change ~stem ~post =
+    let form = Schedule_form change in
+    let ko = state.ui_language = Lang_ko in
     (* A refusal stays on the Schedules surface for the last-action window:
        the action line alone is lost under a workspace warning. A new
        attempt clears the previous one. *)
     state.schedule_form_refusal <- None;
     let authority = state.workspace_authority in
     let identity = state.server_identity in
-    let report_form_refusal detail =
-      state.schedule_form_refusal <- Some
-        { sfr_action = action; sfr_detail = detail; sfr_at = Unix.gettimeofday ()
-        ; sfr_workspace = workspace_input_identity_of_server identity };
-      report_action state "error" (action ^ ": " ^ detail)
+    let report_form_refusal reason =
+      let refusal =
+        { sfr_change = change; sfr_reason = reason; sfr_at = Unix.gettimeofday ()
+        ; sfr_workspace = workspace_input_identity_of_server identity } in
+      state.schedule_form_refusal <- Some refusal;
+      report_action state "error" (schedule_form_refusal_text ~ko refusal)
     in
     let host = server_peer_host and port = state.port in
     match Masc_tui_editor.editor_command () with
     | None ->
       report_form_refusal
-        ("no $EDITOR set; export EDITOR to " ^ action ^ " a schedule here")
+        (Schedule_form_editor (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset))
     | Some _ ->
       (match
          Masc_tui_editor.roundtrip ~restore:hand_off_terminal
            ~reenter:take_back_terminal stem
        with
        | Error Masc_tui_editor.Cancelled ->
-           report_editor_abort state ~action Masc_tui_editor.Cancelled
+           report_editor_abort state ~form Masc_tui_editor.Cancelled
        | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
-           report_form_refusal (Masc_tui_editor.abort_detail abort)
+           report_form_refusal (Schedule_form_editor abort)
        | Ok declaration ->
          (match Yojson.Safe.from_string declaration with
           | exception Yojson.Json_error message ->
-            report_form_refusal ("body is not JSON: " ^ message)
+            report_form_refusal (Schedule_form_not_json message)
           | `Assoc _ ->
-            (match Result.bind
-               (check_workspace_request ~schedule_form_action:action state
-                  ~mailbox:async_messages ~authority ~identity ~host ~port ())
-               (fun () -> post declaration) with
-             | Error detail -> report_form_refusal detail
+            (match
+               admit_workspace_request ~schedule_form_change:change state
+                 ~mailbox:async_messages ~authority ~identity ~host ~port ()
+             with
+             | Error refusal -> report_form_refusal (Schedule_form_request (Request_withdrawn refusal))
+             | Ok () ->
+             match post declaration with
+             | Error detail -> report_form_refusal (Schedule_form_request (Request_failed detail))
              | Ok response ->
                (match Masc.Tui_decode.tool_envelope_outcome response with
-                | Error detail -> report_form_refusal detail
+                | Error detail -> report_form_refusal (Schedule_form_request (Request_failed detail))
                 | Ok message ->
-                  report_action state "system" (action ^ ": " ^ message);
+                  report_action state "system" (schedule_change_name ~ko change ^ ": " ^ message);
                   state.schedule_cancel_armed <- None;
                   state.schedule_cancel_error <- None;
                   (* Owed, as after a cancel: the [schedule_store_invalidated] this
                      write announces folds into the same read. *)
                   owe_schedules_read state))
-          | _ ->
-            report_form_refusal "the editor form must be a JSON object"))
+          | _ -> report_form_refusal Schedule_form_not_an_object))
   in
   let handle_schedule_create () =
-    handle_schedule_form ~action:"create"
+    handle_schedule_form ~change:Schedule_create
       ~stem:(Masc_tui_types.schedule_create_form_json ())
       ~post:(fun body_json ->
         Masc_tui_http.post_schedule_create_json ~host:server_peer_host
@@ -32505,15 +32714,23 @@ Use relative paths for resources already held in the package. -->
        refused before an editor opens; their reason goes to the footer. *)
     state.schedule_form_refusal <- None;
     match selected_schedule_row state with
-    | None -> report_action state "error" "modify: no schedule under the cursor"
+    | None ->
+      let ko = state.ui_language = Lang_ko in
+      report_action state "error"
+        (schedule_change_name ~ko Schedule_modify ^ ": "
+         ^ (if ko then "커서 아래 일정 없음" else "no schedule under the cursor"))
     (* The refusal was always real; it just arrived after the operator had
        edited fifteen fields and saved. The status is on the screen before the
        key is pressed, so the answer is available here. *)
     | Some row ->
       (match Masc_tui_types.schedule_update_form_json row with
-       | Error reason -> report_action state "error" ("modify: " ^ reason)
+       | Error reason ->
+         let ko = state.ui_language = Lang_ko in
+         report_action state "error"
+           (schedule_change_name ~ko Schedule_modify ^ ": "
+            ^ schedule_modify_refusal_text ~ko reason)
        | Ok stem ->
-         handle_schedule_form ~action:"modify" ~stem
+         handle_schedule_form ~change:Schedule_modify ~stem
            ~post:(fun body_json ->
              Masc_tui_http.post_schedule_update ~host:server_peer_host
                ~port:state.port ~body_json))
@@ -35702,8 +35919,9 @@ Use relative paths for resources already held in the package. -->
                       | "k" | "up" -> update (Addons.move_action view (-1))
                       | "J" | "K" -> scroll_lane_addons ~page:false ~down:(key = "J")
                       | "\r" | "\n" | "enter" ->
-                          (match Addons.submit_action view with
-                           | Ok action -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                          (match Addons.enter_action view with
+                           | Ok (next,None) -> update next
+                           | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=lane_addons_input_failure detail})
                       | _ -> ())
                  (* A line that takes letters owns them. This branch answered
@@ -35968,12 +36186,10 @@ Use relative paths for resources already held in the package. -->
                         ~en:"Wait for the pending preset save · input retained")
                  else if not (server_authority_ready state) then
                    report_action state "error"
-                     (ui_text state ~ko:"작업 공간 확인 후 저장하세요 · 입력은 유지됩니다"
-                        ~en:"Confirm the workspace before saving · input retained")
+                     (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
                  else (match workspace_input_identity_of_server state.server_identity with
                    | None -> report_action state "error"
-                       (ui_text state ~ko:"작업 공간 확인 후 저장하세요"
-                          ~en:"Confirm the workspace before saving")
+                       (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
                    | Some workspace ->
                      if state.preset_save_draft_workspace = None
                         && state.preset_armed <> Some (Save_workspace_armed (name, workspace)) then begin
@@ -35982,17 +36198,17 @@ Use relative paths for resources already held in the package. -->
                        state.preset_confirmation_presented <- None;
                        state.config_scroll <- 0;
                        report_action state "system"
-                         (ui_text state ~ko:"저장할 작업 공간을 확인하고 Enter를 다시 누르세요"
+                         (ui_text state ~ko:"저장할 워크스페이스를 확인하고 Enter를 다시 누르세요"
                             ~en:"Check the save workspace and press Enter again")
                      end else if Option.fold ~none:false
                          ~some:(fun origin -> origin <> workspace) state.preset_save_draft_workspace then
                        report_action state "error"
-                         (ui_text state ~ko:"다른 작업 공간의 이름 초안입니다"
+                         (ui_text state ~ko:"다른 워크스페이스의 이름 초안입니다"
                             ~en:"This name draft belongs to a different workspace")
                      else if state.preset_armed = Some (Save_workspace_armed (name, workspace))
                              && not (Masc_tui_render_config.preset_confirmation_ready state) then
                        report_action state "system"
-                         (ui_text state ~ko:"Home 후 PgDn으로 작업 공간을 처음부터 확인하세요"
+                         (ui_text state ~ko:"Home 후 PgDn으로 워크스페이스를 처음부터 확인하세요"
                             ~en:"Use Home then PgDn to review the complete workspace confirmation")
                      else begin
                        if state.preset_save_draft_workspace = None then begin
@@ -36964,7 +37180,7 @@ Use relative paths for resources already held in the package. -->
                      match Masc_tui_editor_jump.route () with
                      | Masc_tui_editor_jump.No_editor ->
                          report_action state "error"
-                           "no editor: run this inside Neovim, or set $EDITOR"
+                           (editor_jump_unset state)
                      | Masc_tui_editor_jump.Remote_neovim { server } -> (
                          let target =
                            { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line = 1 }
@@ -40261,7 +40477,7 @@ Use relative paths for resources already held in the package. -->
                        state.preset_save_suspended_drafts <-
                          List.remove_assoc origin state.preset_save_suspended_drafts;
                        report_action state "system"
-                         (ui_text state ~ko:"이 작업 공간의 저장 이름 초안을 복원했습니다"
+                         (ui_text state ~ko:"이 워크스페이스의 저장 이름 초안을 복원했습니다"
                             ~en:"Restored this workspace's preset name draft")
                      | None ->
                        state.preset_save_draft <- Some "";
@@ -42513,7 +42729,7 @@ Use relative paths for resources already held in the package. -->
                       match Masc_tui_editor_jump.route () with
                       | Masc_tui_editor_jump.No_editor ->
                           report_action state "error"
-                            "no editor: run this inside Neovim, or set $EDITOR"
+                            (editor_jump_unset state)
                       | Masc_tui_editor_jump.Remote_neovim { server } -> (
                           (* The editor is already on screen. Nothing here
                              gives up the terminal, so this surface keeps
@@ -42881,7 +43097,8 @@ Use relative paths for resources already held in the package. -->
                       ~mailbox:async_messages action
                 | Some None ->
                     report_action state "system"
-                      "No lifecycle action applies to this keeper yet"
+                      (if state.ui_language = Lang_ko then "이 키퍼에 아직 쓸 수 있는 동작 없음"
+                       else "No lifecycle action applies to this keeper yet")
                 | None -> ())
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes

@@ -1301,11 +1301,37 @@ let keeper_json ~base_path keeper_name ~busy ~queue_residence rows =
 ;;
 
 (* One candidate of a Keeper's route whose quota window is spent, with the
-   reset the provider stated, if it stated one. *)
+   window's own entry: who set it and when it ends. *)
 type spent_candidate =
   { runtime_id : string
-  ; resets_at : float option
+  ; spent : Runtime_quota_window.spent
   }
+
+(* The reset the provider stated, if it stated one. *)
+let stated_reset candidate =
+  match candidate.spent.Runtime_quota_window.rest with
+  | Runtime_quota_window.Reset_stated at -> Some at
+  | Runtime_quota_window.Observed_until _ -> None
+;;
+
+(* What refused the route, in the order the two kinds are named: a spent
+   usage window (a refused call or a usage read found it), then a refused
+   payment. A route can rest on both. *)
+let spent_route_what spent =
+  let has kind = List.exists (fun candidate -> kind candidate.spent.Runtime_quota_window.cause) spent in
+  let quota = function
+    | Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused
+    | Runtime_quota_window.Usage_read -> true
+    | Runtime_quota_window.Refused Runtime_quota_window.Payment_refused -> false
+  in
+  let payment = function
+    | Runtime_quota_window.Refused Runtime_quota_window.Payment_refused -> true
+    | Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused
+    | Runtime_quota_window.Usage_read -> false
+  in
+  String.concat "·"
+    ((if has quota then [ "한도 소진" ] else []) @ if has payment then [ "결제 거절" ] else [])
+;;
 
 (* The route's candidates when every one of them has spent its quota window
    (RFC-0484 §3.1), else [None]. Only the quota window counts: a 429 rest
@@ -1323,12 +1349,9 @@ let spent_route_candidates ~now route =
          | None -> None
          | Some runtime ->
            let scope = Runtime_instance.quota_scope_of_runtime runtime in
-           if Runtime_quota_window.is_exhausted ~scope ~now
-           then
-             all_spent
-               ({ runtime_id; resets_at = Runtime_quota_window.active_until ~scope ~now } :: acc)
-               rest
-           else None)
+           (match Runtime_quota_window.spent ~scope ~now with
+            | Some spent -> all_spent ({ runtime_id; spent } :: acc) rest
+            | None -> None))
     in
     (match Runtime_lane.ordered_candidates lane with
      | [] -> None
@@ -1341,7 +1364,7 @@ let spent_route_candidates ~now route =
 let earliest_stated_reset spent =
   List.fold_left
     (fun earliest candidate ->
-       match earliest, candidate.resets_at with
+       match earliest, stated_reset candidate with
        | None, stated -> stated
        | Some at, None -> Some at
        | Some at, Some stated -> Some (Float.min at stated))
@@ -1369,7 +1392,7 @@ let runtime_quota_spent_rows ~now ~base_path keeper_name =
            ; source = Runtime_quota_spent
            ; bearing = Holds_state
            ; waiting_on = route
-           ; what = Printf.sprintf "모든 후보 한도 소진 · %s" route
+           ; what = Printf.sprintf "모든 후보 %s · %s" (spent_route_what spent) route
            ; wake_producer = Keeper_supervisor
            ; since = None
            ; due_at = earliest_stated_reset spent
@@ -1383,7 +1406,11 @@ let runtime_quota_spent_rows ~now ~base_path keeper_name =
                           (fun candidate ->
                              `Assoc
                                [ "runtime_id", `String candidate.runtime_id
-                               ; "resets_at", unix_iso_json candidate.resets_at
+                               ; ( "cause"
+                                 , `String
+                                     (Runtime_quota_window.cause_to_wire_name
+                                        candidate.spent.Runtime_quota_window.cause) )
+                               ; "resets_at", unix_iso_json (stated_reset candidate)
                                ])
                           spent) )
                  ]

@@ -57,6 +57,43 @@ val confirm_record : t -> Lane_addon_tool_request_owner.retained -> (unit, strin
     as {!restore} checks, and the digest of this request. Equal digests name
     equal canonical requests, so this replaces restoring the record again and
     comparing encodings. Offload the whole call; it reads the source root. *)
+type index = private {
+  owner : owner;
+  destination : destination;
+  predecessor : predecessor option;
+  runtime_keepers_dir : string;  (** The path {!confirm_index_source_root} observes. *)
+  exact_digest : string;  (** [Lane_addon_exact.digest] of {!request}. *)
+  source_digest : string;  (** The digest a history fence names the source by. *)
+  source_basis_digest : string;
+      (** Digest of [Keeper_librarian_durable_capture.basis_json]: equal for an
+          original and the child an operator resolution makes of it. *)
+}
+(** What a reader of the record alone needs of the request. {!index} makes it
+    from a verified request and nothing else does; one read from a record
+    comes from {!index_of_summary}. *)
+val index : t -> (index, string) result
+val source_basis_digest : t -> (string, string) result
+(** [(index t).source_basis_digest] alone, for a reader that needs no other
+    digest of the source. *)
+val index_to_json : index -> Yojson.Safe.t
+(** The record summary [Keeper_librarian_durable_owner.retain] writes. *)
+val index_of_summary : Lane_addon_tool_request_owner.Record.t -> (index, string) result
+(** Strict decode of a record's summary. The owner it names addresses the
+    record's scope, and its destination is the record's installation, package
+    and tool. The other values are bound to the request only where a body is
+    read: {!restore_payload} compares them, and compares the two source
+    digests for an original with a predecessor; {!confirm_index} compares all
+    of them. A summary that is not an index is an error. *)
+val confirm_index : t -> Lane_addon_tool_request_owner.Record.t -> (unit, string) result
+(** The record's index is exactly {!index} of this request, source digests
+    included. *)
+val confirm_index_source_root : index -> (unit, string) result
+(** What {!restore} adds to {!restore_payload}, from the index: the captured
+    runtime path is still the owner's physical runtime root. Offload it. *)
+val observe_index_owner : base_path:string -> keepers_dir:string -> index -> (owner, string) result
+(** {!observe_record_owner} for a reader of the record alone: the owner the
+    index names is the live one, Memory epoch included. {!index_of_summary}
+    already bound that owner to the record's scope. Offload it. *)
 val of_json : owner:owner -> Yojson.Safe.t -> (t, string) result
 (** Pure full original-request decoder used for a retained replacement intent.
     This grants no physical-source, retained-owner or dispatch authority. *)

@@ -32,6 +32,11 @@ val turn_path : string
     ([Server_preview_keeper_conversation], plan S1b-3). *)
 val conversation_path : string
 
+(** [/api/v1/auth/keepers/conversation/], followed by the id of a
+    conversation: [DELETE] deletes the person's conversation of that id
+    ([Server_preview_keeper_conversation.delete], plan S1b-3c). *)
+val conversation_entry_prefix : string
+
 (** A Keeper name of the Keeper grammar ({!Keeper_id.Keeper_name}), which is
     also the name of its TOML, as an id of the log. For a name that is not
     both, the error is the sentence that says why; a route answers it 400. *)

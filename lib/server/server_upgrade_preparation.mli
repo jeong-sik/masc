@@ -1,7 +1,20 @@
 (** Explicit upgrade preparation for an existing owner, including older servers
     without the model-setup resume endpoint. No process starts or forced kills. *)
 type t
-type error = Invalid_health | Different_workspace | Admin_required | Owner_unavailable
+type error =
+  | Invalid_health
+  | Different_workspace
+  | Admin_required
+      (** The local sign-in failed or left no credential, or the running
+          server read the credential and refused it (401 or 403). *)
+  | Server_starting
+      (** [/health/ready] of the running server says it is not ready yet. It
+          was not asked about the credential. Signing in does not change
+          this; the server becoming ready does. *)
+  | Admin_check_unanswered
+      (** The running server gave no verdict on the credential: another
+          status than 200, 401 or 403, or no answer. *)
+  | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
 type incumbent = { base_path : string; version : string }
 val decode_health : string -> (incumbent, error) result
@@ -16,8 +29,8 @@ val prepare :
   run_dir:string -> base_path:string -> port:int -> (t, error) result
 val incumbent : t -> incumbent
 val request_termination : t -> (unit, error) result
-(** Call only after the user selects replacement. Rechecks workspace/version and
-    admin authentication immediately before identity-bound SIGTERM. Success is
+(** Call only after the user selects replacement. Rechecks workspace/version,
+    readiness and admin authentication immediately before identity-bound SIGTERM. Success is
     a request, not proof of drain. Caller waits for lease/port release and starts
     the replacement with the same workspace and existing authentication. *)
 
@@ -25,11 +38,19 @@ val close : t -> unit
 val suggest_loopback_port : unit -> (int, error) result
 (** OS-selected candidate, not a reserved port. Recheck conflicts at startup. *)
 
+type http_answer = (int * string, string) result
+(** One loopback GET as {!Masc_http_client.get_sync} hands it over: the status
+    and the body, or why no answer came. *)
+
 module For_testing : sig
   val prepare : sw:Eio.Switch.t -> base_path:string -> observe:(unit -> (string, error) result) ->
-    authorize:(unit -> bool) ->
+    readiness:(unit -> http_answer) -> access:(unit -> http_answer) ->
     capture:(unit -> (((unit -> (unit, error) result) * (unit -> unit)), error) result) ->
     (t, error) result
+  (** {!prepare} over answers the caller supplies: [readiness] is the answer
+      of [/health/ready], [access] the answer of the admin route to the
+      bearer. [access] is not asked when [readiness] says the server is
+      still starting. *)
 end
 
 type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start

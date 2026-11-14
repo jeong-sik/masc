@@ -265,7 +265,8 @@ end
 
 (** In-memory ring buffer for dashboard log viewer.
     Fixed capacity, oldest entries evicted on overflow.
-    Lock-free: single-writer (log functions), multi-reader (API).
+    Writers on any domain or systhread take [ring_mutex] to install an
+    entry; readers (API) take no lock.
     Optional file sink persists entries across restarts. *)
 module Ring = struct
   (* RFC-0079: [entry] is the typed record produced by the write-side encoder.
@@ -337,7 +338,18 @@ module Ring = struct
       category = None;
       diagnostic_kind = None;
     }
-  let total = Atomic.make 0 (* next sequence to hand out *)
+  (* Next sequence to hand out. A writer stores its entry in the slot first
+     and raises [total] after, so a reader that sees [total = t] reads slots
+     whose writes come before that [Atomic.set]: every sequence below [t]
+     has landed. The other order (number first, slot after) let a reader on
+     another domain find the row from [capacity] entries ago in a slot whose
+     number was already out (#51304). *)
+  let total = Atomic.make 0
+
+  (* One writer at a time takes a sequence, fills its slot and raises
+     [total], so [total] rises in sequence order. Held for those three steps
+     only; no I/O and no listener runs under it. *)
+  let ring_mutex = Stdlib.Mutex.create ()
 
   (* Sequence of the oldest entry the ring can answer for.  Zero for a
      process that started with an empty log directory; after
@@ -873,15 +885,54 @@ module Ring = struct
        skipping or replaying records.  Resuming above the on-disk maximum
        keeps the sequence a key for the whole file. *)
     let base_seq = !max_seq_on_disk + 1 in
-    Atomic.set total base_seq;
-    Atomic.set first_seq base_seq;
-    Queue.iter
-      (fun e ->
-        let seq = Atomic.fetch_and_add total 1 in
-        let idx = seq mod capacity in
-        buf.(idx) <- { e with seq })
-      buf_ring;
+    Stdlib.Mutex.protect ring_mutex (fun () ->
+      let next = ref base_seq in
+      Queue.iter
+        (fun e ->
+          buf.(!next mod capacity) <- { e with seq = !next };
+          incr next)
+        buf_ring;
+      Atomic.set first_seq base_seq;
+      Atomic.set total !next);
     Queue.length buf_ring
+
+  type sink_io_failure =
+    | Unix_failure of { error : Unix.error; call : string; path : string }
+    | Sys_failure of string
+    | Eio_failure of string
+
+  type file_sink_error =
+    | Restore_undecodable of { dir : string; reason : string }
+    | Restore_io of { dir : string; failure : sink_io_failure }
+    | Open_io of { dir : string; failure : sink_io_failure }
+
+  let sink_io_failure_to_string = function
+    | Unix_failure { error; call; path } ->
+        Printf.sprintf "%s (%s %s)" (Unix.error_message error) call path
+    | Sys_failure message | Eio_failure message -> message
+
+  let file_sink_error_to_string = function
+    | Restore_undecodable { dir; reason } ->
+        Printf.sprintf "cannot restore the log entries in %s: %s" dir reason
+    | Restore_io { dir; failure } ->
+        Printf.sprintf "cannot read the log files in %s: %s" dir
+          (sink_io_failure_to_string failure)
+    | Open_io { dir; failure } ->
+        Printf.sprintf "cannot open a log file in %s: %s" dir
+          (sink_io_failure_to_string failure)
+
+  (* The three exceptions a file operation of the sink raises: [Unix] calls,
+     [Stdlib] channels, and [Eio.Path] when the restore runs inside an Eio
+     loop. Any other exception is not an I/O outcome and keeps propagating.
+     [Stdlib.Error] is spelled out because a bare [Error] in this file is
+     the log level. *)
+  let sink_io f =
+    match f () with
+    | value -> Ok value
+    | exception Unix.Unix_error (error, call, path) ->
+        Stdlib.Error (Unix_failure { error; call; path })
+    | exception Sys_error message -> Stdlib.Error (Sys_failure message)
+    | exception (Eio.Io _ as exn) -> Stdlib.Error (Eio_failure (Printexc.to_string exn))
 
   let init_file_sink
       ?(identity_recheck_interval_s = default_sink_identity_recheck_interval_s)
@@ -895,13 +946,28 @@ module Ring = struct
          the previous directory A is no longer an authorized destination. *)
       file_base_dir := "";
       file_current_date := "";
-      let loaded = load_from_file dir in
-      file_base_dir := dir;
-      let oc, date = open_channel dir in
-      file_channel := Some oc;
-      file_current_date := date;
-      if loaded > 0 then
-        Printf.eprintf "[%s] [INFO] [Log] Restored %d log entries from disk\n%!" (timestamp ()) loaded)
+      let restored =
+        sink_io (fun () ->
+          match load_from_file dir with
+          | loaded -> Ok loaded
+          | exception Entry_decode_error reason -> Stdlib.Error reason)
+      in
+      match restored with
+      | Stdlib.Error failure -> Stdlib.Error (Restore_io { dir; failure })
+      | Ok (Stdlib.Error reason) ->
+          Stdlib.Error (Restore_undecodable { dir; reason })
+      | Ok (Ok loaded) ->
+          file_base_dir := dir;
+          (match sink_io (fun () -> open_channel dir) with
+           | Stdlib.Error failure -> Stdlib.Error (Open_io { dir; failure })
+           | Ok (oc, date) ->
+               file_channel := Some oc;
+               file_current_date := date;
+               if loaded > 0 then
+                 Printf.eprintf
+                   "[%s] [INFO] [Log] Restored %d log entries from disk\n%!"
+                   (timestamp ()) loaded;
+               Ok ()))
 
   let cleanup_old_files ?(keep_days = 7) dir =
     if Sys.file_exists dir then begin
@@ -974,26 +1040,32 @@ module Ring = struct
     let details =
       Secret_patterns.redact_json_strings details |> sanitize_json_strings
     in
-    let seq = Atomic.fetch_and_add total 1 in
-    let idx = seq mod capacity in
-    let overwritten =
-      let previous = buf.(idx) in
-      if seq >= capacity && previous.seq >= Atomic.get first_seq
-      then Some previous else None in
-    let entry = {
-        seq;
-        ts = timestamp_iso ();
-        level;
-        source;
-        module_name;
-        keeper_name;
-        turn_id;
-        message;
-        details;
-        category;
-        diagnostic_kind;
-      } in
-    buf.(idx) <- entry;
+    let ts = timestamp_iso () in
+    let entry, overwritten =
+      Stdlib.Mutex.protect ring_mutex (fun () ->
+        let seq = Atomic.get total in
+        let idx = seq mod capacity in
+        let overwritten =
+          let previous = buf.(idx) in
+          if seq >= capacity && previous.seq >= Atomic.get first_seq
+          then Some previous else None in
+        let entry = {
+            seq;
+            ts;
+            level;
+            source;
+            module_name;
+            keeper_name;
+            turn_id;
+            message;
+            details;
+            category;
+            diagnostic_kind;
+          } in
+        buf.(idx) <- entry;
+        Atomic.set total (seq + 1);
+        (entry, overwritten))
+    in
     Eio.Condition.broadcast appended;
     notify_published {entry; overwritten};
     (* A failed append closes the channel. Keep sending later entries to the
@@ -1014,10 +1086,12 @@ module Ring = struct
       let start = max (Atomic.get first_seq) (t - capacity) in
       (* [since_seq] raises the lower bound (entries strictly newer than the
          cursor); [before_seq] lowers the upper bound (entries strictly older
-         than the cursor). For retained slots in [start, t-1] the entry seq
-         equals its scan index [i] (seq is assigned monotonically and the ring
-         only retains the last [capacity] entries), so seq comparisons reduce
-         to index bounds. The two cursors compose into a bounded window. *)
+         than the cursor). The slot of scan index [i] holds the entry of
+         sequence [i] (see [total]) unless writers went [capacity] entries
+         further while this scan ran and put a newer entry there. The scan
+         leaves such a slot out: sequence [i] is gone from the ring. So seq
+         comparisons reduce to index bounds. The two cursors compose into a
+         bounded window. *)
       let start =
         match since_seq with
         | Some seq -> max start (seq + 1)
@@ -1033,6 +1107,7 @@ module Ring = struct
       let i = ref upper in
       while !i >= start && !count < limit do
         let e = buf.(!i mod capacity) in
+        let retained = e.seq = !i in
         let level_ok = level_to_int e.level >= min_level in
         let module_ok = module_filter = "" ||
           String.lowercase_ascii e.module_name =
@@ -1049,7 +1124,7 @@ module Ring = struct
           | Some selectors ->
               not (List.exists (fun selector -> selects selector e.category) selectors)
         in
-        if level_ok && module_ok && category_ok && exclude_ok then begin
+        if retained && level_ok && module_ok && category_ok && exclude_ok then begin
           entries := e :: !entries;
           incr count
         end;

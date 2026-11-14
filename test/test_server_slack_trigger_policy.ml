@@ -925,6 +925,67 @@ let test_unreadable_original_history_is_not_absence () =
   check (list string) "strict original read failure adds no ACK" [] !acks;
   check int "no admission from malformed original history" 0 (List.length (pending_queue base))
 
+(* #28401: the workspace calls the bot "KinoBot", the channel is bound to
+   "luna". A Keeper that read "@KinoBot 듄" took it for another bot and
+   refused the turn. The bot's own mention -- bare or with Slack's label --
+   reads as the bound Keeper on both lanes; other people keep their names,
+   and without a known bot id every mention renders as before. *)
+let test_own_bot_mention_reads_as_the_bound_keeper () =
+  with_bound_slack @@ fun env sw base ->
+  let directory =
+    Slack_user_directory.create
+      ~fetch:(fun ~user_id ->
+        let named display_name =
+          Ok { Slack_rest_client.user_id; name = None; real_name = None
+             ; display_name = Some display_name } in
+        match user_id with
+        | "UBOT" -> named "KinoBot"
+        | "U999" -> named "Vincent"
+        | _ -> Error (Slack_rest_client.Slack_api { error = "user_not_found" }))
+      ~now:(fun () -> 0.0) ()
+  in
+  let ingress = Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) () in
+  let delivered = ref [] in
+  let dispatch ~channel ~channel_user_id:_ ~channel_user_name:_ ~channel_workspace_id:_
+      ~keeper_name ~idempotency_key ~metadata:_ ~content =
+    delivered := content :: !delivered;
+    queued_receipt ~channel ~keeper_name ~idempotency_key in
+  let clock = Eio.Stdenv.clock env in
+  let triggered ?bot_user_id event =
+    G.For_testing.submit_event ~team_id:"T123" ~deliver:(fun () -> ())
+      ~user_directory:directory ?bot_user_id ingress
+      ~dispatch_for_delivery:(fun _ -> dispatch) ~clock ~base_dir:base event
+    |> expect_ingress in
+  let text = "<@UBOT> 듄 <@UBOT|KinoBot> <@U999>" in
+  let message ts : Gw.slack_event =
+    Gw.Message_create { channel_id = "C123"; thread_ts = None; user_id = "U123"
+      ; user_name = Some "operator"; text; ts; mentions_bot = true; bot_id = None
+      ; files = [] } in
+  triggered ~bot_user_id:"UBOT" (message "1710000010.000001");
+  triggered ~bot_user_id:"UBOT"
+    (Gw.App_mention { channel_id = "C123"; thread_ts = None; user_id = "U123"; text
+      ; ts = "1710000010.000002"; files = [] });
+  triggered (message "1710000010.000003");
+  check (list string) "the Keeper reads its own mention as itself"
+    [ "@luna 듄 @luna @Vincent"; "@luna 듄 @luna @Vincent"
+    ; "@KinoBot 듄 @KinoBot @Vincent" ]
+    (List.rev !delivered);
+  expect_ingress
+    (G.For_testing.submit_ambient_event ~team_id:"T123" ~user_directory:directory
+       ~bot_user_id:"UBOT" ingress
+       ~dispatch_for_delivery:(fun _ -> fail "ambient work must not dispatch")
+       ~clock ~base_dir:base (message "1710000010.000004"));
+  let ambient =
+    Keeper_external_attention.load_events ~base_path:base ~keeper_name:"luna"
+    |> List.filter_map (fun (Keeper_external_attention.Recorded item) ->
+         match item.Keeper_external_attention.external_message with
+         | Some { Keeper_external_attention.message_id = "1710000010.000004"; _ } ->
+           Some item.Keeper_external_attention.content_preview
+         | Some _ | None -> None)
+  in
+  check (list string) "the ambient record reads it the same way"
+    [ "@luna 듄 @luna @Vincent" ] ambient
+
 let () =
   run "server_slack_trigger_policy"
     [ ( "resolved_trigger_policy (env > TOML > default)"
@@ -975,6 +1036,8 @@ let () =
             test_a_name_seen_once_is_remembered
         ; test_case "binding store failure does not enqueue" `Quick
             test_binding_store_failure_does_not_enqueue
+        ; test_case "own bot mention reads as the bound Keeper" `Quick
+            test_own_bot_mention_reads_as_the_bound_keeper
         ] )
     ; ( "params_plane"
       , [ test_case "start without transport publishes configuration and keeps overrides" `Quick

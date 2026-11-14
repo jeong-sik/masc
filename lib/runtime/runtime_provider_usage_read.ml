@@ -596,7 +596,7 @@ let rest_on_account_refusal_read ~scope ~observed_at read =
       read
   in
   (match read with
-   | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
+   | Spent_until resets_at -> Runtime_quota_window.note_read_spent_until ~scope ~resets_at
    | Spent_without_reset -> Runtime_quota_window.note_read_without_reset ~scope
    | Spent_in_several_limits _ ->
      Log.Runtime_agent.info

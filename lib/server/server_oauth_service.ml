@@ -181,7 +181,7 @@ let callback_origin redirect_uri =
   let uri = Uri.of_string redirect_uri in
   match Uri.scheme uri, Uri.host uri with
   | Some scheme, Some host ->
-    let host = if String.contains host ':' then "[" ^ host ^ "]" else host in
+    let host = Masc_network_defaults.(url_host_to_string (url_host_of_string host)) in
     Some
       (match Uri.port uri with
        | Some port -> Printf.sprintf "%s://%s:%d" scheme host port

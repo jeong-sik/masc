@@ -197,38 +197,23 @@ let read_back doc = function
   | Unset key -> not (List.mem_assoc (dotted key) doc)
 ;;
 
-(* The searxng URL is refused here, not left to the loader. The loader checks a
-   value's type and range and not its scheme; the reader
-   ([Env_config_runtime.Tools.searxng_base_url]) refuses any scheme but http
-   and https and any userinfo each time a search resolves it. A writer that
-   passed a typo through would leave a provider that fails on every call and
-   reads as configured. A host is required on top of the reader's scheme rule:
-   an http URL with none cannot be searched, and is a typo whichever reader
-   sees it. *)
+(* A change that sets the searxng URL has to name one. The loader reads a blank
+   value as unset, and unsetting is [Unset]'s to ask for, so blank is refused
+   here. Which URLs are usable is the setting's own rule
+   ([Env_config_runtime.Tools.searxng_url_configured]), the one the loader
+   and the reader decide by; asking it before the edit keeps a refused URL out
+   of the edited text. *)
 let change_problem = function
   | Set_searxng_url url ->
-    let uri = Uri.of_string url in
-    let has_authority_userinfo = not (String.equal url (Url_userinfo.redact url)) in
-    (match
-       ( Option.map String.lowercase_ascii (Uri.scheme uri)
-       , Uri.host uri
-       , Uri.userinfo uri
-       , has_authority_userinfo )
-     with
-     | Some ("http" | "https"), Some host, None, false when not (String.equal host "") ->
-       None
-     | Some ("http" | "https"), Some host, (Some _ | None), _ when not (String.equal host "") ->
-       Some
-         (Printf.sprintf
-            "%s must not contain userinfo credentials (got %S)"
-            (dotted Searxng_url)
-            (Url_userinfo.redact url))
-     | Some _, _, _, _ | None, _, _, _ ->
+    (match Env_config_runtime.Tools.searxng_url_configured url with
+     | Ok (Some (_ : string)) -> None
+     | Ok None ->
        Some
          (Printf.sprintf
             "%s must be an http or https URL with a host (got %S)"
             (dotted Searxng_url)
-            (Url_userinfo.redact url)))
+            url)
+     | Error detail -> Some (Printf.sprintf "%s %s" (dotted Searxng_url) detail))
   | Set_provider _
   | Set_provider_order _
   | Set_fallbacks _

@@ -103,6 +103,18 @@ module Mark = struct
     | Yours -> "\xe2\x97\x86"
 end
 
+module Unknown = struct
+  type t =
+    | Unread
+    | Read_failed
+    | Unreported
+
+  let glyph = function
+    | Unread -> "\xe2\x97\x8c"
+    | Read_failed -> Mark.glyph Mark.Failed
+    | Unreported -> "?"
+end
+
 module Count = struct
   (* Digits between two separators. *)
   let group_size = 3

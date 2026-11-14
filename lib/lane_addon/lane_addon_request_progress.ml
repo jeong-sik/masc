@@ -197,9 +197,11 @@ let step phase = function
       | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_}
       | Subdividing _ | Subdivided _ -> invalid ())
   | Successor_intended successor -> (match phase with
-      | Rejected ({stage=Execution;_} as refusal) -> Ok (Subdividing (refusal,successor))
+      (* Each consumer decides which refusals may lead to a successor; this
+         machine only keeps the one intent and its acknowledgement. *)
+      | Rejected ({stage=(Execution | Before_dispatch);_} as refusal) -> Ok (Subdividing (refusal,successor))
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_}
+      | Commit_unknown _ | Finished _ | Conflicted _
       | Subdividing _ | Subdivided _ -> invalid ())
   | Successor_observed request_id -> (match phase with
       | Subdividing (refusal,successor) ->

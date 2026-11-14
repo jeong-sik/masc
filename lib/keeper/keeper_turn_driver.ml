@@ -629,7 +629,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   match route, deferred with
   | ( ( Route.Retry_after_observed
           { retry_class =
-              ( Route.Rate_limited | Route.Hard_quota | Route.Provider_capacity
+              ( Route.Rate_limited | Route.Hard_quota _ | Route.Provider_capacity
               | Route.Server_error | Route.Empty_completion _
               | Route.Network_transient | Route.Provider_timeout
               | Route.Local_admission_timeout )
@@ -643,7 +643,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
        | Walk_waits_until { release_at; release_basis = _; resting_runtime_id } ->
          Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   | ( Route.Retry_after_observed
-        { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
+        { retry_class = (Route.Rate_limited | Route.Hard_quota _) as retry_class; retry_after }
     , None ) ->
     (match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
      | Ok { order = _ :: _ :: _; _ } ->
@@ -700,7 +700,7 @@ let provider_rest_of_failure ~now ~route ~assignment_id deferred =
     | Some (Dispatch_now _) | None -> None
   in
   match route with
-  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota _; retry_after } ->
     (match Route.usable_retry_after retry_after with
      | Some _ -> rest_of_wait ()
      | None -> None)
@@ -990,7 +990,7 @@ let attempt_runtime_candidates
           provider hint as candidate-only ordering evidence. A shared
           credential quota rests on the distinct HardQuota/402 contract, or
           on the provider's usage read after a 429 that states no wait. *)
-       let note_quota retry_after =
+       let note_quota source retry_after =
          (* A hint the provider did not really state -- zero, negative, NaN --
             named no reset. Planting it as a window would date the quota to a
             moment already past, and that window replaces an observation the
@@ -1000,7 +1000,7 @@ let attempt_runtime_candidates
          let resets_at = Option.map
            (fun retry_after_s -> Unix.gettimeofday () +. retry_after_s)
            (Keeper_runtime_failure_route.usable_retry_after retry_after) in
-         observe_standing (Runtime_candidate_standing.Hard_quota {resets_at})
+         observe_standing (Runtime_candidate_standing.Hard_quota {source; resets_at})
        in
        let note_rate_limit retry_after =
          observe_standing (Runtime_candidate_standing.Rate_limited {retry_after})
@@ -1043,7 +1043,7 @@ let attempt_runtime_candidates
            | Some _ -> ()
            | None -> read_usage_after_account_refusal candidate)
         | Keeper_runtime_failure_route.Retry_after_observed
-            { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
+            { retry_class = Keeper_runtime_failure_route.Hard_quota source; retry_after } ->
           (* A spent quota that states no reset rests the scope only to the
              fallback cap, a time MASC set: the path comes back then and is
              refused again while the window stays spent. GLM's 1308 states
@@ -1055,19 +1055,14 @@ let attempt_runtime_candidates
              failed read leaves the observation, and the next refusal reads
              again. A payment refusal (402) names no usage window and is not
              read. *)
-          note_quota retry_after;
-          (match
-             ( Keeper_runtime_failure_route.usable_retry_after retry_after
-             , Keeper_runtime_failure_route.hard_quota_source error )
-           with
-           | None, Some Keeper_runtime_failure_route.Provider_quota_refused ->
+          note_quota source retry_after;
+          (match Keeper_runtime_failure_route.usable_retry_after retry_after, source with
+           | None, Keeper_runtime_failure_route.Provider_quota_refused ->
              read_usage_after_account_refusal candidate
            | ( Some _
-             , ( Some
-                   ( Keeper_runtime_failure_route.Payment_refused
-                   | Keeper_runtime_failure_route.Provider_quota_refused )
-               | None ) )
-           | None, (Some Keeper_runtime_failure_route.Payment_refused | None) -> ())
+             , ( Keeper_runtime_failure_route.Payment_refused
+               | Keeper_runtime_failure_route.Provider_quota_refused ) )
+           | None, Keeper_runtime_failure_route.Payment_refused -> ())
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Server_error

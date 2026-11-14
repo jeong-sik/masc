@@ -1130,7 +1130,7 @@ let test_a_held_http_lane_rests_without_dispatch () =
         [ target held_slot server.base_url ];
       Runtime_quota_window.reset_for_testing ();
       Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
-        Runtime_quota_window.note_exhausted ~scope ~resets_at:(Time_compat.now () +. 3600.0);
+        Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope ~resets_at:(Time_compat.now () +. 3600.0);
         let prepared =
           match prepare_exact ~net:(Some net) candidate with
           | Ok prepared -> prepared
@@ -1188,7 +1188,7 @@ let test_a_held_http_slot_keeps_the_http_order_of_a_mixed_lane () =
         [ target held_slot server.base_url ];
       Runtime_quota_window.reset_for_testing ();
       Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
-        Runtime_quota_window.note_exhausted ~scope ~resets_at:(Time_compat.now () +. 3600.0);
+        Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope ~resets_at:(Time_compat.now () +. 3600.0);
         let prepared =
           match prepare_exact ~net:(Some net) candidate with
           | Ok prepared -> prepared

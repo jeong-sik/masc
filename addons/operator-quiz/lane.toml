@@ -103,8 +103,6 @@ presentation = '''{
     {"lane_id": "quiz/questions", "path": ["response"], "label": "Your answer", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["key"], "label": "Expected", "unit": null, "format": "json"},
     {"lane_id": "quiz/questions", "path": ["sources"], "label": "Sources", "unit": null, "format": "json"},
-    {"lane_id": "quiz/questions", "path": ["ask_id"], "label": "Ask id, for a dispute", "unit": null, "format": "text"},
-    {"lane_id": "quiz/questions", "path": ["question_id"], "label": "Question id, for a dispute", "unit": null, "format": "text"},
     {"lane_id": "quiz/topics", "path": ["items"], "label": "Review items", "unit": "items", "format": "number"},
     {"lane_id": "quiz/topics", "path": ["attempts"], "label": "Attempts", "unit": "answers", "format": "number"},
     {"lane_id": "quiz/topics", "path": ["misses"], "label": "Misses", "unit": "answers", "format": "number"},
@@ -113,5 +111,9 @@ presentation = '''{
     {"lane_id": "quiz/items", "path": ["latest"], "label": "Latest attempt", "unit": null, "format": "text"},
     {"lane_id": "quiz/items", "path": ["correct_streak"], "label": "Right in a row", "unit": "answers", "format": "number"},
     {"lane_id": "quiz/items", "path": ["attempts"], "label": "Attempts", "unit": null, "format": "json"}
+  ],
+  "actions": [
+    {"lane_id": "quiz/questions", "label": "Dispute this grade", "fixed": {"kind": "dispute"},
+     "from_row": {"ask_id": ["dispute", "ask_id"], "question_id": ["dispute", "question_id"]}}
   ]
 }'''

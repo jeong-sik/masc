@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # records.py
 import quiz_flow as f  # noqa: E402
 import quiz_grading as g  # noqa: E402
 import quiz_log as q  # noqa: E402
+from quiz_projection import question_rows  # noqa: E402
 
 BOARD = {"source_id": "board", "kind": "board", "visibilities": ["public"]}
 REPO = {"source_id": "masc", "kind": "repository", "repository_id": "masc", "paths": ["changelog.d/"]}
@@ -579,6 +580,26 @@ class Disputes(Base):
                 with self.assertRaises(f.DisputeRefused):
                     self.flow.dispute(*args)
         self.assertEqual(len(q.Log(self.state).read()), events)
+
+    def test_a_question_row_offers_a_dispute_exactly_when_the_flow_takes_one(self):
+        # The row action reads row.dispute, so a row that offers what the
+        # flow refuses would send a dispute that fails on every try.
+        session_id, ask_id = self.chose()
+
+        def fields():
+            (row,) = question_rows(self.session(session_id))
+            return row["fields"]
+
+        offer = {"ask_id": ask_id, "question_id": "q1"}
+        self.assertEqual(fields()["dispute"], offer)
+        self.flow.dispute("d-1", ask_id, "q1", "plans too")
+        self.assertNotIn("dispute", fields())
+        with self.assertRaises(f.DisputeRefused):
+            self.flow.dispute("d-2", ask_id, "q1", "again")
+        self.host.grade = judging("incorrect", "facts only")
+        self.host.run(self.flow)
+        self.assertEqual(fields()["dispute"], offer)
+        self.flow.dispute("d-2", ask_id, "q1", "again")
 
     def test_a_dispute_after_a_final_grade_failure_lists_a_new_request(self):
         session_id = self.compose()

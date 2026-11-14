@@ -687,12 +687,19 @@ let read_body t ~max_bytes ~on_body ~on_error =
        : bool)
 ;;
 
-(* masc's HTTP/1.1 error handler writes the 500 without logging, and a cut
-   body calls no handler at all, so the HTTP/1.1 failure is logged here. *)
+(* httpun calls the connection's error handler only for a request with no
+   response and no earlier error (httpun reqd.ml, [report_error]); that
+   handler logs what it answers. Every other HTTP/1.1 failure calls no
+   handler at all, so it is logged here. *)
 let report_exn t exn =
   match t with
   | Http1 http1 ->
-    Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
+    let error_handler_answers =
+      Option.is_none (Httpun.Reqd.response http1.reqd)
+      && Option.is_none (Httpun.Reqd.error_code http1.reqd)
+    in
+    if not error_handler_answers
+    then Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
     http1.reported <- true;
     Httpun.Reqd.report_exn http1.reqd exn
   | Http2 { reqd; stream_end; _ } ->

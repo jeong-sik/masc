@@ -22,5 +22,9 @@ val post_id : Masc_tui_types.board_vote_target -> string
 (** The post the vote lands on or under, whose reading a completion
     refreshes. *)
 
-val describe : Masc_tui_types.board_vote_target -> string
+val describe : ko:bool -> Masc_tui_types.board_vote_target -> string
 (** The target as the status line names it. *)
+
+val direction : ko:bool -> up:bool -> string
+(** Which way the vote goes, as the key sheet names it: 추천 / 비추천 on a
+    Korean screen, up / down on an English one. *)

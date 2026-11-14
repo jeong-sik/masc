@@ -10,7 +10,8 @@ let error_to_string = function Unavailable d | Invalid_original d | Conflict d -
 let worker_error = function
   | W.Store_unavailable d | Execution_pending d -> Unavailable d
   | Original_invalid d -> Invalid_original d
-  | Authority_changed d -> Conflict d
+  | (Destination_mismatch _ | Authority_unavailable _ | Question_changed | Authority_changed _) as error ->
+    Conflict (W.error_to_string error)
 let worker result = Result.map_error worker_error result
 let invalid result = Result.map_error (fun d -> Invalid_original d) result
 let authority_actor = Standalone_lane.to_id Standalone_lane.Verifier

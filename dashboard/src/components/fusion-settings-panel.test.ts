@@ -71,6 +71,7 @@ function runtime(id: string): RuntimeResolvedResponse['runtimes'][number] {
     max_output_tokens: null,
     is_local: false,
     is_default: false,
+    quota_rest: null,
   }
 }
 

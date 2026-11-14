@@ -89,6 +89,12 @@ module Runtime : sig
   (** The first [nameserver] line of a resolv.conf's text. Blanks and tabs
       separate the fields, and anything after the address is ignored. *)
 
+  val microvm_dns_configured : string -> (Ipaddr.t option, string) result
+  (** What a [sandbox.microvm_dns] value names. Blank is unset, [Ok None]. A
+      value that is set and is not an address a guest can use is [Error],
+      saying why without naming the key. runtime.toml validation and
+      {!microvm_dns_from} both decide by this. *)
+
   val microvm_dns_from :
     configured:string -> host:string option -> (Ipaddr.t, string) result
   (** The resolution rule behind {!microvm_dns}, with both inputs given.
@@ -125,6 +131,13 @@ module Runtime : sig
   val microvm_cpus_default : int
   (** What a guest boots with when neither the keeper nor the workspace names
       a size. The registry row displays these rather than restating them. *)
+
+  val microvm_memory_configured :
+    string -> (Keeper_microvm_guest_size.memory option, string) result
+  (** What a [sandbox.microvm_memory] value names. Blank is unset, [Ok None]. A
+      value that is set and is not a guest memory size is [Error], saying why
+      without naming the key. runtime.toml validation and {!microvm_memory}
+      both decide by this. *)
 
   val microvm_memory : unit -> (Keeper_microvm_guest_size.memory, string) result
   (** The workspace's guest memory: [runtime.toml] [sandbox.microvm_memory],

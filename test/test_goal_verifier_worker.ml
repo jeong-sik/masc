@@ -30,13 +30,13 @@ module A = Verification_authority_tools
 module V = Goal_verifier_original
 module W = Goal_verifier_worker
 module P = Lane_addon_request_progress
+module Change = Verifier_review_authority_change
 let installation_id = "goal-review-fixture"
 let package_id = "goal-proof-fixture"
 let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let checked = function
   | Ok value -> value
-  | Error (W.Store_unavailable detail | Original_invalid detail | Authority_changed detail | Execution_pending detail) ->
-    Alcotest.fail detail
+  | Error error -> Alcotest.fail (W.error_to_string error)
 let stored = function Ok value -> value | Error e -> Alcotest.fail (Goal_store.write_error_to_string e)
 let request_complete config goal_id =
   match Tool_workspace.dispatch { Tool_workspace.config; agent_name = "planner" }
@@ -116,6 +116,17 @@ let load store original =
   | Some value -> value | None -> Alcotest.fail "Goal original disappeared"
 let run store retained authority =
   W.run ~store ~retained ~authority ~provider_rest:(fun _ -> AR.No_stated_rest) ()
+let admits original authority =
+  V.question_matches original authority && V.authority_change original authority = Ok None
+let bindings authority = A.goal_review_question_binding authority, A.goal_review_authority_binding authority
+let next_attempt authority original = match V.successor ~authority original with
+  | Ok child -> child
+  | Error V.Question_changed -> Alcotest.fail "the fixture authority asks another question"
+  | Error (V.Prompt_unavailable detail | V.Successor_unavailable detail) -> Alcotest.fail detail
+(* An authority source that counts how often the worker prepares it. *)
+let counted_authority authority =
+  let calls = ref 0 in
+  calls, (fun () -> incr calls; Ok authority)
 let with_reviewer reviewer f =
   let old_reviewer = Atomic.get AR.run_llm_reviewer_fn in
   let old_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
@@ -205,10 +216,10 @@ let test_reported_measurement_snapshot_reaches_retained_worker () =
     let updated_authority = get (A.create_goal_review ~config ~goal_id) in
     Alcotest.(check bool) "fresh authority sees the changed same-criterion report" true
       (A.goal_review_measurement updated_authority = Ok (Some updated));
-    Alcotest.(check string) "a report update grants exactly the same lookup authority"
-      (A.goal_review_binding authority) (A.goal_review_binding updated_authority);
+    Alcotest.(check (pair string string)) "a report update asks the same question with the same lookup authority"
+      (bindings authority) (bindings updated_authority);
     Alcotest.(check bool) "changed report does not revoke the captured original" true
-      (V.matches_authority original updated_authority);
+      (admits original updated_authority);
     let calls = ref 0 and received = ref [] and lookup_results = ref [] in
     with_reviewer (fun ~base_path ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
         ?system_prompt ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
@@ -276,10 +287,10 @@ let test_reported_measurement_snapshot_reaches_retained_worker () =
       let unavailable_authority = get (A.create_goal_review ~config ~goal_id) in
       (match A.goal_review_measurement unavailable_authority with
        | Error _ -> () | Ok _ -> Alcotest.fail "unreadable source became a missing or reported measurement");
-      Alcotest.(check string) "unavailable informational source changes no lookup grant"
-        (A.goal_review_binding authority) (A.goal_review_binding unavailable_authority);
+      Alcotest.(check (pair string string)) "unavailable informational source changes no question or lookup grant"
+        (bindings authority) (bindings unavailable_authority);
       Alcotest.(check bool) "source unavailability does not revoke the retained original" true
-        (V.matches_authority original unavailable_authority);
+        (admits original unavailable_authority);
       assert_restored unavailable_authority;
       Alcotest.(check string) "unavailable source never rewrites the retained original"
         original_bytes (Yojson.Safe.to_string (V.to_json
@@ -328,11 +339,14 @@ let test_unknown_and_cancellation_never_redispatch () =
           | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
           | Subdividing _ | Subdivided _ -> Alcotest.fail "unknown original observation changed phase")
        | [] | _::_::_ -> Alcotest.fail "observation did not retain the one original");
-      (match checked (W.frontier ~store ~installation_id ~package_id ~goal_id:subject.goal_id
-          ~request_id:subject.request_id ~new_run:(fun () -> Alcotest.fail "unknown allocated a new run")) with
+      let authority_calls, current_authority = counted_authority authority in
+      (match checked (W.frontier ~authority:current_authority ~store ~installation_id ~package_id
+          ~goal_id:subject.goal_id ~request_id:subject.request_id
+          ~new_run:(fun () -> Alcotest.fail "unknown allocated a new run")) with
        | Some restored -> Alcotest.(check int) "unknown frontier retains the original attempt" 0
            (V.attempt (W.original restored))
        | None -> Alcotest.fail "unknown original disappeared from frontier");
+      Alcotest.(check int) "unknown frontier prepares no authority" 0 !authority_calls;
       Alcotest.(check int) "no slot fallback or restart replay after unknown" 1 !calls));
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
@@ -379,12 +393,12 @@ let test_destination_authority_and_inventory () = with_workspace (fun config sto
       ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
     incr calls; Alcotest.fail "unauthorized Goal review dispatched") (fun () ->
     (match run store retained other_authority with
-     | Error (W.Authority_changed _) -> () | Ok _ | Error _ -> Alcotest.fail "other Goal authority admitted");
+     | Error W.Question_changed -> () | Ok _ | Error _ -> Alcotest.fail "other Goal authority admitted");
     let original = W.original retained in
     let subject = V.subject original in
     (match W.load ~store ~installation_id ~package_id:"other-package" ~goal_id:subject.goal_id
         ~request_id:subject.request_id ~attempt:0 with
-     | Error (W.Authority_changed _) -> () | Ok _ | Error _ -> Alcotest.fail "another destination admitted");
+     | Error (W.Destination_mismatch _) -> () | Ok _ | Error _ -> Alcotest.fail "another destination admitted");
     let changed_run = {(W.run_identity retained) with run_id="different-run"} in
     (match W.retain ~store ~installation_id ~package_id ~run:changed_run original with
      | Error _ -> () | Ok _ -> Alcotest.fail "wake replaced original run identity");
@@ -409,7 +423,8 @@ let test_linked_frontier_and_staged_run_recovery () =
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
-      Alcotest.(check string) "retry keeps complete original prompt" (V.prompt original) prompt;
+      Alcotest.(check string) "nothing moved, so the next attempt is asked in the parent's words"
+        (V.prompt original) prompt;
       if !calls = 1 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
         {retry_after=Some 1.; message="definite temporary refusal"}))
       else Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None; verdict=Some (AR.Approve "checked original")}) (fun () ->
@@ -425,7 +440,7 @@ let test_linked_frontier_and_staged_run_recovery () =
            request bytes as normal retain; no private owner record is forged. *)
         let staged_store = Lane_addon_store.create
           ~root:(Filename.concat (Workspace.masc_dir config) "staged-goal-fixture") in
-        let child = get (V.successor original) in
+        let child = next_attempt authority original in
         ignore (checked (W.retain ~store:staged_store ~installation_id ~package_id ~run:fixed_run child));
         let load_scope store = get (Lane_addon_tool_request_owner.load_scope ~store
             ~scope:"goal-proof-reviews" |> Result.map_error Lane_addon_tool_request_owner.error_to_string) in
@@ -444,7 +459,8 @@ let test_linked_frontier_and_staged_run_recovery () =
         let report = get (Lane_addon_original_body_inventory.run ~store
           |> Result.map_error Lane_addon_original_body_inventory.error_to_string) in
         Alcotest.(check int) "restart retains the unprotected body and staged Goal input" 1 report.unprotected_files);
-      let next () = match checked (W.frontier ~store ~installation_id ~package_id
+      let authority_calls, current_authority = counted_authority authority in
+      let next () = match checked (W.frontier ~authority:current_authority ~store ~installation_id ~package_id
           ~goal_id:subject.goal_id ~request_id:subject.request_id ~new_run:(fun () ->
             if crash_before_child then Alcotest.fail "restart invented another child run";
             incr allocations; fixed_run)) with
@@ -457,7 +473,9 @@ let test_linked_frontier_and_staged_run_recovery () =
       ignore (checked (run store child authority));
       Alcotest.(check int) "only definite terminal failure gets a new provider attempt" 2 !calls;
       ignore (next ());
-      Alcotest.(check int) "judged frontier does not create another successor" 2 !calls)) in
+      Alcotest.(check int) "judged frontier does not create another successor" 2 !calls;
+      Alcotest.(check int) "authority is prepared only to allocate the next attempt"
+        (if crash_before_child then 0 else 1) !authority_calls)) in
   exercise false;
   exercise true
 
@@ -479,7 +497,7 @@ let test_subdivided_parent_requires_retained_unknown_child () =
       let refusal = checked (run store retained authority) in
       Alcotest.(check bool) "typed refusal retains retry candidate" true
         (refusal.result.retryable_runtimes <> []);
-      let child = get (V.successor original) in
+      let child = next_attempt authority original in
       let fixed_run : W.run_identity = {run_id="fixed-unknown-child/" ^ subject.request_id;
         started_at=Time_compat.now ()} in
       let staged_store = Lane_addon_store.create
@@ -506,13 +524,247 @@ let test_subdivided_parent_requires_retained_unknown_child () =
        | Finished _ | Conflicted _ | Rejected _ | Subdividing _ ->
          Alcotest.fail "fixture must retain a Subdivided parent without its child");
       let allocations = ref 0 in
-      (match W.frontier ~store ~installation_id ~package_id
+      let authority_calls, current_authority = counted_authority authority in
+      (match W.frontier ~authority:current_authority ~store ~installation_id ~package_id
         ~goal_id:subject.goal_id ~request_id:subject.request_id
         ~new_run:(fun () -> incr allocations; fixed_run) with
        | Error (W.Original_invalid _) -> ()
        | Error _ | Ok _ -> Alcotest.fail "missing unknown child was recreated from staged input");
       Alcotest.(check int) "only the original review happened" 1 !calls;
-      Alcotest.(check int) "no new run was allocated for a missing unknown child" 0 !allocations))
+      Alcotest.(check int) "no new run was allocated for a missing unknown child" 0 !allocations;
+      Alcotest.(check int) "a missing unknown child prepares no authority" 0 !authority_calls))
+
+(* The next attempt keeps the parent's question and takes what is current when
+   it is prepared: lookup grants, root layout, prompt, instructions and answer
+   format. A report recorded after the parent stays out of that question, and
+   an authority for another question allocates nothing. Both the automatic
+   retry and the operator's explicit retry go through the same rule. *)
+let test_next_attempt_asks_the_parent_question_with_current_authority () =
+  let exercise ~operator = with_workspace (fun config store _ ->
+    let authority, retained = prepared config store in
+    let parent = W.original retained in
+    let subject = V.subject parent in
+    let goal_id = subject.goal_id and request_id = subject.request_id in
+    let prompts = ref [] in
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      prompts := prompt :: !prompts;
+      if List.length !prompts = 1 then Error (Agent_core.Error.Api (Agent_core.Error.Retry.RateLimited
+        {retry_after=Some 1.; message="definite temporary refusal"}))
+      else Ok {AR.selected_runtime_id="goal-reviewer"; evaluator_execution=None;
+        verdict=Some (AR.Approve "checked the next attempt")}) (fun () ->
+      let refusal = checked (run store retained authority) in
+      Alcotest.(check bool) "fixture retains a retryable parent" true
+        (refusal.result.retryable_runtimes <> []);
+      let goal = match Goal_store.find_goal config ~goal_id with
+        | Goal_store.Goal_found goal -> goal
+        | Goal_absent | Store_unavailable _ -> Alcotest.fail "pending Goal is absent" in
+      let later = get (Goal_measurement.record config ~goal_id ~criterion_revision:goal.criterion_revision
+        ~observed_value:"100" ~evidence:"note:https://example.invalid/proof/later" ~actor:"later-reporter"
+        |> Result.map_error Goal_measurement.error_to_string) in
+      Fs_compat.mkdir_p (Filename.concat
+        (Workspace_verification_store.project_root_of_base_path config.Workspace.base_path)
+        (Playground_paths.bundle_root "later-owner"));
+      let current = get (A.create_goal_review ~config ~goal_id) in
+      Alcotest.(check bool) "the current authority sees the later report" true
+        (A.goal_review_measurement current = Ok (Some later.Goal_measurement.measurement));
+      let other = get (A.create_goal_review ~config ~goal_id:(pending config)) in
+      let allocations = ref 0 in
+      let fixed_run : W.run_identity = {run_id="next-attempt/" ^ request_id; started_at=Time_compat.now ()} in
+      let new_run () = incr allocations; fixed_run in
+      let ask authority =
+        if operator then
+          W.request_retry ~authority ~store ~installation_id ~package_id ~goal_id ~request_id
+            ~requested_by:"operator" ~new_run |> Result.map (fun () -> None)
+        else W.frontier ~authority ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run in
+      (match ask (fun () -> Ok other) with
+       | Error W.Question_changed -> ()
+       | Ok _ | Error _ -> Alcotest.fail "an authority for another question started a next attempt");
+      Alcotest.(check int) "another question allocates no run" 0 !allocations;
+      (match P.phase (W.progress (load store parent)) with
+       | P.Rejected {stage=P.Execution; _} -> ()
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected {stage=P.Before_dispatch; _} | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "another question moved the parent");
+      let authority_calls, current_authority = counted_authority current in
+      ignore (checked (ask current_authority));
+      Alcotest.(check int) "the current authority is prepared once" 1 !authority_calls;
+      let child = match checked (W.frontier
+          ~authority:(fun () -> Alcotest.fail "restoring the next attempt prepared authority again")
+          ~store ~installation_id ~package_id ~goal_id ~request_id
+          ~new_run:(fun () -> Alcotest.fail "restoring the next attempt allocated another run")) with
+        | Some child -> child | None -> Alcotest.fail "the next attempt disappeared" in
+      let next = W.original child in
+      Alcotest.(check int) "one next attempt" (V.attempt parent + 1) (V.attempt next);
+      Alcotest.(check string) "the next attempt keeps its fixed run" fixed_run.run_id (W.run_identity child).run_id;
+      Alcotest.(check string) "the next attempt asks the parent's question digest"
+        (V.question_binding parent) (V.question_binding next);
+      Alcotest.(check bool) "the next attempt keeps the parent's report" true
+        (V.measurement next = V.measurement parent);
+      Alcotest.(check string) "the next attempt takes the current authority digest"
+        (A.goal_review_authority_binding current) (V.authority_binding next);
+      Alcotest.(check (list string)) "the next attempt takes the current lookup tools"
+        (List.map (fun (tool : Types_core.tool_schema) -> tool.name) (A.goal_review_lookup current).schemas)
+        (V.lookup_schemas next);
+      Alcotest.(check (list string)) "the next attempt takes the current root layout"
+        (A.goal_review_root_layout current) (V.root_layout next);
+      Alcotest.(check bool) "the root layout moved after the parent" true
+        (V.root_layout next <> V.root_layout parent);
+      Alcotest.(check string) "the next attempt takes this build's answer format"
+        (Verifier_review_original.canonical_output_contract ()) (V.output_contract next);
+      let json observation = Yojson.Safe.to_string (Goal_measurement.observation_to_yojson observation) in
+      Alcotest.(check bool) "the prompt is drawn with the parent's report" true
+        (String_util.contains_substring (V.prompt next) (json (V.measurement parent)));
+      Alcotest.(check bool) "the later report stays out of the question" false
+        (String_util.contains_substring (V.prompt next) (json (A.goal_review_measurement current)));
+      Alcotest.(check bool) "the prompt lists the current root" true
+        (String_util.contains_substring (V.prompt next) "later-owner");
+      let receipt = checked (run store child current) in
+      Alcotest.(check bool) "the next attempt reached its verdict" true
+        (receipt.result.verdict = Some (AR.Approve "checked the next attempt"));
+      match !prompts with
+      | [second; first] ->
+        Alcotest.(check string) "the parent was asked with its own prompt" (V.prompt parent) first;
+        Alcotest.(check string) "the next attempt was asked with its own prompt" (V.prompt next) second
+      | _ -> Alcotest.fail "expected exactly two reviewer entries")) in
+  exercise ~operator:false;
+  exercise ~operator:true
+
+(* Attempt 0 as an earlier build would have left it: the same question with
+   another lookup authority, another answer format, or both. *)
+let stale_original ~moved authority =
+  let replace key value = function
+    | `Assoc fields -> `Assoc (List.map (fun (name, old) -> if name = key then name, value else name, old) fields)
+    | _ -> Alcotest.fail "original must be an object" in
+  let earlier_authority = replace "authority_binding" (`String (String.make 64 'b')) in
+  let earlier_format = replace "output_contract" (`String "An earlier answer format") in
+  let json = V.to_json (get (V.prepare ~attempt:0 ~authority)) in
+  get (V.of_json (match moved with
+    | `Authority -> earlier_authority json
+    | `Answer_format -> earlier_format json
+    | `Both -> earlier_format (earlier_authority json)))
+
+let check_change ~moved ~current original change =
+  let authority_pair (pair : Change.pair) =
+    pair.Change.before = V.authority_binding original
+    && pair.Change.after = A.goal_review_authority_binding current in
+  let format_pair (pair : Change.pair) =
+    pair.Change.before = Change.answer_format_digest (V.output_contract original)
+    && pair.Change.after = Change.answer_format_digest (Verifier_review_original.canonical_output_contract ()) in
+  Alcotest.(check bool) "the refusal names exactly what moved" true
+    (match moved, change with
+     | `Authority, Change.Authority pair -> authority_pair pair
+     | `Answer_format, Change.Output_contract pair -> format_pair pair
+     | `Both, Change.Both {authority; output_contract} -> authority_pair authority && format_pair output_contract
+     | (`Authority | `Answer_format | `Both), (Change.Authority _ | Output_contract _ | Both _) -> false)
+
+(* A moved lookup authority or answer format ends the retained attempt before
+   dispatch with only what moved. Another question records nothing. The next
+   attempt asks the same question with the current authority, whether a wake
+   or an operator's request opens it, and only that attempt reaches the
+   reviewer. *)
+let test_moved_authority_is_refused_before_dispatch_and_asked_again () =
+  let exercise ~moved ~operator = with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    let authority = get (A.create_goal_review ~config ~goal_id) in
+    let stale = stale_original ~moved authority in
+    let request_id = (V.subject stale).request_id in
+    let first_run : W.run_identity = {run_id="stale/" ^ request_id; started_at=Time_compat.now ()} in
+    let retained = checked (W.retain ~store ~installation_id ~package_id ~run:first_run stale) in
+    let prompts = ref [] in
+    with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime:_ ~candidate_kind:_ ~prompt
+        ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
+        ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
+      prompts := prompt :: !prompts;
+      Ok {AR.selected_runtime_id="goal-reviewer"; evaluator_execution=None;
+        verdict=Some (AR.Approve "checked with the current authority")}) (fun () ->
+      let other = get (A.create_goal_review ~config ~goal_id:(pending config)) in
+      (match run store retained other with
+       | Error W.Question_changed -> ()
+       | Ok _ | Error _ -> Alcotest.fail "another question was not refused as a changed question");
+      (match P.phase (W.progress (load store stale)) with
+       | P.Captured -> ()
+       | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "another question recorded a refusal");
+      let refused () = match run store retained authority with
+        | Error (W.Authority_changed change) -> change
+        | Ok _ | Error _ -> Alcotest.fail "a moved authority was not refused before dispatch" in
+      let change = refused () in
+      check_change ~moved ~current:authority stale change;
+      let parent = load store stale in
+      (match P.phase (W.progress parent) with
+       | P.Rejected {stage=P.Before_dispatch; evidence} ->
+         Alcotest.(check bool) "the refusal holds only what moved" true
+           (Yojson.Safe.equal evidence (Change.to_json change))
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Finished _ | Conflicted _ | Rejected {stage=P.Execution; _} | Subdividing _ | Subdivided _ ->
+         Alcotest.fail "the moved authority did not end before dispatch");
+      Alcotest.(check bool) "a before-dispatch refusal has no receipt" true
+        (checked (W.restored_receipt parent) = None && checked (W.observed_receipt parent) = None);
+      Alcotest.(check int) "a before-dispatch refusal has no tool observation" 0
+        (List.length (checked (W.tool_observations parent)));
+      Alcotest.(check bool) "asking the refused attempt again gives the same change" true
+        (refused () = change);
+      Alcotest.(check int) "the refused attempt reaches no reviewer" 0 (List.length !prompts);
+      let allocations = ref 0 in
+      let fixed_run : W.run_identity = {run_id="asked-again/" ^ request_id; started_at=Time_compat.now ()} in
+      let new_run () = incr allocations; fixed_run in
+      (match W.frontier ~authority:(fun () -> Error "fixture lookup authority unavailable")
+          ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run with
+       | Error (W.Authority_unavailable _) -> ()
+       | Ok _ | Error _ -> Alcotest.fail "an unavailable authority opened a next attempt");
+      Alcotest.(check int) "an unavailable authority allocates no run" 0 !allocations;
+      let authority_calls, current_authority = counted_authority authority in
+      (if operator then
+         checked (W.request_retry ~authority:current_authority ~store ~installation_id ~package_id
+           ~goal_id ~request_id ~requested_by:"operator" ~new_run)
+       else ignore (checked (W.frontier ~authority:current_authority ~store ~installation_id ~package_id
+           ~goal_id ~request_id ~new_run)));
+      let child = match checked (W.frontier
+          ~authority:(fun () -> Alcotest.fail "restoring the next attempt prepared authority again")
+          ~store ~installation_id ~package_id ~goal_id ~request_id
+          ~new_run:(fun () -> Alcotest.fail "restoring the next attempt allocated another run")) with
+        | Some child -> child | None -> Alcotest.fail "the next attempt disappeared" in
+      let next = W.original child in
+      Alcotest.(check int) "one next attempt" 1 (V.attempt next);
+      Alcotest.(check int) "one run for the next attempt" 1 !allocations;
+      Alcotest.(check int) "the current authority is prepared once" 1 !authority_calls;
+      Alcotest.(check bool) "the current authority admits the next attempt" true (admits next authority);
+      let receipt = checked (run store child authority) in
+      Alcotest.(check bool) "the next attempt reached its verdict" true
+        (receipt.result.verdict = Some (AR.Approve "checked with the current authority"));
+      Alcotest.(check (list string)) "only the next attempt reached the reviewer" [V.prompt next] !prompts)) in
+  List.iter (fun moved -> exercise ~moved ~operator:false) [`Authority; `Answer_format; `Both];
+  exercise ~moved:`Authority ~operator:true
+
+(* A before-dispatch refusal whose change starts at another lookup authority
+   is not this attempt's refusal, so it opens no next attempt. *)
+let test_refusal_from_another_authority_opens_no_attempt () = with_workspace (fun config store _ ->
+  let goal_id = pending config in
+  let authority = get (A.create_goal_review ~config ~goal_id) in
+  let stale = stale_original ~moved:`Authority authority in
+  let request_id = (V.subject stale).request_id in
+  ignore (checked (W.retain ~store ~installation_id ~package_id
+    ~run:{W.run_id="foreign/" ^ request_id; started_at=Time_compat.now ()} stale));
+  let format = V.output_contract stale in
+  let foreign = match get (Change.between ~retained_authority:(String.make 64 'd')
+      ~current_authority:(A.goal_review_authority_binding authority)
+      ~retained_format:format ~current_format:format) with
+    | Some change -> change | None -> Alcotest.fail "the fixture change must move" in
+  let record = match get (Lane_addon_tool_request_owner.load_scope ~store ~scope:W.scope
+      |> Result.map_error Lane_addon_tool_request_owner.error_to_string) with
+    | [record] -> record | _ -> Alcotest.fail "fixture needs one actual owner" in
+  ignore (get (Lane_addon_tool_request_owner.advance ~store ~expected:record
+    ~event:(P.Refused {stage=P.Before_dispatch; evidence=Change.to_json foreign})
+    |> Result.map_error Lane_addon_tool_request_owner.update_error_to_string));
+  let allocations = ref 0 in
+  (match W.frontier ~authority:(fun () -> Ok authority) ~store ~installation_id ~package_id
+      ~goal_id ~request_id ~new_run:(fun () -> incr allocations; {W.run_id="never"; started_at=0.}) with
+   | Error (W.Original_invalid _) -> ()
+   | Ok _ | Error _ -> Alcotest.fail "a refusal from another authority opened a next attempt");
+  Alcotest.(check int) "a refusal from another authority allocates no run" 0 !allocations)
 
 let test_actual_goal_commit_reply_loss_and_conflict () =
   let exercise conflict = with_workspace (fun config store _ ->
@@ -643,8 +895,7 @@ let corrupt_host_original_body store retained =
     match W.load ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id
       ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original) with
     | Error (W.Store_unavailable _) -> ()
-    | Error (Original_invalid _ | Authority_changed _ | Execution_pending _)
-    | Ok _ -> Alcotest.fail "damaged own original body did not remain a storage failure"
+    | Error _ | Ok _ -> Alcotest.fail "damaged own original body did not remain a storage failure"
   in
   assert_preserved ();
   assert_preserved
@@ -843,8 +1094,7 @@ let test_request_observation_refuses_unsafe_original_read () =
     (match observe_request ~store ~installation_id:W.host_installation_id
         ~package_id:W.host_package_id ~config authority with
      | Error (W.Store_unavailable _) -> ()
-     | Error (Original_invalid _ | Authority_changed _ | Execution_pending _) | Ok _ ->
-       Alcotest.fail "an unsafe original read became a partial success");
+     | Error _ | Ok _ -> Alcotest.fail "an unsafe original read became a partial success");
     assert_damaged ())
 ;;
 
@@ -961,13 +1211,15 @@ let test_noncanonical_successor_blocks_automatic_retry () =
       ignore (retain_noncanonical_metadata store ~goal_id:subject.goal_id
         ~request_id:subject.request_id ~attempt:1);
       let allocations = ref 0 in
-      let outcome = W.frontier ~store ~installation_id ~package_id
+      let authority_calls, current_authority = counted_authority authority in
+      let outcome = W.frontier ~authority:current_authority ~store ~installation_id ~package_id
         ~goal_id:subject.goal_id ~request_id:subject.request_id
         ~new_run:(fun () ->
           incr allocations;
           {run_id="noncanonical-successor-must-not-run/" ^ subject.request_id;
             started_at=Time_compat.now ()}) in
       Alcotest.(check int) "noncanonical successor cannot allocate a new run" 0 !allocations;
+      Alcotest.(check int) "noncanonical successor prepares no authority" 0 !authority_calls;
       match outcome with
       | Error (W.Original_invalid _) -> ()
       | Error _ | Ok _ -> Alcotest.fail "noncanonical successor was replaced by a fresh retry"))
@@ -1190,6 +1442,45 @@ let test_cloned_workspace_cannot_commit_original () = with_workspace (fun config
      | Error (H.Conflict _) -> () | Ok () | Error _ -> Alcotest.fail "another workspace accepted the retained proof");
     Alcotest.(check bool) "neither original nor clone changed phase" true
       (phase config subject.goal_id=Goal_phase.Verifying && phase other subject.goal_id=Goal_phase.Verifying)))
+
+(* The agent asks a refused attempt again in the same processing. The refused
+   attempt's run row ends deferred with no evaluated verdict, runtime or tool,
+   and its next attempt reaches the reviewer and commits. A processing cut
+   after the refusal was recorded resumes through recovery the same way. *)
+let test_agent_asks_a_moved_authority_again_in_one_processing () =
+  let exercise ~cut_after_refusal = with_workspace (fun config store _ ->
+    let goal_id = pending config in
+    let authority = get (A.create_goal_review ~config ~goal_id) in
+    let stale = stale_original ~moved:`Authority authority in
+    let first_run : W.run_identity = {run_id="host-stale/" ^ (V.subject stale).request_id;
+      started_at=Time_compat.now ()} in
+    let retained = checked (W.retain ~store ~installation_id:W.host_installation_id
+      ~package_id:W.host_package_id ~run:first_run stale) in
+    let calls = ref 0 in
+    with_reviewer (actual_approve calls) (fun () ->
+      if cut_after_refusal then (
+        hosted (H.ensure_registered ~registry:(R.global ()) retained);
+        match run store retained authority with
+        | Error (W.Authority_changed _) -> ()
+        | Ok _ | Error _ -> Alcotest.fail "fixture did not record the before-dispatch refusal");
+      (match Agent.process_pending_work config {Agent.goal_id} with
+       | Agent.Committed -> ()
+       | Agent.Superseded | Agent.Deferred _ ->
+         Alcotest.fail "the moved authority was not asked again in the same processing");
+      Alcotest.(check int) "one reviewer entry, for the next attempt" 1 !calls;
+      (match R.get (R.global ()) ~run_id:first_run.run_id with
+       | Some (R.Review {status=R.Completed {outcome=R.Deferred _; evaluated_verdict=None;
+           evaluator_runtime=None; tools=[]; _}; _}) -> ()
+       | None | Some (R.Review _ | R.Scan_skipped _) ->
+         Alcotest.fail "the refused attempt's run row did not end deferred without a runtime");
+      let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id
+        ~package_id:W.host_package_id) in
+      Alcotest.(check int) "the refused attempt and its next attempt" 2 (List.length rows);
+      match List.find_opt (fun row -> V.attempt (W.original row) = 1) rows with
+      | Some child -> assert_host_proof_published config store (W.original child)
+      | None -> Alcotest.fail "the next attempt was not retained")) in
+  exercise ~cut_after_refusal:false;
+  exercise ~cut_after_refusal:true
 
 let test_actual_explicit_retry_and_unknown_fence () =
   let exercise unknown = with_workspace (fun config store _ ->
@@ -1488,6 +1779,14 @@ let () = match restart_probe with
   Alcotest.test_case "authority destination and strict inventory" `Quick test_destination_authority_and_inventory;
   Alcotest.test_case "linked frontier restores the original staged run" `Quick test_linked_frontier_and_staged_run_recovery;
   Alcotest.test_case "Subdivided parent requires retained unknown child" `Quick test_subdivided_parent_requires_retained_unknown_child;
+  Alcotest.test_case "next attempt asks the parent's question with current authority" `Quick
+    test_next_attempt_asks_the_parent_question_with_current_authority;
+  Alcotest.test_case "moved authority is refused before dispatch and asked again" `Quick
+    test_moved_authority_is_refused_before_dispatch_and_asked_again;
+  Alcotest.test_case "agent asks a moved authority again in one processing" `Quick
+    test_agent_asks_a_moved_authority_again_in_one_processing;
+  Alcotest.test_case "refusal from another authority opens no attempt" `Quick
+    test_refusal_from_another_authority_opens_no_attempt;
   Alcotest.test_case "actual Goal proof commit reply loss and conflict" `Quick test_actual_goal_commit_reply_loss_and_conflict;
   Alcotest.test_case "actual pending Goal survives foreign original body corruption" `Quick
     test_actual_pending_goal_survives_foreign_body_corruption;

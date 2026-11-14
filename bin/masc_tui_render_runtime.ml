@@ -31,7 +31,7 @@ let runtime_refresh_badge ~ko refresh_state =
     match refresh_state with
     | Runtime_probe_fresh -> (if ko then "최신" else "fresh"), (Theme.ok ())
     | Runtime_probe_recent -> (if ko then "최근" else "recent"), (Theme.info ())
-    | Runtime_probe_served_stale -> (if ko then "이전 관측" else "stale"), (Theme.warn ())
+    | Runtime_probe_served_stale -> field_stale ~ko, (Theme.warn ())
     | Runtime_probe_warming_up -> (if ko then "준비 중" else "warming"), (Theme.warn ())
   in
   style ^ label ^ Ansi.reset
@@ -240,7 +240,7 @@ let runtime_routes_detail_lines state ~width =
      | None -> []
      | Some notice ->
          fact ~tone:(runtime_lane_notice_tone notice) (text "작업 결과" "Action result")
-           (Masc_tui_types.runtime_lane_notice_text notice))
+           (Masc_tui_types.runtime_lane_notice_text ~ko notice))
     @ runtime_items ~tone:Page_line.Attention (text "이전 설정 관측" "Stale configuration")
         (Masc_tui_types.runtime_lane_stale_lines state)
   in
@@ -393,16 +393,13 @@ let runtime_detail_lines state target ~width =
             (runtime_bool runtime.ro_is_default)
       in
       let quota =
-        match runtime_quota_badge ~ko:(state.ui_language = Lang_ko) runtime with
+        match runtime.ro_quota_rest with
         | None -> []
-        | Some _ ->
+        | Some spent ->
             fact ~tone:Page_line.Attention "Quota"
-              (match runtime.ro_quota_resets_at with
-               | Some resets_at ->
-                 let tm = Unix.localtime resets_at in
-                 Printf.sprintf "exhausted, resets %02d:%02d"
-                   tm.Unix.tm_hour tm.Unix.tm_min
-               | None -> "exhausted, no reset stated")
+              (Printf.sprintf "%s, %s"
+                 (runtime_quota_cause_label spent.Runtime_quota_window.cause)
+                 (runtime_quota_end_label spent.Runtime_quota_window.rest))
       in
       let rate_limit =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
@@ -877,7 +874,7 @@ let render_runtime_reading (state : state) =
             c.push_styled ~style:(runtime_lane_notice_style notice) ("  " ^ line))
          (String.split_on_char '\n'
             (Keeper_chat.terminal_safe_text ~preserve_newlines:true
-               (Masc_tui_types.runtime_lane_notice_text notice)));
+               (Masc_tui_types.runtime_lane_notice_text ~ko notice)));
        c.push_divider ());
   (* Counted in [runtime_surface_listing_chrome] as one row each and a
      divider. *)
@@ -1622,7 +1619,8 @@ let render_metrics (state : state) =
         if spacing_rows > 0 then
           c.push (if connection_rows = [] then ""
                   else Theme.recede ()
-                    ^ ui_text state ~ko:"End: 연결 상태" ~en:"End: status" ^ Ansi.reset);
+                    ^ metrics_status_at_end ~ko:(state.ui_language = Lang_ko)
+                    ^ Ansi.reset);
         let content_budget = max 0 (budget - navigation_rows - spacing_rows) in
         (* Put variable-length status details after account rows: refreshes do
            not move the account the reader is already scrolling through. *)

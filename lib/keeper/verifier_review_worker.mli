@@ -5,7 +5,17 @@ type error =
   | Original_not_found
   | Original_corrupt of string
   | Authority_unavailable of string
+      (** Lookup authority could not be prepared, or its route changed after
+          preparation. *)
   | Grants_mismatch of string
+      (** The authority or owner store belongs to another workspace. *)
+  | Question_changed
+      (** The current authority asks another question: subject, workspace or
+          submitted evidence moved. No next attempt may ask it. *)
+  | Authority_changed of Verifier_review_authority_change.t
+      (** The same question meets another lookup authority or answer format.
+          The attempt is refused before dispatch; its next attempt asks with
+          the current authority. *)
   | Execution_pending of string
   | Execution_repair_required of string
   | Persistence_unavailable of string
@@ -24,11 +34,13 @@ val run_attempt :
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
   (Verifier_review_original.t * Task.Anti_rationalization.review_result, error) result
 (** Strictly load the original for its recorded destination, then compare the
-    host's opaque authority with its canonical binding and subject. Refuse a
-    changed workspace, producer, full schema or submitted snapshot before
-    dispatch. Execute the stored prompt and images; callers supply neither
-    another question nor a lookup dispatch closure. The structured output
-    contract must still match the review protocol. [prepare_notes] belongs to
+    host's opaque authority with its question digest and subject first. A
+    changed producer or submitted snapshot is [Question_changed]. Then the
+    route is checked again. A moved lookup authority or answer format records
+    a before-dispatch refusal holding only what moved and returns
+    [Authority_changed]; restoring that refusal returns the same. Execute the
+    stored prompt and images; callers supply neither another question nor a
+    lookup dispatch closure. [prepare_notes] belongs to
     the host and renders its captured evidence metadata before the judgment
     and notes are published atomically. The physical owner store must belong
     to [base_path]. [prepare_authority] is called only for a not-yet-dispatched

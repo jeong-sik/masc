@@ -136,7 +136,7 @@ let test_two_workspaces_keep_separate_ledgers () =
   check int "the first workspace holds its verdict" 1 (total first);
   check int "the second workspace holds no verdict" 0 (total second);
   check int "a label in the second workspace makes no divergence in the first" 0
-    (List.length (Cal.find_divergences ~base_path:first ()))
+    (List.length (Cal.find_divergences ~base_path:first ()).divergences)
 
 let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
@@ -235,7 +235,7 @@ let test_find_divergences_false_positive () =
   Cal.record_human_label ~base_path:dir
     ~notes_hash:hash ~human_verdict:Cal.Reject_label
     ~labeler:"vincent" ~reason:"did not address the task";
-  let divs = Cal.find_divergences ~base_path:dir () in
+  let divs = (Cal.find_divergences ~base_path:dir ()).divergences in
   check int "1 divergence found" 1 (List.length divs);
   let d = List.hd divs in
   check string "evaluator approved" "approve"
@@ -256,7 +256,7 @@ let test_find_divergences_false_negative () =
   Cal.record_human_label ~base_path:dir
     ~notes_hash:hash ~human_verdict:Cal.Approve_label
     ~labeler:"vincent" ~reason:"";
-  let divs = Cal.find_divergences ~base_path:dir () in
+  let divs = (Cal.find_divergences ~base_path:dir ()).divergences in
   check int "1 divergence found" 1 (List.length divs);
   let d = List.hd divs in
   check string "human approved" "approve"
@@ -273,7 +273,7 @@ let test_find_divergences_agreement () =
   Cal.record_human_label ~base_path:dir
     ~notes_hash:hash ~human_verdict:Cal.Approve_label
     ~labeler:"vincent" ~reason:"";
-  let divs = Cal.find_divergences ~base_path:dir () in
+  let divs = (Cal.find_divergences ~base_path:dir ()).divergences in
   check int "no divergences when agreement" 0 (List.length divs)
 
 let test_find_divergences_no_labels () =
@@ -283,8 +283,115 @@ let test_find_divergences_no_labels () =
   let req = make_req () in
   let result = make_result () in
   Cal.record_verdict ~base_path:dir ~task_id:"t4" ~req ~result ();
-  let divs = Cal.find_divergences ~base_path:dir () in
+  let divs = (Cal.find_divergences ~base_path:dir ()).divergences in
   check int "no divergences without labels" 0 (List.length divs)
+
+(* ================================================================ *)
+(* Store reading tests                                               *)
+(* ================================================================ *)
+
+(* A verdict and a label come back from the store as the records that were
+   written, optional parts included. *)
+let test_written_records_are_read_back () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  let evaluator_execution =
+    match
+      Runtime_response_identity.make ~execution_id:"execution-judge" ~actor:"judge"
+        ~runtime_id:"verifier" ~response_id:"response-judge" ~provider_id:"provider"
+        ~model_id:"model-b" ~tool_use_id:"call-judge" ~provider_turn:1
+        ~source_tool_use_ordinal:0
+    with
+    | Ok identity -> identity
+    | Error detail -> fail detail
+  in
+  let req = make_req ~title:"Round trip" ~notes:"with: colons" () in
+  Cal.record_verdict ~base_path:dir ~task_id:"plain" ~req:(make_req ())
+    ~result:(make_result ()) ();
+  Cal.record_verdict ~base_path:dir ~task_id:"full" ~req
+    ~result:
+      (make_result ~verdict:(AR.Reject "vague: no evidence") ~gen_runtime:"producer"
+         ~evaluator_execution ~gate:AR.Invalid_verdict ~fallback_reason:"bad shape" ())
+    ();
+  let hash = Cal.notes_hash ~task_title:"Round trip" ~notes:"with: colons" in
+  Cal.record_human_label ~base_path:dir ~notes_hash:hash ~human_verdict:Cal.Approve_label
+    ~labeler:"vincent" ~reason:"evidence was attached";
+  let window = Cal.read_window ~base_path:dir ~max_rows:10 () in
+  check int "every row was readable" 0 window.unreadable_rows;
+  (match window.verdicts with
+   | [ plain; full ] ->
+     check string "plain task" "plain" plain.task_id;
+     check bool "plain verdict" true (plain.verdict = AR.Approve "");
+     check bool "plain gate" true (plain.gate = AR.Structured_tool);
+     check (option string) "plain has no generator" None plain.generator_runtime;
+     check (option string) "plain has no fallback reason" None plain.fallback_reason;
+     check bool "plain has no evaluator identity" true (plain.evaluator_execution = None);
+     check string "full task" "full" full.task_id;
+     check string "full title" "Round trip" full.task_title;
+     check string "full agent" "alice" full.agent_name;
+     check string "full hash" hash full.notes_hash;
+     check bool "full verdict keeps its reason" true
+       (full.verdict = AR.Reject "vague: no evidence");
+     check bool "full gate" true (full.gate = AR.Invalid_verdict);
+     check string "full evaluator" "verifier" full.evaluator_runtime;
+     check (option string) "full generator" (Some "producer") full.generator_runtime;
+     check (option string) "full fallback reason" (Some "bad shape") full.fallback_reason;
+     check bool "full evaluator identity" true
+       (full.evaluator_execution = Some evaluator_execution)
+   | rows -> failf "expected two verdicts, read %d" (List.length rows));
+  match window.labels with
+  | [ label ] ->
+    check string "label hash" hash label.notes_hash;
+    check bool "label verdict" true (label.human_verdict = Cal.Approve_label);
+    check string "labeler" "vincent" label.labeler;
+    check string "label reason" "evidence was attached" label.reason
+  | rows -> failf "expected one label, read %d" (List.length rows)
+
+(* Rows the current writers do not produce are in no count, list or example,
+   and every reader of the store reports how many it passed over. Each row
+   below differs from a written one in a single place. *)
+let test_rows_no_writer_produces_are_skipped_and_counted () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  let req = make_req ~title:"Current" ~notes:"current notes" () in
+  Cal.record_verdict ~base_path:dir ~task_id:"current" ~req ~result:(make_result ()) ();
+  let store = Cal.store ~base_path:dir in
+  let written =
+    match Dated_jsonl.read_recent store 10 with
+    | [ `Assoc fields ] -> fields
+    | _ -> fail "expected the one written verdict row"
+  in
+  let without key = List.filter (fun (name, _) -> not (String.equal name key)) written in
+  let replaced key value = (key, value) :: without key in
+  let renamed key name = (name, List.assoc key written) :: without key in
+  let foreign_rows =
+    [ renamed "evaluator_runtime" "evaluator_cascade"
+    ; replaced "gate" (`String "format_fallback")
+    ; replaced "verdict" (`String "approve_with_minor_documentation_gap:fine")
+    ; without "timestamp"
+    ; without "producer_execution"
+    ; replaced "generator_runtime" (`Int 3)
+    ; replaced "record_type" (`String "note")
+    ; [ "record_type", `String "label"; "notes_hash", `String "abc" ]
+    ]
+  in
+  List.iter (fun fields -> Dated_jsonl.append store (`Assoc fields)) foreign_rows;
+  let foreign = List.length foreign_rows in
+  let window = Cal.read_window ~base_path:dir ~max_rows:100 () in
+  check int "only the written verdict is read" 1 (List.length window.verdicts);
+  check int "no label is read" 0 (List.length window.labels);
+  check int "the window counts the rows it passed over" foreign window.unreadable_rows;
+  let stats = Cal.calibration_stats ~base_path:dir () in
+  let stat name = Yojson.Safe.Util.(stats |> member name |> to_int) in
+  check int "statistics count the written verdict only" 1 (stat "total_verdicts");
+  check int "one approval" 1 (stat "approve_count");
+  check int "statistics report the passed-over rows" foreign (stat "unreadable_record_count");
+  check (list string) "only a current gate name is a distribution key" [ "structured_tool" ]
+    (Yojson.Safe.Util.(stats |> member "gate_distribution" |> keys));
+  let scan = Cal.find_divergences ~base_path:dir () in
+  check int "divergence analysis reports the passed-over rows" foreign scan.unreadable_rows
 
 (* ================================================================ *)
 (* Few-shot example tests                                            *)
@@ -513,6 +620,11 @@ let () =
       test_case "false negative" `Quick test_find_divergences_false_negative;
       test_case "agreement" `Quick test_find_divergences_agreement;
       test_case "no labels" `Quick test_find_divergences_no_labels;
+    ];
+    "store reading", [
+      test_case "written records are read back" `Quick test_written_records_are_read_back;
+      test_case "rows no writer produces are skipped and counted" `Quick
+        test_rows_no_writer_produces_are_skipped_and_counted;
     ];
     "examples", [
       test_case "max cap" `Quick test_select_examples_max;

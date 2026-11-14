@@ -288,14 +288,20 @@ class Flow:
                     return following.request_id
         if not note.strip():
             raise DisputeRefused("a dispute says what is wrong with the grade")
-        session = next((s for s in sessions if s.ask_id == ask_id and s.state == "answered"), None)
-        posed = next((p for p in session.posed if p.question_id == question_id), None) if session else None
-        if session is None or session.answer is None or posed is None:
-            raise DisputeRefused(f"{ask_id}/{question_id} is not an answered question of this package")
-        if session.outstanding_grade(question_id) is not None:
-            raise DisputeRefused(f"a grade request for {ask_id}/{question_id} is still waiting")
-        response = dict(zip((p.question_id for p in session.posed),
-                            _responses(session.answer, session.posed)))[question_id]
+        not_answered = f"{ask_id}/{question_id} is not an answered question of this package"
+        # An ask belongs to one session (the log refuses a second), so the
+        # first session with this ask is the only one.
+        session = next((s for s in sessions if s.ask_id == ask_id), None)
+        if session is None:
+            raise DisputeRefused(not_answered)
+        match session.dispute_standing(question_id):
+            case q.NotAnswered():
+                raise DisputeRefused(not_answered)
+            case q.GradeWaiting():
+                raise DisputeRefused(f"a grade request for {ask_id}/{question_id} is still waiting")
+            case q.Disputable(posed=posed, answer=answer):
+                pass
+        response = dict(zip((p.question_id for p in session.posed), _responses(answer, session.posed)))[question_id]
         prior = g.verdict(posed, response, session.judgments_of(question_id))
         texts = self._record_texts(sessions, posed.sources)
         records = [texts[(s.kind, s.source_id, s.pin)] for s in posed.sources if (s.kind, s.source_id, s.pin) in texts]

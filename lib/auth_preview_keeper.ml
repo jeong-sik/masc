@@ -7,6 +7,7 @@ let keepers_path = "/api/v1/auth/keepers"
 let assign_path = keepers_path ^ "/assign"
 let turn_path = keepers_path ^ "/turn"
 let conversation_path = keepers_path ^ "/conversation"
+let conversation_entry_prefix = conversation_path ^ "/"
 let error status text = R.json status [ "error", `String text ]
 let make_shape = {|The body is {"keeper_id": "<name>"}.|}
 let assign_shape = {|The body is {"keeper_id": "<name>", "runtime_id": "<id>"}.|}

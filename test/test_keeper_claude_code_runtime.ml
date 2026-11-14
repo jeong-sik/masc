@@ -3065,12 +3065,12 @@ let test_only_a_spent_window_is_a_hard_quota () =
       { resets_at; windows = [ Runtime_claude_code.Named_window "five_hour" ] }
   in
   (match route_of (spent (Some (an_hour_from_now ()))) with
-   | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = Some wait } ->
+   | Route.Retry_after_observed { retry_class = Route.Hard_quota _; retry_after = Some wait } ->
      check bool "a spent window waits until the reset it states" true
        (Float.abs (wait -. 3600.0) < 5.0)
    | route -> failf "a spent window routed as %s" (Route.route_class_label route));
   (match route_of (spent None) with
-   | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = None } -> ()
+   | Route.Retry_after_observed { retry_class = Route.Hard_quota _; retry_after = None } -> ()
    | route -> failf "a spent window with no reset routed as %s" (Route.route_class_label route));
   match route_of Runtime_claude_code.Rate_throttled with
   | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after = None } -> ()

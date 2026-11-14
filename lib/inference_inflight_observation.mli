@@ -8,7 +8,10 @@ val with_observation :
 (** Run the callback while recording one active inference call. *)
 
 val active : unit -> int
-(** Number of callbacks currently crossing the AGENT_CORE boundary. *)
+(** Number of callbacks currently crossing the AGENT_CORE boundary. The
+    Keeper turn driver enters one per provider attempt it hands to
+    AGENT_CORE. A turn run by an official client (Codex, Claude Code,
+    Antigravity, Muse) does not cross this boundary and is not counted. *)
 
 val snapshot_json : unit -> Yojson.Safe.t
 (** Exact observation payload.  It contains no configured or inferred

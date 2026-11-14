@@ -1607,8 +1607,7 @@ let corrupt_daemon_original store retained =
         ~package_id:Worker.host_package_id ~goal_id:subject.goal_id
         ~request_id:subject.request_id ~attempt:(Original.attempt original) with
     | Error (Worker.Store_unavailable _) -> ()
-    | Error (Worker.Original_invalid _ | Worker.Authority_changed _ | Worker.Execution_pending _)
-    | Ok _ -> fail "the damaged original must remain an explicit storage failure"
+    | Error _ | Ok _ -> fail "the damaged original must remain an explicit storage failure"
   in
   check_preserved ();
   let restore () =
@@ -2268,7 +2267,7 @@ tools-support = true
   Eio_mock.Clock.set_time clock started;
   (* What the provider walk records for this refusal ([note_quota]). *)
   Runtime_quota_window.reset_for_testing ();
-  Runtime_quota_window.note_exhausted
+  Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
     ~scope:(Option.get (Runtime.quota_scope_of_runtime_id slot))
     ~resets_at:(started +. rest_sec);
   let refusal =

@@ -43,8 +43,7 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io deletion_source_io () =
-  let workspace_binding = Board_workspace_binding.capture ~base_path in
+let create_store_on_binding workspace_binding posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io deletion_source_io () =
   { posts_source = Posts_unobserved
   ; posts_source_io
   ; comments_source = Comments_unobserved
@@ -86,6 +85,13 @@ let create_store_with_source_io ~base_path posts_source_io comments_source_io su
   }
 ;;
 
+let create_store_with_source_io ~base_path posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io deletion_source_io () =
+  create_store_on_binding (Board_workspace_binding.capture ~base_path)
+    posts_source_io comments_source_io sub_boards_source_io votes_source_io
+    reactions_source_io deletion_source_io ()
+
+let create_store_bound workspace_binding =
+  create_store_on_binding workspace_binding { posts = None } None None None None None ()
 let create_store ~base_path () =
   create_store_with_source_io ~base_path { posts = None } None None None None None ()
 let create_store_with_source_io_for_testing ~base_path ~io () =

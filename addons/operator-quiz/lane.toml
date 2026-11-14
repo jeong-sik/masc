@@ -1,5 +1,5 @@
 id = "operator-quiz"
-revision = "0.4.0"
+revision = "0.5.0"
 title = "Operator quiz"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
@@ -35,9 +35,18 @@ max_reply_bytes = 4194304
 binding_schema = '''{
   "type": "object",
   "properties": {
-    "sources": {"type": "array", "maxItems": 0,
-      "items": {"type": "object", "properties": {}, "additionalProperties": false},
-      "description": "Always empty: the quiz reads records through binding.records."},
+    "sources": {"type": "array", "maxItems": 1,
+      "items": {"type": "object",
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "kind": {"type": "string", "const": "lane_output"},
+          "installation_id": {"type": "string", "minLength": 1,
+            "description": "The operator-lesson installation, in the same run as this one"},
+          "output_id": {"type": "string", "const": "scenes"},
+          "selection": {"type": "string", "const": "latest_completed"}},
+        "required": ["source_id", "kind", "installation_id", "output_id", "selection"],
+        "additionalProperties": false},
+      "description": "Empty, or the scenes output of one operator-lesson installation. With it, new questions come only from records the quiz read that a lesson cited; both declarations must give those records the same source_id. Records are read through binding.records either way."},
     "language": {"type": "string", "minLength": 1,
       "description": "The language every question is written in, such as ko"},
     "timezone": {"type": "string", "minLength": 1,

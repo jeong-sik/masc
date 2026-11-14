@@ -66,6 +66,51 @@ def language_of_binding(binding: dict) -> str:
     return language
 
 
+# -- The lesson a quiz follows (RFC operator-quiz-follows-lesson §3). --------
+
+LESSON_PORT = "scenes"  # the output port of operator-lesson that holds its scene rows
+LESSON_LANE = "lesson/scenes"
+
+
+def lesson_source_of_binding(binding: dict) -> str | None:
+    """The source_id of the lesson output the binding names, or None when
+    it names none. The quiz reads no other source."""
+    sources = binding.get("sources")
+    if not isinstance(sources, list) or len(sources) > 1:
+        raise InvalidBinding("binding.sources must be empty or name one lesson output")
+    if not sources:
+        return None
+    source = sources[0]
+    keys = {"source_id", "kind", "installation_id", "output_id", "selection"}
+    if not isinstance(source, dict) or set(source) != keys or any(
+            not isinstance(source[key], str) or not source[key] for key in keys):
+        raise InvalidBinding("a lesson source names source_id, kind, installation_id, output_id and selection")
+    if (source["kind"], source["output_id"], source["selection"]) != ("lane_output", LESSON_PORT, "latest_completed"):
+        raise InvalidBinding(f"a lesson source is the latest completed {LESSON_PORT} output of a lesson installation")
+    return source["source_id"]
+
+
+def _scene_of_row(row: Any, instance_id: str) -> q.Scene:
+    """The scene a row of the lesson's port is, read strictly in what the
+    quiz uses of it. A row of another shape is a LogError."""
+    if not isinstance(row, dict) or row.get("lane_id") != f"{instance_id}/{LESSON_LANE}":
+        raise q.LogError(f"a row that is not on {LESSON_LANE} of the producer")
+    fields = row.get("fields")
+    if not isinstance(fields, dict) or not isinstance(fields.get("sources"), list):
+        raise q.LogError("a scene row without its sources")
+    cites: list[q.Cite] = []
+    for source in fields["sources"]:
+        if not isinstance(source, dict):
+            raise q.LogError("a scene source that is not an object")
+        records.text(source.get("quote"), "scene source quote")
+        records.text(source.get("sha256"), "scene source sha256")
+        cite = q.Cite.of_json({key: source.get(key) for key in ("kind", "source_id", "pin")})
+        if cite not in cites:
+            cites.append(cite)
+    return q.Scene.of_json({"session_id": fields.get("session_id"), "entry_id": fields.get("entry_id"),
+                            "cites": [cite.to_json() for cite in cites]})
+
+
 # -- Drafts (RFC §4.9 Compose, step 3). -------------------------------------
 
 def check_draft(draft: dict, input_material: list[dict],
@@ -143,9 +188,12 @@ class Flow:
 
     # -- compose --------------------------------------------------------------
 
-    def compose(self, action_request_id: str, questions: int, binding: dict, opened_at: float) -> str:
+    def compose(self, action_request_id: str, questions: int, binding: dict, opened_at: float, *,
+                lesson: str | None = None) -> str:
         """Opens the session for one compose action; the same action again
-        names the same session and writes nothing."""
+        names the same session and writes nothing. [lesson] is the lesson
+        source the binding names (lesson_source_of_binding): the session then
+        follows it."""
         grants = grants_of_binding(binding)
         language = language_of_binding(binding)
         session_id = session_id_of(action_request_id)
@@ -159,9 +207,77 @@ class Flow:
                      for posed, response in zip(session.posed, _responses(session.answer, session.posed))
                      if _needs_grade(session.grading_of(posed.question_id), response)
                      for event in self._request_grade(session, posed, response)]
+            follows = [q.FollowsLesson(session_id, lesson)] if lesson is not None else []
             self.log.append([q.SessionOpened(session_id, action_request_id, questions, grants, language, opened_at),
-                             *again])
+                             *follows, *again])
         return session_id
+
+    # -- the lesson output, at an observation ---------------------------------
+
+    def see_lesson(self, binding: dict, sources: list) -> dict | None:
+        """Records the lesson output an observation carries, once per
+        distinct set of rows, and returns what the host said of the source:
+        complete and detail. None when the binding names no lesson.
+
+        Only an observation carries another installation's output, and the
+        author request is written while a result is consumed, so what the
+        lesson cited is kept in the log between the two. The event says
+        what was received; a repeated observation writes nothing."""
+        name = lesson_source_of_binding(binding)
+        if name is None:
+            return None
+        source = next((item for item in sources if isinstance(item, dict) and item.get("source_id") == name), None)
+        if source is None:
+            return {"complete": False, "detail": "the host supplied no source of this name"}
+        status = {"complete": source.get("complete") is True, "detail": source.get("detail")}
+        observations = source.get("observations")
+        outputs = [item for item in observations if isinstance(item, dict) and item.get("kind") == "lane_output"] \
+            if isinstance(observations, list) else []
+        if not outputs:
+            return status
+        if len(outputs) != 1:
+            raise InvalidResult("a lesson source carries one completed output")
+        try:
+            producer, evidence = outputs[0]["producer"], outputs[0]["evidence"]
+            instance_id = records.text(producer["instance_id"], "producer.instance_id")
+            seq = records.count(producer["observation_seq"], "producer.observation_seq")
+            sha256 = records.text(evidence[0]["sha256"], "evidence.sha256")
+            rows = outputs[0]["output"]["rows"]
+            if not isinstance(rows, list):
+                raise q.LogError("output.rows must be an array")
+        except (KeyError, TypeError, IndexError, q.LogError) as error:
+            raise InvalidResult(f"a lane_output observation does not have the host's shape: {error}") from error
+        # The lesson completes an output at every observation of its own, so
+        # the same scenes arrive under many sequence numbers; they are kept
+        # once. The host puts that number in each row id, so the key is taken
+        # over what the lesson wrote: each row's lane and fields.
+        try:
+            key = digest([[row.get("lane_id"), row.get("fields")] if isinstance(row, dict) else row for row in rows])
+        except ValueError as error:
+            raise InvalidResult(f"the rows of a lane_output observation cannot be written as JSON: {error}") from error
+        if any(isinstance(event, (q.LessonSeen, q.LessonUnreadable)) and event.rows == key
+               for event in self.log.read()):
+            return status
+        self.log.append([self._lesson_event(instance_id, seq, sha256, key, rows)])
+        return status
+
+    @staticmethod
+    def _lesson_event(instance_id: str, seq: int, sha256: str, key: str, rows: list) -> q.Event:
+        """The output as scenes, or as unreadable when one row is not a
+        scene or the log could not read the event back."""
+        try:
+            seen = q.LessonSeen(instance_id, seq, sha256, key,
+                                tuple(_scene_of_row(row, instance_id) for row in rows))
+            problem = q.unreadable(seen)
+        except q.LogError as error:
+            problem = str(error)
+        else:
+            if problem is None:
+                return seen
+        unreadable = q.LessonUnreadable(instance_id, seq, sha256, key, problem)
+        if q.unreadable(unreadable) is None:
+            return unreadable
+        return q.LessonUnreadable(instance_id, seq, sha256, key, "a row the log cannot keep")
 
     # -- listing --------------------------------------------------------------
 
@@ -180,8 +296,15 @@ class Flow:
         out: list[dict] = []
         checked = 0
         grants = {grant.source_id: grant for grant in session.grants}
+        # A session that follows a lesson asks only about records a lesson
+        # cited (RFC operator-quiz-follows-lesson §3.5).
+        cited = q.cited(self.log.read()) if session.follows is not None else None
         for read in reversed(self._session_reads(session)):
-            out = material(self._reads.whole(read), grants) + out
+            page = material(self._reads.whole(read), grants)
+            if cited is not None:
+                page = [record for record in page
+                        if q.Cite(record["kind"], record["source_id"], record["pin"]) in cited]
+            out = page + out
             if out and len(out) >= 2 * checked:
                 checked = len(out)
                 if not self.fits(self._author_body(session, sessions, scope=SCOPE_ALL, records=out)):
@@ -261,8 +384,11 @@ class Flow:
             if self.fits(body):
                 key = digest(body)
                 self.requests.write(key, body)
+                kept = (q.LessonScopeApplied(session.session_id, body["request_id"], tuple(
+                    q.Cite(record["kind"], record["source_id"], record["pin"]) for record in records)),) \
+                    if session.follows is not None else ()
                 return (q.ExactRequested(session.session_id, body["request_id"], AUTHOR, key),
-                        q.AuthorContextRecorded(session.session_id, body["request_id"], scope))
+                        q.AuthorContextRecorded(session.session_id, body["request_id"], scope), *kept)
             if len(records) == 1:
                 return (q.SessionFailed(session.session_id, q.AuthorRequestExceedsFrame(body["request_id"])),)
             records = records[len(records) // 2:]

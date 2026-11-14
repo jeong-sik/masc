@@ -133,7 +133,8 @@ def question_rows(session: q.Session) -> list[dict]:
                   "grading": grading_state(session, posed.question_id),
                   "disputes": [{"note": d.note, "action_request_id": d.action_request_id}
                                for d in session.disputes_of(posed.question_id)],
-                  "sources": [source.to_json() for source in posed.sources]}
+                  "sources": [source.to_json() for source in posed.sources],
+                  "taught": posed.question_id in session.taught}
         title = {g.CORRECT: "맞음", g.INCORRECT: "틀림", g.SKIPPED: "건너뜀",
                  g.AWAITING_JUDGMENT: "채점 대기", g.VOID: "무효"}[verdict]
         out.append(row(QUESTIONS, f"{session.session_id}/{posed.question_id}",
@@ -250,15 +251,39 @@ def review_rows(sessions: list[q.Session], items: list[g.Item]) -> list[dict]:
                   "by": "judgment" if judgments else "key",
                   "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale,
                                  "request_id": j.request_id} for j in judgments],
-                  "sources": [source.to_json() for source in item.sources]}
+                  "sources": [source.to_json() for source in item.sources],
+                  "taught": posed.question_id in session.taught}
         out.append(row(REVIEW, item.item_id, f"오답 노트 — {item.topic}",
                        answer.answered_at, fields, kind="event",
                        evidence=retained(item.sources)))
     return out
 
 
+def lesson_measures(sessions: list[q.Session], events: list[q.Event], source: dict | None) -> dict:
+    """What the quiz received of the lesson it follows and what came of it
+    (RFC operator-quiz-follows-lesson §3.7). [source] is what the host said
+    of the source at the latest observation. first_attempt is reported and
+    read by nothing: the two groups are not assigned at random."""
+    seen = [event for event in events if isinstance(event, q.LessonSeen)]
+    cited = q.cited(events)
+    kept = {cite for session in sessions for scope in session.scopes for cite in scope.kept}
+    first: dict[str, tuple[bool, str]] = {}
+    for session in sessions:
+        for posed, state in attempt_states(session):
+            if state in GRADED:
+                first.setdefault(posed.item_id, (posed.question_id in session.taught, state))
+    groups = {taught: [state for group, state in first.values() if group is taught] for taught in (True, False)}
+    scenes = {(scene.session_id, scene.entry_id) for event in seen for scene in event.scenes}
+    return {"scenes_seen": len(scenes), "cites_seen": len(cited),
+            "cites_unmatched": len(cited - kept),
+            "unreadable": sum(isinstance(event, q.LessonUnreadable) for event in events),
+            "source": source,
+            "first_attempt": {name: fraction(groups[taught].count(g.CORRECT), len(groups[taught]))
+                              for name, taught in (("taught", True), ("other", False))}}
+
+
 def measures_row(sessions: list[q.Session], items: list[g.Item], zone: ZoneInfo, observed_at: float,
-                 evidence: list | None) -> dict:
+                 evidence: list | None, lesson: dict | None = None) -> dict:
     recoveries = [r for r in (recovered(item, zone) for item in items) if r is not None]
     states = [state for session in sessions for _, state in attempt_states(session)]
     graded = sum(state in GRADED for state in states)
@@ -281,13 +306,16 @@ def measures_row(sessions: list[q.Session], items: list[g.Item], zone: ZoneInfo,
               + failures.get("author_input_refused", 0),
               "posed_never_answered": sum(len(session.posed) for session in sessions if session.state == "failed"),
               "sessions": len(sessions)}
+    if lesson is not None:
+        fields["lesson"] = lesson
     return row(MEASURES, "measures", "퀴즈 측정값", observed_at, fields, evidence=evidence)
 
 
 def observation(sessions: list[q.Session], scopes: dict[str, str | None], zone: ZoneInfo, now: float,
-                export: dict | None = None) -> dict:
+                export: dict | None = None, lesson: dict | None = None) -> dict:
     """The output for one observation. [export] is the log artifact of an
-    export action, referenced from the measures row.
+    export action, referenced from the measures row. [lesson] is
+    lesson_measures of an installation bound to a lesson, and None otherwise.
 
     Items and topics come from answered sessions only: a question still open
     must not show its sources, because a citation can give the answer away
@@ -308,7 +336,7 @@ def observation(sessions: list[q.Session], scopes: dict[str, str | None], zone: 
     # with nothing new gives the same rows.
     observed_at = now if export else max((r["observed_at"] for r in rows), default=now)
     rows.append(measures_row(sessions, items, zone, observed_at,
-                             [{"artifact_id": export["id"]}] if export else None))
+                             [{"artifact_id": export["id"]}] if export else None, lesson))
     output: dict = {"rows": rows, "coverage": []}
     if export:
         output["artifacts"] = [export]

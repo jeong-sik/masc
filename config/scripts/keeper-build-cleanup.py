@@ -71,7 +71,7 @@ def process_paths(proc: Path) -> list[Path]:
                 for descriptor in (process / "fd").iterdir():
                     try:
                         target = os.readlink(descriptor)
-                    except FileNotFoundError:
+                    except (FileNotFoundError, ProcessLookupError):
                         # This descriptor closed; later ones may still own a checkout.
                         continue
                     if target.startswith("/"):
@@ -80,8 +80,9 @@ def process_paths(proc: Path) -> list[Path]:
                 if int(fields[SESSION]) == INIT_PID:
                     continue
                 raise Unreadable(f"process {process.name}: {error}") from error
-        except FileNotFoundError:
-            # The process exited while its ownership was being inspected.
+        except (FileNotFoundError, ProcessLookupError):
+            # The process exited while its ownership was being inspected. A
+            # read of its stat that began before it was reaped ends in ESRCH.
             continue
     return paths
 

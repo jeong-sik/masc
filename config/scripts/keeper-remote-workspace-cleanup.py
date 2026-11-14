@@ -108,6 +108,31 @@ def tree_facts(entry: Path) -> tuple[int, float, list[Path]]:
     return size, newest, repos
 
 
+# /proc/<pid>/stat after the command name: state, parent, process group, session.
+SESSION = 3
+ROOT_UID = 0
+
+
+def led_by_root(proc: Path, process: Path) -> bool:
+    """Whether a root process leads the session [process] is in.
+
+    A session's id is the PID of its leader, and the kernel does not hand
+    that PID to another process while the session has a member. So
+    /proc/<session id> is the leader or nothing. Without a leader (it
+    exited, or the id is 0 because it lives in another PID namespace) the
+    answer is no.
+    """
+    # A process chooses its command name, parentheses included. The kernel's
+    # own fields start after the last ")".
+    fields = (process / "stat").read_text().rsplit(")", 1)[1].split()
+    try:
+        return (proc / fields[SESSION]).stat().st_uid == ROOT_UID
+    except FileNotFoundError:
+        # Raises instead when [process] is the one that is gone.
+        process.stat()
+        return False
+
+
 def live_paths(proc: Path, root: Path) -> list[Path]:
     """cwd, exe and open files of the processes that can be inside [root].
 
@@ -115,13 +140,21 @@ def live_paths(proc: Path, root: Path) -> list[Path]:
     to group or others, only our own user's processes can be inside it, so
     other users' processes are passed over. That includes root: the Keeper
     user cannot read root's processes, and a root shell in a Keeper's
-    directory is the operator's own act. A process of our own user whose
-    /proc links belong to root has given up being inspectable: the kernel
-    does that for privilege-dropping or setuid programs, such as the sshd
-    session this payload itself runs under. Keeper work runs inspectable,
-    so such a process is passed over too. Any other unreadable process
-    keeps every entry. When that process belongs to another user, the root
-    let it in, so the reason names the root's mode and how to close it.
+    directory is the operator's own act.
+
+    A process of our own user that cannot be read is passed over only in a
+    session a root process leads. That is the sshd pair of a connection, the
+    one this payload runs under included: the root side opens the session,
+    and the side that dropped to the Keeper user stays in it, closed to
+    inspection by the kernel. sshd starts every command in a session of its
+    own, and a process can leave its session but never enter another, so
+    nothing a Keeper runs is in a session root leads. A Keeper command that
+    turned inspection off itself (prctl PR_SET_DUMPABLE, as ssh-agent does)
+    is in a session the Keeper user leads.
+
+    Any other unreadable process keeps every entry. When that process
+    belongs to another user, the root let it in, so the reason names the
+    root's mode and how to close it.
     """
     if not proc.is_dir():
         raise Unreadable("/proc unavailable")
@@ -141,24 +174,25 @@ def live_paths(proc: Path, root: Path) -> list[Path]:
                 for descriptor in (process / "fd").iterdir():
                     try:
                         targets.append(os.readlink(descriptor))
-                    except FileNotFoundError:
+                    except (FileNotFoundError, ProcessLookupError):
                         continue
                 # Compare real paths: the root was resolved the same way.
                 paths.extend(
                     Path(os.path.realpath(target)) for target in targets if target.startswith("/")
                 )
             except PermissionError as error:
-                if owner == me and (process / "cwd").lstat().st_uid != me:
+                if owner != me:
+                    raise Unreadable(
+                        f"process {process.name}: {error}; {root} has mode {mode:04o},"
+                        " so another user's process can be inside it; rerun"
+                        " masc-exec-ssh-bootstrap for this Keeper or chmod go-rwx it"
+                    ) from error
+                if led_by_root(proc, process):
                     continue
-                if owner == me:
-                    raise Unreadable(f"process {process.name}: {error}") from error
-                raise Unreadable(
-                    f"process {process.name}: {error}; {root} has mode {mode:04o},"
-                    " so another user's process can be inside it; rerun"
-                    " masc-exec-ssh-bootstrap for this Keeper or chmod go-rwx it"
-                ) from error
-        except FileNotFoundError:
-            # The process exited while it was being read.
+                raise Unreadable(f"process {process.name}: {error}") from error
+        except (FileNotFoundError, ProcessLookupError):
+            # The process exited while it was being read. A read of
+            # /proc/<pid>/stat that began before it was reaped ends in ESRCH.
             continue
     return paths
 

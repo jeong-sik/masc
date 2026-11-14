@@ -1,13 +1,33 @@
-// What the console reads of the conversations of a person's Keeper and how
-// it reads the refusals of those routes
-// (lib/server/server_preview_keeper_conversation.ml, `read`). An answer that
-// is not what the route promises is not read.
+// What the console sends to a person's Keeper and reads of its
+// conversations, and how it reads the refusals of those routes
+// (lib/server/server_preview_keeper_conversation.ml, `read` and `start`;
+// lib/server/server_preview_keeper_turn.ml, `run`). An answer that is not
+// what the route promises is not read.
 
 import { isRecord } from '../lib/type-guards'
-import { bodyOf, deliver } from './wire'
+import { bodyOf, csrfHeader, deliver } from './wire'
 import type { Send } from './wire'
 
 export const conversationPath = '/api/v1/auth/keepers/conversation'
+export const turnPath = '/api/v1/auth/keepers/turn'
+
+/** The most bytes of UTF-8 a message may have (`max_message_bytes`). */
+export const messageLimitBytes = 4096
+
+/** A message of nothing but the characters `String.trim` of OCaml takes
+    away, which the server refuses as blank. */
+const blankMessage = /^[ \t\n\f\r]*$/
+
+/** Why the page sends no message: the server would refuse it. */
+export type Unsendable = 'blank' | 'too_long'
+
+/** What the server would refuse in `message` before it reads anything else, or null. */
+export function unsendable(message: string): Unsendable | null {
+  if (blankMessage.test(message)) return 'blank'
+  return bytesOf(message) > messageLimitBytes ? 'too_long' : null
+}
+
+export const bytesOf = (message: string): number => new TextEncoder().encode(message).length
 
 /** The codes of a refusal of the routes of a Keeper's turn and conversation
     (lib/server/server_preview_keeper_error.ml, `code`). A screen tells the
@@ -148,6 +168,54 @@ export async function talkProblemOf(response: Response): Promise<TalkProblem> {
     reason: isRecord(json) ? text(json.error) : null,
   }
 }
+
+/** What a turn the Keeper answered came to. `recorded` is whether the
+    server wrote it in the conversation of the Keeper: a turn on a Codex
+    Runtime is written nowhere, so its answer is only in this answer. */
+export interface Answered {
+  readonly text: string
+  readonly model: string
+  readonly recorded: boolean
+}
+
+/** The answer of a turn of the Keeper `keeperId`. A turn written in a
+    conversation names it and says whether it continued it; one written
+    nowhere names neither. */
+export function readAnswered(json: unknown, keeperId: string): Answered | null {
+  if (!isRecord(json) || json.keeper_id !== keeperId || text(json.runtime_id) === null || typeof json.text !== 'string') return null
+  const model = text(json.model)
+  const named = json.conversation_id !== undefined || json.continued !== undefined
+  if (model === null || (named && (text(json.conversation_id) === null || typeof json.continued !== 'boolean'))) return null
+  return { text: json.text, model, recorded: named }
+}
+
+/** The id of the conversation a start of the Keeper `keeperId` made. */
+export function readStarted(json: unknown, keeperId: string): string | null {
+  return isRecord(json) && json.keeper_id === keeperId ? text(json.conversation_id) : null
+}
+
+async function post<T>(to: Send, path: string, csrfToken: string, body: unknown, read: (json: unknown) => T | null): Promise<TalkAnswer<T>> {
+  const response = await deliver(to, path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json', [csrfHeader]: csrfToken },
+    body: JSON.stringify(body),
+  })
+  if (response === null) return { ok: false, problem: { kind: 'unreachable' } }
+  if (!response.ok) return { ok: false, problem: await talkProblemOf(response) }
+  const value = read(await bodyOf(response))
+  return value === null ? { ok: false, problem: { kind: 'unreadable' } } : { ok: true, value }
+}
+
+/** Sends `message` to the Keeper `keeperId` and waits for its answer. The
+    page sets no deadline: the server stops a turn only once its client has
+    said nothing for a while, so a turn that goes on has no end the page
+    could know of (lib/runtime/runtime_claude_code.mli, `timeout_s`). */
+export const say = (to: Send, csrfToken: string, keeperId: string, message: string): Promise<TalkAnswer<Answered>> =>
+  post(to, turnPath, csrfToken, { keeper_id: keeperId, message }, (json) => readAnswered(json, keeperId))
+
+/** Starts a new conversation of the Keeper `keeperId`; its next turn goes on in it. */
+export const start = (to: Send, csrfToken: string, keeperId: string): Promise<TalkAnswer<string>> =>
+  post(to, conversationPath, csrfToken, { keeper_id: keeperId }, (json) => readStarted(json, keeperId))
 
 /** Reads the current conversation of the Keeper `keeperId`. */
 export async function conversationOf(to: Send, keeperId: string): Promise<TalkAnswer<Conversation>> {

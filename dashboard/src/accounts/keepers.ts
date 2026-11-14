@@ -133,7 +133,7 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     assigning.value = next
     leave()
   }
-  const talking = createTalk({ send, leave: leaveAll, left: () => left })
+  const talking = createTalk({ send, leave: leaveAll, left: () => left, token: () => session?.csrfToken ?? null })
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
     latest += 1

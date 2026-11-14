@@ -6985,6 +6985,39 @@ let install_suite_watchdog () =
   end
 ;;
 
+(* #45358: nothing in the server retired an expired bearer credential, so each
+   one stayed in the store until an operator ran `masc token prune`. The 24h
+   maintenance block now retires them. The live credential beside it must
+   keep authenticating. *)
+let test_daily_retention_retires_only_expired_credentials () =
+  with_temp_dir "daily-credential-prune" (fun dir ->
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:None);
+    let mint name =
+      match Auth.create_token dir ~agent_name:name ~role:Masc_domain.Worker with
+      | Ok minted -> minted
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+    in
+    let _, expired_credential = mint "claude-expired" in
+    Auth.save_credential dir
+      { expired_credential with expires_at = Some "2000-01-01T00:00:00Z" };
+    let live_token, _ = mint "claude-live" in
+    let stored name = Option.is_some (Auth.load_credential dir name) in
+    Alcotest.(check bool) "expired credential is stored before the pass"
+      true (stored "claude-expired");
+    Server_bootstrap_maintenance.run_daily_retention config
+      ~task_archive_retention_days:30 ~now:(Time_compat.now ());
+    Alcotest.(check bool) "expired credential left the store"
+      false (stored "claude-expired");
+    match Auth.find_static_credential_by_token dir ~token:live_token with
+    | Ok (credential : Masc_domain.agent_credential) ->
+      Alcotest.(check string) "live bearer still authenticates its agent"
+        "claude-live" credential.agent_name
+    | Error error ->
+      Alcotest.failf "live bearer was refused after the pass: %s"
+        (Masc_domain.masc_error_to_string error))
+;;
+
 (* F-06 / D6-11: the 24h maintenance block runs one archive-first task-only
    GC pass, so the backlog shrinks without an operator running the manual
    masc_gc tool. The pass archives terminal tasks past the retention window
@@ -7100,6 +7133,10 @@ let () =
       ( "periodic task gc",
         [ Alcotest.test_case "archives only stale terminal tasks" `Quick
             test_periodic_task_gc_archives_only_stale_terminal_tasks
+        ] );
+      ( "daily credential prune",
+        [ Alcotest.test_case "retires only expired credentials" `Quick
+            test_daily_retention_retires_only_expired_credentials
         ] );
       ( "manual configuration health",
         let configuration = Keeper_registry.Turn_configuration_error

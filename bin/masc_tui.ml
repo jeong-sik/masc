@@ -110,6 +110,18 @@ let report_editor_unset state ~form =
   report_editor_abort state ~form
     (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset)
 
+(* An operator request the TUI kept back, said on the action line: why, that
+   nothing was sent, and what stayed. *)
+let report_kept_back state reason kept =
+  let ko = state.ui_language = Lang_ko in
+  report_action state "error" (kept_back ~ko (reason ~ko) kept)
+
+(* Kept back until the server says again which workspace it serves, which a
+   reconnect brings. *)
+let kept_back_until_reconnect ~ko =
+  kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept
+  ^ " · " ^ (if ko then "다시 연결한 뒤 다시 시도하세요" else "retry after reconnecting")
+
 (* Opening a file needs a Neovim to talk to or an editor to hand the terminal
    to. *)
 let editor_jump_unset state =
@@ -2305,7 +2317,7 @@ let launch_artifact_check_change state ~mailbox =
   | (None | Some (Masc_tui_resource_catalog.Mcp _)), _ ->
     report_action state "error" "Select a published report revision to check or uncheck"
   | Some (Report _), None ->
-    report_action state "error" "Workspace identity is unavailable"
+    report_kept_back state workspace_identity_unread Nothing_kept
   | Some (Report report), Some expected_workspace ->
     match Masc_tui_resources_updates.begin_check state ~report with
     | Error detail -> report_action state "error" detail
@@ -2996,9 +3008,9 @@ let launch_surface_tool_approval state ~mailbox ~keeper_name ~tool_call_id
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   (* Answering a held tool call mutates server state over one round trip, like
      the Gate and operator-confirm decisions beside it. Take the same
@@ -3699,9 +3711,9 @@ let launch_gate_resolve state ~mailbox ~approval_id ~approve ~reason =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   (* A Gate decision mutates durable server state over one round trip. Take the
      same single-action slot the operator-confirm path takes, so the header
@@ -3747,9 +3759,9 @@ let launch_gate_auto_judge_retry state ~mailbox (pending : Tui_decode.gate_pendi
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   match pending.gp_retry_request with
   | None ->
@@ -3919,9 +3931,9 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match state.server_identity with
-  | None -> report_action state "error" "Cannot decide: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
@@ -4642,9 +4654,9 @@ let launch_task_history_load ?(older=false) ?limit state ~mailbox task_id =
 let launch_task_cancel state ~mailbox ~authority ~identity ~task_id ~reason =
   if state.workspace_identity <> Workspace_identity_match
      || authority <> state.workspace_authority then
-    report_action state "error" "Cannot cancel task: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else match identity with
-  | None -> report_action state "error" "Cannot cancel task: workspace identity is unverified"
+  | None -> report_kept_back state workspace_identity_unread Nothing_kept
   | Some expected_workspace ->
   supersede_home_decision_receipt state;
   let host = server_peer_host in
@@ -4804,9 +4816,7 @@ let launch_keeper_deletions state ~mailbox ?retry () =
                 try
                   match identity with
                   | None ->
-                    Error
-                      (if ko then "공간 정보 없음 · 삭제 재시도를 보내지 않음"
-                       else "Workspace identity is unavailable; Keeper deletion retry was not sent")
+                    Error (kept_back ~ko (workspace_identity_unread ~ko) Nothing_kept)
                   | Some expected_workspace ->
                     let* status, body =
                       Masc_tui_http.post_keeper_deletion_retry ~host ~port ~path
@@ -4933,7 +4943,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
        | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
        | Login.Close | Login.Nothing | Login.Refresh_saved _ | Login.Select_existing _
        | Login.Start _ | Login.Input (_, _) | Login.Prepare _ | Login.Save _
-       | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.notice <- "Workspace identity is unconfirmed; account action was not sent.")
+       | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
+         view.notice <-
+           (let ko = state.ui_language = Lang_ko in
+            kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept))
     end
   end
   else begin
@@ -5374,7 +5387,7 @@ let launch_preset_save state ~mailbox ~sink ~name ~description ~chat_input ~also
 
 let launch_chat_command_read state ~mailbox ~label ~call ~wrap =
   if not (server_authority_ready state) then
-    report_action state "error" (label ^ " waits for confirmed workspace identity; retry after reconnecting")
+    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
     let ticket = ref () in
     state.chat_command_reads <- (ticket, state.workspace_read_authority, label) :: state.chat_command_reads;
@@ -6255,7 +6268,7 @@ let launch_lane_subscriptions state ~mailbox request =
 
 let launch_lane_addons ?target state ~mailbox request =
   if not (server_authority_ready state) then
-    report_action state "error" "Lane request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
   let module Addons = Masc_tui_lane_addons in
   let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
@@ -10578,8 +10591,7 @@ let settle_retired_chat_copy state =
 
 let launch_keeper_chat_copy state ~mailbox ~keeper_name =
   if not (server_authority_ready state) then
-    report_action state "error"
-      "/copy cannot read chat history while workspace identity is unconfirmed; retry after reconnecting"
+    report_action state "error" (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
   let enqueue_async = workspace_enqueue state in
   state.msg_copy_generation <- state.msg_copy_generation + 1;
@@ -12043,8 +12055,7 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
   match target with
   | None -> report_action state "error" "/steer needs a Keeper selected"
   | Some _ when state.workspace_identity <> Workspace_identity_match ->
-      report_action state "error"
-        "Cannot steer: workspace identity is unverified · draft retained"
+      report_kept_back state workspace_identity_unconfirmed Draft_kept
   | Some keeper_name when not (keeper_available_for_new_message state keeper_name) ->
       report_action state "error"
         (Printf.sprintf "Cannot steer: Keeper %s is unavailable"
@@ -12135,8 +12146,7 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
       (* Unread and mismatched workspaces refuse. An unconfirmed match keeps
          the last confirmed match, so the line queues and waits for the
          resume that a confirming read runs. *)
-      report_action state "error"
-        "Cannot send: workspace identity is unverified · draft retained"
+      report_kept_back state workspace_identity_unconfirmed Draft_kept
   | Some target when Option.is_some state.keepers_error
                      && not (keeper_available_for_new_message state target) ->
       report_action state "error"
@@ -12703,8 +12713,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
          chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:(if failure then Notice_failure else Notice_reply) text) in
   if not (server_authority_ready state) then
-    panel_notice ~failure:true
-      "/queue request was not sent while workspace identity is unconfirmed; retry after reconnecting"
+    panel_notice ~failure:true (kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko))
   else begin
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
@@ -15107,7 +15116,9 @@ let listen_newest_media ?(destination=Listen_player) state ~mailbox =
         ^ " attachment in this conversation")
   | Some keeper, Some media ->
       if not (server_authority_ready state) then
-        notice ~kind:Notice_failure (command ^ ": waiting for confirmed workspace identity")
+        notice ~kind:Notice_failure
+          (let ko = state.ui_language = Lang_ko in
+           kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept)
       else begin
         let request = begin_chat_listen ~destination state ~keeper media in
         let host = server_peer_host and port = state.port in
@@ -16027,7 +16038,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Run_next
     when state.workspace_identity <> Workspace_identity_match ->
       notice ~kind:Notice_failure
-        "Cannot run next: workspace identity is unverified · queued input retained"
+        (let ko = state.ui_language = Lang_ko in
+         kept_back ~ko (workspace_identity_unconfirmed ~ko) Queued_input_kept)
   | Masc_tui_command.Run_next ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
@@ -16186,7 +16198,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            Masc_tui_message_input.clear state.msg_input;
            open_chat_call_reader state ~mailbox keeper_name
        | Some _ | None ->
-           notice ~kind:Notice_failure "Workspace identity must be confirmed before reading original calls")
+           notice ~kind:Notice_failure
+             (let ko = state.ui_language = Lang_ko in
+              kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept))
   | Masc_tui_command.Set_tools mode ->
       Masc_tui_message_input.clear state.msg_input;
       state.msg_tool_visibility <-
@@ -21375,7 +21389,7 @@ let start_approval_decision state approval decision ~mailbox =
   let identity = state.server_identity in
   let reading = Some state.workspace_read_authority in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot decide: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else
   match Approval.Flow.begin_action state.approval_flow with
   | Error `Already_inflight ->
@@ -21470,7 +21484,9 @@ let toggle_selected_ask_origin state =
 
 let inspect_selected_ask_origin state ~mailbox =
   if not (server_authority_ready state) then
-    report_action state "system" "Confirm the workspace identity before reading the question source"
+    report_action state "system"
+      (let ko = state.ui_language = Lang_ko in
+       kept_back ~ko (workspace_identity_unconfirmed ~ko) Nothing_kept)
   else match selected_ask_origin state with
   | None -> report_action state "system" "No question source is available"
   | Some origin ->
@@ -21743,7 +21759,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
     as_authority = authority; as_reading = reading; as_asker = asker;
     as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
+    report_kept_back state workspace_identity_unconfirmed Draft_kept
   else begin
   supersede_home_decision_receipt state;
 
@@ -21811,7 +21827,7 @@ let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answ
 
 let handle_ask_submit state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot answer: workspace identity is unverified; draft retained"
+    report_kept_back state workspace_identity_unconfirmed Draft_kept
   else
   match state.asks_error with
   | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
@@ -21859,16 +21875,6 @@ let handle_ask_submit state ~mailbox =
                 ~ask_id:row.Masc.Tui_decode_asks.ar_id
                 ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
                 ~answered_label ~answers ~mailbox))
-
-(* Said by the action gates (the keeper actions and the schedule cancel)
-   while the workspace identity is not confirmed. *)
-let workspace_unread_refusal ~ko =
-  if ko then "공간 미조회 · 동작 불가"
-  else "Workspace identity has not been read; action unavailable"
-
-let workspace_unconfirmed_refusal ~ko =
-  if ko then "공간 확인 대기 · 동작 불가"
-  else "Workspace identity is unconfirmed; action unavailable"
 
 (* Run one lifecycle action's steps against the server.
 
@@ -21991,8 +21997,7 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   if not (server_authority_ready state) then begin
     state.keeper_action_pending <- None;
-    report_action state "error"
-      (workspace_unconfirmed_refusal ~ko:(state.ui_language = Lang_ko))
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   end else
   let origin = state.server_identity in
   let enqueue_async = workspace_enqueue state in
@@ -22087,13 +22092,13 @@ let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string
       end
   | ( Workspace_identity_match | Workspace_identity_mismatch _
     | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
-      report_action state "error" "Cannot change goal: workspace identity is unverified"
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
 
 (* Confirmation uses the operator route and the exact proof read here, never
    the public MCP action set or a proof obtained at the second keypress. *)
 let handle_goal_confirmation_key state ~mailbox =
   if state.workspace_identity <> Workspace_identity_match then
-    report_action state "error" "Cannot confirm goal: workspace identity is unverified"
+    report_kept_back state workspace_identity_unconfirmed Nothing_kept
   else
   match state.planning_mode with
   | Planning_list -> ()
@@ -22304,11 +22309,9 @@ let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
 let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_action state "error"
-        (workspace_unread_refusal ~ko:(state.ui_language = Lang_ko))
+      report_kept_back state workspace_identity_unread Nothing_kept
   | Workspace_identity_match_unconfirmed _ ->
-      report_action state "error"
-        (workspace_unconfirmed_refusal ~ko:(state.ui_language = Lang_ko))
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   let enqueue_async = workspace_enqueue state in
   let check = capture_workspace_check state ~mailbox in
@@ -22920,11 +22923,9 @@ let no_keeper_under_cursor ~ko =
 let handle_keeper_action state ~base_path ~mailbox action =
   match state.workspace_identity with
   | Workspace_identity_unread ->
-      report_action state "error"
-        (workspace_unread_refusal ~ko:(state.ui_language = Lang_ko))
+      report_kept_back state workspace_identity_unread Nothing_kept
   | Workspace_identity_match_unconfirmed _ ->
-      report_action state "error"
-        (workspace_unconfirmed_refusal ~ko:(state.ui_language = Lang_ko))
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
   | Workspace_identity_match | Workspace_identity_mismatch _ ->
   match selected_keeper state with
   | None ->
@@ -32158,7 +32159,7 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_skill_evidence () =
     if not (server_authority_ready state) then
-      report_action state "error" "Workspace identity is unconfirmed; Skill evidence unavailable"
+      report_kept_back state workspace_identity_unconfirmed Nothing_kept
     else match selected_tools_skill_profile state with
     | None -> report_action state "error" "no published Skill selected"
     | Some profile ->
@@ -32467,7 +32468,7 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
     if state.workspace_identity <> Workspace_identity_match then
-      report_action state "error" "Cannot create: workspace identity is unverified; declaration retained"
+      report_kept_back state workspace_identity_unconfirmed Draft_kept
     else
     let return_to = Option.value state.keeper_creation_return ~default:return_to in
     match Masc_tui_editor.editor_command () with

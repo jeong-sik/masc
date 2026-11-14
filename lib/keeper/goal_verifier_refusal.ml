@@ -77,12 +77,12 @@ let run_of_json json =
   if Float.is_finite started_at then Ok {run_id; started_at}
   else Error "Goal verifier run time must be finite"
 
-let observation = function
+let observation_of = function
   | Progress.Waiting json -> Waiting json
   | Progress.Outcome_unknown json -> Outcome_unknown json
   | Progress.Absent json -> Absent json
 
-let stage = function
+let stage_of = function
   | Progress.Before_dispatch -> Before_dispatch
   | Progress.Execution -> Execution
 
@@ -98,15 +98,15 @@ let view (phase : Progress.phase) =
   match phase with
   | Progress.Captured -> Captured
   | Progress.Admission_wait json -> Admission_wait json
-  | Progress.Dispatch_pending observation ->
-    Dispatch_pending (Option.map observation observation)
+  | Progress.Dispatch_pending pending ->
+    Dispatch_pending (Option.map observation_of pending)
   | Progress.Judged json -> Judged json
   | Progress.Committing commit -> Committing commit
   | Progress.Commit_unknown (commit, json) -> Commit_unknown (commit, json)
   | Progress.Finished commit -> Finished commit
   | Progress.Conflicted (commit, json) -> Conflicted (commit, json)
   | Progress.Rejected {stage; evidence} ->
-    Rejected {stage = stage stage; refusal = refusal_of stage evidence}
+    Rejected {stage = stage_of stage; refusal = refusal_of stage evidence}
   | Progress.Subdividing ({stage; evidence}, successor) ->
     Subdividing (refusal_of stage evidence, successor)
   | Progress.Subdivided ({stage; evidence}, successor) ->

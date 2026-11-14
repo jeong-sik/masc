@@ -263,7 +263,7 @@ let gate_request ~request_authority (request : Httpun.Request.t) =
 ;;
 
 let page answer_of (t : R.t) (_ : Httpun.Request.t) reqd =
-  respond reqd (answer_of ~nonce:(t.draw ()) ~github:(Option.is_some t.github))
+  respond reqd (answer_of ~nonce:(Account_page.Nonce.draw ()) ~github:(Option.is_some t.github))
 ;;
 
 (* A request is judged on one snapshot of the zone, and only on one the zone

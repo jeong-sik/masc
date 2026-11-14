@@ -9,9 +9,9 @@ let github_authorize_origin = "https://github.com"
    [form-action] on that redirect too. *)
 let policy ~nonce =
   Printf.sprintf
-    "default-src 'none'; script-src 'nonce-%s'; %s; connect-src 'self'; form-action 'self' %s; \
+    "default-src 'none'; script-src %s; %s; connect-src 'self'; form-action 'self' %s; \
      base-uri 'none'; frame-ancestors 'none'"
-    nonce
+    (Account_page.Nonce.source nonce)
     (Account_page.style_source ~nonce)
     github_authorize_origin
 ;;
@@ -36,7 +36,11 @@ let page ~nonce ~title ~body ~script =
         ~title
         (String.concat
            "\n"
-           [ "<main>"; body; "</main>"; Printf.sprintf "<script nonce=\"%s\">%s</script>" nonce script ])
+           [ "<main>"
+           ; body
+           ; "</main>"
+           ; Printf.sprintf "<script %s>%s</script>" (Account_page.Nonce.attribute nonce) script
+           ])
   }
 ;;
 

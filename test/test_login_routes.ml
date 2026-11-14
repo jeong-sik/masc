@@ -420,8 +420,8 @@ let clears_the_transaction answer =
   Alcotest.(check (option string)) "the transaction cookie is cleared" (Some "") (cookie_set ~name:Q.transaction_cookie answer)
 ;;
 
-(* The value of a source ['nonce-<value>'] when the value is one the draw of
-   the installation gives: hex digits, never empty. *)
+(* The value of a source ['nonce-<value>'] when the value is one
+   [Account_page.Nonce.draw] gives: hex digits, never empty. *)
 let drawn_nonce source =
   let prefix = "nonce-" in
   if String.starts_with ~prefix source
@@ -499,6 +499,11 @@ let page_nonce label page (answer : R.answer) =
 ;;
 
 let applies_only_its_sheet label answer = page_nonce label Refused answer
+
+(* The draw of the routes gives ids, and a page draws its own nonce, so a
+   draw whose value would end the source and add a directive leaves the
+   policy of a page as it is. *)
+let not_a_nonce () = "0'; script-src 'unsafe-inline"
 
 (* No two answers share a nonce: each is drawn for its answer. *)
 let each_drawn_once label nonces =
@@ -609,6 +614,7 @@ let a_start_that_is_refused () =
     refused "a URL" ~fields:[ "return_to", "https://evil.example/" ] R.Google 400;
     refused "Google not set up" ~routes:{ t.routes with R.google = None } R.Google 404;
     refused "GitHub not set up" ~routes:{ t.routes with R.github = None } R.Github 404;
+    refused "a draw that is no nonce" ~origin:Q.Other_origin ~routes:{ t.routes with R.draw = not_a_nonce } R.Google 403;
     List.iter
       (fun provider ->
         let answer =
@@ -653,6 +659,14 @@ let a_callback_that_is_refused () =
     check
       "a transaction cookie that is not one"
       (R.callback t.routes R.Github ~transaction_cookie:(Some "abc") ~query:[ "state", "s"; "code", "c" ])
+      401;
+    check
+      "a draw that is no nonce"
+      (R.callback
+         { t.routes with R.draw = not_a_nonce }
+         R.Google
+         ~transaction_cookie:None
+         ~query:[ "state", "s"; "code", "c" ])
       401;
     let b, (_ : string) = fresh_start R.Google in
     check "no state" (callback t b R.Google [ "code", "c" ]) 400;

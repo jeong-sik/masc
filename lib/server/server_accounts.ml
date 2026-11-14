@@ -112,7 +112,7 @@ let register ~login ~env ~base_path zone router =
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness (readiness zone)
   |> Server_login_http.add_routes login
   |> Server_login_http.add_person_routes login ~env ~base_path
-  |> Server_account_console.add_routes ~draw:login.Login_routes.draw
+  |> Server_account_console.add_routes
 ;;
 
 (* A value of the HTTP mode that is not in its vocabulary stops the boot here,

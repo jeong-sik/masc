@@ -360,8 +360,9 @@ let test_disabled_cleanup_withdraws_skill_until_replacement () =
     ignore (reconcile fixture);
     check int "one replacement after confirmed cleanup" 2 !(fixture.starts);
     check bool "replacement restores discovery" true (has_source fixture owner);
-    check bool "retired incarnation remains inspectable" true
-      (instance fixture id |> member "phase" |> json_string "kind" = "detached");
+    check bool "the replacement supersedes the retired incarnation's record" false
+      (inspect fixture |> values "instances"
+       |> List.exists (fun row -> json_string "instance_id" row = id));
     ignore (dispatch fixture Lane.Detach ["instance_id", `String replacement_id]);
     await clock (fun () -> instance fixture replacement_id |> member "phase" |> json_string "kind" = "detached"))
 

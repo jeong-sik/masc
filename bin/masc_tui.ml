@@ -22564,6 +22564,10 @@ let open_board_composer_editor state ~restore ~reenter =
           end )
 ;;
 
+(* The attach path input closed with nothing staged: Esc, or Enter on an
+   empty path. *)
+let attach_cancelled state = ui_text state ~ko:"첨부 취소" ~en:"attach cancelled"
+
 (* Stage one local file for the post. Its kind comes from the file's name:
    the store keeps nothing that says what a file is, so the extension is the
    only signal. A path that does not name a plain file keeps the input open
@@ -22580,22 +22584,26 @@ let stage_board_compose_path state raw =
         Filename.concat home (String.sub typed 2 (String.length typed - 2))
     | Some _ | None -> typed
   in
+  let ko = state.ui_language = Lang_ko in
   if String.equal path "" then begin
     state.board_compose_attach_input <- None;
     state.board_post_error <- None;
-    report_action state "system" "attach cancelled"
+    report_action state "system" (attach_cancelled state)
   end
   else if
     List.exists
       (fun (staged : board_staged_attachment) -> String.equal staged.sa_path path)
       state.board_compose_attachments
-  then state.board_post_error <- Some "that file is already attached"
+  then
+    state.board_post_error <-
+      Some (if ko then "이미 첨부한 파일" else "that file is already attached")
   else
     match
       Masc_tui_board_upload.attachable
         ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path
     with
-    | Error reason -> state.board_post_error <- Some reason
+    | Error refusal ->
+        state.board_post_error <- Some (Masc_tui_board_upload.refusal_text ~ko refusal)
     | Ok () ->
         let sa_kind = upload_kind_of_path path in
         state.board_compose_attachments <-
@@ -22604,10 +22612,12 @@ let stage_board_compose_path state raw =
         state.board_compose_attach_input <- None;
         state.board_post_error <- None;
         report_action state "system"
-          (Printf.sprintf "attached %s (%s) — %d staged for the post"
+          (Printf.sprintf
+             (if ko then "%s (%s) 첨부 준비 · 글에 붙일 파일 %s개"
+              else "attached %s (%s) · %s staged for the post")
              (Filename.basename path)
              (board_upload_kind_to_wire sa_kind)
-             (List.length state.board_compose_attachments))
+             (Masc_tui_value.Count.grouped (List.length state.board_compose_attachments)))
 ;;
 
 (* While the attach path is being typed it owns the compose keys: Enter
@@ -22621,7 +22631,7 @@ let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool
   | "esc" ->
       state.board_compose_attach_input <- None;
       state.board_post_error <- None;
-      report_action state "system" "attach cancelled";
+      report_action state "system" (attach_cancelled state);
       true
   | "\127" | "\b" ->
       let next =
@@ -22637,6 +22647,10 @@ let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool
       true
   | _ -> true
 ;;
+
+(* A second send while one is out is refused; the draft stays. *)
+let send_in_flight state =
+  ui_text state ~ko:"이미 보내는 중" ~en:"a send is already in flight"
 
 (* Compose-mode keys. Sending is armed rather than pressed: esc offers
    send-or-discard, so a stray key during writing cannot publish. Returns
@@ -22662,7 +22676,8 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
       match state.board_compose_reply_to with
       | Some _ ->
           report_action state "system"
-            "attachments are sent with new posts; a comment carries text only";
+            (ui_text state ~ko:"첨부는 새 글에만 · 댓글은 글자만"
+               ~en:"attachments go with new posts · a comment carries text only");
           true
       | None ->
           state.board_compose_attach_input <- Some (Buffer.create 128);
@@ -22689,10 +22704,12 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
         Board_hearth.next ~current:state.board_compose_hearth
           ~census:(board_census_values state);
       (* Keep armed so the operator can continue cycling hearths or press 's' to send *)
+      (* The pane's own label for the hearth, with the value it now holds. *)
       report_action state "system"
-        (match state.board_compose_hearth with
-         | Some h -> "Board target hearth set to #" ^ h
-         | None -> "Board target hearth set to default");
+        (ui_text state ~ko:"게시판: " ~en:"hearth: "
+         ^ (match state.board_compose_hearth with
+            | Some h -> "#" ^ h
+            | None -> ui_text state ~ko:"기본" ~en:"default"));
       true
   | "esc" ->
       state.board_compose_armed <- not state.board_compose_armed;
@@ -22705,11 +22722,12 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           let content = Buffer.contents state.board_draft in
           if String.equal (String.trim content) "" then begin
             state.board_compose_armed <- false;
-            state.board_post_error <- Some "the comment is empty";
+            state.board_post_error <-
+              Some (ui_text state ~ko:"댓글이 비어 있음" ~en:"the comment is empty");
             true
           end else if board_write_inflight state.board_write then begin
             state.board_compose_armed <- false;
-            state.board_post_error <- Some "a send is already in flight";
+            state.board_post_error <- Some (send_in_flight state);
             true
           end else begin
             state.board_compose_armed <- false;
@@ -22751,11 +22769,14 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
           match String.split_on_char '\n' (String.trim title) with
           | [] | [ "" ] ->
               state.board_compose_armed <- false;
-              state.board_post_error <- Some "the first line (title) is empty";
+              state.board_post_error <-
+                Some
+                  (ui_text state ~ko:"첫 줄(제목)이 비어 있음"
+                     ~en:"the first line (title) is empty");
               true
           | _ when board_write_inflight state.board_write ->
               state.board_compose_armed <- false;
-              state.board_post_error <- Some "a send is already in flight";
+              state.board_post_error <- Some (send_in_flight state);
               true
           | _ ->
               state.board_compose_armed <- false;

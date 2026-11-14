@@ -31,15 +31,42 @@ let uploaded_sha256 json =
   | _ -> Error "artifact upload response was not a JSON object"
 ;;
 
+(* Units are symbols, so a size reads the same on either screen. *)
 let size_text bytes =
   if bytes >= 1024 * 1024 then
     Printf.sprintf "%.1f MiB" (float_of_int bytes /. 1048576.)
-  else Printf.sprintf "%d bytes" bytes
+  else Masc_tui_value.Count.grouped bytes ^ " B"
 ;;
 
-let too_large ~max_bytes size =
-  Printf.sprintf "the file is %s; an attachment holds at most %s"
-    (size_text size) (size_text max_bytes)
+(** Why a file cannot be attached, or could not be read at send time. The
+    screen words it where it is shown, in the screen's language. *)
+type refusal =
+  | No_such_file
+  | Directory
+  | Symbolic_link
+  | Not_regular_file
+  | Empty_file
+  | Too_large of { size : int; max_bytes : int }
+  | Changed_while_opening
+  | System of Unix.error
+
+let refusal_text ~ko = function
+  | No_such_file -> if ko then "파일 없음" else "no such file"
+  | Directory -> if ko then "파일이 아니라 디렉터리" else "that is a directory, not a file"
+  | Symbolic_link ->
+      if ko then "심볼릭 링크 · 가리키는 파일을 첨부하세요"
+      else "that is a symbolic link · attach the file it points to"
+  | Not_regular_file -> if ko then "일반 파일 아님" else "not a regular file"
+  | Empty_file -> if ko then "빈 파일" else "the file is empty"
+  | Too_large { size; max_bytes } ->
+      Printf.sprintf
+        (if ko then "파일 %s · 첨부는 %s까지"
+         else "the file is %s · an attachment holds at most %s")
+        (size_text size) (size_text max_bytes)
+  | Changed_while_opening ->
+      if ko then "여는 동안 파일이 바뀜" else "the file changed while it was being opened"
+  (* The system's own sentence for the error, as it reports it. *)
+  | System error -> Unix.error_message error
 ;;
 
 (* What the name points at, without following a link at its end. *)
@@ -47,17 +74,16 @@ type inspected = { device : int; inode : int; size : int }
 
 let inspect path =
   match Unix.lstat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error "no such file"
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-  | { Unix.st_kind = Unix.S_DIR; _ } -> Error "that is a directory, not a file"
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error No_such_file
+  | exception Unix.Unix_error (error, _, _) -> Error (System error)
+  | { Unix.st_kind = Unix.S_DIR; _ } -> Error Directory
   (* A link shows its own name on the pane and uploads whatever it points
      at, which the name does not say. *)
-  | { Unix.st_kind = Unix.S_LNK; _ } ->
-      Error "that is a symbolic link; attach the file it points to"
+  | { Unix.st_kind = Unix.S_LNK; _ } -> Error Symbolic_link
   (* A device or a pipe has no end to read to. *)
   | { Unix.st_kind = Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
-      Error "not a regular file"
-  | { Unix.st_kind = Unix.S_REG; st_size = 0; _ } -> Error "the file is empty"
+      Error Not_regular_file
+  | { Unix.st_kind = Unix.S_REG; st_size = 0; _ } -> Error Empty_file
   | { Unix.st_kind = Unix.S_REG; st_dev; st_ino; st_size; _ } ->
       Ok { device = st_dev; inode = st_ino; size = st_size }
 ;;
@@ -69,7 +95,7 @@ let inspect path =
 let attachable ~max_bytes path =
   match inspect path with
   | Error _ as refused -> refused
-  | Ok { size; _ } when size > max_bytes -> Error (too_large ~max_bytes size)
+  | Ok { size; _ } when size > max_bytes -> Error (Too_large { size; max_bytes })
   | Ok _ -> Ok ()
 ;;
 
@@ -90,7 +116,8 @@ let read_bounded ~max_bytes descriptor =
   let rec fill () =
     let room = max_bytes + 1 - Buffer.length read in
     if room = 0 then
-      Error (too_large ~max_bytes (size_now descriptor ~at_least:(max_bytes + 1)))
+      Error
+        (Too_large { size = size_now descriptor ~at_least:(max_bytes + 1); max_bytes })
     else
       match Unix.read descriptor chunk 0 (min room (Bytes.length chunk)) with
       | 0 -> Ok (Buffer.contents read)
@@ -98,7 +125,7 @@ let read_bounded ~max_bytes descriptor =
           Buffer.add_subbytes read chunk 0 count;
           fill ()
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill ()
-      | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+      | exception Unix.Unix_error (error, _, _) -> Error (System error)
   in
   fill ()
 ;;
@@ -112,7 +139,7 @@ let read_file ~max_bytes path =
   | Error _ as refused -> refused
   | Ok named -> (
       match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
-      | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
+      | exception Unix.Unix_error (error, _, _) -> Error (System error)
       | descriptor ->
           Fun.protect
             ~finally:(fun () ->
@@ -120,14 +147,25 @@ let read_file ~max_bytes path =
             (fun () ->
               match Unix.fstat descriptor with
               | exception Unix.Unix_error (error, _, _) ->
-                  Error (Unix.error_message error)
+                  Error (System error)
               | opened ->
                   if
                     opened.Unix.st_kind = Unix.S_REG
                     && opened.st_dev = named.device
                     && opened.st_ino = named.inode
                   then read_bounded ~max_bytes descriptor
-                  else Error "the file changed while it was being opened"))
+                  else Error Changed_while_opening))
+;;
+
+(** Why a staged file was not sent: it could not be read, or the upload was
+    refused. Either names the file by the name the pane shows for it. *)
+type failure =
+  | Unreadable of { name : string; refusal : refusal }
+  | Upload_refused of { name : string; detail : string }
+
+let failure_text ~ko = function
+  | Unreadable { name; refusal } -> name ^ ": " ^ refusal_text ~ko refusal
+  | Upload_refused { name; detail } -> name ^ ": " ^ detail
 ;;
 
 (** Read and upload each staged file in staging order, stopping at the first
@@ -139,13 +177,11 @@ let upload_staged ~read ~upload staged =
   let rec each sent = function
     | [] -> Ok (List.rev sent)
     | (file : Masc_tui_types.board_staged_attachment) :: rest -> (
-        (* Either refusal names the file by the name the pane shows for it. *)
-        let named detail = Error (Printf.sprintf "%s: %s" file.sa_name detail) in
         match read file.sa_path with
-        | Error detail -> named detail
+        | Error refusal -> Error (Unreadable { name = file.sa_name; refusal })
         | Ok bytes -> (
             match upload ~bytes with
-            | Error detail -> named detail
+            | Error detail -> Error (Upload_refused { name = file.sa_name; detail })
             | Ok sha256 ->
                 each
                   ({ Masc_tui_types.oa_kind = file.sa_kind

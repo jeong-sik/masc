@@ -122,8 +122,10 @@ let start_board_post state ~host ~results ~admit ~report
           ~upload:(fun ~bytes ->
             Masc_tui_http.upload_artifact ~host:request.host ~port:request.port ~bytes)
           request.staged
-        |> Result.map_error (fun detail ->
-          boundary_error ((if ko then "첨부 실패: " else "attachment failed: ") ^ detail))
+        |> Result.map_error (fun failure ->
+          boundary_error
+            ((if ko then "첨부 실패: " else "attachment failed: ")
+             ^ Masc_tui_board_upload.failure_text ~ko failure))
       in
       let* prepared =
         Masc_tui_http.prepare_board_new request attachments

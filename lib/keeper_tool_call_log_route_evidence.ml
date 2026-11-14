@@ -102,8 +102,11 @@ let route_evidence_json_of_tool_io
   in
   (* A completed Execute keeps [via] and [sandbox_profile] in its execution
      evidence, which the model does not read (#39035); its output keeps
-     [status]. No route field is in both, so the two field lists are one
-     record rather than a choice between sources. *)
+     [status]. [network_mode] is in both (#32799): the model reads it in the
+     output, and the evidence keeps it for an output stored as a blob, whose
+     marker carries no route field. Both copies come from one dispatch, so
+     the output's, found first, is the same value, and the two field lists
+     are one record rather than a choice between sources. *)
   let output_route_fields =
     Option.bind (Option.bind parsed_output route_candidate_of_output) assoc_opt
   in

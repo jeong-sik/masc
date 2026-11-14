@@ -1,0 +1,9 @@
+### Fixed
+
+- An Execute call whose command ran now tells the Keeper the network mode it
+  ran under, and for a microVM the backend, whether the command succeeded,
+  exited nonzero or failed after the run. Only a failed Execute carried them,
+  so a Keeper in a guest without a network read `gh`'s "token invalid" with
+  nothing to check it against. The microVM backend an Execute names is now
+  the one the turn's guest boots on, not the keeper meta reread on each tool
+  call (#32799, #PENDING).

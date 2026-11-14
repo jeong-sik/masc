@@ -1118,6 +1118,140 @@ let test_execute_guest_start_failure_reports_sandbox_and_conditions () =
     (List.mem_assoc "microvm_backend" fields)
 ;;
 
+(* The guest's [gh] cannot reach github.com, reports its token as invalid and
+   exits 1 (#32799). The command ran, so this is an observed result the model
+   reads, not an Execute failure. *)
+let fake_docker_gh_token_invalid_script =
+  "#!/bin/sh\n\
+if [ \"$1\" = \"info\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
+  printf '[]\\n'\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"inspect\" ]; then\n\
+  case \"$3\" in\n\
+    *State.Running*) printf 'true\\n' ;;\n\
+    *) printf 'fake-container-id\\n' ;;\n\
+  esac\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"exec\" ]; then\n\
+  if [ \"${2-}\" = \"-i\" ]; then cat >/dev/null; fi\n\
+  case \"$*\" in\n\
+    *\"gh auth status\"*)\n\
+      printf 'The token in github.com is invalid.\\n' >&2\n\
+      exit 1 ;;\n\
+  esac\n\
+  printf 'stdout:%s\\n' \"$*\"\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"rm\" ]; then\n\
+  exit 0\n\
+fi\n\
+if [ \"$1\" = \"run\" ]; then\n\
+  printf 'fake-container-id\\n'\n\
+  exit 0\n\
+fi\n\
+printf 'unexpected docker invocation\\n' >&2\n\
+exit 2\n"
+
+(* A failed Execute names the network mode it would have run under; a command
+   that ran must name it too, or a keeper in a guest without a network reads
+   the [gh] line above as a token to renew (#32799). The two calls differ in
+   network mode and in exit, so the value is each call's own. *)
+let test_execute_ran_command_reports_its_network_mode () =
+  List.iter
+    (fun (network_mode, program, argv, exit_code) ->
+      with_fake_docker fake_docker_gh_token_invalid_script @@ fun () ->
+      setup ~sandbox:Keeper_types_profile_sandbox.Docker
+      @@ fun ~config ~meta ~playground ->
+      Masc_test_deps.write_sandbox_image_catalog
+        ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+      let meta =
+        { meta with Keeper_meta_contract.sandbox_image = Some "base"; network_mode }
+      in
+      with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+      let outcome =
+        Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+          ~result_projection:Tool_output.default_model_projection
+          ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+          ~turn_sandbox_factory:(Some factory) ~config ~meta
+          ~args:(tool_execute_typed_exec_args ~cwd:playground program ~argv)
+          ()
+      in
+      let raw = outcome.raw_output in
+      let mode = Keeper_types_profile_sandbox.network_mode_to_string network_mode in
+      Alcotest.(check bool) (program ^ " ran, so Execute completed") true
+        (match outcome.disposition with
+         | Tool_result.Completed () -> true
+         | Tool_result.Failed _ | Tool_result.Deferred _ -> false);
+      Alcotest.(check int) (program ^ " keeps its exit") exit_code
+        (parse_status_exit_code raw);
+      Alcotest.(check (option string))
+        (program ^ " result names the network mode it ran under")
+        (Some mode)
+        (parse_string_field raw "network_mode");
+      Alcotest.(check bool) (program ^ " Docker result invents no microVM backend")
+        true
+        (parse_field raw "microvm_backend" = `Null))
+    [ Keeper_types_profile_sandbox.Network_none, "gh", [ "auth"; "status" ], 1
+    ; Keeper_types_profile_sandbox.Network_inherit, "echo", [ "hello" ], 0
+    ]
+;;
+
+(* The hook rereads the keeper's meta on every tool call, so a TOML edit can
+   name another microVM backend in the middle of a turn. The turn's guest
+   still boots on the backend its factory froze, and a result names that one.
+   A drifted replay is refused with the call's typed context after the route
+   is bound and before anything starts the guest. *)
+let test_execute_names_the_frozen_microvm_backend () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Micro_vm
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~store:
+      (Masc.Keeper_sandbox_image_catalog.Microvm
+         Masc.Keeper_microvm_backend.Apple_container)
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let frozen =
+    { meta with
+      Keeper_meta_contract.sandbox_image = Some "base"
+    ; microvm_backend = Some Masc.Keeper_microvm_backend.Apple_container
+    }
+  in
+  let caller =
+    { frozen with microvm_backend = Some Masc.Keeper_microvm_backend.Microsandbox }
+  in
+  let args = tool_execute_typed_exec_args ~cwd:playground "pwd" ~argv:[] in
+  let drifted =
+    Keeper_tool_execute_runtime.execute_gate_input
+      ~input:args ~cwd:playground ~sandbox_profile:"microvm"
+      ~sandbox_target:"microvm:drifted" ~network_mode:frozen.network_mode
+  in
+  let factory = Keeper_sandbox_factory.create ~config ~meta:frozen () in
+  let override = Keeper_tool_execute_runtime.For_testing.dispatch_override in
+  let previous_override = !override in
+  override := Some (fun () -> failwith "a drifted replay must not dispatch");
+  Fun.protect
+    ~finally:(fun () -> override := previous_override; Keeper_sandbox_factory.cleanup factory)
+    (fun () ->
+      let raw =
+        (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+           ~turn_sandbox_factory:(Some factory) ~config ~meta:caller
+           ~replay_gate_input:drifted
+           ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+           ~result_projection:Tool_output.default_model_projection ~args ())
+          .raw_output
+      in
+      Alcotest.(check bool) ("the bound route answered: " ^ raw) true
+        (String_util.contains_substring raw "approval_input_drifted");
+      Alcotest.(check (option string)) "the result names the backend the guest boots on"
+        (Some "apple_container")
+        (parse_string_field raw "microvm_backend"))
+;;
+
 let test_execute_identity_failure_after_start_reports_identity_code () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2401,6 +2535,12 @@ let test_execute_preserves_large_docker_output ~exit_code ~private_output ~stora
    | None -> ()
    | Some token -> Alcotest.(check bool) "response does not expose the private token" false
        (String_util.contains_substring raw token));
+  let network_mode =
+    Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode
+  in
+  (* #32799: a failure after the run and a stored result both name it. *)
+  Alcotest.(check (option string)) "the result names the network mode the child ran under"
+    (Some network_mode) (parse_string_field raw "network_mode");
   if storage_failure then (
     Alcotest.(check bool) "storage failure is a failure after an actual execution" true
       (match outcome.disposition, outcome.failure_effect_disposition with
@@ -2417,6 +2557,21 @@ let test_execute_preserves_large_docker_output ~exit_code ~private_output ~stora
       (Some (exit_code = 0)) (parse_bool_field raw "ok");
     Alcotest.(check (option string)) "the files reached actual EOF"
       (Some "complete") (parse_string_field raw "output_completeness");
+    (* A stored result reaches the tool-call hook as a blob marker rather
+       than as this payload, so the ledger's route evidence has only the
+       execution evidence to read the network mode from (#32799). *)
+    Alcotest.(check (option string)) "a stored result's ledger route keeps its network mode"
+      (Some network_mode)
+      (Option.bind
+         (Masc.Keeper_tool_call_log.route_evidence_json_of_tool_io
+            ~tool_name:"tool_execute"
+            ~input:(`Assoc [])
+            ~output_text:
+              (Tool_output.encode_for_agent_core
+                 (Tool_output.Stored (execute_artifact raw "output_artifact")))
+            ~execution_evidence:
+              (Masc.Keeper_tool_call_log.execution_evidence_of_metadata outcome.metadata))
+         (fun route -> Json.member "network_mode" route |> Json.to_string_option));
     Sys.remove stdout_path;
     Sys.remove stderr_path;
     verify_execute_artifact_pages store (execute_artifact raw "stdout_artifact")
@@ -3155,6 +3310,12 @@ let () =
           Alcotest.test_case
             "Execute guest start failure reports sandbox and conditions"
             `Quick test_execute_guest_start_failure_reports_sandbox_and_conditions;
+          Alcotest.test_case
+            "Execute that ran names its network mode"
+            `Quick test_execute_ran_command_reports_its_network_mode;
+          Alcotest.test_case
+            "Execute names the microVM backend its factory froze"
+            `Quick test_execute_names_the_frozen_microvm_backend;
           Alcotest.test_case
             "Execute identity failure after start keeps the identity code"
             `Quick test_execute_identity_failure_after_start_reports_identity_code;

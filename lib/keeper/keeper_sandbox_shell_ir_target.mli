@@ -45,6 +45,9 @@ type guest_dispatch =
   ; runtime : Keeper_turn_sandbox_runtime.t
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; network_mode : Keeper_types_profile_sandbox.network_mode
+  ; microvm_backend : Keeper_microvm_backend.t option
+      (** {!Keeper_sandbox_factory.runtime_binding.microvm_backend}: the
+          backend the guest boots on, not the caller's meta snapshot. *)
   ; observe_route : unit -> observe_route
   }
 

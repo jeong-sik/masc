@@ -327,7 +327,15 @@ type dispatch_bundle =
   { sandbox : Masc_exec.Sandbox_target.t
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; network_mode : Keeper_types_profile_sandbox.network_mode
-  ; fields : (string * Yojson.Safe.t) list
+  ; execution_conditions : (string * Yojson.Safe.t) list
+    (* What the call runs under. The model reads them in the result of a
+       command that ran, beside its exit, as it does in a failure carrying the
+       typed context: [gh] without a network calls a good token invalid, and
+       only the network mode says why (#32799). *)
+  ; route_labels : (string * Yojson.Safe.t) list
+    (* Which route ran the call. A failure carrying the typed context shows
+       them to the model; a command that ran records them only as ledger
+       evidence, because they are the same on every call (#39035). *)
   ; base_host_env : string array option
   ; github_secret_files :
       unit ->
@@ -452,17 +460,19 @@ let handle_tool_execute_typed
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         (* The conditions a result was produced under. A resolved route passes
-           its own frozen profile: this meta snapshot must not decide whether
-           a microVM backend applies to a route the factory already fixed. *)
+           its own frozen profile and backend: this meta snapshot, which the
+           hook rereads on every call, must not name a backend other than the
+           one the route's guest boots on. *)
         let execution_condition_fields
               ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
+              ~(microvm_backend : Keeper_microvm_backend.t option)
               ~network_mode
           =
           [ "network_mode"
           , `String
               (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
           ]
-          @ (match sandbox_profile, meta.microvm_backend with
+          @ (match sandbox_profile, microvm_backend with
              | Micro_vm, Some backend ->
                [ "microvm_backend", `String (Keeper_microvm_backend.to_string backend) ]
              | Micro_vm, None | Docker, _ | Remote_ssh, _ -> [])
@@ -530,7 +540,11 @@ let handle_tool_execute_typed
                  { sandbox = dispatch.target
                  ; sandbox_profile = Remote_ssh
                  ; network_mode = effective_network
-                 ; fields = execution_condition_fields ~sandbox_profile:Remote_ssh ~network_mode:effective_network @
+                 ; execution_conditions =
+                     (* An SSH route boots no microVM. *)
+                     execution_condition_fields ~sandbox_profile:Remote_ssh ~microvm_backend:None
+                       ~network_mode:effective_network
+                 ; route_labels =
                      [ "requested_sandbox", `String "remote_ssh"
                      ; "via", `String "remote_ssh"
                      ; "sandbox_profile", `String "remote_ssh"
@@ -554,7 +568,10 @@ let handle_tool_execute_typed
               { sandbox = dispatch.target
               ; sandbox_profile = dispatch.sandbox_profile
               ; network_mode = dispatch.network_mode
-              ; fields = execution_condition_fields ~sandbox_profile:dispatch.sandbox_profile ~network_mode:dispatch.network_mode @
+              ; execution_conditions =
+                  execution_condition_fields ~sandbox_profile:dispatch.sandbox_profile
+                    ~microvm_backend:dispatch.microvm_backend ~network_mode:dispatch.network_mode
+              ; route_labels =
                   [ "requested_sandbox", `String label
                   ; "via", `String label
                   ; "sandbox_profile", `String label
@@ -581,14 +598,18 @@ let handle_tool_execute_typed
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]
-                   @ execution_condition_fields ~sandbox_profile ~network_mode:effective_network
+                   (* No route was resolved, so the meta's declaration is all
+                      there is to name. *)
+                   @ execution_condition_fields ~sandbox_profile
+                       ~microvm_backend:meta.microvm_backend ~network_mode:effective_network
                    @ model_location_fields
                    @ fields)
                 message)
          | Ok dispatch_bundle ->
         Fun.protect ~finally:dispatch_bundle.cleanup (fun () ->
         let dispatch_sandbox = dispatch_bundle.sandbox in
-        let sandbox_extra_fields = dispatch_bundle.fields in
+        let execution_conditions = dispatch_bundle.execution_conditions in
+        let sandbox_extra_fields = execution_conditions @ dispatch_bundle.route_labels in
         let base_host_env = dispatch_bundle.base_host_env in
         let dispatched_location_fields () =
           (* [Host] is unreachable on this lane: every profile a keeper may
@@ -1218,7 +1239,8 @@ let handle_tool_execute_typed
                           ; "output", `String (String_util.sanitize_utf8 output)
                           ; execution_time_field, `Int elapsed_ms
                           ]
-                          @ dispatched_model_location_fields ())
+                          @ dispatched_model_location_fields ()
+                          @ execution_conditions)
                        message))
              | Ok (publication, completeness_evidence) ->
                let output_fields = publication.Keeper_execute_output_files.fields in
@@ -1228,7 +1250,9 @@ let handle_tool_execute_typed
                  | Command_request_not_sent | Command_effect_unknown -> [] in
                (* [execution_location] stays with the model: it is the
                   observation channel for where a call ran
-                  (RFC-keeper-workspace-root-only §3.3, §3.6). *)
+                  (RFC-keeper-workspace-root-only §3.3, §3.6). So do the
+                  conditions it ran under, read beside the exit they may
+                  explain (#32799). *)
                let payload =
                  `Assoc
                    ([ "ok", `Bool succeeded
@@ -1236,6 +1260,7 @@ let handle_tool_execute_typed
                     ]
                     @ model_shim_evidence_fields receipts
                     @ dispatched_location_fields ()
+                    @ execution_conditions
                     @ escaped_shell_fields
                     @ timeout_fields
                     @ output_fields
@@ -1243,10 +1268,12 @@ let handle_tool_execute_typed
                       ; execution_time_field, `Int elapsed_ms
                       ])
                in
-               (* The same call's audit fields, which the model does not read:
-                  tool-result metadata reaches the tool-call ledger as
-                  [execution_evidence] and is not part of a direct call's
-                  provider request (#39035). *)
+               (* The same call's audit fields: tool-result metadata reaches
+                  the tool-call ledger as [execution_evidence] and is not part
+                  of a direct call's provider request (#39035). The execution
+                  conditions are in the payload as well; they stay here
+                  because a payload stored as a blob reaches the ledger's
+                  route evidence as a marker, not as these fields (#32799). *)
                let execution_evidence =
                  Keeper_tool_call_log.execution_evidence_metadata
                    ([ "shim_execution_evidence", shim_execution_evidence_json receipts
@@ -1314,7 +1341,8 @@ let handle_tool_execute_typed
                             ; "output", `String (String_util.sanitize_utf8 output)
                             ; execution_time_field, `Int elapsed_ms
                             ]
-                            @ dispatched_model_location_fields ())
+                            @ dispatched_model_location_fields ()
+                            @ execution_conditions)
                          message)))
         )))))
         in

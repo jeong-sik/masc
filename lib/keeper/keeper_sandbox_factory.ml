@@ -6,6 +6,7 @@ type runtime_binding =
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
   ; network_mode : Keeper_types_profile_sandbox.network_mode
+  ; microvm_backend : Keeper_microvm_backend.t option
   ; image : (string, Keeper_sandbox_image_resolver.error) result
   }
 
@@ -90,8 +91,16 @@ let resolve (t : t) ~cwd =
         , Keeper_types_profile_sandbox.network_mode_to_string actual_network
         , host_root )
       in
+      (* The runtime boots a microVM on the backend of the meta it is created
+         from, which is this one, so the binding reads the same field. *)
+      let microvm_backend =
+        match guest_profile with
+        | Micro_vm_guest -> meta.Keeper_meta_contract.microvm_backend
+        | Docker_guest -> None
+      in
       let bind runtime =
-        Runtime { runtime; guest_profile; network_mode = actual_network; image }
+        Runtime
+          { runtime; guest_profile; network_mode = actual_network; microvm_backend; image }
       in
       match Hashtbl.find_opt t.cache key with
       | Some runtime -> bind runtime

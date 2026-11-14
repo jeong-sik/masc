@@ -270,27 +270,10 @@ let h2_outcome client path =
   H2.Body.Writer.close writer;
   Eio.Promise.await result
 
-(* One HTTP/1.1 exchange in memory, through the ingress the HTTP/1.1
-   listener runs. The client sends [request], then leaves ([eof]) or goes
-   quiet. The read operation that follows is the one the listener's read
-   loop asks for next: httpun handles a request it could not read to the
-   end there. Every step is synchronous, so a writer that yields is a
-   response nobody will finish. *)
-let h1_exchange ?(eof = true) ~routes request =
-  let trust_policy =
-    match
-      Server_request_authority.make_trust_policy
-        ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None
-    with
-    | Ok policy -> policy
-    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
-  in
+(* Feeds [request] to an HTTP/1.1 connection in memory and collects what it
+   writes; {!h1_exchange} says what the steps stand for. *)
+let h1_feed ~eof conn request =
   let output = Buffer.create 256 in
-  let conn = Httpun.Server_connection.create (fun reqd ->
-    Server_http_ingress.serve ~routes
-      ~client_addr:(`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
-      (Server_request_authority.classify_http1_request ~trust_policy (Httpun.Reqd.request reqd))
-      (Masc.Http_reqd.of_httpun reqd)) in
   let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
   let feed =
     if eof then Httpun.Server_connection.read_eof else Httpun.Server_connection.read
@@ -310,6 +293,29 @@ let h1_exchange ?(eof = true) ~routes request =
   in
   drain ()
 
+(* One HTTP/1.1 exchange in memory, through the ingress the HTTP/1.1
+   listener runs. The client sends [request], then leaves ([eof]) or goes
+   quiet. The read operation that follows is the one the listener's read
+   loop asks for next: httpun handles a request it could not read to the
+   end there. Every step is synchronous, so a writer that yields is a
+   response nobody will finish. *)
+let h1_exchange ?(eof = true) ~routes request =
+  let trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None
+    with
+    | Ok policy -> policy
+    | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  h1_feed ~eof
+    (Httpun.Server_connection.create (fun reqd ->
+       Server_http_ingress.serve ~routes
+         ~client_addr:(`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+         (Server_request_authority.classify_http1_request ~trust_policy (Httpun.Reqd.request reqd))
+         (Masc.Http_reqd.of_httpun reqd)))
+    request
+
 let h1_outcome ~routes path =
   h1_exchange ~routes
     (Printf.sprintf "GET %s HTTP/1.1\r\nHost: localhost:8935\r\n\r\n" path)
@@ -325,13 +331,21 @@ let test_route_failure_follows_the_response_state () =
     with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:failing_routes
       (fun ~player:_ ~reader:_ client ->
         let routes = match !captured with Some routes -> routes | None -> fail "missing routes" in
-        check bool "HTTP/2: a failure before the response is a 500" true
-          (match h2_outcome client "/early" with `Ended (500, _) -> true | `Ended _ | `Reset -> false);
+        (* The 500 says a fixed sentence: the exception's text can name a
+           file of the server, so only the log has it (#50613). *)
+        check bool "HTTP/2: a failure before the response is a 500 with the fixed body" true
+          (match h2_outcome client "/early" with
+           | `Ended (500, "Internal server error") -> true
+           | `Ended _ | `Reset -> false);
         (match h1_outcome ~routes "/early" with
          | `Open output -> failf "HTTP/1.1: the 500 did not end: %S" output
          | `Closed output ->
            check bool "HTTP/1.1: a failure before the response is a 500" true
-             (String_util.contains_substring output " 500 "));
+             (String_util.contains_substring output " 500 ");
+           check bool "HTTP/1.1: the 500 has the fixed body" true
+             (String_util.contains_substring output "\r\n\r\nInternal server error");
+           check bool "HTTP/1.1: the 500 leaves the exception's text out" false
+             (String_util.contains_substring output early_failure));
         check int "a failure before the response is logged on both" 2 (logged early_failure);
         check bool "HTTP/2: an auth configuration failure is a 503" true
           (match h2_outcome client "/auth-config" with
@@ -396,11 +410,56 @@ let test_route_failure_follows_the_response_state () =
           (match h2_outcome client "/sse-failed" with `Reset -> true | `Ended _ -> false);
         check int "a failed SSE route is logged on both" 2 (logged sse_failure)))
 
+(* The HTTP/1.1 listener's error handler answers a request that failed
+   before its response. httpun calls it with the exception, from its own
+   runtime when a request handler raises ([Httpun.Reqd.report_exn]) and
+   through [Http_reqd.report_exn]. Either way the body is the fixed sentence
+   and the exception's text is logged once (#50613). *)
+let test_h1_error_handler_answers_a_fixed_body () =
+  let exception_text = "/srv/masc/fixture-path-in-an-exception" in
+  let failed_request ~report =
+    let lines = ref [] in
+    Console_sink.For_testing.reset ();
+    Console_sink.For_testing.set_writer (Some (fun line -> lines := line :: !lines));
+    let outcome =
+      Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+        h1_feed ~eof:true
+          (Httpun.Server_connection.create
+             ~error_handler:
+               (Server_bootstrap_http.h1_error_handler
+                  (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)))
+             (fun reqd -> report reqd (Failure exception_text)))
+          "GET /boom HTTP/1.1\r\nHost: localhost:8935\r\n\r\n")
+    in
+    let logged =
+      List.length
+        (List.filter (fun line -> String_util.contains_substring line exception_text) !lines)
+    in
+    match outcome with
+    | `Open output -> failf "HTTP/1.1: the error response did not end: %S" output
+    | `Closed output -> output, logged
+  in
+  List.iter
+    (fun (label, report) ->
+      let output, logged = failed_request ~report in
+      check bool (label ^ ": answered as an internal error") true
+        (String_util.contains_substring output " 500 ");
+      check bool (label ^ ": the body is the fixed sentence") true
+        (String_util.contains_substring output "\r\n\r\nInternal server error");
+      check bool (label ^ ": the body leaves the exception's text out") false
+        (String_util.contains_substring output exception_text);
+      check int (label ^ ": the exception's text is logged once") 1 logged)
+    [ "reported by httpun", Httpun.Reqd.report_exn
+    ; ( "reported through Http_reqd"
+      , fun reqd exn -> Masc.Http_reqd.report_exn (Masc.Http_reqd.of_httpun reqd) exn )
+    ]
+
 (* A request body that ends short reaches no route; the request has its
    answer or its end by then. A client that leaves mid-body cuts its body,
    and httpun answers that request itself. A route that fails after its
    response started cuts a chunked body still coming in. *)
 let body_failure = "fixture route failed while its body was still coming"
+let body_callback_failure = "fixture route failed in its body callback"
 
 let body_routes ~delivered ~sw:_ ~clock:_ =
   Masc.Http_server_eio.Router.create ()
@@ -408,6 +467,9 @@ let body_routes ~delivered ~sw:_ ~clock:_ =
     Masc.Http_server_eio.Request.read_body_async reqd (fun body ->
       delivered := body :: !delivered;
       Masc.Http_server_eio.Response.text "stored" reqd))
+  |> Server_route.post Server_route.Always_public "/read-then-raise" (fun _request reqd ->
+    Masc.Http_server_eio.Request.read_body_async reqd (fun _body ->
+      failwith body_callback_failure))
   |> Server_route.post Server_route.Always_public "/read-then-fail" (fun _request reqd ->
     let writer =
       Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd
@@ -467,7 +529,30 @@ let test_a_cut_request_body_reaches_no_route () =
        | `Open output -> failf "HTTP/1.1: the failed route's response stayed open: %S" output
        | `Closed _ -> ());
       check (list string) "a chunked body its route's failure cut reaches no route" []
-        !delivered)
+        !delivered;
+      (* A route that raises once its body is read gets the same 500 as one
+         that raises before it: the fixed sentence, with the text in the log. *)
+      let lines = ref [] in
+      Console_sink.For_testing.reset ();
+      Console_sink.For_testing.set_writer (Some (fun line -> lines := line :: !lines));
+      let outcome =
+        Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+          h1_exchange ~routes (post "/read-then-raise" ~fields:"Content-Length: 5\r\n" "hello"))
+      in
+      (match outcome with
+       | `Open output -> failf "HTTP/1.1: the body callback's 500 did not end: %S" output
+       | `Closed output ->
+         check bool "a body callback that raised is a 500" true
+           (String_util.contains_substring output " 500 ");
+         check bool "its 500 has the fixed body" true
+           (String_util.contains_substring output "\r\n\r\nInternal server error");
+         check bool "its 500 leaves the exception's text out" false
+           (String_util.contains_substring output body_callback_failure));
+      check int "the body callback's failure is logged once" 1
+        (List.length
+           (List.filter
+              (fun line -> String_util.contains_substring line body_callback_failure)
+              !lines)))
 
 let test_fusion_workspace_admission () =
   with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
@@ -928,6 +1013,8 @@ let () =
         ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
         ; test_case "a route failure follows the response state" `Quick
             test_route_failure_follows_the_response_state
+        ; test_case "the HTTP/1.1 error handler answers a fixed body" `Quick
+            test_h1_error_handler_answers_a_fixed_body
         ; test_case "a cut request body reaches no route" `Quick
             test_a_cut_request_body_reaches_no_route
         ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission

@@ -210,25 +210,25 @@ let test_error_payload_cannot_exceed_capacity () =
 (* The gateway's error handler writes its message and closes the body the same
    way, and it is the one site where h2 has already set the stream's error
    code, so the stream ends with RST_STREAM once the body is out. Its message
-   is the exception's text, which is how this case gets an error body larger
-   than the window. The text goes to the log too, so the console writer is
-   swapped for one that keeps it out of the test output. *)
-let test_error_handler_body_arrives_whole () =
-  let expected = Printexc.to_string (Failure payload) in
+   is a fixed sentence: the exception's text can name a file of the server,
+   so it reaches the log and not the client (#50488). *)
+let test_error_handler_answers_a_fixed_body () =
+  let exception_text = "/srv/masc/fixture-path-in-an-exception" in
+  let lines = ref [] in
   Console_sink.For_testing.reset ();
-  Console_sink.For_testing.set_writer (Some (fun _line -> ()));
+  Console_sink.For_testing.set_writer (Some (fun line -> lines := line :: !lines));
   let reply =
     Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
       exchange
         ~error_handler:(Server_h2_gateway.make_error_handler () ())
-        ~handler:(fun reqd -> Masc.Http_reqd.report_exn reqd (Failure payload))
+        ~handler:(fun reqd -> Masc.Http_reqd.report_exn reqd (Failure exception_text))
         "/boom")
   in
   check int "answered as an internal error" 500 reply.status;
-  check int "every byte arrived" (String.length expected)
-    (String.length reply.body);
-  check bool "the bytes are the ones written" true
-    (String.equal expected reply.body)
+  check string "the body is the fixed sentence" "Internal server error" reply.body;
+  check int "the exception's text is logged once" 1
+    (List.length
+       (List.filter (fun line -> String_util.contains_substring line exception_text) !lines))
 
 let () =
   run "H2 response window"
@@ -237,8 +237,8 @@ let () =
             test_response_over_the_window_arrives_whole
         ; test_case "an empty response still ends its stream" `Quick
             test_empty_response_still_ends_its_stream
-        ; test_case "an error handler's body arrives whole" `Quick
-            test_error_handler_body_arrives_whole
+        ; test_case "an error handler answers a fixed body" `Quick
+            test_error_handler_answers_a_fixed_body
         ; test_case "capacity refusal precedes asset success headers" `Quick
             test_capacity_refusal_precedes_success_headers
         ; test_case "exact capacity preserves the complete body" `Quick

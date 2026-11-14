@@ -462,11 +462,12 @@ module Request = struct
   let respond_too_large reqd max_bytes =
     respond_error reqd `Payload_too_large (too_large_body max_bytes)
 
+  (* [exn] is what the route's body callback raised. Its text can name a
+     file of the server, so it goes to the log and the body is the fixed
+     sentence. *)
   let respond_internal_error reqd exn =
-    let body = Printf.sprintf
-      "500 Internal Server Error: %s" (Printexc.to_string exn)
-    in
-    respond_error reqd `Internal_server_error body
+    Log.Http.error "[http] request body handler failed: %s" (Printexc.to_string exn);
+    respond_error reqd `Internal_server_error Http_error_body.internal_server_error
 
   type body_read_error = Http_reqd.body_read_error =
     | Too_large of int

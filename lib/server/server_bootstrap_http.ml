@@ -195,13 +195,27 @@ let h1_request_handler request_handler client_addr (reqd : Httpun.Reqd.t Gluten.
   with_request_lane (Httpun.Reqd.request reqd.Gluten.Reqd.reqd).meth (fun () ->
     request_handler client_addr reqd)
 
+(* The body is a fixed sentence: an exception's text can name a file of the
+   server, so it goes to the log. httpun calls this handler only for a
+   request with no response yet, and nothing else logs that failure
+   ([Http_reqd.report_exn] logs the ones this handler is not called for).
+   httpun answers a request it could not parse here too; that is the
+   client's error and stays at debug. *)
 let h1_error_handler _client_addr ?request:_ error respond =
   let msg =
     match error with
-    | `Exn exn -> Printexc.to_string exn
-    | `Bad_request -> "Bad request"
-    | `Bad_gateway -> "Bad gateway"
-    | `Internal_server_error -> "Internal server error"
+    | `Exn exn ->
+      Log.Http.error "[http] request failed: %s" (Printexc.to_string exn);
+      Http_error_body.internal_server_error
+    | `Internal_server_error ->
+      Log.Http.error "[http] request failed: %s" Http_error_body.internal_server_error;
+      Http_error_body.internal_server_error
+    | `Bad_gateway ->
+      Log.Http.error "[http] request failed: %s" Http_error_body.bad_gateway;
+      Http_error_body.bad_gateway
+    | `Bad_request ->
+      Log.Http.debug "[http] request refused: %s" Http_error_body.bad_request;
+      Http_error_body.bad_request
   in
   let body = respond (Httpun.Headers.of_list [ "content-type", "text/plain" ]) in
   Httpun.Body.Writer.write_string body msg;

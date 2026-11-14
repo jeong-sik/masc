@@ -1,15 +1,15 @@
 name = "masc_dashboard"
 description = """
-Return a concise workspace dashboard summary for the current project.
+Return a workspace dashboard summary for the current project.
 
-Use scope to choose the current task-focused view or the full workspace view."""
+The full view lists attention items, agents, keepers, tasks and messages.
+Set compact to true for a four-line count summary instead."""
 additional_properties = false
 
 defer_loading = true
 
 [[params]]
-name = "scope"
-type = "string"
-enum = ["all", "current"]
-description = "Dashboard scope: current or all"
-default = "current"
+name = "compact"
+type = "boolean"
+default = false
+description = "true returns the four-line count summary instead of the full dashboard. Defaults to false."

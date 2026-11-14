@@ -77,7 +77,10 @@ val retract_facts :
   result
 
 val read_journal_tail_projection :
-  keepers_dir:string -> keeper_id:string -> limit:int -> Yojson.Safe.t list
+  keepers_dir:string ->
+  keeper_id:string ->
+  limit:int ->
+  (Yojson.Safe.t list, string) result
 
 val move_aside_for_keepers_dir :
   ?clock:float Eio.Time.clock_ty Eio.Time.clock_base ->

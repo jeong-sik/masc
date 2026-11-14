@@ -64,13 +64,19 @@ let kind_label (kind : Current.librarian_failure_kind) =
   | Unhandled_exception -> "Unhandled_exception"
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_missing_journal_reads_empty () =
   with_keepers_dir (fun keepers_dir ->
     check
       int
       "no journal file yields no lines"
       0
-      (List.length (Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10)))
+      (List.length (readable_journal_tail ~keepers_dir ~keeper_id ~limit:10)))
 ;;
 
 let test_failure_round_trips () =
@@ -83,7 +89,7 @@ let test_failure_round_trips () =
       ~kind:Exact_execution_failure
       ~detail:"provider returned 503"
       ~snapshot_present:true;
-    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Ok (Journal_failed entry) ] ->
       check (float 0.0) "recorded_at" 1_700_000_000.0 entry.recorded_at;
       check string "trace_id" "trace-a" entry.trace_id;
@@ -110,7 +116,7 @@ let test_every_kind_round_trips () =
            ~snapshot_present:false)
       all_kinds;
     let decoded =
-      Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:100
+      readable_journal_tail ~keepers_dir ~keeper_id ~limit:100
       |> List.map (function
         | Ok (Current.Journal_failed entry) -> kind_label entry.kind
         | Ok (Current.Journal_committed _) -> "committed"
@@ -129,7 +135,7 @@ let test_unknown_kind_is_an_error () =
     append_raw
       ~keepers_dir
       {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"quota_exhausted","detail":"d","snapshot_present":true}|};
-    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Error reason ] ->
       check
         bool
@@ -144,7 +150,7 @@ let test_unknown_kind_is_an_error () =
 let test_unknown_outcome_is_an_error () =
   with_keepers_dir (fun keepers_dir ->
     append_raw ~keepers_dir {|{"outcome":"deferred","recorded_at":1.0}|};
-    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Error reason ] ->
       check
         bool
@@ -161,7 +167,7 @@ let test_unknown_outer_field_is_an_error () =
     append_raw
       ~keepers_dir
       {|{"outcome":"failed","recorded_at":1.0,"trace_id":"t","kind":"unhandled_exception","detail":"d","snapshot_present":false,"unexpected":true}|};
-    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Error reason ] ->
       check
         bool
@@ -193,7 +199,7 @@ let test_one_bad_line_does_not_hide_its_neighbours () =
       ~detail:"d"
       ~snapshot_present:true;
     let shape =
-      Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+      readable_journal_tail ~keepers_dir ~keeper_id ~limit:10
       |> List.map (function
         | Ok (Current.Journal_failed entry) -> entry.trace_id
         | Ok (Current.Journal_committed _) -> "committed"
@@ -221,7 +227,7 @@ let test_limit_keeps_the_newest_lines_oldest_first () =
            ~snapshot_present:false)
       [ 1; 2; 3; 4; 5 ];
     let traces =
-      Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:2
+      readable_journal_tail ~keepers_dir ~keeper_id ~limit:2
       |> List.map (function
         | Ok (Current.Journal_failed entry) -> entry.trace_id
         | Ok (Current.Journal_committed _) -> "committed"
@@ -245,7 +251,7 @@ let test_non_positive_limit_reads_nothing () =
       int
       "limit 0 is empty, not unbounded"
       0
-      (List.length (Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:0)))
+      (List.length (readable_journal_tail ~keepers_dir ~keeper_id ~limit:0)))
 ;;
 
 let test_committed_line_decodes_as_a_commit () =
@@ -266,7 +272,7 @@ let test_committed_line_decodes_as_a_commit () =
     with
     | Error reason -> fail ("replace failed: " ^ reason)
     | Ok _ ->
-      (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+      (match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
        | [ Ok (Journal_committed entry) ] ->
          check int "revision" 1 entry.revision;
          check string "trace_id" "trace-commit" entry.source.trace_id;
@@ -332,11 +338,32 @@ let test_committed_line_requires_fact_basis () =
       | json -> json
     in
     Fs_compat.save_file path (Yojson.Safe.to_string broken ^ "\n");
-    match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+    match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
     | [ Error _ ] -> ()
     | [ Ok _ ] -> fail "a journal fact without basis decoded as current"
     | entries ->
       fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries)))
+;;
+
+(* A journal path that exists and cannot be read as a file is a read failure:
+   not an empty journal, and not an exception out of the reader. *)
+let test_unreadable_journal_is_an_error () =
+  with_keepers_dir (fun keepers_dir ->
+    let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+    Unix.mkdir path 0o755;
+    Fun.protect
+      ~finally:(fun () -> Unix.rmdir path)
+      (fun () ->
+         (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+          | Error _ -> ()
+          | Ok rows ->
+            fail
+              (Printf.sprintf "a directory read as %d journal lines" (List.length rows)));
+         match Current.read_journal_tail_projection ~keepers_dir ~keeper_id ~limit:10 with
+         | Error _ -> ()
+         | Ok rows ->
+           fail
+             (Printf.sprintf "a directory projected as %d journal lines" (List.length rows))))
 ;;
 
 let () =
@@ -369,6 +396,10 @@ let () =
             "committed fact basis is required"
             `Quick
             test_committed_line_requires_fact_basis
+        ; test_case
+            "unreadable journal is an error"
+            `Quick
+            test_unreadable_journal_is_an_error
         ] )
     ]
 ;;

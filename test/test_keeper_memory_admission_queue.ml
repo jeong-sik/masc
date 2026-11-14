@@ -189,6 +189,12 @@ let test_removed_destination_cannot_consume () = with_store (fun keepers_dir ->
   check int "candidate remains pending for a fresh judgment" 1
     (List.length (Queue.candidates (batch keepers_dir))))
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_stale_retirement_after_source_reobservation () = with_store (fun keepers_dir ->
   let keeper_id = "keeper" in
   let original = fact "ordinary observation to retire" in
@@ -225,7 +231,7 @@ let test_stale_retirement_after_source_reobservation () = with_store (fun keeper
     (Current.read_for_keepers_dir ~keepers_dir ~keeper_id |> require = Some committed.snapshot);
   check bool "retirement does not invent revision or absorption edges" true
     (committed.revisions_applied=[] && committed.absorbed_applied=[]);
-  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  (match readable_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
    | [Ok (Current.Journal_committed entry)] ->
      check bool "the journal removes the exact restored fields and basis" true
        (entry.change.removed = [reobserved]);

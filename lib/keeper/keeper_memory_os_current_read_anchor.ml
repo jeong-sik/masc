@@ -70,18 +70,20 @@ let read_with_snapshot_sha256 ~keepers_dir ~keeper_id =
    does not depend on the window it was read in. *)
 let read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit =
   if limit <= 0
-  then []
+  then Ok []
   else (
     let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-    Dated_jsonl.map_tail_rows path ~max_lines:limit ~f:(fun { Dated_jsonl.offset; line } ->
+    Dated_jsonl.map_tail_rows_result path ~max_lines:limit ~f:(fun { Dated_jsonl.offset; line } ->
       match Yojson.Safe.from_string line with
       | json -> offset, Journal_codec.journal_entry_of_json json
       | exception Yojson.Json_error message ->
-        offset, Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
+        offset, Error (Printf.sprintf "journal line is not valid JSON: %s" message))
+    |> Result.map_error Dated_jsonl.read_error_to_string)
 ;;
 
 let read_journal_tail ~keepers_dir ~keeper_id ~limit =
-  read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit |> List.map snd
+  read_journal_tail_indexed ~keepers_dir ~keeper_id ~limit
+  |> Result.map (List.map snd)
 ;;
 
 type removal_lookup =

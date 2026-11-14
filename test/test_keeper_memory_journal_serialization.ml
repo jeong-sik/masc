@@ -134,8 +134,14 @@ let with_live_partial_row ~path ~row action =
         close_lock ())
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let journal ~keepers_dir =
-  Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+  readable_journal_tail ~keepers_dir ~keeper_id ~limit:10
   |> List.map require_ok
 ;;
 

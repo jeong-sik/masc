@@ -54,6 +54,12 @@ let journal ~keepers_dir = Current.journal_path_for_keepers_dir ~keepers_dir ~ke
 let snapshot_path ~keepers_dir = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper
 let pending_path ~keepers_dir = Current.publication_receipt_path ~keepers_dir ~keeper_id:keeper
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_single_commit_and_original_archive () = fixture @@ fun keepers_dir anchor ->
   let prior=Fs_compat.load_file (journal ~keepers_dir) in
   let published=publish ~keepers_dir ~anchor (program ()) |> require in
@@ -64,7 +70,7 @@ let test_single_commit_and_original_archive () = fixture @@ fun keepers_dir anch
   Proof.of_json (Proof.to_json {proof with captured={proof.captured with journal_sha256=String.make 64 '0'}})
     |> refused;
   Proof.of_json (Proof.to_json {proof with captured={proof.captured with snapshot=None}}) |> refused;
-  let tail=Current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:1 in
+  let tail=readable_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:1 in
   let entry=match tail with
     | [entry] -> require entry
     | [] | _ :: _ -> fail "expected exactly one canonical journal row" in
@@ -378,7 +384,7 @@ let test_hole_publication_recovers_external_cursor boundary fault () =
        (Current.committed_official_range ~keepers_dir ~keeper_id:keeper ~receipt_scope:expected.receipt_scope |> require=None)
    | None,None | Some _,Some _ -> fail "fixture must own exactly one original boundary");
   let journal_rows=Fs_compat.load_jsonl (journal ~keepers_dir) in
-  let proofs=Current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:(List.length journal_rows)
+  let proofs=readable_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:(List.length journal_rows)
     |> List.filter_map (fun row -> match require row with
     | Current.Journal_committed {program=Some proof;_} -> Some proof
     | Current.Journal_committed {program=None;_} | Current.Journal_failed _ | Current.Journal_quarantined _ -> None) in

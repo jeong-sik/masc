@@ -433,6 +433,12 @@ let test_a_walk_that_sent_before_it_failed_reports_the_send () =
       (Astring.String.is_infix ~affix:"outward_effect=started" detail)
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_failure_reaches_journal
       ~cli_only
       ~cli_slot_ids
@@ -458,7 +464,7 @@ let test_failure_reaches_journal
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
   check int "only admitted CLI slots reach the runner" calls !attempts;
   let api_failure = if cli_only then None else Some projection_failure in
-  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  (match readable_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
    | [Ok (Current.Journal_failed { detail; kind = actual_kind; _ })] ->
      check_detail ?api_failure ?cli_failure:failure detail;
      check bool "journal keeps the original failure kind" true (actual_kind = kind)
@@ -580,7 +586,7 @@ let test_body_timeout_reaches_http_successor ~with_cli () =
   check (list string) "accepted HTTP disposition was committed"
     [current_a.claim]
     (List.map (fun (fact : Memory.fact) -> fact.claim) snapshot.facts);
-  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
+  (match readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 with
    | [Ok (Current.Journal_committed _);
       Ok (Current.Journal_committed { source = { kind = Current.Librarian; _ }; _ })] -> ()
    | _ -> fail "expected seed and one Librarian commit in the Memory journal");
@@ -768,7 +774,7 @@ let test_a_held_api_lane_is_an_execution_failure () =
     ~on_not_committed:(fun report -> reports := report :: !reports)
     ~base_path ~keepers_dir ~keeper_id ~expected_revision:None (input ());
   check int "the held API slot received no request" 0 (Fixture.post_count server);
-  (match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  (match readable_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
    | [Ok (Current.Journal_failed { kind; _ })] ->
      check bool "a held lane is an execution failure, not a lane without transport" true
        (kind = Current.Exact_execution_failure)
@@ -1589,7 +1595,7 @@ let check_stored_plan_steps ~keepers_dir ~keeper_id plan =
       ~new_claims:step.new_claims () |> require_memory in
     check_memory_payloads "staged/store facts and order agree" stage.current.facts stored.snapshot.facts;
     check_memory_payloads "staged/store refused claims agree" stage.claims_not_applied stored.claims_not_applied;
-    let journal_result = match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+    let journal_result = match readable_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
       | [entry] -> entry
       | [] | _ :: _ -> fail "expected one disposition journal entry" in
     match require_memory journal_result with

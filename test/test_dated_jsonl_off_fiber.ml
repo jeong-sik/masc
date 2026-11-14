@@ -132,10 +132,43 @@ let test_pool_and_inline_read_the_same () =
    | _ -> fail "read_everything shape changed")
 ;;
 
+(* The result reader returns the rows the raising reader returns, reads a
+   missing file as an empty tail, and names a path it cannot read as a file
+   instead of raising. *)
+let test_tail_rows_result_names_read_failures () =
+  let dir = tmpdir "dated_jsonl_tail_result" in
+  let file = Filename.concat dir "rows.jsonl" in
+  Out_channel.with_open_bin file (fun oc -> output_string oc "a\nb\nc\n");
+  let row { Dated_jsonl.offset; line } = Printf.sprintf "%d:%s" offset line in
+  (match Dated_jsonl.map_tail_rows_result file ~max_lines:2 ~f:row with
+   | Ok rows ->
+     check (list string) "same rows as the raising reader"
+       (Dated_jsonl.map_tail_rows file ~max_lines:2 ~f:row) rows;
+     check (list string) "newest two rows, oldest first" [ "2:b"; "4:c" ] rows
+   | Error error -> fail (Dated_jsonl.read_error_to_string error));
+  (match
+     Dated_jsonl.map_tail_rows_result (Filename.concat dir "absent.jsonl") ~max_lines:2 ~f:row
+   with
+   | Ok rows -> check (list string) "a missing file is an empty tail" [] rows
+   | Error error -> fail (Dated_jsonl.read_error_to_string error));
+  match Dated_jsonl.map_tail_rows_result dir ~max_lines:2 ~f:row with
+  | Error (Dated_jsonl.Non_regular_file { path; kind = Dated_jsonl.Directory }) ->
+    check string "the failure names the path" dir path
+  | Error error ->
+    fail ("a directory failed as another error: " ^ Dated_jsonl.read_error_to_string error)
+  | Ok rows -> fail (Printf.sprintf "a directory read as %d rows" (List.length rows))
+;;
+
 let () =
   run
     "dated_jsonl off fiber"
     [ ( "pool"
       , [ test_case "pooled reads equal inline reads" `Quick test_pool_and_inline_read_the_same ] )
+    ; ( "tail result"
+      , [ test_case
+            "read failures are values"
+            `Quick
+            test_tail_rows_result_names_read_failures
+        ] )
     ]
 ;;

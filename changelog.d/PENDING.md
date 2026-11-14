@@ -1,0 +1,11 @@
+### Fixed
+
+- The operator snapshot no longer shows a Keeper's tool audit as empty when
+  the audit was not read. A projection-cache timeout and an unreadable
+  metrics store each set `tool_audit_read` on the Keeper row to `timed_out`
+  or `unreadable` (with `tool_audit_read_error`), publish the six audit
+  values as `null` instead of empty lists, and make a `Current` snapshot
+  read partial (#43101, #PENDING).
+- `masc_keeper_status` detail and the dashboard Keeper brief carry the same
+  `tool_audit_read` state, and an unreadable metrics store no longer reads
+  there as a Keeper that recorded no turn (#43101, #PENDING).

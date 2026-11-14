@@ -27,9 +27,31 @@ val summarize_metrics_lines : string list -> metrics_summary
     producer writes today satisfies one of those shapes. Rows failing to parse
     as JSON are reported through the persistence read-drop surface; rows of an
     unknown record kind are skipped without counting. *)
+(** What a published tool audit says about its own read. An audit that was
+    read and holds no tool call is [Tool_audit_read]; the other two say
+    nothing about what the Keeper called. *)
+type tool_audit_read_state =
+  | Tool_audit_read
+  | Tool_audit_timed_out
+  | Tool_audit_unreadable
+
+val tool_audit_read_field : string
+(** The JSON field that carries {!tool_audit_read_state_to_wire}. *)
+
+val tool_audit_read_error_field : string
+(** The JSON field that carries the diagnostic of an unreadable audit. *)
+
+val tool_audit_read_state_to_wire : tool_audit_read_state -> string
+(** ["read"], ["timed_out"] or ["unreadable"]. *)
+
 val empty_tool_audit_snapshot : tool_audit_snapshot
 val latest_tool_audit_snapshot_from_files :
-  Workspace.config -> keeper_name:string -> tool_audit_snapshot option
+  Workspace.config ->
+  keeper_name:string ->
+  (tool_audit_snapshot option, Dated_jsonl.read_error) result
+(** The newest recorded turn's tool audit. [Ok None] means the metrics store
+    was read and holds no turn row; [Error] means the store could not be read,
+    which says nothing about whether a turn was recorded. *)
 val invalidate_tool_audit_cache :
   Workspace.config -> keeper_name:string -> unit
 (** Forget the process-local tool-audit snapshot when a Keeper metrics

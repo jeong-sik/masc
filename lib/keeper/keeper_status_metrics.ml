@@ -46,6 +46,19 @@ let empty_metrics_summary =
   ; proactive_points = 0
   }
 
+type tool_audit_read_state =
+  | Tool_audit_read
+  | Tool_audit_timed_out
+  | Tool_audit_unreadable
+
+let tool_audit_read_field = "tool_audit_read"
+let tool_audit_read_error_field = "tool_audit_read_error"
+
+let tool_audit_read_state_to_wire = function
+  | Tool_audit_read -> "read"
+  | Tool_audit_timed_out -> "timed_out"
+  | Tool_audit_unreadable -> "unreadable"
+
 let empty_tool_audit_snapshot =
   { latest_tool_names = []
   ; latest_tool_call_count = None
@@ -242,16 +255,16 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
     match Dated_jsonl.find_latest_entry_result store parse_snapshot with
     | Error error ->
         report_read_error error;
-        None
+        Error error
     | Ok snapshot ->
         if rows_stable ~physical_row_count
         then cache_snapshot ~physical_row_count snapshot;
-        snapshot
+        Ok snapshot
   in
   let physical_row_count = Dated_jsonl.count_entries store in
   match Tool_audit_cache.find metrics_path with
   | Some cached when cached.physical_row_count = physical_row_count ->
-      cached.snapshot
+      Ok cached.snapshot
   | Some cached when cached.physical_row_count < physical_row_count ->
       let appended_row_count =
         physical_row_count - cached.physical_row_count
@@ -259,7 +272,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
       (match Dated_jsonl.read_recent_result store appended_row_count with
        | Error error ->
            report_read_error error;
-           None
+           Error error
        | Ok appended_entries ->
            let appended_snapshot =
              List.fold_left
@@ -278,7 +291,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
            if rows_stable ~physical_row_count
            then begin
              cache_snapshot ~physical_row_count snapshot;
-             snapshot
+             Ok snapshot
            end
            else scan_full (Dated_jsonl.count_entries store))
   | Some _ | None -> scan_full physical_row_count

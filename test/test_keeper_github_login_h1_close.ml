@@ -20,6 +20,11 @@ let require = function
    fixture bound, not a login policy. *)
 let patience_s = 10.0
 let poll_s = 0.05
+
+(* Ten times as long as the login takes to look at its response again, and
+   longer than a SIGTERM to the stand-in gh takes to land. A response seen
+   closed in this time would have stopped gh within it. *)
+let unnoticed_window_s = 1.0
 let one_time_code = "FAKE-CODE"
 
 let rec remove_tree path =
@@ -191,6 +196,14 @@ let test_a_client_gone_from_a_quiet_login_stops_its_gh () =
       Eio.Flow.close flow;
       pid)
   in
+  (* No keepalive is due yet, and the route writes nothing else while gh
+     waits: the departure is not seen. *)
+  Eio.Time.sleep clock unnoticed_window_s;
+  check bool "before a keepalive is written the client's departure is not seen" true
+    (process_alive pid);
+  (* gh stops before its 600-second timeout only through the login's watch,
+     which reads the response's [is_closed]. A stopped gh therefore says the
+     keepalive write that failed closed the response. *)
   within "the server to stop the gh of a client that left" (fun () ->
     while process_alive pid do
       (* Each step is one keepalive interval on the route's clock. *)

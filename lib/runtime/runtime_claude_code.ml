@@ -3454,6 +3454,10 @@ let purge_project ~mgr ~clock ~cwd ~account ~cli_path ~timeout_s ~project =
              (version_label version)
              (version_label purge_minimum_version))
       | Some (_ : int * int * int) ->
+        (* The two runs share one buffer. Whatever [--version] wrote there is
+           not about purge, so a failing purge must not report it as its
+           own stderr. *)
+        Buffer.clear stderr_buf;
         let (_ : string) =
           run
             [ cli_path

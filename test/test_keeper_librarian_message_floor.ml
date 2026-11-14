@@ -422,7 +422,7 @@ let test_a_durable_step_asks_the_runtime_floors_question () =
   with_floor @@ fun ~base_path ~keepers_dir ~server:_ ->
   let context = step_context () in
   let question = question_input ~current:(Some { Librarian.facts = [ current_fact ] }) () in
-  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context question |> ok in
+  let prepared = Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000. ~context question |> ok in
   let runtime = runtime_step ~base_path ~keepers_dir context question in
   check string "the rendered prompt is the Runtime floor's" runtime.rendered_prompt
     prepared.preparation.rendered_prompt;
@@ -441,7 +441,7 @@ let test_a_retained_step_makes_the_decision_the_runtime_floor_makes () =
   with_floor @@ fun ~base_path ~keepers_dir ~server:_ ->
   let context = step_context () in
   let question = question_input () in
-  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context question |> ok in
+  let prepared = Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000. ~context question |> ok in
   let runtime = runtime_step ~base_path ~keepers_dir context question in
   let proposal =
     Runtime.validate_durable_step_proposal prepared first_answer
@@ -475,7 +475,7 @@ let test_a_retained_step_makes_the_decision_the_runtime_floor_makes () =
 let test_a_restored_omitted_step_cannot_become_a_live_program_decision () =
   with_floor @@ fun ~base_path ~keepers_dir ~server:_ ->
   let context=step_context () and question=question_input () in
-  let prepared=Runtime.prepare_durable_step ~now:1_000_000. ~context question |> ok in
+  let prepared=Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000. ~context question |> ok in
   let runtime=runtime_step ~base_path ~keepers_dir context question in
   let key=Prompt_names.librarian in
   let previous=(Prompt_registry.resolve_prompt key).override_value in
@@ -503,7 +503,7 @@ let test_a_restored_omitted_step_cannot_become_a_live_program_decision () =
 let test_a_step_preparation_restores_and_refuses_tampering () =
   with_floor @@ fun ~base_path:_ ~keepers_dir:_ ~server:_ ->
   let context = step_context () in
-  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context (question_input ()) |> ok in
+  let prepared = Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000. ~context (question_input ()) |> ok in
   let restored =
     Runtime.restore_durable_step_preparation ~context ~source_input:prepared.preparation.source_input
       ~parsing_now:prepared.preparation.parsing_now ~policy:prepared.preparation.policy
@@ -548,7 +548,7 @@ let test_a_step_preparation_restores_and_refuses_tampering () =
 
 let test_a_step_answer_needs_a_working_state () =
   with_floor @@ fun ~base_path:_ ~keepers_dir:_ ~server:_ ->
-  let prepared = Runtime.prepare_durable_step ~now:1_000_000. ~context:(step_context ()) (question_input ()) |> ok in
+  let prepared = Runtime.prepare_durable_step ~source_lines:[] ~now:1_000_000. ~context:(step_context ()) (question_input ()) |> ok in
   let with_state state = `Assoc
     [ "new_claims", `List []; "dropped", `List []; "working_contexts", `List []; "working_state", state ] in
   let verdict answer = match Runtime.validate_durable_step_proposal prepared answer with

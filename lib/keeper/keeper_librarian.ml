@@ -365,27 +365,39 @@ let keeper_id_variable (inp : input) =
   "keeper_id", Keeper_identity.Keeper_id.to_string inp.keeper_id
 ;;
 
-let facts_budget_variable ~facts_max_bytes (inp : input) =
-  let current_ordinary =
-    Option.fold
-      ~none:0
-      ~some:(fun (current : current_selection) ->
-        Keeper_memory_os_render.facts_payload_bytes
-          ~ordinary_facts:current.facts
-          ~source_lines:[])
-      inp.current
-  in
-  ( "facts_budget"
-  , Printf.sprintf
-      "max=%d bytes; current ordinary=%d bytes"
-      facts_max_bytes
-      current_ordinary )
+let facts_budget ~facts_max_bytes ~source_lines (inp : input) =
+  Keeper_memory_os_render.measure_facts_budget
+    ~maximum_bytes:facts_max_bytes
+    ~ordinary_facts:
+      (Option.fold ~none:[] ~some:(fun (current : current_selection) -> current.facts)
+         inp.current)
+    ~source_lines
 ;;
 
-let prompt_variables_with_policy ~facts_max_bytes ~category_cap ~facts_per_category_cap
-    (inp : input) : (string * string) list =
+(* A Keeper without file-source memory commits exactly its ordinary facts, so
+   that total keeps the one-part text. With source memory the total the commit
+   compares comes first, then the part the answer can drop and the part it
+   cannot. *)
+let facts_budget_text (budget : Keeper_memory_os_render.facts_budget) =
+  match budget.source with
+  | No_source_memory ->
+    Printf.sprintf
+      "max=%d bytes; current ordinary=%d bytes"
+      budget.maximum_bytes
+      budget.ordinary_bytes
+  | Source_memory { bytes } ->
+    Printf.sprintf
+      "max=%d bytes; current=%d bytes (ordinary=%d bytes, source=%d bytes)"
+      budget.maximum_bytes
+      budget.total_bytes
+      budget.ordinary_bytes
+      bytes
+;;
+
+let prompt_variables_with_policy ~facts_max_bytes ~source_lines ~category_cap
+    ~facts_per_category_cap (inp : input) : (string * string) list =
   [ keeper_id_variable inp
-  ; facts_budget_variable ~facts_max_bytes inp
+  ; "facts_budget", facts_budget_text (facts_budget ~facts_max_bytes ~source_lines inp)
   ; "memory_limits", Yojson.Safe.to_string
       (Keeper_memory_limits.to_json
          (Keeper_memory_limits.measure ~category_cap ~facts_per_category_cap
@@ -409,9 +421,10 @@ let prompt_variables_with_policy ~facts_max_bytes ~category_cap ~facts_per_categ
   ]
 ;;
 
-let prompt_variables input =
+let prompt_variables ~source_lines input =
   prompt_variables_with_policy
     ~facts_max_bytes:(Env_config.KeeperMemoryOs.facts_max_bytes ())
+    ~source_lines
     ~category_cap:(Env_config.KeeperMemoryOs.category_cap ())
     ~facts_per_category_cap:(Env_config.KeeperMemoryOs.facts_per_category_cap ()) input
 ;;

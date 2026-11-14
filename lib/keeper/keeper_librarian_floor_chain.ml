@@ -105,7 +105,11 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
       Edge.with_destination ~config ~reserved (fun destination ->
         let context : Memory_runtime.durable_step_context =
           {previous_state = question.previous_state; unread_messages = question.unread_messages} in
-        let* preparation = Memory_runtime.prepare_durable_step ~now:(Time_compat.now ()) ~context question.input in
+        let* source_lines = io (fun () ->
+          Keeper_memory_source_current.read_budget_lines ~keepers_dir:(Durable.keepers_dir owner)
+            ~keeper_id:keeper_name) in
+        let* preparation = Memory_runtime.prepare_durable_step ~now:(Time_compat.now ()) ~context
+          ~source_lines question.input in
         let* step = Step.create ~request_id:(Step.fresh_request_id owner) ~owner ~destination
           ~transaction_id:start.transaction_id ~range ~previous ~question ~step:preparation () in
         let* record = Step_owner.retain ~store step |> Result.map_error owner_error in

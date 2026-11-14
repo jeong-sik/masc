@@ -334,37 +334,49 @@ let input_for_pass pass (input : Keeper_librarian.input) =
   | Volatile_memory_pass _ ->
     { input with working_context = Keeper_librarian_context.empty }
 
-let prompt_variables_of_pass pass input =
+(* A Memory pass shows the facts budget the commit measures, so it needs the
+   file-source store's lines ([source_lines]); the read result is consulted
+   only by the passes that show the budget. *)
+let prompt_variables_of_pass ~source_lines pass input =
+  let memory_variables () =
+    Result.map (fun source_lines -> Keeper_librarian.prompt_variables ~source_lines input)
+      source_lines in
   match pass with
-  | Memory_pass (None, _) -> Keeper_librarian.prompt_variables input
+  | Memory_pass (None, _) -> memory_variables ()
   | Memory_pass (Some prepared, _) ->
-    ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
-    :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input)
+    Result.map (fun variables ->
+      ("continuity", Yojson.Safe.to_string (Keeper_librarian_continuity.prompt_json prepared))
+      :: List.remove_assoc "continuity" variables) (memory_variables ())
   | Continuity_state_pass prepared ->
-    Keeper_librarian.continuity_prompt_variables input
-      ~continuity:(Keeper_librarian_continuity.prompt_json prepared)
+    Ok (Keeper_librarian.continuity_prompt_variables input
+      ~continuity:(Keeper_librarian_continuity.prompt_json prepared))
   | Volatile_state_pass (previous_state, unread_messages) ->
-    Keeper_librarian.continuity_prompt_variables input
+    Ok (Keeper_librarian.continuity_prompt_variables input
       ~continuity:(`Assoc ["previous_working_state",
         (match previous_state with None -> `Null | Some state -> `String state);
-        "unread_messages", Keeper_librarian_unread.list_to_json unread_messages])
-  | Volatile_memory_pass (previous_state, unread_messages) ->
-    ("continuity", Yojson.Safe.to_string
-      (`Assoc ["previous_working_state",
-        (match previous_state with None -> `Null | Some state -> `String state);
         "unread_messages", Keeper_librarian_unread.list_to_json unread_messages]))
-    :: List.remove_assoc "continuity" (Keeper_librarian.prompt_variables input)
-  | Working_context_pass -> Keeper_librarian.working_context_prompt_variables input
+  | Volatile_memory_pass (previous_state, unread_messages) ->
+    Result.map (fun variables ->
+      ("continuity", Yojson.Safe.to_string
+        (`Assoc ["previous_working_state",
+          (match previous_state with None -> `Null | Some state -> `String state);
+          "unread_messages", Keeper_librarian_unread.list_to_json unread_messages]))
+      :: List.remove_assoc "continuity" variables) (memory_variables ())
+  | Working_context_pass -> Ok (Keeper_librarian.working_context_prompt_variables input)
 ;;
 
-let librarian_prompt_variables ?continuity input =
+let librarian_prompt_variables ?continuity ~source_lines input =
   let pass = Memory_pass (continuity, ()) in
-  with_working_contexts_rule (prompt_variables_of_pass pass (input_for_pass pass input))
+  Result.bind
+    (prompt_variables_of_pass ~source_lines:(Ok source_lines) pass (input_for_pass pass input))
+    with_working_contexts_rule
 ;;
 
-let resolve_librarian_prompt pass input =
+let resolve_librarian_prompt ~source_lines pass input =
   let input = input_for_pass pass input in
-  let variables = prompt_variables_of_pass pass input in
+  match prompt_variables_of_pass ~source_lines pass input with
+  | Error detail -> [], Error detail
+  | Ok variables ->
   let variables_with_rule =
     match pass with
     | Memory_pass _ | Volatile_memory_pass _ | Working_context_pass -> with_working_contexts_rule variables
@@ -383,6 +395,7 @@ let resolve_librarian_prompt pass input =
 
 type durable_policy = {
   facts_max_bytes : int;
+  facts_source_lines : string list;
   category_cap : int;
   facts_per_category_cap : int;
 }
@@ -398,6 +411,7 @@ type durable_preparation = {
 }
 type admission_policy = {
   facts_max_bytes : int;
+  facts_source_lines : string list;
   category_cap : int;
   facts_per_category_cap : int;
 }
@@ -444,6 +458,7 @@ let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~pro
   let* rule=Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_working_contexts_rule rule_prompt [] in
   let base=Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+    ~source_lines:policy.facts_source_lines
     ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap
     source_input in
   let base=match continuity with
@@ -490,15 +505,17 @@ let require_counterpart_source ~(source_input : Keeper_librarian.input) ~prompt 
   else Error "Librarian prompt must include {{counterpart_observations}} while counterpart input is pending"
 let require_counterpart_template (preparation : durable_preparation) =
   require_counterpart_source ~source_input:preparation.source_input ~prompt:preparation.prompt
-let prepare_durable_with ?continuity ~output_schema ~now source_input =
+let prepare_durable_with ?continuity ~output_schema ~now ~source_lines source_input =
   let open Result.Syntax in
   let policy : durable_policy = {
     facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
+    facts_source_lines=source_lines;
     category_cap=Env_config.KeeperMemoryOs.category_cap ();
     facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
   let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian_working_contexts_rule [] in
   let base=Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+    ~source_lines:policy.facts_source_lines
     ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap source_input in
   let base=match continuity with
     | None -> base
@@ -511,9 +528,10 @@ let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let* ()=check_durable_preparation ?continuity ~expected_schema:output_schema preparation in
   let* ()=require_counterpart_template preparation in
   Ok preparation
-let prepare_durable ~now source_input =
+let prepare_durable ~now ~source_lines source_input =
   prepare_durable_with
-    ~output_schema:Keeper_structured_output_schema.librarian_current_output_schema ~now source_input
+    ~output_schema:Keeper_structured_output_schema.librarian_current_output_schema ~now ~source_lines
+    source_input
 (* One question of the durable message floor. It is the question the Runtime
    floor asks for the same message (Volatile_memory_pass): the same prompt,
    with the working state so far and the unread messages in the continuity slot,
@@ -547,15 +565,16 @@ let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy
 (* A floor step reads the input the Runtime floor's volatile Memory pass reads.
    The pass's state and unread arguments do not change that input. *)
 let durable_step_source_input input = input_for_pass (Volatile_memory_pass (None,[])) input
-let prepare_durable_step ~now ~context input =
+let prepare_durable_step ~now ~context ~source_lines input =
   let open Result.Syntax in
   let source_input=durable_step_source_input input in
   let* preparation=prepare_durable_with ~continuity:(durable_step_continuity context)
-    ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now source_input in
+    ~output_schema:Keeper_structured_output_schema.librarian_continuity_output_schema ~now ~source_lines
+    source_input in
   let step={context;preparation} in
   let+ ()=validate_durable_step_preparation step in step
-let render_librarian_prompt input =
-  prepare_durable ~now:(Time_compat.now ()) input
+let render_librarian_prompt ~source_lines input =
+  prepare_durable ~now:(Time_compat.now ()) ~source_lines input
   |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)
 let validate_admission_preparation ~batch ~retirement ~input preparation =
   let open Result.Syntax in
@@ -572,6 +591,7 @@ let validate_admission_preparation ~batch ~retirement ~input preparation =
     Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
   let variables=(working_contexts_rule_variable,String.trim rule)
     ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~source_lines:policy.facts_source_lines
       ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
   let* ()=if preparation.variables=variables then Ok ()
     else Error "Original Librarian prompt variables differ from captured input" in
@@ -582,9 +602,10 @@ let validate_admission_preparation ~batch ~retirement ~input preparation =
   if String.trim rule<>"" && preparation.rendered_prompt=rendered ^ suffix
     && Yojson.Safe.equal actual_schema expected_schema
   then Ok () else Error "Original Librarian prompt/schema differs from its captured template and input"
-let prepare_admission ~batch ~retirement input =
+let prepare_admission ~batch ~retirement ~source_lines input =
   let open Result.Syntax in
   let policy={facts_max_bytes=Env_config.KeeperMemoryOs.facts_max_bytes ();
+    facts_source_lines=source_lines;
     category_cap=Env_config.KeeperMemoryOs.category_cap ();
     facts_per_category_cap=Env_config.KeeperMemoryOs.facts_per_category_cap ()} in
   let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
@@ -592,6 +613,7 @@ let prepare_admission ~batch ~retirement input =
   let* ()=if String.trim rule<>"" then Ok () else Error "Librarian working-context rule rendered empty" in
   let variables=(working_contexts_rule_variable,String.trim rule)
     ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
+      ~source_lines:policy.facts_source_lines
       ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
   let* prompt,rendered=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
   let* admission_prompt,_=Prompt_registry.resolve_and_render_prompt_template
@@ -607,25 +629,25 @@ let prepare_admission ~batch ~retirement input =
   let* ()=validate_admission_preparation ~batch ~retirement ~input preparation in
   Ok preparation
 
-let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
+let prompt_and_input_for_librarian ~source_lines (inp : Keeper_librarian.input) =
   let open Result.Syntax in
   (* One asset, one message: the librarian's role statement lives at the top
      of the selection prompt it is rendered with, so there is no second file
      to keep in step. *)
   let+ prompt =
-    render_librarian_prompt inp
+    render_librarian_prompt ~source_lines inp
   in
   inp, prompt
 ;;
 
-let messages_and_input_for_librarian inp =
+let messages_and_input_for_librarian ~source_lines inp =
   Result.map
     (fun (input, prompt) -> input, [ message Agent_core.Types.User prompt ])
-    (prompt_and_input_for_librarian inp)
+    (prompt_and_input_for_librarian ~source_lines inp)
 ;;
 
-let messages_for_librarian inp =
-  Result.map snd (messages_and_input_for_librarian inp)
+let messages_for_librarian ~source_lines inp =
+  Result.map snd (messages_and_input_for_librarian ~source_lines inp)
 ;;
 
 let flow_candidates selected_slots =
@@ -853,7 +875,7 @@ let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   }
 ;;
 
-let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
+let fit_continuity ~capacity ~base_path ~keeper_id ~source_lines ~input_for prepared =
   let open Result.Syntax in
   let* _, cli_slots, _ = resolve_librarian_slots ~base_path ~keeper_id
     |> Result.map_error extraction_error_to_string in
@@ -866,7 +888,7 @@ let fit_continuity ~capacity ~base_path ~keeper_id ~input_for prepared =
        when both requests fit: an operator override can make either prompt
        the longer one. *)
     let pass_fits pass =
-      let* material = snd (resolve_librarian_prompt pass input) in
+      let* material = snd (resolve_librarian_prompt ~source_lines:(Ok source_lines) pass input) in
       let prompt = Keeper_lane_cli_oneshot.prompt_with_schema
         ~requirement:(output_requirement_of_pass pass) ~prompt:material.rendered in
       let* actual_chars = Runtime_codex_app_server.prompt_char_count prompt in
@@ -1466,26 +1488,14 @@ let record_failure ~keepers_dir ~keeper_id ~trace_id ~kind ~detail =
     record_failure_io ~keepers_dir ~keeper_id ~trace_id ~kind ~detail)
 ;;
 
-(* The payload the commit measures: the facts this pass saw plus the source
-   store's lines. A memory over the budget commits only by shrinking, so a
-   pass that proposes no change cannot commit it. An unreadable source store
-   counts as not within, so the pass takes the full lane. *)
-let current_memory_within_budget ~keepers_dir ~keeper_id (inp : Keeper_librarian.input) =
-  match
-    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id)
-  with
-  | Error detail ->
-    Log.Keeper.warn ~keeper_name:keeper_id
-      "librarian preflight skipped: source memory unreadable: %s" detail;
-    false
-  | Ok source ->
-    Keeper_memory_os_render.facts_within_budget
-      ~ordinary_facts:
-        (Option.fold ~none:[]
-           ~some:(fun (current : Keeper_librarian.current_selection) -> current.facts)
-           inp.current)
-      ~source_lines:(Keeper_memory_source_current.budget_lines source)
+(* The budget the prompt showed: the captured maximum over the facts this pass
+   saw and the source lines captured with it, measured as the commit measures.
+   A memory over the budget commits only by shrinking, so a pass that proposes
+   no change cannot commit it. *)
+let durable_facts_fit (prepared : durable_preparation) =
+  Keeper_memory_os_render.facts_budget_fits
+    (Keeper_librarian.facts_budget ~facts_max_bytes:prepared.policy.facts_max_bytes
+       ~source_lines:prepared.policy.facts_source_lines prepared.source_input)
 ;;
 
 let current_selection_registry_summary = function
@@ -1783,18 +1793,26 @@ let run_pass
           | Best_effort Context_only, None -> Working_context_pass
         in
         let prompt_input = input_for_pass pass inp in
+        (* Read once per pass: every Memory prompt this pass renders, and the
+           no-change preflight that judges it, show the same source part of
+           the facts budget. A pass that shows no budget does not consult it. *)
+        let source_lines =
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id)
+          |> Result.map_error (fun detail -> "source memory unreadable: " ^ detail) in
         let durable_preparation = match admission with
           | Some _ -> None
           | None -> match pass with
             | Memory_pass (None, commit) ->
-              Some (commit, prepare_durable ~now:(Time_compat.now ()) prompt_input)
+              Some (commit, Result.bind source_lines (fun source_lines ->
+                prepare_durable ~now:(Time_compat.now ()) ~source_lines prompt_input))
             | Memory_pass (Some _, _) | Continuity_state_pass _ | Volatile_state_pass _
             | Volatile_memory_pass _ | Working_context_pass -> None in
         let prompt_variables, prompt_material = match admission with
           | None ->
             (match durable_preparation with
              | None ->
-               let variables, material = resolve_librarian_prompt pass prompt_input in
+               let variables, material = resolve_librarian_prompt ~source_lines pass prompt_input in
                let material = match pass with
                  | Memory_pass (Some _, _) | Volatile_memory_pass _ ->
                    Result.bind material (fun (material : librarian_prompt_material) ->
@@ -1818,7 +1836,8 @@ let run_pass
                 | Retirement_archive archive -> Ok (match archive with
                     | Ok archive -> Keeper_memory_admission_judgment.Available archive
                     | Error detail -> Unavailable detail) in
-              prepare_admission ~batch ~retirement prompt_input in
+              let* source_lines = source_lines in
+              prepare_admission ~batch ~retirement ~source_lines prompt_input in
             (match prepared with
              | Ok prepared -> prepared.variables,Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
              | Error detail -> [],Error detail) in
@@ -2061,7 +2080,9 @@ let run_pass
                  | Memory_pass (None, Commit_with_contexts _) ->
                    Keeper_librarian_context.shows_no_working_context
                      prompt_input.working_context
-                   && current_memory_within_budget ~keepers_dir ~keeper_id prompt_input
+                   && (match durable_preparation with
+                       | Some (_, Ok prepared) -> durable_facts_fit prepared
+                       | None | Some (_, Error _) -> false)
                  | Memory_pass (None, Commit_maintenance _) | Memory_pass (Some _, _)
                  | Working_context_pass | Continuity_state_pass _ | Volatile_state_pass _
                  | Volatile_memory_pass _ -> false in

@@ -122,7 +122,10 @@ let new_capture ~config ~reserved ~owner part =
     | Retirement_source_unavailable detail -> Error detail
     | Retirement_archive (Ok archive) -> Ok (Keeper_memory_admission_judgment.Available archive)
     | Retirement_archive (Error detail) -> Ok (Keeper_memory_admission_judgment.Unavailable detail)) in
-  let* preparation=Keeper_librarian_runtime.prepare_admission ~batch:(Parts.batch part) ~retirement input in
+  let* source_lines=io (fun () ->
+    Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id:keeper_name) in
+  let* preparation=Keeper_librarian_runtime.prepare_admission ~batch:(Parts.batch part) ~retirement
+    ~source_lines input in
   let now=Time_compat.now () in
   let* export=resolve ~config ~reserved in
   let request_id=Capture.fresh_request_id owner in

@@ -319,13 +319,8 @@ let update_locked_with_output
                 Error (store_error
                   "recall binding target was retired after the admission decision read Memory")) in
          let* source_lines =
-           match
-             Keeper_memory_source_current.read_for_keepers_dir
-               ~keepers_dir
-               ~keeper_id
-           with
-           | Error message -> Error (store_error message)
-           | Ok snapshot -> Ok (Keeper_memory_source_current.budget_lines snapshot)
+           Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id
+           |> Result.map_error store_error
          in
          let previous_bytes =
            Keeper_memory_os_render.facts_payload_bytes

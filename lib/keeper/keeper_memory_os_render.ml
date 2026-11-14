@@ -37,23 +37,44 @@ let facts_payload_bytes ~ordinary_facts ~source_lines =
   |> String.length
 ;;
 
-let bytes_within_budget actual =
-  actual <= Env_config.KeeperMemoryOs.facts_max_bytes ()
+type facts_source_usage =
+  | No_source_memory
+  | Source_memory of { bytes : int }
+
+type facts_budget =
+  { maximum_bytes : int
+  ; ordinary_bytes : int
+  ; source : facts_source_usage
+  ; total_bytes : int
+  }
+
+let measure_facts_budget ~maximum_bytes ~ordinary_facts ~source_lines =
+  { maximum_bytes
+  ; ordinary_bytes = facts_payload_bytes ~ordinary_facts ~source_lines:[]
+  ; source =
+      (match source_lines with
+       | [] -> No_source_memory
+       | _ :: _ ->
+         Source_memory { bytes = facts_payload_bytes ~ordinary_facts:[] ~source_lines })
+  ; total_bytes = facts_payload_bytes ~ordinary_facts ~source_lines
+  }
 ;;
 
-let facts_within_budget ~ordinary_facts ~source_lines =
-  bytes_within_budget (facts_payload_bytes ~ordinary_facts ~source_lines)
-;;
+let facts_budget_fits budget = budget.total_bytes <= budget.maximum_bytes
 
 let check_facts_budget ~previous_bytes ~ordinary_facts ~source_lines =
-  let actual = facts_payload_bytes ~ordinary_facts ~source_lines in
-  let maximum = Env_config.KeeperMemoryOs.facts_max_bytes () in
-  if bytes_within_budget actual || actual < previous_bytes
+  let budget =
+    measure_facts_budget
+      ~maximum_bytes:(Env_config.KeeperMemoryOs.facts_max_bytes ())
+      ~ordinary_facts
+      ~source_lines
+  in
+  if facts_budget_fits budget || budget.total_bytes < previous_bytes
   then Ok ()
   else
     Error
       (Printf.sprintf
          "current Memory OS facts exceed commit budget: %d bytes > %d bytes; drop facts before committing"
-         actual
-         maximum)
+         budget.total_bytes
+         budget.maximum_bytes)
 ;;

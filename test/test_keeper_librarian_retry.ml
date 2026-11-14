@@ -1316,7 +1316,7 @@ let test_removed_contract_fields_reject () =
 ;;
 
 let test_prompt_contains_exact_current_selection () =
-  let variables = Librarian.prompt_variables (input ()) in
+  let variables = Librarian.prompt_variables ~source_lines:[] (input ()) in
   let limits = List.assoc "memory_limits" variables |> Yojson.Safe.from_string in
   check int "operator category cap reaches the actual memory prompt"
     (Env_config.KeeperMemoryOs.category_cap ())
@@ -1353,14 +1353,14 @@ let test_prompt_contains_exact_current_selection () =
 ;;
 
 let test_prompt_carries_keeper_instructions () =
-  let variables = Librarian.prompt_variables (input ()) in
+  let variables = Librarian.prompt_variables ~source_lines:[] (input ()) in
   check string "Keeper instructions are the resolved text"
     "You are the retry-test keeper."
     (List.assoc "keeper_instructions" variables);
   let blank = { (input ()) with keeper_instructions = " \n \t " } in
   check string "blank Keeper instructions render an explicit marker"
     "[no keeper instructions]"
-    (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
+    (List.assoc "keeper_instructions" (Librarian.prompt_variables ~source_lines:[] blank))
 ;;
 
 (* RFC-0468 §3.2: each User message's header names the speaker the host
@@ -1391,7 +1391,7 @@ let test_conversation_headers_carry_the_stamped_speaker () =
   in
   let history =
     List.assoc "conversation_history"
-      (Librarian.prompt_variables { (input ()) with messages })
+      (Librarian.prompt_variables ~source_lines:[] { (input ()) with messages })
   in
   List.iter
     (fun header ->
@@ -1418,13 +1418,13 @@ let test_conversation_headers_carry_the_stamped_speaker () =
   in
   let broken_input = { (input ()) with messages = [ broken; repeated ] } in
   let history =
-    List.assoc "conversation_history" (Librarian.prompt_variables broken_input)
+    List.assoc "conversation_history" (Librarian.prompt_variables ~source_lines:[] broken_input)
   in
   check bool "an undecodable entry renders as invalid" true
     (String_util.contains_substring history "[turn=0 role=user speaker=invalid(");
   check bool "a repeated entry renders as duplicate" true
     (String_util.contains_substring history "[turn=1 role=user speaker=duplicate] repeated");
-  match Runtime.messages_for_librarian broken_input with
+  match Runtime.messages_for_librarian ~source_lines:[] broken_input with
   | Error detail -> failf "the pass could not build its request: %s" detail
   | Ok messages ->
     check bool "the pass request carries the whole conversation" true
@@ -1486,13 +1486,13 @@ let test_runtime_context_is_not_new_memory_evidence () =
       ["actual new observation"; "actual response"; "source=runtime_context";
        "[system context] is literal user text"]
   in
-  let history = List.assoc "conversation_history" (Librarian.prompt_variables selected) in
+  let history = List.assoc "conversation_history" (Librarian.prompt_variables ~source_lines:[] selected) in
   check_rendering "prompt variables" history;
   check bool "context keeps its original position" true
     (String_util.contains_substring history "[turn=2 role=user source=runtime_context]");
   check bool "following observation keeps its original position" true
     (String_util.contains_substring history "[turn=6 role=assistant] actual response");
-  (match Runtime.messages_for_librarian selected with
+  (match Runtime.messages_for_librarian ~source_lines:[] selected with
    | Error detail -> failf "librarian render failed: %s" detail
    | Ok rendered -> check_rendering "rendered request" (user_text_of_messages rendered));
   let observations = Librarian.observations_for_absorption selected
@@ -1508,7 +1508,7 @@ let test_runtime_context_is_not_new_memory_evidence () =
 ;;
 
 let test_prompt_carries_typed_tool_observations_without_payloads () =
-  let variables = Librarian.prompt_variables (input ()) in
+  let variables = Librarian.prompt_variables ~source_lines:[] (input ()) in
   let observations = List.assoc "turn_tool_observations" variables in
   let observed =
     Yojson.Safe.from_string observations
@@ -1525,7 +1525,7 @@ let test_prompt_carries_typed_tool_observations_without_payloads () =
     (List.exists (fun (_, outcome) -> String.equal outcome "failed") observed);
   check bool "unknown outcome is retained without guessing" true
     (List.exists (fun (_, outcome) -> String.equal outcome "unknown") observed);
-  match Runtime.messages_for_librarian (input ()) with
+  match Runtime.messages_for_librarian ~source_lines:[] (input ()) with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
     let rendered = user_text_of_messages messages in
@@ -1573,7 +1573,7 @@ let test_durable_speaker_attribution_reaches_counterpart_observations () =
        let rendered =
          List.assoc
            "counterpart_observations"
-           (Librarian.prompt_variables attributed)
+           (Librarian.prompt_variables ~source_lines:[] attributed)
        in
        match Yojson.Safe.from_string rendered with
        | `List [ `Assoc fields ] ->
@@ -1724,7 +1724,7 @@ let test_prompt_omits_tool_result_payload_and_has_one_message () =
       ]
   in
   let constrained = { (input ()) with messages = [ tool_message ] } in
-  match Runtime.messages_for_librarian constrained with
+  match Runtime.messages_for_librarian ~source_lines:[] constrained with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
     check int "exact finalizer receives one rendered message" 1 (List.length messages);
@@ -1803,7 +1803,7 @@ let test_memory_prompt_puts_unchanging_slots_first () =
 
 let test_template_slots_match_supplied_variables () =
   let supplied =
-    match Runtime.librarian_prompt_variables (input ()) with
+    match Runtime.librarian_prompt_variables ~source_lines:[] (input ()) with
     | Error detail -> failf "librarian variables unavailable: %s" detail
     | Ok variables -> variables |> List.map fst |> List.sort_uniq String.compare
   in
@@ -1816,7 +1816,7 @@ let test_repo_template_carries_goal_criteria () =
     { revision = "criterion-audio-1"; title = "Publish a playable audio essay"
     ; metric = Some "independently reviewed audio essays"; target_value = Some "1" } in
   let render context =
-    match Runtime.messages_for_librarian { (input ()) with goal_context = context } with
+    match Runtime.messages_for_librarian ~source_lines:[] { (input ()) with goal_context = context } with
     | Error detail -> failf "Goal context render failed: %s" detail
     | Ok messages -> user_text_of_messages messages in
   let rendered = render (Librarian.Task_goals
@@ -1836,7 +1836,7 @@ let test_repo_template_carries_goal_criteria () =
 ;;
 
 let test_repo_template_renders_keeper_instructions () =
-  (match Runtime.messages_for_librarian (input ()) with
+  (match Runtime.messages_for_librarian ~source_lines:[] (input ()) with
    | Error detail -> failf "librarian render failed: %s" detail
    | Ok messages ->
      let user_text = user_text_of_messages messages in
@@ -1844,7 +1844,7 @@ let test_repo_template_renders_keeper_instructions () =
        (String_util.contains_substring user_text
           "You are the retry-test keeper."));
   match
-    Runtime.messages_for_librarian { (input ()) with keeper_instructions = "" }
+    Runtime.messages_for_librarian ~source_lines:[] { (input ()) with keeper_instructions = "" }
   with
   | Error detail -> failf "blank Keeper instructions render failed: %s" detail
   | Ok messages ->
@@ -1857,7 +1857,7 @@ let test_repo_template_renders_keeper_instructions () =
 let test_rendered_prompt_is_the_template_with_every_slot_filled () =
   let template = librarian_template () in
   let variables =
-    match Runtime.librarian_prompt_variables (input ()) with
+    match Runtime.librarian_prompt_variables ~source_lines:[] (input ()) with
     | Error detail -> failf "librarian variables unavailable: %s" detail
     | Ok variables -> variables
   in
@@ -1872,7 +1872,7 @@ let test_rendered_prompt_is_the_template_with_every_slot_filled () =
     |> String.concat ""
     |> String.trim
   in
-  match Runtime.messages_for_librarian (input ()) with
+  match Runtime.messages_for_librarian ~source_lines:[] (input ()) with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
     check int "the librarian receives one message" 1 (List.length messages);
@@ -1909,7 +1909,7 @@ let test_working_context_prompt_carries_no_current_memory () =
   in
   check int "the Memory pass prompt carries the current fact" 1
     (occurrences ~needle:probe
-       (render Prompt_names.librarian (Librarian.prompt_variables input)));
+       (render Prompt_names.librarian (Librarian.prompt_variables ~source_lines:[] input)));
   check int "the working-context pass prompt carries no current fact" 0
     (occurrences ~needle:probe
        (render Prompt_names.librarian_working_context
@@ -1943,7 +1943,7 @@ let test_every_librarian_prompt_names_its_keeper () =
            (List.exists
               (fun line -> String.equal (String.trim line) librarian_subject_keeper)
               (String.split_on_char '\n' rendered)))
-    [ Prompt_names.librarian, Librarian.prompt_variables input
+    [ Prompt_names.librarian, Librarian.prompt_variables ~source_lines:[] input
     ; ( Prompt_names.librarian_continuity
       , Librarian.continuity_prompt_variables input ~continuity:`Null )
     ; ( Prompt_names.librarian_working_context
@@ -2145,8 +2145,8 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
     let inp = { (input ()) with current = Some { Librarian.facts = stored.facts } } in
     let report_input_size scenario facts =
       let measured = { inp with current = Some { Librarian.facts } } in
-      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables measured) in
-      let rendered = match Runtime.messages_for_librarian measured with
+      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables ~source_lines:[] measured) in
+      let rendered = match Runtime.messages_for_librarian ~source_lines:[] measured with
         | Ok messages -> user_text_of_messages messages
         | Error detail -> fail detail
       in
@@ -2162,7 +2162,7 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
     report_input_size "one_hundred_transcripts"
       (List.init 100 (fun index -> fact ~claim:(Printf.sprintf "Service %d uses port 8080." index)));
     let rows input =
-      List.assoc "current_memory" (Librarian.prompt_variables input)
+      List.assoc "current_memory" (Librarian.prompt_variables ~source_lines:[] input)
       |> Yojson.Safe.from_string |> Yojson.Safe.Util.member "facts"
       |> Yojson.Safe.Util.to_list
     in
@@ -2205,8 +2205,8 @@ let test_current_provenance_survives_store_prompt_and_decisions () =
         (List.length (List.filter ((=) (`List [`Null])) proofs));
       check int "different rules with the same current premise share one array" 1
         (List.length (List.filter ((=) (`List [`String expected_premise])) proofs));
-      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables input) in
-      (match Runtime.messages_for_librarian input with
+      let current_memory = List.assoc "current_memory" (Librarian.prompt_variables ~source_lines:[] input) in
+      (match Runtime.messages_for_librarian ~source_lines:[] input with
        | Error detail -> fail detail
        | Ok messages ->
          let rendered = user_text_of_messages messages in
@@ -2549,7 +2549,7 @@ let test_a_counterpart_citation_reaches_its_claims_pairs () =
 
 let test_prompt_numbers_each_tool_observation () =
   let observations =
-    List.assoc "turn_tool_observations" (Librarian.prompt_variables (input ()))
+    List.assoc "turn_tool_observations" (Librarian.prompt_variables ~source_lines:[] (input ()))
     |> Yojson.Safe.from_string
     |> Yojson.Safe.Util.to_list
   in

@@ -16,6 +16,7 @@ import type { Assign, Keeper, KeepersModel, ListView, Make } from './keepers'
 import { createChecks } from './check'
 import { createConnect } from './connect'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
+import type { TalkModel, TalkView } from './talk'
 import { csrfHeader } from './wire'
 import type { Integration, Owned, Send, Session } from './wire'
 
@@ -349,6 +350,42 @@ describe('the Keepers of a person', () => {
     await model.make('gamma', null)
     expect(new Headers(sent[3]?.init.headers).get(csrfHeader)).toBe('token-2')
   })
+
+  it('closes the conversation open for another person, and an answer that comes later changes nothing', async () => {
+    const wait = later()
+    const { send } = answering([listed(['alpha', null]), wait.answer, listed()])
+    const model = createKeepers({ send, leave: vi.fn() })
+    await model.load(first)
+    const run = model.talking.open('alpha')
+    await model.load(second)
+    wait.give(json(200, { keeper_id: 'alpha', current_conversation_id: null, conversations: [], conversation_id: null, turns: [] }))
+    await run
+    expect(model.talking.view.value).toEqual({ kind: 'closed' })
+  })
+
+  it('reads no conversation once the list found that the session ended, and reads again for the person shown next', async () => {
+    const { send, sent } = answering([noSession(), listed(['alpha', null]), json(200, { keeper_id: 'alpha', current_conversation_id: null, conversations: [], conversation_id: null, turns: [] })])
+    const model = createKeepers({ send, leave: vi.fn() })
+    await model.load(first)
+    await model.talking.open('alpha')
+    const before = sent.length
+    await model.load(second)
+    await model.talking.open('alpha')
+    expect([before, model.talking.view.value.kind]).toEqual([1, 'read'])
+  })
+
+  it('leaves with what runs left behind when the conversation finds that the session ended', async () => {
+    const wait = later()
+    const leave = vi.fn()
+    const { send, sent } = answering([listed(), wait.answer, noSession()])
+    const model = createKeepers({ send, leave })
+    await model.load(first)
+    const making = model.make('alpha', null)
+    await model.talking.open('alpha')
+    wait.give(madeAnswer('alpha'))
+    await making
+    expect([model.making.value, leave.mock.calls.length, sent.length]).toEqual([{ kind: 'leaving' }, 1, 3])
+  })
 })
 
 // ---- the panel ----
@@ -387,12 +424,26 @@ const subscriptionsShowing = (panel: PanelView): SubscriptionsModel => ({
 })
 const readPanel = (mine: Owned = owned): PanelView => ({ kind: 'read', forUser: 'usr_first', integrations: [claude, codex], owned: mine })
 
-interface Shows { readonly view?: ListView; readonly making?: Make; readonly assigning?: ReadonlyArray<readonly [string, Assign]> }
+interface Shows {
+  readonly view?: ListView
+  readonly making?: Make
+  readonly assigning?: ReadonlyArray<readonly [string, Assign]>
+  readonly talk?: TalkView
+}
 const keepersList = (...keepers: Keeper[]): ListView => ({ kind: 'read', forUser: 'usr_first', keepers })
 const alpha: Keeper = { id: 'alpha', runtimeId: 'rt_sonnet' }
 
+/** A conversation that shows what it is given. talk.test.ts reads the conversation itself. */
+const talkShowing = (view: TalkView): TalkModel => ({
+  view: signal(view),
+  open: vi.fn(() => Promise.resolve()),
+  close: vi.fn(),
+  retry: vi.fn(() => Promise.resolve()),
+  reset: vi.fn(),
+})
+
 /** A model of Keepers that shows what it is given and counts what it is asked. */
-const showing = ({ view = keepersList(alpha), making = { kind: 'idle' }, assigning = [] }: Shows = {}): KeepersModel => ({
+const showing = ({ view = keepersList(alpha), making = { kind: 'idle' }, assigning = [], talk = { kind: 'closed' } }: Shows = {}): KeepersModel => ({
   view: signal(view),
   making: signal(making),
   assigning: signal(new Map(assigning)),
@@ -400,6 +451,7 @@ const showing = ({ view = keepersList(alpha), making = { kind: 'idle' }, assigni
   retry: vi.fn(() => Promise.resolve()),
   make: vi.fn(() => Promise.resolve(null)),
   assign: vi.fn(() => Promise.resolve()),
+  talking: talkShowing(talk),
 })
 
 const panelOf = (model: KeepersModel, panel: PanelView = readPanel()) =>
@@ -423,6 +475,8 @@ describe('the Keepers panel', () => {
     ['with a model the server did not find', { assigning: [['alpha', { kind: 'refused', runtimeId: 'rt_sonnet', problem: { kind: 'refused', status: 404, reason: null }, attempts: 1 }]] }],
     ['with an assignment whose answer could not be read', { assigning: [['alpha', { kind: 'unknown', runtimeId: 'rt_sonnet', problem: { kind: 'unreadable' }, attempts: 3 }]] }],
     ['while the browser leaves', { making: { kind: 'leaving' }, assigning: [['alpha', { kind: 'leaving' }]] }],
+    ['with a conversation open', { talk: { kind: 'read', keeperId: 'alpha', conversation: { id: 'cv_1', earlier: 0, turns: [{ message: '안녕', askedAtMs: 1, outcome: { kind: 'answered', text: '네', model: 'claude-sonnet-5', atMs: 2 } }] } } }],
+    ['with a conversation that could not be read', { talk: { kind: 'failed', keeperId: 'alpha', failure: { problem: { kind: 'unreachable' }, attempts: 1 }, next: 'idle' } }],
   ]
   const count = (selector: string) => steps.map(([name, shows]) => {
     const found = panelOf(showing(shows)).querySelectorAll(selector).length
@@ -444,13 +498,14 @@ describe('the Keepers panel', () => {
       'with a make whose answer did not come': 1,
       'with a model the server did not find': 1,
       'with an assignment whose answer could not be read': 1,
+      'with a conversation that could not be read': 1,
     }))
   })
 
   it('has one line a screen reader reads out under the form and in each card with a field, in every step', () => {
     const lines = steps.map(([name, shows]) => {
       const container = panelOf(showing(shows))
-      const found = [container.querySelectorAll('form.keeper-form ~ [role=status]').length, container.querySelectorAll('.row').length, container.querySelectorAll('.row [role=status]').length]
+      const found = [container.querySelectorAll('form.keeper-form ~ [role=status]').length, container.querySelectorAll('.row').length, container.querySelectorAll('.row > [role=status]').length]
       cleanup()
       return [name, found[0] === (shows.view === undefined || shows.view.kind === 'read' ? 1 : 0) && found[1] === found[2]]
     })
@@ -554,16 +609,25 @@ describe('the Keepers panel', () => {
   const nameOf = (element: Element | null): string =>
     (element?.getAttribute('aria-labelledby') ?? '').split(' ').map((id) => document.getElementById(id)?.textContent?.trim() ?? '?').join(' ')
 
-  it('names the field and the button of each card with the card', () => {
-    const container = panelOf(showing({ view: keepersList({ id: 'alpha', runtimeId: null }, { id: 'beta', runtimeId: null }) }))
+  it('opens the conversation of the Keeper of a card from the card', () => {
+    const model = showing({ view: keepersList(alpha, { id: 'beta', runtimeId: null }) })
+    const button = panelOf(model).querySelector<HTMLButtonElement>('[data-home="keeper-title-beta"] button[aria-expanded]')
+    if (button !== null) fireEvent.click(button)
+    expect(vi.mocked(model.talking.open).mock.calls).toEqual([['beta']])
+  })
+
+  it('names the field and the buttons of each card with the card', () => {
+    const talk: TalkView = { kind: 'failed', keeperId: 'alpha', failure: { problem: { kind: 'unreachable' }, attempts: 1 }, next: 'idle' }
+    const container = panelOf(showing({ view: keepersList({ id: 'alpha', runtimeId: null }, { id: 'beta', runtimeId: null }), talk }))
     const names = [...container.querySelectorAll('.row select, .row button')].map(nameOf)
     expect(new Set(names).size).toBe(names.length)
     expect(names.every((one) => !one.includes('?'))).toBe(true)
   })
 
   it('gives each element its own id, whatever the names of the Keepers', async () => {
-    const names = ['x', 'label-x', 'field-x', 'button-x', 'title-x', 'new-title', 'name']
-    const container = panelOf(showing({ view: keepersList(...names.map((id) => ({ id, runtimeId: null }))) }))
+    const names = ['x', 'label-x', 'field-x', 'button-x', 'title-x', 'open-x', 'talk-x', 'said-x', 'new-title', 'name']
+    const conversation = { id: 'cv_1', turns: [], earlier: 0 }
+    const container = panelOf(showing({ view: keepersList(...names.map((id) => ({ id, runtimeId: null }))), talk: { kind: 'read', keeperId: 'x', conversation } }))
     const ids = [...container.querySelectorAll('[id]')].map((one) => one.id)
     expect(ids.length - new Set(ids).size).toBe(0)
     expect(await axe(container)).toHaveNoViolations()

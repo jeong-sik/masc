@@ -555,66 +555,92 @@ let test_extended_redirect_remains_a_current_owner () =
    | _ -> fail "extended redirect must participate in the shared-owner rotation");
   List.iter (check_recoverable base_path) ["aaa"; "bbb"]
 
+(* Each FIFO case runs in a freshly executed copy of this binary, never in a
+   [Unix.fork] copy of the test process. In a full run, earlier cases have
+   already started Eio and its system threads, and the OCaml manual says
+   that after such threads were spawned "the child process might be in a
+   corrupted state" (Unix.fork): the copy keeps only the forking thread and
+   any lock another thread held at that moment. [Unix.create_process] starts
+   a new process image that holds none of that. *)
+type fifo_preflight_child =
+  | Diagnostic_listing
+  | Publication_snapshots
+
+let fifo_preflight_children = [ Diagnostic_listing; Publication_snapshots ]
+
+let fifo_preflight_child_argument = function
+  | Diagnostic_listing -> "diagnostic-listing"
+  | Publication_snapshots -> "publication-snapshots"
+
+let fifo_preflight_child_flag = "--fifo-preflight-child"
+
+(* The alarm is a hang watchdog, not a timing oracle: the child must finish
+   far inside it on any healthy tree, and only a deadlock on the FIFO should
+   ever fire it. Under a loaded CI runner a tight window kills healthy
+   children (see #41159 for the EINTR twin of this flake). *)
+let fifo_watchdog_seconds = 60
+
+let diagnostic_listing_refuses_fifo () =
+  with_workspace (fun base_path ->
+    Unix.mkfifo (Auth.credential_file base_path "fifo") 0o600;
+    match Auth.list_credential_results base_path with
+    | [Error (Auth.Unreadable_credential _)] -> ()
+    | _ -> fail "nonregular diagnostic entry must be unreadable")
+
+let publication_snapshots_refuse_fifo () =
+  List.iter (fun raw_fifo -> with_workspace (fun base_path ->
+    let _pair = seed_pair base_path in
+    let named = Auth.credential_file base_path "aaa" in
+    let raw = Auth.raw_token_file base_path "aaa" in
+    let occupied, counterpart = if raw_fifo then raw, named else named, raw in
+    let previous = occupied ^ ".preserved" in
+    let before = read counterpart in
+    Unix.rename occupied previous; Unix.mkfifo occupied 0o600;
+    check bool "supplied writer refuses special-file preflight" true
+      (Result.is_error (Auth.save_file_backed_raw_token_credential base_path
+        ~agent_name:"aaa" ~role:Masc_domain.Worker ~raw_token:"new-unpublished"));
+    check bool "Keeper refuses special-file preflight" true
+      (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa"));
+    (match rotate base_path with
+     | Error _ when not raw_fifo -> ()
+     | Ok [{Auth.rotated_agents = ("aaa", Error _) :: _; _}] when raw_fifo -> ()
+     | _ -> fail "rotation must report the occupied special-file refusal");
+    check string "counterpart remains unchanged" before (read counterpart);
+    Unix.unlink occupied; Unix.rename previous occupied;
+    let _restored = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
+    check_recoverable base_path "aaa")) [false; true]
+
+let run_fifo_preflight_child child =
+  Sys.set_signal Sys.sigalrm Sys.Signal_default;
+  let _previous_alarm_seconds = Unix.alarm fifo_watchdog_seconds in
+  let body = match child with
+    | Diagnostic_listing -> diagnostic_listing_refuses_fifo
+    | Publication_snapshots -> publication_snapshots_refuse_fifo in
+  match body () with
+  | () -> exit 0
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception exn -> prerr_endline (Printexc.to_string exn); exit 2
+
+let check_fifo_preflight_child child ~contract =
+  let executable = Sys.executable_name in
+  let pid = Unix.create_process executable
+      [| executable; fifo_preflight_child_flag; fifo_preflight_child_argument child |]
+      Unix.stdin Unix.stdout Unix.stderr in
+  let _, status = waitpid_nointr pid in
+  match status with
+  | Unix.WEXITED 0 -> ()
+  | Unix.WSIGNALED signal when Int.equal signal Sys.sigalrm ->
+    failf "watchdog fired: the %s child did not finish within %d s; its output above ends \
+           where it stopped" (fifo_preflight_child_argument child) fifo_watchdog_seconds
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> fail contract
+
 let test_fifo_diagnostic_listing_refuses_without_blocking () =
-  match Unix.fork () with
-  | 0 ->
-    Sys.set_signal Sys.sigalrm Sys.Signal_default;
-    (* The alarm is a hang watchdog, not a timing oracle: the child must
-       finish far inside it on any healthy tree, and only a deadlock on the
-       FIFO should ever fire it. Under a loaded CI runner a tight window
-       kills healthy children and the parent then reports a phantom
-       contract failure (see #41159 for the EINTR twin of this flake). *)
-    let _previous_alarm_seconds = Unix.alarm 60 in
-    (try with_workspace (fun base_path ->
-       Unix.mkfifo (Auth.credential_file base_path "fifo") 0o600;
-       match Auth.list_credential_results base_path with
-       | [Error (Auth.Unreadable_credential _)] -> ()
-       | _ -> fail "nonregular diagnostic entry must be unreadable"); exit 0
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> prerr_endline (Printexc.to_string exn); exit 2)
-  | pid ->
-    let _, status = waitpid_nointr pid in
-    match status with
-    | Unix.WEXITED 0 -> ()
-    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      fail "diagnostic FIFO read must refuse without waiting for a writer"
+  check_fifo_preflight_child Diagnostic_listing
+    ~contract:"diagnostic FIFO read must refuse without waiting for a writer"
 
 let test_publication_fifo_snapshots_refuse_without_blocking () =
-  match Unix.fork () with
-  | 0 ->
-    Sys.set_signal Sys.sigalrm Sys.Signal_default;
-    let _previous_alarm_seconds = Unix.alarm 60 in
-    (try List.iter (fun raw_fifo -> with_workspace (fun base_path ->
-       let _pair = seed_pair base_path in
-       let named = Auth.credential_file base_path "aaa" in
-       let raw = Auth.raw_token_file base_path "aaa" in
-       let occupied, counterpart = if raw_fifo then raw, named else named, raw in
-       let previous = occupied ^ ".preserved" in
-       let before = read counterpart in
-       Unix.rename occupied previous; Unix.mkfifo occupied 0o600;
-       check bool "supplied writer refuses special-file preflight" true
-         (Result.is_error (Auth.save_file_backed_raw_token_credential base_path
-           ~agent_name:"aaa" ~role:Masc_domain.Worker ~raw_token:"new-unpublished"));
-       check bool "Keeper refuses special-file preflight" true
-         (Result.is_error (Auth.ensure_keeper_credential base_path ~agent_name:"aaa"));
-       (match rotate base_path with
-        | Error _ when not raw_fifo -> ()
-        | Ok [{Auth.rotated_agents = ("aaa", Error _) :: _; _}] when raw_fifo -> ()
-        | _ -> fail "rotation must report the occupied special-file refusal");
-       check string "counterpart remains unchanged" before (read counterpart);
-       Unix.unlink occupied; Unix.rename previous occupied;
-       let _restored = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"aaa") in
-       check_recoverable base_path "aaa")) [false; true]; exit 0
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> prerr_endline (Printexc.to_string exn); exit 2)
-  | pid ->
-    let _, status = waitpid_nointr pid in
-    match status with
-    | Unix.WEXITED 0 -> ()
-    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      fail "publication must refuse FIFO paths without waiting for a writer"
+  check_fifo_preflight_child Publication_snapshots
+    ~contract:"publication must refuse FIFO paths without waiting for a writer"
 
 let test_keeper_batch_updates_its_admitted_index () =
   with_workspace @@ fun base_path ->
@@ -800,6 +826,17 @@ let test_minted_bearer_survives_retirement_failure () =
   check bool "cleanup failure remains observable on disk" true (Sys.is_directory target)
 
 let () =
+  match Array.to_list Sys.argv with
+  | _ :: flag :: arguments when String.equal flag fifo_preflight_child_flag ->
+    (match arguments with
+     | [ argument ] ->
+       (match List.find_opt (fun child ->
+            String.equal (fifo_preflight_child_argument child) argument) fifo_preflight_children with
+        | Some child -> run_fifo_preflight_child child
+        | None -> prerr_endline ("unknown FIFO preflight child: " ^ argument); exit 2)
+     | [] | _ :: _ :: _ ->
+       prerr_endline ("expected " ^ fifo_preflight_child_flag ^ " CHILD"); exit 2)
+  | _ ->
   run "auth_token_rotation_transaction"
     [ "rotation",
       [ test_case "Keeper ensure rejects forged foreign UUID before publication" `Quick test_keeper_ensure_refuses_foreign_uuid_before_publication

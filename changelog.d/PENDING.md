@@ -1,0 +1,9 @@
+### Internal
+
+- `test_auth_token_rotation_transaction` runs its two FIFO cases in a freshly
+  executed copy of the test binary instead of a `Unix.fork` copy of the test
+  process. Earlier cases leave that process with Eio system threads, and a
+  forked child keeps any lock those threads held at fork time; on Linux CI
+  the publication case sometimes stopped for the whole 60 s watchdog. When the
+  watchdog fires, the case now says so and names the child, instead of naming
+  the FIFO contract the child had already passed (#42158, #PENDING).

@@ -24,7 +24,10 @@ describe('Keeper Chat tool output failure contract fixture', () => {
     resetToolCallOutputs()
   })
 
-  it('renders hydration-failed and coverage-gap states without silent pending fallback', () => {
+  // The step status reports the exact lookup only (#43920). A failed or
+  // out-of-range bulk refresh shows on the coverage attribute, the timeline
+  // header count and the opened row, while the status dot stays pending.
+  it('shows a failed bulk refresh and a coverage gap beside a pending exact lookup', () => {
     container = document.createElement('div')
     document.body.append(container)
     installToolOutputFailureFixtureStore()
@@ -53,10 +56,10 @@ describe('Keeper Chat tool output failure contract fixture', () => {
     expect(hydrationTool?.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-hydration-failed')
     expect(hydrationTool?.getAttribute('data-chat-trace-entry-id')).toBe('tool-tc-hydration-failed')
     expect(hydrationTool?.getAttribute('data-chat-trace-link-state')).toBe('joined')
-    expect(hydrationTool?.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+    expect(hydrationTool?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(hydrationTool?.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
-    expect(hydrationTool?.querySelector('.chat-block-tstep-status.hydration-failed')).not.toBeNull()
-    expect(hydrationTool?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(hydrationTool?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(hydrationTool?.querySelector('.chat-block-tstep-status.hydration-failed')).toBeNull()
 
     const hydrationToolRow = hydrationTool?.querySelector('.chat-block-tstep-row') as HTMLElement | null
     expect(hydrationToolRow).not.toBeNull()
@@ -82,10 +85,10 @@ describe('Keeper Chat tool output failure contract fixture', () => {
     expect(coverageTool?.getAttribute('data-chat-trace-tool-call-id')).toBe('tc-coverage-gap')
     expect(coverageTool?.getAttribute('data-chat-trace-entry-id')).toBe('tool-tc-coverage-gap')
     expect(coverageTool?.getAttribute('data-chat-trace-link-state')).toBe('joined')
-    expect(coverageTool?.getAttribute('data-chat-trace-output-state')).toBe('coverage-gap')
+    expect(coverageTool?.getAttribute('data-chat-trace-output-state')).toBe('pending')
     expect(coverageTool?.getAttribute('data-chat-trace-output-coverage')).toBe('coverage-gap')
-    expect(coverageTool?.querySelector('.chat-block-tstep-status.coverage-gap')).not.toBeNull()
-    expect(coverageTool?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
+    expect(coverageTool?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
+    expect(coverageTool?.querySelector('.chat-block-tstep-status.coverage-gap')).toBeNull()
     expect(coverageTool?.querySelector('.chat-block-tstep-status.missing')).toBeNull()
 
     const coverageToolRow = coverageTool?.querySelector('.chat-block-tstep-row') as HTMLElement | null

@@ -149,49 +149,50 @@ let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
   Error (Keeper_alerting_path.refusal_of_rejection rej)
 ;;
 
-let project_keeper_logical_path
+(* HIGH-RISK-UNREVIEWED: sandbox path boundary, needs human review.
+   The one place a path a Keeper names becomes a host path (#29964). Read,
+   Grep, Execute, Edit/Write and keeper_code_query all come through here, so
+   the same spelling names the same host location whichever tool receives it:
+   - a Docker Keeper's container-visible absolute path maps to its host mount;
+   - any other absolute path keeps its identity;
+   - a relative path joins [host_cwd] when the tool resolved one, and the
+     Keeper's playground root otherwise.
+   [None] means the caller named nothing; what that means (a required path, or
+   a default cwd) is the tool's to say. The result is not yet confined: every
+   caller hands it to a [Keeper_alerting_path] resolver, which owns the
+   allowed-root check and its typed rejections. *)
+let host_path_of_keeper_visible_path
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      (raw_path : string)
+      ?host_cwd
+      (visible_path : string)
   =
-  let raw_path =
-    String.trim raw_path
-    |> keeper_observation_host_path_of_visible_path ~config ~meta
-  in
-  if String.equal raw_path "" || not (Filename.is_relative raw_path)
-  then raw_path
-  else Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config meta) raw_path
+  match String.trim visible_path with
+  | "" -> None
+  | visible_path ->
+    let host_path =
+      keeper_observation_host_path_of_visible_path ~config ~meta visible_path
+    in
+    if Filename.is_relative host_path
+    then (
+      let base =
+        match host_cwd with
+        | Some host_cwd -> host_cwd
+        | None -> Keeper_sandbox.host_root_abs_of_meta ~config meta
+      in
+      Some (Filename.concat base host_path))
+    else Some host_path
 ;;
 
-let resolve_projected_keeper_read_path
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(raw_for_error : string)
-      ~(projected_path : string)
-  =
-  (* Both path-carrying rejections format their payload straight into the
-     message the keeper reads, and the resolver only ever sees the projected
-     path. Restate them with [raw_for_error] so the diagnostic names the path
-     the model asked for instead of the host-side projection — which is the
-     contract this function's .mli already declares. *)
-  let in_visible_namespace = function
-    | Keeper_alerting_path.Outside_sandbox _ ->
-      Keeper_alerting_path.Outside_sandbox { raw = raw_for_error }
-    | Keeper_alerting_path.Invalid_normalized_path_projection _ ->
-      Keeper_alerting_path.Invalid_normalized_path_projection { path = raw_for_error }
-    | ( Keeper_alerting_path.Path_required
-      | Keeper_alerting_path.Invalid_lexical_endpoint
-      | Keeper_alerting_path.Sandbox_roots_normalized_empty _ ) as carries_no_path ->
-      carries_no_path
-  in
-  match
-    Keeper_alerting_path.resolve_keeper_read_path
+let confine_keeper_visible_path ~config ~meta ?host_cwd ~endpoint ~raw_path () =
+  match host_path_of_keeper_visible_path ~config ~meta ?host_cwd raw_path with
+  | None -> Error Keeper_alerting_path.Path_required
+  | Some host_path ->
+    Keeper_alerting_path.resolve_keeper_confined_path
       ~config
       ~sandbox_roots:(keeper_sandbox_roots ~meta)
-      ~raw_path:projected_path
-  with
-  | Ok path -> Ok path
-  | Error rejection -> user_message_error (in_visible_namespace rejection)
+      ~endpoint
+      ~raw_path:host_path
 ;;
 
 let resolve_keeper_confined_write_path
@@ -200,56 +201,64 @@ let resolve_keeper_confined_write_path
       ~(endpoint : Keeper_alerting_path.confined_path_endpoint)
       ~(raw_path : string)
   =
-  let sandbox_roots = keeper_sandbox_roots ~meta in
-  let projected_path = project_keeper_logical_path ~config ~meta raw_path in
-  match
-    Keeper_alerting_path.resolve_keeper_confined_path
-      ~config
-      ~sandbox_roots
-      ~endpoint
-      ~raw_path:projected_path
-  with
+  match confine_keeper_visible_path ~config ~meta ~endpoint ~raw_path () with
   | Ok confined -> Ok confined
   | Error rejection -> user_message_error rejection
 ;;
-
 
 let resolve_keeper_read_path
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(raw_path : string)
   =
-  let sandbox_roots = keeper_sandbox_roots ~meta in
-  let projected_path = project_keeper_logical_path ~config ~meta raw_path in
   match
-    Keeper_alerting_path.resolve_keeper_read_path
+    confine_keeper_visible_path
       ~config
-      ~sandbox_roots
-      ~raw_path:projected_path
+      ~meta
+      ~endpoint:Keeper_alerting_path.Follow_referent
+      ~raw_path
+      ()
   with
   | Error rejection -> user_message_error rejection
-  | Ok path -> Ok path
+  | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
 ;;
 
-(* These low-level cwd resolvers take concrete host coordinates. Public
-   Execute projects its admitted Keeper's container-visible cwd before this
-   boundary; both spellings are confined to the same owned root here. *)
-let resolve_keeper_read_cwd
+let resolve_keeper_read_path_in_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(host_cwd : string)
       ~(raw_path : string)
   =
-  let sandbox_roots = keeper_sandbox_roots ~meta in
+  (* Both path-carrying rejections format their payload straight into the
+     message the keeper reads, and the confinement only ever sees the host
+     path. Restate them with [raw_path] so the diagnostic names the path the
+     model asked for instead of the host-side projection. *)
+  let in_visible_namespace = function
+    | Keeper_alerting_path.Outside_sandbox _ ->
+      Keeper_alerting_path.Outside_sandbox { raw = raw_path }
+    | Keeper_alerting_path.Invalid_normalized_path_projection _ ->
+      Keeper_alerting_path.Invalid_normalized_path_projection { path = raw_path }
+    | ( Keeper_alerting_path.Path_required
+      | Keeper_alerting_path.Invalid_lexical_endpoint
+      | Keeper_alerting_path.Sandbox_roots_normalized_empty _ ) as carries_no_path ->
+      carries_no_path
+  in
   match
-    Keeper_alerting_path.resolve_keeper_read_path
+    confine_keeper_visible_path
       ~config
-      ~sandbox_roots
-      ~raw_path:(String.trim raw_path)
+      ~meta
+      ~host_cwd
+      ~endpoint:Keeper_alerting_path.Follow_referent
+      ~raw_path
+      ()
   with
-  | Error rejection -> user_message_error rejection
-  | Ok path -> Ok path
+  | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
+  | Error rejection -> user_message_error (in_visible_namespace rejection)
 ;;
 
+(* Execute resolves its cwd through [host_path_of_keeper_visible_path] and, for
+   a remote keeper, its endpoint namespace before this boundary, so what
+   arrives here is a concrete host coordinate to confine. *)
 let resolve_keeper_execute_cwd_typed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)

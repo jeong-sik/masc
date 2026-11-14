@@ -71,13 +71,33 @@ type cwd_existence =
 
 val cwd_existence : meta:Keeper_meta_contract.keeper_meta -> string -> cwd_existence
 
-(** Project a Keeper-visible write path into its deterministic logical
-    namespace and return the opaque allowed-root capability locator. A relative
-    path is rooted at that Keeper's playground; an absolute path, including a
-    Docker-visible path projected to its host mount, keeps its explicit
-    identity. The projected path is then checked against the allowed roots.
-    This is the single owner of relative-path and Docker-visible-path
-    projection for local filesystem writes. *)
+(** HIGH-RISK-UNREVIEWED: sandbox path boundary, needs human review.
+
+    [host_path_of_keeper_visible_path ~config ~meta ?host_cwd path] is the
+    single owner of turning a path a Keeper names into a host path (#29964).
+    Every Keeper tool that takes a path or a cwd resolves it here, so one
+    spelling names one host location whichever tool receives it.
+
+    - A Docker Keeper's container-visible absolute path maps to its host
+      mount; any other absolute path keeps its identity.
+    - A relative path joins [host_cwd] (a host directory this function
+      already returned) when given, and the Keeper's playground root
+      otherwise.
+    - [None] when [path] is blank: the caller named nothing.
+
+    The result is not confined. Pass it to a resolver below, or to
+    {!resolve_keeper_execute_cwd_typed}, before any use. Nothing is created on
+    disk. *)
+val host_path_of_keeper_visible_path
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> ?host_cwd:string
+  -> string
+  -> string option
+
+(** Resolve a Keeper-visible write path through
+    {!host_path_of_keeper_visible_path} and return the opaque allowed-root
+    capability locator, or the typed refusal of the allowed-root check. *)
 val resolve_keeper_confined_write_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -85,7 +105,7 @@ val resolve_keeper_confined_write_path
   -> raw_path:string
   -> (Keeper_alerting_path.confined_path, Keeper_alerting_path.path_refusal) result
 
-(** Resolve a read target using the same deterministic namespace as
+(** Resolve a read target, or a read/search [cwd], using the same namespace as
     {!resolve_keeper_confined_write_path}, without existence inference. *)
 val resolve_keeper_read_path
   :  config:Workspace.config
@@ -93,19 +113,21 @@ val resolve_keeper_read_path
   -> raw_path:string
   -> (string, Keeper_alerting_path.path_refusal) result
 
-(** Resolve a caller-declared [cwd] against the read boundary WITHOUT the
-    logical-path projection: no container-root rewrite and no playground
-    join for relative input, so ambiguous cwd values reach the
-    [path_outside_sandbox] Gate unmodified. *)
-val resolve_keeper_read_cwd
+(** {!resolve_keeper_read_path} for a path given together with a cwd.
+    [host_cwd] is the host directory {!resolve_keeper_read_path} returned for
+    that cwd; a relative [raw_path] reads against it and an absolute one
+    ignores it. A refusal names [raw_path], the path the model asked for. *)
+val resolve_keeper_read_path_in_cwd
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> host_cwd:string
   -> raw_path:string
   -> (string, Keeper_alerting_path.path_refusal) result
 
-(** [resolve_keeper_read_cwd] for the execute/write boundary. The successful
-    result retains the resolver's opaque root-capability witness until the
-    caller verifies it against an Eio directory handle. *)
+(** Confine a concrete host cwd for the execute/write boundary. The caller has
+    already mapped the Keeper's cwd with {!host_path_of_keeper_visible_path}.
+    The successful result retains the resolver's opaque root-capability
+    witness until the caller verifies it against an Eio directory handle. *)
 val resolve_keeper_execute_cwd_typed
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -116,16 +138,6 @@ val verify_keeper_confined_root :
   Keeper_alerting_path.confined_path -> (unit, string) result
 (** Verify the immutable root identity captured by the path resolver against
     the Eio directory capability that will be used by the caller. *)
-
-(** Resolve an already projected host path that came from a
-    Keeper-visible [cwd] + relative [file_path] composition. [raw_for_error]
-    is the model-facing path to keep diagnostics in the visible namespace. *)
-val resolve_projected_keeper_read_path
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> raw_for_error:string
-  -> projected_path:string
-  -> (string, Keeper_alerting_path.path_refusal) result
 
 val keeper_agent_sender : meta:Keeper_meta_contract.keeper_meta -> string
 

@@ -130,19 +130,16 @@ let handle ~config ~meta ~start_time ~args =
     (* The sandbox bounds the question before a language server sees the path,
        and the refusal names the path the Keeper gave (RFC §2). *)
     let resolved =
-      Keeper_alerting_path.resolve_keeper_read_path
-        ~config
-        ~sandbox_roots:(Keeper_alerting_path.sandbox_roots ~meta)
-        ~raw_path
+      Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta ~raw_path
     in
     (match resolved with
-     | Error rejection ->
+     | Error path_refusal ->
        refusal
          ~start_time
          (Printf.sprintf
             "%s: %s"
             raw_path
-            (Keeper_alerting_path.rejection_to_user_message rejection))
+            path_refusal.Keeper_alerting_path.message)
      | Ok path ->
        let prepared =
          let* language = language_of ~path in

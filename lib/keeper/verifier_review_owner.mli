@@ -4,8 +4,9 @@
     ({!Verifier_review_original.t}) is a decision's input, not a record; this
     module stores exactly one original per attempt and reads it back as the
     same value. Wakes restore that attempt. Only a known terminal transient
-    refusal authorizes a linked successor whose input differs solely in its
-    attempt identity; it never overwrites a previous attempt's record.
+    refusal authorizes a linked successor. The successor asks the same
+    question with the lookup authority current when it is prepared; it never
+    overwrites a previous attempt's record.
 
     Storage goes through {!Lane_addon_tool_request_owner}, which persists the
     complete canonical request before any dispatch and reads it back through
@@ -92,15 +93,27 @@ val check_retained : Lane_addon_tool_request_owner.retained -> (unit, string) re
     original's attempt key, and it keeps the tool, request digest and summary
     {!load_for_destination} requires. *)
 
+type next_attempt_error =
+  | Load of load_error
+  | Lookup_unavailable of string
+      (** The current lookup authority, or the prompt rendered from it, could
+          not be prepared for a new attempt. Nothing is allocated. *)
+  | Question_changed
+      (** The current authority asks another question than the parent did. *)
+
 val next_attempt :
   store:store -> verification_id:string -> installation_id:string -> package_id:string ->
-  (int, load_error) result
+  lookup:(unit -> (Verifier_review_original.lookup, string) result) ->
+  (int, next_attempt_error) result
 (** Select the exact retained frontier from the strictly validated durable
     inventory for this verification. Independently bound foreign identities
     are excluded before semantic Original decoding; target failures remain
     errors and never authorize a fresh attempt.
     New identities require a definite typed terminal retry and a durably linked
-    successor preserving the complete frozen input. A wake alone never allocates.
+    successor that asks the parent's question with the lookup authority
+    current at allocation. [lookup] is forced only to allocate a new identity;
+    restoring an intended successor uses its pinned body and never prepares
+    authority. A wake alone never allocates.
     The host holds its workspace process lease and serializes this verification
     through allocation, retain and dispatch. Missing inventory starts at zero;
     unreadable or malformed records never authorize a partial allocation.

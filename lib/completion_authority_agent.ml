@@ -1159,10 +1159,18 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               let* attempt =
                 Verifier_review_owner.next_attempt ~store:owner_store ~verification_id
                   ~installation_id ~package_id
+                  ~lookup:(fun () -> Result.map Verifier_review_original.lookup_of_authority
+                    (prepare_authority ()))
                 |> Result.map_error (function
-                  | Verifier_review_owner.Not_found -> Verifier_review_worker.Original_not_found
-                  | Verifier_review_owner.Load_store_unavailable d -> Verifier_review_worker.Persistence_unavailable d
-                  | Verifier_review_owner.Corrupt_original d -> Verifier_review_worker.Original_corrupt d) in
+                  | Verifier_review_owner.Load Verifier_review_owner.Not_found -> Verifier_review_worker.Original_not_found
+                  | Verifier_review_owner.Load (Verifier_review_owner.Load_store_unavailable d) ->
+                    Verifier_review_worker.Persistence_unavailable d
+                  | Verifier_review_owner.Load (Verifier_review_owner.Corrupt_original d) ->
+                    Verifier_review_worker.Original_corrupt d
+                  | Verifier_review_owner.Lookup_unavailable d -> Verifier_review_worker.Authority_unavailable d
+                  | Verifier_review_owner.Question_changed ->
+                    Verifier_review_worker.Grants_mismatch
+                      "the submitted question changed after the first review attempt") in
               let* () = match Verifier_review_owner.load_for_destination ~store:owner_store
                 ~verification_id ~attempt ~installation_id ~package_id with
               | Ok _ -> Ok ()
@@ -1171,8 +1179,6 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               | Error Verifier_review_owner.Not_found ->
               let* lookup_authority = prepare_authority ()
                 |> Result.map_error (fun detail -> Verifier_review_worker.Authority_unavailable detail) in
-              let lookup_tools = Verification_authority_tools.task_review_tools lookup_authority in
-              let lookup_root = Verification_authority_tools.task_review_root lookup_authority in
               let* original =
                 Verifier_review_original.prepare
                   ~generator_runtime:(Option.map
@@ -1180,10 +1186,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                   ~verification_id
                   ~attempt
                   ~question
-                  ~lookup_root
-                  ~lookup_binding:(Verification_authority_tools.task_review_binding lookup_authority)
-                  ~lookup_schemas:(List.map (fun (s : Types_core.tool_schema) -> s.name)
-                                     (Verification_authority_tools.schemas lookup_tools))
+                  ~lookup:(Verifier_review_original.lookup_of_authority lookup_authority)
                   prepared.review_request
                 |> Result.map_error (fun reason -> Verifier_review_worker.Original_corrupt reason)
               in
@@ -1254,9 +1257,10 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                answered for the intended one. A non-verdict is a no-op
                inside. *)
             let reviewed_request = Verifier_review_original.review_request original in
-            (* The v3 original freezes the generator runtime, not the submitting
-               response identity. The current wake cannot bind that identity to
-               this original, even when both name the same runtime. *)
+            (* The retained original freezes the generator runtime, not the
+               submitting response identity. The current wake cannot bind that
+               identity to this original, even when both name the same
+               runtime. *)
             Eval_calibration.record_verdict
               ~base_path:runtime.config.base_path
               ~task_id:reviewed_request.task_id

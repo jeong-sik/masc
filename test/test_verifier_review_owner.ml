@@ -43,15 +43,20 @@ let sample_question : AR.verdict_question =
 let sample_root : AR.lookup_root = AR.Producer_tree [ "a"; "b" ]
 let sample_schemas = [ "lookup_read" ]
 
+let sample_lookup : V.lookup =
+  { V.granted_root = sample_root
+  ; granted_tools = sample_schemas
+  ; question_digest = String.make 64 'a'
+  ; authority_digest = String.make 64 'b'
+  }
+
 let prepare_original ~request ~verification_id ~attempt =
   match
     V.prepare ~generator_runtime:None
       ~verification_id
       ~attempt
       ~question:sample_question
-      ~lookup_root:sample_root
-      ~lookup_binding:(String.make 64 'a')
-      ~lookup_schemas:sample_schemas
+      ~lookup:sample_lookup
       request
   with
   | Ok original -> original
@@ -199,9 +204,14 @@ let routing_fixture ?(summary_edit=Fun.id) ?(body_edit=Fun.id) ?(supported=false
   request_id,digest
 
 let selected_next store id = O.next_attempt ~store ~verification_id:id ~installation_id:"i" ~package_id:"p"
+  ~lookup:(fun () -> Error "inventory selection must not prepare lookup authority")
 let expect_scope_error = function
   | Error (O.Corrupt_original _ | O.Load_store_unavailable _) -> ()
   | Error O.Not_found | Ok _ -> failwith "unverifiable inventory must not prove absence or a fresh attempt"
+let expect_next_scope_error = function
+  | Error (O.Load (O.Corrupt_original _ | O.Load_store_unavailable _)) -> ()
+  | Error (O.Load O.Not_found | O.Lookup_unavailable _ | O.Question_changed) | Ok _ ->
+    failwith "unverifiable inventory must not prove absence or a fresh attempt"
 
 let test_verification_selection_preserves_unsupported_foreign_original () =
   with_workspace @@ fun base_path ->
@@ -218,7 +228,7 @@ let test_verification_selection_preserves_unsupported_foreign_original () =
   assert (O.pending_commits ~store ~selection:(O.Verification "target") ~terminal_pending:(fun _ -> Ok false)
     ~installation_id:"i" ~package_id:"p"=Ok []);
   expect_scope_error (O.load ~store ~verification_id:"other:attempt-7" ~attempt:0);
-  expect_scope_error (selected_next store "other:attempt-7");
+  expect_next_scope_error (selected_next store "other:attempt-7");
   expect_scope_error (O.retained_commits ~store ~selection:O.All_verifications ~installation_id:"i" ~package_id:"p");
   expect_scope_error (O.pending_commits ~store ~selection:O.All_verifications ~terminal_pending:(fun _ -> Ok false)
     ~installation_id:"i" ~package_id:"p");
@@ -243,14 +253,14 @@ let test_foreign_routing_requires_independent_key_header_and_body () =
     with_workspace @@ fun base_path ->
     let store=tmp_store base_path in
     ignore (routing_fixture ~summary_edit ~body_edit store ~key_id ~summary_id ~body_id ());
-    expect_scope_error (selected_next store "independent")) cases
+    expect_next_scope_error (selected_next store "independent")) cases
 
 let test_target_corruption_and_unreadable_foreign_body_are_not_absence () =
   with_workspace (fun base_path ->
     let store=tmp_store base_path in
     ignore (routing_fixture ~supported:true ~body_edit:(replace_field "generator_runtime" (`String " "))
       store ~key_id:"target" ~summary_id:"target" ~body_id:"target" ());
-    expect_scope_error (selected_next store "target"));
+    expect_next_scope_error (selected_next store "target"));
   List.iter (fun replacement -> with_workspace @@ fun base_path ->
     let store=tmp_store base_path in
     let _,digest=routing_fixture store ~key_id:"foreign" ~summary_id:"foreign" ~body_id:"foreign" () in
@@ -258,7 +268,7 @@ let test_target_corruption_and_unreadable_foreign_body_are_not_absence () =
       (Filename.concat "tool-request-bodies" (Filename.concat (Store.digest fixture_scope) (digest^".json"))) in
     Sys.remove path;
     if replacement then Unix.mkdir path 0o700;
-    expect_scope_error (selected_next store "target")) [false;true]
+    expect_next_scope_error (selected_next store "target")) [false;true]
 
 let test_duplicate_metadata_cannot_hide_a_target () =
   List.iter (fun body_duplicate -> with_workspace @@ fun base_path ->
@@ -282,9 +292,132 @@ let test_duplicate_metadata_cannot_hide_a_target () =
       record |> replace_field "request_digest" (`String request_digest)
         |> replace_field "summary" (replace_field "original_digest" (`String request_digest) summary) in
     ignore (fixture_get (Store.save_tool_request_owner store ~scope:fixture_scope ~request_id record));
-    expect_scope_error (selected_next store "target")) [false;true]
+    expect_next_scope_error (selected_next store "target")) [false;true]
+
+module Progress = Masc.Lane_addon_request_progress
+
+(* The lookup authority current at the next attempt: other tools, another
+   root and another authority digest for the same question. *)
+let current_lookup : V.lookup =
+  { V.granted_root = AR.Producer_namespace { root = "/current" }
+  ; granted_tools = [ "lookup_read"; "lookup_grep" ]
+  ; question_digest = sample_lookup.question_digest
+  ; authority_digest = String.make 64 'c'
+  }
+
+(* A definite execution refusal that names one runtime to review again. *)
+let definite_refusal =
+  let result : AR.review_result =
+    { AR.verdict = None
+    ; evaluator_runtime = "rt-a"
+    ; generator_runtime = None
+    ; evaluator_execution = None
+    ; gate = AR.Evaluator_unavailable
+    ; fallback_reason = Some "the reviewer refused before reporting"
+    ; retryable_runtimes = [ "rt-a" ]
+    ; model_absent_runtimes = []
+    }
+  in
+  `Assoc
+    [ "schema", `String "verifier_review_refusal/v1"
+    ; "certainty", `String "definite"
+    ; "observations", `List [ `Assoc [ "fact", `String "definite_refusal"
+        ; "runtime_id", `String "rt-a"; "error_category", `String "provider" ] ]
+    ; "result", O.result_to_json result
+    ]
+
+let loaded_or_fail = function
+  | Ok value -> value
+  | Error err -> failwith (string_of_load_error err)
+
+let refused_first ~store ~verification_id =
+  let original = make_original ~verification_id ~attempt:0 in
+  (match O.retain ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p" original with
+   | Ok () -> ()
+   | Error err -> failwith ("retain failed: " ^ string_of_retain_error err));
+  let retained = loaded_or_fail
+    (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  ignore (loaded_or_fail (O.advance_events ~store retained
+    [ Progress.Dispatch_intended
+    ; Progress.Refused { stage = Progress.Execution; evidence = definite_refusal } ]));
+  original
+
+let next_with ~lookup store verification_id =
+  O.next_attempt ~store ~verification_id ~installation_id:"i" ~package_id:"p" ~lookup
+
+let must_not_prepare () = Error "restoring an attempt must not prepare lookup authority"
+
+let test_retry_successor_asks_with_current_lookup () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  let parent = refused_first ~store ~verification_id:"vrf-next" in
+  let prepared = ref 0 in
+  let lookup () = incr prepared; Ok current_lookup in
+  assert (next_with ~lookup store "vrf-next" = Ok 1);
+  assert (!prepared = 1);
+  let child = loaded_or_fail (O.load ~store ~verification_id:"vrf-next" ~attempt:1) in
+  assert (V.is_successor_of ~parent child);
+  assert (String.equal (V.question_binding child) (V.question_binding parent));
+  assert (String.equal (V.authority_binding child) current_lookup.authority_digest);
+  assert (V.lookup_schemas child = current_lookup.granted_tools);
+  assert (V.lookup_root child = current_lookup.granted_root);
+  (* the next wake restores attempt 1 without preparing authority again *)
+  assert (next_with ~lookup:must_not_prepare store "vrf-next" = Ok 1)
+
+let test_retry_with_a_changed_question_opens_nothing () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (refused_first ~store ~verification_id:"vrf-moved");
+  let moved = { current_lookup with V.question_digest = String.make 64 'd' } in
+  (match next_with ~lookup:(fun () -> Ok moved) store "vrf-moved" with
+   | Error O.Question_changed -> ()
+   | Ok _ | Error (O.Load _ | O.Lookup_unavailable _) ->
+     failwith "a changed question must not open the next attempt");
+  (match O.load ~store ~verification_id:"vrf-moved" ~attempt:1 with
+   | Error O.Not_found -> ()
+   | Ok _ | Error _ -> failwith "no next attempt may be retained for a changed question");
+  let parent = loaded_or_fail
+    (O.load_retained ~store ~verification_id:"vrf-moved" ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  match Progress.phase (O.progress parent) with
+  | Progress.Rejected { stage = Progress.Execution; _ } -> ()
+  | _ -> failwith "the refused attempt must stay refused"
+
+let test_retry_without_lookup_authority_opens_nothing () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (refused_first ~store ~verification_id:"vrf-down");
+  (match next_with ~lookup:(fun () -> Error "route unavailable") store "vrf-down" with
+   | Error (O.Lookup_unavailable "route unavailable") -> ()
+   | Ok _ | Error (O.Load _ | O.Lookup_unavailable _ | O.Question_changed) ->
+     failwith "unavailable lookup authority must not open the next attempt");
+  match O.load ~store ~verification_id:"vrf-down" ~attempt:1 with
+  | Error O.Not_found -> ()
+  | Ok _ | Error _ -> failwith "no next attempt may be retained without lookup authority"
+
+let test_intended_successor_is_restored_without_preparing_authority () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  let parent = refused_first ~store ~verification_id:"vrf-cut" in
+  (* The process stopped after the parent recorded its successor intent and
+     before the child was retained. *)
+  let child = match V.successor ~lookup:current_lookup parent with
+    | Ok child -> child
+    | Error _ -> failwith "successor fixture failed" in
+  let request_id = fixture_get (O.attempt_request_id ~verification_id:"vrf-cut" ~attempt:1) in
+  let successor = fixture_get
+    (Raw_owner.prepare_successor ~store ~scope:O.scope ~request_id ~request:(V.to_json child)) in
+  let retained = loaded_or_fail
+    (O.load_retained ~store ~verification_id:"vrf-cut" ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  ignore (loaded_or_fail (O.advance ~store retained (Progress.Successor_intended successor)));
+  assert (next_with ~lookup:must_not_prepare store "vrf-cut" = Ok 1);
+  let restored = loaded_or_fail (O.load ~store ~verification_id:"vrf-cut" ~attempt:1) in
+  assert (Yojson.Safe.equal (V.to_json restored) (V.to_json child))
 
 let () =
+  test_retry_successor_asks_with_current_lookup ();
+  test_retry_with_a_changed_question_opens_nothing ();
+  test_retry_without_lookup_authority_opens_nothing ();
+  test_intended_successor_is_restored_without_preparing_authority ();
   test_round_trip ();
   test_retain_is_idempotent ();
   test_different_original_at_same_key_rejected ();

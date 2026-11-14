@@ -791,26 +791,21 @@ let process_step root operation =
         let schema_json (schema : Types_core.tool_schema) =
           `Assoc ["name", `String schema.name; "description", `String schema.description;
             "input_schema", schema.input_schema] in
-        let legacy_review = `Assoc ["purpose", `String "task_review";
-          "subject", Workspace_verification_store.request_header_to_yojson request_header;
-          "base_path", `String base; "ownership_root", `String ownership_root;
+        let legacy_review = `Assoc ["purpose", `String "task_review_authority";
+          "ownership_root", `String ownership_root;
           "route", legacy_route; "read_authority", legacy_identity;
-          "schemas", `List (List.map schema_json (A.schemas (A.task_review_tools old)));
-          "submitted_evidence", `List []] in
+          "schemas", `List (List.map schema_json (A.schemas (A.task_review_tools old)))] in
         let legacy_binding = value (Lane_addon_action.canonical legacy_review)
           |> Yojson.Safe.to_string |> Lane_addon_store.digest in
-        check string "review binding matches the pre-change projection"
-          legacy_binding (A.task_review_binding old);
+        check string "review authority binding matches the pre-change projection"
+          legacy_binding (A.task_review_authority_binding old);
         let request : AR.review_request =
           {task_title="T"; task_description="D"; completion_notes="N"; agent_name=keeper;
            task_id; evidence_refs=[]; evidence_images=[]} in
         let question : AR.verdict_question =
           {completion_contract=None; required_evidence=[]; evidence_posture=AR.Note_only; few_shot_block=""} in
         let original = value (V.prepare ~generator_runtime:None ~verification_id ~attempt:0
-            ~question ~lookup_root:(A.task_review_root old)
-            ~lookup_binding:legacy_binding
-            ~lookup_schemas:(List.map (fun (schema : Types_core.tool_schema) -> schema.name)
-              (A.schemas (A.task_review_tools old))) request) in
+            ~question ~lookup:(V.lookup_of_authority old) request) in
         let store = Lane_addon_store.create
             ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
         (match O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id original with
@@ -854,7 +849,9 @@ let process_step root operation =
             (Yojson.Safe.to_string first_projection) (Yojson.Safe.to_string second_projection);
           let second = authority () in
           check string "reconstructed authority retains the legacy binding"
-            (A.task_review_binding old) (A.task_review_binding second);
+            (A.task_review_authority_binding old) (A.task_review_authority_binding second);
+          check string "reconstructed authority asks the same question"
+            (A.task_review_question_binding old) (A.task_review_question_binding second);
           (* Equality here does not establish which revision the original
              carried; that durable binding gap is tracked separately. *)
           List.iter (fun bytes -> List.iter (fun secret ->
@@ -910,10 +907,7 @@ let process_step root operation =
         let question : AR.verdict_question =
           {completion_contract=None; required_evidence=[]; evidence_posture=AR.Note_only; few_shot_block=""} in
         let original = value (V.prepare ~generator_runtime:None ~verification_id ~attempt:0
-            ~question ~lookup_root:(A.task_review_root old)
-            ~lookup_binding:(A.task_review_binding old)
-            ~lookup_schemas:(List.map (fun (schema : Types_core.tool_schema) -> schema.name)
-              (A.schemas (A.task_review_tools old))) request) in
+            ~question ~lookup:(V.lookup_of_authority old) request) in
         let store = Lane_addon_store.create
             ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
         (match O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id original with
@@ -932,7 +926,9 @@ let process_step root operation =
         let before_requests = request_count () in
         let prepared = authority () in
         check string "guest availability does not change a retained binding"
-          (A.task_review_binding old) (A.task_review_binding prepared);
+          (A.task_review_authority_binding old) (A.task_review_authority_binding prepared);
+        check string "guest availability does not change the question"
+          (A.task_review_question_binding old) (A.task_review_question_binding prepared);
         value (A.validate_task_review old);
         value (A.validate_task_review prepared);
         check int "capture and review admission do not inspect the guest" before_capture (call_count ());

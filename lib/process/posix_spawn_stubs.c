@@ -76,6 +76,9 @@ static void free_strings(char **strings)
 /* masc_posix_spawn executable argv env (cwd_opt, own_group) fds
    fds: (child_fd, parent_fd) list. Equal fds are inherited in place;
    others are dup2'd. Every other descriptor is closed in the child.
+   The mappings are simultaneous: each child descriptor gets what its
+   parent descriptor named when the call was made, in whatever order the
+   list gives them (see promote_sources).
 
    exec closes only what is marked close-on-exec, so neither fork+exec nor
    posix_spawn closes a stray descriptor on its own -- measured 2026-09-07,
@@ -107,6 +110,45 @@ static void free_strings(char **strings)
 
    Returns the child's pid or raises Unix.Unix_error with the errno
    posix_spawn reported. */
+/* posix_spawn applies its file actions one at a time in the child, so an
+   action that writes child descriptor N destroys whatever a later action
+   meant to read from N. A parent descriptor numbered inside the target range
+   is such a source: a process whose fd 0 was closed gets 0 for the next file
+   it opens, and with [0 <- null; 1 <- that file] the child's stdout became
+   /dev/null and it still exited 0 (#47475). A swap [1 <- 2; 2 <- 1] sent
+   both streams to one file the same way.
+
+   Every source at or below the highest target is copied above the highest
+   target first, so no action's target can be another action's source and the
+   order of the list stops mattering. F_DUPFD_CLOEXEC picks the number and
+   sets the flag in one step and never takes a number at or below the
+   minimum, so a concurrent spawn cannot see a temporary standard descriptor
+   and a concurrent exec cannot inherit the copy. The child loses the copies
+   too: they are close-on-exec, and they sit above every target, where
+   POSIX_SPAWN_CLOEXEC_DEFAULT or addclosefrom_np closes them.
+
+   An identity mapping is left alone: it is no dup2 source, and the only
+   action that could overwrite it is a second mapping to the same child
+   descriptor, which no caller writes.
+
+   copies[j] starts at -1 and becomes the copy made for mapping j. The
+   caller closes them once the spawn has returned. Returns 0 or the errno of the failed copy. */
+static int promote_sources(int fd_count, const int *child_fds, int *parent_fds,
+                           int *copies)
+{
+  int highest_target = -1;
+  for (int j = 0; j < fd_count; j++) {
+    if (child_fds[j] > highest_target) highest_target = child_fds[j];
+  }
+  for (int j = 0; j < fd_count; j++) {
+    if (parent_fds[j] == child_fds[j] || parent_fds[j] > highest_target) continue;
+    copies[j] = fcntl(parent_fds[j], F_DUPFD_CLOEXEC, highest_target + 1);
+    if (copies[j] < 0) return errno;
+    parent_fds[j] = copies[j];
+  }
+  return 0;
+}
+
 static value spawn_process(value v_executable, value v_argv, value v_env,
                            value v_options, value v_fds, int search_path)
 {
@@ -133,11 +175,16 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
     child_fds[i] = Int_val(Field(pair, 0));
     parent_fds[i] = Int_val(Field(pair, 1));
   }
+  int *copies = caml_stat_alloc((fd_count + 1) * sizeof(int));
+  for (int j = 0; j < fd_count; j++) copies[j] = -1;
 
   posix_spawn_file_actions_t actions;
   posix_spawnattr_t attr;
   int rc = posix_spawn_file_actions_init(&actions);
   if (rc == 0) rc = posix_spawnattr_init(&attr);
+  /* A failed copy is reported like every other failure of this call, under
+     the spawn's name with its errno (EMFILE when the table is full). */
+  if (rc == 0) rc = promote_sources(fd_count, child_fds, parent_fds, copies);
   if (rc == 0) {
     short flags = POSIX_SPAWN_SETSIGMASK;
 #ifdef POSIX_SPAWN_CLOEXEC_DEFAULT
@@ -228,6 +275,10 @@ static value spawn_process(value v_executable, value v_argv, value v_env,
   posix_spawnattr_destroy(&attr);
   free_strings(argv);
   free_strings(env);
+  for (int j = 0; j < fd_count; j++) {
+    if (copies[j] >= 0) close(copies[j]);
+  }
+  caml_stat_free(copies);
   caml_stat_free(child_fds);
   caml_stat_free(parent_fds);
   if (cwd != NULL) caml_stat_free(cwd);

@@ -3002,6 +3002,7 @@
 (include stanzas/test_play_invite_routes.inc)
 (include stanzas/test_pool_body_limit.inc)
 (include stanzas/test_posix_spawn_process_mgr.inc)
+(include stanzas/test_spawn_descriptor_mapping.inc)
 
 (include stanzas/test_distributed_lock_acquire_failed_counter.inc)
 

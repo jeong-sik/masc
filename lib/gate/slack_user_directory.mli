@@ -35,10 +35,22 @@ val display_label : t -> user_id:string -> string option
     handle). [None] when the lookup failed or no name is usable — callers
     render the raw id. Serves from cache within the TTLs; fetches otherwise. *)
 
-val rewrite_mentions : t -> string -> string
-(** Rewrites [<@U…>] and [<@U…|label>] mention escapes to [@label]. Channel,
-    special and link escapes ([<#…>], [<!…>], [<http…>]) pass through
-    unchanged, as does any mention whose id cannot be resolved. *)
+(** Who the bot's own mention stands for in one message. *)
+type self =
+  | Bot_user_id_unknown
+      (** [auth.test] gave no bot user id, so no mention can be told apart as
+          the bot's own; every mention renders through the directory. *)
+  | Bound_keeper of { bot_user_id : string; keeper_name : string }
+      (** The bot is [bot_user_id] and the message's channel is bound to
+          [keeper_name]. One Slack app can serve channels bound to different
+          Keepers, so the binding, not the app, says who the bot is here. *)
+
+val rewrite_mentions : t -> self:self -> string -> string
+(** Rewrites [<@U…>] and [<@U…|label>] mention escapes to [@label]. A
+    mention whose id equals [self]'s [bot_user_id] renders as
+    [@keeper_name] instead of the bot's Slack name. Channel, special and link
+    escapes ([<#…>], [<!…>], [<http…>]) pass through unchanged, as does any
+    other mention whose id cannot be resolved. *)
 
 val label_of_user_info : Slack_rest_client.user_info_ok -> string option
 (** Display precedence over one [users.info] record, exposed for unit

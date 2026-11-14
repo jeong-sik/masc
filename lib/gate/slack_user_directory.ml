@@ -101,6 +101,20 @@ let display_label t ~user_id =
     store_entry t ~user_id entry;
     (match entry with Label label -> Some label | Fetch_failed -> None)
 
+type self =
+  | Bot_user_id_unknown
+  | Bound_keeper of { bot_user_id : string; keeper_name : string }
+
+(* The bot's own id names the Keeper the channel is bound to, whatever the
+   workspace calls the bot (#28401). Its Slack display name is another name:
+   a Keeper that read "@KinoBot" for itself took it for a different bot and
+   refused the turn. Decided by id equality alone. *)
+let self_label ~self ~user_id =
+  match self with
+  | Bot_user_id_unknown -> None
+  | Bound_keeper { bot_user_id; keeper_name } ->
+    if String.equal user_id bot_user_id then Some keeper_name else None
+
 (* Rewrite Slack mention escapes into plain [@label] text before a message
    reaches keeper prompts and durable transcripts. Only the user-mention
    escape is touched; channel ([<#…>]), special ([<!…>]) and link
@@ -108,7 +122,7 @@ let display_label t ~user_id =
    its exact wire form — lossless, never a guessed name.
    Wire format:
    https://api.slack.com/reference/surfaces/formatting#mentioning-users *)
-let rewrite_mentions t text =
+let rewrite_mentions t ~self text =
   let len = String.length text in
   let buf = Buffer.create len in
   let is_id_char c = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') in
@@ -126,7 +140,12 @@ let rewrite_mentions t text =
       let user_id = String.sub text (i + 2) (id_end - (i + 2)) in
       if id_end < len && text.[id_end] = '>' && String.length user_id >= 2
       then begin
-        (match display_label t ~user_id with
+        let label =
+          match self_label ~self ~user_id with
+          | Some _ as keeper_name -> keeper_name
+          | None -> display_label t ~user_id
+        in
+        (match label with
          | Some label -> Buffer.add_string buf ("@" ^ label)
          | None -> Buffer.add_string buf (String.sub text i (id_end + 1 - i)));
         loop (id_end + 1)
@@ -139,8 +158,12 @@ let rewrite_mentions t text =
                                (String.sub text (id_end + 1)
                                   (close - id_end - 1))
                              <> "" ->
-          Buffer.add_string buf
-            ("@" ^ String.sub text (id_end + 1) (close - id_end - 1));
+          let label =
+            match self_label ~self ~user_id with
+            | Some keeper_name -> keeper_name
+            | None -> String.sub text (id_end + 1) (close - id_end - 1)
+          in
+          Buffer.add_string buf ("@" ^ label);
           loop (close + 1)
         | Some _ | None ->
           Buffer.add_char buf text.[i];

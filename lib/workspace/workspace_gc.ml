@@ -189,7 +189,7 @@ let archive_terminal_tasks config ~days () =
       config
       ~actor:Workspace_hooks.{ kind = "system"; id = "keeper-gc" }
       ~subject:Workspace_hooks.{ kind = "task"; id = t.id }
-      ~kind:"task.restored_from_archive"
+      ~kind:(Event_kind.Task.to_string Event_kind.Task.Restored_from_archive)
       ~payload:(`Assoc [ ("status", `String status) ])
       ~tags:[ "gc"; "self_heal"; "rfc-0220" ]
       ()

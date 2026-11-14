@@ -2138,6 +2138,59 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
       (List.mem 901 (Workspace.read_archive_task_ids config)))
 ;;
 
+(* The restore is reported as one activity event on the task. Readers decode
+   task kinds through [Event_kind.Task.of_string]; a kind written outside that
+   type reaches them as an unknown string (#42832). The wire name stays what
+   stored activity rows already carry. *)
+let test_gc_restore_reports_a_task_kind_readers_parse () =
+  with_test_env (fun config ->
+    let orphan =
+      gc_make_task
+        ~id:"task-905"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = "claude"
+             ; started_at = gc_ancient_ts
+             ; submitted_at = gc_ancient_ts
+             ; verification_id = "verif-905"
+             })
+    in
+    append_archive config [ orphan ];
+    let previous = Atomic.get Workspace_hooks.activity_emit_fn in
+    let emitted = ref [] in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set Workspace_hooks.activity_emit_fn previous)
+      (fun () ->
+         Atomic.set
+           Workspace_hooks.activity_emit_fn
+           (fun _config ~actor:_ ?subject ~kind ~payload:_ ~tags:_ () ->
+              emitted := (subject, kind) :: !emitted);
+         let _ = Workspace.gc config ~days:1 () in
+         ());
+    let task_kinds =
+      List.filter_map
+        (fun (subject, kind) ->
+           match subject with
+           | Some (entity : Workspace_hooks.activity_entity)
+             when String.equal entity.kind "task" && String.equal entity.id "task-905" ->
+             Some kind
+           | Some _ | None -> None)
+        !emitted
+    in
+    Alcotest.(check (list string))
+      "one restore event on the task, under the stored wire name"
+      [ "task.restored_from_archive" ]
+      task_kinds;
+    Alcotest.(check bool)
+      "readers decode the kind as the restore"
+      true
+      (List.for_all
+         (fun kind ->
+            Event_kind.Task.of_string kind = Some Event_kind.Task.Restored_from_archive)
+         task_kinds))
+;;
+
 (* The same GC pass that restores an archive-only non-terminal task must use the
    restored live task set when pruning old messages.  Otherwise the restored
    task survives but its old task-reference message is deleted immediately. *)
@@ -3510,6 +3563,10 @@ let () =
             "restores orphaned non-terminal from archive"
             `Quick
             test_gc_restores_orphaned_nonterminal_from_archive
+        ; Alcotest.test_case
+            "restore reports a task kind readers parse"
+            `Quick
+            test_gc_restore_reports_a_task_kind_readers_parse
         ; Alcotest.test_case
             "restored task preserves old messages same pass"
             `Quick

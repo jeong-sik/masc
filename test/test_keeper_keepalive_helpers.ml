@@ -1595,7 +1595,7 @@ let test_path_rest_follows_the_answer_not_the_cadence () =
   let rest = Keeper_runtime_failure_route.path_rest_sec ~cap_sec:900.0 in
   let floor_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
   let rate_limited = Keeper_runtime_failure_route.Rate_limited in
-  let hard_quota = Keeper_runtime_failure_route.Hard_quota in
+  let hard_quota = (Keeper_runtime_failure_route.Hard_quota Keeper_runtime_failure_route.Provider_quota_refused) in
   check (float 0.001) "a stated 5 s rests 5 s" 5.0
     (rest ~retry_class:rate_limited ~retry_after_hint:(Some 5.0));
   check (float 0.001) "a stated 120 s rests 120 s" 120.0

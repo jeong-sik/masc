@@ -59,7 +59,8 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
     (* NDT-OK: convert the provider's relative reset at observation ingress. *)
     let resets_at = Option.map (fun seconds -> Unix.gettimeofday () +. seconds)
       (Keeper_runtime_failure_route.usable_retry_after retry_after_s) in
-    observe_slot ~resolved ~slot_id (Standing.Hard_quota {resets_at})
+    observe_slot ~resolved ~slot_id
+      (Standing.Hard_quota {source=Runtime_quota_window.Payment_refused; resets_at})
   | Exact.Completion_failed {error; dispatch=Exact.Generation_dispatch_started} ->
     Option.iter
       (fun (runtime : Registry.runtime_observation) ->

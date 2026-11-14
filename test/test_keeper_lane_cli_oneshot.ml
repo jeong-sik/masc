@@ -129,7 +129,7 @@ let test_a_held_only_slot_calls_no_runner () =
         | None -> fail "the official-client fixture runtime must exist"
       in
       let resets_at = Time_compat.now () +. 3600.0 in
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Runtime_instance.quota_scope_of_runtime runtime) ~resets_at;
       let observed = ref [] in
       match
@@ -705,7 +705,7 @@ let test_real_quota_reorders_siblings_and_next_walk () =
       check int "exhausted candidates remain eligible" 2 (List.length failures);
       check (list string) "same-account tail retains declaration order"
         ["A:claude-sonnet-5"; "B"; "B"; "A:claude-sonnet-5"; "A:claude-opus-5-5"] (calls marker);
-      Runtime_quota_window.note_observed_exhausted ~scope:(scope b);
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:(scope b);
       write_file ~path:marker ~perm:0o600 "";
       walk_real ~dir [a1; a2; b] |> require_b;
       check (list string) "all scopes exhausted still try every declared candidate"
@@ -751,7 +751,7 @@ let test_provider_reset_and_success_before_json_validation () =
     check bool "success does not erase provider-stated window" true
       (Runtime_quota_window.is_exhausted ~scope:account ~now:(Time_compat.now ()));
     Runtime_quota_window.reset_for_testing ();
-    Runtime_quota_window.note_observed_exhausted ~scope:account;
+    Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:account;
     (match walk_real ~dir [a1] with
      | Error [Cli_oneshot.Invalid_json_output _] -> ()
      | _ -> fail "transport success must still fail strict domain JSON parsing");
@@ -952,7 +952,7 @@ let test_success_observation_precedes_usage_rebind_and_json () =
     let original = runtime_exn a1 in
     let original_scope = Runtime_instance.quota_scope_of_runtime original in
     seed_candidate original;
-    Runtime_quota_window.note_observed_exhausted ~scope:original_scope;
+    Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:original_scope;
     write_file ~path:claude_cli ~perm:0o700 (claude_script ~marker ~body:(claude_answer "not JSON"));
     (match walk_real ~dir [a1] with
      | Error [Cli_oneshot.Invalid_json_output _] -> ()
@@ -960,7 +960,7 @@ let test_success_observation_precedes_usage_rebind_and_json () =
     check bool "transport answer clears candidate despite JSON rejection" true
       (Option.is_none (candidate_state original));
     seed_candidate original;
-    Runtime_quota_window.note_observed_exhausted ~scope:original_scope;
+    Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:original_scope;
     let replacement_cli = path "replacement-claude" in
     let callbacks = ref 0 in
     let on_usage _ =

@@ -2207,7 +2207,7 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
       let head = runtime "primary.text_model" in
       let lanevision = runtime "lanevision.vision_model" in
       let backupvision = runtime "backupvision.vision_model" in
-      Runtime_quota_window.note_observed_exhausted
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Runtime_instance.quota_scope_of_runtime lanevision);
       let now = Unix.gettimeofday () in
       let candidates_at now =
@@ -2318,7 +2318,7 @@ let test_media_turn_starts_from_the_live_walk_head () =
       let assigned = runtime "lanevision.vision_model" in
       let text_only = runtime "primary.text_model" in
       let backupvision = runtime "backupvision.vision_model" in
-      Runtime_quota_window.note_observed_exhausted
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Runtime_instance.quota_scope_of_runtime assigned);
       let image_block =
         Agent_core.Types.Image
@@ -2389,13 +2389,13 @@ let test_image_turn_degrades_while_its_capable_candidate_rests () =
       , Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec )
     ; ( "dated quota window"
       , (fun (runtime : Runtime_instance.t) ->
-          Runtime_quota_window.note_exhausted
+          Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
             ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
             ~resets_at:(Unix.gettimeofday () +. stated_sec))
       , stated_sec )
     ; ( "quota observation"
       , (fun (runtime : Runtime_instance.t) ->
-          Runtime_quota_window.note_observed_exhausted
+          Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
             ~scope:(Runtime_instance.quota_scope_of_runtime runtime))
       , Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec )
     ]
@@ -3512,7 +3512,7 @@ let test_an_empty_completion_clears_stale_unavailability_evidence () =
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:runtime.candidate_backpressure ~retry_after:None;
       let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
-      Runtime_quota_window.note_observed_exhausted ~scope;
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
       let error =
         Agent_core.Error.Provider
           (Llm_provider.Error.EmptyCompletion
@@ -3693,7 +3693,7 @@ let refused_walk_case ~toml ~usages_body ~refusal check =
     and sibling = "shared_b.test_model"
     and refused = "other.test_model" in
     let lane = [ head; sibling; refused ] in
-    Runtime_quota_window.note_observed_exhausted
+    Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
       ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head));
     Alcotest.(check (list string)) "the unmarked last candidate leads while the heads rest"
       [ refused; head; sibling ] (backpressure_order lane);
@@ -3884,7 +3884,7 @@ let test_the_rest_that_ends_last_names_who_set_the_release () =
            let runtime = Option.get (Runtime.get_runtime_by_id id) in
            Runtime_candidate_backpressure.note_rate_limit
              ~candidate:runtime.candidate_backpressure ~retry_after:(Some stated_sec);
-           Runtime_quota_window.note_observed_exhausted
+           Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id));
            match Driver.path_rest ~now:(Unix.gettimeofday ()) id with
            | Driver.Path_resting { release_basis; release_at = _ } ->
@@ -3957,7 +3957,7 @@ let with_glm_refusing_behind_a_resting_head f =
     let head = "shared_a.test_model" and glm = "other.test_model" in
     let now = Unix.gettimeofday () in
     let glm_resets_at = Float.round (now +. 976.0) in
-    Runtime_quota_window.note_exhausted
+    Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
       ~scope:(Option.get (Runtime.quota_scope_of_runtime_id head))
       ~resets_at:(now +. (3.0 *. 86400.0));
     let refusal = glm_spent_window_refusal () in
@@ -3986,7 +3986,7 @@ let with_glm_refusing_behind_a_resting_head f =
 
 let hard_quota_without_a_reset =
   Keeper_runtime_failure_route.Retry_after_observed
-    { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = None }
+    { retry_class = (Keeper_runtime_failure_route.Hard_quota Keeper_runtime_failure_route.Provider_quota_refused); retry_after = None }
 ;;
 
 let quota_lane_wait ~now =
@@ -4289,7 +4289,7 @@ let test_a_yield_before_the_first_token_clears_no_evidence () =
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:runtime.candidate_backpressure ~retry_after:None;
       let scope = Option.get (Runtime.quota_scope_of_runtime_id id) in
-      Runtime_quota_window.note_observed_exhausted ~scope;
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
       let (_ : (unit, Agent_core.Error.t) result) =
         walk_once ~provider_answered:(fun () -> false) (fun _ -> Ok ()) [id]
       in
@@ -4311,7 +4311,7 @@ let test_a_path_that_only_failed_walks_before_one_told_to_rest () =
     reset_quota_lane_rests ();
     Fun.protect ~finally:reset_quota_lane_rests (fun () ->
       let resting = "shared_a.test_model" and failed = "other.test_model" in
-      Runtime_quota_window.note_observed_exhausted
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id resting));
       Runtime_candidate_backpressure.note_failed_attempt
         ~candidate:(quota_lane_candidate failed)
@@ -4457,7 +4457,7 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       Alcotest.(check string) "a resting head waits for the earliest promoted release"
         "resting shared_b.test_model for 120s (stated_by_provider)"
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)));
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 30.);
       Alcotest.(check string) "a stated quota reset is a release too"
@@ -4512,7 +4512,7 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       reset_quota_lane_rests ();
       List.iter
         (fun id ->
-           Runtime_quota_window.note_exhausted
+           Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
              ~resets_at:(now +. 60.))
         both_shared;
@@ -4544,7 +4544,7 @@ let test_provider_resets_outlive_the_fallback_cap () =
       let head = "shared_a.test_model" and next = "other.test_model" in
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate head) ~retry_after:(Some (cap +. 7200.));
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id next))
         ~resets_at:(now +. cap +. 3600.);
       let suffix = quota_lane_suffix [head; next] in
@@ -4605,7 +4605,7 @@ let test_the_list_row_says_resting_when_every_path_is_out_of_quota () =
       let now = Unix.gettimeofday () in
       List.iter
         (fun id ->
-           Runtime_quota_window.note_exhausted
+           Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id))
              ~resets_at:(now +. 600.))
         [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
@@ -4627,7 +4627,7 @@ let test_an_undated_quota_row_does_not_move_between_reads () =
       let now = Unix.gettimeofday () in
       List.iter
         (fun id ->
-           Runtime_quota_window.note_observed_exhausted
+           Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused
              ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id)))
         [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ];
       let first = quota_lane_path_rest ~now in
@@ -4663,7 +4663,7 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
         ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 600.);
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 900.);
       let floor = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
@@ -4671,7 +4671,7 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
         (Printf.sprintf "wait %.0fs for shared_b.test_model" floor)
         (decide ());
       let last_quota = Keeper_runtime_failure_route.Retry_after_observed
-        {retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = Some 3600.} in
+        {retry_class = (Keeper_runtime_failure_route.Hard_quota Keeper_runtime_failure_route.Provider_quota_refused); retry_after = Some 3600.} in
       Alcotest.(check string) "last candidate quota cannot outlast the next walk's release"
         (Printf.sprintf "wait %.0fs for shared_b.test_model" floor)
         (describe_dispatch ~now
@@ -4711,7 +4711,7 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
       in
       Alcotest.(check string) "a fenced failure on a serving path keeps ordinary cadence"
         "no provider wait" (decide ~now);
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 88441.0);
       Alcotest.(check string) "a fenced failure waits for the quota its attempt recorded"
@@ -4742,7 +4742,7 @@ let test_a_fenced_failure_waits_for_the_rest_its_attempt_recorded () =
 let test_a_dated_quota_refusal_is_a_rest () =
   let hard_quota retry_after =
     Keeper_runtime_failure_route.Retry_after_observed
-      { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after }
+      { retry_class = (Keeper_runtime_failure_route.Hard_quota Keeper_runtime_failure_route.Provider_quota_refused); retry_after }
   in
   let describe_rest ~now = function
     | None -> "no rest"
@@ -4777,7 +4777,7 @@ let test_a_dated_quota_refusal_is_a_rest () =
               { retry_class = Keeper_runtime_failure_route.Rate_limited
               ; retry_after = Some 3600.
               }));
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 7200.);
       Alcotest.(check string) "the rest is the walk's later release when its path records one"
@@ -5305,7 +5305,7 @@ let test_deferred_quota_order_is_frozen_before_predispatch () =
          let shared_scope =
            Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
          in
-         Runtime_quota_window.note_exhausted
+         Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
            ~scope:shared_scope
            ~resets_at:500.0;
          let hint =
@@ -5351,7 +5351,7 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
          let shared_scope =
            Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
          in
-         Runtime_quota_window.note_exhausted
+         Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
            ~scope:shared_scope
            ~resets_at:(Unix.gettimeofday () +. 300.0);
          Eio_main.run
@@ -5523,13 +5523,13 @@ let test_a_resting_hint_path_does_not_hold_a_serving_lane_candidate () =
     Runtime_quota_window.reset_for_testing ();
     Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
       let now = Unix.gettimeofday () in
-      Runtime_quota_window.note_exhausted
+      Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "acct_b.test_model"))
         ~resets_at:(now +. 88441.0);
       let hint = three_account_hint () in
       let hard_quota =
         Keeper_runtime_failure_route.Retry_after_observed
-          { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = Some 88441.0 }
+          { retry_class = (Keeper_runtime_failure_route.Hard_quota Keeper_runtime_failure_route.Provider_quota_refused); retry_after = Some 88441.0 }
       in
       Alcotest.(check string) "the failed cycle does not wait for the resting hint path"
         "dispatch acct_c.test_model"
@@ -5657,7 +5657,7 @@ let test_official_client_does_not_inherit_registry_api_key_scope () =
              ~provider_id:"openai"
              (Some (Runtime_schema.Env "OPENAI_API_KEY"))
          in
-         Runtime_quota_window.note_exhausted
+         Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
            ~scope:official_scope
            ~resets_at:500.0;
          Alcotest.(check (option (float 0.0)))

@@ -2657,7 +2657,7 @@ let read_after_spent_usage_refusal ~provider_id read_result =
         let codex =
           ({ cli_path = path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 2.0 } : Runtime_execution.codex_app_server)
         in
-        Runtime_quota_window.note_observed_exhausted ~scope;
+        Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
         Eio.Switch.run (fun root_sw ->
           Eio_context.set_switch root_sw;
           check bool "the refusal starts a read" true

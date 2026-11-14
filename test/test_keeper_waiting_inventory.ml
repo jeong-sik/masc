@@ -905,7 +905,7 @@ let spend_quota runtime_id ~resets_at =
   match Runtime.get_runtime_by_id runtime_id with
   | None -> fail ("runtime not loaded: " ^ runtime_id)
   | Some runtime ->
-    Runtime_quota_window.note_exhausted
+    Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
       ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
       ~resets_at
 ;;

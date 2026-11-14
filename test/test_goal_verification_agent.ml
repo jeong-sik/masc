@@ -2267,7 +2267,7 @@ tools-support = true
   Eio_mock.Clock.set_time clock started;
   (* What the provider walk records for this refusal ([note_quota]). *)
   Runtime_quota_window.reset_for_testing ();
-  Runtime_quota_window.note_exhausted
+  Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
     ~scope:(Option.get (Runtime.quota_scope_of_runtime_id slot))
     ~resets_at:(started +. rest_sec);
   let refusal =

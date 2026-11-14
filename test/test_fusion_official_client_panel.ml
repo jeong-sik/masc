@@ -1632,12 +1632,12 @@ let test_a_claude_throttle_is_not_a_spent_quota () =
     (standing
        (Runtime_claude_code.Quota_spent
           { resets_at = Some 1786356000; windows = [ Runtime_claude_code.Named_window "seven_day" ] })
-     = Runtime_candidate_standing.Hard_quota { resets_at = Some 1786356000. });
+     = Runtime_candidate_standing.Hard_quota { source = Runtime_quota_window.Provider_quota_refused; resets_at = Some 1786356000. });
   check bool "a spent window with no reset is a hard quota with no time" true
     (standing
        (Runtime_claude_code.Quota_spent
           { resets_at = None; windows = [ Runtime_claude_code.Unnamed_window ] })
-     = Runtime_candidate_standing.Hard_quota { resets_at = None });
+     = Runtime_candidate_standing.Hard_quota { source = Runtime_quota_window.Provider_quota_refused; resets_at = None });
   check bool "a throttle is a rate limit with no stated wait" true
     (standing Runtime_claude_code.Rate_throttled
      = Runtime_candidate_standing.Rate_limited { retry_after = None })

@@ -127,8 +127,6 @@ type record =
 type t
 type active_run
 
-exception Trace_error of Error.t
-
 val safe_name : string -> string
 val record_type_to_string : record_type -> string
 val record_type_of_string : string -> (record_type, Error.t) result
@@ -233,5 +231,4 @@ val finish_run
   -> error:string option
   -> (run_ref, Error.t) result
 
-val raise_if_error : ('a, Error.t) result -> unit
 val active_run_id : active_run -> string

@@ -142,8 +142,6 @@ type active_run =
   ; redact_secrets : bool
   }
 
-exception Trace_error of Error.t
-
 (* v4 is a hard cut: assistant reasoning remains metadata-only at every
    nesting depth, and native provider-step identity is now typed. Earlier rows
    are not migrated or rewritten and the exact-version decoder rejects them. *)
@@ -894,11 +892,6 @@ let finish_run
   Eio.Mutex.use_rw ~protect:true active.sink.lock (fun () ->
     active.sink.last_run <- Some run_ref);
   Ok run_ref
-;;
-
-let raise_if_error : type a. (a, Error.t) result -> unit = function
-  | Ok _ -> ()
-  | Error err -> raise (Trace_error err)
 ;;
 
 let active_run_id (active : active_run) = active.worker_run_id

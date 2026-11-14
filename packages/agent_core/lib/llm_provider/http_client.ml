@@ -17,6 +17,7 @@ let is_success_status status = status >= 200 && status < 300
 type network_error_kind =
   | Connection_refused
   | Dns_failure
+  | Unreachable
   | Tls_error
   | Timeout
   | Local_resource_exhaustion
@@ -345,17 +346,17 @@ let classify_unix_error = function
   | Unix.ECONNRESET -> Connection_reset
   | Unix.EPIPE -> End_of_file
   | Unix.ETIMEDOUT -> Timeout
-  | Unix.ENETUNREACH -> Dns_failure
-  | Unix.EHOSTUNREACH -> Dns_failure
+  | Unix.ENETUNREACH | Unix.EHOSTUNREACH | Unix.ENETDOWN | Unix.EHOSTDOWN -> Unreachable
   | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS -> Local_resource_exhaustion
   | Unix.EADDRNOTAVAIL -> Local_resource_exhaustion
-  | (Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.ENETDOWN | Unix.ENETRESET | Unix.ECONNABORTED | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.EHOSTDOWN | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _) as unclassified_unix_error -> let (_ : Unix.error) = unclassified_unix_error in
+  | (Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.ENETRESET | Unix.ECONNABORTED | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _) as unclassified_unix_error -> let (_ : Unix.error) = unclassified_unix_error in
     Unknown
 ;;
 
 let network_error_kind_to_string = function
   | Connection_refused -> "connection_refused"
   | Dns_failure -> "dns_failure"
+  | Unreachable -> "unreachable"
   | Tls_error -> "tls_error"
   | Timeout -> "timeout"
   | Local_resource_exhaustion -> "local_resource_exhaustion"
@@ -367,6 +368,7 @@ let network_error_kind_to_string = function
 let network_error_kind_of_string = function
   | "connection_refused" -> Some Connection_refused
   | "dns_failure" -> Some Dns_failure
+  | "unreachable" -> Some Unreachable
   | "tls_error" -> Some Tls_error
   | "timeout" -> Some Timeout
   | "local_resource_exhaustion" -> Some Local_resource_exhaustion
@@ -382,6 +384,7 @@ let%test "network_error_kind: every kind reads back from its own spelling" =
   let (_ : network_error_kind -> unit) = function
     | Connection_refused
     | Dns_failure
+    | Unreachable
     | Tls_error
     | Timeout
     | Local_resource_exhaustion
@@ -392,6 +395,7 @@ let%test "network_error_kind: every kind reads back from its own spelling" =
   let every_kind =
     [ Connection_refused
     ; Dns_failure
+    ; Unreachable
     ; Tls_error
     ; Timeout
     ; Local_resource_exhaustion
@@ -478,6 +482,7 @@ let known_network_error_kind = function
   | Unknown -> None
   | ( Connection_refused
     | Dns_failure
+    | Unreachable
     | Tls_error
     | Timeout
     | Local_resource_exhaustion
@@ -490,7 +495,8 @@ let known_network_error_kind = function
    This mirrors the severity ordering rather than the retry policy itself. *)
 let network_error_kind_is_non_retryable = function
   | Local_resource_exhaustion | Tls_error -> true
-  | Connection_refused | Dns_failure | Timeout | Connection_reset | End_of_file | Unknown ->
+  | Connection_refused | Dns_failure | Unreachable | Timeout | Connection_reset | End_of_file
+  | Unknown ->
     false
 ;;
 
@@ -745,6 +751,7 @@ let%test "prepare_sync_request rejects missing host before dispatch" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -768,6 +775,7 @@ let%test "prepare_sync_request rejects unsupported schemes before dispatch" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -1033,6 +1041,7 @@ let backend_named_peer_close backend =
   | Some
       ( Connection_refused
       | Dns_failure
+      | Unreachable
       | Tls_error
       | Timeout
       | Local_resource_exhaustion
@@ -1046,6 +1055,7 @@ let transport_named_peer_close = function
      | Connection_reset | End_of_file -> true
      | Connection_refused
      | Dns_failure
+     | Unreachable
      | Tls_error
      | Timeout
      | Local_resource_exhaustion
@@ -2920,6 +2930,7 @@ let%test "catch_network maps End_of_file to NetworkError with kind" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -2971,6 +2982,7 @@ let%test "catch_network classifies Unix ECONNREFUSED" =
           { message = _
           ; kind =
               ( Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -2997,6 +3009,7 @@ let%test "catch_network classifies Unix ETIMEDOUT" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Local_resource_exhaustion
               | Connection_reset
@@ -3035,12 +3048,12 @@ let%test "classify_unix_error: ECONNRESET is Connection_reset" =
   classify_unix_error Unix.ECONNRESET = Connection_reset
 ;;
 
-let%test "classify_unix_error: ENETUNREACH is Dns_failure" =
-  classify_unix_error Unix.ENETUNREACH = Dns_failure
-;;
-
-let%test "classify_unix_error: EHOSTUNREACH is Dns_failure" =
-  classify_unix_error Unix.EHOSTUNREACH = Dns_failure
+(* No route to the network or host is not a name-lookup failure: connect
+   raises these after the name resolved (#52045). *)
+let%test "classify_unix_error: every no-route errno is Unreachable" =
+  List.for_all
+    (fun code -> classify_unix_error code = Unreachable)
+    [ Unix.ENETUNREACH; Unix.EHOSTUNREACH; Unix.ENETDOWN; Unix.EHOSTDOWN ]
 ;;
 
 let%test "oversized response is typed without draining" =
@@ -3089,6 +3102,7 @@ let%test "classify_network_exn: typed Eio refused" =
           { message = _
           ; kind =
               ( Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -3111,6 +3125,7 @@ let%test "classify_network_exn: typed Eio timeout" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Local_resource_exhaustion
               | Connection_reset
@@ -3132,6 +3147,7 @@ let%test "classify_network_exn: typed Eio Unix backend resource exhaustion" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Connection_reset
@@ -3169,6 +3185,7 @@ let%test "classify_network_exn: plain Tls_alert is Tls_error" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Timeout
               | Local_resource_exhaustion
               | Connection_reset
@@ -3187,6 +3204,7 @@ let%test "classify_network_exn: plain Tls_failure is Tls_error" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Timeout
               | Local_resource_exhaustion
               | Connection_reset
@@ -3219,6 +3237,7 @@ let%test "classify_network_exn: unknown backend printer text does not classify" 
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -3256,6 +3275,7 @@ let%test "classify_network_exn: Multiple_io prefers non-retryable kind" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Connection_reset
@@ -3280,6 +3300,7 @@ let%test "classify_network_exn: Multiple_io falls back to first known kind" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -3304,9 +3325,38 @@ let%test "classify_network_exn: Multiple_io keeps a leading reset as a known kin
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
+  | Some (ProviderTerminal _ | ProviderFailure _)
+  | None -> false
+;;
+
+(* ENETDOWN read as Unknown until #52045, and a composite dropped it. It now
+   names a missing route, so a leading one is the first known kind and wins
+   over a later reset, as any known kind does. *)
+let%test "classify_network_exn: Multiple_io keeps a leading no-route errno as a known kind" =
+  match
+    classify_network_exn
+      (multiple_io_exn
+         [ Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETDOWN, "connect", ""))
+         ; Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNRESET, "read", ""))
+         ])
+  with
+  | Some (NetworkError { kind = Unreachable; _ }) -> true
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
               | End_of_file
               | Unknown )
           } | TimeoutError _ | AcceptRejected _)
@@ -3327,6 +3377,7 @@ let%test "classify_network_exn: Multiple_io does not prefer a reset over a refus
           { message = _
           ; kind =
               ( Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion

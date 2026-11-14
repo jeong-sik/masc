@@ -3685,7 +3685,7 @@ let connection_recovery_sequence ~same_run_retry_authorized ~on_reconnect
       | Some (Llm_provider.Http_client.NetworkError
           { kind = (Connection_reset | End_of_file) as kind; _ }) -> Some kind
       | Some (Llm_provider.Http_client.NetworkError
-          { kind = (Connection_refused | Dns_failure | Tls_error | Timeout
+          { kind = (Connection_refused | Dns_failure | Unreachable | Tls_error | Timeout
                    | Local_resource_exhaustion | Unknown); _ })
       | Some (HttpError _ | TimeoutError _ | AcceptRejected _ | ProviderTerminal _
              | ProviderFailure _)

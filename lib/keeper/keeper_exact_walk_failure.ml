@@ -91,7 +91,7 @@ type stop =
 [@@deriving yojson]
 
 type network =
-  | Connection_refused | Dns_failure | Tls_error | Network_timeout
+  | Connection_refused | Dns_failure | Unreachable | Tls_error | Network_timeout
   | Local_resource_exhaustion | Connection_reset | End_of_file | Unknown_network
 [@@deriving yojson]
 
@@ -121,7 +121,8 @@ let stop = function
 let completion (error : Http_client.http_error) = match error with
   | HttpError _ -> Http_failure
   | NetworkError {kind;_} -> Network_failure (match kind with
-      | Connection_refused -> Connection_refused | Dns_failure -> Dns_failure | Tls_error -> Tls_error
+      | Connection_refused -> Connection_refused | Dns_failure -> Dns_failure
+      | Unreachable -> Unreachable | Tls_error -> Tls_error
       | Timeout -> Network_timeout | Local_resource_exhaustion -> Local_resource_exhaustion
       | Connection_reset -> Connection_reset | End_of_file -> End_of_file | Unknown -> Unknown_network)
   | TimeoutError {phase;_} -> Deadline phase

@@ -4727,9 +4727,27 @@ let render_keeper_message (state : state) =
       status_frame.kmsf_interrupt_rows;
     (match state.msg_loaded_error with
      | Some _ ->
-         box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
-           (ui_text state ~ko:"  대화 기록 조회 실패 · /errors"
-              ~en:"  History load failed · /errors")
+         (* A failed read leaves the owed read Waiting on its backoff, so the
+            next attempt is already scheduled; say so next to the pointer to
+            [/errors]. *)
+         let retrying =
+           match state.msg_history_owed with
+           | Some owed -> (
+               match owed.kho_read with
+               | Masc_tui_owed_read.Waiting _ -> true
+               | _ -> false)
+           | None -> false
+         in
+         if retrying then
+           box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+             (ui_text state
+                ~ko:"  대화 기록 조회 실패 · 재시도 예정 · /errors"
+                ~en:"  History load failed · retrying · /errors")
+         else
+           box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
+             (ui_text state
+                ~ko:"  대화 기록 조회 실패 · /errors"
+                ~en:"  History load failed · /errors")
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())

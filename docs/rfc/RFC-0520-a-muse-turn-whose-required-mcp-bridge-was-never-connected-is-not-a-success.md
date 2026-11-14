@@ -49,16 +49,18 @@ bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting
 |---|---|---|
 | 없음 (dynamic tool 0개) | 해당 없음 | 지금과 같다 |
 | 있음 | `Ready` | 지금과 같다 |
-| 있음 | `Awaiting_initialize` | 실패 `Session_mcp_not_connected` |
-| 있음 | `Awaiting_initialized` | 실패 `Session_mcp_not_connected` |
+| 있음 | `Awaiting_initialize` | 실패 `session_mcp_not_connected` |
+| 있음 | `Awaiting_initialized` | 실패 `session_mcp_not_connected` |
 
-실패는 닫힌 타입으로 둔다. 문장을 읽어 분류하지 않는다. 단계 값을 실패에 싣는다.
+실패는 `Agent_core.Error.Provider (ProviderReportedError { error_type = Some "session_mcp_not_connected"; _ })` 로 낸다. `session_approval_mode_mismatch` 가 쓰는 것과 같은 그릇이다. `error_type` 은 MASC 가 붙이는 상수이고, host 의 문장을 읽어 만들지 않는다. 단계 값은 `detail` 에 싣는다.
+
+이 종류는 lane 에서 `ProviderFailure` 로 읽힌다(`keeper_runtime_attempt.ml`). 턴이 한 일이 없다고 판정되면 같은 턴 안에서 다음 후보로 넘어간다. 다음 후보가 그 턴을 다시 돈다.
 
 판정 시점은 턴이 끝난 뒤다. host 는 세션 시작 응답 뒤에 비동기로 접속한다(1.4.18 탐침: 응답 시점 요청 0건, 6초 뒤 `initialize`·`notifications/initialized`·`tools/list`). 턴이 끝났는데도 `Ready` 가 아니면 그 턴의 모델은 MASC 도구 목록을 받지 못했다.
 
 ### D3. 실패한 턴이 한 일은 RFC-0509 판정을 따른다
 
-`Session_mcp_not_connected` 는 요청이 나간 뒤의 실패다. 모델이 돌았고 native 도구가 움직였을 수 있다. 효과 판정은 지금의 durable item 판정을 그대로 쓴다. 새 판정 규칙을 더하지 않는다.
+`session_mcp_not_connected` 는 요청이 나간 뒤의 실패다. 모델이 돌았고 native 도구가 움직였을 수 있다. 효과 판정은 지금의 durable item 판정을 그대로 쓴다. 새 판정 규칙을 더하지 않는다.
 
 `Agent_core.Error.Config (InvalidConfig _)` 로 만들지 않는다. `provider_attempt_dispatch` 는 요청이 나가지 않은 `InvalidConfig` 를 `Rejected_before_dispatch` 로 읽는다(`keeper_turn_driver.ml`). 이 실패는 요청이 나간 뒤라 그 뜻과 맞지 않는다.
 
@@ -77,24 +79,27 @@ bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting
 
 ## 4. 운영자에게 보이는 변화
 
-- Muse 가 MASC 도구에 접속하지 못한 턴은 성공 대신 `Session_mcp_not_connected` 로 기록된다.
+- Muse 가 MASC 도구에 접속하지 못한 턴은 성공 대신 `session_mcp_not_connected` 로 기록된다. 턴이 한 일이 없으면 lane 의 다음 후보가 그 턴을 맡는다.
 - `docker` Keeper 와 `native = "full"` 세션은 #51961 뒤에도 신뢰 없이 뜬다. 이 RFC 뒤에는 그 턴이 실패로 보인다.
 - 지금 fleet(Keeper 29개, 전부 `microvm`·`remote_ssh`, native 읽기 전용)은 #51961 로 접속이 되므로 결과가 달라지지 않는다.
 
 ## 5. 알려진 한계와 열린 질문
 
 1. **토큰은 한 번 쓰인다.** 판정이 턴 뒤라 그 턴의 모델 호출은 이미 끝났다. 이 RFC 는 잘못된 성공 기록을 없애고, 낭비를 막지는 못한다.
-2. **같은 실패가 턴마다 되풀이되는지 모른다.** `Session_mcp_not_connected` 뒤에 lane 이 다음 턴에도 같은 Muse runtime 을 먼저 부르면 턴마다 토큰을 쓴다. 이 실패를 runtime 을 쉬게 하는 종류로 둘지는 lane 의 후보 진행 코드를 읽고 정한다. 구현 층을 열기 전에 닫아야 하는 질문이다.
+2. **같은 실패가 턴마다 되풀이된다.** 턴을 넘어 후보를 쉬게 하는 장치는 둘뿐이다. quota 창(`Runtime_quota_window`, `HardQuota`·402 가 쓴다)과 rate limit backpressure(429 가 쓴다)다. `ProviderReportedError` 는 아무것도 남기지 않는다(`keeper_turn_driver.ml` 의 `Provider_reported_failure` 경로). 그래서 다음 턴도 같은 Muse runtime 을 먼저 부르고, 턴마다 Muse 한 턴의 토큰을 쓴 뒤 다음 후보로 넘어간다. 로그인이 풀린 계정(`AuthError`)도 지금 같은 식으로 턴마다 다시 불린다.
+   이 RFC 는 새 「쉬게 하는 상태」를 더하지 않는다. quota 창에 적으면 사실과 다른 원인을 적게 된다. 새 상태는 운영자가 lane 을 고칠 때까지 후보를 막는 Gate 가 되고, 그 Gate 없이도 기록은 정확하다. 되풀이를 끝내는 방법은 운영자가 lane 에서 그 runtime 을 빼거나 host 설정을 고치는 것이다.
 3. **세션 재개.** 도구 없이 돈 턴이 Muse 세션 기록에 남는다. 다음 턴이 그 세션을 재개할지 새로 시작할지는 정하지 않았다.
 4. **재개 세션의 접속 시점.** 탐침은 `session/start` 만 봤다. `session/resume` 에서도 턴 전에 접속하는지는 확인하지 않았다.
 5. **1.4.15 시작 추정.** 접속이 끊긴 버전은 로그 시각으로 추정했다. 1.4.14 바이너리로 비교하지 않았다.
 
 ## 6. 확인 방법
 
-- 단위: scripted host 가 bridge 에 접속하지 않고 턴을 완료하면 `Keeper_muse_runtime.run` 결과가 `Session_mcp_not_connected` 다. 접속하고 완료하면 성공이다. dynamic tool 이 0개면 지금과 같다.
+- 단위: scripted host 가 bridge 에 접속하지 않고 턴을 완료하면 `Keeper_muse_runtime.run` 결과가 `session_mcp_not_connected` 다. 접속하고 완료하면 성공이다. dynamic tool 이 0개면 지금과 같다.
 - 실물: Muse 구독 한도가 풀린 뒤(2026-11-16T00:00Z), 신뢰 없이 띄운 host 로 한 턴을 돌려 실패 기록을 확인한다.
 
 ## 7. 하지 않는 것
+
+- MASC 가 host 를 신뢰 없이 띄우면서 MCP 서버를 넘기는 경우(`docker` Keeper, `native = "full"`)를 띄우기 전에 설정 오류로 끝내는 일. 토큰을 전혀 쓰지 않는 장점이 있다. 그러나 `InvalidConfig` 는 다음 후보로 넘어가지 않고 턴을 끝낸다(`keeper_runtime_attempt.ml`). 그 Keeper 는 lane 에 다른 후보가 있어도 멈춘다. 또 「신뢰 없이는 접속하지 않는다」는 1.4.18 을 관찰한 사실이라 host 가 바뀌면 틀린 거절이 된다. 지금 fleet 에 해당 Keeper 가 없어 넣지 않는다.
 
 - 접속을 기다리는 timer, 재시도 횟수 상한, 실패 문장 분류.
 - Antigravity·Codex·Claude Code 경로. 같은 bridge 모듈을 쓰는 경로가 있지만 접속을 건너뛰는 사례를 관찰하지 않았다.
@@ -106,4 +111,4 @@ bridge 는 클라이언트가 어디까지 왔는지를 이미 안다. `Awaiting
 |---|---|
 | L0 | 이 RFC |
 | L1 | D1: `client_phase` 와 시험 |
-| L2 | D2·D3: `Session_mcp_not_connected` 와 Keeper Muse 시험. 5절 2번을 닫은 뒤 연다 |
+| L2 | D2·D3: `session_mcp_not_connected` 와 Keeper Muse 시험 |

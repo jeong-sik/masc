@@ -649,8 +649,10 @@ let test_claimable_title_does_not_reach_system_context () =
 
 let test_failed_only_backlog_omits_readable_empty_statement () =
   let user = user_message { base_observation with failed_task_count = 2 } in
-  check bool "failed count rendered" true
-    (contains ~needle:"- Failed tasks: 2" user);
+  (* The count is of owned tasks whose assignee is absent from active
+     membership (Workspace.audit_orphan_tasks_in_tasks), not of failures. *)
+  check bool "orphaned claim count rendered" true
+    (contains ~needle:"- Claimed tasks whose holder is not an active member: 2" user);
   check bool "readable empty statement absent" false
     (contains ~needle:readable_empty_line user)
 

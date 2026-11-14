@@ -155,6 +155,7 @@
 (include stanzas/test_fusion_judge_response_evidence_walk.inc)
 (include stanzas/test_keeper_trust_disposition.inc)
 (include stanzas/test_keeper_attention_reason.inc)
+(include stanzas/test_keeper_trust_disposition_reason.inc)
 (include stanzas/test_play_room.inc)
 (include stanzas/test_server_play_room_events.inc)
 (include stanzas/test_h2_play_room.inc)

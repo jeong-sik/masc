@@ -600,10 +600,11 @@ let fold_statement db statement ~operation ~f =
 
 let series_select =
   "SELECT e.ts, e.tool_name, e.disposition, e.duration_ms, s.result_bytes, \
-   c.failure_class \
+   c.failure_class, k.caller \
    FROM tool_metric_events e \
    LEFT JOIN tool_metric_result_sizes s ON s.record_id = e.record_id \
    LEFT JOIN tool_metric_failure_classes c ON c.record_id = e.record_id \
+   LEFT JOIN tool_metric_callers k ON k.record_id = e.record_id \
    WHERE e.ts >= ?1 AND e.ts < ?2"
 ;;
 
@@ -637,6 +638,14 @@ let sample_of_statement statement =
       Error
         ("tool metric failure class is not text: " ^ Sqlite3.Data.to_string_debug other)
   in
+  (* NULL is a call made outside any Keeper, or stored before callers were kept. *)
+  let* caller =
+    match Sqlite3.column statement 6 with
+    | Sqlite3.Data.NULL -> Ok None
+    | Sqlite3.Data.TEXT text -> Ok (Some text)
+    | (Sqlite3.Data.NONE | Sqlite3.Data.INT _ | Sqlite3.Data.FLOAT _ | Sqlite3.Data.BLOB _) as other ->
+      Error ("tool metric caller is not text: " ^ Sqlite3.Data.to_string_debug other)
+  in
   Ok
     { Tool_metrics_series.ts = Sqlite3.column_double statement 0
     ; tool_name = Sqlite3.column_text statement 1
@@ -644,6 +653,7 @@ let sample_of_statement statement =
     ; duration_ms = Sqlite3.column_double statement 3
     ; result_bytes
     ; failure_class
+    ; caller
     }
 ;;
 

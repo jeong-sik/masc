@@ -1532,7 +1532,7 @@ let test_actual_explicit_retry_after_provider_failure () =
         (phase config subject.goal_id = Awaiting_confirmation);
       let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id) in
       Alcotest.(check int) (kind ^ " explicit request links the refused original and its successor")
-        2 (List.length rows)) in
+        2 (List.length rows))) in
   exercise "unknown certainty" (Agent_core.Error.Retry.NetworkError
     {message="reply lost"; kind=Llm_provider.Http_client.Connection_reset});
   exercise "definite refusal" (Agent_core.Error.Retry.NotFound {message="candidate removed"})

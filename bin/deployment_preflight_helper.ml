@@ -1142,10 +1142,10 @@ let judge_runtime_config ~base_path ~config_root path =
           ~config_dir:(Env_config_core.masc_config_dir_opt ())
         |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
       in
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      let* observation =
+        Runtime_model_catalog_boot.load_standalone_config_observation
+          ~runtime_config_path:path
       in
-      let* observation = Runtime.load_config_observation ~runtime_config_path:path () in
       let source_text = observation.Runtime.source_text in
       let* _, skill_notices =
         Skill_source_config.parse_text_with_notices source_text

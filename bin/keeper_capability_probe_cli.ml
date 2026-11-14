@@ -430,7 +430,7 @@ let () =
   let clock = Eio.Stdenv.clock env in
   Eio_context.set_env env;
   Eio_context.set_clock clock;
-  (match Runtime.init_default ~config_path with
+  (match Runtime_model_catalog_boot.init_standalone ~gate:Routing_only ~config_path with
    | Error msg ->
      Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;
      exit 1

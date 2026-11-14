@@ -283,7 +283,7 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
   let load_calls = ref [] in
   let set_calls = ref 0 in
   let result =
-    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
       ~env
       ~load_catalog:(fun path ->
         load_calls := path :: !load_calls;
@@ -318,7 +318,7 @@ auth = "none"
     let env = function
       | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/rejected-catalog.toml"
       | _ -> None in
-    (match Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    (match Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
        ~env ~load_catalog:(fun _ -> invalid) () with
      | _ -> Alcotest.fail "invalid provider admission must stop bootstrap"
      | exception Env_config_core.Config_error detail ->
@@ -340,7 +340,7 @@ let test_model_catalog_configuration_replaces_whole_selection () =
     let env = function
       | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/replacement-catalog.toml"
       | _ -> None in
-    ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    ignore (Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
       ~env ~load_catalog:(fun _ -> Ok Llm_provider.Model_catalog.empty) ());
     let models, providers = Snapshot.sources (Snapshot.current ()) in
     Alcotest.(check bool) "replacement installs explicit model facts" true
@@ -378,7 +378,7 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
 let test_model_catalog_configuration_delegates_to_agent_core_ambient () =
   let env _ = None in
   let result =
-    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
       ~env
       ~agent_core_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
       ()

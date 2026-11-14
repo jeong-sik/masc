@@ -16,15 +16,6 @@ let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
    reserve carries them at the ~10x slowdown observed when a concurrent build
    saturates the disk, which is the condition under which maintenance
    overran its host's watchdog. *)
-(* Whether AGENT_CORE_MODEL_CATALOG names a full replacement is one answer,
-   [Runtime.exact_output_target_source]: installing the catalog, warning
-   about retired config-root catalogs, choosing where the exact targets come
-   from, and whether rule 3 applies to runtime.toml all read it there. *)
-let replacement_catalog_path ?env () =
-  match Runtime.exact_output_target_source ?env () with
-  | Runtime.Replacement_catalog_targets { path } -> Some path
-  | Runtime.Runtime_binding_targets -> None
-
 let existing_file path =
   let path = String.trim path in
   if String.equal path "" then
@@ -35,48 +26,12 @@ let existing_file path =
     with
     | Sys_error _ -> None
 
-let install_runtime_model_catalog_override ~load_catalog ~publish_catalog path =
-  let refuse detail =
-    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail)) in
-  match load_catalog path with
-  | Error detail -> refuse detail
-  | Ok catalog ->
-    (match Llm_provider.Catalog_snapshot.of_catalogs
-        ~models:(Some catalog) ~providers:None with
-     | Ok snapshot -> publish_catalog snapshot
-     | Error error -> refuse (Llm_provider.Catalog_snapshot.error_to_string error))
-
-let configure_agent_core_model_catalog_env
-      ?env
-      ?(agent_core_catalog = fun () ->
-        Llm_provider.Catalog_snapshot.models (Llm_provider.Catalog_snapshot.current ()))
-      ?(load_catalog = Llm_provider.Model_catalog.load_file)
-      ?(publish_catalog = Llm_provider.Catalog_snapshot.publish)
-      ()
-  =
-  match replacement_catalog_path ?env () with
-  | Some path ->
-    install_runtime_model_catalog_override ~load_catalog ~publish_catalog path;
-    Log.Misc.info
-      "model_catalog: AGENT_CORE_MODEL_CATALOG=%s already configured and loaded"
-      path;
-    Some path
-  | None ->
-    (match agent_core_catalog () with
-     | Some _ ->
-       Log.Misc.info
-         "model_catalog: no explicit catalog path resolved; using agent_core ambient \
-          model catalog"
-     | None ->
-       raise (Env_config_core.Config_error "model_catalog: AGENT_CORE embedded model catalog is unavailable"));
-    None
-
 let warn_ignored_config_root_full_catalogs
       ?env
       ~config_root
       ()
   =
-  if Option.is_none (replacement_catalog_path ?env ())
+  if Option.is_none (Runtime_model_catalog_boot.replacement_catalog_path ?env ())
   then
     [ "models.toml"; "agent-core-models.toml" ]
     |> List.iter (fun filename ->
@@ -459,7 +414,9 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let config_root = (startup_config_resolution ~base_path).config_root.path in
   Server_slack_connector_config.configure ~config_root;
   warn_ignored_config_root_full_catalogs ~config_root ();
-  let (_ : string option) = configure_agent_core_model_catalog_env () in
+  let (_ : string option) =
+    Runtime_model_catalog_boot.configure_agent_core_model_catalog_env ()
+  in
   apply_runtime_toml ~base_path;
   Keeper_runtime_resolved.init ();
   (* Boot-time observability: emit the resolved runtime knobs once, right after

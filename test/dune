@@ -2376,6 +2376,13 @@
  (modules test_keeper_attempt_without_clock)
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
+; The operator snapshot's inference_inflight counts a run_named turn while the
+; provider holds its request, and reads 0 again once the turn ended.
+(test
+ (name test_keeper_inference_inflight_turn)
+ (modules test_keeper_inference_inflight_turn)
+ (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
+
 ; The operator's body-timeout override reaches a non-streaming run_named turn
 ; that named none. Slow: the setting's lower bound is ten seconds.
 (test

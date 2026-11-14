@@ -90,9 +90,11 @@ max_output_tokens = 4096
 
 | lane | 행 하나 | 보는 것 |
 | --- | --- | --- |
-| `lesson/scenes` | 쓴 장면 | 본문, 출처(pin, 인용문, 보존된 페이지의 SHA-256) |
+| `lesson/scenes` | 가장 최근 수업의 장면 | 본문, 출처(pin, 인용문, 보존된 페이지의 SHA-256) |
 | `lesson/sessions` | `compose` 하나 | 상태, 장면 수(요청·outline·씀·거절·대기), 버린 항목과 장면의 이유, 실패 이유 |
-| `lesson/measures` | 하나 | 상태별 세션 수, 쓴 장면 수, 이유별 거절 수 |
+| `lesson/measures` | 하나 | 상태별 세션 수, 쓴 장면 수, 장면이 나온 세션(`shown_session`), 이유별 거절 수 |
+
+`lesson/scenes` 에는 가장 최근에 장면을 쓴 수업 하나만 나온다. 새 수업의 첫 장면이 쓰이면 지난 수업의 장면은 Results 에서 사라진다. 지난 수업은 `export` 한 log 에 있다.
 
 세션 상태는 다섯이다.
 

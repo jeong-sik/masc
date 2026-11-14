@@ -267,7 +267,9 @@ let test_dashboard_static_missing_statuses () =
 
 let test_dashboard_static_read_error_statuses () =
   with_dashboard_asset_tree (fun asset_dir ->
-    Unix.mkdir (Filename.concat asset_dir "broken.js") 0o755;
+    let linked = Filename.concat asset_dir "broken.js" in
+    Out_channel.with_open_bin linked (fun oc -> Out_channel.output_string oc "linked bytes");
+    Unix.link linked (Filename.concat asset_dir "second-name.js");
     let h1_status, h1_body =
       http1_dashboard_asset_response "/dashboard/assets/broken.js"
     in
@@ -346,8 +348,10 @@ let test_report_snapshot_exclusion_uses_directory_identity () =
     (* On case-insensitive filesystems long s can name the same directory even
        when the request uses a different spelling. Exercise that real alias. *)
     if Sys.file_exists (Filename.concat asset_dir "publiſhed-artifacts") then
-      check bool "a Unicode alias of the protected directory is refused" true
-        (Result.is_error (read ["assets"; "publiſhed-artifacts"; "snapshot.json"])))
+      check bool "a Unicode alias of the protected directory names no file" true
+        (match read ["assets"; "publiſhed-artifacts"; "snapshot.json"] with
+         | Ok None -> true
+         | Ok (Some _) | Error _ -> false))
 ;;
 
 let relative_path components =
@@ -463,6 +467,111 @@ let test_reload_keeps_the_checks_of_the_load () =
             (relative_path [ "published-artifacts"; "snapshot.json" ]))))
 ;;
 
+let absent_or_error =
+  testable
+    (fun fmt -> function
+       | Ok None -> Format.pp_print_string fmt "no such file"
+       | Ok (Some body) -> Format.fprintf fmt "bytes %S" body
+       | Error detail -> Format.fprintf fmt "read error: %s" detail)
+    ( = )
+;;
+
+let load_beneath ~root components =
+  Fs_compat.load_single_link_regular_file_beneath ~root (relative_path components)
+  |> Result.map (Option.map (fun (contents : Fs_compat.owned_regular_file_contents) ->
+       contents.content))
+  |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
+;;
+
+let other_case_names = [ "INDEX-48NNFFCC.JS"; "Index-48nnFfCc.js"; "index-48nnffcc.JS" ]
+
+(* On a file system that folds case (APFS as macOS formats it) [openat] opens
+   the entry under each of these names. On one that does not, the kernel
+   already answers that there is no such entry. *)
+let test_load_takes_only_the_listed_name () =
+  with_temp_dir (fun root ->
+    write_file (Filename.concat root "index-48nnffcc.js") "bundle bytes";
+    Unix.mkdir (Filename.concat root "nested") 0o755;
+    write_file (Filename.concat root "nested/chunk.js") "chunk bytes";
+    check absent_or_error "the listed name" (Ok (Some "bundle bytes"))
+      (load_beneath ~root [ "index-48nnffcc.js" ]);
+    check absent_or_error "a listed directory and name" (Ok (Some "chunk bytes"))
+      (load_beneath ~root [ "nested"; "chunk.js" ]);
+    List.iter
+      (fun name -> check absent_or_error name (Ok None) (load_beneath ~root [ name ]))
+      other_case_names;
+    check absent_or_error "another case of a directory" (Ok None)
+      (load_beneath ~root [ "NESTED"; "chunk.js" ]);
+    check absent_or_error "another case of a name in a directory" (Ok None)
+      (load_beneath ~root [ "nested"; "Chunk.js" ]);
+    let held = (loaded_contents ~root [ "index-48nnffcc.js" ]).Fs_compat.snapshot in
+    check bool "a reload under another case does not answer with the held file" true
+      (match
+         Fs_compat.reload_single_link_regular_file_beneath
+           ~root ~held (relative_path [ "INDEX-48NNFFCC.JS" ])
+       with
+       | Ok None -> true
+       | Ok (Some (Fs_compat.Same_file | Fs_compat.Read _)) | Error _ -> false))
+;;
+
+(* Names for which the tree has no regular file. Before, each was a read
+   error: ENOTDIR, ENAMETOOLONG and a leaf that is a directory. *)
+let test_load_finds_no_file_where_the_tree_has_none () =
+  with_temp_dir (fun root ->
+    write_file (Filename.concat root "bundle.js") "bundle bytes";
+    Unix.mkdir (Filename.concat root "nested") 0o755;
+    check absent_or_error "a component before the last is a regular file" (Ok None)
+      (load_beneath ~root [ "bundle.js"; "x" ]);
+    check absent_or_error "a name longer than a directory entry can be" (Ok None)
+      (load_beneath ~root [ String.make 300 'a' ^ ".js" ]);
+    check absent_or_error "a long name below a directory" (Ok None)
+      (load_beneath ~root [ "nested"; String.make 300 'a' ^ ".js" ]);
+    check absent_or_error "the last component is a directory" (Ok None)
+      (load_beneath ~root [ "nested" ]);
+    check absent_or_error "a name the directory does not list" (Ok None)
+      (load_beneath ~root [ "nested"; "missing.js" ]))
+;;
+
+(* What the exact name does not turn into "no such file". *)
+let test_load_still_refuses_links () =
+  with_temp_dir (fun root ->
+    let target = Filename.concat root "target.js" in
+    write_file target "target bytes";
+    Unix.symlink target (Filename.concat root "symlink.js");
+    Unix.mkdir (Filename.concat root "nested") 0o755;
+    write_file (Filename.concat root "nested/chunk.js") "chunk bytes";
+    Unix.symlink (Filename.concat root "nested") (Filename.concat root "linked-directory");
+    check bool "a symbolic link under its listed name" true
+      (Result.is_error (load_beneath ~root [ "symlink.js" ]));
+    check bool "a symbolic link to a directory before the last component" true
+      (Result.is_error (load_beneath ~root [ "linked-directory"; "chunk.js" ]));
+    Unix.link target (Filename.concat root "second-name.js");
+    check bool "a file with a second hard link" true
+      (Result.is_error (load_beneath ~root [ "target.js" ])))
+;;
+
+let test_dashboard_static_answers_only_the_listed_name () =
+  with_dashboard_asset_tree (fun asset_dir ->
+    write_file (Filename.concat asset_dir "index-48nnffcc.js") "bundle bytes";
+    Unix.mkdir (Filename.concat asset_dir "nested") 0o755;
+    List.iter
+      (fun (protocol, request) ->
+         check (pair int string) (protocol ^ " the listed name") (200, "bundle bytes")
+           (request "/dashboard/assets/index-48nnffcc.js");
+         List.iter
+           (fun name ->
+              let status, body = request ("/dashboard/assets/" ^ name) in
+              check int (protocol ^ " " ^ name) 404 status;
+              check bool (protocol ^ " " ^ name ^ " carries no asset bytes") false
+                (String_util.contains_substring body "bundle bytes"))
+           (other_case_names
+            @ [ "index-48nnffcc.js/x"; String.make 300 'a' ^ ".js"; "nested" ]);
+         (* A name the table took is asked again through the reload. *)
+         check (pair int string) (protocol ^ " the listed name again") (200, "bundle bytes")
+           (request "/dashboard/assets/index-48nnffcc.js"))
+      [ "HTTP/1", http1_dashboard_asset_response; "HTTP/2", http2_dashboard_asset_response ])
+;;
+
 let test_dashboard_static_serves_a_replaced_asset () =
   with_dashboard_asset_tree (fun asset_dir ->
     List.iter
@@ -516,6 +625,10 @@ let () =
             `Quick
             test_report_snapshot_exclusion_uses_directory_identity
         ; test_case
+            "H1/H2 answer only the listed name"
+            `Quick
+            test_dashboard_static_answers_only_the_listed_name
+        ; test_case
             "H1/H2 serve a replaced asset"
             `Quick
             test_dashboard_static_serves_a_replaced_asset
@@ -528,6 +641,14 @@ let () =
             `Quick
             test_reload_reads_a_file_written_to_another_length
         ; test_case "the checks of the load stay" `Quick test_reload_keeps_the_checks_of_the_load
+        ] )
+    ; ( "exact_name"
+      , [ test_case "only the listed name is read" `Quick test_load_takes_only_the_listed_name
+        ; test_case
+            "no file where the tree has none"
+            `Quick
+            test_load_finds_no_file_where_the_tree_has_none
+        ; test_case "links stay refused" `Quick test_load_still_refuses_links
         ] )
     ; ( "dashboard_etag"
       , [ test_case "body content hash" `Quick test_dashboard_etag_of_body_content_hash

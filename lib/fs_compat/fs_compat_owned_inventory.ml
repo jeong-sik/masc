@@ -404,7 +404,10 @@ let load_owned_regular_file_range_with_sha256_blocking
 external open_owned_inventory_entry : Unix.file_descr -> string -> Unix.file_descr
   = "caml_masc_owned_entry_open"
 
-let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?excluded_stat root path fn =
+exception No_exactly_named_entry
+
+let with_owned_inventory_entry
+      ?owner_uid ?(single_link = false) ?(exact_names = false) ?excluded_stat root path fn =
   let ownership_root = root.inventory_path in
   match owned_directory_paths ~ownership_root (Filename.dirname path) with
   | Error rejection -> owned_file_error (Ownership_boundary_rejected {path; rejection})
@@ -438,6 +441,33 @@ let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?excluded_stat 
       observed.Unix.st_kind = initial.Unix.st_kind
       && descriptor.Unix.st_kind = initial.Unix.st_kind
       && same_file_identity observed initial && same_file_identity descriptor initial in
+    (* HIGH-RISK-UNREVIEWED: decides which request names reach a file.
+       [openat] resolves a name by the rules of the file system, so on one
+       that folds case or Unicode form many spellings open one entry. Under
+       [exact_names] a component is opened only when the held parent lists a
+       name of the same bytes. *)
+    let require_listed parent name =
+      if exact_names && not (List.exists (String.equal name) (owned_directory_names parent))
+      then raise No_exactly_named_entry in
+    (* Under [exact_names] an ancestor is opened as the leaf is, without
+       [O_DIRECTORY], and its kind is read from the descriptor: the errno of a
+       refused [O_DIRECTORY] open does not tell a regular file from a symbolic
+       link on every platform. *)
+    let open_ancestor parent directory =
+      let name = Filename.basename directory in
+      require_listed parent name;
+      let fd = if exact_names then open_owned_inventory_entry parent name
+        else open_owned_directory_child parent name in
+      descriptors := fd :: !descriptors;
+      let stat = Unix.fstat fd in
+      (match stat.Unix.st_kind with
+       | Unix.S_DIR -> ()
+       | Unix.S_REG -> raise No_exactly_named_entry
+       | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+         raise (Owned_directory_read_rejected (Owned_file_operation_failed
+           {path=directory;operation=Inspect_descriptor;
+            cause=Sys_error "owned path ancestor is not a directory"})));
+      fd, stat in
     let close_all () =
       let failure = ref None in
       List.iter (fun fd ->
@@ -453,13 +483,12 @@ let with_owned_inventory_entry ?owner_uid ?(single_link = false) ?excluded_stat 
           check_owner ownership_root (Unix.fstat root.inventory_fd);
           check_excluded ownership_root root.inventory_stat;
           let parent = List.fold_left (fun parent directory ->
-            let fd = open_owned_directory_child parent (Filename.basename directory) in
-            descriptors := fd :: !descriptors;
-            let stat = Unix.fstat fd in
+            let fd, stat = open_ancestor parent directory in
             check_owner directory stat;
             check_excluded directory stat;
             opened := (directory, fd, stat) :: !opened;
             fd) root.inventory_fd descendants in
+          require_listed parent (Filename.basename path);
           let fd = open_owned_inventory_entry parent (Filename.basename path) in
           descriptors := fd :: !descriptors;
           let stat = Unix.fstat fd in

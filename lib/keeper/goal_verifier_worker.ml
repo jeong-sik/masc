@@ -12,7 +12,7 @@ let tool_name = "goal_proof_review"
 let host_installation_id = "masc.goal-verification"
 let host_package_id = "masc.goal-verification.review"
 
-type run_identity = View.run_identity
+type run_identity = {run_id : string; started_at : float}
 type receipt = {
   run : run_identity;
   result : AR.review_result;
@@ -77,8 +77,14 @@ let field key fields = match List.assoc_opt key fields with
 let object_fields allowed = function
   | `Assoc fields -> let* () = Json_util.reject_unknown_fields ~surface:scope ~allowed fields in Ok fields
   | _ -> Error (scope ^ " must be an object")
-let run_json = View.run_json
-let run_of_json = View.run_of_json
+let run_json (run : run_identity) =
+  `Assoc ["run_id", `String run.run_id; "started_at", `Float run.started_at]
+let run_of_json json =
+  let* fields = object_fields ["run_id"; "started_at"] json in
+  let* run_id = text "run_id" fields in
+  let* started_at = Json_util.require_field_float ~surface:scope "started_at" fields in
+  if Float.is_finite started_at then Ok {run_id; started_at}
+  else Error "Goal verifier run time must be finite"
 
 (* The staged successor and its published owner name the very same complete
    request bytes. In particular, recovery cannot invent another run after the

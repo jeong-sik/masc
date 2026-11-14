@@ -37,6 +37,20 @@ const MaxContextSourceSchema = union([
   literal('binding_override_clamped_by_capability'),
 ])
 
+// Why this runtime's credential scope rests on quota, as the server's quota
+// table holds it: the provider refused payment, refused on quota, or a usage
+// read found the window spent. `until` is the provider's reset when
+// `reset_stated`, otherwise the time the server calls the scope again.
+const RuntimeQuotaRestSchema = object({
+  cause: union([
+    literal('payment_refused'),
+    literal('provider_quota_refused'),
+    literal('usage_read'),
+  ]),
+  reset_stated: boolean(),
+  until: number(),
+})
+
 const RuntimeResolutionSchema = object({
   id: string(),
   provider: string(),
@@ -46,6 +60,7 @@ const RuntimeResolutionSchema = object({
   max_output_tokens: nullable(number()),
   is_local: boolean(),
   is_default: boolean(),
+  quota_rest: nullable(RuntimeQuotaRestSchema),
 })
 
 const RuntimeLaneSchema = object({
@@ -131,6 +146,7 @@ const RuntimeResolvedResponseSchema = object({
 
 export type MaxContextSource = InferOutput<typeof MaxContextSourceSchema>
 export type RuntimeResolution = InferOutput<typeof RuntimeResolutionSchema>
+export type RuntimeQuotaRest = InferOutput<typeof RuntimeQuotaRestSchema>
 export type RuntimeLaneSnapshot = InferOutput<typeof RuntimeLaneSchema>
 export type ResolvedAssignmentTarget = InferOutput<typeof ResolvedAssignmentTargetSchema>
 export type RuntimeAssignment = InferOutput<typeof RuntimeAssignmentSchema>

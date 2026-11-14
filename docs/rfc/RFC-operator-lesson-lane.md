@@ -215,9 +215,13 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 ### 4.6 행
 
-- `lesson/scenes`: `Scene_written` 하나에 한 행. 제목, 본문(문단을 빈 줄로 이은 글), 출처(pin, 인용문, SHA-256), 세션 id, 쓴 시각. readings 의 첫 값이 본문이라 Results 가 이 lane 에서 열린다.
+- `lesson/scenes`: 가장 최근에 장면을 쓴 세션의 `Scene_written` 하나에 한 행. 제목, 본문(문단을 빈 줄로 이은 글), 출처(pin, 인용문, SHA-256), 세션 id, 쓴 시각. readings 의 첫 값이 본문이라 Results 가 이 lane 에서 열린다.
+  - 지금까지 쓴 장면을 모두 주지 않는 이유: 관측 응답은 `max_reply_bytes` 안에 들어가야 한다. 넘으면 host 가 응답을 받지 않고, 그 뒤로는 관측과 action 응답이 모두 오류다(#51941).
+  - "가장 최근에 장면을 쓴 세션"은 `written_at` 이 가장 늦은 장면을 가진 세션이다. 같은 시각이면 나중에 연 세션이다. `writing` 세션 둘이 번갈아 쓰면 행이 그때마다 바뀐다. 방금 쓴 장면은 늘 그 세션에 있으므로, 모든 장면은 쓴 직후의 관측에 한 번은 나온다.
+  - 지난 수업은 `export` 한 log 에서 읽는다. Results 에는 나오지 않는다.
 - `lesson/sessions`: compose 하나에 한 행. 상태, 장면 수(요청·통과·거절·아직 안 쓴 것), 거절 이유, 실패 이유, 대체한 세션.
-- `lesson/measures`: 세션 수(상태별, `superseded` 포함), 쓴 장면 수, 거절된 항목과 장면 수(이유별), 실패한 세션 수(이유별). 합격·불합격 필드는 없다.
+- `lesson/measures`: 세션 수(상태별, `superseded` 포함), 쓴 장면 수(모든 세션), 장면이 행으로 나온 세션의 id(`shown_session`), 거절된 항목과 장면 수(이유별), 실패한 세션 수(이유별). 합격·불합격 필드는 없다.
+- `lesson/sessions` 는 세션마다 한 행이라 같은 한도에 훨씬 늦게 닿는다. 범위를 두지 않았다.
 
 ### 4.7 사실이 사는 곳
 

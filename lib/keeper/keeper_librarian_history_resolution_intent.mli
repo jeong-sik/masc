@@ -56,13 +56,16 @@ val confirm_fence : store:Lane_addon_store.t -> expected:t ->
 val intend_child : store:Lane_addon_store.t -> expected:t ->
   Keeper_librarian_durable_request.t -> (t, error) result
 val confirm_child : store:Lane_addon_store.t -> expected:t ->
-  Lane_addon_tool_request_owner.retained -> (t, error) result
+  Lane_addon_tool_request_owner.Record.t -> (t, error) result
 val observe_memory_commit : store:Lane_addon_store.t -> expected:t ->
   request:Keeper_librarian_durable_request.t ->
   completed:Lane_addon_tool_request_owner.retained -> (t, error) result
 (** Serialized Memory-lane use only. Confirm exact current committed range
     receipts under Memory locks without recovery, then retain that observation.
-    A missing/pending/uncertain receipt does not establish completion. *)
+    A missing/pending/uncertain receipt does not establish completion.
+    When [request] is a replacement that descends from the resolution child,
+    the child is read as its record and index, not its body: the caller has
+    confirmed [request]'s lineage, which restores that child. *)
 val child : t -> child option
 (** The child a [Child_intended] or [Child_confirmed] intent names by ID and
     digest. The intent holds no request: the child's request is the body file

@@ -90,6 +90,10 @@ val confirm_index : t -> Lane_addon_tool_request_owner.Record.t -> (unit, string
 val confirm_index_source_root : index -> (unit, string) result
 (** What {!restore} adds to {!restore_payload}, from the index: the captured
     runtime path is still the owner's physical runtime root. Offload it. *)
+val observe_index_owner : base_path:string -> keepers_dir:string -> index -> (owner, string) result
+(** {!observe_record_owner} for a reader of the record alone: the owner the
+    index names is the live one, Memory epoch included. {!index_of_summary}
+    already bound that owner to the record's scope. Offload it. *)
 val of_json : owner:owner -> Yojson.Safe.t -> (t, string) result
 (** Pure full original-request decoder used for a retained replacement intent.
     This grants no physical-source, retained-owner or dispatch authority. *)

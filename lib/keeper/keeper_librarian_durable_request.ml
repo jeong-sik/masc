@@ -356,6 +356,9 @@ let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
     "Original history host record belongs to another scope" in
   let* current=observe_owner ~base_path ~keepers_dir ~keeper_id:original.keeper_id in
   let+ ()=owner_matches_json current (value "owner" f) in current
+let observe_index_owner ~base_path ~keepers_dir (index:index) =
+  let* current=observe_owner ~base_path ~keepers_dir ~keeper_id:index.owner.keeper_id in
+  let+ ()=owner_matches_json current (owner_to_json index.owner) in current
 let confirm_owner capture =
   let* current=observe_owner ~base_path:capture.owner.workspace.path ~keepers_dir:capture.owner.keepers.path
     ~keeper_id:capture.owner.keeper_id in

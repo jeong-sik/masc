@@ -30,6 +30,10 @@ type runtime_binding = private
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
   ; network_mode : Keeper_types_profile_sandbox.network_mode
+  ; microvm_backend : Keeper_microvm_backend.t option
+        (** The backend a microVM guest boots on: the declaration of the meta
+            the runtime was created from. [None] for a Docker guest, and for
+            a microVM meta that declares none, whose start then fails. *)
   ; image : (string, Keeper_sandbox_image_resolver.error) result
         (** The turn's [sandbox_image] resolved through the host catalog.
             [Error] still binds the runtime: a caller that only needs the

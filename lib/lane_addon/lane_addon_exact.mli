@@ -289,16 +289,39 @@ type execution_authority =
     started marker, later guard vetoes stop the actual walk. Retained terminal
     replay uses only original validation and never invokes this guard. *)
 
-val check_retained_record : Yojson.Safe.t -> (unit, string) result
-(** Decode one retained record of the Exact store with the reads {!run}
-    applies before reusing it: the record envelope, its original request, the
-    declaration and request identity it names, and every attempt and final.
-    Started markers are exactly [{"started":"<32 lowercase hex>"}] and only
-    occur last in an open record. Unknown terminal attempts require their
-    cause, and [raised] requires nonblank exception evidence. Old null markers
-    and cause-less unknown attempts are refused: deployment requires a hard
-    cut of those records and their consumer originals. Reads nothing else and
-    writes nothing. *)
+module Retained_key : sig
+  type t = private { declaration_id : string; request_id : string; digest : string }
+
+  val of_record : Yojson.Safe.t -> (t, string) result
+  (** The declaration, request ID and request digest a retained record of the
+      Exact store names, read without decoding the rest of the record. *)
+
+  val proof_path : t -> string
+  (** The proof link of that request, below {!Lane_addon_store.root}. *)
+end
+
+val proof_store_roots : Yojson.Safe.t -> string list
+(** The store roots the entries of a proof link name, read without decoding
+    the link. *)
+
+val check_retained_record : store:Lane_addon_store.t -> first:Yojson.Safe.t ->
+  proof:Yojson.Safe.t option -> second:Yojson.Safe.t -> (unit, string) result
+(** Decode one retained record of the Exact store and its proof link with the
+    reads {!run} applies before reusing them: the record envelope, its
+    original request, the declaration and request identity it names, every
+    attempt and final, and every proof of the link against [store] and its
+    attempt. Started markers are exactly [{"started":"<32 lowercase hex>"}]
+    and only occur last in an open record. Unknown terminal attempts require
+    their cause, and [raised] requires nonblank exception evidence. Old null
+    markers and cause-less unknown attempts are refused: deployment requires a
+    hard cut of those records and their consumer originals.
+
+    [first] is the record as read before the link, [proof] the link ([None]
+    when the request has none) and [second] the record read again after it.
+    Both records are bound to the request and digest [first] names; the link
+    is bound to the attempts of [second]. The server writes attempt n before
+    proof n, so a link read between two reads of a live record matches the
+    second one. Reads nothing and writes nothing. *)
 
 type retained_observation = Retained_absent | Retained_open | Retained_terminal of retained_final
 

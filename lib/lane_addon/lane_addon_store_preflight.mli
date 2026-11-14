@@ -36,7 +36,14 @@ type decoder =
   | Action_receipt
       (** {!Lane_addon_action.of_json}, and the receipt's own ids against the
           key it is stored under. *)
-  | Exact_record  (** {!Lane_addon_exact.check_retained_record} *)
+  | Exact_record
+      (** {!Lane_addon_exact.check_retained_record}, with the record's proof
+          link, and the record's own ids against the key it is stored under. *)
+  | Exact_proof_link
+      (** {!Lane_addon_exact.Retained_key.proof_path}: no retained record names
+          the proof link. *)
+  | Exact_slot_observation
+      (** {!Lane_addon_exact_observation.request_id}, the startup sweep's read. *)
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.Published_reader.read} *)
   | Tool_request_payload (** The consumer's current pure payload decoder. *)
@@ -78,11 +85,16 @@ type refusal =
             could be read and they exist. For a tool request owner or a
             history resolution record it is the scope's directories that
             exist: owner records, request bodies, history fences and history
-            resolution records. *)
+            resolution records. For an Exact record stored under its own key
+            it is that file, its proof link and the slot observation files of
+            its request, those that exist. *)
   }
 
 type report =
-  { rows : int  (** Files (installation slots, for native claims) read. *)
+  { rows : int
+        (** Files (installation slots, for native claims) read. The Exact scan
+            also counts the slot observation files it reads and the proof
+            links it refuses. *)
   ; refusals : refusal list  (** In path order. *)
   }
 
@@ -105,10 +117,14 @@ val scan : ?validate_tool_request:(unit -> payload_validator) ->
   Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's
     decoders. A missing store directory is an empty store. [Error] means a
-    directory exists and cannot be listed. The scan runs beside a live server
-    and takes none of its locks: a record removed before it is read, or while
-    it is checked, is absent, since a settle moves an original's record and
-    then the body its check reads. *)
+    directory exists and cannot be listed, or an Exact proof link or slot
+    observation names another store root than the one below [base_path]; the
+    message names both roots. [base_path] is read as given: the server
+    resolves its workspace with {!Workspace_root.resolve_current}, so a caller
+    resolves it the same way. The scan runs beside a live server and takes
+    none of its locks: a record removed before it is read, or while it is
+    checked, is absent, since a settle moves an original's record and then the
+    body its check reads. *)
 
 module For_testing : sig
   val scan : ?validate_tool_request:(unit -> payload_validator) ->
@@ -116,5 +132,9 @@ module For_testing : sig
     Store.t -> base_path:string -> (report, string) result
   (** The same scan, calling [after_read] with each record's path once its
       bytes are read and before they are decoded, so a test can move a file
-      at the point a running server could. *)
+      at the point a running server could. The Exact scan calls it for every
+      file it reads: a record, its proof link and the record again, in that
+      order before the next record, each slot observation, and, after the
+      declaration's proof links are listed, each record no fresh-state line
+      deletes, once more. *)
 end

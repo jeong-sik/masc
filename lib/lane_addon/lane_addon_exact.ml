@@ -618,20 +618,6 @@ let validate_record ~request ~schema record =
       if Yojson.Safe.equal actual expected then Ok (Retained_terminal observed)
       else Error "original Exact final differs from its determining attempt"
 
-(* The reads [run] applies to a retained record before it reuses it, with the
-   declaration and the original request the record names. *)
-let check_retained_record wire =
-  let* declaration_id = match wire with
-    | `Assoc fields -> (match List.assoc_opt "declaration_id" fields with
-        | Some (`String value) -> Ok value
-        | Some _ | None -> Error "record declaration_id")
-    | _ -> Error "record must be an object" in
-  let* stored = record_of_json wire in
-  let* original = request_of_json stored.request in
-  let* stored = bound_record ~declaration_id (Digested.make original) wire in
-  let* _ = validate_record ~request:original ~schema:None stored in
-  Ok ()
-
 type recovery_error =
   | Recovery_unavailable of string
   | Recovery_invalid of string
@@ -862,6 +848,56 @@ let bound_proofs ~store ~declaration_id bound record =
   let* proofs=load_proofs ~store ~declaration_id bound in
   let* ()=bind_proofs record proofs in
   Ok proofs
+
+module Retained_key = struct
+  type t = { declaration_id : string; request_id : string; digest : string }
+
+  let of_record = function
+    | `Assoc fields ->
+      let text name = match List.assoc_opt name fields with
+        | Some (`String value) -> Ok value
+        | Some _ | None -> Error ("record " ^ name) in
+      let* declaration_id = text "declaration_id" in
+      let* request_id = text "request_id" in
+      let* digest = text "digest" in
+      Ok { declaration_id; request_id; digest }
+    | _ -> Error "record must be an object"
+
+  let proof_path key =
+    Lane_addon_store.host_result_path
+      ~instance_id:(proof_instance_id ~declaration_id:key.declaration_id)
+      ~request_id:(proof_request_key ~request_id:key.request_id ~digest:key.digest)
+end
+
+let proof_store_roots = function
+  | `Assoc fields ->
+    (match List.assoc_opt "executions" fields with
+     | Some (`List entries) ->
+       List.filter_map (function
+         | `Assoc entry ->
+           (match List.assoc_opt "store_root" entry with
+            | Some (`String root) -> Some root
+            | Some _ | None -> None)
+         | _ -> None) entries
+     | Some _ | None -> [])
+  | _ -> []
+
+(* The reads [run] applies to a retained record and its proof link, in the
+   order a check beside a running server reads them: the record, the link,
+   then the record again. The server writes attempt n to the record before
+   proof n and removes no attempt, so the second record holds every attempt
+   the link proves. Both records are bound to the request and digest the first
+   one names. *)
+let check_retained_record ~store ~first ~proof ~second =
+  let* { Retained_key.declaration_id; _ } = Retained_key.of_record first in
+  let* stored = record_of_json first in
+  let* original = request_of_json stored.request in
+  let bound = Digested.make original in
+  let* _ = bound_record ~declaration_id bound first in
+  let* record = bound_record ~declaration_id bound second in
+  let* _ = validate_record ~request:original ~schema:None record in
+  let* proofs = decode_proofs ~store ~declaration_id bound proof in
+  bind_proofs record proofs
 
 (* RFC-exact-request-skips-a-slot-that-refused-its-input 3.2. The HTTP slots
    whose provider refused this request for its size, read from its retained

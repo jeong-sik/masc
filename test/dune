@@ -2978,6 +2978,7 @@
 (include stanzas/test_tool_metrics_store_concurrent.inc)
 (include stanzas/test_tool_metrics_series.inc)
 (include stanzas/test_tool_metrics_series_stream.inc)
+(include stanzas/test_dispatch_caller.inc)
 (include stanzas/test_model_metrics_stream.inc)
 (include stanzas/test_native_query_observer_scope.inc)
 (include stanzas/test_tui_decode_tool_series.inc)

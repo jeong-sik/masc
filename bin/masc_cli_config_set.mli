@@ -8,13 +8,14 @@
 val run : base_path:string -> port:int -> agent:string -> assignments:string list -> int
 (** Writes every assignment in one commit, or none.
 
-    When [base_path]'s server answers on [port] and is ready, the commit goes
-    through it (RFC-0482 §3.2): the server is the one writer of runtime.toml
-    while it runs and tells its readers. That needs the sign-in [masc login]
-    keeps for [agent]. A port answering for another workspace, a server still
-    starting or a missing sign-in writes nothing.
+    When the process that holds the lease of [base_path] announces [port] as
+    the server of a single user and is ready, the commit goes through it
+    (RFC-0482 §3.2): the server is the one writer of runtime.toml while it
+    runs and tells its readers. That needs the sign-in [masc login] keeps for
+    [agent]. A lease holder that announces another port or none, an account
+    server, a server still starting or a missing sign-in writes nothing.
 
-    With no server answering, the file is the one the server reads for
+    With nothing holding the lease, the file is the one the server reads for
     [base_path], [MASC_CONFIG_DIR] included. A workspace with no runtime.toml
     is seeded the way server start seeds it, so a script can set a key before
     the first start; a workspace that has one is left as it is.

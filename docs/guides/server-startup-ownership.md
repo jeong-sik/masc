@@ -16,15 +16,35 @@ replacement.
 `masc restart` replaces this workspace's server on this host, for example
 after `scripts/install-local-build.sh`:
 
-1. It reads `/health?full=1` on loopback. Only a server of this workspace is
-   asked to stop; another workspace, a non-MASC listener, or a lease owner
-   that does not answer on the port is refused and left running. A `--host`
-   that 127.0.0.1 cannot reach is refused too, because restart could not see
-   that replacement answer, and so is one that is not an IP address, such as
-   `localhost`, because the replacement could not bind it.
-2. It signs in as the local operator and sends one SIGTERM to the lease
-   owner it identified with `F_GETLK`, the same request `masc setup` makes.
-   Nothing is forced down.
+1. It asks the kernel which process holds the workspace lease and which
+   port that process announces: a server locks the byte of its port on
+   `<lease>.single-user-server`, or on `<lease>.account-server` when it is
+   the account server, once its listener is bound. Only the lease owner that
+   announces the selected port is asked to stop. What answers on the port
+   decides nothing: restart reads from it only the version, on the compact
+   `/health`, after the kernel named the server. A lease owner that
+   announces another port is refused with that port. A lease owner that
+   announces nothing is refused with its pid. The kernel does not say why it
+   announces nothing, so the refusal lists the five cases: it is starting
+   (wait), it is shutting down (it withdraws the announcement when its
+   listener closes; run the command again once it has exited), it announces
+   another port that the lock of another process hid from the read (run the
+   command again with the `--port` it was started with), it listens on
+   an address that 127.0.0.1 does not reach (it logs that at startup;
+   commands on this host cannot use it), or a MASC that does not announce
+   started it (stop it with `kill <pid>` and run `masc start`). A listener
+   on the port with no lease owner behind it is refused and left running. A
+   `--host` that 127.0.0.1 cannot reach is refused too, because restart
+   could not see that replacement answer, and so is one that is not an IP
+   address, such as `localhost`, because the replacement could not bind it.
+2. It asks the kernel again, signs in as the local operator, and sends one
+   SIGTERM to the lease owner it identified with `F_GETLK`, the same request
+   `masc setup` makes. The operator credential goes only to the process the
+   kernel names as lease owner and announcer of the port, and the kernel is
+   asked again before each send. Nothing is forced down. When the kernel no
+   longer names that server at one of these checks, restart and `masc setup`
+   say what it names now: the pid that withdrew its announcement, as a
+   server does when it shuts down, or the owner that took its place.
 3. It starts `masc start --wait-for-previous-owner` in its own process group
    with its output appended to `<base>/.masc/logs/masc-start-<UTC time>.log`
    (`--log` chooses another file). That process sleeps on the lease until
@@ -32,8 +52,26 @@ after `scripts/install-local-build.sh`:
    take the workspace in between. Only one process waits for a workspace: a
    second replacement started meanwhile exits at once, naming the first.
    When no server was running, restart starts plain `masc start` instead.
-4. It waits until `/health/ready` answers 200 with the new process's `pid`,
-   then prints how long it took. Ctrl-C stops the waiting, not the new server.
+4. It waits until `/health/ready` answers 200 and the process it started
+   holds the announcement byte of the port, then prints how long it took.
+   Nothing in the answer is read. Ctrl-C stops the waiting, not the new
+   server.
+
+`masc setup`, `masc runtime-resume` and the commands that save runtime.toml
+through the running server (`masc config set` and the setup commands) find
+the server the same way and refuse the same owners. The sentence for each
+owner is `Server_upgrade_preparation.owner_sentence`, followed by what the
+command did not do; restart words the account server itself, because it is
+the command that replaces one.
+
+All of this reads the lease under one lease root: `<base>/.masc-owner`, or
+the directory `MASC_BASE_PATH_LEASE_DIR` names. A command sees the server
+only when both run with the same lease root. With another one the command
+finds no lease and takes the workspace for unheld: restart and setup refuse
+a port that is busy and start a second server on a free one, and `masc
+config set` writes runtime.toml itself. No command falls back to asking the
+port. A sentence that says no process holds the lease names the directory
+it was read in, so a mismatch can be seen there.
 
 Plain `masc start` still refuses at once while another process holds the
 lease: a running server that was not asked to stop does not exit.

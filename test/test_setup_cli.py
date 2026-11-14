@@ -5,15 +5,18 @@ Model inference and guest execution are measured separately with the real
 onboarding acceptance; this checks ownership and preserves the imp manifest.
 """
 import argparse
+import contextlib
 import http.server
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +35,97 @@ def _swap_fixture(text, old, new, *, what):
 
 
 BINARY = None
+ANNOUNCER = None
+
+
+class Announcement:
+    """The helper that holds the lease of a workspace and announces a port.
+
+    The kernel then names it as the server of the workspace, the way it names
+    a booted server, so an HTTP stand-in on that port is the server a command
+    talks to. It holds both until it is closed.
+    """
+
+    def __init__(self, base, port, kind, env):
+        assert ANNOUNCER is not None
+        self.process = subprocess.Popen(
+            [ANNOUNCER, '--base-path', str(base), '--port', str(port), '--kind', kind],
+            env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        line = self.process.stdout.readline()
+        if not line.startswith('ready '):
+            self.process.kill()
+            raise AssertionError('the announcer did not hold the workspace: '
+                                 + line + self.process.stderr.read())
+        self.pid = int(line.split()[1])
+
+    def alive(self):
+        return self.process.poll() is None
+
+    def withdraw(self):
+        """Withdraws the announcement and keeps the lease, as a server does
+        once its listener closes on the way to its exit."""
+        self.process.stdin.write('withdraw\n')
+        self.process.stdin.flush()
+        answer = self.process.stdout.readline().strip()
+        if answer != 'withdrawn':
+            raise AssertionError('the announcer did not withdraw: ' + answer)
+
+    def leave(self):
+        """Ends the helper, so nothing holds the workspace any more."""
+        self.process.stdin.close()
+        self.process.wait(timeout=30)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.process.stdin.close()
+        self.process.wait(timeout=30)
+        self.process.stdout.close()
+        self.process.stderr.close()
+
+
+class Recorder:
+    """An HTTP stand-in that answers every request 200 and records it.
+
+    `before` maps a path to what runs once, when that path is first asked
+    for and before it is answered.
+    """
+
+    def __init__(self):
+        requests = self.requests = []
+        before = self.before = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def answer(self):
+                requests.append((self.command, self.path, self.headers.get('Authorization')))
+                hook = before.pop(self.path, None)
+                if hook is not None:
+                    hook()
+                data = json.dumps({'server': 'masc', 'version': '0.0.0'}).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            do_GET = do_POST = answer
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+        self.port = self.server.server_port
+        self.thread = threading.Thread(target=self.server.serve_forever)
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.server.shutdown()
+        self.thread.join()
+        self.server.server_close()
 
 
 @unittest.skipUnless(BINARY, 'pass --binary for native setup checks')
@@ -387,13 +481,13 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             self.assertIn('No process holds the lease', receipt['error'])
             self.assertEqual(sorted(path.name for path in workspace.iterdir()), [])
 
-    def test_an_owner_that_cannot_be_read_gives_no_status_where_the_config_asks_for_accounts(self):
-        # Whether an account server holds the workspace is not known then, and
-        # a port named free would be taken for a workspace with no server.
-        # Where the config asks for no accounts the port answers as before.
+    def test_an_owner_that_cannot_be_read_gives_no_status(self):
+        # Which process holds the workspace is not known then, and a port
+        # named free would be taken for a workspace with no server, whatever
+        # the config asks for.
         assert BINARY is not None
         asks = '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}'
-        for config, code in ((asks, 1), ('{"enabled":true,"require_token":true}', 0), (None, 0)):
+        for config in (asks, '{"enabled":true,"require_token":true}', None):
             with self.subTest(config=config), tempfile.TemporaryDirectory(prefix='masc-setup-unread-') as tmp:
                 root = Path(tmp)
                 workspace = root / 'workspace'
@@ -407,16 +501,177 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 observed = subprocess.run(
                     [BINARY, 'setup-server', '--base-path', str(workspace), '--port', self.unused_port()],
                     env=env, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
-                self.assertEqual(observed.returncode, code, observed.stderr)
+                self.assertEqual(observed.returncode, 1, observed.stderr)
                 document = json.loads(observed.stdout)
-                if code:
-                    self.assertEqual(document['schema'], 'masc.setup_server_unread.v1')
-                    self.assertIs(document['read_only'], True)
-                    self.assertIsInstance(document['error'], str)
-                    self.assertNotIn('status', document)
-                else:
-                    self.assertEqual((document['schema'], document['status']), ('masc.setup_server.v1', 'free'))
+                self.assertEqual(document['schema'], 'masc.setup_server_unread.v1')
+                self.assertIs(document['read_only'], True)
+                self.assertIsInstance(document['error'], str)
+                self.assertNotIn('status', document)
                 self.assertEqual((workspace / '.masc-owner').read_text(), '')
+
+    def test_an_owner_that_announces_nothing_is_named_and_not_signed_in_to(self):
+        # A process holds the lease and announces no port: starting, shutting
+        # down, announcing another port behind the lock of another process,
+        # listening out of loopback reach, or started by a MASC that does not
+        # announce. It is named by its pid, and nothing signs in to
+        # it or stops it.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-setup-silent-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            port = self.unused_port()
+            with Announcement(workspace, port, 'none', env) as holder:
+                observed = subprocess.run([BINARY, 'setup-server', '--base-path', str(workspace), '--port', port],
+                                          env=env, capture_output=True, text=True, timeout=60,
+                                          stdin=subprocess.DEVNULL)
+                self.assertEqual(observed.returncode, 0, observed.stderr)
+                document = json.loads(observed.stdout)
+                self.assertEqual((document['status'], document['server_pid']), ('owner_unannounced', holder.pid))
+                stopped = subprocess.run([BINARY, 'setup-stop-previous-owner', '--base-path', str(workspace),
+                                          '--port', port, '--expected-version', '0.0.0'],
+                                         env=env, capture_output=True, text=True, timeout=60,
+                                         stdin=subprocess.DEVNULL)
+                self.assertEqual(stopped.returncode, 1, stopped.stderr)
+                receipt = json.loads(stopped.stdout)
+                self.assertIs(receipt['termination_requested'], False)
+                self.assertIn(f'pid {holder.pid}', receipt['error'])
+                self.assertIn(f'kill {holder.pid}', receipt['error'])
+                self.assertFalse((workspace / '.masc/auth/local-admin.token').exists())
+                self.assertTrue(holder.alive())
+
+    def test_a_single_user_server_on_another_port_is_named(self):
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-setup-elsewhere-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            announced, asked = self.unused_port(), self.unused_port()
+            with Announcement(workspace, announced, 'single-user', env) as holder:
+                observed = subprocess.run([BINARY, 'setup-server', '--base-path', str(workspace), '--port', asked],
+                                          env=env, capture_output=True, text=True, timeout=60,
+                                          stdin=subprocess.DEVNULL)
+                self.assertEqual(observed.returncode, 0, observed.stderr)
+                document = json.loads(observed.stdout)
+                self.assertEqual((document['status'], document['server_pid'], document['server_port']),
+                                 ('same_workspace_on_another_port', holder.pid, int(announced)))
+                # The stop names the port too, before it signs anyone in.
+                stopped = subprocess.run([BINARY, 'setup-stop-previous-owner', '--base-path', str(workspace),
+                                          '--port', asked, '--expected-version', '0.0.0'],
+                                         env=env, capture_output=True, text=True, timeout=60,
+                                         stdin=subprocess.DEVNULL)
+                self.assertEqual(stopped.returncode, 1, stopped.stderr)
+                receipt = json.loads(stopped.stdout)
+                self.assertIs(receipt['termination_requested'], False)
+                self.assertIn(f'--port {announced}', receipt['error'])
+                self.assertFalse((workspace / '.masc/auth/local-admin.token').exists())
+                self.assertTrue(holder.alive())
+
+    def test_runtime_resume_sends_nothing_to_an_owner_that_announces_nothing(self):
+        # What answers on the port is not the server, whatever it says: the
+        # kernel names no server there, so the operator token stays home.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-resume-silent-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            (workspace / '.masc/auth').mkdir(parents=True)
+            (workspace / '.masc/auth/local-admin.token').write_text('operator-token')
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            with Recorder() as standin, Announcement(workspace, standin.port, 'none', env) as holder:
+                resumed = subprocess.run([BINARY, 'runtime-resume', '--base-path', str(workspace),
+                                          '--port', str(standin.port)],
+                                         env=env, capture_output=True, text=True, timeout=60,
+                                         stdin=subprocess.DEVNULL)
+                self.assertEqual(resumed.returncode, 1, resumed.stdout + resumed.stderr)
+                self.assertIn(f'pid {holder.pid}', resumed.stderr)
+                self.assertEqual(standin.requests, [])
+
+    def test_runtime_resume_sends_nothing_to_a_server_that_withdrew_its_announcement(self):
+        # A server that shuts down keeps the lease and withdraws its
+        # announcement. Here it does so after it answered ready: the kernel is
+        # asked again right before the operator token would go out, and the
+        # token stays home.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-resume-withdrawn-') as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            (workspace / '.masc/auth').mkdir(parents=True)
+            (workspace / '.masc/auth/local-admin.token').write_text('operator-token')
+            env = {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+            with Recorder() as standin, Announcement(workspace, standin.port, 'single-user', env) as holder:
+                standin.before['/health/ready'] = holder.withdraw
+                resumed = subprocess.run([BINARY, 'runtime-resume', '--base-path', str(workspace),
+                                          '--port', str(standin.port)],
+                                         env=env, capture_output=True, text=True, timeout=60,
+                                         stdin=subprocess.DEVNULL)
+                self.assertEqual(resumed.returncode, 1, resumed.stdout + resumed.stderr)
+                self.assertIn(f'(pid {holder.pid}) withdrew its announcement', resumed.stderr)
+                self.assertEqual(standin.requests, [('GET', '/health/ready', None)])
+                self.assertTrue(holder.alive())
+
+    def restart_refused(self, workspace, port, env):
+        """`masc restart` on a workspace it must leave alone: exit 1, and no
+        replacement was started. Returns what it wrote to stderr."""
+        result = subprocess.run([BINARY, 'restart', '--base-path', str(workspace), '--port', str(port)],
+                                env=env, capture_output=True, text=True, timeout=60,
+                                stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn('Started pid', result.stdout)
+        self.assertNotIn('to stop', result.stdout)
+        self.assertFalse((workspace / '.masc/logs').exists(), 'restart opened a log for a replacement')
+        return result.stderr
+
+    def test_restart_leaves_a_workspace_it_cannot_stop_alone(self):
+        # Restart stops only the lease owner that announces the port, and
+        # starts a server only when nothing holds the workspace. Every other
+        # holder is named and left running, and nothing is sent to the port.
+        assert BINARY is not None
+
+        def scratch(tmp):
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            return workspace, {'PATH': '/usr/bin:/bin', 'HOME': tmp, 'XDG_CONFIG_HOME': str(root / 'config')}
+
+        with self.subTest('an owner that announces nothing'), \
+                tempfile.TemporaryDirectory(prefix='masc-restart-silent-') as tmp:
+            workspace, env = scratch(tmp)
+            with Recorder() as standin, Announcement(workspace, standin.port, 'none', env) as holder:
+                said = self.restart_refused(workspace, standin.port, env)
+                self.assertIn(f'pid {holder.pid} holds', said)
+                self.assertIn(f'kill {holder.pid}', said)
+                self.assertIn('Nothing was stopped or started.', said)
+                self.assertEqual(standin.requests, [])
+                self.assertTrue(holder.alive())
+        with self.subTest('a server of a single user on another port'), \
+                tempfile.TemporaryDirectory(prefix='masc-restart-elsewhere-') as tmp:
+            workspace, env = scratch(tmp)
+            announced = self.unused_port()
+            with Recorder() as standin, Announcement(workspace, announced, 'single-user', env) as holder:
+                said = self.restart_refused(workspace, standin.port, env)
+                self.assertIn(f'(pid {holder.pid}) serves port {announced}', said)
+                self.assertIn(f'--port {announced}', said)
+                self.assertIn('Nothing was stopped or started.', said)
+                self.assertEqual(standin.requests, [])
+                self.assertTrue(holder.alive())
+        with self.subTest('a server of a single user that does not answer'), \
+                tempfile.TemporaryDirectory(prefix='masc-restart-mute-') as tmp:
+            workspace, env = scratch(tmp)
+            port = self.unused_port()
+            with Announcement(workspace, port, 'single-user', env) as holder:
+                said = self.restart_refused(workspace, port, env)
+                self.assertIn(f'(pid {holder.pid}) announces port {port} and does not answer its version',
+                              said)
+                self.assertTrue(holder.alive())
+        with self.subTest('a listener with no lease owner behind it'), \
+                tempfile.TemporaryDirectory(prefix='masc-restart-foreign-') as tmp:
+            workspace, env = scratch(tmp)
+            with Recorder() as standin:
+                said = self.restart_refused(workspace, standin.port, env)
+                self.assertIn(f'Port {standin.port} is held by a process that is not', said)
+                self.assertEqual(standin.requests, [])
 
     def test_recording_does_not_overwrite_a_preexisting_partial_file(self):
         assert BINARY is not None
@@ -528,7 +783,16 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 # Refused as usage: nothing was seeded on the way out.
                 self.assertFalse((base/'.masc').exists(), 'a usage error must not seed a workspace')
 
-    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False, reject_resume=False, imp_without_image=False):
+    def scenario(self, foreign=False, missing_key=False, stale_token=False, linked_root=False, unsupported_sandbox=False, reject_resume=False, imp_without_image=False,
+                 holder_kind='single-user', withdraw_at=None, while_waiting=None, own_server=False):
+        # holder_kind: what the lease holder behind the stand-in announces.
+        # withdraw_at: 'ready' or 'resume', the answer before which that
+        # holder withdraws its announcement, as a server that shuts down does.
+        # while_waiting: 'withdraws' or 'leaves'. The stand-in is not ready,
+        # and at the first readiness read the holder withdraws its
+        # announcement, or ends.
+        # own_server: nothing holds the workspace and the port is free, so
+        # setup starts the real server and waits for the kernel to name it.
         with tempfile.TemporaryDirectory(prefix='masc-setup-') as tmp:
             base = Path(tmp)
             commands = base / 'commands'
@@ -541,17 +805,13 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             env['HOME'] = tmp
             env['XDG_CONFIG_HOME'] = str(base / 'user-config')
             env['PATH'] = str(commands) + os.pathsep + env['PATH']
-            def run(*args):
+            def run(*args, timeout=30):
                 return subprocess.run([BINARY, *args, '--base-path', str(base)],
-                                      env=env, text=True, capture_output=True, timeout=30)
+                                      env=env, text=True, capture_output=True, timeout=timeout)
             initialized = run('init')
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             # `masc init` on its own still names every file it writes.
             self.assertIn('wrote  ', initialized.stdout)
-            if linked_root:
-                volume = base / 'deployment-volume'
-                (base / '.masc').rename(volume)
-                (base / '.masc').symlink_to(volume, target_is_directory=True)
             config = base / '.masc/config'
             runtime = config / 'runtime.toml'
             runtime.write_bytes(_swap_fixture(
@@ -599,10 +859,27 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
             posted = []
             accepted_auth = []
             model_requests = []
+            held = {}
+            def withdraw_before(answer):
+                if withdraw_at == answer and 'withdrawn' not in held:
+                    held['withdrawn'] = True
+                    held['holder'].withdraw()
             class Handler(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
-                    self.send({'paths': {'effective_base_path': str(base.parent if foreign else base)},
-                               'startup': {'state_ready': True}})
+                    # /health/ready and the compact /health: setup reads no
+                    # identity from the port, the kernel names the server.
+                    if self.path == '/health/ready':
+                        withdraw_before('ready')
+                        if while_waiting is not None:
+                            if 'waited' not in held:
+                                held['waited'] = True
+                                if while_waiting == 'withdraws':
+                                    held['holder'].withdraw()
+                                else:
+                                    held['holder'].leave()
+                            self.send({'ready': False}, status=503)
+                            return
+                    self.send({'server': 'masc', 'version': '0.0.0', 'ready': True})
                 def do_POST(self):
                     if self.path == '/v1/chat/completions':
                         request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -649,6 +926,7 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                     posted.append((self.path, body))
                     accepted_auth.append((self.path, self.headers.get('Authorization'), self.headers.get('x-masc-agent')))
                     if self.path == '/api/v1/runtime/setup/resume':
+                        withdraw_before('resume')
                         if reject_resume:
                             self.send({'error': 'fixture resume unavailable'}, status=503)
                         else:
@@ -676,7 +954,24 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                     what='base_url http://127.0.0.1:9/v1'))
                 thread = threading.Thread(target=server.serve_forever)
                 thread.start()
+                holding = contextlib.ExitStack()
                 try:
+                    if not foreign and not own_server:
+                        # The kernel names this helper as the server of the
+                        # workspace on the stand-in's port. A listener with
+                        # no lease holder behind it is not that server.
+                        held['holder'] = holding.enter_context(
+                            Announcement(base, server.server_port, holder_kind, env))
+                    if linked_root:
+                        # Linked after the helper took the lease: taking the
+                        # lease refuses a workspace whose .masc is a link, and
+                        # a server boot takes it the same way. So this is not
+                        # a state a server boots into; the case checks that
+                        # setup reads and writes its own files through the
+                        # link.
+                        volume = base / 'deployment-volume'
+                        (base / '.masc').rename(volume)
+                        (base / '.masc').symlink_to(volume, target_is_directory=True)
                     verification = run('runtime-verify','setup_fixture.setup-fixture-owned-model')
                     receipt = json.loads(verification.stdout)
                     self.assertEqual(receipt['schema'],'masc.runtime_verification.v1')
@@ -692,8 +987,45 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                         self.assertEqual(receipt['observed_model'],'setup-fixture-owned-model')
                         self.assertEqual(receipt['checks'],{'response':True,'tool_called':True,'tool_roundtrip':True})
                     sandbox_args = ['--sandbox-profile','microvm','--microvm-backend','microsandbox'] if unsupported_sandbox else []
-                    result = run('setup', '--no-tui', '--port', str(server.server_port), *sandbox_args)
+                    if own_server:
+                        # A real boot: bounded by the 60 s setup gives its
+                        # server, and the steps after it.
+                        setup_port = self.unused_port()
+
+                        def observed_status():
+                            # An owner that cannot be read answers a document
+                            # without a status; the document says why.
+                            document = json.loads(run('setup-server', '--port', setup_port).stdout)
+                            if document.get('status') is None:
+                                self.fail('setup-server named no status: %r' % (document,))
+                            return document
+
+                        def freed_within(seconds):
+                            deadline = time.monotonic() + seconds
+                            while time.monotonic() < deadline:
+                                if observed_status()['status'] == 'free':
+                                    return True
+                                time.sleep(.2)
+                            return observed_status()['status'] == 'free'
+
+                        try:
+                            result = run('setup', '--no-tui', '--port', setup_port, timeout=240)
+                        finally:
+                            # Setup stops the server it started when it does
+                            # not finish. One it left running is ended here,
+                            # before its workspace is removed under it.
+                            left = observed_status()
+                            if 'server_pid' in left:
+                                os.kill(left['server_pid'], signal.SIGTERM)
+                                if not freed_within(60):
+                                    os.kill(left['server_pid'], signal.SIGKILL)
+                                    self.assertTrue(freed_within(15), 'the server setup left did not end')
+                    else:
+                        left = None
+                        result = run('setup', '--no-tui', '--port', str(server.server_port), *sandbox_args)
+                    holder_alive = held['holder'].alive() if 'holder' in held else None
                 finally:
+                    holding.close()
                     server.shutdown()
                     thread.join()
             self.assertEqual(manifest.read_bytes(), original)
@@ -703,11 +1035,62 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 # runtime-verify above made two model requests; setup made none.
                 self.assertEqual(len(model_requests), 2)
                 self.assertEqual(posted, [])
+            elif holder_kind == 'none':
+                # The stand-in answers on the port, and the kernel names no
+                # server there: nothing is minted, sent or started.
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(posted, [])
+                self.assertFalse((base / '.masc/auth/local-admin.token').exists())
+                self.assertIn(f"pid {held['holder'].pid} holds", result.stderr)
+                self.assertIn('No server was started or signed in to.', result.stderr)
+                self.assertIs(holder_alive, True)
+            elif own_server:
+                # The kernel named the server setup started, on the port setup
+                # gave it. Only then was the operator signed in to it and the
+                # bearer sent: the real server accepted both. Nothing of this
+                # went to the model stand-in, which listens on another port.
+                self.assertIn('Local operator credential ready.', result.stderr)
+                self.assertIn('The running workspace has loaded your saved model settings.', result.stdout)
+                self.assertTrue((base / '.masc/auth/local-admin.token').exists())
+                self.assertEqual(posted, [])
+                # The Keeper boot fails in this fixture: its docker stand-in
+                # answers no security options. Setup then ends with exit 1
+                # and stops the server it started.
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn('Starting imp failed', result.stderr)
+                self.assertEqual(left['status'], 'free', 'setup left the server it started running')
+            elif while_waiting == 'leaves':
+                # The server setup found left before it was ready. Setup says
+                # so at once; it does not wait out its minute for a process
+                # that is gone.
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(posted, [])
+                self.assertFalse((base / '.masc/auth/local-admin.token').exists())
+                self.assertIn('No process holds the lease of', result.stderr)
+                self.assertIn('Nothing was signed in to', result.stderr)
+            elif while_waiting == 'withdraws':
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(posted, [])
+                self.assertFalse((base / '.masc/auth/local-admin.token').exists())
+                self.assertIn(f"(pid {held['holder'].pid}) withdrew its announcement", result.stderr)
+                self.assertIn('Nothing was signed in to', result.stderr)
+            elif withdraw_at == 'ready':
+                # The kernel is asked again before the operator is signed in.
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(posted, [])
+                self.assertFalse((base / '.masc/auth/local-admin.token').exists())
+                self.assertIn(f"(pid {held['holder'].pid}) withdrew its announcement", result.stderr)
+            elif withdraw_at == 'resume':
+                # And again before the bearer goes to the Keeper boot.
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(posted, [('/api/v1/runtime/setup/resume', {})])
+                self.assertIn(f"(pid {held['holder'].pid}) withdrew its announcement", result.stderr)
             elif foreign or missing_key or unsupported_sandbox:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(posted, [])
                 self.assertFalse((base / '.masc/auth/local-admin.token').exists())
-                self.assertIn('MASC_SETUP_TEST_KEY' if missing_key else 'microsandbox cannot express' if unsupported_sandbox else 'Port belongs to workspace', result.stderr)
+                self.assertIn('MASC_SETUP_TEST_KEY' if missing_key else 'microsandbox cannot express' if unsupported_sandbox
+                              else f'Port {server.server_port} is in use by a process that does not hold', result.stderr)
             elif reject_resume:
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(posted, [('/api/v1/runtime/setup/resume', {})])
@@ -741,8 +1124,26 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
     def test_failed_new_sandbox_preserves_existing_manifest(self):
         self.scenario(unsupported_sandbox=True)
 
-    def test_supported_linked_deployment_root(self):
+    def test_setup_works_through_a_masc_directory_linked_after_the_lease_was_taken(self):
         self.scenario(linked_root=True)
+
+    def test_an_owner_that_announces_nothing_is_not_signed_in_to_by_setup(self):
+        self.scenario(holder_kind='none')
+
+    def test_a_server_that_withdrew_its_announcement_is_not_signed_in_to(self):
+        self.scenario(withdraw_at='ready')
+
+    def test_a_server_that_withdrew_its_announcement_gets_no_keeper_boot(self):
+        self.scenario(withdraw_at='resume')
+
+    def test_a_server_that_leaves_while_setup_waits_for_it_ends_the_wait(self):
+        self.scenario(while_waiting='leaves')
+
+    def test_a_server_that_withdraws_while_setup_waits_for_it_ends_the_wait(self):
+        self.scenario(while_waiting='withdraws')
+
+    def test_setup_signs_in_to_the_server_it_started_once_the_kernel_names_it(self):
+        self.scenario(own_server=True)
 
     def test_preserves_default_imp_and_starts_by_name(self):
         self.scenario()
@@ -763,7 +1164,9 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', required=True)
+    parser.add_argument('--announcer', required=True)
     args, remaining = parser.parse_known_args()
     BINARY = str(Path(args.binary).resolve())
+    ANNOUNCER = str(Path(args.announcer).resolve())
     Setup.__unittest_skip__ = False
     unittest.main(argv=[__file__, *remaining])

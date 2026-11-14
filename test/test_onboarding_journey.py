@@ -93,7 +93,7 @@ class Journey(StepByStep):
     def test_group_session_restarts_old_owner_instead_of_reusing_its_groups(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
-        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        same = dict(status='same_workspace', server_pid=4242, server_answers=True, read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
                    receipt('masc.setup_server_shutdown.v1', termination_requested=True, readiness='owner_draining'),
                    receipt('masc.setup_server.v1', status='free', read_only=True)]
@@ -109,7 +109,7 @@ class Journey(StepByStep):
     def test_group_session_restarts_reclaims_port_when_stop_reports_available(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
-        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        same = dict(status='same_workspace', server_pid=4242, server_answers=True, read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
                    receipt('masc.setup_server_shutdown.v1', termination_requested=True, readiness='replacement_can_start')]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
@@ -121,7 +121,7 @@ class Journey(StepByStep):
     def test_group_session_restarts_rechecks_port_when_stop_reports_busy(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
-        same = dict(status='same_workspace', read_only=True, installed_version='0.35.5', server_version='0.35.5')
+        same = dict(status='same_workspace', server_pid=4242, server_answers=True, read_only=True, installed_version='0.35.5', server_version='0.35.5')
         replies = [receipt('masc.setup_server.v1', **same),
                    receipt('masc.setup_server_shutdown.v1', termination_requested=True, readiness='port_busy'),
                    receipt('masc.setup_server.v1', status='free', read_only=True)]
@@ -134,7 +134,7 @@ class Journey(StepByStep):
     def test_shutdown_observation_failure_rechecks_without_resending_termination(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
-        replies = [receipt('masc.setup_server.v1', status='same_workspace', read_only=True,
+        replies = [receipt('masc.setup_server.v1', status='same_workspace', server_pid=4242, server_answers=True, read_only=True,
                            installed_version='fixture', server_version='fixture'),
                    receipt('masc.setup_server_shutdown.v1', termination_requested=True,
                            readiness='observation_failed', observation_error='Owner observation unavailable'),
@@ -149,7 +149,7 @@ class Journey(StepByStep):
     def test_pending_shutdown_reinspection_never_sends_a_second_signal(self):
         def receipt(schema, **values):
             return subprocess.CompletedProcess([], 0, json.dumps(dict(schema=schema, **values)))
-        same = receipt('masc.setup_server.v1', status='same_workspace', read_only=True,
+        same = receipt('masc.setup_server.v1', status='same_workspace', server_pid=4242, server_answers=True, read_only=True,
                        installed_version='fixture', server_version='fixture')
         replies = [same, receipt('masc.setup_server_shutdown.v1', termination_requested=True,
                                 readiness='owner_draining'), same,
@@ -162,7 +162,7 @@ class Journey(StepByStep):
 
     def test_shutdown_reinspection_failure_keeps_the_confirmed_request(self):
         same = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
-            status='same_workspace', read_only=True, installed_version='fixture', server_version='fixture')))
+            status='same_workspace', server_pid=4242, server_answers=True, read_only=True, installed_version='fixture', server_version='fixture')))
         requested = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server_shutdown.v1',
             termination_requested=True, readiness='observation_failed', observation_error='Unavailable')))
         with patch.object(SETUP.subprocess, 'run', side_effect=[same, requested, subprocess.CompletedProcess([], 1, '')]) as run, \
@@ -178,7 +178,7 @@ class Journey(StepByStep):
                        dict(termination_requested=True, readiness='observation_failed')):
             with self.subTest(fields=fields):
                 same = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
-                    status='same_workspace', read_only=True, installed_version='fixture', server_version='fixture')))
+                    status='same_workspace', server_pid=4242, server_answers=True, read_only=True, installed_version='fixture', server_version='fixture')))
                 stopped = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server_shutdown.v1', **fields)))
                 with patch.object(SETUP.subprocess, 'run', side_effect=[same, stopped]) as run, \
                         patch.object(SETUP, 'pick', return_value=[0]), contextlib.redirect_stderr(io.StringIO()):
@@ -398,7 +398,7 @@ class Journey(StepByStep):
 
     def test_current_owner_history_quick_open_still_observes_identity(self):
         result = subprocess.CompletedProcess([], 0, json.dumps(dict(schema='masc.setup_server.v1',
-            read_only=True, status='same_workspace', installed_version='0.35.5', server_version='0.35.5')))
+            read_only=True, status='same_workspace', server_pid=4242, server_answers=True, installed_version='0.35.5', server_version='0.35.5')))
         with patch.object(SETUP.subprocess, 'run', return_value=result) as run, patch.object(SETUP, 'pick') as pick:
             self.assertEqual(SETUP.select_setup_server('/owned/masc', '/saved', 19301, resume_existing=True), 19301)
         self.assertEqual(run.call_args.args[0], ['/owned/masc', 'setup-server', '--base-path', '/saved', '--port', '19301'])
@@ -776,6 +776,11 @@ class Journey(StepByStep):
             record.parent.mkdir(parents=True)
             record.write_text(str(old) + '\n')
             chosen = Path(home, 'chosen')
+            # A port of its own: the default port may serve a MASC on this
+            # host, and setup would then ask about that server first.
+            with socket.socket() as listener:
+                listener.bind(('127.0.0.1', 0))
+                port = str(listener.getsockname()[1])
             pid, fd = pty.fork()
             if pid == 0:
                 environment = {key: value for key, value in os.environ.items()
@@ -783,7 +788,7 @@ class Journey(StepByStep):
                 environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb',
                                    PATH=path_without('claude', environment.get('PATH', '')))
                 os.chdir(home)
-                os.execve(BINARY, [BINARY, 'setup'], environment)
+                os.execve(BINARY, [BINARY, 'setup', '--port', port], environment)
             captured = b''
             exited = False
 
@@ -909,6 +914,10 @@ class Journey(StepByStep):
     def account_server(port=19400, answers=True, **fields):
         return dict(status='account_server', server_port=port, server_answers=answers, **fields)
 
+    @staticmethod
+    def single_user_server(pid=4242, answers=True, **fields):
+        return dict(status='same_workspace', server_pid=pid, server_answers=answers, **fields)
+
     def test_an_account_installation_is_reported_and_nothing_else_is_run(self):
         # A boot of this workspace runs the account server or stops. The
         # journey of a single user neither opens its history nor prepares imp
@@ -955,13 +964,19 @@ class Journey(StepByStep):
                 (self.account_server(answers=False, server_version='0.36.0'),
                  'announces port 19400 and did not answer its health probe there', '0.36.0'),
                 (dict(status='free'), self.UNANNOUNCED, 'Port 19400'),
-                (dict(status='other_workspace', server_workspace='/other', suggested_port=19999),
-                 self.UNANNOUNCED + ' Port 19400 belongs to /other', 'is running'),
                 (dict(status='unknown_server', suggested_port=19999),
-                 self.UNANNOUNCED + ' Port 19400 is held by a process that does not answer as a MASC workspace',
+                 self.UNANNOUNCED + ' Port 19400 is held by a process that does not hold this workspace',
                  'is running'),
-                (dict(status='same_workspace', server_version='0.36.0'),
-                 'serves this workspace to a single user is running on port 19400', self.UNANNOUNCED)]
+                (self.single_user_server(server_version='0.36.0'),
+                 'serves this workspace to a single user (pid 4242) announces port 19400 (MASC 0.36.0)',
+                 self.UNANNOUNCED),
+                # A version from a port that did not answer is not shown.
+                (self.single_user_server(answers=False, server_version='0.36.0'),
+                 'serves this workspace to a single user (pid 4242) announces port 19400.', '0.36.0'),
+                (dict(status='same_workspace_on_another_port', server_pid=4242, server_port=19401),
+                 'serves this workspace to a single user (pid 4242) announces port 19401.', self.UNANNOUNCED),
+                (dict(status='owner_unannounced', server_pid=4242),
+                 self.UNANNOUNCED + ' pid 4242 holds this workspace but announces no port', 'is running')]
         for fields, said, unsaid in rows:
             with self.subTest(fields=fields), \
                     patch.object(SETUP, 'workspace_port', return_value=19400), \
@@ -989,7 +1004,11 @@ class Journey(StepByStep):
                       self.server_observation(**self.account_server(server_version=36)),
                       self.server_reply(0, schema='masc.setup_server.v1', read_only=True, **self.account_server()),
                       self.server_observation(status='same_workspace'),
-                      self.server_observation(status='other_workspace'),
+                      self.server_observation(**self.single_user_server(pid='4242')),
+                      self.server_observation(**self.single_user_server(answers=None)),
+                      self.server_observation(status='same_workspace_on_another_port', server_pid=4242),
+                      self.server_observation(status='same_workspace_on_another_port', server_port=19401),
+                      self.server_observation(status='owner_unannounced'),
                       self.server_reply(0, schema='masc.setup_server.v1', status='free'),
                       self.server_reply(1, schema='masc.setup_server.v1', read_only=True, status='free'),
                       # The reason of an unread owner is a sentence, under its own schema.
@@ -1036,7 +1055,7 @@ class Journey(StepByStep):
             SETUP.select_setup_server('/bin/masc', '/workspace', 19400)
         self.assertEqual(str(preserved.exception), reason)
         # After it asked one to stop, "No server was changed" would be false.
-        same = self.server_observation(status='same_workspace', server_version='0.36.0')
+        same = self.server_observation(**self.single_user_server(server_version='0.36.0'))
         requested = self.server_reply(0, schema='masc.setup_server_shutdown.v1', termination_requested=True,
                                       readiness='owner_draining')
         with patch.object(SETUP.subprocess, 'run', side_effect=[same, requested, unread]) as run, \
@@ -1151,10 +1170,54 @@ class Journey(StepByStep):
             self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
             picker.assert_not_called()
 
+    def test_a_holder_the_kernel_names_without_a_server_to_talk_to_ends_setup_by_its_pid(self):
+        # The kernel names the process that holds the workspace. Setup signs
+        # in to it and stops it only on the port it announces and answers on,
+        # so each of these ends with the pid and what to do, and nothing is
+        # asked to stop.
+        rows = [(dict(status='owner_unannounced', server_pid=4242),
+                 ('pid 4242', 'kill 4242')),
+                (dict(status='same_workspace_on_another_port', server_pid=4242, server_port=19401),
+                 ('(pid 4242) serves port 19401, not port 19400', '--port 19401')),
+                (self.single_user_server(answers=False),
+                 ('(pid 4242) announces port 19400 and does not answer its version there', 'kill 4242')),
+                # A port that answered without a version names none to compare.
+                (self.single_user_server(),
+                 ('(pid 4242) announces port 19400 and does not answer its version there', 'kill 4242'))]
+        for fields, said in rows:
+            with self.subTest(fields=fields), \
+                    patch.object(SETUP.subprocess, 'run', return_value=self.server_observation(**fields)) as run, \
+                    patch.object(SETUP, 'pick') as picker, \
+                    self.assertRaises(SETUP.SetupError) as refused:
+                SETUP.select_setup_server('/bin/masc', '/workspace', 19400)
+            for text in said:
+                self.assertIn(text, str(refused.exception))
+            self.assertEqual([call.args[0][1] for call in run.call_args_list], ['setup-server'])
+            picker.assert_not_called()
+
+    def test_a_server_asked_to_stop_that_withdrew_its_announcement_is_still_shutting_down(self):
+        # The server withdraws its announcement before it lets go of the
+        # workspace. That is the shutdown in progress, not a server that
+        # never announced: no second request is sent, and setup goes on once
+        # nothing holds the workspace.
+        same = self.server_observation(**self.single_user_server(server_version='0.36.0'))
+        requested = self.server_reply(0, schema='masc.setup_server_shutdown.v1', termination_requested=True,
+                                      readiness='owner_draining')
+        draining = self.server_observation(status='owner_unannounced', server_pid=4242)
+        free = self.server_observation(status='free')
+        with patch.object(SETUP.subprocess, 'run', side_effect=[same, requested, draining, free]) as run, \
+                patch.object(SETUP, 'pick', side_effect=[[0], [0]]), \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            self.assertEqual(SETUP.select_setup_server('/bin/masc', '/workspace', 19400, require_new_owner=True),
+                             19400)
+        self.assertEqual([call.args[0][1] for call in run.call_args_list],
+                         ['setup-server', 'setup-stop-previous-owner', 'setup-server', 'setup-server'])
+        self.assertIn('No second shutdown request will be sent', printed.getvalue())
+
     def test_an_account_server_that_appears_after_a_stop_is_said_with_the_request(self):
         # The server of a single user was asked to stop, so "nothing was
         # stopped" would be false; no second request is sent.
-        same = self.server_observation(status='same_workspace', server_version='0.36.0')
+        same = self.server_observation(**self.single_user_server(server_version='0.36.0'))
         requested = self.server_reply(0, schema='masc.setup_server_shutdown.v1', termination_requested=True,
                                       readiness='owner_draining')
         running = self.server_observation(**self.account_server(server_version='0.36.0'))
@@ -1276,6 +1339,9 @@ class Journey(StepByStep):
             server = int(named.group(1))
             try:
                 self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+                # The kernel named the replacement on the account server's
+                # announcement file, and restart reports it as that kind.
+                self.assertIn(': the account server masc ', started.stdout)
                 for asked in (port, other):
                     with self.subTest(asked=asked):
                         observed = masc('setup-server', '--port', asked)
@@ -1293,7 +1359,9 @@ class Journey(StepByStep):
                 self.assertEqual(stopped.returncode, 1, stopped.stderr)
                 receipt = json.loads(stopped.stdout)
                 self.assertIs(receipt['termination_requested'], False)
-                self.assertIn('held by its account server', receipt['error'])
+                self.assertIn('The account server of ' + str(base), receipt['error'])
+                self.assertIn('masc restart replaces the account server', receipt['error'])
+                self.assertIn('No server was signed in to or stopped.', receipt['error'])
                 os.kill(server, 0)  # It still runs.
             finally:
                 os.kill(server, signal.SIGTERM)
@@ -1981,10 +2049,9 @@ class ImpTools(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs['timeout'], SETUP.SETUP_SERVER_PROBE_TIMEOUT_SECONDS)
 
     def test_no_running_server_of_this_workspace_means_no_note(self):
-        # Another workspace's server, or a stranger on the port, is not the
-        # server `masc setup` would reuse. An account server starts no Keeper,
-        # so it reads no browser setting.
-        for status in ('free', 'other_workspace', 'unknown_server', 'account_server'):
+        # A stranger on the port is not the server `masc setup` would reuse.
+        # An account server starts no Keeper, so it reads no browser setting.
+        for status in ('free', 'unknown_server', 'account_server'):
             with self.subTest(status=status):
                 self.assertEqual(self.note(completed(json.dumps(dict(status=status))))[1], '')
 

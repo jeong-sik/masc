@@ -1,11 +1,18 @@
 (* RFC-0482 §3.2: while the workspace's server runs, it is the one writer of
    runtime.toml. A command that edits the file asks the server for the text it
    reads, edits that text, and saves it back with the revision it read, so the
-   server commits, publishes and announces it like any other save. With no
-   server answering, the command writes the file itself, as it did before:
-   then there is no other writer and no reader to tell. *)
+   server commits, publishes and announces it like any other save. When no
+   process holds the workspace's lease, the command writes the file itself:
+   then there is no other writer and no reader to tell. A command never writes
+   the file while a process holds the lease. *)
 
-type server = { origin : string; headers : (string * string) list }
+module Upgrade = Server_upgrade_preparation
+
+type server =
+  { owner : Upgrade.single_user_server
+  ; origin : string
+  ; headers : (string * string) list
+  }
 
 type target =
   | Running_server of server
@@ -15,41 +22,69 @@ type saved =
   | Unchanged
   | Saved of { path : string }
 
-let health_path = Server_health_paths.full
 let raw_path = "/api/v1/runtime/config/raw"
 let voice_setup_path = "/api/v1/voice/setup"
 
-(* This workspace's server answers on the port and is ready: it is the
-   writer. This workspace's server is still starting, or answers without a
-   sign-in to present: the command stops, because writing the file under a
-   running server would bypass it. Nothing answers, or the port answers for
-   another workspace or for something that is not a masc server: this
-   workspace's server is not there, and the command is the writer. *)
+(* HIGH-RISK-UNREVIEWED: which process gets the operator bearer, and whether
+   the command may write runtime.toml itself, is what the kernel says of the
+   lease of [base_path]. Only the server of a single user that the kernel
+   names as lease owner and announcer of [port] gets a [Running_server]. The
+   file is written locally only when nothing holds the lease; any other owner
+   stops the command. The port is read without credentials only for
+   [/health/ready]. *)
 let find ~clock ~base_path ~port ~agent =
-  let origin = Masc_network_defaults.masc_http_loopback_origin ~port in
-  match Masc_http_client.get_sync ~clock ~url:(origin ^ health_path) ~headers:[] () with
-  | Error _ -> Ok No_server
-  | Ok (200, health) ->
-    (match Masc_cli_setup.health_state ~base_path health with
-     (* [health_state] resolves the answered path, which on another machine's
-        layout or a removed workspace does not exist here. *)
-     | exception (Masc_cli_setup.Setup_error _ | Unix.Unix_error _) -> Ok No_server
-     | false -> Error "The workspace server is starting. Run this again when it is ready."
-     | true ->
+  let root = (Host_config.host ()).base_path_lease_root in
+  match Upgrade.owner_without_making root ~base_path ~port with
+  | Ok Upgrade.Unowned -> Ok No_server
+  | Error unread ->
+    Error
+      (Printf.sprintf "The owner of %s could not be checked (%s). Nothing was saved." base_path
+         (Server_startup_takeover.owner_capture_error_to_string unread))
+  | Ok (Upgrade.Single_user_server_here owner) ->
+    let origin = Masc_network_defaults.masc_http_loopback_origin ~port in
+    (match
+       Masc_http_client.get_sync ~clock ~timeout_sec:Masc_http_client.default_request_timeout_sec
+         ~url:(origin ^ Server_health_paths.readiness) ~headers:[] ()
+     with
+     | Ok (200, (_ : string)) ->
        (match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
         | None ->
           Error "The workspace server is running, and this command saves through it. Sign in first (masc login)."
         | Some token ->
           Ok
             (Running_server
-               { origin
+               { owner
+               ; origin
                ; headers =
                    [ "authorization", "Bearer " ^ token
                    ; "x-masc-agent", agent
                    ; "content-type", "application/json"
                    ]
-               })))
-  | Ok ((_ : int), _) -> Ok No_server
+               }))
+     | Ok ((_ : int), (_ : string)) -> Error "The workspace server is starting. Run this again when it is ready."
+     | Error (_ : string) ->
+       Error
+         (Printf.sprintf
+            "The server of %s (pid %d) announces port %d and does not answer there. Run this again \
+             when it does. Nothing was saved."
+            base_path (Upgrade.single_user_server_pid owner) port))
+  | Ok
+      (( Upgrade.Single_user_server_elsewhere _ | Upgrade.Owner_unannounced _
+       | Upgrade.Account_server_here _ | Upgrade.Account_server_elsewhere _ ) as owner) ->
+    Error
+      (Upgrade.owner_sentence ~lease_dir:(Upgrade.lease_directory root ~base_path) ~base_path ~port
+         owner
+       ^ " Nothing was saved.")
+
+(* HIGH-RISK-UNREVIEWED: every send of the bearer asks the kernel again, right
+   before it, whether it still names the server [find] found. A command that
+   sends several requests, or sends after a long edit, sends nothing more to a
+   process that took the port or the lease meanwhile. *)
+let checked server ~refused send =
+  match Upgrade.confirm server.owner with
+  | Ok () -> send ()
+  | Error departure ->
+    refused (Upgrade.departure_sentence server.owner departure ^ " Nothing more was sent to it.")
 
 let string_field json name =
   match Yojson.Safe.Util.member name json with
@@ -72,6 +107,7 @@ type source = { text : string; revision : string; path : string }
 
 let fetch ~clock server =
   let open Result.Syntax in
+  checked server ~refused:Result.error @@ fun () ->
   let* status, body =
     Result.map_error
       (fun detail -> "The workspace server did not answer runtime.toml: " ^ detail)
@@ -107,6 +143,7 @@ let store_error_message = function
 let store_source ~clock server source ~edited =
   if String.equal edited source.text then Ok Unchanged
   else
+    checked server ~refused:(fun message -> Error (Not_stored message)) @@ fun () ->
     let request =
       Yojson.Safe.to_string
         (`Assoc
@@ -193,6 +230,7 @@ let voice_speaking json =
    would (MASC_CONFIG_DIR), and the changes are applied to the server's. *)
 let fetch_voice_ground ~clock server =
   let open Result.Syntax in
+  checked server ~refused:Result.error @@ fun () ->
   let* status, body =
     Result.map_error
       (fun detail -> "The workspace server did not answer its voice setup: " ^ detail)
@@ -220,6 +258,7 @@ let fetch_voice_ground ~clock server =
    applies [changes] under its lock against [revision], the revision they were
    decided on, and refuses (409) when the file moved since. *)
 let apply_voice_setup ~clock server ~revision changes =
+  checked server ~refused:Result.error @@ fun () ->
   let body = Yojson.Safe.to_string (Voice_wizard.request_json ~revision changes) in
   match
     Masc_http_client.post_sync ~clock ~url:(server.origin ^ voice_setup_path) ~headers:server.headers ~body ()
@@ -293,6 +332,8 @@ let setup_publication_timeout_sec = 60.0
    It is saved even when it equals [source], as the local commit would be, so
    the receipt is the server's. *)
 let publish_setup_text ~clock server (source : source) ~text =
+  (* Nothing was sent when the kernel names another process: a refusal. *)
+  checked server ~refused:(fun message -> Error (Runtime_setup_batch.Commit_refused message)) @@ fun () ->
   let request =
     Yojson.Safe.to_string
       (`Assoc

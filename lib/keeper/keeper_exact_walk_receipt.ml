@@ -212,10 +212,14 @@ let valid_digest = String_util.is_lowercase_sha256_hex
 let unique values = List.length values=List.length (List.sort_uniq String.compare values)
 let valid_names values = unique values && List.for_all (fun value -> String.trim value<>"") values
 let check condition detail = if condition then Ok () else Error detail
+(* The walk keeps version 1. A receipt with response observations encodes
+   as version 2. *)
+let walk_version = 1
+let observed_receipt_version = 2
 let validate receipt =
   let h=receipt.http in
   let ids=List.map (fun (b : binding) -> b.candidate_id) h.declared in
-  let* ()=check (receipt.version=1 && valid_names receipt.declared_http && valid_names receipt.declared_cli
+  let* ()=check (receipt.version=walk_version && valid_names receipt.declared_http && valid_names receipt.declared_cli
     && valid_names receipt.excluded_http) "invalid walk version or declarations" in
   let* ()=check (List.for_all (fun id -> List.mem id receipt.declared_http) receipt.excluded_http)
     "excluded HTTP member not declared" in
@@ -404,7 +408,7 @@ let validate_observations walk observations =
       "response digest differs from the original outcome") (Ok ()) (List.combine h.attempts observations)
 
 let make_internal ~version ~declared_http ~excluded_http ~declared_cli ~(http : http) ~cli =
-  let walk={version=1;declared_http;excluded_http;declared_cli;http=http.legacy;cli} in
+  let walk={version=walk_version;declared_http;excluded_http;declared_cli;http=http.legacy;cli} in
   let* ()=validate walk in
   let* observations=match version with
     | `V1 -> Ok None
@@ -420,25 +424,28 @@ let to_json receipt =
   | json,None -> json
   | `Assoc fields,Some observations -> `Assoc
       (("response_observations",response_observations_to_yojson observations)
-       :: List.map (fun (key,value) -> key,if key="version" then `Int 2 else value) fields)
+       :: List.map (fun (key,value) -> key,if key="version" then `Int observed_receipt_version else value) fields)
   | _,Some _ -> invalid_arg "original walk encoding must be an object"
+(* Only a proof stores a receipt, and every proof holds a receipt with its
+   response observations. The walk inside keeps the shape [make] gives it. *)
 let of_json json =
-  let* walk,observations=match json with
-    | `Assoc fields -> (match List.assoc_opt "version" fields with
-      | Some (`Int 1) -> let* walk=walk_of_yojson json in Ok (walk,None)
-      | Some (`Int 2) ->
-        let* encoded=Option.to_result ~none:"missing response observations" (List.assoc_opt "response_observations" fields) in
-        let* observations=response_observations_of_yojson encoded in
-        let v1=`Assoc (List.filter_map (fun (key,value) ->
-          if key="response_observations" then None
-          else Some (key,if key="version" then `Int 1 else value)) fields) in
-        let* walk=walk_of_yojson v1 in Ok (walk,Some observations)
-      | Some _ | None -> Error "unknown original walk version")
+  let* fields=match json with
+    | `Assoc fields -> Ok fields
     | _ -> Error "original walk evidence must be an object" in
-  let value={walk;observations} in
+  let* ()=match List.assoc_opt "version" fields with
+    | Some (`Int version) when version=observed_receipt_version -> Ok ()
+    | Some _ | None ->
+      Error (Printf.sprintf "an original walk receipt must be version %d" observed_receipt_version) in
+  let* encoded=Option.to_result ~none:"missing response observations" (List.assoc_opt "response_observations" fields) in
+  let* observations=response_observations_of_yojson encoded in
+  let walk_fields=`Assoc (List.filter_map (fun (key,value) ->
+    if key="response_observations" then None
+    else Some (key,if key="version" then `Int walk_version else value)) fields) in
+  let* walk=walk_of_yojson walk_fields in
+  let value={walk;observations=Some observations} in
   let* original=Lane_addon_action.canonical json in
   let* encoded=Lane_addon_action.canonical (to_json value) in
   let* ()=check (original=encoded) "unknown or noncanonical original walk evidence" in
   let* ()=validate walk in
-  let* ()=match observations with None -> Ok () | Some observations -> validate_observations walk observations in
+  let* ()=validate_observations walk observations in
   Ok value

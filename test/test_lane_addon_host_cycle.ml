@@ -15,7 +15,7 @@ let executed outcome =
     | Exact.Call_ended (Exact.Answered {slot; _}) -> [slot], [slot], Receipt.Answered slot
     | Exact.Call_ended (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)
     | Exact.Call_refused _ -> [], [], Receipt.Not_reached in
-  let receipt = match Receipt.make ~declared_http:[] ~excluded_http:[] ~declared_cli
+  let receipt = match Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli
       ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
       ~cli:(Receipt.cli ~visited:dispatched ~dispatched ~failures:[] ~result) with
     | Ok receipt -> receipt | Error detail -> Alcotest.fail detail in

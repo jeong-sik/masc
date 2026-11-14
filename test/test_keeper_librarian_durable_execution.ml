@@ -697,7 +697,28 @@ let test_preflight_passes_a_history_body_refusal_whose_record_goes () = with_fix
   let refusals ()=(io (fun () -> Lane_addon_store_preflight.scan
     ~validate_tool_request:Keeper_librarian_store_preflight.preflight
     Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get).refusals in
+  let exact_deletes ()=(io (fun () -> Lane_addon_store_preflight.scan
+    Lane_addon_store_preflight.Store.Exact_requests ~base_path:fixture.base_path) |> get).refusals
+    |> List.concat_map (fun (refusal:Lane_addon_store_preflight.refusal) -> refusal.delete) in
   check int "the refusal passes while its record and proof are kept" 0 (List.length (refusals ()));
+  check (list string) "the Exact check keeps the record with its version 2 proof" [] (exact_deletes ());
+  (* A version 1 proof holds the request body. [run] refuses to read it, so
+     the Exact check deletes the record with it (L2b-3). *)
+  let link=Yojson.Safe.from_string (io (fun () -> Fs_compat.load_file proof_path)) in
+  let version_1=function
+    | `Assoc fields -> `Assoc (("request",Lane_addon_exact.request_to_json request)
+        :: List.map (fun (key,value) -> key,if String.equal key "version" then `Int 1 else value) fields)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "a proof is an object" in
+  (match link with
+   | `Assoc fields -> io (fun () -> write proof_path (Yojson.Safe.to_string (`Assoc (List.map (fun (key,value) ->
+       key,match key,value with
+         | "executions",`List entries -> `List (List.map version_1 entries)
+         | _ -> value) fields))))
+   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "a proof link is an object");
+  check bool "the Exact check deletes the record with its version 1 proof" true
+    (List.mem proof_path (exact_deletes ()));
+  check int "with a version 1 proof the final alone gives history its evidence, so the original passes" 0
+    (List.length (refusals ()));
   (* A proof link that is not JSON: the Exact check deletes the record with it. *)
   io (fun () -> write proof_path "{");
   check int "the final alone gives history its evidence, so the original passes" 0

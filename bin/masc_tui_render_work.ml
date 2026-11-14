@@ -1876,7 +1876,8 @@ let render_schedule_list (state : state) =
                 ^ fit_width
                     (Terminal_text.single_line
                        (schedule_id ^ ": "
-                        ^ request_failure_text ~ko:(state.ui_language = Lang_ko) err))
+                        ^ request_failure_text ~ko:(state.ui_language = Lang_ko)
+                            ~request:Kept_request.Schedule_cancel err))
                     (framed_inner_width cols - 4)
                 ^ Ansi.reset)
           | None -> ())
@@ -2219,7 +2220,8 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
      | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
          [ Theme.bad ()
          , ui_text state ~ko:"취소 오류: " ~en:"Cancel error: "
-           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko) error) ]
+           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:Kept_request.Schedule_cancel error) ]
      | Some _ | None -> [])
     @ (match schedule_source_warning state with
        | None -> []

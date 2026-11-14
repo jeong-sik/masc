@@ -275,10 +275,7 @@ class HistoryTimeoutTest(unittest.TestCase):
                 with server.condition:
                     for release in server.history_holds:
                         release.set()
-                server.release_history.set()
                 server.events.put(None)
-                server.release_recovery.set()
-                server.release_recovery_health.set()
                 if process.poll() is None:
                     process.terminate()
                 try:

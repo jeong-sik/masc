@@ -1,0 +1,7 @@
+### Fixed
+
+- The issue the nightly test lane files now names every failing test command.
+  It read the runner log, which keeps only the last 120 lines of dune's
+  output, so a night with 62 failing commands was filed as the single line
+  `[test-suite] FAIL - dune exited 1`. The commands now come from dune's full
+  log, each with its count of failed Alcotest cases (#42430, #PENDING).

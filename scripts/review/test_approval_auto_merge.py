@@ -60,8 +60,12 @@ class FakeGitHub:
     def __init__(self, states=None):
         self.pulls, self.reviews, self.counts = {}, {}, {}
         # Head SHA -> its type-check runs, and -> the files `main...head` lists.
-        # A comparison no test prepared is a read the worker should not make.
+        # A head no test prepared has one run that compiled it. A comparison
+        # with main no test prepared is a read the worker should not make.
         self.type_checks, self.compared = {}, {}
+        # Lower head -> how many of its commits the heads above do not hold.
+        self.behind = {}
+        self.commit_page_size = 100
         self.mutations = []
         self.list_page_size = 100
         self.merge_returncode = 0
@@ -103,13 +107,27 @@ class FakeGitHub:
         elif path.startswith(PREFIX + '/commits/'):
             head, rest = path.removeprefix(PREFIX + '/commits/').split('/', 1)
             assert rest == 'check-runs?check_name=type-check&filter=all&per_page=100', path
-            runs = self.type_checks.get(head, [])
-            value = {'total_count': len(runs), 'check_runs': runs}
-        elif path.startswith(PREFIX + '/compare/'):
-            base, head = path.removeprefix(PREFIX + '/compare/').split('...')
-            assert base == 'main', path
+            runs = (self.type_checks[head] if head in self.type_checks else
+                    [type_check(1, head, 'success')])
+            # A test hands over a whole listing to give it another shape.
+            value = ({'total_count': len(runs), 'check_runs': runs}
+                     if isinstance(runs, list) else runs)
+        elif path.startswith(PREFIX + '/compare/main...'):
+            head = path.removeprefix(PREFIX + '/compare/main...')
             value = {'files': [{'filename': name} if isinstance(name, str) else name
                                for name in self.compared[head]]}
+        elif path.startswith(PREFIX + '/compare/'):
+            # Two layer heads. Every layer was built on the one below it, so
+            # the higher head adds one commit for each layer in between.
+            heads, paging = path.removeprefix(PREFIX + '/compare/').split('?')
+            lower, top = heads.split('...')
+            query = dict(part.split('=') for part in paging.split('&'))
+            assert query['per_page'] == '100', path
+            added = [{'sha': sha(number)}
+                     for number in range(int(lower, 16) + 1, int(top, 16) + 1)]
+            start = (int(query['page']) - 1) * self.commit_page_size
+            value = {'behind_by': self.behind.get(lower, 0), 'total_commits': len(added),
+                     'commits': added[start:start + self.commit_page_size]}
         elif path.startswith(PREFIX + '/pulls?'):
             query = dict(part.split('=') for part in path.split('?', 1)[1].split('&'))
             assert query['state'] == 'open' and query['per_page'] == '100', path
@@ -332,25 +350,21 @@ class SkippedTypeCheck(unittest.TestCase):
     def test_a_file_list_at_the_comparison_limit_proves_nothing(self):
         with FakeGitHub() as github:
             github.type_checks[sha(101)] = [type_check(1, sha(101))]
-            github.compared[sha(101)] = [f'dashboard/{n}.ts' for n in range(MERGE.COMPARE_FILE_LIMIT)]
+            github.compared[sha(101)] = [f'dashboard/{n}.ts' for n in range(MERGE.CHECKS.COMPARE_FILE_LIMIT)]
             with self.assertRaisesRegex(MERGE.Hold, 'too many to list'):
                 MERGE.prepare(REPO, 101)
             github.compared[sha(101)].pop()
             MERGE.prepare(REPO, 101)
 
-    def test_only_a_completed_skip_makes_the_worker_read_the_scope(self):
-        left_to_github = {
-            'no run yet': [],
-            'queued': [type_check(1, sha(101), status='queued')],
-            'running': [type_check(1, sha(101), status='in_progress')],
+    def test_a_run_that_compiled_the_head_is_admitted_without_reading_the_scope(self):
+        compiled = {
             'success': [type_check(1, sha(101), 'success')],
-            'failure': [type_check(1, sha(101), 'failure')],
             'a later dispatched run compiled it': [
                 type_check(1, sha(101)), type_check(2, sha(101), 'success')],
-            'a skip reported by another app': [type_check(1, sha(101), app='someone-else')],
-            'a skip of another commit': [type_check(1, sha(99))],
+            'a newer run of another app is not ours': [
+                type_check(1, sha(101), 'success'), type_check(2, sha(101), app='someone-else')],
         }
-        for label, runs in left_to_github.items():
+        for label, runs in compiled.items():
             with self.subTest(label), FakeGitHub() as github, redirect_stdout(io.StringIO()):
                 github.type_checks[sha(101)] = runs
                 MERGE.prepare(REPO, 101)
@@ -402,6 +416,196 @@ class SkippedTypeCheck(unittest.TestCase):
             github.hook = push
             with self.assertRaises(ValueError):
                 MERGE.prepare(REPO, 101)
+
+
+def run_worker(number):
+    """One worker run for a pull request, as the workflow starts it."""
+    environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                   'DISPATCH_PR': str(number), 'DISPATCH_RECEIPT': '', 'GITHUB_STEP_SUMMARY': ''}
+    output = io.StringIO()
+    with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+         redirect_stdout(output), redirect_stderr(io.StringIO()):
+        code = MERGE.main()
+    return code, output.getvalue()
+
+
+class UnsettledTypeCheck(unittest.TestCase):
+    """The worker reserves or requests a merge only from a run that compiled
+    the head, or from a skip it proved. FakeGitHub refuses any other write
+    than a reservation, so a merge request here fails the test."""
+
+    DISARM = ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']
+    CHECKS = SkippedTypeCheck.CHECKS
+
+    def test_every_other_state_holds_and_drops_the_reservation(self):
+        def run(rid, **fields):
+            return dict(type_check(rid, sha(101), 'success'), **fields)
+        states = {
+            'no run yet': [],
+            'a skip reported by another app': [type_check(1, sha(101), app='someone-else')],
+            'a skip of another commit': [type_check(1, sha(99))],
+            'a new run queued after a success': [
+                type_check(1, sha(101), 'success'), type_check(2, sha(101), status='queued')],
+            'a status GitHub does not document': [run(1, status='paused')],
+            'completed without a conclusion': [run(1, conclusion=None)],
+            'a conclusion GitHub does not document': [run(1, conclusion='startup_failure')],
+            # A run that cannot be read could be the newest, so the success
+            # listed beside it decides nothing.
+            'an app without a slug': [run(1), run(2, app={'slug': None})],
+            'no app': [run(1), run(2, app=None)],
+            'an id that is not a number': [run(1), run('2')],
+            'a run that is not an object': [run(1), 'type-check'],
+            'a listing of another shape': {'message': 'ok'},
+        }
+        for status in ('queued', 'in_progress', 'waiting', 'requested', 'pending'):
+            states[status] = [type_check(1, sha(101), status=status)]
+        for conclusion in ('failure', 'cancelled', 'timed_out', 'neutral', 'action_required',
+                           'stale'):
+            states[conclusion] = [type_check(1, sha(101), conclusion)]
+        for label, runs in states.items():
+            for reserved in (False, True):
+                with self.subTest(label, reserved=reserved), FakeGitHub() as github:
+                    github.type_checks[sha(101)] = runs
+                    if reserved:
+                        github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+                    code, output = run_worker(101)
+                    self.assertEqual((code, json.loads(output)['status']), (0, 'held'))
+                    self.assertIn('type-check', json.loads(output)['reason'])
+                    self.assertEqual(github.mutations, [self.DISARM] if reserved else [])
+                    self.assertIsNone(github.pulls[101]['auto_merge'])
+
+    def test_a_queued_run_that_ends_skipped_was_never_reserved_or_requested(self):
+        for layers in (['open'], ['open', 'open']):
+            top = 100 + len(layers)
+            with self.subTest(layers=len(layers)), FakeGitHub(layers) as github:
+                github.type_checks[sha(top)] = [type_check(1, sha(top), status='queued')]
+                code, output = run_worker(101)
+                self.assertEqual((code, json.loads(output)['status']), (0, 'held'))
+                # The run ends skipped: the pull request had become a lower
+                # layer, and the scope changes a source.
+                github.type_checks[sha(top)] = [type_check(1, sha(top))]
+                github.compared[sha(top)] = ['lib/a.ml']
+                code, output = run_worker(101)
+                self.assertEqual((code, json.loads(output)['status']), (0, 'held'))
+                self.assertEqual(github.mutations, [])
+
+    def failing(self, github, path, answer):
+        """A client whose read of `path` gets `answer` instead of GitHub's."""
+        def run(command, **kwargs):
+            if command[-1] != path:
+                return github.run(command, **kwargs)
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+        return MERGE.GET.Client(run=run, clock=lambda: 1000.0, sleep=lambda seconds: None)
+
+    def test_a_read_that_fails_drops_the_reservation_and_makes_none(self):
+        compare = SkippedTypeCheck.COMPARE
+        failures = {
+            'HTTP error': (self.CHECKS, http_response(500, {'message': 'boom'})),
+            'not JSON': (self.CHECKS, subprocess.CompletedProcess(
+                [], 0, 'HTTP/2.0 200 OK\n\n<html>', '')),
+            'no answer in time': (self.CHECKS, subprocess.TimeoutExpired(['gh'], 120)),
+            'quota': (self.CHECKS, http_response(403, {'message': 'limited'}, {
+                'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1030'})),
+            'the scope of a skip cannot be read': (compare, http_response(502, {'message': 'x'})),
+            'the review rule cannot be read': (
+                PREFIX + '/rules/branches/main', http_response(500, {'message': 'boom'})),
+        }
+        for label, (path, answer) in failures.items():
+            for reserved in (False, True):
+                with self.subTest(label, reserved=reserved), FakeGitHub() as github:
+                    github.type_checks[sha(101)] = [
+                        type_check(1, sha(101), 'skipped' if path == compare else 'success')]
+                    if reserved:
+                        github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+                    with patch.object(MERGE, 'CLIENT', self.failing(github, path, answer)), \
+                         patch.dict(MERGE._ADMISSION, {'ends_at_quota': True}), \
+                         self.assertRaises(MERGE.GET.ApiFailure):
+                        MERGE.auto_merge_default(REPO, 101)
+                    self.assertEqual(github.mutations, [self.DISARM] if reserved else [])
+
+    def test_a_quota_during_the_check_read_ends_the_run_without_a_reservation(self):
+        with FakeGitHub() as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            limited = http_response(403, {'message': 'limited'}, {
+                'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1030'})
+            with patch.object(MERGE, 'CLIENT', self.failing(github, self.CHECKS, limited)):
+                code, _ = run_worker(101)
+        self.assertEqual(code, MERGE.QUOTA_EXIT)
+        self.assertEqual(github.mutations, [self.DISARM])
+
+    def test_a_stack_listing_that_fails_drops_the_reservation_of_the_requested_layer(self):
+        with FakeGitHub(['open', 'open']) as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            broken = self.failing(github, PREFIX + '/stacks/900',
+                                  http_response(500, {'message': 'boom'}))
+            with patch.object(MERGE, 'CLIENT', broken), self.assertRaises(MERGE.GET.ApiFailure):
+                MERGE.auto_merge_default(REPO, 101)
+        self.assertEqual(github.mutations, [self.DISARM])
+
+
+class LayersUnderTheTopCheck(unittest.TestCase):
+    """The type-check of a stack ran on its top. It says nothing about a
+    lower layer whose current head the top does not hold."""
+
+    def push(self, github, number, head, behind=0):
+        """A layer gets a new head, approved twice, that no layer above holds."""
+        github.pulls[number]['head']['sha'] = head
+        position = number - 101
+        github.stack['pull_requests'][position]['head']['sha'] = head
+        github.reviews[number] = [review(1, head=head), review(2, 3, head=head)]
+        if behind:
+            github.behind[head] = behind
+
+    def test_a_lower_layer_pushed_after_the_top_holds_the_stack(self):
+        pushed = {'the lowest layer': (101, 1), 'a layer in between': (102, 0)}
+        for label, (number, behind) in pushed.items():
+            with self.subTest(label), FakeGitHub(['open', 'open', 'open']) as github:
+                self.push(github, number, sha(9000 + number), behind)
+                with self.assertRaisesRegex(
+                        MERGE.Hold, f'#103 does not hold the current head of #{number};'):
+                    MERGE.prepare(REPO, 101)
+                code, output = run_worker(101)
+                self.assertEqual((code, json.loads(output)['status']), (0, 'held'))
+                self.assertEqual(github.mutations, [])
+
+    def test_the_layers_are_compared_in_one_read_whatever_their_number(self):
+        for layers in (2, 3, 12):
+            with self.subTest(layers=layers), FakeGitHub(['open'] * layers) as github:
+                selected, _, _ = MERGE.prepare(REPO, 101)
+                self.assertEqual(selected, 100 + layers)
+                compared = {path: count for path, count in github.counts.items()
+                            if '/compare/' in path}
+                self.assertEqual(compared, {
+                    f'{PREFIX}/compare/{sha(101)}...{sha(100 + layers)}?per_page=100&page=1': 1})
+
+    def test_a_layer_head_on_a_later_page_of_commits_is_found(self):
+        with FakeGitHub(['open'] * 6) as github:
+            github.commit_page_size = 2
+            MERGE.prepare(REPO, 101)
+            self.assertEqual(sum(count for path, count in github.counts.items()
+                                 if '/compare/' in path), 2)
+            self.push(github, 105, sha(9105))
+            with self.assertRaisesRegex(MERGE.Hold, 'the current head of #105;'):
+                MERGE.prepare(REPO, 101)
+
+    def test_merged_layers_and_a_lone_pull_request_need_no_comparison(self):
+        for layers in (['open'], ['merged', 'merged', 'open']):
+            with self.subTest(layers=layers), FakeGitHub(layers) as github:
+                MERGE.prepare(REPO, 100 + len(layers))
+                self.assertFalse(any('/compare/' in path for path in github.counts))
+
+    def test_a_comparison_that_cannot_be_read_holds(self):
+        with FakeGitHub(['open', 'open']) as github:
+            real = github.output
+
+            def cut(command):
+                body = real(command)
+                return body.replace('"behind_by": 0', '"behind_by": null')
+            with patch.object(github, 'output', side_effect=cut):
+                with self.assertRaisesRegex(MERGE.Hold, 'did not list the commits'):
+                    MERGE.prepare(REPO, 101)
 
 
 class DefaultAutoMergeReservation(unittest.TestCase):

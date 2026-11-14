@@ -64,12 +64,7 @@ SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched', 'followi
 # is the only reader of its receipt, so one lost dispatch would leave it unread.
 HAND_OFF_RETRY_SECONDS = 5
 UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
-TYPE_CHECK = 'type-check'  # the job name in .github/workflows/pr-type-check.yml
-ACTIONS_APP = 'github-actions'
-CHECK_RUN_PAGE = 100
-# GitHub lists at most this many files in one comparison. A list this long
-# may be cut, so it cannot show that a scope changes no source.
-COMPARE_FILE_LIMIT = 300
+COMMIT_PAGE = 100  # commits GitHub lists on one page of a comparison
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
 # A pull request that touches workflow files cannot be merged by this token:
@@ -78,12 +73,9 @@ SHA = re.compile(r'[0-9a-f]{40}')
 WORKFLOW_REFUSAL = re.compile(r'refusing to allow .+ to create or update workflow', re.I)
 
 
-def source_patterns():
-    """The source patterns of the pull request type-check, read from the one
-    file that holds them. That module declares dataclasses, which look their
-    module up by name, so it is registered before it runs."""
-    name = 'pr_source_changes'
-    path = Path(__file__).resolve().parents[1] / 'ci' / (name + '.py')
+def registered(name, path):
+    """Load a module that declares dataclasses. They look their module up by
+    name, so it is registered before it runs."""
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f'cannot load {path}')
@@ -93,7 +85,11 @@ def source_patterns():
     return module
 
 
-SOURCES = source_patterns()
+# The source patterns of the pull request type-check, read from the one file
+# that holds them.
+SOURCES = registered('pr_source_changes',
+                     Path(__file__).resolve().parents[1] / 'ci' / 'pr_source_changes.py')
+CHECKS = registered('type_check_state', Path(__file__).with_name('type-check-state.py'))
 
 
 class Hold(ValueError):
@@ -185,9 +181,14 @@ def disable_reservation(repo, current):
                         '--disable-auto'], check=True)
 
 
-def reservation_reads(repo, number):
-    """Plan a reservation using only reads, so a quota pause can restart it."""
+def reservation_reads(repo, number, seen):
+    """Plan a reservation using only reads, so a quota pause can restart it.
+
+    `seen` receives the requested pull request as soon as it is read. When a
+    later read fails, the caller still knows whose reservation to drop.
+    """
     current = pull(repo, number)
+    seen[number] = current
     stack = current.get('stack')
     if stack is not None:
         live = read(f'repos/{repo}/stacks/{stack["number"]}')
@@ -208,17 +209,28 @@ def reservation_reads(repo, number):
         raise Hold('merge scope changed before enabling auto-merge')
     if scope_snapshot(repo, selected, head) != before:
         raise Hold('PR identity changed before enabling auto-merge')
-    # A reservation lets GitHub merge on the required checks alone. Do not
-    # make one, and drop one made earlier, while a skipped type-check is
-    # unproven; `prepare` then reports why.
-    if unproven_skip(repo, head, current['base']['ref']) is not None:
+    # A reservation lets GitHub merge on the required checks alone, and a
+    # skipped type-check satisfies them. Do not make one, and drop one made
+    # earlier, unless the type-check lets this scope merge now; `prepare`
+    # then reports why.
+    if type_check_hold(repo, head, current['base']['ref']) is not None:
         return None, [current]
     return (current, selected, head), []
 
 
 def auto_merge_default(repo, number):
     """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
-    reservation, disabled = stable_reads(lambda: reservation_reads(repo, number))
+    seen = {}
+    try:
+        reservation, disabled = stable_reads(lambda: reservation_reads(repo, number, seen))
+    except (ValueError, KeyError, TypeError, OSError):
+        # A reservation is GitHub's own promise to merge on the required
+        # checks. It must not outlive a run that could not confirm the
+        # type-check, whatever ended the reads: a hold, an HTTP error, an
+        # answer that cannot be read, or a quota.
+        for row in seen.values():
+            disable_reservation(repo, row)
+        raise
     for row in disabled:
         # A lower layer's reservation could land only part of a native stack.
         disable_reservation(repo, row)
@@ -264,48 +276,46 @@ def review_evidence(repo, current):
     return history
 
 
-def newest_type_check(repo, head):
-    """The newest `type-check` run GitHub Actions reported on this commit, or
-    None. A commit can carry several: one per pull request event, and one per
-    workflow_dispatch run of the same workflow on the branch."""
-    listed = read(f'repos/{repo}/commits/{head}/check-runs'
-                  f'?check_name={TYPE_CHECK}&filter=all&per_page={CHECK_RUN_PAGE}')
-    runs = listed['check_runs']
-    if listed['total_count'] > len(runs):
-        raise Hold(f'{head[:12]} has more than {CHECK_RUN_PAGE} {TYPE_CHECK} runs')
-    ours = [run for run in runs
-            if run['name'] == TYPE_CHECK and run['head_sha'] == head and
-            run['app']['slug'] == ACTIONS_APP]
-    return max(ours, key=lambda run: run['id'], default=None)
+def type_check_hold(repo, head, destination):
+    """Why the type-check of `head` does not let this scope merge, or None.
 
-
-def unproven_skip(repo, head, destination):
-    """Why a skipped type-check on `head` proves nothing, or None.
-
-    `skipped` satisfies the required check, and it has two meanings: this
-    scope changes no source, or the pull request was a lower layer of a native
-    stack and left the check to the stack's top. The second meaning stops being
-    true when the pull request leaves the stack, and no event runs the check
-    again. So a skipped check is trusted only when this worker sees for itself
-    that the scope changes no source.
-
-    Every other state is left to GitHub: it waits for a running check and
-    refuses a failed one, and nothing wakes this worker when a check ends.
+    The scope is `destination...head`; it is read only for a skipped run.
     """
-    run = newest_type_check(repo, head)
-    if run is None or run['status'] != 'completed' or run['conclusion'] != 'skipped':
-        return None
-    remedy = (f'run the pr-type-check workflow on the branch with workflow_dispatch; '
-              f'it compiles {head[:12]} without asking what changed')
-    files = read(f'repos/{repo}/compare/{destination}...{head}')['files']
-    if len(files) >= COMPARE_FILE_LIMIT:
-        return (f'{TYPE_CHECK} was skipped and the scope changes {COMPARE_FILE_LIMIT} files '
-                f'or more, too many to list; {remedy}')
-    for changed in files:
-        for name in (changed['filename'], changed.get('previous_filename')):
-            if name is not None and SOURCES.is_source(name):
-                return f'{TYPE_CHECK} was skipped but the scope changes {name}; {remedy}'
-    return None
+    listing = read(f'repos/{repo}/commits/{head}/check-runs?check_name={CHECKS.TYPE_CHECK}'
+                   f'&filter=all&per_page={CHECKS.CHECK_RUN_PAGE}')
+    return CHECKS.hold_reason(
+        CHECKS.classify(listing, head), head,
+        lambda: read(f'repos/{repo}/compare/{destination}...{head}'), SOURCES.is_source)
+
+
+def layers_outside(repo, top, lower):
+    """Numbers of the lower layers whose current head `top` does not hold.
+
+    `lower` pairs each unmerged layer below the selected pull request with its
+    head, bottom first. A layer pushed after the layers above it is not part
+    of the tree the top's type-check compiled, and its own check was skipped.
+
+    One comparison from the lowest head lists the commits `top` adds to it,
+    and every other lower head must be among them. The cost is one read for
+    every 100 commits of the stack, not one for every layer.
+    """
+    if not lower:
+        return []
+    lowest = lower[0][1]
+    missing = {head: number for number, head in lower[1:] if head != lowest}
+    page = 1
+    while True:
+        compared = CHECKS.ancestry(read(f'repos/{repo}/compare/{lowest}...{top}'
+                                        f'?per_page={COMMIT_PAGE}&page={page}'))
+        if compared is None:
+            raise Hold(f'GitHub did not list the commits between {lowest[:12]} and {top[:12]}')
+        if compared.behind_by:
+            return [lower[0][0]]
+        for commit in compared.commits:
+            missing.pop(commit, None)
+        if not missing or not compared.commits:
+            return sorted(missing.values())
+        page += 1
 
 
 def prepare_reads(repo, number):
@@ -334,10 +344,18 @@ def prepare_reads(repo, number):
         if identity['state'] != 'open' or identity['draft'] is not False:
             raise Hold(f'#{member["number"]} is not open and ready')
         histories[member['number']] = review_evidence(repo, rows[member['number']])
-    # The head of the selected pull request holds every layer of the scope.
-    unproven = unproven_skip(repo, head, destination)
-    if unproven is not None:
-        raise Hold(f'#{selected}: {unproven}')
+    hold = type_check_hold(repo, head, destination)
+    if hold is not None:
+        raise Hold(f'#{selected}: {hold}')
+    # That type-check ran on the head of the selected pull request. It covers
+    # a lower layer only while that head holds the layer's current head.
+    outside = layers_outside(repo, head, [
+        (member['number'], member['identity']['head']['sha']) for member in before['scope']
+        if member['number'] != selected and member['identity']['merged'] is not True])
+    if outside:
+        raise Hold(f'#{selected} does not hold the current head of '
+                   f'{", ".join(f"#{n}" for n in outside)}; push the layers above again so '
+                   f'that the type-check of the top compiles them')
     # Membership, all head/base identities and review histories must still
     # match. GitHub independently enforces the two-review rule during merge.
     for pr, history in histories.items():

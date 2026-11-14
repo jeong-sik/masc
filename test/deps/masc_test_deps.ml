@@ -22,8 +22,21 @@ module Board_attention_parent_fixture = struct
 
   let install source =
     reset ();
-    Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:source.config.base_path
-      ~recipient_lookup:source.recipient_lookup ())
+    (* The refusal is spelled out: [Result.get_ok] reported every one of them
+       as the same [Invalid_argument], which says nothing about the workspace. *)
+    match Masc.Board_dispatch.init_jsonl ~base_path:source.config.base_path
+            ~recipient_lookup:source.recipient_lookup () with
+    | Ok () -> ()
+    | Error (Masc.Board_dispatch.Workspace_mismatch
+        { active_workspace_masc_dir; requested_workspace_masc_dir }) ->
+      Printf.ksprintf failwith
+        "Board_attention_parent_fixture: Board workspace mismatch: active=%s requested=%s"
+        active_workspace_masc_dir requested_workspace_masc_dir
+    | Error (Masc.Board_dispatch.Workspace_binding_refused rejection) ->
+      Printf.ksprintf failwith
+        "Board_attention_parent_fixture: Board workspace binding refused for %s: %s"
+        source.config.base_path
+        (Board_workspace_binding.rejection_to_string rejection)
 
   let with_source ?(recipient_lookup = Masc.Recipient_lookup.none_declared)
       ~base_path f =

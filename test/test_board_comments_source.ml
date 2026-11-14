@@ -417,8 +417,12 @@ let test_query_boundary source base_path =
 
 let test_incomplete_queries_preserve_hidden_target_boundary base_path =
   let store, public_post = seed base_path in
-  let post = match Board.create_post store ~lookup:Recipient_lookup.none_declared
-      ~author:"private-owner" ~content:"private thread" ~visibility:Board.Direct
+  (* A Direct post is refused unless it addresses a declared recipient. The
+     reader below is neither the author nor that recipient. *)
+  let lookup = Recipient_lookup.make (fun _ ->
+    Ok (Some (require (Board.Agent_id.of_string "private-target")))) in
+  let post = match Board.create_post store ~lookup
+      ~author:"private-owner" ~content:"@private-target private thread" ~visibility:Board.Direct
       ~post_kind:Board.Human_post ~ttl_hours:0 () with
     | Ok post -> post
     | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in

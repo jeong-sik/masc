@@ -632,10 +632,19 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
       ~body:(Yojson.Safe.to_string (`Assoc ["post_id", `String post_id])) ()
   in
   let post_id = create "delete with a failed snapshot" in
+  (* [create] leaves the visibility at its default, Internal. A change to a
+     post that is not Public is announced as [Board_changed], which names no
+     post. *)
   let writes = ref 0 in
+  let named_posts = ref 0 in
   Masc.Board_dispatch.set_board_sse_hook (function
-    | Masc.Board_dispatch.Post_changed _ -> incr writes
-    | _ -> ());
+    | Masc.Board_dispatch.Board_changed -> incr writes
+    | Masc.Board_dispatch.Post_changed _ -> incr named_posts
+    | Masc.Board_dispatch.Post_created _
+    | Masc.Board_dispatch.Comment_added _
+    | Masc.Board_dispatch.Post_voted _
+    | Masc.Board_dispatch.Comment_voted _
+    | Masc.Board_dispatch.Reaction_changed _ -> ());
   let path = Masc.Board.reactions_path (Masc.Board.global ()) in
   let had_snapshot = Sys.file_exists path in
   let backup = path ^ ".before-delete" in
@@ -656,13 +665,24 @@ let test_dashboard_delete_preserves_applied_pending_and_refused () =
       check string "persistence remains pending" "pending"
         (receipt |> member "persistence" |> to_string);
       check int "applied pending deletion is announced" 1 !writes;
+      check int "the announcement does not name the Internal post" 0 !named_posts;
       check bool "post is absent from memory" true
         (Result.is_error (Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id));
+      (* The first deletion's decision is still recorded, and the Board takes
+         no further deletion decision until that one settles. *)
       let retry_status, _ = delete post_id in
-      check int "repeating the applied deletion is a lookup miss" 404 retry_status;
+      check int "a deletion while the first one is unsettled is a storage refusal" 503 retry_status;
       check int "refused retry is not announced again" 1 !writes);
+  (* A deletion whose snapshot write failed is finished by the recovery that
+     runs when the Board starts, so the Board is started again here. *)
+  Masc.Board.reset_global_for_test ();
+  Masc.Board_dispatch.reset_for_test ();
+  Result.get_ok (Masc.Board_dispatch.init_jsonl
+    ~base_path:(Env_config_core.base_path ())
+    ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
+  check bool "recovered deletion does not bring the post back" true
+    (Result.is_error (Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id));
   let store = Masc.Board_dispatch.backend () in
-  Masc.Board.flush_dirty store;
   let durable_id = create "delete with healthy snapshots" in
   let status, receipt = delete durable_id in
   check int "durable deletion succeeds" 200 status;

@@ -451,13 +451,6 @@ let meta_has_source (meta : Yojson.Safe.t option) : bool =
   | _ -> false
 
 (* stdlib-only substring containment; avoids a [re] dep for this test exe. *)
-let check_io_error ~where = function
-  | Error (Board.Io_error msg) ->
-      if not (String_util.string_contains_substring ~needle:where msg) then
-        Alcotest.failf "error includes %s: %S is missing from %S" where where msg
-  | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
-  | Ok _ -> Alcotest.fail "expected Io_error"
-
 let check_source_io_error = function
   | Error (Board.Io_error _) -> ()
   | Error error -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error error)
@@ -1504,8 +1497,7 @@ let test_reaction_persistence_failure_returns_error_without_publish () =
     | _ -> ());
   with_blocked_board_masc_dir (fun () ->
   let before_errors = Board.persist_error_count () in
-  check_io_error
-    ~where:"rewrite_reactions"
+  check_source_io_error
     (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator
        ~target_type:Board.Reaction_post
        ~target_id:post_id

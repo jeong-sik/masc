@@ -309,7 +309,14 @@ let test_stale_author_refuses_before_record base_path =
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "stale author recorded a deletion decision");
   Alcotest.(check bool) "stale guard never creates a marker" false (Sys.file_exists (marker stale));
-  check_owner stale parent "deletion-owner";
+  (* [other] rewrote the posts file, so [stale] no longer has source authority
+     and an evidence read is refused. Its cached display is what the refused
+     request must leave alone. *)
+  let displayed = match Board.read_post stale ~post_id:(Board.Post_id.to_string parent.id) with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.show_board_read_error error) in
+  Alcotest.(check string) "refused request leaves the stale display on its old owner"
+    "deletion-owner" (Board.Agent_id.to_string displayed.author);
   check_bytes "stale request preserves foreign ownership and every dependent source" before;
   Board.flush_dirty stale;
   check_bytes "ordinary flush does not replay refused request" before;

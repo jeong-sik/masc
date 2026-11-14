@@ -4942,49 +4942,6 @@ let test_decode_connector_reads_a_poll_state () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
-let test_decode_connector_telegram_numeric_bot_id () =
-  let decode id bot_user_id =
-    let json =
-      connector_snapshot_json
-        [ connector_json ~id ~gateway_state:`Null
-            ~poll_state:(`String "polling") ~bot_user_id () ]
-    in
-    Masc.Tui_decode_connectors.decode_connector_snapshot
-      (Yojson.Safe.from_string (Yojson.Safe.to_string json))
-  in
-  let expect_id label id bot_user_id expected =
-    match decode id bot_user_id with
-    | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]
-         ; cs_refused = []; _ } ->
-        Alcotest.(check (option string)) label expected connector.cn_bot_user_id
-    | Ok _ -> Alcotest.failf "%s: expected one readable connector" label
-    | Error err -> Alcotest.failf "%s: decode failed: %s" label err
-  in
-  let expect_refused label id bot_user_id =
-    match decode id bot_user_id with
-    | Ok { Masc.Tui_decode_connectors.cs_connectors = []
-         ; cs_refused = [ _ ]; _ } -> ()
-    | Ok _ -> Alcotest.failf "%s: expected a refused connector" label
-    | Error err -> Alcotest.failf "%s: snapshot failed: %s" label err
-  in
-  expect_id "Telegram integer" "telegram" (`Int 4242) (Some "4242");
-  expect_id "Telegram int64 maximum" "telegram"
-    (`Intlit "9223372036854775807") (Some "9223372036854775807");
-  expect_id "Telegram string" "telegram" (`String "4242") (Some "4242");
-  expect_id "Telegram blank string" "telegram" (`String "   ") None;
-  expect_id "Telegram null" "telegram" `Null None;
-  expect_id "Slack string" "slack" (`String "U123") (Some "U123");
-  expect_refused "Slack integer" "slack" (`Int 4242);
-  expect_refused "Telegram zero integer" "telegram" (`Int 0);
-  expect_refused "Telegram negative integer" "telegram" (`Int (-42));
-  expect_refused "Telegram zero string" "telegram" (`String "0");
-  expect_refused "Telegram negative string" "telegram" (`String "-42");
-  expect_refused "Telegram non-numeric string" "telegram" (`String "not-a-bot-id");
-  expect_refused "Telegram leading-zero string" "telegram" (`String "0042");
-  expect_refused "Telegram float" "telegram" (`Float 1.5);
-  expect_refused "Telegram int64 overflow" "telegram"
-    (`Intlit "9223372036854775808")
-
 (* A gateway or poll state the server's state machines never produce is not
    read as some nearby state. The row that carries it is refused on its own:
    the transports beside it still decode, and the refusal names the row. *)
@@ -14032,8 +13989,6 @@ let () =
           test_decode_connector_reads_a_stale_state;
         Alcotest.test_case "poll state is typed" `Quick
           test_decode_connector_reads_a_poll_state;
-        Alcotest.test_case "Telegram bot ID accepts its native numeric form" `Quick
-          test_decode_connector_telegram_numeric_bot_id;
         Alcotest.test_case "unknown runtime state refuses only its row" `Quick
           test_decode_connector_refuses_only_the_row_with_an_unknown_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick

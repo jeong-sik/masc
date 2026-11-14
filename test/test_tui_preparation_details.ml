@@ -416,8 +416,8 @@ let failed_owner_to_saved_preparation () =
     (match operation.state with
      | Keeper_chat_operation.Failed {failure;_} ->
        check (option string) "canonical failure preserves only its producer-supplied turn" expected_ref failure.outcome_ref;
-       check bool "cancellation keeps its original failure class" true
-         (failure.kind=(match mode with Cancelled_failure -> Keeper_chat_operation.Turn_cancelled
+       check bool "an Owner stop names the restart and a producer failure keeps its class" true
+         (failure.kind=(match mode with Cancelled_failure -> Keeper_chat_operation.Interrupted_by_restart
            | Returned_failure | Raised_failure | Unobserved_failure -> Turn_exception))
      | Queued | Running _ | Succeeded _ | Cancelled _ -> fail "Owner did not persist a failed operation");
     let log = Log.create ~keeper_name ~request_id:(Keeper_operation_id.to_string operation_id) ~started_at:0. in

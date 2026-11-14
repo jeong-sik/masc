@@ -88,12 +88,12 @@ selection = "latest_completed"
 
 | 사건 | 필드 | 언제 |
 | --- | --- | --- |
-| `LessonSeen` | `instance_id`, `observation_seq`, `sha256`, `scenes` | 행을 모두 읽었을 때 |
-| `LessonUnreadable` | `instance_id`, `observation_seq`, `sha256`, `reason` | 행 하나라도 모양이 틀렸을 때 |
+| `LessonSeen` | `instance_id`, `observation_seq`, `sha256`, `rows`, `scenes` | 행을 모두 읽었을 때 |
+| `LessonUnreadable` | `instance_id`, `observation_seq`, `sha256`, `rows`, `reason` | 행 하나라도 모양이 틀렸을 때 |
 
 - `scenes` 의 항목은 `session_id`, `entry_id`, `written_at`, `cites` 다. `cites` 의 항목은 `kind`, `source_id`, `pin` 이고 `records.parse_pin` 으로 엄격하게 읽는다(`addons/records.py:240-248`). 행에 있는 `quote` 와 `sha256` 은 모양만 검사하고 적지 않는다. 퀴즈는 자기가 읽은 기록의 바이트로 인용문을 검사한다.
 - `sha256` 은 host 가 그 관측에 붙인 evidence 의 값이다. 퀴즈가 무엇을 보고 적었는지 나중에 대조할 수 있다.
-- 같은 `instance_id` 와 `observation_seq` 는 한 번만 적는다. 관측은 몇 번이고 다시 불리고, 수업의 commit 마다도 불린다.
+- `rows` 는 행마다 lane 과 `fields` 를 모아 낸 digest 다. `rows` 가 같은 출력은 한 번만 적는다. 수업은 장면을 쓰지 않을 때도 관측마다 출력을 완료하고, 그때마다 순번이 올라간다. 순번으로 가리면 같은 장면이 관측마다 log 에 쌓인다. host 가 행 id 에 순번을 넣으므로(`lane_addon_runtime.ml:956-960`) 행 전체가 아니라 lane 과 `fields` 로 가린다.
 - 모양이 틀린 출력은 일부만 받지 않는다. 통째로 `LessonUnreadable` 이다. 틀린 행을 건너뛰면 어떤 장면이 빠졌는지 알 수 없다.
 - source 가 관측 없이 오면(`run_id` 가 다름, 수업 설치가 없음, 수업이 아직 출력을 낸 적 없음) 아무것도 적지 않는다. host 가 준 detail 을 `quiz/measures` 행에 그대로 보여 준다.
 - 수업이 실패 중이어도 완료된 출력이 있으면 host 는 그 행을 준다(`lane_addon_runtime.ml:659-671`). 그 장면은 이미 쓴 장면이므로 적는다.
@@ -102,7 +102,7 @@ selection = "latest_completed"
 
 ### 3.4 세션이 수업을 따르는지 적는 것
 
-`compose` 는 binding 을 받는다(`quiz_flow.py:146`). binding 에 수업 source 가 있으면 `SessionOpened` 와 같은 쓰기에 `FollowsLesson(session_id, source_id)` 를 더한다. 그 뒤의 일은 binding 없이 log 만 읽고 정한다.
+worker 가 `compose` action 을 받으면 binding 에서 수업 source 의 이름을 읽어 `Flow.compose` 에 넘긴다. 이름이 있으면 `SessionOpened` 와 같은 쓰기에 `FollowsLesson(session_id, source_id)` 를 더한다. 그 뒤의 일은 binding 없이 log 만 읽고 정한다.
 
 `SessionOpened` 에 필드를 더하지 않는 이유: 옛 log 의 `SessionOpened` 를 읽지 못하게 된다.
 
@@ -113,7 +113,7 @@ selection = "latest_completed"
 - 수업이 인용한 집합: 그때까지 log 에 있는 모든 `LessonSeen` 의 `cites`.
 - 남기는 기록: 이번 세션이 읽은 기록 가운데 `kind`, `source_id`, `pin` 이 그 집합에 있는 것.
 - 거른 뒤에 지금과 같은 순서로 간다. 요청이 frame 에 안 들어가면 새 절반만 남기는 규칙(`quiz_flow.py:254-270`)도 거른 자료에 건다.
-- 출제 요청과 같은 쓰기에 `LessonScopeApplied(session_id, request_id, read, kept)` 를 적는다. `read` 는 읽은 기록 수, `kept` 는 남긴 기록 수다.
+- 출제 요청과 같은 쓰기에 `LessonScopeApplied(session_id, request_id, kept)` 를 적는다. `kept` 는 그 요청의 자료에 실린 기록의 cite 다. 읽은 기록 수는 적지 않는다. 퀴즈는 요청 하나에 들어갈 만큼만 디스크에서 다시 읽으므로(`quiz_flow.py:172-189`) 그 수를 세려면 모든 page 를 읽어야 한다.
 
 남긴 기록이 없을 때는 지금의 규칙이 그대로 돈다(`quiz_flow.py:416-424`).
 
@@ -133,17 +133,18 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 | 일 18:00 ~ 월 09:00 | 인용할 수 있다 | 읽는다 | 물을 수 있다 |
 | 월 09:00 ~ 월 18:00 | 아직 못 봤다 | 읽는다 | 걸러진다. 퀴즈가 문항을 내면 cursor 가 지나가고, 화요일 수업이 인용해도 퀴즈는 다시 읽지 않는다 |
 
-퀴즈를 수업 바로 뒤에 두면 빠지는 구간이 그 사이 시간으로 줄어든다. 가이드에 그렇게 적는다. `LessonScopeApplied` 의 `read` 와 `kept`, 그리고 한 번도 맞지 않은 cite 의 수를 `quiz/measures` 에 보여 준다. 구간을 없애는 방법 둘은 §8 D2 에 적었다.
+퀴즈를 수업 바로 뒤에 두면 빠지는 구간이 그 사이 시간으로 줄어든다. 가이드에 그렇게 적는다. 한 번도 자료에 실리지 않은 cite 의 수를 `quiz/measures` 에 보여 준다. 구간을 없애는 방법 둘은 §8 D2 에 적었다.
 
 ### 3.7 행과 재는 값
 
 - `quiz/questions` 와 `quiz/review` 의 문항 행에 `taught` 를 더한다. 그 문항을 낼 때까지 적힌 `LessonSeen` 의 cite 가운데 문항의 출처와 같은 것이 하나라도 있으면 참이다. log 에서 계산하고 따로 저장하지 않는다.
 - `quiz/measures` 에 `lesson` 을 더한다.
   - `scenes_seen`, `cites_seen`: 적은 장면과 cite 의 수.
-  - `cites_unmatched`: 어떤 세션의 자료와도 맞지 않은 cite 의 수.
+  - `cites_unmatched`: 어떤 출제 요청의 자료에도 실리지 않은 cite 의 수. 요청이 커서 잘려 나간 기록도 여기에 든다.
   - `unreadable`: `LessonUnreadable` 의 수.
   - `source`: 마지막 관측에서 host 가 준 `complete` 와 `detail`.
-  - `first_attempt`: `taught` 인 문항과 아닌 문항 각각의 첫 시도 수와 정답 수.
+  - `first_attempt`: 항목마다 처음 채점된 시도를 `taught` 와 나머지로 나눈 수와 정답 수.
+- `lesson` 은 수업을 묶은 설치의 행에만 있다.
 
 `first_attempt` 는 보고하는 값이다. 어떤 상태도 그 값을 읽지 않는다. 무작위 배정이 아니다. 묶은 뒤에는 새 문항이 모두 `taught` 이므로, 나머지 쪽은 묶기 전 문항과 다시 묻는 문항이다. 주제의 난이도와 시기 차이가 섞인다.
 

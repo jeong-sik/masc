@@ -18,6 +18,12 @@ Author history scope is retained as domain context alongside its request, rather
 than reconstructed from the request message wire. Missing recorded context is
 reported as unavailable; original questions, answers and request blobs stay intact.
 
+An installation may bind the `scenes` output of an `operator-lesson`
+installation in the same run. The quiz then keeps the pins each lesson output
+cited (`lesson_seen`), and a session opened under that binding asks new
+questions only from records it read that a lesson cited. Design:
+[RFC](../../docs/rfc/RFC-operator-quiz-follows-lesson.md).
+
 - `quiz_log.py`: the log's events, the session fold, and the body store.
 - `quiz_flow.py`: the listing and the consumption of each result, including
   the quote check of every draft against the record bytes the host retained.

@@ -218,6 +218,20 @@ let count_rows ~masc_root table =
   then Alcotest.failf "count %s: %s" table (Sqlite3.Rc.to_string rc);
   !count
 
+let first_text ~masc_root sql =
+  let db = Sqlite3.db_open ~mode:`READONLY (Tool_metrics_store.database_path ~masc_root) in
+  let text = ref None in
+  let rc =
+    Sqlite3.exec
+      db
+      ~cb:(fun row _ -> if Option.is_none !text then text := row.(0))
+      sql
+  in
+  let closed = Sqlite3.db_close db in
+  if not (Sqlite3.Rc.is_success rc && closed)
+  then Alcotest.failf "select %s: %s" sql (Sqlite3.Rc.to_string rc);
+  !text
+
 let test_hydrate_prunes_the_sizes_of_expired_rows () =
   with_tmp_dir (fun base_path ->
     let masc_root = masc_root base_path in
@@ -269,6 +283,51 @@ let test_enqueue_stores_the_size_of_the_result_message () =
     let empty = read "empty" in
     Alcotest.(check int) "an empty message is a size of zero, observed" 1 empty.total.result_observed_count;
     Alcotest.(check int) "and adds no bytes" 0 empty.total.result_bytes_total)
+
+let test_enqueue_stores_the_calling_keeper () =
+  with_tmp_dir (fun base_path ->
+    let masc_root = masc_root base_path in
+    P.enqueue
+      ~base_path
+      ~caller:"keeper-a"
+      (make_result ~name:"by_keeper" ~success:true ~duration_ms:1.0);
+    P.enqueue ~base_path (make_result ~name:"outside" ~success:true ~duration_ms:1.0);
+    Alcotest.(check int) "both calls are stored" 2 (count_rows ~masc_root "tool_metric_events");
+    Alcotest.(check int)
+      "only the call a Keeper made has a caller"
+      1
+      (count_rows ~masc_root "tool_metric_callers");
+    Alcotest.(check (option string))
+      "the caller is the Keeper that made that call"
+      (Some "by_keeper|keeper-a")
+      (first_text
+         ~masc_root
+         "SELECT e.tool_name || '|' || c.caller FROM tool_metric_events e \
+          JOIN tool_metric_callers c ON c.record_id = e.record_id"))
+
+let test_hydrate_prunes_the_callers_of_expired_rows () =
+  with_tmp_dir (fun base_path ->
+    let masc_root = masc_root base_path in
+    P.enqueue
+      ~base_path
+      ~caller:"keeper-a"
+      (make_result ~name:"current" ~success:true ~duration_ms:2.0);
+    P.reset_for_testing ();
+    Tool_metrics_store.insert
+      ~masc_root
+      ~result_bytes:0
+      ~failure_class:None
+      ~caller:"keeper-b"
+      { record_id = "old-record"
+      ; ts = 1.0
+      ; tool_name = "expired"
+      ; disposition = "completed"
+      ; duration_ms = 1.0
+      }
+    |> get_ok "insert old row with a caller";
+    Alcotest.(check int) "a caller for each row before pruning" 2 (count_rows ~masc_root "tool_metric_callers");
+    ignore (P.hydrate ~base_path ~retention_days:30 |> get_ok "hydrate after prune");
+    Alcotest.(check int) "callers after pruning" 1 (count_rows ~masc_root "tool_metric_callers"))
 
 let test_multidomain_writes_are_serialized () =
   with_tmp_dir (fun base_path ->
@@ -437,6 +496,12 @@ let () =
           ; eio_test
               "enqueue stores the size of the result message"
               test_enqueue_stores_the_size_of_the_result_message
+          ; eio_test
+              "enqueue stores the Keeper that made the call"
+              test_enqueue_stores_the_calling_keeper
+          ; eio_test
+              "startup hydration prunes the callers of expired rows"
+              test_hydrate_prunes_the_callers_of_expired_rows
           ; eio_test
               "writes from multiple domains are serialized"
               test_multidomain_writes_are_serialized

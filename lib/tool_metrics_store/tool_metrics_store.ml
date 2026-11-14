@@ -164,6 +164,19 @@ CREATE TABLE IF NOT EXISTS tool_metric_failure_classes (
 ) WITHOUT ROWID
 |}
 
+(* The Keeper that made a call. It is a table of its own for the same reason as
+   the two above: the rows written before it existed, and calls made outside any
+   Keeper, have no row here, and a call without a row is a call whose caller was
+   not observed. The column holds the Keeper name as {!Dispatch_caller} carried
+   it. *)
+let callers_schema_sql =
+  {|
+CREATE TABLE IF NOT EXISTS tool_metric_callers (
+  record_id TEXT PRIMARY KEY NOT NULL,
+  caller TEXT NOT NULL
+) WITHOUT ROWID
+|}
+
 let busy_timeout_ms = 5000
 let busy_timeout_sql = Printf.sprintf "PRAGMA busy_timeout=%d" busy_timeout_ms
 
@@ -196,6 +209,12 @@ let configure db =
           db
           ~operation:"create tool metric failure class table"
           failure_classes_schema_sql
+      in
+      let* () =
+        exec
+          db
+          ~operation:"create tool metric caller table"
+          callers_schema_sql
       in
       exec
         db
@@ -291,7 +310,7 @@ let in_transaction db ~operation f =
     rollback ();
     raise exn
 
-let insert ~masc_root ~result_bytes ~failure_class row =
+let insert ~masc_root ~result_bytes ~failure_class ?caller row =
   if result_bytes < 0
   then Error (Printf.sprintf "tool metric %s has a negative result size" row.record_id)
   else
@@ -340,29 +359,51 @@ let insert ~masc_root ~result_bytes ~failure_class row =
                 statement
                 ~operation:"insert tool metric result size")
         in
-        match failure_class with
+        let* () =
+          match failure_class with
+          | None -> Ok ()
+          | Some failure_class ->
+            with_statement
+              store.db
+              ~operation:"insert tool metric failure class"
+              "INSERT OR IGNORE INTO tool_metric_failure_classes \
+               (record_id, failure_class) VALUES (?1, ?2)"
+              (fun statement ->
+                let* () =
+                  bind_all
+                    store.db
+                    statement
+                    ~operation:"bind tool metric failure class"
+                    [ Sqlite3.Data.TEXT row.record_id
+                    ; Sqlite3.Data.TEXT
+                        (Tool_result.tool_failure_class_to_string failure_class)
+                    ]
+                in
+                expect_done
+                  store.db
+                  statement
+                  ~operation:"insert tool metric failure class")
+        in
+        match caller with
         | None -> Ok ()
-        | Some failure_class ->
+        | Some caller ->
           with_statement
             store.db
-            ~operation:"insert tool metric failure class"
-            "INSERT OR IGNORE INTO tool_metric_failure_classes \
-             (record_id, failure_class) VALUES (?1, ?2)"
+            ~operation:"insert tool metric caller"
+            "INSERT OR IGNORE INTO tool_metric_callers (record_id, caller) \
+             VALUES (?1, ?2)"
             (fun statement ->
               let* () =
                 bind_all
                   store.db
                   statement
-                  ~operation:"bind tool metric failure class"
-                  [ Sqlite3.Data.TEXT row.record_id
-                  ; Sqlite3.Data.TEXT
-                      (Tool_result.tool_failure_class_to_string failure_class)
-                  ]
+                  ~operation:"bind tool metric caller"
+                  [ Sqlite3.Data.TEXT row.record_id; Sqlite3.Data.TEXT caller ]
               in
               expect_done
                 store.db
                 statement
-                ~operation:"insert tool metric failure class")))
+                ~operation:"insert tool metric caller")))
 
 let prune ~masc_root ~retention_days =
   if retention_days <= 0
@@ -396,6 +437,12 @@ let prune ~masc_root ~retention_days =
           delete
             ~operation:"prune tool metric failure classes"
             "DELETE FROM tool_metric_failure_classes WHERE record_id IN \
+             (SELECT record_id FROM tool_metric_events WHERE ts < ?1)"
+        in
+        let* _callers =
+          delete
+            ~operation:"prune tool metric callers"
+            "DELETE FROM tool_metric_callers WHERE record_id IN \
              (SELECT record_id FROM tool_metric_events WHERE ts < ?1)"
         in
         delete

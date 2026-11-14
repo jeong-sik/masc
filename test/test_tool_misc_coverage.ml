@@ -186,20 +186,56 @@ let () = test "dispatch_dashboard_compact" (fun () ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
 )
 
-let () = test "dispatch_dashboard_current_scope" (fun () ->
+(* #51211: [scope] was parsed, checked against an enum and then dropped, so
+   "current" and "all" answered byte for byte the same. A key the tool does not
+   declare is refused instead of read past. *)
+let () = test "dispatch_dashboard_refuses_an_argument_it_does_not_declare" (fun () ->
   let ctx = make_test_ctx () in
-  ignore (Workspace.init ctx.config ~agent_name:None);
-  let focused = ctx.config in
-  ignore (Workspace.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
-      assert (Tool_result.is_success result);
-      assert (str_contains (Tool_result.message result) "MASC Dashboard");
-      assert (not (str_contains (Tool_result.message result) "focus-workspace"))
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (str_contains (Tool_result.message result) "scope")
   | None -> failwith "dispatch returned None"
-  | exception Effect.Unhandled _ ->
-      Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+(* The same call through the check that runs before a Keeper's or an MCP
+   client's call reaches the handler: every declared argument passes it, so
+   [compact] is reachable and not only readable by the handler. *)
+let () = test "dashboard_declared_arguments_pass_the_pre_dispatch_check" (fun () ->
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_dashboard")
+        Config.raw_all_tool_schemas
+    with
+    | Some schema -> schema.input_schema
+    | None -> failwith "masc_dashboard is not registered"
+  in
+  let check args =
+    Tool_input_validation.validate_args ~schema ~name:"masc_dashboard" ~args ()
+  in
+  assert (Result.is_ok (check (`Assoc [])));
+  assert (Result.is_ok (check (`Assoc [ Dashboard.compact_argument, `Bool true ])));
+  assert (Result.is_error (check (`Assoc [ "scope", `String "current" ])))
+)
+
+(* Leaving [compact] out answers with the view the schema names as default. *)
+let () = test "dispatch_dashboard_without_compact_is_the_declared_default" (fun () ->
+  let ctx = make_test_ctx () in
+  let message args =
+    match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
+    | Some result ->
+        assert (Tool_result.is_success result);
+        Tool_result.message result
+    | None -> failwith "dispatch returned None"
+  in
+  let default = Dashboard.compact_of_view Dashboard.default_view in
+  let is_compact text = str_contains text "ATTENTION:" && not (str_contains text "MASC Dashboard") in
+  assert (is_compact (message (`Assoc [])) = default);
+  assert (is_compact (message (`Assoc [ Dashboard.compact_argument, `Bool default ])) = default);
+  assert (is_compact (message (`Assoc [ Dashboard.compact_argument, `Bool (not default) ])) = not default)
 )
 
 let () = test "dispatch_keeper_waiting_inventory" (fun () ->
@@ -234,13 +270,13 @@ let () = test "dispatch_keeper_waiting_inventory_rejects_unexpected_args" (fun (
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_dashboard_invalid_scope" (fun () ->
+let () = test "dispatch_dashboard_refuses_a_compact_that_is_not_a_boolean" (fun () ->
   let ctx = make_test_ctx () in
-  let args = `Assoc [("scope", `String "everywhere")] in
+  let args = `Assoc [(Dashboard.compact_argument, `String "yes")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      assert (str_contains (Tool_result.message result) "Invalid dashboard scope")
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
   | None -> failwith "dispatch returned None"
 )
 

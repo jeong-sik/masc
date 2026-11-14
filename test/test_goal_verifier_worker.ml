@@ -315,15 +315,15 @@ let test_unknown_and_cancellation_never_redispatch () =
       incr calls;
       let error = Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError
         {message="Goal reply lost"; kind=Llm_provider.Http_client.Connection_reset}) in
-      Alcotest.(check bool) "actual inner continuation must resolve its original" true
-        (attempt_continuation ~dispatch:Runtime_attempt_dispatch.Dispatched error = Runtime_attempt_dispatch.Original_must_resolve);
+      Alcotest.(check bool) "unknown certainty may dispatch the next slot" true
+        (attempt_continuation ~dispatch:Runtime_attempt_dispatch.Dispatched error = Runtime_attempt_dispatch.Next_may_dispatch);
       on_runtime_attempt_error ~runtime_id:"goal-reviewer" ~attempt:0 ~dispatch:Runtime_attempt_dispatch.Dispatched error;
       Error error) (fun () ->
       Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
-        (fun () -> Ok ["goal-reviewer",Types_core.Catalog_slot;"must-not-run",Types_core.Catalog_slot]);
-      let pending () = match run store retained authority with
-        | Error (W.Execution_pending _) -> () | Ok _ | Error _ -> Alcotest.fail "unknown Goal original replayed" in
-      pending (); pending ();
+        (fun () -> Ok ["goal-reviewer",Types_core.Catalog_slot;"goal-reviewer-2",Types_core.Catalog_slot]);
+      let receipt = checked (run store retained authority) in
+      Alcotest.(check int) "provider failure fails over to the second slot" 2 !calls;
+      Alcotest.(check bool) "the all-slot failure keeps no verdict" true (receipt.result.verdict = None);
       let original = W.original retained in
       let subject = V.subject original in
       let observation = checked (observe_request ~store ~installation_id ~package_id ~config authority) in
@@ -334,20 +334,43 @@ let test_unknown_and_cancellation_never_redispatch () =
          Alcotest.(check string) "observation retains the original run" (W.run_identity retained).run_id
            (W.run_identity observed).run_id;
          (match P.phase (W.progress observed) with
-          | Dispatch_pending (Some (Outcome_unknown _)) -> ()
-          | Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Absent _))
-          | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
-          | Subdividing _ | Subdivided _ -> Alcotest.fail "unknown original observation changed phase")
+          | Rejected {stage=Execution; evidence} ->
+            (match evidence with
+             | `Assoc fields ->
+               (match List.assoc_opt "disposition" fields with
+                | Some (`Assoc disposition) ->
+                  (match List.assoc_opt "observations" disposition with
+                   | Some (`List observations) ->
+                     Alcotest.(check bool) "failure observations stay in the evidence" true
+                       (List.exists (fun entry ->
+                          match entry with
+                          | `Assoc entry_fields ->
+                            List.exists (fun (key, value) ->
+                              key = "fact" && value = `String "outcome_unknown") entry_fields
+                          | _ -> false) observations)
+                   | _ -> Alcotest.fail "refusal disposition lost its observations")
+                | _ -> Alcotest.fail "refusal evidence lost its disposition")
+             | _ -> Alcotest.fail "refusal evidence is not an object")
+          | Captured | Admission_wait _ | Dispatch_pending _
+          | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+          | Rejected {stage=Before_dispatch; _}
+          | Subdividing _ | Subdivided _ ->
+            Alcotest.fail "unknown certainty no longer ends the walk as unknown")
        | [] | _::_::_ -> Alcotest.fail "observation did not retain the one original");
+      (match run store retained authority with
+       | Error (W.Original_invalid _) -> ()
+       | Ok _ | Error (W.Execution_pending _) | Error _ ->
+         Alcotest.fail "refused Goal original replayed without its refusal");
       let authority_calls, current_authority = counted_authority authority in
       (match checked (W.frontier ~authority:current_authority ~store ~installation_id ~package_id
           ~goal_id:subject.goal_id ~request_id:subject.request_id
-          ~new_run:(fun () -> Alcotest.fail "unknown allocated a new run")) with
-       | Some restored -> Alcotest.(check int) "unknown frontier retains the original attempt" 0
+          ~new_run:(fun () ->
+            {run_id="goal-unknown-retry/" ^ subject.request_id; started_at=0.0})) with
+       | Some restored ->
+         Alcotest.(check int) "retryable refusal advances to the successor attempt" 1
            (V.attempt (W.original restored))
-       | None -> Alcotest.fail "unknown original disappeared from frontier");
-      Alcotest.(check int) "unknown frontier prepares no authority" 0 !authority_calls;
-      Alcotest.(check int) "no slot fallback or restart replay after unknown" 1 !calls));
+       | None -> Alcotest.fail "retryable refusal disappeared from frontier");
+      Alcotest.(check int) "retryable refusal prepares its successor authority" 1 !authority_calls);
   with_workspace (fun config store _ ->
     let authority, retained = prepared config store in
     let calls = ref 0 in
@@ -1482,8 +1505,8 @@ let test_agent_asks_a_moved_authority_again_in_one_processing () =
   exercise ~cut_after_refusal:false;
   exercise ~cut_after_refusal:true
 
-let test_actual_explicit_retry_and_unknown_fence () =
-  let exercise unknown = with_workspace (fun config store _ ->
+let test_actual_explicit_retry_after_provider_failure () =
+  let exercise kind error = with_workspace (fun config store _ ->
     let authority, retained = host_prepared config store in
     let original = W.original retained in
     let subject = V.subject original in
@@ -1492,27 +1515,27 @@ let test_actual_explicit_retry_and_unknown_fence () =
         ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_
         ~attempt_continuation:_ ~on_runtime_attempt_error:_ () ->
       incr calls;
-      if unknown then Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError
-        {message="reply lost"; kind=Llm_provider.Http_client.Connection_reset}))
-      else Error (Agent_core.Error.Api (Agent_core.Retry.NotFound {message="candidate removed"}))) (fun () ->
+      if !calls = 1 then Error (Agent_core.Error.Api error)
+      else Ok {AR.selected_runtime_id="goal-reviewer";evaluator_execution=None;
+               verdict=Some (AR.Approve "recovered on the explicit retry")}) (fun () ->
       ignore (run store retained authority);
       let ctx : Workspace_types.context = {config; agent_name="planner"} in
       let result = Workspace_goals.handle_goal_transition ~tool_name:"goal_transition"
           ~start_time:(Tool_timing.start ()) ctx
           (`Assoc ["goal_id", `String subject.goal_id; "action", `String "request_complete"]) in
-      Alcotest.(check bool) "retry response distinguishes unknown from settled refusal"
-        (not unknown) (Tool_result.is_success result);
-      if unknown then Alcotest.(check bool) "unknown response explains why no review started" true
-        (String_util.contains_substring (Tool_result.message result) "outcome is unknown");
-      let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id) in
-      Alcotest.(check int) "explicit request links only a definitely settled failure" (if unknown then 1 else 2) (List.length rows);
+      Alcotest.(check bool) (kind ^ " refusal answers an explicit retry") true
+        (Tool_result.is_success result);
       Atomic.set AR.run_llm_reviewer_fn (actual_approve calls);
       drain config;
-      Alcotest.(check int) "unknown execution never re-enters after explicit request" (if unknown then 1 else 2) !calls;
-      Alcotest.(check bool) "actual phase follows definite retry authority" true
-        (phase config subject.goal_id = if unknown then Goal_phase.Verifying else Awaiting_confirmation))) in
-  exercise false;
-  exercise true
+      Alcotest.(check int) (kind ^ " retry reviews the successor once") 2 !calls;
+      Alcotest.(check bool) (kind ^ " retry reaches human confirmation") true
+        (phase config subject.goal_id = Awaiting_confirmation);
+      let rows = checked (W.inventory ~store ~installation_id:W.host_installation_id ~package_id:W.host_package_id) in
+      Alcotest.(check int) (kind ^ " explicit request links the refused original and its successor")
+        2 (List.length rows)) in
+  exercise "unknown certainty" (Agent_core.Error.Retry.NetworkError
+    {message="reply lost"; kind=Llm_provider.Http_client.Connection_reset});
+  exercise "definite refusal" (Agent_core.Error.Retry.NotFound {message="candidate removed"})
 
 (* The verifier's retained judgment has already crossed the model boundary
    when Candle refuses its commit. A later explicit retry must commit that same
@@ -1697,17 +1720,15 @@ let reviewer_exit_after_actual_lookup calls ~base_path:_ ?sw:_ ?execution_owner:
   on_tool_result ~input result;
   raise Exit
 
-let test_caught_reviewer_exit_retains_actual_unknown_receipt () = with_workspace (fun config store _ ->
+let test_caught_reviewer_exit_retains_actual_refusal_receipt () = with_workspace (fun config store _ ->
   let authority,retained = host_prepared config store in
   let original = W.original retained in
   let calls = ref 0 in
   with_reviewer (reviewer_exit_after_actual_lookup calls) (fun () ->
-    (match run store retained authority with
-     | Error (W.Execution_pending _) -> ()
-     | Ok _ | Error _ -> Alcotest.fail "caught reviewer error did not retain an unknown dispatch");
+    let receipt = checked (run store retained authority) in
     let restored_store = Lane_addon_store.create ~root:(Lane_addon_store.root store) in
     let restored = host_load restored_store original in
-    let receipt = match checked (W.observed_receipt restored) with
+    let receipt = match checked (W.restored_receipt restored) with
       | Some receipt -> receipt | None -> Alcotest.fail "caught reviewer error lost its raw result" in
     let caught_error = Agent_core.Error.Internal
       (Printf.sprintf "review evaluator raised unexpectedly: %s" (Printexc.to_string Exit)) in
@@ -1716,9 +1737,9 @@ let test_caught_reviewer_exit_retains_actual_unknown_receipt () = with_workspace
        && receipt.result.retryable_runtimes=[]);
     Alcotest.(check (option string)) "raw caught Internal error survives reopening"
       (Some (Agent_core.Error.to_string caught_error)) receipt.result.fallback_reason;
-    let tools = checked (W.tool_observations restored) in
+    let tools = receipt.tools in
     Alcotest.(check bool) "caught reviewer error retains its actual lookup" true
-      (tools=receipt.tools && List.exists (fun (tool : Verification_run_registry.tool_observation) ->
+      (List.exists (fun (tool : Verification_run_registry.tool_observation) ->
         tool.tool_name="tool_read_file") tools);
     let registry = R.replay (Filename.concat config.base_path "caught-review-history.jsonl") in
     hosted (H.publish ~store:restored_store ~registry restored
@@ -1728,8 +1749,9 @@ let test_caught_reviewer_exit_retains_actual_unknown_receipt () = with_workspace
        Alcotest.(check bool) "caught error publishes its actual tools as deferred" true (observed=tools)
      | None | Some (R.Review _ | R.Scan_skipped _) -> Alcotest.fail "caught error observation is absent");
     (match run restored_store restored authority with
-     | Error (W.Execution_pending _) -> ()
-     | Ok _ | Error _ -> Alcotest.fail "caught reviewer error redispatched its unknown original");
+     | Error (W.Original_invalid _) -> ()
+     | Ok _ | Error (W.Execution_pending _) | Error _ ->
+       Alcotest.fail "caught reviewer error redispatched its refused original");
     Alcotest.(check int) "caught reviewer is never replayed" 1 !calls))
 
 let test_raised_review_retains_actual_tool_observation () = with_workspace (fun config store _ ->
@@ -1817,10 +1839,10 @@ let () = match restart_probe with
   Alcotest.test_case "actual integral receipt commits after restart and rejects alteration" `Quick test_actual_integral_receipt_commits_after_restart;
   Alcotest.test_case "actual agent restores before lookup and registry" `Quick test_actual_agent_restores_before_lookup_and_registry;
   Alcotest.test_case "finished publication survives registry retention" `Quick test_finished_publication_survives_registry_retention;
-  Alcotest.test_case "caught reviewer Exit retains its actual unknown receipt" `Quick test_caught_reviewer_exit_retains_actual_unknown_receipt;
+  Alcotest.test_case "caught reviewer Exit retains its actual refusal receipt" `Quick test_caught_reviewer_exit_retains_actual_refusal_receipt;
   Alcotest.test_case "raised review retains actual tool observation" `Quick test_raised_review_retains_actual_tool_observation;
   Alcotest.test_case "actual proof partial write and phase-moved boot" `Quick test_actual_partial_proof_and_nonverifying_boot;
-  Alcotest.test_case "actual explicit retry and unknown fence" `Quick test_actual_explicit_retry_and_unknown_fence;
+  Alcotest.test_case "actual explicit retry after provider failure" `Quick test_actual_explicit_retry_after_provider_failure;
   Alcotest.test_case "Candle config repair recovers the actual retained judgment" `Quick
     test_candle_config_repair_recovers_the_actual_retained_judgment;
   Alcotest.test_case "reasonless Goal reply needs an explicit linked retry" `Quick test_reasonless_goal_reply_requires_explicit_retry;

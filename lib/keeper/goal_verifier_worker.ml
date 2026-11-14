@@ -757,7 +757,6 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         else invalid "Goal retained lookup tools differ from their authority digest" in
     let* dispatching = advance ~store retained Progress.Dispatch_intended in
     let current = ref dispatching in
-    let unknown = ref false in
     let reached = ref false in
     let facts = ref [] in
     let tools = ref [] in
@@ -770,7 +769,7 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         let fact = match certainty with
           | AR.Before_dispatch -> "before_dispatch"
           | Definite_refusal -> reached := true; "definite_refusal"
-          | Outcome_unknown -> unknown := true; reached := true; "outcome_unknown" in
+          | Outcome_unknown -> reached := true; "outcome_unknown" in
         facts := `Assoc ["fact", `String fact; "runtime_id", `String runtime_id;
           "error_category", `String Agent_core.Error.(category error |> category_label)] :: !facts in
     let observed_tool ~input result =
@@ -789,13 +788,10 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         @ if !reached then ["certainty", `String "definite"] else []) in
       let refusal = `Assoc ["schema", `String "goal_verifier_refusal/v1";
         "receipt", encoded; "disposition", disposition] in
-      let event = match !unknown, admission.AR.verdict, !reached with
-        | true, _, _ -> Progress.Execution_observed (Progress.Outcome_unknown
-            (`Assoc ["schema", `String "goal_verifier_unknown/v1";
-              "receipt", encoded; "observations", `List (List.rev !facts)]))
-        | false, Some _, _ -> Progress.Judgment_retained encoded
-        | false, None, false -> Progress.Admission_declined refusal
-        | false, None, true -> Progress.Refused {stage=Progress.Execution; evidence=refusal} in
+      let event = match admission.AR.verdict, !reached with
+        | Some _, _ -> Progress.Judgment_retained encoded
+        | None, false -> Progress.Admission_declined refusal
+        | None, true -> Progress.Refused {stage=Progress.Execution; evidence=refusal} in
       match advance ~store !current event with
       | Ok saved -> current := saved
       | Error error -> raise (Retention_failed error) in
@@ -808,9 +804,7 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         ~log_warn:(fun message -> Log.Misc.warn "[goal-proof-review] goal_id=%s %s" subject.goal_id message)
         ~lookup:(A.goal_review_lookup authority) ~provider_rest
         ~base_path:(A.goal_review_base_path authority) ());
-      if !unknown then Error (Execution_pending "Goal reviewer outcome unknown; original retained")
-      else
-        (match View.view (Progress.phase (progress !current)) with
+      (match View.view (Progress.phase (progress !current)) with
          | View.Admission_wait evidence ->
            let* receipt, _ = decode (refusal_receipt !current {evidence}) in Ok receipt
          | View.Captured | View.Dispatch_pending _ | View.Judged _ | View.Committing _

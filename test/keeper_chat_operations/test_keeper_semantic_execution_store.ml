@@ -310,7 +310,10 @@ let test_admission_commit_faults () =
       | _ -> fail "commit fault produced a partial or missing admission")))
     Store.For_testing.[Fail_before_commit; Fail_after_commit]
 
-let test_restart_interrupted_execution_releases_the_running_slot () =
+(* #46918: a restart that fails a direct operation running with no native
+   call settles its execution in the same transaction, so nothing it left
+   behind holds back history clear or the Keeper retirement check. *)
+let test_restart_settles_the_execution_of_the_operation_it_fails () =
   with_store (fun path store ->
     let input = `Assoc ["message", `String "resume the checkpointed work"] in
     let cp = checkpoint () in
@@ -321,14 +324,33 @@ let test_restart_interrupted_execution_releases_the_running_slot () =
     resume_checkpoint store ~now:5. a cp;
     let running = get store (direct_scope a) in
     check string "resumed continuation holds the running slot" "running" (Execution.phase_name running.phase);
+    check bool "no native call is bound yet" true
+      (Keeper_native_call.equal_state Keeper_native_call.No_native_call running.native_call);
     Store.close store |> store_ok;
     with_open path (fun reopened ->
-      let _failed = Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:30. |> store_ok in
+      check int "the restart fails the operation" 1
+        (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:30. |> store_ok));
+      let failure = match Store.get reopened a.operation_id |> store_ok with
+        | Some {Chat.state = Chat.Failed {failure; _}; _} -> failure
+        | Some _ | None -> fail "the restart did not fail the operation" in
+      check bool "the operation failed as interrupted by the restart" true
+        (failure.kind = Chat.Interrupted_by_restart);
       let recovered = get reopened running.id in
       (match recovered.phase with
-       | Execution.Recovering {origin = Execution.Interrupted_execution; _} -> ()
-       | _ -> fail "interrupted Running was not marked Recovering");
+       | Execution.Settled (Execution.Failed detail) ->
+         check string "the execution failed with its operation's detail" failure.detail detail
+       | _ -> fail "the failed operation left its execution unsettled");
+      check bool "settlement released the semantic input" true (Option.is_none recovered.input);
       check bool "restart preserved execution identity" true (Scope.equal (Execution.scope running) (Execution.scope recovered));
+      ignore (Store.history_clear_input_checkpoint reopened ~trace_id:cp.trace_id |> store_ok
+              : Keeper_checkpoint_ref.t option);
+      (match Store.inspect_outstanding ~path |> store_ok with
+       | Store.Stored_operations {chat_operations = []; semantic_executions = []; _} -> ()
+       | Store.Stored_operations _ | Store.Missing_store ->
+         fail "the retirement check still finds outstanding work");
+      (match Store.inspect_native_history ~path ~operation_id:a.operation_id |> store_ok with
+       | Some {Store.calls = []; _} -> ()
+       | Some _ | None -> fail "the failed operation's native history is unreadable");
       submit reopened ~now:31. "after-restart" input;
       let b = claim reopened ~now:32. in
       ignore (defer_checkpoint reopened ~now:33. b cp);
@@ -1111,7 +1133,7 @@ let () =
         test_case "waiting adds a request and resolving moves a pending entry once" `Quick test_await_and_resolve_receipt_actions;
         test_case "waiting is admitted only while the execution holds the slot" `Quick test_await_receipt_is_admitted_only_while_the_execution_holds_the_slot ];
       "owner isolation", [
-        test_case "startup marks an interrupted execution and releases the running slot" `Quick test_restart_interrupted_execution_releases_the_running_slot;
+        test_case "startup settles the execution of the operation it fails" `Quick test_restart_settles_the_execution_of_the_operation_it_fails;
         test_case "readonly inventory includes every unsettled phase" `Quick test_readonly_inventory_includes_every_unsettled_phase;
         test_case "corrupt owned frame refuses unsafe inspection" `Quick test_corrupt_semantic_frame_refuses_unsafe_inspection;
         test_case "a Gate record that names a session scope is refused" `Quick test_gate_record_with_a_session_scope_is_refused;

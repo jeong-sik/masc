@@ -3594,7 +3594,15 @@ let settle_running_without_executor_with_journal_terminal
         (match blocked with
          | Some _ -> Ok interrupted
          | None -> match pending_checkpoint execution, pending_retry execution, gate_state execution with
-         | None, None, None -> Ok (operation :: interrupted)
+         | None, None, None ->
+           (* Nothing resumes this operation, so it fails below. Its execution
+              settles with it here as [fail_running] settles it; the
+              operation's failure records the interruption. *)
+           let kind, detail = running_settlement_failure cause in
+           let* () = settle_direct_semantic store operation
+               (Reducer.Fail_running
+                  {completed_at = now; failure = {Operation.kind; detail; outcome_ref = None}}) in
+           Ok (operation :: interrupted)
          | Some _, _, _ | None, Some _, _ | None, None, Some _ ->
            requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))) (Ok []) running in
     let interrupted = List.rev interrupted in

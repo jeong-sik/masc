@@ -69,10 +69,13 @@ require queue rows that a successful checkpoint ACK legitimately removed.
 Cancellation must settle the operation authority before removing its delivery
 projection in the later runtime integration.
 
-Startup moves interrupted Running records to Recovering without clearing their
-frames. This frees the execution slot for unrelated work. An empty frame is not
-proof that a partially transmitted request or tool had no effect. No arbitrary
-hash or checkpoint-presence escape hatch authorizes replay of Interrupted execution.
+Startup fails a direct operation that was running with nothing to resume, and
+settles its record as Failed with the operation's failure detail in the same
+transaction. An interrupted Running record that no failed operation settles
+moves to Recovering without clearing its frame. Both free the execution slot
+for unrelated work. An empty frame is not proof that a partially transmitted
+request or tool had no effect. No arbitrary hash or checkpoint-presence escape
+hatch authorizes replay of Interrupted execution.
 
 ## Evidence and remaining integration
 

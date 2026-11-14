@@ -962,8 +962,8 @@ the running turn sooner.
 A direct operation can also end at a checkpoint instead of an answer, for
 example when a tool result arrives later. The retained continuation survives
 restart while queued or claimed before resume admission. A crash after resume
-authority has been consumed remains an interrupted execution; MASC does not
-silently replay potentially completed effects. A changed conversation or tool surface also requires recovery instead
+authority has been consumed fails the operation as interrupted by the restart;
+MASC does not silently replay potentially completed effects. A changed conversation or tool surface also requires recovery instead
 of replaying the original input into a new session.
 
 ## Resume a refused counterpart-only history read

@@ -500,6 +500,30 @@ let test_intended_successor_after_a_before_dispatch_refusal_is_restored () =
   let restored = loaded_or_fail (O.load ~store ~verification_id:"vrf-cut-moved" ~attempt:1) in
   assert (Yojson.Safe.equal (V.to_json restored) (V.to_json child))
 
+let test_negative_attempt_is_a_wrong_key_for_every_entry () =
+  (* No attempt has a negative number, so the key is what is wrong and asking
+     again cannot help. [retain] says so as [Identity_mismatch]; every read
+     must land on its own "the input is wrong" side, [Corrupt_original], and
+     never on the store failure a caller waits out. *)
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  let original = make_original ~verification_id:"vrf-neg" ~attempt:0 in
+  (match O.retain ~store ~verification_id:"vrf-neg" ~attempt:(-1) ~installation_id:"i" ~package_id:"p" original with
+   | Error (O.Identity_mismatch _) -> ()
+   | Ok () -> failwith "a negative attempt key must not retain"
+   | Error err -> failwith ("wrong retain rejection: " ^ string_of_retain_error err));
+  let wrong_key name = function
+    | Error (O.Corrupt_original _) -> ()
+    | Ok _ -> failwith (name ^ ": a negative attempt key must not load")
+    | Error err -> failwith (name ^ ": wrong rejection: " ^ string_of_load_error err) in
+  wrong_key "load" (O.load ~store ~verification_id:"vrf-neg" ~attempt:(-1));
+  wrong_key "load_for_destination"
+    (O.load_for_destination ~store ~verification_id:"vrf-neg" ~attempt:(-1)
+       ~installation_id:"i" ~package_id:"p");
+  wrong_key "load_retained"
+    (O.load_retained ~store ~verification_id:"vrf-neg" ~attempt:(-1)
+       ~installation_id:"i" ~package_id:"p")
+
 let () =
   test_before_dispatch_refusal_opens_the_next_attempt_with_current_lookup ();
   test_unreadable_before_dispatch_refusal_opens_nothing ();
@@ -515,6 +539,7 @@ let () =
   test_different_destination_rejected ();
   test_retry_is_new_attempt ();
   test_load_not_found ();
+  test_negative_attempt_is_a_wrong_key_for_every_entry ();
   test_verification_selection_preserves_unsupported_foreign_original ();
   test_foreign_routing_requires_independent_key_header_and_body ();
   test_target_corruption_and_unreadable_foreign_body_are_not_absence ();

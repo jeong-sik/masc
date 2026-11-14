@@ -1,0 +1,6 @@
+### Fixed
+
+- A verifier review original read under a negative attempt now fails as
+  `Corrupt_original`, the same "the key is wrong" refusal `retain` already
+  gives as `Identity_mismatch`, so the review stops instead of being deferred
+  as if the store might come back (#47843, #PENDING).

@@ -23,8 +23,12 @@ split: after the other facts, the model restates one durable fact of the
 planned category with the duplicate's own marks, near the length of that fact.
 The model writes only text: role material, a world sheet, category names, a
 goal, and claims; a claim whose marks differ from its plan, a claim that copies
-a fact of its memory or an earlier candidate, or a candidate or duplicate whose
-length leaves its band, is not kept. Every model call is cached in
+a fact of its memory or an earlier candidate, a fact shorter than
+FACT_LENGTH_FLOOR of its plan, or a candidate or duplicate whose length leaves
+its band, is not kept. A facts answer whose items are not one text claim per
+slot is refused whole and asked again: its claims cannot be matched to the
+slots by position. summary.json counts the refused facts answers and the facts
+left out, by reason. Every model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request per line; `synth_rows.label_of_row` reads its label) and <out>/summary.json.
@@ -46,9 +50,10 @@ import json
 import random
 import sys
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Set
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Protocol, assert_never, cast
 
@@ -73,6 +78,13 @@ FACTS_PER_CALL = 6
 LENGTH_ASK = 1.7
 # Share of a call's durable slots whose claims must come back with their marks.
 DURABLE_KEEP_SHARE = 0.7
+# A fact is kept only when it is at least this share of its planned length. The call logs of the
+# training split (seed 20261114) and the second eval batch (seed 20261113), replayed: of 7,565
+# claims written to a plan, p1 was 0.41 to 0.44 of the plan and the median 1.12 to 1.14. The
+# shortest was "NaN", 3 chars for 470 (#51430); the next, a whole sentence, 0.117 (209 for 1,780).
+# CANDIDATE_LENGTH_BAND would have left out 54 to 56 percent. No ceiling: the longest was 6,228
+# bytes, under the 16,000 the librarian's absorb gate judges (keeper_librarian_absorb_gate.ml).
+FACT_LENGTH_FLOOR = 0.1
 EFFORT = {"profile": "medium", "facts": "low", "duplicate": "medium", "candidate": "medium"}
 MAX_TOKENS = {"profile": 8192, "facts": 16384, "duplicate": 4096, "candidate": 4096}
 # Measured role material: p10 716, p50 1,144, p90 2,684 chars.
@@ -243,16 +255,89 @@ def between(rng: random.Random, start: dt.datetime, end: dt.datetime) -> dt.date
     return start + dt.timedelta(seconds=rng.randrange(int((end - start).total_seconds())))
 
 
+class AnswerFault(Enum):
+    """Why a facts answer is refused whole: its claims cannot be matched to the slots by position."""
+
+    NOT_FACTS = "not_facts"  # not a JSON object holding a list under "facts"
+    COUNT = "count"  # the list holds another number of items than the slots asked for
+    CLAIM_NOT_TEXT = "claim_not_text"  # an item is not an object whose "claim" is a non-blank string
+
+
+class ClaimMiss(Enum):
+    """Why a claim of a readable facts answer is left out of its slot."""
+
+    COPY = "copy"  # the text of a fact already written, or of an earlier claim of the answer
+    MARKS = "marks"  # its date, time or number differs from its slot's surface
+    SHORT = "short"  # under FACT_LENGTH_FLOOR of its slot's planned length
+
+
+type Refusal = AnswerFault | ClaimMiss
+type FactClaims = tuple[str, ...] | AnswerFault
+
+
+@dataclass(frozen=True, slots=True)
+class Asked[T]:
+    """What a stage got: its value, None when no attempt was kept or calls stopped, and why each
+    refused answer and each claim left out was not kept."""
+
+    value: T | None
+    refused: tuple[Refusal, ...]
+
+
+def answer_object(text: str) -> dict[str, object] | None:
+    """The JSON object of an answer, inside a code fence or not."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+        stripped = stripped.rsplit("```", 1)[0]
+    try:
+        value: object = json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+    return cast(dict[str, object], value) if isinstance(value, dict) else None
+
+
+def parse_facts(answer: str, n: int) -> FactClaims:
+    """The n claims of a facts answer in slot order, each stripped, or why the answer does not read
+    as one text claim per slot. An item left out or not text would shift every later claim onto
+    the slot before its own."""
+    obj = answer_object(answer)
+    raw = obj.get("facts") if obj is not None else None
+    if not isinstance(raw, list):
+        return AnswerFault.NOT_FACTS
+    items = cast(list[object], raw)
+    if len(items) != n:
+        return AnswerFault.COUNT
+    claims: list[str] = []
+    for item in items:
+        claim = cast(dict[str, object], item).get("claim") if isinstance(item, dict) else None
+        if not isinstance(claim, str) or not claim.strip():
+            return AnswerFault.CLAIM_NOT_TEXT
+        claims.append(claim.strip())
+    return tuple(claims)
+
+
+def claim_miss(claim: str, slot: FactSlot, texts: Set[str]) -> ClaimMiss | None:
+    """Why `claim` cannot fill `slot`, given the texts already written; None when it can."""
+    if claim in texts:
+        return ClaimMiss.COPY
+    if not S.surface_holds(claim, slot.surface):
+        return ClaimMiss.MARKS
+    if len(claim) < FACT_LENGTH_FLOOR * slot.length:
+        return ClaimMiss.SHORT
+    return None
+
+
 def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactSlot, ...],
-               same: Sequence[str], others: Sequence[str]) -> list[tuple[FactSlot, str]] | None:
+               same: Sequence[str], others: Sequence[str]) -> Asked[tuple[tuple[FactSlot, str], ...]]:
     """Claims for `slots`, matched by position. The prompt shows the facts already written in
     `category` whole and those of other categories by their first EXISTING_HEAD chars: a category
     takes several calls, and a later call that saw only the head of a long fact wrote its lesson
     again as a short fact (27 of the 29 unplanted repeats the 11-10 dev label audit found).
-    A claim counts only when its text carries exactly its slot's surface. An attempt is kept when
-    every planted slot (stale, or with a use time) and DURABLE_KEEP_SHARE of the durable ones came
-    back: a planted fact that failed its marks would leave the kept planted facts with other marks
-    than the kept durable ones."""
+    An answer counts only when it holds one text claim per slot (`parse_facts`), and a claim only
+    when `claim_miss` finds nothing. An attempt is kept when every planted slot (stale, or with a
+    use time) and DURABLE_KEEP_SHARE of the durable ones came back: a planted fact that failed its
+    marks would leave the kept planted facts with other marks than the kept durable ones."""
     items = "\n".join(P.fact_item(i + 1, text_kind(slot), int(round(slot.length * LENGTH_ASK, -1)), slot.surface)
                       for i, slot in enumerate(slots))
     prompt = P.FACTS_PROMPT.format(role=plan.keeper.role_material, world=plan.keeper.world, category=category,
@@ -260,23 +345,35 @@ def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactS
                                    others=listed(others, head), style=P.STYLE)
     durable = sum(not planted(s) for s in slots)
     plants = len(slots) - durable
+    refused: list[Refusal] = []
     for attempt in range(ATTEMPTS):
         answer = ask(caller, "facts", prompt, attempt)
         if answer is None:
-            return None
-        claims = S.parse_claims(answer) if answer else None
-        if claims is None:
+            return Asked(None, tuple(refused))
+        if not answer:
             continue
+        parsed = parse_facts(answer, len(slots))
+        match parsed:
+            case AnswerFault():
+                refused.append(parsed)
+                continue
+            case tuple():
+                claims = parsed
+            case _:
+                assert_never(parsed)
         texts = {c.strip() for c in (*same, *others)}
         kept: list[tuple[FactSlot, str]] = []
-        for slot, claim in zip(slots, claims):
-            if claim.strip() not in texts and S.surface_holds(claim, slot.surface):
-                texts.add(claim.strip())
+        for slot, claim in zip(slots, claims, strict=True):
+            miss = claim_miss(claim, slot, texts)
+            if miss is None:
+                texts.add(claim)
                 kept.append((slot, claim))
+            else:
+                refused.append(miss)
         kept_plants = sum(planted(s) for s, _ in kept)
         if kept_plants == plants and len(kept) - kept_plants >= round(DURABLE_KEEP_SHARE * durable):
-            return kept
-    return None
+            return Asked(tuple(kept), tuple(refused))
+    return Asked(None, tuple(refused))
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,25 +426,27 @@ def duplicate_for(caller: Asks, rng: random.Random, plan: MemoryPlan, slot: Dupl
     return None
 
 
-def build_memory(caller: Asks, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | None:
+def build_memory(caller: Asks, plan: MemoryPlan) -> Asked[tuple[S.MemoryFact, ...]]:
     rng = random.Random(plan.seed)
     written: list[Written] = []
+    refused: list[Refusal] = []
     for category, group in itertools.groupby(plan.slots, key=lambda slot: slot.category):
         slots = tuple(group)
         for start in range(0, len(slots), FACTS_PER_CALL):
             got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL],
                              [w.claim for w in written if w.category == category],
                              [w.claim for w in written if w.category != category])
-            if got is None:
-                return None
+            refused.extend(got.refused)
+            if got.value is None:
+                return Asked(None, tuple(refused))
             written.extend(Written(slot.seen, slot.category, slot.stale, claim, None, slot.use_at)
-                           for slot, claim in got)
+                           for slot, claim in got.value)
     if plan.duplicate is not None:
         restated = duplicate_for(caller, rng, plan, plan.duplicate, written)
         if restated is None:
-            return None
+            return Asked(None, tuple(refused))
         written.append(restated)
-    return facts_of(rng, written)
+    return Asked(facts_of(rng, written), tuple(refused))
 
 
 def target_choices(facts: tuple[S.MemoryFact, ...]) -> list[S.MemoryFact]:
@@ -469,7 +568,7 @@ def main() -> int:
         def profile_task(pair: tuple[S.KeeperSeed, random.Random]) -> S.KeeperProfile | None:
             return profile_of(caller, pair[0], pair[1])
 
-        def memory_task(plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | None:
+        def memory_task(plan: MemoryPlan) -> Asked[tuple[S.MemoryFact, ...]]:
             return build_memory(caller, plan)
 
         profiles = list(pool.map(profile_task, zip(keepers_seeds, profile_rngs, strict=True)))
@@ -479,8 +578,9 @@ def main() -> int:
         paired = C.flags(rng, len(homes), S.DUPLICATE_PAIR_SHARE)
         plans = [plan_memory(rng, keeper, i, pair) for (keeper, i), pair in zip(homes, paired, strict=True)]
         memories = list(pool.map(memory_task, plans))
-        built = [(plan, facts) for plan, facts in zip(plans, memories, strict=True) if facts is not None]
+        built = [(plan, got.value) for plan, got in zip(plans, memories, strict=True) if got.value is not None]
         status["memories_failed"] = len(plans) - len(built)
+        refusals = Counter(r for got in memories for r in got.refused)
         if not built:
             print("no memory was built", caller.stopped or "", file=sys.stderr)
             return 2
@@ -511,6 +611,8 @@ def main() -> int:
                "memories_with_duplicate": sum(any(f.duplicate_of is not None for f in facts) for _, facts in built),
                "records_by_side": dict(Counter("past" if f.planted_stale else "ahead"
                                                for _, facts in built for f in facts if f.use_at is not None)),
+               "fact_answers_refused": {fault.value: refusals[fault] for fault in AnswerFault},
+               "facts_left_out": {miss.value: refusals[miss] for miss in ClaimMiss},
                "spent_usd": round(caller.spent, 4), "budget_usd": budget, "stopped": caller.stopped}
     (out / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print("SUMMARY", json.dumps(summary))

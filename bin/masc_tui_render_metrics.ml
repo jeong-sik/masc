@@ -9,10 +9,6 @@ module Unknown = Masc_tui_value.Unknown
 
 module Task_flow = Masc_tui_task_flow
 
-(* The Work & Outcomes section is written in English only, so the fleet words
-   drawn inside its sentences are asked for in English too. *)
-let fleet_words_in_korean = false
-
 type turn_counts = { running : int; idle : int; unavailable : int }
 type metrics_kpis = {
   total_keepers : int;
@@ -497,11 +493,6 @@ let render_section_fleet ?session_rows ~cols (state : state) =
      @ scheduler_lines
      @ [ ""; title (say "전송" "Transport delivery") ] @ transport_lines @ [ feed_line ])
 
-let timestamp_utc at =
-  let tm = Unix.gmtime at in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d UTC"
-    (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min
-
 (* The one ladder every other surface reads a span on. This pane had its own
    -- a single unit with a tenth after it -- so "how long since" read "7.6s"
    and "1.5d" here while the Board, Fusion, Keepers and the chat rows read
@@ -516,63 +507,98 @@ let render_section_resources ~cols (state : state) =
   let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let now = Unix.gettimeofday () in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
+  (* The blocks after the first read the same snapshot. Without one they say
+     why in a word; the first block carries the loader's sentence. *)
+  let no_snapshot = "    " ^ field_missing_reading ~ko ~error:state.tasks_error in
   let task_lines = match state.task_flow with
     | None ->
-      [ "    Task snapshot unavailable"
-      ; "    "
+      [ "    "
         ^ (match state.tasks_error with
-           | None -> "Backlog has not been observed yet."
+           | None -> field_unread ~ko
            | Some error -> Terminal_text.single_line error) ]
     | Some flow ->
       let current = flow.Task_flow.current in
-      [ Printf.sprintf "    New tasks %d · Done %d · Cancelled %d"
-          flow.recent.created flow.recent.completed flow.recent.cancelled
-      ; Printf.sprintf "    Window: %s — %s"
-          (timestamp_utc flow.window_started_at) (timestamp_utc flow.observed_at)
-      ; Printf.sprintf "    Current open %d: todo %d · claimed %d · working %d · verification %d"
-          (Task_flow.open_count current) current.todo current.claimed current.in_progress
-          current.awaiting_verification
-      ; Printf.sprintf "    Retained total %d · Done %d · Cancelled %d · snapshot %s ago"
-          (Task_flow.total_count current) current.completed current.cancelled
-          (age_text (now -. flow.observed_at))
-      ; "    Oldest open task registration: "
-          ^ Option.fold ~none:"none with a known timestamp"
-              ~some:(fun at -> age_text (flow.observed_at -. at) ^ " before this snapshot")
-              flow.oldest_open_created_at
-      ; "    Done is a task outcome; tool calls and turn endings are activity." ]
+      let moment at =
+        Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
+      in
+      (* A count of the tasks in a status, which the Tasks screen names. *)
+      let in_status (tag : Masc_domain.Task_status_tag.t) count =
+        Masc_tui_task_document.status_tag_label ~ko tag ^ " " ^ Count.grouped count
+      in
+      let row parts = "    " ^ String.concat " · " parts in
+      [ row
+          [ say "새 작업 " "New tasks " ^ Count.grouped flow.recent.created
+          ; in_status Done flow.recent.completed
+          ; in_status Cancelled flow.recent.cancelled ]
+      ; Printf.sprintf (if ko then "    구간: %s ~ %s" else "    Window: %s to %s")
+          (moment flow.window_started_at) (moment flow.observed_at)
+      ; say "    지금 열린 작업 " "    Current open "
+        ^ Count.grouped (Task_flow.open_count current) ^ ": "
+        ^ String.concat " · "
+            [ in_status Todo current.todo
+            ; in_status Claimed current.claimed
+            ; in_status In_progress current.in_progress
+            ; in_status Awaiting_verification current.awaiting_verification ]
+      ; row
+          [ say "백로그 전체 " "Retained total " ^ Count.grouped (Task_flow.total_count current)
+          ; in_status Done current.completed
+          ; in_status Cancelled current.cancelled
+          ; Printf.sprintf (if ko then "스냅샷 %s 전" else "snapshot %s ago")
+              (age_text (now -. flow.observed_at)) ]
+      ; say "    가장 오래된 열린 작업: " "    Oldest open task registration: "
+        ^ Option.fold ~none:(say "등록 시각을 아는 작업 없음" "none with a known timestamp")
+            ~some:(fun at ->
+              Printf.sprintf (if ko then "스냅샷 %s 전 등록" else "%s before this snapshot")
+                (age_text (flow.observed_at -. at)))
+            flow.oldest_open_created_at
+      ; say "    완료는 작업 결과이고, 도구 호출과 턴 종료는 활동입니다."
+          "    Done is a task outcome; tool calls and turn endings are activity." ]
       @ (if flow.unparseable_timestamps = 0 then [] else
-           [ Printf.sprintf "    %d invalid timestamps excluded from time-window counts"
-               flow.unparseable_timestamps ])
+           [ Printf.sprintf
+               (if ko then "    구간 집계에서 뺀 잘못된 시각 %s개"
+                else "    %s invalid timestamps excluded from time-window counts")
+               (Count.grouped flow.unparseable_timestamps) ])
       @ (match state.tasks_error with None -> [] | Some error ->
-           [ "    Snapshot warning: " ^ Terminal_text.single_line error ])
+           [ say "    스냅샷 경고: " "    Snapshot warning: " ^ Terminal_text.single_line error ])
   in
   (* One row per assignee, longest queue first. The list is capped so the two
      blocks below it stay on screen; the tail is reported as a count rather
-     than dropped silently. *)
+     than dropped silently. The columns are fitted by cells: Printf pads by
+     bytes, so a Korean head or name pulled every column after it left. *)
   let assignee_rows_shown = 10 in
+  let assignee_row name done_count open_count lead =
+    let count text = " " ^ Layout.pad_left text 6 in
+    "    " ^ Layout.fit_width name 26 ^ count done_count ^ count open_count ^ "  " ^ lead
+  in
   let assignee_lines = match state.task_flow with
-    | None -> [ "    No snapshot to attribute work in." ]
+    | None -> [ no_snapshot ]
     | Some flow ->
       (match flow.Task_flow.by_assignee with
-       | [] -> [ "    No retained task carries an assignee." ]
+       | [] -> [ say "    담당자가 있는 작업이 없습니다." "    No retained task carries an assignee." ]
        | rows ->
          let head = List.filteri (fun index _ -> index < assignee_rows_shown) rows in
          let body =
            List.map
              (fun (row : Task_flow.assignee_flow) ->
-               Printf.sprintf "    %-26s %5d %5d  %s"
-                 (Layout.fit_width row.af_assignee 26) row.af_done row.af_open
+               assignee_row row.af_assignee (Count.grouped row.af_done)
+                 (Count.grouped row.af_open)
                  (match row.af_median_lead_hours with
-                  | None -> "no measurable pair"
+                  | None -> Masc_tui_theme.Glyph.no_value
                   | Some hours -> age_text (hours *. 3600.)))
              head
          in
          let omitted = List.length rows - List.length head in
-         [ "    A keeper name and an agent name stay separate rows; nothing is merged."
-         ; Printf.sprintf "    %-26s %5s %5s  %s" "assignee" "done" "open" "median lead" ]
+         [ say "    키퍼 이름과 에이전트 이름은 합치지 않고 따로 적습니다."
+             "    A keeper name and an agent name stay separate rows; nothing is merged."
+         ; assignee_row (say "담당자" "assignee") (say "완료" "done") (say "열림" "open")
+             (say "소요 중앙값" "median lead") ]
          @ body
          @ (if omitted <= 0 then []
-            else [ Printf.sprintf "    %d further assignees not listed" omitted ]))
+            else
+              [ Printf.sprintf (if ko then "    외 %s명" else "    %s more")
+                  (Count.grouped omitted) ]))
   in
   let day_label at =
     let tm = Unix.gmtime at in
@@ -582,32 +608,52 @@ let render_section_resources ~cols (state : state) =
     | Some flow when flow.Task_flow.daily <> [] ->
       let first = List.hd flow.Task_flow.daily in
       let last = List.fold_left (fun _ day -> day) first flow.Task_flow.daily in
-      Printf.sprintf "Daily task flow · %s to %s UTC"
+      Printf.sprintf
+        (if ko then "일별 작업 흐름 · %s ~ %s UTC" else "Daily task flow · %s to %s UTC")
         (day_label first.Task_flow.d_start) (day_label last.Task_flow.d_start)
     | Some _ | None ->
-      Printf.sprintf "Daily task flow · %d UTC days" Task_flow.daily_days
+      Printf.sprintf
+        (if ko then "일별 작업 흐름 · UTC 기준 %d일간" else "Daily task flow · %d UTC days")
+        Task_flow.daily_days
   in
   (* Days run across rather than down: the question is the shape of the trend,
-     and one line per day pushes every other block off the section. *)
+     and one line per day pushes every other block off the section. A day's
+     column is its widest figure and a space, so a day of a thousand tasks
+     does not run into the next one, and does not widen the quiet days and
+     push the latest off a narrow pane. *)
   let daily_lines = match state.task_flow with
-    | None -> [ "    No snapshot to count days in." ]
+    | None -> [ no_snapshot ]
     | Some flow ->
-      let days = flow.Task_flow.daily in
-      let row label pick =
-        Printf.sprintf "    %-10s" label
-        ^ String.concat ""
-            (List.map (fun (day : Task_flow.day) -> Printf.sprintf "%3d" (pick day)) days)
+      let rows =
+        [ say "날짜" "day", (fun (day : Task_flow.day) -> (Unix.gmtime day.d_start).Unix.tm_mday)
+        ; say "새 작업" "created", (fun (day : Task_flow.day) -> day.d_created)
+        ; say "완료" "completed", (fun (day : Task_flow.day) -> day.d_completed)
+        ; say "취소" "cancelled", (fun (day : Task_flow.day) -> day.d_cancelled) ]
       in
-      [ row "day" (fun (day : Task_flow.day) -> (Unix.gmtime day.d_start).Unix.tm_mday)
-      ; row "created" (fun (day : Task_flow.day) -> day.d_created)
-      ; row "completed" (fun (day : Task_flow.day) -> day.d_completed)
-      ; row "cancelled" (fun (day : Task_flow.day) -> day.d_cancelled) ]
+      let columns =
+        List.map
+          (fun day ->
+            ( day
+            , List.fold_left
+                (fun width (_, pick) -> max width (1 + String.length (Count.grouped (pick day))))
+                3 rows ))
+          flow.Task_flow.daily
+      in
+      List.map
+        (fun (label, pick) ->
+          "    " ^ Layout.fit_width label 10
+          ^ String.concat ""
+              (List.map
+                 (fun (day, width) -> Layout.pad_left (Count.grouped (pick day)) width)
+                 columns))
+        rows
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
       [ "    " ^ Terminal_text.single_line error
-      ; "    Previous rows are not counted as current running turns." ]
-    | None, None -> [ "    Current turns have not been observed yet." ]
+      ; say "    이전 행은 지금 실행 중인 턴으로 세지 않습니다."
+          "    Previous rows are not counted as current running turns." ]
+    | None, None -> [ "    " ^ field_unread ~ko ]
     | Some observed_at, None ->
       let running = List.filter_map
           (fun (row : Decode.keeper_turn_row) -> match row.ktr_state with
@@ -621,47 +667,60 @@ let render_section_resources ~cols (state : state) =
             | Keeper_turn_unavailable _ -> idle, unavailable + 1
             | Keeper_turn_running _ -> idle, unavailable)
           (0, 0) state.keeper_turns in
-      [ Printf.sprintf "    %d running · %d idle · %d unavailable · observed %s ago"
-          (List.length running) idle unavailable (age_text (now -. observed_at))
-      ; "    Turn age = since owner-reported start. Recent pane evt = since event receipt." ]
+      [ Printf.sprintf
+          (if ko then "    실행 중 %s · 대기 중 %s · 확인 불가 %s · %s 전 조회"
+           else "    %s running · %s idle · %s unavailable · observed %s ago")
+          (Count.grouped (List.length running)) (Count.grouped idle)
+          (Count.grouped unavailable) (age_text (now -. observed_at))
+      ; say "    턴 시간은 키퍼가 알린 시작 시각부터 잽니다."
+          "    Turn age = since owner-reported start." ]
       @ List.map
           (fun (name, lane, started_at_unix) ->
-              let lane = match lane with
-                | Decode.Turn_lane_autonomous -> "autonomous"
-                | Decode.Turn_lane_chat_operation -> "chat"
-                | Decode.Turn_lane_maintenance -> "maintenance" in
-              Printf.sprintf "    %-18s  turn %8s  lane %s"
+              Printf.sprintf
+                (if ko then "    %s  턴 %8s  레인 %s" else "    %s  turn %8s  lane %s")
                 (Layout.fit_width name 18)
-                (age_text (now -. started_at_unix)) lane)
+                (age_text (now -. started_at_unix))
+                (Masc_tui_answering.lane_word ~ko lane))
           running
   in
   (* A failed read is the loader's own sentence, as the Keepers header draws
-     it. It read "not observed", which is what the section says before the
-     first read, so a fleet the TUI could not read looked like one it had not
-     asked for yet (#38499). *)
+     it. It read the words this block says before the first read, so a fleet
+     the TUI could not read looked like one it had not asked for yet
+     (#38499). *)
+  let readiness text = say "    실행 준비: " "    Execution readiness: " ^ text in
   let safety_lines = match fleet_stream_view state with
     | Masc_tui_fleet_stream.Cannot_read failure ->
-      [ "    Execution readiness: " ^ Masc_tui_fleet_line.failure_text ~ko:fleet_words_in_korean failure ]
-    | Masc_tui_fleet_stream.Awaiting_first_reading -> [ "    Execution readiness not observed" ]
+      [ readiness (Masc_tui_fleet_line.failure_text ~ko failure) ]
+    | Masc_tui_fleet_stream.Awaiting_first_reading -> [ readiness (field_unread ~ko) ]
     | Masc_tui_fleet_stream.Unreachable { since } ->
-      [ "    Execution readiness: " ^ Masc_tui_fleet_line.unreachable_text ~ko:fleet_words_in_korean ~now ~since ]
+      [ readiness (Masc_tui_fleet_line.unreachable_text ~ko ~now ~since) ]
     | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
-      [ "    Execution readiness: "
-        ^ Masc_tui_fleet_line.unavailable_text ~ko:fleet_words_in_korean ~now ~degradation ~disconnected_since ]
+      [ readiness
+          (Masc_tui_fleet_line.unavailable_text ~ko ~now ~degradation ~disconnected_since) ]
     | Masc_tui_fleet_stream.Reading { reading = { fleet = safety; _ }; trouble } ->
-      Printf.sprintf "    Executable %d / target %d · shortfall %d · failing %d · paused %d"
-        safety.fs_executable_count safety.fs_target_reaction_capacity
-        safety.fs_reaction_capacity_shortfall safety.fs_failing_count safety.fs_paused_count
+      Printf.sprintf
+        (if ko then "    실행 가능 %s · 목표 %s · 부족 %s · 실패 %s · 일시정지 %s"
+         else "    Executable %s · target %s · shortfall %s · failing %s · paused %s")
+        (Count.grouped safety.fs_executable_count)
+        (Count.grouped safety.fs_target_reaction_capacity)
+        (Count.grouped safety.fs_reaction_capacity_shortfall)
+        (Count.grouped safety.fs_failing_count) (Count.grouped safety.fs_paused_count)
       :: (trouble
-          |> Option.map (fun trouble -> "    " ^ Masc_tui_fleet_line.trouble_text ~ko:fleet_words_in_korean ~now trouble)
+          |> Option.map (fun trouble -> "    " ^ Masc_tui_fleet_line.trouble_text ~ko ~now trouble)
           |> Option.to_list)
   in
   List.map clip
-    ([ title "Retained task outcomes · 24-hour snapshot window" ] @ task_lines
-     @ [ ""; title "Work per assignee · lead time is created to completed" ] @ assignee_lines
+    ([ title (say "작업 결과 · 스냅샷 전 24시간" "Retained task outcomes · 24-hour snapshot window") ]
+     @ task_lines
+     @ [ ""
+       ; title
+           (say "담당자별 작업 · 소요는 등록부터 완료까지"
+              "Work per assignee · lead time is created to completed") ]
+     @ assignee_lines
      @ [ ""; title daily_title ] @ daily_lines
-     @ [ ""; title "Current owner turns" ] @ turn_lines
-     @ [ ""; title "Execution readiness (fleet stream)" ] @ safety_lines)
+     @ [ ""; title (say "현재 턴" "Current owner turns") ] @ turn_lines
+     @ [ ""; title (say "실행 준비 (fleet 스트림)" "Execution readiness (fleet stream)") ]
+     @ safety_lines)
 
 let render_section_tools ~cols (state : state) : string list =
   (* Section 3: Memory & Gate Safety *)

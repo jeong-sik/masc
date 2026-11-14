@@ -386,6 +386,8 @@ let shipped_operator_lesson_declaration_loads () =
     (List.sort String.compare
        (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs));
   check bool "the package does not ask the operator" false package.operator_asks;
+  check bool "the scenes port selects the scene lane alone" true
+    (List.assoc_opt "scenes" package.outputs = Some (Lane_addon_types.Selected_lanes ["lesson/scenes"]));
   check bool "the lesson log lives on persistent state" true (package.state_storage = Lane_addon_types.Persistent);
   check (option string) "compose and export arrive through lane_act" (Some "lane_act") package.action_tool;
   check int "the example grants a Board and a repository" 2

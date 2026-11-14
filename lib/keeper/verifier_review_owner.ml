@@ -101,9 +101,12 @@ let retain ~store ~verification_id ~attempt ~installation_id ~package_id origina
   |> Result.map_error (map_retain_error ~request_id)
 
 let load ~store ~verification_id ~attempt =
+  (* No original has a negative attempt, so such a key is wrong and reading
+     again cannot help. [retain] refuses the same key as [Identity_mismatch];
+     a read must not report it as a store that may come back. *)
   let* request_id =
     attempt_request_id ~verification_id ~attempt
-    |> Result.map_error (fun detail -> Load_store_unavailable detail)
+    |> Result.map_error (fun detail -> Corrupt_original detail)
   in
   let* existing =
     Owner.load ~store ~scope ~request_id

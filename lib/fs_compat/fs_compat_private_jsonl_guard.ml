@@ -13,6 +13,13 @@ type 'a private_jsonl_guard_result =
       cleanup_failures : private_jsonl_guard_failure list;
     }
 
+type 'a private_jsonl_dependency_guard_result =
+  | Dependency_is_target of {
+      target_path : string;
+      dependency_path : string;
+    }
+  | Dependency_guarded of 'a private_jsonl_guard_result
+
 let with_guard ~io requested_path ~expected ~f =
   let cleanup = ref [] in
   (* Only the stable descriptor uses this close function. Data validation uses
@@ -26,9 +33,9 @@ let with_guard ~io requested_path ~expected ~f =
         backtrace = Printexc.get_raw_backtrace () } in
       cleanup := failure :: !cleanup) } in
   let perform () =
-    with_private_jsonl_stable_lock ~io:guard_io
+    with_private_jsonl_identified_stable_lock ~io:guard_io
       ~success:(fun _ -> Snapshot_succeeded expected) requested_path
-      (fun ~dir ~path ->
+      (fun ~dir ~path ~lock_identity ->
         let* actual = Fs_compat_private_jsonl_write.read_private_jsonl_snapshot_locked ~io path ~after:None in
         let* () =
           if Private_jsonl_cursor.equal expected.cursor actual.cursor then Ok ()
@@ -36,7 +43,7 @@ let with_guard ~io requested_path ~expected ~f =
         let* () =
           if String.equal expected.bytes actual.bytes then Ok ()
           else Error (Transaction_content_changed { path }) in
-        Ok (f ~dir ~path)) in
+        Ok (f ~dir ~path ~lock_identity)) in
   match perform () with
   | Ok value ->
     Guard_executed { value; cleanup_failures = List.rev_map (fun failure ->
@@ -52,20 +59,39 @@ let with_guard ~io requested_path ~expected ~f =
 
 let with_private_jsonl_snapshot_guard_result path ~expected ~f =
   with_guard ~io:private_jsonl_transaction_unix_io path ~expected
-    ~f:(fun ~dir:_ ~path:_ -> f ())
+    ~f:(fun ~dir:_ ~path:_ ~lock_identity:_ -> f ())
 
 let with_private_jsonl_snapshot_guard_with_io_for_testing ~io path ~expected ~f =
-  with_guard ~io path ~expected ~f:(fun ~dir:_ ~path:_ -> f ())
+  with_guard ~io path ~expected ~f:(fun ~dir:_ ~path:_ ~lock_identity:_ -> f ())
 
 let append_with_dependency ~io ~dependency_io path ~expected
     ~dependency_path ~dependency suffix =
-  with_guard ~io path ~expected ~f:(fun ~dir ~path ->
-    with_guard ~io:dependency_io dependency_path ~expected:dependency
-      ~f:(fun ~dir:_ ~path:_ ->
-        (* Keep the target's original IO: guard_io only collects stable-lock
-           cleanup and must never swallow data-descriptor failures. *)
-        Fs_compat_private_jsonl_write.append_private_jsonl_snapshot_locked
-          ~io ~dir path ~expected suffix))
+  with_guard ~io path ~expected ~f:(fun ~dir ~path ~lock_identity ->
+    (* The dependency guard takes this process's path mutex and a second
+       descriptor on its stable lock. When both names reach the lock held
+       here, the mutex is re-locked by its owner, or closing the second
+       descriptor drops the POSIX lock of the first. Compare the held
+       descriptor with the entry the dependency would open, by [lstat]: opening
+       it to [fstat] would itself be that second descriptor. A missing entry
+       cannot be the held lock. *)
+    match private_jsonl_capture Inspect_stable_lock (fun () ->
+      match Unix.lstat (private_jsonl_requested_lock_path dependency_path) with
+      | stats -> Some stats
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None)
+    with
+    | Error failure ->
+      Dependency_guarded (Guard_refused { guard_path = dependency_path;
+        guard_error = Private_jsonl_operation_failed failure })
+    | Ok (Some stats) when private_jsonl_same_identity lock_identity stats ->
+      Dependency_is_target { target_path = path; dependency_path }
+    | Ok (Some _ | None) ->
+      Dependency_guarded (
+        with_guard ~io:dependency_io dependency_path ~expected:dependency
+          ~f:(fun ~dir:_ ~path:_ ~lock_identity:_ ->
+            (* Keep the target's original IO: guard_io only collects stable-lock
+               cleanup and must never swallow data-descriptor failures. *)
+            Fs_compat_private_jsonl_write.append_private_jsonl_snapshot_locked
+              ~io ~dir path ~expected suffix)))
 
 let append_private_jsonl_durable_locked_at_snapshot_with_dependency_result
     path ~expected ~dependency_path ~dependency suffix =

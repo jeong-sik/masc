@@ -1055,10 +1055,11 @@ let compact_connection_state (state : state) =
    the full badge beside it whatever the spelling. *)
 let compact_connection_wording ~ko compact =
   let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
+  let spelled whole state = [ whole ~ko, false; state ~ko, true ] in
   match compact with
-  | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
-  | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
-  | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
+  | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, spelled workspace_mismatch field_mismatch, true
+  | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, spelled workspace_identity_unconfirmed field_unconfirmed, true
+  | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, spelled workspace_identity_unread field_unread, true
   | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
   | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
   | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
@@ -2007,10 +2008,10 @@ let refresh_progress_pieces (state : state) =
     | Account_emails -> "계정" | Tool_series -> "도구 호출" in
   let source_name source = if not ko then Http_refresh_progress.source_name source else
     match source with
-    | Http_refresh_progress.Identity_before -> "작업 공간"
+    | Http_refresh_progress.Identity_before -> workspace_name ~ko
     | Approvals -> "승인" | Questions -> "질문" | Keepers -> "Keeper"
     | Surface_data source -> surface_name source
-    | Identity_after -> "작업 공간 확인" in
+    | Identity_after -> workspace_name ~ko ^ " 확인" in
   let component_name component = if not ko then Http_refresh_progress.component_name component else
     match component with
     | Http_refresh_progress.Runtime_catalogue -> "런타임 목록" | Provider_windows -> "제공자 한도"

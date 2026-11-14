@@ -116,14 +116,15 @@ let status_item_projection ~ko = function
   | Workspace_mismatch local ->
     Some
       { text =
-          (if ko then "공간 불일치 \xc2\xb7 로컬 " ^ local ^ " (r:다시 시도)"
-           else "MISMATCH local " ^ local ^ " (r:retry)")
+          String.capitalize_ascii (Masc_tui_words.workspace_mismatch ~ko)
+          ^ " \xc2\xb7 "
+          ^ (if ko then "로컬 " ^ local ^ " (r:다시 시도)" else "local " ^ local ^ " (r:retry)")
       ; retention = Workspace_conflict
       ; shorter = []
       }
   | Workspace_unconfirmed ->
     Some
-      { text = (if ko then "[공간 확인 대기]" else "[workspace unconfirmed]")
+      { text = "[" ^ Masc_tui_words.workspace_identity_unconfirmed ~ko ^ "]"
       ; retention = Workspace_conflict
       ; shorter = []
       }

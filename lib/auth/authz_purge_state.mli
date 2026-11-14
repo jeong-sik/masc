@@ -43,6 +43,10 @@ val empty : t
 (** The status of the target, or [None] when no purge of it has started. *)
 val find : t -> Authz_purge_event.target -> status option
 
+(** Each target a purge record names, with its status, in the order of the
+    targets. *)
+val to_list : t -> (Authz_purge_event.target * status) list
+
 type refusal =
   | Not_the_owner of
       { target : Authz_purge_event.target

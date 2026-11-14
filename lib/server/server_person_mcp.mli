@@ -46,7 +46,12 @@
       [GET /api/v1/auth/keepers/conversation], [Manage_own_keeper] and
       [Read_auth] ({!Auth_preview.keeper_conversation_reader}): a PAT needs
       [manage_own_keeper] and [read_state]. The arguments are the query of
-      that route. *)
+      that route.
+    - [masc_my_keeper_conversation_delete]:
+      [DELETE /api/v1/auth/keepers/conversation/<id>], [Manage_own_keeper]
+      with the namespace of the person ({!Auth_preview.keeper_turn_caller}).
+      It starts no turn, so the scope of a PAT needs no more than that
+      effect. [conversation_id] is the id the path ends in. *)
 
 (** [/mcp]. *)
 val path : string

@@ -72,14 +72,28 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
   (* Life state: the quota window says whether the
      provider side of this runtime is currently refusing work (2026-09-12
      operator ask: the runtime list shows what exists, not what is alive).
-     [Until] is a provider-stated reset deadline; [Observed] is a hard-quota
-     rejection that claimed no reset -- it rests the scope until the fallback
-     cap after it was noted, and the next success on the scope clears it
-     sooner. A numeric "remaining" is not honest: providers do not expose it,
-     and the window's own contract is these two facts. *)
+     The row carries the window's own entry: who set it (a 402, the
+     provider's hard quota, or a usage read) and when it ends. A stated reset
+     is the provider's deadline; without one the scope rests until the
+     fallback cap after it was noted, and the next success on the scope
+     clears it sooner. A numeric "remaining" is not honest: providers do not
+     expose it. *)
   let quota_scope = Runtime_instance.quota_scope_of_runtime rt in
-  let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
-  let quota_resets_at = Runtime_quota_window.active_until ~scope:quota_scope ~now in
+  let quota_rest =
+    match Runtime_quota_window.spent ~scope:quota_scope ~now with
+    | None -> `Null
+    | Some { Runtime_quota_window.cause; rest } ->
+      let reset_stated, until =
+        match rest with
+        | Runtime_quota_window.Reset_stated at -> true, at
+        | Runtime_quota_window.Observed_until at -> false, at
+      in
+      `Assoc
+        [ "cause", `String (Runtime_quota_window.cause_to_wire_name cause)
+        ; "reset_stated", `Bool reset_stated
+        ; "until", `Float until
+        ]
+  in
   let quota_scope_label = scope_label quota_scope in
   (* The provider refused this runtime's credential and no call on it has
      been answered since. It is not a rest: nothing waits on it. It stays
@@ -135,8 +149,7 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
         | None -> `Null )
     ; "is_local", `Bool (Runtime_instance.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
-    ; "quota_exhausted", `Bool quota_exhausted
-    ; "quota_resets_at", (match quota_resets_at with Some t -> `Float t | None -> `Null)
+    ; "quota_rest", quota_rest
     ; "quota_scope", `String quota_scope_label
     ; ( "credential_refused_at"
       , match credential_refused_at with Some t -> `Float t | None -> `Null )

@@ -453,8 +453,10 @@ type runtime_option = {
       (** The effort a request on this runtime carries; [None] is unset. *)
   ro_is_local : bool;
   ro_is_default : bool;
-  ro_quota_exhausted : bool;
-  ro_quota_resets_at : float option;
+  ro_quota_rest : Runtime_quota_window.spent option;
+      (** The quota window resting this runtime's credential scope: who set
+          it (a payment refusal, the provider's hard quota, or a usage read)
+          and when it ends. [None] when nothing rests the scope. *)
   ro_quota_scope : string option;
   ro_quota_scope_id : string option;
       (** Opaque credential/quota scope ID joined from Usage in this response.
@@ -469,7 +471,7 @@ type runtime_option = {
   ro_rate_limited : bool;
       (** This process observed a 429 that has neither reached its provider's
           Retry-After deadline nor been cleared by a successful answer.
-          Distinct from [ro_quota_exhausted], the provider's quota window. *)
+          Distinct from [ro_quota_rest], the provider's quota window. *)
   ro_rate_limit_resets_at : float option;
       (** The end of the provider's active wait; [None] when no limit remains
           or the active limit stated no wait. *)

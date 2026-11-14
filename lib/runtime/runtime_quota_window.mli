@@ -125,6 +125,12 @@ val spent : scope:scope -> now:float -> spent option
     rests. It reads the same entry, so [spent] is [Some] exactly when {!rest}
     is. Ordering does not read the cause. *)
 
+val cause_to_wire_name : cause -> string
+(** The word a cause is written as in a JSON projection. *)
+
+val cause_of_wire_name : string -> cause option
+(** Inverse of {!cause_to_wire_name}; [None] for any other word. *)
+
 type answered_rest =
   | Stated_reset_ahead  (** a stated window that has not passed at [now] *)
   | Read_found_no_reset  (** {!note_read_without_reset}, not yet cleared *)

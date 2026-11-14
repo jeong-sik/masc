@@ -7,6 +7,7 @@
   unix
   yojson
   masc
+  masc.runtime
   masc_tui_types
   masc_tui_ansi
   masc_tui_theme

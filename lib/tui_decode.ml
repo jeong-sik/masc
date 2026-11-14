@@ -1807,8 +1807,7 @@ type runtime_option = {
   ro_declared_reasoning_effort : Llm_provider.Reasoning_effort.t option;
   ro_is_local : bool;
   ro_is_default : bool;
-  ro_quota_exhausted : bool;
-  ro_quota_resets_at : float option;
+  ro_quota_rest : Runtime_quota_window.spent option;
   ro_quota_scope : string option;
   ro_quota_scope_id : string option;
   ro_credential_refused_at : float option;
@@ -2058,18 +2057,30 @@ let decode_runtime_option ~usage ~default_id json =
     else Ok ()
   in
   let* _binding_is_default = required_bool_field json "is_default" in
-  (* Quota life state (2026-09-12): optional because the document grew these
-     fields -- an older server's rows simply lack them, and absence reads as
-     unknown, not healthy. *)
-  let* ro_quota_exhausted =
-    match optional_bool_field json "quota_exhausted" with
-    | Ok (Some value) -> Ok value
-    (* Absent on an older server's document: the badge then answers ready,
-       which is the reading every pre-quota surface already gave. *)
-    | Ok None -> Ok false
-    | Error detail -> Error detail
+  (* Quota life state: the window's own entry, or null when nothing rests
+     the scope. A cause this build does not name is a decode error, not a
+     quiet "ready". *)
+  let* ro_quota_rest =
+    match Json_util.assoc_member_opt "quota_rest" json with
+    | None -> missing_field "quota_rest"
+    | Some `Null -> Ok None
+    | Some (`Assoc _ as rest) ->
+        let* cause_name = required_string_field rest "cause" in
+        let* reset_stated = required_bool_field rest "reset_stated" in
+        let* until = Json_util.require_float rest "until" in
+        (match Runtime_quota_window.cause_of_wire_name cause_name with
+         | None -> Error (Printf.sprintf "runtime quota_rest cause %S is not known" cause_name)
+         | Some cause ->
+             Ok
+               (Some
+                  { Runtime_quota_window.cause
+                  ; rest =
+                      (if reset_stated
+                       then Runtime_quota_window.Reset_stated until
+                       else Runtime_quota_window.Observed_until until)
+                  }))
+    | Some _ -> Error "runtime quota_rest must be an object or null"
   in
-  let* ro_quota_resets_at = optional_float_field json "quota_resets_at" in
   let* ro_quota_scope = optional_string_field json "quota_scope" in
   let ro_quota_scope_id =
     match usage, ro_quota_scope with
@@ -2115,8 +2126,7 @@ let decode_runtime_option ~usage ~default_id json =
     ; ro_declared_reasoning_effort
     ; ro_is_local
     ; ro_is_default
-    ; ro_quota_exhausted
-    ; ro_quota_resets_at
+    ; ro_quota_rest
     ; ro_quota_scope
     ; ro_quota_scope_id
     ; ro_credential_refused_at

@@ -171,6 +171,16 @@ let spent ~scope ~now =
 let is_exhausted ~scope ~now =
   Stdlib.Mutex.protect mu (fun () -> Option.is_some (live_entry ~scope ~now))
 
+let cause_to_wire_name = function
+  | Refused Payment_refused -> "payment_refused"
+  | Refused Provider_quota_refused -> "provider_quota_refused"
+  | Usage_read -> "usage_read"
+
+let cause_of_wire_name name =
+  List.find_map
+    (fun cause -> if String.equal (cause_to_wire_name cause) name then Some cause else None)
+    [ Refused Payment_refused; Refused Provider_quota_refused; Usage_read ]
+
 type answered_rest =
   | Stated_reset_ahead
   | Read_found_no_reset

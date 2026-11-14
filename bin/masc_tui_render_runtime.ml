@@ -393,16 +393,13 @@ let runtime_detail_lines state target ~width =
             (runtime_bool runtime.ro_is_default)
       in
       let quota =
-        match runtime_quota_badge ~ko:(state.ui_language = Lang_ko) runtime with
+        match runtime.ro_quota_rest with
         | None -> []
-        | Some _ ->
+        | Some spent ->
             fact ~tone:Page_line.Attention "Quota"
-              (match runtime.ro_quota_resets_at with
-               | Some resets_at ->
-                 let tm = Unix.localtime resets_at in
-                 Printf.sprintf "exhausted, resets %02d:%02d"
-                   tm.Unix.tm_hour tm.Unix.tm_min
-               | None -> "exhausted, no reset stated")
+              (Printf.sprintf "%s, %s"
+                 (runtime_quota_cause_label spent.Runtime_quota_window.cause)
+                 (runtime_quota_end_label spent.Runtime_quota_window.rest))
       in
       let rate_limit =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with

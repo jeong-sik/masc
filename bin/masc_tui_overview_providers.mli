@@ -19,7 +19,7 @@
     such a window is marked as other use whatever its value. A window that sits under
     [At_limit_or_exhausted] only because the catalogue observed the account exhausted
     keeps the tone its own report earns. The one other fact
-    drawn is the runtime catalogue's [quota_exhausted], as an
+    drawn is the runtime catalogue's [quota_rest], as an
     [exhausted (observed)] tag on the account whose quota scope it names.
 
     The containing Usage view owns the title.
@@ -39,12 +39,12 @@ val text_for_viewport : columns:int -> rows:int -> string -> string
 type observed =
   | Not_observed_exhausted
   | Observed_exhausted of float option
-      (** The latest [quota_resets_at] among the scope's exhausted runtimes;
+      (** The latest stated reset among the scope's resting runtimes;
           [None] when none of them states one. *)
 
 val observed_exhaustion :
   runtimes:Masc_tui_types.overview_quota_reading -> string -> observed
-(** The catalogue's [quota_exhausted] joined by quota scope. A catalogue that
+(** The catalogue's [quota_rest] joined by quota scope. A catalogue that
     was not read or failed observes nothing. *)
 
 val window_at_limit : Masc.Tui_decode_usage.provider_usage_window -> bool

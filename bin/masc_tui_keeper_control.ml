@@ -428,7 +428,6 @@ let classify_purge_response ~keeper_name ~status ~body =
     | exception Yojson.Json_error _ -> invalid ()
 
 type failure =
-  | Workspace_unbound
   | Empty_plan
   | Followup_failed of string
   | Refused of { status : int; detail : string }
@@ -436,9 +435,6 @@ type failure =
   | No_answer of string
 
 let failure_text ~ko = function
-  | Workspace_unbound ->
-      if ko then "공간 정보 없음 · 보내지 않음"
-      else "workspace identity is unavailable; nothing was sent"
   | Empty_plan -> if ko then "보낼 요청 없음" else "no request to send"
   | Followup_failed detail ->
       (if ko then "저장된 일시정지 해제됨 · 실행 재개 실패: "

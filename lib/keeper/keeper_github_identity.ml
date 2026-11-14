@@ -1254,6 +1254,22 @@ let local_lane ~config ~keeper_name ~hostname =
     Ok lane
 ;;
 
+(* How often a watched stage looks at whether its response is still open. *)
+let response_close_poll_sec = 0.1
+
+(* What a stage run under the response's watch came back with: its own
+   result, or the response closing before the stage finished. *)
+type 'a watched =
+  | Stage_finished of 'a
+  | Response_closed
+
+(* How a login stage that got as far as [gh] exiting ends. A login that exited
+   0 carries the result of securing the credential it wrote; one that exited
+   otherwise carries its stderr. *)
+type login_exit =
+  | Exited_zero of login_lane * (unit, string) result
+  | Exited_failed of Unix.process_status * string
+
 let stream_login ~config ~keeper_name ~scopes ~make_lane ~is_closed ~send_event =
   let base_path = config.Workspace.base_path in
   let send event json =
@@ -1270,9 +1286,14 @@ let stream_login ~config ~keeper_name ~scopes ~make_lane ~is_closed ~send_event 
     let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
     let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
     let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
+    (* gh's output reaches the operator only while the response is open. A
+       chunk that comes after it closed is dropped rather than raised: the
+       raise would end [run_login] without its exit status, so a login that
+       exited 0 in that moment would skip securing. The watch below still
+       stops a login whose response closed. *)
     let send_redacted_output stream state chunk =
       let text = Keeper_secret_redaction.redact_stream_chunk state chunk in
-      if not (String.equal text "")
+      if not (String.equal text "" || is_closed ())
       then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
     in
     let finish_redacted_output stream state =
@@ -1280,70 +1301,101 @@ let stream_login ~config ~keeper_name ~scopes ~make_lane ~is_closed ~send_event 
       if not (String.equal text "")
       then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
     in
-    let run_process (lane : login_lane) =
-      let finished = Atomic.make false in
-      let process_result = ref None in
-      Eio.Cancel.sub (fun cancellation ->
-        Eio.Fiber.both
+    (* HIGH-RISK-UNREVIEWED: decides which login stages an operator's closed
+       response stops, on a path that writes and secures a GitHub credential.
+
+       Every stage that reaches the lane's machine only for the operator
+       watching this response runs under this watch: closing the response
+       cancels whichever of them is running and reaps what it started. On a
+       Remote_ssh lane each such stage holds one of the endpoint's sessions,
+       and an unwatched one kept that session (and, for the login, a live
+       [gh] on the endpoint) until its own timeout after the operator had
+       gone (#32910). Securing a login that exited 0 is the one step no
+       close may stop, and it runs inside the login stage itself: a close
+       that cancels the whole response, as an HTTP/2 stream reset does,
+       makes [Eio.Fiber.first] drop the result of a stage that had already
+       finished, so securing cannot wait for that result. *)
+    let while_response_open stage =
+      if is_closed ()
+      then Response_closed
+      else
+        Eio.Fiber.first
+          ~combine:(fun first second ->
+            match first, second with
+            | Stage_finished _, _ -> first
+            | Response_closed, second -> second)
+          (fun () -> Stage_finished (stage ()))
           (fun () ->
-             Fun.protect
-               ~finally:(fun () -> Atomic.set finished true)
-               (fun () ->
-                  process_result :=
-                    Some
-                      (lane.run_login
-                         ~scopes
-                         ~on_stdout_chunk:
-                           (send_redacted_output "stdout" stdout_redaction)
-                         ~on_stderr_chunk:
-                           (send_redacted_output "stderr" stderr_redaction))))
-          (fun () ->
-             while (not (Atomic.get finished)) && not (is_closed ()) do
-               Eio.Time.sleep clock 0.1
+             while not (is_closed ()) do
+               Eio.Time.sleep clock response_close_poll_sec
              done;
-             if is_closed ()
-             then
-               Eio.Cancel.cancel
-                 cancellation
-                 (Failure "GitHub login response closed")));
-      match !process_result with
-      | Some result -> result
-      | None -> failwith "GitHub login process completed without a result"
+             Response_closed)
     in
+    (* The lane is shaped here rather than by the caller so that a lane which
+       has to reach another machine does it after the response headers are
+       out. Built before them, a slow or unreachable endpoint left the
+       operator's browser with no reply at all for as long as the shaping
+       steps took, and a failure to shape one is reported as the same [error]
+       event every other failure uses. Shaping, the login and the securing
+       after an exit 0 are one watched stage: a response closed while the
+       endpoint is still being prepared stops the preparation, and the login
+       never starts. *)
+    let shape_and_log_in () =
+      match make_lane () with
+      | Error message -> Error message
+      | Ok (lane : login_lane) ->
+        let status, _, stderr =
+          lane.run_login
+            ~scopes
+            ~on_stdout_chunk:(send_redacted_output "stdout" stdout_redaction)
+            ~on_stderr_chunk:(send_redacted_output "stderr" stderr_redaction)
+        in
+        (match status with
+         | Unix.WEXITED 0 ->
+           (* HIGH-RISK-UNREVIEWED: a login that exited 0 has written its
+              credential, so securing it is not the operator's to cancel,
+              whether by closing the window or by a stream reset that cancels
+              the whole response. [Eio.Cancel.protect] keeps every cancel out
+              of it, and nothing between [run_login] returning and the
+              protection taking hold can suspend, so no cancel lands in
+              between. A cancel that lands before [run_login] returns leaves an
+              exit status masc never saw, and nothing is secured; both lanes
+              made the credential directory 0700 before the login started. *)
+           Ok (Exited_zero (lane, Eio.Cancel.protect lane.secure_after_login))
+         | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failed ->
+           Ok (Exited_failed (failed, stderr)))
+    in
+    let report_failure message = send "error" (`Assoc [ "message", `String message ]) in
     (try
-       (* The lane is shaped here rather than by the caller so that a lane which
-          has to reach another machine does it after the response headers are
-          out. Built before them, a slow or unreachable endpoint left the
-          operator's browser with no reply at all for as long as the shaping
-          steps took, and a failure to shape one is reported as the same [error]
-          event every other failure uses. *)
-       match make_lane () with
-       | Error message ->
-         send "error" (`Assoc [ "message", `String message ]);
+       match while_response_open shape_and_log_in with
+       | Response_closed -> Ok ()
+       | Stage_finished (Error message) ->
+         report_failure message;
          Ok ()
-       | Ok (lane : login_lane) ->
-         let status, _, stderr = run_process lane in
+       | Stage_finished (Ok (Exited_zero ((lane : login_lane), secured))) ->
          finish_redacted_output "stdout" stdout_redaction;
          finish_redacted_output "stderr" stderr_redaction;
-         let stderr = Keeper_secret_redaction.redact_text redaction stderr in
-         (match status with
-          | Unix.WEXITED 0 ->
-            (match lane.secure_after_login () with
-             | Error message -> send "error" (`Assoc [ "message", `String message ])
-             | Ok () ->
-               (match lane.observe_after_login () with
-                | Ok observation ->
-                  send
-                    "complete"
-                    (`Assoc [ "observation", observation_to_yojson observation ])
-                | Error message ->
-                  send "error" (`Assoc [ "message", `String message ])))
-          | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failed ->
-            let detail = String.trim stderr in
-            let detail =
-              if String.equal detail "" then process_exit_text failed else detail
-            in
-            send "error" (`Assoc [ "message", `String detail ]));
+         (match secured with
+          | Error message -> report_failure message
+          | Ok () ->
+            (match while_response_open lane.observe_after_login with
+             | Response_closed -> ()
+             | Stage_finished (Ok observation) ->
+               send
+                 "complete"
+                 (`Assoc [ "observation", observation_to_yojson observation ])
+             | Stage_finished (Error message) -> report_failure message));
+         Ok ()
+       | Stage_finished (Ok (Exited_failed (failed, stderr))) ->
+         finish_redacted_output "stdout" stdout_redaction;
+         finish_redacted_output "stderr" stderr_redaction;
+         let detail =
+           String.trim (Keeper_secret_redaction.redact_text redaction stderr)
+         in
+         let detail =
+           if String.equal detail "" then process_exit_text failed else detail
+         in
+         report_failure detail;
          Ok ()
      with
      | Eio.Cancel.Cancelled _ when is_closed () -> Ok ()

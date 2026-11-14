@@ -6047,6 +6047,7 @@
 (include stanzas/test_h2_response_resources.inc)
 (include stanzas/test_h2_listener_response_resources.inc)
 (include stanzas/test_h2_github_response_resources.inc)
+(include stanzas/test_keeper_github_login_h1_close.inc)
 
 ; Log.Kv: a key=value line leaves out the fields whose value is None.
 (test

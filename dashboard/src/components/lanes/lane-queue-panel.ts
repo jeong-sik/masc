@@ -18,7 +18,7 @@ import { setupObservationRefresh } from '../../lib/observation-refresh'
 // next_action / evidence statuses) only appear behind it.
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, signal } from '@preact/signals'
 import type { VNode } from 'preact'
 
@@ -53,6 +53,13 @@ import { countQueueDrainMisses } from '../schedule/queue-drain-status'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { formatTimeHmMs } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
+import { VirtualList } from '../common/virtual-list'
+import {
+  WindowedWaitingRow,
+  keyedWaitingRows,
+  waitingRowsOldestFirst,
+  type KeyedWaitingRow,
+} from '../common/waiting-row-window'
 
 import {
   DRAIN_LEGEND_STATES,
@@ -81,7 +88,6 @@ import {
   waitAxisPosition,
   waitingAgeMinutes,
   waitingDueMinutes,
-  waitingRowsOldestFirst,
   type DrainEvidenceRow,
   type LaneQueueSegment,
 } from './lane-queue-model'
@@ -300,6 +306,18 @@ function LanePipeline({ entry, dev }: { entry: DashboardKeeperWaitingKeeper; dev
 
 /* ── 대기 나이 축 (wa-*) ──────────────────────────────────────────────── */
 
+const WAIT_LIST_LABEL = '오래 기다린 순서'
+/** Height the list assumes for a row it has not measured yet: the 4px gap
+ *  above the row, the bar's 1px borders and 5px paddings, and one line of its
+ *  10.5px source label at the app's 1.55 line height, 32.3px together. The
+ *  list replaces it once the row mounts. */
+const WAIT_ROW_PITCH_PX = 32
+
+/** The server does not cap a Keeper's waiting rows, so only the rows near the
+ *  scroll position are mounted (#51359). A row unmounts when it scrolls away,
+ *  so the open row is kept here by its row key, not in the row's DOM.
+ *  Scroll position and the open row belong to one mounted instance; callers
+ *  key this component by Keeper so both start fresh on a Keeper switch. */
 function WaitAges({
   entry,
   dev,
@@ -309,55 +327,74 @@ function WaitAges({
   dev: boolean
   nowSec: number
 }): VNode {
-  const [open, setOpen] = useState<number | null>(null)
-  const rows = waitingRowsOldestFirst(entry.waiting_on ?? [])
-  if (rows.length === 0) {
+  const host = useRef<HTMLDivElement>(null)
+  const { items, keys } = useMemo(
+    () => keyedWaitingRows(waitingRowsOldestFirst(entry.waiting_on ?? [])),
+    [entry.waiting_on],
+  )
+  const [open, setOpen] = useState<string | null>(null)
+  // A row that left the list is forgotten in the render that sees it gone, as
+  // in KeeperLaneInventoryWindow: the next row to take that place starts closed.
+  const openKey = open !== null && keys.has(open) ? open : null
+  if (openKey !== open) setOpen(openKey)
+  if (items.length === 0) {
     return html`<div class="lq-gap"><b>기다리는 작업 없음</b></div>`
   }
-  const ages = rows.map(row => waitingAgeMinutes(row, nowSec))
-  const axisMax = waitAxisMaxMinutes(ages)
-  return html`
-    <div class="wa">
-      <div class="wa-scale"><span>지금</span><span>1시간</span><span>1일+</span></div>
-      ${rows.map((row, index) => {
-        const age = ages[index] ?? null
-        const dueMinutes = waitingDueMinutes(row, nowSec)
-        const on = open === index
-        const width = age == null ? MIN_BAR_PERCENT : Math.max(MIN_BAR_PERCENT, waitAxisPosition(age, axisMax))
-        const reading = dev ? row.waiting_on : row.what
-        return html`
-          <div key=${`${row.source}:${row.waiting_on}:${index}`} class="wa-row" data-tone=${laneSourceTone(row.source)} data-testid="lane-wait-row">
-            <button
-              type="button"
-              class="wa-bar"
-              aria-expanded=${on}
-              onClick=${() => setOpen(on ? null : index)}
-              style=${{ width: `${width}%` }}
-            >
-              <span class="wa-src">${row.source}</span>
-              <span class="wa-on ${dev ? 'mono' : ''}" title=${row.waiting_on}>${reading}</span>
-              <span class="wa-age mono">${laneAgoText(age)}</span>
-            </button>
-            ${on
-              ? html`
-                  <div class="wa-detail">
-                    <div class="wa-meta">
-                      <span>${reading}</span>
-                      ${dueMinutes != null
-                        ? html`<span class="warn">실행 예정 · ${laneUntilText(dueMinutes)}</span>`
-                        : null}
-                      ${dev ? html`<span>wake · <b class="mono">${row.wake_producer ?? '미기록'}</b></span>` : null}
-                      ${dev ? html`<span>다음 동작 · <b class="mono">${row.next_action}</b></span>` : null}
-                    </div>
-                    ${dev
-                      ? html`<pre class="mono">${JSON.stringify({ source: row.source, wake_producer: row.wake_producer ?? null, detail: row.detail ?? null }, null, 2)}</pre>`
+  const axisMax = waitAxisMaxMinutes(items.map(item => waitingAgeMinutes(item.row, nowSec)))
+  const renderItem = ({ key, row }: KeyedWaitingRow) => {
+    const age = waitingAgeMinutes(row, nowSec)
+    const dueMinutes = waitingDueMinutes(row, nowSec)
+    const on = openKey === key
+    const width = age == null ? MIN_BAR_PERCENT : Math.max(MIN_BAR_PERCENT, waitAxisPosition(age, axisMax))
+    const reading = dev ? row.waiting_on : row.what
+    return html`
+      <${WindowedWaitingRow} host=${host} listLabel=${WAIT_LIST_LABEL} className="wa-slot">
+        <div class="wa-row" data-tone=${laneSourceTone(row.source)} data-testid="lane-wait-row">
+          <button
+            type="button"
+            class="wa-bar"
+            aria-expanded=${on}
+            onClick=${() => setOpen(on ? null : key)}
+            style=${{ width: `${width}%` }}
+          >
+            <span class="wa-src">${row.source}</span>
+            <span class="wa-on ${dev ? 'mono' : ''}" title=${row.waiting_on}>${reading}</span>
+            <span class="wa-age mono">${laneAgoText(age)}</span>
+          </button>
+          ${on
+            ? html`
+                <div class="wa-detail">
+                  <div class="wa-meta">
+                    <span>${reading}</span>
+                    ${dueMinutes != null
+                      ? html`<span class="warn">실행 예정 · ${laneUntilText(dueMinutes)}</span>`
                       : null}
+                    ${dev ? html`<span>wake · <b class="mono">${row.wake_producer ?? '미기록'}</b></span>` : null}
+                    ${dev ? html`<span>다음 동작 · <b class="mono">${row.next_action}</b></span>` : null}
                   </div>
-                `
-              : null}
-          </div>
-        `
-      })}
+                  ${dev
+                    ? html`<pre class="mono">${JSON.stringify({ source: row.source, wake_producer: row.wake_producer ?? null, detail: row.detail ?? null }, null, 2)}</pre>`
+                    : null}
+                </div>
+              `
+            : null}
+        </div>
+      <//>
+    `
+  }
+  return html`
+    <div ref=${host} class="wa">
+      <div class="wa-scale"><span>지금</span><span>1시간</span><span>1일+</span></div>
+      <${VirtualList}
+        items=${items}
+        getKey=${(item: KeyedWaitingRow) => item.key}
+        renderItem=${renderItem}
+        estimatedItemHeight=${WAIT_ROW_PITCH_PX}
+        className="wa-list"
+        scrollBox="self"
+        tabIndex=${-1}
+        ariaLabel=${WAIT_LIST_LABEL}
+      />
     </div>
   `
 }
@@ -538,6 +575,7 @@ export function KeeperWaitQueueRail({ keeperName, dev = false }: { keeperName: s
             <div class="lq-rail-body">
               <div class="lq-state-row"><span class="lq-chip" data-tone=${present.tone}>${present.label}</span></div>
               <${WaitAges}
+                key=${keeperName}
                 entry=${entry}
                 dev=${dev}
                 nowSec=${nowSec}
@@ -739,6 +777,7 @@ export function LaneQueuePanel(props: LaneQueuePanelProps = {}): VNode {
                 <div class="lq-batch">한 턴이 밀린 자극을 묶어서 처리합니다.</div>
                 <div class="lq-sec-sub">오래 기다린 순서</div>
                 <${WaitAges}
+                  key=${selEntry.keeper_name}
                   entry=${selEntry}
                   dev=${dev}
                   nowSec=${nowSec}

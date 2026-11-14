@@ -1,10 +1,10 @@
 import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
 import { captureDashboardObservationOwner } from '../../lib/observation-read-owner'
 import { html } from 'htm/preact'
-import { cleanup, render, waitFor, fireEvent } from '@testing-library/preact'
+import { act, cleanup, render, waitFor, fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { DashboardKeeperWaitingInventory } from '../../api'
+import type { DashboardKeeperWaitingInventory, DashboardKeeperWaitingRow } from '../../api'
 import type { FleetCompositeSnapshot, KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 import type { KeeperLifecycleTimelineResponse } from '../../api/keeper'
 
@@ -49,7 +49,11 @@ import {
   resetLaneQueueObservations,
 } from './lane-queue-panel'
 import { keepers } from '../../store'
-import { keeperWaitingInventoryStates } from '../../keeper-waiting-inventory-store'
+import {
+  keeperWaitingInventoryStates,
+  refreshKeeperWaitingInventory,
+  subscribeKeeperWaitingInventory,
+} from '../../keeper-waiting-inventory-store'
 import { nowSecondsSignal } from '../../lib/now-signal'
 import type { Keeper } from '../../types'
 
@@ -348,6 +352,170 @@ describe('KeeperWaitQueueRail', () => {
     const { container } = render(html`<${KeeperWaitQueueRail} keeperName="ghost" />`)
     await waitFor(() => expect(container.querySelector('.lq-gap')).not.toBeNull())
     expect(container.querySelector('.lq-gap b')?.textContent).toBe('상태 알 수 없음')
+  })
+})
+
+describe('Wait age list over a large inventory', () => {
+  /** The row count of the keeper-lane-window fixture (#26606). */
+  const ROW_COUNT = 5000
+  const LAST = ROW_COUNT - 1
+  /** Few enough rows that the list keeps every one of them mounted. */
+  const SHORT_ROW_COUNT = 3
+  const VIEWPORT_HEIGHT_PX = 240
+  /** Past any content height the list can have, so the window lands on its end. */
+  const BELOW_EVERY_ROW_PX = 10_000_000
+  const LIST = '[aria-label="오래 기다린 순서"]'
+
+  /** Every Keeper's server rows; a test replaces an entry to change what the next read returns. */
+  let serverRows: Record<string, DashboardKeeperWaitingRow[]> = {}
+
+  /** `count` pending events, one per minute, oldest first. */
+  function eventRows(name: string, count = ROW_COUNT): DashboardKeeperWaitingRow[] {
+    return Array.from({ length: count }, (_, index) => ({
+      keeper_name: name,
+      source: 'event_queue_pending',
+      waiting_on: 'workspace_message',
+      what: `${name}-wait-${index}`,
+      since: NOW - (count - index) * 60,
+      next_action: 'keeper_drain_event_queue',
+    }))
+  }
+
+  function inventoryOf(name: string): DashboardKeeperWaitingInventory {
+    const rows = serverRows[name] ?? []
+    return {
+      keeper_count: 1,
+      waiting_keeper_count: 1,
+      row_count: rows.length,
+      keepers: [{
+        keeper_name: name,
+        state: 'waiting',
+        state_sources: ['event_queue_pending'],
+        waiting_count: rows.length,
+        waiting_on: rows,
+      }],
+    }
+  }
+
+  beforeEach(() => {
+    nowSecondsSignal.value = NOW
+    serverRows = {}
+    mocks.fetchKeeperWaitingInventory.mockImplementation((name: string) => Promise.resolve(inventoryOf(name)))
+  })
+
+  function rail(name: string) {
+    return html`<${KeeperWaitQueueRail} keeperName=${name} />`
+  }
+
+  /** The scroll list, given a height: happy-dom lays nothing out. */
+  function listOf(container: Element): HTMLElement {
+    const list = container.querySelector<HTMLElement>(LIST)!
+    Object.defineProperty(list, 'clientHeight', { configurable: true, value: VIEWPORT_HEIGHT_PX })
+    return list
+  }
+
+  async function scrollTo(list: HTMLElement, scrollTop: number) {
+    await act(async () => {
+      list.scrollTop = scrollTop
+      fireEvent.scroll(list)
+    })
+  }
+
+  function rowOf(container: Element, what: string): HTMLElement | null {
+    const reading = [...container.querySelectorAll('.wa-on')].find(node => node.textContent === what)
+    return reading?.closest<HTMLElement>('.wa-row') ?? null
+  }
+
+  function isOpen(container: Element, what: string): boolean {
+    return rowOf(container, what)?.querySelector('.wa-detail') != null
+  }
+
+  async function shown(container: Element, what: string) {
+    await waitFor(() => expect(rowOf(container, what)).not.toBeNull())
+  }
+
+  it('mounts a window of the rows and still reaches the last one', async () => {
+    serverRows.alpha = eventRows('alpha')
+    const { container } = render(rail('alpha'))
+    await shown(container, 'alpha-wait-0')
+    expect(container.querySelectorAll('.wa-row').length).toBeLessThan(ROW_COUNT)
+
+    await scrollTo(listOf(container), BELOW_EVERY_ROW_PX)
+    await shown(container, `alpha-wait-${LAST}`)
+    expect(rowOf(container, 'alpha-wait-0')).toBeNull()
+    expect(container.querySelectorAll('.wa-row').length).toBeLessThan(ROW_COUNT)
+  })
+
+  it('keeps the open row open after it leaves the window and returns', async () => {
+    serverRows.alpha = eventRows('alpha')
+    const { container } = render(rail('alpha'))
+    await shown(container, 'alpha-wait-0')
+    fireEvent.click(rowOf(container, 'alpha-wait-0')!.querySelector('.wa-bar')!)
+    expect(isOpen(container, 'alpha-wait-0')).toBe(true)
+
+    const list = listOf(container)
+    await scrollTo(list, BELOW_EVERY_ROW_PX)
+    await shown(container, `alpha-wait-${LAST}`)
+    expect(rowOf(container, 'alpha-wait-0')).toBeNull()
+    await scrollTo(list, 0)
+    await shown(container, 'alpha-wait-0')
+    expect(isOpen(container, 'alpha-wait-0')).toBe(true)
+  })
+
+  it('forgets the open row once the list no longer has its place', async () => {
+    const all = eventRows('alpha', SHORT_ROW_COUNT)
+    serverRows.alpha = all
+    const { container } = render(rail('alpha'))
+    const lastWhat = `alpha-wait-${SHORT_ROW_COUNT - 1}`
+    await shown(container, lastWhat)
+    fireEvent.click(rowOf(container, lastWhat)!.querySelector('.wa-bar')!)
+    expect(isOpen(container, lastWhat)).toBe(true)
+
+    serverRows.alpha = all.slice(0, 1)
+    await act(() => refreshKeeperWaitingInventory('alpha'))
+    await waitFor(() => expect(rowOf(container, lastWhat)).toBeNull())
+    serverRows.alpha = all
+    await act(() => refreshKeeperWaitingInventory('alpha'))
+    await shown(container, lastWhat)
+    expect(isOpen(container, lastWhat)).toBe(false)
+  })
+
+  it('starts another Keeper at its first row with nothing open', async () => {
+    serverRows.alpha = eventRows('alpha')
+    serverRows.beta = eventRows('beta')
+    const view = render(rail('alpha'))
+    await shown(view.container, 'alpha-wait-0')
+    fireEvent.click(rowOf(view.container, 'alpha-wait-0')!.querySelector('.wa-bar')!)
+    const alphaList = listOf(view.container)
+    await scrollTo(alphaList, BELOW_EVERY_ROW_PX)
+    await shown(view.container, `alpha-wait-${LAST}`)
+
+    // The Monitor panel subscribes every tab's Keeper, so beta's rows are
+    // already read when the operator switches: no loading gap in between.
+    const releaseBeta = subscribeKeeperWaitingInventory('beta')
+    try {
+      await waitFor(() => expect(keeperWaitingInventoryStates.value.beta?.ready).toBe(true))
+      view.rerender(rail('beta'))
+      await shown(view.container, 'beta-wait-0')
+      expect(listOf(view.container)).not.toBe(alphaList)
+      expect(isOpen(view.container, 'beta-wait-0')).toBe(false)
+    } finally {
+      releaseBeta()
+    }
+  })
+
+  it('hands keyboard focus to the list when the focused row leaves the window', async () => {
+    serverRows.alpha = eventRows('alpha')
+    const { container } = render(rail('alpha'))
+    await shown(container, 'alpha-wait-0')
+    const bar = rowOf(container, 'alpha-wait-0')!.querySelector<HTMLButtonElement>('.wa-bar')!
+    bar.focus()
+    expect(document.activeElement).toBe(bar)
+
+    const list = listOf(container)
+    await scrollTo(list, BELOW_EVERY_ROW_PX)
+    await shown(container, `alpha-wait-${LAST}`)
+    await waitFor(() => expect(document.activeElement).toBe(list))
   })
 })
 

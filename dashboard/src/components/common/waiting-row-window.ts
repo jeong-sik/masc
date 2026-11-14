@@ -1,12 +1,39 @@
-// What a windowed list of Keeper waiting rows needs besides VirtualList: a
-// key per row and a row wrapper that keeps keyboard focus in the list. The
-// lane strip's KeeperLaneInventoryWindow (#26606) and the age axis WaitAges
-// (#51359) both draw a waiting inventory through it.
+// What a windowed list of Keeper waiting rows needs besides VirtualList: the
+// order it draws the rows in, a key per row and a row wrapper that keeps
+// keyboard focus in the list. The lane strip's KeeperLaneInventoryWindow
+// (#26606) and the age axis WaitAges (#51359) both draw a waiting inventory
+// through it. A row's key holds its drawn place, so both lists sort with the
+// same function.
 
 import { html } from 'htm/preact'
 import { useLayoutEffect, useRef } from 'preact/hooks'
 import type { RefObject, VNode } from 'preact'
 import type { DashboardKeeperWaitingRow } from '../../api'
+
+/** Epoch seconds the row has been waiting since, or null when the server
+ *  recorded no timestamp (row renders with the design's 시각 미기록 arm). */
+export function waitingRowSinceSec(row: DashboardKeeperWaitingRow): number | null {
+  if (row.since != null && Number.isFinite(row.since)) return row.since
+  if (row.since_iso == null) return null
+  const parsed = Date.parse(row.since_iso)
+  return Number.isFinite(parsed) ? parsed / 1000 : null
+}
+
+/** Oldest observation first (오래 기다린 순서). Equal/missing timestamps keep
+ *  their server order, and missing timestamps stay visible at the end. */
+export function waitingRowsOldestFirst(
+  rows: readonly DashboardKeeperWaitingRow[],
+): DashboardKeeperWaitingRow[] {
+  return rows
+    .map((row, serverIndex) => ({ row, serverIndex, since: waitingRowSinceSec(row) }))
+    .sort((left, right) => {
+      if (left.since == null && right.since == null) return left.serverIndex - right.serverIndex
+      if (left.since == null) return 1
+      if (right.since == null) return -1
+      return left.since - right.since || left.serverIndex - right.serverIndex
+    })
+    .map(({ row }) => row)
+}
 
 export interface KeyedWaitingRow {
   key: string

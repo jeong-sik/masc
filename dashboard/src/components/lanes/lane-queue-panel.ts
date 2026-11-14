@@ -54,7 +54,12 @@ import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { formatTimeHmMs } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 import { VirtualList } from '../common/virtual-list'
-import { WindowedWaitingRow, keyedWaitingRows, type KeyedWaitingRow } from '../common/waiting-row-window'
+import {
+  WindowedWaitingRow,
+  keyedWaitingRows,
+  waitingRowsOldestFirst,
+  type KeyedWaitingRow,
+} from '../common/waiting-row-window'
 
 import {
   DRAIN_LEGEND_STATES,
@@ -83,7 +88,6 @@ import {
   waitAxisPosition,
   waitingAgeMinutes,
   waitingDueMinutes,
-  waitingRowsOldestFirst,
   type DrainEvidenceRow,
   type LaneQueueSegment,
 } from './lane-queue-model'

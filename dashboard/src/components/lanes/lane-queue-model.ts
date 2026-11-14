@@ -29,6 +29,7 @@ import { isObservedStall } from '../fsm-hub-lane-analysis'
 import { laneChangedAt, laneTransitionCount } from '../fsm-hub-derivations'
 import { waitingStateWithSources } from '../tools/keeper-waiting-inventory-panel'
 import { queueDrainStateOfEvidence as drainStateOfEvidence, type QueueDrainState } from '../schedule/queue-drain-status'
+import { waitingRowSinceSec } from '../common/waiting-row-window'
 export { drainStateOfEvidence }
 
 /** Observation window of the swimlane, seconds (design WINDOW_S = 20분). */
@@ -327,31 +328,6 @@ export function laneStageBreakdown(entry: DashboardKeeperWaitingKeeper): {
       else unknown.push(item)
     })
   return { byStage, unknown }
-}
-
-/** Epoch seconds the row has been waiting since, or null when the server
- *  recorded no timestamp (row renders with the design's 시각 미기록 arm). */
-export function waitingRowSinceSec(row: DashboardKeeperWaitingRow): number | null {
-  if (row.since != null && Number.isFinite(row.since)) return row.since
-  if (row.since_iso == null) return null
-  const parsed = Date.parse(row.since_iso)
-  return Number.isFinite(parsed) ? parsed / 1000 : null
-}
-
-/** Oldest observation first (오래 기다린 순서). Equal/missing timestamps keep
- *  their server order, and missing timestamps stay visible at the end. */
-export function waitingRowsOldestFirst(
-  rows: readonly DashboardKeeperWaitingRow[],
-): DashboardKeeperWaitingRow[] {
-  return rows
-    .map((row, serverIndex) => ({ row, serverIndex, since: waitingRowSinceSec(row) }))
-    .sort((left, right) => {
-      if (left.since == null && right.since == null) return left.serverIndex - right.serverIndex
-      if (left.since == null) return 1
-      if (right.since == null) return -1
-      return left.since - right.since || left.serverIndex - right.serverIndex
-    })
-    .map(({ row }) => row)
 }
 
 export function waitingAgeMinutes(row: DashboardKeeperWaitingRow, nowSec: number): number | null {

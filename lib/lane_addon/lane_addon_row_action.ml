@@ -124,3 +124,89 @@ let snapshot_fields ~actions ~tool = match actions with
           | None -> `Null
           | Some (tool_name, tool_schema) -> `List (List.mapi (fun index action ->
               to_json ~index (judge ~tool_name ~tool_schema action)) actions)) ]
+
+(* Readers of what [to_json] writes. Members are compared after sorting, so a
+   transport that reorders object members still reads the same verdict. *)
+let sorted = function
+  | `Assoc fields -> Some (List.sort (fun (left, _) (right, _) -> String.compare left right) fields)
+  | _ -> None
+
+let refusal_of_json json = match sorted json with
+  | Some [ "reason", `String "schema_shape_unsupported" ] -> Ok Schema_shape_unsupported
+  | Some [ "reason", `String "no_branch_accepts" ] -> Ok No_branch_accepts
+  | Some [ "branches", `List branches; "reason", `String "several_branches_accept" ] ->
+      Lane_addon_json.traverse (function
+          | `Int index when index >= 0 -> Ok index
+          | _ -> Error "row action refusal branches must be positions") branches
+      |> Result.map (fun branches -> Several_branches_accept branches)
+  | Some [ "member", `String member; "reason", `String "member_not_in_branch" ] ->
+      Ok (Member_not_in_branch member)
+  | Some [ "member", `String member; "reason", `String "fixed_value_rejected" ] ->
+      Ok (Fixed_value_rejected member)
+  | Some _ | None -> Error "row action verdict has an unknown refusal"
+
+let offer_of_json json = match sorted json with
+  | Some [ "branch", branch; "human", `List human ] ->
+      let* branch = match branch with
+        | `Null -> Ok None
+        | `Int index when index >= 0 -> Ok (Some index)
+        | _ -> Error "row action offer branch must be a position or null" in
+      let* human = Lane_addon_json.traverse (fun member -> match sorted member with
+          | Some [ "name", `String name; "required", `Bool required ] -> Ok { name; required }
+          | Some _ | None -> Error "row action offer has a malformed human member") human in
+      Ok (Offered { branch; human })
+  | Some _ | None -> Error "row action verdict has a malformed offer"
+
+let verdict_of_json ~index json = match sorted json with
+  | Some [ "index", `Int position; "offered", offer ] when position = index -> offer_of_json offer
+  | Some [ "index", `Int position; "refused", refusal ] when position = index ->
+      Result.map (fun refusal -> Refused refusal) (refusal_of_json refusal)
+  | Some [ "index", `Int _; ("offered" | "refused"), _ ] ->
+      Error "row action verdicts are not in declaration order"
+  | Some _ | None -> Error "row action verdict requires an index and an offer or a refusal"
+
+let snapshot_of_json = function
+  | `Null -> Ok None
+  | `List values ->
+      Lane_addon_json.traverse (fun (index, json) -> verdict_of_json ~index json)
+        (List.mapi (fun index json -> index, json) values)
+      |> Result.map Option.some
+  | _ -> Error "row_actions must be null or a list"
+
+type unfilled =
+  | Not_offered of refusal
+  | Row_value_absent of { member : string; path : string list }
+  | Row_value_wrong_shape of { member : string; path : string list }
+  | Row_value_rejected of { member : string; detail : string }
+type filled = { branch : int option; locked : (string * Yojson.Safe.t) list }
+
+(* The members of the alternative a verdict offers, read from the same schema
+   the verdict was judged against. *)
+let offered_members ~tool_schema offered =
+  match Option.bind (action_object tool_schema) shape, offered with
+  | Some (Single branch), None -> Some branch.properties
+  | Some (Union branches), Some index when index >= 0 ->
+      Option.map (fun (branch : branch) -> branch.properties) (List.nth_opt branches index)
+  | Some (Single _), Some _ | Some (Union _), (Some _ | None) | None, (Some _ | None) -> None
+
+(* Row values are checked under the action tool's name, as a send checks
+   them. *)
+let fill ~tool_name ~tool_schema verdict (action : P.row_action) fields =
+  match verdict with
+  | Refused refusal -> Error [ Not_offered refusal ]
+  | Offered { branch; _ } ->
+      match offered_members ~tool_schema branch with
+      | None -> Error [ Not_offered Schema_shape_unsupported ]
+      | Some properties ->
+          let read (member, path) = match P.row_value path fields with
+            | P.Absent -> Error (Row_value_absent { member; path })
+            | P.Wrong_shape -> Error (Row_value_wrong_shape { member; path })
+            | P.Present value -> (match List.assoc_opt member properties with
+                | None -> Error (Not_offered (Member_not_in_branch member))
+                | Some schema -> (match Lane_addon_action.validate_input ~schema ~name:tool_name value with
+                    | Ok _ -> Ok (member, value)
+                    | Error detail -> Error (Row_value_rejected { member; detail }))) in
+          let values = List.map read action.P.from_row in
+          (match List.filter_map (function Ok _ -> None | Error unfilled -> Some unfilled) values with
+           | [] -> Ok { branch; locked = action.P.fixed @ List.filter_map Result.to_option values }
+           | unfilled -> Error unfilled)

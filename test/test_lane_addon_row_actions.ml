@@ -1,6 +1,7 @@
-(* RFC lane-row-offers-actions-filled-from-its-own-fields L1: the presentation
-   [actions] grammar, the row value reader, the manifest action tool check and
-   the host verdict. *)
+(* RFC lane-row-offers-actions-filled-from-its-own-fields L1 and L3a: the
+   presentation [actions] grammar, the row value reader, the manifest action
+   tool check, the host verdict, reading it back and filling an action from a
+   row. *)
 open Alcotest
 module P = Masc.Lane_addon_presentation
 module R = Masc.Lane_addon_row_action
@@ -63,7 +64,12 @@ let row_values_are_typed () =
   is P.Wrong_shape [ "grading"; "ask_id" ];
   (* Readings keep showing a JSON null as a value. *)
   let reading = { P.lane_id = "l"; path = [ "dispute"; "question_id" ]; label = "q"; unit = None; format = P.Json } in
-  check bool "json reading of null" true (P.value reading fields = Ok `Null)
+  check bool "json reading of null" true (P.value reading fields = Ok `Null);
+  let refused label expected path format =
+    check bool label true (P.value { reading with path; format } fields = Error expected) in
+  refused "reading of a missing key" P.Field_absent [ "dispute"; "note" ] P.Json;
+  refused "reading through a non-object" P.Field_wrong_shape [ "grading"; "ask_id" ] P.Json;
+  refused "reading in another format" P.Format_mismatch [ "grading" ] P.Number
 
 (* A whole lane action tool schema, valid as a worker must advertise it. *)
 let tool_name = "lane_act"
@@ -157,6 +163,55 @@ let snapshot_fields () =
     (R.snapshot_fields ~actions:[ action () ] ~tool:(Some (tool_name, tool three_branches))
      = [ "row_actions", json {|[{"index":0,"offered":{"branch":1,"human":[{"name":"note","required":true}]}}]|} ])
 
+(* L3a: screens read the host's verdicts back and fill an action from a row. *)
+let verdicts_read_back () =
+  let every = [ R.Offered { branch = None; human = [ { R.name = "note"; required = false } ] };
+                R.Offered { branch = Some 1; human = [] };
+                R.Refused R.Schema_shape_unsupported; R.Refused R.No_branch_accepts;
+                R.Refused (R.Several_branches_accept [ 0; 2 ]);
+                R.Refused (R.Member_not_in_branch "ask_id"); R.Refused (R.Fixed_value_rejected "kind") ] in
+  let written = `List (List.mapi (fun index verdict -> R.to_json ~index verdict) every) in
+  check bool "every verdict reads back" true (R.snapshot_of_json written = Ok (Some every));
+  check bool "no advertised schema" true (R.snapshot_of_json `Null = Ok None);
+  check bool "members in another order" true
+    (R.snapshot_of_json (json {|[{"refused":{"member":"kind","reason":"fixed_value_rejected"},"index":0}]|})
+     = Ok (Some [ R.Refused (R.Fixed_value_rejected "kind") ]));
+  let unread label text = check bool label true (Result.is_error (R.snapshot_of_json (json text))) in
+  unread "index out of declaration order" {|[{"index":1,"refused":{"reason":"no_branch_accepts"}}]|};
+  unread "unknown reason" {|[{"index":0,"refused":{"reason":"maybe"}}]|};
+  unread "extra member" {|[{"index":0,"refused":{"reason":"no_branch_accepts"},"note":1}]|};
+  unread "not a list" {|{"index":0}|};
+  unread "negative alternative" {|[{"index":0,"offered":{"branch":-1,"human":[]}}]|}
+
+let fill_reads_the_row () =
+  let tool_schema = tool three_branches in
+  let offered = R.judge ~tool_name ~tool_schema (action ()) in
+  let fill fields = R.fill ~tool_name ~tool_schema offered (action ()) (json fields) in
+  check bool "every member present" true
+    (fill {|{"dispute":{"ask_id":"a1","question_id":"q1"}}|}
+     = Ok { R.branch = Some 1;
+            locked = [ "kind", `String "dispute"; "ask_id", `String "a1"; "question_id", `String "q1" ] });
+  check bool "a missing member is named with its path" true
+    (fill {|{"dispute":{"ask_id":"a1"}}|}
+     = Error [ R.Row_value_absent { member = "question_id"; path = [ "dispute"; "question_id" ] } ]);
+  check bool "every member a null object cannot give" true
+    (fill {|{"dispute":null}|}
+     = Error [ R.Row_value_wrong_shape { member = "ask_id"; path = [ "dispute"; "ask_id" ] };
+               R.Row_value_wrong_shape { member = "question_id"; path = [ "dispute"; "question_id" ] } ]);
+  check bool "a value the member schema refuses" true
+    (match fill {|{"dispute":{"ask_id":7,"question_id":"q1"}}|} with
+     | Error [ R.Row_value_rejected { member = "ask_id"; _ } ] -> true
+     | Ok _ | Error _ -> false);
+  check bool "a refused action stays refused" true
+    (R.fill ~tool_name ~tool_schema (R.Refused R.No_branch_accepts) (action ()) (json {|{}|})
+     = Error [ R.Not_offered R.No_branch_accepts ]);
+  let lacking branch = R.fill ~tool_name ~tool_schema (R.Offered { branch = Some branch; human = [] })
+      (action ()) (json {|{"dispute":{"ask_id":"a1","question_id":"q1"}}|}) in
+  check bool "a verdict naming an alternative the schema lacks" true
+    (lacking 5 = Error [ R.Not_offered R.Schema_shape_unsupported ]);
+  check bool "a verdict naming a negative alternative" true
+    (lacking (-1) = Error [ R.Not_offered R.Schema_shape_unsupported ])
+
 let manifest ~actions_tool ~outputs ~actions = Printf.sprintf {|id = "row-action-probe"
 revision = "fixture-1"
 title = "Row action probe"
@@ -218,6 +273,8 @@ let () =
     "verdict", [
       test_case "verdicts" `Quick verdicts;
       test_case "snapshot fields" `Quick snapshot_fields;
+      test_case "verdicts read back" `Quick verdicts_read_back;
+      test_case "fill reads the row" `Quick fill_reads_the_row;
     ];
     "manifest", [ test_case "row actions need an action tool, not a port" `Quick manifest_checks_action_tool ];
   ]

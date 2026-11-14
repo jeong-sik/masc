@@ -1143,7 +1143,7 @@ let declared_results_show_body_before_activity_and_keep_raw_evidence () =
   let value_texts value = List.map (fun (row : UI.value_row) -> row.text) (UI.value_rows ~depth:0 value) in
   let reading_texts row = List.map (fun (_, value) -> match value with
     | Ok value -> value_texts value
-    | Error detail -> fail detail) (UI.result_readings worker row) in
+    | Error _ -> fail "a declared reading is unavailable") (UI.result_readings worker row) in
   check (option string) "opening selects the declared report" (Some row.id) (selected_id detail);
   check (list (list string)) "a text value keeps its written lines as rows, not escaped JSON"
     [["First finding"; "Second finding"]; ["false"]; ["not attempted"]] (reading_texts row);

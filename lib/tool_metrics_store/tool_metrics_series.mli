@@ -78,7 +78,9 @@ val next_change_at :
     returned; [None] is a call recorded before sizes were kept, whose size is
     unknown. It is not a call that returned nothing. [failure_class] is why a
     failed call failed; [None] is a call that did not fail, or a failure
-    recorded without a class (every failure recorded before classes were kept). *)
+    recorded without a class (every failure recorded before classes were kept).
+    [caller] is the Keeper that made the call; [None] is a call recorded before
+    callers were kept or made outside any Keeper, whose caller was not observed. *)
 type sample =
   { ts : float
   ; tool_name : string
@@ -86,6 +88,7 @@ type sample =
   ; duration_ms : float
   ; result_bytes : int option
   ; failure_class : Tool_result.tool_failure_class option
+  ; caller : string option
   }
 
 type builder
@@ -155,16 +158,32 @@ type tool_usage =
   ; usage : stat
   }
 
+type caller_usage =
+  { caller : string
+  ; usage : stat
+  }
+
 type t =
   { window : window  (** The window the samples were counted in. *)
   ; buckets : bucket list  (** Oldest first, one per {!width} step. *)
   ; total : stat  (** Every sample in the window. *)
   ; top_by_time : tool_usage list
         (** The tools that spent the most time, longest first. *)
+  ; by_caller : caller_usage list
+        (** The Keepers whose calls failed most, most failures first, then
+            most calls. Only calls with a recorded caller are counted here. *)
+  ; caller_unobserved_count : int
+        (** The calls in the window with no recorded caller, among them
+            every call stored before callers were kept. [total.call_count]
+            is the sum of this and the calls of every Keeper, before
+            [by_caller] is cut to {!top_caller_limit}. *)
   }
 
 val top_tool_limit : int
 (** How many tools [top_by_time] keeps. *)
+
+val top_caller_limit : int
+(** How many Keepers [by_caller] keeps. *)
 
 val finish : builder -> t
 

@@ -2301,6 +2301,15 @@ def account_server_line(observed):
             + '). The installed MASC is ' + terminal_text(observed['installed_version']) + '.')
 
 
+# The status of the journey that stopped at a workspace whose config asks for
+# accounts. It prepared nothing there, so it does not end with the 0 of a
+# journey that did: scripts/install.sh reads this status
+# (MASC_SETUP_ACCOUNT_INSTALLATION_EXIT) to say what comes next, never the
+# lines printed before it. The terminal UI and `masc setup --no-tui`, whose
+# statuses the journey passes on, do not exit 3.
+ACCOUNT_INSTALLATION_EXIT = 3
+
+
 def account_installation(binary, state, port):
     """Say what runs in a workspace whose config asks for accounts, and stop.
 
@@ -2317,6 +2326,10 @@ def account_installation(binary, state, port):
         if check['condition'] != 'satisfied':
             print(check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
     port = workspace_port(binary, base, port)
+    # `masc setup-server` waits for an announced account server that does not
+    # answer its health probe (Masc_http_client.default_request_timeout_sec),
+    # so the screen says what it waits on before the read.
+    print('Checking whether an account server runs for this workspace…', file=sys.stderr)
     try:
         observed = setup_server_observation(binary, base, port)
     except ServerUnread as unread:
@@ -2344,7 +2357,7 @@ def account_installation(binary, state, port):
     # The journey ends before its workspace screen, so the way to another
     # workspace is said here.
     print('To set up another workspace: masc setup --base-path DIRECTORY', file=sys.stderr)
-    return 0
+    return ACCOUNT_INSTALLATION_EXIT
 
 
 def account_installation_at(binary, base, port):
@@ -3480,6 +3493,11 @@ def sandbox_step(binary, base, port):
     """The sandbox step of a journey that began in an earlier session."""
     # The workspace may ask for accounts since that session.
     ended = account_installation_at(binary, base, port)
+    if ended == ACCOUNT_INSTALLATION_EXIT:
+        # The group-session handoff that runs this step reads every status
+        # but 0 as a session that has to sign in again. This one has nothing
+        # left to do, and what comes next is already on screen.
+        return 0
     if ended is not None:
         return ended
     return sandbox_journey(binary, base, port, refresh_owner=True)

@@ -35,7 +35,7 @@ BASE_PATH=/fixture
 '''
 
 
-def run_shell(body, terminal_input=None):
+def run_shell(body, terminal_input=None, timeout=5):
     master = slave = reader = None
     terminal = bytearray()
     try:
@@ -62,7 +62,7 @@ def run_shell(body, terminal_input=None):
             stdin=slave if slave is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=slave if slave is not None else subprocess.PIPE,
-            text=True, timeout=5,
+            text=True, timeout=timeout,
         )
         if slave is not None:
             os.close(slave)
@@ -148,6 +148,71 @@ Path(os.environ['COMMAND_RECEIPT']).write_text(json.dumps({
                             'MASC_RUNTIME_EVENTS': runtime_events,
                         })
                         self.assertFalse((root / 'injected').exists())
+
+    def test_a_journey_that_stopped_at_a_workspace_asking_for_accounts_is_not_called_finished(self):
+        # `masc setup` on a terminal runs the shipped journey. Where the config
+        # asks for accounts the journey prepares no model or sandbox, so the
+        # summary names the command that starts the account server instead of
+        # one that reopens a workspace of a single user. The stand-in binary
+        # answers the journey's reads as the doctor and setup-server do.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = str(root / 'accounts')
+            receipt = root / 'receipt.json'
+            binary = root / 'masc'
+            binary.write_text('#!' + sys.executable + '\n' + '''
+import json, os, subprocess, sys
+from pathlib import Path
+command, options = sys.argv[1], sys.argv[2:]
+def value(flag):
+    return options[options.index(flag) + 1]
+if command == 'setup':
+    if os.environ['JOURNEY_ENDS'] == 'prepared':
+        sys.exit(0)
+    sys.exit(subprocess.run([sys.executable, '-B', os.environ['JOURNEY_HELPER'], '--binary', sys.argv[0],
+                             '--journey', *options]).returncode)
+elif command == 'doctor':
+    base = value('--base-path')
+    print(json.dumps(dict(schema='masc.onboarding_status.v1', scope='configuration_observation',
+                          base_path=base, opening='account_installation', checks=[
+        dict(id='workspace', condition='satisfied', message='Workspace found.', actions=[]),
+        dict(id='multi_account_request', condition='needs_verification',
+             message=base + '/.masc/auth/config.json asks for Multi_account', actions=[])])))
+elif command == 'workspace-connection':
+    print(json.dumps(dict(schema='masc.workspace_connection.v1', readiness='not_checked', port=int(value('--port')))))
+elif command == 'setup-server':
+    print(json.dumps(dict(schema='masc.setup_server.v1', read_only=True, installed_version='9.9.9', status='free')))
+else:
+    Path(os.environ['COMMAND_RECEIPT']).write_text(json.dumps(sys.argv[1:]))
+''')
+            binary.chmod(0o755)
+            variables = {'DEST': str(binary), 'DASHBOARD_ASSETS_DIR': str(root / 'assets'),
+                         'BASE_PATH': base, 'VERSION': 'v9.9.9', 'MASC_PORT': '9876',
+                         'JOURNEY_HELPER': str(ROOT / 'scripts/install-runtime-setup.py')}
+            body = ('\nDRY_RUN=0\nRUN_SETUP_JOURNEY=1\nexport JOURNEY_HELPER\n'
+                    + ''.join(key + '=' + shlex.quote(value) + '\n' for key, value in variables.items()))
+            for ends, said, unsaid, copied_argv in (
+                    ('accounts', 'asks for accounts', 'Setup finished',
+                     ['restart', '--base-path', base, '--port', '9876']),
+                    ('prepared', 'Setup finished', 'asks for accounts',
+                     ['--base-path', base, '--port', '9876'])):
+                with self.subTest(ends=ends):
+                    result, _ = run_shell(body + 'export JOURNEY_ENDS=' + ends
+                                          + '\nfinish_setup_journey\nprint_install_summary\n', timeout=60)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(said, result.stdout)
+                    self.assertNotIn(unsaid, result.stdout)
+                    self.assertNotIn('setup did not finish', result.stderr)
+                    if ends == 'accounts':
+                        # The journey itself ran: what it said is on screen above the summary.
+                        self.assertIn(base + '/.masc/auth/config.json asks for Multi_account', result.stderr)
+                    commands = [line.strip() for line in result.stdout.splitlines() if line.startswith('  env ')]
+                    self.assertEqual(len(commands), 1, result.stdout)
+                    copied = subprocess.run(['bash', '-c', commands[0]], cwd=root,
+                                            env=dict(os.environ, COMMAND_RECEIPT=str(receipt)),
+                                            capture_output=True, text=True, timeout=30)
+                    self.assertEqual(copied.returncode, 0, copied.stderr)
+                    self.assertEqual(json.loads(receipt.read_text()), copied_argv)
 
     def test_authenticated_provider_probe_keeps_credentials_out_of_curl_argv(self):
         key = 'synthetic-provider-probe-credential'

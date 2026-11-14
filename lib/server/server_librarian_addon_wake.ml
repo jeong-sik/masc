@@ -120,6 +120,7 @@ let discover ~fold_records ~on_original ~config ~store =
       let with_body keeper =
         let* original=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
         let* original=Option.to_result ~none:"Librarian result hint has no original owner" original in
+        on_original original;
         keeper original in
       let parts_by_owner=ref [] in
       let* keeper,original_installation=match Namespace.of_request_id request_id with

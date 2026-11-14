@@ -2015,9 +2015,9 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
   refuse_fenced_resume fixture original request;
   no_memory fixture;
   (* The pass reads a fenced original with no predecessor as its record and
-     index. Without its body file the inventory still lists it. The host's
-     wake still reads every body of the scope, so the file is back before
-     any dispatch; the pass itself is run without the file below. *)
+     index. Without its body file the inventory still lists it. The file
+     is back before any dispatch, whose host-side check reads it; the pass
+     itself is run without the file below. *)
   let body=Filename.concat (Store.root fixture.store)
     (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
   let bytes=io (fun () -> In_channel.with_open_bin body In_channel.input_all) in
@@ -2041,9 +2041,10 @@ let test_history_fence_allows_the_next_history_pass () = with_fixture (fun ~sw:_
      instance_id="fixture-instance";request_id=original.request_id}) with
    | Ok (keepers,_,_) -> check (list string) "a result hint finds the Keeper without the body" [keeper_name] keepers
    | Error detail -> fail detail);
-  check bool "a result hint from another installation is still refused" true
-    (Result.is_error (wake (Runtime.Exact_result_delivered {installation_id="another-installation";
-      instance_id="fixture-instance";request_id=original.request_id})));
+  check bool "a result hint from another installation is refused for its installation" true
+    (wake (Runtime.Exact_result_delivered {installation_id="another-installation";
+      instance_id="fixture-instance";request_id=original.request_id})
+     =Error "Librarian result hint belongs to a different original installation");
   io (fun () -> write body bytes);
   drive_advanced fixture;
   check int "only the newly captured original reaches the provider" 1 (F.post_count fixture.server);

@@ -189,6 +189,8 @@ let error_label = function
   | Upgrade.Invalid_health -> "invalid health"
   | Different_workspace -> "different workspace"
   | Admin_required -> "admin required"
+  | Server_starting -> "server starting"
+  | Admin_check_unanswered -> "admin check unanswered"
   | Owner_unavailable -> "owner unavailable"
   | Incumbent_changed -> "incumbent changed"
   | Already_requested -> "already requested"

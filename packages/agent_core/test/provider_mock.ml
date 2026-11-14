@@ -97,7 +97,22 @@ let thinking_response
   }
 ;;
 
-let local_provider_config ?(provider_id = "test") ~base_url ~model_id ~request_path () =
+(* What a scripted endpoint that answers with server-sent events declares. A
+   provider the catalog has no row for resolves to
+   [Capabilities.default_capabilities], which declares no native streaming, and
+   [Pipeline] then sends a streaming turn as one synchronous request. *)
+let native_streaming_capabilities =
+  { Llm_provider.Capabilities.default_capabilities with supports_native_streaming = true }
+;;
+
+let local_provider_config
+      ?(provider_id = "test")
+      ?model_capabilities_override
+      ~base_url
+      ~model_id
+      ~request_path
+      ()
+  =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~provider_id
@@ -106,6 +121,7 @@ let local_provider_config ?(provider_id = "test") ~base_url ~model_id ~request_p
     ~api_key:""
     ~headers:[ "Content-Type", "application/json" ]
     ~request_path
+    ?model_capabilities_override
     ()
 ;;
 

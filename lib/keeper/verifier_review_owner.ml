@@ -293,7 +293,11 @@ let known_observations = function
         (match List.assoc "fact" fields,List.assoc "runtime_id" fields,List.assoc "error_category" fields with
          | `String "before_dispatch",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
            Ok (reached,id::failed)
-         | `String "definite_refusal",`String id,`String category when String.trim id<>"" && String.trim category<>"" ->
+         (* RFC-0489 §2.1: a lost reply is a typed refusal fact now — the run
+            was dispatched, no verdict came back, and the candidate failure
+            classification owns retryability. *)
+         | `String ("definite_refusal" | "outcome_unknown"),`String id,`String category
+           when String.trim id<>"" && String.trim category<>"" ->
            Ok (true,id::failed)
          | _ -> Error "retained reviewer failure is not definitely resolved")
       | None,_ -> Error "invalid retained reviewer execution observations") (Ok (false,[])) observations

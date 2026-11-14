@@ -2,6 +2,7 @@ module W = Goal_verifier_worker
 module V = Goal_verifier_original
 module R = Goal_verification_run_registry
 module P = Lane_addon_request_progress
+module View = Goal_verifier_refusal
 module AR = Task.Anti_rationalization
 module Observer = Lane_addon_request_receipt
 open Result.Syntax
@@ -122,15 +123,15 @@ let publish ~store ~registry retained ~outcome =
       same_facts expected ~evaluated_verdict ~evaluator_runtime ~tools ~elapsed_s
       && (observed = outcome || observed = R.Committed) in
   let* prior = read_registry ~registry retained in
-  let* publication = match P.phase (W.progress retained),outcome with
-    | P.Finished _,R.Committed ->
+  let* publication = match View.view (P.phase (W.progress retained)),outcome with
+    | View.Finished _,R.Committed ->
       let* retained,registration = observer_intent ~store retained Observer.Registration
         (R.run_to_yojson (run_row retained R.Running)) in
       let* retained,completion = observer_intent ~store retained Observer.Completion
         (completion_payload retained expected outcome) in
       Ok (Some (retained,registration,completion))
-    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
-      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
+    | (View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _ | View.Committing _
+      | View.Commit_unknown _ | View.Finished _ | View.Conflicted _ | View.Rejected _ | View.Subdividing _ | View.Subdivided _),
       (Reviewed | Committed | Superseded _ | Deferred _ | Raised _ | Review_cancelled _) -> Ok None in
   let record_completion () =
     try match R.mark_completed_confirmed registry ~run_id:(W.run_identity retained).run_id ~outcome
@@ -172,10 +173,10 @@ let needs_recovery ~registry retained =
         | R.Committed -> false
         | Superseded _ -> not conflicted
         | Reviewed | Deferred _ | Raised _ | Review_cancelled _ -> true) in
-  match P.phase (W.progress retained) with
-  | P.Judged _ | Committing _ | Commit_unknown _ -> Ok true
-  | Captured -> Ok false
-  | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+  match View.view (P.phase (W.progress retained)) with
+  | View.Judged _ | View.Committing _ | View.Commit_unknown _ -> Ok true
+  | View.Captured -> Ok false
+  | View.Admission_wait _ | View.Dispatch_pending _ | View.Rejected _ | View.Subdividing _ | View.Subdivided _ ->
     let* expected = completion ~registry retained in
     let* row = read_registry ~registry retained in
     (match row with
@@ -249,13 +250,15 @@ let commit_proof ~config ~store ~registry retained =
       let* record = Goal_verification.get_record_authoritative config ~goal_id:subject.goal_id in
       let* value = callback goal record in Ok (goal, value))
     |> Result.map snd |> Result.map_error Goal_store.write_error_to_string in
-  let* change = match P.phase (W.progress retained) with
-    | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) -> Ok commit.change
-    | Judged _ ->
+  let* change = match View.view (P.phase (W.progress retained)) with
+    | View.Committing commit | View.Commit_unknown (commit,_) | View.Finished commit
+    | View.Conflicted (commit,_) -> Ok commit.change
+    | View.Judged _ ->
       let* before = Result.map_error (fun d -> Unavailable d)
         (read_goal (fun _ record -> Ok (before_json record))) in
       Ok {P.before; after}
-    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+    | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Rejected _
+    | View.Subdividing _ | View.Subdivided _ ->
       Error (Invalid_original "Goal commit has no original judgment frontier") in
   let authenticate (change : P.change) =
     let* record = before_record change.before in
@@ -330,10 +333,11 @@ let commit_proof ~config ~store ~registry retained =
       (match W.load ~store ~installation_id ~package_id
           ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original) with
        | Ok (Some current) ->
-         (match P.phase (W.progress current) with
-          | Conflicted _ -> Error (Conflict (error_to_string (worker_error error)))
-          | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-          | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> Error (worker_error error))
+         (match View.view (P.phase (W.progress current)) with
+          | View.Conflicted _ -> Error (Conflict (error_to_string (worker_error error)))
+          | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+          | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Rejected _
+          | View.Subdividing _ | View.Subdivided _ -> Error (worker_error error))
        | Ok None | Error _ -> Error (worker_error error)) in
   let* current = worker (W.load ~store ~installation_id ~package_id
     ~goal_id:subject.goal_id ~request_id:subject.request_id ~attempt:(V.attempt original)) in

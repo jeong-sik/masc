@@ -29,7 +29,8 @@ let apply_board_post_load state ~report_error request result =
   if board_detail_request_still_current state request then
     let post_id = Board_detail.request_post_id request in
     let fail err =
-      let err = "Board post load failed: " ^ err in
+      let ko = state.ui_language = Lang_ko in
+      let err = (if ko then "글 " else "Board post ") ^ field_failed ~ko ^ ": " ^ err in
       state.board_detail <-
         Board_detail.complete state.board_detail request (Error err);
       if state.view <> Board then
@@ -51,27 +52,29 @@ let apply_board_post_load state ~report_error request result =
     | Ok (post, _, _) ->
         fail
           (Printf.sprintf
-             "response ID mismatch: expected %s, received %s"
+             (if state.ui_language = Lang_ko then "응답 글 ID 다름 · 요청 %s · 받음 %s"
+              else "response ID mismatch · expected %s · received %s")
              post_id post.bp_id)
     | Error err -> fail err
 
 module Publication = Masc_tui_board_publication
 
-let publication_diagnostic = function
+let publication_diagnostic ~ko = function
   | Publication.Not_attempted { detail; _ } ->
-      "Board publication did not start: " ^ detail
+      (if ko then "글 " else "Board post ") ^ not_sent ~ko ^ ": " ^ detail
   | Publication.Returned { response; _ } ->
-      let detail = Option.value (Publication.response_diagnostic response)
-          ~default:"No publication acknowledgement was received" in
+      let detail = Option.value (Publication.response_diagnostic ~ko response)
+          ~default:(if ko then "응답 없음" else "no acknowledgement received") in
       match Publication.response_effect response with
       | Failure_effect.Proven_pre_effect ->
-          "Board publication was refused before creation: " ^ detail
+          (if ko then "게시판이 글을 거절함: " else "Board refused the post: ") ^ detail
       | Failure_effect.Effect_outcome_unknown ->
-          "Board publication outcome is unknown: " ^ detail
+          Publication.outcome_unknown ~ko ^ ": " ^ detail
       | Failure_effect.Proven_post_effect -> detail
 
 let apply_current_publication state ~report ~refresh outcome request =
   state.board_write <- Board_idle;
+  let ko = state.ui_language = Lang_ko in
   let committed_post_id = match outcome with
     | Publication.Not_attempted _ -> None
     | Publication.Returned { response; _ } -> Publication.committed_post_id response in
@@ -80,7 +83,7 @@ let apply_current_publication state ~report ~refresh outcome request =
       let post_id = Board_types.Post_id.to_string post_id in
       let diagnostic = match outcome with
         | Publication.Not_attempted _ -> None
-        | Publication.Returned { response; _ } -> Publication.response_diagnostic response in
+        | Publication.Returned { response; _ } -> Publication.response_diagnostic ~ko response in
       state.board_compose_attachments <-
         List.filter (fun staged -> not (List.memq staged request.Publication.staged))
           state.board_compose_attachments;
@@ -92,14 +95,15 @@ let apply_current_publication state ~report ~refresh outcome request =
         state.board_compose_attach_input <- None;
         state.board_mode <- Board_list
       end;
-      state.board_post_error <- Option.map
-        (fun detail -> "Board post " ^ post_id ^ " was published; " ^ detail) diagnostic;
-      report "system" ("Board: published " ^ post_id
-        ^ Option.fold ~none:"" ~some:(fun detail -> "; " ^ detail) diagnostic);
+      let published =
+        if ko then "글 " ^ post_id ^ " 올림" else "Board post " ^ post_id ^ " published" in
+      state.board_post_error <- Option.map (fun detail -> published ^ " · " ^ detail) diagnostic;
+      report "system"
+        (published ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) diagnostic);
       refresh ()
   | None ->
       state.board_compose_armed <- false;
-      state.board_post_error <- Some (publication_diagnostic outcome)
+      state.board_post_error <- Some (publication_diagnostic ~ko outcome)
 
 let apply_publication state ~report ~refresh outcome =
   match Publication.record state.board_publications outcome with
@@ -116,13 +120,16 @@ let apply_publication state ~report ~refresh outcome =
           ~reading:None ~kind:Workspace_operation_outcome then
         apply_current_publication state ~report ~refresh outcome request
 
+let comment_outcome_unknown ~ko =
+  if ko then "댓글 결과 미확인 · 다시 보내기 전에 댓글을 확인하세요"
+  else "Board comment outcome unknown · check the thread before retrying"
+
 let comment_launch_failed state ~request_id =
   match state.board_write with
   | Board_commenting current when current == request_id ->
     state.board_write <- Board_idle;
     state.board_compose_armed <- false;
-    state.board_post_error <-
-      Some "Board comment not confirmed; check the thread before retrying"
+    state.board_post_error <- Some (comment_outcome_unknown ~ko:(state.ui_language = Lang_ko))
   | Board_idle | Board_posting _ | Board_commenting _ -> ()
 
 let comment_done state ~request_id ~post_id ~sent_draft ~report ~refresh ~refresh_detail result =
@@ -140,7 +147,7 @@ let comment_done state ~request_id ~post_id ~sent_draft ~report ~refresh ~refres
           state.board_compose_attach_input <- None;
           state.board_mode <- Board_read post_id
         end;
-        report "system" ("Board: " ^ message);
+        report "system" ((if state.ui_language = Lang_ko then "게시판: " else "Board: ") ^ message);
         refresh ();
         refresh_detail post_id
     | Error err ->
@@ -152,7 +159,7 @@ let vote_done state ~report ~refresh ~refresh_detail target result =
   match result with
   | Ok message ->
       state.board_vote_armed <- None;
-      report "system" ("Board vote: " ^ message);
+      report "system" ((if state.ui_language = Lang_ko then "투표: " else "Board vote: ") ^ message);
       (* The list row draws a post's score and the open reading draws the
          post header and every comment's; refresh both rather than waiting
          out the interval to see the arrow land. The comment cursor is an
@@ -165,4 +172,4 @@ let vote_done state ~report ~refresh ~refresh_detail target result =
        | Board_read _ | Board_list | Board_compose -> ())
   | Error err ->
       state.board_vote_armed <- None;
-      report "error" ("Board vote failed: " ^ err)
+      report "error" ((if state.ui_language = Lang_ko then "투표 실패: " else "Board vote failed: ") ^ err)

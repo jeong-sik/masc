@@ -921,6 +921,57 @@ let semantic_rows db ~active_only =
     ~keep:(fun execution -> not (active_only && Semantic.is_terminal execution))
 ;;
 
+(* A direct record a restart interrupted, with no native call and no
+   checkpoint or Gate approval that another reader of the outstanding records
+   keeps alive. [Some] names its operation. *)
+let interrupted_without_references (execution : Semantic.t) =
+  match execution.phase, execution.native_call with
+  | Semantic.Recovering {origin = Semantic.Interrupted_execution; _}, Keeper_native_call.No_native_call ->
+    if List.is_empty (Semantic.checkpoint_references execution)
+       && List.is_empty (Semantic.gate_approval_ids execution)
+    then Keeper_execution_scope_id.direct_operation_id execution.id
+    else None
+  | Semantic.Recovering {origin = Semantic.Interrupted_execution; _},
+    (Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _)
+  | (Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _
+    | Semantic.Preparation_wait _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+    | Semantic.Suspended _ | Semantic.Settled _
+    | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
+        | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Runtime_retry _
+        | Semantic.Gate_wait _ | Semantic.Gate_binding _ | Semantic.Input_wait _); _}),
+    (Keeper_native_call.No_native_call | Keeper_native_call.Active _
+    | Keeper_native_call.Terminal_unacknowledged _) -> None
+;;
+
+(* No action resumes [Interrupted_execution], and an operation that ended never
+   runs again. Such a record of an ended operation holds no work back, while it
+   keeps its input and the fact that its effect is unknown. *)
+let unresumable_interruption (operation : Operation.t) (execution : Semantic.t) =
+  match interrupted_without_references execution, operation.state with
+  | Some operation_id, (Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _) ->
+    Id.equal operation_id operation.operation_id
+  | Some _, (Operation.Queued | Operation.Running _)
+  | None, (Operation.Queued | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _
+          | Operation.Cancelled _) -> false
+;;
+
+(* The unsettled records that still hold work back. *)
+let outstanding_semantic_rows db =
+  let* executions = semantic_rows db ~active_only:true in
+  List.fold_left (fun result (execution : Semantic.t) ->
+    let* kept = result in
+    match interrupted_without_references execution with
+    | None -> Ok (execution :: kept)
+    | Some operation_id ->
+      let* operation = get_with_db db operation_id in
+      (match operation with
+       | None -> Error (Unknown_operation operation_id)
+       | Some operation ->
+         Ok (if unresumable_interruption operation execution then kept else execution :: kept)))
+    (Ok []) executions
+  |> Result.map List.rev
+;;
+
 let decode_input_checkpoint stmt =
   let* trace_id = Keeper_id.Trace_id.of_string (Sqlite3.column_text stmt 0)
     |> Result.map_error (fun detail -> Integrity_error ("input checkpoint trace: " ^ detail)) in
@@ -1097,10 +1148,11 @@ let update_input_checkpoint ?(allow_turn_reset = false) store ~observed ~checkpo
       Ok Input_checkpoint_updated)
 
 (* A settled record never resumes. The native receipt a restart or a stop
-   leaves on it records the call and does not hold the clear back. *)
+   leaves on it records the call and does not hold the clear back, and neither
+   does an unresumable interruption of an ended operation. *)
 let require_history_clear_quiescence store =
   let* inventory = inventory store in
-  let* outstanding = semantic_rows store.db ~active_only:true in
+  let* outstanding = outstanding_semantic_rows store.db in
   if Option.is_some inventory.running_operation_id || not (List.is_empty outstanding) then
     Error (Invalid_input "history clear requires every operation and semantic execution to be settled")
   else Ok ()
@@ -1240,7 +1292,7 @@ let inspect_store_with ~scope ~path =
     let* semantic_executions = match scope with
       | Pending_inputs -> Ok []
       | All_durable_records -> semantic_rows db ~active_only:false
-      | Outstanding_integrity_audit -> semantic_rows db ~active_only:true in
+      | Outstanding_integrity_audit -> outstanding_semantic_rows db in
     let* input_history = input_history_with_db db in
     let* input_checkpoints = match scope with
       | Pending_inputs -> Ok []
@@ -2366,7 +2418,9 @@ let direct_execution_with_db db (operation : Operation.t) =
         if String.equal input saved then Ok ()
         else Error (Integrity_error "direct continuation input differs from operation")
       | None, None when Operation.is_terminal operation.state && Semantic.is_terminal execution -> Ok ()
-      | _ -> Error (Integrity_error "direct continuation input binding is not current") in
+      | None, Some _ when unresumable_interruption operation execution -> Ok ()
+      | (Some _ | None), (Some _ | None) ->
+        Error (Integrity_error "direct continuation input binding is not current") in
     Ok (Some execution)
 ;;
 

@@ -94,6 +94,12 @@
 /* 대기 나이 축 */
 .wa { display: flex; flex-direction: column; gap: 4px; }
 .wa-scale { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.06em; color: var(--text-dim); border-bottom: 1px dashed var(--border-main); padding-bottom: 3px; }
+/* The rows scroll in their own list, as tall as the lane strip's list. The
+   scroll box clips the 4px focus halo drawn outside a bar, so the list reaches
+   4px past the axis on each side and each row carries the 4px gap above it.
+   The bars stay where they were: in line with the axis, 4px apart. */
+.wa-list { max-height: 30rem; overflow-y: auto; margin: -4px -4px 0; padding: 0 4px 4px; }
+.wa-slot { padding-top: 4px; }
 .wa-row { display: flex; flex-direction: column; gap: 3px; }
 .wa-bar { appearance: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-width: 0; text-align: left; border: 1px solid var(--border-main); border-left-width: 3px; border-radius: var(--radius-xs); background: var(--bg-sunken); padding: 5px 8px; }
 .wa-bar:hover { background: var(--bg-panel-alt); }

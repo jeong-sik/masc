@@ -16,6 +16,13 @@ SPEC = importlib.util.spec_from_file_location('approval_merge_sweep',
 assert SPEC is not None and SPEC.loader is not None
 SWEEP = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SWEEP)
+# The model of GitHub that linked-issues is tested against; the sweep hands it
+# the same documents.
+LINKED_SPEC = importlib.util.spec_from_file_location('test_linked_issues',
+                                                     HERE / 'test_linked_issues.py')
+assert LINKED_SPEC is not None and LINKED_SPEC.loader is not None
+LINKED = importlib.util.module_from_spec(LINKED_SPEC)
+LINKED_SPEC.loader.exec_module(LINKED)
 
 
 def sha(number):
@@ -176,6 +183,122 @@ class MergedLeftovers(unittest.TestCase):
         self.assertEqual((record['found'], record['not_reached']), (1, 1))
 
 
+def closer(number, *, merged=True, repository='owner/repo'):
+    return {'number': number, 'merged': merged, 'repository': {'nameWithOwner': repository}}
+
+
+def open_issue(number, *closers, total=None):
+    return {'number': number, 'url': LINKED.url(number),
+            'closedByPullRequestsReferences': {
+                'totalCount': len(closers) if total is None else total, 'nodes': list(closers)}}
+
+
+class Repository(LINKED.FakeGitHub):
+    """linked-issues' model of GitHub, with the open issues the sweep lists first.
+
+    The listing is answered from the model in pages of the document's `first`
+    and kept in `listings`; every other document goes to linked-issues' model.
+    """
+
+    def __init__(self, issues, *pulls, **behaviour):
+        super().__init__(*pulls, **behaviour)
+        self.issues, self.listings = list(issues), []
+
+    def __call__(self, document, **variables):
+        if document != SWEEP.OPEN_ISSUES:
+            return super().__call__(document, **variables)
+        self.listings.append(variables.get('cursor'))
+        _, selections = LINKED.parse(document)
+        return LINKED.resolve({'repository': self.listing}, selections, variables)
+
+    def listing(self, arguments, variables):
+        return dict(self.repository(arguments, variables), issues=self.page)
+
+    def page(self, arguments, variables):
+        assert LINKED.argument(arguments, 'states', variables) == 'OPEN', arguments
+        assert 'after: $cursor' in arguments, arguments
+        start = int(variables.get('cursor', 0))
+        end = start + int(LINKED.argument(arguments, 'first', variables))
+        return {'pageInfo': {'hasNextPage': end < len(self.issues), 'endCursor': str(end)},
+                'nodes': self.issues[start:end]}
+
+
+class LeftoverLinkedIssues(unittest.TestCase):
+    def close(self, github, *, dry_run=False, started=None):
+        with patch.object(SWEEP, 'graphql', github):
+            return SWEEP.close_merged_issues(
+                'owner/repo', SWEEP.time.monotonic() if started is None else started, dry_run)
+
+    def test_an_issue_a_merge_on_main_left_open_closes(self):
+        github = Repository([open_issue(7, closer(101))], (101, LINKED.pull(101, LINKED.issue(7))))
+        self.assertEqual(self.close(github), {
+            'pull_requests': [101], 'not_reached': 0,
+            'issues': [{'pr': 101, 'issue': LINKED.url(7), 'closed': True}]})
+        self.assertEqual(github.closes, ['I_7'])
+
+    def test_a_stack_layer_closes_its_issue_only_when_its_merge_commit_is_on_main(self):
+        github = Repository(
+            [open_issue(7, closer(102)), open_issue(8, closer(103))],
+            (102, LINKED.pull(102, LINKED.issue(7), base='feat/parent')),
+            (103, LINKED.pull(103, LINKED.issue(8), base='feat/layer-2')),
+            ahead={102: 0, 103: 2})
+        record = self.close(github)
+        self.assertEqual(record['pull_requests'], [102, 103])
+        self.assertEqual(LINKED.decisions(record['issues']),
+                         [(102, LINKED.url(7), True), (103, LINKED.url(8), False)])
+        self.assertEqual(github.closes, ['I_7'])
+
+    def test_an_issue_reopened_after_the_merge_stays_open(self):
+        github = Repository([open_issue(7, closer(101))], (101, LINKED.pull(101, LINKED.issue(7))),
+                            reopened_at={'I_7': [LINKED.AFTER_THE_MERGE]})
+        record = self.close(github)
+        self.assertEqual(LINKED.decisions(record['issues']), [(101, LINKED.url(7), False)])
+        self.assertEqual(github.closes, [])
+
+    def test_a_closer_that_did_not_merge_here_is_not_passed_and_an_unread_list_is_a_record(self):
+        github = Repository([
+            open_issue(7, closer(101, merged=False), closer(102, repository='other/repo')),
+            open_issue(8),
+            open_issue(9, None, closer(103), total=21)],
+            (103, LINKED.pull(103, LINKED.issue(9))))
+        record = self.close(github)
+        self.assertEqual(record['pull_requests'], [103])
+        self.assertEqual(record['issues'], [
+            {'issue': LINKED.url(9), 'closed': False,
+             'reason': '21 closing pull requests; only the first 2 were read'},
+            {'issue': LINKED.url(9), 'closed': False,
+             'reason': '1 closing pull requests are not readable'},
+            {'pr': 103, 'issue': LINKED.url(9), 'closed': True}])
+        self.assertEqual(github.closes, ['I_9'])
+
+    def test_every_page_of_open_issues_is_read(self):
+        issues = [open_issue(number) for number in range(1, 101)] + [open_issue(500, closer(101))]
+        github = Repository(issues, (101, LINKED.pull(101, LINKED.issue(500))))
+        self.assertEqual(self.close(github)['pull_requests'], [101])
+        self.assertEqual(github.listings, [None, '100'])
+        self.assertEqual(github.closes, ['I_500'])
+
+    def test_a_dry_run_and_a_sweep_out_of_time_close_nothing(self):
+        for name, behaviour in (('dry run', {'dry_run': True}),
+                                ('out of time',
+                                 {'started': SWEEP.time.monotonic() - SWEEP.SWEEP_SECONDS})):
+            with self.subTest(name):
+                github = Repository([open_issue(7, closer(101))],
+                                    (101, LINKED.pull(101, LINKED.issue(7))))
+                record = self.close(github, **behaviour)
+                self.assertEqual(record, {'pull_requests': [101], 'not_reached': 1, 'issues': []})
+                self.assertEqual((github.reads, github.closes), ([], []))
+
+    def test_a_read_that_fails_is_a_record(self):
+        with patch.object(SWEEP, 'graphql', side_effect=ValueError('API rate limit exceeded')):
+            self.assertEqual(SWEEP.close_merged_issues('owner/repo', SWEEP.time.monotonic(), False),
+                             {'error': 'API rate limit exceeded'})
+        github = Repository([open_issue(7, closer(101))], read=ValueError('refused'))
+        self.assertEqual(self.close(github)['issues'], [
+            {'prs': [101], 'closed': False, 'reason': 'ValueError: refused'}])
+        self.assertEqual(github.closes, [])
+
+
 class Sweeping(unittest.TestCase):
     def sweep(self, exits, *, clock=None):
         runs = []
@@ -186,6 +309,8 @@ class Sweeping(unittest.TestCase):
         patches = [patch.object(SWEEP, 'open_pulls', return_value=[row(1), row(2), row(3)]),
                    patch.object(SWEEP, 'quota', return_value=None),
                    patch.object(SWEEP, 'clean_branches', return_value={'found': 0}),
+                   patch.object(SWEEP, 'close_merged_issues',
+                                return_value={'pull_requests': [], 'not_reached': 0, 'issues': []}),
                    patch.object(SWEEP.subprocess, 'run', side_effect=run),
                    patch.dict(os.environ, {'GITHUB_REPOSITORY': 'owner/repo'}),
                    patch.object(SWEEP.sys, 'argv', ['sweep'])]
@@ -207,6 +332,7 @@ class Sweeping(unittest.TestCase):
         self.assertEqual(code, 0)  # a held or failed scope does not fail the sweep
         self.assertEqual(runs, [('--hand-off-now', n, 'workflow_dispatch') for n in '123'])
         self.assertIn('"stopped": null', output)
+        self.assertIn('"linked_issues": {', output)
 
     def test_a_quota_exit_stops_the_sweep(self):
         code, runs, output = self.sweep([SWEEP.QUOTA_EXIT])

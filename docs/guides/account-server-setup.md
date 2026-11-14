@@ -150,8 +150,9 @@ signs in through an Admin invitation becomes an Admin.
   `revocation_pending` and a member whose `held` is not empty carry a
   change the log did not record: the store holds it, nobody joins or acts
   through it, and making the same change again closes it (for a member,
-  `held` names which: `revoke`, `disable` or `delete`). Anyone else gets
-  403.
+  `held` names which: `revoke`, `disable` or `delete`). With no session
+  the answer is 401; a session of a person who is not an Admin, or a
+  request from another origin, gets 403.
 
 ## 6. Declare what people connect
 

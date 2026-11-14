@@ -978,27 +978,6 @@ let observe_pre_dispatch_serialization ?request_wire_observer observation =
          (Request_wire_observer.show_failure failure))
 ;;
 
-let observe_request_wire
-      ?request_wire_observer
-      ~capture_id
-      ~(config : Provider_config.t)
-      ~http_codec
-      ~stream
-      ~body
-      ()
-  =
-  let observation =
-    Request_wire_observer.observation
-      ~capture_id
-      ~provider:(Provider_registry.provider_name_of_config config)
-      ~model:config.model_id
-      ~http_codec:(Provider_http_codec.fingerprint_tag http_codec)
-      ~stream
-      ~body
-  in
-  observe_pre_dispatch_serialization ?request_wire_observer observation
-;;
-
 (** Strip query string and userinfo from a URL before logging.  A caller-owned
     [Provider_config.t] may contain an arbitrary endpoint; a misconfigured one like
     [https://user:token@api.example.com/v1?token=abc] must not leak the

@@ -128,15 +128,25 @@ let latest_ts_probe_rows = 64
    rows: this runs once per store, and the summary path runs it once per
    keeper, so retaining [latest_ts_probe_rows] trees per store made the
    resident set scale with keeper count — the axis RFC-0372 §5 gates Phase 2
-   on. Same value as [latest_ts_of_entries] over the same window. *)
+   on. Same value as [latest_ts_of_entries] over the same window.
+
+   The summary reruns on every trajectory write, at most once a second, and
+   probes every keeper's metric and receipt store each time, while a minute
+   changes only a few of them (3 of 29 metric stores and 1 of 29 receipt
+   stores, 2026-11-13). Re-parsing the unchanged ones was 13.6% of the
+   server's sampled allocation (memprof, 1.1 GB in 50 s), so the view keeps
+   each store's answer until its files change. *)
+let latest_ts_view =
+  Dated_jsonl.recent_view latest_ts_probe_rows ~f:(fun json ->
+    let ts = extract_ts json in
+    if ts > 0.0 then Some ts else None)
+
 let latest_store_ts source location label : float option =
   if not (Sys.file_exists (Dated_jsonl.Store.dir location)) then None
   else
     match Dated_jsonl.open_store location with
     | store ->
-      Dated_jsonl.filter_map_recent store latest_ts_probe_rows ~f:(fun json ->
-        let ts = extract_ts json in
-        if ts > 0.0 then Some ts else None)
+      Dated_jsonl.read_recent_view latest_ts_view store
       |> List.fold_left max_ts_opt None
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception exn ->

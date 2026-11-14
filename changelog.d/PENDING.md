@@ -1,0 +1,6 @@
+### Internal
+
+- A pull request that adds or edits a malformed changelog fragment no longer
+  merges. The required `changes` check now validates the fragments a pull
+  request changes; the separate fragment workflow, which nothing required,
+  keeps only its on-demand whole-directory run (#42280, #PENDING).

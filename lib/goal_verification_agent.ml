@@ -481,31 +481,33 @@ let process_pending_work ?(sw : Eio.Switch.t option = None)
     | Error _ when recovered -> Committed
     | Error detail -> defer ~goal_id:work.goal_id (Review_not_bound {detail})
     | Ok (_, (request_id, criterion, _)) ->
+      (* One lookup authority per processing: a new attempt, the first attempt
+         and the dispatch check all read the same value. *)
+      let lookup_authority = Eio.Lazy.from_fun ~cancel:`Record (fun () ->
+        Verification_authority_tools.create_goal_review ~config ~goal_id:work.goal_id) in
+      let prepare_authority () = Eio.Lazy.force lookup_authority in
       let operation () =
-        let* selected = Worker.frontier ~store ~installation_id:Worker.host_installation_id
+        let* selected = Worker.frontier ~authority:prepare_authority ~store
+          ~installation_id:Worker.host_installation_id
           ~package_id:Worker.host_package_id ~goal_id:work.goal_id ~request_id ~new_run
           |> Result.map_error worker_detail in
-        let* retained, prepared_authority = match selected with
-          | Some retained -> Ok (retained, None)
+        let* retained = match selected with
+          | Some retained -> Ok retained
           | None ->
-            let* authority = Verification_authority_tools.create_goal_review ~config ~goal_id:work.goal_id in
+            let* authority = prepare_authority () in
             let subject = Verification_authority_tools.goal_review_subject authority in
             let* () = if subject.request_id=request_id && Goal_store.criterion_equal subject.criterion criterion
               then Ok () else Error "Goal proof changed during original preparation" in
             let* original = Original.prepare ~attempt:0 ~authority in
-            let* retained = Worker.retain ~store ~installation_id:Worker.host_installation_id ~package_id:Worker.host_package_id
+            Worker.retain ~store ~installation_id:Worker.host_installation_id ~package_id:Worker.host_package_id
               ~run:(new_run ()) original |> Result.map_error worker_detail in
-            Ok (retained, Some authority) in
         active := Some retained;
         let* () = Host.ensure_registered ~registry retained |> Result.map_error Host.error_to_string in
         let* restored = Worker.restored_receipt retained |> Result.map_error worker_detail in
         let execution = match restored with
           | Some receipt -> Ok receipt
           | None ->
-            let authority = match prepared_authority with
-              | Some authority -> Ok authority
-              | None -> Verification_authority_tools.create_goal_review ~config ~goal_id:work.goal_id in
-            (match authority with
+            (match prepare_authority () with
              | Error detail -> Error (Worker.Authority_changed detail)
              | Ok authority -> Worker.run ~store ~retained ~authority ~sw
                  ~provider_rest:Verification_retry.provider_rest ()) in

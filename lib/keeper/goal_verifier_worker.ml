@@ -492,7 +492,19 @@ let retryable_refusal retained evidence =
   | [] -> Ok false
   | _::_ -> let* () = decode (Verifier_review_owner.retry_result disposition) in Ok true
 
-let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
+(* HIGH-RISK-UNREVIEWED: a new attempt asks the parent's question with the
+   lookup authority prepared now. [authority] is forced only on the way to a
+   new attempt, before its identity is allocated; restoring an intended
+   successor uses its pinned body and never prepares authority again. A
+   changed question forces it and allocates nothing. *)
+let successor_of ~authority parent =
+  let* current = authority () |> Result.map_error (fun detail -> Authority_changed detail) in
+  V.successor ~authority:current parent.original |> Result.map_error (function
+    | V.Question_changed -> Authority_changed "the Goal proof question changed after its first review attempt"
+    | V.Prompt_unavailable detail -> Authority_changed ("Goal review prompt unavailable: " ^ detail)
+    | V.Successor_unavailable detail -> Original_invalid detail)
+
+let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
   let* _ = decode (key ~goal_id ~request_id ~attempt:0) in
   let* discovery = discover_subjects ~store in
   let selected = List.filter (fun ((observed_goal,observed_request),_) ->
@@ -520,12 +532,14 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
       | Some grant when grant.parent_digest = parent.record.request_digest ->
         decode (Verifier_review_owner.terminal_result disposition)
       | Some _ -> invalid "Goal explicit retry names another parent" in
-    let* expected = decode (V.successor parent.original) in
+    (* The parent's [Successor_intended] digest pins the child's whole body,
+       so its lookup grants are the ones it was prepared with. Here the child
+       must also ask the parent's question as its next attempt. *)
     let* child_key = decode (original_key child) in
     let* () = if successor.Progress.request_id = child_key
-        && Yojson.Safe.equal (V.to_json expected) (V.to_json child)
+        && V.is_successor_of ~parent:parent.original child
         && run.run_id <> parent.run.run_id then Ok ()
-      else invalid "Goal successor changed its complete original or reused the previous run" in
+      else invalid "Goal successor changed its question or reused the previous run" in
     let* child = retain_with_grant ~store ~installation_id ~package_id ~run ~explicit_retry child in
     let* _ = match Progress.phase (progress parent) with
       | Progress.Subdividing _ -> advance ~store parent (Progress.Successor_observed successor.request_id)
@@ -559,7 +573,7 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
       let* retryable = retryable_refusal parent evidence in
       if not retryable || not automatic then Ok (Some parent)
       else
-        let* child = decode (V.successor parent.original) in
+        let* child = successor_of ~authority parent in
         let run = new_run () in
         let* _ = decode (summary child run) in
         let* () = if run.run_id <> parent.run.run_id then Ok ()
@@ -581,14 +595,14 @@ let select_frontier ~automatic ~store ~installation_id ~package_id ~goal_id ~req
   | first::rest when V.attempt first.original = 0 -> walk first rest
   | _::_ -> invalid "Goal frontier is missing its first original attempt"
 
-let frontier ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
+let frontier ~authority ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
   serialized_subject ~store ~goal_id ~request_id (fun () ->
-    select_frontier ~automatic:true ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run)
+    select_frontier ~automatic:true ~authority ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run)
 
-let request_retry ~store ~installation_id ~package_id ~goal_id ~request_id ~requested_by ~new_run =
+let request_retry ~authority ~store ~installation_id ~package_id ~goal_id ~request_id ~requested_by ~new_run =
   serialized_subject ~store ~goal_id ~request_id (fun () ->
   let* _ = decode (text "requested_by" ["requested_by", `String requested_by]) in
-  let* parent = select_frontier ~automatic:false ~store ~installation_id ~package_id
+  let* parent = select_frontier ~automatic:false ~authority ~store ~installation_id ~package_id
     ~goal_id ~request_id ~new_run in
   match parent with
   | None -> Ok ()
@@ -598,7 +612,7 @@ let request_retry ~store ~installation_id ~package_id ~goal_id ~request_id ~requ
       let* _ = retryable_refusal parent evidence in
       let* _, disposition = decode (refusal_receipt parent evidence) in
       let* () = decode (Verifier_review_owner.terminal_result disposition) in
-      let* child = decode (V.successor parent.original) in
+      let* child = successor_of ~authority parent in
       let run = new_run () in
       let* _ = decode (summary child run) in
       let* () = if run.run_id <> parent.run.run_id then Ok () else invalid "Goal retry reused its parent's run" in
@@ -608,7 +622,7 @@ let request_retry ~store ~installation_id ~package_id ~goal_id ~request_id ~requ
         ~request:(request_json child run grant)
         |> Result.map_error (fun e -> Store_unavailable (Owner.error_to_string e)) in
       let* _ = advance ~store parent (Progress.Successor_intended successor) in
-      let* _ = select_frontier ~automatic:false ~store ~installation_id ~package_id
+      let* _ = select_frontier ~automatic:false ~authority ~store ~installation_id ~package_id
         ~goal_id ~request_id ~new_run in Ok ()
     | Dispatch_pending (Some (Progress.Outcome_unknown _)) ->
       Error (Execution_pending "The original Goal verification outcome is unknown; no new review was started. Inspect its original run.")
@@ -637,11 +651,17 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
       | Dispatch_pending _ -> Error (Execution_pending "Goal reviewer may have dispatched; no automatic replay")
       | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
       | Rejected _ | Subdividing _ | Subdivided _ -> invalid "Goal review frontier changed" in
-    let* () = if V.matches_authority retained.original authority then Ok ()
-      else Error (Authority_changed "Goal subject or complete lookup authority differs") in
-    let* () = if String.equal (V.output_contract retained.original)
-        (Verifier_review_original.canonical_output_contract ()) then Ok ()
-      else invalid "Goal retained output contract differs from the reviewer protocol" in
+    let* () = if V.question_matches retained.original authority then Ok ()
+      else Error (Authority_changed "Goal subject or submitted evidence differs") in
+    let* () = match V.authority_change retained.original authority with
+      | Error detail -> invalid detail
+      | Ok (Some change) -> Error (Authority_changed (Verifier_review_authority_change.to_string change))
+      | Ok None ->
+        (* The same authority digest names the same tools, so other names mean
+           the retained original disagrees with its own digest. *)
+        if V.lookup_schemas retained.original = List.map (fun (tool : Types_core.tool_schema) -> tool.name)
+            (A.goal_review_lookup authority).schemas then Ok ()
+        else invalid "Goal retained lookup tools differ from their authority digest" in
     let* dispatching = advance ~store retained Progress.Dispatch_intended in
     let current = ref dispatching in
     let unknown = ref false in

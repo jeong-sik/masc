@@ -125,15 +125,19 @@ val inventory_by_goal :
     no dispatch or cross-Goal authority. *)
 
 val frontier :
+  authority:(unit -> (Verification_authority_tools.goal_review, string) result) ->
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> request_id:string -> new_run:(unit -> run_identity) ->
   (retained option, error) result
 (** Restore the exact linked original before preparing a new input. A definite
     terminal refusal with typed retryable runtimes may retain one successor;
-    its complete input and fixed run are staged before the parent intent.
-    Restart restores that staged child without calling [new_run] or rendering
-    prompts. Once the parent has observed a successor, its actual retained
-    record and progress are required; a missing or different child is an error,
+    its complete input and fixed run are staged before the parent intent. The
+    successor asks the parent's question with the lookup authority [authority]
+    prepares; [authority] is forced only to allocate it, and a changed
+    question allocates nothing.
+    Restart restores that staged child without calling [new_run], [authority]
+    or rendering prompts. Once the parent has observed a successor, its actual
+    retained record and progress are required; a missing or different child is an error,
     never a fresh [Captured] replacement or another unknown dispatch.
     A noncanonical key for this exact Goal/request refuses selection even when
     a canonical original exists; another Goal or request's noncanonical key
@@ -144,6 +148,7 @@ val frontier :
     retention and run. *)
 
 val request_retry :
+  authority:(unit -> (Verification_authority_tools.goal_review, string) result) ->
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> request_id:string -> requested_by:string ->
   new_run:(unit -> run_identity) -> (unit, error) result
@@ -153,7 +158,9 @@ val request_retry :
     its required stated reason. The exact reviewer result stays in its receipt;
     the Goal admission projection grants no judgment or automatic retry.
     Store the actor/parent
-    authorization in the complete staged child before acknowledging it.
+    authorization in the complete staged child before acknowledging it. The
+    child asks the parent's question with the lookup authority [authority]
+    prepares now.
     An ordinary wake or judgment grants no retry. An active or unknown dispatch
     returns [Execution_pending], so the caller cannot report a new retry as
     accepted while its original result is unresolved. *)

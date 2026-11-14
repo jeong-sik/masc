@@ -6415,6 +6415,11 @@
  (libraries masc.machine_configuration masc_test_deps masc.fusion_core masc.browser_lane masc.msx_lane masc.msx_tool masc.dos_lane masc.tool_schemas eio eio_main yojson unix))
 
 (test
+ (name test_lane_addon_row_actions)
+ (modules test_lane_addon_row_actions)
+ (libraries alcotest yojson masc))
+
+(test
  (name test_lane_addon_surface)
  (modules test_lane_addon_surface)
  (libraries alcotest yojson masc masc.server masc.masc_tool_dispatch

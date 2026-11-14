@@ -35,12 +35,27 @@ val run_schedule_runner_tick :
 
 val run_periodic_task_gc : Workspace.config -> days:int -> unit
 (** One archive-first task-only GC pass (audit 2026-10-07 F-06 / D6-11),
-    run from its own 24h maintenance block: first due at startup, then every
+    run from {!run_daily_retention}: first due at startup, then every
     24h of uptime, independent of the JSONL-prune outcome. Terminal tasks
     older than [days] move to [tasks-archive.json]; non-terminal tasks are
     never archived, and old workspace messages and backend pubsub are never
     touched. Failures are logged here and never propagate to the cleanup
     loop. *)
+
+val run_periodic_credential_prune : Workspace.config -> now:float -> unit
+(** HIGH-RISK-UNREVIEWED: deletes auth credentials (#45358). One
+    {!Auth_token_prune.run} retirement pass over the workspace's credential
+    store: credentials whose own [expires_at] is at or before [now], and
+    redirect stubs whose target is gone, are removed; live, undecodable and
+    mismatched credentials are kept. A store that cannot be read retires
+    nothing. Refusals and per-credential failures are logged here and never
+    propagate to the cleanup loop. *)
+
+val run_daily_retention :
+  Workspace.config -> task_archive_retention_days:int -> now:float -> unit
+(** What the 24h maintenance block runs: {!run_periodic_task_gc}, then
+    {!run_periodic_credential_prune}. First due at startup, then every 24h of
+    uptime. A failure of one pass does not skip the other. *)
 
 val recover_keeper_msg_requests_on_startup :
   base_path:string -> Keeper_msg_async.recovery_report

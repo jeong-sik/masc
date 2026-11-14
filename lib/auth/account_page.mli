@@ -12,11 +12,32 @@
     writes no [style] attribute: a nonce covers a [<style>] element and never
     an attribute, so the policy would drop it. *)
 
-(** [style-src 'nonce-<nonce>']: the directive a policy needs so that a
+(* HIGH-RISK-UNREVIEWED: a nonce is the one part of a policy that changes
+   with each answer, and a browser runs and applies what carries it. [draw]
+   is the only maker of one, so no caller can put another text there. *)
+
+(** The nonce of one answer. *)
+module Nonce : sig
+  type t
+
+  (** 32 bytes from the CSPRNG of {!Random_id}, as lowercase hex: a value a
+      browser cannot guess, of hex digits only. An answer draws its own. *)
+  val draw : unit -> t
+
+  (** ['nonce-<value>'], quotes included: the source of a [script-src] or
+      [style-src] directive. *)
+  val source : t -> string
+
+  (** [nonce="<value>"]: the attribute of a [<script>] or [<style>]
+      element. *)
+  val attribute : t -> string
+end
+
+(** [style-src 'nonce-<value>']: the directive a policy needs so that a
     browser applies the sheet {!document} wrote with the same [nonce]. With
     [default-src 'none'] and without this directive the browser applies no
     style at all. *)
-val style_source : nonce:string -> string
+val style_source : nonce:Nonce.t -> string
 
 (** [base-uri 'none'; form-action 'none'; frame-ancestors 'none']: the three
     limits [default-src] does not set, for a page that submits no form. Under
@@ -34,6 +55,6 @@ val base_sheet : string
 (** [document ~nonce ~title body]: an HTML document whose head holds [title]
     and the sheet, and whose body is the line that names the place and then
     [body]. [title] and [body] are written as
-    they are given, so they hold no request data. [nonce] is a value a browser
-    cannot guess, fresh for each answer, of letters and digits only. *)
-val document : nonce:string -> title:string -> string -> string
+    they are given, so they hold no request data. [nonce] is the nonce of
+    the answer, on the [<style>] element. *)
+val document : nonce:Nonce.t -> title:string -> string -> string

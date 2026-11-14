@@ -53,7 +53,8 @@ val github_callback_path : string
 (** The pages and the routes of a person (plan, preview scope P3, and
     S1a-3b), on top of {!add_routes}:
     - [GET /] and [GET /accounts/invite], the pages of {!Auth_preview}, open
-      ([Always_public]); each page gets a fresh nonce from [draw]
+      ([Always_public]); each page gets a fresh nonce
+      ({!Account_page.Nonce.draw})
     - [GET /api/v1/auth/whoami], judged by {!Auth_gate.decide} on one
       snapshot of the zone. It reads every [Authorization] and
       [x-masc-internal-token] field and every session cookie, so two of them

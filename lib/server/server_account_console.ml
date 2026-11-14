@@ -75,14 +75,14 @@ let unavailable ~nonce reqd =
     reqd
 ;;
 
-let page ~draw (_ : Httpun.Request.t) reqd =
+let page (_ : Httpun.Request.t) reqd =
   match Web_dashboard.load_dashboard_asset bundle_page with
   | Ok { Web_dashboard.body; version = _ } ->
     Http.Response.html
       ~headers:[ no_store; referrer_policy; "content-security-policy", policy ]
       body
       reqd
-  | Error (_ : Web_dashboard.asset_load_error) -> unavailable ~nonce:(draw ()) reqd
+  | Error (_ : Web_dashboard.asset_load_error) -> unavailable ~nonce:(Account_page.Nonce.draw ()) reqd
 ;;
 
 (* A file the bundle cannot give now. The answer of the operator dashboard
@@ -126,9 +126,9 @@ let base_sheet request reqd =
     reqd
 ;;
 
-let add_routes ~draw router =
+let add_routes router =
   router
-  |> Server_route.get Server_route.Always_public page_path (page ~draw)
+  |> Server_route.get Server_route.Always_public page_path page
   |> Server_route.get Server_route.Always_public base_sheet_path base_sheet
   |> Server_route.prefix_get Server_route.Always_public assets_prefix asset
 ;;

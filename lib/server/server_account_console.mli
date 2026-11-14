@@ -47,7 +47,6 @@ val policy : string
     server; [None] when it can. *)
 val unreadable : unit -> string option
 
-(** Registers the three routes. [draw] gives the nonce of the sheet of the
-    page that says the console cannot be opened; the account server passes
-    the [draw] of its {!Login_routes.t}. *)
-val add_routes : draw:(unit -> string) -> Http_server_eio.Router.t -> Http_server_eio.Router.t
+(** Registers the three routes. The page that says the console cannot be
+    opened draws the nonce of its sheet ({!Account_page.Nonce.draw}). *)
+val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

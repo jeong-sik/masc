@@ -3336,6 +3336,34 @@ let%test "classify_network_exn: Multiple_io keeps a leading reset as a known kin
   | None -> false
 ;;
 
+(* ENETDOWN read as Unknown until #52045, and a composite dropped it. It now
+   names a missing route, so a leading one is the first known kind and wins
+   over a later reset, as any known kind does. *)
+let%test "classify_network_exn: Multiple_io keeps a leading no-route errno as a known kind" =
+  match
+    classify_network_exn
+      (multiple_io_exn
+         [ Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETDOWN, "connect", ""))
+         ; Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNRESET, "read", ""))
+         ])
+  with
+  | Some (NetworkError { kind = Unreachable; _ }) -> true
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
+  | Some (ProviderTerminal _ | ProviderFailure _)
+  | None -> false
+;;
+
 let%test "classify_network_exn: Multiple_io does not prefer a reset over a refusal" =
   match
     classify_network_exn

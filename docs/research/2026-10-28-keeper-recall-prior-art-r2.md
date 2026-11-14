@@ -2,7 +2,7 @@
 
 - 날짜: 2026-10-28 (KST). 외부 자료는 같은 날 확인했다.
 - 범위: [r1](2026-10-28-keeper-recall-prior-art-r1.md) 뒤에 운영자가 가져온 LambdaDB 글(2026-10-25)과, 그 글이 건드리는 쟁점인 쓰기 전략, 전체 이력 대 검색, 맞게 찾고도 안 쓰는 문제, 다자 대화를 다룬다.
-- 방법: 페이지는 웹 가져오기 도구로 읽었다. 이 도구는 작은 모델이 페이지를 요약해 주므로 수치는 요약이 인용한 문장이고 원문 표와 대조하지 못했다. 검색 결과 요약만 본 것은 따로 표시했다. 우리 코드와 라이브 설정은 직접 읽었다.
+- 방법: 페이지는 웹 가져오기 도구로 읽었다. 이 도구는 작은 모델이 페이지를 요약해 주므로 수치는 요약이 인용한 문장이고 원문 표와 대조하지 못했다. Zep 만 2026-11-14 에 원문 PDF 의 표와 대조했다. 검색 결과 요약만 본 것은 따로 표시했다. 우리 코드와 라이브 설정은 직접 읽었다.
 - 확신도: H 는 공식 문서·소스를 직접 읽음, M 은 한 번 요약을 거친 1차 자료나 공개 저장소 문서, L 은 벤더 블로그나 검색 결과 요약.
 - 이 문서는 조사다. 결정은 [RFC-keeper-recall-reaches-the-turn](../rfc/RFC-keeper-recall-reaches-the-turn.md) 에 있다.
 
@@ -29,7 +29,8 @@
 | Mem2ActBench, ACL 2026 long.370 | 학회 논문 | 세션 2,029개와 도구 과제 400개. 사용자가 다시 말하지 않아도 기억을 도구 인자에 반영해야 하는 과제. 메모리 프레임워크 일곱은 도구 인자를 기억으로 채우는 데 약하다. 프레임워크별 수치는 페이지에 없다 | M |
 | GroupMemBench, arXiv 2605.14498 (2026-05-14) | 프리프린트 | 다자 대화. 가장 좋은 시스템이 평균 46.0%, 지식 갱신 27.1%, 용어 모호성 37.7%. 단순 BM25 가 대부분의 에이전트 메모리 시스템과 같거나 낫다. 수집 과정이 그룹 대화의 구조·어휘 단서를 지운다고 해석 | M |
 | BEAM, arXiv 2510.27246 (ICLR 2026) | 학회 논문 | 100개 대화, 2,000문항, 최대 10M 토큰. 긴 문맥 모델은 대화가 길수록 나빠진다 | L |
-| Zep(2025), Hindsight arXiv 2512.12818, Mem0(2026-04), Couchbase, Tigerdata(2026-09), MemMachine | 벤더 글과 프리프린트 | 검색 결과 요약만 봤다. Zep 은 GPT-4o 에서 71.2% 대 전체 컨텍스트 63.8%. Hindsight 는 OSS-20B 에서 83.6% 대 39.0%. Mem0 는 LongMemEval 94.4, BEAM 1M 64.1, 10M 48.6. Couchbase 는 원문 메시지가 요약을 이김(LoCoMo 0.826 대 0.675). Tigerdata 는 LLM 추출 사실을 빼도 F1 이 안 떨어지고 수집 시간이 약 절반 | L |
+| Rasmussen 등, Zep, arXiv 2501.13956v1 (2025-01-20) | 벤더 프리프린트 | LongMemEval-S, 대화 평균 약 115k 토큰, 판정은 GPT-4o. 그래프는 gpt-4o-mini 로 만들고 답변 모델만 바꿨다(§4.1). Table 2(7쪽): 전체 컨텍스트는 gpt-4o-mini 55.4%, gpt-4o 60.2%. Zep 은 gpt-4o-mini 63.8%, gpt-4o 71.2%. 답변 입력은 평균 115k 대 1.6k 토큰. 격차는 gpt-4o-mini 8.4점, gpt-4o 11.0점. Zep 회사가 자기 제품을 잰 값 | H |
+| Hindsight arXiv 2512.12818, Mem0(2026-04), Couchbase, Tigerdata(2026-09), MemMachine | 벤더 글과 프리프린트 | 검색 결과 요약만 봤다. Hindsight 는 OSS-20B 에서 83.6% 대 39.0%. Mem0 는 LongMemEval 94.4, BEAM 1M 64.1, 10M 48.6. Couchbase 는 원문 메시지가 요약을 이김(LoCoMo 0.826 대 0.675). Tigerdata 는 LLM 추출 사실을 빼도 F1 이 안 떨어지고 수집 시간이 약 절반 | L |
 | Jev 공식 문서(docs.typesafe.ai/models) | 공식 문서 | Jev 1.14 가 2026-10-14 에 나왔고 `jev-latest` 가 그것을 가리킨다. 별칭은 새 릴리스로 옮겨 가서 "코드를 안 바꿔도 답이 바뀔 수 있다"고 하며 버전 고정을 권한다. 기본 한도는 요청당 문맥(`state` 와 모든 질문의 합) 64k, 질문당 문맥(`state` 와 질문 하나의 합) 32k 토큰. 긴 맥락 헤더를 쓰면 262k 까지 되지만 "더 느리고 덜 정확하다". 가격은 입력 100만 토큰당 $0.042 이고 출력은 무료. 고객 데이터로 학습하지 않는다. 같은 입력에 같은 출력인지는 문서에 없다 | M |
 
 ## 3. 해석
@@ -40,9 +41,9 @@ Yuan 등은 검색 방식이 정확도를 20점 움직이고 쓰기 전략은 3~
 
 우리 쪽에서 읽는 법은 둘이다. 하나는 사실의 98%를 LLM(Librarian)이 쓰는데 그 레인이 최근 14일 시도의 42% 를 실패했다는 점이다([RFC §2.6](../rfc/RFC-keeper-recall-reaches-the-turn.md)). 쓰기 때 LLM 에 기대는 비용이 크다. 다른 하나는 MERIT 의 결과다. 갱신된 사실이 있는 도구 사용 과제에서는 갱신 시점에 구조화한 방식이 임베딩 검색보다 안정적이었다. 낡은 값을 고치고 지우는 Librarian 의 일은 이 쪽에 해당한다. 그래서 "Librarian 이 의미 없다"는 결론은 이 자료로 나오지 않는다. 의미가 있다면 갱신과 정리에 있고, 추려 쓰는 일 자체는 아니다.
 
-### 3.2 전체 이력 대 검색은 답변 모델에 달렸다
+### 3.2 전체 이력 대 검색은 실험마다 다르다
 
-LambdaDB 에서 전체 이력(105K 토큰)과 검색(5K 토큰)의 차이는 500문항 중 4문항이다. 대등하다고 읽어야 하고 보고서도 우월성을 부인한다. 같은 규모의 이력에서 Zep 의 2025년 실험은 GPT-4o 로 63.8% 대 71.2% 였고, Hindsight 는 20B 모델로 39.0% 대 83.6% 였다. 답변 모델이 강해지면 전체 이력이 따라잡는다. 우리 키퍼는 백엔드가 여럿이라 RFC §7 의 팔 D(전체 노출)를 런타임별로 따로 본다. MERIT 는 전체 리플레이가 달러당 효용이 낮다고 했지만, 우리 헌법은 비용을 판단 기준에 넣지 않는다.
+LambdaDB 에서 전체 이력(105K 토큰)과 검색(5K 토큰)의 차이는 500문항 중 4문항이다. 대등하다고 읽어야 하고 보고서도 우월성을 부인한다. 비슷한 규모의 이력(대화 평균 약 115k 토큰)에서 Zep 의 2025년 실험은 전체 컨텍스트 대 Zep 이 gpt-4o-mini 로 55.4% 대 63.8%, gpt-4o 로 60.2% 대 71.2% 였다(arXiv 2501.13956 Table 2, 7쪽). 이 실험 안에서 답변 모델을 gpt-4o 로 바꾸자 격차는 8.4점에서 11.0점으로 커졌다. Hindsight 는 20B 모델로 39.0% 대 83.6% 였다. LambdaDB 와 Zep 은 판정자부터 다르고(Jev 대 GPT-4o), Hindsight 는 검색 결과 요약만 봤다. 세 결과를 이어 붙여 답변 모델의 효과를 읽을 수 없다(§3.5). 우리 키퍼는 백엔드가 여럿이라 RFC §7 의 팔 D(전체 노출)를 런타임별로 따로 본다. MERIT 는 전체 리플레이가 달러당 효용이 낮다고 했지만, 우리 헌법은 비용을 판단 기준에 넣지 않는다.
 
 ### 3.3 맞게 찾아도 안 쓴다
 
@@ -83,7 +84,7 @@ LongMemEval, LoCoMo, BEAM, GroupMemBench 는 질문이 과거를 직접 묻는�
 ## 5. 확인하지 못한 것
 
 - 요약 도구를 거친 수치는 원문 표와 대조하지 못했다. 특히 MERIT 의 55% 는 "갱신된 사실, 임베딩 검색 조건"의 값으로 읽었다.
-- 검색 결과 요약만 본 자료(Zep, Hindsight, Mem0, Couchbase, Tigerdata, MemMachine)는 원문을 열지 않았다.
+- 검색 결과 요약만 본 자료(Hindsight, Mem0, Couchbase, Tigerdata, MemMachine)는 원문을 열지 않았다.
 - Jev 가 같은 입력에 같은 답을 내는지 공식 문서에 없다.
 - 이 자료들은 모두 대화나 과제 한 가지를 단일 사용자나 합성 다자 설정에서 잰다. 여러 Keeper 가 한 저장소를 쓰는 우리 상황과 같은 설정은 없다.
 
@@ -96,5 +97,6 @@ LongMemEval, LoCoMo, BEAM, GroupMemBench 는 질문이 과거를 직접 묻는�
 - Shen 등, Mem2ActBench (ACL 2026): https://aclanthology.org/2026.acl-long.370/
 - Yang 등, GroupMemBench: https://arxiv.org/abs/2605.14498
 - Tavakoli 등, Beyond a Million Tokens (BEAM): https://arxiv.org/abs/2510.27246
+- Rasmussen, Paliychuk, Beauvais, Ryan, Chalef, Zep: A Temporal Knowledge Graph Architecture for Agent Memory: https://arxiv.org/abs/2501.13956 (v1 원문 PDF, 확인 2026-11-14)
 - Hindsight is 20/20: https://arxiv.org/abs/2512.12818
 - TypeSafe Jev 모델 문서: https://docs.typesafe.ai/models

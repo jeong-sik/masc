@@ -176,7 +176,10 @@ let transport_status_json (ctx : http_context) =
              ]
            @
            if grpc_enabled
-           then [ "url", `String (Printf.sprintf "grpc://%s:%d" ctx.host grpc_port) ]
+           then [ "url", `String (Printf.sprintf
+                            "grpc://%s:%d"
+                            Masc_network_defaults.(url_host_to_string (url_host_of_string ctx.host))
+                            grpc_port) ]
            else []) )
     ; "websocket", websocket_discovery_json ctx
     ; "total_sessions", `Int (Transport_bridge.total_session_count ())

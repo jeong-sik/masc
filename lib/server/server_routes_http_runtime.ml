@@ -30,9 +30,7 @@ let json_rpc_error (code : Mcp_error_code.t) message =
 let server_start_time = Server_routes_http_runtime_health_helpers.server_start_time
 
 let authority_host host =
-  match Ipaddr.of_string host with
-  | Ok (Ipaddr.V6 _) -> "[" ^ host ^ "]"
-  | Ok (Ipaddr.V4 _) | Error _ -> host
+  Masc_network_defaults.(url_host_to_string (url_host_of_string host))
 
 let authority_of_host_port host port =
   Printf.sprintf "%s:%d" (authority_host host) port

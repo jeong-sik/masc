@@ -24,24 +24,23 @@ let bind_address_error_to_string = function
       Masc_network_defaults.masc_http_default_host
 ;;
 
+let advertised_base_url ~address ~port =
+  Masc_network_defaults.http_origin
+    ~address:(Masc_network_defaults.advertised_bind_address address)
+    ~port
+;;
+
 let make_http_config ~address ~port : Http.config =
   let config = { Http.default_config with port; host = Ipaddr.to_string address } in
-  let advertised_host =
-    if Server_auth.is_unspecified_host config.host
-    then Masc_network_defaults.masc_http_default_host
-    else config.host
-  in
+  let base_url = advertised_base_url ~address ~port in
   Unix.putenv Env_config_core.host_env_key config.host;
   Unix.putenv Env_config_core.http_port_env_key (string_of_int config.port);
   Unix.putenv
     Env_config_core.mcp_url_env_key
-    (Printf.sprintf "http://%s:%d/mcp" advertised_host config.port);
+    (base_url ^ "/mcp");
   (match Sys.getenv_opt Env_config_core.http_base_url_env_key with
    | Some existing when String.trim existing <> "" -> ()
-   | _ ->
-     Unix.putenv
-       Env_config_core.http_base_url_env_key
-       (Printf.sprintf "http://%s:%d" advertised_host config.port));
+   | _ -> Unix.putenv Env_config_core.http_base_url_env_key base_url);
   config
 ;;
 
@@ -89,7 +88,10 @@ let print_startup_banner
       ~masc_dir
       ~path_diagnostics
   =
-  Printf.printf "MASC MCP Server listening on http://%s:%d\n%!" config.host config.port;
+  Printf.printf
+    "MASC MCP Server listening on http://%s:%d\n%!"
+    Masc_network_defaults.(url_host_to_string (url_host_of_string config.host))
+    config.port;
   Printf.printf "   Base path: %s\n%!" resolved_base;
   if resolved_base <> base_path
   then Printf.printf "   Base path (input): %s\n%!" base_path;

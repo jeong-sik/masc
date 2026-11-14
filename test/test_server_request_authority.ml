@@ -517,6 +517,45 @@ let test_tls_listener_port_is_validated () =
     fail "the TLS port was blamed on another identity"
 ;;
 
+(* A server started with --host ::1 writes its own base URL and reads it back
+   as the explicit trusted identity. Without brackets the URL was
+   http://::1:18977, the policy refused it, and the boot ended (#46375,
+   #51833). *)
+let test_ipv6_listener_base_url_is_its_own_trusted_identity () =
+  let port = 18977 in
+  let base_url =
+    Server_bootstrap_http.advertised_base_url
+      ~address:(Ipaddr.V6 Ipaddr.V6.localhost)
+      ~port
+  in
+  check string "base URL of a listener on ::1" "http://[::1]:18977" base_url;
+  let policy =
+    trust_policy ~bind_host:"::1" ~bind_port:port ~explicit_base_url:base_url ()
+  in
+  let admitted = admitted_http1 ~policy [ "Host", "[::1]:18977" ] in
+  check string "admitted authority keeps the brackets" "[::1]:18977"
+    (Authority.rendered admitted);
+  check string "a wildcard IPv6 listener is dialled on the loopback peer"
+    "http://127.0.0.1:18977"
+    (Server_bootstrap_http.advertised_base_url
+       ~address:(Ipaddr.V6 Ipaddr.V6.unspecified)
+       ~port);
+  let global = "fd00::1" in
+  let global_url =
+    Server_bootstrap_http.advertised_base_url
+      ~address:(Ipaddr.of_string_exn global)
+      ~port
+  in
+  check string "base URL of a listener on a routed IPv6 address"
+    "http://[fd00::1]:18977" global_url;
+  let global_policy =
+    trust_policy ~bind_host:global ~bind_port:port ~explicit_base_url:global_url ()
+  in
+  check string "its Host is admitted with brackets" "[fd00::1]:18977"
+    (Authority.rendered
+       (admitted_http1 ~policy:global_policy [ "Host", "[fd00::1]:18977" ]))
+;;
+
 let test_request_context_preserves_scheme_and_trust () =
   let local = admitted_http1 [ "host", "localhost:8935" ] in
   check_scheme "local scheme" Authority.Http local;
@@ -1005,6 +1044,10 @@ let () =
             `Quick
             test_tls_listener_identity_yields_to_the_cleartext_bind
         ; test_case "port is validated" `Quick test_tls_listener_port_is_validated
+        ; test_case
+            "an IPv6 listener trusts the base URL it writes"
+            `Quick
+            test_ipv6_listener_base_url_is_its_own_trusted_identity
         ] )
     ]
 ;;

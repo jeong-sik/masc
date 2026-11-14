@@ -5,6 +5,8 @@
 
 open Result.Syntax
 
+module Progress = Lane_addon_request_progress
+
 type run_identity = { run_id : string; started_at : float }
 
 type observation = Waiting of Yojson.Safe.t | Outcome_unknown of Yojson.Safe.t

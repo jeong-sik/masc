@@ -637,10 +637,10 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
    explicit wake. No wall-clock expiry. *)
 
 (* One claimed review. [requested] retains a wake that arrived while the
-   review ran. [abandon] is resolved when the Goal leaves [Verifying] through
-   an operator Drop or Reopen: the review is cancelled and its claim released,
-   so a verifier lane that never answers does not keep a slot or block the
-   Goal's next request. A Promise is used because the operator's transition
+   review ran. [abandon] is resolved when a Drop, a Reopen or a criterion edit
+   leaves the Goal unable to take the review's verdict: the review is cancelled
+   and its claim released, so a verifier lane that never answers does not keep
+   a slot or block the Goal's next request. A Promise is used because the operator's transition
    can run on another domain; resolving one is domain-safe. *)
 type claim =
   { work : pending_work

@@ -26,19 +26,6 @@ val bootstrap_prompt_registry_from_binary : base_path:string -> unit
     probes): the runtime prompt directory under the config root is written
     only by the server's boot sync. *)
 
-val configure_agent_core_model_catalog_env :
-  ?env:(string -> string option) ->
-  ?agent_core_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
-  ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
-  ?publish_catalog:(Llm_provider.Catalog_snapshot.t -> unit) ->
-  unit ->
-  string option
-(** Admit and publish only an operator-supplied [AGENT_CORE_MODEL_CATALOG] as a
-    complete replacement without a JSON provider overlay. Failed admission
-    retains the previous publication. Without it, require the selected catalog.
-    Config-root and executable-parent full catalogs are deliberately not
-    discovered. *)
-
 val config_load_failure_diagnostic : detail:string -> string
 (** Operator-facing diagnostic for runtime configuration load failures:
     attributes the failure to configuration — explicitly not a

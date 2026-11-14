@@ -1911,7 +1911,7 @@ let runtime_default_set_cmd_exit base_path port agent runtime_id setup_lanes fal
      config writer checks deployment-local provider/model bindings. This
      command edits the resolved runtime file, so its sibling overlay must come
      from that same config root. No server services are started. *)
-  match Server_runtime_bootstrap.configure_agent_core_model_catalog_env () with
+  match Runtime_model_catalog_boot.configure_agent_core_model_catalog_env () with
   | exception Env_config_core.Config_error message -> fail message
   | (_ : string option) ->
   (* With no server answering on the port, the command writes the file
@@ -2199,11 +2199,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
     let config_path = runtime_config_path_for_base_path base_path in
-    let loaded = try
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      Runtime.load_list ~config_path
-      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
-      with Env_config_core.Config_error message -> Error message in
+    let loaded = Runtime_model_catalog_boot.load_standalone_list ~config_path in
     match loaded with
     | Error message ->
       unavailable
@@ -2932,10 +2928,9 @@ let runtime_probe_refused (first, rest) =
 
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
-  match Runtime.load_list ~config_path:runtime_config_path with
-  | Error failure ->
-      Printf.eprintf "runtime-probe failed: %s\n"
-        (Runtime_config_error.to_diagnostic_text ~config_path:runtime_config_path failure);
+  match Runtime_model_catalog_boot.load_standalone_list ~config_path:runtime_config_path with
+  | Error detail ->
+      Printf.eprintf "runtime-probe failed: %s\n" detail;
       1
   | Ok (runtimes, _default, _, _, _) -> (
       match
@@ -4560,13 +4555,7 @@ let runtime_model_info_cmd =
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
-  let loaded =
-    try
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      Runtime.load_list ~config_path
-      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
-    with Env_config_core.Config_error message -> Error message
-  in
+  let loaded = Runtime_model_catalog_boot.load_standalone_list ~config_path in
   match loaded with
   | Error message ->
     prerr_endline (Server_runtime_bootstrap.config_load_failure_diagnostic ~detail:message);

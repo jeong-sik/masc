@@ -1091,7 +1091,7 @@ let test_repo_seed_board_attention_lane_admits () =
      clear. Follow production startup: embedded catalog, then runtime
      loading. *)
   (Llm_provider.Catalog_snapshot.reset ());
-  ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env ());
+  ignore (Runtime_model_catalog_boot.configure_agent_core_model_catalog_env ());
   (match Runtime.init_default ~config_path:runtime_path with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);

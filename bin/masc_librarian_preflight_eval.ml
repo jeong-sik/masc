@@ -99,11 +99,8 @@ let run () =
     let+ cases = parse_dataset ~fact_observed_at (Yojson.Safe.from_string bytes) in bytes, cases
     with Sys_error detail | Yojson.Json_error detail -> Error detail in
   let* config_observation =
-    try
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      Runtime.load_config_observation
-        ~runtime_config_path:(Config_dir_resolver.absolute_path !config) ()
-    with Env_config_core.Config_error detail -> Error detail in
+    Runtime_model_catalog_boot.load_standalone_config_observation
+      ~runtime_config_path:(Config_dir_resolver.absolute_path !config) in
   let* _ = Runtime.init_default_degraded_observation config_observation
     |> Result.map_error Runtime.strict_init_error_to_string in
   Prompt_registry.set_markdown_dir (Config_dir_resolver.absolute_path !prompts);

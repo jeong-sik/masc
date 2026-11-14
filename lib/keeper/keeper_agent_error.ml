@@ -251,6 +251,7 @@ let agent_core_timeout_observation :
          { kind =
              ( Llm_provider.Http_client.Connection_refused
              | Llm_provider.Http_client.Dns_failure
+             | Llm_provider.Http_client.Unreachable
              | Llm_provider.Http_client.Tls_error
              | Llm_provider.Http_client.Local_resource_exhaustion
              | Llm_provider.Http_client.Connection_reset

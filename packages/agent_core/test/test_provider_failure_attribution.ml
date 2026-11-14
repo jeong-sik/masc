@@ -360,6 +360,12 @@ let test_closed_ownership_matrix () =
     with_credential
     (Http.NetworkError
        { message = "local resource detail"; kind = Http.Local_resource_exhaustion });
+  (* No route names neither this host's network nor the endpoint's path. *)
+  check_ownership
+    "no route to the network or host is unclassified"
+    Attribution.Unclassified
+    with_credential
+    (Http.NetworkError { message = "no route detail"; kind = Http.Unreachable });
   check_ownership
     "provider first-token timeout is not widened"
     Attribution.Unclassified

@@ -221,6 +221,11 @@ let test_is_retryable () =
     (Retry.is_retryable (Retry.NetworkError { message = ""; kind = Connection_reset }));
   check
     bool
+    "no route to the network or host is retryable"
+    true
+    (Retry.is_retryable (Retry.NetworkError { message = ""; kind = Unreachable }));
+  check
+    bool
     "timeout retryable"
     true
     (Retry.is_retryable (Retry.Timeout { message = ""; phase = None }));
@@ -369,6 +374,8 @@ let test_error_message_all_variants () =
       , "Network error (connection_refused): refused" )
     ; ( Retry.NetworkError { message = "reset"; kind = Connection_reset }
       , "Network error (connection_reset): reset" )
+    ; ( Retry.NetworkError { message = "no route"; kind = Unreachable }
+      , "Network error (unreachable): no route" )
     ; Retry.Timeout { message = "10s"; phase = None }, "Timeout: 10s"
       (* A timeout that does not say which phase stalled reads the same as
          every other timeout. The phase was in the record and absent from

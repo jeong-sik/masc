@@ -193,6 +193,8 @@ let provider_network_summary ~provider ~kind ~detail =
   | Llm_provider.Http_client.Connection_refused ->
     who ^ " refused the connection; nothing is listening on the runtime endpoint"
   | Llm_provider.Http_client.Dns_failure -> detail_speaks "could not be resolved"
+  | Llm_provider.Http_client.Unreachable ->
+    who ^ " is unreachable; there is no route to its network or host"
   | Llm_provider.Http_client.Tls_error -> who ^ " failed the TLS handshake"
   | Llm_provider.Http_client.Timeout -> who ^ " did not respond in time"
   | Llm_provider.Http_client.Local_resource_exhaustion ->

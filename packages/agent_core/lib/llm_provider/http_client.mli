@@ -20,6 +20,11 @@ type network_error_kind =
   | Connection_refused
   (** Remote endpoint actively refused the connection (ECONNREFUSED). *)
   | Dns_failure (** Hostname resolution failed or returned no results. *)
+  | Unreachable
+  (** No route to the remote network or host (ENETUNREACH, EHOSTUNREACH,
+      ENETDOWN, EHOSTDOWN). The connect or send that raised it ran after the
+      name resolved, so it is not [Dns_failure]. It does not say whether this
+      host's network or the provider's path is down. *)
   | Tls_error
   (** TLS handshake, certificate validation, trust-store discovery, or TLS
       protocol processing failed. *)

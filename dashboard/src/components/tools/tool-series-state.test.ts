@@ -14,6 +14,14 @@ let state: State
 const busy = {
   call_count: 4,
   failure_count: 1,
+  failure_classes: {
+    dependency_unavailable: 1,
+    policy_rejection: 0,
+    runtime_failure: 0,
+    workflow_rejection: 0,
+    operator_cancelled: 0,
+  },
+  failure_unclassified_count: 0,
   deferred_count: 0,
   total_ms: 400,
   p50_ms: 80,
@@ -28,6 +36,14 @@ const busy = {
 const idle = {
   call_count: 0,
   failure_count: 0,
+  failure_classes: {
+    dependency_unavailable: 0,
+    policy_rejection: 0,
+    runtime_failure: 0,
+    workflow_rejection: 0,
+    operator_cancelled: 0,
+  },
+  failure_unclassified_count: 0,
   deferred_count: 0,
   total_ms: 0,
   p50_ms: null,

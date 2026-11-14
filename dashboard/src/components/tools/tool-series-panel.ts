@@ -1,10 +1,10 @@
 // Tool call series panel — hourly or daily totals of the retained tool calls,
-// drawn as calls, failure rate, time spent (and the part of it inside calls that ran a minute
-// or more), latency and result bytes, with the tools that spent the most time.
+// drawn as calls, failure rate, failures by class, time spent (and the part of it inside calls
+// that ran a minute or more), latency and result bytes, with the tools that spent the most time.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import type { ToolMetricsSeriesResponse } from '../../api/schemas/tool-metrics-series'
+import type { ToolMetricsFailureClassCounts, ToolMetricsSeriesResponse } from '../../api/schemas/tool-metrics-series'
 import { formatMsCompact } from '../../lib/format-number'
 import { FilterChips } from '../common/filter-chips'
 import { ObservedMetricChart, type MetricChartSeries } from '../common/observed-metric-chart'
@@ -116,6 +116,52 @@ export function failureRateSeries(series: ToolMetricsSeriesResponse): MetricChar
   ]
 }
 
+type FailureClassKey = keyof ToolMetricsFailureClassCounts
+
+interface FailureClassLine {
+  readonly key: FailureClassKey
+  readonly name: string
+  readonly color: string
+  readonly dashed?: boolean
+}
+
+/**
+ * One line per class of `Tool_result.tool_failure_class`, in a fixed order and
+ * color so a class keeps its line from one window to the next. A class the
+ * server adds has no line until it is listed here; the panel test compares
+ * this list with the keys the server sends.
+ */
+export const FAILURE_CLASS_LINES: readonly FailureClassLine[] = [
+  { key: 'dependency_unavailable', name: '외부 의존 불가', color: 'var(--color-status-warn)' },
+  { key: 'policy_rejection', name: '인자·권한 거절', color: 'var(--color-status-info)' },
+  { key: 'runtime_failure', name: '내부 오류', color: 'var(--color-status-err)' },
+  { key: 'workflow_rejection', name: '업무 규칙 거절', color: 'var(--color-accent-fg)' },
+  { key: 'operator_cancelled', name: '운영자 취소', color: 'var(--color-status-idle)' },
+]
+
+const UNCLASSIFIED_LINE_NAME = '종류 미기록'
+
+/**
+ * Failed calls per bucket, one line for each class they recorded and a dashed
+ * line for the failures that recorded none. Together the lines add up to the
+ * failure line of the call chart.
+ */
+export function failureClassSeries(series: ToolMetricsSeriesResponse): MetricChartSeries[] {
+  return [
+    ...FAILURE_CLASS_LINES.map(line => ({
+      name: line.name,
+      color: line.color,
+      readings: bucketReadings(series, bucket => bucket.failure_classes[line.key]),
+    })),
+    {
+      name: UNCLASSIFIED_LINE_NAME,
+      color: 'var(--color-fg-muted)',
+      dashed: true,
+      readings: bucketReadings(series, bucket => bucket.failure_unclassified_count),
+    },
+  ]
+}
+
 /**
  * Time spent per bucket, and the part of it that went into calls running the
  * long-call line or more. Both are times, so they share one axis, and the
@@ -205,6 +251,9 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
         <${ObservedMetricChart} label="구간별 실패율" unit="%" formatValue=${formatPercent} series=${failureRateSeries(series)} />
       <//>
       <${DetailCard}>
+        <${ObservedMetricChart} label="구간별 실패 종류" unit="회" formatValue=${formatCount} series=${failureClassSeries(series)} />
+      <//>
+      <${DetailCard}>
         <${ObservedMetricChart} label="구간별 실행 시간 합계" unit="ms" formatValue=${formatTotalTime} series=${timeSeries(series)} />
       <//>
       <${DetailCard}>
@@ -214,6 +263,9 @@ function ToolSeriesCharts({ series }: { series: ToolMetricsSeriesResponse }) {
         <${ObservedMetricChart} label="구간별 결과 바이트 합계" unit="B" formatValue=${formatResultBytes} series=${resultBytesSeries(series)} />
       <//>
     </div>
+    ${total.failure_unclassified_count > 0
+      ? html`<p class="text-2xs text-[var(--color-fg-muted)]">실패 종류는 기록하기 시작한 뒤의 호출만 가려요. 이 구간 실패 ${formatCount(total.failure_count)} 중 ${formatCount(total.failure_unclassified_count)}는 종류가 없어서 '${UNCLASSIFIED_LINE_NAME}' 선에 따로 그렸어요.</p>`
+      : null}
     ${unsized > 0
       ? html`<p class="text-2xs text-[var(--color-fg-muted)]">결과 바이트는 크기를 기록하기 시작한 뒤의 호출만 더해요. 이 구간 호출 ${formatCount(total.call_count)} 중 ${formatCount(unsized)}는 크기가 없어서 합계와 가장 큰 결과에 들어 있지 않고, 그런 호출이 든 구간은 그래프에서 뺐어요.</p>`
       : null}

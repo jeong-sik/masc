@@ -81,16 +81,24 @@
  (name runtest)
  (deps (alias runtest-test_keeper_remote_workspace_cleanup)))
 
-; The fixture-/proc cases only: the other classes need a Linux guest with Dune.
+; LiveProcesses reads a fixture /proc. ManagedBuildCleanup runs the native
+; targeted clean and skips itself without a dune on PATH, so the rule depends
+; on that dune: a missing one stops the rule. GuestCleanup, and
+; test_keeper_build_cleanup_transport.py, sweep the real /proc. They pass only
+; where the user running them can inspect every process outside the first
+; process's session, which a CI runner's unprivileged user cannot (#50014).
 (rule
- (alias runtest-test_keeper_vm_build_cleanup_live_processes)
+ (alias runtest-test_keeper_vm_build_cleanup)
  (deps ../config/scripts/keeper-build-cleanup.py
-       test_keeper_vm_build_cleanup.py)
- (action (run python3 %{dep:test_keeper_vm_build_cleanup.py} LiveProcesses)))
+       test_keeper_vm_build_cleanup.py
+       %{bin:dune})
+ (action
+  (run python3 %{dep:test_keeper_vm_build_cleanup.py}
+   LiveProcesses ManagedBuildCleanup)))
 
 (alias
  (name runtest)
- (deps (alias runtest-test_keeper_vm_build_cleanup_live_processes)))
+ (deps (alias runtest-test_keeper_vm_build_cleanup)))
 
 (test
  (name test_tui_board_reader)

@@ -312,19 +312,148 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
   | Error e ->
     Alcotest.fail ("bare repos should stay inside playground: " ^ e.Keeper_alerting_path.message)
 
-let test_relative_cwd_is_not_rewritten () =
+(* #29964: one spelling of a path names one host location, whichever tool
+   receives it. The search cwd used to join a relative cwd to the project
+   root and refuse it as outside the sandbox, and refused the container path
+   Execute hands back, while Read and Execute resolved both into the
+   playground. *)
+let read_cwd ~config ~meta cwd =
+  Keeper_tool_filesystem_runtime.resolve_read_file_cwd ~config ~meta ~cwd:(Some cwd)
+
+let search_cwd ~config ~meta cwd =
+  Keeper_tool_execute_path.resolve_tool_read_cwd
+    ~config ~meta ~args:(`Assoc [ ("cwd", `String cwd) ])
+
+let execute_cwd ~config ~meta cwd =
+  Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
+    ~remote_workspace_root:None ~config ~meta ~write_enabled:true
+    ~args:(`Assoc [ ("cwd", `String cwd) ])
+
+let test_one_cwd_spelling_names_one_directory_for_every_tool () =
   setup ~keeper_name:"glm-coding" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let repo = Filename.concat playground "repos/masc" in
-  ensure_dir repo;
-  let args = `Assoc [ ("cwd", `String "repos/masc") ] in
-  match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
-  | Ok cwd -> Alcotest.fail ("relative cwd was unexpectedly rewritten: " ^ cwd)
-  | Error error ->
-    Alcotest.(check bool)
-      "literal base-relative candidate is outside allowed roots"
-      true
-      (String_util.contains_substring error.Keeper_alerting_path.message "path_outside_sandbox")
+  let lib = Filename.concat repo "lib" in
+  ensure_dir lib;
+  let container = Keeper_sandbox.container_root meta.name in
+  List.iter
+    (fun (spelling, expected) ->
+       let expected = normalize_realpath expected in
+       let same tool = function
+         | Ok cwd ->
+           Alcotest.(check string)
+             (Printf.sprintf "%s cwd %S" tool spelling)
+             expected
+             (normalize_realpath cwd)
+         | Error detail ->
+           Alcotest.failf "%s refused cwd %S: %s" tool spelling detail
+       in
+       let message = Result.map_error (fun e -> e.Keeper_alerting_path.message) in
+       same "Read" (message (read_cwd ~config ~meta spelling));
+       same "Grep" (message (search_cwd ~config ~meta spelling));
+       same "Execute"
+         (Result.map_error
+            Keeper_tool_execute_path.execute_cwd_resolution_error_private_message
+            (execute_cwd ~config ~meta spelling)))
+    [ "repos/masc", repo
+    ; ".", playground
+    ; "repos/masc/lib", lib
+    ; " repos/masc ", repo
+    ; repo, repo
+    ; Filename.concat container "repos/masc", repo
+    ; container, playground
+    ]
+
+let test_one_cwd_spelling_is_refused_by_every_tool () =
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~base ~config ~meta ~playground:_ ->
+  let outside = Filename.concat base "outside-playground" in
+  ensure_dir outside;
+  List.iter
+    (fun spelling ->
+       let refused tool = function
+         | Ok cwd -> Alcotest.failf "%s admitted cwd %S as %s" tool spelling cwd
+         | Error (e : Keeper_alerting_path.path_refusal) ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%s names %S as outside the sandbox: %s" tool spelling e.message)
+             true
+             (String.starts_with ~prefix:"path_outside_sandbox" e.message);
+           Alcotest.(check bool)
+             (Printf.sprintf "%s leaves %S to the caller" tool spelling)
+             true
+             (e.failure_class = Tool_result.Policy_rejection)
+       in
+       refused "Read" (read_cwd ~config ~meta spelling);
+       refused "Grep" (search_cwd ~config ~meta spelling);
+       match execute_cwd ~config ~meta spelling with
+       | Ok cwd -> Alcotest.failf "Execute admitted cwd %S as %s" spelling cwd
+       | Error error ->
+         Alcotest.(check string)
+           (Printf.sprintf "Execute names %S as outside the sandbox" spelling)
+           "cwd_outside_sandbox"
+           (Keeper_tool_execute_path.execute_cwd_resolution_error_code error);
+         Alcotest.(check bool)
+           (Printf.sprintf "Execute leaves %S to the caller" spelling)
+           true
+           (Keeper_tool_execute_path.execute_cwd_resolution_error_class error
+            = Tool_result.Policy_rejection))
+    [ "../outside-playground"
+    ; outside
+    ; Filename.concat (Keeper_sandbox.container_root "delta") "repos/masc"
+    ]
+
+(* The same holds for a file: the search path, the write path and the read
+   path of one spelling are one host file, with and without a cwd. *)
+let test_one_file_spelling_names_one_file_for_every_tool () =
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~base:_ ~config ~meta ~playground ->
+  let repo = Filename.concat playground "repos/masc" in
+  let file = Filename.concat repo "lib/a.ml" in
+  ensure_dir (Filename.dirname file);
+  ignore (Fs_compat.save_file_atomic file "let a = 1\n");
+  let container = Keeper_sandbox.container_root meta.name in
+  let expected = normalize_realpath file in
+  let same label = function
+    | Ok path -> Alcotest.(check string) label expected (normalize_realpath path)
+    | Error (e : Keeper_alerting_path.path_refusal) ->
+      Alcotest.failf "%s refused: %s" label e.message
+  in
+  List.iter
+    (fun spelling ->
+       same
+         (Printf.sprintf "Grep path %S" spelling)
+         (Keeper_tool_execute_path.resolve_tool_read_path
+            ~config ~meta ~args:(`Assoc [ ("path", `String spelling) ]));
+       same
+         (Printf.sprintf "read path %S" spelling)
+         (Keeper_tool_shared_runtime.resolve_keeper_read_path
+            ~config ~meta ~raw_path:spelling);
+       same
+         (Printf.sprintf "write path %S" spelling)
+         (Keeper_tool_shared_runtime.resolve_keeper_confined_write_path
+            ~config ~meta ~endpoint:Keeper_alerting_path.Lexical_entry
+            ~raw_path:spelling
+          |> Result.map Keeper_alerting_path.confined_host_path))
+    [ "repos/masc/lib/a.ml"; file; Filename.concat container "repos/masc/lib/a.ml" ];
+  List.iter
+    (fun (cwd, path) ->
+       same
+         (Printf.sprintf "Grep cwd %S path %S" cwd path)
+         (Keeper_tool_execute_path.resolve_tool_read_path
+            ~config ~meta
+            ~args:(`Assoc [ ("cwd", `String cwd); ("path", `String path) ]));
+       match read_cwd ~config ~meta cwd with
+       | Error e -> Alcotest.failf "Read refused cwd %S: %s" cwd e.message
+       | Ok host_cwd ->
+         same
+           (Printf.sprintf "Read cwd %S path %S" cwd path)
+           (Keeper_tool_shared_runtime.resolve_keeper_read_path_in_cwd
+              ~config ~meta ~host_cwd ~raw_path:path))
+    [ "repos/masc", "lib/a.ml"
+    ; Filename.concat container "repos/masc", "lib/a.ml"
+    ; "repos/masc", Filename.concat container "repos/masc/lib/a.ml"
+    ; "repos/masc", file
+    ]
 
 let test_execute_own_container_cwd_preserves_containment () =
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -339,15 +468,14 @@ let test_execute_own_container_cwd_preserves_containment () =
       "repos/masc/.worktrees/task-186"
   in
   let args = `Assoc [ ("cwd", `String container_worktree) ] in
+  (* Execute accepts the exact cwd a previous guest call returned, and so
+     does the search cwd (#29964). *)
   (match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
-   | Ok cwd -> Alcotest.fail ("container cwd was unexpectedly rewritten: " ^ cwd)
+   | Ok cwd ->
+     Alcotest.(check string) "own guest cwd maps to the same host directory for search"
+       (normalize_realpath host_worktree) (normalize_realpath cwd)
    | Error error ->
-     Alcotest.(check bool)
-       "read cwd remains exact"
-       true
-       (String_util.contains_substring error.Keeper_alerting_path.message "path_outside_sandbox"));
-  (* Execute accepts the exact cwd a previous guest call returned. Read
-     retains its literal path contract, asserted above. *)
+     Alcotest.fail ("own guest search cwd rejected: " ^ error.Keeper_alerting_path.message));
   List.iter
     (fun write_enabled ->
       match Keeper_tool_execute_path.resolve_tool_execute_cwd ~remote_workspace_root:None
@@ -361,6 +489,11 @@ let test_execute_own_container_cwd_preserves_containment () =
   ensure_dir outside;
   Unix.symlink outside (Filename.concat host_worktree "escape");
   let args = `Assoc ["cwd", `String (Filename.concat container_worktree "escape")] in
+  (match Keeper_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
+   | Ok cwd -> Alcotest.fail ("own guest search alias followed an escaping symlink: " ^ cwd)
+   | Error error ->
+     Alcotest.(check bool) "search alias still enforces the canonical boundary" true
+       (String.starts_with ~prefix:"path_outside_sandbox" error.Keeper_alerting_path.message));
   List.iter
     (fun write_enabled ->
       match Keeper_tool_execute_path.resolve_tool_execute_cwd_typed ~remote_workspace_root:None
@@ -397,7 +530,7 @@ let test_readonly_execute_omitted_cwd_does_not_create_playground () =
        (String_util.contains_substring e "cwd_not_directory"));
   Alcotest.(check bool) "playground remains absent" false (Sys.file_exists playground)
 
-let test_container_file_path_is_not_rewritten () =
+let test_container_file_path_names_the_host_file () =
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_file =
@@ -415,12 +548,13 @@ let test_container_file_path_is_not_rewritten () =
     `Assoc [ ("op", `String "head"); ("path", `String container_file) ]
   in
   match Keeper_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
-  | Ok path -> Alcotest.fail ("container path was unexpectedly rewritten: " ^ path)
+  | Ok path ->
+    Alcotest.(check string)
+      "own guest file path maps to the host file"
+      (normalize_realpath host_file)
+      (normalize_realpath path)
   | Error error ->
-    Alcotest.(check bool)
-      "container path remains exact"
-      true
-      (String_util.contains_substring error.Keeper_alerting_path.message "path_outside_sandbox")
+    Alcotest.fail ("own guest file path rejected: " ^ error.Keeper_alerting_path.message)
 
 let test_docker_other_container_root_stays_blocked () =
   setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -534,9 +668,7 @@ let test_cwd_existence_asks_whoever_holds_the_tree () =
    the week to 2026-09-24, told that "no repository is materialized" -- the
    host playground scan answering for a checkout that existed in the guest.
    A docker keeper, whose tree is this host's, still hears the checkouts
-   that exist. Read projects a relative cwd into the playground; the search
-   resolver takes host coordinates only (test_relative_cwd_is_not_rewritten),
-   so it is asked with the absolute form. *)
+   that exist. *)
 let test_read_cwds_follow_the_tree () =
   let search_cwd playground =
     `Assoc [ ("cwd", `String (Filename.concat playground "masc")) ]
@@ -602,15 +734,19 @@ let () =
             `Quick test_docker_keeper_allows_inside_playground;
           Alcotest.test_case "docker relative repos path resolves inside playground"
             `Quick test_docker_relative_repos_path_resolves_inside_playground;
-          Alcotest.test_case "relative cwd is not rewritten"
-            `Quick test_relative_cwd_is_not_rewritten;
+          Alcotest.test_case "one cwd spelling names one directory for every tool"
+            `Quick test_one_cwd_spelling_names_one_directory_for_every_tool;
+          Alcotest.test_case "one cwd spelling is refused by every tool"
+            `Quick test_one_cwd_spelling_is_refused_by_every_tool;
+          Alcotest.test_case "one file spelling names one file for every tool"
+            `Quick test_one_file_spelling_names_one_file_for_every_tool;
           Alcotest.test_case "Execute own container cwd preserves containment"
             `Quick test_execute_own_container_cwd_preserves_containment;
           Alcotest.test_case
             "read-only omitted cwd does not create playground"
             `Quick test_readonly_execute_omitted_cwd_does_not_create_playground;
-          Alcotest.test_case "container file path is not rewritten"
-            `Quick test_container_file_path_is_not_rewritten;
+          Alcotest.test_case "container file path names the host file"
+            `Quick test_container_file_path_names_the_host_file;
           Alcotest.test_case "docker other container root stays blocked"
             `Quick test_docker_other_container_root_stays_blocked;
           Alcotest.test_case

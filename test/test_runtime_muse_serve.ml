@@ -559,14 +559,20 @@ let with_masc_directory ?(left = []) f =
     | Error detail -> fail detail)
 ;;
 
+(* [Serve.workspace_origin] is private: a test reads it, never builds it. *)
+let is_masc_private = function
+  | Serve.Masc_private -> true
+  | Serve.Other_tree -> false
+;;
+
 let test_only_an_empty_masc_directory_is_masc_private () =
   with_masc_directory (fun origin ->
-    check bool "empty" true (origin = Serve.Masc_private));
+    check bool "empty" true (is_masc_private origin));
   (* A session with native writes may have left a skill or a rule. *)
   with_masc_directory ~left:[ "SKILL.md" ] (fun origin ->
-    check bool "holds a file" true (origin = Serve.Other_tree));
+    check bool "holds a file" false (is_masc_private origin));
   with_masc_directory ~left:[ ".muse" ] (fun origin ->
-    check bool "holds a dot file" true (origin = Serve.Other_tree));
+    check bool "holds a dot file" false (is_masc_private origin));
   match Serve.origin_of_masc_directory "/nonexistent/masc-muse-workspace" with
   | Error _ -> ()
   | Ok _ -> fail "an unreadable directory has no origin"

@@ -514,14 +514,32 @@ let logout t request =
         | Error error -> json_refused (issue_failure error) (Bs.error_to_string error)))
 ;;
 
-let acting t request =
+let acting_in t request =
   match Authz_zone.read t.zone with
   | Error uncertain -> Error (zone_uncertain uncertain)
   | Ok trusted ->
     (match Q.check trusted ~now_ms:(ms_of (t.now ())) request with
      | Error refusal -> Error (json_refused (request_failure refusal) (Q.refusal_to_string refusal))
      | Ok Q.No_session -> Error (json_refused Unauthorized no_session)
-     | Ok (Q.Session { cookie; signed_in }) -> Ok (cookie, signed_in))
+     | Ok (Q.Session { cookie; signed_in }) -> Ok (trusted, cookie, signed_in))
+;;
+
+let acting t request =
+  Result.map (fun ((_ : Authz_zone.trusted), cookie, signed_in) -> cookie, signed_in) (acting_in t request)
+;;
+
+let not_an_admin = "only an Admin reads this"
+
+(* The role is read in the snapshot that judged the session, as the gate
+   reads it in the snapshot that authenticated a credential. *)
+let admin_reading t request =
+  match acting_in t request with
+  | Error answer -> Error answer
+  | Ok (trusted, (_ : Bs.Cookie.t), { Bs.user_id; session_id = _; expires_at_ms = _ }) ->
+    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+    if Authz_principal_state.is_admin state.Authz_state.principals user_id
+    then Ok state
+    else Error (json_refused Forbidden not_an_admin)
 ;;
 
 let session t request =

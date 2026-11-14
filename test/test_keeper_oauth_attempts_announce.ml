@@ -6,20 +6,47 @@ open Masc
 
 let check = Alcotest.check
 
-let test_event_names_only_the_keeper () =
+(* The dataset events a subscriber of [base_path]'s runtime hears, newest
+   first, as their fields. *)
+let with_dataset_events ~base_path ~id f =
   let heard = ref [] in
-  let base_path = "/tmp/oauth-attempts-announce" in
-  Fun.protect
-    ~finally:(fun () -> Keeper_oauth_pending.install_change_observer (fun ~base_path:_ ~keeper:_ -> ()))
-    (fun () ->
-      Keeper_oauth_pending.install_change_observer (fun ~base_path:seen ~keeper:seen_keeper ->
-        heard := (seen, seen_keeper) :: !heard);
-      Workspace_dataset_event.announce ~base_path
-        (Workspace_dataset_event.Keeper_oauth_attempts { keeper = "largo" });
-      let (seen_base, seen_keeper) = List.hd !heard in
-      check string "the workspace is the one announced" base_path seen_base;
-      check string "the Keeper is named" "largo" seen_keeper;
-      check int "one announcement" 1 (List.length !heard))
+  Sse.subscribe_external ~runtime_authority:(Sse.runtime_authority_exn ~base_path) ~id
+    ~callback:(fun (event : Sse.external_event) ->
+      match event.ext_payload with
+      | `Assoc fields
+        when Option.equal String.equal
+               (Json_util.assoc_string_opt "type" event.ext_payload)
+               (Some Workspace_dataset_event.event_type) ->
+        heard := fields :: !heard
+      | _ -> ())
+    ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external id) (fun () -> f heard)
+
+let with_workspace f =
+  let base_path = Unix.realpath (Filename.temp_dir "keeper-oauth-announce-" "") in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    ignore (Workspace.init (Workspace.default_config base_path) ~agent_name:None);
+    f base_path)
+
+(* An announcement reaches the readers of the workspace it names and no other
+   workspace's, and carries the Keeper. *)
+let test_event_names_only_the_keeper () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_workspace @@ fun base_path ->
+  with_workspace @@ fun elsewhere ->
+  with_dataset_events ~base_path ~id:"keeper-oauth-announce-named" @@ fun heard ->
+  with_dataset_events ~base_path:elsewhere ~id:"keeper-oauth-announce-elsewhere"
+  @@ fun heard_elsewhere ->
+  Workspace_dataset_event.announce ~base_path
+    (Workspace_dataset_event.Keeper_oauth_attempts { keeper = "largo" });
+  check int "another workspace's readers hear nothing" 0 (List.length !heard_elsewhere);
+  match !heard with
+  | [ fields ] ->
+    check bool "the Keeper is named" true
+      (Workspace_dataset_event.of_fields fields
+       = Ok (Workspace_dataset_event.Keeper_oauth_attempts { keeper = "largo" }))
+  | heard -> fail (Printf.sprintf "expected one announcement, heard %d" (List.length heard))
 
 let decoded = function
   | Ok (Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->

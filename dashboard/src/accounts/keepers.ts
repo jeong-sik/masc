@@ -17,6 +17,8 @@ import { assign, make, readList } from './keepers-wire'
 import type { Keeper } from './keepers-wire'
 import { slowAfterMs } from './notes'
 import type { Failure, Next, Shown } from './notes'
+import { createTalk } from './talk'
+import type { TalkModel } from './talk'
 import type { Problem, Send, Session } from './wire'
 
 export type { Keeper } from './keepers-wire'
@@ -87,6 +89,8 @@ export interface KeepersModel {
   /** Gives the Keeper `name` the Runtime `runtimeId`. A Keeper whose
       assignment runs is left as it is. */
   readonly assign: (name: string, runtimeId: string) => Promise<void>
+  /** The conversation of one of the Keepers, which another person shown closes. */
+  readonly talking: TalkModel
 }
 
 /** How many tries of the same thing came to nothing in a row before this one. */
@@ -129,6 +133,7 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     assigning.value = next
     leave()
   }
+  const talking = createTalk({ send, leave: leaveAll, left: () => left })
 
   const read = async (forUser: string, attemptsBefore: number): Promise<void> => {
     latest += 1
@@ -264,6 +269,7 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     left = false
     making.value = { kind: 'idle' }
     assigning.value = new Map()
+    talking.reset()
     view.value = { kind: 'reading', forUser: next.userId, slow: false }
     return read(next.userId, 0)
   }
@@ -275,7 +281,7 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     return read(now.forUser, now.failure.attempts)
   }
 
-  return { view, making, assigning, load, retry, make: makeKeeper, assign: assignKeeper }
+  return { view, making, assigning, load, retry, make: makeKeeper, assign: assignKeeper, talking }
 }
 
 /** Reads the Keepers of each person the console comes to show signed in.

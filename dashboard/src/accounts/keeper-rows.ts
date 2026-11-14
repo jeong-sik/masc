@@ -1,6 +1,6 @@
 // The Keepers panel: a card for each Keeper of the person, with the model it
-// works with and the field that gives it another, and the form of a new
-// Keeper. The models offered are the ones a Keeper can run on here: a model
+// works with, the field that gives it another and its conversation
+// (talk-area.ts), and the form of a new Keeper. The models offered are the ones a Keeper can run on here: a model
 // checked on an account whose subscription the server lets a Keeper run on.
 // A Keeper that cannot work says so on its card before anything is pressed.
 
@@ -12,6 +12,7 @@ import type { Assign, Keeper, KeepersModel, Make } from './keepers'
 import { ProblemNote, Retry, idTail, sessionEndedWords } from './notes'
 import type { Shown } from './notes'
 import type { SubscriptionsModel } from './subscriptions'
+import { TalkPart } from './talk-area'
 import { integrationName } from './wire'
 import type { Integration, Owned } from './wire'
 
@@ -213,6 +214,7 @@ function KeeperRow({ keeper, owned, choices, model }: {
           ? html`<p class="hint">${noChoiceWords}</p>`
           : html`<${AssignArea} keeper=${keeper} uses=${uses} choices=${choices} assign=${model.assigning.value.get(keeper.id)}
               model=${model} card=${titleId} />`}
+      <${TalkPart} keeperId=${keeper.id} card=${titleId} talk=${model.talking} />
     </li>
   `
 }

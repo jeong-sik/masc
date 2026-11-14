@@ -116,7 +116,9 @@ def grading_state(session: q.Session, question_id: str) -> dict | None:
             return None
 
 
-def question_rows(session: q.Session) -> list[dict]:
+def question_rows(session: q.Session, bound: bool = False) -> list[dict]:
+    """[bound] says the installation follows a lesson; only then does a row
+    say whether its question was taught."""
     if session.answer is None:
         return []
     responses = {answer.question_id: answer.response for answer in session.answer.answers}
@@ -133,8 +135,9 @@ def question_rows(session: q.Session) -> list[dict]:
                   "grading": grading_state(session, posed.question_id),
                   "disputes": [{"note": d.note, "action_request_id": d.action_request_id}
                                for d in session.disputes_of(posed.question_id)],
-                  "sources": [source.to_json() for source in posed.sources],
-                  "taught": posed.question_id in session.taught}
+                  "sources": [source.to_json() for source in posed.sources]}
+        if bound:
+            fields["taught"] = posed.question_id in session.taught
         title = {g.CORRECT: "맞음", g.INCORRECT: "틀림", g.SKIPPED: "건너뜀",
                  g.AWAITING_JUDGMENT: "채점 대기", g.VOID: "무효"}[verdict]
         out.append(row(QUESTIONS, f"{session.session_id}/{posed.question_id}",
@@ -218,7 +221,7 @@ def scorecard_rows(sessions: list[q.Session], zone: ZoneInfo) -> list[dict]:
     return rows
 
 
-def review_rows(sessions: list[q.Session], items: list[g.Item]) -> list[dict]:
+def review_rows(sessions: list[q.Session], items: list[g.Item], bound: bool = False) -> list[dict]:
     """The wrong-answer note: one row per item whose latest attempt is a
     miss, carrying its last answered question. A question still open is not
     an attempt and never gets a row, so an open re-ask shows no sources and
@@ -251,8 +254,9 @@ def review_rows(sessions: list[q.Session], items: list[g.Item]) -> list[dict]:
                   "by": "judgment" if judgments else "key",
                   "judgments": [{"judgment": q.judgment_to_json(j.judgment), "rationale": j.rationale,
                                  "request_id": j.request_id} for j in judgments],
-                  "sources": [source.to_json() for source in item.sources],
-                  "taught": posed.question_id in session.taught}
+                  "sources": [source.to_json() for source in item.sources]}
+        if bound:
+            fields["taught"] = posed.question_id in session.taught
         out.append(row(REVIEW, item.item_id, f"오답 노트 — {item.topic}",
                        answer.answered_at, fields, kind="event",
                        evidence=retained(item.sources)))
@@ -267,12 +271,14 @@ def lesson_measures(sessions: list[q.Session], events: list[q.Event], source: di
     seen = [event for event in events if isinstance(event, q.LessonSeen)]
     cited = q.cited(events)
     kept = {cite for session in sessions for scope in session.scopes for cite in scope.kept}
-    first: dict[str, tuple[bool, str]] = {}
-    for session in sessions:
-        for posed, state in attempt_states(session):
-            if state in GRADED:
-                first.setdefault(posed.item_id, (posed.question_id in session.taught, state))
-    groups = {taught: [state for group, state in first.values() if group is taught] for taught in (True, False)}
+    # An item's first attempt is its first answer, not its first pose: two
+    # asks of one item may be open at once and answered in the other order.
+    taught_in = {session.session_id: session.taught for session in sessions}
+    first = [next((attempt for attempt in item.attempts if attempt.verdict in GRADED), None)
+             for item in g.items(sessions)]
+    groups = {taught: [attempt.verdict for attempt in first if attempt is not None
+                       and (attempt.question_id in taught_in[attempt.session_id]) is taught]
+              for taught in (True, False)}
     scenes = {(scene.session_id, scene.entry_id) for event in seen for scene in event.scenes}
     return {"scenes_seen": len(scenes), "cites_seen": len(cited),
             "cites_unmatched": len(cited - kept),
@@ -327,11 +333,11 @@ def observation(sessions: list[q.Session], scopes: dict[str, str | None], zone: 
         for posed in session.posed:
             first_posed.setdefault(posed.item_id, session.opened_at)
     rows = [session_row(session, scopes.get(session.session_id)) for session in sessions]
-    rows += [r for session in sessions for r in question_rows(session)]
+    rows += [r for session in sessions for r in question_rows(session, lesson is not None)]
     rows += topic_rows(items, first_posed)
     rows += [item_row(item, first_posed[item.item_id]) for item in items]
     rows += scorecard_rows(sessions, zone)
-    rows += review_rows(sessions, items)
+    rows += review_rows(sessions, items, lesson is not None)
     # Without an export the row times come from the log, so an observation
     # with nothing new gives the same rows.
     observed_at = now if export else max((r["observed_at"] for r in rows), default=now)

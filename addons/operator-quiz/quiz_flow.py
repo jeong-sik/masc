@@ -210,6 +210,14 @@ class Flow:
             follows = [q.FollowsLesson(session_id, lesson)] if lesson is not None else []
             self.log.append([q.SessionOpened(session_id, action_request_id, questions, grants, language, opened_at),
                              *follows, *again])
+        elif lesson is not None:
+            # The opening and follows_lesson are two lines of one write. A
+            # write cut between them leaves a session that asks about every
+            # record; the same action, sent again, completes it while the
+            # session has read nothing yet.
+            opened = next(session for session in sessions if session.session_id == session_id)
+            if opened.state == "writing" and opened.follows is None and not opened.material and not opened.requests:
+                self.log.append([q.FollowsLesson(session_id, lesson)])
         return session_id
 
     # -- the lesson output, at an observation ---------------------------------
@@ -255,10 +263,15 @@ class Flow:
             key = digest([[row.get("lane_id"), row.get("fields")] if isinstance(row, dict) else row for row in rows])
         except ValueError as error:
             raise InvalidResult(f"the rows of a lane_output observation cannot be written as JSON: {error}") from error
-        if any(isinstance(event, (q.LessonSeen, q.LessonUnreadable)) and event.rows == key
-               for event in self.log.read()):
+        recorded = [event for event in self.log.read()
+                    if isinstance(event, (q.LessonSeen, q.LessonUnreadable)) and event.rows == key]
+        if any(isinstance(event, q.LessonSeen) for event in recorded):
             return status
-        self.log.append([self._lesson_event(instance_id, seq, sha256, key, rows)])
+        event = self._lesson_event(instance_id, seq, sha256, key, rows)
+        # Rows an earlier revision of this package could not read are read
+        # again, and recorded once this one can.
+        if not recorded or isinstance(event, q.LessonSeen):
+            self.log.append([event])
         return status
 
     @staticmethod
@@ -389,7 +402,9 @@ class Flow:
                     if session.follows is not None else ()
                 return (q.ExactRequested(session.session_id, body["request_id"], AUTHOR, key),
                         q.AuthorContextRecorded(session.session_id, body["request_id"], scope), *kept)
-            if len(records) == 1:
+            # With no record left to drop, the history alone is too large;
+            # halving an empty material would never end.
+            if len(records) <= 1:
                 return (q.SessionFailed(session.session_id, q.AuthorRequestExceedsFrame(body["request_id"])),)
             records = records[len(records) // 2:]
 

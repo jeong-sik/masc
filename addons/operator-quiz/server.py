@@ -227,9 +227,10 @@ class Worker:
 
 
 TOOLS = [
-    {"name": "lane_observe", "description": "Publish the quiz sessions, reveals, topics, items and measures.",
+    {"name": "lane_observe", "description": "Publish the quiz sessions, reveals, topics, items and measures. "
+                                            "An installation bound to a lesson also keeps what that lesson cited.",
      "inputSchema": OBSERVE_SCHEMA, "outputSchema": OUTPUT_SCHEMA,
-     "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True,
+     "annotations": {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
                      "openWorldHint": False}},
     {"name": "lane_act", "description": "compose: start a quiz session; dispute: grade one answered question "
                                         "again with a note; export: return the whole log.",

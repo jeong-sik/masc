@@ -714,7 +714,7 @@ def fold(events: list[Event]) -> list[Session]:
     sessions: dict[str, dict] = {}
     order: list[str] = []
     by_ask: dict[str, str] = {}
-    outputs: set[str] = set()
+    outputs: set[tuple[type, str]] = set()
     cited: set[tuple[str, str, str]] = set()
     grade_requests: set[str] = set()
     disputes: set[str] = set()
@@ -748,9 +748,11 @@ def fold(events: list[Event]) -> list[Session]:
                                         "follows": None, "scopes": [], "taught": set()}
                 order.append(session_id)
             case LessonSeen(rows=rows) | LessonUnreadable(rows=rows):
-                if rows in outputs:
+                # Rows recorded as unreadable may be recorded as seen later,
+                # by a revision that reads them; neither is recorded twice.
+                if (type(event), rows) in outputs or (LessonSeen, rows) in outputs:
                     raise LogError(f"the lesson output with rows {rows} was recorded twice")
-                outputs.add(rows)
+                outputs.add((type(event), rows))
                 if isinstance(event, LessonSeen):
                     cited.update((cite.kind, cite.source_id, cite.pin) for scene in event.scenes for cite in scene.cites)
             case FollowsLesson(session_id=session_id, source_id=source_id):

@@ -1,11 +1,15 @@
 // VirtualList — scroll-position based windowing for fixed and dynamic-height items
 //
-// Only activates above ACTIVATION_THRESHOLD items. Below that, renders all
-// items directly (zero overhead). Uses requestAnimationFrame-throttled scroll
-// handler + ResizeObserver for efficient viewport tracking.
+// Every list has the same DOM: root → spacer → viewport → one keyed row per
+// drawn item. Up to ACTIVATION_THRESHOLD items the list draws every row in
+// normal flow, which keeps them reachable by the browser's find and by
+// assistive technology. Above it the list draws the rows near the scroll
+// position and offsets them inside a spacer as tall as the whole list. A row
+// that is drawn before and after the item count crosses the threshold keeps
+// its DOM node, and so its focus and whatever state lives in that node.
 //
-// Hooks are always called unconditionally to satisfy Rules of Hooks.
-// The threshold check only affects the returned markup.
+// The caller names the element that scrolls the list (`scrollBox`). The list
+// reads the position from that element and does not look for one itself.
 
 import { html } from 'htm/preact'
 import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'preact/hooks'
@@ -14,6 +18,13 @@ import { onFpsChange } from '../../utils/fps-adaptive'
 
 const ACTIVATION_THRESHOLD = 40
 
+/** The element whose scrolling moves the list.
+ *  - `'self'`: the list's own root. The caller's `className` gives it a bounded
+ *    height and `overflow-y`.
+ *  - an element: an ancestor that scrolls, with the list somewhere inside it.
+ *    A caller that gets it from a ref renders the list once the element exists. */
+export type VirtualListScrollBox = 'self' | HTMLElement
+
 interface VirtualListProps<T> {
   items: T[]
   itemHeight?: number
@@ -21,6 +32,7 @@ interface VirtualListProps<T> {
   overscan?: number
   renderItem: (item: T, index: number) => ComponentChildren
   getKey: (item: T) => string
+  scrollBox: VirtualListScrollBox
   className?: string
   onEndReached?: () => void
   tabIndex?: number
@@ -30,6 +42,26 @@ interface VirtualListProps<T> {
 interface VisibleRange {
   start: number
   end: number
+}
+
+/** The stretch of the list the scroll box shows, measured from the list's top. */
+interface View {
+  top: number
+  height: number
+  /** Height of the whole list, drawn or not. */
+  listHeight: number
+}
+
+function viewOf(root: HTMLElement, scrollBox: VirtualListScrollBox): View {
+  if (scrollBox === 'self') {
+    return { top: root.scrollTop, height: root.clientHeight, listHeight: root.scrollHeight }
+  }
+  const boxTop = scrollBox.getBoundingClientRect().top + scrollBox.clientTop
+  return {
+    top: boxTop - root.getBoundingClientRect().top,
+    height: scrollBox.clientHeight,
+    listHeight: root.offsetHeight,
+  }
 }
 
 function binarySearchOffset(offsets: number[], target: number): number {
@@ -47,26 +79,26 @@ function binarySearchOffset(offsets: number[], target: number): number {
   return lo
 }
 
-/** The items a scroll position shows, widened by the overscan on both sides.
- *  `itemHeight` undefined means dynamic heights, read from `offsets`. */
+/** The items a view shows, widened by the overscan on both sides.
+ *  `itemHeight` undefined means dynamic heights, read from `offsets`. A list
+ *  that sits above or below what its scroll box shows has no item in view, so
+ *  both ends stay inside the list. */
 function rangeInView(
-  el: HTMLElement,
+  view: View,
   count: number,
   overscan: number,
   offsets: number[],
   itemHeight: number | undefined,
 ): VisibleRange {
-  const { scrollTop, clientHeight } = el
-  if (itemHeight === undefined) {
-    return {
-      start: Math.max(0, binarySearchOffset(offsets, scrollTop) - overscan),
-      end: Math.min(count, binarySearchOffset(offsets, scrollTop + clientHeight) + overscan),
-    }
-  }
-  return {
-    start: Math.max(0, Math.floor(scrollTop / itemHeight) - overscan),
-    end: Math.min(count, Math.ceil((scrollTop + clientHeight) / itemHeight) + overscan),
-  }
+  const bottom = view.top + view.height
+  const first = itemHeight === undefined
+    ? binarySearchOffset(offsets, view.top)
+    : Math.floor(view.top / itemHeight)
+  const last = itemHeight === undefined
+    ? binarySearchOffset(offsets, bottom)
+    : Math.ceil(bottom / itemHeight)
+  const inList = (index: number) => Math.min(count, Math.max(0, index))
+  return { start: inList(first - overscan), end: inList(last + overscan) }
 }
 
 function sameRange(left: VisibleRange, right: VisibleRange): boolean {
@@ -76,14 +108,14 @@ function sameRange(left: VisibleRange, right: VisibleRange): boolean {
 function readRowHeight(entry: ResizeObserverEntry): number {
   const blockSize = entry.borderBoxSize?.[0]?.blockSize
   if (typeof blockSize === 'number' && blockSize > 0) {
-    return Math.round(blockSize)
+    return blockSize
   }
   const contentHeight = entry.contentRect?.height
   if (typeof contentHeight === 'number' && contentHeight > 0) {
-    return Math.round(contentHeight)
+    return contentHeight
   }
   const target = entry.target as HTMLElement
-  return Math.round(target.getBoundingClientRect().height)
+  return target.getBoundingClientRect().height
 }
 
 export function VirtualList<T>({
@@ -93,19 +125,24 @@ export function VirtualList<T>({
   overscan = 5,
   renderItem,
   getKey,
+  scrollBox,
   className = '',
   onEndReached,
   tabIndex,
   ariaLabel,
 }: VirtualListProps<T>) {
-  // Hooks must be called unconditionally (Rules of Hooks)
-  const containerRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const viewportRef = useRef<HTMLDivElement>(null)
   const heightsRef = useRef<Map<string, number>>(new Map())
   const endReachedCalledRef = useRef(false)
+  // The rows the scroll position shows. It follows the scroll box at every
+  // item count, so that the render in which a list grows past the threshold
+  // already knows which rows are on screen and keeps their DOM nodes.
   const [range, setRange] = useState<VisibleRange>({ start: 0, end: 30 })
   const [measureTick, setMeasureTick] = useState(0)
   const [effectiveOverscan, setEffectiveOverscan] = useState(overscan)
-  const virtualize = items.length > ACTIVATION_THRESHOLD
+  const windowed = items.length > ACTIVATION_THRESHOLD
+  const drawn: VisibleRange = windowed ? range : { start: 0, end: items.length }
 
   const dynamicMode = itemHeight === undefined
 
@@ -117,8 +154,8 @@ export function VirtualList<T>({
   // The rows the child ResizeObserver must watch are identified by their
   // keys. A same-length dataset can replace every visible key while the
   // range indices stay put, so the observer binding follows this signature.
-  const visibleKeySignature = items
-    .slice(range.start, range.end)
+  const drawnKeySignature = items
+    .slice(drawn.start, drawn.end)
     .map(item => getKey(item))
     .join('\u0000')
 
@@ -129,14 +166,16 @@ export function VirtualList<T>({
   }, [items.length])
 
   // PR-4.9: FPS adaptive quality — shrink overscan when frame rate drops.
+  // Overscan only decides what a windowed list draws, and the subscription
+  // keeps a frame counter running, so a list that draws every row stays out.
   useEffect(() => {
-    if (!virtualize) return undefined
+    if (!windowed) return undefined
     return onFpsChange((fps) => {
       if (fps < 30) setEffectiveOverscan(1)
       else if (fps < 45) setEffectiveOverscan(Math.max(2, overscan - 2))
       else setEffectiveOverscan(overscan)
     })
-  }, [virtualize, overscan])
+  }, [windowed, overscan])
 
   // Discard cached heights for items that are no longer present so the map
   // does not grow unbounded across reordering / filtering.
@@ -168,36 +207,34 @@ export function VirtualList<T>({
 
   // The effect below runs after the browser has painted. When the items change
   // under a scrolled list, that paint would still show the previous range: a
-  // list that shrank slices past its end, and a list that crosses the
-  // activation threshold keeps the range of an earlier, longer list. Either
-  // leaves the top of the viewport, or all of it, without rows for a frame.
-  // Move the window to the scroll position before that paint. Preact renders
-  // the state change below in a microtask, which is what keeps it in the same
-  // frame.
+  // list that shrank slices past its end. That leaves the top of the viewport,
+  // or all of it, without rows for a frame. Move the window to the scroll
+  // position before that paint. Preact renders the state change below in a
+  // microtask, which is what keeps it in the same frame.
   useLayoutEffect(() => {
-    if (!virtualize) return
-    const el = containerRef.current
-    if (!el) return
-    const next = rangeInView(el, items.length, effectiveOverscan, offsets, itemHeight)
+    const root = rootRef.current
+    if (!root) return
+    const next = rangeInView(viewOf(root, scrollBox), items.length, effectiveOverscan, offsets, itemHeight)
     setRange(prev => (sameRange(prev, next) ? prev : next))
-  }, [virtualize, items.length, effectiveOverscan, offsets, itemHeight])
+  }, [scrollBox, items.length, effectiveOverscan, offsets, itemHeight])
 
   useEffect(() => {
-    if (!virtualize) return
-    const el = containerRef.current
-    if (!el) return
+    const root = rootRef.current
+    if (!root) return
+    const scroller = scrollBox === 'self' ? root : scrollBox
 
     let disposed = false
     const endThreshold = dynamicMode ? estimatedItemHeight * 5 : itemHeight! * 4
 
     const recompute = () => {
-      const next = rangeInView(el, items.length, effectiveOverscan, offsets, itemHeight)
+      const next = rangeInView(viewOf(root, scrollBox), items.length, effectiveOverscan, offsets, itemHeight)
       setRange(prev => (sameRange(prev, next) ? prev : next))
     }
 
     const checkEndReached = () => {
       if (!onEndReached || disposed) return
-      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+      const view = viewOf(root, scrollBox)
+      const remaining = view.listHeight - view.top - view.height
       const nearBottom = remaining < endThreshold
       if (nearBottom && !endReachedCalledRef.current) {
         endReachedCalledRef.current = true
@@ -226,21 +263,24 @@ export function VirtualList<T>({
 
     recompute()
     checkEndReached()
-    el.addEventListener('scroll', onScroll, { passive: true })
-    ro.observe(el)
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    ro.observe(scroller)
 
     return () => {
       disposed = true
-      el.removeEventListener('scroll', onScroll)
+      scroller.removeEventListener('scroll', onScroll)
       ro.disconnect()
     }
-  }, [virtualize, items.length, itemHeight, effectiveOverscan, dynamicMode, offsets, estimatedItemHeight, onEndReached])
+  }, [scrollBox, items.length, itemHeight, effectiveOverscan, dynamicMode, offsets, estimatedItemHeight, onEndReached])
 
-  // Observe child heights in dynamic mode
+  // Observe row heights in dynamic mode. A list that draws every row measures
+  // them too: when it grows past the threshold, the rows above the scroll
+  // position already have the height they were laid out with, and the rows on
+  // screen stay where they were.
   useEffect(() => {
-    if (!virtualize || !dynamicMode) return
-    const el = containerRef.current
-    if (!el) return
+    if (!dynamicMode) return
+    const viewport = viewportRef.current
+    if (!viewport) return
 
     let disposed = false
     const ro = new ResizeObserver((entries) => {
@@ -260,95 +300,54 @@ export function VirtualList<T>({
       }
     })
 
-    const viewport = el.querySelector('.virtual-list-viewport')
-    if (viewport) {
-      for (const child of viewport.children) {
-        ro.observe(child)
-      }
+    for (const child of viewport.children) {
+      ro.observe(child)
     }
 
     return () => {
       disposed = true
       ro.disconnect()
     }
-  }, [virtualize, dynamicMode, visibleKeySignature])
+  }, [dynamicMode, drawnKeySignature])
 
-  // Below threshold: render all items directly, no virtualization. Apply
-  // content-visibility to each row so the browser can skip layout/paint for
-  // off-screen rows while keeping them in the DOM (Ctrl-F / a11y friendly).
-  if (!virtualize) {
-    const fallbackRowHeight = itemHeight ?? estimatedItemHeight
-    return html`
-      <div class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
-        ${items.map((item, i) => html`
-          <div
-            key=${getKey(item)}
-            class="virtual-list-fallback-row"
-            style=${{
-              contentVisibility: 'auto',
-              containIntrinsicSize: `auto ${fallbackRowHeight}px`,
-            }}
-          >
-            ${renderItem(item, i)}
-          </div>
-        `)}
-      </div>
-    `
-  }
+  const rowHeight = itemHeight ?? estimatedItemHeight
+  const totalHeight = itemHeight === undefined
+    ? offsets[items.length] ?? items.length * estimatedItemHeight
+    : items.length * itemHeight
+  const offsetY = itemHeight === undefined
+    ? offsets[drawn.start] ?? drawn.start * estimatedItemHeight
+    : drawn.start * itemHeight
 
-  // Dynamic height path
-  if (dynamicMode) {
-    const totalHeight = offsets[items.length] ?? items.length * estimatedItemHeight
-    const offsetY = offsets[range.start] ?? range.start * estimatedItemHeight
-    const visible = items.slice(range.start, range.end)
-
-    return html`
-      <div ref=${containerRef} class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
-        <div class="virtual-list-spacer" style=${{ height: `${totalHeight}px`, position: 'relative' }}>
-          <div
-            class="virtual-list-viewport"
-            style=${{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              willChange: 'transform',
-              transform: `translateY(${offsetY}px)`,
-            }}
-          >
-            ${visible.map((item, i) => {
-              const idx = range.start + i
-              return html`<div key=${getKey(item)} data-vl-key=${getKey(item)}>${renderItem(item, idx)}</div>`
-            })}
-          </div>
-        </div>
-      </div>
-    `
-  }
-
-  // Fixed height path
-  const ih = itemHeight!
-  const totalHeight = items.length * ih
-  const offsetY = range.start * ih
-  const visible = items.slice(range.start, range.end)
+  // A windowed list reserves the height of every row and moves the drawn rows
+  // to their place in it. `flex: none` keeps that height when the caller's
+  // className makes the root a flex container. A list that draws every row
+  // leaves them in normal flow, where the browser gives each its real height.
+  const spacerStyle = windowed
+    ? { height: `${totalHeight}px`, position: 'relative', flex: 'none' }
+    : undefined
+  const viewportStyle = windowed
+    ? {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        willChange: 'transform',
+        transform: `translateY(${offsetY}px)`,
+      }
+    : undefined
+  // With every row in the DOM, content-visibility lets the browser skip layout
+  // and paint for the rows that are off screen.
+  const rowStyle = windowed
+    ? undefined
+    : { contentVisibility: 'auto', containIntrinsicSize: `auto ${rowHeight}px` }
 
   return html`
-    <div ref=${containerRef} class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
-      <div class="virtual-list-spacer" style=${{ height: `${totalHeight}px`, position: 'relative' }}>
-        <div
-          class="virtual-list-viewport"
-          style=${{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            willChange: 'transform',
-            transform: `translateY(${offsetY}px)`,
-          }}
-        >
-          ${visible.map((item, i) => {
-            const idx = range.start + i
-            return html`<div key=${getKey(item)}>${renderItem(item, idx)}</div>`
+    <div ref=${rootRef} class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
+      <div class="virtual-list-spacer" style=${spacerStyle}>
+        <div ref=${viewportRef} class="virtual-list-viewport" style=${viewportStyle}>
+          ${items.slice(drawn.start, drawn.end).map((item, i) => {
+            const key = getKey(item)
+            return html`<div key=${key} data-vl-key=${key} style=${rowStyle}>${renderItem(item, drawn.start + i)}</div>`
           })}
         </div>
       </div>

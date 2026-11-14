@@ -3,6 +3,7 @@ module A = Verification_authority_tools
 module AR = Task.Anti_rationalization
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
+module Change = Verifier_review_authority_change
 
 open Result.Syntax
 let scope = "goal-proof-reviews"
@@ -17,8 +18,14 @@ type receipt = {
   tools : Verification_run_registry.tool_observation list;
   elapsed_s : float;
 }
-type error = Store_unavailable of string | Original_invalid of string
-  | Authority_changed of string | Execution_pending of string
+type error =
+  | Store_unavailable of string
+  | Original_invalid of string
+  | Destination_mismatch of string
+  | Authority_unavailable of string
+  | Question_changed
+  | Authority_changed of Change.t
+  | Execution_pending of string
 type interruption = Cancelled | Raised
 let interruption_label = function Cancelled -> "review_cancelled" | Raised -> "review_raised"
 let interruption_of_label = function
@@ -45,7 +52,11 @@ type request_observation = {
   observed_records : retained list;
   issues : observation_issue list;
 }
-let error_to_string = function Store_unavailable d | Original_invalid d | Authority_changed d | Execution_pending d -> d
+let error_to_string = function
+  | Store_unavailable d | Original_invalid d | Destination_mismatch d | Authority_unavailable d
+  | Execution_pending d -> d
+  | Question_changed -> "the Goal proof question changed after its review original was prepared"
+  | Authority_changed change -> Change.to_string change
 
 let invalid detail = Error (Original_invalid detail)
 let decode result = Result.map_error (fun detail -> Original_invalid detail) result
@@ -147,7 +158,7 @@ let validate_record ~installation_id ~package_id (record : Owner.retained) =
     || not (Yojson.Safe.equal expected_summary record.summary) then
     invalid "Goal verifier owner identity or complete original differs"
   else if record.installation_id <> installation_id || record.package_id <> package_id then
-    Error (Authority_changed "Goal verifier original belongs to another destination")
+    Error (Destination_mismatch "Goal verifier original belongs to another destination")
   else Ok {record; original; run}
 
 let load ~store ~installation_id ~package_id ~goal_id ~request_id ~attempt =
@@ -384,6 +395,15 @@ let refusal_receipt retained evidence =
     Error "Goal verifier refusal is not an original non-verdict"
   else Ok (receipt, disposition)
 
+(* A before-dispatch refusal reached no reviewer. Its evidence holds only what
+   moved away from this original's lookup authority or answer format, so it
+   has no receipt, result or evaluator runtime. *)
+let moved_authority retained evidence =
+  let* change = Change.of_json evidence |> Result.map_error (fun detail -> Original_invalid detail) in
+  if Change.begins_at ~authority:(V.authority_binding retained.original)
+      ~answer_format:(V.output_contract retained.original) change then Ok change
+  else invalid "Goal before-dispatch refusal names another original's authority or answer format"
+
 let restored_receipt retained =
   let decode_judgment json =
     let* receipt = decode (receipt_of_json retained json) in
@@ -395,7 +415,10 @@ let restored_receipt retained =
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
     decode_judgment commit.judgment
   | Rejected refusal | Subdividing (refusal,_) | Subdivided (refusal,_) ->
-    let* receipt, _ = decode (refusal_receipt retained refusal.evidence) in Ok (Some receipt)
+    (match refusal.Progress.stage with
+     | Progress.Execution ->
+       let* receipt, _ = decode (refusal_receipt retained refusal.evidence) in Ok (Some receipt)
+     | Before_dispatch -> let* _ = moved_authority retained refusal.evidence in Ok None)
   | Captured | Admission_wait _ | Dispatch_pending _ -> Ok None
 
 let retained_judgment retained =
@@ -424,9 +447,13 @@ let observed_receipt retained =
       let* encoded = decode (field "receipt" fields) in
       Result.map Option.some (decode (receipt_of_json retained encoded))
     | Captured | Dispatch_pending None
-    | Dispatch_pending (Some (Outcome_unknown _ | Waiting _ | Absent _)) -> Ok None
-    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
-    | Subdividing _ | Subdivided _ -> invalid "Goal terminal observation lacks its original receipt"
+    | Dispatch_pending (Some (Outcome_unknown _ | Waiting _ | Absent _))
+    | Rejected {stage=Before_dispatch; _}
+    | Subdividing ({stage=Before_dispatch; _}, _) | Subdivided ({stage=Before_dispatch; _}, _) -> Ok None
+    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+    | Rejected {stage=Execution; _}
+    | Subdividing ({stage=Execution; _}, _) | Subdivided ({stage=Execution; _}, _) ->
+      invalid "Goal terminal observation lacks its original receipt"
 
 let tool_observations retained =
   let* receipt = observed_receipt retained in
@@ -450,11 +477,15 @@ let tool_observations retained =
          if run = retained.run then decode (tools_of_json tools)
          else invalid "Goal interrupted observation differs from its fixed run"
        | _ -> invalid "Goal unknown observation is malformed")
-    | Captured | Admission_wait _ | Dispatch_pending None -> Ok []
+    | Captured | Admission_wait _ | Dispatch_pending None
+    | Rejected {stage=Before_dispatch; _}
+    | Subdividing ({stage=Before_dispatch; _}, _) | Subdivided ({stage=Before_dispatch; _}, _) -> Ok []
     | Dispatch_pending (Some (Waiting _ | Absent _)) ->
       invalid "Goal dispatch observation has no retained tool receipt"
-    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
-    | Subdividing _ | Subdivided _ -> invalid "Goal terminal observation lacks its original receipt"
+    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
+    | Rejected {stage=Execution; _}
+    | Subdividing ({stage=Execution; _}, _) | Subdivided ({stage=Execution; _}, _) ->
+      invalid "Goal terminal observation lacks its original receipt"
 
 let advance ~store retained event =
   serialized ~store ~kind:"record" ~identity:retained.record.request_id (fun () ->
@@ -498,10 +529,10 @@ let retryable_refusal retained evidence =
    successor uses its pinned body and never prepares authority again. A
    changed question forces it and allocates nothing. *)
 let successor_of ~authority parent =
-  let* current = authority () |> Result.map_error (fun detail -> Authority_changed detail) in
+  let* current = authority () |> Result.map_error (fun detail -> Authority_unavailable detail) in
   V.successor ~authority:current parent.original |> Result.map_error (function
-    | V.Question_changed -> Authority_changed "the Goal proof question changed after its first review attempt"
-    | V.Prompt_unavailable detail -> Authority_changed ("Goal review prompt unavailable: " ^ detail)
+    | V.Question_changed -> Question_changed
+    | V.Prompt_unavailable detail -> Authority_unavailable ("Goal review prompt unavailable: " ^ detail)
     | V.Successor_unavailable detail -> Original_invalid detail)
 
 let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~goal_id ~request_id ~new_run =
@@ -524,14 +555,23 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
       | Subdividing (refusal,_) | Subdivided (refusal,_) -> Ok refusal
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected _ -> invalid "Goal child lacks its terminal parent" in
-    let* automatic_retry = retryable_refusal parent refusal.evidence in
-    let* _, disposition = decode (refusal_receipt parent refusal.evidence) in
-    let* () = match explicit_retry with
-      | None when automatic_retry -> Ok ()
-      | None -> invalid "Goal successor lacks a typed automatic retry"
-      | Some grant when grant.parent_digest = parent.record.request_digest ->
-        decode (Verifier_review_owner.terminal_result disposition)
-      | Some _ -> invalid "Goal explicit retry names another parent" in
+    (* The refusal's stage says which evidence authorizes the child: an
+       execution refusal's receipt, or what moved before dispatch. *)
+    let* () = match refusal.Progress.stage with
+      | Progress.Execution ->
+        let* automatic_retry = retryable_refusal parent refusal.evidence in
+        let* _, disposition = decode (refusal_receipt parent refusal.evidence) in
+        (match explicit_retry with
+         | None when automatic_retry -> Ok ()
+         | None -> invalid "Goal successor lacks a typed automatic retry"
+         | Some grant when grant.parent_digest = parent.record.request_digest ->
+           decode (Verifier_review_owner.terminal_result disposition)
+         | Some _ -> invalid "Goal explicit retry names another parent")
+      | Before_dispatch ->
+        let* _ = moved_authority parent refusal.evidence in
+        (match explicit_retry with
+         | None -> Ok ()
+         | Some _ -> invalid "Goal explicit retry cannot follow a before-dispatch refusal") in
     (* The parent's [Successor_intended] digest pins the child's whole body,
        so its lookup grants are the ones it was prepared with. Here the child
        must also ask the parent's question as its next attempt. *)
@@ -547,6 +587,19 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected _ -> invalid "Goal successor has no original parent intent" in
     Ok child in
+  let allocate parent =
+    let* child = successor_of ~authority parent in
+    let run = new_run () in
+    let* _ = decode (summary child run) in
+    let* () = if run.run_id <> parent.run.run_id then Ok ()
+      else invalid "Goal successor must have a distinct fixed run" in
+    let* request_id = decode (original_key child) in
+    let* successor = Owner.prepare_successor ~store ~scope ~request_id
+      ~request:(request_json child run None)
+      |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
+    let* parent = advance ~store parent (Progress.Successor_intended successor) in
+    let* child = restore_child parent successor in
+    Ok (Some child) in
   let rec walk parent rest =
     match Progress.phase (progress parent), rest with
     | (Progress.Subdividing (_, successor) | Subdivided (_, successor)), _ ->
@@ -571,22 +624,15 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
          then walk child tail else invalid "Goal inventory differs from its original linked child")
     | Rejected {stage=Progress.Execution; evidence}, [] ->
       let* retryable = retryable_refusal parent evidence in
-      if not retryable || not automatic then Ok (Some parent)
-      else
-        let* child = successor_of ~authority parent in
-        let run = new_run () in
-        let* _ = decode (summary child run) in
-        let* () = if run.run_id <> parent.run.run_id then Ok ()
-          else invalid "Goal successor must have a distinct fixed run" in
-        let* request_id = decode (original_key child) in
-        let* successor = Owner.prepare_successor ~store ~scope ~request_id
-          ~request:(request_json child run None)
-          |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
-        let* parent = advance ~store parent (Progress.Successor_intended successor) in
-        let* child = restore_child parent successor in
-        Ok (Some child)
+      if not retryable || not automatic then Ok (Some parent) else allocate parent
+    | Rejected {stage=Progress.Before_dispatch; evidence}, [] ->
+      (* HIGH-RISK-UNREVIEWED: the same question met another lookup authority
+         or answer format before dispatch. Its next attempt asks it again with
+         the current authority, on a wake or an explicit request alike. *)
+      let* _ = moved_authority parent evidence in
+      allocate parent
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}), [] -> Ok (Some parent)
+      | Finished _ | Conflicted _), [] -> Ok (Some parent)
     | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
       | Finished _ | Conflicted _ | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}), _::_ ->
       invalid "Goal child exists without the original successor intent" in
@@ -649,13 +695,24 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
           | _ -> false in
         if agrees then Ok () else invalid "Goal admission observation differs from its original receipt"
       | Dispatch_pending _ -> Error (Execution_pending "Goal reviewer may have dispatched; no automatic replay")
+      | Rejected {stage=Before_dispatch; evidence} ->
+        (* Already refused before dispatch: its next attempt asks again. *)
+        let* change = moved_authority retained evidence in
+        Error (Authority_changed change)
       | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
-      | Rejected _ | Subdividing _ | Subdivided _ -> invalid "Goal review frontier changed" in
+      | Rejected {stage=Execution; _} | Subdividing _ | Subdivided _ -> invalid "Goal review frontier changed" in
     let* () = if V.question_matches retained.original authority then Ok ()
-      else Error (Authority_changed "Goal subject or submitted evidence differs") in
+      else Error Question_changed in
+    (* HIGH-RISK-UNREVIEWED: a retained attempt whose lookup authority or answer
+       format is not the current one is refused before dispatch. The refusal
+       keeps only what moved; the next attempt asks the same question with the
+       current authority, so the old grants never reach a reviewer. *)
     let* () = match V.authority_change retained.original authority with
       | Error detail -> invalid detail
-      | Ok (Some change) -> Error (Authority_changed (Verifier_review_authority_change.to_string change))
+      | Ok (Some change) ->
+        let* _ = advance ~store retained
+          (Progress.Refused {stage=Progress.Before_dispatch; evidence=Change.to_json change}) in
+        Error (Authority_changed change)
       | Ok None ->
         (* The same authority digest names the same tools, so other names mean
            the retained original disagrees with its own digest. *)

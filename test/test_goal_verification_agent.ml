@@ -1607,8 +1607,7 @@ let corrupt_daemon_original store retained =
         ~package_id:Worker.host_package_id ~goal_id:subject.goal_id
         ~request_id:subject.request_id ~attempt:(Original.attempt original) with
     | Error (Worker.Store_unavailable _) -> ()
-    | Error (Worker.Original_invalid _ | Worker.Authority_changed _ | Worker.Execution_pending _)
-    | Ok _ -> fail "the damaged original must remain an explicit storage failure"
+    | Error _ | Ok _ -> fail "the damaged original must remain an explicit storage failure"
   in
   check_preserved ();
   let restore () =

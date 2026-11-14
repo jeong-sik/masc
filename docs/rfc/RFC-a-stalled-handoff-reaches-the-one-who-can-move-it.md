@@ -8,7 +8,7 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["keeper-world-state-shows-open-work", "at-name-resolves-to-declared-recipient", "task-lifecycle-a-verdict-assigns-no-work", "board-attention-asks-jev-once-per-event", "provider-path-rest", "keeper-github-apps", "0361", "0390", "0406"]
-implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613", "#51618", "#51785"]
+implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613", "#51618", "#51785", "#51929", "#51930", "#51931", "#51932", "#51933"]
 ---
 
 # RFC: 멈춘 전달은 그것을 움직일 수 있는 쪽에 닿는다
@@ -18,6 +18,7 @@ implementation_prs: ["#51440", "#51470", "#51525", "#51540", "#51589", "#51613",
 2026-11-12 저녁에 L2 를 구현하면서 5.2 를 코드대로 고쳤어요. L2b 는 PR #51525 와 #51589, L2a 는 PR #51540, #51613, #51618 이에요. 고친 자리에는 "구현하며 고쳤어요"라고 적었어요.
 2026-11-12 밤에 L2a 배포 뒤 측정(8절)을 적고, 거기서 찾은 경합을 고치는 L2c(5.2)를 더했어요. L2c 의 줄 번호는 `origin/main` `79c51d7c6725` 기준이에요.
 2026-11-13 에 L2c 로 움직이지 않는 권한 불일치 4건의 원인을 찾아 L2d(5.2)를 더했어요. 독립 적대 검토를 세 번 받아 고쳤어요. L2d 의 줄 번호는 `origin/main` `a28f9269d797` 기준이에요.
+L2d 는 PR #51929(Task 다음 attempt), #51930(Task 디스패치 전 거절), #51931(답 형식이 바뀐 끊긴 Task 리뷰), #51932(Goal 다음 attempt), #51933(Goal 디스패치 전 거절)으로 구현했어요.
 
 - 요청된 판정 보고는 정산된 보고가 있을 때만 세요. 호출 노드가 아니라 기록된 provider 응답에서 읽어요.
 - "보고 없이 성공으로 끝난 실행은 수리"라는 규칙은 뺐어요. 지금 코드와 맞지 않았어요.

@@ -175,16 +175,8 @@ let verify_directory_permissions ~subject directory =
          { expected = directory_permissions; actual })
 ;;
 
-let prepare_directory_entry ~parent ~leaf ~subject =
+let published_directory_entry ~parent ~leaf ~subject =
   let path = Eio.Path.(parent / leaf) in
-  let creation =
-    raise_io ~operation:Create_directory ~subject (fun () ->
-      try
-        Eio.Path.mkdir ~perm:directory_permissions path;
-        `Created
-      with
-      | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) -> `Existing)
-  in
   let lexical =
     raise_io ~operation:Inspect_directory ~subject (fun () ->
       Eio.Path.stat ~follow:false path)
@@ -196,7 +188,21 @@ let prepare_directory_entry ~parent ~leaf ~subject =
       ~subject
       (Record_kind_mismatch
          { expected = `Directory; actual = lexical.kind });
-  let lexical_identity = identity_of_stat lexical in
+  path, identity_of_stat lexical
+;;
+
+let prepare_directory_entry ~parent ~leaf ~subject =
+  let creation =
+    raise_io ~operation:Create_directory ~subject (fun () ->
+      try
+        Eio.Path.mkdir ~perm:directory_permissions Eio.Path.(parent / leaf);
+        `Created
+      with
+      | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) -> `Existing)
+  in
+  let path, lexical_identity =
+    published_directory_entry ~parent ~leaf ~subject
+  in
   path, creation, lexical_identity
 ;;
 
@@ -282,6 +288,139 @@ let open_ensured_directory
   opened
 ;;
 
+(* A directory that was published whole is pinned as found: it is never
+   created here, and it receives the barriers of an existing component. *)
+let with_published_directory
+      ~parent
+      ~parent_subject
+      ~leaf
+      ~subject
+      f
+  =
+  let path, lexical_identity =
+    published_directory_entry ~parent ~leaf ~subject
+  in
+  raise_io ~operation:Open_directory ~subject (fun () ->
+    Eio.Path.with_open_dir path @@ fun opened ->
+    let opened = (opened :> Eio.Fs.dir_ty Eio.Path.t) in
+    stabilize_directory
+      ~parent
+      ~parent_subject
+      ~subject
+      ~creation:`Existing
+      ~lexical_identity
+      opened;
+    f opened)
+;;
+
+let open_published_directory
+      ~sw
+      ~parent
+      ~parent_subject
+      ~leaf
+      ~subject
+  =
+  let path, lexical_identity =
+    published_directory_entry ~parent ~leaf ~subject
+  in
+  let opened =
+    raise_io ~operation:Open_directory ~subject (fun () ->
+      Eio.Path.open_dir ~sw path)
+  in
+  let opened = (opened :> Eio.Fs.dir_ty Eio.Path.t) in
+  stabilize_directory
+    ~parent
+    ~parent_subject
+    ~subject
+    ~creation:`Existing
+    ~lexical_identity
+    opened;
+  opened
+;;
+
+let lane_entry_kind ~(registry : registry) ~owner =
+  raise_io ~operation:Inspect_directory ~subject:(Lane_root owner) (fun () ->
+    Eio.Path.kind
+      ~follow:false
+      Eio.Path.(registry.lanes / owner_to_string owner))
+;;
+
+(* NDT-OK: UUID entropy names a lane skeleton that is created exclusively
+   under [staging]; a name that is already taken draws another. The name does
+   not survive publication and never drives recovery or publication policy. *)
+let staged_lane_rng = Domain.DLS.new_key Random.State.make_self_init
+
+let rec stage_lane ~staging ~owner =
+  let leaf =
+    Uuidm.to_string (Uuidm.v4_gen (Domain.DLS.get staged_lane_rng) ())
+  in
+  let subject = Staged_lane owner in
+  let path, creation, lexical_identity =
+    prepare_directory_entry ~parent:staging ~leaf ~subject
+  in
+  match creation with
+  | `Existing -> stage_lane ~staging ~owner
+  | `Created ->
+    raise_io ~operation:Open_directory ~subject (fun () ->
+      Eio.Path.with_open_dir path @@ fun staged ->
+      let staged = (staged :> Eio.Fs.dir_ty Eio.Path.t) in
+      stabilize_directory
+        ~parent:staging
+        ~parent_subject:Staging_root
+        ~subject
+        ~creation
+        ~lexical_identity
+        staged;
+      List.iter
+        (fun area ->
+           with_ensured_directory
+             ~parent:staged
+             ~parent_subject:subject
+             ~leaf:(area_directory_leaf area)
+             ~subject:(Area (area, owner))
+             (fun _ -> ()))
+        [ Active; Owned; Forensic ]);
+    path
+;;
+
+(* A lane becomes visible under [lanes] in one rename, with its three areas
+   already inside. Building it in place would let a process that dies between
+   two mkdirs leave a lane without an area, and reconciliation reads such a
+   lane as damage and blocks its owner. A skeleton left under [staging] by a
+   process that died before the rename is not a lane and names no owner. *)
+let publish_lane ~(registry : registry) ~owner =
+  with_ensured_directory
+    ~parent:registry.recovery
+    ~parent_subject:Recovery_root
+    ~leaf:staging_directory_leaf
+    ~subject:Staging_root
+  @@ fun staging ->
+  let staged = stage_lane ~staging ~owner in
+  try
+    raise_io ~operation:Rename_directory ~subject:(Lane_root owner) (fun () ->
+      Eio.Path.rename
+        staged
+        Eio.Path.(registry.lanes / owner_to_string owner))
+  with
+  | Store_failure _ as failure ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match lane_entry_kind ~registry ~owner with
+     | `Directory ->
+       (* Another process published this owner's lane first. *)
+       raise_io
+         ~operation:Remove_directory
+         ~subject:(Staged_lane owner)
+         (fun () -> Eio.Path.rmtree staged)
+     | `Not_found
+     | `Unknown
+     | `Fifo
+     | `Character_special
+     | `Block_device
+     | `Regular_file
+     | `Symbolic_link
+     | `Socket -> Printexc.raise_with_backtrace failure backtrace)
+;;
+
 let open_registry_under ~sw ~registry_root =
     let root_stat =
       raise_io ~operation:Inspect_directory ~subject:Registry_root (fun () ->
@@ -294,12 +433,14 @@ let open_registry_under ~sw ~registry_root =
         ~subject:Registry_root
         (Record_kind_mismatch
            { expected = `Directory; actual = root_stat.kind });
-    with_ensured_directory
-      ~parent:registry_root
-      ~parent_subject:Registry_root
-      ~leaf:recovery_directory_leaf
-      ~subject:Recovery_root
-    @@ fun recovery ->
+    let recovery =
+      open_ensured_directory
+        ~sw
+        ~parent:registry_root
+        ~parent_subject:Registry_root
+        ~leaf:recovery_directory_leaf
+        ~subject:Recovery_root
+    in
     let lanes =
       open_ensured_directory
         ~sw
@@ -308,7 +449,7 @@ let open_registry_under ~sw ~registry_root =
         ~leaf:lanes_directory_leaf
         ~subject:Lanes_root
     in
-    { lanes }
+    { recovery; lanes }
 ;;
 
 let open_registry ~sw ~registry_root =

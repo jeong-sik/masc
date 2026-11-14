@@ -1,9 +1,9 @@
 (** Owner discovery and the scoped opening of one owner's store in the
     publication recovery store: list the owners under the registry's [lanes]
     directory, inspect one owner's entry, and run a callback inside a resource
-    scope with that owner's store open. [with_store] creates the lane layout
-    when it is missing; [with_existing_store] only observes a lane that
-    already exists.
+    scope with that owner's store open. [with_store] publishes the whole lane
+    in one rename when it is missing and pins an existing lane as found;
+    [with_existing_store] only observes a lane that already exists.
 
     This module is private to [fs_compat_internal] and has no interface file.
     [Capability_recovery_obligation] includes it. *)
@@ -70,39 +70,34 @@ let inspect_owner (registry : registry) owner =
 
 let open_store_in_scope ~sw ~registry ~owner =
   run_layout (fun () ->
-    with_ensured_directory
+    (match lane_entry_kind ~registry ~owner with
+     | `Not_found -> publish_lane ~registry ~owner
+     | `Directory
+     | `Unknown
+     | `Fifo
+     | `Character_special
+     | `Block_device
+     | `Regular_file
+     | `Symbolic_link
+     | `Socket -> ());
+    with_published_directory
       ~parent:registry.lanes
       ~parent_subject:Lanes_root
       ~leaf:(owner_to_string owner)
       ~subject:(Lane_root owner)
     @@ fun lane ->
-    let active =
+    let area area =
       Area_available
-        (open_ensured_directory
+        (open_published_directory
            ~sw
            ~parent:lane
            ~parent_subject:(Lane_root owner)
-           ~leaf:active_directory_leaf
-           ~subject:(Area (Active, owner)))
+           ~leaf:(area_directory_leaf area)
+           ~subject:(Area (area, owner)))
     in
-    let owned =
-      Area_available
-        (open_ensured_directory
-           ~sw
-           ~parent:lane
-           ~parent_subject:(Lane_root owner)
-           ~leaf:owned_directory_leaf
-           ~subject:(Area (Owned, owner)))
-    in
-    let forensic =
-      Area_available
-        (open_ensured_directory
-           ~sw
-           ~parent:lane
-           ~parent_subject:(Lane_root owner)
-           ~leaf:forensic_directory_leaf
-           ~subject:(Area (Forensic, owner)))
-    in
+    let active = area Active in
+    let owned = area Owned in
+    let forensic = area Forensic in
     { owner; active; owned; forensic; lane_residues = [] })
 ;;
 

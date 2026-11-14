@@ -4,8 +4,8 @@
 
 (** The server side of the login routes (plan C3-8c): the transport of a login
     to its provider over {!Masc_http_client}, and the HTTP/1 handlers of
-    {!Login_routes}, {!Login_allowlist_routes}, {!Login_invite_routes} and
-    {!Login_pat_routes}.
+    {!Login_routes}, {!Login_allowlist_routes}, {!Login_invite_routes},
+    {!Login_member_routes} and {!Login_pat_routes}.
 
     A handler reads the request into the values those modules take and writes
     their answer as it is: its status, its headers (each [set-cookie] among
@@ -23,15 +23,19 @@ val get : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> Login_transport.g
 val post : clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> Login_transport.post
 
 (** 16 KiB. The form of a start and an identity to register are under a KiB.
-    A longer body is a 413, and no route reads it. *)
+    A route that takes a body answers 413 to a longer one, and no route
+    reads it. A [GET] route reads no body. *)
 val max_request_bytes : int
 
 (** Registers, each as [Self_authenticated Browser_session]:
     - [POST /auth/oidc/start] and [GET /auth/oidc/callback] (Google)
     - [POST /auth/github/start] and [GET /auth/github/callback]
     - [POST /auth/logout] and [GET /auth/session]
-    - [POST /api/v1/auth/allowlist] and [DELETE /api/v1/auth/allowlist/<id>]
-    - [POST /api/v1/auth/invites] and [DELETE /api/v1/auth/invites/<id>]
+    - [POST] and [GET /api/v1/auth/allowlist], and
+      [DELETE /api/v1/auth/allowlist/<id>]
+    - [POST] and [GET /api/v1/auth/invites], and
+      [DELETE /api/v1/auth/invites/<id>]
+    - [GET /api/v1/auth/members]
     - [POST] and [GET /api/v1/auth/pats], and [DELETE /api/v1/auth/pats/<id>]
 
     A form or a query is read as pairs in order, so a field that comes twice

@@ -2,8 +2,8 @@
 
 A multi-account installation runs the account server. A person joins it
 through an invitation link, or because an Admin registered their identity
-on the allowlist. This guide covers the two routes with which an Admin
-issues and revokes invitations, and what they do not do yet.
+on the allowlist. This guide covers the routes with which an Admin issues,
+lists and revokes invitations, and what they do not do yet.
 
 The host operator makes the first Admin invitation without a server, with
 `masc auth bootstrap` and `masc auth invite`. Those commands write Admin
@@ -15,6 +15,7 @@ invitations only and revoke none. The steps are in
 | Request | Answer |
 | --- | --- |
 | `POST /api/v1/auth/invites` with `{"role":"member"}` or `{"role":"admin"}` | 200 with the invitation. |
+| `GET /api/v1/auth/invites` | 200 with every invitation, and no token. |
 | `DELETE /api/v1/auth/invites/<invite_id>` | 204 with no body. |
 
 An issued invitation is answered as
@@ -34,18 +35,28 @@ An issued invitation is answered as
 - Whoever opens the link and signs in joins with the role of the
   invitation. An `admin` invitation makes an Admin.
 
+The list is `{"invites":[…]}`, one object per invitation, revoked and used
+ones included: `invite_id`, `role`, `issuer` (`{"kind":"local_operator"}` or
+`{"kind":"admin","user_id":…}`), `expires_at_ms`, `status` and, for one a
+person joined through, that person's `user_id`. `status` is `open`,
+`expired`, `revocation_pending` (a revocation the log did not record: no one
+joins through it, and revoking it again closes it), `revoked` or
+`consumed`.
+
 ## Who may call them
 
-A browser session of an Admin. The request carries the session cookie, comes
-from the origin of the account server, and has the CSRF token of the session
-in the `x-masc-csrf-token` header. `GET /auth/session` answers that token as
-`csrf_token`. A personal access token does not issue or revoke invitations.
+A browser session of an Admin. The request carries the session cookie and
+comes from the origin of the account server. An issue and a revoke also
+have the CSRF token of the session in the `x-masc-csrf-token` header;
+`GET /auth/session` answers that token as `csrf_token`. The list needs no
+CSRF token. A personal access token does not issue, list or revoke
+invitations.
 
 | Status | When |
 | --- | --- |
 | 400 | The body is not one `role` of `member` or `admin`, or the id of the path is not an id. |
 | 401 | No session. |
-| 403 | No CSRF token, another origin, or a person who is not an Admin. |
+| 403 | No CSRF token on an issue or a revoke, another origin, or a person who is not an Admin. |
 | 404 | No invitation has the id. |
 | 409 | The invitation was revoked before, or a person joined through it. |
 | 503 | The authorization log cannot be written now. |
@@ -68,6 +79,12 @@ const issued = await (await fetch("/api/v1/auth/invites", {
 new URL(issued.link, location.origin).href; // the link to hand over
 ```
 
+To list them:
+
+```js
+const { invites } = await (await fetch("/api/v1/auth/invites")).json();
+```
+
 To revoke it:
 
 ```js
@@ -79,7 +96,5 @@ await fetch("/api/v1/auth/invites/" + issued.invite_id, {
 
 ## What is not there yet
 
-- No route lists the open invitations. Keep the `invite_id` of the answer
-  if the invitation may have to be revoked.
 - No screen calls the routes.
 - An invitation has no other lifetime than 24 hours.

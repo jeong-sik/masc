@@ -162,6 +162,7 @@ let work_task_rows_complete state =
   work_task_rows_current state && Option.is_none state.tasks_error
 
 let work_task_scope (state : state) =
+  let ko = state.ui_language = Lang_ko in
   let text ko en = ui_text state ~ko ~en in
   let current = work_task_rows_current state in
   let partial = Option.is_some state.tasks_error in
@@ -175,8 +176,8 @@ let work_task_scope (state : state) =
         let reason = match state.local_workspace with
           | Local_workspace_failed detail ->
               text "새 조회 실패: " "Refresh failed: " ^ Terminal_text.single_line detail
-          | Local_workspace_unread -> text "로컬 작업 공간 미조회" "Local workspace not read"
-          | Local_workspace_read -> text "작업 공간 식별 미확인" "Workspace identity unconfirmed" in
+          | Local_workspace_unread -> text "로컬 워크스페이스 " "Local workspace " ^ field_unread ~ko
+          | Local_workspace_read -> String.capitalize_ascii (workspace_identity_unconfirmed ~ko) in
         text "이전 작업 관측 · " "Previous Task reading · " ^ reason
     | Rows_unread -> text "작업 미조회 · 남은 줄은 이전 관측" "Tasks not read · the rows shown are a previous reading"
     | Rows_unavailable detail ->
@@ -544,7 +545,8 @@ let planning_proof_detail ~ko (goal : planning_goal) =
 let planning_stale_notice_rows (state : state) ~cols =
   let ko = state.ui_language = Lang_ko in
   let notice = match state.workspace_identity, state.planning_error with
-    | Workspace_identity_match_unconfirmed detail, _ -> Some ((if ko then "작업 공간 미확인" else "Workspace unconfirmed"), detail)
+    | Workspace_identity_match_unconfirmed detail, _ ->
+        Some (String.capitalize_ascii (workspace_identity_unconfirmed ~ko), detail)
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), Some error ->
         Some ((if ko then "새로고침 실패" else "Refresh failed"), error)
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _), None -> None
@@ -581,7 +583,8 @@ let planning_summary_reading ~cols (state : state) =
   let warning =
     (match state.workspace_identity with
      | Workspace_identity_match_unconfirmed detail ->
-         [text "작업 공간 미확인: " "Workspace unconfirmed: " ^ Terminal_text.single_line detail]
+         [String.capitalize_ascii (workspace_identity_unconfirmed ~ko) ^ ": "
+          ^ Terminal_text.single_line detail]
      | Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _ -> [])
     @ Option.to_list (Option.map (fun detail ->
         text "조회 실패: " "Read failed: " ^ Terminal_text.single_line detail) state.planning_error)
@@ -906,16 +909,19 @@ let planning_measurement_lines (state : state) (goal : planning_goal) =
                   ; tasks ]))
 
 let planning_confirmation_view (state : state) ~goal_id =
+  let ko = state.ui_language = Lang_ko in
   let text ko en = ui_text state ~ko ~en in
   match state.goal_confirmation with
   | Planning_detail.Inspecting read ->
       let view = Planning_detail.confirmation_view_for read ~goal_id in
       let view = match view with
         | (Ready _ | Stale _ | Failed _) when state.workspace_identity <> Workspace_identity_match ->
-            Masc_tui_fetched.Failed (text "작업 공간 미확인 · 근거를 다시 조회하세요" "Workspace identity is unconfirmed; read the proof again")
+            Masc_tui_fetched.Failed
+              (String.capitalize_ascii (workspace_identity_unconfirmed ~ko)
+               ^ text " · 근거를 다시 조회하세요" " · read the proof again")
         | (Ready confirmation | Stale (confirmation, _))
           when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
-            Masc_tui_fetched.Failed (text "인증 정보 변경 · 근거를 다시 조회하세요" "Credential changed; read the proof again")
+            Masc_tui_fetched.Failed (text "인증 정보 변경 · 근거를 다시 조회하세요" "Credential changed · read the proof again")
         | (Ready confirmation | Stale (confirmation, _))
           when not (Option.exists (fun identity -> identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
             Masc_tui_fetched.Failed (text "서버 변경 · 근거를 다시 조회하세요" "Server changed; read the proof again")

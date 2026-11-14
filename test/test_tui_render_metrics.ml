@@ -521,7 +521,7 @@ let test_the_fleet_section_escapes_the_probe_word () =
       ; sid_gc = None
       ; sid_scheduler =
           Some
-            { Decode.ssch_probe = "running" ^ escape
+            { Decode.ssch_probe = Some (Decode.Probe_unknown ("running" ^ escape))
             ; ssch_samples = 0
             ; ssch_p50_ms = 0.
             ; ssch_p95_ms = 0.

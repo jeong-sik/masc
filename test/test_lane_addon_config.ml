@@ -49,6 +49,19 @@ let only_declaration (snapshot : Config.snapshot) = match snapshot.declarations 
   | [declaration] -> declaration
   | values -> failf "expected one declaration, found %d" (List.length values)
 let check_error label path = check bool label true (Result.is_error (Config.load_file ~path))
+let contains text needle =
+  let width = String.length needle in
+  let rec at index =
+    index + width <= String.length text
+    && (String.sub text index width = needle || at (index + 1)) in
+  at 0
+(* For a refusal a guide quotes to operators. The row fails when the wording
+   changes, so the guide is changed with it. *)
+let check_refusal label path quoted = match Config.load_file ~path with
+  | Ok _ -> failf "%s: the declaration loaded" label
+  | Error message ->
+      check bool (Printf.sprintf "%s: refused with %S, and the guide quotes %S" label message quoted) true
+        (contains message quoted)
 
 let relative_package_and_source () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in
@@ -385,16 +398,46 @@ visibilities = ["public"]
                  [[binding.records]]\nsource_id = \"prs\"\nkind = \"github_pulls\"\nrepository_id = \"masc\"\n";
     check int "the binding also takes wiki and github_pulls grants" 3
       (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true (unwrap (Config.load_file ~path)).binding)));
+    (* The binding schema is two alternatives, and the host's validator names
+       no member of an alternative: a binding that fits neither is refused
+       with this one message, whichever member is wrong (#52319).
+       docs/guides/operator-quiz.md quotes it and the other messages below. *)
+    let unmatched = "lane binding must match exactly one schema alternative" in
     declaration "";
-    check_error "a binding without a time zone is refused before install" path;
+    check_refusal "a binding without a time zone is refused before install" path unmatched;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
-    check_error "a binding key the package does not read is refused" path;
+    check_refusal "a binding key the package does not read is refused" path unmatched;
     (* since says where a quiz that follows a lesson reads a record source
        from until a session that asked has left a cursor on that source (RFC
        operator-quiz-follows-lesson §3.8). *)
     declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n";
-    check_error "a quiz on its own refuses since" path;
-    let following ?(since = "since = 1794441600\n") ?(more = "") output = write path (Printf.sprintf {|id = "quiz"
+    check_refusal "a quiz on its own refuses since" path unmatched;
+    (* Before the schema the host reads the TOML, turns the binding into JSON
+       and checks the shape of each source: a declaration wrong there is
+       refused with that check's message. *)
+    declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n\n[[binding.sources]]\nsource_id = \"lesson\"\n\
+                 kind = \"lane_output\"\ninstallation_id = \"operator-lesson\"\noutput_id = \"scenes\"\n\
+                 selection = \"latest_completed\"\n";
+    check_refusal "sources = [] left beside [[binding.sources]] does not read as TOML" path
+      "table [binding.sources] is duplicated by an array of tables [[binding.sources]]";
+    write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+sources = "lesson"
+language = "ko"
+timezone = "Asia/Seoul"
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest);
+    check_refusal "sources that is not an array is refused" path
+      "binding.sources requires an array of observation sources";
+    let following ?(since = "since = 1794441600\n") ?(selection = "selection = \"latest_completed\"\n") ?(more = "")
+        output = write path (Printf.sprintf {|id = "quiz"
 run_id = "quiz"
 manifest_path = %S
 
@@ -407,13 +450,12 @@ source_id = "lesson"
 kind = "lane_output"
 installation_id = "operator-lesson"
 output_id = %S
-selection = "latest_completed"
-%s
+%s%s
 [[binding.records]]
 source_id = "board"
 kind = "board"
 visibilities = ["public"]
-|} manifest since output more) in
+|} manifest since output selection more) in
     following "scenes";
     ignore (unwrap (Config.load_file ~path));
     (* The worker takes zero and a fraction of a second, so the host does. *)
@@ -422,13 +464,22 @@ visibilities = ["public"]
     following ~since:"since = 1794441600.5\n" "scenes";
     ignore (unwrap (Config.load_file ~path));
     following ~since:"" "scenes";
-    check_error "a quiz that follows a lesson without since is refused" path;
+    check_refusal "a quiz that follows a lesson without since is refused" path unmatched;
     following ~since:"since = \"yesterday\"\n" "scenes";
-    check_error "a since that is not a number is refused" path;
+    check_refusal "a since that is not a number is refused" path unmatched;
     following ~since:"since = -1\n" "scenes";
-    check_error "a since before 1970 is refused" path;
+    check_refusal "a since before 1970 is refused" path unmatched;
+    following ~since:"since = 2026-11-12\n" "scenes";
+    check_refusal "a since written as a TOML date is refused before the schema" path
+      "binding.since: TOML date/time values are unsupported; use an explicit string";
     following "lesson";
-    check_error "a source that is not a lesson's scenes output is refused" path;
+    check_refusal "a source that is not a lesson's scenes output is refused" path unmatched;
+    following ~more:"language = \"ko\"\n" "scenes";
+    check_refusal "a binding key written under the lesson source is refused as a field of that source" path
+      "lane_output contains duplicate or unknown fields";
+    following ~selection:"" "scenes";
+    check_refusal "a lesson source without its selection is refused" path
+      "lane_output selection must be latest_completed";
     following ~more:"\n[[binding.sources]]\nsource_id = \"lesson-2\"\nkind = \"lane_output\"\n\
                      installation_id = \"operator-lesson-2\"\noutput_id = \"scenes\"\n\
                      selection = \"latest_completed\"\n" "scenes";
@@ -609,13 +660,6 @@ let model_access_is_explicit_and_revisioned () = with_directory (fun _root packa
   List.iter (fun value ->
     write manifest (package () ^ "\n[interface]\nmodel_access = " ^ value ^ "\n");
     check_error "unknown or untyped model access is rejected" path) ["\"auto\"";"true"])
-
-let contains text needle =
-  let width = String.length needle in
-  let rec at index =
-    index + width <= String.length text
-    && (String.sub text index width = needle || at (index + 1)) in
-  at 0
 
 let operator_asks_are_a_package_declaration () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in

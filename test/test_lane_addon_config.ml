@@ -374,6 +374,47 @@ visibilities = ["public"]
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
     check_error "a binding key the package does not read is refused" path)
 
+(* The shipped operator lesson: the example declaration loads with the
+   package's own manifest, and the binding contract refuses a binding without
+   the time the first lesson reads from. *)
+let shipped_operator_lesson_declaration_loads () =
+  let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
+  let package = loaded.package in
+  check string "the declaration names the package" "operator-lesson" package.id;
+  check (list string) "the package declares the outline and scene outputs"
+    ["outline"; "scene"]
+    (List.sort String.compare
+       (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs));
+  check bool "the package does not ask the operator" false package.operator_asks;
+  check bool "the lesson log lives on persistent state" true (package.state_storage = Lane_addon_types.Persistent);
+  check (option string) "compose and export arrive through lane_act" (Some "lane_act") package.action_tool;
+  check int "the example grants a Board and a repository" 2
+    (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true loaded.binding)));
+  with_directory (fun _root _packages directory ->
+    let path = Filename.concat directory "lesson.toml" in
+    let manifest = Unix.realpath (repo_file "addons/operator-lesson/lane.toml") in
+    let declaration binding = write path (Printf.sprintf {|id = "lesson"
+run_id = "lesson"
+manifest_path = %S
+
+[binding]
+sources = []
+language = "ko"
+%s
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest binding) in
+    declaration "since = 1794441600\n";
+    ignore (unwrap (Config.load_file ~path));
+    declaration "";
+    check_error "a binding without since is refused before install" path;
+    declaration "since = \"yesterday\"\n";
+    check_error "a since that is not a number is refused" path;
+    declaration "since = 1794441600\ntimezone = \"Asia/Seoul\"\n";
+    check_error "a binding key the package does not read is refused" path)
+
 (* The operator quiz worker itself, read with the host's own decoders: the
    action schema the worker start checks, the observation packet, and the
    host request listing after a compose. *)
@@ -1083,6 +1124,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;
      test_case "the operator quiz worker speaks the host contract" `Quick operator_quiz_worker_speaks_the_host_contract;
+     test_case "the shipped operator lesson declaration loads with its manifest" `Quick shipped_operator_lesson_declaration_loads;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;
      test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;

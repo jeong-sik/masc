@@ -231,7 +231,6 @@ function Body({ view, subscriptions, keepers, tokens, invites, allowlist, member
         ${view.who.role === 'admin'
           ? html`<${InvitesPanel} model=${invites} /><${AllowlistPanel} model=${allowlist} /><${MembersPanel} model=${members} />`
           : null}
-        <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `
   }

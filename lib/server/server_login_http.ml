@@ -178,6 +178,20 @@ let register t request reqd =
     with_body reqd (fun body -> respond reqd (Login_allowlist_routes.register t browser ~body)))
 ;;
 
+(* The three lists of an Admin (plan L2d) are reads: no body, and no CSRF
+   token, which the routes do not ask of a safe request. *)
+let list_allowlist t request reqd =
+  with_browser request reqd (fun browser -> respond reqd (Login_allowlist_routes.list t browser))
+;;
+
+let list_invites t request reqd =
+  with_browser request reqd (fun browser -> respond reqd (Login_invite_routes.list t browser))
+;;
+
+let list_members t request reqd =
+  with_browser request reqd (fun browser -> respond reqd (Login_member_routes.list t browser))
+;;
+
 (* The router matched the prefix, so the path holds it; the rest is the id,
    which the route reads. *)
 let with_entry ~prefix request reqd f =
@@ -234,9 +248,12 @@ let add_routes t router =
   |> Server_route.post access "/auth/logout" (logout t)
   |> Server_route.get access "/auth/session" (session t)
   |> Server_route.post access allowlist_path (register t)
+  |> Server_route.get access allowlist_path (list_allowlist t)
   |> Server_route.prefix_delete access allowlist_entry_prefix (remove t)
   |> Server_route.post access invites_path (issue_invite t)
+  |> Server_route.get access invites_path (list_invites t)
   |> Server_route.prefix_delete access invite_entry_prefix (revoke_invite t)
+  |> Server_route.get access Login_member_routes.path (list_members t)
   |> Server_route.post access pats_path (issue_pat t)
   |> Server_route.get access pats_path (list_pats t)
   |> Server_route.prefix_delete access pat_prefix (revoke_pat t)

@@ -323,12 +323,21 @@ let handle_journal_get state req reqd name =
     in
     let config = Mcp_server.workspace_config state in
     let keepers_dir = memory_os_keepers_dir config in
-    let entries =
+    match
       Keeper_memory_os_current.read_journal_tail_projection
         ~keepers_dir
         ~keeper_id:name
         ~limit
-    in
+    with
+    | Error detail ->
+      (* A journal that exists and cannot be read is not an empty one. *)
+      Http.Response.json_value ~status:`Internal_server_error
+        (`Assoc
+           [ "keeper", `String name
+           ; "read_error", `String detail
+           ])
+        reqd
+    | Ok entries ->
     let undecodable =
       List.length
         (List.filter

@@ -459,6 +459,23 @@ module Optional_read_for_testing : sig
       must not perform Eio effects. *)
 end
 
+type regular_file_read_error =
+  | Not_a_regular_file of Unix.file_kind
+      (** The opened entry is a directory, a device, a FIFO or a socket. *)
+  | Regular_file_unreadable of string
+
+val regular_file_read_error_to_string : regular_file_read_error -> string
+
+(** Load an entire regular file, or [Ok None] when the path is absent at
+    open. The open does not wait: a FIFO without a writer is
+    [Error (Not_a_regular_file S_FIFO)], not a blocked caller. The kind is
+    read from the opened descriptor, so the entry cannot change between the
+    check and the read. A link to a regular file is followed; a dangling link
+    is [Ok None], like any path that does not resolve. Open, read and close
+    form one blocking job, as in {!load_file_opt}. *)
+val load_regular_file_opt :
+  string -> (string option, regular_file_read_error) result
+
 (** Save string to file (overwrite). A write, flush or close error is raised
     as [Sys_error], on the Eio branch and the inline branch alike: both run
     one writer. *)

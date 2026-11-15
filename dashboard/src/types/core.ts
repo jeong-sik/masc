@@ -1579,6 +1579,9 @@ interface KeeperConfigExecution {
   selected_runtime_id: string
   selected_runtime_canonical: string
   runtime_options: string[]
+  /** Declared `[runtime.lanes.<id>]` lane ids. An assignment may name one
+   *  instead of a runtime (RFC-0457); the server resolves lanes first. */
+  lane_options: string[]
 }
 
 

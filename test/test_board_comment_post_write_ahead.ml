@@ -303,7 +303,10 @@ let test_fusion_combined_held_observer_preserves_replay_and_later_creation () =
   Alcotest.(check (list string)) "both Fusion writes remain on disk"
     ids (persisted_ids () |> List.sort String.compare)
 
-let test_acquire_observer_failure_proves_no_publication () =
+(* The acquire-wait sample is reported after the persistence lock is released,
+   so its observer cannot prevent the write. A failing observer is reported
+   with the receipt of the write that already happened. *)
+let test_acquire_observer_failure_follows_the_write () =
   let calls = ref 0 in
   let failure = with_observer
       { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
@@ -311,22 +314,72 @@ let test_acquire_observer_failure_proves_no_publication () =
           if !calls = 1 then failwith "acquire observer failed") }
       (fun () ->
         match Board_dispatch.create_post_with_unresolved
-                ~author:"receipt-author" ~content:"never reached publication"
+                ~author:"receipt-author" ~content:"published before the acquire sample"
                 ~post_kind:Board.Human_post () with
         | Ok _ -> Alcotest.fail "the failing acquire observer must be reported"
         | Error failure -> failure)
   in
   Alcotest.(check int) "the real acquire observer was invoked once" 1 !calls;
-  check_effect "the write did not begin" Failure_effect.Proven_pre_effect failure;
-  Alcotest.(check bool) "pre-effect failure has no committed receipt" true
-    (Option.is_none (Board.Post_publication_failure.committed failure));
-  Alcotest.(check int) "pre-effect failure publishes no post" 0
-    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
-  Alcotest.(check int) "pre-effect failure appends no WAL row" 0
-    (List.length (post_rows ()));
-  ignore (create_post_exn ~author:"receipt-author" ~content:"healthy after refusal");
-  Alcotest.(check int) "the same store accepts a later real write" 1
+  check_effect "publication preceded the observer failure"
+    Failure_effect.Proven_post_effect failure;
+  let creation = match Board.Post_publication_failure.committed failure with
+    | Some creation -> creation
+    | None -> Alcotest.fail "the committed post lost its receipt"
+  in
+  (match Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator () with
+   | [post] ->
+     Alcotest.(check string) "the receipt names the published post"
+       (Board.Post_id.to_string creation.post.id) (Board.Post_id.to_string post.id)
+   | posts -> Alcotest.failf "expected one published post, got %d" (List.length posts));
+  Alcotest.(check int) "the write reached the WAL once" 1 (List.length (post_rows ()));
+  ignore (create_post_exn ~author:"receipt-author" ~content:"healthy after the observer failure");
+  Alcotest.(check int) "the same store accepts a later real write" 2
     (List.length (post_rows ()))
+
+(* #51273: both lock observers used to run while [persist_mutex] was held, so
+   an observer that read Board through the same lock waited on itself forever.
+   [read_post_for_evidence] takes the persistence lock. *)
+let test_lock_observers_may_read_board_through_the_persistence_lock () =
+  let seed = create_post_exn ~author:"reentrant-author" ~content:"read by the observer" in
+  let post_id = Board.Post_id.to_string seed.id in
+  let reading = ref false in
+  let acquire_reads = ref 0 and held_reads = ref 0 in
+  let read_back reads =
+    (* The read below has its own persistence interval and reports it to this
+       same observer; that nested report does not read again. *)
+    if not !reading then begin
+      reading := true;
+      let result =
+        Board_dispatch.read_post_for_evidence
+          ~reader:Masc_board_handlers.Board_access.Operator ~post_id in
+      reading := false;
+      match result with
+      | Ok (post : Board.post) ->
+        Alcotest.(check string) "the observer reads the committed post"
+          post_id (Board.Post_id.to_string post.id);
+        incr reads
+      | Error error ->
+        Alcotest.fail (Board.show_board_error (Board.board_error_of_read_error error))
+    end
+  in
+  with_observer
+    { noop_observer with
+      observe_persist_lock_acquire_sec = (fun _ -> read_back acquire_reads)
+    ; observe_persist_lock_held_sec = (fun _ -> read_back held_reads)
+    }
+    (fun () ->
+      ignore (create_post_exn ~author:"reentrant-author" ~content:"written while observed");
+      match Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator
+              ~post_id ~author:"reentrant-commenter" ~content:"commented while observed" () with
+      | Ok _ -> ()
+      | Error error -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool) "the acquire observer read Board through the lock" true
+    (!acquire_reads > 0);
+  Alcotest.(check bool) "the held observer read Board through the lock" true
+    (!held_reads > 0);
+  Alcotest.(check int) "both observed writes are published" 2
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
+  Alcotest.(check int) "both observed writes reached the WAL" 2 (List.length (post_rows ()))
 
 let flush () =
   Board.flush_dirty (Board_dispatch.backend ())
@@ -550,8 +603,9 @@ let test_creation_commits_before_releasing_persistence () =
     Eio.Switch.on_release sw (fun () -> Board_metrics_hooks.set_observer noop);
     Board_metrics_hooks.set_observer
       { noop with observe_persist_lock_held_sec = (fun _ ->
-          (* This existing observer runs at the end of the persistence
-             critical section. Every successful append must already be
+          (* This existing observer runs as soon as a persistence critical
+             section is released, before the call that owned it continues.
+             Every successful append must already be
              visible to the next snapshot writer before it can enter, so the
              section that performs a creation must end with the target state
              already reached. A later section that only reads carries the same
@@ -733,28 +787,44 @@ let sub_board_rows () =
   let path = Board.sub_boards_path (Board.global ()) in
   if Sys.file_exists path then Fs_compat.load_jsonl path else []
 
+(* Hold the persistence lock while [first] and then [second] start. Each runs
+   until it waits for that lock, and [Eio.Mutex] admits waiters in arrival
+   order, so [first] owns persistence with [second] already queued behind it.
+   [while_queued] runs before either is admitted. *)
+let queue_on_persistence ?(while_queued = fun () -> ()) ~sw first second =
+  let first_done, resolve_first = Eio.Promise.create () in
+  let second_done, resolve_second = Eio.Promise.create () in
+  let first_waited, second_waited =
+    Board.with_persist_lock (Board_dispatch.backend ()) (fun () ->
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_first (first ()));
+      Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve_second (second ()));
+      let waited =
+        not (Eio.Promise.is_resolved first_done),
+        not (Eio.Promise.is_resolved second_done)
+      in
+      while_queued ();
+      waited)
+  in
+  Alcotest.(check bool) "the first operation waits for persistence" true first_waited;
+  Alcotest.(check bool) "the second operation queues behind it" true second_waited;
+  let first_result = Eio.Promise.await first_done in
+  first_result, Eio.Promise.await second_done
+
 let test_queued_post_uses_the_policy_before_append () =
   ignore (board_result_exn (create_policy_board "queued-policy"));
   let observations = fanout_counts () in
   let failure = Eio.Switch.run (fun sw ->
-    let posted, resolve_posted = Eio.Promise.create () in
-    let start_post = ref true in
-    with_observer
-      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
-          if !start_post then begin
-            start_post := false;
-            (* The real update owns persistence but has not changed state.
-               The post stages under Open policy, then queues on that lock. *)
-            Eio.Fiber.fork ~sw (fun () ->
-              Eio.Promise.resolve resolve_posted (policy_post "queued-policy"));
-            Alcotest.(check bool) "the post waits for the policy writer" false
-              (Eio.Promise.is_resolved posted)
-          end) }
-      (fun () ->
-        ignore (board_result_exn
-          (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"queued-policy"
-             ~access:Board.Owner_only ()));
-        Eio.Promise.await posted |> post_refusal_exn))
+    (* The post stages under Open policy, then queues behind the real update
+       before that update has changed state. *)
+    let updated, posted =
+      queue_on_persistence ~sw
+        (fun () ->
+          Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"queued-policy"
+            ~access:Board.Owner_only ())
+        (fun () -> policy_post "queued-policy")
+    in
+    ignore (board_result_exn updated);
+    post_refusal_exn posted)
   in
   check_denied_policy failure;
   check_no_posts ();
@@ -771,33 +841,25 @@ let test_post_admission_defers_the_policy_update () =
   ignore (board_result_exn (create_policy_board "admitted-policy"));
   let observations = fanout_counts () in
   let creation = Eio.Switch.run (fun sw ->
-    let updated, resolve_updated = Eio.Promise.create () in
-    let start_update = ref true in
-    with_observer
-      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
-          if !start_update then begin
-            start_update := false;
-            (* This seam is inside post persistence, before append. The
-               competing API must wait before mutating the policy. *)
-            Eio.Fiber.fork ~sw (fun () ->
-              Eio.Promise.resolve resolve_updated
-                (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy"
-                   ~access:Board.Owner_only ()));
-            Alcotest.(check bool) "the updater waits for post admission" false
-              (Eio.Promise.is_resolved updated);
-            let policy = board_result_exn
-                (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy") in
-            Alcotest.(check bool) "a waiting update has not changed policy" true
-              (policy.access = Board.Open)
-          end) }
-      (fun () ->
-        let creation = match policy_post "admitted-policy" with
-          | Ok creation -> creation
-          | Error failure ->
-            Alcotest.fail (Board.Post_publication_failure.to_string failure)
-        in
-        ignore (board_result_exn (Eio.Promise.await updated));
-        creation))
+    (* The competing update queues behind the post before the post appends. It
+       must wait there without mutating the policy. *)
+    let posted, updated =
+      queue_on_persistence ~sw
+        ~while_queued:(fun () ->
+          let policy = board_result_exn
+              (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy") in
+          Alcotest.(check bool) "a waiting update has not changed policy" true
+            (policy.access = Board.Open))
+        (fun () -> policy_post "admitted-policy")
+        (fun () ->
+          Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy"
+            ~access:Board.Owner_only ())
+    in
+    ignore (board_result_exn updated);
+    match posted with
+    | Ok creation -> creation
+    | Error failure ->
+      Alcotest.fail (Board.Post_publication_failure.to_string failure))
   in
   let post_id = Board.Post_id.to_string creation.post.id in
   Alcotest.(check int) "the admitted post has one WAL row" 1
@@ -819,37 +881,34 @@ let test_post_admission_defers_the_policy_update () =
     (policy.access = Board.Owner_only)
 
 let test_same_slug_loser_never_appends () =
-  let winner, loser, rows_at_unlock = Eio.Switch.run (fun sw ->
-    let created, resolve_created = Eio.Promise.create () in
-    let start_competitor = ref true in
-    let rows_at_unlock = ref [] in
+  let winner, loser, rows_after_each_interval = Eio.Switch.run (fun sw ->
+    let rows_after_each_interval = ref [] in
     with_observer
       { noop_observer with
-        observe_persist_lock_acquire_sec = (fun _ ->
-          if !start_competitor then begin
-            start_competitor := false;
-            Eio.Fiber.fork ~sw (fun () ->
-              Eio.Promise.resolve resolve_created
-                (create_policy_board "one-policy"));
-            Alcotest.(check bool) "the competing create waits before append" false
-              (Eio.Promise.is_resolved created)
-          end)
-      ; observe_persist_lock_held_sec = (fun _ ->
+        observe_persist_lock_held_sec = (fun _ ->
           (* Observe each real write before a possible later cleanup rewrite
              could conceal an appended losing row. *)
-          rows_at_unlock := List.length (sub_board_rows ()) :: !rows_at_unlock)
+          (* Observers run outside the lock now, and reading the rows
+             yields: read first, then prepend, so one interval's sample does
+             not overwrite another's. *)
+          let rows = List.length (sub_board_rows ()) in
+          rows_after_each_interval := rows :: !rows_after_each_interval)
       }
       (fun () ->
-        let winner = board_result_exn (create_policy_board "one-policy") in
-        let loser = Eio.Promise.await created in
-        winner, loser, List.rev !rows_at_unlock))
+        let winner, loser =
+          queue_on_persistence ~sw
+            (fun () -> create_policy_board "one-policy")
+            (fun () -> create_policy_board "one-policy")
+        in
+        board_result_exn winner, loser, List.rev !rows_after_each_interval))
   in
   (match loser with
    | Error (Board.Already_exists _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "two same-slug creations were accepted");
+  (* The first interval is the empty one that queued both creations. *)
   Alcotest.(check (list int)) "neither persistence interval appends a losing row"
-    [1; 1] rows_at_unlock;
+    [0; 1; 1] rows_after_each_interval;
   Alcotest.(check int) "one sub-board row remains" 1 (List.length (sub_board_rows ()));
   restart_board ();
   let reloaded = board_result_exn
@@ -861,21 +920,13 @@ let test_same_slug_loser_never_appends () =
 let test_new_restrictive_board_rechecks_a_queued_unknown_hearth () =
   let observations = fanout_counts () in
   let failure = Eio.Switch.run (fun sw ->
-    let posted, resolve_posted = Eio.Promise.create () in
-    let start_post = ref true in
-    with_observer
-      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
-          if !start_post then begin
-            start_post := false;
-            Eio.Fiber.fork ~sw (fun () ->
-              Eio.Promise.resolve resolve_posted (policy_post "new-private-policy"));
-            Alcotest.(check bool) "the unknown-hearth post queues behind create"
-              false (Eio.Promise.is_resolved posted)
-          end) }
-      (fun () ->
-        ignore (board_result_exn
-          (create_policy_board ~access:Board.Owner_only "new-private-policy"));
-        Eio.Promise.await posted |> post_refusal_exn))
+    let created, posted =
+      queue_on_persistence ~sw
+        (fun () -> create_policy_board ~access:Board.Owner_only "new-private-policy")
+        (fun () -> policy_post "new-private-policy")
+    in
+    ignore (board_result_exn created);
+    post_refusal_exn posted)
   in
   check_denied_policy failure;
   check_no_posts ();
@@ -953,24 +1004,18 @@ let test_partial_policy_source_refuses_comment_publication () =
 let test_queued_update_does_not_resurrect_a_deleted_policy () =
   ignore (board_result_exn (create_policy_board "deleted-policy"));
   let updated = Eio.Switch.run (fun sw ->
-    let updated, resolve_updated = Eio.Promise.create () in
-    let start_update = ref true in
-    with_observer
-      { noop_observer with observe_persist_lock_acquire_sec = (fun _ ->
-          if !start_update then begin
-            start_update := false;
-            Eio.Fiber.fork ~sw (fun () ->
-              Eio.Promise.resolve resolve_updated
-                (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"deleted-policy"
-                   ~name:"must not resurrect" ()));
-            Alcotest.(check bool) "the updater waits for deletion" false
-              (Eio.Promise.is_resolved updated)
-          end) }
-      (fun () ->
-        (match board_result_exn (Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:"deleted-policy") with
-         | Board.Durable_deletion -> ()
-         | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
-        Eio.Promise.await updated))
+    let deleted, updated =
+      queue_on_persistence ~sw
+        (fun () ->
+          Board_dispatch.delete_sub_board ~authorization:Board.Operator_sub_board_deletion ~sub_board_id:"deleted-policy")
+        (fun () ->
+          Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"deleted-policy"
+            ~name:"must not resurrect" ())
+    in
+    (match board_result_exn deleted with
+     | Board.Durable_deletion -> ()
+     | Board.Deletion_decision_pending detail | Board.Deletion_persistence_pending detail -> Alcotest.fail detail);
+    updated)
   in
   (match updated with
    | Error (Board.Invalid_id _) -> ()
@@ -993,8 +1038,10 @@ let () =
             (with_eio test_combined_reserved_held_observer_is_reraised_after_commit);
           Alcotest.test_case "Fusion combined held observer preserves replay and later creation" `Quick
             (with_eio test_fusion_combined_held_observer_preserves_replay_and_later_creation);
-          Alcotest.test_case "acquire observer failure proves no publication" `Quick
-            (with_eio test_acquire_observer_failure_proves_no_publication);
+          Alcotest.test_case "acquire observer failure follows the write" `Quick
+            (with_eio test_acquire_observer_failure_follows_the_write);
+          Alcotest.test_case "lock observers may read Board through the persistence lock" `Quick
+            (with_eio test_lock_observers_may_read_board_through_the_persistence_lock);
           Alcotest.test_case "dispatch preparation failure proves no publication" `Quick
             (with_eio test_dispatch_preparation_failure_proves_no_publication);
           Alcotest.test_case "creations commit before persistence unlock" `Quick

@@ -2193,7 +2193,7 @@ def workspace_check(binary, base_path):
 # The document decides whether imp's persisted conversation opens directly,
 # and whether the workspace is one the journey prepares at all;
 # the journey never re-derives that from check condition strings.
-ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey', 'account_installation')
+ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey', 'account_installation', 'refused_by_boot')
 
 
 def onboarding_status(binary, base_path=None):
@@ -2250,10 +2250,17 @@ class ServerUnread(ValueError):
 # The text each status carries besides its name. The journey reads these
 # fields and no others, so a document without one of them is not read at all.
 SERVER_OBSERVATION_TEXT = {
-    'same_workspace': ('server_version', 'installed_version'),
-    'other_workspace': ('server_workspace',),
+    'same_workspace': ('installed_version',),
     'account_server': ('installed_version',),
 }
+
+# The statuses that name the process the kernel shows as the holder of the
+# workspace, by its pid.
+SERVER_OBSERVATION_PID = ('same_workspace', 'same_workspace_on_another_port', 'owner_unannounced')
+# The statuses that name the port a server announces.
+SERVER_OBSERVATION_PORT = ('account_server', 'same_workspace_on_another_port')
+# The statuses that say whether that port answered, and with which version.
+SERVER_OBSERVATION_ANSWER = ('account_server', 'same_workspace')
 
 
 def setup_server_observation(binary, base_path, port):
@@ -2274,13 +2281,34 @@ def setup_server_observation(binary, base_path, port):
         raise ValueError('invalid server observation')
     if not all(isinstance(observed.get(name), str) for name in SERVER_OBSERVATION_TEXT.get(status, ())):
         raise ValueError('invalid server observation')
-    if status == 'account_server':
+    if status in SERVER_OBSERVATION_PID and not positive_integer(observed.get('server_pid')):
+        raise ValueError('invalid server observation')
+    if status in SERVER_OBSERVATION_PORT:
         announced = observed.get('server_port')
-        if (not positive_integer(announced) or announced > 65535
-                or type(observed.get('server_answers')) is not bool
+        if not positive_integer(announced) or announced > 65535:
+            raise ValueError('invalid server observation')
+    if status in SERVER_OBSERVATION_ANSWER:
+        if (type(observed.get('server_answers')) is not bool
                 or not isinstance(observed.get('server_version', ''), str)):
             raise ValueError('invalid server observation')
     return observed
+
+
+def answered_version(observed):
+    """The version the announced port answered, or None when it gave none."""
+    return observed.get('server_version') if observed['server_answers'] else None
+
+
+def owner_unannounced_line(observed):
+    """What an `owner_unannounced` observation says of the process, and what to do."""
+    pid = str(observed['server_pid'])
+    return ('pid ' + pid + ' holds this workspace but announces no port that setup saw. It may be '
+            'starting: wait and run setup again. It may be shutting down: run setup again once it has '
+            'exited. It may announce another port, which the lock of another process hid from this '
+            'read: run setup again with the --port it was started with. It may listen on an address '
+            'that 127.0.0.1 does not reach, which its log says when it starts: setup cannot use it '
+            'until it is started with --host 127.0.0.1 or --host 0.0.0.0. Or a MASC that announces no '
+            'port started it: stop it with kill ' + pid + ' and run masc start.')
 
 
 def account_server_line(observed):
@@ -2301,6 +2329,15 @@ def account_server_line(observed):
             + '). The installed MASC is ' + terminal_text(observed['installed_version']) + '.')
 
 
+# The status of the journey that stopped at a workspace whose config asks for
+# accounts. It prepared nothing there, so it does not end with the 0 of a
+# journey that did: scripts/install.sh reads this status
+# (MASC_SETUP_ACCOUNT_INSTALLATION_EXIT) to say what comes next, never the
+# lines printed before it. The terminal UI and `masc setup --no-tui`, whose
+# statuses the journey passes on, do not exit 3.
+ACCOUNT_INSTALLATION_EXIT = 3
+
+
 def account_installation(binary, state, port):
     """Say what runs in a workspace whose config asks for accounts, and stop.
 
@@ -2317,6 +2354,10 @@ def account_installation(binary, state, port):
         if check['condition'] != 'satisfied':
             print(check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
     port = workspace_port(binary, base, port)
+    # `masc setup-server` waits for an announced account server that does not
+    # answer its health probe (Masc_http_client.default_request_timeout_sec),
+    # so the screen says what it waits on before the read.
+    print('Checking whether an account server runs for this workspace…', file=sys.stderr)
     try:
         observed = setup_server_observation(binary, base, port)
     except ServerUnread as unread:
@@ -2329,34 +2370,60 @@ def account_installation(binary, state, port):
         print(account_server_line(observed), file=sys.stderr)
     elif status == 'free':
         print(unannounced, file=sys.stderr)
-    elif status == 'other_workspace':
-        print(unannounced + ' Port ' + str(port) + ' belongs to '
-              + terminal_text(observed['server_workspace']) + '.', file=sys.stderr)
     elif status == 'unknown_server':
         print(unannounced + ' Port ' + str(port)
-              + ' is held by a process that does not answer as a MASC workspace.', file=sys.stderr)
-    elif status == 'same_workspace':
-        print('A server that serves this workspace to a single user is running on port ' + str(port)
-              + ' (MASC ' + terminal_text(observed['server_version'])
-              + '). It started before the config asked for accounts.', file=sys.stderr)
+              + ' is held by a process that does not hold this workspace.', file=sys.stderr)
+    elif status in ('same_workspace', 'same_workspace_on_another_port'):
+        version = answered_version(observed) if status == 'same_workspace' else None
+        print('A server that serves this workspace to a single user (pid ' + str(observed['server_pid'])
+              + ') announces port ' + str(port if status == 'same_workspace' else observed['server_port'])
+              + ('' if version is None else ' (MASC ' + terminal_text(version) + ')')
+              + '. It started before the config asked for accounts.', file=sys.stderr)
+    elif status == 'owner_unannounced':
+        print(unannounced + ' ' + owner_unannounced_line(observed), file=sys.stderr)
     else:
         raise SetupError('MASC returned an unknown server observation')
     # The journey ends before its workspace screen, so the way to another
     # workspace is said here.
     print('To set up another workspace: masc setup --base-path DIRECTORY', file=sys.stderr)
-    return 0
+    return ACCOUNT_INSTALLATION_EXIT
+
+
+def refused_by_boot(state):
+    """Say why no boot runs a server in this workspace, and stop.
+
+    The config holds an account mode the boot does not know. Nothing is asked,
+    initialized or started: the doctor's line is the sentence the boot stops
+    with, and it names the file to correct.
+    """
+    base = state.get('base_path')
+    if not isinstance(base, str):
+        raise SetupError('MASC returned an unsupported setup observation; reinstall the complete release.')
+    print('\n' + terminal_text(base), file=sys.stderr)
+    for check in state['checks']:
+        if check['condition'] != 'satisfied':
+            print(check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
+    print('Nothing was initialized or started.\n'
+          'To set up another workspace: masc setup --base-path DIRECTORY', file=sys.stderr)
+    return 1
+
+
+def journey_ends_at(binary, state, port):
+    """The exit of the journey in a workspace it does not prepare, and None otherwise."""
+    if state['opening'] == 'account_installation':
+        return account_installation(binary, state, port)
+    if state['opening'] == 'refused_by_boot':
+        return refused_by_boot(state)
+    return None
 
 
 def account_installation_at(binary, base, port):
-    """The exit of the journey when `base` asks for accounts, and None otherwise.
+    """The exit of the journey when `base` is not one it prepares, and None otherwise.
 
     For a directory that no doctor document read so far described: it is read
     before anything is offered, checked or initialized in it.
     """
-    described = onboarding_status(binary, base)
-    if described['opening'] == 'account_installation':
-        return account_installation(binary, described, port)
-    return None
+    return journey_ends_at(binary, onboarding_status(binary, base), port)
 
 
 # Why `masc setup-stop-previous-owner` sent no stop, as its receipt names it.
@@ -2382,13 +2449,32 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
         state = observed.get('status')
         if state == 'free':
             return port
+        if termination_requested and state in ('same_workspace', 'owner_unannounced'):
+            # The server that was asked to stop withdraws its announcement
+            # before it lets go of the workspace, so both are the same server
+            # on its way out.
+            print('Graceful shutdown was requested, but its server still holds this workspace. No second shutdown request will be sent.', file=sys.stderr)
+            if pick('Workspace shutdown', ['Check shutdown again', 'Finish later'])[0]:
+                raise SetupError('Shutdown was requested; its completion remains unconfirmed. Inspect this workspace before restarting it.')
+            continue
+        if state == 'owner_unannounced':
+            raise SetupError(owner_unannounced_line(observed))
+        if state == 'same_workspace_on_another_port':
+            announced = str(observed['server_port'])
+            raise SetupError('The server of this workspace (pid ' + str(observed['server_pid']) + ') serves port '
+                             + announced + ', not port ' + str(port) + '. Run setup again with --port '
+                             + announced + '.')
         if state == 'same_workspace':
-            server_version = observed['server_version']
-            if termination_requested:
-                print('Graceful shutdown was requested, but this workspace is still answering. No second shutdown request will be sent.', file=sys.stderr)
-                if pick('Workspace shutdown', ['Check shutdown again', 'Finish later'])[0]:
-                    raise SetupError('Shutdown was requested; its completion remains unconfirmed. Inspect this workspace before restarting it.')
-                continue
+            server_version = answered_version(observed)
+            if server_version is None:
+                # The kernel names the server; without the version it answers
+                # there is nothing to compare with the installed MASC, and the
+                # stop is refused for a server that names none.
+                pid = str(observed['server_pid'])
+                raise SetupError('The server of this workspace (pid ' + pid + ') announces port ' + str(port)
+                                 + ' and does not answer its version there. If it is starting, run setup again '
+                                 'once it is ready. If it is stuck, stop it with kill ' + pid
+                                 + ' and run setup again.')
             if resume_existing and not require_new_owner and server_version == observed['installed_version']:
                 return port
             choices = [('use', 'Continue with this running workspace'),
@@ -2457,12 +2543,9 @@ def select_setup_server(binary, base_path, port, require_new_owner=False, resume
                              + ' by its account server, which announces port ' + str(observed['server_port'])
                              + '. Setup prepares imp for the server of a single user, so it stops here. '
                              'masc restart replaces the account server.')
-        if state not in ('other_workspace', 'unknown_server'):
+        if state != 'unknown_server':
             raise SetupError('MASC returned an unknown server observation')
-        if state == 'other_workspace':
-            print('Port ' + str(port) + ' belongs to ' + terminal_text(observed['server_workspace']), file=sys.stderr)
-        else:
-            print('Another service is using port ' + str(port), file=sys.stderr)
+        print('Another service is using port ' + str(port), file=sys.stderr)
         suggested = observed.get('suggested_port')
         if not positive_integer(suggested) or suggested > 65535:
             raise SetupError('MASC could not find an unused local port')
@@ -3141,9 +3224,10 @@ def note_running_server(binary, base, port):
     except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
         status = None
     # An account server starts no Keeper, so it reads no browser setting.
-    if status in ('free', 'other_workspace', 'unknown_server', 'account_server'):
+    if status in ('free', 'unknown_server', 'account_server'):
         return
-    print(('A workspace server is already running. It' if status == 'same_workspace'
+    print(('A workspace server is already running. It'
+           if status in ('same_workspace', 'same_workspace_on_another_port')
            else 'If a workspace server is already running, it')
           + " reads the browser setting only when it starts, so restart it for imp's browser to turn on.",
           file=sys.stderr)
@@ -3407,8 +3491,9 @@ def show_imp_tools(binary, base):
 
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
-    if state['opening'] == 'account_installation':
-        return account_installation(binary, state, port)
+    ended = journey_ends_at(binary, state, port)
+    if ended is not None:
+        return ended
     # `invalid` is not one condition. Saving a selection repairs some of them —
     # configure_locked stages the edit, lets runtime-default-set rewrite it,
     # and publishes that rewrite — while a declaration the parser cannot
@@ -3504,6 +3589,11 @@ def sandbox_step(binary, base, port):
     """The sandbox step of a journey that began in an earlier session."""
     # The workspace may ask for accounts since that session.
     ended = account_installation_at(binary, base, port)
+    if ended == ACCOUNT_INSTALLATION_EXIT:
+        # The group-session handoff that runs this step reads every status
+        # but 0 as a session that has to sign in again. This one has nothing
+        # left to do, and what comes next is already on screen.
+        return 0
     if ended is not None:
         return ended
     return sandbox_journey(binary, base, port, refresh_owner=True)

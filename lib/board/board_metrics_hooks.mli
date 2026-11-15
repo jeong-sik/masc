@@ -1,4 +1,7 @@
-(** Board-owned metric hooks. *)
+(** Board-owned metric hooks.
+
+    The persist-lock samples are measured inside [persist_mutex] and reported
+    after it is released, so an observer may call back into Board. *)
 
 type observer =
   { observe_persist_lock_acquire_sec : float -> unit

@@ -40,13 +40,15 @@ let rejected_before_dispatch message =
    corrupt provenance or a strict caller policy and stay configuration
    errors. *)
 let validate_replay_continuity
-      ?on_provider_failure ~binding ~source_change_policy ~tools_present ~provider_config messages =
+      ?on_provider_failure ~on_reasoning_replay_exclusion ~binding ~source_change_policy
+      ~tools_present ~provider_config messages =
   let module Projection = Llm_provider.Reasoning_history_projection in
+  let boundary = Projection.Provider_dispatch {tools_present} in
   match Projection.validate_replay_continuity_for_provider_config
-      ~source_change_policy ~boundary:(Provider_dispatch {tools_present}) provider_config messages with
-  | Ok {disposition=Source_change_admitted drops;_} ->
-    Llm_provider.Diag.info "pipeline_stage_route"
-      "reasoning source change admitted: boundary=provider_dispatch excluded_message_count=%d" (List.length drops);
+      ~source_change_policy ~boundary provider_config messages with
+  | Ok {capability; disposition=Source_change_admitted drops} ->
+    on_reasoning_replay_exclusion
+      {Projection.boundary; target=capability.target; drops};
     Ok ()
   | Ok {disposition=(Preserve_reasoning | Caller_excluded_reasoning);_} -> Ok ()
   | Error (Projection.Required_reasoning_unreadable _ as refusal) ->
@@ -261,6 +263,7 @@ let dispatch_sync
       ?clock
       ?(trace_context = [])
       ?on_provider_failure
+      ~on_reasoning_replay_exclusion
       ?before_provider_attempt
       ~provider_config
       agent
@@ -275,7 +278,8 @@ let dispatch_sync
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
-  let* () = validate_replay_continuity ?on_provider_failure ~binding ~provider_config
+  let* () = validate_replay_continuity ?on_provider_failure ~on_reasoning_replay_exclusion
+    ~binding ~provider_config
     ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
     ~source_change_policy:agent.options.reasoning_source_change
     prep.Agent_turn.effective_messages in
@@ -418,6 +422,7 @@ let dispatch_stream
       ?(trace_context = [])
       ?on_telemetry
       ?on_provider_failure
+      ~on_reasoning_replay_exclusion
       ?before_provider_attempt
       ()
   =
@@ -430,7 +435,8 @@ let dispatch_stream
     binding_identity_for_call agent provider_config
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
-  let* () = validate_replay_continuity ?on_provider_failure ~binding ~provider_config
+  let* () = validate_replay_continuity ?on_provider_failure ~on_reasoning_replay_exclusion
+    ~binding ~provider_config
     ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
     ~source_change_policy:agent.options.reasoning_source_change
     prep.Agent_turn.effective_messages in

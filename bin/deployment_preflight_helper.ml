@@ -846,14 +846,12 @@ let validate_tool_request () =
        the owner record past what the scan's owner reader already checked. *)
     | Some (Tool_request_consumer.One_scope Tool_request_consumer.Candle_appraisal) ->
       L.Payload_valid
-    (* No reader of this build reads this scope, so fresh state deletes it. *)
+    (* No reader of this build reads this scope, so fresh state deletes it.
+       The refusal's fresh-state line names the scope's directories; the
+       detail does not list them again. *)
     | None ->
       L.Payload_invalid
-        (Printf.sprintf
-           "no consumer of this build reads tool request originals of this scope; with \
-            the server stopped, delete the folder %s under tool-request-owners, \
-            tool-request-bodies and tool-request-owners-settled"
-           (Masc.Lane_addon_store.digest record.scope))
+        "no consumer of this build reads tool request originals of this scope"
 ;;
 
 let run_scan ~base_path = function
@@ -1160,10 +1158,10 @@ let judge_runtime_config ~base_path ~config_root path =
           ~config_dir:(Env_config_core.masc_config_dir_opt ())
         |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
       in
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
+      let* observation =
+        Runtime_model_catalog_boot.load_standalone_config_observation
+          ~runtime_config_path:path
       in
-      let* observation = Runtime.load_config_observation ~runtime_config_path:path () in
       let source_text = observation.Runtime.source_text in
       let* _, skill_notices =
         Skill_source_config.parse_text_with_notices source_text

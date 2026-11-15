@@ -119,8 +119,9 @@ const COMPLETION_CAUSES = ['Http_failure', 'Accept_rejected', 'Provider_terminal
 function completionCause(value: unknown): string {
   const [tag, nested] = variant(value)
   switch (tag) {
-    case 'Network_failure': return `${tag} / ${nullary(nested, ['Connection_refused', 'Dns_failure', 'Tls_error',
-      'Network_timeout', 'Local_resource_exhaustion', 'Connection_reset', 'End_of_file', 'Unknown_network'])}`
+    case 'Network_failure': return `${tag} / ${nullary(nested, ['Connection_refused', 'Dns_failure', 'Unreachable',
+      'Tls_error', 'Network_timeout', 'Local_resource_exhaustion', 'Connection_reset', 'End_of_file',
+      'Unknown_network'])}`
     // Keep the measured failure family. No inference from an exception message.
     case 'Deadline': case 'Empty_completion': {
       const [detail] = variant(nested)

@@ -713,7 +713,9 @@ let test_world_writer_never_waits_for_sse_fanout () =
         Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
         Workspace_memory_ledger.save ~base_path Workspace_memory_ledger.empty |> require;
         Eio.Promise.await started;
-        (* A suspended World fanout also cannot hold up another read model. *)
+        (* A suspended World fanout also cannot hold up another read model.
+           The signal names the directory a write resolved to, so it exists. *)
+        Fs_compat.mkdir_p runtime_keepers_dir;
         Keeper_memory_health_input.written ~keepers_dir:runtime_keepers_dir ~keeper_id:"largo";
         await_health ();
         Eio.Promise.resolve finish_fanout ());

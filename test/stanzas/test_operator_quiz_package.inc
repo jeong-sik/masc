@@ -2,6 +2,7 @@
  (alias runtest-test_operator_quiz_package)
  (deps test_operator_quiz_package.py
        ../addons/protocol.py
+       ../addons/records.py
        (glob_files ../addons/operator-quiz/*.py)
        ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)

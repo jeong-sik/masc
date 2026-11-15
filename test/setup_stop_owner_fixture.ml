@@ -1,7 +1,7 @@
 (* The owner of a workspace that the setup journey stops (#36877), standing
    in for an older single-user server. It holds the lease of BASE_PATH under
    RUN_DIR, announces a loopback port as its single-user server, and answers
-   that port as the server of BASE_PATH at VERSION. The admin route answers
+   the compact /health of that port with VERSION. The admin route answers
    ADMIN_STATUS to any bearer, so the stop gets the verdict the case names.
    It prints "PORT PID" once it holds the lease, then serves until killed. *)
 let rec retrying f =
@@ -28,7 +28,7 @@ let request_path client =
 let answer client ~health ~admin_status =
   let status, body =
     match request_path client with
-    | path when String.equal path Server_health_paths.full -> "200 OK", health
+    | path when String.equal path Server_health_paths.health -> "200 OK", health
     | path when String.equal path Server_health_paths.readiness -> "200 OK", {|{"ready":true}|}
     | path when String.equal path "/api/v1/runtime/config/raw" ->
       admin_status ^ " Fixture", {|{"error":"fixture"}|}
@@ -68,9 +68,7 @@ let () =
      | Server_startup_takeover.Base_path_already_owned _
      | Server_startup_takeover.Base_path_rejected _ -> failwith "the lease was not acquired");
     let health =
-      Yojson.Safe.to_string
-        (`Assoc [ "version", `String version;
-                  "paths", `Assoc [ "effective_base_path", `String base_path ] ]) in
+      Yojson.Safe.to_string (`Assoc [ Server_health_public.version_field, `String version ]) in
     Printf.printf "%d %d\n%!" port (Unix.getpid ());
     while true do
       let client, (_ : Unix.sockaddr) = retrying (fun () -> Unix.accept ~cloexec:true socket) in

@@ -64,8 +64,14 @@ let replace ~keepers_dir ~expected_revision ~now claim =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let journal_rows ~keepers_dir =
-  List.length (Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:100)
+  List.length (readable_journal_tail ~keepers_dir ~keeper_id ~limit:100)
 ;;
 
 let test_each_journal_row_is_heard () =

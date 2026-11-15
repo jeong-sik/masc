@@ -340,13 +340,16 @@ let read_raw_doc config path : (string option, Workspace_utils.json_doc_error) r
     | Ok true -> Error (Workspace_utils.Json_doc_unreadable "Goal proof entry exists but could not be read")
     | Error detail -> Error (Workspace_utils.Json_doc_unreadable detail) in
   let read_local () =
-    match Safe_ops.read_file_result path with
-    | Error (Safe_ops.File_not_found _) -> confirmed_local_absence ()
-    | Error (Safe_ops.Read_failed _ as error) ->
+    (* The read runs under the ledger lock on the change paths. An open that
+       waits (a FIFO with no writer) would hold that lock for good, so the
+       ledger is read only as a regular file. *)
+    match Fs_compat.load_regular_file_opt path with
+    | Ok None -> confirmed_local_absence ()
+    | Error error ->
         Error
           (Workspace_utils.Json_doc_unreadable
-             (Safe_ops.read_file_error_to_string error))
-    | Ok content -> Ok (Some content)
+             (Fs_compat.regular_file_read_error_to_string error))
+    | Ok (Some content) -> Ok (Some content)
   in
   match Workspace_utils.key_of_path config path with
   | Some key ->

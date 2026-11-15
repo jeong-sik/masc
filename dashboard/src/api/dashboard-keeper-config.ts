@@ -484,6 +484,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         ?? asNullableString(execution.selected_runtime_id)
         ?? '',
       runtime_options: normalizeStringList(execution.runtime_options),
+      lane_options: normalizeStringList(execution.lane_options),
     },
     skills: {
       names: decodeSkillNames(skills.names),

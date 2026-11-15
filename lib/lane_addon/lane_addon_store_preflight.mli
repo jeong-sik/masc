@@ -159,7 +159,7 @@ val fresh_state_step : refusal -> string
     [delete], start the new build. *)
 
 type history_resolution_validator = group:string -> name:string -> Yojson.Safe.t -> (unit, string) result
-(** One file of [history-resolutions/<group>/<name>]. *)
+(** One file of [<group>/<name>] under {!Lane_addon_store.history_resolutions_directory}. *)
 
 val scan : ?validate_tool_request:(unit -> payload_validator) ->
   ?validate_history_resolution:history_resolution_validator ->

@@ -9810,6 +9810,48 @@ let test_decode_server_identity_reads_the_startup_readiness () =
       "no startup section is unknown, not booting" None
       identity.Tui_decode.sid_state_ready
 
+(* Before the workspace is published, and to a requester without a read, the
+   server answers the public probe. The boot display depends on its [ready]. *)
+let test_the_public_probe_tells_the_tui_whether_the_server_is_ready () =
+  let public_probe ready =
+    `Assoc
+      [ ("server", `String "masc");
+        ("version", `String "1.2.3");
+        ("live", `Bool true);
+        ("ready", `Bool ready);
+        ("phase", `String (if ready then "ready" else "blocking"));
+      ]
+  in
+  let decoded json =
+    match Tui_decode.decode_server_identity json with
+    | Error detail -> Alcotest.fail detail
+    | Ok identity -> identity
+  in
+  let booting = decoded (public_probe false) in
+  Alcotest.(check (option bool)) "a public probe that is not ready is booting"
+    (Some false) booting.Tui_decode.sid_state_ready;
+  Alcotest.(check string) "the version is read" "1.2.3" booting.Tui_decode.sid_version;
+  Alcotest.(check string) "no base path" ""
+    (Tui_decode.Canonical_path.to_string booting.Tui_decode.sid_base_path);
+  Alcotest.(check string) "no masc root" ""
+    (Tui_decode.Canonical_path.to_string booting.Tui_decode.sid_masc_root);
+  Alcotest.(check (option bool)) "a ready public probe says so" (Some true)
+    (decoded (public_probe true)).Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool))
+    "the startup section still decides when it is there" (Some false)
+    (decoded (`Assoc [ ("startup", `Assoc [ ("state_ready", `Bool false) ]) ]))
+      .Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool))
+    "the startup section wins over a top-level ready" (Some false)
+    (decoded
+       (`Assoc
+          [ ("ready", `Bool true);
+            ("startup", `Assoc [ ("state_ready", `Bool false) ]);
+          ]))
+      .Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool)) "neither is unknown" None
+    (decoded (`Assoc [ ("status", `String "ok") ])).Tui_decode.sid_state_ready
+
 let test_decode_server_identity_reads_the_worktree_verdict () =
   let with_flag value =
     `Assoc [ ("build", `Assoc [ ("executable_in_worktree", `Bool value) ]) ]
@@ -11408,8 +11450,8 @@ let test_decode_secret_projection_reads_names_not_values () =
   | Error err -> Alcotest.fail err
   | Ok (_, Some p) ->
       Alcotest.(check string) "keeper" "marlow" p.Tui_decode.ksp_keeper;
-      Alcotest.(check string) "status" "ready"
-        (Tui_decode.keeper_secret_status_to_string p.Tui_decode.ksp_status);
+      Alcotest.(check bool) "status" true
+        (p.Tui_decode.ksp_status = Tui_decode.Secret_ready);
       Alcotest.(check (list string)) "env names"
         [ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
         p.Tui_decode.ksp_env_names;
@@ -11476,6 +11518,36 @@ let test_decode_secret_projection_keeps_an_unknown_status () =
   | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word; _ })
     ->
       Alcotest.(check string) "the producer's word survives" "quarantined" word
+  | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
+  | Error err -> Alcotest.fail err
+
+(* #51610: the Secrets tab draws the status text between its own style codes
+   and hands the row to the frame as it is. An unknown word carrying ESC, a
+   C1 CSI (raw and UTF-8 encoded), BEL, DEL or a line break must arrive as
+   visible text on one row, in either screen language. *)
+let test_secret_status_text_keeps_an_unknown_word_on_one_printable_row () =
+  let hostile = "quar\x1b[2J\x1b]0;owned\x07antined\r\nnext\x9b31m\xc2\x9b0m\x7f" in
+  let json =
+    composite_json "marlow"
+      ~projection:(secret_projection_json ~status:hostile ~env_names:[] ~mounts:[])
+  in
+  match Tui_decode.decode_keeper_composite json with
+  | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word as status; _ })
+    ->
+      Alcotest.(check string) "the decoded value keeps the producer's bytes" hostile word;
+      List.iter
+        (fun ko ->
+          let drawn = Tui_decode.keeper_secret_status_text ~ko status in
+          Alcotest.(check bool)
+            (Printf.sprintf "ko=%b: every byte is printable ASCII" ko)
+            true
+            (String.for_all (fun c -> c >= ' ' && c <= '~') drawn);
+          Alcotest.(check bool)
+            (Printf.sprintf "ko=%b: the producer's word is still readable" ko)
+            true
+            (Astring.String.is_infix ~affix:"quar" drawn
+             && Astring.String.is_infix ~affix:"antined" drawn))
+        [ true; false ]
   | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
   | Error err -> Alcotest.fail err
 
@@ -14552,6 +14624,8 @@ let () =
           test_decode_server_identity_reads_the_worktree_verdict;
         Alcotest.test_case "reads the startup readiness" `Quick
           test_decode_server_identity_reads_the_startup_readiness;
+        Alcotest.test_case "reads the public probe's readiness" `Quick
+          test_the_public_probe_tells_the_tui_whether_the_server_is_ready;
         Alcotest.test_case "reads telemetry" `Quick
           test_decode_server_identity_reads_telemetry;
       ] );
@@ -14597,6 +14671,8 @@ let () =
           test_decode_keeper_composite_reads_an_offline_keeper;
         Alcotest.test_case "keeps an unknown status" `Quick
           test_decode_secret_projection_keeps_an_unknown_status;
+        Alcotest.test_case "draws an unknown status on one printable row" `Quick
+          test_secret_status_text_keeps_an_unknown_word_on_one_printable_row;
         Alcotest.test_case "rejects a wrong env name type" `Quick
           test_decode_secret_projection_rejects_a_wrong_env_name_type;
       ] );

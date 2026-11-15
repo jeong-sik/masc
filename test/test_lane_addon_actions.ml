@@ -43,10 +43,11 @@ let test_canonical_request_identity () =
 let object_schema properties = obj ["type",str "object"; "properties",obj properties;
   "required",strings (List.map fst properties); "additionalProperties",`Bool false]
 let string_schema = obj ["type",str "string"]
-let schema = object_schema [
+let action_tool_schema action = object_schema [
   "context",object_schema ["instance_id",string_schema;"incarnation",string_schema];
   "request_id",string_schema;
-  "action",object_schema ["steps",obj ["type",str "integer";"minimum",`Int 1;"maximum",`Int 2]]]
+  "action",object_schema action]
+let schema = action_tool_schema ["steps",obj ["type",str "integer";"minimum",`Int 1;"maximum",`Int 2]]
 let output : Types.output = {rows=[{id="state";lane_id="state";kind=Types.Event;
   title="Observed state";observed_at=1.;subject_id="owned-fixture";clock=None;
   actor=None;fields=[];evidence=[];related_ids=[]}];coverage=[]}
@@ -56,7 +57,7 @@ type outcome = Confirm | Refuse | Unknown | Lost_reply
 let echoed request_id = if String.length request_id > 256 then Store.digest request_id else request_id
 type fixture = {config:Workspace.config; root:string; calls:int ref; observes:int ref;
   outcome:outcome ref; barrier:unit Eio.Promise.t option ref;
-  exited:string Eio.Promise.t option ref}
+  exited:string Eio.Promise.t option ref; action_schema:Yojson.Safe.t ref}
 let backend fixture : Runtime.For_testing.backend = {
   start=(fun ~sw:_ ~state_owner:_ ~instance_id ~installation_id:_ ~(package:Types.package) ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let connection : Runtime.For_testing.connection = {browser=None;
@@ -71,7 +72,7 @@ let backend fixture : Runtime.For_testing.backend = {
       operator_schema=(fun () -> None);
       observation_effect=(fun _ -> Lane_addon_call_context.May_change);
       call_operator=(fun ~admit:_ ~arguments:_ -> Error Lane_addon_worker_protocol.Operator_unavailable);
-      action_schema=(fun () -> Option.map (fun _ -> schema) package.action_tool);
+      action_schema=(fun () -> Option.map (fun _ -> !(fixture.action_schema)) package.action_tool);
       observe=(fun ~binding:_ ~sources:_ -> incr fixture.observes; Ok output);
       act=(fun ~arguments ->
         incr fixture.calls;
@@ -107,7 +108,7 @@ let inspect fixture id = dispatch fixture Runtime.Inspect ["instance_id",str id]
   |> values "instances" |> List.hd
 let await clock predicate =
   let rec loop () = if predicate () then () else (Eio.Time.sleep clock 0.001;loop ()) in loop ()
-let attach ?(reply_bytes=65536) clock fixture ~acting =
+let attach ?(reply_bytes=65536) ?(action_tool="lane_act") clock fixture ~acting =
   let name = if acting then "actor" else "observer" in
   let path = Filename.concat fixture.root (name ^ ".toml") in
   let manifest = Printf.sprintf {|id = %S
@@ -123,7 +124,7 @@ memory_bytes = 67108864
 pids = 16
 max_reply_bytes = %d
 |} name (if acting then "[\"observe\",\"act\"]" else "[\"observe\"]")
-    (if acting then "[world.actions]\ntool = \"lane_act\"" else "") reply_bytes in
+    (if acting then Printf.sprintf "[world.actions]\ntool = %S" action_tool else "") reply_bytes in
   Out_channel.with_open_bin path (fun channel -> output_string channel manifest);
   let instance = dispatch fixture Runtime.Attach ["manifest_path",str path;
     "run_id",str "action-world";"binding",obj ["sources",`List []]] |> unwrap in
@@ -159,7 +160,7 @@ let with_fixture f =
             ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
               Runtime.For_testing.reset ();
               let fixture = {config=Workspace.default_config root;root;calls=ref 0;observes=ref 0;
-                outcome=ref Confirm;barrier=ref None;exited=ref None} in
+                outcome=ref Confirm;barrier=ref None;exited=ref None;action_schema=ref schema} in
               Runtime.For_testing.with_backend (backend fixture) (fun () -> f clock fixture))))))
 let rejects label = function Error _ -> () | Ok value -> failf "%s accepted: %s" label (Yojson.Safe.to_string value)
 
@@ -197,6 +198,28 @@ let test_validation_precedes_effect () = with_fixture (fun clock fixture ->
   ignore (act fixture id "valid" (`Int 1) |> unwrap);
   ignore (await_state clock fixture id "valid" "confirmed");
   detach clock fixture id; detach clock fixture observer)
+
+(* A package's action schema owns every member it declares. Host tools strip
+   underscore-prefixed transport markers and refuse masc_transition's retired
+   aliases; an action that shares a key or a tool name with them is not a
+   host tool call. *)
+let act_with fixture id request_id action = dispatch fixture Runtime.Act ["instance_id",str id;
+  "expected_incarnation",str id;"request_id",str request_id;"action",obj action]
+let test_declared_underscore_member_reaches_the_worker () = with_fixture (fun clock fixture ->
+  fixture.action_schema := action_tool_schema ["_ask",string_schema];
+  let id = attach clock fixture ~acting:true in
+  rejects "undeclared underscore member" (act_with fixture id "undeclared" ["_ask",str "a";"_other",str "b"]);
+  ignore (act_with fixture id "declared" ["_ask",str "a"] |> unwrap);
+  ignore (await_state clock fixture id "declared" "confirmed");
+  check int "only the declared action reached the worker" 1 !(fixture.calls);
+  detach clock fixture id)
+let test_action_named_masc_transition_keeps_its_members () = with_fixture (fun clock fixture ->
+  fixture.action_schema := action_tool_schema ["to",string_schema;"note",string_schema];
+  let id = attach ~action_tool:"masc_transition" clock fixture ~acting:true in
+  ignore (act_with fixture id "noted" ["to",str "done";"note",str "n"] |> unwrap);
+  ignore (await_state clock fixture id "noted" "confirmed");
+  check int "the declared to and note reached the worker" 1 !(fixture.calls);
+  detach clock fixture id)
 
 (* The HTTP entry already bounds a request body (Http_server_eio.max_body_bytes),
    so a package's reply bound must not also decide whether a valid action is
@@ -1042,6 +1065,8 @@ let () = run "Lane action workflow" ["canonical request identity",[
   test_case "persisted confirmation requires its received result without replay" `Quick test_confirmed_receipt_requires_result;
   test_case "queued receipt, normalized dedup and retained output" `Quick test_one_request_one_effect;
   test_case "identity, schema and actor before effect" `Quick test_validation_precedes_effect;
+  test_case "a declared underscore member reaches the worker" `Quick test_declared_underscore_member_reaches_the_worker;
+  test_case "an action named masc_transition keeps its declared to and note" `Quick test_action_named_masc_transition_keeps_its_members;
   test_case "action input is not bounded by the reply bound" `Quick test_action_input_is_not_bounded_by_the_reply_bound;
   test_case "held action preserves another observer and Slice" `Quick test_held_action_preserves_other_activity;
   test_case "package outcomes and lost replies stay distinct" `Quick test_outcomes_are_not_inferred;

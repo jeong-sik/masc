@@ -58,6 +58,30 @@ let github_login_stream_send response event json =
   | Server_sse_response.Written | Closed | Stalled -> ()
 ;;
 
+(* An HTTP/1.1 response hears that its client left only from a write that is
+   not taken (Server_sse_response.await_closed). A login is quiet for most of
+   its life -- while its lane is shaped, and while gh waits for the operator to
+   approve the one-time code -- so with no write of its own a closed window
+   went unnoticed until the login timed out, and a Remote_ssh endpoint kept its
+   gh and its session that long (#32910). Once a keepalive is not taken the
+   response is closed, [stream_login] sees it and stops its stage, and the
+   keepalive stops too.
+
+   An HTTP/2 stream that ends under the response cancels this fiber with the
+   stream's own end. A response that is over ends the login quietly, as
+   [stream_login] ends it, so that end stops the keepalive instead of failing
+   the login's switch. *)
+let github_login_keepalive ~clock response =
+  let rec keep_alive () =
+    Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
+    match Server_sse_response.send response Server_sse_pump.keepalive_frame with
+    | Server_sse_response.Written -> keep_alive ()
+    | Closed | Stalled -> `Stop_daemon
+  in
+  try keep_alive () with
+  | Eio.Cancel.Cancelled _ when Server_sse_response.is_closed response -> `Stop_daemon
+;;
+
 (* Run [run] for the Keeper the request path names, once its meta has been
    read with [read_meta]. [extract_keeper_name_for_suffix] answers "" both for
    a path with no name and for a name [Keeper_config.validate_name] refuses, so
@@ -99,26 +123,31 @@ let handle_keeper_github_login_post ~clock state req reqd =
           reqd (Httpun.Response.create ~headers `OK)
       in
       Server_sse_response.close_after response (fun () ->
-           match
-             Keeper_github_identity.stream_login
-               ~config
-               ~keeper_name:name
-               ~scopes
-               (* Shaping a Remote_ssh lane runs commands on the endpoint. Doing
-                  that before this response existed left the browser waiting on
-                  a request that had not answered at all. *)
-               ~make_lane:(fun () ->
-                 Keeper_github_login_lane.for_keeper ~config ~meta ~hostname)
-               ~is_closed:(fun () -> Server_sse_response.is_closed response)
-               ~send_event:(github_login_stream_send response)
-           with
-           | Ok () -> ()
-           | Error message when not (Server_sse_response.is_closed response) ->
-             github_login_stream_send
-               response
-               "error"
-               (`Assoc [ "message", `String message ])
-           | Error _ -> ()))
+        (* The keepalive lives exactly as long as the login: the switch
+           cancels it once the login has ended. *)
+        Eio.Switch.run (fun login_sw ->
+          Eio.Fiber.fork_daemon ~sw:login_sw (fun () ->
+            github_login_keepalive ~clock response);
+          match
+            Keeper_github_identity.stream_login
+              ~config
+              ~keeper_name:name
+              ~scopes
+              (* Shaping a Remote_ssh lane runs commands on the endpoint.
+                 Doing that before this response existed left the browser
+                 waiting on a request that had not answered at all. *)
+              ~make_lane:(fun () ->
+                Keeper_github_login_lane.for_keeper ~config ~meta ~hostname)
+              ~is_closed:(fun () -> Server_sse_response.is_closed response)
+              ~send_event:(github_login_stream_send response)
+          with
+          | Ok () -> ()
+          | Error message when not (Server_sse_response.is_closed response) ->
+            github_login_stream_send
+              response
+              "error"
+              (`Assoc [ "message", `String message ])
+          | Error _ -> ())))
 ;;
 
 let handle_keeper_github_token_post state req reqd body_str =

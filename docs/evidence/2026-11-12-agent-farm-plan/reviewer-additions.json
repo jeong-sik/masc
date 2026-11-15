@@ -1,0 +1,611 @@
+[
+ {
+  "domain": "agent-dev-process-docs",
+  "n": 1,
+  "title": "취소된 request 실행이 PR 검사 요약을 빨갛게 만든다",
+  "evidence": ".github/workflows/approval-merge-request.yml:48-64 (스택 층이 group 하나를 같이 쓰고 cancel-in-progress: true), :66-67 (job request). 11:28Z 표본(gh-open-prs.json) 열린 PR 36개 중 12개의 statusCheckRollup 이 FAILURE 였고, 12개 모두 실패 항목은 취소된 request 뿐이었다.",
+  "why": "에이전트가 이것을 CI 실패로 읽고 다시 돌리거나 다시 push 한다. push 는 ruleset 의 dismiss_stale_reviews_on_push 로 승인을 지운다(gap 03). 요구 16 의 잦은 검증 병목을 거짓 신호가 키운다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "n": 2,
+  "title": "병합 worker 의 Hold 이유가 Actions 실행 출력에만 있다",
+  "evidence": "scripts/review/approval-auto-merge.py:737-747 은 판정을 stdout 과 step summary 에만 쓴다(Hold 는 :790-799). worker·sweep 에 commit status·PR 댓글 호출 0건(rg). scripts/review/approval-merge-sweep.py:2-5 와 .github/workflows/approval-merge-sweep.yml:3-7 은 승인된 미병합 범위마다 30분에 한 번 worker 를 다시 돈다. skill·가이드에 Hold 이유를 읽는 곳을 적은 문장이 없다.",
+  "why": "손 dispatch 가 필요한 unproven skip Hold(:277-278)는 PR 에 신호 없이 30분마다 같은 이유로 되풀이되고 REST 한도(병목 1번)를 쓴다. PR 상태 쓰기는 실행당 REST 를 늘리므로(사용자 결정 6) 고정 비용인 sweep 요약과 skill 안내가 먼저다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "n": 3,
+  "title": "낡은 hook 설명이 에이전트에게 브랜치 보호 hook 을 끄게 한다",
+  "evidence": "docs/guides/CONTRIBUTOR-WORKFLOW.md:159-164(.ko :153)는 pre-commit 이 Dune 빌드를 돈다며 git -c core.hooksPath=/dev/null commit 을 쓰게 한다. 실제 .githooks/pre-commit:1-14 는 #40412 뒤 main·master·develop 커밋 차단만 한다. CONTRIBUTING.md:54 가 hooksPath 를 켠다. 같은 명령이 docs·.agents 8개 파일에 19번 나온다(예: docs/superpowers/plans/2026-11-04-tui-smoothness.md:68).",
+  "why": "감사는 이 문장을 틀린 문장 목록에만 넣었다. 실제 결과는 빌드를 피하는 이득 없이 남은 유일한 보호를 끄는 것이다. 서버 ruleset 은 main push 를 막지만 로컬 main 커밋은 막지 못한다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "n": 4,
+  "title": "병합 worker 캠페인이 승인 판정 셋째 사본을 막 더했다",
+  "evidence": "scripts/review/approval-merge-sweep.py:25 REQUIRED_APPROVALS = 2, :195-203 ready() (#51609, 2026-11-12); approval-auto-merge.py:39; review-routing.py:487-490; 열린 #51702 의 RFC patch '리뷰 목록 2L 이 남는다'; issue #51465 OPEN",
+  "why": "gap 04 는 사본 둘만 본다. 같은 판정을 가진 진행 중 캠페인이 지금 그 코드를 바꾸고 있어, 한 함수로 모으는 일을 따로 내면 같은 파일에서 부딪힌다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "n": 5,
+  "title": "TUI 화면 문법 RFC 는 TUI-KEYS.md 를 남기는 설계다",
+  "evidence": "docs/rfc/RFC-tui-one-screen-grammar.md:218, :242, :254; docs/TUI-GUIDE.md:51; 열린 층 #51719·#51672·#51653 은 bin/masc_tui_keys.ml 만 고침; .github/workflows/tui-native-proof.yml:166 이 key-reference.md 를 렌더; 운영자 비공개 기록",
+  "why": "gap 06 의 커밋 중단은 진행 중 캠페인 설계와 반대다. 그 캠페인과 사용자가 먼저 정해야 한다. 렌더 경로는 이미 있어 바꾸는 비용은 작다."
+ },
+ {
+  "domain": "agent-dev-process-docs",
+  "n": 6,
+  "title": "Keeper 가 CI run 을 기다리는 비용이 CI 병목 표에 없다",
+  "evidence": "docs/rfc/RFC-keeper-waits-for-its-own-github-run-in-the-same-turn.md:22 (72시간 sleep+gh 535건 36.6시간, Actions run 315건 23.9시간), :24 (rondo 97% 가 push·workflow run 뒤), :178-180 (사용자 결정 2026-11-12); #51663·#51673 병합, #51691 열림",
+  "why": "요구 16 의 병목에는 Keeper 턴이 run 을 기다리며 묶이는 몫이 있다. 사용자 결정이 붙은 진행 중 캠페인이라 감사 3절 표와 gap 10 의 skill 문장을 이 캠페인과 맞춰야 한다."
+ },
+ {
+  "domain": "basepath-portability",
+  "n": 1,
+  "title": "단일 사용자 모드는 BasePath 를 옛 백업으로 되돌린 것을 알아채지 못한다 (P2 제안)",
+  "evidence": "lib/auth/authz_install_record.mli:5-12 (BasePath 밖 고수위는 다계정에만), lib/auth/authz_boot_mode.mli:89-99, lib/schedule/schedule_runner.ml:189 와 lib/dated_jsonl/dated_jsonl_store.ml:149-150 (신호 중복을 막는 signal_keys.json 이 .masc 안), lib/schedule/schedule_runner.mli:184-185. auth 밖 rg 'high.water|rewound|restored from' 은 Board 커서·shim 버퍼·DOS 슬롯 같은 다른 뜻뿐.",
+  "why": "백업의 기본 동작인 옛 사본 들이기가 at-most-once 기록까지 되돌린다. 그 사이 낸 신호·외부 효과를 MASC 는 모른다. 다계정은 같은 문제를 BasePath 밖 고수위로 이미 풀었다. 복원을 사실로 남기는 기록이면 Gate 가 아니다. 감사 11·12 는 schema 와 다계정만 다룬다."
+ },
+ {
+  "domain": "basepath-portability",
+  "n": 2,
+  "title": "Keeper 가 만든 git worktree 가 .masc/playground 안에서 절대 gitdir 을 적는다 (P2 제안)",
+  "evidence": "측정 2026-11-12: <base-path>/.masc/playground 깊이 6 안 .git 파일 5개, 내용 'gitdir: <base-path>/.masc/playground/.../.git/worktrees/...'. lib/exec_policy/execute_script_paths.ml:74-75 (Keeper 의 worktree add), lib/keeper/keeper_bundle_worktrees.mli:1-20 (bundle 밖으로 풀린 worktree 는 보고만 하고 지우지 않음).",
+  "why": "BasePath 를 옮기면 Keeper 의 커밋하지 않은 작업 트리가 git 저장소로 열리지 않는다. 해체 정리도 옛 절대 경로를 bundle 밖으로 읽어 남긴다. 감사는 6절 확인 필요로만 남겼다."
+ },
+ {
+  "domain": "basepath-portability",
+  "n": 3,
+  "title": "같은 기기 복제본이 원본의 로그인 상태와 나뉘지 않는다 (P2 제안)",
+  "evidence": "좌표는 수리 뒤 싣는다.",
+  "why": "자격 증명 경계에 닿는다. 닿는 조건은 수리 뒤 싣는다. 03 과 04 는 이 경우를 적지 않았다."
+ },
+ {
+  "domain": "basepath-portability",
+  "n": 4,
+  "title": "세계 묶음과 workspace 묶음이 같은 config 를 두 타입으로 나눈다",
+  "evidence": "감사 원문(world-config-text) (World_bundle.t·component, 장비 묶임 별도 타입, masc world export|import) 대 감사 원문(basepath-portability) (Workspace_export, Host_bound tier, placement)",
+  "why": "두 감사가 각자 닫힌 목록과 CLI 명사를 만든다. Keeper TOML·runtime 배정·schema 거절을 두 곳이 정의하면 다음 store 를 더할 때 한쪽만 고친다. 세계 묶음은 workspace 목록의 Authored_config projection 으로 두고 거절 타입은 하나로 해야 한다."
+ },
+ {
+  "domain": "basepath-portability",
+  "n": 5,
+  "title": "RFC-0496 이 workspace id 파일 안을 이미 기각했고, 지금 identity 가 복사본의 진행 기록 이어받기를 막는다",
+  "evidence": "docs/rfc/RFC-0496-durable-file-identity-drops-the-device-number.md:119-127 (B 기각, 11-06 masc-productor-owner; 감사는 1-70행만 읽음, basepath-portability.md:392); lib/workspace_memory/workspace_memory_execution_capture.ml:359-365; lib/keeper/keeper_owned_job_invocation.ml:106-111; 이슈 #46997 OPEN",
+  "why": "폴더를 복사하면 id 도 같이 복사된다. 지금 path 비교는 복사본이 Curator 진행 기록과 예약된 job 을 이어받지 못하게 한다. id 로 바꾸면 import 를 거치지 않은 복사본 둘이 같은 effect 를 다시 낼 수 있다. 옮김·복제 판별을 import 밖에서도 정하고 RFC-0496 을 supersede 해야 한다. #46997 재부팅 관측 전에 바꾸면 두 변화가 섞인다."
+ },
+ {
+  "domain": "basepath-portability",
+  "n": 6,
+  "title": "gap 09 가 빠뜨린 진행 중 정리 RFC 와 이미 고른 순서",
+  "evidence": "bin/main_eio.ml:387 Server_settled_archive_sweep.run_at_startup (RFC-0498 3a층); docs/rfc/RFC-0497-released-lane-instances-leave-when-superseded.md (Draft, #48946); docs/reports/2026-11-11-open-issue-map-and-plan.md:266 (B 행 '오른쪽 먼저'); gh #42837·#42891 CLOSED COMPLETED",
+  "why": "감사는 lane-addons 를 정리 없음으로 세어 72% 를 냈지만 settled 보관은 기동 때 지워진다. bindings 쪽 증가만 #48946 에 남는다. 인용한 후속 이슈 둘은 닫혔다. 이 계획이 같은 정리를 다시 제안하면 RFC-0495·0497·0498·0499 와 겹치고, 열린 이슈 지도가 고른 '읽는 곳 없는 쓰기부터' 순서를 뒤집는다."
+ },
+ {
+  "domain": "candle-economy",
+  "n": 1,
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "n": 2,
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "n": 3,
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "n": 4,
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "candle-economy",
+  "n": 5,
+  "withheld": "Candle 지급 규칙은 Keeper 가 읽는 자리에 싣지 않는다(운영자 결정 10). 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "n": 1,
+  "title": "멘션이 바로 정착하지 않은 broadcast 는 다른 Keeper 전원의 fleet 투영에서 영구히 빠진다 (P2)",
+  "evidence": "lib/server/server_bootstrap_loops.ml:1852-1857 미정착이면 투영 생략·warn, :373-379 Pending·Deferred·Rejected 미정착, 운영 호출은 :1864 하나(rg). lib/workspace/workspace_broadcast.ml:951-953 앞선 멘션 대기면 handler 미호출, :443-447 reconcile 은 System_record 로 재전달, lib/server/server_bootstrap_loops.ml:431-445 System_record 는 투영 생략, :215-225 meta 읽기 실패 Deferred·Keeper 아닌 @이름 Rejected",
+  "why": "gap 06 은 재시작만 적었다. 운영 중에도 meta 읽기 실패, 앞선 멘션 대기, Keeper 가 아닌 @이름 하나로 그 broadcast 가 다른 Keeper 전원의 fleet layer 에서 빠지고 다시 싣는 경로가 없다. 멘션 없는 줄은 fleet layer 로만 턴에 닿는다(lib/keeper/keeper_config.ml:149-153)."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "n": 2,
+  "title": "기본 기억 검색이 바깥 판정자에게 보내는 범위가 스키마 설명과 다르다 (P2)",
+  "evidence": "좌표는 수리 뒤 싣는다.",
+  "why": "gap 09 의 서술과 코드가 다르다. 데이터 반출 경계에 걸린다. 닿는 조건은 수리 뒤 싣는다. 고칠 자리는 Draft RFC 에 방향만 있다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "n": 3,
+  "title": "task_id 를 지정한 claim 은 잠금 경합 때 typed LockContention 대신 Invalid_argument 를 던진다 (P3)",
+  "evidence": "lib/workspace/workspace_task_claim.ml:107 throwing with_file_lock, try 는 closure 안(:112-318). lib/workspace/workspace_utils_ops.ml:580-591 Lease_contended 면 invalid_arg, :593-606 _r 판은 LockContention. 같은 잠금의 다른 경로는 _r(lib/workspace/workspace_task_schedule.ml:243, lib/workspace/workspace_task_transitions.ml:201,925). 호출자 lib/keeper/keeper_tool_task_runtime.ml:739-757 은 Ok/Error 만 받고, lib/keeper/keeper_tools_agent_core_handler_exec.ml:437-450 이 예외를 Runtime_failure 문자열로 바꾼다",
+  "why": "gap 04 가 먼저 깨진다고 본 증상이 이 경로로 나온다. 반환 타입은 masc_result 인데 경합은 문자열 실패가 되어 Keeper 도구가 경합으로 분류하지 못한다. #18472 주석(workspace_utils_ops.ml:602-605)이 없애려던 문자열 분류가 이 경로에 남는다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "n": 4,
+  "title": "운영자 방향 #41525 는 '해결됨'으로 닫혔고 반대 방향의 #41907 은 열려 있다",
+  "evidence": "gh(20:28 KST) #41525 CLOSED/COMPLETED 2026-10-26, 닫는 댓글은 해시 접두 자르기 제거·원장과 브리핑 분리만 든다. #41907 OPEN 'Make shared memory inventory the default', 열린 채 유지. RFC-shared-memory…md:147 은 #41909 단독 병합이면 #41525 에 걸린다고 적었고 8a6fb62dfe4e 가 단독으로 들어갔다.",
+  "why": "gap 01·08 은 닫힌 이슈의 방향에 기댄다. 다음 세션은 닫힌 #41525 로 전달이 끝났다고 읽거나 열린 #41907 로 조회 기본을 이어 간다. 두 이슈를 운영자 결정 하나로 정리하지 않으면 공유 기억 제안이 같은 자리에서 다시 갈린다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "n": 5,
+  "title": "gap 01·02·08 의 생산자인 Curator 가 멈춰 있을 수 있다(#49587)",
+  "evidence": "gh(20:29 KST) #49587(hard cut 뒤 Curator 정지) OPEN, 설치 전 검사 부분만 44b1de3177bb(#49590, 11-07)로 고침.",
+  "why": "log 전달, 충돌 행, 판본 정리는 모두 Curator commit 을 입력으로 쓴다. 생산자가 멈췄다면 전달 설계보다 생산자 복구가 먼저다. 바뀐 사실이 없었던 것인지 멈춘 것인지는 로그를 읽지 않아 확인 필요."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "n": 6,
+  "title": "gap 03 은 11-09 에 지운 그래프 계층을 다시 세우자는 제안이다",
+  "evidence": "#50293·#50298·#50321·#50324(2026-11-09)가 /api/v1/activity/graph, 스냅숏 계산, graph_json, reducer·그래프 타입을 부르는 곳이 없다는 이유로 지웠다(#50321 본문 'Nothing calls graph_json'). 하루 뒤 사용자 결정(11-10, brief 2절 9번): 호출처 0 인 코드는 먼저 빠진 연결인가를 본다.",
+  "why": "감사는 '그래프는 이름뿐'이라 적지만 그것은 하루 전 숙청의 결과다. 새 Relation_index 가 소비자 없이 먼저 들어가면 다음 숙청이 다시 지운다. 첫 조각을 World State·TUI 의 실제 소비자와 묶어야 숙청과 재구축이 번갈아 돌지 않는다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "n": 1,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "n": 2,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "n": 3,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "n": 4,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "n": 5,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "n": 1,
+  "title": "Ollama native wire 는 Document 를 강등하지 않고 요청 생성을 실패시킨다",
+  "evidence": "packages/agent_core/lib/llm_provider/backend_openai_serialize.ml:960-966 (history 에 Document 가 있으면 Error), packages/agent_core/lib/llm_provider/backend_ollama.ml:101-110 (Error 를 invalid_arg 로 바꿈, degrade 호출 0건), 대조: backend_openai_request.ml:345-358, config/runtime.toml:1748,1758,1777,1790,1801 (로컬 native Ollama 셋이 multimodal=true), lib/runtime/runtime_agent.ml:420, lib/keeper/keeper_turn_driver.ml:1618",
+  "why": "canonical history 는 원본 block 을 그대로 둔다. 그래서 PDF 하나가 들어온 뒤로 그 runtime 의 요청이 매번 실패한다. OpenAI 경로는 같은 이유로 거절을 강등으로 바꿨지만 Ollama 경로는 바꾸지 않았다. 예외가 failover 로 이어지는지는 확인 필요다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "n": 2,
+  "title": "loopback callback provider 31개는 서버 기기의 브라우저에서만 붙일 수 있다",
+  "evidence": "rg -l 'callback = \"loopback\"' config/identity 결과 31개(atlassian, stripe, asana, datadog, circleci 등), lib/server/server_keeper_oauth.ml:56-81, docs/KEEPER-IDENTITY-MANUAL.md:222, config/identity/atlassian.toml:13-22",
+  "why": "redirect 가 127.0.0.1 로 고정이고, redirect URL 을 붙여 넣는 대체 경로는 없다. 외부 dashboard(요구 6), 원격 기기에 둔 서버, 다계정에서 사람이 자기 서비스를 붙이는 단계 어디서든 89개 가운데 31개는 붙일 수 없다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "n": 3,
+  "title": "외부 MCP 도구를 Keeper 에 주는 방식을 두 문서가 반대로 정한다",
+  "evidence": "docs/rfc/RFC-keeper-external-tools-and-produced-artifacts.md:180-191(Draft: 범용 relay·서버 도구 전체 수입 기각, typed external_operation adapter 요구. lib·config 에 external_operation·Tool_external_dispatch 0건) vs lib/keeper/keeper_run_tools_setup.ml:506-526(붙인 서비스 catalog 전체를 도구로 냄), RFC-attached-service-tool-scoping(Accepted), RFC-0403-per-keeper-toolset-selection(Draft)",
+  "why": "gap 03 은 앞 문서를 근거로 들고 gap 05 는 뒤 경로를 넓힌다. 한쪽을 죽은 문서로 정하지 않으면 두 계획이 다른 전제로 가고, 헌법 legacy_residue 가 지우라는 틀린 문서가 남는다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "n": 4,
+  "title": "자격 증명 위치를 두 감사 영역이 따로 고친다",
+  "evidence": "external-tools-multimodal gap 01 과 sandbox-remote 의 보안 항목 둘. docs/rfc/RFC-0392-keeper-identity-for-oauth-services.md:127 non-goal '새 비밀 저장소'",
+  "why": "같은 규칙(자격 증명은 그것을 쓰는 process·주인에게만)을 다른 스택이 따로 바꾸면 같은 모듈에서 충돌한다. RFC 하나로 묶고 RFC-0392 non-goal 부터 고쳐야 한다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "n": 5,
+  "title": "이미지 history 재전송 #48999 를 놓쳤고 gap 03 방향이 그것을 키운다",
+  "evidence": "이슈 #48999 열림(이미지를 받는 lane 이 지난 이미지를 전부 요청에 실음, 233~1,186장·24~118MB, 조사 때 만든 열린 이슈 목록). docs/rfc/RFC-0476-checkpoint-history-by-reference.md:13-40 은 디스크 저장만, docs/rfc/RFC-keeper-vision-delegation-tool.md:28,103(Draft)이 per-turn base64 재전송을 다룸",
+  "why": "gap 03 은 MCP 결과 이미지를 content_blocks 로 history 에 넣자고 한다. 재전송을 막는 RFC 가 Draft 인 채로 넣으면 요청이 더 커진다. K Keeper × 턴에서 먼저 깨지는 곳인데 감사 3절 목록에 없다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "n": 1,
+  "title": "기억 fact 의 '처음 본 날'·'마지막으로 본 날'은 사건 시각이 아니라 Librarian 회차의 시계다",
+  "evidence": "lib/keeper/keeper_librarian.ml:1054-1059 (now 기본값 Unix.gettimeofday, 주석 'extraction time is presentation metadata only'); lib/keeper/keeper_librarian_floor_chain.ml:108, lib/keeper/keeper_librarian_runtime.ml:558 (~now:(Time_compat.now ())); lib/keeper/keeper_memory_os_types.ml:755-762 (first_seen = now); lib/keeper/keeper_memory_os_support_core.ml:263-268; config/prompts/keeper.md:868, :871",
+  "why": "Librarian 이 밀리거나 atom 0 부터 다시 쓰면 오래된 대화가 회차 날짜로 찍힌다. recall 은 그 날짜를 '처음 본 날'로 보여서 Keeper 가 오래된 사실을 새 기억으로 읽는다. 원천 시각(Turn_ended.recorded_at, 조각 ts_unix)은 이미 durable 하다. 시간 맥락 요구 1번에 바로 닿는다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "n": 2,
+  "title": "World State 는 턴마다 chat transcript 전체를 load_all 로 읽고, 모든 Keeper 의 transcript 를 상한 없이 메모리에 쥔다",
+  "evidence": "lib/keeper/keeper_world_observation_message_scope.ml:421-423 (load_all. 감사 1.2 표가 말한 꼬리 4 MiB 읽기 load_result 가 아니다); lib/keeper/keeper_chat_store_transcript_load.ml:53-95, :93 (부를 때마다 List.rev 로 전체 목록); lib/keeper/keeper_chat_store_transcript_rows.ml:20-33 (전역 Hashtbl, 상한·내보냄 없음); rg purge_transcript (dashboard 삭제만 있고 회전 없음); ops stat: keeper_chat/*.jsonl 29개 합 245,681,217 B, 최대 35,154,745 B",
+  "why": "증분 reader 라 I/O 는 작다. 하지만 힙과 턴당 할당이 K × Keeper 수명에 비례해 늘고 줄지 않는다. 감사는 이 경로를 '운영 1.8 MB, 꼬리 4 MiB'로 잘못 적어 3절 K×Q×P 의 파일 I/O·메모리 분석에서 빠뜨렸다. GC 영향은 재지 않았다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "n": 3,
+  "title": "경계 로그 decode 캐시는 fleet 전체에 128 MiB 하나이고, 로그는 잘리지 않아 언젠가 넘는다. 넘으면 LRU 적중이 사라진다",
+  "evidence": "lib/keeper/keeper_turn_boundaries.ml:396-400 (decoded_store_budget_bytes = 128*1024*1024); lib/keeper/keeper_decoded_rows.mli:9-13 (넘으면 가장 오래 안 읽은 것부터 버림); lib/keeper/keeper_turn_boundaries.mli:82-88 (자르지 않음); git 80b290dd97ff changelog.d/51195.md (11-11 29개 48.2 MB, 전체 decode 6.6 MB 에 205-455 ms); ops stat 11-12: 합 52,566,673 B",
+  "why": "Keeper 들이 차례로 턴을 도는 접근에서 합이 상한을 넘으면 LRU 는 거의 매번 빗나간다. #51195 가 없앤 턴당 수백 ms decode 가 한꺼번에 돌아오는 절벽이다. 감사는 이 캐시를 보지 못해 gap 10 을 '통째 읽기'로만 적었다. 넘는 시점은 확인 필요(두 측정의 단위와 시각이 다르다)."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "n": 4,
+  "title": "장부 큐 backpressure 는 #20677 fleet freeze 수리를 되돌린다",
+  "evidence": "git show 9d8408bf256e(#20677, 2026-06-10 RCA: 12 Keeper 가 30분 Streaming 에서 멈춤, 공유 mutex 뒤 inline append 가 원인 하나 → 'bounded queue drained by a 0.5s maintenance fiber (same shape as Keeper_tool_call_log)'); c1b6b32e8fb4(#16091); lib/keeper_tool_call_log.ml:397-402(프로세스 하나의 큐·Stdlib.Mutex), :761-779",
+  "why": "gap 04 방향대로 생산자를 기다리게 하면 flush 가 밀릴 때 모든 Keeper 의 도구 경로가 같이 선다. 서버 정지 캠페인(#51655)과도 부딪힌다. 버리지 않으려면 장부가 유일한 기록이 아니게 하는 쪽(Keeper 별 장부, 턴 기록)을 먼저 따져야 한다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "n": 5,
+  "title": "[Temporal] 을 도구 뒤 round 에 싣는 안은 task-514 계약과 부딪힌다",
+  "evidence": "lib/types/prompt_block_id.mli:123-131, :155-160; lib/keeper/keeper_run_tools_hooks.ml:1017-1025(한 Keeper 가 같은 답 36번); docs/evidence/2026-10-25-completion-authority-retention/README.md:42; config/tools/masc_schedule_create.toml:6-7; docs/rfc/RFC-arrived-stimuli-reach-the-running-turn.md:44-45; lib/keeper/keeper_arrived_stimuli.ml:72-78, :111-123",
+  "why": "감사는 81 B·cache 비용만 따졌다. 플래그를 뒤집으면 '도구 결과가 마지막 메시지' 계약이 깨지고, 시계가 첫 요청뿐이라고 Keeper 에게 알린 도구 설명도 바뀐다. 지금 시각은 이미 뒤 round 에 가는 Arrived_stimuli 블록이나 도구 결과에 싣는 안을 따져야 한다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "n": 6,
+  "title": "context_delivery 를 RFC-0473 과 gap 02 가 서로 다르게 바꾼다",
+  "evidence": "docs/rfc/RFC-0473-official-client-turns-record-what-masc-delivered.md:101-112(Session_start|Session_resume, 'context_delivery 는 쓰지 않는다'); lib/keeper/keeper_official_client_session_store.mli:158-161; RFC-0473 §5.2 일부 구현 lib/runtime/runtime_claude_code.ml:3102, lib/runtime/runtime_antigravity.ml:921",
+  "why": "감사는 RFC-0473 을 인용하지 않았다. 따로 진행하면 같은 저장 타입을 두 번 하드컷한다. #35953 의 import frontier 와 RFC-0473 의 delivery 를 한 RFC 에서 합쳐야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "n": 1,
+  "title": "cut·raised 로 끝난 exact 원본이 Librarian·Curator 줄을 멈추고, 푸는 길이 없다",
+  "evidence": "docs/rfc/RFC-host-cycle-runs-exact-requests-side-by-side.md:175-198 (§2.5 \"cut·raised 원본을 푸는 길은 코드에 없다\"); lib/keeper/keeper_librarian_admission_owner.ml:255-262 (주석 \"one that this process cuts is [Cut] and keeps blocking\"), :296-299 → :190-195 Waiting; lib/keeper/keeper_librarian_durable_commit.ml:246 (Cut|Raised → Unfinished); lib/workspace_memory/workspace_memory_execution_capture.ml:413-421 (refusal_blocks 가 true); 진행 중은 docs/rfc/RFC-librarian-ends-waiting-requests-of-a-replaced-declaration.md:15-27 (Draft, 선언 교체로 생긴 경우만)",
+  "why": "instance 가 물러나면 돌던 호출이 cut 이 되고 그 Keeper 의 exact 소비가 멈춘다. 물러나는 경우는 worker 종료, 상태 저장 실패, detach, effect 미확인, Keeper purge 다. RFC 0절은 이것을 max_exact_in_flight 를 올리기 전 조건으로 적었다. 판정 lane 을 늘리면(gap 03·04) 멈추는 수도 는다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "n": 2,
+  "title": "승인 gate 를 outer 로 합쳐서, 승인된 호출은 inner pre_tool_use 를 건너뛰고 skill async action 결과가 조용히 빠진다",
+  "evidence": "packages/agent_core/lib/base/hooks.ml:461-467 (outer 가 Continue 가 아니면 inner 를 부르지 않음); lib/keeper/keeper_turn_driver_try_provider.ml:2347-2361 (gate 가 outer); packages/agent_core/lib/agent/agent_tools.ml:1205-1243 와 agent_tool_pre_execution_gate.ml:64-90 (pre_tool_use 를 한 번 부르고 승인되면 바로 실행); lib/keeper/keeper_skill_async_action_observer.ml:85-100 (PreToolUse 가 만든 pending 이 없으면 PostToolUse 가 아무것도 안 남김); lib/keeper/keeper_run_tools_hooks.ml:922-955; lib/server/server_routes_http_keeper_stream.ml:1630-1645 (운영자 stream 턴에만 gate)",
+  "why": "운영자 stream 턴에서 Auto 모드가 묻고 승인한 호출은 기록 없이 빠진다. 빠지는 것은 skill async action 결과, skill action 관측, preview 표시이고 이것은 silent failure 다. gap 01 방향은 판정 hook 을 Hooks.compose 에 끼운다. 그러면 같은 규칙을 물려받아, 판정이 Continue 가 아닐 때마다 같은 손실이 난다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "n": 3,
+  "title": "Board attention 문턱 0.3 은 한 주 로그로 한 번 잰 값이다. 기본 목적지 모델은 jev-latest 이고 문턱 위 답을 다시 재는 길이 없다",
+  "evidence": "lib/runtime/runtime_schema.ml:571-575 (model = \"jev-latest\"); lib/runtime/runtime_schema.ml:583-590 (2026-09-23..30 로그로 잼); lib/keeper/keeper_board_attention_exact_flow.ml:697-699,719 (rejudged 는 low_confidence·uncertain 뒤에만, Jev_decided 는 confidence 만 남김); git 37e390738d24 (#40413 confident Jev 답은 LLM lane 없이 확정)",
+  "why": "문턱을 정할 때는 LLM lane 이 Jev 답을 모두 다시 봤다. #40413 뒤로는 문턱 위 답의 뒤집힘 비율을 셀 수 없다. 모델 이름이 움직이면 문턱의 근거가 조용히 낡는다. 사용자 규칙 '재생에서 고른 상수'와 요구 12(되먹임)에 걸린다. gap 06 의 D2 결정보다 이 사실을 먼저 알아야 한다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "n": 4,
+  "title": "gap 02 의 snapshot 권위 안이 진행 중인 '선언 교체' 설계와 같은 권위를 두고 부딪친다",
+  "evidence": "docs/rfc/RFC-librarian-ends-waiting-requests-of-a-replaced-declaration.md:155(Draft 11-11, 이슈 #51278), docs/design/workspace-curator-production-owner.md:49-53, lib/lane_addon/lane_addon_runtime.ml:2431, :642. 정지 구간 캠페인의 Draft #51707 과 11-12 병합 넷(#51377·#51376·#51352·#51422)이 같은 파일을 고친다",
+  "why": "두 설계가 '새 일을 허가하는 선언 권위'를 서로 다르게 정한다. 한 RFC 에서 먼저 맞추지 않으면 잠금 수리 PR 이 Off 선언 거절이나 Librarian 대기 요청 정리를 깬다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "n": 5,
+  "title": "사용자 결정 D1·D2·D3 는 이미 정해진 것을 다시 묻는다",
+  "evidence": "brief(2.1·2.2·2.3), docs/constitution.xml:503-507, lib/runtime/runtime_schema.ml:582-590(0.3 은 2026-09-23..30 로그로 고른 값, 문턱 아래 7.3%·뒤집힘 41%), docs/rfc/RFC-0517-…:294(같은 gates 조항으로 게이트를 미룸)",
+  "why": "'이미 고른 선택은 다시 묻지 않는다'와 brief 2.4(규칙 하나에서 끌어낸다)에 어긋나 결정 목록을 부풀린다. D2 의 '건수는 재지 않았다'도 틀렸다. 대가가 코드 주석에 있다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "n": 6,
+  "title": "in_flight 인용 셋은 범위가 다르고, 진짜 추적 문서 둘이 빠졌다",
+  "evidence": "RFC-every-lane-is-one-row-in-one-registry.md:14(판정 동작 범위 밖), RFC-any-runtime-serves-an-exact-lane·RFC-cli-runtimes-as-lane-slots(패키지 sampling 0건), RFC-operator-quiz-lane.md:148. 빠진 것: docs/reports/addon-lane-full-worklist-20261021.md:9-12(10-23 운영자 전체 전환, task-2523·2524), RFC-0517(흡수 gate 낱말로 F1 지표를 셈)",
+  "why": "계획이 엉뚱한 RFC 진척을 기다리거나, 이미 맡은 곳과 겹치는 PR 을 낸다. gap 04 는 10-23 전체 전환과 09-27 '내장 lane 은 서버 안'이 함께 서는 방법을 적어야 한다. gap 06 의 gate 공통 타입은 RFC-0517 과 맞춰야 한다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "n": 1,
+  "title": "Cancel-propagation rule has a single helper (Cancel_safe) that nothing forces anyone to use, and its Active RFC cites a deleted lint",
+  "evidence": "lib/cancel_safe/cancel_safe.mli:1-7 calls itself the RFC-0106 SSOT that re-raises Cancelled; only 33 sites in 19 files use it, against 839 hand-written 'Cancelled _ as e -> raise' lines in 390 files. docs/rfc/RFC-0106-cancel-safe-try-with-discipline.md:4 is Active and :25 says scripts/lint-cancel-guard.sh is 'still active', but the file is gone (#40298). 139 cancel-guard-ok markers are unread.",
+  "why": "A swallowed Eio.Cancel.Cancelled breaks fiber-tree unwind, and nothing at compile or CI time stops new catch-alls. Gap 02 proposes a second helper in Eio_guard; gaps 10 and 12 miss this RFC and these markers. Severity P2."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "n": 2,
+  "title": "Two Keeper identifier types with different grammars and error types",
+  "evidence": "lib/keeper_registry/keeper_id.mli:4-14 and keeper_id.ml:15: Keeper_name.t = private string, up to 128 bytes of [A-Za-z0-9._-], string error. lib/auth/authz_id.mli:1-9 and authz_id.ml:27-30: Authz_types.Keeper_id.t is abstract, up to 255 bytes, also allows ':', closed error variant. lib/runtime/runtime_account_access.mli:169-193 sends person turns as (owner, keeper_id) and operator turns as keeper_name:string.",
+  "why": "Gap 04's plan to put (workspace, person, name) into Keeper_id.t must first pick one type and one grammar. Converting a person id containing ':' or longer than 128 bytes to Keeper_name fails, so when person Keepers enter the keeper runtime (.masc/keepers/<name>/), the mapping becomes partial. Severity P2."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "n": 3,
+  "title": "Registration through module-init side effects, kept alive by force_link units",
+  "evidence": "lib/operator/operator_tool.ml:436-439 registers operator tools and dashboard hooks in a top-level let (). lib/operator/operator_tool.ml:482 and lib/dashboard/dashboard.ml:624 define 'let force_link = ()'. lib/server/server_runtime_bootstrap.ml:336 runs 'ignore (Dashboard.force_link, Operator_tool.force_link)'. There is no -linkall in lib/dune or bin/dune, and lib has 85 top-level 'let () =' in 71 files.",
+  "why": "docs/constitution.xml:306-308 forbids build-reachability devices. Removing the ignore line, or a module's last reference, drops its registrations with no compile error; I found no boot check for this (needs confirmation). Same root as gap 03's late-filled refs; passing values at the assembly point fixes both. Severity P3."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "n": 4,
+  "title": "gap 02 가 병합된 HTTP 분리 RFC 와 main domain RFC §7.6 의 결정을 빠뜨렸다",
+  "evidence": "RFC-http-transport-runs-on-its-own-domain-and-each-route-names-where-it-runs.md(#51080)와 구현 #51139·#51189·#51214·#51222·#51224; lib/http_server_eio.mli:400-403; lib/config/env_config_runtime.ml:200-201(기본 false); RFC-main-domain-scheduler-latency.md:140, :229, :231, :243; S1·S2·S2b 병합 #51282·#51364·#51422·#51427; 운영자 비공개 기록",
+  "why": "감사는 'Keeper loop 와 HTTP 가 같은 domain', '타입으로 막는 작업 없음'을 P1 근거로 썼다. 실제로는 경로 도메인이 이미 타입이고 분리는 설정 하나 남았다. 병합된 RFC 는 blocking 타입을 S3 뒤로 미뤘고 systhread 상한을 두지 않기로 했다. 계획이 이 결정에서 출발하지 않으면 정해진 것을 다시 묻는다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "n": 5,
+  "title": "bin/ 구조를 세 계획이 서로 다른 library 단위로 바꾼다",
+  "evidence": "RFC-tui-async-answers-in-domain-modules.md:4, :11, :358(묶음마다 library); bin/dune:3451-3454 masc_tui_code_results; tui-grammar3/03-activity-editors-carry-typed-notices(#51630)가 bin/dune 에 masc_tui_activity_notice library 추가; 감사 ocaml-architecture.md:222-224(층 library 몇 개, 모듈마다 library 금지); 로컬 tui-grammar3/* 28개; bin/masc_tui.ml 을 고치는 열린 PR #51620·#51630·#51662",
+  "why": "같은 bin/dune·masc_tui.ml 을 세 계획이 서로 다른 규칙으로 고친다. 규칙 하나를 먼저 정하지 않으면 구조가 섞이고, 헌법 :321-327 대로 열린 스택 전체를 매번 다시 올린다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "n": 6,
+  "title": "다계정이 gap 03·04 의 위험과 순서를 이미 바꿨다",
+  "evidence": "dca8b40061cd(#51565)는 감사 HEAD 77f7bec3039f 의 조상(git merge-base --is-ancestor); lib/runtime/runtime_account_access.mli:169-193(사람 Keeper_turn 은 User_id.t·Keeper_id.t, Operator_keeper_turn 은 'a multi-account process runs none'); lib/server/server_preview_keeper_turn.mli:1-3(사람 구독의 공식 클라이언트를 바로 띄움); lib/auth/authz_id.mli:25-38; lib/keeper/keeper_transition_audit.ml:25; 이슈 #43005; 운영자 비공개 기록",
+  "why": "사람별 이름은 감사 전에 authz 층의 추상 id 로 들어왔고, 사람 Keeper 는 이름 키 table 이 있는 lane loop 를 타지 않는다. 섞임은 사람 Keeper 를 lane loop 에 올리는 조각까지 잠복이다. typed id 는 그 조각 앞에 두면 되고, 'S1b 다음 조각 앞' 순서는 사용자 순서를 거스른다."
+ },
+ {
+  "domain": "provider-protocol",
+  "n": 1,
+  "title": "429 의 provider 시각을 성공 한 번이 지운다",
+  "evidence": "lib/runtime/runtime_candidate_backpressure.ml:80-82 (note_candidate_success 가 칸 전체를 State.empty 로), lib/runtime/runtime_quota_window.ml:93-101 (stated window 는 성공으로 안 지움), lib/runtime/runtime_candidate_standing.ml:75-94 (exact walk 이 그 429 시각을 held 로 읽음), lib/keeper/keeper_turn_driver.ml:977-981 (답한 시도가 지움)",
+  "why": "같은 'provider 가 말한 시각'에 두 저장소가 반대 규칙을 쓴다. 429 전에 보낸 요청이 뒤에 답하면 Retry-After 전에 다시 보낸다. gap 01 방향을 받으면 그 방향을 무른다. 감사는 6절 확인 필요에만 두었다."
+ },
+ {
+  "domain": "provider-protocol",
+  "n": 2,
+  "title": "응답 글자가 나간 뒤 실패의 fence 판정이 lane 마다 반대다",
+  "evidence": "lib/keeper/keeper_claude_code_runtime.ml:817-824 (Text_delta 를 effect 불확실로, 다른 후보가 두 번 답한다고 적음), lib/keeper/keeper_codex_runtime.ml:461-462 (글자를 턴 도중 흘림), :1641 (Text_delta 는 effect 없음), :920-940 (Turn_failed 도 없음), lib/keeper/keeper_antigravity_runtime.ml:491-494 (full 아닐 때 없음)",
+  "why": "같은 '글자 뒤 turn_failed' 가 Claude 에서는 턴을 끝내고 Codex·Antigravity 에서는 다음 후보가 다시 답한다. gap 05 표에 없는 판정 차이이고 공통 effect 관측이 먼저 맞출 항목이다. 화면이 앞 시도 글자를 거두는지는 확인 필요."
+ },
+ {
+  "domain": "provider-protocol",
+  "n": 3,
+  "title": "01번은 진행 중인 사용량·재시작 캠페인의 다음 결정과 같은 일이다",
+  "evidence": "docs/rfc/RFC-a-restarted-server-keeps-the-resets-providers-stated.md:88-90(#51547, 주인 결정 대기)이 '재시작과 무관한 반복 거절(3절)을 먼저 조사하는 쪽이 줄일 수 있는 실패가 더 많다'고 적는다. docs/rfc/RFC-provider-path-rest.md:342-362 와 docs/rfc/RFC-exact-lane-waits-for-a-stated-reset.md:256 이 같은 일을 Phase 2·#39190 Keeper 부분으로 남겼다. 감사는 이 RFC 를 #51466 으로 잘못 적었다(#51466 은 288b5ddcc607, 사용량 보고 되읽기).",
+  "why": "계획이 01번을 새 항목으로 세우면 같은 2,113번 한도 거절을 줄이려는 일이 두 갈래가 된다. brief 3절의 'provider 목록 실시간성·사용량 영속' 캠페인과 #51547 의 주인 결정으로 보내야 중복과 충돌이 없다."
+ },
+ {
+  "domain": "provider-protocol",
+  "n": 4,
+  "title": "05번 방향과 RFC-typed-terminal-reason D3 이 같은 문자열 칸을 서로 다른 집으로 옮긴다",
+  "evidence": "docs/rfc/RFC-typed-terminal-reason.md:29-32(D3: Keeper_internal_error.Official_client_failed 를 carrier 로), :446-451(안 B·C 기각), packages/agent_core/lib/base/error.mli:155-182(Internal_carried 있음). 감사 05번은 native_fault → Agent_core.Error.t 사상을 제안하면서 in_flight 를 '없음'으로 적었다.",
+  "why": "둘을 따로 진행하면 ProviderReportedError.error_type 을 두 곳으로 옮기는 설계가 부딪힌다. brief 2.4(규칙 하나에서 끌어낸다)에 따라 D3 의 Q1 운영자 결정과 묶어 한 설계로 정해야 한다."
+ },
+ {
+  "domain": "provider-protocol",
+  "n": 5,
+  "title": "감사 6절의 '먼저 보낸 요청의 성공이 나중 Retry-After 를 지우는가'는 이미 열린 이슈 #50837 이다",
+  "evidence": "issue #50837 OPEN '먼저 보낸 호출의 답이 나중에 받은 Retry-After 를 지워요'(gh GraphQL). docs/rfc/RFC-exact-lane-waits-for-a-stated-reset.md:96-98 — 'Keeper walk 도 바뀐다. 그래서 #50837 에서 따로 다룬다'.",
+  "why": "감사는 이것을 의도인지 모르는 질문으로 남겼다. 실제로는 Keeper walk 순서에 닿는 열린 결함이고 다룰 자리도 정해져 있다. 계획은 다시 조사하지 말고 이 이슈를 인용해야 한다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "n": 1,
+  "title": "대기 멘션 층은 개수·길이 상한이 없고 32 경계 밖에 있다",
+  "evidence": "lib/keeper/keeper_world_observation_message_scope.ml:287-308,349-365 (watermark 뒤의 답 안 한 멘션·scope 줄을 본문 그대로 전부); lib/keeper/keeper_unified_prompt.ml:1802-1811,89-104 (전부 렌더); lib/keeper/keeper_unified_turn_success.ml:587-591 (watermark 는 성공 처리에서만 오르고, acknowledge_pending_messages 호출은 이 한 곳); lib/keeper/keeper_context_layers.ml:214-217 (Pending_mentions 는 Sent_every_resume); lib/keeper/keeper_unified_turn_execution.ml:444-475 (입력 초과는 terminal error)",
+  "why": "감사 03 은 32 가 첫 요청 크기를 막는 유일한 경계라 했다. 그러나 멘션 층은 32 와 무관하다. 자율 턴이 실패하거나 채팅에 밀리는 동안 멘션이 쌓이고, 다음 턴과 공식 클라이언트 resume 마다 전부 실린다. 입력 초과로 실패하면 watermark 가 안 올라 다음 턴이 더 커지는 고리가 코드상 열려 있다. 일어난 기록은 확인하지 못했다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "n": 2,
+  "title": "공식 클라이언트 턴은 MASC 도구를 부를 때만 도착 행을 본다",
+  "evidence": "lib/keeper/keeper_official_client_host.ml:1649-1658 ('a tool result is the one place a MASC-written line reaches it'), :2209-2225 (dynamic tool 결과에만 arrival 을 붙임); 비교: lib/keeper/keeper_run_tools_hooks.ml:1236-1243 (Agent Core 는 도구 뒤 round 마다)",
+  "why": "감사 6절이 확인 필요로 남긴 항목이 코드 주석으로 풀린다. vendor 자체 도구(Bash·Read 등)만 쓰는 Claude Code·Codex 턴에는 도는 동안 도착한 승인·완료·멘션 행이 턴이 끝날 때까지 닿지 않는다. 같은 큐라도 runtime 에 따라 도는 턴의 주의 범위가 다르다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "n": 3,
+  "title": "World State 가 다음 round 에 남는지가 provider 종류로 갈린다",
+  "evidence": "packages/agent_core/lib/pipeline/pipeline.ml:440-449 (Anthropic 만 첫 round 문맥을 Historical_system_context 로 기록에 남기고, Kimi·OpenAI_compat·Ollama·Gemini·Glm 은 남기지 않음); packages/agent_core/lib/agent/agent_turn.ml:39-61; packages/agent_core/lib/llm_provider/message_origin_lowering.mli:4-15; lib/types/prompt_block_id.ml:132-136; lib/keeper/keeper_heartbeat_loop.ml:694-702",
+  "why": "비 Anthropic lane 의 Keeper 는 첫 도구 round 뒤에 World State 전체(Board 활동, 멘션, Namespace 상태, 일정)를 다시 보지 못한다. 같은 Keeper 라도 lane 의 provider 에 따라 긴 턴의 주의 범위가 달라진다. 감사 04 는 이것을 모든 runtime 의 일로 적었고, 범위도 큐 행으로만 잡았다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "n": 4,
+  "title": "1번 hard cut 이 영수증 기다림·Delegate 캠페인과 같은 길을 자른다",
+  "evidence": "lib/keeper/keeper_tool_surface_ops.ml:699-769, :873-929, :1102-1119; 커밋 056b526033d9 (#51546 masc_keeper_delegate_status_many, 11-12 병합); 운영자 비공개 기록; brief",
+  "why": "감사는 메시지 제출만 옮긴다고 적는다. 하지만 sender_keeper·Surface_ref.Agent hard cut 은 delegate 와 그 상태 조회의 durable 기록까지 지운다(brief 2-2). 같은 store 를 읽는 측정과 Delegate 결정이 진행 중이다. 그 전에 바꾸면 측정이 깨지고 결정이 겹친다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "n": 5,
+  "title": "KeeperBacklogPreemption.tla 가 지운 양보 장치를 현행으로 모델링한다",
+  "evidence": "specs/keeper-state-machine/KeeperBacklogPreemption.tla:1-30 (Runtime correspondence (read at 3e41385b549) 가 keeper_chat_yield_request.ml, make_autonomous_yield_probe, observe_scheduled_turn 예약을 인용, 셋 다 #47961·#48051·#51221 로 지워짐); specs/INDEX.md:69 (manual, cfg 5개); 마지막 수정 #46766",
+  "why": "9번은 문장 다섯만 찾았고 Owner 슬롯을 이미 모델링한 이 spec 을 보지 못했다. legacy_residue 와 brief 2-7 에 따라 이 spec 을 지금 코드에 맞게 고치거나 지우는 것이 먼저다. 그러지 않으면 9번 방향이 슬롯 모델을 두 벌 만든다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "n": 6,
+  "title": "두 큐를 묶는 Keeper 대기 읽기 모델이 이미 있고 Keeper 에게만 막혀 있다",
+  "evidence": "lib/server_keeper_waiting_inventory.mli:2-5 (여러 store 를 join 하는 read model), :18-21 (dashboard_json_for_keeper), :108-114 ((urgency, source, conversation) 묶음, 가장 오래된 항목 기준); lib/keeper/keeper_waiting_inventory_broadcast.mli:5 (Chat_operation | Event_queue | Approval_count | Approval_detail); lib/keeper/keeper_tool_descriptor.ml:3121-3123 (masc_keeper_waiting_inventory 는 Operator_only)",
+  "why": "2번은 이 도구를 [확인 필요]로 남기고 새 waiting_view 타입을 제안한다. 같은 사실(종류·개수·가장 오래된 시각)을 투영하는 모델이 이미 있으니, 새 타입을 만들면 같은 사실의 출처가 둘이 된다. 이 모듈은 상위 라이브러리라 lib/keeper 의 프롬프트 층은 callback 으로 받아야 한다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "n": 1,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "n": 2,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "n": 3,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "n": 4,
+  "withheld": "보안 항목이다. 수리가 main 에 들어갈 때까지 좌표와 재현 경로는 공개하지 않는다. 원문은 이 저장소에 없다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "n": 1,
+  "title": "lease 가 만료된 뒤의 쓰기를 막는 fence 가 store 몇 곳에만 있다 (P2, unsafe_concurrency)",
+  "evidence": "lib/workspace/workspace_utils_ops.mli:166-170 (lease 를 쥐고 쓰는 쪽은 commit_under_held_lease 를 써야 한다); lib/workspace/workspace_backlog.ml:381-388 (CPU pool 을 기다리는 동안 lease 가 만료될 수 있다고 적음); fence 를 쓰는 곳은 workspace_backlog.ml:395, Candle 코드의 한 곳, workspace/workspace_init.ml:185,207, workspace/workspace_task_rejection_outbox.ml:78 넷; fence 없이 쓰는 곳은 lib/schedule/schedule_store.ml:553 (pool 인코딩),561,586,624-632, lib/workspace/workspace_state.ml:110-116, lib/goal/goal_store.ml:359,525, lib/workspace/workspace_goal_index.ml:583; lib/backend/backend.ml:774-783 extend_lock 은 부르는 곳이 0",
+  "why": "쥔 쪽이 2분을 넘기면 다른 fiber 가 만료된 lease 를 가져간다. 그러면 두 쪽이 같은 12.6 MB 문서를 통째로 써서 한쪽 변경이 사라진다. backlog 만 고친 N-of-M 이다. gap 01 은 포기와 쥐는 시간만 다루고 이 lost update 는 다루지 않는다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "n": 2,
+  "title": "Board 는 댓글·투표 하나마다 다음 flush(30초)에서 posts·comments·votes·reactions 네 원장을 통째로 다시 쓴다 (P2, perf_bottleneck)",
+  "evidence": "lib/board/board_comments.ml:173,180-181 (reply_count 를 올리고 글·댓글을 dirty 로 표시); lib/board/board_voting.ml:172,251; lib/board/board_snapshot_batch.ml:38-48 (dirty 하나면 votes·reactions 까지 고름); lib/board/board_deletion.ml:520-541 (flush_dirty 가 persist_mutex 안에서 capture 와 rewrite); lib/board/board_posts_source.ml:435-449, lib/board/board_snapshot_rows.ml:3-23 (전체 concat); lib/fs_compat/fs_compat_private_jsonl_write.ml:674-677 (옛 파일 전체 읽기 비교),386-389 (stage 쓰기 + fsync); lib/board/board_core_persist.ml:532-556, lib/config/env_config_runtime.ml:266-267 (30초); 측정 21:31:30 KST 에 크기가 그대로인 votes(330,976 B)·reactions(13,405 B)의 mtime 이 posts·comments 와 같은 초에 바뀜",
+  "why": "댓글 한 건이 append 한 줄로 끝나지 않는다. 약 97 MB 를 렌더하고, 읽고, fsync 해서 다시 쓴다. gap 02 의 cursor 방향은 이 rewrite 를 줄이지 못한다. 원인은 append 행 안에 든 가변 카운터(reply_count, 득표 수)다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "n": 3,
+  "title": "예약 장부는 정지 구간 캠페인이 이미 맡았고, 그 RFC 가 gap 01·08 이 지울 잠금을 새로 쓴다",
+  "evidence": "docs/rfc/RFC-schedule-notes-live-outside-the-ledger.md:4-11 (Draft, implementation_prs []), :100 (notes 파일마다 Workspace_utils.with_file_lock), :182 (§6), :209-214 (§9); issue #51476 OPEN; PR #51480 MERGED 2026-11-12T03:41Z; lib/workspace/workspace_utils_ops.ml:657-673 → :580-591 (TTL lease, 50회)",
+  "why": "gap 01·08 은 TTL lease 를 지우자는데, 사용자가 쓰라고 한 RFC 는 예약마다 그 lease 를 새로 건다. brief 3절에도 없다. 순서를 정하지 않으면 한쪽이 다른 쪽을 되돌리고, Schedule 행 원장 질문은 그 RFC 의 §6·§9 와 따로 결정된다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "n": 4,
+  "title": "in_flight 로 인용한 이슈·RFC 가 닫혔거나 다른 경로라 gap 03·08 은 맡은 곳이 비어 있다",
+  "evidence": "#33588 CLOSED 2026-09-29, #37372 CLOSED 2026-09-25 (gh); lib/core/cross_context_mutex.mli:21, lib/process/file_lock_eio.ml:505 가 아직 열린 일처럼 가리킴; RFC-0338 = event queue 잠금, #24205 (0a238ac7f0f8, 2026-07-11) 로 구현, status Draft; RFC-0348 = Keeper lane 쓰기 대기 (docs/rfc/RFC-0348-bounded-durable-write-wait.md:60,107)",
+  "why": "계획이 '맡은 곳 있음'으로 읽고 빼면 아무도 안 고친다. 닫힌 이슈를 가리키는 주석 둘과 구현된 Draft RFC 는 gap 12 의 틀린 문서 목록에도 들어가야 한다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "n": 5,
+  "title": "같은 잠금 규칙의 열린 이슈 넷을 인용하지 않았고, 지도는 이 묶음의 맡은 곳을 다른 일로 적었다",
+  "evidence": "#51419 OPEN (systhread 안 read_state 되쓰기 → Backend Eio.Mutex poison, S2b 분류 중 발견), #51261·#51273 OPEN (Board persist_mutex 를 쥔 채 관측자 호출 → 재진입 교착), #36020 OPEN 1번 (취소 안 되는 F_LOCK, lib/fs_compat/fs_compat_durable_append.ml:131-134); docs/reports/2026-11-11-open-issue-map-and-plan.md:339 의 맡은 곳 '#51050 병합, RFC-0518 스택'",
+  "why": "넷은 gap 03·04·08·09 의 지금 사례이고 재현 경로가 적혀 있다. 지도가 적은 #51050·RFC-0518 은 이 경로를 고치지 않는다. 한 잠금 규칙으로 묶지 않으면 이슈마다 따로 고치는 N-of-M 이 된다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "n": 1,
+  "title": "사람용 MCP 도구 목록이 손 목록이라 새 도구가 조용히 빠질 수 있다",
+  "evidence": "lib/server/server_person_mcp.ml:50-51 의 손 목록 tools 가 tools/list(85, 302)와 tools/call 이름 찾기(224)를 함께 정한다. [@@deriving enumerate] 가 없다. name_of·definition_of 는 빠짐없이 match 하지만 tools 목록은 컴파일러가 검사하지 않는다.",
+  "why": "새 variant 가 컴파일되어도 목록에서 빠지면 보이지 않고 부를 수도 없다. 오류도 나지 않는다. 감사는 gap 06 에서 이 파일을 도구 추가의 본보기로 든다. 이 패턴을 옮기면 손 목록도 함께 퍼진다. P3."
+ },
+ {
+  "domain": "tools-paradigm",
+  "n": 2,
+  "title": "masc_decide 를 두 감사가 다른 방향으로 다룬다",
+  "evidence": "감사 원문(lane-addon-hooks-judgement)('Keeper 도구: masc_decide'), :178·:325(D6: Tool_local_runtime_systemone codec 을 hard cut 하고 [typesafeai].destinations 로) 대 lib/keeper/keeper_tool_descriptor.ml:2461-2467(실제는 Operator_only); 운영자 비공개 기록",
+  "why": "gap 02 가 masc_decide 를 Keeper 에게 연 뒤 D6 이 그 client 를 갈아엎으면 같은 도구를 두 번 고친다. D6 다음 노출 순서로 한 결정에 묶어야 한다. lane-addon 감사의 'Keeper 도구' 표기는 코드와 다르다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "n": 3,
+  "title": "gap 01·03·04 가 기대는 async-fleet RFC 는 11-07 부터 수락 대기이고 §6 이 brief §2.2 와 겹친다",
+  "evidence": "운영자 비공개 기록(RFC 수락이 사용자 결정 항목); docs/rfc/RFC-keeper-async-fleet-continuity.md:152-176(durable dependency records, wait·delegation dependency 수명, typed cycle); brief §2.2; audit/sandbox-remote.verify-flight.md:181-183",
+  "why": "세 gap 과 sandbox-remote 감사가 같은 Draft 를 따로 in_flight 로 든다. 수락 하나로 묶고, §6 의 dependency·wait 수명을 '위임 아님·대기 의무 없음·dependency 를 scheduling Gate 로 안 씀'과 맞춘 뒤 §5·A07·A11 위에서 구현해야 한다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "n": 4,
+  "title": "gap 03 의 status 도구 합치기는 11-12 사용자 선택 #51546 과 측정 창을 거스른다",
+  "evidence": "056b526033d9 (#51546, config/tools/masc_keeper_delegate_status_many.toml); 운영자 비공개 기록('사용자 선택 상태 조회 묶음 도구 추가', 배포 뒤 72시간 status_sweeps.py); 운영자 비공개 기록(묶음으로 줄일 수 있는 것 15.1%)",
+  "why": "사용자가 하루 전에 producer 전용 묶음 도구를 골랐고 효과는 배포 뒤 72시간에 잰다. 감사는 #51546 을 gap 06 의 비용 예로만 들고 gap 03 의 in_flight 에서 빠뜨렸다."
+ },
+ {
+  "domain": "tui-core-music",
+  "n": 1,
+  "title": "TUI 첨부·이미지 캐시의 임시 폴더가 여러 사람이 쓰는 기기를 전제하지 않는다",
+  "evidence": "좌표는 수리 뒤 싣는다.",
+  "why": "보안 경계라 P1 제안이고 사람 리뷰가 필요하다. 닿는 조건은 수리 뒤 싣는다."
+ },
+ {
+  "domain": "tui-core-music",
+  "n": 2,
+  "title": "Keeper 목록의 한 번짜리 g(yolo)를 한글 음절 재생이 연달아 누를 수 있다",
+  "evidence": "bin/masc_tui.ml:42207-42227(Keeper 목록·상세에서 g 한 번으로 tool 승인 끄기·켜기, 주석 'One press'); bin/masc_tui.ml:34032-34066(command_reading 이면 음절 하나를 자모 수만큼 명령으로 다시 읽고, 패널만 :34040-34043 에서 single_latin_key 로 막음); bin/masc_tui_types.ml:4621-4624(Keeper 목록·상세는 채팅 화면이 아님); bin/masc_tui_keys.ml:414-416(g, p / w, s)",
+  "why": "composer 초점이 없을 때 친 한국어 낱말 하나가 w·g·p 같은 동작을 한 번에 여러 개 낸다. ㅎ 이 든 음절 하나로 그 Keeper 의 tool 승인이 꺼진다. 빨간 이름과 이벤트 줄로 보이고 재시작하면 auto 로 돌아온다. RFC §3.3(199-202행)이 g 를 조심 묶음으로 옮기기로 했지만 감사는 이 위험을 적지 않았다. P2 제안."
+ },
+ {
+  "domain": "tui-core-music",
+  "n": 3,
+  "title": "Gate 승인은 도착해도 울리지 않고 머리 줄 배지에도 없다",
+  "evidence": "bin/masc_tui.ml:16555-16557(OSC 9·BEL 을 쓰는 곳은 질문 notify_new_asks 하나), :27821-27842(Gate snapshot 은 상태만 바꿈); bin/masc_tui_types.ml:23056-23064(모든 화면 머리 줄의 agenda 는 held call·질문·목표 확인·멈춘 Task 만, gate_pending 없음); bin/masc_tui_render_prim.ml:1132-1148; bin/masc_tui_approvals_model.ml:11-14",
+  "why": "Gate 승인은 Keeper 의 외부 쓰기를 붙든다. Board·Work·Fusion 에 있는 운영자는 Overview·Approvals 에 가야 안다. 질문은 울리는데 Gate 승인은 울리지 않아 주의(요구 23)가 비대칭이다. 승인은 durable 이라 잃는 것은 없어 P3 제안."
+ },
+ {
+  "domain": "tui-core-music",
+  "n": 4,
+  "title": "PR 로 도는 workflow 여섯과 헌법 330행이 서로 다르다",
+  "evidence": "pull_request trigger: pr-type-check(운영자 결정으로 필수 검사, .github/workflows/pr-type-check.yml:15-18, :36), changelog-fragments.yml:8, proto-generated.yml:14, model-catalog-uniqueness.yml:12, installer-deps-macos.yml:13, alphatex-native.yml:11. docs/constitution.xml:330 과 brief 은 PR push 로 자동 CI 를 시작하지 않는다고 적는다.",
+  "why": "감사 12번처럼 alphatex 하나만 고치면 저장소 규칙이 거절하는 N-of-M 패치다. 헌법 문장과 운영자 결정이 다르니, 스택 CI 캠페인(RFC #51521) 영역에서 허용할 PR 검사를 규칙 하나로 운영자에게 올리고 헌법 330행도 그 답에 맞춘다."
+ },
+ {
+  "domain": "tui-core-music",
+  "n": 5,
+  "title": "자식 프로세스를 기다리는 방식이 셋으로 갈릴 수 있다",
+  "evidence": "bin/masc_tui_score.ml:23 (맨 Unix.waitpid), bin/masc_tui_attachment_action.ml:113 (오류를 버리는 waitpid), bin/masc_tui.ml:37184·:43570 (Process_eio), 이슈 #51704 (raw waitpid 를 공용 helper 로, 11-12)·#51395 (spawn 마다 SIGCHLD handler), 운영자 비공개 기록 (Eio_main.run 이 SIGCHLD 처리기를 남긴다, #51594)",
+  "why": "감사 02는 systhread 안 waitpid 를 새로 권하고 08은 stop 경로를 더한다. 그 사이 #51704 가 helper 를 만들면 같은 일을 하는 길이 셋이 된다. TUI 는 이미 Process_eio 를 쓰니 02·08 을 그쪽으로 모으고 #51704 와 순서를 맞춘다."
+ },
+ {
+  "domain": "tui-core-music",
+  "n": 6,
+  "title": "곁가지 기능·TUI 잔결함 처리는 사용자가 이미 정했고 실행까지 끝났다",
+  "evidence": "운영자 비공개 기록, docs/reports/2026-11-11-open-issue-map-and-plan.md:388-389, 운영자 비공개 기록",
+  "why": "감사는 5번을 '뒤로 미는 제안'으로만 인용하고 음악 gap 넷(07·08·09·11)을 핵심 gap 과 같은 P2 로 둔다. 계획은 넷을 side-feature 몫으로 두고, TUI gap(01·03·04·05)은 4번대로 새 사례 이슈 없이 문법 캠페인 층으로 보내야 한다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "n": 1,
+  "title": "Keeper 별 토큰 화면 둘이 다른 원장을 읽고, dashboard 쪽은 실패 턴을 뺀다",
+  "evidence": "lib/dashboard/dashboard_http_keeper_feeds.ml:26-44,128-140,194 keeper-costs 는 keeper metrics turn 행의 usage 를 더함; lib/keeper/keeper_unified_metrics_snapshot.ml:23-29,169 와 lib/keeper/keeper_unified_turn_success.ml:595 그 행은 성공 run_result 로만 씀; lib/keeper/keeper_unified_turn.ml:1230-1237 실패 경로는 메모리 카운터만; lib/keeper/keeper_turn_spend_commit.ml:62-77 실패 턴 spend 는 cost ledger 로; lib/keeper_efficiency/keeper_efficiency.ml:163-179, bin/masc_cost.ml:107-113 은 그 ledger 를 더함",
+  "why": "같은 Keeper 의 토큰이 dashboard 비용 화면·TUI 사용량(실패 턴 제외)과 TUI 효율·masc cost(실패 턴 포함)에서 다르게 나오고 차이를 말하는 칸이 없다. 실패가 잦은 Keeper(예: Muse 입력 초과 #51628)일수록 dashboard 에서 덜 쓴 것처럼 보인다. gap 05 는 턴 토큰 authority 를 둘로 셌지만 넷이다. P2."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "n": 2,
+  "title": "Keeper×도구 누적 카운터가 Keeper 마다 파일로 영속되지만 실패 수를 읽는 화면이 없다",
+  "evidence": "lib/keeper_types/keeper_types.ml:27-33 count/successes/deferred/failures; lib/mcp_server_eio_call_tool.ml:775 호출마다 mark_dirty; lib/keeper/keeper_heartbeat_snapshot.ml:94 heartbeat 마다 flush; lib/keeper/keeper_registry_tool_usage_persistence.ml:14-58 Keeper 마다 JSON; lib/keeper/keeper_keepalive.ml:1172 시작 때 복원; 읽는 곳 lib/dashboard/dashboard_briefing_assembly.ml:62-71(이름·합계), lib/keeper/keeper_heartbeat_loop.ml:1198-1211(entropy), lib/server_keeper_waiting_inventory.ml:1208-1217(마지막 도구)",
+  "why": "gap 04 가 없다고 한 Keeper×도구 실패 수가 원장과 따로 창 없이 쌓이고 failures 를 읽는 곳이 없다. gap 05 저장소 목록과 gap 10 지울 것 목록에 빠져서, entropy 만 옮기면 이 store 와 heartbeat 마다의 파일 쓰기가 소비자 없이 남는다. P3."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "n": 3,
+  "title": "dashboard Tools 요청 한 번이 실행 중인 Keeper 마다 metric 표 전체를 전역 Stdlib.Mutex 아래 복사한다",
+  "evidence": "lib/server/server_dashboard_http_runtime_info.ml:2286-2288,2305 요청마다 waiting inventory 를 새로 붙임; lib/server_keeper_waiting_inventory.ml:1205-1221,1299 live 턴 Keeper 행마다 composite observe; lib/keeper/keeper_composite_observer.ml:116-125,422-425 Otel_metric_store.snapshot 과 metric_total; lib/otel_metric_store/otel_metric_store_core.ml:76-90,230-242 Stdlib.Mutex 아래 전 series 복사",
+  "why": "series 는 지워지지 않고 keeper 라벨로 늘며 540곳의 emit 이 같은 domain 차단 잠금을 기다린다. 비용은 (실행 중 Keeper 수 × series 수)이고 잰 값은 없다. 서버 정지 구간 캠페인(#51655)과 겹치는 자리라 P3 로 기록한다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "n": 4,
+  "title": "RFC-0437 파생 색인이 이미 tool-call 원장을 Keeper 별로 읽는다",
+  "evidence": "docs/rfc/RFC-0437-derived-read-index.md:3-19,69 (Draft); lib/keeper_tool_call_index/keeper_tool_call_index.ml:20-37 (keeper_name·ts·execution_id 색인, tool_name·outcome 없음), 호출처 10곳; issue #39074 OPEN (tool_name 색인 요청)",
+  "why": "gap 04·05·08 은 같은 원장 위에 새 kept reading 을 제안하면서 이 색인을 인용하지 않는다. 따로 만들면 같은 원장의 파생 읽기가 둘이 된다. Keeper×도구 롤업과 masc-trace 조회는 이 색인에 칸을 더하는 쪽이 RFC-0437 규칙(원장 authority, 읽을 때 따라잡기)과 맞는다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "n": 5,
+  "title": "도구 호출 수를 맞추는 진행 중 Goal 이 gap 05 와 반대 방향으로 간다",
+  "evidence": "issue #38824 OPEN 댓글(Goal goal-tool-usage-truth-20261106, task-3268, 기한 11-12); ac37d6f0ceb4 #50692 handler 세 곳 observer 추가; 84a5682c54f0 #51380 tool_metrics_store 스키마 확장; issue #51494 OPEN 재시작 뒤 500",
+  "why": "Goal 은 따로 쓰는 저장소에 쓰는 자리를 손으로 늘려 원장과 맞춘다. 이는 AGENTS.md 의 '같은 실수를 N곳에서 손으로 고침'에 가깝다. gap 05 는 그 쓰기를 지운다. 다음 handler 패치 전에 하나로 정해야 한다. Goal 상태는 확인 필요다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "n": 6,
+  "title": "Keeper 별 통계의 키가 사람별 Keeper 이름 공간 결정과 맞지 않는다",
+  "evidence": "사용자 11-12 결정 3(#51073): 로그의 Keeper 는 (주인, 이름) 쌍. 통계 원장의 키에 주인 칸이 없다. 좌표는 수리 뒤 싣는다.",
+  "why": "gap 01 과 gap 04 의 키는 이름 문자열로 거른다. 사람별 Keeper 이름 공간이 열리면 키가 (주인, 이름)이어야 한다. 이 일을 설계에 먼저 넣어야 한다."
+ },
+ {
+  "domain": "world-config-text",
+  "n": 1,
+  "title": "restore 로 세계를 바꿔도 Board·karma·Candle 원장이 세계별로 나뉘지 않는다",
+  "evidence": "lib/board/board_paths.ml:25,29 (base path 하나의 board_posts·board_votes); lib/board/board_votes.ml:294-296,311-326,354-362 (karma 받는 쪽은 글쓴이 Agent_id, 곧 Keeper 이름); Candle 원장(base path 에 하나); presets/README.md:61-66,80-82 (세계마다 같은 이름 넷, restore 로 교체 안내); lib/prompt_preset.ml:582-602 (capture 대상 아님)",
+  "why": "gap 06 은 기억만 본다. 같은 base path 에서 세계를 바꾸면 앞 세계의 글·표·karma·Candle 이 같은 이름의 Keeper 에게 이어진다. 결정 9 의 (세계, 자리) 정체가 이 공유 상태까지 다뤄야 '세계를 바꿨다'는 말이 맞고, 세계 비교가 성립한다."
+ },
+ {
+  "domain": "world-config-text",
+  "n": 2,
+  "title": "Two audits each propose their own export/import bundle format",
+  "evidence": "감사 원문(basepath-portability) (Workspace_export/Workspace_import), :188-209 (Workspace_store.Id.t list), :245-259 (config/keepers split), :261-276 (backups after hard cut) vs world-config-text-01/02/06",
+  "why": "If each bundles the same base-path files (Keeper TOML, overrides, runtime.toml, constitution ledger, Candle 설정) in its own format, the plan rebuilds the 'two preset formats' problem that gap 01 criticizes. World_bundle should be one projection of the Workspace_store list. The config/keepers move also needs one method: hard cut or the D8 hand move."
+ },
+ {
+  "domain": "world-config-text",
+  "n": 3,
+  "title": "The TUI screen-grammar campaign's design runs against gap 08's direction and exit criterion",
+  "evidence": "docs/rfc/RFC-tui-one-screen-grammar.md:390-403,501-507; docs/rfc/RFC-0519-goal-task-board-memory-share-a-reading-language.md:29; merged #51533, #51538; open tui-grammar3 #51620-#51716",
+  "why": "The auditor wrote that the TUI stack gathers text into a Screen_text table. In fact the stack makes ~ko a required argument of each screen function, and both RFCs say no generic translation framework. The exit criterion rg '~ko' bin = 0 and the shared table would undo a 29-layer in-flight stack. Before raising decision 1, ask whether those RFC lines change."
+ },
+ {
+  "domain": "world-config-text",
+  "n": 4,
+  "title": "Two in-flight campaigns are still adding text to gap 04/08/11 files",
+  "evidence": "receipt wait: #51663/#51673/#51546 merged 11-12, #51691 open, keeper_tool_receipt_wait.ml:100-121; multi-account UI: lib/auth_preview.ml edited by #51566/#51652/#51693 on 11-12, #51635 merged with L3c unpushed, server_preview_keeper_turn.ml:13-35 (#51636)",
+  "why": "The auditor cites #51673 and #51636 as evidence but marks in_flight as 'none'. Receipt wait and the multi-account person screens are brief §3 campaigns. Fix PRs on the same files would conflict, and new OCaml literals keep arriving meanwhile. Sequence the fixes with both campaigns first."
+ }
+]

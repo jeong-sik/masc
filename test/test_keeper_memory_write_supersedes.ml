@@ -155,6 +155,12 @@ let revised_events events =
     events
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_supersede_replaces_the_earlier_claim () =
   with_env
   @@ fun env ->
@@ -191,7 +197,7 @@ let test_supersede_replaces_the_earlier_claim () =
     "exactly one Revised event, old id to new id"
     [ first_id, second_id ]
     (revised_events (events_for ~keepers_dir:env.keepers_dir ~keeper_id));
-  match Current.read_journal_tail ~keepers_dir:env.keepers_dir ~keeper_id ~limit:1 with
+  match readable_journal_tail ~keepers_dir:env.keepers_dir ~keeper_id ~limit:1 with
   | [ Ok (Current.Journal_committed { dropped = Some [ statement ]; _ }) ] ->
     Alcotest.(check string)
       "the journal names the removed fact"

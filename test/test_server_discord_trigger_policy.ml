@@ -253,10 +253,10 @@ let discord_message ~message_id =
     ; message_id
     ; author_id = "U123"
     ; author_name = Some "operator"
-    ; content = "wake the keeper"
     ; attachments = []
     ; raw_content = "wake the keeper"
     ; resolved_mentions = []
+    ; bot_user_id = Some "B123"
     ; mention_user_ids = []
     ; mentions_bot = true
     ; explicit_mentions_bot = true
@@ -359,6 +359,137 @@ let test_durable_accept_precedes_delivery_handoff () =
   check string "typed source" "discord_triggered" failure.event_id.source;
   let (Connector_ingress_lane.Keeper_lane keeper_name) = failure.lane in
   check string "resolved Keeper lane" "luna" keeper_name
+;;
+
+(* #51900: the guild calls the bot "KinoBot" and channel C123 is bound to
+   "luna". A Keeper that read "@KinoBot 안녕" took its own mention for
+   another bot. The mention is named only after the binding is read: the
+   bot's id reads as the bound Keeper on both lanes, other people keep their
+   Discord names, a message decoded without the bot's id renders every
+   mention by name as before, and an unbound channel still reaches no
+   Keeper. *)
+let discord_bot_id = "900000000000000001"
+let discord_bob_id = "900000000000000999"
+
+let mention_payload ~channel_id ~message_id =
+  let user ~id ~username ~global_name =
+    `Assoc
+      [ "id", `String id
+      ; "username", `String username
+      ; "global_name", `String global_name
+      ]
+  in
+  `Assoc
+    [ "id", `String message_id
+    ; "channel_id", `String channel_id
+    ; "guild_id", `String "G123"
+    ; "content",
+      `String (Printf.sprintf "<@%s> 안녕 <@%s>" discord_bot_id discord_bob_id)
+    ; "author", user ~id:"U123" ~username:"operator" ~global_name:"Operator"
+    ; "mentions",
+      `List
+        [ user ~id:discord_bot_id ~username:"kino_bot" ~global_name:"KinoBot"
+        ; user ~id:discord_bob_id ~username:"bob_2" ~global_name:"Bob"
+        ]
+    ]
+;;
+
+let decoded_mention ~bot_user_id ~channel_id ~message_id =
+  match
+    Discord_gateway_state.decode_dispatch ~bot_user_id
+      ~event_name:"MESSAGE_CREATE"
+      ~payload:(mention_payload ~channel_id ~message_id)
+  with
+  | Ok event -> event
+  | Error detail -> fail detail
+;;
+
+let with_bound_luna f =
+  with_temp_dir @@ fun base_dir ->
+  with_env Env_config_core.base_path_env_key base_dir @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_STORE_PATH"
+    (Filename.concat base_dir "bindings.json")
+  @@ fun () ->
+  with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
+    (Filename.concat base_dir "audit.jsonl")
+  @@ fun () ->
+  (match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+   | Error detail -> fail detail
+   | Ok _ -> ());
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let failures = ref [] in
+  let ingress =
+    Connector_ingress_lane.create ~sw
+      ~on_failure:(fun failure -> failures := failure :: !failures)
+      ()
+  in
+  let after_drain = f ~base_dir ingress in
+  (* Lanes are FIFO: once this marker runs, every earlier callback on the
+     Keeper's lane has run. *)
+  let drained, resolve_drained = Eio.Promise.create () in
+  (match
+     Connector_ingress_lane.submit ingress
+       ~lane:(Connector_ingress_lane.Keeper_lane "luna")
+       ~event_id:{ source = "test"; opaque_id = "drain" }
+       (fun () -> Eio.Promise.resolve resolve_drained ())
+   with
+   | Ok () -> Eio.Promise.await drained
+   | Error error -> fail (Connector_ingress_lane.submit_error_to_string error));
+  check (list string) "no ingress callback failed" []
+    (List.map
+       (fun (failure : Connector_ingress_lane.failure) ->
+         Connector_ingress_lane.failure_reason_to_string failure.reason)
+       !failures);
+  after_drain ()
+;;
+
+let test_own_bot_mention_reads_as_the_bound_keeper () =
+  with_bound_luna @@ fun ~base_dir ingress ->
+  let delivered = ref [] in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name ~idempotency_key:_ ~metadata:_
+      ~content =
+    delivered := (keeper_name, content) :: !delivered;
+    Gate_protocol.Reply
+      { content = ""; structured = None; stats = None; message_request = None }
+  in
+  let triggered event =
+    G.For_testing.submit_triggered_event ~deliver:(fun () -> ()) ingress
+      ~dispatch_for_delivery:(fun _ -> dispatch) ~base_dir event
+  in
+  triggered
+    (decoded_mention ~bot_user_id:(Some discord_bot_id) ~channel_id:"C123"
+       ~message_id:"9100");
+  triggered
+    (decoded_mention ~bot_user_id:None ~channel_id:"C123" ~message_id:"9101");
+  triggered
+    (decoded_mention ~bot_user_id:(Some discord_bot_id) ~channel_id:"C404"
+       ~message_id:"9102");
+  fun () ->
+    check (list (pair string string))
+      "the Keeper reads its own mention as itself; unbound reaches no Keeper"
+      [ "luna", "@luna 안녕 @Bob"; "luna", "@KinoBot 안녕 @Bob" ]
+      (List.rev !delivered)
+;;
+
+let test_ambient_own_bot_mention_reads_as_the_bound_keeper () =
+  with_bound_luna @@ fun ~base_dir ingress ->
+  G.For_testing.submit_ambient_event ingress ~base_dir
+    (decoded_mention ~bot_user_id:(Some discord_bot_id) ~channel_id:"C123"
+       ~message_id:"9103");
+  fun () ->
+    let ambient =
+      Keeper_external_attention.load_events ~base_path:base_dir
+        ~keeper_name:"luna"
+      |> List.filter_map (fun (Keeper_external_attention.Recorded item) ->
+           match item.Keeper_external_attention.external_message with
+           | Some { Keeper_external_attention.message_id = "9103"; _ } ->
+             Some item.Keeper_external_attention.content_preview
+           | Some _ | None -> None)
+    in
+    check (list string) "the ambient record reads it the same way"
+      [ "@luna 안녕 @Bob" ] ambient
 ;;
 
 module Gw = Discord_gateway_state
@@ -528,6 +659,10 @@ let () =
     ; ( "ingress handoff"
       , [ test_case "durable accept precedes Discord delivery" `Quick
             test_durable_accept_precedes_delivery_handoff
+        ; test_case "own bot mention reads as the bound Keeper" `Quick
+            test_own_bot_mention_reads_as_the_bound_keeper
+        ; test_case "ambient own bot mention reads as the bound Keeper" `Quick
+            test_ambient_own_bot_mention_reads_as_the_bound_keeper
         ] )
     ; ( "directory projection"
       , [ test_case "named channels" `Quick

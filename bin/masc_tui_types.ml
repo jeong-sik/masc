@@ -9244,6 +9244,14 @@ type preset_save_receipt =
   ; psr_visible : bool
   }
 
+(* What a finished save tells about the named snapshot on the server. A
+   refusal or a request that never left wrote nothing, so it says nothing
+   about an earlier save whose answer was lost. *)
+type preset_save_name_evidence =
+  | Preset_name_written
+  | Preset_name_unknown
+  | Preset_name_untouched
+
 (* The two Schedules forms an $EDITOR round trip fills. *)
 type schedule_change = Schedule_create | Schedule_modify
 
@@ -11716,14 +11724,28 @@ let reveal_unsent_preset_save_receipts (state : state) =
            | Ok _ | Error (Preset_save_refused _ | Preset_save_unconfirmed _) -> false)
     then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
 
+let preset_save_name_evidence receipt =
+  match receipt.psr_result with
+  | Ok _ -> Preset_name_written
+  | Error (Preset_save_unconfirmed _) -> Preset_name_unknown
+  | Error (Preset_save_not_sent _ | Preset_save_refused _
+           | Preset_save_auth_retry_not_sent _) -> Preset_name_untouched
+
+(* Receipts are prepended as results arrive, and a workspace has at most one
+   save of a name in flight (a same-name request joins it). The first receipt
+   for the name that wrote or may have written it is therefore the latest word
+   on that snapshot: a later confirmed save settles an earlier unknown one. *)
 let preset_save_is_unconfirmed (state : state) name =
-  List.exists (fun receipt ->
-    same_preset_save_name receipt.psr_request.psp_name name
-    && match receipt.psr_result with
-       | Error (Preset_save_unconfirmed _) -> true
-       | Ok _ | Error (Preset_save_not_sent _ | Preset_save_refused _
-                      | Preset_save_auth_retry_not_sent _) -> false)
-    (workspace_preset_save_receipts state)
+  let rec latest = function
+    | [] -> false
+    | receipt :: rest when same_preset_save_name receipt.psr_request.psp_name name ->
+      (match preset_save_name_evidence receipt with
+       | Preset_name_unknown -> true
+       | Preset_name_written -> false
+       | Preset_name_untouched -> latest rest)
+    | _ :: rest -> latest rest
+  in
+  latest (workspace_preset_save_receipts state)
 
 let workspace_preset_save_pending (state : state) =
   match workspace_input_identity_of_server state.server_identity with
@@ -11743,16 +11765,20 @@ let preset_save_needs_workspace_text ~ko =
   if ko then workspace ^ " 확인 후 저장하세요 · 입력은 유지됩니다"
   else "Confirm the " ^ workspace ^ " before saving · input retained"
 
+(* Reopens only the notice [preset_save_is_unconfirmed] stands on. *)
 let reveal_unconfirmed_preset_save (state : state) name =
   let workspace = workspace_input_identity_of_server state.server_identity in
-  state.preset_save_receipts <- List.map (fun receipt ->
-    if receipt.psr_request.psp_workspace = workspace
-       && same_preset_save_name receipt.psr_request.psp_name name
-       && (match receipt.psr_result with
-           | Error (Preset_save_unconfirmed _) -> true
-           | Ok _ | Error (Preset_save_not_sent _ | Preset_save_refused _
-                          | Preset_save_auth_retry_not_sent _) -> false)
-    then { receipt with psr_visible = true } else receipt) state.preset_save_receipts
+  let rec reveal = function
+    | [] -> []
+    | receipt :: rest when receipt.psr_request.psp_workspace = workspace
+                          && same_preset_save_name receipt.psr_request.psp_name name ->
+      (match preset_save_name_evidence receipt with
+       | Preset_name_unknown -> { receipt with psr_visible = true } :: rest
+       | Preset_name_written -> receipt :: rest
+       | Preset_name_untouched -> receipt :: reveal rest)
+    | receipt :: rest -> receipt :: reveal rest
+  in
+  state.preset_save_receipts <- reveal state.preset_save_receipts
 
 let dismiss_latest_preset_save_receipt (state : state) =
   let workspace = workspace_input_identity_of_server state.server_identity in

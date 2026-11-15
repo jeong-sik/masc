@@ -363,6 +363,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `f` | cycle Turns / Actions / Everything; Turns has no individual event evidence |
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
+| `/` | Actions/Everything: jump the cursor to a matching event, tool or keeper, over the rows the filter leaves; Turns has no cursor to land on |
+| `n / N` | next / previous match |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
 
 ## Keeper detail

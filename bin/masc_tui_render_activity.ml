@@ -1115,12 +1115,14 @@ let render_acting (state : state) =
          (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   else box_empty buf cols;
   box_bottom buf cols;
+  (* A Turns row is a fold with no cursor on it: "/" and n have no row to
+     land on there, and the dispatcher refuses both. *)
+  let cursor_rows = state.acting_filter <> Acting.Turns && shown > 0 in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
          (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
-            ~has_rows:(shown > 0)
-            ~has_reading:(state.acting_filter <> Acting.Turns && shown > 0) Acting));
+            ~has_rows:cursor_rows ~has_reading:cursor_rows Acting));
   let clamped = match state.acting_filter with
     | Acting.Turns -> Acting scroll
     | Actions | Everything -> Acting_selection (scroll, cursor) in

@@ -2390,6 +2390,102 @@ let test_workspace_activity_offers_no_row_search () =
   Alcotest.(check (option int)) "Workspace Activity answers no search"
     None (Masc_tui_surface_search.surface_search_count ~cols:120 state Repositories ~query:"masc")
 
+let acting_tool_call ~at ~keeper tool : Masc_tui_acting.entry =
+  { Masc_tui_acting.ae_at = at
+  ; ae_event =
+      Masc_tui_observer.Keeper_tool_call
+        { Masc_tui_observer.kt_keeper = keeper
+        ; kt_turn = None
+        ; kt_tool = tool
+        ; kt_duration_ms = None
+        ; kt_disposition = None
+        ; kt_at = at
+        ; kt_tool_use_id = None
+        ; kt_schedule = None
+        ; kt_tool_args = None
+        ; kt_tool_result = None
+        ; kt_tool_args_preview = None
+        ; kt_tool_output_preview = None
+        }
+  }
+
+let acting_heartbeat ~at keeper : Masc_tui_acting.entry =
+  { Masc_tui_acting.ae_at = at
+  ; ae_event =
+      Masc_tui_observer.Keeper_heartbeat
+        { Masc_tui_observer.hb_keeper = keeper
+        ; hb_phase = None
+        ; hb_in_turn = None
+        ; hb_in_flight_ms = None
+        ; hb_at = at
+        }
+  }
+
+(* "/" and n land through [row_list], which names [acting_cursor], so a
+   match index has to be the cursor position of the row it matched. The
+   ring holds a heartbeat between two of scout's calls; Actions hides it,
+   and a search that walked the ring instead of the rows the filter keeps
+   would land one row late for every hidden entry above the match. *)
+let test_activity_search_lands_on_the_row_the_cursor_reads () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Acting;
+  state.acting <-
+    [ acting_tool_call ~at:4. ~keeper:"scout" "keeper_board_read"
+    ; acting_heartbeat ~at:3. "scout"
+    ; acting_tool_call ~at:2. ~keeper:"probe" "keeper_task_claim"
+    ; acting_tool_call ~at:1. ~keeper:"scout" "keeper_artifact_read"
+    ];
+  let needle = "scout" in
+  let mentions text =
+    let width = String.length needle in
+    let rec from index =
+      index + width <= String.length text
+      && (String.equal (String.sub text index width) needle || from (index + 1))
+    in
+    from 0
+  in
+  (* Every cursor position whose row the query matches, in the order a
+     search from the top visits them: "/" takes the first, n each next. *)
+  let landings () =
+    match Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting with
+    | None -> Alcotest.fail "the flat filter offers no row search"
+    | Some rows ->
+        List.concat (List.mapi (fun index text -> if mentions text then [ index ] else []) rows)
+  in
+  let under_cursor index =
+    state.acting_cursor <- index;
+    match selected_acting_entry state with
+    | Some { Masc_tui_acting.ae_event = Masc_tui_observer.Keeper_tool_call call; _ } ->
+        call.Masc_tui_observer.kt_tool
+    | Some { Masc_tui_acting.ae_event = Masc_tui_observer.Keeper_heartbeat beat; _ } ->
+        "heartbeat of " ^ beat.Masc_tui_observer.hb_keeper
+    | Some _ -> "another event"
+    | None -> "no row"
+  in
+  let count () =
+    Masc_tui_surface_search.surface_search_count ~cols:120 state Acting ~query:needle
+  in
+  Alcotest.(check bool) "Turns opens no search" true
+    (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting));
+  Alcotest.(check (option int)) "Turns counts nothing" None (count ());
+  state.acting_filter <- Masc_tui_acting.Actions;
+  Alcotest.(check (list string)) "Actions: / lands on scout's newest call, n on the next"
+    [ "keeper_board_read"; "keeper_artifact_read" ]
+    (List.map under_cursor (landings ()));
+  Alcotest.(check (option int)) "Actions counts the rows it can land on" (Some 2) (count ());
+  state.acting_filter <- Masc_tui_acting.Everything;
+  Alcotest.(check (list string)) "Everything lands on the heartbeat it draws"
+    [ "keeper_board_read"; "heartbeat of scout"; "keeper_artifact_read" ]
+    (List.map under_cursor (landings ()));
+  state.acting_detail <- selected_acting_entry state;
+  Alcotest.(check bool) "open evidence opens no search" true
+    (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting));
+  state.acting_detail <- None;
+  state.acting <- [ acting_heartbeat ~at:3. "scout" ];
+  state.acting_filter <- Masc_tui_acting.Actions;
+  Alcotest.(check bool) "a filter that leaves no row opens no search" true
+    (Option.is_none (Masc_tui_surface_search.surface_row_texts ~cols:120 state Acting))
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -2411,6 +2507,8 @@ let () =
             `Quick test_detail_search_counts_follow_the_active_pane
         ; Alcotest.test_case "Workspace Activity offers no row search"
             `Quick test_workspace_activity_offers_no_row_search
+        ; Alcotest.test_case "Activity search lands on the row the cursor reads"
+            `Quick test_activity_search_lands_on_the_row_the_cursor_reads
         ;] )
     ; ( "two-press arms"
       , [ Alcotest.test_case "a loop turn without input keeps an arm" `Quick

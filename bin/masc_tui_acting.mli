@@ -104,6 +104,13 @@ val keeper_row_of_entry :
     {!measured_of_event} of the entry's event is {!measured_of_row} of this
     row. *)
 
+val search_text_of_entry :
+  ko:bool -> traces:(string * string) list -> entry -> string
+(** The text "/" matches a flat row against: the row's EVENT cell, label then
+    detail, followed by its ACTOR. A returned agent_core call is spelled
+    without the duration beside it, which only a pairing with its start
+    gives. *)
+
 val row_of_event :
   ko:bool -> at:float -> duration_ms:float option -> Observer.event -> row
 (** [at] is the row's clock, given by the caller. The screen is a feed: rows

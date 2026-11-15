@@ -812,6 +812,19 @@ let keeper_row_of_entry ~ko ~traces ~duration_ms entry =
     keeper = keeper_of_event ~traces entry.ae_event
   }
 
+(* What "/" finds a flat row by: its EVENT cell as the table spells it, then
+   its ACTOR. The one word left out is the duration after a returned
+   agent_core call. That number is the gap to the call's start, and the
+   renderer pairs a return with its start only for the rows on the page;
+   pairing every kept entry on each keystroke and each repaint of the match
+   count is the walk it avoids. The keeper, the event and the tool are all
+   here, and those are what a reader hunting a call names. *)
+let search_text_of_entry ~ko ~traces entry =
+  let row = keeper_row_of_entry ~ko ~traces ~duration_ms:None entry in
+  row.label
+  ^ (if row.detail = "" then "" else " \xc2\xb7 " ^ row.detail)
+  ^ " " ^ row.keeper
+
 (* ── Turn chunks ────────────────────────────────────────────────────────
    [Turns] draws one row per keeper turn instead of the up-to-seven
    lifecycle rows a single tool call produces across the two reporting

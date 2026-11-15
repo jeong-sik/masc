@@ -137,8 +137,9 @@ let completed_outcome request =
 (* [listed] is every original of the scope as its record and index; [read]
    holds the request of each one this pass read. A fenced parent's link is
    checked on records and indexes. A known-basis link compares whole requests:
-   the pass reads every original that holds a replacement intent, is unfenced,
-   or follows a predecessor of either kind. *)
+   the pass reads every original that holds a replacement intent, is a
+   predecessor, or follows a predecessor that is not a settled fence. An
+   original the pass leaves unread is none of these. *)
 let validate_lineage ~store ~fenced ~read listed =
   let find id=List.find_opt (fun (record,_) -> Record.request_id record=id) listed in
   let body id=Option.to_result ~none:"Original history lineage needs a request this pass did not read"
@@ -456,13 +457,21 @@ let rec consume_one ~config ~keeper_name ~wake =
           match frontier with
           | Commit.Unfinished -> Ok (Owner.Read original::unfinished,settled,fenced_read)
           | Commit.Settled -> Ok (unfinished,original::settled,fenced_read)) (Ok ([],[],[])) originals in
+        (* A waiting original's fence is read again here, as the fold above
+           reads it for every original it holds with its body. *)
+        let* unfinished,fenced_read=List.fold_left (fun result ((record,index) as original) ->
+          let* unfinished,fenced_read=result in
+          let+ fence=io (fun () -> Resolution_lineage.fenced_record ~store ~record ~index) in
+          match fence with
+          | Some _ -> unfinished,Record.request_id record::fenced_read
+          | None -> Owner.Listed original::unfinished,fenced_read) (Ok (unfinished,fenced_read)) waiting in
         Ok (unfinished,fenced_read,Some (scope,owner,inventory,settled)) in
     match validated with
     | Error detail -> error detail
     | Ok (unfinished,fenced_read,observed) ->
     (* A fence published after the first observation is one this fold saw. *)
     let fenced id=fenced id || List.mem id fenced_read in
-    let unfinished=List.rev_append unfinished (List.map (fun original -> Owner.Listed original) waiting) in
+    let unfinished=List.rev unfinished in
     (* Every pass lists the whole retained inventory and verifies each body
        it reads, so those counts and this time are what the pass costs before
        any new work. *)

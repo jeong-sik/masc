@@ -1564,6 +1564,7 @@ let read_file path=io (fun () -> In_channel.with_open_bin path In_channel.input_
 let refused_pass fixture detail=match run_worker fixture with
   | Error error -> Consumer.error_to_string error
   | Ok _ -> fail detail
+let body_missing="original request body named by its record is missing"
 (* An original admitted to its worker goes on as its record and index while
    its host record is open, so the pass reads no body. When the host record
    holds the answer, the pass reads the body before anything else. *)
@@ -1595,7 +1596,7 @@ let test_a_waiting_pass_reads_no_body () = with_fixture (fun ~sw:_ fixture ->
   await_delivery fixture ~after:delivered;
   let waited=read_file record in
   let missing=refused_pass fixture "a host answer was taken without the original's body" in
-  check bool "the host answer needs the body" true (Astring.String.is_infix ~affix:"body" missing);
+  check bool "the host answer needs the body" true (Astring.String.is_infix ~affix:body_missing missing);
   check string "the refused pass leaves the record as it was" waited (read_file record);
   check bool "and moves no read position" true (progress fixture=positions);
   no_memory fixture;
@@ -1633,7 +1634,7 @@ let test_a_finished_worker_answer_reads_the_body_first () = with_fixture (fun ~s
   io (fun () -> Sys.remove exact;Sys.remove proof;Sys.remove body);
   let waited=read_file record and positions=progress fixture in
   let missing=refused_pass fixture "a finished answer was taken without the original's body" in
-  check bool "the finished answer needs the body" true (Astring.String.is_infix ~affix:"body" missing);
+  check bool "the finished answer needs the body" true (Astring.String.is_infix ~affix:body_missing missing);
   check string "and the record stays as it was" waited (read_file record);
   check bool "no read position moves" true (progress fixture=positions);
   no_memory fixture)
@@ -2840,7 +2841,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       let child_bytes=read_file child_body in
       io (fun () -> Sys.remove child_body);
       check bool "a waiting child of a known-basis lineage reads its body" true
-        (Astring.String.is_infix ~affix:"body" (refused_pass fixture "a lineage child went on without its body"));
+        (Astring.String.is_infix ~affix:body_missing (refused_pass fixture "a lineage child went on without its body"));
       io (fun () -> write child_body child_bytes);
       let retained_parent=Progress.to_json parent.progress in
       let path=Filename.concat (Store.root fixture.store)

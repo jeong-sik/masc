@@ -184,8 +184,10 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
   let prepare () =
     let* ()=confirm_live_owner () in
     Keeper_librarian_durable_edge.confirm_destination ~config ~reserved destination in
+  (* Admission reads the body inside [prepare], where an [Unavailable] check
+     is a wait. A body the store cannot give is not one: it ends the pass. *)
   let admit () =
-    let* body=read_body () in
+    let* body=read_body () |> Result.map_error (fun error -> Rejected (error_to_string error)) in
     let* ()=Memory_runtime.require_counterpart_template (Request.preparation body.request) |> rejected in
     prepare () in
   let call ~arguments =

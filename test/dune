@@ -5741,6 +5741,14 @@
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
+; #52033: the real shim started with a standard descriptor closed.
+(test
+ (name test_exec_shim_standard_descriptors)
+ (modules test_exec_shim_standard_descriptors)
+ (libraries alcotest exec_ssh_protocol exec_shim unix)
+ (deps ../bin/masc_exec_shim.exe)
+ (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
+
 (rule
  (alias runtest-test_shim_execution_receipts)
  (enabled_if (= %{system} linux))

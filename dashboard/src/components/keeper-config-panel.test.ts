@@ -103,7 +103,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       system_prompt_blocks: {
         system: { key: 'keeper', source: 'file', text: 'system text' },
       },
-      system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [] } },
+      system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [], isolated_lines: [] } },
       unified_user_message_preview: 'world state',
     },
     execution: {
@@ -2684,7 +2684,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
   it('shows the assembled system prompt when it was built', async () => {
     await openSystemPromptPreview({
       state: 'available', effective: 'full prompt', assembled: 'assembled prompt',
-      constitution_ledger: { state: 'read', rejected_lines: [] },
+      constitution_ledger: { state: 'read', rejected_lines: [], isolated_lines: [] },
     })
     expect(container.textContent).toContain('assembled prompt')
     expect(container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')).toBeNull()
@@ -2700,6 +2700,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
           { line: 2, line_end: 'newline_terminated', detail: 'Yojson error' },
           { line: 4, line_end: 'unterminated_final_line', detail: 'Unexpected end of input' },
         ],
+        isolated_lines: [],
       },
     })
     expect(container.textContent).toContain('assembled prompt')
@@ -2710,6 +2711,22 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     ])
     expect(rows[0]?.textContent).toContain('Yojson error')
     expect(rows[1]?.textContent).toContain('Unexpected end of input')
+  })
+
+  it('names each constitution line whose author left the roster beside the unreadable ones (#52169)', async () => {
+    await openSystemPromptPreview({
+      state: 'available', effective: 'full prompt', assembled: 'assembled prompt',
+      constitution_ledger: {
+        state: 'read',
+        rejected_lines: [{ line: 2, line_end: 'newline_terminated', detail: 'Yojson error' }],
+        isolated_lines: [{ line: 3, subject: 'departed-keeper', article_ids: ['a-0123456789abcdef0123456789abcdef'] }],
+      },
+    })
+    const rejected = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="kcf-constitution-rejected-line"]'))
+    expect(rejected.map(row => row.dataset.line)).toEqual(['2'])
+    const isolated = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="kcf-constitution-isolated-line"]'))
+    expect(isolated.map(row => [row.dataset.line, row.dataset.subject])).toEqual([['3', 'departed-keeper']])
+    expect(isolated[0]?.textContent).toContain('a-0123456789abcdef0123456789abcdef')
   })
 
   it('says the left-out lines are unknown when the ledger read failed', async () => {

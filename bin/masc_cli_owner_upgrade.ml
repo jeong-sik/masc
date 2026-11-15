@@ -1,22 +1,26 @@
 module Upgrade = Server_upgrade_preparation
-(* What the port an account server announces said to one [GET /health]. *)
-type account_health =
+(* What the port a server announces said to one [GET /health]. *)
+type compact_answer =
   | Answers of string option  (* A 200, and the version it names when one is read. *)
   | No_answer
 type observation =
   | Free
-  | Same_workspace of string
-  | Other_workspace of string
   | Unknown_server
-  | Account_server of { port : int; health : account_health }
+  | Same_workspace of { pid : int; health : compact_answer }
+  | Same_workspace_on_another_port of { pid : int; port : int }
+  | Owner_unannounced of { pid : int }
+  | Account_server of { port : int; health : compact_answer }
 let error_message = function
   | Upgrade.Admin_required -> "The running workspace rejected local operator access. Sign in before restarting it."
   | Server_starting -> "The running workspace is still starting. Try again once it is ready; signing in does not change this."
   | Admin_check_unanswered -> "The running workspace did not answer the local operator access check. Try again."
-  | Different_workspace -> "This server belongs to another workspace. Choose a different port."
-  | Incumbent_changed -> "The running server changed after inspection. Refresh setup before restarting it."
+  | Incumbent_changed -> "The server that announces this port changed after inspection. Refresh setup before restarting it."
+  | Not_confirmed { listener; departure } ->
+    (* The pid and the cause of the departure, not only that something
+       changed. The sign-in may have happened by then; the stop has not. *)
+    Upgrade.departure_sentence listener departure ^ " It was not asked to stop."
   | Owner_unavailable -> "The running workspace owner could not be verified."
-  | Invalid_health -> "The selected port did not return a valid workspace identity."
+  | Invalid_health -> "The server of this workspace did not answer its version on the selected port."
   | Already_requested -> "A graceful shutdown was already requested."
   | Closed -> "This server inspection is no longer active. Refresh setup."
   | Port_unavailable -> "The selected port could not be inspected."
@@ -25,11 +29,6 @@ let with_http f = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
   Eio_context.set_env env; Eio_context.set_switch sw;
   Eio_context.set_net (Eio.Stdenv.net env); Eio_context.set_clock (Eio.Stdenv.clock env);
   Masc_http_client.with_scoped_pool ~sw ~env (fun () -> f sw (Eio.Stdenv.clock env))))
-let decode ~base_path body =
-  match Upgrade.decode_health body with
-  | Ok identity when identity.base_path = base_path -> Same_workspace identity.version
-  | Ok identity -> Other_workspace identity.base_path
-  | Error _ -> Unknown_server
 let port_free port =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -43,29 +42,26 @@ let owner_lease_run_dir ~base_path =
   |> Result.map_error (fun (_ : Server_startup_takeover.base_path_lock_rejection) ->
     Upgrade.Owner_unavailable)
 (* What the kernel shows of the process that holds a workspace, read without
-   making anything ([Upgrade.holder]). *)
-let holder ~base_path ~port =
-  Upgrade.holder (Host_config.host ()).base_path_lease_root ~base_path ~port
+   making anything ([Upgrade.owner_without_making]). *)
+let owner ~base_path ~port =
+  Upgrade.owner_without_making (Host_config.host ()).base_path_lease_root ~base_path ~port
   |> Result.map_error Server_startup_takeover.owner_capture_error_to_string
 let owner_unread ~base_path reason =
   Printf.sprintf "The owner of %s could not be checked (%s). No server was changed." base_path reason
-(* What the port says of itself: the answer of this command before accounts. *)
-let port_says ~clock ~base_path ~port =
-  match Masc_http_client.get_sync ~clock ~headers:[]
-    ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full) () with
-  | Ok (200, body) -> decode ~base_path body
-  | Ok _ | Error _ -> if port_free port then Free else Unknown_server
-(* The [/health] of an account server names no workspace, so its port alone
-   would read as another service. The kernel says which port the owner of the
-   workspace announces, the one asked about or another. The answer of that
-   port only says whether it serves and which version, and is read inside a
-   window, since a stopped server accepts and says nothing. *)
-let account_health ~clock ~port =
+(* The kernel names the server and the port it announces. The answer of that
+   port only says whether it serves and which version, read without
+   credentials inside a window, since a stopped server accepts and says
+   nothing. *)
+let compact_answer ~clock ~port ~decode =
   match Masc_http_client.get_sync ~clock
     ~timeout_sec:Masc_http_client.default_request_timeout_sec ~headers:[]
     ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.health) () with
-  | Ok (200, body) -> Answers (Server_accounts.health_version body)
+  | Ok (200, body) -> Answers (decode body)
   | Ok _ | Error _ -> No_answer
+(* HIGH-RISK-UNREVIEWED: the status the installer offers a stop on. Only the
+   server the kernel names as lease owner and announcer of [port] is
+   [same_workspace]; whatever answers on a port that no owner announces is
+   [unknown_server]. An owner that cannot be read gives no status. *)
 let inspect ~base_path ~port =
   let base_path = Masc_cli_setup.preflight_base_path base_path in
   let base_path = try Unix.realpath base_path with Unix.Unix_error _ -> base_path in
@@ -78,122 +74,96 @@ let inspect ~base_path ~port =
       "error", `String (Authz_boot_mode_read.refused_line ~base_path refusal
                         ^ ". No server was changed.")]);
     1
-  | Ok asked ->
+  | Ok (_ : Authz_boot_mode.asked) ->
   let observed = with_http (fun _ clock ->
-    match holder ~base_path ~port with
-    | Ok (Upgrade.Held_by_account_server { port }) ->
-      Ok (Account_server { port; health = account_health ~clock ~port })
-    | Ok (Upgrade.Held_by_nobody | Upgrade.Held_without_announcement) ->
-      Ok (port_says ~clock ~base_path ~port)
-    | Error reason ->
-      (* Whether an account server holds the workspace is not known. Where
-         the config asks for accounts no status is given: a port named free
-         could be taken for a workspace with no server. Where it does not,
-         the port answers as it did before accounts, whatever the lease. *)
-      (match asked with
-       | Authz_boot_mode.Asks_multi_account -> Error reason
-       | Authz_boot_mode.Asks_single_user -> Ok (port_says ~clock ~base_path ~port))) in
+    match owner ~base_path ~port with
+    | Error reason -> Error reason
+    | Ok Upgrade.Unowned -> Ok (if port_free port then Free else Unknown_server)
+    | Ok (Upgrade.Single_user_server_here listener) ->
+      Ok (Same_workspace { pid = Upgrade.listener_pid listener;
+        health = compact_answer ~clock ~port ~decode:Upgrade.compact_health_version })
+    | Ok (Upgrade.Single_user_server_elsewhere { pid; port = announced }) ->
+      Ok (Same_workspace_on_another_port { pid; port = announced })
+    | Ok (Upgrade.Owner_unannounced { pid }) -> Ok (Owner_unannounced { pid })
+    | Ok (Upgrade.Account_server_here { pid = (_ : int) }) ->
+      Ok (Account_server { port; health = compact_answer ~clock ~port ~decode:Server_accounts.health_version })
+    | Ok (Upgrade.Account_server_elsewhere { pid = (_ : int); port = announced }) ->
+      Ok (Account_server { port = announced;
+        health = compact_answer ~clock ~port:announced ~decode:Server_accounts.health_version })) in
   match observed with
   | Error reason ->
     emit (`Assoc ["schema", `String "masc.setup_server_unread.v1"; "read_only", `Bool true;
       "error", `String (owner_unread ~base_path reason)]);
     1
   | Ok observed ->
+  let answers = function
+    | Answers (Some version) -> ["server_answers", `Bool true; "server_version", `String version]
+    | Answers None -> ["server_answers", `Bool true]
+    | No_answer -> ["server_answers", `Bool false] in
   let fields = match observed with
     | Free -> ["status", `String "free"]
-    | Same_workspace version -> ["status", `String "same_workspace"; "server_version", `String version]
-    | Other_workspace path -> ["status", `String "other_workspace"; "server_workspace", `String path]
     | Unknown_server -> ["status", `String "unknown_server"]
+    | Same_workspace { pid; health } ->
+      ["status", `String "same_workspace"; "server_pid", `Int pid] @ answers health
+    | Same_workspace_on_another_port { pid; port } ->
+      ["status", `String "same_workspace_on_another_port"; "server_pid", `Int pid; "server_port", `Int port]
+    | Owner_unannounced { pid } -> ["status", `String "owner_unannounced"; "server_pid", `Int pid]
     | Account_server { port; health } ->
-      ["status", `String "account_server"; "server_port", `Int port]
-      @ (match health with
-         | Answers (Some version) -> ["server_answers", `Bool true; "server_version", `String version]
-         | Answers None -> ["server_answers", `Bool true]
-         | No_answer -> ["server_answers", `Bool false]) in
+      ["status", `String "account_server"; "server_port", `Int port] @ answers health in
   let alternative = match observed with
-    | Free | Same_workspace _ | Account_server _ -> []
-    | Other_workspace _ | Unknown_server ->
+    | Free | Same_workspace _ | Same_workspace_on_another_port _ | Owner_unannounced _ | Account_server _ -> []
+    | Unknown_server ->
       (match Upgrade.suggest_loopback_port () with Ok port -> ["suggested_port", `Int port] | Error _ -> []) in
   emit (`Assoc (["schema", `String "masc.setup_server.v1"; "read_only", `Bool true;
     "installed_version", `String Runtime_build_version.current] @ fields @ alternative)); 0
-(* Why the owner of a workspace was not signed in to, as sentences that end
-   before what the command did not do. *)
-let listener_refusal_message ~base_path ~port = function
-  | Upgrade.No_lease_owner ->
-    Printf.sprintf "No process holds the lease this MASC reads for %s, so what answers on \
-                    port %d is not its server and was sent no operator credential." base_path port
-  | Upgrade.Owner_announces_no_port { pid } ->
-    Printf.sprintf "The process that holds %s (pid %d) does not tell this host which port it \
-                    listens on, so nothing shows that port %d is its own, and no operator \
-                    credential was sent there. A server built before this check, or one bound \
-                    outside 127.0.0.1, announces nothing: stop it yourself (send SIGTERM to pid \
-                    %d, wait for it to exit), then run `masc start`." base_path pid port pid
-  | Upgrade.Owner_listens_on_another_port { pid; port = announced } ->
-    Printf.sprintf "The server of %s (pid %d) listens on port %d, not port %d. No operator \
-                    credential was sent to port %d; pass --port %d."
-      base_path pid announced port port announced
-  | Upgrade.Listener_unread unread ->
-    Printf.sprintf "The owner of %s could not be checked (%s), so no operator credential was sent."
-      base_path (Server_startup_takeover.owner_capture_error_to_string unread)
 (* HIGH-RISK-UNREVIEWED: signs the local operator in and hands its bearer to
-   [Upgrade.prepare] (#51321). Workspace and port come out of [listener], the
-   kernel's word that the owner of the lease listens there, so neither the
-   sign-in nor the bearer can be reached for a port that only answered. *)
+   [Upgrade.prepare] (#51321). The admin credential is minted only after the
+   kernel names [listener] again and its port answers [expected_version]
+   ([Upgrade.authorize_initial]), and its bearer goes only to [listener]
+   ([Upgrade.prepare] and [Upgrade.request_termination] ask the kernel again
+   before each send). *)
 let with_selected_owner ~sw ~clock ~listener ~agent ~expected_version ~login use =
   let open Result.Syntax in
-  let base_path = Upgrade.listener_base_path listener and port = Upgrade.listener_port listener in
-  let* () = match Masc_http_client.get_sync ~clock ~headers:[]
-    ~url:(Masc_network_defaults.masc_http_loopback_origin ~port ^ Server_health_paths.full) () with
-    | Ok (200, body) -> Upgrade.authorize_initial ~base_path ~expected_version ~body
-        ~login:(fun () -> login () = 0)
-    | Ok _ | Error _ -> Error Upgrade.Invalid_health in
+  let* () = Upgrade.authorize_initial ~clock listener ~expected_version ~login:(fun () -> login () = 0) in
+  let base_path = Upgrade.listener_base_path listener in
   let* token = match Auth_login.read_persisted_http_token ~base_path ~agent_name:agent with
     | None -> Error Upgrade.Admin_required | Some token -> Ok token in
   let* owner = Upgrade.prepare ~sw ~clock ~listener ~token ~agent in
-  Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () ->
-    if (Upgrade.incumbent owner).version <> expected_version then Error Upgrade.Incumbent_changed
-    else use owner)
+  Fun.protect ~finally:(fun () -> Upgrade.close owner) (fun () -> use owner)
 type request_phase = Request_not_confirmed | Request_confirmed
 type stop_refusal =
   | Owner_not_stopped of Upgrade.error
   | Owner_unread of { base_path : string; reason : string }
-  | Nobody_holds_workspace
-  | Account_server_holds_workspace
-  | Owner_listener_unconfirmed of
-      { base_path : string; port : int; refusal : Upgrade.listener_refusal }
+  | Not_the_server_to_stop of { base_path : string; port : int; owner : Upgrade.owner }
+      (* What the kernel names when it is not the server of a single user on
+         [port]: nothing, another port, an account server, or an owner that
+         announces no port. *)
 let stop_refusal_message = function
   | Owner_not_stopped error -> error_message error
   | Owner_unread { base_path; reason } -> owner_unread ~base_path reason
-  | Nobody_holds_workspace ->
-    "No process holds the lease this MASC reads for this workspace, so no server was signed in \
-     to or stopped."
-  | Account_server_holds_workspace ->
-    "This workspace is held by its account server, which no local operator signs in to. \
-     masc restart stops and replaces it."
-  | Owner_listener_unconfirmed { base_path; port; refusal } ->
-    listener_refusal_message ~base_path ~port refusal ^ " No server was changed."
-(* The stop below signs a local operator in and sends its bearer to the port.
-   The kernel is asked first, as [masc restart] asks it, and before anything
-   is made: where nothing holds the lease, what answers on the port is not
-   the owner this command stops (a server of a MASC that kept its lease
-   elsewhere answers so too), and an owner that announces the port of an
-   account server, the one asked about or another, is not signed in to,
-   whatever answers on the port. An owner that announces
-   no account server must be the server of a single user that the kernel
-   shows on this very port ([Upgrade.single_user_listener]); the lease file
-   is there by then, so that read makes nothing. The answer is the value the
-   sign-in and the bearer need, and without it the stop ends here. *)
+  | Not_the_server_to_stop { base_path; port; owner } ->
+    Upgrade.owner_sentence
+      ~lease_dir:(Upgrade.lease_directory (Host_config.host ()).base_path_lease_root ~base_path)
+      ~base_path ~port owner
+    ^ " No server was signed in to or stopped."
+(* HIGH-RISK-UNREVIEWED: the stop below signs a local operator in and sends
+   its bearer to the port. The kernel is asked first, as [masc restart] asks
+   it, and before anything is made. Only the server of a single user that the
+   kernel names as lease owner and announcer of [port] goes on. Where nothing
+   holds the lease, what answers on the port is not the owner this command
+   stops; an account server is not signed in to; an owner that announces
+   nothing, or another port, is named and left alone. *)
 let stoppable ~base_path ~port =
-  match holder ~base_path ~port with
+  match owner ~base_path ~port with
   | Error reason -> Error (Owner_unread { base_path; reason })
-  | Ok Upgrade.Held_by_nobody -> Error Nobody_holds_workspace
-  | Ok (Upgrade.Held_by_account_server { port = (_ : int) }) -> Error Account_server_holds_workspace
-  | Ok Upgrade.Held_without_announcement ->
-    let unconfirmed refusal = Owner_listener_unconfirmed { base_path; port; refusal } in
-    (match owner_lease_run_dir ~base_path with
-     | Error (error : Upgrade.error) -> Error (Owner_not_stopped error)
-     | Ok run_dir ->
-       Upgrade.single_user_listener ~run_dir ~base_path ~port |> Result.map_error unconfirmed)
+  | Ok (Upgrade.Single_user_server_here listener) -> Ok listener
+  | Ok
+      (( Upgrade.Unowned
+       | Upgrade.Account_server_here { pid = (_ : int) }
+       | Upgrade.Account_server_elsewhere { pid = (_ : int); port = (_ : int) }
+       | Upgrade.Owner_unannounced { pid = (_ : int) }
+       | Upgrade.Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) } ) as owner) ->
+    Error (Not_the_server_to_stop { base_path; port; owner })
 let stop ~base_path ~port ~agent ~expected_version ~login =
   let phase = ref Request_not_confirmed in
   let not_stopped answer = Result.map_error (fun error -> Owner_not_stopped error) answer in

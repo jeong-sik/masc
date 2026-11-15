@@ -531,6 +531,7 @@ let stage_collect
 (** Handle tool execution and context injection. *)
 let stage_execute
       ?raw_trace_run
+      ?clock
       ?before_tool_execution
       ~turn
       ~rejected_tool_calls
@@ -566,13 +567,21 @@ let stage_execute
          match tool_results with
          | [] -> Ok ()
          | _ ->
+           (* The whole batch has finished here, so this is when its results
+              enter the conversation. *)
+           let appended_at = Pipeline_common.timestamp_now ?clock () in
            (* Commit completed effects before surfacing a terminal hook or
               observer failure.  Updating memory first prevents same-process
               replay even when the caller-owned checkpoint sink itself fails;
               the checkpoint then makes the same invariant durable. *)
            update_state agent (fun state ->
              let with_results =
-               Util.snoc state.messages (make_message ~role:Tool tool_results)
+               Util.snoc
+                 state.messages
+                 (make_message
+                    ~metadata:[ Tool_results_appended_at.entry ~appended_at ]
+                    ~role:Tool
+                    tool_results)
              in
              (* The refusal rides in the same update as the results it follows,
                 so the checkpoint below cannot persist a turn that answered two
@@ -648,7 +657,7 @@ let replay_settled_before_checkpoint agent =
 ;;
 
 (** Map stop_reason to turn_outcome. *)
-let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_calls agent response =
+let stage_output ?raw_trace_run ?clock ?before_tool_execution ~turn ~rejected_tool_calls agent response =
   Tracing.with_span
     agent.options.tracer
     { kind = Hook_invoke
@@ -697,6 +706,7 @@ let stage_output ?raw_trace_run ?before_tool_execution ~turn ~rejected_tool_call
           | Some tool_uses_nonempty ->
             stage_execute
               ?raw_trace_run
+              ?clock
               ?before_tool_execution
               ~turn
               ~rejected_tool_calls
@@ -850,6 +860,7 @@ let run_new_turn
        | None ->
          stage_output
            ?raw_trace_run
+           ?clock
            ?before_tool_execution
            ~turn
            ~rejected_tool_calls
@@ -859,6 +870,7 @@ let run_new_turn
          Execution_context.with_provider_attempt provider (fun () ->
            stage_output
              ?raw_trace_run
+             ?clock
              ?before_tool_execution
              ~turn
              ~rejected_tool_calls
@@ -909,6 +921,7 @@ let run_turn
          cut; tracked separately rather than guessed at here. *)
       stage_execute
         ?raw_trace_run
+        ?clock
         ?before_tool_execution
         ~turn
         ~rejected_tool_calls:no_refused_tool_calls
@@ -919,7 +932,7 @@ let run_turn
     ~tools_settled_before_checkpoint:(replay_settled_before_checkpoint agent)
     ~tools_settled:Pipeline_terminal_tool.recovered_outcome
     ~pending_terminal:(fun ~turn response ->
-      stage_output ?raw_trace_run ?before_tool_execution ~turn
+      stage_output ?raw_trace_run ?clock ?before_tool_execution ~turn
         ~rejected_tool_calls:no_refused_tool_calls agent response)
     ~terminal:(fun response -> Complete response)
     ~fresh:(fun ~turn ->

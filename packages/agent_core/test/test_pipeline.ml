@@ -3260,7 +3260,18 @@ let test_agent_run_resumes_tool_without_duplicate_effects
             Alcotest.(check string)
               "terminal response"
               "done-after-restart"
-              (Types.text_of_response response)
+              (Types.text_of_response response);
+            (* The journal does not keep when the result settled, so the
+               replayed Tool message carries no appended-at stamp (RFC
+               replayed-tool-results-carry-their-time, D1). *)
+            Alcotest.(check bool)
+              "the journal-replayed Tool message is the only one and is unstamped"
+              true
+              ((Agent.state agent).messages
+               |> List.filter (fun (message : Types.message) -> message.role = Types.Tool)
+               |> List.map (fun (message : Types.message) ->
+                 Types.Tool_results_appended_at.classify message.metadata)
+               = [ Types.Tool_results_appended_at.Absent ])
           | true, Error error -> Alcotest.fail (Error.to_string error)
           | false, Error (Error.Internal _) -> ()
           | false, Error error ->

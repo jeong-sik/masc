@@ -35,12 +35,14 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
 
 ### D1. 붙인 시각은 Agent Core 가 소유한 metadata 키 하나로 남긴다
 
-- Agent Core 에 `Tool_results_appended_at` 모듈을 둔다. `Input_speaker`(`packages/agent_core/lib/llm_provider/types.mli:424`)와 같은 모양이다. 모듈이 키를 소유하고, 값은 초 단위 float 하나다. 읽는 쪽은 `classify : metadata -> Absent | Present of float | Duplicate` 로만 읽는다.
+- Agent Core 에 `Tool_results_appended_at` 모듈을 둔다. `Input_speaker`(`packages/agent_core/lib/llm_provider/types.mli:424`)와 같은 모양이다. 모듈이 키를 소유하고, 값은 초 단위 float 하나다. 읽는 쪽은 `classify : metadata -> Absent | Present of float | Invalid | Duplicate` 로만 읽는다.
+  - `Invalid` 는 값이 유한한 JSON float 가 아닌 키 하나다. 키를 쓰는 함수가 `entry` 하나라서 정상 경로에서는 나오지 않는다. 정수 초도 `Invalid` 다. `entry` 가 쓰는 모양이 아니다.
 - 뜻은 「이 Tool 메시지의 결과가 대화에 붙은 시각」이다. 실시간 턴에서는 묶음(batch)의 모든 결과가 끝난 뒤다.
 - 붙이는 함수는 하나다. `~appended_at` 을 필수 인자로 받는다. 지금 실행 결과를 히스토리에 붙이는 production 자리는 둘이다.
   - `packages/agent_core/lib/pipeline/pipeline.ml:572` (`stage_execute`): 파이프라인 시계(`Pipeline_common.timestamp_now ?clock`)로 찍는다.
   - `packages/agent_core/lib/pipeline/pipeline_terminal_resume.ml:22`: 일지(journal)에 남은 결과를 다시 붙이는 자리다. `Agent_tools.tool_execution_result`(`agent_tools.mli:116-125`)에는 완료 시각이 없다. 다시 붙이는 시각을 쓰면 결과가 실제보다 젊어 보인다. 그래서 이 자리는 찍지 않고 `Absent` 로 둔다.
 - Agent Core 가 provider 로 보내는 요청에는 이 키를 싣지 않는다. L2 시험이 이를 고정한다.
+- L2 는 v4 코덱에서도 이 키를 뺀다(`Input_speaker` 옆). 층이 따로 병합돼도 모델은 날것의 unix 초를 받지 않는다. 키가 붙은 메시지의 인코딩 글과 `canonical_source_sha256` 도 키가 없을 때와 같다.
 
 ### D2. 공식 클라이언트 인코딩은 시각을 정해진 필드로 싣는다 (v4 → v5)
 
@@ -49,6 +51,7 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
   - 시각이 있으면 `"result_time": {"state": "recorded", "appended_at": "2026-11-14T08:06:49Z"}` 다.
   - 없으면 `"result_time": {"state": "unrecorded"}` 다.
 - 시각이 없는 경우를 턴 경계나 도구 호출 원장으로 짐작해 채우지 않는다. 배포 전에 쌓인 메시지, 일지에서 다시 붙인 결과가 `unrecorded` 다.
+- `Invalid`·`Duplicate` 는 `unrecorded` 로 바꾸지 않는다. 읽을 때 거부한다. Start 를 에러로 끝내고 어느 메시지인지 남긴다.
 - 1.0 전이라 하드컷으로 바꾼다. 저장 상태를 바꾸는 것이 아니라 클라이언트로 보내는 글의 형식이 바뀐다.
 
 ### D3. 나이는 새 세션 씨앗에만 싣고 digest 에는 넣지 않는다
@@ -136,7 +139,7 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
 
 ### 6.2 단위 시험
 
-- L2: `stage_execute` 가 붙인 Tool 메시지에 키가 하나 있다. 일지에서 다시 붙인 메시지는 `Absent` 다. 체크포인트를 저장하고 읽어도 값이 같다. provider 요청 직렬화에는 키가 없다.
+- L2: `stage_execute` 가 붙인 Tool 메시지에 키가 하나 있고, 값은 파이프라인 시계의 값이다. 일지에서 다시 붙인 메시지는 `Absent` 다. 체크포인트를 저장하고 읽어도 값이 같다. provider 요청 직렬화에는 키가 없다. v4 코덱의 글과 digest 는 키 유무와 상관없이 같다.
 - L3: v5 인코딩이 raw 키를 뺀다. `recorded`·`unrecorded` 를 그대로 싣는다. `started_at` 만 다른 두 Start 에서 `canonical_source_sha256` 이 같다. 나이는 `started_at − appended_at` 이다.
 
 ### 6.3 배포 뒤
@@ -161,5 +164,5 @@ RFC 가 Draft 일 때 native stack 으로 묶는다. 층마다 자기 changelog 
 |---|---|---|
 | L0 | 이 RFC | `python3 scripts/rfc-generate-index.py --check` |
 | L1 | §6.1 시험 입력과 판정 스크립트. v4 갈래 값 기록(운영자 허락 뒤) | 판정 스크립트 단위 시험 |
-| L2 | Agent Core `Tool_results_appended_at` 키 모듈, `stage_execute` 에서 찍기, 일지 자리는 `Absent` | §6.2 L2 |
+| L2 | Agent Core `Tool_results_appended_at` 키 모듈, `stage_execute` 에서 찍기, 일지 자리는 `Absent`, v4 코덱에서 키 빼기 | §6.2 L2 |
 | L3 | 코덱 v5, `rendering` 타입, Claude Code 봉투 v2, Start 경로 넷 | §6.2 L3, §6.1 v5 갈래 값 |

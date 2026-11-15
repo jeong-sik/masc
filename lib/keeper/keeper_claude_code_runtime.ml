@@ -27,28 +27,33 @@ let bounded_probe_config ~fallback_timeout_s
   | None -> { config with timeout_s = Some fallback_timeout_s }
 ;;
 
-let project_messages messages =
+let project_messages ~started_at messages =
+  let rendering = Keeper_official_client_context_codec.Session_start { started_at } in
   let rec loop system history = function
     | [] -> Ok (List.rev system, List.rev history)
     | (message : Agent_core.Types.message) :: rest ->
       (match message.role with
        | Agent_core.Types.System ->
-         loop (Host.encode_history_message message :: system) history rest
+         loop (Host.encode_start_message ~started_at message :: system) history rest
        | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
          loop
            system
-           (Keeper_official_client_context_codec.to_json message :: history)
+           (Keeper_official_client_context_codec.to_json rendering message :: history)
            rest)
   in
   loop [] [] messages
 ;;
 
-let initial_turn_prompt ~history ~goal =
+(* [session_started_at] heads the envelope so the model reads every
+   [result_time] age against one stated moment (RFC
+   replayed-tool-results-carry-their-time, D3). *)
+let initial_turn_prompt ~session_started_at ~history ~goal =
   match history with
   | [] -> goal
   | _ :: _ ->
     `Assoc
-      [ "schema", `String "masc.claude-code.initial-turn.v1"
+      [ "schema", `String "masc.claude-code.initial-turn.v2"
+      ; "session_started_at", `String (Time_codec.rfc3339_of_unix session_started_at)
       ; ( "history"
         , `List history )
       ; "current_goal", `String goal
@@ -987,7 +992,8 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
       |> Result.map_error internal_error in
     let prepared = {prepared with Host.messages = prepared.messages
       @ Option.to_list (Keeper_client_tool_outbox.carrier_message retained_carrier)} in
-    let* system_messages, history = project_messages prepared.messages in
+    let started_at = Time_compat.now () in
+    let* system_messages, history = project_messages ~started_at prepared.messages in
     let* goal, images =
       match goal_blocks with
       | None -> Ok (goal, [])
@@ -1016,7 +1022,8 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     let prompt, held_context =
       match session_mode with
       | Runtime_claude_code.Start ->
-        ( Host.start_prompt prepared (initial_turn_prompt ~history ~goal)
+        ( Host.start_prompt prepared
+            (initial_turn_prompt ~session_started_at:started_at ~history ~goal)
           |> Keeper_context_submission_link.text
         , Host.start_held_context ~turn_observation:prepared.turn_observation
             ?composed_context prepared.messages )

@@ -1256,7 +1256,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
        Memory, on every resume. This increases request bytes/tokens; it does not
        cure oversized inputs. Session/history continuity remains independent. *)
     let held = [] in
-    let* prompt = Host.framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal prepared in
+    let* prompt =
+      Host.framed_prompt_for_turn ?composed_context ~held
+        ~delivery:(if is_resume then Host.Framed_resume
+       else Host.Framed_start { started_at = Time_compat.now () })
+        ~goal prepared
+    in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d goal_bytes=%d \

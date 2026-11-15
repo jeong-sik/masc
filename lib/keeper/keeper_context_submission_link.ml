@@ -202,7 +202,7 @@ let system_observation_source ~block assembly (message : Agent_core.Types.messag
       | ToolResult _ | Document _ | Image _ | Audio _)], _ -> Unavailable Unsupported_carrier
 
 let encode_with_evidence evidence message =
-  let text = Keeper_official_client_context_codec.encode message in
+  let text = Keeper_official_client_context_codec.(encode Canonical_source) message in
   let occurrences = match evidence with
     | Not_applicable | Unavailable _ -> []
     | Verified proof -> [ { offset = 0; bytes = String.length text; proof } ] in

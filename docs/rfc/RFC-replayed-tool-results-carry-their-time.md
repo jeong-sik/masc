@@ -51,15 +51,19 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
   - 시각이 있으면 `"result_time": {"state": "recorded", "appended_at": "2026-11-14T08:06:49Z"}` 다.
   - 없으면 `"result_time": {"state": "unrecorded"}` 다.
 - 시각이 없는 경우를 턴 경계나 도구 호출 원장으로 짐작해 채우지 않는다. 배포 전에 쌓인 메시지, 일지에서 다시 붙인 결과가 `unrecorded` 다.
-- `Invalid`·`Duplicate` 는 `unrecorded` 로 바꾸지 않는다. 읽을 때 거부한다. Start 를 에러로 끝내고 어느 메시지인지 남긴다.
+- `Invalid`·`Duplicate` 는 `unrecorded` 로 바꾸지 않는다. `{"state": "invalid"}`·`{"state": "duplicate"}` 로 깨진 그대로 싣는다.
+  - L2 에서는 「Start 를 에러로 끝낸다」로 적었다. L3 에서 바꿨다. Librarian 머리줄이 깨진 입력 화자를 `invalid(...)`·`duplicate` 로 보여 주고 대화 읽기를 멈추지 않는 선례가 있다(`keeper_input_speaker.mli` 의 `header_value`).
+  - 키를 쓰는 곳은 `entry` 하나이고, Tool 메시지 둘의 metadata 를 합치는 곳은 provider 요청의 follow-up 합치기(`api_common.ml:688`)뿐이라 저장된 메시지에서는 나오지 않는다.
+  - 거부하면 코덱이 `result` 를 돌려야 한다. 그러면 창 크기를 재는 함수(`measure_message_bytes : message -> int`)까지 바뀌어야 한다. 정상 경로에서 나오지 않는 상태 하나 때문에 Keeper 의 Start 를 막지 않는다.
 - 1.0 전이라 하드컷으로 바꾼다. 저장 상태를 바꾸는 것이 아니라 클라이언트로 보내는 글의 형식이 바뀐다.
 
 ### D3. 나이는 새 세션 씨앗에만 싣고 digest 에는 넣지 않는다
 
 - 코덱이 렌더링을 타입으로 가른다. `type rendering = Canonical_source | Session_start of { started_at : float }` 이다.
 - `canonical_source_sha256`(`keeper_official_client_context_codec.ml:104`)은 `Canonical_source` 로 인코딩한다. 나이가 없으므로 같은 히스토리는 언제 Start 해도 같은 digest 다. Muse(`keeper_muse_runtime.ml:1083`)와 Antigravity(`keeper_antigravity_runtime.ml:600`)가 저장한 세션을 이 digest 로 견준다. 나이가 digest 에 들어가면 모든 세션이 매번 바뀐 것으로 읽혀 이어 쓰지 못한다.
-- `Session_start` 는 `result_time` 에 `"age_at_session_start": "4h00m"` 과 `"age_seconds": 14399` 를 더한다. `started_at` 은 Start 프롬프트를 만드는 시각이다.
-- 코덱을 부르는 모든 자리는 둘 중 하나를 골라야 컴파일된다. Start 경로 넷(Claude Code·Codex·Muse·Antigravity)이 `Session_start` 를 고른다. 손으로 넷을 찾아 고치지 않고 컴파일러가 빠진 곳을 찾는다.
+- `Session_start` 는 `result_time` 에 `"age_at_session_start": "3h59m"` 과 `"age_seconds": 14399` 를 더한다. `started_at` 은 Start 프롬프트를 만드는 시각이다. 사람이 읽는 꼴은 대기열 행의 나이와 같은 `Keeper_age_text.of_seconds` 다(1분 아래는 초, 1시간 아래는 분, 그 위는 시·분). 시작이 붙인 시각보다 앞서면(시계가 뒤로 간 경우) 나이는 0 이다.
+- 코덱의 `message_to_json`·`to_json`·`encode` 는 렌더링을 반드시 받는다. Start 프롬프트를 만드는 함수 셋도 시작 시각을 반드시 받는다. Claude Code `project_messages ~started_at`, Codex `project_messages ~started_at`, `Host.framed_prompt_for_turn ~delivery:(Framed_start {started_at} | Framed_resume)`(Muse·Antigravity) 이다. 그래서 Start 경로 넷은 컴파일러가 찾는다.
+  - `Host.encode_history_message` 는 `Canonical_source` 로 남긴다. digest, 보유 맥락 해시, Resume, 창 크기 재기가 이것을 쓴다. 시험 50여 곳이 이 함수로 기대 글을 만든다. 키가 없는 메시지는 두 렌더링의 글이 같으므로 그 시험들은 그대로 맞다.
 - Claude Code 씨앗 봉투는 `masc.claude-code.initial-turn.v1` → `v2` 로 바꾸고 `session_started_at` 을 맨 위에 둔다(`keeper_claude_code_runtime.ml:30-55`).
 
 ### D4. 고정 시험을 먼저 만들고, 고치기 전 값을 잰 뒤 고친다
@@ -122,6 +126,9 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
 4. 나이를 보여 줘도 모델이 도구를 다시 부르지 않을 수 있다. 그러면 원인은 다른 곳이다. 후보는 목표 문장(§2 마지막 줄)이다. §6 시험이 이 가설을 가른다.
 5. 일지에서 다시 붙인 결과(`pipeline_terminal_resume.ml`)는 `unrecorded` 다. 일지에 완료 시각을 남길지는 이 RFC 에서 정하지 않는다.
 6. 운영자가 정할 것: 시각을 어디에 남기는가. 권하는 쪽은 metadata 키(D1)다. 히스토리를 버리지 않고, 묶음 단위 시각으로 시간 단위의 낡음을 가릴 수 있다고 본다. `ToolResult` 블록 필드를 고르면 결과마다 정확하고 컴파일러가 모든 생성 자리를 찾는다. 대신 배포 때 모든 Keeper 의 히스토리를 버린다. §6.1 시험에서 묶음 단위 시각으로 FAIL 이 줄지 않으면 이 질문을 다시 연다.
+7. Claude Code·Codex 가 창을 자를 때 재는 바이트는 `Canonical_source` 글이다. 실제로 보내는 글에는 시각이 있는 Tool 메시지마다 나이 두 필드(50바이트 안팎)가 더 붙는다. 이 측정은 원래도 역할 머리줄과 봉투 틀을 세지 않는다(`keeper_official_client_host.ml` 의 `measure_message_bytes` 주석). 창은 provider 가 너무 크다고 거절한 뒤에만 좁아지고, 다음 거절이 다시 좁힌다.
+8. 코덱 schema 는 세션 저장소의 `tool_surface_sha256` 에 들어간다. v4 → v5 로 바뀌면 저장된 공식 클라이언트 세션은 배포 뒤 첫 턴에 한 번 새로 시작한다. 1.0 전 하드컷이다.
+9. 블롭 정리기(`tool_blob_maintenance.ml`)는 keeper 아래 라이브러리라 코덱 schema 를 글자로 들고 있다. v5 와 Tool 메시지의 `result_time` 을 알아보게 같이 고쳤다. 알아보지 못한 봉투는 그림을 지우지 않고 정리를 거부하는 쪽으로 간다.
 
    결정(2026-11-15): metadata 키다. §6.1 유료 시험도 돌린다. 근거는 #52090 에서 두 질문을 물은 뒤 받은 운영자 답 「go」다. 권고를 받아들인 것으로 적는다.
 
@@ -135,12 +142,13 @@ related: ["tool-results-age-out-of-context", "official-client-conversation-in-ma
 - 통과 기준: 두 갈래의 FAIL 수를 한쪽 Fisher 정확 검정으로 견줘 p < 0.05 여야 L3 를 Ready 로 바꾼다. v4 가 20번 모두 FAIL 이면 v5 는 15번 이하여야 한다(p = 0.024, 16번이면 p = 0.053). 기준을 넘지 못하면 「시각이 없어서」라는 가설이 틀린 것이다. L3 를 병합하지 않고 §5-4 로 돌아간다.
   - 이 기준은 v4 갈래가 14번째 실행까지 모두 FAIL 인 것을 본 뒤, v5 를 한 번도 돌리기 전에 정했다(2026-11-15). 처음 적은 「v5 가 v4 보다 적으면」은 20번 중 1번 차이도 통과시켜 우연과 가르지 못했다.
 - v4 갈래 결과(2026-11-14 16:16~16:20Z): 20번 중 20번 FAIL 이다. 20번 모두 Board 글도 읽지 않고 댓글부터 달았다. 근거는 `docs/evidence/2026-11-15-replayed-result-age-baseline/` 이다.
+- v5 갈래 결과(2026-11-15 09:02~09:07Z): 20번 중 FAIL 은 0번이다. 20번 모두 `keeper_lane_status` 를 먼저 불렀다. 그중 16번은 Board 글도 읽은 뒤 댓글을 달았다. 한쪽 Fisher 정확 검정 p = 1/C(40,20) ≈ 7.3e-12 라 기준(p < 0.05)을 통과한다. 두 갈래를 다른 날 돌린 한계는 근거 README 에 적었다. 근거는 `docs/evidence/2026-11-15-replayed-result-age-v5/` 이다.
 - 비용: 유료 세션 40번이다. 운영자가 허락한 뒤 돌린다. 판정 스크립트 시험은 손으로 돌린다. 헌법 `build_and_ci` 가 검사기 시험을 PR 마다 반복하지 말라고 한다.
 
 ### 6.2 단위 시험
 
 - L2: `stage_execute` 가 붙인 Tool 메시지에 키가 하나 있고, 값은 파이프라인 시계의 값이다. 일지에서 다시 붙인 메시지는 `Absent` 다. 체크포인트를 저장하고 읽어도 값이 같다. provider 요청 직렬화에는 키가 없다. v4 코덱의 글과 digest 는 키 유무와 상관없이 같다.
-- L3: v5 인코딩이 raw 키를 뺀다. `recorded`·`unrecorded` 를 그대로 싣는다. `started_at` 만 다른 두 Start 에서 `canonical_source_sha256` 이 같다. 나이는 `started_at − appended_at` 이다.
+- L3: v5 인코딩이 raw 키를 뺀다. `recorded`·`unrecorded`·`invalid`·`duplicate` 를 그대로 싣는다. 나이는 `Session_start` 에만 있고 `started_at − appended_at` 이다. digest 는 `Canonical_source` 글의 것이다(키가 있는 Tool 메시지로 확인한다. 키가 없는 메시지는 두 글이 같아 가를 수 없다). 블롭 정리기가 v5 봉투를 알아본다.
 
 ### 6.3 배포 뒤
 
@@ -165,4 +173,4 @@ RFC 가 Draft 일 때 native stack 으로 묶는다. 층마다 자기 changelog 
 | L0 | 이 RFC | `python3 scripts/rfc-generate-index.py --check` |
 | L1 | §6.1 시험 입력과 판정 스크립트. v4 갈래 값 기록(운영자 허락 뒤) | 판정 스크립트 단위 시험 |
 | L2 | Agent Core `Tool_results_appended_at` 키 모듈, `stage_execute` 에서 찍기, 일지 자리는 `Absent`, v4 코덱에서 키 빼기 | §6.2 L2 |
-| L3 | 코덱 v5, `rendering` 타입, Claude Code 봉투 v2, Start 경로 넷 | §6.2 L3, §6.1 v5 갈래 값 |
+| L3 | 코덱 v5, `rendering` 타입, Claude Code 봉투 v2, Start 경로 넷, 블롭 정리기 v5 | §6.2 L3, §6.1 v5 갈래 값 |

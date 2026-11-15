@@ -308,16 +308,29 @@ let tool_receipt_payload_fields fields =
   then ["input"; "execution_evidence"; "route_evidence"] else []
 ;;
 
+(* The schema Keeper_official_client_context_codec writes. This library sits
+   below keeper and cannot read that module's [schema]; the official-envelope
+   cases in test_tool_blob_store encode through the codec, so a schema the two
+   disagree on fails there. *)
 let official_envelope fields =
   exact_fields ["schema";"message"] fields
-  && string_field "schema" fields = Some "masc.official-client-context-message.v4"
+  && string_field "schema" fields = Some "masc.official-client-context-message.v5"
 ;;
 
 let official_message fields =
   let optional_text name = match List.assoc_opt name fields with
     | Some (`Null | `String _) -> true | _ -> false in
-  exact_fields ["role";"origin";"content_blocks";"name";"tool_call_id";"metadata"] fields
-  && Option.is_some (Option.bind (string_field "role" fields) Agent_core_base.Types.role_of_string)
+  let role = Option.bind (string_field "role" fields) Agent_core_base.Types.role_of_string in
+  let names = ["role";"origin";"content_blocks";"name";"tool_call_id";"metadata"] in
+  (* The codec gives a Tool message, and no other role, its [result_time]. *)
+  let names, result_time_valid = match role with
+    | Some Agent_core_base.Types.Tool ->
+      ( "result_time" :: names
+      , (match List.assoc_opt "result_time" fields with Some (`Assoc _) -> true | _ -> false) )
+    | Some (Agent_core_base.Types.System | User | Assistant) | None -> names, true in
+  exact_fields names fields
+  && Option.is_some role
+  && result_time_valid
   && Option.is_some (Option.bind (string_field "origin" fields) Agent_core_base.Types.message_origin_of_string)
   && optional_text "name" && optional_text "tool_call_id"
   && (match List.assoc "metadata" fields with `Assoc _ -> true | _ -> false)

@@ -55,11 +55,11 @@ export function KeeperLaneInventoryWindow({ rows, renderRow }: Props): VNode {
     })
   }
   // The list measures the row wrapper, so the gap between two rows is part of
-  // it. A short list clips each row to its wrapper, and the keyboard focus ring
-  // is drawn just outside the row, so the room around a row belongs here: the
-  // row gap above it and the list's right padding beside it. Below the row its
-  // own grid gap leaves the same room. The first row starts at the list's top
-  // edge, where the list has always cut the top of its ring.
+  // it. The list's scroll box clips at its own edge, and the keyboard focus
+  // ring is drawn just outside the row, so the room around a row belongs here:
+  // the row gap above it and the list's right padding beside it. Below the row
+  // its own grid gap leaves the same room. The first row starts at the list's
+  // top edge, where the list has always cut the top of its ring.
   const renderItem = (item: KeyedWaitingRow, index: number) => html`
     <${WindowedWaitingRow} host=${host} listLabel=${LIST_LABEL} className=${index === 0 ? 'pr-1' : 'pr-1 pt-1'}>
       ${renderRow(item.row, open.has(item.key), expanded => setExpanded(item.key, expanded))}

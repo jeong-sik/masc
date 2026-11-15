@@ -310,7 +310,6 @@ export function VirtualList<T>({
     }
   }, [dynamicMode, drawnKeySignature])
 
-  const rowHeight = itemHeight ?? estimatedItemHeight
   const totalHeight = itemHeight === undefined
     ? offsets[items.length] ?? items.length * estimatedItemHeight
     : items.length * itemHeight
@@ -335,19 +334,16 @@ export function VirtualList<T>({
         transform: `translateY(${offsetY}px)`,
       }
     : undefined
-  // With every row in the DOM, content-visibility lets the browser skip layout
-  // and paint for the rows that are off screen.
-  const rowStyle = windowed
-    ? undefined
-    : { contentVisibility: 'auto', containIntrinsicSize: `auto ${rowHeight}px` }
-
+  // The element around each row carries no style at any item count. Paint
+  // containment there (content-visibility: auto turns it on) would cut off
+  // what a row draws outside its own box, such as its keyboard focus ring.
   return html`
     <div ref=${rootRef} class=${className} tabindex=${tabIndex} aria-label=${ariaLabel}>
       <div class="virtual-list-spacer" style=${spacerStyle}>
         <div ref=${viewportRef} class="virtual-list-viewport" style=${viewportStyle}>
           ${items.slice(drawn.start, drawn.end).map((item, i) => {
             const key = getKey(item)
-            return html`<div key=${key} data-vl-key=${key} style=${rowStyle}>${renderItem(item, drawn.start + i)}</div>`
+            return html`<div key=${key} data-vl-key=${key}>${renderItem(item, drawn.start + i)}</div>`
           })}
         </div>
       </div>

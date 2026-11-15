@@ -568,27 +568,36 @@ describe('KeeperWorkspaceRoster', () => {
   // covered on the Monitor Fleet roster (agent-roster). See PR notes — restore the
   // workspace-roster preview line if operators want it back.
 
-  it('uses content-visibility:auto on plain-list rows below the virtualization threshold', () => {
-    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    expect(host.querySelector('.virtual-list-spacer')).toBeNull()
-    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
-    expect(rows.length).toBeGreaterThan(0)
-    expect(rows.every(r => r.style.contentVisibility === 'auto')).toBe(true)
-  })
+  // A fleet of 59 to 61 keepers puts 59 to 62 items in the list: the flat
+  // sorts add nothing, the status sort adds one group header. Moving across
+  // that span must leave the rows on screen, and the focus in them, alone.
+  for (const sort of ['name', 'status'] as const) {
+    it(`keeps the first row and its focus while the fleet moves between 59 and 61 keepers (${sort} sort)`, async () => {
+      const fleet = Array.from({ length: 61 }, (_, i) =>
+        mk({ name: `keeper-${String(i).padStart(2, '0')}`, status: 'running', lifecycle_phase: 'Running' }))
+      rosterSortPref.value = sort
+      const draw = (count: number) => {
+        keepers.value = fleet.slice(0, count)
+        render(html`<${KeeperWorkspaceRoster} activeName="keeper-00" />`, host)
+      }
+      const firstRow = () =>
+        host.querySelector('[data-testid="kw-roster-menu-keeper-00"]')?.closest<HTMLElement>('.kw-kp-row') ?? null
 
-  it('switches to VirtualList once the flattened roster exceeds the threshold', () => {
-    // 60 rows plus 1 group header = 61 items, which is over WINDOW_AT (60).
-    keepers.value = Array.from({ length: 60 }, (_, i) =>
-      mk({ name: `keeper-${i}`, status: 'running', lifecycle_phase: 'Running' }),
-    )
-    render(html`<${KeeperWorkspaceRoster} activeName="keeper-0" />`, host)
-    // status mode adds a group header (60 rows + 1 header = 61 > WINDOW_AT).
-    selectStatusSort()
-    expect(host.querySelector('.virtual-list-spacer')).not.toBeNull()
-    expect(host.querySelector('.kw-roster-list')).not.toBeNull()
-    // The windowed path renders the group header through the same renderHeader().
-    expect(host.querySelector('.kw-roster-group .kw-roster-group-label')?.textContent).toBe('실행 중')
-  })
+      draw(59)
+      const first = firstRow()
+      expect(first).not.toBeNull()
+      first?.focus()
+      expect(document.activeElement).toBe(first)
+
+      for (const count of [60, 61, 60, 59]) {
+        draw(count)
+        await Promise.resolve()
+        await Promise.resolve()
+        expect(firstRow()).toBe(first)
+        expect(document.activeElement).toBe(first)
+      }
+    })
+  }
 
   it('renders the sort select defaulting to lifecycle status groups', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)

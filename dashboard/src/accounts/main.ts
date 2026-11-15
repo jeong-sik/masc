@@ -3,6 +3,7 @@
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { ConsoleFrame, createConsole } from './console'
+import { createKeepers, followKeepers } from './keepers'
 import { createSubscriptions, follow } from './subscriptions'
 
 const root = document.getElementById('app')
@@ -12,6 +13,8 @@ const send = (path: string, init: RequestInit): Promise<Response> => fetch(path,
 const leave = (): void => { location.replace('/') }
 const model = createConsole({ send, leave })
 const subscriptions = createSubscriptions({ send, leave })
+const keepers = createKeepers({ send, leave })
 follow(model.view, subscriptions)
-render(html`<${ConsoleFrame} model=${model} subscriptions=${subscriptions} />`, root)
+followKeepers(model.view, keepers)
+render(html`<${ConsoleFrame} model=${model} subscriptions=${subscriptions} keepers=${keepers} />`, root)
 void model.load()

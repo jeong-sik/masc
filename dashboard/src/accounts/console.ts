@@ -12,6 +12,8 @@ import type { VNode } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { ProblemNote, Retry, idTail, slowAfterMs } from './notes'
 import type { Failure, Next, Shown } from './notes'
+import { KeepersPanel } from './keeper-rows'
+import type { KeepersModel } from './keepers'
 import { SubscriptionsPanel } from './subscriptions'
 import type { SubscriptionsModel } from './subscriptions'
 import { session as readSession, signOut as endSession, who as readWho } from './wire'
@@ -184,9 +186,10 @@ function Account({ who, signOut, onSignOut }: { readonly who: Who; readonly sign
 /** What is under the heading of the page in one state. A note of a failure
     is made anew for each failure (its key is the count), so a screen reader
     says the second one as it said the first. */
-function Body({ view, subscriptions, onRetry }: {
+function Body({ view, subscriptions, keepers, onRetry }: {
   readonly view: View
   readonly subscriptions: SubscriptionsModel
+  readonly keepers: KeepersModel
   readonly onRetry: () => void
 }): VNode {
   switch (view.kind) {
@@ -213,7 +216,8 @@ function Body({ view, subscriptions, onRetry }: {
           ? html`<${ProblemNote} key=${view.signOut.failure.attempts} title="로그아웃하지 못했어요" failure=${view.signOut.failure} />`
           : null}
         <${SubscriptionsPanel} model=${subscriptions} />
-        <p>Keeper와 토큰은 아직 처음 화면에서 다뤄요.</p>
+        <${KeepersPanel} model=${keepers} subscriptions=${subscriptions} />
+        <p>Keeper에게 말 걸기와 토큰은 아직 처음 화면에서 해요.</p>
         <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `
@@ -226,9 +230,10 @@ function Body({ view, subscriptions, onRetry }: {
 const takesThePressedButton = (from: View['kind'], to: View['kind']): boolean =>
   ((from === 'failed' || from === 'changed') && to === 'signed_in') || (from === 'signed_in' && to === 'changed')
 
-export function ConsoleFrame({ model, subscriptions }: {
+export function ConsoleFrame({ model, subscriptions, keepers }: {
   readonly model: ConsoleModel
   readonly subscriptions: SubscriptionsModel
+  readonly keepers: KeepersModel
 }): VNode {
   const view = model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
@@ -248,7 +253,7 @@ export function ConsoleFrame({ model, subscriptions }: {
     </header>
     <main>
       <h1 ref=${heading} tabindex="-1">내 계정</h1>
-      <${Body} view=${view} subscriptions=${subscriptions} onRetry=${() => { void model.load() }} />
+      <${Body} view=${view} subscriptions=${subscriptions} keepers=${keepers} onRetry=${() => { void model.load() }} />
     </main>
   `
 }

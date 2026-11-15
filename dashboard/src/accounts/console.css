@@ -74,3 +74,9 @@ legend { margin-bottom: 8px; padding: 0; color: var(--text-bright); font-weight:
 .reply, .check { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
 .check { grid-template-columns: minmax(0, 32rem) auto; justify-content: start; }
 .reply label, .check label { grid-column: 1 / -1; }
+
+/* A new Keeper: each field with its label and hint, one under another, in
+   a column as wide as the field of a model in a card. */
+.keeper-form { display: grid; gap: 16px; max-width: 32rem; }
+.keeper-form > h3 { margin: 0; font-size: 1rem; color: var(--text-bright); }
+.field { display: grid; gap: 8px; }

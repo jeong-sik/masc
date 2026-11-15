@@ -47,7 +47,7 @@ const sameScope = (a: Scope, b: Scope): boolean =>
   sameReach(a.runtimes, b.runtimes) && sameReach(a.channels, b.channels) && sameReach(a.effects, b.effects)
 
 /** The use whose scope `scope` is, or null for a scope made some other way
-    (the page at `/` takes any scope). */
+    (the token route takes any scope from a script that calls it itself). */
 export const useOf = (scope: Scope): Use | null => uses.find((use) => sameScope(scopeOf(use), scope)) ?? null
 
 /** What the server says of a token now. `unknown` is the server's own word

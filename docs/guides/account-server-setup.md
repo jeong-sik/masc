@@ -10,7 +10,8 @@ signed in. Two other guides go on from there:
 
 - It answers the health probes (`GET /health`, `/health/live`,
   `/health/ready`), the login routes of the login clients in `config.json`,
-  a person's page at `/`, the routes of invitations and of the allowlist,
+  the sign-in page at `/`, a person's console at `/accounts/console`, the
+  routes of invitations and of the allowlist,
   and the MCP endpoint of a person (`POST /mcp`).
 - It serves only routes that are public or that check a browser session or
   a personal access token themselves. No route of the single-user server is
@@ -176,14 +177,18 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   the models of Claude Code. It refuses those of Codex and Muse for their
   native tools. It leaves out a model whose runtime.toml row declares no
   tool calling.
-- The person makes Keepers on their own Runtimes, from their page or from
+- The person makes Keepers on their own Runtimes, from the console or from
   an MCP client. See [The MCP endpoint of a person](account-server-mcp.md).
-- The page at `/` is moving to `/accounts/console`.
+- A browser that is signed in and opens `/` goes on to `/accounts/console`.
+  A login that starts at `/` or at an invitation link comes back there.
+  When the server cannot give the console, `/` says so and offers the
+  sign-out in its place: the console is read from the dashboard bundle of
+  the binary, and the server logs once at its start when it cannot read it.
 
 ## Try it on this machine first
 
-`masc auth preview` serves the login routes and a person's pages on
-127.0.0.1 without TLS. It needs an activated workspace. Write the
+`masc auth preview` serves the login routes, the sign-in page at `/` and
+the console at `/accounts/console` on 127.0.0.1 without TLS. It needs an activated workspace. Write the
 `config.json` of step 1 in a scratch base path, without `github` or
 `google`: the preview makes its own login client from the flags below.
 
@@ -202,6 +207,9 @@ masc auth preview --base-path <scratch base> --github-client-id <client ID>
 - Open the link that bootstrap printed. The preview also serves the MCP
   endpoint of a person, and no Board route. It holds the workspace lease
   until Ctrl-C.
+- The console comes from the dashboard bundle of the binary, as on the
+  account server. When the preview cannot read it, its output says so at
+  the start and the console answers 503.
 
 ## Turn the accounts off
 

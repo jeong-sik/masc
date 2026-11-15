@@ -528,15 +528,27 @@ let acting t request =
   Result.map (fun ((_ : Authz_zone.trusted), cookie, signed_in) -> cookie, signed_in) (acting_in t request)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: a route answers what it reads in this state to the
+   person of the session, with no commit to judge it again. The state is the
+   one trusted snapshot that judged the session, so no second read of the zone
+   can answer from a state that a restart would not confirm. *)
+let acting_reading t request =
+  Result.map
+    (fun ((trusted : Authz_zone.trusted), (_ : Bs.Cookie.t), signed_in) ->
+      signed_in, (trusted :> Authz_zone.snapshot).Authz_zone.state)
+    (acting_in t request)
+;;
+
 let not_an_admin = "only an Admin reads this"
 
-(* The role is read in the snapshot that judged the session, as the gate
-   reads it in the snapshot that authenticated a credential. *)
+(* HIGH-RISK-UNREVIEWED: the role is read in the snapshot that judged the
+   session, as the gate reads it in the snapshot that authenticated a
+   credential. A wrong role here shows an installation to someone who is not
+   an Admin. *)
 let admin_reading t request =
-  match acting_in t request with
+  match acting_reading t request with
   | Error answer -> Error answer
-  | Ok (trusted, (_ : Bs.Cookie.t), { Bs.user_id; session_id = _; expires_at_ms = _ }) ->
-    let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
+  | Ok ({ Bs.user_id; session_id = _; expires_at_ms = _ }, state) ->
     if Authz_principal_state.is_admin state.Authz_state.principals user_id
     then Ok state
     else Error (json_refused Forbidden not_an_admin)

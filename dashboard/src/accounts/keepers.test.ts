@@ -374,6 +374,17 @@ describe('the Keepers of a person', () => {
     expect([before, model.talking.view.value.kind]).toEqual([1, 'read'])
   })
 
+  it('sends a message of the conversation with the token of the person shown', async () => {
+    const none = { keeper_id: 'alpha', current_conversation_id: null, conversations: [], conversation_id: null, turns: [] }
+    const { send, sent } = answering([listed(['alpha', null]), listed(['alpha', null]), json(200, none), json(503, { error: 'busy', code: 'conversation_record_unavailable' }), json(200, none)])
+    const model = createKeepers({ send, leave: vi.fn() })
+    await model.load(first)
+    await model.load(second)
+    await model.talking.open('alpha')
+    await model.talking.say('안녕')
+    expect(new Headers(sent[3]?.init.headers).get(csrfHeader)).toBe('token-2')
+  })
+
   it('leaves with what runs left behind when the conversation finds that the session ended', async () => {
     const wait = later()
     const leave = vi.fn()
@@ -436,9 +447,12 @@ const alpha: Keeper = { id: 'alpha', runtimeId: 'rt_sonnet' }
 /** A conversation that shows what it is given. talk.test.ts reads the conversation itself. */
 const talkShowing = (view: TalkView): TalkModel => ({
   view: signal(view),
+  act: signal({ kind: 'idle' }),
   open: vi.fn(() => Promise.resolve()),
   close: vi.fn(),
   retry: vi.fn(() => Promise.resolve()),
+  say: vi.fn(() => Promise.resolve(null)),
+  start: vi.fn(() => Promise.resolve()),
   reset: vi.fn(),
 })
 
@@ -517,6 +531,8 @@ describe('the Keepers panel', () => {
       'while a Keeper is made': 1,
       'while a model is given': 1,
       'while the browser leaves': 2,
+      // The conversation is not read, so no message can be sent yet.
+      'with a conversation that could not be read': 1,
     }))
   })
 

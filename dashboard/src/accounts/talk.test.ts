@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // The conversation of a Keeper: what the server's answers read as, what a
-// reading sends, how the state moves, and the place of the conversation in a
-// card in each step. What a step says and where it puts things is not
+// reading, a message and a new conversation send, how the state moves, and
+// the place of the conversation in a card in each step. What a step says and where it puts things is not
 // checked here: that is read in a browser.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { signal } from '@preact/signals'
@@ -11,10 +11,12 @@ import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import { slowAfterMs } from './notes'
 import { createTalk } from './talk'
-import type { TalkModel, TalkView } from './talk'
+import type { Act, TalkModel, TalkView } from './talk'
 import { TalkPart } from './talk-area'
-import { conversationOf, conversationPath, readConversation, talkProblemOf } from './talk-wire'
+import { refusalOf } from './talk-say'
+import { conversationOf, conversationPath, messageLimitBytes, readAnswered, readConversation, readStarted, say, start, talkProblemOf, turnPath, unsendable } from './talk-wire'
 import type { Conversation, Turn } from './talk-wire'
+import { csrfHeader } from './wire'
 import type { Send } from './wire'
 
 interface Sent { readonly path: string; readonly init: RequestInit }
@@ -134,11 +136,78 @@ describe('reading the answers about a conversation', () => {
   })
 })
 
+const turnAnswer = (keeper: string, extra: Record<string, unknown> = { conversation_id: 'cv_1', continued: true }) =>
+  ({ keeper_id: keeper, runtime_id: 'rt_1', model: 'claude-sonnet-5', text: '네', ...extra })
+
+describe('sending a message and starting a conversation', () => {
+  it('reads an answer the conversation recorded, and one it did not', () => {
+    expect([readAnswered(turnAnswer('alpha'), 'alpha'), readAnswered(turnAnswer('alpha', {}), 'alpha')]).toEqual([
+      { text: '네', model: 'claude-sonnet-5', recorded: true },
+      { text: '네', model: 'claude-sonnet-5', recorded: false },
+    ])
+  })
+
+  it.each([
+    ['another Keeper', turnAnswer('beta')],
+    ['no Runtime', { ...turnAnswer('alpha'), runtime_id: '' }],
+    ['no model', { ...turnAnswer('alpha'), model: '' }],
+    ['no text', { ...turnAnswer('alpha'), text: null }],
+    ['a conversation and no word of whether it went on', turnAnswer('alpha', { conversation_id: 'cv_1' })],
+    ['a word of whether it went on and no conversation', turnAnswer('alpha', { continued: false })],
+  ])('refuses the answer of a turn with %s', (_name, answer) => {
+    expect(readAnswered(answer, 'alpha')).toBeNull()
+  })
+
+  it('reads the conversation a start made, for the Keeper asked about only', () => {
+    expect([readStarted({ keeper_id: 'alpha', conversation_id: 'cv_2' }, 'alpha'), readStarted({ keeper_id: 'beta', conversation_id: 'cv_2' }, 'alpha'), readStarted({ keeper_id: 'alpha', conversation_id: '' }, 'alpha')])
+      .toEqual(['cv_2', null, null])
+  })
+
+  it('sends no message the server would refuse as blank or too long, by the rules of the server', () => {
+    const hangul = '가'
+    expect([
+      unsendable(''),
+      unsendable(' \t\n\r\f'),
+      unsendable('\u00a0'),
+      unsendable('a'.repeat(messageLimitBytes)),
+      unsendable('a'.repeat(messageLimitBytes + 1)),
+      unsendable(hangul.repeat(1365)),
+      unsendable(hangul.repeat(1366)),
+    ]).toEqual(['blank', 'blank', null, null, 'too_long', null, 'too_long'])
+  })
+
+  it('sends the message and the start with the token of the session and no other credential', async () => {
+    const { send, sent } = answering([json(200, turnAnswer('alpha')), json(200, { keeper_id: 'alpha', conversation_id: 'cv_2' })])
+    await say(send, 'token-1', 'alpha', '안녕')
+    await start(send, 'token-1', 'alpha')
+    expect(sent.map((one) => {
+      const headers = new Headers(one.init.headers)
+      return [one.path, one.init.method, one.init.credentials, headers.get(csrfHeader), headers.has('authorization'), JSON.parse(String(one.init.body))]
+    })).toEqual([
+      [turnPath, 'POST', 'same-origin', 'token-1', false, { keeper_id: 'alpha', message: '안녕' }],
+      [conversationPath, 'POST', 'same-origin', 'token-1', false, { keeper_id: 'alpha' }],
+    ])
+  })
+
+  it('waits for a turn as long as the server runs it', async () => {
+    vi.useFakeTimers()
+    let answer: (response: Response) => void = () => undefined
+    const send: Send = (_path, init) => new Promise((resolve) => {
+      expect(init.signal ?? null).toBe(null)
+      answer = resolve
+    })
+    const run = say(send, 'token-1', 'alpha', '안녕')
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    answer(json(200, { keeper_id: 'alpha', runtime_id: 'pa_x.gpt-5.5', model: 'gpt-5.5', text: '네' }))
+    expect(await run).toEqual({ ok: true, value: { text: '네', model: 'gpt-5.5', recorded: false } })
+  })
+})
+
 /** What the page that holds a conversation gives it: a way to the sign-in
     page that marks the session ended for the whole page, as keepers.ts does. */
 const page = () => {
   let gone = false
-  return { leave: vi.fn(() => { gone = true }), left: () => gone }
+  return { leave: vi.fn(() => { gone = true }), left: () => gone, token: () => 'token-1' }
 }
 
 const readOf = (model: TalkModel): Conversation | null => {
@@ -251,7 +320,7 @@ describe('the conversation of a Keeper', () => {
 
   it('reads nothing once another request of the page found that the session ended', async () => {
     const { send, sent } = answering([])
-    const model = createTalk({ send, leave: vi.fn(), left: () => true })
+    const model = createTalk({ send, leave: vi.fn(), left: () => true, token: () => 'token-1' })
     await model.open('alpha')
     expect([model.view.value, sent.length]).toEqual([{ kind: 'closed' }, 0])
   })
@@ -259,7 +328,7 @@ describe('the conversation of a Keeper', () => {
   it('takes no answer that comes after another request of the page found that the session ended', async () => {
     const wait = later()
     let gone = false
-    const model = createTalk({ send: answering([wait.answer]).send, leave: vi.fn(), left: () => gone })
+    const model = createTalk({ send: answering([wait.answer]).send, leave: vi.fn(), left: () => gone, token: () => 'token-1' })
     const run = model.open('alpha')
     gone = true
     wait.give(conversationAnswer('alpha'))
@@ -290,15 +359,162 @@ describe('the conversation of a Keeper', () => {
   })
 })
 
+/** A conversation of alpha read, with the answers after it scripted. */
+async function readFirst(answers: readonly Scripted[], token: string | null = 'token-1') {
+  const { send, sent } = answering([conversationAnswer('alpha'), ...answers])
+  const way = page()
+  const model = createTalk({ send, leave: way.leave, left: way.left, token: () => token })
+  await model.open('alpha')
+  return { model, sent, way }
+}
+const posted = (sent: readonly Sent[]) => sent.filter((one) => one.init.method === 'POST').map((one) => one.path)
+const reads = (sent: readonly Sent[]) => sent.filter((one) => one.init.method === 'GET').length
+/** Waits until the conversation is read again after a request: its
+    answer is taken from the script when it is sent. */
+const settled = async (model: TalkModel, sent: readonly Sent[], gets: number) => {
+  await vi.waitFor(() => { expect([reads(sent), model.view.value.kind]).toEqual([gets, 'read']) })
+}
+
+describe('a message and a new conversation of the Keeper', () => {
+  it('sends the message, says it waits, takes the answer, and reads the conversation again', async () => {
+    const wait = later()
+    const { model, sent } = await readFirst([wait.answer, conversationAnswer('alpha', ['cv_1'], [answered, answered])])
+    const run = model.say('안녕')
+    const during = model.act.value
+    wait.give(json(200, turnAnswer('alpha')))
+    expect([during, await run]).toEqual([{ kind: 'sending', message: '안녕' }, { kind: 'answered', answer: { text: '네', model: 'claude-sonnet-5', recorded: true } }])
+    await vi.waitFor(() => { expect([reads(sent), readOf(model)?.turns.length]).toEqual([2, 2]) })
+  })
+
+  it('reads a refusal by its code, counts refusals in a row, and reads the conversation again after each', async () => {
+    const { model, sent } = await readFirst([refusedAnswer(429, 'no_quota'), conversationAnswer('alpha'), refusedAnswer(409, 'account_call_running'), conversationAnswer('alpha')])
+    await model.say('안녕')
+    await settled(model, sent, 2)
+    const second = await model.say('안녕')
+    await settled(model, sent, 3)
+    expect(second).toEqual({ kind: 'refused', step: 'say', problem: { kind: 'refused', status: 409, code: 'account_call_running', reason: 'A sentence of the server.' }, attempts: 2 })
+  })
+
+  it('does not know what came of a message with no answer, or with a failure from in front of the server', async () => {
+    const { model, sent } = await readFirst(['no answer', conversationAnswer('alpha'), json(502, { error: 'bad gateway' }), conversationAnswer('alpha'), json(403, { error: 'origin' }), conversationAnswer('alpha')])
+    const kinds = []
+    for (let n = 0; n < 3; n += 1) {
+      kinds.push((await model.say('안녕'))?.kind)
+      await settled(model, sent, n + 2)
+    }
+    expect(kinds).toEqual(['unknown', 'unknown', 'refused'])
+  })
+
+  it('sends nothing the server would refuse, and counts it in a row', async () => {
+    const { model, sent } = await readFirst([])
+    const outcomes = [await model.say(' \n'), await model.say('a'.repeat(messageLimitBytes + 1))]
+    expect([outcomes, posted(sent)]).toEqual([[{ kind: 'not_sent', why: 'blank', attempts: 1 }, { kind: 'not_sent', why: 'too_long', attempts: 2 }], []])
+  })
+
+  it('sends one request at a time, and nothing before the conversation is read or without a token', async () => {
+    const wait = later()
+    const { model, sent } = await readFirst([wait.answer])
+    const run = model.say('하나')
+    expect([await model.say('둘'), posted(sent)]).toEqual([null, [turnPath]])
+    await model.start()
+    expect(posted(sent)).toEqual([turnPath])
+    model.close()
+    wait.give(json(200, turnAnswer('alpha')))
+    expect([await run, model.act.value]).toEqual([null, { kind: 'idle' }])
+    const reading = await readFirst([], null)
+    expect([await reading.model.say('안녕'), posted(reading.sent)]).toEqual([null, []])
+  })
+
+  it('takes no answer of a message after another conversation was opened, and reads nothing for it', async () => {
+    const wait = later()
+    const { model, sent } = await readFirst([wait.answer, conversationAnswer('beta', ['cv_9'])])
+    const run = model.say('안녕')
+    await model.open('beta')
+    wait.give(json(200, turnAnswer('alpha')))
+    expect([await run, model.act.value, reads(sent)]).toEqual([null, { kind: 'idle' }, 2])
+  })
+
+  it('leaves for the sign-in page once when a message finds that the session ended', async () => {
+    const { model, sent, way } = await readFirst([noSession()])
+    expect([await model.say('안녕'), way.leave.mock.calls.length, reads(sent)]).toEqual([{ kind: 'leaving' }, 1, 1])
+    expect(await model.say('안녕')).toBeNull()
+  })
+
+  it('starts a new conversation and reads it, also when the conversation could not be read', async () => {
+    const { send, sent } = answering([refusedAnswer(503, 'conversation_row_half_written'), json(200, { keeper_id: 'alpha', conversation_id: 'cv_2' }), conversationAnswer('alpha', ['cv_1', 'cv_2'], [])])
+    const model = createTalk({ send, ...page() })
+    await model.open('alpha')
+    await model.start()
+    await settled(model, sent, 2)
+    expect([model.act.value, readOf(model)?.earlier]).toEqual([{ kind: 'started' }, 1])
+  })
+
+  it('shows what a message came to only once the conversation was read again, and sends nothing meanwhile', async () => {
+    const reread = later()
+    const { model, sent } = await readFirst([json(200, turnAnswer('alpha')), reread.answer])
+    const run = model.say('안녕')
+    await vi.waitFor(() => { expect(reads(sent)).toBe(2) })
+    const during = model.act.value.kind
+    const second = await model.say('또')
+    reread.give(conversationAnswer('alpha', ['cv_1'], [answered, answered]))
+    expect([during, second, (await run)?.kind, posted(sent)]).toEqual(['sending', null, 'answered', [turnPath]])
+  })
+
+  it('counts on a reading that fails again after a request, so the same failure is announced again', async () => {
+    const { send } = answering([refusedAnswer(503, 'conversation_record_unavailable'), refusedAnswer(409, 'account_call_running'), refusedAnswer(503, 'conversation_record_unavailable')])
+    const model = createTalk({ send, ...page() })
+    await model.open('alpha')
+    await model.start()
+    const now = model.view.value
+    expect([model.act.value.kind, now.kind === 'failed' ? now.failure.attempts : null]).toEqual(['refused', 2])
+  })
+
+  it('counts the failures of a message and of a start apart', async () => {
+    const { model } = await readFirst([
+      refusedAnswer(409, 'account_call_running'), conversationAnswer('alpha'),
+      refusedAnswer(409, 'account_call_running'), conversationAnswer('alpha'),
+      refusedAnswer(429, 'no_quota'), conversationAnswer('alpha'),
+    ])
+    await model.say(' ')
+    const after = []
+    for (const step of [() => model.start(), () => model.start(), () => model.say('안녕')]) {
+      await step()
+      after.push(model.act.value)
+    }
+    expect(after.map((one) => (one.kind === 'refused' ? one.attempts : null))).toEqual([1, 2, 1])
+  })
+
+  it('says nothing of a message whose conversation, read again, found that the session ended', async () => {
+    const { model, way } = await readFirst([json(200, turnAnswer('alpha')), noSession()])
+    expect([await model.say('안녕'), model.view.value.kind, way.leave.mock.calls.length]).toEqual([{ kind: 'idle' }, 'leaving', 1])
+  })
+
+  it('knows which refusals of a message come after the server took the message in', () => {
+    const codes = ['not_signed_in', 'no_quota', 'silent', 'not_started', 'configuration_refused', 'no_answer', 'answer_unrecorded', 'message_blank', 'account_call_running', 'runtime_reassigned', 'conversation_record_unavailable'] as const
+    expect(codes.map((code) => refusalOf(code)?.sent)).toEqual([true, true, true, true, true, true, true, false, false, false, false])
+  })
+
+  it('says a start was refused with the step it was', async () => {
+    const { model, sent } = await readFirst([refusedAnswer(409, 'keeper_has_no_runtime'), conversationAnswer('alpha')])
+    await model.start()
+    await settled(model, sent, 2)
+    const now = model.act.value
+    expect(now.kind === 'refused' ? [now.step, now.problem.code] : null).toEqual(['start', 'keeper_has_no_runtime'])
+  })
+})
+
 // ---- the place of the conversation in a card ----
 
 const turn = (outcome: Turn['outcome']): Turn => ({ message: '긴 말\n두 줄', askedAtMs: 1_763_000_000_000, outcome })
 const conversation = (turns: readonly Turn[], earlier = 0): Conversation => ({ id: 'cv_1', turns, earlier })
-const showingTalk = (view: TalkView): TalkModel => ({
+const showingTalk = (view: TalkView, act: Act = { kind: 'idle' }): TalkModel => ({
   view: signal(view),
+  act: signal(act),
   open: vi.fn(() => Promise.resolve()),
   close: vi.fn(),
   retry: vi.fn(() => Promise.resolve()),
+  say: vi.fn(() => Promise.resolve(null)),
+  start: vi.fn(() => Promise.resolve()),
   reset: vi.fn(),
 })
 const cardOf = (talk: TalkModel) =>
@@ -340,7 +556,7 @@ describe('the conversation in a card', () => {
     expect(await axe(cardOf(showingTalk(view)))).toHaveNoViolations()
   })
 
-  it('has one line a screen reader reads out in the place of the conversation, which is on the page in every step', () => {
+  it('has one line a screen reader reads out in the place of the conversation, which is on the page in every step, and one under the form when it is open', () => {
     const found = steps.map(([name, view]) => {
       const container = cardOf(showingTalk(view))
       const button = container.querySelector('button[aria-controls]')
@@ -349,7 +565,7 @@ describe('the conversation in a card', () => {
       cleanup()
       return [name, lines]
     })
-    expect(found).toEqual(steps.map(([name]) => [name, 1]))
+    expect(found).toEqual(steps.map(([name, view]) => [name, view.kind === 'closed' || view.keeperId !== 'alpha' ? 1 : 2]))
   })
 
   it('says each reading that failed where a screen reader announces it', () => {
@@ -373,7 +589,7 @@ describe('the conversation in a card', () => {
 
   it('marks the retry button while it reads again', () => {
     const found = steps.map(([name, view]) => {
-      const marked = cardOf(showingTalk(view)).querySelectorAll('button[aria-disabled=true]').length
+      const marked = cardOf(showingTalk(view)).querySelectorAll('#keeper-again-alpha[aria-disabled=true]').length
       cleanup()
       return [name, marked]
     })
@@ -406,7 +622,7 @@ describe('the conversation in a card', () => {
     const view: TalkView = { kind: 'failed', keeperId: 'alpha', failure: { problem: { kind: 'unreachable' }, attempts: 1 }, next: 'idle' }
     const buttons = [...cardOf(showingTalk(view)).querySelectorAll('button')]
     expect(buttons.map((one) => one.getAttribute('aria-labelledby'))).toEqual(buttons.map((one) => `${one.id} keeper-title-alpha`))
-    expect(buttons).toHaveLength(2)
+    expect(buttons).toHaveLength(4)
   })
 
   it('gives each time its moment in a form a machine reads', () => {
@@ -450,5 +666,160 @@ describe('the conversation in a card', () => {
     container.querySelector<HTMLButtonElement>('.talk button')?.focus()
     await act(() => { view.value = { kind: 'read', keeperId: 'alpha', conversation: conversation([]) } })
     expect(document.activeElement?.getAttribute('aria-expanded')).toBe('true')
+  })
+})
+
+// ---- the form of a message ----
+
+describe('the form of a message', () => {
+  const read: TalkView = { kind: 'read', keeperId: 'alpha', conversation: conversation([]) }
+  const failedRead: TalkView = { kind: 'failed', keeperId: 'alpha', failure: { problem: { kind: 'unreachable' }, attempts: 1 }, next: 'idle' }
+  const noQuota = { kind: 'refused', status: 429, code: 'no_quota', reason: 'The subscription of this Runtime has no quota left.' } as const
+  const internal = { kind: 'refused', status: 500, code: 'internal_error', reason: null } as const
+  const steps: ReadonlyArray<readonly [string, TalkView, Act]> = [
+    ['while the conversation is read', { kind: 'reading', keeperId: 'alpha', slow: true }, { kind: 'idle' }],
+    ['when the conversation could not be read', failedRead, { kind: 'idle' }],
+    ['before anything is sent', read, { kind: 'idle' }],
+    ['while a message is sent', read, { kind: 'sending', message: '긴 말\n두 줄' }],
+    ['while a conversation starts', read, { kind: 'starting' }],
+    ['after an answer', read, { kind: 'answered', answer: { text: '네', model: 'claude-sonnet-5', recorded: true } }],
+    ['after an answer the record does not keep', read, { kind: 'answered', answer: { text: '네', model: 'gpt-5.5', recorded: false } }],
+    ['after a start', read, { kind: 'started' }],
+    ['with a blank message', read, { kind: 'not_sent', why: 'blank', attempts: 1 }],
+    ['with a refusal it has words for', read, { kind: 'refused', step: 'say', problem: noQuota, attempts: 2 }],
+    ['with a refusal it has no words for', read, { kind: 'refused', step: 'start', problem: internal, attempts: 1 }],
+    ['with a message whose end it does not know', read, { kind: 'unknown', step: 'say', problem: { kind: 'unreachable' }, attempts: 1 }],
+    ['with a start whose end it does not know and a conversation not read again', failedRead, { kind: 'unknown', step: 'start', problem: { kind: 'unreadable' }, attempts: 1 }],
+    ['while the browser leaves', read, { kind: 'leaving' }],
+  ]
+  const each = <T>(look: (container: Element) => T) => steps.map(([name, view, now]) => {
+    const found = look(cardOf(showingTalk(view, now)))
+    cleanup()
+    return [name, found]
+  })
+  const named = (values: Readonly<Record<string, unknown>>, otherwise: unknown) => steps.map(([name]) => [name, name in values ? values[name] : otherwise])
+
+  it.each(steps)('passes the accessibility rules %s', async (_name, view, now) => {
+    expect(await axe(cardOf(showingTalk(view, now)))).toHaveNoViolations()
+  })
+
+  it('says each request that came to nothing where a screen reader announces it', () => {
+    expect(each((container) => container.querySelectorAll('form ~ [role=alert]').length)).toEqual(named({
+      'with a blank message': 1,
+      'with a refusal it has words for': 1,
+      'with a refusal it has no words for': 1,
+      'with a message whose end it does not know': 1,
+      'with a start whose end it does not know and a conversation not read again': 1,
+    }, 0))
+  })
+
+  it('marks what cannot be pressed yet: a message before the conversation is read, either while a request runs', () => {
+    const marked = (container: Element) => ['#talk-send', '#talk-start'].map((id) => container.querySelector(id)?.getAttribute('aria-disabled'))
+    expect(each(marked)).toEqual(named({
+      'while the conversation is read': ['true', 'true'],
+      'when the conversation could not be read': ['true', 'false'],
+      'with a start whose end it does not know and a conversation not read again': ['true', 'false'],
+      'while a message is sent': ['true', 'true'],
+      'while a conversation starts': ['true', 'true'],
+      'while the browser leaves': ['true', 'true'],
+    }, ['false', 'false']))
+  })
+
+  it('shows a message while it is sent, and an answer only when the record does not keep it', () => {
+    expect(each((container) => container.querySelectorAll('.talk > .turn-part').length)).toEqual(named({
+      'while a message is sent': 1,
+      'after an answer the record does not keep': 1,
+    }, 0))
+  })
+
+  it('says what the server meant by a code it has words for', () => {
+    const container = cardOf(showingTalk(read, { kind: 'refused', step: 'say', problem: noQuota, attempts: 1 }))
+    expect(container.querySelector('form ~ [role=alert]')?.textContent).toContain(refusalOf('no_quota')?.words)
+  })
+
+  it('keeps the field from being changed while a request runs', () => {
+    expect(each((container) => container.querySelector('textarea')?.readOnly)).toEqual(named({
+      'while a message is sent': true,
+      'while a conversation starts': true,
+      'while the browser leaves': true,
+    }, false))
+  })
+
+  it('keeps the line a screen reader reads out under the form as one element through every request', async () => {
+    const now = signal<Act>({ kind: 'idle' })
+    const container = cardOf({ ...showingTalk(read), act: now })
+    const line = () => container.querySelector('form ~ [role=status]')
+    const first = line()
+    const same = []
+    for (const next of steps.map(([, , one]) => one)) {
+      await act(() => { now.value = next })
+      same.push(line() === first)
+    }
+    expect([first !== null, same.every(Boolean)]).toEqual([true, true])
+  })
+
+  it('puts a new alert on the page when a request fails again', async () => {
+    const now = signal<Act>({ kind: 'refused', step: 'say', problem: noQuota, attempts: 1 })
+    const container = cardOf({ ...showingTalk(read), act: now })
+    const before = container.querySelector('form ~ [role=alert]')
+    await act(() => { now.value = { kind: 'refused', step: 'say', problem: noQuota, attempts: 2 } })
+    expect(container.querySelector('form ~ [role=alert]') === before).toBe(false)
+  })
+
+  it('sends what is typed, on the button and on Ctrl+Enter, and empties the field once the Keeper answered', async () => {
+    const talk = showingTalk(read)
+    vi.mocked(talk.say).mockResolvedValue({ kind: 'answered', answer: { text: '네', model: 'claude-sonnet-5', recorded: true } })
+    const container = cardOf(talk)
+    const field = container.querySelector('textarea')
+    if (field === null) throw new Error('no field')
+    fireEvent.input(field, { target: { value: '안녕\n두 줄' } })
+    fireEvent.keyDown(field, { key: 'Enter', ctrlKey: true })
+    await vi.waitFor(() => { expect(field.value).toBe('') })
+    fireEvent.input(field, { target: { value: '또' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    const button = container.querySelector<HTMLButtonElement>('#talk-send')
+    if (button !== null) fireEvent.click(button)
+    await vi.waitFor(() => { expect(vi.mocked(talk.say).mock.calls).toEqual([['안녕\n두 줄'], ['또']]) })
+  })
+
+  it('keeps a message the server refused, and puts the focus on the field when nothing was sent', async () => {
+    const refusing = showingTalk(read)
+    vi.mocked(refusing.say).mockResolvedValue({ kind: 'refused', step: 'say', problem: noQuota, attempts: 1 })
+    const field = cardOf(refusing).querySelector('textarea')
+    fireEvent.input(field as HTMLTextAreaElement, { target: { value: '안녕' } })
+    fireEvent.submit(field?.form as HTMLFormElement)
+    await vi.waitFor(() => { expect(refusing.say).toHaveBeenCalled() })
+    const kept = field?.value
+    cleanup()
+    const blank = showingTalk(read)
+    vi.mocked(blank.say).mockResolvedValue({ kind: 'not_sent', why: 'blank', attempts: 1 })
+    const empty = cardOf(blank).querySelector('textarea')
+    fireEvent.submit(empty?.form as HTMLFormElement)
+    await vi.waitFor(() => { expect(document.activeElement).toBe(empty) })
+    expect(kept).toBe('안녕')
+  })
+
+  it('leaves an Enter that ends the composing of a syllable to it', () => {
+    const talk = showingTalk(read)
+    const field = cardOf(talk).querySelector('textarea')
+    fireEvent.keyDown(field as HTMLTextAreaElement, { key: 'Enter', ctrlKey: true, isComposing: true })
+    expect(vi.mocked(talk.say).mock.calls.length).toBe(0)
+  })
+
+  it('asks for nothing on a press of a button that is marked', () => {
+    const talk = showingTalk({ kind: 'reading', keeperId: 'alpha', slow: false })
+    const container = cardOf(talk)
+    for (const id of ['#talk-send', '#talk-start']) {
+      const button = container.querySelector<HTMLButtonElement>(id)
+      if (button !== null) fireEvent.click(button)
+    }
+    expect([vi.mocked(talk.say).mock.calls.length, vi.mocked(talk.start).mock.calls.length]).toEqual([0, 0])
+  })
+
+  it('starts a new conversation on a press', () => {
+    const talk = showingTalk(failedRead)
+    const button = cardOf(talk).querySelector<HTMLButtonElement>('#talk-start')
+    if (button !== null) fireEvent.click(button)
+    expect(vi.mocked(talk.start).mock.calls.length).toBe(1)
   })
 })

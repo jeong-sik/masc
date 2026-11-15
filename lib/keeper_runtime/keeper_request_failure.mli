@@ -66,6 +66,14 @@ type cause =
       ; kind : Llm_provider.Http_client.network_error_kind
       ; detail : string
       }
+  | Provider_connect_failed of
+      { provider : string option
+      ; kind : Llm_provider.Http_client.network_error_kind
+      ; detail : string
+      }
+      (** The connection to the provider did not open, so the request was not
+          sent ([Retry.Connect_failed] or the provider [Connect_failed]). Not
+          folded into [Provider_network]. Stored as [provider_connect_failed]. *)
   | Provider_rate_limited of
       { provider : string option
       ; retry_after : float option

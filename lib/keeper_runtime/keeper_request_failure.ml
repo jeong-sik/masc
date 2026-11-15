@@ -32,6 +32,11 @@ type cause =
       ; kind : Llm_provider.Http_client.network_error_kind
       ; detail : string
       }
+  | Provider_connect_failed of
+      { provider : string option
+      ; kind : Llm_provider.Http_client.network_error_kind
+      ; detail : string
+      }
   | Provider_rate_limited of
       { provider : string option
       ; retry_after : float option
@@ -99,6 +104,8 @@ let cause_of_core_error (error : Agent_core.Error.t) =
   match error with
   | Agent_core.Error.Api (Agent_core.Retry.NetworkError { message; kind }) ->
     Provider_network { provider = None; kind; detail = message }
+  | Agent_core.Error.Api (Agent_core.Retry.Connect_failed { message; kind }) ->
+    Provider_connect_failed { provider = None; kind; detail = message }
   | Agent_core.Error.Api (Agent_core.Retry.RateLimited { message; retry_after }) ->
     Provider_rate_limited { provider = None; retry_after; detail = message }
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow { limit; _ }) ->
@@ -115,6 +122,8 @@ let cause_of_core_error (error : Agent_core.Error.t) =
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     Provider_network { provider = Some provider; kind; detail }
+  | Agent_core.Error.Provider (Llm_provider.Error.Connect_failed { provider; kind; detail })
+    -> Provider_connect_failed { provider = Some provider; kind; detail }
   | Agent_core.Error.Provider
       (Llm_provider.Error.RateLimit { provider; retry_after; detail }) ->
     Provider_rate_limited { provider = Some provider; retry_after; detail }
@@ -203,6 +212,12 @@ let provider_network_summary ~provider ~kind ~detail =
   | Llm_provider.Http_client.Unknown -> detail_speaks "could not be reached"
 ;;
 
+(* A connection that did not open reads like any other network failure, so the
+   summary adds what only this cause knows: the request never left. *)
+let provider_connect_failed_summary ~provider ~kind ~detail =
+  provider_network_summary ~provider ~kind ~detail ^ "; the request was not sent"
+;;
+
 (* The wait is shown when the provider stated one and omitted when it did not;
    it is never worked out from the provider's text. *)
 let provider_rate_limited_summary ~provider ~retry_after ~detail =
@@ -271,6 +286,8 @@ let summary_of_cause = function
             (Keeper_internal_error.core_error_of_masc_internal_error masc_error)))
   | Provider_network { provider; kind; detail } ->
     provider_network_summary ~provider ~kind ~detail
+  | Provider_connect_failed { provider; kind; detail } ->
+    provider_connect_failed_summary ~provider ~kind ~detail
   | Provider_rate_limited { provider; retry_after; detail } ->
     provider_rate_limited_summary ~provider ~retry_after ~detail
   | Context_overflow { limit } -> context_overflow_summary ~limit
@@ -399,6 +416,18 @@ let failure_site_of_string = function
   | _ -> None
 ;;
 
+let network_cause_to_yojson ~label ~provider ~kind ~detail =
+  `Assoc
+    [ "kind", `String label
+    ; ( "provider"
+      , match provider with
+        | Some provider -> `String provider
+        | None -> `Null )
+    ; "network_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
+    ; "detail", `String detail
+    ]
+;;
+
 let cause_to_yojson = function
   | Core core ->
     `Assoc
@@ -409,16 +438,9 @@ let cause_to_yojson = function
       ; "error", Keeper_internal_error.masc_internal_error_to_json masc_error
       ]
   | Provider_network { provider; kind; detail } ->
-    `Assoc
-      [ "kind", `String "provider_network"
-      ; ( "provider"
-        , match provider with
-          | Some provider -> `String provider
-          | None -> `Null )
-      ; ( "network_kind"
-        , `String (Llm_provider.Http_client.network_error_kind_to_string kind) )
-      ; "detail", `String detail
-      ]
+    network_cause_to_yojson ~label:"provider_network" ~provider ~kind ~detail
+  | Provider_connect_failed { provider; kind; detail } ->
+    network_cause_to_yojson ~label:"provider_connect_failed" ~provider ~kind ~detail
   | Provider_rate_limited { provider; retry_after; detail } ->
     `Assoc
       [ "kind", `String "provider_rate_limited"
@@ -544,6 +566,27 @@ let nullary kind fields value =
   require kind [] fields (fun () -> Ok value)
 ;;
 
+let network_cause kind fields build =
+  require kind [ "provider"; "network_kind"; "detail" ] fields (fun () ->
+    let provider =
+      match List.assoc_opt "provider" fields with
+      | Some (`String provider) -> Ok (Some provider)
+      | Some `Null -> Ok None
+      | Some _ | None -> field_error kind "provider"
+    in
+    Result.bind provider (fun provider ->
+      Result.bind
+        (labelled
+           kind
+           "network_kind"
+           Llm_provider.Http_client.network_error_kind_of_string
+           fields)
+        (fun network_kind ->
+           Result.map
+             (fun detail -> build ~provider ~network_kind ~detail)
+             (string_field kind fields "detail"))))
+;;
+
 let cause_of_yojson (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
@@ -566,25 +609,11 @@ let cause_of_yojson (json : Yojson.Safe.t) =
             | Some masc_error -> Ok (Masc masc_error)
             | None -> field_error kind "error")
         | "provider_network" ->
-          require kind [ "provider"; "network_kind"; "detail" ] fields (fun () ->
-            let provider =
-              match List.assoc_opt "provider" fields with
-              | Some (`String provider) -> Ok (Some provider)
-              | Some `Null -> Ok None
-              | Some _ | None -> field_error kind "provider"
-            in
-            Result.bind provider (fun provider ->
-              Result.bind
-                (labelled
-                   kind
-                   "network_kind"
-                   Llm_provider.Http_client.network_error_kind_of_string
-                   fields)
-                (fun network_kind ->
-                   Result.map
-                     (fun detail ->
-                        Provider_network { provider; kind = network_kind; detail })
-                     (string_field kind fields "detail"))))
+          network_cause kind fields (fun ~provider ~network_kind ~detail ->
+            Provider_network { provider; kind = network_kind; detail })
+        | "provider_connect_failed" ->
+          network_cause kind fields (fun ~provider ~network_kind ~detail ->
+            Provider_connect_failed { provider; kind = network_kind; detail })
         | "provider_rate_limited" ->
           require kind [ "provider"; "retry_after"; "detail" ] fields (fun () ->
             let provider =

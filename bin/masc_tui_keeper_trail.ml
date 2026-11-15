@@ -86,7 +86,8 @@ let cause_group_of_failure (failure : Request_failure.t) =
   | Request_failure.Core { Core_failure.category; message = _ } ->
       group_of_core_category category
   | Request_failure.Masc error -> group_of_masc_error error
-  | Request_failure.Provider_network _ -> Connection
+  | Request_failure.Provider_network _ | Request_failure.Provider_connect_failed _ ->
+    Connection
   | Request_failure.Provider_rate_limited _ -> Rate_limited
   | Request_failure.Context_overflow _ | Request_failure.Input_capacity -> Input
   | Request_failure.Operator_cancelled -> Stopped
@@ -224,6 +225,7 @@ let fault_word : Fault.t option -> string option = function
   | Some Fault.Unattributed -> Some "unattributed"
   | Some Fault.Unknown_after_dispatch -> Some "uncertain"
   | Some Fault.Local_admission -> Some "MASC admission wait"
+  | Some Fault.Not_sent -> Some "not sent"
 
 let attempt_of_failure (failure : Evidence.failure) : attempt =
   { ordinal = failure.attempt

@@ -3966,6 +3966,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Some Fault.Unattributed -> t "원인 미분류 API 거절" "unattributed API refusal"
         | Some Fault.Unknown_after_dispatch -> t "결과 불확실" "outcome uncertain"
         | Some Fault.Local_admission -> t "MASC 입장 대기" "MASC admission wait"
+        | Some Fault.Not_sent -> t "연결 못 함, 보내지 않음" "not sent, no connection"
         | Some (Fault.Binding binding) ->
           match binding with
           | Fault.Credential -> t "인증 정보" "credential"

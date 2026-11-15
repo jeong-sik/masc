@@ -140,7 +140,7 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 
 퀴즈를 수업 바로 뒤에 두면 빠지는 구간이 그 사이 시간으로 줄어든다. 가이드에 그렇게 적는다. 한 번도 자료에 실리지 않은 cite 의 수를 `quiz/measures` 에 보여 준다. 구간을 없애는 방법 둘은 §8 D2 에 적었다.
 
-이 표는 퀴즈가 질문을 낸 세션이 이미 있어 cursor 가 움직인 뒤만 다룬다. 질문을 낸 세션이 아직 없을 때는 §3.8 이다.
+이 표는 질문을 낸 세션이 cursor 를 남긴 source 만 다룬다. cursor 가 없는 source 를 어디서부터 읽는지는 §3.8 이다.
 
 ### 3.7 행과 재는 값
 
@@ -157,12 +157,12 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 
 ### 3.8 첫 읽기 시작점
 
-질문을 낸 세션이 아직 없으면 퀴즈는 첫 세션을 연 시각부터 읽는다(`addons/operator-quiz/quiz_flow.py:338-349`). history 전체를 읽다 worker 가 메모리 부족으로 죽은 #44537 뒤에 정한 규칙이다. cursor 는 질문을 낸 세션만 옮긴다(§3.5). 그래서 질문을 낸 세션이 생길 때까지 모든 세션이 같은 시각부터 읽는다.
+수업을 따르지 않는 세션은 cursor 가 없는 source 를 퀴즈가 첫 세션을 연 시각부터 읽는다(`addons/operator-quiz/quiz_flow.py` `_next_read`). history 전체를 읽다 worker 가 메모리 부족으로 죽은 #44537 뒤에 정한 규칙이다. cursor 는 질문을 낸 세션만 옮긴다(§3.5). 그래서 질문을 낸 세션이 cursor 를 남길 때까지 모든 세션이 그 source 를 같은 시각부터 읽는다. 이 절을 정하기 전에는 수업을 따르는 세션도 그렇게 읽었다.
 
-수업은 binding 의 `since` 부터 읽는다. 그 뒤로는 outline 까지 간 지난 세션의 cursor 부터 읽는다(`addons/operator-lesson/lesson_flow.py:53-64, 136-147`). 둘을 맞대면 이렇게 된다.
+수업은 cursor 가 없는 source 를 binding 의 `since` 부터 읽는다. outline 까지 간 지난 세션이 cursor 를 남긴 source 는 그 cursor 부터 읽는다(`addons/records.py` `last_cursor`, `addons/operator-lesson/lesson_flow.py` `_next_read`). 둘을 맞대면 이렇게 됐다.
 
-- 수업을 묶어 새로 설치한 퀴즈는 첫 퀴즈 세션보다 먼저 만들어진 기록을 읽지 못한다.
-- 수업이 그 기록을 인용해도 §3.5 의 거르기에서 모두 빠진다. 다시 물을 문항도 없으면 세션은 `no_material` 로 끝난다.
+- 수업을 묶어 새로 설치한 퀴즈는 첫 퀴즈 세션보다 먼저 만들어진 기록을 읽지 못했다.
+- 수업이 그 기록을 인용해도 §3.5 의 거르기에서 모두 빠졌다. 다시 물을 문항도 없으면 세션은 `no_material` 로 끝났다.
 - 2026-11-15 시험 설치에서 그대로 일어났다(§7, #52289).
 
 고친다.
@@ -181,11 +181,13 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 
 `FollowsLesson` 의 모양이 바뀐다. 이 사건이 적힌 log 는 #52003 병합(2026-11-15) 뒤의 시험 설치 하나뿐이다. `since` 가 없는 `FollowsLesson` 은 읽지 않는다(hard cut). 시험 설치의 퀴즈 volume 은 지우고 다시 만든다. 옛 모양을 읽는 코드나 변환 코드는 만들지 않는다.
 
-질문을 낸 세션이 cursor 를 남긴 source 에는 `since` 를 다시 쓰지 않는다. 그때부터 빠지는 기록은 §3.6 이다. 그런 cursor 가 없는 source 는 `since` 부터 읽는다. 세 경우가 그렇다.
+질문을 낸 세션이 남긴 cursor 를 쓸 수 있는 source 에는 `since` 를 다시 쓰지 않는다. 그때부터 빠지는 기록은 §3.6 이다. 쓸 수 있는 cursor 가 없는 source 는 `since` 부터 읽는다. 세 경우가 그렇다.
 
-- 뒤에 더한 source.
-- `since` 부터 읽었는데 기록이 하나도 없던 source. host 는 그런 읽기에 cursor 를 주지 않는다(`lib/lane_addon/lane_addon_records.ml` 121·232행). 질문을 낸 세션이 읽었어도 cursor 가 남지 않아, 다음 세션이 다시 `since` 부터 읽는다.
+- 질문을 낸 세션이 아직 읽지 않은 source. 새로 설치한 퀴즈에서는 모든 source 가 그렇고, 처음 쓰는 `source_id` 로 더한 source 도 그렇다. cursor 는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 source 는 전에 남은 cursor 부터 읽는다.
+- 질문을 낸 세션이 읽었는데 host 가 cursor 를 주지 않은 source. host 는 기록도 없고 지나친 항목도 없는 읽기에 cursor 를 주지 않는다(`lib/lane_addon/lane_addon_records.ml` `start_cursor`·`answer_page`). 그 source 는 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 는 기록이 없어도 cursor 가 남을 수 있다. host 는 병합한 PR 이 없는 commit 을 지나치면 지나친 자리를 cursor 로 준다(`take_page`). 그때는 다음 세션이 그 cursor 부터 읽는다.
 - host 가 남은 cursor 를 모두 거절한 source(`addons/records.py` `last_cursor`).
+
+이미 질문을 낸 퀴즈에 수업을 묶어도 같다. 묶기 전 세션이 cursor 를 남긴 source 는 그 cursor 부터 읽고, `since` 는 위 세 경우의 source 에만 쓰인다. 수업이 그 cursor 보다 앞선 기록을 인용하면 퀴즈는 그 기록을 읽지 않는다.
 
 수업의 첫 읽기도 source 마다 같은 함수로 고른다. 수업에서는 outline 까지 간 세션이 cursor 를 남긴다.
 

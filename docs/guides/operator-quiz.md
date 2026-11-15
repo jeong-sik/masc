@@ -169,14 +169,43 @@ selection = "latest_completed"
 
 `since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
-선언이 저장되지 않을 때 나오는 문구는 두 갈래다. host 는 `sources` 항목의 모양을 먼저 보고, 그다음 `[binding]` 을 패키지의 스키마에 대어 본다.
+`[binding]` 을 잘못 적으면 선언이 저장되지 않는다. host 는 아래 순서로 보고, 처음 걸린 문구 하나만 낸다.
 
-- `sources` 항목이 틀리면 그 항목을 말하는 문구가 나온다. 위처럼 `language`·`timezone` 이 source 항목 아래에 놓이면 `lane_output contains duplicate or unknown fields` 다. `selection` 이 빠지면 `lane_output selection must be latest_completed`, `sources` 가 배열이 아니면 `binding.sources requires an array of observation sources` 다.
-- `[binding]` 이 패키지의 스키마에 맞지 않으면 문구는 `lane binding must match exactly one schema alternative` 하나다. `since` 를 뺐을 때도, 수업을 묶지 않은 선언에 `since` 를 적었을 때도, 다른 칸이 틀렸을 때(빠진 `timezone`, 모르는 키, 틀린 `output_id`)도 같은 문구가 나온다. 어느 칸이 틀렸는지는 나오지 않는다(#52319).
+| 순서 | host 가 보는 것 | 걸리는 예 | 문구 |
+| --- | --- | --- | --- |
+| 1 | 파일이 TOML 로 읽히는가 | `sources = []` 를 지우지 않고 `[[binding.sources]]` 를 더했다 | `table [binding.sources] is duplicated by an array of tables [[binding.sources]]` |
+| 2 | 값이 날짜나 시각이 아닌가 | `since = 2026-11-12` | `binding.since: TOML date/time values are unsupported; use an explicit string` |
+| 3 | `sources` 항목의 모양 | `since`·`language`·`timezone` 이 `[[binding.sources]]` 아래에 있다 | `lane_output contains duplicate or unknown fields` |
+| 3 | | `selection` 이 없다 | `lane_output selection must be latest_completed` |
+| 3 | | `sources` 가 배열이 아니다 | `binding.sources requires an array of observation sources` |
+| 4 | `[binding]` 이 패키지의 스키마에 맞는가 | 아래 목록 | `lane binding must match exactly one schema alternative` |
+
+4 번 문구는 어느 칸이 틀렸는지 말하지 않는다(#52319). 이럴 때 나온다.
+
+- `since` 가 없다. 숫자가 아니다. 0 보다 작다.
+- 수업을 묶지 않은 선언에 `since` 가 있다.
+- `timezone` 이 없다. 패키지가 읽지 않는 키가 있다. `output_id` 가 `scenes` 가 아니다.
+
+`since` 는 Unix 시각(초)을 숫자로 적는다. 2 번 문구는 문자열로 적으라고 하지만, 문자열로 적은 `since` 는 4 번에서 걸린다.
 
 맞춰야 하는 것이 넷이다.
 
-- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. `records` 의 항목마다, 질문을 낸 세션이 멈춘 자리(cursor)가 남아 있으면 거기서부터 읽고 없으면 이 시각부터 읽는다. 처음에는 모든 항목에 그 자리가 없고, 나중에 더한 항목에도 없다. 이 시각부터 읽었는데 기록이 하나도 없던 항목에도 자리가 남지 않아, 다음 세션이 다시 이 시각부터 읽는다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
+- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다. 퀴즈가 읽기 시작하는 곳은 `records` 의 항목마다 따로 정해진다.
+
+  | 그 항목에 | 읽기 시작하는 곳 |
+  | --- | --- |
+  | 질문을 낸 세션이 멈춘 자리(cursor)가 남아 있다 | 그 자리 |
+  | 남은 자리가 없다 | `since` |
+
+  남은 자리가 없는 항목은 셋이다.
+
+  - 질문을 낸 세션이 읽은 적 없는 항목. 질문을 낸 적 없는 퀴즈는 모든 항목이 그렇다. 나중에 새 `source_id` 로 더한 항목도 그렇다.
+  - `since` 부터 읽었는데 기록이 하나도 없던 항목. 다음 세션이 다시 `since` 부터 읽는다. `github_pulls` 항목은 다를 수 있다. 그 사이에 PR 없이 들어간 커밋이 있으면 host 가 그 커밋을 지나친 자리를 남기고, 다음 세션은 그 자리부터 읽는다.
+  - 남은 자리를 host 가 모두 거절한 항목. host 는 저장소 항목에서 그 자리의 커밋이 기본 브랜치에 더는 없으면 거절한다. 거절당한 세션은 실패로 끝나고, 다음 세션은 그보다 앞서 남은 자리부터 읽는다. 그런 자리도 없으면 `since` 부터 읽는다.
+
+  자리는 `source_id` 로 찾는다. 뺐다가 같은 `source_id` 로 다시 더한 항목은 전에 멈춘 자리부터 읽는다.
+
+  질문을 낸 적 없는 퀴즈는 첫 수업과 같은 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. 이미 질문을 낸 퀴즈에 수업을 묶으면 퀴즈는 전에 멈춘 자리부터 읽는다. 수업이 그 자리보다 앞선 기록을 인용해도 퀴즈는 그 기록을 읽지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.
 - 두 선언이 같은 기록에 같은 `source_id` 를 써야 한다. 수업이 `board` 라고 부른 기록을 퀴즈가 `notes` 라고 부르면 같은 글이어도 맞지 않는다.
 - 퀴즈 Schedule 을 수업 Schedule 바로 뒤에 둔다. 이유는 아래 표에 있다.

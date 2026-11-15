@@ -25,23 +25,6 @@ let cleanup_dir dir =
   in
   if Sys.file_exists dir then rm dir
 
-let write_file path content =
-  let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
-
-let with_config_dir config_root f =
-  let prev = Sys.getenv_opt "MASC_CONFIG_DIR" in
-  Fun.protect
-    ~finally:(fun () ->
-      (match prev with
-       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
-       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-      Config_dir_resolver.reset ())
-    (fun () ->
-      Unix.putenv "MASC_CONFIG_DIR" config_root;
-      Config_dir_resolver.reset ();
-      f ())
-
 let setup_workspace config =
   (* Use Workspace.init to properly initialize MASC *)
   ignore (Lib.Workspace.init config ~agent_name:(Some "test-agent"))

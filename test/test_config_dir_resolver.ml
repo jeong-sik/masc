@@ -46,19 +46,6 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
-let string_contains ~needle haystack =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  let rec loop idx =
-    if idx + needle_len > hay_len then
-      false
-    else if String.sub haystack idx needle_len = needle then
-      true
-    else
-      loop (idx + 1)
-  in
-  if needle_len = 0 then true else loop 0
-
 let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");

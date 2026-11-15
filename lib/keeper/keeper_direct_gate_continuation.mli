@@ -30,7 +30,9 @@ val pending : base_path:string -> keeper_name:string -> operation_id:Keeper_chat
 
 (** Called by the official adapter's post-write callback. The inputs are the
     prepared arguments passed to that adapter, not serialized wire bytes. The
-    complete Gate message and stable replay identity must remain in those inputs. *)
+    complete Gate message and stable replay identity must remain in those inputs:
+    [transmitted] equals the prepared text, or [blocks] end with exactly the
+    prepared [resolution_blocks] of {!Keeper_gate_replay.model_message}. *)
 val observe_native_input : ?blocks:Agent_core.Types.content_block list -> prepared:Keeper_gate_replay.model_message -> config:Workspace.config -> user_message:string -> admission -> transmitted:string -> (unit, string) result
 (** Discharge only after transmitted input and a later native turn settled in the original session. *)
 val complete_native : config:Workspace.config -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->

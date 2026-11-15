@@ -41,8 +41,9 @@ function expiryWords(expiry: Expiry): string {
   }
 }
 
-/** What the page heard of a request whose end it does not know. */
-function unknownWords(problem: Shown): string {
+/** What the page heard of a request whose end it does not know. The
+    invitations panel says it in the same words. */
+export function unknownWords(problem: Shown): string {
   switch (problem.kind) {
     case 'unreachable': return '서버의 답을 받지 못했어요.'
     case 'unreadable': return '서버의 답을 읽지 못했어요.'

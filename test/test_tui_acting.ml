@@ -57,7 +57,15 @@ let observation ~keeper ~session ~completed : Observer.event =
 
 let text row =
   Printf.sprintf "%s %s %s | %s" (Acting.glyph_text row.Acting.glyph)
-    row.Acting.keeper row.Acting.label row.Acting.detail
+    (Acting.actor_text ~ko:false row.Acting.actor) row.Acting.label row.Acting.detail
+
+let actor =
+  testable
+    (fun ppf -> function
+      | Acting.Actor_named name -> Format.fprintf ppf "Actor_named %S" name
+      | Acting.Actor_unnamed -> Format.pp_print_string ppf "Actor_unnamed"
+      | Acting.Actor_server -> Format.pp_print_string ppf "Actor_server")
+    ( = )
 
 let entries_of events =
   (* Newest first, as the screen holds them; arrival follows list order. *)
@@ -374,7 +382,7 @@ let test_a_stream_frame_draws_its_keeper_and_what_it_was () =
          { keeper = "test-keeper"; operation_id = "op"; seq = None
          ; frame = Some "CUSTOM KEEPER_TOOL_RESULT_READY"; at = 1787507570.5 })
   in
-  check string "keeper" "test-keeper" row.Acting.keeper;
+  check actor "keeper" (Acting.Actor_named "test-keeper") row.Acting.actor;
   check bool "the row wears the feed's clock, not the frame's" true
     (Float.equal row.Acting.at 100.);
   check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
@@ -390,7 +398,7 @@ let test_a_fusion_status_row_names_the_owning_keeper () =
       (Observer.Fusion_run_status
          { keeper = "polisher"; run_id = "kmsg-f04701e2"; status = "completed" })
   in
-  check string "keeper" "polisher" row.Acting.keeper;
+  check actor "keeper" (Acting.Actor_named "polisher") row.Acting.actor;
   check string "label" "fusion" row.Acting.label;
   check string "detail carries status and run id"
     "completed \xc2\xb7 kmsg-f04701e2" row.Acting.detail
@@ -534,9 +542,9 @@ let test_an_observation_leaves_the_ring_with_its_calls () =
 let test_trimming_keeps_the_order_it_was_given () =
   let ring = [ settled "a"; heartbeat "b"; settled "c"; heartbeat "d"; settled "e" ] in
   let kept, dropped = Acting.retain ~actions:2 ~quiet:1 ~event_of:Fun.id ring in
-  check (list string) "newest of each class, in arrival order"
-    [ "a"; "b"; "c" ]
-    (List.map (fun e -> (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None e).Acting.keeper) kept);
+  check (list actor) "newest of each class, in arrival order"
+    [ Acting.Actor_named "a"; Acting.Actor_named "b"; Acting.Actor_named "c" ]
+    (List.map (fun e -> (Acting.row_of_event ~ko:false ~at:100. ~duration_ms:None e).Acting.actor) kept);
   check int "the rest is counted" 2 dropped
 
 (* The screen is a feed: rows are held and drawn in the order they arrived,
@@ -656,13 +664,55 @@ let test_a_lane_named_event_is_attributed_by_its_trace () =
   let traces =
     [ ("polisher", "trace-1787333554796-0001d"); ("largo", "trace-1787333554989-0001e") ]
   in
-  check string "the keeper whose trace the event carries" "largo"
-    (Acting.keeper_of_event ~traces on_lane);
-  check string "an unmatched trace keeps the lane name"
-    "agent_core-glm-coding.glm-5-turbo"
-    (Acting.keeper_of_event ~traces:[] on_lane);
-  check string "a keeper-named event keeps its keeper" "bandleader"
-    (Acting.keeper_of_event ~traces (heartbeat "bandleader"))
+  check actor "the keeper whose trace the event carries" (Acting.Actor_named "largo")
+    (Acting.actor_of_event ~traces on_lane);
+  check actor "an unmatched trace keeps the lane name"
+    (Acting.Actor_named "agent_core-glm-coding.glm-5-turbo")
+    (Acting.actor_of_event ~traces:[] on_lane);
+  check actor "a keeper-named event keeps its keeper" (Acting.Actor_named "bandleader")
+    (Acting.actor_of_event ~traces (heartbeat "bandleader"))
+
+(* A change of the whole workspace is the server's, and a Keeper named
+   [server] is that Keeper. Were they one value, the Activity pane's Changes
+   tab would read every queue or dataset change as the selected Keeper acting
+   when that Keeper is named server (#51699). *)
+let test_the_server_is_not_a_keeper_named_server () =
+  List.iter
+    (fun (what, event) ->
+      check actor (what ^ " is the server's") Acting.Actor_server
+        (Acting.actor_of_event ~traces:[] event);
+      check actor (what ^ ": the flat row agrees") Acting.Actor_server
+        (Acting.keeper_row_of_entry ~ko:false ~traces:[] ~duration_ms:None
+           { Acting.ae_at = 100.; ae_event = event })
+          .Acting.actor)
+    [ ("the approval queue", Observer.Approval_change Observer.Approval_queue_changed)
+    ; ("the Goal dataset", Observer.Dataset_changed Masc.Workspace_dataset_event.Goals)
+    ; ("the schedule store", Observer.Workspace_store_changed Observer.Schedule_store)
+    ];
+  check actor "a Keeper named server is that Keeper" (Acting.Actor_named "server")
+    (Acting.actor_of_event ~traces:[] (heartbeat "server"));
+  check actor "and so is its own Gate settings change" (Acting.Actor_named "server")
+    (Acting.actor_of_event ~traces:[]
+       (Observer.Approval_change
+          (Observer.Gate_keeper_settings_changed { keeper = "server" })))
+
+(* A frame that names no trace and no agent is nobody's: it is not filed as a
+   keeper's turn under the no-value mark, and the Turns scope draws it as its
+   own row. *)
+let test_a_nameless_frame_is_nobodys () =
+  let nameless =
+    match agent_core ~tool:"Grep" "unused" with
+    | Observer.Agent_core e -> Observer.Agent_core { e with Observer.agent = None }
+    | other -> other
+  in
+  check actor "the event names no one" Acting.Actor_unnamed
+    (Acting.actor_of_event ~traces:[] nameless);
+  check int "it opens no keeper turn" 0
+    (List.length (Acting.chunks ~traces:[] (entries_of [ nameless ])));
+  check (list actor) "Turns draws it as its own row" [ Acting.Actor_unnamed ]
+    (List.map
+       (fun (row : Acting.row) -> row.Acting.actor)
+       (Acting.chunk_rows ~ko:false ~traces:[] (entries_of [ nameless ])))
 
 let test_elapsed_text_picks_a_unit () =
   check (list (option string)) "ms, seconds, minutes"
@@ -1050,18 +1100,18 @@ let test_turns_names_the_keeper_of_a_plain_correlated_event () =
         Observer.Agent_core { e with Observer.correlation = Some "trace-1" }
     | other -> other
   in
-  let keepers rows = List.map (fun (row : Acting.row) -> row.Acting.keeper) rows in
-  check (list string) "Turns draws the row under the keeper the trace names"
-    [ "keeper-one" ]
+  let keepers rows = List.map (fun (row : Acting.row) -> row.Acting.actor) rows in
+  check (list actor) "Turns draws the row under the keeper the trace names"
+    [ Acting.Actor_named "keeper-one" ]
     (keepers (Acting.chunk_rows ~ko:false ~traces (entries_of [ started ])));
-  check (list string) "the flat scopes draw the same event under the same keeper"
-    [ "keeper-one" ]
+  check (list actor) "the flat scopes draw the same event under the same keeper"
+    [ Acting.Actor_named "keeper-one" ]
     (List.map
        (fun entry ->
-          (Acting.keeper_row_of_entry ~ko:false ~traces ~duration_ms:None entry).Acting.keeper)
+          (Acting.keeper_row_of_entry ~ko:false ~traces ~duration_ms:None entry).Acting.actor)
        (entries_of [ started ]));
-  check (list string) "without a trace for it the agent name stays"
-    [ lane ]
+  check (list actor) "without a trace for it the agent name stays"
+    [ Acting.Actor_named lane ]
     (keepers (Acting.chunk_rows ~ko:false ~traces:[] (entries_of [ started ])))
 
 let test_measuring_reads_what_the_row_draws () =
@@ -1073,7 +1123,7 @@ let test_measuring_reads_what_the_row_draws () =
     | other -> other
   in
   let drawn event =
-    Acting.measured_of_row
+    Acting.measured_of_row ~ko:false
       (Acting.keeper_row_of_entry ~ko:false ~traces ~duration_ms:None
          { Acting.ae_at = 100.; ae_event = event })
   in
@@ -1105,8 +1155,8 @@ let test_measuring_reads_what_the_row_draws () =
     Acting.row_of_entry ~ko:false ~duration_ms:None
       { Acting.ae_at = 100.; ae_event = correlated }
   in
-  check string "which is not the lane the feed named"
-    "agent_core-glm-coding.glm-5-turbo" unrenamed.Acting.keeper
+  check actor "which is not the lane the feed named"
+    (Acting.Actor_named "agent_core-glm-coding.glm-5-turbo") unrenamed.Acting.actor
 
 let () =
   run "tui acting"
@@ -1145,6 +1195,10 @@ let () =
             test_a_return_with_no_start_held_has_no_duration
         ; test_case "a lane-named event is attributed by its trace" `Quick
             test_a_lane_named_event_is_attributed_by_its_trace
+        ; test_case "the server is not a keeper named server" `Quick
+            test_the_server_is_not_a_keeper_named_server
+        ; test_case "a nameless frame is nobody's" `Quick
+            test_a_nameless_frame_is_nobodys
         ; test_case "elapsed text picks a unit" `Quick test_elapsed_text_picks_a_unit
         ; test_case "turns fold the two planes into one row per turn" `Quick
             test_turns_fold_the_two_planes_into_one_row_per_turn

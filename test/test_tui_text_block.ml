@@ -73,8 +73,20 @@ let test_preformatted_rows_are_still_neutralised () =
     false
     (String.exists (fun c -> Char.code c = 0x1b) drawn)
 
+(* The styled reader takes a line's indent partly as a count beside its text,
+   as a block line under a nested member arrives. Half of a line's opening
+   spaces go over as the count and the rest stay in the text, so both kinds
+   of indent are read in every case below. *)
 let styled ~max_cells text =
-  Masc_tui_text_block.preformatted_styled_rows ~max_cells text
+  String.split_on_char '\n' text
+  |> List.map (fun line ->
+    let opening =
+      String.length line
+      - String.length (Astring.String.drop ~sat:(Char.equal ' ') line)
+    in
+    let counted = opening / 2 in
+    counted, String.sub line counted (String.length line - counted))
+  |> Masc_tui_text_block.preformatted_styled_rows ~max_cells
 
 let reset = Masc_tui_ansi.Ansi.reset
 

@@ -54,7 +54,11 @@ let extract_generated_nickname_prefix name =
    above, so the two paths cannot drift. Keeper aliases use a different
    canonical shape (keeper-<name>-agent) and must resolve to the middle segment
    so keeper-scoped credentials can be stored under the stable keeper name
-   rather than the transport alias. Covered by the nickname fallback tests. *)
+   rather than the transport alias. Covered by the nickname fallback tests.
+   That shape is the only one the keeper- prefix decides: any other keeper-*
+   name goes through the generated-nickname check like every other name. A
+   name that must sign in with another name's credential gets a stored alias
+   ([Auth.ensure_credential_alias]). *)
 let keeper_transport_alias_stable_name name =
   match String.split_on_char '-' name with
   | "keeper" :: rest ->
@@ -64,13 +68,18 @@ let keeper_transport_alias_stable_name name =
   | _ -> None
 ;;
 
+(* HIGH-RISK-UNREVIEWED: decides which credential owner a name without its own
+   credential file may sign in as ([credential_agent_name], read by
+   [Auth_credential_token.verify_token_owner_alias]).
+
+   Only the transport alias shape and a generated nickname name an owner. A
+   keeper- prefix alone does not: treating it as the owner would let the token
+   of the credential "keeper" authenticate keeper-evil or any other
+   unregistered keeper-* name (#44137). *)
 let extract_agent_type_prefix name =
   match keeper_transport_alias_stable_name name with
   | Some stable_name -> Some stable_name
-  | None ->
-    (match String.split_on_char '-' name with
-     | "keeper" :: _ -> Some "keeper"
-     | _ -> extract_generated_nickname_prefix name)
+  | None -> extract_generated_nickname_prefix name
 ;;
 
 let credential_agent_name agent_name =

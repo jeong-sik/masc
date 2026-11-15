@@ -115,9 +115,11 @@ let count marker text =
   in
   go 0 0
 
+(* The document's text as {!Tool_detail.structured} spells it out, each line
+   at its indent. *)
 let document_exn ?palette payload =
   match Tool_detail.document ?palette payload with
-  | Some text -> text
+  | Some _ -> Tool_detail.structured ?palette payload
   | None -> failf "%s is a JSON object or array" payload
 
 let test_the_palette_adds_markers_and_nothing_else () =
@@ -247,13 +249,11 @@ let test_a_document_is_terminal_safe () =
         ])
   in
   check bool "the payload carries hostile bytes to begin with" true (hostile_in payload);
-  match Tool_detail.document payload, Tool_detail.document ~palette:marked payload with
-  | Some plain_text, Some painted ->
-    check bool "a plain document carries no hostile byte" false (hostile_in plain_text);
-    check bool "nor does a painted one" false (hostile_in painted);
-    check bool "a key is painted" true (holds "<key>" painted);
-    check bool "a string is painted" true (holds "<str>" painted)
-  | _ -> fail "a JSON object is a document"
+  let plain_text = document_exn payload and painted = document_exn ~palette:marked payload in
+  check bool "a plain document carries no hostile byte" false (hostile_in plain_text);
+  check bool "nor does a painted one" false (hostile_in painted);
+  check bool "a key is painted" true (holds "<key>" painted);
+  check bool "a string is painted" true (holds "<str>" painted)
 
 let numbers_json_cannot_write =
   [ "[NaN]", "NaN"
@@ -296,7 +296,7 @@ let not_documents =
 let test_anything_else_is_not_a_document () =
   List.iter
     (fun payload ->
-      check (option string) (Printf.sprintf "%S" payload) None
+      check (option (list (pair int string))) (Printf.sprintf "%S" payload) None
         (Tool_detail.document payload))
     not_documents
 

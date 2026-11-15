@@ -116,7 +116,28 @@ let test_byte_holder () =
      | Error Unavailable -> ()
      | _ -> Alcotest.fail "the kernel answered about a byte before the file");
     Alcotest.check Alcotest.int "nothing was written to the file" 0 (Unix.fstat fd).Unix.st_size)
+(* The holder of the lease is read without a handle on it: the process that
+   holds the lock while it holds it, and nobody before or after. A lock of
+   this process is not what the kernel names. *)
+let test_lease_holder () =
+  let path = Filename.temp_file "masc-identity-fixture-" ".lock" in
+  let fd = Unix.openfile path [Unix.O_RDWR] 0o600 in
+  let label = function
+    | Ok pid -> Printf.sprintf "pid %d" pid
+    | Error Owner_process_identity.No_owner -> "nobody"
+    | Error (Owner_changed | Unsupported | Unavailable | Closed) -> "unread" in
+  let read () = label (Owner_process_identity.lease_holder ~lease_fd:fd) in
+  Fun.protect ~finally:(fun () -> Unix.close fd; Sys.remove path) (fun () ->
+    Alcotest.(check string) "a lease nobody holds" "nobody" (read ());
+    with_child_lock fd ~byte:0 ~length:0 (fun child ->
+      Alcotest.(check string) "the process that holds the lease" (label (Ok child)) (read ()));
+    Alcotest.(check string) "a lease whose holder is gone" "nobody" (read ());
+    let own = Unix.openfile path [Unix.O_RDWR] 0o600 in
+    Fun.protect ~finally:(fun () -> Unix.close own) (fun () ->
+      Unix.lockf own Unix.F_TLOCK 0;
+      Alcotest.(check string) "a lease this process holds" "nobody" (read ())))
 let () = Alcotest.run "owner process identity"
-  ["lease owner",[Alcotest.test_case "owned child graceful signal" `Quick test_kernel_owner_graceful_signal];
+  ["lease owner",[Alcotest.test_case "owned child graceful signal" `Quick test_kernel_owner_graceful_signal;
+     Alcotest.test_case "the holder of the lease, without a handle" `Quick test_lease_holder];
    "held byte",[Alcotest.test_case "the holder and the byte of a lock, while it is held" `Quick test_held_byte;
      Alcotest.test_case "the holder of one byte, beside other locks" `Quick test_byte_holder]]

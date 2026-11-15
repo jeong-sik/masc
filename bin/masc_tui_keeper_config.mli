@@ -90,8 +90,31 @@ type system_prompt_unavailable_reason =
 (** The typed refusal reason a turn's system prompt carries. [Workspace_unavailable]
     names the endpoint workspace the server could not resolve, with no path field. *)
 
+type ledger_line_end =
+  | Newline_terminated
+  | Unterminated_final_line
+(** Whether a newline followed the rejected line. Only the ledger's last line
+    can lack one. *)
+
+type ledger_rejected_line =
+  { line : int  (** 1-based line number in the ledger file. *)
+  ; line_end : ledger_line_end
+  ; detail : string
+  }
+
+type constitution_ledger_view =
+  | Ledger_read of ledger_rejected_line list
+      (** The ledger was read; these lines did not decode and are not in the
+          prompt. An empty list means every line decoded. *)
+  | Ledger_unreadable of { path : string; detail : string }
+      (** The preview could not re-read the ledger, so which lines the prompt
+          left out is unknown. *)
+
 type system_prompt_view =
-  | System_prompt_available of { effective : string }
+  | System_prompt_available of
+      { effective : string
+      ; constitution_ledger : constitution_ledger_view
+      }
   | System_prompt_unavailable of
       { reason : system_prompt_unavailable_reason
       ; detail : string
@@ -100,7 +123,9 @@ type system_prompt_view =
 
 val system_prompt_view_of_json : Yojson.Safe.t option -> system_prompt_view
 (** Decode the prompt.system_prompt member. A shape this reader does not know
-    is [System_prompt_undecodable], never mistaken for a not-declared prompt. *)
+    is [System_prompt_undecodable], never mistaken for a not-declared prompt.
+    An available prompt without a decodable [constitution_ledger] is
+    undecodable too, never a ledger with nothing left out. *)
 
 val sandbox_patch : profile:Keeper_sandbox_config.sandbox_profile -> Yojson.Safe.t -> (Yojson.Safe.t option, string) result
 (** Prepare the Sandbox selection using this snapshot's composite revision.

@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardGoalDetailResponse,
   DashboardGoalsTreeResponse,
+  GoalDetailKeeper,
+  GoalKeeperTrustSummary,
   GoalTreeNode,
 } from '../../types'
 import { hydrateGoalTreeError, hydrateGoalTreeSnapshot } from '../../goal-tree-state'
+import { attentionReasonLabel } from '../../lib/keeper-attention-labels'
+import { operatorDispositionReasonLabel } from '../fsm-hub-types'
 import { observeGoalIds } from '../../lib/goal-identity'
 import { DASHBOARD_AGENT_NAME_KEY, persistDashboardActorName, resolveDashboardActorName } from '../../lib/dashboard-actor'
 
@@ -449,6 +453,37 @@ describe('GoalTree', () => {
     resolveTree(tree)
     await waitFor(() => expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledTimes(2))
     expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(goal.id)
+  })
+
+  // The keeper card names why the trust snapshot flagged a Keeper, and the
+  // snapshot sends that reason as a wire token. A receipt reason the summary
+  // already names stays a single line.
+  it('names a linked keeper trust reason by its label, not the wire token', async () => {
+    const goal = makeGoal('goal-keeper-trust', 'Keeper trust')
+    const keeper = (name: string, runtime_trust: GoalKeeperTrustSummary): GoalDetailKeeper => ({
+      name, current_task_id: null, sandbox_profile: 'docker', network_mode: 'inherit', runtime_id: 'primary',
+      runtime_outcome: null, latest_execution_outcome: null, latest_execution_at: null, latest_receipt: null,
+      runtime_trust, latest_causal_event: null,
+    })
+    mocks.fetchDashboardGoalsTree.mockResolvedValue({ approval_queue_state: { state: 'ready' }, tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1 } })
+    mocks.fetchDashboardGoalDetail.mockResolvedValue({ goal, linked_tasks: [], approvals: [], execution_receipts: [],
+      timeline: [], linked_keepers: [
+        keeper('keeper-deciding', { disposition: 'Alert', disposition_reason: 'pending_operator_decision' }),
+        keeper('keeper-fallback', { disposition: 'Pass', disposition_reason: 'runtime_fallback',
+          operator_disposition_reason: 'runtime_fallback' }),
+      ] } satisfies DashboardGoalDetailResponse)
+    render(html`<${GoalTree} />`)
+    fireEvent.click(await screen.findByRole('button', { name: 'evidence' }))
+    try {
+      await screen.findByText('keeper-deciding')
+      expect(screen.getByText(attentionReasonLabel('pending_operator_decision', false)!)).toBeTruthy()
+      expect(screen.queryByText('pending_operator_decision')).toBeNull()
+      expect(screen.getByText(attentionReasonLabel('runtime_fallback', false)!)).toBeTruthy()
+      expect(screen.queryByText(`운영자 ${operatorDispositionReasonLabel('runtime_fallback')}`)).toBeNull()
+    } finally {
+      fireEvent.click(screen.getByRole('button', { name: 'summary' }))
+    }
   })
 
   it('recovers an expired credential refused by the current detail read', async () => {

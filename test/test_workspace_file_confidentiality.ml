@@ -1038,6 +1038,154 @@ let test_file_read_rejects_lost_scope lost () =
             check string "the same-named project file really exists" project_content
               Yojson.Safe.Util.(body |> member "content" |> to_string)))))
 
+(* The production router over a fresh project workspace, read without a
+   credential the way a Public_read route is reached. [get route params] sends a
+   GET with the workspace precondition bound. *)
+let with_workspace_read_routes f =
+  let old_state = Server_auth.For_testing.snapshot_server_state () in
+  let old_startup = Masc.Server_startup_state.snapshot () in
+  let old_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state old_state;
+      Masc.Server_startup_state.For_testing.restore old_startup;
+      match old_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+    (fun () ->
+      Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "0") (fun () ->
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+          (fun () -> with_temp_dir (fun base_path ->
+            Masc.Board.reset_global_for_test ();
+            Masc.Board_dispatch.reset_for_test ();
+            let state = Masc.Mcp_server.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path in
+            let config = Masc.Mcp_server.workspace_config state in
+            ignore (Masc.Workspace.init config ~agent_name:None);
+            Masc.Mcp_server.For_testing.await_publication_recovery_initialization state;
+            Server_auth.For_testing.restore_server_state (Some state);
+            (match Masc.Server_startup_state.mark_state_ready () with
+             | Ok () -> ()
+             | Error error -> fail (Masc.Server_startup_state.state_ready_error_to_string error));
+            let encode = Uri.pct_encode ~component:`Query_value in
+            let binding = "expected_base_path=" ^ encode (Unix.realpath base_path)
+              ^ "&expected_masc_root=" ^ encode (Unix.realpath (Masc.Workspace.masc_dir config)) in
+            let router = W.add_routes (Masc.Http_server_eio.Router.create ()) in
+            let get route params =
+              workspace_http_response ~router
+                (route ^ "?" ^ binding
+                 ^ String.concat "" (List.map (fun (key, value) -> "&" ^ key ^ "=" ^ encode value) params))
+            in
+            f ~base_path ~get))))
+
+(* The console lines logged while [f] runs. *)
+let with_logged_lines f =
+  let lines = ref [] in
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun line -> lines := line :: !lines));
+  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+    f (fun () -> !lines))
+
+let logged lines needle =
+  List.exists (fun line -> String_util.contains_substring line needle) lines
+
+let check_fixed_internal_error label status body =
+  check_workspace_http_status label 500 status body;
+  check (testable Yojson.Safe.pp Yojson.Safe.equal)
+    (label ^ ": the body is the fixed sentence of every 500")
+    (`Assoc [ ("ok", `Bool false)
+            ; ("error", `String Masc.Http_error_body.internal_server_error) ])
+    body
+
+(* Git's own words about a failed read stay in the server log (#48500). The
+   detail each route used to answer with is computed first, from the same
+   checkout, so the case also proves the log keeps the reason the body drops. *)
+let test_failed_git_reads_answer_a_fixed_500 () =
+  with_workspace_read_routes (fun ~base_path ~get ->
+    write_file (Filename.concat base_path ".git") "gitdir: missing-git-dir\n";
+    let base = base_path in
+    (* [base] is the project root the routes resolve for a request without
+       [repo_id] or [keeper]. *)
+    let failures =
+      [ ( "/api/v1/workspace/files", [ ("path", "") ]
+        , match W.For_testing.workspace_file_catalog ~base ~path:"" with
+          | Error (W.Catalog_scan_failed detail) -> detail
+          | Ok _ | Error _ -> fail "a broken checkout did not fail its file scan" )
+      ; ( "/api/v1/git/branches", [ ("path", "") ]
+        , match W.For_testing.workspace_branches ~base ~path:"" with
+          | Error (W.Branches_failed detail) -> detail
+          | Ok _ | Error _ -> fail "a broken checkout did not fail its branch list" )
+      ; ( "/api/v1/git/worktrees", [ ("path", "") ]
+        , match W.For_testing.workspace_worktrees ~base ~path:"" with
+          | Error (W.Worktrees_failed detail) -> detail
+          | Ok _ | Error _ -> fail "a broken checkout did not fail its worktree list" )
+      ; ( "/api/v1/workspace/search", [ ("path", ""); ("q", "needle") ]
+        , match W.For_testing.workspace_search ~base ~path:"" ~query:"needle" ~ignore_case:false with
+          | Error (W.Search_failed detail) -> detail
+          | Ok _ | Error _ -> fail "a broken checkout did not fail its search" )
+      ; ( "/api/v1/git/status", []
+        , match Repo_git.status_snapshot_at ~local_path:base () with
+          | Error detail -> detail
+          | Ok _ -> fail "a broken checkout did not fail its status" )
+      ]
+    in
+    List.iter
+      (fun (route, params, detail) ->
+        with_logged_lines (fun lines ->
+          let status, body = get route params in
+          check_fixed_internal_error route status body;
+          check bool (route ^ ": the withheld detail is logged") true
+            (logged (lines ()) detail)))
+      failures)
+
+(* A search git abandons midway, the way the inspection deadline stops it,
+   exits with nothing on standard error; what it had printed is the rows it
+   found. Here that is a line of a tracked [.env], which the file reader refuses
+   to serve, so it reaches neither the client nor the log. *)
+let test_search_stopped_midway_keeps_found_lines_out () =
+  with_workspace_read_routes (fun ~base_path ~get ->
+    catalog_git ~cwd:base_path [ "init"; "-b"; "main" ];
+    let secret = "value-only-in-the-env-file" in
+    write_file (Filename.concat base_path ".env") ("LEAKCHECK=" ^ secret ^ "\n");
+    catalog_git ~cwd:base_path [ "add"; "--"; ".env" ];
+    let inherited_path =
+      match Sys.getenv_opt "PATH" with
+      | Some path -> path
+      | None -> fail "PATH is unset"
+    in
+    let real_git =
+      match
+        List.find_opt
+          (fun dir -> Sys.file_exists (Filename.concat dir "git"))
+          (String.split_on_char ':' inherited_path)
+      with
+      | Some dir -> Filename.concat dir "git"
+      | None -> fail "git is not on PATH"
+    in
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git
+      (Printf.sprintf
+         "#!/bin/sh\n\
+          for arg in \"$@\"; do\n\
+         \  if [ \"$arg\" = grep ]; then %s \"$@\" 2>/dev/null; exit 124; fi\n\
+          done\n\
+          exec %s \"$@\"\n"
+         (Filename.quote real_git) (Filename.quote real_git));
+    Unix.chmod fake_git 0o700;
+    Masc_test_deps.with_process_env "PATH" (Some (fake_bin ^ ":" ^ inherited_path)) (fun () ->
+      with_logged_lines (fun lines ->
+        let status, body = get "/api/v1/workspace/search" [ ("path", ""); ("q", "LEAKCHECK") ] in
+        check_fixed_internal_error "stopped search" status body;
+        check bool "the failed search is logged" true (logged (lines ()) "workspace_search");
+        check bool "no found line reaches the log" false (logged (lines ()) secret))))
+
 let with_save_files f =
   let old_fs = Fs_compat.get_fs_opt () in
   Fun.protect ~finally:(fun () -> match old_fs with
@@ -1397,6 +1545,12 @@ let () =
             test_search_says_so_when_one_file_hit_the_per_file_cap
         ; test_case "caps the answer and says so" `Quick
             test_search_caps_the_answer_and_says_so
+        ] )
+    ; ( "failed Git reads"
+      , [ test_case "answer a fixed 500 and log what Git said" `Quick
+            test_failed_git_reads_answer_a_fixed_500
+        ; test_case "a search stopped midway keeps found lines out" `Quick
+            test_search_stopped_midway_keeps_found_lines_out
         ] )
     ; ( "selected file scope"
       , [ test_case "removed repository registration cannot read project file" `Quick

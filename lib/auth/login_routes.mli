@@ -62,7 +62,8 @@ type t =
   ; now : unit -> Ptime.t  (** The wall clock. *)
   ; draw : unit -> string
         (** 32 random bytes as lowercase hex ({!Random_id.hex} in the server):
-            user ids, namespaces, session ids, and the nonce of a page. *)
+            user ids, namespaces and session ids. A page draws its nonce with
+            {!Account_page.Nonce.draw}. *)
   }
 
 (** [POST /auth/oidc/start] and [POST /auth/github/start].
@@ -134,13 +135,24 @@ val acting
   -> Authz_browser_request.request
   -> (Authz_browser_session.Cookie.t * Authz_browser_session.signed_in, answer) result
 
+(** For a route that reads the state for the person of a session and makes no
+    commit (the PAT list of plan C4-10): the session that [request] acts
+    through, and the state of the trusted snapshot ({!Authz_zone.read}) that
+    judged it. A read that allows something without a commit reads a trusted
+    snapshot, so the route answers from this state and reads the zone no
+    second time: the session and what the route answers then agree. The error
+    is the refusal of {!acting}. *)
+val acting_reading
+  :  t
+  -> Authz_browser_request.request
+  -> (Authz_browser_session.signed_in * Authz_state.t, answer) result
+
 (** For a route that reads the state of an installation for an Admin (the
-    allowlist of plan L2d): the state of the snapshot that judged the session
-    of [request], once the principal of that session is an Admin in the same
-    snapshot. A read that allows something without a commit reads a trusted
-    snapshot ({!Authz_zone.read}), and the session, the role and what the
-    route answers then agree. The error is the refusal of {!acting}, or a 403
-    JSON [{"error": ...}] for a principal that is not an Admin. *)
+    allowlist of plan L2d): the state of {!acting_reading}, once the principal
+    of that session is an Admin in the same snapshot. The session, the role
+    and what the route answers then agree. The error is the refusal of
+    {!acting}, or a 403 JSON [{"error": ...}] for a principal that is not an
+    Admin. *)
 val admin_reading : t -> Authz_browser_request.request -> (Authz_state.t, answer) result
 
 (** A JSON object answer with [cache-control: no-store]. *)

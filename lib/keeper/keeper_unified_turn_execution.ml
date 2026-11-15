@@ -18,10 +18,6 @@ type declared_lane_failure =
   | Provider_context_overflow
   | Declared_runtime_lane_exhausted
 
-(* Only the context-window axis classifies as [Provider_context_overflow]:
-   that branch below publishes the cascade reason and the execution-error
-   phase [provider_context_overflow], which would be wrong for a
-   declared-byte refusal. *)
 (* How this lane continues after a failed turn. It restarts its cycle: the next
    cycle is a new turn, and a hint that named the path this one failed on would
    become [turn_state.deferred_runtime_lane] below and start the next cycle on
@@ -32,11 +28,40 @@ let lane_retry_continuation = Keeper_turn_driver.Restart_cycle
 (* The paused agent's question is logged cut to this many bytes. *)
 let input_required_question_log_max_bytes = 80
 
-let declared_lane_failure_of_error err =
-  match capacity_refusal_of_error err with
-  | Some (Provider_context_window _) -> Provider_context_overflow
-  | Some (Provider_request_body_refusal _)
-  | None -> Declared_runtime_lane_exhausted
+(* Only a typed provider context-window refusal is [Provider_context_overflow]:
+   that branch below publishes the cascade reason and the execution-error
+   phase [provider_context_overflow], which would be wrong for the provider's
+   refusal of the request body. A serving-constraint boundary or an
+   unmeasurable token count is not a context window either. A limit the
+   provider reported stays in [err] and reaches the cascade resolution's
+   error message through [Agent_core.Error.to_string]. *)
+let declared_lane_failure_of_error (err : Agent_core.Error.t) =
+  match err with
+  | Agent_core.Error.Api (ContextOverflow _) -> Provider_context_overflow
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason =
+             ( Request_body_refused_by_provider _
+             | Json_parse_error
+             | Attempt_rejected
+             | Refusal_body_not_received
+             | Unknown_invalid_request )
+         ; _
+         })
+  | Agent_core.Error.Api (InputCapacity _)
+  | Agent_core.Error.Api
+      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
+      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
+    Declared_runtime_lane_exhausted
 
 let run_provider_dispatch_if_authorized ~before_dispatch_authority dispatch =
   match before_dispatch_authority () with

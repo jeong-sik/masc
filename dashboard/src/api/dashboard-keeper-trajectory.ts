@@ -37,7 +37,6 @@ export type TrajectoryEntry = {
 export type TrajectoryResponse = {
   keeper: string
   trace_id: string
-  total_entries: number
   showing: number
   entries: TrajectoryEntry[]
 }

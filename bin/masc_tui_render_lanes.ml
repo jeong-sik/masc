@@ -753,10 +753,6 @@ let render_exact_lane_provider_editor (state : state) editor =
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 let render_lanes_overview (state : state) =
-  match state.slot_editor with
-  | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
-    render_exact_lane_provider_editor state editor
-  | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
@@ -2538,7 +2534,8 @@ let render_lane_inventory_detail (state : state) target =
   in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
     ~surface_key:"lane-inventory-detail" ~path
-    ~hints:(Masc_tui_keys.footer_hints_lane_inventory_detail ~lang:state.ui_language)
+    ~hints:(Masc_tui_keys.footer_hints_lane_inventory_detail ~lang:state.ui_language
+              ~exact_models:(Option.is_some (Masc_tui_types.lanes_screen_standalone_lane state)))
     content
 
 let render_machine_activity (state : state) session =
@@ -2564,7 +2561,13 @@ let render_lanes (state : state) =
   | Some session -> render_machine_activity state session
   | None -> match Masc_tui_types.shown_exact_activity state with
   | Some session -> render_exact_activity state session
-  | None -> match state.lanes_mode with
+  (* The slot editor covers the overview or the inventory detail it was
+     opened from; [lanes_mode] keeps naming that screen for its Esc. *)
+  | None -> match state.slot_editor with
+  | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
+    render_exact_lane_provider_editor state editor
+  | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
+  match state.lanes_mode with
   | Lanes_overview -> render_lanes_overview state
   | Lanes_inventory_detail target -> render_lane_inventory_detail state target
   | Lanes_run_list lane -> render_lane_run_list state ~lane

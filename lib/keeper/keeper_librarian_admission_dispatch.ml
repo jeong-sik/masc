@@ -89,7 +89,7 @@ let resume ~store ~config ~reserved ~destination ~(original : Owner.retained)
     | Ok () -> call ~expected:destination ~original ~arguments in
   let decode_final json = Systhread_host.run ~label:"librarian-admission-decode-final"
     (fun () -> Capture.decode_final ~store capture json) in
-  let* resumed = Submit.resume ~store ~label:"Admission" ~original ~request:exact ~schema
+  let* resumed = Submit.resume_retained ~store ~label:"Admission" ~original ~request:exact ~schema
     ~decode_final ~prepare ~call ~terminal in
   match resumed with
   | Submit.Awaiting (wait, record) -> Ok (Pending (wait, record))

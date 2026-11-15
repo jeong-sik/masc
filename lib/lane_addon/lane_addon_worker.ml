@@ -228,7 +228,7 @@ let recover_stop ~clock ~control_timeout_sec ~mgr ~instance_id ~container_id ~en
   if not (Float.is_finite control_timeout_sec) || control_timeout_sec <= 0. then
     Error (Invalid_package "control_timeout_sec must be finite and positive")
   else if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
-  else if Option.exists (fun id -> not (Engine.valid_id id)) container_id then
+  else if Option.exists (fun id -> not (Engine.valid_id runtime id)) container_id then
     Error (engine_error runtime ~operation:"recover ownership" "invalid container ID")
   else
     let command = command_for runtime ~docker_command ~container_command in
@@ -392,7 +392,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     | Error error -> fail_start error
   in
   let id = String.trim created in
-  if not (Engine.valid_id id) || (runtime = Apple_container && not (String.equal id name)) then
+  if not (Engine.valid_id runtime id) || (runtime = Apple_container && not (String.equal id name)) then
     fail_start (engine_error runtime ~operation:"create" "invalid container ID")
   else begin
     identity := Some id;

@@ -20,8 +20,9 @@ file, so merging one does not make the other conflict.
   `가이드 없음(<target doc or 문서 없음>)`; the release counter also
   recognises the legacy English `No guide yet (` spelling but new notes
   should use the Korean one.
-- `python3 scripts/changelog-fragments.py check` validates the fragments; CI
-  runs it on every pull request.
+- `python3 scripts/changelog-fragments.py check` validates the fragments. On a
+  pull request the required `changes` check validates the fragments that pull
+  request adds or edits, and a malformed one blocks the merge.
 - At release, `scripts/bump-version.sh` runs
   `python3 scripts/changelog-fragments.py assemble`, which folds every
   fragment into `## [Unreleased]` of `CHANGELOG.md` (grouped by section, in

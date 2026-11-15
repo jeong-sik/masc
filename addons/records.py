@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -333,6 +334,23 @@ def grants_of_binding(binding: dict) -> tuple[Grant, ...]:
     if len({grant.source_id for grant in grants}) != len(grants):
         raise InvalidBinding("binding.records names a source twice")
     return tuple(grants)
+
+
+def since_of_binding(binding: dict) -> float:
+    """binding.since: the Unix time, in seconds, a first session reads from
+    while no earlier session has moved the cursor. The lesson always reads it;
+    a quiz reads it when it follows a lesson."""
+    since = binding.get("since")
+    problem = InvalidBinding("binding.since must be the Unix time, in seconds, the first session reads from")
+    if isinstance(since, bool) or not isinstance(since, (int, float)):
+        raise problem
+    try:
+        seconds = float(since)
+    except OverflowError as error:
+        raise problem from error
+    if not math.isfinite(seconds) or seconds < 0:
+        raise problem
+    return seconds
 
 
 # -- Read results, put back together. ---------------------------------------

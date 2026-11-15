@@ -3274,6 +3274,7 @@
 (include stanzas/test_keeper_owner.inc)
 (include stanzas/test_keeper_owner_open_native_call.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
+(include stanzas/test_keeper_chat_stream_keepalive_http.inc)
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
 
@@ -4032,7 +4033,8 @@
  (name test_tui_autonomous_journal)
  (modules test_tui_autonomous_journal)
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
-  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
+  masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_transcript
   masc_tui_keeper_chat_history masc_tui_render_chat masc_tui_image_preview masc_tui_message_layout
   masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane yojson))
 
@@ -5067,6 +5069,12 @@
  (modules test_tui_planning_detail)
  (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
 
+; #39571: a Goal at work past its due date stands apart from one due later.
+(test
+ (name test_tui_planning_due)
+ (modules test_tui_planning_due)
+ (libraries alcotest masc masc.masc_goal masc_tui_planning_due ptime))
+
 (test
  (name test_tui_roster_pane)
  (modules test_tui_roster_pane)
@@ -5316,6 +5324,7 @@
 (include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
+(include stanzas/test_tui_workspace_precondition.inc)
 (include stanzas/test_tui_wrap_words.inc)
 (include stanzas/test_tui_hint_lines.inc)
 (include stanzas/test_tui_numbered_list.inc)
@@ -5742,6 +5751,14 @@
  (modules test_exec_shim)
  (libraries masc_test_deps exec_ssh_protocol exec_shim))
 
+; #52033: the real shim started with a standard descriptor closed.
+(test
+ (name test_exec_shim_standard_descriptors)
+ (modules test_exec_shim_standard_descriptors)
+ (libraries alcotest exec_ssh_protocol exec_shim unix)
+ (deps ../bin/masc_exec_shim.exe)
+ (action (run %{test} %{dep:../bin/masc_exec_shim.exe})))
+
 (rule
  (alias runtest-test_shim_execution_receipts)
  (enabled_if (= %{system} linux))
@@ -5953,7 +5970,8 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix yojson masc masc.msx_lane masc_tui_types masc_tui_machine_live masc_tui_msx))
+ (libraries alcotest unix yojson masc masc.msx_lane masc_tui_types masc_tui_machine_live masc_tui_msx
+  masc_tui_message_layout))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
 ; shape, the malformed ones, and what a read does to the drawn view.
@@ -6092,12 +6110,20 @@
 
 (include stanzas/test_shipped_skills.inc)
 
+; Holds the lease of a workspace and announces a port for it, so the Python
+; tests can stand an HTTP peer in for the server the kernel names.
+(executable
+ (name hold_workspace_announcement)
+ (modules hold_workspace_announcement)
+ (libraries unix ipaddr masc.server masc.host_config))
+
 (rule
  (alias runtest-test_setup_cli)
- (deps test_setup_cli.py ../bin/main_eio.exe
+ (deps test_setup_cli.py ../bin/main_eio.exe hold_workspace_announcement.exe
        (source_tree ../scripts/fixtures/release-evidence))
  (action
-  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe})))
+  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe}
+   --announcer %{dep:hold_workspace_announcement.exe})))
 
 (alias
  (name runtest)
@@ -6359,13 +6385,20 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.host_config masc.fs_compat))
+ (libraries alcotest unix yojson eio eio.unix eio_main ipaddr masc masc.runtime masc.server masc.host_config
+  masc.fs_compat masc.http_client masc.masc_eio_context masc.owner_process_identity))
 
 (test
  (name test_upgrade_bearer_destination)
  (modules test_upgrade_bearer_destination)
  (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.fs_compat
   masc.http_client masc.masc_eio_context))
+
+; The lease owner test_onboarding_journey.py runs the setup stop against (#36877).
+(executable
+ (name setup_stop_owner_fixture)
+ (modules setup_stop_owner_fixture)
+ (libraries unix yojson ipaddr masc.server))
 
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
@@ -6476,7 +6509,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries masc.toml_line_editor alcotest yojson unix eio eio_main masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.masc_log masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -6546,7 +6579,10 @@
        ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py ../addons/records.py
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)
-       (glob_files ../addons/operator-quiz/prompts/*.md))
+       (glob_files ../addons/operator-quiz/prompts/*.md)
+       ; The operator lesson case loads its declaration.
+       ../docs/examples/lane-addons/operator-lesson.toml ../addons/operator-lesson/lane.toml
+       (glob_files ../addons/operator-lesson/schemas/*.json))
  (libraries alcotest masc masc.browser_lane masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
@@ -7530,3 +7566,5 @@
 (include stanzas/test_server_dashboard_keeper_decisions_current.inc)
 
 (include stanzas/test_http_response_content.inc)
+
+(include stanzas/test_tui_termios_reclaim.inc)

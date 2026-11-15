@@ -14,7 +14,8 @@ const started = frame('started', receipt('running'))
 const linked = frame('complete', receipt('complete', { account: 'linked', authentication: 'login_completed' }))
 /** The client took the last reply. */
 const took = frame('input_ready', {})
-const printed = (text: string): string => frame('output', { stream: 'terminal', text })
+const printed = (text: string): string => frame('output', { stream: 'stdout', text })
+const drawn = (text: string): string => frame('screen', { text })
 const stopped = (status: string): string => frame('error', { message: 'a sentence for the operator', ...receipt(status) })
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -224,6 +225,14 @@ describe('a login', () => {
     expect([model.view.value, refresh.mock.calls.length]).toEqual([
       { kind: 'failed', integrationId: 'claude_code', failure: { problem: { kind: 'unreachable' }, attempts: 1 } }, 0,
     ])
+  })
+
+  it('shows the screen a terminal client drew last, in place of the one before', async () => {
+    const { model, stream } = await following()
+    stream.say(drawn('⣷  Signing in...') + drawn('Select login method:\n> 1. Google OAuth'))
+    await flush()
+    const view = model.view.value
+    expect(view.kind === 'running' ? view.transcript : view.kind).toBe('Select login method:\n> 1. Google OAuth')
   })
 
   it('keeps the newest part of what the client printed, from a whole character on', async () => {

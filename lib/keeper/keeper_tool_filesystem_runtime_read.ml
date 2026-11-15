@@ -109,11 +109,8 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
   match cwd with
   | None -> Ok (Keeper_sandbox.host_root_abs_of_meta ~config meta)
   | Some raw_cwd ->
-    (* File tools keep the logical projection for cwd: a keeper-visible
-       relative cwd ("repos/<repo>") composed with a relative file_path is
-       established Read vocabulary (test_keeper_visible_path_projection).
-       Execute/search cwd goes through the strict no-projection resolvers
-       instead (keeper_tool_execute_path). *)
+    (* The same resolver names the cwd of Read, Grep and Execute:
+       [Keeper_tool_shared_runtime.host_path_of_keeper_visible_path]. *)
     let* cwd = resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd in
     let cwd_refusal reason = Error (Keeper_alerting_path.caller_refusal reason) in
     (* The hint scans the host playground, so it is only offered where the
@@ -173,14 +170,7 @@ let resolve_read_file_target
   else (
     let keeper_tree =
       let* cwd_abs = resolve_read_file_cwd ~config ~meta ~cwd in
-      let candidate =
-        if Filename.is_relative raw_path then Filename.concat cwd_abs raw_path else raw_path
-      in
-      resolve_projected_keeper_read_path
-        ~config
-        ~meta
-        ~raw_for_error:raw_path
-        ~projected_path:candidate
+      resolve_keeper_read_path_in_cwd ~config ~meta ~host_cwd:cwd_abs ~raw_path
     in
     match keeper_tree with
     | Ok path -> Ok (Keeper_tree_file path)

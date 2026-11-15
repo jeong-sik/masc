@@ -37,6 +37,7 @@ type installation =
   { routes : R.t
   ; zone : Z.t
   ; clock : int ref  (** Milliseconds since the epoch, read by the routes. *)
+  ; log_path : string
   ; admin : Bs.Cookie.t
   ; member : Bs.Cookie.t
   }
@@ -159,7 +160,7 @@ let with_installation f =
             | Ok (Authz_login.Admitted { user_id; _ }) -> session_for zone user_id
             | Ok (Authz_login.Signed_in _) | Error _ -> Alcotest.fail "the Member did not join"
           in
-          f { routes; zone; clock; admin; member }))
+          f { routes; zone; clock; log_path; admin; member }))
 ;;
 
 let code (answer : R.answer) = R.status_code answer.status
@@ -390,6 +391,74 @@ let a_request_that_is_refused () =
       (listed (P.list t.routes (read admin))))
 ;;
 
+(* Bytes another writer added to the log: the next issue finds the end moved
+   and stops the log. The PATs stay in the state the zone published, and the
+   list shows none of them: it answers from a snapshot the zone can be trusted
+   for, or with the 503 of a zone that cannot be trusted. *)
+let a_stopped_zone_lists_nothing () =
+  with_installation (fun t ->
+    let admin = Some t.admin in
+    let issued_before, (_ : Token.Pat.t) =
+      issued (P.issue t.routes (request admin) ~body:(issue_body "null"))
+    in
+    Alcotest.(check (list entry))
+      "listed while the zone can be trusted"
+      [ issued_before, "open", "null" ]
+      (listed (P.list t.routes (read admin)));
+    Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 t.log_path (fun channel ->
+      Out_channel.output_string channel "{}\n");
+    Alcotest.(check int)
+      "an issue on a log another writer moved"
+      503
+      (code (P.issue t.routes (request admin) ~body:(issue_body "null")));
+    let uncertain =
+      match Z.read t.zone with
+      | Error uncertain -> uncertain
+      | Ok (_ : Z.trusted) -> Alcotest.fail "the zone is trusted after its log was moved"
+    in
+    let answer = P.list t.routes (read admin) in
+    let expected = R.zone_uncertain uncertain in
+    Alcotest.(check int) "the list of a stopped zone" (code expected) (code answer);
+    Alcotest.(check string)
+      "with the refusal of a zone that cannot be trusted"
+      expected.R.body
+      answer.R.body)
+;;
+
+type other_writer =
+  | Waiting
+  | Issued of string  (** The id of the PAT it issued. *)
+
+(* Another request issues a PAT while this list is judged. The routes read the
+   clock for the expiry of the session once the trusted snapshot is taken, and
+   the other writer runs there, through routes that read the plain clock. The
+   list answers from the snapshot that judged the session, so that PAT is not
+   in this answer, and the next list shows it. *)
+let a_pat_issued_after_the_judgment_waits_for_the_next_list () =
+  with_installation (fun t ->
+    let admin = Some t.admin in
+    let writer = ref Waiting in
+    let now () =
+      (match !writer with
+       | Waiting ->
+         let pat_id, (_ : Token.Pat.t) =
+           issued (P.issue t.routes (request admin) ~body:(issue_body "null"))
+         in
+         writer := Issued pat_id
+       | Issued (_ : string) -> ());
+      instant_of_ms !(t.clock)
+    in
+    let answer = P.list { t.routes with R.now } (read admin) in
+    match !writer with
+    | Waiting -> Alcotest.fail "the other writer did not issue during the judgment"
+    | Issued pat_id ->
+      Alcotest.(check (list entry)) "the snapshot that judged the session" [] (listed answer);
+      Alcotest.(check (list entry))
+        "the next list"
+        [ pat_id, "open", "null" ]
+        (listed (P.list t.routes (read admin))))
+;;
+
 let () =
   Alcotest.run
     "login_pat_routes"
@@ -403,6 +472,11 @@ let () =
             `Quick
             a_person_sees_and_revokes_only_their_own
         ; Alcotest.test_case "refused" `Quick a_request_that_is_refused
+        ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_lists_nothing
+        ; Alcotest.test_case
+            "issued after the judgment"
+            `Quick
+            a_pat_issued_after_the_judgment_waits_for_the_next_list
         ] )
     ]
 ;;

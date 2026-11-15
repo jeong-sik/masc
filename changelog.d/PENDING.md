@@ -1,0 +1,7 @@
+### Documentation
+
+- RFC response-failure-text-comes-from-a-closed-type (Draft) proposes that a
+  failure sentence in an HTTP, SSE or JSON-RPC response comes only from the
+  route's closed failure type, and that exception text and lower-layer error
+  text go to the log with an incident id the response carries. It lists the
+  60 remaining sites and adds no code (#51903, #PENDING).

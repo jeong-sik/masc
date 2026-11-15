@@ -5,7 +5,8 @@ type source = {
       Masc_tui_board_detail.view;
   related_posts : Masc_tui_types.board_post list;
   keeper_names : string list;
-  columns : int;
+  body_columns : int;
+  comment_columns : int;
   language : Masc_tui_types.ui_language;
   styles : string list;
   table_frame : bool;

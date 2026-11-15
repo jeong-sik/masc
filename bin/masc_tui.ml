@@ -40198,18 +40198,7 @@ Use relative paths for resources already held in the package. -->
             | Board_list | Board_compose | Board_read _ -> ());
        | Some ("z" | "Z") when state.view = Board ->
            (match state.board_mode with
-            | Board_read _ -> (
-                (* On one pane the two layouts draw the same screen, so the
-                   footer does not offer [z] and pressing it must not leave
-                   the flag set for the next widening. *)
-                match
-                  board_read_layout ~cols:terminal_columns
-                    ~wide:state.board_detail_wide
-                with
-                | Board_read_one_pane -> ()
-                | Board_read_split | Board_read_wide ->
-                    state.board_detail_wide <- not state.board_detail_wide;
-                    state.board_focus <- Right_pane)
+            | Board_read _ -> toggle_board_read_wide state ~cols:terminal_columns
             | Board_list | Board_compose -> ())
        | Some (("o" | "O" | "l") as sandbox_log_key)
          when state.view = Keepers Keeper_detail

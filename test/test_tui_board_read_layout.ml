@@ -15,7 +15,8 @@ let comments = List.init 128 (fun index ->
 
 let source : Layout.source =
   { post; detail = Detail.Ready (post, comments, None); related_posts = [post];
-    keeper_names = ["keeper"]; columns = 100; language = Masc_tui_types.Lang_en; styles = ["cyan"];
+    keeper_names = ["keeper"]; body_columns = 100; comment_columns = 100;
+    language = Masc_tui_types.Lang_en; styles = ["cyan"];
     table_frame = false }
 
 let render source () =
@@ -69,7 +70,8 @@ let test_live_inputs_replace_rows () =
         List.map (fun c -> if c.bc_id = "127" then {c with bc_parent_id = Some "0"} else c) comments, None)};
       "related posts", {source with related_posts = [{post with bp_body = "new reference"}]};
       "keeper roles", {source with keeper_names = []};
-      "width", {source with columns = 60};
+      "post width", {source with body_columns = 60};
+      "comment width", {source with comment_columns = 60};
       "language", {source with language = Masc_tui_types.Lang_ko};
       "style", {source with styles = ["dark cyan"]};
       "tables", {source with table_frame = true};
@@ -93,7 +95,7 @@ let test_live_inputs_replace_rows () =
 let test_failed_render_and_single_document () =
   let cache = Layout.create () in
   let initial = Layout.get cache ~source ~render:(render source) in
-  let changed = {source with columns = 80} in
+  let changed = {source with body_columns = 80} in
   (try ignore (Layout.get cache ~source:changed ~render:(fun () -> raise Exit)) with Exit -> ());
   let recovered = Layout.get cache ~source ~render:(fun () -> Alcotest.fail "lost good rows") in
   Alcotest.(check bool) "failed render keeps previous complete rows" true (initial == recovered);
@@ -172,6 +174,75 @@ let test_paging_uses_the_window_the_frame_drew () =
   page 1;
   Alcotest.(check int) "outside the reader nothing is paged" 9 state.board_scroll
 
+(* [z] hides the post list so the thread can be read wider (#40134). The cells
+   counted here are the ones the decision wraps the thread to -- the pane under
+   the post, the comment column beside it -- not a drawn screen. *)
+let thread_cells ~pane_cols = function
+  | Masc_tui_layout.Stacked -> pane_cols
+  | Masc_tui_layout.Side { comment_cols; _ } -> comment_cols
+
+let split_pane_cols ~terminal_cols = terminal_cols - Masc_tui_roster_pane.pane_cols
+
+(* Every width from the split's threshold up to one far past the side layout's
+   minimum in both layouts. *)
+let two_pane_terminal_widths =
+  List.init 300 (fun extra -> Masc_tui_roster_pane.threshold_cols + extra)
+
+let test_z_never_narrows_the_thread () =
+  List.iter (fun terminal_cols ->
+    let split_cols = split_pane_cols ~terminal_cols in
+    let split =
+      thread_cells ~pane_cols:split_cols
+        (board_read_arrangement Board_read_split ~cols:split_cols ~has_comments:true)
+    in
+    let wide =
+      thread_cells ~pane_cols:terminal_cols
+        (board_read_arrangement Board_read_wide ~cols:terminal_cols ~has_comments:true)
+    in
+    if wide < split then
+      Alcotest.failf "%d columns: z wrapped the thread to %d cells instead of %d"
+        terminal_cols wide split)
+    two_pane_terminal_widths
+
+let test_the_split_keeps_the_thread_beside_the_post () =
+  let side_cols = Masc_tui_layout.board_read_side_minimum_cols in
+  let beside = function
+    | Masc_tui_layout.Side _ -> true
+    | Masc_tui_layout.Stacked -> false
+  in
+  Alcotest.(check bool) "a split pane that holds both columns" true
+    (beside (board_read_arrangement Board_read_split ~cols:side_cols ~has_comments:true));
+  Alcotest.(check bool) "a split pane one cell short stacks" false
+    (beside (board_read_arrangement Board_read_split ~cols:(side_cols - 1) ~has_comments:true));
+  Alcotest.(check bool) "a post without comments has no column to place" false
+    (beside (board_read_arrangement Board_read_split ~cols:side_cols ~has_comments:false));
+  for cols = 1 to Masc_tui_roster_pane.threshold_cols - 1 do
+    if beside (board_read_arrangement Board_read_one_pane ~cols ~has_comments:true) then
+      Alcotest.failf "one pane of %d columns put the thread beside the post" cols
+  done
+
+(* [z] changes which layout draws; where the reader stands in the post and in
+   the thread stays as stored, for the next frame to measure. *)
+let test_z_keeps_the_stored_place () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  let split_cols = Masc_tui_roster_pane.threshold_cols in
+  state.board_mode <- Board_read "p1";
+  state.board_scroll <- 7;
+  state.board_comment_scroll <- 11;
+  state.board_focus <- Left_pane;
+  toggle_board_read_wide state ~cols:split_cols;
+  Alcotest.(check bool) "z hides the list" true state.board_detail_wide;
+  Alcotest.(check bool) "the open post takes the keys" true (state.board_focus = Right_pane);
+  Alcotest.(check (pair int int)) "z keeps the post and thread place" (7, 11)
+    (state.board_scroll, state.board_comment_scroll);
+  toggle_board_read_wide state ~cols:split_cols;
+  Alcotest.(check bool) "z gives the list back" false state.board_detail_wide;
+  Alcotest.(check (pair int int)) "and still keeps the place" (7, 11)
+    (state.board_scroll, state.board_comment_scroll);
+  toggle_board_read_wide state ~cols:(split_cols - 1);
+  Alcotest.(check bool) "on one pane z leaves no flag for the next widening" false
+    state.board_detail_wide
+
 let () = Alcotest.run "Board document layout"
   ["scroll and refresh", [
     Alcotest.test_case "128 comments scroll without re-layout" `Quick test_long_thread_scroll_reuses_rows;
@@ -181,4 +252,9 @@ let () = Alcotest.run "Board document layout"
     Alcotest.test_case "leaving the acting pane keeps a choice the layout hides" `Quick
       test_leaving_the_acting_pane_keeps_a_choice_the_layout_hides;
     Alcotest.test_case "paging uses the window the frame drew" `Quick
-      test_paging_uses_the_window_the_frame_drew]]
+      test_paging_uses_the_window_the_frame_drew];
+   "z and the thread", [
+    Alcotest.test_case "z never narrows the thread" `Quick test_z_never_narrows_the_thread;
+    Alcotest.test_case "the split keeps the thread beside the post" `Quick
+      test_the_split_keeps_the_thread_beside_the_post;
+    Alcotest.test_case "z keeps the stored place" `Quick test_z_keeps_the_stored_place]]

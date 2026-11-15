@@ -365,6 +365,19 @@ let metric_fields_and_receipts_remain_readable () =
       (List.for_all (fun line -> not (String.contains line '\027')) plain))
     [40;80;200]
 
+(* A row is cut at its width. A key or a label as wide as the row left its
+   value no cell, so the cut dropped the whole value (#51036). *)
+let a_value_that_cannot_fit_beside_its_lead_goes_below () =
+  let placement = testable (fun f value -> Format.pp_print_string f
+    (match value with UI.Beside -> "beside" | UI.Below -> "below")) ( = ) in
+  let at ~lead_cells pieces = UI.led_placement ~width:14 ~lead_cells pieces in
+  check placement "a lead as wide as the row puts the value below" UI.Below (at ~lead_cells:14 ["v"; "a"; "l"]);
+  check placement "a lead wider than the row puts the value below" UI.Below (at ~lead_cells:20 ["v"; "a"; "l"]);
+  check placement "one cell beside the lead keeps a one-cell value beside" UI.Beside (at ~lead_cells:13 ["v"; "a"; "l"]);
+  check placement "one cell beside the lead cannot hold a two-cell character" UI.Below (at ~lead_cells:13 ["지"; "표"]);
+  check placement "two cells beside the lead hold a two-cell character" UI.Beside (at ~lead_cells:12 ["지"; "표"]);
+  check placement "an empty value loses nothing beside a wide lead" UI.Beside (at ~lead_cells:20 [""])
+
 let guided_actions () =
   let schema = Yojson.Safe.from_string {|{
     "type":"object","required":["context","request_id","action"],"additionalProperties":false,
@@ -2004,6 +2017,8 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
   test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
   test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable;
+  test_case "a value that cannot fit beside its lead goes below" `Quick
+    a_value_that_cannot_fit_beside_its_lead_goes_below;
   test_case "a host request cycle decodes and fails alone" `Quick host_request_cycle_decodes_and_fails_alone;
   test_case "every host issue reads back" `Quick every_host_issue_reads_back;
   test_case "an answered installation opens its Results" `Quick answered_installation_opens_its_results]]

@@ -231,15 +231,17 @@ L2 의 Python 시험(`addons/tests/`):
 | 층 | 내용 | 확인 |
 | --- | --- | --- |
 | L0 | 이 개정 | |
-| L1 | `since_of_binding` 을 `addons/records.py` 로 옮김, 퀴즈 binding 스키마의 `oneOf`, `FollowsLesson.since`, 첫 읽기 규칙, revision 올림 | 아래 시험 |
+| L1 | `since_of_binding` 을 `addons/records.py` 로 옮김, 퀴즈 binding 스키마의 `oneOf`, `FollowsLesson.since`, 첫 읽기 규칙, revision 올림, 두 이미지 태그 올림 | 아래 시험 |
 | L2 | 가이드와 예제 선언에 `since`, `addons/README.md` | 예제 선언이 `test_lane_addon_config` 에서 읽힌다 |
+
+`records.py` 는 패키지 폴더가 아니라 이미지에 들어 있다(각 `Dockerfile` 의 `COPY records.py /records.py`). 그래서 함수를 옮기면 수업과 퀴즈 이미지를 둘 다 새 태그로 만든다. 옛 이미지에서 새 worker 는 `since_of_binding` 을 찾지 못하고 시작하지 못한다.
 
 L1 의 시험:
 
 1. 수업을 묶고 질문을 낸 세션이 없으면 첫 읽기는 `FollowsLesson.since` 부터다.
 2. 질문을 낸 세션이 있으면 `since` 와 상관없이 그 cursor 부터 읽는다.
 3. 묶지 않은 퀴즈는 지금처럼 첫 세션을 연 시각부터 읽는다. 지금 있는 시험을 본문 수정 없이 통과한다.
-4. 수업을 묶었는데 `since` 가 없거나, 묶지 않았는데 `since` 가 있으면 binding 스키마가 거절한다. 같은 경우를 OCaml 선언 시험(`test_lane_addon_config`)에도 둔다.
+4. 수업을 묶었는데 `since` 가 없거나, 묶지 않았는데 `since` 가 있으면 binding 스키마가 거절한다. 같은 경우를 OCaml 선언 시험(`test_lane_addon_config`)에도 둔다. #52004 가 더한 수업 source 선언 case 에는 `since` 를 넣는다.
 5. `since` 가 없는 `FollowsLesson` 줄은 log 오류로 읽지 않는다.
 6. #52289 재현: 수업이 인용한 기록이 첫 퀴즈 세션보다 오래돼도, `since` 가 그보다 앞이면 그 기록이 자료에 남는다.
 7. 수업의 `since` 시험은 함수를 옮긴 뒤에도 본문 수정 없이 통과한다.

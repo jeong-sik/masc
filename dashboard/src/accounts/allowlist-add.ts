@@ -100,7 +100,7 @@ export function Outcome({ title, step, outcome }: {
 function FieldHint({ provider }: { readonly provider: Provider }): VNode {
   switch (provider) {
     case 'github':
-      return html`<p id=${fieldHintId} class="hint">로그인 이름이 아니라 숫자예요. 로그인 이름을 알면 터미널에서 <span class="mono"><span lang="en">gh api users/</span>로그인이름<span lang="en"> --jq .id</span></span>로 볼 수 있어요.</p>`
+      return html`<p id=${fieldHintId} class="hint">로그인 이름이 아니라 숫자예요. 로그인 이름을 알면 터미널에서 <span class="mono"><span lang="en">gh api</span> <span class="nowrap"><span lang="en">users/</span>로그인이름</span> <span lang="en" class="nowrap">--jq</span> <span lang="en">.id</span></span>로 볼 수 있어요.</p>`
     case 'google':
       return html`<p id=${fieldHintId} class="hint">Google 로그인이 계정마다 주는 번호(sub)예요. 이메일 주소가 아니에요. 이메일 주소를 넣으면 그 항목으로는 아무도 들어오지 못해요.</p>`
   }

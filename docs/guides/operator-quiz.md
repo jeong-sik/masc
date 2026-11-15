@@ -151,9 +151,11 @@ max_output_tokens = 2048
 
 [운영자 수업](operator-lesson.md)을 같이 쓰면, 퀴즈가 수업에 나온 기록에서만 새 문항을 내게 할 수 있다. 묶지 않으면 퀴즈는 지금까지처럼 읽은 기록 전체에서 낸다.
 
-퀴즈 설치 선언에 수업 설치의 `scenes` 출력을 더한다.
+퀴즈 설치 선언의 `[binding]` 에서 `sources = []` 를 지우고, 그 자리에 수업 선언의 `since` 와 수업 설치의 `scenes` 출력을 넣는다.
 
 ```toml
+since = 1794441600
+
 [[binding.sources]]
 source_id = "lesson"
 kind = "lane_output"
@@ -162,8 +164,11 @@ output_id = "scenes"
 selection = "latest_completed"
 ```
 
-맞춰야 하는 것이 셋이다.
+`since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
+맞춰야 하는 것이 넷이다.
+
+- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. 질문을 낸 세션이 아직 없으면 퀴즈는 이 시각부터 읽는다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.
 - 두 선언이 같은 기록에 같은 `source_id` 를 써야 한다. 수업이 `board` 라고 부른 기록을 퀴즈가 `notes` 라고 부르면 같은 글이어도 맞지 않는다.
 - 퀴즈 Schedule 을 수업 Schedule 바로 뒤에 둔다. 이유는 아래 표에 있다.
@@ -298,7 +303,7 @@ Results 에 일곱 lane 이 나온다.
    ```
 
 4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.
-5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다.
+5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다. 수업을 묶은 설치는 첫 세션을 연 시각이 아니라 binding 의 `since` 부터 읽는다. 질문을 낸 세션이 생길 때까지 세션마다 그 시각부터 읽으므로, `since` 가 오래될수록 한 번에 읽는 기록이 많다.
 
 - 옮긴 log 는 volume 안에 그대로 남는다. 새 package 는 그 파일을 읽지 않는다.
 - 옮기기 전에 답한 문제의 풀이와 판정은 옮긴 log 에만 있다. 새 package 의 R, G, P 는 빈 log 에서 다시 센다.

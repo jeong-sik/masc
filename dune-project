@@ -35,7 +35,11 @@
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
-(executables_implicit_empty_intf false)
+; A test or executable main module without an .mli gets an empty interface,
+; so warnings 32 and 69 from the root dune file see it: a helper nothing
+; calls, a test no suite lists and a field nothing reads stop the build
+; there as they do in libraries (#52314).
+(executables_implicit_empty_intf true)
 
 (source
  (github jeong-sik/masc))

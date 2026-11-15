@@ -68,6 +68,12 @@ type api_error =
       { message : string
       ; kind : Http_client.network_error_kind
       }
+  | Connect_failed of
+      { message : string
+      ; kind : Http_client.network_error_kind
+      }
+  (** {!Http_client.Connect_failed} carried across: the connection to the
+      origin did not open, so the request was not sent (RFC #52028 §2.3). *)
   | Timeout of
       { message : string
       ; phase : Http_client.timeout_phase option

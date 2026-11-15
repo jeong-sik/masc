@@ -26,7 +26,7 @@ let rest = [ "model", `Null; "workspace_root", `String "/workspace" ]
 let spelled_out ~rest =
   `Assoc
     (("system_prompt", `String system_prompt)
-     :: ("messages", `List (List.map Codec.to_json messages))
+     :: ("messages", `List (List.map (Codec.to_json Codec.Canonical_source) messages))
      :: rest)
   |> Yojson.Safe.to_string
   |> Agent_core_sha256.digest_string
@@ -40,35 +40,6 @@ let test_the_digest_is_of_the_text_the_runtimes_wrote () =
     (Codec.canonical_source_sha256 ~system_prompt ~messages ~rest:[]);
   check bool "the trailing fields are part of it" false
     (String.equal (spelled_out ~rest) (spelled_out ~rest:[]))
-;;
-
-(* The tool-results appended-at stamp is a bare Unix float with no "now" to
-   read it against. The codec leaves it out, so a stamped Tool message reads
-   and hashes as the same message without it, and a stored session keeps
-   matching. *)
-let test_the_appended_at_stamp_stays_out_of_the_text () =
-  let tool ~metadata =
-    Agent_core.Types.make_message
-      ~metadata
-      ~role:Agent_core.Types.Tool
-      [ Agent_core.Types.ToolResult
-          { tool_use_id = "call_1"
-          ; content = "lane down"
-          ; outcome = Agent_core.Types.Tool_succeeded
-          ; json = None
-          ; content_blocks = None
-          }
-      ]
-  in
-  let unstamped = tool ~metadata:[] in
-  let stamped =
-    tool
-      ~metadata:[ Agent_core.Types.Tool_results_appended_at.entry ~appended_at:1_794_643_609.25 ]
-  in
-  check string "encoded text" (Codec.encode unstamped) (Codec.encode stamped);
-  check string "digest"
-    (Codec.canonical_source_sha256 ~system_prompt ~messages:[ unstamped ] ~rest)
-    (Codec.canonical_source_sha256 ~system_prompt ~messages:[ stamped ] ~rest)
 ;;
 
 let busy_worker_polls = 50
@@ -124,8 +95,6 @@ let () =
             test_the_digest_is_of_the_text_the_runtimes_wrote
         ; test_case "a fiber with a domain pool digests on the pool" `Quick
             test_a_fiber_with_a_domain_pool_digests_on_the_pool
-        ; test_case "the appended-at stamp stays out of the text" `Quick
-            test_the_appended_at_stamp_stays_out_of_the_text
         ] )
     ]
 ;;

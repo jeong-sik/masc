@@ -1010,8 +1010,16 @@ let test_agent_core_checkpoint_starts_official_client_turn () =
        let open Yojson.Safe.Util in
        check string
          "typed initial-turn schema"
-         "masc.claude-code.initial-turn.v1"
+         "masc.claude-code.initial-turn.v2"
          (projected |> member "schema" |> to_string);
+       check bool
+         "the session start time is RFC 3339"
+         true
+         (projected
+          |> member "session_started_at"
+          |> to_string
+          |> Time_codec.parse_rfc3339
+          |> Result.is_ok);
        check string
          "current goal"
          "CHECKPOINT_GOAL"

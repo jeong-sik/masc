@@ -1157,7 +1157,7 @@ let test_maintenance_distinguishes_tool_payloads_from_media_owners () =
         Masc.Keeper_context_core_message_json.message_to_json tool;
         Masc.Keeper_librarian_input_capture.message_json assistant;
         Masc.Keeper_librarian_input_capture.message_json tool;
-        Masc.Keeper_official_client_context_codec.to_json official_tool]));
+        Masc.Keeper_official_client_context_codec.(to_json Canonical_source) official_tool]));
     write_maintenance_tool_receipts ~base_path payload;
     let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
     Alcotest.(check int) "first complete scan only records the dead candidate" 0 first.deleted;
@@ -1217,7 +1217,7 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
         [Agent_core.Types.ToolResult {tool_use_id="call";content="data";
           outcome=Tool_succeeded;json=Some payload;content_blocks}] in
     let official_result () =
-      Masc.Keeper_official_client_context_codec.to_json
+      Masc.Keeper_official_client_context_codec.(to_json Canonical_source)
         (result_message ()) in
     let malformed_media_sibling = function
       | `Assoc fields ->
@@ -1272,7 +1272,7 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
       | `Unknown_receipt -> `Assoc ["record_kind",`String "other";"input",malformed_source]
       | `Duplicate_official ->
         (match official_result () with
-         | `Assoc fields -> `Assoc (fields @ ["schema",`String "masc.official-client-context-message.v4"])
+         | `Assoc fields -> `Assoc (fields @ ["schema",`String "masc.official-client-context-message.v5"])
          | _ -> Alcotest.fail "invalid official fixture envelope")
       | `Unknown_failure_kind ->
         corrupt_official_result ["is_error",`Bool true;"failure_kind",`String "unknown-kind"]
@@ -1284,7 +1284,7 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
         Masc.Keeper_librarian_input_capture.message_json (media_message ())
         |> malformed_message_sibling "content"
       | `Official_media_sibling ->
-        (match Masc.Keeper_official_client_context_codec.to_json (media_message ()) with
+        (match Masc.Keeper_official_client_context_codec.(to_json Canonical_source) (media_message ()) with
          | `Assoc envelope ->
            let message = List.assoc "message" envelope
              |> malformed_message_sibling "content_blocks" in
@@ -1325,7 +1325,7 @@ let test_maintenance_outbox_payloads_are_tool_data () =
     let payload = `List [`List [partial;full;
       Agent_core.History.content_block_to_json
         (Agent_core.Types.ToolUse {id="fake";name="nested data";input=partial});
-      `Assoc ["schema",`String "masc.official-client-context-message.v4";
+      `Assoc ["schema",`String "masc.official-client-context-message.v5";
         "message",`Assoc ["content_blocks",`List [
           `Assoc ["type",`String "image";"source",partial]]]];
       O.normalized_artifact_ref_to_json artifact;

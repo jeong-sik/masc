@@ -24715,8 +24715,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let acted_by_pane_keeper event =
         match pane_changes_keeper with
         | None -> false
-        | Some name ->
-            String.equal name (Masc_tui_acting.keeper_of_event ~traces event)
+        | Some name -> (
+            match Masc_tui_acting.actor_of_event ~traces event with
+            | Masc_tui_acting.Actor_named actor -> String.equal name actor
+            | Masc_tui_acting.Actor_unnamed | Masc_tui_acting.Actor_server -> false)
       in
       List.iter
         (fun (delivery : Masc_tui_observer.delivery) ->

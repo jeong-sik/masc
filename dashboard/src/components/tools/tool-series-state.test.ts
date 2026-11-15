@@ -68,6 +68,8 @@ function series(overrides: Partial<ToolMetricsSeriesResponse> = {}): ToolMetrics
       { start: 3600, ...busy },
     ],
     top_by_time: [],
+    by_caller: [],
+    caller_unobserved_count: 0,
     ...overrides,
   }
 }

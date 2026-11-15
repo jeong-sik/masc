@@ -74,6 +74,8 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
       { start: 1_793_808_000, ...busy },
     ],
     top_by_time: [{ name: 'tool_execute', public_names: ['Execute'], ...busy }],
+    by_caller: [{ caller: 'keeper-a', ...busy }],
+    caller_unobserved_count: 4,
     ...overrides,
   }
 }

@@ -7,6 +7,7 @@ import {
   FAILURE_CLASS_LINES,
   callSeries,
   failureClassSeries,
+  formatFailureClasses,
   failureRatePercent,
   failureRateSeries,
   latencySeries,
@@ -97,6 +98,11 @@ const series: ToolMetricsSeriesResponse = {
       result_bytes_max: 500,
     },
   ],
+  by_caller: [
+    { caller: 'keeper-flaky', ...busy, failure_count: 2 },
+    { caller: 'keeper-quiet', ...busy, call_count: 1, failure_count: 0, failure_classes: idle.failure_classes },
+  ],
+  caller_unobserved_count: 3,
 }
 
 function view(overrides: Partial<ToolSeriesViewProps> = {}): ToolSeriesViewProps {
@@ -130,9 +136,14 @@ function tileValues(): Record<string, string | null> {
   )
 }
 
+/** The column titles of the table of tools, which is the first table. */
+function toolTableHeader(): Array<string | null> {
+  return Array.from(container.querySelector('table')?.querySelectorAll('thead th') ?? []).map(cell => cell.textContent)
+}
+
 /** The text of one column of the table of tools, one entry per row. */
 function tableColumn(index: number): Array<string | undefined> {
-  return Array.from(container.querySelectorAll('tbody tr')).map(
+  return Array.from(container.querySelector('table')?.querySelectorAll('tbody tr') ?? []).map(
     row => row.querySelectorAll('td')[index]?.textContent ?? undefined,
   )
 }
@@ -283,6 +294,16 @@ describe('longCallLine', () => {
   })
 })
 
+describe('formatFailureClasses', () => {
+  it('names each class that failed, with the unclassified ones last, and a dash when none failed', () => {
+    const classes = { ...busy.failure_classes, dependency_unavailable: 2, runtime_failure: 1 }
+    expect(formatFailureClasses({ ...busy, failure_classes: classes, failure_unclassified_count: 3 })).toBe(
+      '외부 의존 불가 2회 · 내부 오류 1회 · 종류 미기록 3회',
+    )
+    expect(formatFailureClasses(idle)).toBe('-')
+  })
+})
+
 describe('failureRatePercent', () => {
   it('is the share of failed calls', () => {
     expect(failureRatePercent(4, 1)).toBe(25)
@@ -321,6 +342,30 @@ describe('ToolSeriesView', () => {
     expect(toolButtons().map(button => button.textContent)).toEqual(['tool_execute', 'tool_read_file'])
   })
 
+  it('lists the Keepers whose calls failed most, one row each, under the tools', () => {
+    mount(view())
+    const table = container.querySelectorAll('table')[1]
+    const rows = Array.from(table?.querySelectorAll('tbody tr') ?? [])
+    expect(rows.map(row => row.querySelectorAll('td')[0]?.textContent)).toEqual(['keeper-flaky', 'keeper-quiet'])
+    expect(rows.map(row => row.querySelectorAll('td')[2]?.textContent)).toEqual(['2', '0'])
+  })
+
+  it('says how many calls have no caller only when some do not', () => {
+    mount(view())
+    expect(container.textContent).toContain('호출 3건은 부른 Keeper를 기록하지 않아')
+    mount(view({ series: { ...series, caller_unobserved_count: 0 } }))
+    expect(container.textContent).not.toContain('부른 Keeper를 기록하지 않아')
+  })
+
+  it('draws no Keeper table when no call has a caller, and still says so', () => {
+    mount(view({ series: { ...series, by_caller: [] } }))
+    expect(container.querySelectorAll('table')).toHaveLength(1)
+    expect(container.textContent).toContain('부른 Keeper를 기록하지 않아')
+    mount(view({ series: { ...series, by_caller: [], caller_unobserved_count: 0 } }))
+    expect(container.querySelectorAll('table')).toHaveLength(1)
+    expect(container.textContent).not.toContain('부른 Keeper를 기록하지 않아')
+  })
+
   it('shows how many calls ran a minute or more, and the time they took', () => {
     mount(view())
     const tiles = tileValues()
@@ -344,7 +389,7 @@ describe('ToolSeriesView', () => {
 
   it('puts the bytes of each tool in the table', () => {
     mount(view())
-    const header = Array.from(container.querySelectorAll('thead th')).map(cell => cell.textContent)
+    const header = toolTableHeader()
     expect(header.slice(8)).toEqual(['결과 바이트 합계', '가장 큰 결과'])
     expect(tableColumn(8)).toEqual(['5.0 MB', '900 B'])
     expect(tableColumn(9)).toEqual(['2.0 MB', '500 B'])
@@ -366,7 +411,7 @@ describe('ToolSeriesView', () => {
 
   it('puts the long calls of each tool in the table, and a dash where it had none', () => {
     mount(view())
-    const header = Array.from(container.querySelectorAll('thead th')).map(cell => cell.textContent)
+    const header = toolTableHeader()
     expect(header[4]).toBe('1분 이상 걸린 호출')
     expect(tableColumn(4)).toEqual(['1회 · 3.3m', '-'])
   })

@@ -365,15 +365,6 @@ let test_an_output_keeps_its_indentation () =
   check (list string) "an indent as wide as the row is dropped for that line"
     [ "ab" ] (wrap 4 "    ab")
 
-let timeline_bucket ?(is_dst = false) hour : Layout.timeline_bucket =
-  { tb_year = 2026
-  ; tb_month = 9
-  ; tb_day = 1
-  ; tb_hour = hour
-  ; tb_is_dst = is_dst
-  }
-;;
-
 let test_live_edge_positions_belong_to_actual_selected_rows () =
   let entries=[entry Layout.Keeper "keeper" "live-edge"
     (String.concat "\n" (List.init 100 (fun n -> Printf.sprintf "ROW_%03d" n)))] in

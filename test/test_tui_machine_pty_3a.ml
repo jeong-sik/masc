@@ -53,16 +53,6 @@ let contains ~sub text =
   let rec at i = i + n <= m && (String.sub text i n = sub || at (i + 1)) in
   at 0
 
-let remove_tree path =
-  let rec go path =
-    if (Unix.lstat path).Unix.st_kind = Unix.S_DIR then begin
-      Array.iter (fun name -> go (Filename.concat path name)) (Sys.readdir path);
-      Unix.rmdir path
-    end
-    else Unix.unlink path
-  in
-  if try Sys.file_exists path with _ -> false then go path
-
 let sha256_of_file path =
   let module D = Digestif.SHA256 in
   let ic = open_in_bin path in

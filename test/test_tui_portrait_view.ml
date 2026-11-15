@@ -10,8 +10,6 @@ module Palette = Masc_tui_terminal_palette
 
 let mascot_id = Masc_tui_graphics.image_id Masc_tui_graphics.Mascot
 
-let project = Palette.For_testing.best_color_for_level ~level:Palette.True_color
-
 let contains ~sub s =
   let ls = String.length s and lsub = String.length sub in
   let rec loop i = i + lsub <= ls && (String.sub s i lsub = sub || loop (i + 1)) in

@@ -171,7 +171,15 @@ let layout ~max_width (score : Score.t) =
                 take (finish ~left ~right:Continuation taken :: fragments)
                   Continuation [] 0 remaining
     in
-    take [] Barline [] 0 source.Score.beats
+    match source.Score.beats with
+    | [] ->
+        (* A bar with no beat, which alphaTab plays as a rest for the whole
+           bar: nothing to draw in it, and it keeps its place, its number
+           and its signs as one whole fragment. *)
+        let needed = lead + width_for ~bar ~source ~left:Barline ~right:Barline 0 in
+        if needed <= max_width then Ok [ finish ~left:Barline ~right:Barline [] ]
+        else Error (Too_wide {needed; available=max_width})
+    | _ :: _ as beats -> take [] Barline [] 0 beats
   in
   let rec fragments bar acc = function
     | [] -> Ok (List.rev acc)

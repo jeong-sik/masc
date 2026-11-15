@@ -10402,7 +10402,10 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          let model = Masc.Keeper_gate_replay.compose_model_message ~base_path
            ~user_message:prepared_prompt
            ~inputs:[ resolution_input_exn (Gate.resolution admission) !native_replay_delivery ] in
-         let unrelated = { (Gate.resolution admission) with approval_id = "unrelated-repair" } in
+         (* Only an approved resolution can own a replay, so the unrelated
+            input stays approved even when the admitted decision is a denial. *)
+         let unrelated = { (Gate.resolution admission) with approval_id = "unrelated-repair";
+           decision = Keeper_event_queue.Hitl_approved } in
          let unrelated_outcome = Masc.Keeper_gate_replay.Repair_required
            { operation = "tool_execute"; stage = Resolution_lookup; detail = "unrelated repair" } in
          let mixed = Masc.Keeper_gate_replay.compose_model_message ~base_path

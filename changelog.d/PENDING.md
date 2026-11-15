@@ -1,0 +1,8 @@
+### Internal
+
+- The TUI reads an approval queue row's `phase` with the server's decoder
+  (`Keeper_approval_queue_rules_types.approval_queue_phase_of_string`) instead
+  of its own copy of the four words, and names every server phase when it
+  maps one to the TUI phase. A phase the server adds is now a compile error
+  in the TUI rather than a row it rejects as `unknown gate pending phase`.
+  The words and the rows the TUI accepts stay the same (#52127, #PENDING).

@@ -11620,9 +11620,10 @@ let test_decode_gate_rows_distinguish_operator_phases () =
       ; "input", `Assoc []
       ]
       @
-      match phase_field with
-      | Some (`String "human_required") -> [ "summary_status", handed_over ]
-      | Some _ | None -> []
+      match Option.map Q.approval_queue_phase_of_yojson_with_error phase_field with
+      | Some (Ok Q.Phase_human_required) -> [ "summary_status", handed_over ]
+      | Some (Ok (Q.Phase_queued | Q.Phase_judging | Q.Phase_blocked) | Error _)
+      | None -> []
     in
     let fields =
       match phase_field with
@@ -11641,26 +11642,29 @@ let test_decode_gate_rows_distinguish_operator_phases () =
         (List.length snapshot.gs_pending)
     | Error detail -> Error detail
   in
-  Alcotest.check
-    Alcotest.bool
-    "queued phase"
-    true
-    (phase ~phase_field:(`String "queued") () = Ok Tui_decode.Gate_queued);
-  Alcotest.check
-    Alcotest.bool
-    "judging phase"
-    true
-    (phase ~phase_field:(`String "judging") () = Ok Tui_decode.Gate_judging);
-  Alcotest.check
-    Alcotest.bool
-    "human_required phase"
-    true
-    (phase ~phase_field:(`String "human_required") () = Ok Tui_decode.Gate_human_required);
-  Alcotest.check
-    Alcotest.bool
-    "blocked phase"
-    true
-    (phase ~phase_field:(`String "blocked") () = Ok Tui_decode.Gate_blocked);
+  (* The server spells the phase; every phase it can put on a row, encoded the
+     way the queue projection encodes it, reads as the TUI phase naming the
+     same state. *)
+  List.iter
+    (fun server_phase ->
+      let word = Q.approval_queue_phase_to_string server_phase in
+      let expected =
+        match server_phase with
+        | Q.Phase_queued -> Tui_decode.Gate_queued
+        | Q.Phase_judging -> Tui_decode.Gate_judging
+        | Q.Phase_human_required -> Tui_decode.Gate_human_required
+        | Q.Phase_blocked -> Tui_decode.Gate_blocked
+      in
+      match phase ~phase_field:(Q.approval_queue_phase_to_yojson server_phase) () with
+      | Ok decoded ->
+        Alcotest.check
+          Alcotest.bool
+          (Printf.sprintf "server phase %s" word)
+          true
+          (decoded = expected)
+      | Error detail ->
+        Alcotest.failf "server phase %s did not decode: %s" word detail)
+    Q.approval_queue_phases;
   Alcotest.check
     Alcotest.bool
     "unknown phase rejects"

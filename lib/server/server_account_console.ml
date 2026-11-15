@@ -2,7 +2,7 @@
 
 module Http = Http_server_eio
 
-let page_path = "/accounts/console"
+let page_path = Account_page.console_path
 let assets_prefix = page_path ^ "/assets/"
 let base_sheet_path = page_path ^ "/base.css"
 

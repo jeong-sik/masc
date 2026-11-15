@@ -35,7 +35,7 @@ function statusWords(status: EntryStatus['kind']): readonly [string, boolean] {
 function StatusLine({ status }: { readonly status: EntryStatus }): VNode {
   switch (status.kind) {
     case 'open': return html`<p>이 계정으로 로그인하면 구성원으로 들어와요.</p>`
-    case 'removal_pending': return html`<p>빼기가 기록되지 않았어요. 이 계정으로는 아무도 들어올 수 없어요. 한 번 더 빼면 마무리돼요.</p>`
+    case 'removal_pending': return html`<p>빼기가 기록되지 않았어요. 이 항목으로는 아무도 들어올 수 없어요. 한 번 더 빼면 마무리돼요.</p>`
     case 'removed': return html`<p>목록에서 뺀 계정이에요.</p>`
     case 'consumed': return html`<p>이 계정으로 들어온 사용자: <span class="mono">${idTail(status.joined)}</span></p>`
     case 'unrecognised': return html`<p>서버가 알려 준 상태를 이 화면은 몰라요.</p>`

@@ -4,9 +4,10 @@
 
 import { html } from 'htm/preact'
 import { useRef, useState } from 'preact/hooks'
+import type { Dispatch, StateUpdater } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { Callout, ProblemNote, sessionEndedWords } from './notes'
-import { providers, readTyped } from './allowlist'
+import { maxGithubUserId, providers, readTyped } from './allowlist'
 import type { Add, AllowlistModel, Provider, Remove, Typed } from './allowlist'
 import { identityWords } from './member-rows'
 import { unknownWords } from './token-make'
@@ -14,6 +15,7 @@ import { unknownWords } from './token-make'
 const formTitleId = 'allowlist-new-title'
 const fieldId = 'allowlist-account'
 const fieldHintId = 'allowlist-account-hint'
+const mistakeId = 'allowlist-account-mistake'
 const addTipId = 'allowlist-add-tip'
 /** The answers of a request about an entry the page has words for (lib/auth/login_allowlist_routes.mli). */
 const forbidden = 403
@@ -35,6 +37,7 @@ function mistakeWords(why: Extract<Typed, { ok: false }>['why']): string {
   switch (why) {
     case 'empty': return '칸이 비어 있어요.'
     case 'not_a_number': return '숫자만 적어 주세요. 로그인 이름이 아니라 사용자 번호예요.'
+    case 'out_of_range': return `GitHub 사용자 번호는 1부터 ${maxGithubUserId.toLocaleString('ko-KR')}까지예요.`
     case 'not_a_sub': return '공백 없는 영문·숫자·기호로 255자까지 적어 주세요.'
   }
 }
@@ -44,7 +47,7 @@ function addWords(adding: Add): string {
     case 'sending': return '목록에 넣고 있어요…'
     case 'done':
       return adding.registered.previouslyDeleted
-        ? `넣었어요: ${identityWords(adding.identity)}. 이 계정으로 들어왔던 사람은 삭제됐어요. 다시 로그인하면 새 사람으로 들어와요.`
+        ? `넣었어요: ${identityWords(adding.identity)}. 이 계정으로 전에 들어왔던 사람은 삭제됐어요. 다시 로그인하면 새 구성원으로 들어와요.`
         : `넣었어요: ${identityWords(adding.identity)}. 이 계정으로 로그인하면 구성원으로 들어와요.`
     case 'leaving': return sessionEndedWords
     case 'idle':
@@ -64,7 +67,8 @@ function refusedWords(status: number, step: 'add' | 'remove'): readonly string[]
       '다른 탭에서 다시 로그인했거나 다른 계정으로 로그인했다면, 이 화면을 새로 고친 뒤 다시 해 주세요.',
     ]
   }
-  if (status === conflict && step === 'add') return ['이미 목록에 있거나, 이미 이 서버에 들어온 계정이에요.', '이 목록과 「들어온 사람」을 확인해 주세요.']
+  // A 409 also answers an earlier try of this page that landed though the page did not hear so.
+  if (status === conflict && step === 'add') return ['목록에 이미 있는 계정이거나, 이 서버에 이미 들어온 계정이에요.', '이 목록과 「들어온 사람」을 확인해 주세요.']
   if (status === notFound && step === 'remove') return ['서버에서 이 항목을 찾지 못했어요. 목록을 다시 불러와요.']
   return null
 }
@@ -82,7 +86,7 @@ export function Outcome({ title, step, outcome }: {
   if (outcome.kind === 'unknown') {
     const after = step === 'add'
       ? ['계정이 목록에 들어갔을 수도 있어요.', '목록에 이 계정이 보이는지 보고, 없으면 다시 넣어 주세요.']
-      : ['항목이 빠졌을 수도 있어요.', '이 항목의 상태를 보고, 아직 기다리는 중이면 다시 빼 주세요.']
+      : ['항목이 빠졌을 수도 있어요.', '이 항목의 상태를 보고, 「기다리는 중」이나 「빼기 마무리 필요」이면 다시 빼 주세요.']
     return html`<${Callout} title=${title} attempts=${attempts} reason=${reason} lines=${[`${unknownWords(problem)} ${after[0]}`, after[1]]} />`
   }
   const words = refusedWords(outcome.problem.status, step)
@@ -96,9 +100,9 @@ export function Outcome({ title, step, outcome }: {
 function FieldHint({ provider }: { readonly provider: Provider }): VNode {
   switch (provider) {
     case 'github':
-      return html`<p id=${fieldHintId} class="hint">로그인 이름이 아니라 숫자예요. 로그인 이름을 알면 터미널에서 <span class="mono" lang="en">gh api users/로그인이름 --jq .id</span>로 볼 수 있어요.</p>`
+      return html`<p id=${fieldHintId} class="hint">로그인 이름이 아니라 숫자예요. 로그인 이름을 알면 터미널에서 <span class="mono"><span lang="en">gh api users/</span>로그인이름<span lang="en"> --jq .id</span></span>로 볼 수 있어요.</p>`
     case 'google':
-      return html`<p id=${fieldHintId} class="hint">Google 로그인이 계정마다 주는 번호(sub)예요. 이메일 주소는 받지 않아요.</p>`
+      return html`<p id=${fieldHintId} class="hint">Google 로그인이 계정마다 주는 번호(sub)예요. 이메일 주소가 아니에요. 이메일 주소를 넣으면 그 항목으로는 아무도 들어오지 못해요.</p>`
   }
 }
 
@@ -106,13 +110,13 @@ function FieldHint({ provider }: { readonly provider: Provider }): VNode {
     signing in picked and what was typed, so a form drawn again (the list
     could not be read again) still shows them. What was typed is sent only
     when it is an account the server takes, and is emptied once the server
-    put it on the list. */
+    put it on the list, unless the Admin typed something else meanwhile. */
 export function AddForm({ model, provider, setProvider, typed, setTyped }: {
   readonly model: AllowlistModel
   readonly provider: Provider
   readonly setProvider: (provider: Provider) => void
   readonly typed: string
-  readonly setTyped: (typed: string) => void
+  readonly setTyped: Dispatch<StateUpdater<string>>
 }): VNode {
   const adding = model.adding.value
   const busy = adding.kind === 'sending' || adding.kind === 'leaving'
@@ -128,9 +132,10 @@ export function AddForm({ model, provider, setProvider, typed, setTyped }: {
       return
     }
     setMistake(null)
+    const sent = typed
     await model.add(read.identity)
     const after = model.adding.peek()
-    if (after.kind === 'done' && after.identity === read.identity) setTyped('')
+    if (after.kind === 'done' && after.identity === read.identity) setTyped((now) => (now === sent ? '' : now))
   }
   return html`
     <form class="keeper-form" aria-labelledby=${formTitleId} onSubmit=${(event: Event) => { void onSubmit(event) }}>
@@ -152,7 +157,7 @@ export function AddForm({ model, provider, setProvider, typed, setTyped }: {
       <div class="field">
         <label for=${fieldId}>${providerWords(provider)[1]}</label>
         <input ref=${field} id=${fieldId} name="account" value=${typed} autocomplete="off" autocapitalize="off" spellcheck=${false}
-          inputmode=${provider === 'github' ? 'numeric' : 'text'} aria-invalid=${mistake !== null} aria-describedby=${fieldHintId}
+          inputmode=${provider === 'github' ? 'numeric' : 'text'} aria-invalid=${mistake !== null} aria-describedby=${mistake === null ? fieldHintId : `${fieldHintId} ${mistakeId}`}
           onInput=${(event: Event) => { setTyped((event.currentTarget as HTMLInputElement).value); setMistake(null) }} />
         <${FieldHint} provider=${provider} />
       </div>
@@ -161,9 +166,16 @@ export function AddForm({ model, provider, setProvider, typed, setTyped }: {
     </form>
     ${mistake === null
       ? null
-      : html`<${Callout} key=${mistake.attempts} attempts=${mistake.attempts} reason=${null}
-          title="적은 값을 보내지 않았어요" lines=${[mistakeWords(mistake.why)]} />`}
+      : html`<div id=${mistakeId}><${Callout} key=${mistake.attempts} attempts=${mistake.attempts} reason=${null}
+          title="적은 값을 보내지 않았어요" lines=${[mistakeWords(mistake.why)]} /></div>`}
   `
+}
+
+/** The title of a registration that came to nothing. A 409 did not put
+    the account on the list because it is there or bound already. */
+function addTitle(adding: Extract<Add, { kind: 'refused' | 'unknown' }>): string {
+  if (adding.kind === 'unknown') return '계정을 넣었는지 알 수 없어요'
+  return adding.problem.status === conflict ? '목록에 넣지 않았어요' : '계정을 넣지 못했어요'
 }
 
 /** What came of the latest registration: a line a screen reader reads out
@@ -177,8 +189,8 @@ export function AddArea({ model }: { readonly model: AllowlistModel }): VNode {
   return html`
     <p class="hint" role="status">${words}</p>
     ${adding.kind === 'refused' || adding.kind === 'unknown'
-      ? html`<${Outcome} key=${adding.attempts} step="add" outcome=${adding}
-          title=${`${adding.kind === 'refused' ? '계정을 넣지 못했어요' : '계정을 넣었는지 알 수 없어요'}: ${identityWords(adding.identity)}`} />`
+      ? html`<${Outcome} key=${`${String(adding.attempts)} ${identityWords(adding.identity)}`} step="add" outcome=${adding}
+          title=${`${addTitle(adding)}: ${identityWords(adding.identity)}`} />`
       : null}
   `
 }

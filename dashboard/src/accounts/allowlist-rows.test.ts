@@ -80,6 +80,7 @@ describe('the allowlist panel', () => {
     ['with a removal whose end it does not know', showing(readView([entry('reg_1')]), { kind: 'idle' }, new Map([['reg_1', { kind: 'unknown', problem: { kind: 'unreachable' }, attempts: 1 }]]))],
     ['with an entry removed here', showing(readView([entry('reg_1', { status: { kind: 'removed' } })]), { kind: 'idle' }, new Map([['reg_1', { kind: 'done', before: false }]]))],
     ['while the browser leaves', showing({ kind: 'leaving', forUser: 'usr_first' }, { kind: 'leaving' })],
+    ['while the browser leaves after a registration with the list shown', showing(readView([]), { kind: 'leaving' })],
   ]
   const each = <T>(look: (container: Element) => T) => steps.map(([name, model]) => {
     const found = look(panelOf(model))
@@ -122,6 +123,7 @@ describe('the allowlist panel', () => {
       'with a registration refused and a list that could not be read again': 'none',
       'while an account is registered': 'true',
       'while the browser leaves': 'none',
+      'while the browser leaves after a registration with the list shown': 'true',
     }, 'false'))
   })
 
@@ -241,7 +243,8 @@ describe('the allowlist panel', () => {
       type(container, text)
       submit(container)
       await act(() => undefined)
-      seen.push([container.querySelectorAll('[role=alert]').length, fieldOf(container)?.getAttribute('aria-invalid'), document.activeElement?.id])
+      const described = (fieldOf(container)?.getAttribute('aria-describedby') ?? '').split(' ').map((id) => document.getElementById(id)?.querySelector('[role=alert]') !== null)
+      seen.push([container.querySelectorAll('[role=alert]').length, fieldOf(container)?.getAttribute('aria-invalid'), document.activeElement?.id, described])
     }
     type(container, '7')
     const fixing = [container.querySelectorAll('[role=alert]').length, fieldOf(container)?.getAttribute('aria-invalid')]
@@ -253,7 +256,7 @@ describe('the allowlist panel', () => {
     await act(() => undefined)
     const picked = [container.querySelectorAll('[role=alert]').length, fieldOf(container)?.getAttribute('aria-invalid')]
     expect([seen, fixing, picked, vi.mocked(model.add).mock.calls]).toEqual([
-      [[1, 'true', 'allowlist-account'], [1, 'true', 'allowlist-account']], [0, 'false'], [0, 'false'], [[{ provider: 'github', userId: 7 }]],
+      [[1, 'true', 'allowlist-account', [false, true]], [1, 'true', 'allowlist-account', [false, true]]], [0, 'false'], [0, 'false'], [[{ provider: 'github', userId: 7 }]],
     ])
   })
 
@@ -297,6 +300,41 @@ describe('the allowlist panel', () => {
     submit(container)
     await act(() => Promise.resolve())
     expect([refused, fieldOf(container)?.value]).toEqual(['777', ''])
+  })
+
+  it('keeps what the Admin typed while a registration was sent when the server put the account sent on the list', async () => {
+    const adding = signal<Add>({ kind: 'idle' })
+    let answer: () => void = () => undefined
+    const model: AllowlistModel = {
+      ...showing(readView([])),
+      adding,
+      add: vi.fn((identity: Registrable) => {
+        adding.value = { kind: 'sending', identity }
+        return new Promise<void>((resolve) => {
+          answer = () => {
+            adding.value = { kind: 'done', identity, registered: { id: 'reg_new', previouslyDeleted: false } }
+            resolve()
+          }
+        })
+      }),
+    }
+    const container = panelOf(model)
+    type(container, '777')
+    submit(container)
+    await act(() => undefined)
+    type(container, '888')
+    await act(() => { answer() })
+    await act(() => Promise.resolve())
+    expect(fieldOf(container)?.value).toBe('888')
+  })
+
+  it('makes a new alert when a registration of another account is refused as many times', async () => {
+    const refused = (userId: number): Add => ({ kind: 'refused', identity: { provider: 'github', userId }, problem: { kind: 'refused', status: 409, reason: null }, attempts: 1 })
+    const adding = signal(refused(777))
+    const container = panelOf({ ...showing(readView([])), adding })
+    const before = container.querySelector('[role=alert]')
+    await act(() => { adding.value = refused(888) })
+    expect([before !== null, container.querySelector('[role=alert]') === before]).toEqual([true, false])
   })
 
   it('keeps the way of signing in picked and what was typed when the form comes back with the list', async () => {

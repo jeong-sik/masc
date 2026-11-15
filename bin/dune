@@ -2259,7 +2259,7 @@
  (name masc_tui_memory_lineage)
  (wrapped false)
  (modules masc_tui_memory_lineage)
- (libraries masc masc_tui_message_layout masc_tui_terminal_palette unix))
+ (libraries masc masc_tui_message_layout masc_tui_terminal_palette unix yojson))
 
 (library
  (name masc_tui_memory_recall_form)

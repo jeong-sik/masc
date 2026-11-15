@@ -43,7 +43,7 @@ let test_original_admission () =
    | (_,Masc_tui_image_preview.Output_image {source=Inline_svg raw;_}) :: _ ->
        check string "XML TAB and CRLF survive admission" svg raw
    | [] | (_, (Masc_tui_image_preview.Named_path _ | Staged _ | Stored_attachment _
-       | Output_image {source=(Inline_data _ | Inline_mermaid _ | Server_path _ | Remote_uri _);_}
+       | Output_image {source=(Inline_data _ | Inline_mermaid _ | Inline_graph _ | Server_path _ | Remote_uri _);_}
        | Unavailable_image _ | No_image)) :: _ -> fail "expected original SVG source");
   check bool "retain original immutable observation" true (original == admitted);
   match admitted with

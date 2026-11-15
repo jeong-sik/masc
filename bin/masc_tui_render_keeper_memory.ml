@@ -226,9 +226,10 @@ let change_chart (state : Masc_tui_types.state) ~keeper_name =
 let change_diagram (state : Masc_tui_types.state) ~keeper_name =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in
   change_chart state ~keeper_name |> Option.map (fun chart ->
-    Masc_tui_image_preview.mermaid
+    let palette = Masc_tui_terminal_palette.snapshot_palette (Masc_tui_terminal_palette.snapshot ()) in
+    Masc_tui_image_preview.graph
       ~name:((if ko then "기억 형성 · " else "Memory formation · ") ^ keeper_name)
-      (Masc_tui_memory_lineage.mermaid ~ko chart))
+      (Masc_tui_memory_lineage.lineage_graph ~ko ?palette ~keeper_name chart))
 
 let change_focus_diagram (state : Masc_tui_types.state) ~keeper_name =
   let ko = state.ui_language = Masc_tui_types.Lang_ko in

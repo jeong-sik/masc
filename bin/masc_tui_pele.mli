@@ -1,5 +1,5 @@
 (** Offline Pele subprocess, called only by the image acquisition worker. *)
-type format = Mermaid | Svg
+type format = Mermaid | Svg | Graph
 type scene = private {
   format : format;
   source : string;

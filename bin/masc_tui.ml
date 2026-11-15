@@ -14701,7 +14701,7 @@ let board_image_source_matches subject source =
       (match source with
        | Masc_tui_image_requests.Generated (Inline_mermaid diagram) ->
            List.exists (String.equal diagram) (Masc_tui_markdown.mermaid_sources body)
-       | Generated (Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _)
+       | Generated (Inline_data _ | Inline_svg _ | Inline_graph _ | Server_path _ | Remote_uri _)
        | Local_file _ | Draft _ | Retained _ | Board_artifact _ -> false)
   | Board_attachment_image {post_id;attachment={ba_kind;ba_source;ba_name}} ->
       if ba_kind <> Ak_image then false else

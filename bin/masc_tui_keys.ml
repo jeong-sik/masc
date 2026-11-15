@@ -2438,10 +2438,10 @@ let bindings_memory_changes =
   [ b ~ko:"이동" Navigate "j/k" "move"
   ; b ~ko:"전문" Act "Enter" "full reading"
       ~help:"read all original and successor claims of the selected committed change"
-  ; b ~ko:"… 변화 카드" Act "." "… change cards"
-      ~help:"open only the selected change as before/change/after cards with wrapped claim excerpts; full text remains on Enter"
+  ; b ~ko:"변화 카드" Act "." "change cards"
+      ~help:"open the selected change as before/change/after cards with full wrapped claims, reason, and notes"
   ; b ~ko:"연결 트리" Act "Ctrl-O" "connected tree"
-      ~help:"open the selected change's complete connected observed memory lineage with the offline Pele Mermaid preview"
+      ~help:"open the selected change's complete connected observed memory lineage as a rich Pele graph"
   ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
   ; b ~ko:"뒤로" Act "Esc" "back to facts" ]
   @ row_list_edges @ listing_meta

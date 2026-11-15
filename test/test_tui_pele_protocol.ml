@@ -33,7 +33,18 @@ let test_confirmed_success () = with_cache (fun cache_dir ->
   let open Yojson.Safe.Util in
   check int "requested protocol" 1 (request |> member "protocol" |> to_int);
   check string "requested source format" "mermaid" (request |> member "format" |> to_string);
-  check int "requested raster width" 320 (request |> member "raster" |> member "width" |> to_int))
+  check int "requested raster width" 320 (request |> member "raster" |> member "width" |> to_int);
+  let graph_scene = Pele.scene ~format:Graph ~max_width:640 ~font_size:16
+      ~now_ms:0L ~colors:None "{\"nodes\":[],\"edges\":[]}" in
+  let graph_req = ref None in
+  let graph_runner ~input ~output ~errors =
+    graph_req := Some (Yojson.Safe.from_file input);
+    write output "masc-pele-protocol:1\npng";
+    write errors "";
+    Unix.WEXITED 0 in
+  let graph_res = Pele.render ~cache_dir ~runner:graph_runner graph_scene in
+  check (result string string) "confirmed graph image" (Ok "png") graph_res;
+  check string "requested graph format" "graph" (Option.get !graph_req |> member "format" |> to_string))
 
 let test_unconfirmed_success () = with_cache (fun cache_dir ->
   List.iter (fun stdout ->

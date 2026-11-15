@@ -6,6 +6,7 @@ test, and an ask only once the test answers it."""
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -831,6 +832,60 @@ class Recovery(Base):
             self.compose("act-2")
 
 
+class MissingFields(Base):
+    """A read result that lacks a field this package reads is refused before
+    anything is kept, so the host keeps it and the worker lists the same read
+    again, also after a restart (#51940)."""
+
+    def kept(self) -> list[Path]:
+        directory = q.Blobs(self.state, "pages").directory
+        return sorted(directory.iterdir()) if directory.is_dir() else []
+
+    def test_a_page_without_a_field_the_listing_reads_is_refused_and_read_again(self):
+        self.compose()
+        (request,) = self.flow.listing()
+        for field in ("complete", "next_cursor", "records", "sha256"):
+            with self.subTest(field=field):
+                page = copy.deepcopy(self.host.produce(request))
+                assert page is not None
+                del page[field]
+                with self.assertRaises(f.InvalidResult):
+                    self.flow.deliver(request["request_id"], page)
+                self.assertEqual(self.kept(), [])
+                self.assertEqual(self.flow.listing(), [request])
+        self.assertEqual(f.Flow(self.state, PROMPTS, lambda request: True).listing(), [request])
+
+    def test_a_record_without_its_body_is_refused_and_the_session_goes_on(self):
+        session_id = self.compose()
+        (request,) = self.flow.listing()
+        page = copy.deepcopy(self.host.produce(request))
+        assert page is not None and page["complete"] is False
+        del page["records"][0]["body"]
+        with self.assertRaises(f.InvalidResult):
+            self.flow.deliver(request["request_id"], page)
+        self.assertEqual((self.kept(), self.flow.listing()), ([], [request]))
+        # The same page as the host keeps it whole is taken, and so is the rest.
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(session_id).state, "asked")
+
+    def test_a_file_without_its_content_is_refused_and_read_again(self):
+        self.host.commits = [commit(1, ["changelog.d/a.md"])]
+        self.host.files = {(f"{1:040x}", "changelog.d/a.md"): "the ledger records facts"}
+        self.compose(binding={"records": [REPO], "language": "ko"})
+        (page,) = self.flow.listing()
+        self.assertTrue(self.flow.deliver(page["request_id"], self.host.produce(page)))
+        (request,) = self.flow.listing()
+        self.assertEqual(request["kind"], "read_file")
+        kept = self.kept()
+        result = copy.deepcopy(self.host.produce(request))
+        assert result is not None
+        del result["content"]
+        with self.assertRaises(f.InvalidResult):
+            self.flow.deliver(request["request_id"], result)
+        self.assertEqual((self.kept(), self.flow.listing()), (kept, [request]))
+
+
 class Pieces(Base):
     def test_a_page_too_large_for_the_frame_is_read_in_pieces(self):
         self.host = FakeHost(page_size=3, frame=180)
@@ -917,11 +972,11 @@ class Kinds(Base):
         self.assertEqual(self.flow.listing(), [request])
 
     def test_a_read_of_a_source_the_session_does_not_grant_is_not_material(self):
-        read = {"request": {"kind": "read_records", "source_id": "wiki"}, "marker": None, "chunks": [],
-                "digests": [], "result": {"status": "records", "source_id": "wiki", "sha256": "0" * 64,
-                                          "records": [wiki_page("ledger", 1, "x")]}}
+        request = {"kind": "read_records", "request_id": "read-0", "source_id": "wiki"}
+        result = {"status": "records", "source_id": "wiki", "sha256": "0" * 64,
+                  "records": [wiki_page("ledger", 1, "x")], "next_cursor": None, "complete": True}
         with self.assertRaisesRegex(f.InvalidResult, "does not grant"):
-            f.material([read], {})
+            f.parse_result(request, result, ())
 
     def test_a_record_of_another_kind_than_its_grant_reads_is_not_taken(self):
         self.host.wiki = [post(1, "the ledger records facts")]
@@ -990,6 +1045,14 @@ class Memory(Base):
         (request,) = self.flow.listing()
         self.assertTrue(self.flow.deliver(request["request_id"], self.host.produce(request)))
 
+    def open_every_kept_file(self):
+        """One restarted worker lists before the one measured. pathlib interns
+        the name of each file it opens, and the interpreter's table of
+        interned names grows in steps of a few hundred KiB that no worker
+        holds. Whether a step falls inside the measurement depends on how
+        many names the process interned before it, not on this package."""
+        f.Flow(self.state, PROMPTS, lambda request: True).listing()
+
     def test_a_restarted_worker_keeps_no_record_body_of_the_pages_it_reads_back(self):
         self.host = FakeHost(page_size=10)
         self.host.board = [post(n, f"post {n} " + "x" * 4000) for n in range(1, 201)]
@@ -997,6 +1060,7 @@ class Memory(Base):
         for _ in range(19):
             self.deliver_one()
         kept = sum(path.stat().st_size for path in q.Blobs(self.state, "pages").directory.iterdir())
+        self.open_every_kept_file()
         tracemalloc.start()
         try:
             restarted = f.Flow(self.state, PROMPTS, lambda request: True)
@@ -1015,6 +1079,7 @@ class Memory(Base):
         for _ in range(40):
             self.deliver_one()
         kept = sum(path.stat().st_size for path in q.Blobs(self.state, "pages").directory.iterdir())
+        self.open_every_kept_file()
         tracemalloc.start()
         try:
             restarted = f.Flow(self.state, PROMPTS, lambda request: True)

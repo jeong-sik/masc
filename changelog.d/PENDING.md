@@ -1,0 +1,16 @@
+### Upgrade notes
+
+- The operator quiz package is revision `0.6.1` and needs image
+  `masc-lane-operator-quiz:0.2.2`, which carries the changed `records.py`.
+  Build the image before updating the installed package; rows and
+  `log.jsonl` are unchanged (#51940, #PENDING).
+
+### Fixed
+
+- The operator quiz parses a host read result before it keeps anything of
+  it. A page, file or result piece that lacks a field the worker reads, or
+  holds a record of another shape, is refused as an invalid result: the host
+  keeps it, nothing is written to `pages/`, and the worker lists the same
+  read again. Before, the result was kept first and the worker exited with a
+  `KeyError`; a page kept that way stopped the session again after every
+  restart (#51940, #PENDING).

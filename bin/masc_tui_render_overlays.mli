@@ -1,5 +1,5 @@
 (** Overlay and modal screens (About, Keeper navigation, Context inspector,
-    Command palette, Patch review, Link preview, Play invite card, Keeper
+    Command palette, Link preview, Play invite card, Keeper
     deletions, Cheat sheet, Agenda, Answering, Terminal-too-small, Account
     login, Collab, and Lane add-ons) and their viewport calculators. *)
 
@@ -39,14 +39,6 @@ val render_context_inspector :
 val help_viewport : Masc_tui_types.state -> int * int
 
 val render_palette :
-  Masc_tui_types.state ->
-  Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
-
-val patch_modal_horizontal_limit : Masc_tui_types.state -> int
-
-val patch_modal_viewport : Masc_tui_types.state -> int * int
-
-val render_patch_modal :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 

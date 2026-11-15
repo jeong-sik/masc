@@ -511,7 +511,6 @@ val help_sections_for_state :
 (** Put the active nested reader's own keys first, ahead of surface reference
     sections. This is the help sheet's state-aware entry point. *)
 
-val footer_hints_patch_review : lang:Masc_tui_types.ui_language -> string
 val footer_hints_about : lang:Masc_tui_types.ui_language -> string
 val footer_hints_queue : Masc_tui_types.state -> Masc_tui_types.queue_panel -> string
 val footer_hints_context : cols:int -> Masc_tui_types.state -> string

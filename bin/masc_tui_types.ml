@@ -3649,12 +3649,9 @@ type runtime_lane_list_freshness =
   | Lane_list_read
   | Lane_list_unread of string
 
-(** Identity of an asynchronous diff read, including its destination. *)
-type repository_diff_reader = Repository_diff_reader | Patch_diff_reader
-
+(** Identity of an asynchronous Git Changes diff read. *)
 type repository_diff_request =
-  { rdr_reader : repository_diff_reader
-  ; rdr_scope : Tui_decode.repository_change_scope
+  { rdr_scope : Tui_decode.repository_change_scope
   ; rdr_path : string
   ; rdr_generation : int
   }
@@ -11131,15 +11128,6 @@ type state = {
   mutable repository_changes_diff_hscroll: int;
   mutable repository_changes_diff_max_width: int;
   mutable repository_changes_return_chat: bool;
-  (* The patch review overlay: the pending diff to scroll, and [e] to open it
-     in $EDITOR. *)
-  mutable patch_modal_open: bool;
-  mutable patch_modal_scroll: int;
-  mutable patch_modal_hscroll: int;
-  mutable patch_modal_path: string option;
-  mutable patch_modal_diff: (string * Tui_decode.git_diff) option;
-  mutable patch_modal_generation: int;
-  mutable patch_modal_error: string option;
   (* Web Link Preview and Rich Embed modal & settings *)
   mutable link_modal_open: bool;
   mutable link_modal_scroll: int;
@@ -21255,13 +21243,6 @@ let create_state
   repository_changes_diff_hscroll = 0;
   repository_changes_diff_max_width = 0;
   repository_changes_return_chat = false;
-  patch_modal_open = false;
-  patch_modal_scroll = 0;
-  patch_modal_hscroll = 0;
-  patch_modal_path = None;
-  patch_modal_diff = None;
-  patch_modal_generation = 0;
-  patch_modal_error = None;
   link_modal_open = false;
   link_modal_scroll = 0;
   link_modal_url = None;
@@ -22547,13 +22528,12 @@ type clamped_scroll =
      correct the row it names. *)
   | Metrics_scroll of { scroll : int; content_height : int; card_rows : int option }
   | Approval_detail_scroll of int * approval_detail_viewport option
-  (* Both modals draw over a surface rather than being one, and both counted
-     their rows the same way the diff does: the patch modal out of the recorded
-     diff, the link preview out of the card the drawing formats. Neither count
-     is knowable at the keypress, which steps by one or jumps to 9999 and lets
-     the frame say where that landed. They wrote the answer back from inside
-     the drawing instead, which is the one thing the renderer must not do. *)
-  | Patch_modal_scroll of int * int
+  (* The link preview draws over a surface rather than being one, and counts
+     its rows the same way the diff does, out of the card the drawing formats.
+     The count is not knowable at the keypress, which steps by one or jumps to
+     9999 and lets the frame say where that landed. It wrote the answer back
+     from inside the drawing instead, which is the one thing the renderer must
+     not do. *)
   | Link_modal_scroll of int
   | Play_invite_scroll of Masc_tui_play_card.t * int
   | Queue_panel_presented of queue_panel_owner
@@ -22591,7 +22571,7 @@ let approval_detail_viewport_of_reader = function
          | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
          | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
-         | Resource_scroll _ | Metrics_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Resource_scroll _ | Metrics_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _
          | Queue_panel_presented _ | Help_presented)
@@ -22606,7 +22586,7 @@ let task_detail_of_reader = function
          | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
          | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
-         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
          | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _
          | Keeper_list_scroll _ | Context_inspector_scroll _ | Context_inspector_response_scroll _
          | Queue_panel_presented _ | Help_presented)
@@ -22622,7 +22602,7 @@ let play_card_of_reader = function
          | System_log_detail_scroll _ | Planning_confirmation_scroll _
          | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
-         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Approval_detail_scroll _ | Link_modal_scroll _
          | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _
          | Help_presented)
@@ -22638,7 +22618,7 @@ let queue_owner_of_reader = function
          | System_log_detail_scroll _ | Planning_confirmation_scroll _
          | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
-         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Approval_detail_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Help_presented)
   | None -> None
@@ -22653,7 +22633,7 @@ let help_is_presented = function
          | System_log_detail_scroll _ | Planning_confirmation_scroll _
          | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
-         | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _
+         | Approval_detail_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
   | None -> false
@@ -22676,7 +22656,7 @@ let resource_scroll_position = function
   | Runtime_detail_scroll _ | Runtime_params_scroll _ | System_log_detail_scroll _
   | Planning_confirmation_scroll _ | Planning_detail_scroll _ | Lane_run_detail_scroll _
   | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
-  | Approval_detail_scroll _ | Patch_modal_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
+  | Approval_detail_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
   | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Context_inspector_scroll _
   | Context_inspector_response_scroll _ | Planning_list_page_rows _ | Queue_panel_presented _
   | Help_presented -> None
@@ -22746,9 +22726,6 @@ let apply_clamped_scroll (state : state) = function
       state.metrics_content_height <- content_height;
       state.metrics_scroll_card_rows <- card_rows
   | Approval_detail_scroll (value, _) -> state.approval_detail_scroll <- value
-  | Patch_modal_scroll (vertical, horizontal) ->
-      state.patch_modal_scroll <- vertical;
-      state.patch_modal_hscroll <- horizontal
   | Link_modal_scroll value -> state.link_modal_scroll <- value
   | Play_invite_scroll (card, value) ->
       (match play_card_shown state with

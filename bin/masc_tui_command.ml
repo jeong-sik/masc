@@ -31,7 +31,6 @@ type t =
   | Account_login of string
   | Open_settings
   | Open_diff
-  | Open_patch_modal
   | Open_usage
   | Open_link_preview of string option
   | Open_links_list
@@ -158,11 +157,6 @@ let catalog =
     ; aliases = []
     ; args = ""
     ; summary = "open git changes and diff for the workspace"
-    }
-  ; { word = "patch"
-    ; aliases = [ "review" ]
-    ; args = ""
-    ; summary = "open the patch review for pending code changes"
     }
   ; { word = "cost"
     ; aliases = []
@@ -370,7 +364,7 @@ let help_lines =
 
 (* Every spelling the parser answers to, one entry each. An alias is not a
    second command: the parser folds the pair into a single arm
-   ("patch", _ | "review", _ -> Open_patch_modal), so the catalog describes the
+   ("metrics", _ | "telemetry", _ -> Open_metrics), so the catalog describes the
    command once and this projection spells it as many ways as the parser
    accepts. The composer reads this list, the help row reads [catalog] -- which
    is why a new alias cannot arrive with its summary copied beside it. *)
@@ -475,7 +469,6 @@ let parse_with_message_source text =
     | "login", client -> Account_login client
     | "settings", _ -> Open_settings
     | "diff", _ -> Open_diff
-    | "patch", _ | "review", _ -> Open_patch_modal
     | "cost", _ -> Open_usage
     | "preview", arg ->
         let trimmed = String.trim arg in

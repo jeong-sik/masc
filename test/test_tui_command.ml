@@ -15,7 +15,6 @@ let describe = function
   | Command.About -> "about"
   | Command.Open_settings -> "open-settings"
   | Command.Open_diff -> "open-diff"
-  | Command.Open_patch_modal -> "open-patch-modal"
   | Command.Open_usage -> "open-usage"
   | Command.Open_link_preview None -> "open-link-preview"
   | Command.Open_link_preview (Some u) -> "open-link-preview:" ^ u
@@ -210,8 +209,8 @@ let test_pane_commands_parse_by_word () =
     ; "about"
     ; "open-settings"
     ; "open-diff"
-    ; "open-patch-modal"
-    ; "open-patch-modal"
+    ; "unknown:patch"
+    ; "unknown:review"
     ; "open-usage"
     ; "open-link-preview"
     ; "open-link-preview:https://github.com/jeong-sik/masc"
@@ -751,14 +750,14 @@ let test_an_alias_shares_its_command_row () =
     (List.exists
        (fun (entry : Command.command_help) -> entry.Command.aliases <> [])
        Command.catalog);
-  check bool "/patch spells /review in its own column" true
+  check bool "/metrics spells /telemetry in its own column" true
     (List.exists
-       (fun line -> String.starts_with ~prefix:"/patch (/review)" line)
+       (fun line -> String.starts_with ~prefix:"/metrics (/telemetry)" line)
        Command.help_lines);
-  check int "and /review opens no row of its own" 0
+  check int "and /telemetry opens no row of its own" 0
     (List.length
        (List.filter
-          (fun line -> String.starts_with ~prefix:"/review" line)
+          (fun line -> String.starts_with ~prefix:"/telemetry" line)
           Command.help_lines));
   check int "one row per command" (List.length Command.catalog)
     (List.length Command.help_lines)

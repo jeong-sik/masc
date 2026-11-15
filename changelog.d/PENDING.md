@@ -1,0 +1,11 @@
+### Removed
+
+- The TUI's `/patch` and `/review` commands and the Patch review overlay
+  they opened are gone. The overlay used a file only while a Git Changes
+  diff was open, and Git Changes takes every key while it is open, so a
+  typed `/patch` always asked `GET /api/v1/git/diff` for `path=.`. The
+  server's path check refuses `.` as traversal, and the overlay showed
+  nothing but `HTTP 400: Invalid path`. `/diff` opens Git Changes, which
+  lists the working-tree changes and reads the chosen file's diff. `/patch`
+  and `/review` now report an unknown command and send no request
+  (#50215, #PENDING).

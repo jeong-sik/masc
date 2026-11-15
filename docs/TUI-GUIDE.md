@@ -2265,6 +2265,12 @@ and `due` (earliest due date first, undated last). The current meanings are
 printed above the rollup. Status colour and the proof marker remain independent
 of ordering, so a row does not look successful merely because it sorted first.
 
+An Executing or Verifying goal whose due date has passed says `past due` after
+its phase, in the row, the preview and the detail's Due field. A goal falls due
+at 23:59:59 UTC of its day. One whose due date cannot be read says
+`unreadable due date` rather than passing for a goal with no date. Passing a
+due date only changes what is drawn: it closes no goal and tells no one.
+
 Goal detail's `RELATED ACTIVITY` block is not a complete Task history. It shows
 the latest state per linked Task and Keeper, pending approvals, and Goal phase
 events. Task rows name the typed actor role (`claimed by`, `submitted by`,

@@ -51,10 +51,12 @@ let snapshot ?(audit_limit = 10) () : Channel_gate_connector.snapshot =
     | Starting | Polling _ -> ""
   in
   let error = match binding_read with Ok _ -> poll_error | Error error -> error in
+  (* bot_user_id goes out as a string, as every connector sends it: the
+     dashboard and TUI read one string field for all connectors. *)
   let bot_user_id, next_offset =
     match current with
     | Polling { bot_user_id; next_offset } ->
-        `Intlit (Int64.to_string bot_user_id),
+        `String (Int64.to_string bot_user_id),
         Option.fold ~none:`Null
           ~some:(fun n -> `Intlit (Int64.to_string n)) next_offset
     | Not_configured | Starting | Degraded _ -> `Null, `Null

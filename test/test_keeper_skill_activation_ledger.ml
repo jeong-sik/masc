@@ -1719,8 +1719,8 @@ let test_failed_append_notifies_and_invalidates_cache () =
       let loads_during_notification = ref [] in
       let observer ~config:_ ~trace_id:changed =
         heard := changed :: !heard;
-        loads_during_notification := !loads :: !loads_during_notification;
-        read ()
+        read ();
+        loads_during_notification := !loads :: !loads_during_notification
       in
       Ledger.install_commit_observer observer;
       Fun.protect ~finally:(fun () -> Ledger.withdraw_commit_observer observer)

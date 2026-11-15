@@ -568,26 +568,24 @@ function isToolObservation(event: KeeperChatStreamEvent): boolean {
   }
 }
 
-type OperationFrameTarget =
-  | { readonly kind: 'absent' }
+type MatchedFrameTarget =
   | { readonly kind: 'closed' }
   | { readonly kind: 'entry'; readonly entry: KeeperConversationEntry; readonly observationOnly: boolean }
 
-/** Which row a frame of one operation belongs to. The operation id on the
+type OperationFrameTarget = { readonly kind: 'absent' } | MatchedFrameTarget
+
+/** The row that holds the reply of one operation. The operation id on the
  * row's delivery provenance is the identity; a row id is not, because server
- * history replaces a client placeholder with a row under a different id. Both
- * transports resolve through here: the observer broadcast for every frame, the
- * direct response stream once the placeholder it created is gone. */
-function operationFrameTarget(
+ * history replaces a client placeholder with a row under a different id. */
+function operationReplyRow(
   keeperName: string,
   operationId: string,
-  event: KeeperChatStreamEvent,
-): OperationFrameTarget {
+): KeeperConversationEntry | undefined {
   const entries = keeperThreads.value[keeperName] ?? []
   // A persisted request_failure is a system row. Both the earlier stream
   // terminal and the Owner's settled_failure close their operation; a late
   // event cannot reopen it or replace an assistant result delivered earlier.
-  const matched = [...entries].reverse().find(
+  return [...entries].reverse().find(
     entry =>
       (entry.role === 'assistant' || entry.delivery === 'request_failure')
       && (isOperationDeliveryProvenance(
@@ -599,7 +597,46 @@ function operationFrameTarget(
         && sameDeliveryKey(entry.deliveryProvenance.delivery_key,
           { kind: 'operation', operation_id: operationId }))),
   )
-  if (!matched) return { kind: 'absent' }
+}
+
+export type KeeperLiveSendReplyRow =
+  | { readonly kind: 'placeholder'; readonly entry: KeeperConversationEntry }
+  | { readonly kind: 'replaced'; readonly entry: KeeperConversationEntry }
+  | { readonly kind: 'absent' }
+
+/** Which row holds the reply of a send this session issued. The send owns the
+ * placeholder it created for as long as that row exists. Server history can
+ * replace the placeholder with the stored row of the same operation; from then
+ * on the stored row is the reply, found the way [operationReplyRow] finds it
+ * for the observer. The frames of the send and the tail that settles it both
+ * resolve the row here. */
+export function keeperLiveSendReplyRow(
+  keeperName: string,
+  placeholderEntryId: string,
+  operationId: string,
+): KeeperLiveSendReplyRow {
+  const placeholder = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === placeholderEntryId)
+  if (placeholder) return { kind: 'placeholder', entry: placeholder }
+  const stored = operationReplyRow(keeperName, operationId)
+  return stored ? { kind: 'replaced', entry: stored } : { kind: 'absent' }
+}
+
+/** Which row a frame of one operation belongs to. Both transports resolve
+ * through here: the observer broadcast for every frame, the direct response
+ * stream once the placeholder it created is gone. */
+function operationFrameTarget(
+  keeperName: string,
+  operationId: string,
+  event: KeeperChatStreamEvent,
+): OperationFrameTarget {
+  const matched = operationReplyRow(keeperName, operationId)
+  return matched ? matchedFrameTarget(matched, event) : { kind: 'absent' }
+}
+
+function matchedFrameTarget(
+  matched: KeeperConversationEntry,
+  event: KeeperChatStreamEvent,
+): MatchedFrameTarget {
   const outsideLiveDelivery = matched.delivery !== 'queued'
     && matched.delivery !== 'sending'
     && matched.delivery !== 'streaming'
@@ -723,39 +760,41 @@ export function applyKeeperOperationTurnEvent(
 export const KEEPER_LIVE_SEND_ROW_MISSING = 'Keeper response row is missing for its operation'
 
 /** Apply one frame of the direct response stream of a send this session
- * issued. The stream writes into the placeholder it created for as long as
- * that row exists. Server history can replace the placeholder with the stored
- * row of the same operation while frames are still arriving; live-send
- * ownership discards the broadcast copy of those frames, so this stream is
- * their only carrier and the frame goes to the row [operationFrameTarget]
- * names. A stored row accepts tool observations and stays closed to response
- * content, exactly as it does for the observer. */
+ * issued, to the row [keeperLiveSendReplyRow] names. Server history can
+ * replace the placeholder with the stored row of the same operation while
+ * frames are still arriving; live-send ownership discards the broadcast copy
+ * of those frames, so this stream is their only carrier. A stored row accepts
+ * tool observations and stays closed to response content, exactly as it does
+ * for the observer. */
 export function applyKeeperLiveSendEvent(
   keeperName: string,
   placeholderEntryId: string,
   operation: KeeperOperationTurnEvent,
 ): string | null {
   const operationId = operation.operationId
-  const placeholder = (keeperThreads.value[keeperName] ?? []).some(entry => entry.id === placeholderEntryId)
-  if (placeholder) {
-    return applyKeeperStreamEvent(
-      keeperName,
-      placeholderEntryId,
-      operation.event,
-      { kind: 'operation', operationId, sequence: operation.sequence },
-    )
-  }
-  const target = operationFrameTarget(keeperName, operationId, operation.event)
-  switch (target.kind) {
-    case 'absent': return KEEPER_LIVE_SEND_ROW_MISSING
-    case 'closed': return null
-    case 'entry': {
-      const error = applyOperationFrameToEntry(
-        keeperName, target.entry.id, operationId, operation, target.observationOnly,
+  const reply = keeperLiveSendReplyRow(keeperName, placeholderEntryId, operationId)
+  switch (reply.kind) {
+    case 'placeholder':
+      return applyKeeperStreamEvent(
+        keeperName,
+        placeholderEntryId,
+        operation.event,
+        { kind: 'operation', operationId, sequence: operation.sequence },
       )
-      // An observation the stored row refuses is recorded on that row. The
-      // turn has already converged, so it does not end the send.
-      return target.observationOnly ? null : error
+    case 'absent': return KEEPER_LIVE_SEND_ROW_MISSING
+    case 'replaced': {
+      const target = matchedFrameTarget(reply.entry, operation.event)
+      switch (target.kind) {
+        case 'closed': return null
+        case 'entry': {
+          const error = applyOperationFrameToEntry(
+            keeperName, target.entry.id, operationId, operation, target.observationOnly,
+          )
+          // An observation the stored row refuses is recorded on that row. The
+          // turn has already converged, so it does not end the send.
+          return target.observationOnly ? null : error
+        }
+      }
     }
   }
 }

@@ -5,7 +5,8 @@
     and calls the commit observer after it when the function attempted an
     append, also when it raised. The commit-state observer receives [Some]
     exact ledger after a successful commit under the lock and [None] for an
-    uncertain append after the lock. [install_commit_observer] sets the
+    uncertain append after the lock, both before the commit observer and the
+    dataset event are told. [install_commit_observer] sets the
     attempted-append observer, and [withdraw_commit_observer] unsets it when
     it is still the one installed. [install_commit_state_observer] installs
     the cacheable-state observer and returns its restoration.

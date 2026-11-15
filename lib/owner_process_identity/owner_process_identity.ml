@@ -7,11 +7,16 @@ external terminate_raw : raw -> int = "masc_owner_identity_terminate"
 external close_raw : raw -> unit = "masc_owner_identity_close"
 external pid_raw : raw -> int = "masc_owner_identity_pid"
 external held_byte_raw : Unix.file_descr -> int -> int -> int * int * int = "masc_owner_identity_held_byte"
+external lease_holder_raw : Unix.file_descr -> int * int = "masc_owner_identity_lease_holder"
 let error = function 1 -> No_owner | 2 -> Owner_changed | 3 -> Unsupported | _ -> Unavailable
 let capture ~lease_fd =
   match capture_raw lease_fd with
   | 0, raw -> Ok {raw;pid=pid_raw raw;lock=Mutex.create ();closed=false}
   | code, _ -> Error (error code)
+let lease_holder ~lease_fd =
+  match lease_holder_raw lease_fd with
+  | 0, pid -> Ok pid
+  | code, (_ : int) -> Error (error code)
 let pid owner = owner.pid
 (* [fcntl] reads a length of 0 as "from the start to the end of the file". *)
 let to_the_end_of_the_file = 0

@@ -495,36 +495,71 @@ end = struct
   }
 
   module Pool = Masc_http_client.Pool
+  module Scope = Masc_tui_workspace_precondition
+
+  (* Every request inside a workspace request scope carries its precondition
+     headers, and the answer is recorded for the scope (#43356). *)
+  let scoped ~url ~headers ~answer send =
+    let prepared = Scope.prepare ~url headers in
+    let result = send (Scope.headers prepared) in
+    Scope.observe prepared (answer result);
+    result
+
+  let pair_answer = function
+    | Ok (status, body) -> Scope.Answered { status; body }
+    | Error _ -> Scope.Unanswered
+
+  let response_answer = function
+    | Ok { status; body; headers = _ } -> Scope.Answered { status; body }
+    | Error _ -> Scope.Unanswered
+
+  let stream_answer = function
+    | Ok (Pool.Buffered { status; body; headers = _ }) -> Scope.Answered { status; body }
+    | Ok (Pool.Streamed { status; _ }) -> Scope.Answered { status; body = "" }
+    | Error _ -> Scope.Unanswered
 
   let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
-    on_io_domain (fun () ->
-      Masc_http_client.get_sync ?clock ?timeout_sec ?max_body_bytes ~url
-        ~headers ())
+    scoped ~url ~headers ~answer:pair_answer (fun headers ->
+      on_io_domain (fun () ->
+        Masc_http_client.get_sync ?clock ?timeout_sec ?max_body_bytes ~url
+          ~headers ()))
 
   let get_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =
-    on_io_domain (fun () ->
-      Masc_http_client.get_response_sync ?clock ?timeout_sec ?max_body_bytes
-        ~url ~headers ())
+    scoped ~url ~headers ~answer:response_answer (fun headers ->
+      on_io_domain (fun () ->
+        Masc_http_client.get_response_sync ?clock ?timeout_sec ?max_body_bytes
+          ~url ~headers ()))
 
   let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
-    on_io_domain (fun () ->
-      Masc_http_client.post_sync ?clock ?timeout_sec ~url ~headers ~body ())
+    scoped ~url ~headers ~answer:pair_answer (fun headers ->
+      on_io_domain (fun () ->
+        Masc_http_client.post_sync ?clock ?timeout_sec ~url ~headers ~body ()))
 
   let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
-    on_io_domain (fun () ->
-      Masc_http_client.post_response_sync ?clock ?timeout_sec ~url ~headers
-        ~body ())
+    scoped ~url ~headers ~answer:response_answer (fun headers ->
+      on_io_domain (fun () ->
+        Masc_http_client.post_response_sync ?clock ?timeout_sec ~url ~headers
+          ~body ()))
 
   let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
-    on_io_domain (fun () ->
-      Masc_http_client.patch_sync ?clock ?timeout_sec ~url ~headers ~body ())
+    scoped ~url ~headers ~answer:pair_answer (fun headers ->
+      on_io_domain (fun () ->
+        Masc_http_client.patch_sync ?clock ?timeout_sec ~url ~headers ~body ()))
 
   let delete_sync ?clock ?timeout_sec ?body ~url ~headers () =
-    on_io_domain (fun () ->
-      Masc_http_client.delete_sync ?clock ?timeout_sec ?body ~url ~headers ())
+    scoped ~url ~headers ~answer:pair_answer (fun headers ->
+      on_io_domain (fun () ->
+        Masc_http_client.delete_sync ?clock ?timeout_sec ?body ~url ~headers ()))
 
-  let post_stream = Masc_http_client.post_stream
-  let get_stream = Masc_http_client.get_stream
+  let post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers ~body ~on_chunk () =
+    scoped ~url ~headers ~answer:stream_answer (fun headers ->
+      Masc_http_client.post_stream ~retention ~clock ~idle_timeout_sec ~url ~headers
+        ~body ~on_chunk ())
+
+  let get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response ~on_chunk () =
+    scoped ~url ~headers ~answer:stream_answer (fun headers ->
+      Masc_http_client.get_stream ~clock ~idle_timeout_sec ~url ~headers ?on_response
+        ~on_chunk ())
 end
 
 (** Send an HTTP GET request and return the structured status/body pair. *)

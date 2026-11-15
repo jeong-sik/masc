@@ -1499,7 +1499,8 @@ let test_checkpoint_preserves_receipt_across_session_replacement () =
       let load () = Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:Keeper_client_tool_outbox.Every_receipt |> require in
       let original_id = match Keeper_client_tool_outbox.receipt_ids (load ()) with
         | [id] -> id | _ -> fail "expected the original committed receipt" in
-      Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name |> require;
+      Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name
+      |> Result.map_error Keeper_client_tool_outbox_wake.notify_error_to_string |> require;
       let intake () =
         let env = Option.get (Eio_context.get_env_opt ()) in
         Eio.Switch.run (fun sw ->

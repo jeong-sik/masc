@@ -565,9 +565,76 @@ let handshake_failed ~listener_tag client_addr reason =
     reason
 ;;
 
+(* What the ALPN extension settled on. [Error] is a protocol the
+   configuration did not offer. *)
+let negotiated_of_alpn = function
+  | None -> Ok Https_listener_metrics.Alpn_none
+  | Some protocol when String.equal protocol Server_tls_material.alpn_h2 ->
+    Ok Https_listener_metrics.Alpn_h2
+  | Some protocol when String.equal protocol Server_tls_material.alpn_http1 ->
+    Ok Https_listener_metrics.Alpn_http1
+  | Some protocol -> Error protocol
+;;
+
+let session_ended ~listener_tag client_addr reason =
+  Log.Http.debug
+    "[%s] TLS session with %s ended before its first request: %s"
+    listener_tag
+    (Format.asprintf "%a" Eio.Net.Sockaddr.pp client_addr)
+    reason
+;;
+
+let protocol_mismatch ~listener_tag client_addr negotiated detected =
+  Log.Http.debug
+    "[%s] %s sent %s on a session that negotiated %s: connection closed"
+    listener_tag
+    (Format.asprintf "%a" Eio.Net.Sockaddr.pp client_addr)
+    (Http_protocol_detect.protocol_to_string detected)
+    (match (negotiated : Https_listener_metrics.negotiated) with
+     | Alpn_h2 -> Server_tls_material.alpn_h2
+     | Alpn_http1 -> Server_tls_material.alpn_http1
+     | Alpn_none -> "no ALPN protocol")
+;;
+
 let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_handler ~h2_error_handler =
   let resources = shared_h2_resources () in
   let listener_tag = Printf.sprintf "tls %s" addr_label in
+  (* The first request has the bound a cleartext connection has from its
+     accept, counted from the end of the handshake (RFC-0518 D6). Its first
+     bytes must be the protocol ALPN settled on: a session that speaks the
+     other one is closed, not served as either. *)
+  let serve_session ~conn_sw client_addr connection negotiated session_socket =
+    match
+      Server_connection_socket.prepare connection (fun () ->
+        Http_protocol_detect.detect session_socket)
+    with
+    | exception Tls_eio.Tls_alert alert ->
+      session_ended ~listener_tag client_addr
+        (Printf.sprintf "alert %s" (Tls.Packet.alert_type_to_string alert))
+    | exception Tls_eio.Tls_failure failure ->
+      session_ended ~listener_tag client_addr
+        (Format.asprintf "%a" Tls.Engine.pp_failure failure)
+    | None ->
+      not_prepared ~listener_tag client_addr
+        "sent no request line or HTTP/2 preface after the TLS handshake"
+    | Some (Error reason) -> session_ended ~listener_tag client_addr reason
+    | Some (Ok (detected, flow)) ->
+      (match (negotiated : Https_listener_metrics.negotiated), detected with
+       | Alpn_h2, Http_protocol_detect.Http2 ->
+         serve_h2_connection
+           ~clock
+           ~resources
+           ~sw:conn_sw
+           ~h2_request_handler
+           ~h2_error_handler
+           client_addr
+           flow
+       | (Alpn_http1 | Alpn_none), Http_protocol_detect.Http1 ->
+         serve_h1_connection ~sw:conn_sw ~request_handler client_addr flow
+       | Alpn_h2, Http_protocol_detect.Http1
+       | (Alpn_http1 | Alpn_none), Http_protocol_detect.Http2 ->
+         protocol_mismatch ~listener_tag client_addr negotiated detected)
+  in
   Https_listener_metrics.record_started ();
   Eio.Switch.on_release sw Https_listener_metrics.record_stopped;
   Log.Server.info "[%s] HTTPS: TLS 1.3, ALPN h2 and http/1.1" listener_tag;
@@ -605,28 +672,13 @@ let serve_tls ~sw ~clock ~socket ~addr_label ~tls ~request_handler ~h2_request_h
          | Error () ->
            handshake_failed ~listener_tag client_addr "no active session after the handshake"
          | Ok epoch ->
-           let socket =
-             Tls_stream_socket.wrap session ~on_send_shutdown:(fun () ->
-               Server_connection_socket.send_side_closed connection)
-           in
-           (match epoch.Tls.Core.alpn_protocol with
-            | Some protocol when String.equal protocol Server_tls_material.alpn_h2 ->
-              Https_listener_metrics.record_negotiated Alpn_h2;
-              serve_h2_connection
-                ~clock
-                ~resources
-                ~sw:conn_sw
-                ~h2_request_handler
-                ~h2_error_handler
-                client_addr
-                socket
-            | Some protocol when String.equal protocol Server_tls_material.alpn_http1 ->
-              Https_listener_metrics.record_negotiated Alpn_http1;
-              serve_h1_connection ~sw:conn_sw ~request_handler client_addr socket
-            | None ->
-              Https_listener_metrics.record_negotiated Alpn_none;
-              serve_h1_connection ~sw:conn_sw ~request_handler client_addr socket
-            | Some protocol ->
+           (match negotiated_of_alpn epoch.Tls.Core.alpn_protocol with
+            | Ok negotiated ->
+              Https_listener_metrics.record_negotiated negotiated;
+              serve_session ~conn_sw client_addr connection negotiated
+                (Tls_stream_socket.wrap session ~on_send_shutdown:(fun () ->
+                   Server_connection_socket.send_side_closed connection))
+            | Error protocol ->
               (* The library settles only on a protocol the configuration
                  offered, so this is a library fault, not a client choice. *)
               handshake_failed ~listener_tag client_addr

@@ -416,6 +416,28 @@ val drain_fd : Unix.file_descr -> Buffer.t -> drain_result
     child pipes nonblocking so draining never stalls the timeout/EOF
     watchdogs. *)
 
+(** {1 Standard descriptors} *)
+
+type standard_descriptor =
+  | Standard_input
+  | Standard_output
+  | Standard_error
+
+val closed_standard_descriptors : unit -> standard_descriptor list
+(** The standard descriptors of this process that name no open file, in
+    descriptor order; empty when all three are open. Read with [fstat], so a
+    closed one is one that answers [EBADF]. A shim run reads its request
+    from fd 0, writes to fds 1 and 2, and wires its payload's standard
+    descriptors from pipes it opens; a closed one would hand its number to
+    one of those pipes. *)
+
+val closed_standard_descriptor_exit_code : int
+(** [3]: the exit code of a shim run started while
+    {!closed_standard_descriptors} is not empty. Nothing is written, since
+    stderr may be the closed one. Distinct from the shim's other exits:
+    [0] after the payload's trailer, [1] after a shim-failure trailer and
+    [2] for usage. *)
+
 (** {1 Entry points} *)
 
 val probe : unit -> Exec_ssh_protocol.probe
@@ -429,5 +451,7 @@ val main : unit -> unit
 (** [masc-exec-shim --probe] prints {!probe} via
     {!Exec_ssh_protocol.render_probe} and exits [0];
     [masc-exec-shim --serve SOCKET UID:GID] runs the guest agent
-    ({!Shim_agent.main}); with no arguments runs [run]; anything else prints
-    usage and exits [2]. *)
+    ({!Shim_agent.main}); with no arguments runs [run], or exits
+    {!closed_standard_descriptor_exit_code} before reading anything when
+    {!closed_standard_descriptors} is not empty; anything else prints usage
+    and exits [2]. *)

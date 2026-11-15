@@ -21,10 +21,11 @@ val fresh_authority : config:Workspace.config -> reserved:string list ->
     configuration revision. Blocking read; offload it in an Eio caller. *)
 val call : config:Workspace.config -> reserved:string list ->
   expected:Keeper_librarian_durable_request.destination ->
-  original:Lane_addon_tool_request_owner.retained -> arguments:Yojson.Safe.t ->
+  original:Lane_addon_tool_request_owner.Record.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_submit_once.call_error) result
 (** Submit the retained [original] to the worker of [expected]'s configuration.
-    Only failures before the worker RPC are [Not_sent]. *)
+    The record is enough: the call reads its record again, not its body. Only
+    failures before the worker RPC are [Not_sent]. *)
 val confirm_destination : config:Workspace.config -> reserved:string list ->
   Keeper_librarian_durable_request.destination -> (unit, Lane_addon_submit_once.error) result
 (** The configuration still publishes [destination]'s installation, package,

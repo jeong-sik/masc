@@ -231,13 +231,18 @@ val event_queue_delivery_seen_for_source_result :
     matching rows do not become positive evidence; read failures remain
     explicit so callers can conservatively replay. *)
 
+type incomplete_delivery_evidence =
+  { malformed_row_count : int
+  ; semantic_invalid_row_count : int
+  ; first_reason : row_quarantine_reason
+  }
+(** The rows of a read window that could not be read as delivery evidence:
+    lines that are not JSON, rows the current decoder refuses, and the reason
+    of the first one in file order. *)
+
 type strict_delivery_evidence_error =
   | Delivery_evidence_unavailable of event_queue_reaction_evidence_error
-  | Evidence_incomplete of
-      { malformed_row_count : int
-      ; semantic_invalid_row_count : int
-      ; first_reason : row_quarantine_reason
-      }
+  | Evidence_incomplete of incomplete_delivery_evidence
 
 val strict_delivery_evidence_error_to_string : strict_delivery_evidence_error -> string
 
@@ -258,6 +263,17 @@ val strict_source_delivery_snapshot_result :
     Reuse only within the owning recovery pass and identical Keeper/window.
     It is an observation, not permission to enqueue without the queue
     owner's fresh once-only check. *)
+
+val strict_source_delivery_snapshot_rows : strict_source_delivery_snapshot -> int
+(** Every row of the snapshot's window, readable or not. *)
+
+val strict_source_delivery_snapshot_incomplete :
+  strict_source_delivery_snapshot -> incomplete_delivery_evidence option
+(** [None] when every row of the window was read as delivery evidence.
+    Otherwise the rows {!source_delivery_seen_in_snapshot} reports as
+    {!Evidence_incomplete} for each source the window does not prove. A check
+    before a start reads it to refuse a ledger on which the strict readers
+    would refuse every once-only wake they cannot prove delivered. *)
 
 val source_delivery_seen_in_snapshot :
   strict_source_delivery_snapshot ->

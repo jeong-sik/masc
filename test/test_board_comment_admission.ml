@@ -241,6 +241,44 @@ let test_deleted_sub_board_keeps_comment_available base =
   Alcotest.(check (option string)) "accepted hearth unlink survives restart" None restored.hearth;
   ignore (require (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string comment.id)))
 
+let append_under store (parent : Board.post) ~parent_id ?(author = "outsider") content =
+  Board.add_comment store ~reader:Access.Operator ~lookup:Recipient_lookup.none_declared
+    ~post_id:(Board.Post_id.to_string parent.id) ~author ~content ~parent_id ~ttl_hours:0 ()
+
+let repeat_message (parent : Board.post) ~author (existing : Board.comment) =
+  Printf.sprintf
+    "Post %s already has this exact comment from %s as %s; it was not posted again. \
+     Change the text or reply under a different comment"
+    (Board.Post_id.to_string parent.id) author (Board.Comment_id.to_string existing.id)
+
+let expect_repeat label expected = function
+  | Error (Board.Validation_error message) -> Alcotest.(check string) label expected message
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+  | Ok _ -> Alcotest.fail (label ^ ": the repeat was posted")
+
+(* One Keeper turn once wrote 390 comments of 39 distinct bodies. A repeat is
+   the same author, the same parent and the same bytes; any one of the three
+   differing is a new comment, and the refusal stores nothing. *)
+let test_exact_repeat_is_refused base =
+  let store = fresh base in
+  let parent = post store () in
+  let first = require (append store parent "same words") in
+  expect_repeat "top-level repeat names the first comment"
+    (repeat_message parent ~author:"outsider" first) (append store parent "same words");
+  Alcotest.(check int) "refusal stored nothing" 1 (Hashtbl.length store.comments);
+  ignore (require (append store parent "same words."));
+  ignore (require (append store parent ~author:"someone-else" "same words"));
+  let first_id = Board.Comment_id.to_string first.id in
+  let reply = require (append_under store parent ~parent_id:first_id "same words") in
+  Alcotest.(check int) "different body, author and parent each post" 4 (Hashtbl.length store.comments);
+  expect_repeat "reply repeat names the first reply"
+    (repeat_message parent ~author:"outsider" reply)
+    (append_under store parent ~parent_id:first_id "same words");
+  Alcotest.(check int) "second refusal stored nothing" 4 (Hashtbl.length store.comments);
+  let restarted = fresh base in
+  expect_repeat "durable comment still blocks the repeat after a restart"
+    (repeat_message parent ~author:"outsider" first) (append restarted parent "same words")
+
 let with_fixture f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -266,4 +304,5 @@ let () = match Array.to_list Sys.argv with
        "live parent and policy locks", test_live_readset_locks;
        "known append before parent cleanup", test_known_append_parent_cleanup;
        "policy refusal plus parent cleanup", test_refused_policy_parent_cleanup;
-       "accepted sub-board deletion keeps comments available", test_deleted_sub_board_keeps_comment_available]]
+       "accepted sub-board deletion keeps comments available", test_deleted_sub_board_keeps_comment_available;
+       "exact repeat of a comment is refused", test_exact_repeat_is_refused]]

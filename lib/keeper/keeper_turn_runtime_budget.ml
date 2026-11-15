@@ -1,5 +1,5 @@
-(* Keeper_turn_runtime_budget — runtime execution types, context overflow
-   observation, Keeper lifecycle sync, and context budget resolution.
+(* Keeper_turn_runtime_budget — runtime execution types, Keeper lifecycle
+   sync, and context budget resolution.
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
 
@@ -62,49 +62,6 @@ let summarize_turn_event_bus
       })
     empty_turn_event_bus_summary
     events
-
-type capacity_refusal =
-  | Provider_context_window of { limit_tokens : int option }
-  | Provider_request_body_refusal of { status : int }
-
-(* Two-axis refusal view over the AGENT_CORE error type. The error is matched
-   once, directly. Non-capacity errors and the serving-constraint facts
-   (evidence validity, unmeasurable tokens) stay [None]: they are not a
-   capacity limit and must never be guessed into one. *)
-let capacity_refusal_of_error
-    (err : Agent_core.Error.t) : capacity_refusal option =
-  match err with
-  | Agent_core.Error.Api (ContextOverflow { limit; _ }) ->
-    Some (Provider_context_window { limit_tokens = limit })
-  | Agent_core.Error.Api
-      (InvalidRequest
-         { reason = Request_body_refused_by_provider { status }; _ })
-    ->
-    Some (Provider_request_body_refusal { status })
-  | Agent_core.Error.Api (InputCapacity _)
-  | Agent_core.Error.Api
-      (InvalidRequest
-         { reason =
-             ( Json_parse_error
-             | Attempt_rejected
-             | Refusal_body_not_received
-             | Unknown_invalid_request )
-         ; _
-         })
-  | Agent_core.Error.Api
-      ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
-      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
-      | Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
-  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
-    None
-;;
 
 let runtime_budget_logged : unit StringMap.t Atomic.t =
   Atomic.make StringMap.empty

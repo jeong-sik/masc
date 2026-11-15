@@ -176,7 +176,9 @@ def main():
                 raise RuntimeError('Server exited before health')
             try:
                 health = http('/health?full=1')
-                if health['startup']['state_ready']:
+                # Until the server has published its workspace, /health answers
+                # everyone the public probe, which has no `startup` section: not ready yet.
+                if health.get('startup', {}).get('state_ready'):
                     break
                 if time.monotonic() >= deadline:
                     raise TimeoutError('Server readiness observation deadline')

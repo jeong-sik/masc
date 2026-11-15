@@ -912,7 +912,7 @@ provider did not state an explicit reset time. When the release time has
 already passed in a stale roster reading, the timestamp is omitted.
 
 Roster reads and pause/resume/wakeup requests bind to the complete workspace
-identity observed in `/health`: `paths.effective_base_path` and
+identity read from `/health` with the TUI's credential: `paths.effective_base_path` and
 `paths.effective_masc_root`. API clients bind `GET /api/v1/gate/keepers` with
 both URL-encoded query parameters `expected_workspace=<base_path>` and
 `expected_masc_root=<masc_root>`. Supplying only one, a blank value, or a
@@ -2258,12 +2258,19 @@ completion judge, `Task Review·7` is tasks waiting for a completion verdict.
 The cursor tracks goal identity in visible order, so a refresh that reorders
 goals keeps the same goal selected.
 
-`f` cycles `all`, `active`, `completed`, and `dropped`; active means exactly
-Executing plus Verifying. `s` cycles `phase/P1-P5` (Executing, Verifying,
+`f` cycles `all`, `active`, `completed`, and `dropped`; active means every
+phase that is neither Completed nor Dropped: Executing, Verifying,
+Awaiting confirmation, Paused and Blocked. `s` cycles `phase/P1-P5` (Executing, Verifying,
 Completed, Dropped, then priority), `updated` (most recently changed first),
 and `due` (earliest due date first, undated last). The current meanings are
 printed above the rollup. Status colour and the proof marker remain independent
 of ordering, so a row does not look successful merely because it sorted first.
+
+An Executing or Verifying goal whose due date has passed says `past due` after
+its phase, in the row, the preview and the detail's Due field. A goal falls due
+at 23:59:59 UTC of its day. One whose due date cannot be read says
+`unreadable due date` rather than passing for a goal with no date. Passing a
+due date only changes what is drawn: it closes no goal and tells no one.
 
 Goal detail's `RELATED ACTIVITY` block is not a complete Task history. It shows
 the latest state per linked Task and Keeper, pending approvals, and Goal phase

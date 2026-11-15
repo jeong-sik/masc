@@ -73,7 +73,7 @@ type t = {
   mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
-type event = Started of string * string option | Output of string | Input_ready
+type event = Started of string * string option | Output of string | Screen of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry
   | Select_existing of provider

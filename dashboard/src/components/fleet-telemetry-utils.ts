@@ -4,7 +4,9 @@ import type { Keeper, StopCause } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
 import { formatMsCompact } from '../lib/format-number'
 import { firstNonEmptyString } from '../lib/format-string'
+import { attentionReasonLabel } from '../lib/keeper-attention-labels'
 import { normalizeStopCause } from '../lib/stop-cause'
+import { operatorDispositionReasonLabel } from './fsm-hub-types'
 import {
   keeperActivityDisplay,
   normalizeKeeperBlockerText,
@@ -420,12 +422,10 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             runtime_blocker_summary: runtimeBlockerSummary,
             runtime_trust_attention: keeper.trust?.needs_attention === true,
             runtime_trust_reason:
-              firstNonEmptyString(
-                keeper.trust?.attention_reason,
-                keeper.trust?.latest_terminal_reason?.summary,
-                keeper.trust?.operator_disposition_reason,
-                keeper.trust?.disposition_reason,
-              ) ?? null,
+              attentionReasonLabel(firstNonEmptyString(keeper.trust?.attention_reason), false)
+              ?? firstNonEmptyString(keeper.trust?.latest_terminal_reason?.summary)
+              ?? operatorDispositionReasonLabel(firstNonEmptyString(keeper.trust?.operator_disposition_reason))
+              ?? attentionReasonLabel(firstNonEmptyString(keeper.trust?.disposition_reason), false),
             runtime_trust_next_action:
               firstNonEmptyString(
                 keeper.trust?.next_human_action,

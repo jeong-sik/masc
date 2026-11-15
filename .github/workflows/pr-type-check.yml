@@ -114,6 +114,37 @@ jobs:
           esac
           echo "src=$src" >> "$GITHUB_OUTPUT"
 
+      # The second thing this required job answers: are the changelog
+      # fragments this pull request adds or edits well formed? It is asked
+      # here, not in a workflow of its own, because only a required check
+      # blocks a merge: #50755 merged while the separate fragment check was
+      # red, and the whole-directory check on main (the one a release runs)
+      # failed until #50768. A failure here fails `changes`; `type-check` is
+      # then skipped and runs on the push that repairs the fragment.
+      #
+      # Every pull request answers for the fragments in its own difference
+      # from its first parent, stack layers included: a lower layer can merge
+      # before the top, so the top does not stand in for it. The merge commit
+      # is already here; git fetches the contents of the changed fragments
+      # and of the checker, nothing else. Like the decision script above,
+      # this one is read from the merge commit and has tests
+      # (scripts/ci/test_pr_changelog_fragments.py).
+      - name: Check the changelog fragments this pull request changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/pr-changes"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          check="$RUNNER_TEMP/pr_changelog_fragments.py"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_changelog_fragments.py" > "$check"
+          python3 -I "$check" --git-dir "$work" --merge "$GITHUB_SHA"
+
   type-check:
     needs: [changes]
     # Skipped here rather than at the workflow level so the check context
@@ -147,6 +178,9 @@ jobs:
       # starts this job. About six seconds, before the toolchain is set up.
       - name: Test the type-check decision script
         run: python3 -I scripts/ci/test_pr_source_changes.py
+
+      - name: Test the changelog fragment check of the changes job
+        run: python3 -I scripts/ci/test_pr_changelog_fragments.py
 
       # The path and the key prefix are the ones main-minimal-build.yml
       # saves under; a different path would never match its cache entry.

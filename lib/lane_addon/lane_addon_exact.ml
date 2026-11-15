@@ -315,7 +315,7 @@ let final_of_json ~schema json =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
 
 (* A granted consumer schema is a provider requirement with a partial shape
-   guard, not a Host_tool input contract. Original proofs and observations use
+   guard, not a Declared_schema input contract. Original proofs and observations use
    the same meaning as initial validation. Delivery independently rechecks the
    current package baseline and original consumer authority. *)
 let original_final_of_json ~schema request json =
@@ -661,6 +661,9 @@ let observe_retained ~store ~declaration_id ~schema request =
   Result.map_error describe_recovery_error
     (observe_retained_classified ~store ~declaration_id ~schema (Digested.make request))
 
+let confirm_original_schema ~declaration_id ~schema request =
+  Result.map (fun _ -> ()) (original_schema ~declaration_id ~schema request)
+
 let observe_record ~declaration_id ~schema request record =
   let* schema = original_schema ~declaration_id ~schema request in
   observation ~declaration_id ~schema (Digested.make request) record
@@ -680,6 +683,51 @@ let proof_key ~declaration_id bound =
   proof_instance_id ~declaration_id,
   proof_request_key ~request_id:(Digested.request bound).request_id
     ~digest:(Digested.digest bound)
+(* What a waiting owner needs of the host record, from the request's ID and
+   digest alone. *)
+(* Field names differ from [request]'s so [request.request_id] keeps resolving
+   to the request everywhere this module is opened or qualified. *)
+type identity = { identity_request_id : string; identity_digest : string }
+let identity (request : request) =
+  { identity_request_id = request.request_id; identity_digest = digest request }
+let identity_of_digest ~request_id ~digest =
+  { identity_request_id = request_id; identity_digest = digest }
+type open_observation = No_record | Open | Needs_request
+
+(* [recover_retained] without the caller's request: the record is checked
+   against itself and bound to the caller by its digest. It only reads, so it
+   holds no claim. Decoding a proof link and binding it to an attempt needs the
+   whole request, so a link that exists at all answers [Needs_request]. *)
+let observe_open ~store ~declaration_id identity =
+  let* wire = unreadable (Lane_addon_store.load_exact_request store ~declaration_id
+    ~request_id:identity.identity_request_id) in
+  let* proof = unreadable (Lane_addon_store.load_host_result store
+    ~instance_id:(proof_instance_id ~declaration_id)
+    ~request_id:(proof_request_key ~request_id:identity.identity_request_id ~digest:identity.identity_digest)) in
+  match wire with
+  | None -> Ok (match proof with None -> No_record | Some _ -> Needs_request)
+  | Some wire ->
+    let* observed = invalid (
+      let* wire = Lane_addon_action.canonical wire in
+      let* record = record_of_json wire in
+      let* encoded = Lane_addon_action.canonical
+        (record_to_json ~declaration_id ~request_id:identity.identity_request_id record) in
+      let* () = if Yojson.Safe.equal wire encoded then Ok ()
+        else Error "retained Exact record has different identity or unknown fields" in
+      let* original = request_of_json record.request in
+      let* captured = Lane_addon_action.canonical (request_to_json original) in
+      let* () = if Yojson.Safe.equal captured record.request
+          && String.equal original.request_id identity.identity_request_id
+          && String.equal record.digest (digest original) then Ok ()
+        else Error "retained Exact record differs from its own request or digest" in
+      let* () = if String.equal record.digest identity.identity_digest then Ok ()
+        else Error "retained Exact record differs from the original request or digest" in
+      validate_record ~request:original ~schema:None record) in
+    Ok (match observed, proof with
+      | Retained_open, None -> Open
+      | Retained_open, Some _ | (Retained_terminal _ | Retained_absent), (None | Some _) ->
+        Needs_request)
+
 let proof_directory ~declaration_id =
   Lane_addon_store.host_result_directory ~instance_id:(proof_instance_id ~declaration_id)
 

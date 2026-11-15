@@ -42,6 +42,12 @@ let submitter = "alpha"
 let request_id = "kmsg-0001"
 let composition_tool = "keeper_compose_memory-background"
 
+let refusal_to_string = function
+  | Masc.Keeper_composition_completion_outbox.Intake_shutdown_reserved operation_id ->
+    "held by shutdown operation=" ^ Masc.Keeper_shutdown_types.Operation_id.to_string operation_id
+  | Masc.Keeper_composition_completion_outbox.Delivery_failed detail -> detail
+;;
+
 let with_workspace f =
   let dir =
     Filename.concat
@@ -120,7 +126,7 @@ let deliver_or_fail config ~terminal =
       ~terminal
   with
   | Ok () -> ()
-  | Error detail -> fail ("deliver failed: " ^ detail)
+  | Error refusal -> fail ("deliver failed: " ^ refusal_to_string refusal)
 ;;
 
 let persist_completion_result config status =
@@ -717,7 +723,8 @@ let completion_delivery_recovers_without_replaying_or_reconsuming () =
               ~keeper_name:entry.Async.submitted_by
               ~request_id:entry.request_id ~composition_tool ~terminal:Event_queue.Composition_succeeded with
           | Error _ as error -> error
-          | Ok () -> Error "injected interruption after durable enqueue, before producer acknowledgement")
+          | Ok () -> Error (Outbox.Delivery_failed
+                "injected interruption after durable enqueue, before producer acknowledgement"))
       |> Result.get_ok in
     check int "enqueue-ack gap leaves the same obligation" 1 (List.length queued_but_unacknowledged.failures);
     let source = match queued_results ~base_path ~keeper_name:submitter with
@@ -855,14 +862,14 @@ let independent_completion_owners_keep_original_proofs () =
            | Fence.Intake_committed () -> ()
            | Intake_shutdown_reserved _ -> fail "the already admitted lock holder changed");
           let blocked = Eio.Promise.await alpha_blocked in
+          (* The fresh fence check refuses the delivery. A shutdown holding
+             the intake is a wait, not a failed delivery. *)
           (match blocked.failures with
-           | [Outbox.Request_id id, error] ->
-               check string "active batch retains original request" alpha.request_id id;
-               (match error with
-                | Outbox.Storage_failed _ -> ()
-                | Invalid_obligation _ | Request_unavailable _ | Canonical_result_unavailable _ ->
-                    fail "fresh intake fence was not checked")
-           | [] | _ :: _ -> fail "active original batch was replaced or duplicated");
+           | [] -> ()
+           | _ :: _ -> fail "a shutdown hold was reported as a failed delivery");
+          check int "active batch inspects only its original request" 1 blocked.inspected;
+          check int "the held original request waits" 1 blocked.waiting;
+          check int "the held original request is not delivered" 0 blocked.delivered;
           (match queued_results ~base_path ~keeper_name:"alpha" with
            | [] -> () | _ :: _ -> fail "shutdown fence admitted a completion");
           ignore (Fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
@@ -882,7 +889,7 @@ let independent_completion_owners_keep_original_proofs () =
           (* An already acknowledged original hint is not delivery authority. *)
           (match Outbox.recover beta_hint ~deliver:(fun ~completion:_ ~composition_tool (entry : Async.entry) ->
              match Wake.terminal_of_status entry.status with
-             | None -> Error "no canonical terminal"
+             | None -> Error (Outbox.Delivery_failed "no canonical terminal")
              | Some terminal -> Wake.deliver ~base_path ~not_before:entry.submitted_at
                  ~keeper_name:entry.submitted_by ~request_id:entry.request_id ~composition_tool ~terminal) with
            | Ok Outbox.Retired -> ()
@@ -890,6 +897,69 @@ let independent_completion_owners_keep_original_proofs () =
           (match queued_results ~base_path ~keeper_name:"beta" with
            | [_, completion] when String.equal completion.Event_queue.cc_request_id beta.request_id -> ()
            | [] | _ :: _ -> fail "repeated pulses changed beta's exact queued result"))))
+;;
+
+(* A shutdown that holds the submitter's intake refuses the worker's own
+   delivery and every recovery pass while it lasts. Each pass counts the
+   result as waiting and keeps its obligation; the first pass after the
+   shutdown releases the intake delivers it once. *)
+let a_shutdown_hold_waits_and_the_next_pass_delivers () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let module Outbox = Masc.Keeper_composition_completion_outbox in
+    let module Fence = Masc.Keeper_shutdown_intake_fence in
+    let base_path = config.Workspace.base_path in
+    let operation_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+    (match Fence.begin_shutdown ~base_path ~keeper_name:submitter ~operation_id with
+     | Fence.Reserved _ -> ()
+     | Fence.Already_reserved _ -> fail "a fresh workspace already held a shutdown");
+    let accepted = Eio.Switch.run (fun background_sw ->
+      let settled, settle = Eio.Promise.create () in
+      let accepted = Async.submit_with_request_id
+          ~request_context:[ "composition_tool", `String composition_tool
+                           ; "source_task_id", `String "held-original-task" ]
+          ~on_accepted:(fun request_id ->
+            Outbox.prepare ~base_path ~keeper_name:submitter ~request_id ~composition_tool
+            |> Result.map_error Outbox.error_to_string)
+          ~on_worker_settled:(fun settlement ->
+            Wake.on_worker_settled ~base_path ~composition_tool settlement;
+            Eio.Promise.resolve settle ())
+          ~background_sw ~base_path ~caller:submitter ~keeper_name:submitter
+          ~f:(fun ~request_id:_ _ ->
+            Tool_result.make_ok ~tool_name:composition_tool ~start_time:(Tool_timing.start ())
+              ~data:(`Assoc [ "original_output", `String "held output" ]) ()) ()
+        |> Result.get_ok in
+      Eio.Promise.await settled;
+      accepted) in
+    check int "the worker's own delivery commits nothing while held" 0
+      (List.length (queued_results ~base_path ~keeper_name:submitter));
+    let assert_held pass =
+      let report = Wake.reconcile ~base_path |> Result.get_ok in
+      (match report.failures with
+       | [] -> ()
+       | _ :: _ -> fail (pass ^ ": a shutdown hold was reported as a failed delivery"));
+      check int (pass ^ ": the held result waits") 1 report.waiting;
+      check int (pass ^ ": the held result is not delivered") 0 report.delivered;
+      check int (pass ^ ": nothing reaches the held queue") 0
+        (List.length (queued_results ~base_path ~keeper_name:submitter)) in
+    assert_held "first pass";
+    assert_held "second pass";
+    (match Fence.rollback_shutdown ~base_path ~keeper_name:submitter ~operation_id with
+     | Fence.Rolled_back -> ()
+     | Fence.Not_reserved | Fence.Reserved_by_other _ ->
+       fail "the test's own shutdown did not roll back");
+    let released = Wake.reconcile ~base_path |> Result.get_ok in
+    (match released.failures with
+     | [] -> ()
+     | _ :: _ -> fail "the released result failed to deliver");
+    check int "the first pass after the release delivers" 1 released.delivered;
+    (match queued_results ~base_path ~keeper_name:submitter with
+     | [ _, completion ] ->
+       check string "the original request is delivered" accepted.request_id
+         completion.Event_queue.cc_request_id
+     | _ -> fail "the released result was lost or duplicated");
+    let after = Wake.reconcile ~base_path |> Result.get_ok in
+    check int "the delivered obligation is retired" 0 after.inspected)
 ;;
 
 let discovery_failure_retains_original_completion_and_recovers_with_partial_damage () =
@@ -1025,8 +1095,9 @@ let an_older_torn_row_does_not_block_a_new_completion () =
          ~terminal:Event_queue.Composition_succeeded
      with
      | Ok () -> ()
-     | Error detail ->
-       fail ("an older partition's torn row rejected a new completion: " ^ detail));
+     | Error refusal ->
+       fail ("an older partition's torn row rejected a new completion: "
+             ^ refusal_to_string refusal));
     match queued_results ~base_path ~keeper_name:submitter with
     | [ _, completion ] ->
       check string "the new completion is delivered" request_id completion.cc_request_id
@@ -1043,6 +1114,8 @@ let () =
             completion_delivery_recovers_without_replaying_or_reconsuming
         ; test_case "independent completion owners retain original proof and fresh authority" `Quick
             independent_completion_owners_keep_original_proofs
+        ; test_case "a shutdown hold waits and the next pass delivers" `Quick
+            a_shutdown_hold_waits_and_the_next_pass_delivers
         ; test_case "async discovery failure preserves original completion and partial damage" `Quick
             discovery_failure_retains_original_completion_and_recovers_with_partial_damage
         ; test_case "a failure carries its detail" `Quick a_failure_carries_its_detail

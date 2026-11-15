@@ -1569,7 +1569,7 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       else if Option.exists (fun (menu : Masc_tui_lane_addons.action_menu) -> Option.is_some menu.form) view.action_menu
         then "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
       else if Option.is_some view.action_menu then "j/k:choose action  Enter:run once  J/K:scroll details  Esc:cancel"
-      else Masc_tui_lane_addons.overview_hints view)
+      else String.concat "  " (Masc_tui_lane_addons.overview_hints view))
     ~body:(fun ~budget c ->
       let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
       let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in

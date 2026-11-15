@@ -112,6 +112,109 @@ let test_tool_outbox_receipts exe () = with_workspace (fun root _keepers _traces
     (read refused);
   check bool "the readable receipt is still there" true (Sys.file_exists readable))
 
+(* #48087: #47996 made [audience] required on a Board stimulus and the deploy
+   check did not read the reaction ledger. An ACK row carries the transition
+   receipt with the stimulus it retired, so an install passed with ledgers
+   holding earlier Board receipts, and once-only wakes of those Keepers were
+   refused after the start. The rows are what the production writers leave
+   for a Board post a turn consumed: its dispatch row and the projected ACK. *)
+let write_consumed_board_post ~base_path ~keeper_name =
+  let ok label = function Ok value -> value | Error detail -> fail (label ^ ": " ^ detail) in
+  let module Queue = Keeper_event_queue_persistence in
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "post-read-before-rollout"
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = Unix.gettimeofday ()
+    ; payload = Keeper_event_queue.Board_signal
+        { kind = Keeper_event_queue.Post_created; author = "operator"; title = "Ship"
+        ; content = "Please react"; hearth = None; updated_at = None
+        ; audience = Keeper_event_queue.Audience_discoverable } } in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
+  let (_ : Queue.enqueue_stimulus_result) =
+    Queue.enqueue_stimulus_if_absent_result ~base_path ~keeper_name source |> ok "enqueue" in
+  let selection =
+    match Queue.pending_selections_result ~base_path ~keeper_name |> ok "read the queue" with
+    | [ selection ] -> selection
+    | _ -> fail "the queue holds the one source" in
+  let receipt =
+    match Queue.terminalize_pending_turn_completed_result ~base_path ~keeper_name
+            ~applied_at:(Unix.gettimeofday ()) ~selection () |> ok "complete the turn" with
+    | Queue.Turn_terminal_committed
+        (Queue.Transition_applied receipt | Queue.Transition_already_applied receipt) -> receipt
+    | Queue.Turn_terminal_committed (Queue.Transition_committed_followup_failed { detail; _ }) ->
+      fail detail
+    | Queue.Turn_selection_withdrawn -> fail "the source was withdrawn" in
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result ~base_path ~keeper_name
+    ~expected_transition_id:receipt.transition_id |> ok "project the ACK";
+  Dated_jsonl.range_day_file_paths_result
+    (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name))
+    ~since:"1970-01-01" ~until:"9999-12-31"
+  |> Result.map_error Dated_jsonl.read_error_to_string |> ok "list the ledger"
+
+let ledger_lines paths = List.concat_map (fun path ->
+  In_channel.with_open_bin path In_channel.input_lines) paths
+
+let test_reaction_ledger_refusal exe () = with_workspace (fun root _keepers _traces ->
+  let keeper_name = "keeper" in
+  let paths = write_consumed_board_post ~base_path:root ~keeper_name in
+  (* The receipt as a build before #47996 wrote it: its Board stimulus has no
+     [audience]. *)
+  let rec without_audience = function
+    | `Assoc fields ->
+      `Assoc (List.filter_map (fun (key, value) ->
+        if String.equal key "audience" then None else Some (key, without_audience value)) fields)
+    | `List items -> `List (List.map without_audience items)
+    | json -> json in
+  let ack = Keeper_reaction_ledger.(reaction_kind_to_string Event_queue_ack) in
+  let earlier line = match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match List.assoc_opt "reaction" fields with
+       | Some (`Assoc reaction) when List.assoc_opt "kind" reaction = Some (`String ack) ->
+         let reaction = List.map (fun (key, value) ->
+           if String.equal key "transition_receipt" then key, without_audience value
+           else key, value) reaction in
+         Some (Yojson.Safe.to_string (`Assoc (List.map (fun (key, value) ->
+           if String.equal key "reaction" then key, `Assoc reaction else key, value) fields)))
+       | Some _ | None -> None)
+    | json -> fail ("a ledger row is not an object: " ^ Yojson.Safe.to_string json) in
+  let changed = List.fold_left (fun changed path ->
+    let lines = In_channel.with_open_bin path In_channel.input_lines in
+    let rewritten = List.map (fun line -> Option.value (earlier line) ~default:line) lines in
+    if rewritten = lines then changed
+    else (write path (String.concat "\n" rewritten ^ "\n"); path :: changed)) [] paths in
+  let refused_file = match changed with
+    | [ path ] -> path
+    | _ -> fail "the one ACK row is in one day file" in
+  let refused_bytes = read refused_file in
+  let status, output = invoke exe root in
+  check bool ("a ledger row this build cannot decode stops deployment: " ^ output) true
+    (status <> Unix.WEXITED 0);
+  check bool ("every row is counted and the ACK is refused: " ^ output) true
+    (String_util.contains_substring output
+       (Printf.sprintf "keeper reaction ledger rows=%d refused=1"
+          (List.length (ledger_lines paths))));
+  check bool ("the refusal names the ledger and the reason once-only wakes get: " ^ output) true
+    (String_util.contains_substring output
+       (Keeper_reaction_ledger.store_dir ~base_path:root ~keeper_name
+        ^ ": reaction ledger delivery evidence incomplete: malformed_rows=0 \
+           semantic_invalid_rows=1 first_reason=invalid_transition_receipt"));
+  check string "the refused row is left as it was" refused_bytes (read refused_file))
+
+let test_reaction_ledger_reads exe () = with_workspace (fun root _keepers _traces ->
+  let status, output = invoke exe root in
+  check bool ("a keeper without a ledger does not stop deployment: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool ("a keeper without a ledger has no rows: " ^ output) true
+    (String_util.contains_substring output "keeper reaction ledger rows=0 refused=0");
+  let paths = write_consumed_board_post ~base_path:root ~keeper_name:"keeper" in
+  let status, output = invoke exe root in
+  check bool ("a ledger this build reads does not stop deployment: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool ("the dispatch and the ACK are counted: " ^ output) true
+    (String_util.contains_substring output
+       (Printf.sprintf "keeper reaction ledger rows=%d refused=0"
+          (List.length (ledger_lines paths)))))
+
 (* The logger stamps a line with the second it was written, and a second run
    starts a second later. *)
 let without_log_stamp line =
@@ -1142,6 +1245,10 @@ let () =
       test_case "zero scan jobs are refused" `Quick (test_zero_scan_jobs_are_refused exe);
       test_case "tool outbox receipts are read before rollout" `Quick
         (test_tool_outbox_receipts exe);
+      test_case "a reaction ledger row once-only wakes refuse stops rollout" `Quick
+        (test_reaction_ledger_refusal exe);
+      test_case "reaction ledgers are read before rollout" `Quick
+        (test_reaction_ledger_reads exe);
       test_case "transcript inventory failure stops deployment" `Quick
         (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);

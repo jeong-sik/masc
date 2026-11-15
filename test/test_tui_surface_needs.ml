@@ -432,11 +432,102 @@ let test_asks_and_approvals_collectors_have_independent_lifetimes () =
   check bool "its completion cannot clear another collection" true
     (Order.navigation_active reads board)
 
+(* Entering the chat pane reads its history once (#42012). The opening starts
+   the read; the surface-needs delta sees the pane on the loop pass after it.
+   An opening made inside the async drain lets that pass's drain apply every
+   answer of the read before the delta runs, so the read is no longer in
+   flight when the delta asks. *)
+let drawn state ~previous =
+  let next = needs state.Types.view in
+  Types.note_drawn_surface_needs state next;
+  Types.surface_needs_delta ~previous ~next
+
+let open_chat state keeper =
+  state.Types.view <- Types.Keepers Types.Keeper_message;
+  state.Types.msg_target_keeper_name <- Some keeper
+
+(* What launch_keeper_history_load records once a read of [keeper] is on the
+   wire. *)
+let start_history_read state keeper =
+  Types.note_chat_entry_read state ~keeper_name:keeper;
+  state.Types.msg_history_inflight <-
+    Some (Types.Keeper_history_read.create ~generation:1 ~keeper
+            ~authority:state.Types.workspace_authority
+            ~reading:state.Types.workspace_read_authority ~first_page:true)
+
+let list_surface = Types.Keepers Types.Keeper_list
+let chat_surface = Types.Keepers Types.Keeper_message
+
+let test_entering_chat_reads_its_history_once () =
+  let state = Types.create_state ~workspace:"chat-entry" ~port:0 () in
+  state.view <- list_surface;
+  let _ = drawn state ~previous:Types.nothing in
+  open_chat state "alpha";
+  start_history_read state "alpha";
+  let delta = drawn state ~previous:(needs list_surface) in
+  check bool "the delta brings the chat pane on screen" true delta.needs_keeper_chat;
+  check (option string) "a read in flight answers the entry" None
+    (Types.chat_entry_read_due state ~needs:delta);
+  (* The opening happens inside the drain this time; the next pass applies
+     the read's answers before its delta. *)
+  state.view <- list_surface;
+  let _ = drawn state ~previous:(needs chat_surface) in
+  state.msg_history_inflight <- None;
+  open_chat state "alpha";
+  start_history_read state "alpha";
+  state.msg_history_inflight <- None;
+  let delta = drawn state ~previous:(needs list_surface) in
+  check bool "the delta still brings the pane on screen" true delta.needs_keeper_chat;
+  check (option string) "a landed read answers the entry too" None
+    (Types.chat_entry_read_due state ~needs:delta)
+
+let test_an_entry_no_read_answered_still_reads () =
+  let state = Types.create_state ~workspace:"chat-entry" ~port:0 () in
+  state.view <- list_surface;
+  let _ = drawn state ~previous:Types.nothing in
+  (* Esc from Changes returns to the chat without starting a read. *)
+  open_chat state "alpha";
+  let delta = drawn state ~previous:(needs list_surface) in
+  check (option string) "a way in that starts no read leaves it to the delta"
+    (Some "alpha") (Types.chat_entry_read_due state ~needs:delta);
+  start_history_read state "alpha";
+  state.msg_history_inflight <- None;
+  (* Leaving and coming back is a new entry. *)
+  state.view <- list_surface;
+  let _ = drawn state ~previous:(needs chat_surface) in
+  open_chat state "alpha";
+  let delta = drawn state ~previous:(needs list_surface) in
+  check (option string) "the read of the earlier visit does not answer a new one"
+    (Some "alpha") (Types.chat_entry_read_due state ~needs:delta);
+  (* A read started while another surface is drawn is not the pane's. *)
+  state.view <- list_surface;
+  let _ = drawn state ~previous:(needs chat_surface) in
+  start_history_read state "alpha";
+  state.msg_history_inflight <- None;
+  open_chat state "alpha";
+  let delta = drawn state ~previous:(needs list_surface) in
+  check (option string) "a read from another surface does not answer the entry"
+    (Some "alpha") (Types.chat_entry_read_due state ~needs:delta);
+  (* A read of one Keeper does not answer the pane of another. *)
+  state.view <- list_surface;
+  let _ = drawn state ~previous:(needs chat_surface) in
+  open_chat state "alpha";
+  start_history_read state "alpha";
+  state.msg_history_inflight <- None;
+  open_chat state "beta";
+  let delta = drawn state ~previous:(needs list_surface) in
+  check (option string) "the pane of beta still owes its read" (Some "beta")
+    (Types.chat_entry_read_due state ~needs:delta)
+
 let () =
   run "tui_surface_needs"
     [ ( "refresh scope"
       , [ test_case "only the chat pane asks for chat history" `Quick
             test_only_the_chat_pane_asks_for_chat_history
+        ; test_case "entering chat reads its history once" `Quick
+            test_entering_chat_reads_its_history_once
+        ; test_case "an entry no read answered still reads" `Quick
+            test_an_entry_no_read_answered_still_reads
         ; test_case "only Work asks for the goal tree" `Quick
             test_only_work_asks_for_the_goal_tree
         ; test_case "Usage owns Keeper usage" `Quick

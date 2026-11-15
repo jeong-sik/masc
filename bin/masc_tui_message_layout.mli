@@ -838,6 +838,15 @@ val wrap_body :
     word wrap would ruin. The renderer is handed the text {!escape_document}
     makes, so its tabs are spaces; a plain body leaves a tab to [sanitize]. *)
 
+val wrap_indented_body :
+  max_cells:int -> sanitize:(string -> string) -> string -> string list
+(** Wrap a multi-line body as {!wrap_body} does without a renderer -- each line
+    through [sanitize] on its own, a blank line kept as a blank row -- but keep
+    each line's leading spaces. They go back on every row the line wraps to,
+    so an indented line of code or of a served document stays in its column.
+    An indent that leaves no cell of [max_cells] for the text is dropped for
+    that line. [wrap_body] is for prose, where leading spaces say nothing. *)
+
 val inbound_indent_cells : int
 (** How far a line someone else wrote steps in: two cells. *)
 

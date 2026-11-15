@@ -23,7 +23,6 @@ import re
 import subprocess
 import sys
 import time
-from urllib.parse import quote
 
 REQUIRED_APPROVALS = 2  # the worker's own rule; a lower count here only wastes a run
 QUOTA_EXIT = 75  # approval-auto-merge.py: ended at a quota during admission
@@ -106,6 +105,7 @@ def sibling(name):
 
 
 ISSUES = sibling('linked-issues')
+KEEP = sibling('branch-deletion')  # the worker keeps the same branches
 
 
 def gh(arguments):
@@ -157,23 +157,6 @@ def open_pulls(repo):
     return walk(repo, OPEN_PULLS, 'pullRequests')[1]
 
 
-def open_pulls_using(repo, name):
-    """The open pull requests that have branch `name` as head or base, as
-    (number, side), read from GitHub at this moment.
-
-    A read that fails raises; it never stands for "no pull request".
-    """
-    owner = repo.split('/')[0]
-    using = []
-    for side, value in (('head', f'{owner}:{name}'), ('base', name)):
-        listed = gh(['api', f'repos/{repo}/pulls?state=open&{side}={quote(value, safe="")}'
-                            '&per_page=1'])
-        if not isinstance(listed, list):
-            raise ValueError(f'the open pull requests by {side} are not a list')
-        using.extend((pull['number'], side) for pull in listed)
-    return using
-
-
 def protected_branches(repo):
     """Names of the branches a protection rule or a ruleset applies to.
 
@@ -199,10 +182,10 @@ def merged_leftovers(refs, rows, protected, default):
     worker had merged 87 pull requests whose branch was still there.
 
     A branch goes only when a pull request of this repository that the worker
-    merged ended at exactly its tip, so no commit is lost. It stays when it is
-    the repository's default branch, when an open pull request names it as
-    head or base, when a protection rule or a ruleset applies to it, or when
-    its pull requests were not all read.
+    merged ended at exactly its tip, so no commit is lost. It stays for the
+    rules the worker keeps it for too (branch-deletion.py), when an open pull
+    request names it as head or base, or when its pull requests were not all
+    read.
     GitHub deletes the branch itself after a merge made by a user account.
     """
     in_use = {row[side] for row in rows for side in ('baseRefName', 'headRefName')}
@@ -210,8 +193,8 @@ def merged_leftovers(refs, rows, protected, default):
     for ref in refs:
         name, tip = ref['name'], ref['target']['oid']
         pulls = ref['associatedPullRequests']
-        if (name == default or name == 'main' or name.startswith('release/') or
-                name in in_use or name in protected or pulls['pageInfo']['hasNextPage'] or
+        if (KEEP.kept_by_rule(name, default, name in protected) is not None or
+                name in in_use or pulls['pageInfo']['hasNextPage'] or
                 any(pull['state'] == 'OPEN' for pull in pulls['nodes'])):
             continue
         if any(pull['state'] == 'MERGED' and pull['headRefOid'] == tip and
@@ -260,15 +243,13 @@ def clean_branches(repo, started, dry_run):
             record['not_reached'] = len(leftovers) - position
             break
         try:
-            using = open_pulls_using(repo, name)
+            kept = KEEP.kept_by_open_pull(repo, name, lambda path: gh(['api', path]))
         except (ValueError, KeyError, TypeError) as error:
             record['refused'].append(
                 {'branch': name, 'reason': f'its open pull requests were not read: {error}'})
             continue
-        if using:
-            number, side = using[0]
-            record['refused'].append(
-                {'branch': name, 'reason': f'open pull request #{number} has it as {side}'})
+        if kept is not None:
+            record['refused'].append({'branch': name, 'reason': kept})
             continue
         refusal = delete_branch(repo, name, tip)
         if refusal is None:

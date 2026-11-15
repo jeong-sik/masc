@@ -245,7 +245,7 @@ class MergedLeftovers(unittest.TestCase):
         with patch.object(SWEEP, 'walk', return_value=branches(ref('b1', 1, WORKER))), \
              patch.object(SWEEP, 'open_pulls', return_value=[]), \
              patch.object(SWEEP, 'protected_branches', return_value=set()), \
-             patch.object(SWEEP, 'open_pulls_using', return_value=[]), \
+             patch.object(SWEEP.KEEP, 'kept_by_open_pull', return_value=None), \
              patch.object(SWEEP.subprocess, 'run', return_value=refused):
             record = SWEEP.clean_branches('owner/repo', SWEEP.time.monotonic(), False)
         self.assertEqual(record, {'found': 1, 'deleted': 0, 'not_reached': 0,

@@ -1,9 +1,12 @@
 ### Internal
 
-- The merge sweep reads a branch's open pull requests again, by head and by
-  base, right before it deletes that branch. A pull request opened while the
-  sweep was deleting other branches keeps its branch, and a branch whose open
-  pull requests cannot be read stays. Before, the sweep listed the open pull
-  requests once and then deleted branches for the rest of its 20 minutes. The
-  repository's default branch is never deleted, whatever its name, and when
-  the default branch cannot be read nothing is deleted (#51677, #PENDING).
+- The merge worker and the merge sweep keep the same branches when they delete
+  what a merge left behind: both ask `scripts/review/branch-deletion.py`. The
+  repository's default branch stays whatever its name, and so does any branch
+  a protection rule or a ruleset applies to; the worker asked about neither
+  before. Right before each delete, both read the open pull requests that have
+  the branch as head or as base, and one such pull request, or a read that
+  fails, keeps the branch. Before, the sweep listed the open pull requests
+  once and then deleted branches for the rest of its 20 minutes, and the
+  worker asked only for the base. When the default branch cannot be read, the
+  sweep deletes nothing and the worker keeps that branch (#51677, #PENDING).

@@ -473,6 +473,14 @@ val box_wrapped_field :
 (** Wrap [body] inside a framed box row of width [cols], prefixing the first
     row with [head] and hanging continuation rows to [head]'s display width. *)
 
+val draw_list_idle :
+  Buffer.t -> int -> ko:bool -> empty:string -> height:int -> Masc_tui_list_idle.t -> unit
+(** Draw [height] body rows of the wide pane beside a list while nothing is
+    open in it. A reason wraps at this pane's width with its head and tail
+    kept; the page note under it says what the list holds, and [empty] is the
+    list's own words for an answer with nothing to select. Only the rows the
+    reading leaves are blank. *)
+
 val draw_ask_question :
   Buffer.t ->
   int ->

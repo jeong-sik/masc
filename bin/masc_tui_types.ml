@@ -21886,17 +21886,6 @@ let keeper_rows_page (state : state) ~error =
        | Masc_tui_keeper_control.Roster_unobserved -> None
        | Roster_complete _ | Roster_partial _ | Roster_invalid _ -> Some ())
 
-(* What the Resources pane says under its header when no error is showing and
-   there is no row to draw, and [None] when there is one. The pane flattened
-   the list to [] before asking, so a read that answered with no resources and
-   a read not answered yet were the same empty list, and both said
-   "(loading...)" -- for good, on a server that exposes no resources. *)
-let resources_empty_note ~ko (list : Masc_tui_resource_catalog.t list option) =
-  match list with
-  | None -> Some (if ko then " (읽는 중\xe2\x80\xa6)" else " (loading\xe2\x80\xa6)")
-  | Some [] -> Some (if ko then " (리소스 없음)" else " (no resources)")
-  | Some (_ :: _) -> None
-
 (* A successful refresh need not contain a turn that just finished. Its GET
    may have started before that turn persisted, or a row may have failed to
    decode. Session output stays until the returned page names its replacement.

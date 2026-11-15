@@ -166,6 +166,9 @@
   (uunf (>= 17.0.0))
   (uuseg (>= 17.0.0))
   (uuidm (>= 0.9.10))
+  ; Terminal emulator (matrix.vte) that reads a PTY login's output into
+  ; the screen the TUI and dashboard draw. 0.x may change its API.
+  (matrix (and (>= 0.2.0) (< 0.3.0)))
   ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →
   ; sse_event_{t,j}.{ml,mli}); atdgen-runtime is linked into the

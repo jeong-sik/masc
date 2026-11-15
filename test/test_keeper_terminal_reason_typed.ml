@@ -133,6 +133,8 @@ let roundtrip_corpus =
   ; "api_error_server:502"
   ; "api_error_timeout"
   ; "api_error_network"
+  ; "api_error_connect_failed"
+  ; "provider_error_connect_failed:connection_refused"
   ; "api_error_context_overflow"
   ; "provider_error_parse"
   ; "provider_error_server:500"
@@ -204,9 +206,12 @@ let () =
 (* Independent copy of the intended canonical-wire policy. DO NOT refactor to
    call production helpers — this is the oracle. *)
 
+(* RFC #52028 §2.3 added [api_error_connect_failed]: a connection that did not
+   open waits and is tried again, as a dropped one does. *)
 let frozen_is_transient_provider_runtime_failure terminal_reason =
   String.equal terminal_reason "api_error_timeout"
   || String.equal terminal_reason "api_error_network"
+  || String.equal terminal_reason "api_error_connect_failed"
 ;;
 
 (* Two predicates in the oracle, matching the two production wire sets.

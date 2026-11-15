@@ -171,6 +171,11 @@ let test_every_execution_cause_renders_distinctly () =
     ; Provider_response_refused { http_status = 400; refusal = Context_overflow; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Input_capacity; retry_after_s = None }
     ; Provider_response_refused { http_status = 400; refusal = Network_error; retry_after_s = None }
+    ; Provider_response_refused { http_status = 400; refusal = Connect_failed; retry_after_s = None }
+    ; Completion_failed
+        { error = Http.Connect_failed { message = ""; kind = Http.Connection_refused }
+        ; dispatch = No_generation_dispatch
+        }
     ; Provider_response_refused { http_status = 408; refusal = Timeout; retry_after_s = None }
     ; Output_limit_reached
     ; Incomplete_output

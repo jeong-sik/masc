@@ -794,12 +794,16 @@ let installation_chooses_a_binding_alternative () =
   let module Install = Masc_tui_lane_installer in
   let edit key state = match Install.handle ~key state |> ok with
     | Install.Updated next -> next | _ -> fail "editing must not invoke a request" in
-  (* [naming] is a title or a description member, with its trailing comma. *)
-  let closed ?(naming="") members = Printf.sprintf
-    {|{%s"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|} naming
-    (String.concat "," (List.map (fun (name,_) -> Printf.sprintf {|"%s"|} name) members))
-    (String.concat "," (List.map (fun (name,schema) -> Printf.sprintf {|"%s":%s|} name schema) members)) in
+  (* [naming] is a title or a description member, with its trailing comma.
+     [required] defaults to every member. *)
+  let closed ?(naming="") ?required members =
+    let required = Option.value required ~default:(List.map fst members) in
+    Printf.sprintf
+      {|{%s"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|} naming
+      (String.concat "," (List.map (Printf.sprintf {|"%s"|}) required))
+      (String.concat "," (List.map (fun (name,schema) -> Printf.sprintf {|"%s":%s|} name schema) members)) in
   let text = {|{"type":"string","minLength":1}|} in
+  let whole = {|{"type":"integer"}|} in
   let kind value = Printf.sprintf {|{"type":"string","const":"%s"}|} value in
   let file = closed ["kind",kind "file";"path",text] in
   (* This member is named like the form's own installation_id on purpose. *)
@@ -819,28 +823,56 @@ let installation_chooses_a_binding_alternative () =
          | Ok document -> document | Error _ -> fail "generated TOML must parse")
     | _ -> fail "expected local declaration draft" in
   let at document path = Otoml.find_opt document Otoml.get_string path in
+  (* The host checks a saved binding against the package's own schema
+     (Lane_addon_config.load_source), never against the form's. [taken] is
+     that check, and [drafted] makes it on the binding of every draft. *)
+  let rec json = function
+    | Otoml.TomlString value -> `String value
+    | Otoml.TomlInteger value -> `Int value
+    | Otoml.TomlFloat value -> `Float value
+    | Otoml.TomlBoolean value -> `Bool value
+    | Otoml.TomlArray values | Otoml.TomlTableArray values -> `List (List.map json values)
+    | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
+        `Assoc (List.map (fun (key,value) -> key,json value) fields)
+    | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ ->
+        fail "a drafted binding holds no date" in
+  let taken binding_schema value = Result.is_ok (Masc.Lane_addon_action.validate_value
+    ~schema:(Yojson.Safe.from_string binding_schema) ~name:"lane binding" value) in
+  let drafted label binding_schema fill =
+    let document = draft (fill (opened binding_schema)) in
+    let binding = match Otoml.find_opt document Fun.id ["binding"] with
+      | Some binding -> json binding | None -> fail "a draft holds a binding" in
+    check bool (label ^ ": the host takes the drafted binding") true (taken binding_schema binding);
+    document in
   (* Each value goes into the slot under the cursor, then Tab moves on. [None]
      leaves a slot as the form filled it. *)
   let typed values state = List.fold_left (fun state value ->
       (match value with Some text -> Install.paste ~text state | None -> state) |> edit "tab") state values in
-  let form = opened (union [file;port]) in
-  (* With no alternative chosen the form has no slot to type into. A form that
-     opened on the first alternative would take these four values. *)
-  check bool "what is typed before an alternative is chosen fills nothing" true
-    (refused (form |> edit "tab" |> typed [Some "consumer";Some "shared-run";None;Some "/data/in.txt"]));
-  let as_port = form |> edit "right" |> edit "right" |> edit "tab"
+  let both = union [file;port] in
+  (* With no alternative chosen the form has no slot to type into, so nothing
+     typed makes a draft. A form that opened on the first alternative would
+     take these four values and draft them. *)
+  check bool "no draft comes before an alternative is chosen, whatever is typed" true
+    (refused (opened both |> edit "tab" |> typed [Some "consumer";Some "shared-run";None;Some "/data/in.txt"]));
+  let as_port state = state |> edit "right" |> edit "right" |> edit "tab"
     |> typed [Some "consumer";Some "shared-run";None;Some "producer"] in
-  let document = draft as_port in
+  let document = drafted "the second alternative" both as_port in
   check (list (option string)) "the draft carries the chosen alternative's binding"
     [Some "consumer";Some "shared-run";Some "port";Some "producer";None]
     (List.map (at document) [["id"];["run_id"];["binding";"kind"];["binding";"installation_id"];["binding";"path"]]);
-  let as_file = List.fold_left (fun state key -> edit key state) as_port ["up";"up";"up";"up";"left"] in
-  check bool "another alternative starts empty, the two ids included" true (refused as_file);
-  let document = draft (as_file |> edit "tab" |> typed [Some "reader";Some "shared-run";None;Some "/data/in.txt"]) in
-  check (list (option string)) "what was typed for the previous alternative is not in the draft"
+  let as_file state = List.fold_left (fun state key -> edit key state) (as_port state) ["up";"up";"up";"up";"left"] in
+  (* Every slot of the other alternative is empty here, so this refusal alone
+     does not show that the two ids were dropped. The draft after it does:
+     text goes in after what a slot holds, so an id that was kept would come
+     out as "consumerreader". *)
+  check bool "another alternative has to be filled before a draft comes" true (refused (as_file (opened both)));
+  let document = drafted "the first alternative after the second" both (fun state -> as_file state |> edit "tab"
+    |> typed [Some "reader";Some "shared-run";None;Some "/data/in.txt"]) in
+  check (list (option string)) "what was typed for the previous alternative, its two ids too, is not in the draft"
     [Some "reader";Some "shared-run";Some "file";Some "/data/in.txt";None]
     (List.map (at document) [["id"];["run_id"];["binding";"kind"];["binding";"path"];["binding";"installation_id"]]);
-  let document = draft (opened (union [file]) |> typed [Some "solo";Some "shared-run";None;Some "/data/in.txt"]) in
+  let document = drafted "a single alternative" (union [file])
+    (typed [Some "solo";Some "shared-run";None;Some "/data/in.txt"]) in
   check (list (option string)) "a single alternative is filled without choosing"
     [Some "solo";Some "file";Some "/data/in.txt"]
     (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]);
@@ -848,53 +880,105 @@ let installation_chooses_a_binding_alternative () =
   let with_members = Printf.sprintf
     {|{"type":"object","additionalProperties":false,"required":["topic"],"properties":{"topic":%s,"note":%s},"oneOf":[%s,%s]}|}
     text text (closed ["topic",text]) (closed ["topic",text;"note",text]) in
-  let document = draft (opened with_members |> typed [Some "flat";Some "shared-run";Some "notes"]) in
+  let document = drafted "members beside oneOf" with_members (typed [Some "flat";Some "shared-run";Some "notes"]) in
   check (list (option string)) "a binding with members beside oneOf is filled member by member"
     [Some "flat";Some "notes"] (List.map (at document) [["id"];["binding";"topic"]]);
   (* A title and a description on the node that holds the alternatives say
      nothing about a value, so that node is spread like a bare one. *)
   let annotated = Printf.sprintf
     {|{"type":"object","title":"Where it reads","description":"A file or a port.","oneOf":[%s,%s]}|} file port in
-  let document = draft (opened annotated |> edit "right" |> edit "tab"
+  let document = drafted "an annotated node" annotated (fun state -> state |> edit "right" |> edit "tab"
     |> typed [Some "annotated";Some "shared-run";None;Some "/data/in.txt"]) in
   check (list (option string)) "a node with a title and a description is still chosen by alternative"
     [Some "annotated";Some "file";Some "/data/in.txt"]
     (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]);
   (* A title or a description names an alternative as its constants do. *)
-  let whole = {|{"type":"integer"}|} in
   let by_title = closed ~naming:{|"title":"Read a file",|} ["path",text] in
   let by_description = closed ~naming:{|"description":"Listen on a port.",|} ["port",whole] in
-  let document = draft (opened (union [by_title;by_description]) |> edit "right" |> edit "tab"
+  let named = union [by_title;by_description] in
+  let document = drafted "a title and a description" named (fun state -> state |> edit "right" |> edit "tab"
     |> typed [Some "titled";Some "shared-run";Some "/data/in.txt"]) in
   check (list (option string)) "alternatives named by a title and by a description are chosen"
     [Some "titled";Some "/data/in.txt"] (List.map (at document) [["id"];["binding";"path"]]);
+  (* A refusal that is not an empty slot: the member of the chosen alternative
+     refuses the value, and the host refuses the same binding. *)
+  check bool "a value the chosen alternative's member does not take makes no draft" true
+    (refused (opened named |> edit "right" |> edit "right" |> edit "tab"
+      |> typed [Some "titled";Some "shared-run"] |> Install.paste ~text:{|"eighty"|}));
+  check bool "the host refuses that binding too" false (taken named (`Assoc ["port",`String "eighty"]));
+  (* Constants name an alternative whether or not it requires them, as in the
+     dashboard's binding form (bindingAlternativeLabel). *)
+  let loose = union [closed ~required:["path"] ["kind",kind "file";"path",text];
+    closed ~required:["installation_id"] ["kind",kind "port";"installation_id",text]] in
+  let document = drafted "constants that are not required" loose (fun state -> state |> edit "right" |> edit "tab"
+    |> typed [Some "loose";Some "shared-run";None;Some "/data/in.txt"]) in
+  check (list (option string)) "constants an alternative does not require still name it"
+    [Some "loose";Some "/data/in.txt"] (List.map (at document) [["id"];["binding";"path"]]);
   (* The spread would drop the node that holds the alternatives, so a node
      that says more than its alternatives keeps the binding one member: one
-     JSON field, or one pick where the node lists its values. So does an
-     alternative that is not an object, and so does an alternative its schema
-     does not name: the two unnamed ones below take the same members and
-     differ only in a type, which the form does not show. *)
+     JSON field, or one pick where the node lists its values. The keywords
+     below are the ones the host's validator knows (Lane_addon_action
+     schema_keys) and such a node can carry beside the four the spread
+     allows: properties is the case above, and the manifest loader refuses
+     required and additionalProperties on a node without properties. *)
   let as_json = {|{"kind":"file","path":"/data/in.txt"}|} in
   let typed_as_json state = typed [Some as_json] state in
   let picked state = edit "right" state in
-  let unnamed = closed ["kind",text;"path",text] in
-  let unnamed_number = closed ["kind",text;"path",whole] in
+  let saying keyword value = Printf.sprintf {|{"type":"object","%s":%s,"oneOf":[%s,%s]}|} keyword value file port in
+  let keywords = List.map (fun (keyword,value,fill) ->
+      Printf.sprintf "a node that also says %s keeps the binding one member" keyword,saying keyword value,fill)
+    ["items",text,typed_as_json;"minimum","1",typed_as_json;"maximum","1",typed_as_json;
+     "exclusiveMinimum","1",typed_as_json;"exclusiveMaximum","1",typed_as_json;
+     "minLength","1",typed_as_json;"maxLength","1",typed_as_json;
+     "minItems","1",typed_as_json;"maxItems","1",typed_as_json;
+     "const",as_json,picked;"enum","[" ^ as_json ^ "]",picked] in
+  (* So does an alternative that is not an object, wherever it stands. And so
+     do alternatives an operator could not tell apart: the form shows a
+     member's name and never its type, and each pair below takes members named
+     alike that differ in a type. An alternative is told apart by a name of
+     its own: a title, else a description, else its constants. A title of
+     spaces is no name, and a name two alternatives share is none either. *)
+  let texts = ["kind",text;"path",text] and counts = ["kind",text;"path",whole] in
+  let alike = [
+    "an alternative that is not an object, in the first place, keeps the binding JSON",
+      union [{|{"title":"A path alone","type":"string"}|};file];
+    "an alternative that is not an object, in the last place, keeps the binding JSON",
+      union [file;{|{"title":"A count alone","type":"integer"}|}];
+    "an alternative its schema does not name, in the first place, keeps the binding JSON",
+      union [closed counts;file];
+    "an alternative its schema does not name, in the last place, keeps the binding JSON",
+      union [file;closed counts];
+    "alternatives their schemas do not name are typed as JSON",
+      union [closed texts;closed counts];
+    "a title of spaces alone names nothing",
+      union [closed ~naming:{|"title":" ",|} texts;closed ~naming:{|"title":"  ",|} counts];
+    "alternatives titled alike are typed as JSON",
+      union [closed ~naming:{|"title":"Reads",|} texts;closed ~naming:{|"title":"Reads",|} counts];
+    "alternatives whose constants are alike are typed as JSON",
+      union [file;closed ["kind",kind "file";"path",whole]];
+    "a title is the name even beside a description, so one title on two is typed as JSON",
+      union [closed ~naming:{|"title":"Reads","description":"A file.",|} texts;
+             closed ~naming:{|"title":"Reads","description":"A count.",|} counts]] in
   List.iter (fun (label,binding_schema,fill) ->
-    let document = draft (opened binding_schema |> typed [Some "whole";Some "shared-run"] |> fill) in
+    let document = drafted label binding_schema (fun state -> state |> typed [Some "whole";Some "shared-run"] |> fill) in
     check (list (option string)) label [Some "whole";Some "file";Some "/data/in.txt"]
       (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]))
-    ["a node with another keyword is typed as JSON",
-       Printf.sprintf {|{"type":"object","minLength":1,"oneOf":[%s,%s]}|} file port,typed_as_json;
-     "a node with a constant is picked as one member",
-       Printf.sprintf {|{"type":"object","const":%s,"oneOf":[%s,%s]}|} as_json file port,picked;
-     "a node with an enumeration is picked as one member",
-       Printf.sprintf {|{"type":"object","enum":[%s],"oneOf":[%s,%s]}|} as_json file port,picked;
-     "an alternative that is not an object is typed as JSON",
-       union [file;{|{"title":"A path alone","type":"string"}|}],typed_as_json;
-     "alternatives their schemas do not name are typed as JSON",
-       union [unnamed;unnamed_number],typed_as_json;
-     "one alternative its schema does not name keeps the binding JSON",
-       union [file;unnamed_number],typed_as_json]
+    (keywords @ List.map (fun (label,binding_schema) -> label,binding_schema,typed_as_json) alike);
+  (* The host refuses every value of a node whose description is not text,
+     so no binding of such a package can be saved. A spread would drop that
+     node and draft one. The keys below choose the first alternative of a
+     spread form and fill it; a form that keeps the binding one member
+     refuses them. *)
+  let untexted = saying "description" "1" in
+  let step key state = match Install.handle ~key state with
+    | Ok (Install.Updated next) -> Ok next | Ok _ | Error _ -> Error () in
+  let filled = List.fold_left (fun state value -> Result.bind state (fun state ->
+      step "tab" (match value with Some text -> Install.paste ~text state | None -> state)))
+    (Result.bind (step "right" (opened untexted)) (step "tab"))
+    [Some "untexted";Some "shared-run";None;Some "/data/in.txt"] in
+  check bool "a node whose description is not text is not spread" true
+    (match filled with Error () -> true | Ok state -> refused state);
+  check bool "the host takes no binding under that node" false (taken untexted (Yojson.Safe.from_string as_json))
 
 let object_array_fields () =
   let module Form = Masc_tui_schema_form in

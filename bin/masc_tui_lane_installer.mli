@@ -9,11 +9,12 @@ val create : unit -> (t,string) result
 val accept_preview : Yojson.Safe.t -> (t option,string) result
 (** [Ok None] is a valid package without a binding schema: the form cannot
     draft it, and only a raw TOML declaration can install it. A binding
-    schema that is nothing but a [oneOf] of object alternatives, each named
-    by its own schema ([title], [description] or constant members), is
-    filled one alternative at a time, chosen in the form's first slot when
-    there is more than one. Any other binding schema is left as the
-    [binding] member of the form's root. *)
+    schema that is nothing but a [oneOf] of object alternatives, each with a
+    name of its own from its schema ([title], [description] or constant
+    members) that no other alternative has, is filled one alternative at a
+    time, chosen in the form's first slot when there is more than one. Any
+    other binding schema is left as the [binding] member of the form's
+    root. *)
 val handle : key:string -> t -> (event,string) result
 val paste : text:string -> t -> t
 val lines : ?height:int -> ?render:(string -> string list) -> t -> string list

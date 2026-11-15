@@ -304,12 +304,16 @@ let alternative_label index schema =
   Option.value (alternative_name schema) ~default:(Printf.sprintf "Alternative %d" (index+1))
 (* For a caller whose own root holds such a schema one member down. The form
    edits alternatives only at its root, so that caller spreads its root over
-   these. An unnamed alternative is [None] here and not its position: a
-   position tells an operator nothing about what the alternative takes, and
-   the caller decides whether to spread at all. *)
+   these. The answer is [None] unless every alternative has a name and no two
+   share one. The form shows an alternative by its name and by its members'
+   names, never by a member's type, so alternatives named alike, or known
+   only by position, cannot be told apart when their members are named alike. *)
 let named_alternatives schema =
-  Option.map (List.map (fun alternative -> alternative_name alternative,alternative))
-    (alternatives schema)
+  Option.bind (alternatives schema) (fun alternatives ->
+    let named = List.filter_map (fun alternative ->
+      Option.map (fun name -> name,alternative) (alternative_name alternative)) alternatives in
+    let names = List.sort_uniq String.compare (List.map fst named) in
+    if List.length names=List.length alternatives then Some named else None)
 let locked_lines form = List.map (fun (name,value) ->
   "  " ^ name ^ ": " ^ Yojson.Safe.to_string value ^ " · locked") form.locked
 let union_lines form =

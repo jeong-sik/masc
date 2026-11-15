@@ -14,29 +14,30 @@ let object_schema ?title properties =
      "required",`List (List.map (fun (key,_) -> `String key) properties);"additionalProperties",`Bool false])
 (* The form edits alternatives only at its own root, and the binding schema
    sits one member below this root. A binding schema with alternatives is
-   therefore spread into one root per alternative, named after it. The spread
-   root accepts the same values: the other two members are the same in every
-   root, so a value fits exactly one root when its binding fits exactly one
-   alternative. Three conditions keep that true and the choice readable.
-   The spread drops the node that held the alternatives, so that node may say
-   nothing but its type, its alternatives and its annotations. Every
-   alternative has to be an object, as the node is. And every alternative's
-   own schema has to name it: the form shows a member's name but not its
-   type, so alternatives known only by position cannot be told apart when
-   their members are named alike. Any other binding schema stays a plain
-   member. The spread schema stays in the form; the host checks the saved
-   binding against the package's own schema. *)
+   therefore spread into one root per alternative, named after it. The host's
+   validator takes the same values under the spread root: the other two
+   members are the same in every root, so a value fits exactly one root when
+   its binding fits exactly one alternative. Three conditions keep that true
+   and the choice readable. The spread drops the node that held the
+   alternatives, so that node may say nothing but its type, its alternatives
+   and its annotations, and the annotations have to be text: the host refuses
+   every value of a node whose description is not. Every alternative has to
+   be an object, as the node is. And every alternative has to have a name no
+   other one has (Form.named_alternatives). Any other binding schema stays a
+   plain member. The spread schema stays in the form; the host checks the
+   saved binding against the package's own schema. *)
 let install_schema binding_schema =
   let root ?title binding =
     object_schema ?title ["installation_id",string_schema;"run_id",string_schema;"binding",binding] in
-  let holds_alternatives_only members =
-    List.for_all (fun (key,_) -> List.mem key ["type";"oneOf";"title";"description"]) members in
+  let says_no_more (key,value) = match key,value with
+    | ("type" | "oneOf"),_ | ("title" | "description"),`String _ -> true
+    | _,_ -> false in
   let is_object alternative = field "type" alternative=Ok (`String "object") in
   let spread = match binding_schema,Form.named_alternatives binding_schema with
-    | `Assoc members,Some alternatives when holds_alternatives_only members ->
-        List.fold_right (fun (name,alternative) roots -> match name,roots with
-          | Some title,Some roots when is_object alternative -> Some (root ~title alternative :: roots)
-          | (Some _ | None),(Some _ | None) -> None) alternatives (Some [])
+    | `Assoc members,Some alternatives
+      when List.for_all says_no_more members
+           && List.for_all (fun (_,alternative) -> is_object alternative) alternatives ->
+        Some (List.map (fun (title,alternative) -> root ~title alternative) alternatives)
     | _,(Some _ | None) -> None in
   match spread with
   | Some roots -> `Assoc ["type",`String "object";"oneOf",`List roots]

@@ -193,6 +193,14 @@ let append_removal_journal_and_clear_receipt
          ~dropped_statements:(Some receipt.dropped_statements)
          snapshot)
   in
+  (* Only a writer that reconciles before it builds appends here, and no
+     publication receipt is on disk then. A publication recovery never does:
+     beside a target that was never published the receipt names the current
+     snapshot as its prior, and beside a published one the publication's own
+     line, just finalized, is the removal line. The writer can still fail
+     before it commits anything, so the memory health row's readers are told
+     now, whether or not the receipt removal below succeeds (RFC-0487). *)
+  Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
   remove_retraction_plan_receipt ~keepers_dir ~keeper_id
 ;;
 

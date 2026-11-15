@@ -5051,6 +5051,214 @@ let test_generic_publication_quarantine_requires_current_generation_journal () =
   check string "replayed journal entry appended exactly once" once (Fs_compat.load_file journal)
 ;;
 
+let retire_target ~keepers_dir ~target =
+  let current, current_sha256 =
+    match Current.read_with_snapshot_sha256 ~keepers_dir ~keeper_id:"keeper" with
+    | Ok (Some pair) -> pair
+    | Ok None | Error _ -> fail "removal fixture needs a readable snapshot"
+  in
+  Current.retract_facts ~pass:Masc.Keeper_memory_commit_pass.Operator_delete
+    ~keepers_dir ~keeper_id:"keeper"
+    ~expected_revision:current.revision ~expected_snapshot_sha256:current_sha256
+    ~now:300.0
+    ~source:{ Current.kind = Current.Explicit_retract; trace_id = "plan-beside-its-line" }
+    [ { Current.memory_id = Types.memory_id target; reason = "operator retired this claim" } ]
+;;
+
+(* A removal whose publication appended its journal line but whose own
+   receipt could not be removed; dispatch then cleared the publication, so the
+   removal receipt is left for the next writer (#37682). The removal runs with
+   the journal unavailable and the test writes the journal itself. Returns the
+   journal lines before the removal and the line its publication carried. *)
+let leave_removal_receipt ~keepers_dir ~target =
+  let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  let earlier =
+    Fs_compat.load_file journal_path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  Fs_compat.invalidate_cached_writer journal_path;
+  Sys.remove journal_path;
+  Unix.mkdir journal_path 0o700;
+  (match retire_target ~keepers_dir ~target with
+   | Error (Current.Retract_batch_plan_evidence_pending _) -> ()
+   | Error _ | Ok _ -> fail "removal fixture did not leave its journal evidence pending");
+  Unix.rmdir journal_path;
+  let publication_path = Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+  let removal_line =
+    Yojson.Safe.from_file publication_path
+    |> Yojson.Safe.Util.member "journal"
+    |> Yojson.Safe.to_string
+  in
+  Sys.remove publication_path;
+  check bool "removal receipt is left for the next writer" true
+    (Sys.file_exists (Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+  earlier, removal_line
+;;
+
+let put_journal ~keepers_dir lines =
+  Fs_compat.save_file
+    (Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
+    (String.concat "" (List.map (fun line -> line ^ "\n") lines))
+;;
+
+(* A committed line whose source carries [generation], one of the shapes an
+   earlier build left in live journals (counted 2026-09-22 in #37682). *)
+let with_source_generation line =
+  match Yojson.Safe.from_string line with
+  | `Assoc fields ->
+    Yojson.Safe.to_string
+      (`Assoc
+         (List.map
+            (fun (name, value) ->
+               match name, value with
+               | "source", `Assoc source -> name, `Assoc (source @ [ "generation", `Int 1 ])
+               | _ -> name, value)
+            fields))
+  | _ -> fail "journal fixture line is not an object"
+;;
+
+(* A failed line carrying [cadence_deferred], which the reader stopped
+   accepting in #37653. *)
+let failed_line_with_cadence_deferred =
+  {|{"outcome":"failed","recorded_at":350.0,"trace_id":"later-pass","kind":"lane_cancelled","detail":"cancelled","snapshot_present":true,"cadence_deferred":true}|}
+;;
+
+let write_after_removal ~keepers_dir =
+  Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
+    ~keepers_dir ~keeper_id:"keeper" ~now:400.
+    ~source:(source Current.Explicit_write) (fact ~claim:"memory written after the removal" ())
+;;
+
+let committed_at ~revision lines =
+  let open Yojson.Safe.Util in
+  List.filter
+    (fun line ->
+       member "outcome" line = `String "committed" && member "revision" line = `Int revision)
+    lines
+;;
+
+let removal_label line_present =
+  if line_present then "removal line journalled" else "removal line missing"
+;;
+
+let test_removal_reconcile_reads_no_line_older_than_its_target () =
+  List.iter (fun line_present ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let label = removal_label line_present in
+    let target = fact ~claim:"claim retired by an interrupted removal" () in
+    ignore (replace ~keepers_dir ~facts:[ target ] () |> require_ok);
+    let earlier, removal_line = leave_removal_receipt ~keepers_dir ~target in
+    let older_build_line = with_source_generation (List.hd earlier) in
+    put_journal ~keepers_dir
+      ((older_build_line :: earlier) @ (if line_present then [ removal_line ] else []));
+    let next = write_after_removal ~keepers_dir |> require_upsert_ok in
+    check int (label ^ ": the next write commits") 3 next.revision;
+    check bool (label ^ ": the reconcile clears the receipt") false
+      (Sys.file_exists (Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+    let journal = read_journal_lines ~keepers_dir in
+    (match committed_at ~revision:2 journal with
+     | [ line ] ->
+       check bool (label ^ ": the journal holds the removal's own line once") true
+         (Yojson.Safe.sort line = Yojson.Safe.sort (Yojson.Safe.from_string removal_line))
+     | lines -> failf "%s: expected one removal line, got %d" label (List.length lines));
+    check bool (label ^ ": the older line stays as written") true
+      (List.hd journal = Yojson.Safe.from_string older_build_line))
+    [ true; false ]
+;;
+
+(* An unreadable line newer than the stop may be the removal's own line, so
+   it never lets the removal count as missing. The removal's exact line still
+   settles the receipt beside it: a stuck receipt makes later passes fail, and
+   their failure lines land after the removal's. *)
+let test_removal_reconcile_reads_every_newer_line_before_calling_it_missing () =
+  List.iter (fun line_present ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let label = removal_label line_present in
+    let target = fact ~claim:"claim whose removal meets an unreadable line" () in
+    ignore (replace ~keepers_dir ~facts:[ target ] () |> require_ok);
+    let earlier, removal_line = leave_removal_receipt ~keepers_dir ~target in
+    let lines =
+      earlier
+      @ (if line_present then [ removal_line ] else [])
+      @ [ failed_line_with_cadence_deferred ]
+    in
+    put_journal ~keepers_dir lines;
+    let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let receipt_path = Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let journal_before = Fs_compat.load_file journal_path in
+    match line_present, write_after_removal ~keepers_dir with
+    | true, Ok next ->
+      check int (label ^ ": the next write commits") 3 next.revision;
+      check bool (label ^ ": the exact line clears the receipt") false
+        (Sys.file_exists receipt_path);
+      check int (label ^ ": the removal is not journalled again") 1
+        (List.length (committed_at ~revision:2 (read_journal_lines ~keepers_dir)))
+    | false, Error (Current.Upsert_persistence_failed detail) ->
+      check bool (label ^ ": the refusal names the unreadable line") true
+        (String_util.contains_substring detail
+           (Printf.sprintf
+              "memory journal line %d is undecodable during retraction reconciliation"
+              (List.length lines)));
+      check bool (label ^ ": the receipt stays for a later writer") true
+        (Sys.file_exists receipt_path);
+      check string (label ^ ": the journal is unchanged") journal_before
+        (Fs_compat.load_file journal_path);
+      check int (label ^ ": memory stays at the removal") 2
+        (inspect_snapshot_bytes ~keepers_dir ~keeper_id:"keeper").revision
+    | true, Error error -> failf "%s: %s" label (Current.upsert_error_to_string error)
+    | false, (Ok _ | Error (Current.Unsupported_derivation _)) ->
+      failf "%s: an unreadable newer line let the removal count as missing" label)
+    [ true; false ]
+;;
+
+(* Revisions restart at 1 after a quarantine. The earlier generation holds a
+   line equal to the later generation's removal (same facts, times, source and
+   plan), so only the later generation's own line may settle its receipt. *)
+let test_removal_reconcile_stays_in_the_target_generation () =
+  List.iter (fun line_present ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let label = removal_label line_present in
+    let target = fact ~claim:"claim retired in two generations" () in
+    ignore (replace ~keepers_dir ~facts:[ target ] () |> require_ok);
+    (match retire_target ~keepers_dir ~target with
+     | Ok _ -> ()
+     | Error _ -> fail "earlier generation removal failed");
+    ignore
+      (replace ~keepers_dir ~expected_revision:(Some 2)
+         ~facts:[ fact ~claim:"earlier generation's last claim" () ] ()
+       |> require_ok);
+    quarantine_fixture_snapshot ~keepers_dir;
+    let restarted = replace ~keepers_dir ~facts:[ target ] () |> require_ok in
+    check int (label ^ ": the later generation restarts at revision 1") 1 restarted.revision;
+    let earlier, removal_line = leave_removal_receipt ~keepers_dir ~target in
+    put_journal ~keepers_dir (earlier @ (if line_present then [ removal_line ] else []));
+    let next = write_after_removal ~keepers_dir |> require_upsert_ok in
+    check int (label ^ ": the later generation continues") 3 next.revision;
+    check bool (label ^ ": the reconcile clears the receipt") false
+      (Sys.file_exists (Current.retraction_plan_receipt_path ~keepers_dir ~keeper_id:"keeper"));
+    let outcome line = Yojson.Safe.Util.member "outcome" line in
+    let rec split_at_quarantine before = function
+      | [] -> fail "fixture journal lost its quarantine line"
+      | line :: later when outcome line = `String "quarantined" -> List.rev before, later
+      | line :: later -> split_at_quarantine (line :: before) later
+    in
+    let earlier_generation, later_generation =
+      split_at_quarantine [] (read_journal_lines ~keepers_dir)
+    in
+    let removal = Yojson.Safe.sort (Yojson.Safe.from_string removal_line) in
+    match committed_at ~revision:2 earlier_generation, committed_at ~revision:2 later_generation with
+    | [ earlier_line ], [ later_line ] ->
+      check bool (label ^ ": the earlier generation journalled an equal removal") true
+        (Yojson.Safe.sort earlier_line = removal);
+      check bool (label ^ ": the later generation holds its own removal line") true
+        (Yojson.Safe.sort later_line = removal)
+    | earlier_lines, later_lines ->
+      failf "%s: expected one removal line per generation, got %d and %d" label
+        (List.length earlier_lines) (List.length later_lines))
+    [ true; false ]
+;;
+
 let test_revision_only_absorption_publication_recovers () =
   with_temp_keepers @@ fun keepers_dir ->
   let original = fact ~claim:"original branch" () in
@@ -5197,6 +5405,18 @@ let () =
             "ordinary removals recover torn journal tail"
             `Quick
             test_ordinary_removals_recover_torn_journal_tail
+        ; test_case
+            "removal reconcile reads no line older than its target"
+            `Quick
+            test_removal_reconcile_reads_no_line_older_than_its_target
+        ; test_case
+            "removal reconcile reads every newer line before calling it missing"
+            `Quick
+            test_removal_reconcile_reads_every_newer_line_before_calling_it_missing
+        ; test_case
+            "removal reconcile stays in the target generation"
+            `Quick
+            test_removal_reconcile_stays_in_the_target_generation
         ; test_case
             "receipt write failure preserves current fact"
             `Quick

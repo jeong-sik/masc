@@ -1586,6 +1586,13 @@ let current_selection_registry_summary = function
       ]
 ;;
 
+(* [source], [file_path] and [effective_template] describe the body [key]
+   names. The body shows the turn material through its two slot variables, so
+   the slot text a run was sent is recorded with the other substitutions in
+   [rendered_prompt_variables] ([exact_input_payload]), next to the variables
+   it was rendered from. A reader re-renders the sent prompt from the body
+   template and that list alone. Whether a slot's text came from the file or
+   from an override is not recorded. *)
 let prompt_material_payload ~key = function
   | Ok ({ resolution; rendered; turn_inputs = _ } : librarian_prompt_material) ->
     `Assoc

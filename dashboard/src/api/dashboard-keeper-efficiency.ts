@@ -8,9 +8,11 @@
 // browser's clock guessed.
 //
 // The decoder refuses what it cannot read. A schema it does not know, a
-// missing field, or a number the producer never writes is an error that names
-// the field; none of them becomes a zero. The TUI decoder holds the same rule
-// (lib/tui_decode_keeper_efficiency.ml).
+// missing field, a count that is negative or has a fraction, or a time no
+// Date holds is an error that names the field; none of them becomes a zero.
+// The TUI decoder refuses the same shapes
+// (lib/tui_decode_keeper_efficiency.ml). JSON.parse hands over one number
+// type, so `30.0` in a count position reads as the count 30 here.
 
 import { isRecord } from '../lib/type-guards'
 import { get, type AbortableRequestOptions } from './core'
@@ -52,7 +54,7 @@ export interface KeeperEfficiencyFleet {
 export interface KeeperEfficiencyMonth {
   /** "YYYY-MM", the month the server counted. */
   readonly month: string
-  /** Unix seconds of the aggregation that answered. */
+  /** Unix seconds of the aggregation that answered, within what a Date holds. */
   readonly generated_at: number
   /** Days of the month with at least one ledger row. */
   readonly days_covered: number
@@ -60,13 +62,14 @@ export interface KeeperEfficiencyMonth {
   readonly fleet: KeeperEfficiencyFleet
 }
 
-/** Why a field was refused. Each is a shape the producer never writes. */
+/** Why a field was refused. */
 export type KeeperEfficiencyFieldFault =
   | 'not_a_string'
   | 'empty'
   | 'not_a_number'
   | 'not_an_integer'
   | 'negative'
+  | 'not_an_instant'
   | 'not_a_list'
   | 'not_a_month'
 
@@ -108,8 +111,7 @@ function text(fields: Fields, at: string, name: string): Read<string> {
   return read(found.value)
 }
 
-/** A finite number that is not below zero: every measure of this view is a
- *  count, a sum or a quotient of two of them. */
+/** A finite number that is not below zero. */
 function measure(fields: Fields, at: string, name: string): Read<number> {
   const found = member(fields, at, name)
   if (!found.ok) return found
@@ -121,12 +123,27 @@ function measure(fields: Fields, at: string, name: string): Read<number> {
   return read(found.value)
 }
 
+/** A measure with no fraction. The producer's sums stop at the largest OCaml
+ *  int, and JSON.parse rounds a count past 2^53 to the nearest number it
+ *  holds; that is still a count, so it is read. */
 function count(fields: Fields, at: string, name: string): Read<number> {
   const found = measure(fields, at, name)
   if (!found.ok) return found
-  return Number.isSafeInteger(found.value)
+  return Number.isInteger(found.value)
     ? found
     : refuse({ kind: 'invalid_field', field: at + name, fault: 'not_an_integer' })
+}
+
+// A Date holds up to 8.64e15 ms after the epoch.
+const LAST_DATE_UNIX_SECONDS = 8.64e12
+
+/** Unix seconds that a Date holds, so a page can draw the time. */
+function instant(fields: Fields, at: string, name: string): Read<number> {
+  const found = measure(fields, at, name)
+  if (!found.ok) return found
+  return found.value <= LAST_DATE_UNIX_SECONDS
+    ? found
+    : refuse({ kind: 'invalid_field', field: at + name, fault: 'not_an_instant' })
 }
 
 function row(raw: unknown, at: string): Read<KeeperEfficiencyRow> {
@@ -213,7 +230,7 @@ export function decodeKeeperEfficiencyMonth(raw: unknown): KeeperEfficiencyDecod
   if (!MONTH_SHAPE.test(month.value)) {
     return refuse({ kind: 'invalid_field', field: 'month', fault: 'not_a_month' })
   }
-  const generatedAt = measure(raw, '', 'generated_at')
+  const generatedAt = instant(raw, '', 'generated_at')
   if (!generatedAt.ok) return generatedAt
   const daysCovered = count(raw, '', 'days_covered')
   if (!daysCovered.ok) return daysCovered

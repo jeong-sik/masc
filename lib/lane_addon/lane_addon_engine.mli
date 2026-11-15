@@ -27,8 +27,13 @@ type held = {
   state_owner : string option;
 }
 
+val apple_container_name : string -> string
+(** The first 63 hex digits of the SHA-256 of the text. Apple container takes
+    the name as the container ID and refuses a name longer than 63 characters. *)
 val owned_name : Lane_addon_types.runtime -> string -> string
-val valid_id : string -> bool
+val valid_id : Lane_addon_types.runtime -> string -> bool
+(** A Docker container ID is 64 lowercase hex digits. An Apple container ID is
+    the name this host gave it: 63 lowercase hex digits. *)
 val mount_argument : Lane_addon_types.runtime -> mount -> (string, string) result
 val create_arguments :
   Lane_addon_types.container -> command:string list -> name:string -> instance_id:string -> state_owner:string option ->

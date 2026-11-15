@@ -574,6 +574,81 @@ let test_the_fleet_section_escapes_the_probe_word () =
   let output = drawn (Render_metrics.render_section_fleet ~cols:90 state) in
   check bool "the probe row carries no escape" false (contains output escape)
 
+(* The TUI session log as [state.events] holds it, newest first. The newest
+   event is the long kind the loader writes when the feed closes: the subject
+   first, then the cause, then what to do. *)
+let session_width = 40
+
+let session_log =
+  let event clock content =
+    { Types.timestamp = clock; event_type = "observer"; content } in
+  [ event "11:06:00"
+      ("runtime event feed closed: the server refused the subscription because \
+        the operator token expired; run masc login for this workspace and \
+        press r to open the feed again")
+  ; event "11:05:00" "keeper alpha started"
+  ; event "11:04:00" "keeper beta paused by the operator"
+  ; event "11:03:00" "workspace declaration saved"
+  ; event "11:02:00" "approval queue read"
+  ]
+
+let rows_of (entry : Render_metrics.session_entry) = List.length entry.rows
+
+let rows_used (block : Render_metrics.session_block) =
+  (if block.earlier > 0 then 1 else 0)
+  + List.fold_left (fun used entry -> used + rows_of entry) 0 block.kept
+
+let rec drop count list =
+  match count, list with
+  | 0, _ | _, [] -> list
+  | count, _ :: rest -> drop (count - 1) rest
+
+(* What the block decides with a room, read against every event drawn
+   without one: the kept events are the newest ones with every row they
+   take, and they and the count fit the room, unless the newest alone is
+   taller. No older event would have fit as well. *)
+let check_session_room room =
+  let whole = Render_metrics.session_block ~width:session_width session_log in
+  let block =
+    Render_metrics.session_block ~width:session_width ~room session_log in
+  let total = List.length whole.kept in
+  check int "unbounded, nothing is left out" 0 whole.earlier;
+  check int "every folded event is kept or counted" total
+    (block.earlier + List.length block.kept);
+  check bool "the kept events are the newest, each with all of its rows" true
+    (drop block.earlier whole.kept = block.kept);
+  (match block.kept with
+   | [ _ ] -> ()
+   | [] | _ :: _ :: _ ->
+     check bool "the kept events and the count fit the room" true
+       (rows_used block <= room));
+  if block.earlier > 0 then
+    check bool "the next older event would not have fit" true
+      (rows_used block + rows_of (List.nth whole.kept (block.earlier - 1)) > room)
+
+let test_a_long_session_event_takes_the_rows_its_sentence_needs () =
+  let block = Render_metrics.session_block ~width:session_width session_log in
+  let newest = List.nth block.kept (List.length block.kept - 1) in
+  List.iter
+    (fun row ->
+       check bool "no row is wider than the block" true
+         (Layout.display_width row <= session_width))
+    newest.rows;
+  check bool "the rows hold the whole sentence rather than its first row" true
+    (rows_of newest * session_width >= Layout.display_width newest.event.content)
+
+let test_the_session_room_is_spent_in_rows_on_whole_events () =
+  List.iter check_session_room [ 1; 2; 4; 7; 9; 12; 40 ]
+
+let test_the_newest_session_event_is_kept_when_taller_than_the_room () =
+  let block =
+    Render_metrics.session_block ~width:session_width ~room:3 session_log in
+  check int "the earlier events are counted" 4 block.earlier;
+  check bool "the newest is drawn whole past the room" true
+    (match block.kept with
+     | [ newest ] -> rows_of newest > 3
+     | [] | _ :: _ :: _ -> false)
+
 let () =
   run "tui_render_metrics"
     [ ( "connection"
@@ -608,6 +683,14 @@ let () =
             test_the_fleet_section_escapes_the_probe_word
         ; test_case "approval source observations" `Quick test_approval_source_observations
         ;] )
+    ; ( "session_block"
+      , [ test_case "a long event takes the rows its sentence needs" `Quick
+            test_a_long_session_event_takes_the_rows_its_sentence_needs
+        ; test_case "the room is spent in rows on whole events" `Quick
+            test_the_session_room_is_spent_in_rows_on_whole_events
+        ; test_case "the newest event is kept when taller than the room" `Quick
+            test_the_newest_session_event_is_kept_when_taller_than_the_room
+        ] )
     ; ( "responsiveness"
       , [] )
     ; ( "render_body"

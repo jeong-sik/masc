@@ -8,3 +8,8 @@
   for the approvals address the router gives; the interleave check expects
   the trace-only row to read `unavailable`, as its component test has since
   #43920 (#PENDING).
+- The tool output failure check expects the step status `pending` that the
+  transcript reports since #43920. The tool series browser test answers what
+  the Tools panel now reads: the observer connection, the execution snapshot
+  that names its observer instance, and the open series event stream, with
+  the result size fields each series row carries (#PENDING).

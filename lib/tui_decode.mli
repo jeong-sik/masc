@@ -1143,7 +1143,12 @@ type keeper_secret_status =
   | Secret_error
   | Secret_status_unknown of string
 
-val keeper_secret_status_to_string : keeper_secret_status -> string
+val keeper_secret_status_text : ko:bool -> keeper_secret_status -> string
+(** The status as the Secrets tab draws it. A known status is a word of the
+    screen language. An unknown one is the producer's own word, put through
+    {!Tui_terminal_text.sanitize_terminal_text} so an ESC, a control byte or
+    a line break in it reaches the terminal as visible escape text rather than
+    as a sequence or a new row. The decoded value keeps the raw word. *)
 
 (** One Keeper's credential surface, as the composite endpoint reports it.
 

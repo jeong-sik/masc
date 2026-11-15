@@ -854,24 +854,35 @@ let test_binding_explicit_source_change () = with_net (fun net ->
 (* The record names every excluded message once and each reason once: a
    history that crossed producers repeats a few reasons over thousands of
    messages (#52350). Groups follow the order each reason first appears;
-   indexes follow history order. *)
+   indexes follow the order of [drops]. Every reason here repeats, and each
+   producer is built anew per message as restore and dispatch build it, so
+   a group only forms over equal values. [rotated] differs from [first]
+   only in its endpoint, which names a different producer. *)
 let test_replay_exclusion_record_groups_drops_by_reason () =
-  let first = binding_source (binding_provider "https://first.example") in
-  let second = binding_source (binding_provider ~model:"other-model" "https://second.example") in
+  let first () = binding_source (binding_provider "https://first.example") in
+  let rotated () = binding_source (binding_provider "https://rotated.example") in
+  let second () = binding_source (binding_provider ~model:"other-model" "https://second.example") in
   let target = binding_source (binding_provider ~model:"target-model" "https://target.example") in
   let drop message_index reason = { Binding_projection.message_index; reason } in
+  let no_replay = Llm_provider.Reasoning_replay_contract.No_replay in
+  let all_assistant = Llm_provider.Reasoning_replay_contract.All_assistant_messages in
   let exclusion =
     { Binding_projection.boundary = Checkpoint_restore
     ; target
     ; drops =
-        [ drop 1 (Incompatible_reasoning_source first)
-        ; drop 3 (Incompatible_reasoning_source second)
-        ; drop 4 (Incompatible_reasoning_source first)
+        [ drop 1 (Incompatible_reasoning_source (first ()))
+        ; drop 3 (Incompatible_reasoning_source (second ()))
+        ; drop 4 (Incompatible_reasoning_source (first ()))
+        ; drop 5 (Incompatible_reasoning_source (rotated ()))
         ; drop 6 Missing_reasoning_source
-        ; drop 7 (Replay_policy_excluded Llm_provider.Reasoning_replay_contract.No_replay)
-        ; drop 9 (Replay_policy_excluded Llm_provider.Reasoning_replay_contract.All_assistant_messages)
-        ; drop 10 (Incompatible_reasoning_source first)
+        ; drop 7 (Replay_policy_excluded no_replay)
+        ; drop 8 Missing_reasoning_source
+        ; drop 9 (Replay_policy_excluded all_assistant)
+        ; drop 10 (Incompatible_reasoning_source (first ()))
+        ; drop 11 (Replay_policy_excluded no_replay)
         ; drop 12 Reasoning_on_non_assistant
+        ; drop 13 (Replay_policy_excluded all_assistant)
+        ; drop 14 Reasoning_on_non_assistant
         ]
     }
   in
@@ -886,27 +897,31 @@ let test_replay_exclusion_record_groups_drops_by_reason () =
         , `List
             [ `Assoc
                 [ "reason", `String "incompatible_reasoning_source"
-                ; "stored", source first
+                ; "stored", source (first ())
                 ; indexes [ 1; 4; 10 ]
                 ]
             ; `Assoc
                 [ "reason", `String "incompatible_reasoning_source"
-                ; "stored", source second
+                ; "stored", source (second ())
                 ; indexes [ 3 ]
                 ]
-            ; `Assoc [ "reason", `String "missing_reasoning_source"; indexes [ 6 ] ]
+            ; `Assoc
+                [ "reason", `String "incompatible_reasoning_source"
+                ; "stored", source (rotated ())
+                ; indexes [ 5 ]
+                ]
+            ; `Assoc [ "reason", `String "missing_reasoning_source"; indexes [ 6; 8 ] ]
             ; `Assoc
                 [ "reason", `String "replay_policy_excluded"
-                ; "replay_policy", policy Llm_provider.Reasoning_replay_contract.No_replay
-                ; indexes [ 7 ]
+                ; "replay_policy", policy no_replay
+                ; indexes [ 7; 11 ]
                 ]
             ; `Assoc
                 [ "reason", `String "replay_policy_excluded"
-                ; ( "replay_policy"
-                  , policy Llm_provider.Reasoning_replay_contract.All_assistant_messages )
-                ; indexes [ 9 ]
+                ; "replay_policy", policy all_assistant
+                ; indexes [ 9; 13 ]
                 ]
-            ; `Assoc [ "reason", `String "reasoning_on_non_assistant"; indexes [ 12 ] ]
+            ; `Assoc [ "reason", `String "reasoning_on_non_assistant"; indexes [ 12; 14 ] ]
             ] )
       ]
   in

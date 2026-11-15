@@ -208,48 +208,34 @@ let drop_reason_fields = function
   | Reasoning_on_non_assistant -> [ "reason", `String "reasoning_on_non_assistant" ]
 ;;
 
-let same_drop_reason left right =
-  match left, right with
-  | Replay_policy_excluded left, Replay_policy_excluded right ->
-    Reasoning_replay_contract.equal_replay_policy left right
-  | Incompatible_reasoning_source left, Incompatible_reasoning_source right ->
-    Types.Reasoning_source.equal left right
-  | Missing_reasoning_source, Missing_reasoning_source
-  | Reasoning_on_non_assistant, Reasoning_on_non_assistant -> true
-  | ( Replay_policy_excluded _
-    , (Missing_reasoning_source | Incompatible_reasoning_source _ | Reasoning_on_non_assistant) )
-  | ( Missing_reasoning_source
-    , (Replay_policy_excluded _ | Incompatible_reasoning_source _ | Reasoning_on_non_assistant) )
-  | ( Incompatible_reasoning_source _
-    , (Replay_policy_excluded _ | Missing_reasoning_source | Reasoning_on_non_assistant) )
-  | ( Reasoning_on_non_assistant
-    , (Replay_policy_excluded _ | Missing_reasoning_source | Incompatible_reasoning_source _) ) ->
-    false
-;;
-
-(* One entry per distinct reason, in the order each reason first appears,
-   with the messages it excluded in history order. A history that crossed
-   from one producer to another holds thousands of drops that share a
-   handful of reasons; writing the reason once per message made a single
-   record grow with the whole conversation (#52350). *)
+(* One entry per distinct reason as the record writes it, in the order each
+   first appears, with the indexes of the messages it excluded in the order
+   [drops] lists them. Two drops share an entry exactly when the record would
+   have written the same reason fields for each, so grouping drops nothing a
+   per-drop record held. A history that crossed producers repeats a few
+   reasons over thousands of messages (at most five per record in the 11-15
+   log); writing the reason with every message made one record reach 4.4MB
+   (#52350). The record still lists every excluded index, so it grows with
+   the excluded history, by one integer per message. Each drop is compared
+   with the entries so far, which stay a handful. *)
 let drop_groups drops =
+  let same_fields left right = Yojson.Safe.equal (`Assoc left) (`Assoc right) in
   let add groups { message_index; reason } =
+    let fields = drop_reason_fields reason in
     let rec place = function
-      | [] -> [ reason, [ message_index ] ]
-      | (group_reason, indexes) :: rest when same_drop_reason group_reason reason ->
-        (group_reason, message_index :: indexes) :: rest
+      | [] -> [ fields, [ message_index ] ]
+      | (group_fields, indexes) :: rest when same_fields group_fields fields ->
+        (group_fields, message_index :: indexes) :: rest
       | group :: rest -> group :: place rest
     in
     place groups
   in
   List.fold_left add [] drops
-  |> List.map (fun (reason, indexes) -> reason, List.rev indexes)
+  |> List.map (fun (fields, indexes) -> fields, List.rev indexes)
 ;;
 
-let drop_group_to_json (reason, indexes) =
-  `Assoc
-    (drop_reason_fields reason
-     @ [ "message_indexes", `List (List.map (fun index -> `Int index) indexes) ])
+let drop_group_to_json (fields, indexes) =
+  `Assoc (fields @ [ "message_indexes", `List (List.map (fun index -> `Int index) indexes) ])
 ;;
 
 let replay_exclusion_to_json { boundary; target; drops } =

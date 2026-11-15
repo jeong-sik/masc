@@ -610,6 +610,10 @@ let for_surface = function
          leaves the surface, so two rows read as two bindings. *)
       ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"close event evidence; from the list, back to Dashboard"
+      ; b ~ko:"찾기" Search "/" "find" ~detail:List_only ~rows:Needs_row
+          ~help:"Actions/Everything: jump the cursor to a matching event, tool or keeper, \
+                 over the rows the filter leaves; Turns has no cursor to land on"
+      ; b ~ko:"다음 / 이전 일치" Search "n / N" "next / previous match" ~detail:List_only ~rows:Needs_row
       (* One row per action. g and G reach the ends Home and End reach, and
          l the tab 2 opens; a row for each spent two of the footer's places
          on actions it already showed, and at 120 columns the fitter dropped

@@ -3,6 +3,7 @@
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { ConsoleFrame, createConsole } from './console'
+import { createInvites, followInvites } from './invites'
 import { createKeepers, followKeepers } from './keepers'
 import { createSubscriptions, follow } from './subscriptions'
 import { createTokens, followTokens } from './tokens'
@@ -16,11 +17,16 @@ const model = createConsole({ send, leave })
 const subscriptions = createSubscriptions({ send, leave })
 const keepers = createKeepers({ send, leave })
 const tokens = createTokens({ send, leave, now: () => Date.now() })
+const invites = createInvites({ send, leave })
 follow(model.view, subscriptions)
 followKeepers(model.view, keepers)
 followTokens(model.view, tokens)
-// A token made is shown until the page goes away, as its box says: a page
-// the browser keeps to come back to does not keep it.
-window.addEventListener('pagehide', () => { tokens.forget() })
-render(html`<${ConsoleFrame} model=${model} subscriptions=${subscriptions} keepers=${keepers} tokens=${tokens} />`, root)
+followInvites(model.view, invites)
+// A token or a link made is shown until the page goes away, as its box
+// says: a page the browser keeps to come back to does not keep it.
+window.addEventListener('pagehide', () => {
+  tokens.forget()
+  invites.forget()
+})
+render(html`<${ConsoleFrame} model=${model} subscriptions=${subscriptions} keepers=${keepers} tokens=${tokens} invites=${invites} />`, root)
 void model.load()

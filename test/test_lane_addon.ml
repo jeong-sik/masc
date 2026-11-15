@@ -392,27 +392,31 @@ let test_a_failure_is_explained_only_to_the_operator () =
     (String.equal (Runtime.export_refusal_operator_message (refusal exited))
        (Runtime.export_refusal_operator_message (refusal unconfirmed)))
 
-(* A browser document source reads only a browser whose readers include every
-   reader of the consumer's output, the rule lane_output follows, so an
-   operator-only browser's page never lands in output a Keeper can read. *)
-let test_a_document_source_reads_only_a_browser_that_covers_its_output () =
+(* A browser document source reads the browser installation it names, and only
+   when that browser's readers include every reader of the consumer's output,
+   the rule lane_output follows, so an operator-only browser's page never lands
+   in output a Keeper can read. *)
+let test_a_document_source_reads_only_its_named_browser_that_covers_its_output () =
   let module T = Runtime.For_testing in
-  let choose visibility candidates = T.choose_document_service ~visibility candidates in
+  let module O = Lane_addon_tool_request_owner in
+  let choose ?(named="browser") visibility candidate =
+    T.choose_document_service ~visibility ~installation_id:named candidate in
+  let browser ?(installation=O.Configuration "browser") visibility = Some ("browser", installation, visibility) in
   check bool "a shared browser serves a shared consumer" true
-    (choose T.Shared ["browser", T.Shared] = T.Document_service "browser");
+    (choose T.Shared (browser T.Shared) = T.Document_service "browser");
   check bool "an operator-only browser does not serve a shared consumer" true
-    (choose T.Shared ["browser", T.Operator_only] = T.Browser_narrower_than_consumer);
+    (choose T.Shared (browser T.Operator_only) = T.Browser_narrower_than_consumer);
   check bool "a Keeper's browser does not serve a shared consumer" true
-    (choose T.Shared ["browser", T.Keeper_only "a"] = T.Browser_narrower_than_consumer);
+    (choose T.Shared (browser (T.Keeper_only "a")) = T.Browser_narrower_than_consumer);
   check bool "an operator-only browser serves an operator-only consumer" true
-    (choose T.Operator_only ["browser", T.Operator_only] = T.Document_service "browser");
+    (choose T.Operator_only (browser T.Operator_only) = T.Document_service "browser");
   check bool "another Keeper's browser does not serve a Keeper's consumer" true
-    (choose (T.Keeper_only "a") ["browser", T.Keeper_only "b"] = T.Browser_narrower_than_consumer);
-  check bool "the one browser that covers the consumer is chosen" true
-    (choose T.Shared ["private", T.Operator_only; "public", T.Shared] = T.Document_service "public");
-  check bool "two browsers that cover the consumer cannot be chosen between" true
-    (choose T.Shared ["first", T.Shared; "second", T.Shared] = T.Several_browser_services);
-  check bool "no browser is no browser" true (choose T.Shared [] = T.No_browser_service)
+    (choose (T.Keeper_only "a") (browser (T.Keeper_only "b")) = T.Browser_narrower_than_consumer);
+  check bool "a browser of another declaration is not read for the named one" true
+    (choose ~named:"browser-b" T.Shared (browser T.Shared) = T.Another_installation_serves);
+  check bool "a manual attach is never the named declaration" true
+    (choose T.Shared (browser ~installation:(O.Manual "browser") T.Shared) = T.Another_installation_serves);
+  check bool "no browser is no browser" true (choose T.Shared None = T.No_browser_service)
 
 (* RFC browser-backends-end-alone S-L2: a document read goes to the service of
    its route's source, and a client of a live source two services serve is not
@@ -427,15 +431,28 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   let ego=info (client 1) 51 and second=info (client 3) 52 in
   let service name backend listed = name,backend,Browser_addon_observation.Observed_clients listed in
   let read ?(unready=[]) services route = T.document_route_services ~services ~unready ~backend:(fun (_,backend,_) -> backend)
-      ~clients:(fun (_,_,listed) -> listed) route |> Result.map (List.map (fun (name,_,_) -> name)) in
+      ~clients:(fun (_,_,listed) -> listed) route |> Result.map (Option.map (fun (name,_,_) -> name)) in
   let ego_worker=service "ego" B.Backend.Ego [ego]
   and second_worker=service "second ego" B.Backend.Ego [second] in
   let all=[ego_worker;second_worker] in
   let route client=B.Live_route (Some client.B.client_id) in
-  check bool "first Ego publisher is exact" true (read all (route ego)=Ok ["ego"]);
-  check bool "second Ego publisher is exact" true (read all (route second)=Ok ["second ego"]);
+  check bool "first Ego publisher is exact" true (read all (route ego)=Ok (Some "ego"));
+  check bool "second Ego publisher is exact" true (read all (route second)=Ok (Some "second ego"));
+  (* Of two browser installations, the source reads the one it names, and
+     only for a client that installation publishes. *)
+  let declared = function
+    | "ego" -> Lane_addon_tool_request_owner.Configuration "browser-a"
+    | _ -> Lane_addon_tool_request_owner.Configuration "browser-b" in
+  let source ~named client = match read all (route client) with
+    | Ok service -> T.choose_document_service ~visibility:T.Shared ~installation_id:named
+        (Option.map (fun name -> name, declared name, T.Shared) service)
+    | Error detail -> fail detail in
+  check bool "the named browser of two is read" true
+    (source ~named:"browser-b" second = T.Document_service "second ego");
+  check bool "the other browser's client is not read for the named one" true
+    (source ~named:"browser-b" ego = T.Another_installation_serves);
   check bool "unknown client is never assigned to the only worker" true
-    (read [service "empty ego" B.Backend.Ego []] (route ego)=Ok []);
+    (read [service "empty ego" B.Backend.Ego []] (route ego)=Ok None);
   check bool "duplicate client is refused" true
     (Result.is_error (read [ego_worker;service "copy" B.Backend.Ego [ego]] (route ego)));
   let same_space={second with space=ego.space} in
@@ -2620,8 +2637,8 @@ let () = run "Lane Add-on runtime" ["optional extension", [
   test_case "a failed installation is read as unready with its failure" `Quick
     test_a_failed_installation_is_read_as_unready;
   test_case "a failure is explained only to the operator" `Quick test_a_failure_is_explained_only_to_the_operator;
-  test_case "a document source reads only a browser that covers its output" `Quick
-    test_a_document_source_reads_only_a_browser_that_covers_its_output;
+  test_case "a document source reads only its named browser that covers its output" `Quick
+    test_a_document_source_reads_only_its_named_browser_that_covers_its_output;
   test_case "a document read goes to the service of its source" `Quick
     test_a_document_read_goes_to_the_service_of_its_source;
   test_case "a failed DOS installation is named and not released" `Quick

@@ -12,7 +12,7 @@ Automatic activity follows the sources in the binding:
 |---|---|
 | `snapshot_file` | A completed Keeper tool is a hint to capture the explicitly bound file again. |
 | `msx_capture` | A completed MSX load, eject, restore, disk change, press, step or step-until-change operation. |
-| `browser_document` | A completed Browser session, navigation, action or interaction operation. |
+| `browser_document` | A completed Browser session, navigation, action or interaction operation, and each new observation, failure or detach of the browser Add-on installation its `installation_id` names. |
 | `lane_output` | Existing notifications from the declared producer in the same run. Unrelated Keeper tools do not wake the consumer. |
 | No external sources | Initial/explicit observation and the Add-on's own action lifecycle. Unrelated Keeper tools do not sample an owned environment. |
 

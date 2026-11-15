@@ -31,6 +31,7 @@ import { stateTone, waitingStateWithSources } from '../tools/keeper-waiting-inve
 import { formatDateTimeKo, formatRelativeSec, formatTimeUntil } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 import { JsonViewerCard } from '../common/json-viewer'
+import { waitingRowSinceSec, waitingRowsOldestFirst } from '../common/waiting-row-window'
 import {
   keeperWaitingInventoryState,
   subscribeKeeperWaitingInventory,
@@ -110,29 +111,8 @@ function LaneGap({ children }: { children: VNode | string }): VNode {
   `
 }
 
-function rowSince(row: DashboardKeeperWaitingRow): number | null {
-  if (row.since != null && Number.isFinite(row.since)) return row.since
-  if (row.since_iso == null) return null
-  const parsed = Date.parse(row.since_iso)
-  return Number.isFinite(parsed) ? parsed / 1000 : null
-}
-
-/** Oldest observation first. Equal/missing timestamps keep their server order,
- * and missing timestamps stay visible at the end. */
-function waitingRowsOldestFirst(rows: readonly DashboardKeeperWaitingRow[]): DashboardKeeperWaitingRow[] {
-  return rows
-    .map((row, serverIndex) => ({ row, serverIndex, since: rowSince(row) }))
-    .sort((left, right) => {
-      if (left.since == null && right.since == null) return left.serverIndex - right.serverIndex
-      if (left.since == null) return 1
-      if (right.since == null) return -1
-      return left.since - right.since || left.serverIndex - right.serverIndex
-    })
-    .map(({ row }) => row)
-}
-
 function ageMinutes(row: DashboardKeeperWaitingRow, nowMs: number): number | null {
-  const since = rowSince(row)
+  const since = waitingRowSinceSec(row)
   if (since == null) return null
   return Math.max(0, (nowMs / 1000 - since) / SECONDS_PER_MINUTE)
 }

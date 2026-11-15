@@ -35,6 +35,9 @@ export interface MembersModel {
   readonly load: (session: Session) => Promise<void>
   /** Reads again after a failure. Any other time it does nothing. */
   readonly retry: () => Promise<void>
+  /** Forgets the list once the console shows no Admin: another person, or
+      no one. A reading still under way then changes nothing. */
+  readonly stop: () => void
 }
 
 export function createMembers({ send, leave }: MembersDeps): MembersModel {
@@ -79,15 +82,21 @@ export function createMembers({ send, leave }: MembersDeps): MembersModel {
     return read(shown.forUser, shown.failure.attempts)
   }
 
-  return { view, load, retry }
+  const stop = (): void => {
+    latest += 1
+    view.value = { kind: 'waiting' }
+  }
+
+  return { view, load, retry, stop }
 }
 
-/** Reads the people for each Admin the console comes to show signed in. A
-    Member's session is never sent to the route. The returned function
-    stops following. */
+/** Reads the people for each Admin the console comes to show signed in, and
+    stops whenever it shows anything else, so a Member's session is not sent
+    to the route. The returned function stops following. */
 export function followMembers(frame: ReadonlySignal<View>, members: MembersModel): () => void {
   return effect(() => {
     const shown = frame.value
     if (shown.kind === 'signed_in' && shown.who.role === 'admin') void members.load(shown.session)
+    else members.stop()
   })
 }

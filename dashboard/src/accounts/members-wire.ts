@@ -15,9 +15,10 @@ export type Identity =
   | { readonly provider: 'google'; readonly sub: string }
   | { readonly provider: 'unrecognised' }
 
-export type MemberRole = 'admin' | 'member'
+/** `unrecognised` is a role this console does not know. */
+export type MemberRole = 'admin' | 'member' | 'unrecognised'
 
-const roles: readonly MemberRole[] = ['admin', 'member']
+const roles = ['admin', 'member'] as const
 
 /** Whether the person can sign in and act. `unrecognised` is a word this console does not know. */
 export type MemberStatus = 'active' | 'disabled' | 'unrecognised'
@@ -42,10 +43,15 @@ export interface Member {
 
 const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null)
 
+/** A Google sub the server takes: 1 to 255 visible ASCII characters, no
+    space (lib/auth/authz_external_identity.ml, `google`). */
+export const googleSub = /^[!-~]{1,255}$/
+
 /** An identity as the server writes it: its members in this order, a GitHub
-    user id a positive number, a Google sub a string. */
+    user id a positive number no larger than the server takes, a Google sub
+    as the server takes it. */
 export function readIdentity(json: unknown): Identity | null {
-  if (!isRecord(json) || typeof json.provider !== 'string') return null
+  if (!isRecord(json) || text(json.provider) === null) return null
   const members = Object.keys(json).join(',')
   switch (json.provider) {
     case 'github': {
@@ -56,7 +62,7 @@ export function readIdentity(json: unknown): Identity | null {
     }
     case 'google': {
       const sub = text(json.sub)
-      return members === 'provider,sub' && sub !== null ? { provider: 'google', sub } : null
+      return members === 'provider,sub' && sub !== null && googleSub.test(sub) ? { provider: 'google', sub } : null
     }
     default:
       return { provider: 'unrecognised' }
@@ -81,16 +87,17 @@ function readMember(json: unknown): Member | null {
   if (!isRecord(json)) return null
   const userId = text(json.user_id)
   const identity = readIdentity(json.identity)
-  const role = roles.find((known) => known === json.role) ?? null
   const held = readHeld(json.held)
-  if (userId === null || identity === null || role === null || held === null || typeof json.status !== 'string') return null
+  if (userId === null || identity === null || held === null || typeof json.role !== 'string' || typeof json.status !== 'string') return null
+  const role = roles.find((known) => known === json.role) ?? 'unrecognised'
   const status = statuses.find((known) => known === json.status) ?? 'unrecognised'
   return { userId, identity, role, status, held }
 }
 
-/** Every person, or null when any is not what the route promises. */
+/** Every person, or null when any is not what the route promises. The
+    list holds the Admin who reads it, so it is never empty. */
 export function readMembers(json: unknown): readonly Member[] | null {
-  if (!isRecord(json) || !Array.isArray(json.members)) return null
+  if (!isRecord(json) || !Array.isArray(json.members) || json.members.length === 0) return null
   const members = (json.members as readonly unknown[]).map(readMember)
   if (!members.every((one): one is Member => one !== null)) return null
   return new Set(members.map((one) => one.userId)).size === members.length ? members : null

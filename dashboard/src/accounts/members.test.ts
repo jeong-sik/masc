@@ -60,12 +60,25 @@ describe('reading the people of the server', () => {
       members: [
         memberJson('usr_1', { role: 'admin' }),
         memberJson('usr_2', { identity: google, status: 'disabled', held: ['delete', 'disable', 'revoke'] }),
-        memberJson('usr_3', { identity: { provider: 'gitlab', id: 7 }, status: 'paused', held: ['block', 'purge'] }),
+        memberJson('usr_3', { identity: { provider: 'gitlab', id: 7 }, role: 'owner', status: 'paused', held: ['block', 'purge'] }),
       ],
     })).toEqual([
       { userId: 'usr_1', identity: { provider: 'github', userId: 12345 }, role: 'admin', status: 'active', held: [] },
       { userId: 'usr_2', identity: { provider: 'google', sub: '109876543210987654321' }, role: 'member', status: 'disabled', held: ['delete', 'disable', 'revoke'] },
-      { userId: 'usr_3', identity: { provider: 'unrecognised' }, role: 'member', status: 'unrecognised', held: ['unrecognised'] },
+      { userId: 'usr_3', identity: { provider: 'unrecognised' }, role: 'unrecognised', status: 'unrecognised', held: ['unrecognised'] },
+    ])
+  })
+
+  it('reads an identity at the edges the server takes', () => {
+    const longest = 'a'.repeat(255)
+    expect([
+      readIdentity({ provider: 'github', user_id: Number.MAX_SAFE_INTEGER }),
+      readIdentity({ provider: 'google', sub: longest }),
+      readIdentity({ provider: 'google', sub: '!~' }),
+    ]).toEqual([
+      { provider: 'github', userId: Number.MAX_SAFE_INTEGER },
+      { provider: 'google', sub: longest },
+      { provider: 'google', sub: '!~' },
     ])
   })
 
@@ -75,18 +88,24 @@ describe('reading the people of the server', () => {
       readIdentity({ provider: 'github', user_id: 0 }),
       readIdentity({ provider: 'github', user_id: 1.5 }),
       readIdentity({ provider: 'github', user_id: '1' }),
+      readIdentity({ provider: 'github', user_id: 2 ** 53 }),
       readIdentity({ provider: 'google', sub: '' }),
+      readIdentity({ provider: 'google', sub: 'a'.repeat(256) }),
+      readIdentity({ provider: 'google', sub: 'one two' }),
+      readIdentity({ provider: 'google', sub: '하나' }),
+      readIdentity({ sub: 's', provider: 'google' }),
       readIdentity({ provider: 'google', sub: 's', extra: true }),
+      readIdentity({ provider: '' }),
       readIdentity({ provider: 7 }),
       readIdentity('github'),
-    ]).toEqual(Array.from({ length: 8 }, () => null))
+    ]).toEqual(Array.from({ length: 14 }, () => null))
   })
 
   it('does not read a list with a person that is not what the route promises', () => {
     const one = (extra: Record<string, unknown>) => readMembers({ members: [memberJson('usr_1', extra)] })
     expect([
       one({ user_id: '' }),
-      one({ role: 'owner' }),
+      one({ role: 1 }),
       one({ status: 1 }),
       one({ held: 'disable' }),
       one({ held: ['revoke', 'disable'] }),
@@ -94,8 +113,9 @@ describe('reading the people of the server', () => {
       one({ held: [''] }),
       one({ identity: { provider: 'github' } }),
       readMembers({ members: [memberJson('usr_1'), memberJson('usr_1')] }),
+      readMembers({ members: [] }),
       readMembers({ members: {} }),
-    ]).toEqual(Array.from({ length: 10 }, () => null))
+    ]).toEqual(Array.from({ length: 11 }, () => null))
   })
 })
 
@@ -134,6 +154,16 @@ describe('the people an Admin sees', () => {
     expect([model.view.value, leave.mock.calls.length, sent.length]).toEqual([{ kind: 'leaving', forUser: 'usr_first' }, 1, 1])
   })
 
+  it('keeps the failure on the page when a retry finds that the session ended', async () => {
+    const { send } = answering([json(503, { error: 'not now' }), json(401, { error: 'no session' })])
+    const leave = vi.fn()
+    const model = createMembers({ send, leave })
+    await model.load(first)
+    await model.retry()
+    const now = model.view.value
+    expect([now.kind, now.kind === 'failed' ? now.next : null, leave.mock.calls.length]).toEqual(['failed', 'leaving', 1])
+  })
+
   it('takes the reading of the latest person shown, not one that answers after it', async () => {
     const wait = later()
     const { send } = answering([wait.answer, listed(memberJson('usr_second', { role: 'admin' }))])
@@ -146,7 +176,7 @@ describe('the people an Admin sees', () => {
   })
 
   it('reads the people for an Admin and sends nothing for a Member', async () => {
-    const { send, sent } = answering([listed()])
+    const { send, sent } = answering([listed(memberJson('usr_second', { role: 'admin' }))])
     const model = createMembers({ send, leave: vi.fn() })
     const frame = signal<View>({ kind: 'reading', slow: false })
     const stop = followMembers(frame, model)
@@ -157,13 +187,36 @@ describe('the people an Admin sees', () => {
     stop()
     expect([asMember, sent.length]).toEqual([0, 1])
   })
+
+  it('forgets the list once the console shows no Admin', async () => {
+    const { send, sent } = answering([listed(memberJson('usr_first', { role: 'admin' }))])
+    const model = createMembers({ send, leave: vi.fn() })
+    const frame = signal<View>({ kind: 'signed_in', session: first, who: { id: 'usr_first', role: 'admin' }, signOut: { kind: 'idle' } })
+    const stop = followMembers(frame, model)
+    await vi.waitFor(() => { expect(model.view.value.kind).toBe('read') })
+    frame.value = { kind: 'signed_in', session: first, who: { id: 'usr_first', role: 'member' }, signOut: { kind: 'idle' } }
+    stop()
+    expect([model.view.value, sent.length]).toEqual([{ kind: 'waiting' }, 1])
+  })
+
+  it('takes no reading still under way once it stopped', async () => {
+    const wait = later()
+    const { send } = answering([wait.answer])
+    const model = createMembers({ send, leave: vi.fn() })
+    const run = model.load(first)
+    model.stop()
+    wait.give(listed(memberJson('usr_first', { role: 'admin' })))
+    await run
+    expect(model.view.value).toEqual({ kind: 'waiting' })
+  })
 })
 
 describe('the members panel', () => {
   const member = (id: string, extra: Partial<Member> = {}): Member =>
     ({ userId: id, identity: { provider: 'github', userId: 12345 }, role: 'member', status: 'active', held: [], ...extra })
   const readView = (members: readonly Member[]): MembersView => ({ kind: 'read', forUser: 'usr_first', members })
-  const showing = (view: MembersView): MembersModel => ({ view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()) })
+  const showing = (view: MembersView): MembersModel =>
+    ({ view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), stop: vi.fn() })
   const panelOf = (model: MembersModel) => render(html`<main><h1>내 계정</h1><${MembersPanel} model=${model} /></main>`).container
   const many = [
     member('usr_disabled', { status: 'disabled' }),
@@ -171,6 +224,7 @@ describe('the members panel', () => {
     member('usr_first', { role: 'admin' }),
     member('usr_held', { held: ['disable', 'revoke'] }),
     member('usr_new_word', { status: 'unrecognised', identity: { provider: 'unrecognised' }, role: 'admin' }),
+    member('usr_odd_role', { role: 'unrecognised' }),
   ]
   const unread: MembersView = { kind: 'failed', forUser: 'usr_first', failure: { problem: { kind: 'unreachable' }, attempts: 1 }, next: 'idle' }
   const steps: ReadonlyArray<readonly [string, MembersModel]> = [
@@ -178,7 +232,6 @@ describe('the members panel', () => {
     ['when the list could not be read', showing(unread)],
     ['when the account is not an Admin now', showing({ ...unread, failure: { problem: { kind: 'refused', status: 403, reason: 'only an Admin reads this' }, attempts: 2 } })],
     ['with a person in each state', showing(readView(many))],
-    ['with no one', showing(readView([]))],
     ['while the browser leaves', showing({ kind: 'leaving', forUser: 'usr_first' })],
   ]
 
@@ -205,23 +258,23 @@ describe('the members panel', () => {
     const rows = [...container.querySelectorAll('.rows > li')]
     const marked = rows.map((row) => row.querySelectorAll('.chip').length)
     expect([rows.map((row) => row.querySelector('.mono')?.textContent), marked]).toEqual([
-      ['…_first', '…member', '…w_word', '…sabled', '…r_held'],
-      [2, 1, 2, 2, 2],
+      ['…_first', '…member', '…d_role', '…w_word', '…sabled', '…r_held'],
+      [2, 1, 1, 2, 2, 2],
     ])
   })
 
   it('puts the focus on the heading once a retry read the list', async () => {
     const view = signal<MembersView>(unread)
-    const container = panelOf({ ...showing(readView([])), view })
+    const container = panelOf({ ...showing(readView(many)), view })
     const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find((one) => one.textContent === '다시 시도')
     retry?.focus()
-    await act(() => { view.value = readView([]) })
+    await act(() => { view.value = readView(many) })
     expect([retry !== undefined, document.activeElement?.id]).toEqual([true, 'members-heading'])
   })
 
   it('keeps the line a screen reader reads out under the heading as one element in every step', async () => {
     const view = signal<MembersView>({ kind: 'reading', forUser: 'usr_first', slow: true })
-    const container = panelOf({ ...showing(readView([])), view })
+    const container = panelOf({ ...showing(readView(many)), view })
     const line = () => container.querySelector('#members-heading ~ [role=status]')
     const firstLine = line()
     const seen = []

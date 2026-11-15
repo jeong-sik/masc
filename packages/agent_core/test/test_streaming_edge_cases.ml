@@ -64,11 +64,6 @@ let check_event_count label expected events =
   check int label expected (List.length events)
 ;;
 
-let require_some label = function
-  | Some x -> x
-  | None -> fail (label ^ ": expected Some")
-;;
-
 let require_openai_chunk label = function
   | OW.Openai_chunk chunk -> chunk
   | OW.Openai_done -> fail (label ^ ": unexpected terminal sentinel")

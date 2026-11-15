@@ -44,6 +44,24 @@ let test_non_connection_failures_remain () =
     check bool "unrelated failure is returned unchanged" true (result == failed)) errors
 ;;
 
+(* RFC #52028 §2.3: a connection that never opened was not a reused one the
+   peer closed, so a fresh connection is not its remedy even when the
+   handshake ended on End_of_file or a reset; the walk moves on instead. *)
+let connect_failed kind =
+  Agent_core.Error.Api (Agent_core.Retry.Connect_failed {kind; message="fixture"})
+
+let test_connect_failed_does_not_reconnect () =
+  List.iter (fun kind ->
+    let failed = Error (connect_failed kind), None, () in
+    let result = Recovery.connection_recovery_sequence
+      ~same_run_retry_authorized:(fun () -> fail "a connection that never opened")
+      ~attempt:(fun () -> failed)
+      ~on_reconnect:(fun _ -> fail "a connection that never opened")
+      ~reconnect:(fun () -> fail "a connection that never opened") () in
+    check bool "the connect failure is returned unchanged" true (result == failed))
+    [Http.End_of_file; Connection_reset; Tls_error; Connection_refused]
+;;
+
 let test_fresh_failure_is_not_replayed () =
   let reconnects = ref 0 in
   let fresh_failure = Error (network Http.Connection_reset), Some "fresh state", "usage" in
@@ -72,6 +90,7 @@ let () = run "keeper provider connection recovery"
     test_case "peer close reconnects" `Quick test_peer_close_reconnects;
     test_case "checkpoint/effect authority fences reconnect" `Quick test_progress_fences_reconnect;
     test_case "unrelated failures remain" `Quick test_non_connection_failures_remain;
+    test_case "a connection that never opened does not reconnect" `Quick test_connect_failed_does_not_reconnect;
     test_case "fresh failure returns directly" `Quick test_fresh_failure_is_not_replayed;
     test_case "progress during the request revokes reconnect" `Quick test_progress_during_request_revokes_reconnect;
   ]]

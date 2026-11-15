@@ -136,6 +136,25 @@ let test_admission_wait_survives_persisted_walk () =
       (slow.api_candidate_fault=Some (Fault.Binding Fault.Deadline))
   | _ -> fail "timed-out candidates disappeared"
 
+(* RFC #52028 §2.3: a connection that did not open reads back as Not_sent,
+   apart from a transport failure after the request went out. *)
+let test_unopened_connection_survives_persisted_walk () =
+  let refused = Agent_core.Error.Api (Agent_core.Retry.Connect_failed
+      {message="connection refused";kind=Llm_provider.Http_client.Connection_refused})
+  and reset = Agent_core.Error.Api (Agent_core.Retry.NetworkError
+      {message="connection reset";kind=Llm_provider.Http_client.Connection_reset}) in
+  let unopened=observe 0 "unopened.runtime" refused
+  and dropped=observe 1 "dropped.runtime" reset in
+  let evidence=decode {Evidence.failures=[unopened;dropped];
+    terminal=Evidence.observe_terminal ~runtime_id:"dropped.runtime" ~attempt:1 reset} in
+  match evidence.failures with
+  | [unopened;dropped] ->
+    check bool "a connection that did not open reads back as not sent" true
+      (unopened.api_candidate_fault=Some Fault.Not_sent);
+    check bool "a dropped transport still reads back as unknown after dispatch" true
+      (dropped.api_candidate_fault=Some Fault.Unknown_after_dispatch)
+  | _ -> fail "transport-failed candidates disappeared"
+
 let test_malformed_rate_limit_hint_is_refused () =
   let fields = ["kind",`String "provider_rate_limited";"provider",`Null;
     "retry_after",`Float 12.5;"detail",`String "throttle"] in
@@ -155,4 +174,5 @@ let () = run "runtime walk receipt evidence" ["candidate facts",[
   test_case "malformed evidence cannot masquerade as an empty walk" `Quick test_corrupt_evidence_is_not_an_empty_walk;
   test_case "rate limit survives candidate and terminal persistence" `Quick test_rate_limit_hint_survives_persisted_walk;
   test_case "an admission wait and a provider deadline survive persistence apart" `Quick test_admission_wait_survives_persisted_walk;
+  test_case "an unopened connection and a dropped transport survive persistence apart" `Quick test_unopened_connection_survives_persisted_walk;
   test_case "malformed rate-limit hints are refused" `Quick test_malformed_rate_limit_hint_is_refused]]

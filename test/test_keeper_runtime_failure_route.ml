@@ -447,6 +447,7 @@ let test_response_observed_per_class () =
     ; retry KFR.Provider_capacity
     ; retry KFR.Server_error
     ; retry KFR.Network_transient
+    ; retry KFR.Connection_not_opened
     ; retry KFR.Provider_timeout
     ; retry KFR.Local_admission_timeout
     ; rotate KFR.Auth_failed
@@ -615,6 +616,7 @@ let test_route_resumes_on_same_path_per_class () =
     ; "stop sequence", retry (empty_completion Agent_core.Types.StopSequence)
     ; "", retry KFR.Server_error
     ; "", retry KFR.Network_transient
+    ; "", retry KFR.Connection_not_opened
     ; "", retry KFR.Provider_timeout
     ; "", retry KFR.Local_admission_timeout
     ; "with a reset", retry ~retry_after:3600.0 (KFR.Hard_quota KFR.Provider_quota_refused)
@@ -782,6 +784,10 @@ let test_candidate_fault_route_agreement () =
       , Llm_provider.Retry.NetworkError
           { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
       , retry KFR.Network_transient )
+    ; ( "Connect_failed"
+      , Llm_provider.Retry.Connect_failed
+          { message = "connection refused"; kind = Llm_provider.Http_client.Connection_refused }
+      , retry KFR.Connection_not_opened )
     ]
   in
   let disagreements =
@@ -836,6 +842,7 @@ let test_route_factors_through_candidate_fault () =
     | Llm_provider.Candidate_fault.Unattributed -> "unattributed"
     | Llm_provider.Candidate_fault.Unknown_after_dispatch -> "unknown_after_dispatch"
     | Llm_provider.Candidate_fault.Local_admission -> "local_admission"
+    | Llm_provider.Candidate_fault.Not_sent -> "not_sent"
   in
   let label_of route = KFR.route_kind_label route ^ ":" ^ KFR.route_class_label route in
   let invalid_request reason = Llm_provider.Retry.InvalidRequest { message = "refused"; reason } in
@@ -862,6 +869,10 @@ let test_route_factors_through_candidate_fault () =
         { message = "deadline"; phase = Some Llm_provider.Http_client.Capacity_backpressure }
     ; Llm_provider.Retry.NetworkError
         { message = "connection reset"; kind = Llm_provider.Http_client.Connection_reset }
+    ; Llm_provider.Retry.Connect_failed
+        { message = "connection refused"; kind = Llm_provider.Http_client.Connection_refused }
+    ; Llm_provider.Retry.Connect_failed
+        { message = "handshake"; kind = Llm_provider.Http_client.Tls_error }
     ]
   in
   (* For each judgment, the first route label seen; every later error with the
@@ -888,6 +899,21 @@ let test_route_factors_through_candidate_fault () =
 (* A provider timeout carries its phase too. The route reads it with
    [Llm_provider.Error.is_local_admission_timeout], the same question the
    API-side judgment answers. *)
+(* RFC #52028 §2.3: a provider [Connect_failed] waits as a connection that
+   did not open, whatever its kind; nothing was sent. *)
+let test_provider_connect_failed_is_connection_not_opened () =
+  let connect_failed kind =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.Connect_failed { provider = "p"; kind; detail = "d" })
+  in
+  let not_opened =
+    KFR.Retry_after_observed { retry_class = KFR.Connection_not_opened; retry_after = None }
+  in
+  check_route "refused" not_opened (connect_failed Llm_provider.Http_client.Connection_refused);
+  check_route "name lookup" not_opened (connect_failed Llm_provider.Http_client.Dns_failure);
+  check_route "TLS handshake" not_opened (connect_failed Llm_provider.Http_client.Tls_error)
+;;
+
 let test_provider_timeout_names_local_admission () =
   let timeout phase =
     Agent_core.Error.Provider
@@ -991,6 +1017,10 @@ let () =
             "timeout names local admission"
             `Quick
             test_provider_timeout_names_local_admission
+        ; Alcotest.test_case
+            "connect failed is a connection that did not open"
+            `Quick
+            test_provider_connect_failed_is_connection_not_opened
         ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
         ; Alcotest.test_case
             "wire error rotates"

@@ -1,0 +1,52 @@
+(** Keeper_same_turn_result_stub — a tool result whose text repeats an earlier
+    result of the same turn leaves as a short pointer to that turn's first one
+    (RFC-0510).
+
+    This is a function of the message list alone. It reads no file, holds no
+    state and stores nothing, so the same list gives the same output, and
+    appending messages never changes the output for the messages before them:
+    a result is decided from the messages in front of it only. A result is
+    therefore a stub from the first request that carries it, and the same stub
+    on every later request (RFC-0510 D5).
+
+    Nothing calls this yet. The caller that wires it into request assembly
+    owns three things this module does not: which tools are on ([enabled]),
+    running it off the main domain (it hashes every eligible body with
+    sha256), and where it sits relative to the window cut and
+    {!Keeper_model_input_demotion}. *)
+
+val encode : first_tool_use_id:string -> bytes:int -> sha256:string -> string
+(** The stub text:
+    [[masc:same-result first_tool_use_id="…" bytes=N sha256=…]]. It states
+    which result of the turn holds the text, how many bytes that text is, and
+    its sha256. It carries no instruction (RFC-0510 D3). It does not start
+    with the blob marker prefix, so {!Tool_output.decode_from_agent_core}
+    reads it as [Not_marker]. *)
+
+val apply
+  :  enabled:(string -> bool)
+  -> min_bytes:int
+  -> Agent_core.Types.message list
+  -> Agent_core.Types.message list
+(** Walk the messages once, front to back.
+
+    A turn starts at each [User] message whose origin is [Conversation]; the
+    messages before the first such message are one turn of their own. Within
+    a turn, the first result with a given text stays as it is and every later
+    result with byte-equal text has its [content] replaced by {!encode}
+    pointing at that first result. A result never points into another turn.
+
+    A result is left exactly as it is when any of these hold:
+
+    - no earlier [ToolUse] block carries its [tool_use_id], so its tool is
+      unknown, or [enabled] is false for that tool's name;
+    - its [content] is shorter than [min_bytes];
+    - its [content_blocks] is [Some], or its message carries an image,
+      document or audio block;
+    - the stub would not be shorter than its [content].
+
+    A stubbed result keeps its [tool_use_id] and [outcome]; its [json] becomes
+    [None], because the parsed payload is the text the stub replaces.
+
+    Untouched messages are returned physically, and the input list itself is
+    returned when no result changed. *)

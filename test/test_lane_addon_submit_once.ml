@@ -293,8 +293,78 @@ let test_unknown_refusal_without_a_host_cause_is_not_replayed () = with_store (f
   | Error (Submit.Rejected _) -> ()
   | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ -> Alcotest.fail "cause-free old refusal was accepted")
 
+(* The journal a waiting pass keeps is written from the record alone. *)
+let update value = get (Result.map_error Owner.update_error_to_string value)
+let body_path store =
+  Filename.concat (Store.root store)
+    (Store.tool_request_body_path ~scope ~request_digest:(load store).request_digest)
+let test_a_record_advances_without_its_body () = with_store (fun store ->
+  let original = load store in
+  let record = Owner.listed original in
+  Sys.remove (body_path store);
+  let stored = match update (Owner.advance_record ~store ~expected:record ~event:Progress.Dispatch_intended) with
+    | Owner.Record_stored record -> record
+    | Owner.Record_already_stored _ | Owner.Record_unconfirmed _ ->
+      Alcotest.fail "the first event of a record must be stored" in
+  (match update (Owner.advance_record ~store ~expected:record ~event:Progress.Dispatch_intended) with
+   | Owner.Record_already_stored again ->
+     Alcotest.check json "an equal next history is acknowledged" (Owner.record_to_json stored)
+       (Owner.record_to_json again)
+   | Owner.Record_stored _ | Owner.Record_unconfirmed _ ->
+     Alcotest.fail "an already stored event must not be written again");
+  (match update (Owner.advance_record ~store ~expected:stored
+           ~event:(Progress.Admission_declined (`Assoc ["fixture",`String "declined"]))) with
+   | Owner.Record_stored _ -> ()
+   | Owner.Record_already_stored _ | Owner.Record_unconfirmed _ -> Alcotest.fail "decline was not stored");
+  (match Owner.advance_record ~store ~expected:stored
+           ~event:(Progress.Execution_observed (Progress.Waiting (`Assoc ["fixture",`String "stale"]))) with
+   | Error Owner.State_conflict -> ()
+   | Error (Owner.Ownership_error _ | Owner.Invalid_transition _) | Ok _ ->
+     Alcotest.fail "a write decided on stale progress must be a state conflict");
+  let other = match Owner.rebind original
+      (Owner.listed (owned (Owner.load ~store:(
+        let other = Store.create ~root:(Filename.concat (Store.root store) "other") in
+        owned (Owner.retain ~store:other ~scope ~request_id ~installation_id ~package_id:"fixture"
+          ~tool:"admit" ~summary:`Null ~request:(`Assoc ["another",`String "request"]));
+        other) ~scope ~request_id) |> Option.get)) with
+    | None -> true | Some _ -> false in
+  Alcotest.(check bool) "a record naming another digest is not rebound" true other;
+  match Owner.rebind original stored with
+  | Some rebound ->
+    Alcotest.check json "the rebound original keeps the request it read" original.request rebound.request;
+    Alcotest.check json "and takes the progress of the record"
+      (Progress.to_json (Owner.Record.progress stored)) (Progress.to_json rebound.progress)
+  | None -> Alcotest.fail "the advanced record of the same original must rebind")
+let test_a_worker_call_confirms_the_record_it_carries () = with_store (fun store ->
+  let record = Owner.listed (load store) in
+  Sys.remove (body_path store);
+  owned (Owner.confirm_listed ~store record);
+  let advanced = match update (Owner.advance_record ~store ~expected:record ~event:Progress.Dispatch_intended) with
+    | Owner.Record_stored record -> record
+    | Owner.Record_already_stored _ | Owner.Record_unconfirmed _ -> Alcotest.fail "intent was not stored" in
+  owned (Owner.confirm_listed ~store record);
+  owned (Owner.confirm_listed ~store advanced);
+  let other = Store.create ~root:(Filename.concat (Store.root store) "other") in
+  owned (Owner.retain ~store:other ~scope ~request_id ~installation_id ~package_id:"fixture"
+    ~tool:"admit" ~summary:`Null ~request:(`Assoc ["another",`String "request"]));
+  (match Owner.confirm_listed ~store:other record with
+   | Error Owner.Binding_conflict -> ()
+   | Error (Owner.Store_unavailable _ | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
+     Alcotest.fail "a record naming another digest must be a binding conflict");
+  let empty = Store.create ~root:(Filename.concat (Store.root store) "empty") in
+  match Owner.confirm_listed ~store:empty record with
+  | Error (Owner.Store_unavailable _) -> ()
+  | Error (Owner.Binding_conflict | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
+    Alcotest.fail "an absent record must be unavailable, never retained again")
+
 let () =
   Alcotest.run "Lane_addon_submit_once" [
+    "record", [
+      Alcotest.test_case "a record advances and rebinds without its body" `Quick
+        test_a_record_advances_without_its_body;
+      Alcotest.test_case "a worker call confirms the record it carries without retaining" `Quick
+        test_a_worker_call_confirms_the_record_it_carries;
+    ];
     "admission", [
       Alcotest.test_case "worker unknown retains Interrupted host cause" `Quick
         (fun () -> test_worker_unknown_keeps_the_authoritative_host_cause Exact.Interrupted);

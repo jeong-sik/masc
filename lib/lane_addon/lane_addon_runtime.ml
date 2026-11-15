@@ -2601,7 +2601,7 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
     ~authorize ~principal ~config ~access ~reserved ~export ~arguments)
 
 let call_captured_tool_request ~config ~access ~reserved ~export ~installation_id
-    ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.retained)
+    ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.Record.t)
     ~arguments =
   with_tool_call_owner (fun () ->
     with_tool_request_destination_on_owner ~config ~access ~reserved ~export
@@ -2609,14 +2609,17 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
         let* () = if destination.installation_id=installation_id
             && destination.package_id=package_id && destination.tool=tool
             && destination.configuration_revision=configuration_revision
-            && original.installation_id=installation_id && original.package_id=package_id
-            && original.tool=tool
+            && Lane_addon_tool_request_owner.Record.installation_id original=installation_id
+            && Lane_addon_tool_request_owner.Record.package_id original=package_id
+            && Lane_addon_tool_request_owner.Record.tool original=tool
           then Ok () else Error (Host_refusal (Lane_addon_call_context.Rejected
             "Captured request no longer owns this configured tool destination")) in
         let store=Lane_addon_store.of_config config in
-        let* ()=offload (fun () -> Lane_addon_tool_request_owner.retain ~store
-          ~scope:original.scope ~request_id:original.request_id ~installation_id ~package_id ~tool
-          ~summary:original.summary ~request:original.request) |> Result.map_error (fun error ->
+        (* The caller retained this original before it could reach a call, so
+           the call writes nothing: it reads the record again and checks that
+           it still names what the caller holds. *)
+        let* ()=offload (fun () -> Lane_addon_tool_request_owner.confirm_listed ~store original)
+          |> Result.map_error (fun error ->
             Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
         Ok ())
       ~use:(fun () -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())

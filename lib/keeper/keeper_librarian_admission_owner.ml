@@ -147,7 +147,7 @@ let call ~config ~reserved ~expected ~(original : Owner.retained) ~arguments =
   | Ok export -> Runtime.call_captured_tool_request ~config ~reserved ~export
     ~access:Lane_addon_sources.Operator_configuration ~installation_id:expected.Destination.installation_id
     ~package_id:expected.package_id ~tool:expected.tool ~configuration_revision:expected.configuration_revision
-    ~original ~arguments |> Result.map_error Lane_addon_submit_once.call_error_of_runtime
+    ~original:(Owner.listed original) ~arguments |> Result.map_error Lane_addon_submit_once.call_error_of_runtime
 
 type part_result =
   | Terminal of Parts.terminal_source * bool

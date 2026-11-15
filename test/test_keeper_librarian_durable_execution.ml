@@ -1519,7 +1519,7 @@ let resume_with_settlement_fault fixture before_settlement = memory_action fixtu
     Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
       ~access:Lane_addon_sources.Operator_configuration
       ~installation_id:expected.installation_id ~package_id:expected.package_id ~tool:expected.tool
-      ~configuration_revision:expected.configuration_revision ~original ~arguments
+      ~configuration_revision:expected.configuration_revision ~original:(Owner.listed original) ~arguments
     |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in
   Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[] ~original ~request ~call
     ~wake:(fun () -> ()) ~publish:(fun ~original ~request ~proposal ->
@@ -3936,7 +3936,7 @@ let seed_legacy_original_answer fixture original request =
     Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
       ~access:Lane_addon_sources.Operator_configuration ~installation_id:destination.installation_id
       ~package_id:destination.package_id ~tool:destination.tool ~configuration_revision:destination.configuration_revision
-      ~original ~arguments:(`Assoc ["kind",`String "submit";"request",Exact.request_to_json (Capture.request request |> get)])
+      ~original:(Owner.listed original) ~arguments:(`Assoc ["kind",`String "submit";"request",Exact.request_to_json (Capture.request request |> get)])
       |> Result.map_error (fun _ -> "legacy fixture submit was refused before its modeled old effect") |> get |> ignore;
     await_delivery fixture ~after:before)
 let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =

@@ -2258,8 +2258,9 @@ completion judge, `Task Review·7` is tasks waiting for a completion verdict.
 The cursor tracks goal identity in visible order, so a refresh that reorders
 goals keeps the same goal selected.
 
-`f` cycles `all`, `active`, `completed`, and `dropped`; active means exactly
-Executing plus Verifying. `s` cycles `phase/P1-P5` (Executing, Verifying,
+`f` cycles `all`, `active`, `completed`, and `dropped`; active means every
+phase that is neither Completed nor Dropped: Executing, Verifying,
+Awaiting confirmation, Paused and Blocked. `s` cycles `phase/P1-P5` (Executing, Verifying,
 Completed, Dropped, then priority), `updated` (most recently changed first),
 and `due` (earliest due date first, undated last). The current meanings are
 printed above the rollup. Status colour and the proof marker remain independent

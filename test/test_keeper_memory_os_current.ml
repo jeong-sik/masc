@@ -5198,7 +5198,7 @@ let test_removal_reconcile_reads_every_newer_line_before_calling_it_missing () =
       check bool (label ^ ": the refusal names the unreadable line") true
         (String_util.contains_substring detail
            (Printf.sprintf
-              "memory journal line %d is undecodable during retraction reconciliation"
+              "retraction reconciliation: memory journal line %d is undecodable"
               (List.length lines)));
       check bool (label ^ ": the receipt stays for a later writer") true
         (Sys.file_exists receipt_path);
@@ -5256,6 +5256,59 @@ let test_removal_reconcile_stays_in_the_target_generation () =
     | earlier_lines, later_lines ->
       failf "%s: expected one removal line per generation, got %d and %d" label
         (List.length earlier_lines) (List.length later_lines))
+    [ true; false ]
+;;
+
+(* A publication left pending after its snapshot replaced the prior one: the
+   journal append failed, or the process stopped before the phase write after
+   appending. The next read recovers it, and an older line an earlier build
+   wrote must not stop that recovery (#37682). *)
+let test_publication_recovery_reads_no_line_older_than_its_target () =
+  List.iter (fun line_present ->
+    with_temp_keepers @@ fun keepers_dir ->
+    let label =
+      if line_present then "publication line journalled" else "publication line missing"
+    in
+    ignore (replace ~keepers_dir ~facts:[ fact ~claim:"published before the stall" () ] ()
+            |> require_ok);
+    let journal_path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+    let earlier =
+      Fs_compat.load_file journal_path
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> not (String.equal line ""))
+    in
+    Fs_compat.invalidate_cached_writer journal_path;
+    Sys.remove journal_path;
+    Unix.mkdir journal_path 0o700;
+    let committed =
+      replace ~keepers_dir ~expected_revision:(Some 1)
+        ~facts:[ fact ~claim:"published while the journal was unavailable" () ] ()
+      |> require_ok
+    in
+    check int (label ^ ": the snapshot is replaced") 2 committed.revision;
+    Unix.rmdir journal_path;
+    let publication_path = Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper" in
+    let publication_line =
+      Yojson.Safe.from_file publication_path
+      |> Yojson.Safe.Util.member "journal"
+      |> Yojson.Safe.to_string
+    in
+    let older_build_line = with_source_generation (List.hd earlier) in
+    put_journal ~keepers_dir
+      ((older_build_line :: earlier) @ (if line_present then [ publication_line ] else []));
+    let recovered = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok in
+    check bool (label ^ ": the read returns the published snapshot") true
+      (recovered = Some committed);
+    check bool (label ^ ": the recovery clears the publication receipt") false
+      (Sys.file_exists publication_path);
+    let journal = read_journal_lines ~keepers_dir in
+    (match committed_at ~revision:2 journal with
+     | [ line ] ->
+       check bool (label ^ ": the journal holds the publication's own line once") true
+         (Yojson.Safe.sort line = Yojson.Safe.sort (Yojson.Safe.from_string publication_line))
+     | lines -> failf "%s: expected one publication line, got %d" label (List.length lines));
+    check bool (label ^ ": the older line stays as written") true
+      (List.hd journal = Yojson.Safe.from_string older_build_line))
     [ true; false ]
 ;;
 
@@ -5354,6 +5407,7 @@ let () =
         test_case "journal cancellation retains producer commit" `Quick test_generic_publication_journal_cancellation_keeps_producer_commit;
         test_case "historical revision reuse matches exact entry" `Quick test_generic_publication_reused_revision_keeps_exact_history;
         test_case "quarantine requires current-generation journal" `Quick test_generic_publication_quarantine_requires_current_generation_journal;
+        test_case "recovery reads no line older than its target" `Quick test_publication_recovery_reads_no_line_older_than_its_target;
         test_case "revision-only absorption canonical publication" `Quick test_revision_only_absorption_publication_recovers;
         test_case "conflict preserves all stores" `Quick test_generic_publication_conflict_preserves_stores]); ( "dynamic categories", [test_case "new category survives persistence" `Quick
           test_dynamic_category_roundtrip] )

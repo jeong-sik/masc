@@ -351,49 +351,6 @@ let s2_disposition_preserved () =
 let submitter = "h2-probe-keeper"
 let composition_tool = "keeper_compose_memory-background"
 
-let with_server_workspace f =
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "masc_h2_async_%d_%d"
-         (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1000.)))
-  in
-  Unix.mkdir dir 0o755;
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun root_sw ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_context.set_switch root_sw;
-  let config = Workspace.default_config dir in
-  ignore (Workspace.init config ~agent_name:(Some "operator"));
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-            [ "name", `String submitter
-            ; "activation_mode", `String "manual"
-            ])
-    with
-    | Ok meta -> meta
-    | Error err -> fail ("keeper meta fixture failed: " ^ err)
-  in
-  (match Meta_store.replace_snapshot config meta with
-   | Ok _ -> ()
-   | Error err -> fail ("write keeper meta failed: " ^ err));
-  ignore
-    (Registry.register_offline
-       ~base_path:config.Workspace.base_path
-       submitter
-       meta
-     : Registry.registry_entry);
-  Fun.protect
-    ~finally:(fun () -> ignore (Workspace.reset config))
-    (fun () -> f config (Eio.Stdenv.clock env))
-;;
-
 let with_server_workspace_keep f =
   let dir =
     Filename.concat

@@ -309,18 +309,27 @@ func umpRestoration(_ events: [UmpEvent], prefixCount: Int, followingCount: Int 
     // Besides the cut, a changed field needs its baseline earlier in the replay
     // where a surviving voice keeps its value; the replay is sent at once, so any
     // other value it sets later still reaches that voice.
+    // The replay keeps an absolute write only while it is a field's last value
+    // or a kept message (UmpField.kept) reads it: pressure streamed for minutes
+    // restores as one message, an attack still finds its own patch before it.
     known.removeAll()
-    var replay: [UmpEvent] = [], sounding: [UmpAddress: Set<UInt32>] = [:]
+    var replay = StateReplay<UmpField, UmpEvent>(), sounding: [UmpAddress: Set<UInt32>] = [:]
+    var written: [UmpAddress: Set<UmpField>] = [:]
     for ordinal in 0..<next {
         let event = events[ordinal], message = UmpMessage(event, metadata: metadata)
         if case .stateless = message.action { continue }
         if notes.contains(ordinal) && !live.contains(ordinal) { continue }
-        guard umpKeptFields(message, sounding: sounding[message.address] ?? [], changed: previous).allSatisfy({ $0.covered(by: known) }) else {
+        let addressSounding = sounding[message.address] ?? []
+        guard umpKeptFields(message, sounding: addressSounding, changed: previous).allSatisfy({ $0.covered(by: known) }) else {
             throw UmpRefusal("captured UMP seek needs a source baseline for a changed value that a Note On, Program Change or Detach keeps")
         }
         if case .on(let number) = message.action { sounding[message.address, default: []].insert(number) }
         if case .relative = message.action {} else { known.formUnion(message.fields) }
-        replay.append(event)
+        let reading = (written[message.address] ?? []).filter { $0.kept(by: message, sounding: addressSounding) }
+        if case .absolute = message.action {
+            replay.append(ordinal, event, writes: Set(message.fields), reading: Array(reading))
+            written[message.address, default: []].formUnion(message.fields)
+        } else { replay.append(ordinal, event, writes: [], reading: Array(reading)) }
     }
-    return UmpRestoration(events: replay, nextIndex: next, heldNotes: Set(channels.values.flatMap { $0.voices.filter { $0.held && !excludingNotes.contains($0.on) }.map(\.on) }), releaseOwners: releaseOwners, expiredNotes: expiredNotes)
+    return UmpRestoration(events: replay.entries.map(\.message), nextIndex: next, heldNotes: Set(channels.values.flatMap { $0.voices.filter { $0.held && !excludingNotes.contains($0.on) }.map(\.on) }), releaseOwners: releaseOwners, expiredNotes: expiredNotes)
 }

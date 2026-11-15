@@ -358,12 +358,12 @@ let sameProgram = try wire([["seconds":0,"port":0,"bytes":[0xc0,1,0x90,60,100,0x
 sameProgram.tick(); reviewClock = 300_000_000
 sameProgram.receive("{\"kind\":\"pause\"}"); reviewWire = []
 sameProgram.receive("{\"kind\":\"resume\"}")
-precondition(sameProgram.state == .playing && reviewWire.map(\.1) == [[0xc0,1],[0xc0,2],[0xc0,1],[0x90,60,100]])
+precondition(sameProgram.state == .playing && reviewWire.map(\.1) == [[0xc0,1],[0x90,60,100]])
 print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: explicit refusal before replay for unknown/changed patches and pedal-held notes; bank latches, restored patches and released notes retained")
 var parameter = SourceChase()
 for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]] { parameter.observe(bytes, port: 0) }
 let parameters = try parameter.bootstrap(replacing: parameter)
-precondition(parameters.map(\.1) == parameter.history.map(\.1))
+precondition(parameters.map(\.1) == [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]])
 var unknown = SourceChase(); unknown.observe([0xb0,101,0],port:0);unknown.observe([0xb0,100,0],port:0);unknown.observe([0xb0,96,0],port:0)
 do { _ = try unknown.bootstrap(replacing: unknown);preconditionFailure("relative value guessed") } catch {}
 reset(0); reviewWire = []
@@ -422,7 +422,28 @@ for bytes: [UInt8] in [[0xb0,64,127],[0x90,60,100],[0xb0,66,127],[0xd0,77]] { cu
 let cutMessages = try cutPedals.bootstrap(replacing:cutPedals,notes:false).map(\.1)
 precondition(Array(cutMessages.suffix(3)) == [[0xb0,66,127],[0xb0,64,127],[0xd0,77]],"cut entry did not re-establish the pedal and pressure state")
 precondition(!cutMessages.contains { $0[0] & 0xf0 == 0x90 },"cut entry replayed note events")
-print("SOURCE_CHASE_DECISIONS_PASS: ordered expression, pedal membership, release wire forms, reset coverage, parameter components, paused seek, decoder continuation, due and endpoint pause")
+// A seek restores each controller's final value, not the stream that led to it.
+var floodBytes: [Int] = []
+for step in 0..<1000 { floodBytes += [0xb0,11,step % 128,0xe0,step % 128,step / 128 % 128] }
+let floodFinal: [[UInt8]] = [[0xb0,11,103],[0xe0,103,7]]
+reset(0); reviewWire = []
+let floodSeek = try wire([["seconds":0,"port":0,"bytes":floodBytes + [0x90,60,100]],["seconds":0.8,"port":0,"bytes":[0x80,60,40]]])
+floodSeek.tick(); reviewClock = 300_000_000; floodSeek.tick()
+floodSeek.receive("{\"kind\":\"pause\"}"); reviewWire = []
+floodSeek.receive("{\"kind\":\"seek\",\"seconds\":0.5}"); precondition(reviewWire.isEmpty)
+floodSeek.receive("{\"kind\":\"resume\"}")
+precondition(floodSeek.state == .playing && reviewWire.map(\.1) == floodFinal + [[0x90,60,100]], "seek resent \(reviewWire.count) messages instead of final values")
+// Dropped writes are exactly those replaced before anything read them: a
+// Program Change keeps the bank it applied, Data Entry its selection, and an
+// LSB sent before its MSB stays before it.
+var superseded = SourceChase()
+for bytes: [UInt8] in [[0xb0,0,3],[0xc0,4],[0xb0,0,1],[0xc0,5],[0xb0,0,2],
+                       [0xb0,101,0],[0xb0,100,0],[0xb0,6,1],[0xb0,6,2],[0xb0,100,1],[0xb0,6,64],[0xb0,38,0],
+                       [0xb0,1,5],[0xb0,33,1],[0xb0,33,9],[0xb0,1,70]] { superseded.observe(bytes,port:0) }
+let supersededMessages = try superseded.bootstrap(replacing:superseded).map(\.1)
+precondition(supersededMessages == [[0xb0,0,1],[0xc0,5],[0xb0,0,2],
+    [0xb0,101,0],[0xb0,100,0],[0xb0,6,2],[0xb0,100,1],[0xb0,6,64],[0xb0,38,0],[0xb0,33,9],[0xb0,1,70]],"replaced writes or their readers' inputs changed")
+print("SOURCE_CHASE_DECISIONS_PASS: ordered expression, pedal membership, release wire forms, reset coverage, parameter components, paused seek, decoder continuation, due and endpoint pause, final-value seek")
 
 // Exercise production UID lookup, object-type/name validation and the complete
 // selected-reference check against synthetic CoreMIDI property boundaries.
@@ -535,6 +556,17 @@ precondition(reviewWire.isEmpty && lateCopies.regionCursors[0].copy==2)
 let livePhase = try arrangement([regionSource],[clip("live","a",repeatCount:2_000_000)],duration:1_000_000)
 reviewWire=[];try livePhase.reconcile(at:999_999.75)
 precondition(livePhase.regionCursors[0].copy==1_999_999 && reviewWire.count<30)
+// A region cut late in a source starts every copy from the prefix's final
+// values; its boundary Note On does not wait behind the prefix's stream.
+let floodSource: [String: Any] = ["id":"flood","timeline":["schemaVersion":2,"duration":10.0,"bindings":[["port":2,"destination":"1"]],"events":[
+    ["seconds":0,"port":2,"bytes":floodBytes],["seconds":9.5,"port":2,"bytes":[0x90,60,100]],["seconds":9.9,"port":2,"bytes":[0x80,60,40]]]]]
+reset(0);reviewWire=[]
+let floodCopies = try arrangement([floodSource],[clip("flood","flood",from:9.5,to:10,repeatCount:8)],duration:4)
+try floodCopies.reconcile(at:0)
+precondition(reviewWire.map(\.1) == floodFinal + [[0x90,60,100]],"first copy resent \(reviewWire.count) messages")
+reviewWire=[];try floodCopies.reconcile(at:0.5)
+precondition(floodCopies.regionCursors[0].copy == 1 && Array(reviewWire.map(\.1).suffix(3)) == floodFinal + [[0x90,60,100]]
+    && reviewWire.filter({ $0.1[0] == 0xb0 }).count == 1,"copy edge resent \(reviewWire.count) messages")
 // A late first common-epoch tick skips never-started expired copies. It
 // must preserve the boundary stream for other region copies still alive.
 func sharedClock(_ template: MidiTransport, at offset: Double = 0) throws -> MidiTransport {

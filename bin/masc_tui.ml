@@ -18874,15 +18874,17 @@ let apply_refused_workspace_identity state ~mailbox ~detail latest =
    A successful older full refresh cannot authorize a same-port replacement. *)
 let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
   if Http_refresh_order.is_current state.http_refresh_order results.http_refresh_ticket then begin
-    let latest = Surface_read_order.latest_navigation state.http_surface_reads
-      results.http_surface_request in
-    let identity_matches = server_workspace_matches ~expected:state.server_identity
+    let admission = Masc_tui_types.collector_admission state results.http_surface_request
       results.http_scoped_server_identity in
     let datasets = take_http_surface_datasets state results.http_surface_request in
-    (* Nonlatest collectors can still own independent data. Their older probe
-       cannot replace identity observed by a newer navigation request. *)
-    if latest then apply_server_identity_reading state ~mailbox results.http_scoped_server_identity;
-    if Result.is_ok results.http_scoped_server_identity && (latest || identity_matches) then begin
+    (* Older collectors can still own independent data. Their older probe
+       cannot replace identity observed by a newer collector. *)
+    (match admission with
+     | Admit_identity_and_data | Admit_identity_only ->
+         apply_server_identity_reading state ~mailbox results.http_scoped_server_identity
+     | Admit_data_only | Admit_nothing -> ());
+    match admission with
+    | Admit_identity_and_data | Admit_data_only ->
       (* Identity application can withdraw authority even when this response
          has the current ticket. Only the dispatch generation and workspace
          together authorize its roster; other datasets retain their ticket. *)
@@ -18893,7 +18895,7 @@ let apply_http_scoped_surfaces state ~mailbox ~currency_authority results =
       let results = if same_workspace then results
         else { results with http_keeper_roster = None } in
       apply_http_scoped_data state ~datasets results
-    end else false
+    | Admit_identity_only | Admit_nothing -> false
   end else false
 
 let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mailbox =
@@ -18928,13 +18930,21 @@ let apply_http_surfaces state ~mailbox results =
   if Http_refresh_order.is_current state.http_refresh_order
        results.http_scoped.http_refresh_ticket then begin
   let previous_items = visible_item_revision state in
-  let datasets = take_http_surface_datasets state results.http_scoped.http_surface_request in
-  apply_server_identity_reading state ~mailbox results.http_server_identity;
-  let roster_refreshed = if Result.is_ok results.http_server_identity then begin
-    if state.workspace_identity = Workspace_identity_match then
-      Option.iter (apply_approval_observation state) results.http_approvals;
-    apply_http_scoped_data state ~datasets results.http_scoped
-  end else false in
+  let request = results.http_scoped.http_surface_request in
+  (* Navigation joins this pass's ticket while it runs, so the ticket alone
+     cannot tell whether a newer collector already read the identity. *)
+  let admission = Masc_tui_types.collector_admission state request results.http_server_identity in
+  let datasets = take_http_surface_datasets state request in
+  (match admission with
+   | Admit_identity_and_data | Admit_identity_only ->
+       apply_server_identity_reading state ~mailbox results.http_server_identity
+   | Admit_data_only | Admit_nothing -> ());
+  let roster_refreshed = match admission with
+    | Admit_identity_and_data | Admit_data_only ->
+        if state.workspace_identity = Workspace_identity_match then
+          Option.iter (apply_approval_observation state) results.http_approvals;
+        apply_http_scoped_data state ~datasets results.http_scoped
+    | Admit_identity_only | Admit_nothing -> false in
   if roster_refreshed || Option.is_none results.http_scoped.http_keeper_roster then
     refresh_changed_keeper_items state ~mailbox ~roster_refreshed previous_items;
   let reached result =
@@ -25381,10 +25391,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Http_msg (Http_scoped_refresh_failed (authority, err, approval_ticket, refresh_ticket, latest, request)) ->
       let current_authority = authority = state.workspace_authority in
       let current_generation = Http_refresh_order.is_current state.http_refresh_order refresh_ticket in
-      let latest_navigation = Surface_read_order.latest_navigation state.http_surface_reads request in
-      Log.Transport.info "tui_surface_read_refused request=%d current_authority=%b current_generation=%b latest_navigation=%b"
-        (Surface_read_order.request_id request) current_authority current_generation latest_navigation;
-      if current_authority && current_generation && latest_navigation then begin
+      let owns_identity = Surface_read_order.owns_identity state.http_surface_reads request in
+      Log.Transport.info "tui_surface_read_refused request=%d current_authority=%b current_generation=%b owns_identity=%b"
+        (Surface_read_order.request_id request) current_authority current_generation owns_identity;
+      if current_authority && current_generation && owns_identity then begin
         let before = read_authority state in
         apply_http_scoped_refresh_failure state ~mailbox ~refresh_ticket ~approval_ticket ~latest err;
         resume_reads_after_authority_change state ~mailbox

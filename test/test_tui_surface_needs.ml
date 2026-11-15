@@ -381,10 +381,10 @@ let test_completed_newer_navigation_does_not_restore_old_identity_authority () =
   let reads, board = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)
     ~started_ns:2L reads in
   check bool "the new navigation owns identity observation" true
-    (Order.latest_navigation reads board);
+    (Order.owns_identity reads board);
   let reads = Order.finish reads board in
   check bool "an older failure cannot regain identity authority" false
-    (Order.latest_navigation reads usage);
+    (Order.owns_identity reads usage);
   let reads, config = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Config)
     ~started_ns:3L reads in
   let reads, accepted = Order.take reads usage in
@@ -396,7 +396,7 @@ let test_completed_newer_navigation_does_not_restore_old_identity_authority () =
   check bool "old cleanup leaves the current collector active" true
     (Order.navigation_active reads config);
   check bool "the current collector keeps identity authority" true
-    (Order.latest_navigation reads config)
+    (Order.owns_identity reads config)
 
 let test_withdrawal_retires_authority_without_losing_live_collectors () =
   let module Order = Types.Surface_read_order in
@@ -404,7 +404,7 @@ let test_withdrawal_retires_authority_without_losing_live_collectors () =
     ~started_ns:1L Order.initial in
   let reads = Order.invalidate reads in
   check bool "withdrawal revokes the old identity observation" false
-    (Order.latest_navigation reads old);
+    (Order.owns_identity reads old);
   check bool "the actual old collector remains tracked" true
     (Order.navigation_active reads old);
   let reads, current = Order.dispatch ~kind:Order.Navigation ~needs:(needs Types.Board)

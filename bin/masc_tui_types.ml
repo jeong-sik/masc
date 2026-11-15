@@ -4991,7 +4991,10 @@ let pushed_sources : Surface_read_source.t list =
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
-   Questions, approvals and roster already have independent source owners. *)
+   The identity reading has one owner too: the latest collector dispatched,
+   full or navigation, so a late full bundle cannot put back the workspace a
+   newer navigation read saw go away. Questions, approvals and roster already
+   have independent source owners. *)
 module Surface_read_order : sig
   type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
@@ -5033,7 +5036,10 @@ module Surface_read_order : sig
   val navigation_in_flight : t -> bool
   val navigation_count : t -> int
   val navigation_active : t -> request -> bool
-  val latest_navigation : t -> request -> bool
+  val owns_identity : t -> request -> bool
+  (** Whether [request] may apply its identity reading: it is the latest
+      collector dispatched and no withdrawal came after it. A navigation
+      request also stops owning it when it completes. *)
 end = struct
   type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
@@ -5048,9 +5054,9 @@ end = struct
     next: int;
     owners: (dataset * request) list;
     active_navigation: request list;
-    latest_navigation: request option;
+    identity_owner: request option;
   }
-  let initial = {next=0; owners=[]; active_navigation=[]; latest_navigation=None}
+  let initial = {next=0; owners=[]; active_navigation=[]; identity_owner=None}
   let sources needs =
     [Transport, needs.needs_transport; Board, needs.needs_board;
      Planning, needs.needs_planning;
@@ -5083,11 +5089,11 @@ end = struct
     let request = {id=current.next; kind; started_ns;
       datasets=List.concat_map source_datasets (sources needs); owner=ref ()} in
     let retained = List.filter (fun (dataset, _) -> not (List.mem dataset request.datasets)) current.owners in
-    let active_navigation, latest_navigation = match kind with
-      | Full -> current.active_navigation, current.latest_navigation
-      | Navigation -> request :: current.active_navigation, Some request in
+    let active_navigation = match kind with
+      | Full -> current.active_navigation
+      | Navigation -> request :: current.active_navigation in
     {next=current.next+1; owners=List.map (fun dataset -> dataset,request) request.datasets @ retained;
-     active_navigation; latest_navigation}, request
+     active_navigation; identity_owner=Some request}, request
   let owned current request =
     List.filter (fun dataset ->
       match List.assoc_opt dataset current.owners with
@@ -5114,7 +5120,7 @@ end = struct
     else current, false
   (* Withdrawal retires publication and identity authority. Actual collectors
      remain tracked until their own completion; they block no navigation. *)
-  let invalidate current = {current with owners=[]; latest_navigation=None}
+  let invalidate current = {current with owners=[]; identity_owner=None}
   let pending ~needs current =
     List.filter (fun source -> List.exists (fun dataset -> List.mem_assoc dataset current.owners)
       (source_datasets source)) (sources needs)
@@ -5130,9 +5136,14 @@ end = struct
   let navigation_count current = List.length current.active_navigation
   let navigation_active current request =
     List.exists (fun active -> active.owner == request.owner) current.active_navigation
-  let latest_navigation current request =
-    navigation_active current request && match current.latest_navigation with
-    | Some latest -> latest.owner == request.owner
+  (* A full collector has no completion of its own here; its terminal bundle
+     is applied once, by the refresh that dispatched it. *)
+  let owns_identity current request =
+    let collecting = match request.kind with
+      | Full -> true
+      | Navigation -> navigation_active current request in
+    collecting && match current.identity_owner with
+    | Some owner -> owner.owner == request.owner
     | None -> false
 end
 
@@ -5183,7 +5194,8 @@ module Http_refresh_order = struct
   let dispatch (Ticket generation) = Ticket (generation + 1)
   let is_current latest ticket = latest = ticket
   (* Overlapping collectors share an interval generation. Dataset ownership
-     orders their data; the latest navigation owns its identity update. *)
+     orders their data; [Surface_read_order.owns_identity] names the one
+     collector of the interval that may apply its identity reading. *)
   let for_navigation ~collection_inflight latest =
     if collection_inflight then latest else dispatch latest
 end
@@ -12558,6 +12570,26 @@ let take_http_surface_datasets (state : state) request =
   if List.mem Surface_read_order.Board_posts datasets then
     fail_board_posts_load state "Board posts result was not observed at terminal application";
   datasets
+
+(* What a collector's verified bundle may apply once its interval is still
+   current. Only the identity owner ([Surface_read_order.owns_identity])
+   applies its identity reading. A collector that lost it to a newer dispatch
+   or a withdrawal changes no identity, and keeps its data only when it read
+   the workspace the current reading names. *)
+type collector_admission =
+  | Admit_identity_and_data
+  | Admit_identity_only
+  | Admit_data_only
+  | Admit_nothing
+
+let collector_admission (state : state) request reading =
+  match Surface_read_order.owns_identity state.http_surface_reads request, reading with
+  | true, Ok _ -> Admit_identity_and_data
+  | true, Error _ -> Admit_identity_only
+  | false, Ok _ ->
+      if server_workspace_matches ~expected:state.server_identity reading
+      then Admit_data_only else Admit_nothing
+  | false, Error _ -> Admit_nothing
 
 let finish_http_surface_read (state : state) request =
   if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_hearths then

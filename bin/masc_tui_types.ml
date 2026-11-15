@@ -18461,13 +18461,29 @@ let lane_inventory_lead (state : state) =
 
 (* Exact-only editors retain their current data contract. The inventory cursor
    names a row by identity, never by its position in the exact-only snapshot. *)
-let selected_standalone_lane (state : state) =
-  match selected_inventory_lane state, state.standalone_lanes with
-  | Some { Masc.Tui_decode_lane_inventory.selection = Exact target; _ }, Some snapshot ->
+let standalone_lane_of_inventory_row (state : state) (row : Masc.Tui_decode_lane_inventory.row) =
+  match row.selection, state.standalone_lanes with
+  | Exact target, Some snapshot ->
       List.find_opt (fun (lane : Tui_decode.standalone_lane) ->
         Standalone_lane.equal lane.sl_lane target) snapshot.sls_lanes
-  | Some { selection = (Browser _ | Machine _ | Declaration _ | Manual_instance _); _ }, _
-  | None, _ | _, None -> None
+  | (Browser _ | Machine _ | Declaration _ | Manual_instance _), _ | Exact _, None -> None
+
+let selected_standalone_lane (state : state) =
+  Option.bind (selected_inventory_lane state) (standalone_lane_of_inventory_row state)
+
+(* The exact lane the Lanes screen names: the overview's cursor row, or the
+   row one Lane's inventory detail reads. The detail finds that row by its
+   id, as its drawing does, not by the cursor. *)
+let lanes_screen_standalone_lane (state : state) =
+  match state.lanes_mode with
+  | Lanes_overview -> selected_standalone_lane state
+  | Lanes_inventory_detail (Some id) ->
+      Option.bind
+        (List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
+           String.equal row.id id) (lane_inventory_rows state))
+        (standalone_lane_of_inventory_row state)
+  | Lanes_inventory_detail None | Lanes_run_list _ | Lanes_run_detail _
+  | Lanes_measurement_detail _ -> None
 
 let lanes_inventory_count state = List.length (lane_inventory_rows state)
 
@@ -25158,6 +25174,31 @@ let select_slot_editor_row state index =
 let open_slot_editor state target =
   state.slot_editor <- Some { se_target = target; se_selection = None };
   select_slot_editor_row state 0
+;;
+
+(* [s] on the Lanes surface. The editor opens on the exact lane the screen
+   names and covers that screen. [lanes_mode] keeps naming the screen, so
+   [close_slot_editor] returns to the overview or the inventory detail the
+   editor was opened from. A screen that names no exact lane opens nothing. *)
+let open_lanes_slot_editor (state : state) =
+  Option.iter (fun (lane : Tui_decode.standalone_lane) ->
+    open_slot_editor state (Exact_lane_slots lane.sl_lane);
+    dismiss_runtime_lane_notice state;
+    state.lanes_action_error <- None)
+    (lanes_screen_standalone_lane state)
+;;
+
+let close_slot_editor (state : state) =
+  state.slot_editor <- None;
+  dismiss_runtime_lane_notice state
+;;
+
+(* The lane an open exact-lane editor edits. Its keys act on this lane, not
+   on the cursor of the screen it covers. *)
+let slot_editor_exact_lane (state : state) =
+  match state.slot_editor with
+  | Some { se_target = Exact_lane_slots lane; _ } -> Some lane
+  | Some { se_target = Media_failover_slots; _ } | None -> None
 ;;
 
 let reconcile_slot_editor_selection state =

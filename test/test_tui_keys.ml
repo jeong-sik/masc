@@ -1881,6 +1881,43 @@ let test_inventory_selection_keeps_exact_editor_identity () =
     (Some "librarian_exact")
     (Option.map (fun lane -> Standalone_lane.to_id lane.Tui_decode.sl_lane) (selected_standalone_lane state))
 
+(* [s] opens the model order editor over one exact Lane's inventory detail as
+   it does over the list, and closing the editor returns to the screen it
+   covered. A reading that names no exact lane opens nothing. *)
+let test_slot_editor_opens_over_the_inventory_detail () =
+  let state = lanes_state () in
+  let index id =
+    List.find_index (fun (row : Masc.Tui_decode_lane_inventory.row) -> row.id = id)
+      (lane_inventory_rows state) |> Option.get in
+  let edited () = Option.map Standalone_lane.to_id (slot_editor_exact_lane state) in
+  select_inventory_lane state (index "exact/librarian_exact");
+  let detail = Lanes_inventory_detail (Some "exact/librarian_exact") in
+  state.lanes_mode <- detail;
+  open_lanes_slot_editor state;
+  Alcotest.(check (option string)) "s on the detail edits the lane the detail reads"
+    (Some "librarian_exact") (edited ());
+  Alcotest.(check bool) "the detail stays under the editor" true (state.lanes_mode = detail);
+  close_slot_editor state;
+  Alcotest.(check bool) "Esc closes the editor" true (Option.is_none state.slot_editor);
+  Alcotest.(check bool) "Esc returns to the detail" true (state.lanes_mode = detail);
+  state.lanes_mode <- Lanes_overview;
+  open_lanes_slot_editor state;
+  Alcotest.(check (option string)) "s on the list edits the lane under the cursor"
+    (Some "librarian_exact") (edited ());
+  close_slot_editor state;
+  Alcotest.(check bool) "Esc from the list's editor returns to the list" true
+    (state.lanes_mode = Lanes_overview);
+  select_inventory_lane state (index "machine/dos");
+  state.lanes_mode <- Lanes_inventory_detail (Some "machine/dos");
+  open_lanes_slot_editor state;
+  Alcotest.(check bool) "a machine Lane's detail opens no slot editor" true
+    (Option.is_none state.slot_editor);
+  select_inventory_lane state (index "exact/librarian_exact");
+  state.lanes_mode <- Lanes_inventory_detail None;
+  open_lanes_slot_editor state;
+  Alcotest.(check bool) "the inventory-wide reading opens no slot editor" true
+    (Option.is_none state.slot_editor)
+
 let test_grouped_inventory_keeps_original_action_target () =
   let module I = Masc.Tui_decode_lane_inventory in
   let module D = Masc_tui_lane_inventory in
@@ -2551,6 +2588,8 @@ let () =
             test_inventory_category_preserves_metadata_owner
         ; Alcotest.test_case "inventory selection retains exact editor identity" `Quick
             test_inventory_selection_keeps_exact_editor_identity
+        ; Alcotest.test_case "s opens the slot editor over the inventory detail" `Quick
+            test_slot_editor_opens_over_the_inventory_detail
         ; Alcotest.test_case "search includes all inventory families" `Quick
             test_lanes_search_texts_lead_with_the_standalone_labels
         ; Alcotest.test_case "sub-modes stay unsearchable" `Quick

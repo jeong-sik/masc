@@ -38065,9 +38065,7 @@ Use relative paths for resources already held in the package. -->
               && Option.is_none state.runtime_lane_pick ->
            (match state.slot_editor, key with
             | None, _ -> ()
-            | Some _, Some "esc" ->
-                state.slot_editor <- None;
-                Masc_tui_types.dismiss_runtime_lane_notice state
+            | Some _, Some "esc" -> Masc_tui_types.close_slot_editor state
             | Some _, Some ("j" | "down" | "wheel-down") ->
                 Masc_tui_types.navigate_slot_editor state Masc_tui_types.Move_down;
                 Masc_tui_types.dismiss_runtime_lane_notice state
@@ -38096,34 +38094,33 @@ Use relative paths for resources already held in the package. -->
                      ~en:"Select an Exact or machine Lane to change activity."))
        | Some "s"
          when state.view = Lanes
-              && state.lanes_mode = Lanes_overview
               && Option.is_none state.runtime_lane_pick
               && Option.is_none state.slot_editor ->
-           (* Open the slot editor on the lane under the cursor. Its rows come
-              from the lane list, which is already loaded here. *)
-           (match Masc_tui_types.selected_standalone_lane state with
-            | None -> ()
-            | Some lane ->
-                Masc_tui_types.open_slot_editor state
-                  (Masc_tui_types.Exact_lane_slots lane.Masc.Tui_decode.sl_lane);
-                Masc_tui_types.dismiss_runtime_lane_notice state;
-                state.lanes_action_error <- None;
-                (* [d] resolves an HTTP slot's provider table through the
-                   catalogue, so the editor reads it as it opens. *)
-                launch_runtime_catalog_load state ~mailbox:async_messages)
+           (* Open the slot editor on the lane the overview's cursor or one
+              Lane's inventory detail names. Its rows come from the lane
+              list, which is already loaded here. *)
+           Masc_tui_types.open_lanes_slot_editor state;
+           (* [d] resolves an HTTP slot's provider table through the
+              catalogue, so the editor reads it as it opens. *)
+           if Option.is_some state.slot_editor then
+             launch_runtime_catalog_load state ~mailbox:async_messages
        | Some "a"
          when state.view = Lanes
-              && state.lanes_mode = Lanes_overview
+              && (state.lanes_mode = Lanes_overview || Option.is_some state.slot_editor)
               && Option.is_none state.runtime_lane_pick ->
-           (* Append a failover candidate to the standalone lane under the
-              cursor. The pick is typed as a standalone lane so the routing
-              write resolves the walk-order table rather than the
+           (* Append a failover candidate to the open slot editor's lane, over
+              whichever screen it covers, or else to the standalone lane under
+              the overview's cursor. The pick is typed as a standalone lane so
+              the routing write resolves the walk-order table rather than the
               conversation lane of the same-looking id. *)
-           (match Masc_tui_types.selected_standalone_lane state with
-            | None -> ()
-            | Some lane ->
+           (match
+              Masc_tui_types.slot_editor_exact_lane state,
+              Masc_tui_types.selected_standalone_lane state
+            with
+            | None, None -> ()
+            | Some lane, _ | None, Some { Masc.Tui_decode.sl_lane = lane; _ } ->
                 Masc_tui_types.open_runtime_lane_pick state
-                  (Masc_tui_types.Pick_exact_lane lane.Masc.Tui_decode.sl_lane);
+                  (Masc_tui_types.Pick_exact_lane lane);
                 Masc_tui_types.dismiss_runtime_lane_notice state;
                 state.lanes_action_error <- None;
                 launch_runtime_catalog_load state ~mailbox:async_messages)
@@ -41468,6 +41465,11 @@ Use relative paths for resources already held in the package. -->
                 state.changes_tree_diff <- None;
                 state.changes_tree_diff_error <- None;
                 state.changes_tree_diff_path <- None
+            | Lanes when Option.is_some state.slot_editor ->
+                (* The slot editor covers the screen it was opened from.
+                   Closing that screen under it would send the editor's Esc
+                   to the overview instead of back where it opened. *)
+                ()
             | Lanes ->
                 (* Left closes a drill-down level but never leaves the surface;
                    Esc owns leaving it. *)
@@ -42276,17 +42278,17 @@ Use relative paths for resources already held in the package. -->
                        ~mailbox:async_messages keeper
                  | None -> ())
             | Lanes ->
-                (match state.lanes_mode with
-                 | Lanes_run_list lane ->
+                (* The slot editor answers Enter over whichever screen it
+                   covers, the overview or one Lane's inventory detail. *)
+                (match state.slot_editor, state.runtime_lane_pick, state.lanes_mode with
+                 | Some _, None, _ -> open_selected_slot_config ()
+                 | Some _, Some _, _ -> ()
+                 | None, (None | Some _), Lanes_run_list lane ->
                      open_selected_lane_run state ~mailbox:async_messages ~lane
-                 | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> ()
-                 | Lanes_overview ->
-                     (match state.slot_editor, state.runtime_lane_pick with
-                      | Some _, None -> open_selected_slot_config ()
-                      | Some _, Some _ -> ()
-                      | None, (None | Some _) ->
-                        open_lane_inventory_selection state
-                          ~mailbox:async_messages))
+                 | None, (None | Some _),
+                   (Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _) -> ()
+                 | None, (None | Some _), Lanes_overview ->
+                     open_lane_inventory_selection state ~mailbox:async_messages)
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -43194,9 +43196,9 @@ Use relative paths for resources already held in the package. -->
             | Some Runtime_routes -> report_action state "info" "Select a runtime to edit its model settings"
             | None -> ())
        | Some "d"
-         when state.view = Lanes && state.lanes_mode = Lanes_overview
-              && Option.is_some state.slot_editor ->
-           (* The picker owns focus while it is open. *)
+         when state.view = Lanes && Option.is_some state.slot_editor ->
+           (* The editor answers over the overview or the inventory detail it
+              covers. The picker owns focus while it is open. *)
            if Option.is_none state.runtime_lane_pick then
              open_selected_slot_config ()
        | Some (("e" | "E") as edit_key) ->
@@ -43248,13 +43250,19 @@ Use relative paths for resources already held in the package. -->
                         here. [read_first] above is that read already. *)
                      owe_runtime_config_read state)
                 in
-                (match state.lanes_mode, selected_standalone_lane state with
-                 | Lanes_overview, Some lane ->
+                (* The open slot editor names its own lane over whichever
+                   screen it covers; with none open, the overview names the
+                   lane under its cursor. *)
+                (match
+                   Masc_tui_types.slot_editor_exact_lane state, state.lanes_mode,
+                   selected_standalone_lane state
+                 with
+                 | Some lane, _, _ | None, Lanes_overview, Some { Tui_decode.sl_lane = lane; _ } ->
                    open_lane_table
                      [ Runtime_toml_namespace.(key Runtime); "exact_output_lanes"
-                     ; Standalone_lane.to_id lane.Tui_decode.sl_lane ]
+                     ; Standalone_lane.to_id lane ]
                      ~missing:(Printf.sprintf "runtime.toml has no [%s] section")
-                 | Lanes_overview, None ->
+                 | None, Lanes_overview, None ->
                    (match selected_inventory_lane state with
                     | None ->
                       show_lanes_action_error state
@@ -43276,7 +43284,9 @@ Use relative paths for resources already held in the package. -->
                             open_lane_table path
                               ~missing:(Printf.sprintf
                                 "runtime.toml has no [%s] section yet; e edits runtime.toml to add it"))))
-                 | (Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _), _ -> ())
+                 | None,
+                   (Lanes_run_list _ | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _),
+                   _ -> ())
             | Config ->
                 (match state.config_pane with
                  | Config_prompts ->

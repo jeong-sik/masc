@@ -17,15 +17,15 @@ let seat_path = "/api/v1/play/seat"
 let participants_path = "/api/v1/play/participants"
 let session_path = "/api/v1/play/session"
 
-(* 16 bytes from the CSPRNG, as hex: the page holds a bearer, so the nonce
-   that lets its script run is not a PRNG draw. *)
-let nonce_bytes = 16
-
+(* HIGH-RISK-UNREVIEWED: the page holds a bearer, so the nonce that lets its
+   script run comes from the CSPRNG draw of {!Csp_nonce}, the only maker of
+   one. *)
 let csp_header nonce =
+  let source = Csp_nonce.source nonce in
   Printf.sprintf
-    "default-src 'none'; script-src 'nonce-%s'; style-src 'nonce-%s'; connect-src 'self'; \
+    "default-src 'none'; script-src %s; style-src %s; connect-src 'self'; \
      img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-    nonce nonce
+    source source
 
 let page_head =
   {play|<!doctype html>
@@ -35,10 +35,10 @@ let page_head =
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>masc · 같이 하기</title>
-<style nonce="|play}
+<style |play}
 
 let page_style =
-  {play|">
+  {play|>
 :root { color-scheme: dark; --bg:#111418; --panel:#1b2027; --ink:#e8ecf1; --dim:#9aa4b2; --mine:#2e7d4f; --line:#2c333d; }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; }
@@ -158,11 +158,11 @@ let agent_note =
     ; Play_invite.agent_guide_path
     ; {play|</a>.</p>
 </main>
-<script nonce="|play}
+<script |play}
     ]
 
 let page_script =
-  {play|">
+  {play|>
 'use strict';
 const STREAM_RETRY_MS = Number(document.currentScript.dataset.retryMs);
 const EVENTS_PATH = '/api/v1/play/events';
@@ -1520,11 +1520,14 @@ if (token === '') {
 </html>
 |play}
 
-let page ~nonce = String.concat "" [ page_head; nonce; page_style; agent_note; nonce;
-  "\" data-retry-ms=\""; string_of_int Server_mcp_transport_http_headers.sse_retry_ms; page_script ]
+let page ~nonce =
+  let attribute = Csp_nonce.attribute nonce in
+  String.concat "" [ page_head; attribute; page_style; agent_note; attribute;
+    " data-retry-ms=\""; string_of_int Server_mcp_transport_http_headers.sse_retry_ms; "\"";
+    page_script ]
 
 let serve_page _request reqd =
-  let nonce = Random_id.hex ~bytes:nonce_bytes in
+  let nonce = Csp_nonce.draw () in
   Http.Response.html
     ~headers:
       [ ("content-security-policy", csp_header nonce)

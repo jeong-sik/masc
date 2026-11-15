@@ -48,16 +48,13 @@
 
 (** {1 GraphQL Playground / iql assets} *)
 
-val graphql_playground_html : nonce:string -> string
-(** Renders the GraphQL Playground HTML with the given
-    CSP nonce inlined into the boot script. *)
+(* HIGH-RISK-UNREVIEWED: the nonce decides which inline script a browser runs
+   on this origin. Only {!Csp_nonce.draw} makes one. *)
 
-val graphql_csp_header : string -> string
+val graphql_playground_html : nonce:Csp_nonce.t -> string
+(** Renders the GraphQL Playground HTML with [nonce] on its boot script. *)
 
-val fresh_graphql_csp_nonce : unit -> string
-(** Per-response CSP nonce for the GraphQL playground. Both transports call
-    this so the playground is served with one nonce implementation rather than
-    a copy per route table. *)
+val graphql_csp_header : Csp_nonce.t -> string
 (** Builds the [Content-Security-Policy] header value
     pinned to the GraphQL Playground asset set, threading
     the per-request nonce. *)

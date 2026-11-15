@@ -14,14 +14,15 @@ let account_server_line =
    of a single user"
 ;;
 
-let with_lease ~base_path f =
+(* [held] says why nothing happens when another process holds the lease, and
+   what the person who ran the command does next. *)
+let with_lease ~held ~base_path f =
   match Unix.realpath base_path with
   | exception Unix.Unix_error (error, _, _) ->
     Error (Printf.sprintf "the base path %s is not reachable: %s" base_path (Unix.error_message error))
   | base_path ->
     (match T.acquire_owner_lease (Host_config.host ()).base_path_lease_root base_path with
-     | T.Base_path_already_owned { owner; lock_path } ->
-       Error (T.base_path_contention_message ~base_path ~lock_path owner)
+     | T.Base_path_already_owned { owner; lock_path } -> Error (held ~base_path ~lock_path owner)
      | T.Base_path_rejected rejection -> Error (T.base_path_lock_rejection_to_string rejection)
      | T.Base_path_acquired lease ->
        Fun.protect ~finally:(fun () -> T.release_base_path_lease lease) (fun () -> f base_path))
@@ -49,6 +50,40 @@ let public_base_url () =
             carry the link")
 ;;
 
+(* A running account server issues invitations itself, so the person is sent
+   there before the shared guidance on the lease. Only a workspace whose
+   config.json asks for multi-account use boots that server; the holder of any
+   other lease serves neither the console nor the route, and only the shared
+   guidance is given. The lease does not identify its holder
+   ({!T.base_path_owner}), so the sentence says what holds when the holder is
+   the account server, and the shared guidance keeps the lock file and the
+   warning about the recorded PID. The console is named by the address the
+   link would carry; when that is missing or refused, the reason is given, since
+   this command needs it as well. *)
+let invite_held ~base_path ~lock_path owner =
+  let shared = T.base_path_contention_message ~base_path ~lock_path owner in
+  match Authz_boot_mode_read.asked ~base_path with
+  | Ok Authz_boot_mode.Asks_single_user | Error (_ : Authz_boot_mode.refusal) -> shared
+  | Ok Authz_boot_mode.Asks_multi_account ->
+    let console, address_note =
+      match public_base_url () with
+      | Ok base -> base ^ Account_page.console_path, ""
+      | Error reason ->
+        Account_page.console_path, " It also needs an address for the link: " ^ reason ^ "."
+    in
+    Printf.sprintf
+      "the lease of the workspace is held, so nothing is written. When its holder is \
+       the account server of this workspace, an Admin who has signed in issues \
+       invitations from it with no stop of the server: the 초대 링크 (invitations) \
+       panel of the console at %s, or POST %s \
+       (docs/guides/account-server-invitations.md). This command writes one only \
+       while the lease is free.%s %s"
+      console
+      Login_invite_routes.path
+      address_note
+      shared
+;;
+
 (* What a server started from this shell would read. A server started from
    another environment reads its own. *)
 let anonymous_mutations () =
@@ -61,8 +96,8 @@ let anonymous_mutations () =
 
 (* Both are read before anything is written, so a link that could not be
    printed, or a setting a server would refuse, writes nothing. *)
-let under_lease ~base_path write =
-  with_lease ~base_path (fun base_path ->
+let under_lease ~held ~base_path write =
+  with_lease ~held ~base_path (fun base_path ->
     let* base_url = public_base_url () in
     let* anonymous_mutations = anonymous_mutations () in
     let* written =
@@ -77,14 +112,16 @@ let under_lease ~base_path write =
 ;;
 
 (* The invitation is committed by now. A link that did not reach the output is
-   reported, so the exit code does not claim it was printed. *)
-let print_link ~command ~base_url invitation =
+   reported, so the exit code does not claim it was printed. The link is
+   flushed before the next steps, so a failure after it is not taken for a
+   lost link: the exit code says whether the link was printed, and a lost step
+   is reported on its own. *)
+let print_link ~command ~base_url ~next invitation =
   Printf.printf
-    "The person signs in once with this link before %s. It is not shown again:\n%s\n"
+    "\nThe link works once, until %s, and is not shown again:\n  %s\n"
     (Time_codec.rfc3339_of_unix (float_of_int (A.expires_at_ms invitation) /. 1000.))
     (A.link ~base_url invitation);
   match flush stdout with
-  | () -> 0
   | exception Sys_error detail ->
     Printf.eprintf
       "masc auth %s: the invitation is written, and its link did not reach the standard \
@@ -92,6 +129,35 @@ let print_link ~command ~base_url invitation =
       command
       detail;
     1
+  | () ->
+    Printf.printf
+      "\nNext:\n%s"
+      (String.concat
+         ""
+         (List.mapi (fun index step -> Printf.sprintf "  %d. %s\n" (index + 1) step) next));
+    (match flush stdout with
+     | () -> 0
+     | exception Sys_error detail ->
+       Printf.eprintf
+         "masc auth %s: the link is printed, and the next steps did not reach the \
+          standard output: %s\n"
+         command
+         detail;
+       0)
+;;
+
+(* Both commands leave the workspace with no server on it. A trial on this
+   machine runs the preview in place of the server (account-server-setup.md). *)
+let start_step ~base_url ~base_path =
+  Printf.sprintf
+    "Start the account server where %s reaches it: masc start --base-path %s --port \
+     <port>, with %s and the client secret of each login client of config.json \
+     exported (docs/guides/account-server-setup.md, step 3). A trial on this machine \
+     runs masc auth preview in its place (the same guide, \"Try it on this machine \
+     first\")."
+    base_url
+    (Filename.quote base_path)
+    Env_config_core.http_base_url_env_key
 ;;
 
 let refused command reason =
@@ -105,18 +171,28 @@ let bootstrap ~base_path ~external_store =
       A.error_to_string
       (A.activate ~base_path ~config_dir ~external_store ~anonymous_mutations ~now_ms)
   in
-  match under_lease ~base_path activate with
+  match under_lease ~held:T.base_path_contention_message ~base_path activate with
   | Error reason -> refused "bootstrap" reason
   | Ok (base_url, { A.workspace_id; invitation }) ->
     Printf.printf
-      "The installation is activated for multi-account use, workspace %s.\n\
-       From now on %s. %s. The external store is %s.\n\
+      "Multi-account use is on for workspace %s.\n\
+       - From now on %s.\n\
+       - %s.\n\
+       - The external store is %s.\n\
        The first Admin is invited.\n"
       (Authz_types.Workspace_id.to_string workspace_id)
       account_server_line
       (String.capitalize_ascii Authz_boot_mode_read.turn_off_line)
       external_store;
-    print_link ~command:"bootstrap" ~base_url invitation
+    print_link
+      ~command:"bootstrap"
+      ~base_url
+      ~next:
+        [ start_step ~base_url ~base_path
+        ; "Hand the link to the person who becomes the first Admin. They open it and \
+           sign in."
+        ]
+      invitation
 ;;
 
 let invite ~base_path =
@@ -125,14 +201,25 @@ let invite ~base_path =
       A.invite_error_to_string
       (A.invite ~base_path ~config_dir ~anonymous_mutations ~now_ms)
   in
-  match under_lease ~base_path invite with
+  match under_lease ~held:invite_held ~base_path invite with
   | Error reason -> refused "invite" reason
   | Ok (base_url, invitation) ->
-    (* No flush here: [print_link] flushes once and reports a failure. *)
+    (* No flush here: [print_link] flushes this line with the link. *)
     print_string
       "One more Admin is invited. Earlier invitations stay open until they are spent or \
        expire.\n";
-    print_link ~command:"invite" ~base_url invitation
+    print_link
+      ~command:"invite"
+      ~base_url
+      ~next:
+        [ start_step ~base_url ~base_path
+        ; "Hand the link to the person. They open it and sign in."
+        ; Printf.sprintf
+            "Once an Admin has signed in, Member and Admin invitations come from the \
+             console at %s (초대 링크), with no stop of the server."
+            (base_url ^ Account_page.console_path)
+        ]
+      invitation
 ;;
 
 (* ---- masc auth service-credential (plan C4-9) ---- *)
@@ -143,7 +230,7 @@ module H = Authz_service_credential_host
    invitation does. The setting of anonymous mutations is read first, so a
    setting a server would refuse writes nothing. *)
 let under_lease_only ~base_path call =
-  with_lease ~base_path (fun base_path ->
+  with_lease ~held:T.base_path_contention_message ~base_path (fun base_path ->
     let* anonymous_mutations = anonymous_mutations () in
     Eio_main.run (fun _env ->
       Result.map_error
@@ -237,7 +324,7 @@ let off ~base_path =
         Authz_off.error_to_string
         (Authz_off.turn_off ~base_path ~config_dir:(Env_config_core.masc_config_dir_opt ()) ~now_ms))
   in
-  match with_lease ~base_path turn_off with
+  match with_lease ~held:T.base_path_contention_message ~base_path turn_off with
   | Error reason -> refused "off" reason
   | Ok workspace_id ->
     Printf.printf
@@ -378,7 +465,7 @@ let preview ~select_dashboard ~base_path ~port ~github_client_id =
   in
   let run =
     let* github = github in
-    with_lease ~base_path (fun base_path ->
+    with_lease ~held:T.base_path_contention_message ~base_path (fun base_path ->
       let* anonymous_mutations = anonymous_mutations () in
       let* store =
         Result.map_error

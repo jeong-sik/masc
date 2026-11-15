@@ -19,7 +19,7 @@
 ### 1. 이미지 만들기
 
 ```sh
-docker build -f addons/operator-lesson/Dockerfile -t masc-lane-operator-lesson:0.1.0 addons
+docker build -f addons/operator-lesson/Dockerfile -t masc-lane-operator-lesson:0.1.1 addons
 ```
 
 설치 조정(reconcile)은 이미지를 만들지 않는다. MASC 가 쓰는 엔진에 먼저 올려 둔다.

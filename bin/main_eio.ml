@@ -2570,10 +2570,10 @@ let voice_local_setup_locally ~refuse ~base_path speak_voice hear_model =
            0)
 
 (* RFC-0482 §3.2: while the process that holds the workspace lease announces
-   the port as its server, it is the writer. The changes are decided against what the server holds, read from its
-   voice route, because the server may resolve a different configuration file
-   than this process would; they go back to the same route with the revision
-   they were decided on. *)
+   the port as its server, it is the writer. The changes are decided against
+   what the server holds, read from its voice route, because the server may
+   resolve a different configuration file than this process would; they go
+   back to the same route with the revision they were decided on. *)
 let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let refuse message = prerr_endline message; 1 in

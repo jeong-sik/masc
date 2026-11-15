@@ -7,3 +7,8 @@
   memory health broadcast now empties the row, then the fleet answer, and
   only then announces. The store hooks that already emptied the row stay; a
   write both reach reloads the row once (#52018, #PENDING).
+- A Memory publication recovery that finds the receipt gone once it holds
+  the locks no longer announces a Memory health write. The dispatch that
+  finished the receipt or the purge that removed it announces its own write;
+  the recovery announced one more, and a row read woken by the commit read
+  the row twice (#52018, #PENDING).

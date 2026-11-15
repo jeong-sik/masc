@@ -256,6 +256,16 @@ val capture_existing_owner :
     [Current_process_owner] under every spelling of [run_dir] and
     [base_path], and is not opened. *)
 
+val existing_owner_pid :
+  run_dir:string -> base_path:string -> (int, owner_capture_error) result
+(** The pid of the kernel lock owner of the lease, read as
+    {!capture_existing_owner} reads it and with the same errors, and with no
+    handle on the process ({!Owner_process_identity.lease_holder}). No pidfd
+    is made, so a host where the capture is [Unsupported] still answers. For
+    a reader that compares the owner with another kernel read, such as the
+    holder of an announcement byte. A caller that signals the owner captures
+    it instead. *)
+
 val lease_file_present :
   Host_config.base_path_lease_root -> base_path:string -> (bool, base_path_lock_rejection) result
 (** Whether the lease file of [base_path] is there for the effective user,

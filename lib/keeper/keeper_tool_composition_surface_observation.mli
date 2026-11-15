@@ -8,6 +8,11 @@
     request reaches a durable terminal status. [result_of_execution] turns the
     node results of an execution, or its failure, into the tool result.
     [Keeper_tool_composition_surface] includes this module. *)
+
+val evidence_committed_event_type : string
+(** The SSE [type] [observe_node_result] broadcasts once a node's row is
+    committed. The TUI observer recognises the event by this value. *)
+
 val observe_node_result :
   ?on_receipt_committed:(Ids.Execution_id.t -> unit) ->
   composition_tool:string ->

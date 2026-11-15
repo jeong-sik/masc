@@ -79,7 +79,12 @@ let visible filter (event : Observer.event) =
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
-          true)
+          true
+      (* A skill node's tool call is already its own action row: the handler
+         that ran it sent a [keeper_tool_call]. This frame says the call log
+         committed that row, the way a memory journal row follows a memory
+         write. *)
+      | Observer.Keeper_tool_call_evidence_committed _ -> false)
 
 (* Trimming the ring by arrival alone let one class of event evict every
    other. [acting_retained_entries] was sized against a feed of about four
@@ -105,7 +110,7 @@ let retained_as_action (event : Observer.event) =
   match event with
   | Observer.Keeper_turn_observation _ -> true
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
-  | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+  | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
@@ -443,6 +448,7 @@ let actor_of_event ~traces (event : Observer.event) =
   | Observer.Agent_core e -> named (agent_core_owner ~traces e)
   | Observer.Keeper_heartbeat h -> Actor_named h.Observer.hb_keeper
   | Observer.Keeper_tool_call c -> Actor_named c.Observer.kt_keeper
+  | Observer.Keeper_tool_call_evidence_committed e -> Actor_named e.Observer.ce_keeper
   | Observer.Keeper_turn_complete t -> Actor_named t.Observer.tc_keeper
   | Observer.Keeper_turn_observation o -> Actor_named o.Observer.to_keeper
   | Observer.Keeper_composite_changed { keeper; _ }
@@ -482,8 +488,12 @@ let actor_of_event ~traces (event : Observer.event) =
       | Masc.Workspace_dataset_event.Dashboard_observation _
       | Masc.Workspace_dataset_event.Lane_addons _ )
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
-  | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
-      Actor_server
+  | Observer.Snapshot _ | Observer.Execution_snapshot -> Actor_server
+  (* Only the type name of an untaught event is kept, so who sent it is
+     unknown. [Actor_server] claimed an author the frame never named:
+     [keeper_tool_call_evidence_committed] drew under it while its frame
+     named the Keeper. *)
+  | Observer.Other _ -> Actor_unnamed
 
 (* The EVENT column's word for any event, the sibling of {!actor_of_event}
    for the other measured column. [row_of_event] reads its label here, so the
@@ -506,6 +516,7 @@ let label_of_event ~ko (event : Observer.event) =
           in
           if skill then say "스킬 \xc2\xb7 " "skill \xc2\xb7 " ^ word else word
       | None -> if skill then say "스킬 호출" "skill call" else say "도구 호출" "tool call")
+  | Observer.Keeper_tool_call_evidence_committed _ -> say "호출 기록" "call log"
   | Observer.Keeper_turn_complete _ -> say "턴 완료" "turn done"
   | Observer.Keeper_composite_changed _ -> "composite"
   | Observer.Keeper_metrics_appended _ -> say "지표" "metrics"
@@ -611,6 +622,22 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
           (match Option.bind c.Observer.kt_duration_ms elapsed_text with
            | Some text -> c.Observer.kt_tool ^ " \xc2\xb7 " ^ text
            | None -> c.Observer.kt_tool)
+      }
+  (* Quiet: the call's outcome is on its [keeper_tool_call] row. The detail
+     names what tells one node of a run from the next: the tool, the skill
+     tool and the node. The run id stays in the event evidence; a UUID would
+     take the rest of the cell. *)
+  | Observer.Keeper_tool_call_evidence_committed e ->
+      { at
+      ; actor = Actor_named e.Observer.ce_keeper
+      ; glyph = Quiet
+      ; label
+      ; detail =
+          String.concat " \xc2\xb7 "
+            [ e.Observer.ce_tool
+            ; e.Observer.ce_composition_tool
+            ; Masc.Keeper_tool_plan.Node_id.to_string e.Observer.ce_node_id
+            ]
       }
   | Observer.Keeper_turn_complete t ->
       (* Each part says only itself; the separator belongs to the join. They
@@ -816,7 +843,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
       { at; actor = Actor_server; glyph = Quiet; label
       ; detail = Masc.Dashboard_event_slices.execution_snapshot_type }
   | Observer.Other _ ->
-      { at; actor = Actor_server; glyph = Attention; label; detail = "" }
+      { at; actor = Actor_unnamed; glyph = Attention; label; detail = "" }
 
 (* The screen draws entries, not bare events. Taking the entry means there is
    no clock argument at the call site to hand in the wrong value. *)
@@ -1007,6 +1034,9 @@ let member_of_event ~traces (event : Observer.event) =
             ; output = c.Observer.kt_tool_output_preview
             } )
   | Observer.Keeper_turn_complete t -> Some (t.Observer.tc_keeper, Member_settle t)
+  (* The commit of a skill node's row, not a call: the call is a member
+     through its own [keeper_tool_call]. *)
+  | Observer.Keeper_tool_call_evidence_committed _
   (* Identity for the fold's session table, read before members are filed
      ([fold_chunks]); not a member itself. *)
   | Observer.Keeper_turn_observation _
@@ -1182,7 +1212,7 @@ let observation_of_event (event : Observer.event) =
   match event with
   | Observer.Keeper_turn_observation o -> Some o
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
-  | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+  | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
   | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
@@ -1326,7 +1356,7 @@ let lane_fold_key (event : Observer.event) =
   | Observer.Lane_resource r ->
       Some (r.Observer.lr_package, r.Observer.lr_lifecycle, r.Observer.lr_detail)
   | Observer.Agent_core _ | Observer.Keeper_heartbeat _
-  | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+  | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
   | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _
   | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
   | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _
@@ -1519,7 +1549,7 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
               ; _
               }
           | Observer.Keeper_heartbeat _
-          | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
+          | Observer.Keeper_tool_call _ | Observer.Keeper_tool_call_evidence_committed _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_turn_observation _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _
           | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _
@@ -1603,6 +1633,19 @@ let evidence_fields ~ko (entry : entry) =
       ; field "Tool use ID" call.kt_tool_use_id
       ; some (say "입출력" "Input/output") (say "아래는 보낸 쪽이 가린 관측 · 전체 내용은 보장되지 않음" "producer-redacted observations below; full payload not guaranteed")
       ] @ schedule_fields
+  | Observer.Keeper_tool_call_evidence_committed e ->
+      [ some (say "출처" "Source")
+          (Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type
+           ^ say " 관찰 이벤트" " observer event")
+      ; some "Keeper" e.ce_keeper
+      ; some (say "도구 이름" "Tool name") e.ce_tool
+      ; some (say "스킬 도구" "Skill tool") e.ce_composition_tool
+      ; some "Composition run ID"
+          (Masc.Keeper_tool_plan.Composition_run_id.to_string e.ce_run_id)
+      ; some "Composition node ID" (Masc.Keeper_tool_plan.Node_id.to_string e.ce_node_id)
+      ; some (say "입출력" "Input/output") (say "이 관찰 이벤트에 실려 오지 않음" "not carried by this observer event")
+      ; some (say "호출 근거" "Call evidence") (say "이 이벤트는 도구 호출 그 자체가 아님" "this event is not an exact tool invocation")
+      ]
   | (Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _ | Observer.Dataset_changed _ | Observer.Gate_connector_changed _ | Observer.Keeper_event_queue_changed _ | Observer.Board_changed _ | Observer.Approval_change _ | Observer.Keeper_heartbeat _ | Observer.Keeper_turn_complete _ | Observer.Keeper_turn_observation _ | Observer.Keeper_composite_changed _ | Observer.Keeper_metrics_appended _ | Observer.Keeper_chat_appended _ | Observer.Keeper_memory_journal_appended _ | Observer.Keeper_runtime_journal_appended _ | Observer.Keeper_chat_stream_frame _ | Observer.Keeper_turn_stream_frame _ | Observer.Keeper_waiting_inventory_changed _ | Observer.Keeper_async_requests_changed _ | Observer.Keeper_skill_activations_changed _ | Observer.Keeper_roster_change _ | Observer.Keeper_turn_changed _ | Observer.Fusion_run_status _ | Observer.Lane_resource _ | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _) as event -> let row = row_of_event ~ko ~at:entry.ae_at ~duration_ms:None event in
       [ some (say "출처" "Source") (say "관찰 이벤트" "observer event")
       ; some (say "이벤트" "Event") row.label

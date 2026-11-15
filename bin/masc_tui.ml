@@ -24999,6 +24999,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Masc_tui_observer.Agent_core _
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
+               | Masc_tui_observer.Keeper_tool_call_evidence_committed _
                | Masc_tui_observer.Keeper_turn_complete _
                | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _
@@ -25075,6 +25076,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      _ }
                | Masc_tui_observer.Keeper_heartbeat _
                | Masc_tui_observer.Keeper_tool_call _
+               (* The Changes pane reads again on the skill tool's own
+                  return, not on each of its nodes. *)
+               | Masc_tui_observer.Keeper_tool_call_evidence_committed _
                | Masc_tui_observer.Keeper_turn_complete _
                | Masc_tui_observer.Keeper_turn_observation _
                | Masc_tui_observer.Keeper_composite_changed _ | Masc_tui_observer.Keeper_metrics_appended _

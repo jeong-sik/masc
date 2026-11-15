@@ -403,6 +403,85 @@ let test_a_fusion_status_row_names_the_owning_keeper () =
   check string "detail carries status and run id"
     "completed \xc2\xb7 kmsg-f04701e2" row.Acting.detail
 
+(* One composition node's committed row with every field
+   [Keeper_tool_composition_surface_observation.observe_node_result] writes. *)
+let skill_node_frame ~keeper ~run_id ~tool ~node ~ts =
+  Printf.sprintf
+    "data: {\"type\":\"keeper_tool_call_evidence_committed\",\"name\":\"%s\",\
+     \"tool_name\":\"%s\",\"composition_run_id\":\"%s\",\"composition_node_id\":\"%s\",\
+     \"composition_tool\":\"keeper_compose_triage\",\"composition_execution\":\"inline\",\
+     \"composition_tool_kind\":\"composition\",\"parent_tool_use_id\":\"toolu_parent\",\
+     \"turn\":41,\"execution_id\":\"exec-%s\",\"duration_ms\":12.5,\
+     \"disposition\":\"completed\",\"wire_outcome\":\"ok\",\"result_bytes\":230,\
+     \"truncated_to\":null,\"planned_index\":0,\"batch_index\":0,\"batch_size\":1,\
+     \"execution_mode\":\"serial\",\"ts_unix\":%.2f,\
+     \"tool_use_id\":\"composition-skill:%s\"}\n\n"
+    keeper tool run_id node node ts node
+
+(* The issue's screen (#38884): seven of these in one second drew seven
+   identical rows under "server" with an empty detail, because the frame was
+   kept as a type name only. Fed through the decoder as the server writes
+   them, each row names its Keeper and tells its node from the others. Each
+   node's call already has its own [keeper_tool_call] row, so these are the
+   call log's commits: shown under Everything, not counted as actions. *)
+let test_seven_skill_nodes_in_one_second_draw_seven_distinct_rows () =
+  let triage_run = "019a8c3e-5b2d-7f41-8a6c-3d9e0b1f2a47" in
+  let release_run = "019a8c3e-5b2e-7c02-9b13-6e0f4a2d8c55" in
+  let nodes =
+    [ ("triage-keeper", triage_run, "read_file", "fetch")
+    ; ("triage-keeper", triage_run, "grep", "scan")
+    ; ("triage-keeper", triage_run, "masc_board_post", "report")
+    ; ("triage-keeper", triage_run, "read_file", "recheck")
+    ; ("release-keeper", release_run, "gh_pr_view", "inspect")
+    ; ("release-keeper", release_run, "read_file", "fetch")
+    ; ("release-keeper", release_run, "masc_board_post", "report")
+    ]
+  in
+  let reader = Observer.create () in
+  let events =
+    List.mapi
+      (fun index (keeper, run_id, tool, node) ->
+        skill_node_frame ~keeper ~run_id ~tool ~node
+          ~ts:(1789000123.05 +. (0.1 *. float_of_int index)))
+      nodes
+    |> List.concat_map (Observer.feed reader)
+    |> List.filter_map (fun (delivery : Observer.delivery) ->
+           match delivery.decoded with
+           | Observer.Event event -> Some event
+           | Observer.Undecodable _ -> None)
+  in
+  let rows =
+    List.map
+      (fun event ->
+        Acting.keeper_row_of_entry ~ko:false ~traces:[] ~duration_ms:None
+          { Acting.ae_at = 1789000123.9; ae_event = event })
+      events
+  in
+  let drawn filter = List.length (List.filter (Acting.visible filter) events) in
+  check int "turns draws none of them" 0 (drawn Acting.Turns);
+  check int "actions draws none of them" 0 (drawn Acting.Actions);
+  check int "everything draws all seven" (List.length nodes) (drawn Acting.Everything);
+  check (list actor) "each row names the Keeper its frame names"
+    (List.map (fun (keeper, _, _, _) -> Acting.Actor_named keeper) nodes)
+    (List.map (fun row -> row.Acting.actor) rows);
+  (* Both Keepers ran the same skill, so a node's detail can repeat across
+     them; the Keeper beside it is what tells those two rows apart. *)
+  check int "no two rows say the same thing" (List.length nodes)
+    (List.length
+       (List.sort_uniq compare
+          (List.map (fun row -> (row.Acting.actor, row.Acting.detail)) rows)))
+
+(* An untaught type keeps only its name, so it cannot say who sent it; it is
+   not filed with the pushes the server sends about itself. *)
+let test_an_untaught_type_names_no_author () =
+  let untaught = Observer.Other "brand_new_push" in
+  check actor "the event names no one" Acting.Actor_unnamed
+    (Acting.actor_of_event ~traces:[] untaught);
+  check actor "the flat row agrees" Acting.Actor_unnamed
+    (Acting.keeper_row_of_entry ~ko:false ~traces:[] ~duration_ms:None
+       { Acting.ae_at = 100.; ae_event = untaught })
+      .Acting.actor
+
 let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
   let stream index =
     Observer.Keeper_chat_stream_frame
@@ -1175,6 +1254,10 @@ let () =
             test_a_stream_frame_draws_its_keeper_and_what_it_was
         ; test_case "a fusion status row names the owning keeper" `Quick
             test_a_fusion_status_row_names_the_owning_keeper
+        ; test_case "seven skill nodes in one second draw seven distinct rows" `Quick
+            test_seven_skill_nodes_in_one_second_draw_seven_distinct_rows
+        ; test_case "an untaught type names no author" `Quick
+            test_an_untaught_type_names_no_author
         ; test_case "a long reply does not evict the log it streams into" `Quick
             test_a_long_reply_does_not_evict_the_log_it_streams_into
         ; test_case "the old arrival trim would have lost them" `Quick

@@ -3,7 +3,7 @@ rfc: "lane-row-offers-actions-filled-from-its-own-fields"
 title: "lane 결과 행은 자기 값으로 채운 동작을 내고, 사람은 남은 칸만 채운다"
 status: Active
 created: 2026-11-13
-updated: 2026-11-13
+updated: 2026-11-15
 author: claude
 supersedes: []
 superseded_by: null
@@ -233,7 +233,16 @@ readings 도 같은 경로 읽기를 쓴다. readings 가 값을 못 내는 이�
   - 필수 칸이 없는 갈래가 하나뿐이면, 빈 처음 값도 그 갈래의 값이라 그 갈래로 열린다. 퀴즈 0.3.3 은 모든 갈래가 `kind` 를 요구해서 해당하지 않는다.
   - 갈래가 하나뿐이면 고르는 칸 없이 그 갈래로 연다.
 - 갈래 모드는 양식 자신의 뿌리에만 켜진다. 배열 항목을 고치는 안쪽 양식과 그 밖의 `oneOf` 노드는 JSON 칸 하나다.
-- 다른 양식(Fusion 실행, 설치 바인딩, Records) 가운데 뿌리가 `oneOf` 인 것은 없다. 설치 양식은 바인딩 schema 를 `binding` 칸 안에 넣는다.
+- Fusion 실행과 Records 양식은 뿌리가 `oneOf` 가 아니다.
+- 설치 양식의 뿌리는 `installation_id`·`run_id`·`binding` 세 칸을 가진 닫힌 object 다. 바인딩 schema 는 `binding` 칸의 schema 다.
+  - 바인딩 schema 가 properties 없는 `{"type":"object","oneOf":[…]}` 이면 `binding` 은 뿌리 아래의 `oneOf` 노드다. 그대로 두면 JSON 칸 하나가 된다. `fusion-compute` 의 설치 양식이 그랬다(#52310).
+  - 설치 양식은 그런 바인딩의 뿌리를 갈래마다 하나씩 만들어 `oneOf` 로 묶는다. 갈래 X 의 뿌리는 `binding` 칸의 schema 만 X 로 바꾼 같은 object 다.
+  - 묶은 뿌리와 원래 뿌리는 같은 값을 받는다. `installation_id`·`run_id` 는 뿌리 갈래마다 같다. 그래서 값이 뿌리 갈래 하나에만 맞는 것은 `binding` 이 바인딩 갈래 하나에만 맞는 것과 같다.
+  - 묶으면 갈래를 품던 `oneOf` 노드가 없어진다. 그래서 그 노드가 `type`·`oneOf`·`title`·`description` 만 가지고, 갈래가 모두 object 일 때만 묶는다. 노드가 다른 조건(`enum`, `const` 등)을 가지거나 object 아닌 갈래가 있으면 묶은 뿌리가 다른 값을 받는다. 그런 바인딩은 지금처럼 JSON 칸 하나다.
+  - 뿌리 갈래의 이름은 바인딩 갈래의 이름이다(§1.5 의 순서). 뿌리 갈래의 `title` 로 싣는다.
+  - 양식은 위 규칙대로 움직인다. 첫 칸에서 갈래를 고르고, 고른 갈래의 칸만 편다. 갈래를 바꾸면 `installation_id`·`run_id` 도 새로 쓴다.
+  - 묶은 뿌리는 양식 안에만 있다. 초안 TOML 의 모양은 그대로다. 저장할 때 host 가 `binding` 을 패키지의 바인딩 schema 로 검사한다(`lib/lane_addon/lane_addon_config.ml` 181행).
+  - properties 와 `oneOf` 를 같이 가진 바인딩 schema 는 지금처럼 properties 를 칸으로 편다. 바인딩 갈래 안쪽의 `oneOf` 는 JSON 칸 하나다.
 
 ### 2.6 TUI 행 동작
 
@@ -287,6 +296,7 @@ readings 도 같은 경로 읽기를 쓴다. readings 가 값을 못 내는 이�
 층마다 PR 하나다. L1~L3 이 병합되어도 행 동작을 선언한 패키지가 없으므로 바뀌는 동작은 없다. L4 가 처음으로 쓴다.
 L1~L4 를 스택 #51852 로 열었다. 연달아 병합해, 부르는 곳 없는 층이 오래 남지 않게 한다.
 L3 은 lib(L3a)와 TUI(L3b) 둘로 나눴다. 한 PR 이 고치는 파일이 열 개를 넘지 않게 했다.
+L6 은 2026-11-15 에 더했다. L1~L4 와 따로 열고, 설치 양식만 바꾼다.
 
 | 층 | PR | 범위 | 확인 |
 |---|---|---|---|
@@ -296,6 +306,7 @@ L3 은 lib(L3a)와 TUI(L3b) 둘로 나눴다. 한 PR 이 고치는 파일이 열
 | L3b | #51876 | TUI 행 동작: 동작 목록, 대상 instance, 보낼 때 행 다시 읽기, 패키지의 동작 도구 이름 | 보낸 요청의 `action` 과 instance, 바뀐 행의 거절 |
 | L4 | #51892 | operator-quiz 0.3.3, 안내서 | `addons/tests` 의 schema·projection 시험, 라이브에서 이의 한 번 |
 | L5 | | 대시보드 동작 판 (방향) | 따로 RFC 또는 PR |
+| L6 | 이슈 #52310 | TUI 설치 양식: 갈래 바인딩의 뿌리를 갈래마다 편다(§2.5) | 초안 TOML 의 `binding` 이 고른 갈래의 값, 갈래를 바꾼 뒤의 초안, 갈래 없는 바인딩의 초안이 그대로 |
 
 ## 4. hard cut
 
@@ -334,6 +345,12 @@ masc 규칙대로 화면 글과 배치는 시험하지 않는다. 보낸 요청,
   - 편집 키와 붙여 넣기 뒤에도 잠긴 값이 그대로 나간다.
   - 갈래를 바꾸면 이전 갈래의 값이 보낸 값에 없다. 고른 갈래와 다른 갈래의 값은 거절한다.
   - 음수 갈래, 마지막 뒤 갈래, 두 번 잠근 칸은 열 때 거절한다.
+- TUI 설치 양식(L6)
+  - 갈래 바인딩에서 고른 갈래의 값이 초안 TOML 의 `binding` 이 된다. 갈래를 고르기 전에는 초안이 나오지 않는다.
+  - 갈래를 바꾸면 이전 갈래에서 쓴 값이 초안에 없다. `installation_id`·`run_id` 도 다시 써야 초안이 나온다.
+  - 바인딩 갈래의 칸 이름이 `installation_id` 여도 뿌리의 칸과 섞이지 않는다.
+  - 갈래가 하나뿐인 바인딩은 고르지 않고 채운다. properties 와 `oneOf` 를 같이 가진 바인딩은 지금처럼 칸으로 채운다.
+  - `oneOf` 노드가 다른 조건을 가지거나 object 아닌 갈래가 있는 바인딩은 지금처럼 JSON 칸 하나로 채운다.
 - TUI 행 동작: 보낸 요청의 `action` 이 `{"kind":"dispute","ask_id":<행 값>,"question_id":<행 값>,"note":<입력>}` 이고, instance 가 그 행을 낸 instance 다. 행 값이 바뀌거나 행이 사라진 뒤 보내면 요청이 나가지 않는다.
 - 패키지: 0.3.3 schema 가 세 동작을 받고 `questions` 가 달린 dispute 를 거절한다. 채점 요청이 기다리는 질문 행에는 `dispute` 키가 없다. projection 과 `Flow.dispute` 가 같은 함수로 판단한다.
 
@@ -342,6 +359,9 @@ masc 규칙대로 화면 글과 배치는 시험하지 않는다. 보낸 요청,
 - **TUI 가 행 값을 클립보드에 담아 주기.** 복사 한 번이 줄 뿐, 붙여 넣기와 `kind` 고르기는 남는다. 대시보드에는 쓸 수 없다.
 - **동작 schema 를 lane.toml 로 옮기기.** 설치 때 행 동작을 판정할 수 있다. 대신 worker 계약(`lane_act` 의 `inputSchema`)을 바꿔야 한다. 이 RFC 의 문제를 푸는 데는 필요 없다.
 - **TUI 와 대시보드가 각자 판정.** 같은 패키지를 두 화면이 다르게 판정할 수 있다.
+- **양식이 뿌리 아래의 `oneOf` 노드도 갈래로 편집하기(L6).** 설치 양식 하나 때문에 양식의 칸 목록을 나무로 바꿔야 하고, 갈래 고르기 칸이 노드마다 생긴다. 설치 양식의 뿌리를 갈래마다 펴면 양식은 그대로다.
+- **패키지가 바인딩 schema 맨 위에 properties 를 같이 적기(L6).** TUI 에 칸은 나온다. 대신 패키지가 공통 칸을 뿌리와 갈래마다 다시 적고, 고른 갈래에 없는 칸도 화면에 나온다. 패키지마다 해야 한다.
+- **설치 양식을 두 단계로 나누기(L6).** id 를 먼저 받고 바인딩을 따로 받으면 바인딩 schema 가 양식의 뿌리가 된다. 대신 갈래 없는 패키지도 확인 화면을 두 번 거친다.
 
 ## 7. 사용자 결정
 
@@ -362,3 +382,4 @@ masc 규칙대로 화면 글과 배치는 시험하지 않는다. 보낸 요청,
 - 대시보드 바인딩 양식(`lane-binding-form.ts`)을 동작 schema 에 그대로 쓸 수 있는지. 동작 schema 는 닫힌 object 만 받는다(`Closed_objects`).
 - 라이브 worker 가 알리는 schema 로 낸 판정과 실제 TUI 화면의 행 동작 목록. L4(퀴즈 0.3.3) 전에는 행 동작을 선언한 패키지가 없다. masc 규칙대로 화면 글과 배치는 시험하지 않는다.
 - 라이브 서버가 이 RFC 를 쓰는 시점의 operator-quiz 설치판. 이 RFC 는 저장소의 0.3.2(`addons/operator-quiz/lane.toml`)를 기준으로 했다.
+- 실제 TUI 화면에서 갈래 바인딩 패키지(`fusion-compute`)의 설치 양식을 눌러 본 결과. L6 은 양식이 내는 초안만 시험한다.

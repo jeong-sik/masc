@@ -10,12 +10,6 @@ module Reading = Masc.Tui_decode
 
 let check_bool = Alcotest.(check bool)
 let check_int = Alcotest.(check int)
-let readings =
-  [ "running", Reading.Health_running
-  ; "idle", Reading.Health_idle
-  ; "failing", Reading.Health_failing
-  ; "offline", Reading.Health_offline
-  ]
 
 let test_the_column_legend_explains_every_letter_the_cell_draws () =
   let contains haystack needle =

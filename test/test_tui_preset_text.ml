@@ -5,17 +5,6 @@ module D = Masc.Tui_decode
 module Text = Masc_tui_preset_text
 module Types = Masc_tui_types
 
-let morning : D.preset_manifest =
-  { D.pm_name = "morning"
-  ; pm_description = "before the campaign"
-  ; pm_created_at = "2026-09-03T10:26:08Z"
-  ; pm_override_count = 1
-  ; pm_override_keys = [ "keeper" ]
-  ; pm_keepers = [ "analyst"; "spruce" ]
-  ; pm_assignment_count = 12
-  ; pm_lane_count = 4
-  }
-
 let report ~skipped ~runtime : D.preset_restore_report =
   { D.prr_restored = "morning"
   ; prr_autosave = "_autosave"

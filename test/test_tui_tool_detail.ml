@@ -39,8 +39,6 @@ let test_a_value_is_painted_after_it_is_made_safe () =
       (String.contains row '\027')
   | _ -> fail "expected one row"
 
-let fold = { Tool_detail.fold_rows = 8; fold_note = Printf.sprintf "+%d more" }
-
 let test_a_payload_that_does_not_parse_is_terminal_safe () =
   let escape = "\027[31m" in
   check bool "an escape does not survive a payload that is not JSON" false

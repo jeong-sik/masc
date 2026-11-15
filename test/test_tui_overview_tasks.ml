@@ -7,11 +7,6 @@ open Alcotest
 module Tasks = Masc_tui_overview_tasks
 module Tui_decode = Masc.Tui_decode
 
-let now =
-  match Masc_domain.parse_iso8601_opt "2026-09-23T12:00:00Z" with
-  | Some at -> at
-  | None -> Alcotest.fail "fixture clock does not parse"
-
 let row id status : Tui_decode.task =
   { id; title = "title of " ^ id; status; priority = 2; goal_ids = [] }
 
@@ -26,23 +21,6 @@ let awaiting submitted_at =
     ; verification_id = "v-1"
     }
 
-let domain_todo id created_at : Masc_domain.task =
-  { Masc_domain.id
-  ; title = "title of " ^ id
-  ; description = ""
-  ; task_status = Masc_domain.Todo
-  ; priority = 3
-  ; files = []
-  ; created_at
-  ; created_by = Some "producer"
-  ; predecessor_task_id = None
-  ; contract = None
-  ; execution_links = Masc_domain.no_execution_links
-  ; handoff_context = None
-  ; cycle_count = 0
-  ; skills = []
-  }
-
 (* Backlog order, oldest first, the way the loader hands it over: the todo
    rows come before the held ones, which is how they filled the section. *)
 let tasks =
@@ -56,30 +34,6 @@ let tasks =
       (Masc_domain.Claimed
          { assignee = "fixture-runner"; claimed_at = "2026-09-23T11:59:00Z" })
   ]
-
-let backlog =
-  Tasks.backlog
-    [ domain_todo "task-1501" "2026-09-11T12:00:00Z"
-    ; domain_todo "task-1502" "2026-09-11T13:00:00Z"
-    ; domain_todo "task-1519" "2026-09-12T00:00:00Z"
-    ]
-
-(* Seconds as a plain count, so the test reads the arithmetic rather than
-   the renderer's unit choice. *)
-let seconds_text seconds = string_of_int seconds ^ "s"
-
-(* What the renderer draws, without its colours: a task row is its age and
-   id, every other line its summary text. *)
-let drawn ~height ~selected =
-  Tasks.lines ~height ~selected tasks backlog
-  |> List.map (fun line ->
-         match line with
-         | Tasks.Task_row { task; _ } ->
-             Tasks.age_text ~age_text:seconds_text ~now (Tasks.held_since task)
-             ^ " " ^ task.id
-         | Tasks.Nothing_active | Tasks.Todo_backlog _ ->
-             Option.value ~default:"<no text>"
-               (Tasks.summary_text ~age_text:seconds_text ~now line))
 
 let selected_id tasks ~selected =
   Option.map

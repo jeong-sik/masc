@@ -8,9 +8,9 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { Callout, ProblemNote, Retry, fell, idTail, sessionEndedWords } from './notes'
 import type { Failure } from './notes'
-import { MadeArea, MakeForm, Outcome, roleWords } from './invite-make'
+import { MadeArea, MakeForm, Outcome, defaultRole, roleWords } from './invite-make'
 import type { InvitesModel, ListView, Revoke } from './invites'
-import type { Invite, InviteStatus, Issuer } from './invites-wire'
+import type { Invite, InviteRole, InviteStatus, Issuer } from './invites-wire'
 import { When } from './token-rows'
 
 const headingId = 'invites-heading'
@@ -22,7 +22,7 @@ const forbidden = 403
 /** What an invitation's status says, and whether a person can still join
     through it or the revoke of it is still to finish: the two the Admin
     may revoke. */
-function statusWords(status: InviteStatus): readonly [string, boolean] {
+function statusWords(status: InviteStatus['kind']): readonly [string, boolean] {
   switch (status) {
     case 'open': return ['기다리는 중', true]
     case 'revocation_pending': return ['취소 마무리 필요', true]
@@ -34,12 +34,13 @@ function statusWords(status: InviteStatus): readonly [string, boolean] {
 }
 
 function StatusLine({ invite }: { readonly invite: Invite }): VNode {
-  switch (invite.status) {
+  const { status } = invite
+  switch (status.kind) {
     case 'open': return html`<p><${When} ms=${invite.expiresAtMs} />까지 한 사람이 이 링크로 들어올 수 있어요.</p>`
     case 'revocation_pending': return html`<p>취소가 기록되지 않았어요. 이 링크로는 아무도 들어올 수 없어요. 한 번 더 취소하면 마무리돼요.</p>`
     case 'expired': return html`<p><${When} ms=${invite.expiresAtMs} />에 만료됐어요.</p>`
     case 'revoked': return html`<p>취소한 초대예요.</p>`
-    case 'consumed': return html`<p>이 링크로 들어온 사용자: <span class="mono">${idTail(invite.joined ?? '')}</span></p>`
+    case 'consumed': return html`<p>이 링크로 들어온 사용자: <span class="mono">${idTail(status.joined)}</span></p>`
     case 'unrecognised': return html`<p>서버가 알려 준 상태를 이 화면은 몰라요.</p>`
   }
 }
@@ -102,7 +103,7 @@ function RevokeArea({ invite, revoke, model, title, line, sure, setSure }: {
   }
   const id = `invite-revoke-${invite.id}`
   const backId = `invite-back-${invite.id}`
-  const first = invite.status === 'revocation_pending' ? '취소 마무리' : '초대 취소'
+  const first = invite.status.kind === 'revocation_pending' ? '취소 마무리' : '초대 취소'
   return html`
     <p class="actions">
       <button ref=${button} id=${id} type="button" aria-disabled=${busy} aria-labelledby=${`${id} ${title}`} aria-describedby=${line} onClick=${press}>
@@ -114,7 +115,7 @@ function RevokeArea({ invite, revoke, model, title, line, sure, setSure }: {
 }
 
 function InviteRow({ invite, model, me }: { readonly invite: Invite; readonly model: InvitesModel; readonly me: string }): VNode {
-  const [status, revocable] = statusWords(invite.status)
+  const [status, revocable] = statusWords(invite.status.kind)
   const title = `invite-title-${invite.id}`
   const line = `invite-line-${invite.id}`
   const revoke = model.revoking.value.get(invite.id)
@@ -131,11 +132,11 @@ function InviteRow({ invite, model, me }: { readonly invite: Invite; readonly mo
   return html`
     <li class="row">
       <h3 id=${title} ref=${heading} class="row-title" tabindex="-1">${roleWords(invite.role)[0]} 초대 <span class="mono">${idTail(invite.id)}</span></h3>
-      <p class="chips"><span class=${invite.status === 'open' ? 'chip' : 'chip chip-todo'}>${status}</span></p>
+      <p class="chips"><span class=${invite.status.kind === 'open' ? 'chip' : 'chip chip-todo'}>${status}</span></p>
       <${StatusLine} invite=${invite} />
       <${IssuerLine} issuer=${invite.issuer} me=${me} />
       ${revocable ? html`<${RevokeArea} invite=${invite} revoke=${revoke} model=${model} title=${title} line=${line} sure=${sure} setSure=${setSure} />` : null}
-      <p id=${line} class="hint" role="status">${rowWords(revoke, sure && revocable, invite.status === 'revocation_pending')}</p>
+      <p id=${line} class="hint" role="status">${rowWords(revoke, sure && revocable, invite.status.kind === 'revocation_pending')}</p>
       ${revocable && (revoke?.kind === 'refused' || revoke?.kind === 'unknown')
         ? html`<${Outcome} key=${revoke.attempts} step="revoke" outcome=${revoke}
             title=${revoke.kind === 'refused' ? '초대를 취소하지 못했어요' : '초대를 취소했는지 알 수 없어요'} />`
@@ -158,24 +159,44 @@ function listWords(view: ListView): string {
   }
 }
 
-/** The alert of a list that could not be read. A list answers 403 only to
-    a person who is not an Admin now, so it says so. */
+/** The alert of a list that could not be read. On a request from this page
+    the list answers 403 only when the browser now holds the session of
+    another account that is not an Admin: this build takes the role from no
+    one, and a disabled account gets 401. */
 function ListProblem({ failure }: { readonly failure: Failure }): VNode {
   const title = '초대를 불러오지 못했어요'
   const { problem, attempts } = failure
   if (problem.kind !== 'refused' || problem.status !== forbidden) return html`<${ProblemNote} title=${title} failure=${failure} />`
   return html`<${Callout} title=${title} attempts=${attempts} reason=${problem.reason}
-    lines=${['서버가 이 계정을 관리자로 보지 않아요.', '다른 관리자가 역할을 바꿨거나 다른 탭에서 다른 계정으로 로그인했다면, 이 화면을 새로 고쳐 주세요.']} />`
+    lines=${['이 브라우저에 지금 로그인한 계정은 관리자가 아니에요.', '다른 탭에서 다른 계정으로 로그인했다면, 이 화면을 새로 고치면 그 계정으로 보여요.']} />`
 }
 
 const byNewest = (a: Invite, b: Invite): number => b.expiresAtMs - a.expiresAtMs
 
 export function InvitesPanel({ model }: { readonly model: InvitesModel }): VNode {
   const view = model.view.value
-  const revoking = model.revoking.value
   const heading = useRef<HTMLHeadingElement>(null)
   const shown = useRef(view.kind)
   const [showClosed, setShowClosed] = useState(false)
+  // The role picked is kept by the panel, which stays while the form comes
+  // and goes with the list, so a list read again does not change the pick.
+  const [role, setRole] = useState<InviteRole>(defaultRole)
+  // The invitations once shown with the open ones stay with them while the
+  // list is on the page, so a row never moves to the closed list under the
+  // focus: one revoked here, or that expired or was used meanwhile, says so
+  // where it was.
+  const keptOpen = useRef(new Set<string>())
+  if (view.kind !== 'read') keptOpen.current.clear()
+  // A row the server no longer lists goes away with its buttons. The focus
+  // then goes to the heading of the panel, not to the body of the page. The
+  // check waits for the effects of the rows, which put it on the title of a
+  // row that stays.
+  const lastFocus = useRef<Element | null>(null)
+  useEffect(() => {
+    const was = lastFocus.current
+    if (was === null || was.isConnected) return
+    queueMicrotask(() => { if (!was.isConnected && fell()) heading.current?.focus() })
+  })
   // A retry that read takes the pressed button away. The focus then goes to
   // the heading of the panel, not to the body of the page.
   useEffect(() => {
@@ -184,13 +205,12 @@ export function InvitesPanel({ model }: { readonly model: InvitesModel }): VNode
     if (before !== view.kind && (before === 'failed' || before === 'read') && fell()) heading.current?.focus()
   }, [view.kind])
   const invites = view.kind === 'read' ? [...view.invites].sort(byNewest) : []
-  // An invitation revoked on this page stays with the open ones, so the row
-  // whose button was pressed says what came of it where the focus is.
-  const current = invites.filter((one) => statusWords(one.status)[1] || revoking.has(one.id))
+  const current = invites.filter((one) => statusWords(one.status.kind)[1] || keptOpen.current.has(one.id))
+  for (const one of current) keptOpen.current.add(one.id)
   const closed = invites.filter((one) => !current.includes(one))
   const me = view.kind === 'waiting' ? '' : view.forUser
   return html`
-    <section aria-labelledby=${headingId}>
+    <section aria-labelledby=${headingId} onFocusIn=${(event: FocusEvent) => { lastFocus.current = event.target instanceof Element ? event.target : null }}>
       <h2 id=${headingId} ref=${heading} tabindex="-1">초대 링크</h2>
       <p class="hint">관리자만 보는 칸이에요. 링크를 받은 사람이 GitHub이나 Google로 로그인하면 이 서버에 들어와요.</p>
       <p class="hint" role="status">${listWords(view)}</p>
@@ -205,7 +225,7 @@ export function InvitesPanel({ model }: { readonly model: InvitesModel }): VNode
             ${current.length === 0
               ? html`<p>지금 열린 초대가 없어요.</p>`
               : html`<ul class="rows">${current.map((one) => html`<${InviteRow} key=${one.id} invite=${one} model=${model} me=${me} />`)}</ul>`}
-            <${MakeForm} model=${model} />
+            <${MakeForm} model=${model} role=${role} setRole=${setRole} />
           `
         : null}
       <${MadeArea} model=${model} heading=${headingId} />

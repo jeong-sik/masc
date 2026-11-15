@@ -18,7 +18,7 @@ const hour = 3_600_000
 const expiresAt = 1_763_086_400_000
 
 const invite = (id: string, extra: Partial<Invite> = {}): Invite =>
-  ({ id, role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: 'open', joined: null, ...extra })
+  ({ id, role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: { kind: 'open' }, ...extra })
 const readView = (invites: readonly Invite[]): ListView => ({ kind: 'read', forUser: 'usr_first', invites })
 const showing = (view: ListView, making: Make = { kind: 'idle' }, revoking: ReadonlyMap<string, Revoke> = new Map()): InvitesModel => ({
   view: signal(view),
@@ -29,6 +29,7 @@ const showing = (view: ListView, making: Make = { kind: 'idle' }, revoking: Read
   make: vi.fn(() => Promise.resolve()),
   forget: vi.fn(),
   revoke: vi.fn(() => Promise.resolve()),
+  stop: vi.fn(),
 })
 const panelOf = (model: InvitesModel) =>
   render(html`<main><h1>내 계정</h1><${InvitesPanel} model=${model} /></main>`).container
@@ -45,11 +46,11 @@ describe('the invitations panel', () => {
   const many = [
     invite('inv_open'),
     invite('inv_admin', { role: 'admin', issuer: { kind: 'local_operator' }, expiresAtMs: expiresAt + hour }),
-    invite('inv_held', { status: 'revocation_pending', issuer: { kind: 'admin', userId: 'usr_other' } }),
-    invite('inv_expired', { status: 'expired', expiresAtMs: expiresAt - 2 * hour }),
-    invite('inv_revoked', { status: 'revoked', expiresAtMs: expiresAt - 3 * hour }),
-    invite('inv_used', { status: 'consumed', joined: 'usr_joined', expiresAtMs: expiresAt - 4 * hour }),
-    invite('inv_new_word', { status: 'unrecognised', expiresAtMs: expiresAt - 5 * hour }),
+    invite('inv_held', { status: { kind: 'revocation_pending' }, issuer: { kind: 'admin', userId: 'usr_other' } }),
+    invite('inv_expired', { status: { kind: 'expired' }, expiresAtMs: expiresAt - 2 * hour }),
+    invite('inv_revoked', { status: { kind: 'revoked' }, expiresAtMs: expiresAt - 3 * hour }),
+    invite('inv_used', { status: { kind: 'consumed', joined: 'usr_joined' }, expiresAtMs: expiresAt - 4 * hour }),
+    invite('inv_new_word', { status: { kind: 'unrecognised' }, expiresAtMs: expiresAt - 5 * hour }),
   ]
   const forbiddenProblem = { kind: 'refused', status: 403, reason: 'only an Admin' } as const
   const unreadList: ListView = { kind: 'failed', forUser: 'usr_first', failure: { problem: { kind: 'unreachable' }, attempts: 2 }, next: 'idle' }
@@ -69,7 +70,8 @@ describe('the invitations panel', () => {
     ['while an invitation is revoked', showing(readView([invite('inv_1')]), { kind: 'idle' }, new Map([['inv_1', { kind: 'sending' }]]))],
     ['with a revoke refused', showing(readView([invite('inv_1')]), { kind: 'idle' }, new Map([['inv_1', { kind: 'refused', problem: { kind: 'refused', status: 404, reason: null }, attempts: 1 }]]))],
     ['with a revoke whose end it does not know', showing(readView([invite('inv_1')]), { kind: 'idle' }, new Map([['inv_1', { kind: 'unknown', problem: { kind: 'unreachable' }, attempts: 1 }]]))],
-    ['with an invitation revoked here', showing(readView([invite('inv_1', { status: 'revoked' })]), { kind: 'idle' }, new Map([['inv_1', { kind: 'done', before: false }]]))],
+    ['with an invitation revoked here', showing(readView([invite('inv_1', { status: { kind: 'revoked' } })]), { kind: 'idle' }, new Map([['inv_1', { kind: 'done', before: false }]]))],
+    ['with a revoke refused of an invitation closed since', showing(readView([invite('inv_1', { status: { kind: 'revoked' } })]), { kind: 'idle' }, new Map([['inv_1', { kind: 'refused', problem: { kind: 'refused', status: 404, reason: null }, attempts: 1 }]]))],
     ['while the browser leaves', showing({ kind: 'leaving', forUser: 'usr_first' }, { kind: 'leaving' })],
   ]
   const each = <T>(look: (container: Element) => T) => steps.map(([name, model]) => {
@@ -143,10 +145,51 @@ describe('the invitations panel', () => {
     container.querySelector<HTMLButtonElement>('#invite-revoke-inv_1')?.focus()
     await act(() => {
       revoking.value = new Map([['inv_1', { kind: 'done', before: false }]])
-      view.value = readView([invite('inv_1', { status: 'revoked' })])
+      view.value = readView([invite('inv_1', { status: { kind: 'revoked' } })])
     })
     const open = [...container.querySelectorAll('.rows:not(#invites-closed) > li h3')].map((one) => one.id)
     expect([open, document.activeElement?.id, container.querySelector('#invites-closed')]).toEqual([['invite-title-inv_1'], 'invite-title-inv_1', null])
+  })
+
+  it('keeps a row that closed elsewhere with the open ones while the list is on the page, and puts the focus on its title', async () => {
+    const view = signal<ListView>(readView([invite('inv_1'), invite('inv_2')]))
+    const container = panelOf({ ...showing(readView([])), view })
+    container.querySelector<HTMLButtonElement>('#invite-revoke-inv_1')?.focus()
+    await act(() => { view.value = readView([invite('inv_1', { status: { kind: 'expired' } }), invite('inv_2', { status: { kind: 'consumed', joined: 'usr_7' } })]) })
+    const open = [...container.querySelectorAll('.rows:not(#invites-closed) > li h3')].map((one) => one.id)
+    expect([open, document.activeElement?.id]).toEqual([['invite-title-inv_1', 'invite-title-inv_2'], 'invite-title-inv_1'])
+  })
+
+  it('puts the focus on the heading when the row that held it is no longer listed', async () => {
+    const view = signal<ListView>(readView([invite('inv_1'), invite('inv_2')]))
+    const container = panelOf({ ...showing(readView([])), view })
+    container.querySelector<HTMLButtonElement>('#invite-revoke-inv_1')?.focus()
+    await act(() => { view.value = readView([invite('inv_2')]) })
+    await act(() => Promise.resolve())
+    expect(document.activeElement?.id).toBe('invites-heading')
+  })
+
+  it('leaves a focus moved elsewhere where it is when a row closes', async () => {
+    const view = signal<ListView>(readView([invite('inv_1')]))
+    const container = panelOf({ ...showing(readView([])), view })
+    const submit = container.querySelector<HTMLButtonElement>('form button[type=submit]')
+    submit?.focus()
+    await act(() => { view.value = readView([invite('inv_1', { status: { kind: 'revoked' } })]) })
+    await act(() => Promise.resolve())
+    expect([submit !== null, document.activeElement === submit]).toEqual([true, true])
+  })
+
+  it('keeps the role picked when the form comes back with the list', async () => {
+    const view = signal<ListView>(readView([]))
+    const model = { ...showing(readView([])), view }
+    const container = panelOf(model)
+    const admin = container.querySelector<HTMLInputElement>('input[name="invite-role"][value="admin"]')
+    if (admin !== null) fireEvent.click(admin)
+    await act(() => { view.value = unreadList })
+    await act(() => { view.value = readView([]) })
+    const submit = container.querySelector<HTMLButtonElement>('form button[type=submit]')
+    if (submit !== null) fireEvent.click(submit)
+    expect(vi.mocked(model.make).mock.calls).toEqual([['admin']])
   })
 
   it('names every button with what it does and the invitation it is for, and says what a press does', () => {
@@ -176,7 +219,7 @@ describe('the invitations panel', () => {
   })
 
   it('revokes only on a second press, and a step back puts the focus on the button', async () => {
-    const model = showing(readView([invite('inv_1', { status: 'revocation_pending' })]))
+    const model = showing(readView([invite('inv_1', { status: { kind: 'revocation_pending' } })]))
     const container = panelOf(model)
     const button = container.querySelector<HTMLButtonElement>('#invite-revoke-inv_1')
     if (button === null) throw new Error('no revoke button')

@@ -16,7 +16,11 @@ import { When } from './token-rows'
 export const formTitleId = 'invite-new-title'
 const makeTipId = 'invite-make-tip'
 const linkTitleId = 'invite-link-title'
-const defaultRole: InviteRole = 'member'
+export const defaultRole: InviteRole = 'member'
+/** How long an invitation stays open (lib/auth/authz_invite.mli, `lifetime_ms`).
+    The server says the moment only in the answer of a make, and the form
+    says it before the press. */
+const lifetimeHours = 24
 /** The answers of a request about an invitation the page has words for (lib/auth/login_invite_routes.mli). */
 const notFound = 404
 const forbidden = 403
@@ -27,7 +31,7 @@ const forbidden = 403
 export function roleWords(role: InviteRole): readonly [string, string] {
   switch (role) {
     case 'member': return ['구성원', '자기 구독과 Keeper를 써요. 다른 사람을 들이지는 못해요.']
-    case 'admin': return ['관리자', '구성원이 하는 일에 더해 다른 사람을 초대하고, 허용 목록에 계정을 넣고 빼요.']
+    case 'admin': return ['관리자', '구성원이 하는 일에 더해 다른 사람을 초대하고, 허용 목록에 계정을 넣고 빼요. 이 화면에서는 관리자 역할을 거둘 수 없어요.']
   }
 }
 
@@ -44,14 +48,14 @@ function makeWords(making: Make): string {
 }
 
 /** The words of a refusal the page can say more of than that it was refused.
-    A 403 comes of a session another tab replaced as well as of an account
-    that is no longer an Admin, and its answer does not say which. */
+    A 403 on a request from this page comes of a session another tab
+    replaced: its CSRF token is not the one of the session the browser holds
+    now, or that session is of an account that is not an Admin. */
 function refusedWords(status: number, step: 'make' | 'revoke'): readonly string[] | null {
   if (status === forbidden) {
     return [
       '서버가 이 요청을 받지 않았어요.',
-      '다른 탭에서 다시 로그인했다면 이 화면을 새로 고친 뒤 다시 해 주세요.',
-      '그래도 안 되면 이 계정이 지금 관리자가 아닌 것이에요.',
+      '다른 탭에서 다시 로그인했거나 다른 계정으로 로그인했다면, 이 화면을 새로 고친 뒤 다시 해 주세요.',
     ]
   }
   if (status === notFound && step === 'revoke') return ['서버에서 이 초대를 찾지 못했어요. 목록을 다시 불러와요.']
@@ -70,7 +74,7 @@ export function Outcome({ title, step, outcome }: {
   const reason = problem.kind === 'refused' ? problem.reason : null
   if (outcome.kind === 'unknown') {
     const after = step === 'make'
-      ? ['초대가 만들어졌을 수도 있지만, 그 링크는 다시 볼 수 없어요.', '열린 초대에 모르는 새 초대가 보이면 취소하고 다시 만들어 주세요.']
+      ? ['초대가 만들어졌을 수도 있지만, 그 링크는 다시 볼 수 없어요.', '열린 초대에 「만든 사람: 나」인 새 초대가 보이면 그 초대를 취소하고 다시 만들어 주세요.']
       : ['초대가 취소됐을 수도 있어요.', '이 초대의 상태를 보고, 아직 기다리는 중이면 다시 취소해 주세요.']
     return html`<${Callout} title=${title} attempts=${attempts} reason=${reason} lines=${[`${unknownWords(problem)} ${after[0]}`, after[1]]} />`
   }
@@ -115,15 +119,18 @@ function LinkBox({ issued, onDone }: { readonly issued: Issued; readonly onDone:
   `
 }
 
-/** The form that makes a link. The role picked is kept here, so a form
+/** The form that makes a link. The panel keeps the role picked, so a form
     drawn again (a make refused, the list read again) still shows and sends
     what the Admin picked. */
-export function MakeForm({ model }: { readonly model: InvitesModel }): VNode {
+export function MakeForm({ model, role, setRole }: {
+  readonly model: InvitesModel
+  readonly role: InviteRole
+  readonly setRole: (role: InviteRole) => void
+}): VNode {
   const making = model.making.value
   const showing = making.kind === 'issued'
   const busy = making.kind === 'sending' || making.kind === 'leaving'
   const canMake = !busy && !showing
-  const [role, setRole] = useState<InviteRole>(defaultRole)
   const onSubmit = (event: Event): void => {
     event.preventDefault()
     if (canMake) void model.make(role)
@@ -148,7 +155,7 @@ export function MakeForm({ model }: { readonly model: InvitesModel }): VNode {
       <p id=${makeTipId} class="hint">
         ${showing
           ? '아래 링크를 옮기고 「다 옮겼어요」를 누르면 또 만들 수 있어요.'
-          : '링크는 만든 뒤 한 번만 보여요. 한 사람이 한 번 쓸 수 있고, 정해진 때가 지나면 만료돼요.'}
+          : `링크는 만든 뒤 한 번만 보여요. 한 사람이 한 번 쓸 수 있고, ${String(lifetimeHours)}시간 뒤 만료돼요.`}
       </p>
     </form>
   `

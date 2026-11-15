@@ -913,6 +913,80 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(stored?.traceSteps).toMatchObject([{ kind: 'tool', name: 'Read' }])
   })
 
+  it('settles a text reply on the stored row history put in place of the placeholder before the stream ended', async () => {
+    let operationId = ''
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      operationId = opts.operationId
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'answer' })
+      const placeholder = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+      if (!placeholder) throw new Error('missing placeholder')
+      mergeServerHistoryEntries('echo', [{
+        ...placeholder,
+        id: 'stored-reply',
+        text: 'answer',
+        rawText: 'answer',
+        timestamp: '2026-11-13T00:00:00Z',
+        delivery: 'history',
+        streamState: null,
+      }])
+      expect(keeperThreads.value.echo?.some(entry => entry.id === placeholder.id)).toBe(false)
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    expect(keeperActionErrors.value.echo).toBeNull()
+    // The stored row is the server's record of the reply: the send's tail
+    // does not restamp its delivery, time or text.
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant')).toMatchObject([{
+      id: 'stored-reply',
+      text: 'answer',
+      timestamp: '2026-11-13T00:00:00Z',
+      delivery: 'history',
+      streamState: null,
+    }])
+    expect(trackedKeeperChatOperationsForKeeper('echo').some(candidate => candidate.operationId === operationId)).toBe(false)
+  })
+
+  it('still fails a reply that ends with nothing to show on the placeholder history left in place', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+    expect(reply).toMatchObject({ delivery: 'error', streamState: null })
+    expect(keeperActionErrors.value.echo).toBe(reply?.error)
+    expect(keeperActionErrors.value.echo).toBeTruthy()
+  })
+
   it('fails the send when a frame arrives and no row carries its operation', async () => {
     fetchKeeperChatHistory.mockResolvedValue([])
     streamKeeperMessage.mockImplementation(async (

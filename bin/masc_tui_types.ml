@@ -1392,6 +1392,19 @@ type keeper_history_owed = {
   kho_audit : bool;
 }
 
+(* Entering the chat pane owes one history read (#42012). The place that opens
+   the pane starts it; the surface-needs delta starts it for the ways in that
+   do not. The delta can run a loop pass after the opening, when that read has
+   already landed, so it asks whether one started rather than whether one is
+   in flight. *)
+type chat_entry_read =
+  | Chat_entry_unread
+      (** No history read has started for the pane since the delta last saw
+          a frame without it. *)
+  | Chat_entry_read_started of string
+      (** A history read of this Keeper started while its chat pane was on
+          screen. Landed or not, it answers the entry. *)
+
 (* Each requested source owns a result slot. Workers publish before returning;
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
@@ -11488,6 +11501,7 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
   mutable msg_history_owed: keeper_history_owed option;
+  mutable msg_chat_entry_read: chat_entry_read;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -19344,6 +19358,31 @@ let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : sur
           (match state.tool_series with Tool_series_unread -> true | Tool_series_read _ | Tool_series_error _ -> false))
   | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> false
 
+(* A history read of [keeper_name] is on the wire, started now or already in
+   flight. It answers the chat pane's entry only while that pane shows this
+   Keeper; a read started from another surface does not. *)
+let note_chat_entry_read (state : state) ~keeper_name =
+  if state.view = Keepers Keeper_message
+     && Option.equal String.equal state.msg_target_keeper_name (Some keeper_name)
+  then state.msg_chat_entry_read <- Chat_entry_read_started keeper_name
+
+(* The loop has taken [needs] as what is drawn. A frame without the chat pane
+   means the pane left the screen, so its next entry owes a read again. *)
+let note_drawn_surface_needs (state : state) (needs : surface_needs) =
+  if not needs.needs_keeper_chat then state.msg_chat_entry_read <- Chat_entry_unread
+
+(* The Keeper whose history read entering the chat pane still owes, when the
+   surface-needs delta [needs] brings the pane on screen. Only a pane at its
+   newest row reads on entry. *)
+let chat_entry_read_due (state : state) ~(needs : surface_needs) =
+  if needs.needs_keeper_chat && state.msg_scroll = 0 then
+    match state.msg_target_keeper_name, state.msg_chat_entry_read with
+    | Some keeper_name, Chat_entry_read_started started
+      when String.equal started keeper_name -> None
+    | Some keeper_name, (Chat_entry_unread | Chat_entry_read_started _) -> Some keeper_name
+    | None, (Chat_entry_unread | Chat_entry_read_started _) -> None
+  else None
+
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)
@@ -20075,6 +20114,18 @@ let modal_owns_keys (state : state) =
   || Option.is_some state.client_detail
   || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
+
+(* Where a paste goes once no field has claimed it. A key reaches the chat
+   draft only while no overlay holds the keys ([composer_claimed] asks
+   [modal_owns_keys]), and a paste asks the same question: behind Git
+   Changes or a client detail the draft is not on screen, and text put there
+   unseen is what a voice send would deliver. The overlays with a field of
+   their own -- a reader's search, the Collab form, the skill source filter
+   -- take their paste before this is asked. *)
+type unclaimed_paste = Paste_into_draft | Paste_held_by_overlay
+
+let unclaimed_paste (state : state) =
+  if modal_owns_keys state then Paste_held_by_overlay else Paste_into_draft
 
 (* Whether [?] opens the help sheet on the frame being drawn. A text field
    holding printable keys takes [?] as a character, a modal owns its own
@@ -21423,6 +21474,7 @@ let create_state
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_history_owed = None;
+  msg_chat_entry_read = Chat_entry_unread;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];
@@ -21568,26 +21620,31 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
    here so the callers of this module name them as before. *)
 include Masc_tui_words
 
-(* What the workspace guard says when it withdraws a request, in the shape of
-   every request kept back. The English sentences are the ones the surfaces
-   still in English have always drawn. *)
-let workspace_refusal_text ~ko refusal =
-  if ko then
-    kept_back ~ko
-      (match refusal with
-       | Workspace_authority_withdrawn -> "워크스페이스가 바뀜"
-       | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
-       | Workspace_identity_changed -> "워크스페이스 식별이 바뀌었거나 읽히지 않음")
-      Nothing_kept
-  else
-    match refusal with
-    | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
-    | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
-    | Workspace_identity_changed ->
-        "Workspace identity changed or is unavailable; request withdrawn"
+(* Why the workspace guard withdrew a request. *)
+let workspace_refusal_reason ~ko = function
+  | Workspace_authority_withdrawn ->
+      if ko then "워크스페이스가 바뀜" else "workspace authority withdrawn"
+  | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
+  | Workspace_identity_changed ->
+      if ko then "워크스페이스 식별이 바뀌었거나 읽히지 않음"
+      else "workspace identity changed or unavailable"
 
-let request_failure_text ~ko = function
-  | Request_withdrawn refusal -> workspace_refusal_text ~ko refusal
+(* The guard's refusal of a request its caller names, in the shape of every
+   request kept back. *)
+let workspace_refusal_text ~ko ~request refusal =
+  kept_back ~ko ~request (workspace_refusal_reason ~ko refusal) Nothing_kept
+
+(* The guard's refusal for the callers that do not name their request yet:
+   the English sentences those surfaces, still English, have always drawn.
+   They move to [workspace_refusal_text] with the surface (#52022). *)
+let workspace_guard_refusal_english = function
+  | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
+  | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
+  | Workspace_identity_changed ->
+      "Workspace identity changed or is unavailable; request withdrawn"
+
+let request_failure_text ~ko ~request = function
+  | Request_withdrawn refusal -> workspace_refusal_text ~ko ~request refusal
   | Request_failed detail -> detail
 
 let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
@@ -21598,7 +21655,8 @@ let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
         (if ko then "JSON 이 아님: " else "body is not JSON: ") ^ message
     | Schedule_form_not_an_object ->
         if ko then "양식이 JSON 객체가 아님" else "the editor form must be a JSON object"
-    | Schedule_form_request failure -> request_failure_text ~ko failure
+    | Schedule_form_request failure ->
+        request_failure_text ~ko ~request:Kept_request.Schedule_change failure
   in
   schedule_change_name ~ko sfr_change ^ ": " ^ reason
 

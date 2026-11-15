@@ -1606,17 +1606,43 @@ let muted_style () = Span.fg Masc_tui_theme.Sgr.dim
 let bold_style () = Span.weight Masc_tui_theme.Sgr.bold
 let label_style () = bold_style ()
 
+(* Where [led_rows] starts the text. The row is cut at the width, so a piece
+   wider than the cells the lead leaves loses what does not fit, and a lead
+   as wide as the row leaves the text nothing. [Beside] keeps the text on the
+   lead's row when every piece the text was cut into fits there. Otherwise
+   [Below] gives the lead its own row and the text the rows under it. A text
+   with no character loses nothing beside the lead. *)
+type led_placement = Beside | Below
+
+let led_placement ~width ~lead_cells pieces =
+  let room = max 0 (width - lead_cells) in
+  if List.for_all (fun piece -> Masc_tui_message_layout.display_width piece <= room) pieces
+  then Beside else Below
+
 (* Wrap [text] after a styled lead so continuation pieces start under the
    text, not under the lead. [split] cuts the text to a width. By default it
    cuts at the cell, which keeps the exact spaces of a value, and prose passes
-   a cut at spaces. *)
-let led_rows ?(split = fun ~width text -> document_rows ~width text) ~width ~lead ~text_style text =
+   a cut at spaces. [indent] blank cells come before the lead. Below the lead
+   the text hangs one outline level deeper than [indent], fewer where its
+   widest character would not fit beside the hang. *)
+let led_rows ?(split = fun ~width text -> document_rows ~width text) ?(indent = 0)
+    ~width ~lead ~text_style text =
+  let blank cells = Span.text Span.plain (String.make cells ' ') in
+  let lead = Span.concat [ blank indent; lead ] in
   let lead_cells = Span.width lead in
+  let rows ~first ~hang pieces =
+    List.mapi (fun index piece ->
+      Span.concat [ (if index = 0 then first else hang); Span.text text_style piece ])
+      (match pieces with [] -> [ "" ] | pieces -> pieces) in
   let pieces = split ~width:(max 1 (width - lead_cells)) text in
-  let hang = Span.text Span.plain (String.make lead_cells ' ') in
-  List.mapi (fun index piece ->
-    Span.concat [ (if index = 0 then lead else hang); Span.text text_style piece ])
-    (match pieces with [] -> [ "" ] | pieces -> pieces)
+  match led_placement ~width ~lead_cells pieces with
+  | Beside -> rows ~first:lead ~hang:(blank lead_cells) pieces
+  | Below ->
+      let widest = List.fold_left (fun widest piece ->
+        max widest (Masc_tui_message_layout.widest_grapheme_cells piece)) 0 pieces in
+      let hang_cells = max 0 (min (indent + value_indent_cells) (width - widest)) in
+      let hang = blank hang_cells in
+      lead :: rows ~first:hang ~hang (split ~width:(max 1 (width - hang_cells)) text)
 
 (* A page that lists facts. A heading names a group and takes the label
    weight. Fields are label and value pairs: the fields of one indent share a
@@ -1646,10 +1672,8 @@ let fact_spans ~width rows =
     | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
     | Fact_fields { indent; fields } when beside ->
         List.concat_map (fun (label, value) ->
-          let lead = Span.concat
-            [ Span.text Span.plain (String.make indent ' ')
-            ; Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) ] in
-          led_rows ~width ~lead ~text_style:Span.plain value) fields
+          let lead = Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) in
+          led_rows ~indent ~width ~lead ~text_style:Span.plain value) fields
     | Fact_fields { indent; fields } ->
         List.concat_map (fun (label, value) ->
           led_rows ~width ~lead:(spaces indent) ~text_style:(label_style ()) label
@@ -1658,14 +1682,12 @@ let fact_spans ~width rows =
     List.map (fun span -> Span.render (Span.truncate width span)) (spans row)) rows
 
 let value_row_spans ~width (row : value_row) =
-  let indent = String.make (row.depth * value_indent_cells) ' ' in
   let lead = Span.concat
-    [ Span.text Span.plain indent
-    ; (if row.bullet then Span.text (muted_style ()) "· " else Span.empty)
+    [ (if row.bullet then Span.text (muted_style ()) "· " else Span.empty)
     ; (match row.key with
        | Some key -> Span.text (muted_style ()) (Masc.Tui_terminal_text.sanitize_terminal_text key ^ "  ")
        | None -> Span.empty) ] in
-  led_rows ~width ~lead ~text_style:Span.plain row.text
+  led_rows ~indent:(row.depth * value_indent_cells) ~width ~lead ~text_style:Span.plain row.text
 
 let reading_refusal_text : Masc.Lane_addon_presentation.reading_refusal -> string = function
   | Field_absent -> "field unavailable"
@@ -2372,9 +2394,9 @@ let flow_external_inputs binding =
     | S.Fusion_run {id;run_id} -> Some (id ^ " · Fusion run " ^ run_id)
     | S.Msx_capture {id} -> Some (id ^ " · MSX capture")
     | S.Dos_capture {id} -> Some (id ^ " · DOS capture")
-    | S.Browser_document {id;selection;tab_id;target_id;environment;request_id} ->
-        Some (Printf.sprintf "%s · Browser %s · tab %d · target %s · %s · request %s"
-          id (S.browser_selection_lane selection) tab_id target_id environment request_id)) sources)
+    | S.Browser_document {id;installation_id;selection;tab_id;target_id;environment;request_id} ->
+        Some (Printf.sprintf "%s · Browser %s %s · tab %d · target %s · %s · request %s"
+          id installation_id (S.browser_selection_lane selection) tab_id target_id environment request_id)) sources)
 
 let flow_worker_state (worker : instance) =
   let result = if worker.observation_seq=0 then "no completed observation received"

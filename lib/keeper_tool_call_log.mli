@@ -295,6 +295,24 @@ val failed_commit_deliveries : commit_observer -> int
     gap. Cancellation propagates; committed rows retain their original truth. *)
 
 val record_kind_of_string : string -> record_kind option
+
+(** What a call's input was, decided by {!log_call} on the raw input. The
+    persisted [input] is redacted, and an oversized object becomes a preview
+    string whose shape cannot be read back, so the row states this itself. *)
+type input_form =
+  | Arguments_input
+  | Artifact_reference_input
+      (** The input carried the reserved [_blob] key of
+          {!Tool_output.normalized_artifact_ref_of_json}, valid or not: the
+          stored form of an earlier call, not arguments. *)
+
+val input_form_field : Yojson.Safe.t -> string * Yojson.Safe.t
+(** The row field {!log_call} writes for a raw input. *)
+
+val recorded_input_form : Yojson.Safe.t -> input_form option
+(** The form a persisted row states. [None] for a row that does not carry a
+    value this build writes. *)
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->

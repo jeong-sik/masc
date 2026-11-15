@@ -315,7 +315,7 @@ let final_of_json ~schema json =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _) | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok final
 
 (* A granted consumer schema is a provider requirement with a partial shape
-   guard, not a Host_tool input contract. Original proofs and observations use
+   guard, not a Declared_schema input contract. Original proofs and observations use
    the same meaning as initial validation. Delivery independently rechecks the
    current package baseline and original consumer authority. *)
 let original_final_of_json ~schema request json =

@@ -50,13 +50,30 @@ let spawn_with ~executable ~argv ~env ~output =
     (fun () ->
       posix_spawn executable (Array.of_list argv) env (None, true) [ 0, devnull; 1, output; 2, output ])
 
+external sigchld_has_handler : unit -> bool = "masc_process_sigchld_has_handler"
+
+let sigchld_install = Mutex.create ()
+
+(* Only a backend that installs a SIGCHLD handler broadcasts the condition a
+   reaper waits on. eio_posix installs one when its loop starts; eio_linux
+   reaps through process descriptors and installs none, so there the wait
+   never ended and the child stayed defunct (#33807).
+
+   The handler is installed when a spawn finds none, not on every spawn:
+   [Sys.set_signal] writes the runtime's handler table, which another domain
+   reads while it polls for signals (#51395). Whether one is there is read
+   from the kernel, so a handler removed since the last spawn is installed
+   again. The lock makes a second domain's spawn wait for an installation
+   under way instead of installing too. Nothing inside it yields. *)
+let ensure_sigchld_handler () =
+  Mutex.protect sigchld_install (fun () ->
+    if not (sigchld_has_handler ()) then Eio_unix.Process.install_sigchld_handler ())
+
 let spawn ~sw ~argv ~env ~output =
   match argv with
   | [] -> Error "posix_spawn: empty argv"
   | executable :: _ ->
-    (* Only a backend that installs a SIGCHLD handler broadcasts the
-       condition [reaped] waits on (see Posix_spawn_process_mgr). *)
-    Eio_unix.Process.install_sigchld_handler ();
+    ensure_sigchld_handler ();
     let started =
       match spawn_with ~executable ~argv ~env ~output with
       | pid -> Ok pid

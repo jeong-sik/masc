@@ -2991,6 +2991,7 @@
 (include stanzas/test_tool_metrics_store_concurrent.inc)
 (include stanzas/test_tool_metrics_series.inc)
 (include stanzas/test_tool_metrics_series_stream.inc)
+(include stanzas/test_dispatch_caller.inc)
 (include stanzas/test_model_metrics_stream.inc)
 (include stanzas/test_native_query_observer_scope.inc)
 (include stanzas/test_tui_decode_tool_series.inc)
@@ -3273,6 +3274,7 @@
 (include stanzas/test_keeper_owner.inc)
 (include stanzas/test_keeper_owner_open_native_call.inc)
 (include stanzas/test_keeper_chat_operation_http.inc)
+(include stanzas/test_keeper_chat_stream_keepalive_http.inc)
 
 (include stanzas/test_keeper_meta_current_keyset.inc)
 
@@ -5315,6 +5317,7 @@
 (include stanzas/test_tui_hit.inc)
 (include stanzas/test_tui_pane_selection.inc)
 (include stanzas/test_tui_wheel_reader.inc)
+(include stanzas/test_tui_workspace_precondition.inc)
 (include stanzas/test_tui_wrap_words.inc)
 (include stanzas/test_tui_hint_lines.inc)
 (include stanzas/test_tui_numbered_list.inc)
@@ -6091,12 +6094,20 @@
 
 (include stanzas/test_shipped_skills.inc)
 
+; Holds the lease of a workspace and announces a port for it, so the Python
+; tests can stand an HTTP peer in for the server the kernel names.
+(executable
+ (name hold_workspace_announcement)
+ (modules hold_workspace_announcement)
+ (libraries unix ipaddr masc.server masc.host_config))
+
 (rule
  (alias runtest-test_setup_cli)
- (deps test_setup_cli.py ../bin/main_eio.exe
+ (deps test_setup_cli.py ../bin/main_eio.exe hold_workspace_announcement.exe
        (source_tree ../scripts/fixtures/release-evidence))
  (action
-  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe})))
+  (run python3 %{dep:test_setup_cli.py} --binary %{dep:../bin/main_eio.exe}
+   --announcer %{dep:hold_workspace_announcement.exe})))
 
 (alias
  (name runtest)
@@ -6358,13 +6369,20 @@
 (test
  (name test_server_upgrade_preparation)
  (modules test_server_upgrade_preparation)
- (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.host_config masc.fs_compat))
+ (libraries alcotest unix yojson eio eio.unix eio_main ipaddr masc masc.runtime masc.server masc.host_config
+  masc.fs_compat masc.http_client masc.masc_eio_context masc.owner_process_identity))
 
 (test
  (name test_upgrade_bearer_destination)
  (modules test_upgrade_bearer_destination)
  (libraries alcotest unix yojson eio eio_main ipaddr masc.server masc.fs_compat
   masc.http_client masc.masc_eio_context))
+
+; The lease owner test_onboarding_journey.py runs the setup stop against (#36877).
+(executable
+ (name setup_stop_owner_fixture)
+ (modules setup_stop_owner_fixture)
+ (libraries unix yojson ipaddr masc.server))
 
 (include stanzas/test_docker_desktop_install.inc)
 (include stanzas/test_docker_account_access.inc)
@@ -6545,7 +6563,10 @@
        ../docs/examples/lane-addons/operator-quiz.toml ../addons/protocol.py ../addons/records.py
        (glob_files ../addons/operator-quiz/*.py) ../addons/operator-quiz/lane.toml
        (glob_files ../addons/operator-quiz/schemas/*.json)
-       (glob_files ../addons/operator-quiz/prompts/*.md))
+       (glob_files ../addons/operator-quiz/prompts/*.md)
+       ; The operator lesson case loads its declaration.
+       ../docs/examples/lane-addons/operator-lesson.toml ../addons/operator-lesson/lane.toml
+       (glob_files ../addons/operator-lesson/schemas/*.json))
  (libraries alcotest masc masc.browser_lane masc.masc_log masc.otel_spans mcp_protocol yojson unix))
 
 (test
@@ -6567,6 +6588,7 @@
   mcp_protocol mcp_protocol.eio eio eio.unix eio_main yojson unix))
 
 (include stanzas/test_operator_quiz_package.inc)
+(include stanzas/test_operator_lesson_package.inc)
 (include stanzas/test_lane_fusion_compute_packages.inc)
 
 (test
@@ -6759,6 +6781,8 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_runtime_construction_snapshot.inc)
+
+(include stanzas/test_runtime_model_catalog_boot.inc)
 
 (include stanzas/test_runtime_batch_construction_snapshot.inc)
 
@@ -7381,6 +7405,8 @@
 
 (include stanzas/test_runtime_model_label_binding.inc)
 
+(include stanzas/test_runtime_verify_discovered_row.inc)
+
 
 
 (include stanzas/test_keeper_direct_goal_provider_wire.inc)
@@ -7524,3 +7550,5 @@
 (include stanzas/test_server_dashboard_keeper_decisions_current.inc)
 
 (include stanzas/test_http_response_content.inc)
+
+(include stanzas/test_tui_termios_reclaim.inc)

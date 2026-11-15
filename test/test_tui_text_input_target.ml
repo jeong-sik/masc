@@ -876,6 +876,57 @@ let test_the_loop_drops_a_launch_form_left_on_another_surface () =
     (Tui_types.abandon_fusion_launch state);
   check bool "and drops it too" true (Option.is_none state.Tui_types.fusion_launch)
 
+let unclaimed =
+  testable
+    (Fmt.of_to_string (function
+      | Tui_types.Paste_into_draft -> "into-draft"
+      | Tui_types.Paste_held_by_overlay -> "held-by-overlay"))
+    ( = )
+;;
+
+(* A paste no field claims goes to the chat draft unless an overlay holds the
+   keys. With Git Changes open over the chat, keys went to Git Changes and a
+   paste went into the draft under it: the operator could not see the draft
+   change, and a voice send could deliver it to the Keeper. *)
+let test_an_overlay_holding_the_keys_holds_the_paste () =
+  let state = fresh_state () in
+  state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_message;
+  check unclaimed "the chat draft takes a paste on its own" Tui_types.Paste_into_draft
+    (Tui_types.unclaimed_paste state);
+  state.Tui_types.repository_changes_open <- true;
+  state.Tui_types.repository_changes_return_chat <- true;
+  check target "Git Changes has no field of its own" None (resolved state);
+  check unclaimed "Git Changes over the chat holds the paste"
+    Tui_types.Paste_held_by_overlay (Tui_types.unclaimed_paste state);
+  Tui_types.close_repository_changes state;
+  check unclaimed "closing it gives the draft back" Tui_types.Paste_into_draft
+    (Tui_types.unclaimed_paste state);
+  state.Tui_types.view <- Tui_types.Clients;
+  state.Tui_types.client_detail <- Some
+    { Masc.Tui_decode.cr_name = "codex"; cr_agent_type = "codex"
+    ; cr_status = Masc.Tui_decode.Client_active; cr_current_task = None
+    ; cr_keeper_name = None; cr_session_bound_at = None; cr_last_seen = None
+    ; cr_capabilities = [] };
+  check target "a client detail has no field of its own" None (resolved state);
+  check unclaimed "a client detail holds the paste" Tui_types.Paste_held_by_overlay
+    (Tui_types.unclaimed_paste state);
+  Tui_types.close_key_modals state;
+  List.iter
+    (fun (name, open_it) ->
+      Tui_types.close_key_modals state;
+      open_it ();
+      check unclaimed (name ^ " holds the paste") Tui_types.Paste_held_by_overlay
+        (Tui_types.unclaimed_paste state))
+    [ ("help", fun () -> state.Tui_types.help_open <- true)
+    ; ("agenda", fun () -> state.Tui_types.agenda_open <- true)
+    ; ("context inspector", fun () -> state.Tui_types.context_inspector_open <- true)
+    ; ("about", fun () -> state.Tui_types.about_open <- true)
+    ; ("deletions", fun () -> state.Tui_types.keeper_deletions_open <- true) ];
+  Tui_types.close_key_modals state;
+  check unclaimed "with every overlay closed the draft takes it again"
+    Tui_types.Paste_into_draft (Tui_types.unclaimed_paste state)
+;;
+
 let () =
   Alcotest.run
     "tui text input target"
@@ -889,6 +940,8 @@ let () =
           test_case "github token claims input when active" `Quick test_github_token_claims_input_when_active;
           test_case "nothing claims a plain surface" `Quick
             test_nothing_claims_a_plain_surface;
+          test_case "an overlay holding the keys holds the paste" `Quick
+            test_an_overlay_holding_the_keys_holds_the_paste;
           test_case "the palette claims while it is open" `Quick
             test_the_palette_claims_while_it_is_open;
           test_case "row search claims while a query is armed" `Quick

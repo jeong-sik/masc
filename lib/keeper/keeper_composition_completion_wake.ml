@@ -1,8 +1,9 @@
 (* The result is committed before it is announced. The one-shot queue writer
    confirms strict snapshot durability before updating the live queue, so
-   an [Error] here means the submitter has not been told and the caller can
-   report the delivery as failed instead of acknowledging one that never
-   landed.
+   an [Error] here means the submitter has not been told. [Intake_shutdown_reserved]
+   means a shutdown holds its intake and the delivery waits; [Delivery_failed]
+   lets the caller report the delivery as failed instead of acknowledging
+   one that never landed.
 
    The wake that follows is a hint, not the delivery: it reaches only a
    [Running] Keeper, and a paused or unregistered one is left alone, exactly
@@ -48,20 +49,32 @@ let deliver ~not_before ~base_path ~keeper_name ~request_id ~composition_tool ~t
       | Keeper_registry_event_queue.Stimulus_enqueued
       | Keeper_registry_event_queue.Stimulus_already_present -> Ok ()
       | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
-        Error (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
-      | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error detail
+        Error (Keeper_composition_completion_outbox.Intake_shutdown_reserved operation_id)
+      | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+        Error (Keeper_composition_completion_outbox.Delivery_failed detail)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Printexc.to_string exn)
+    | exn -> Error (Keeper_composition_completion_outbox.Delivery_failed (Printexc.to_string exn))
   with
-  | Error reason ->
+  | Error (Keeper_composition_completion_outbox.Intake_shutdown_reserved operation_id as refusal) ->
+    (* The shutdown announces itself, and recovery offers this result again
+       on every maintenance pass the hold lasts, so the hold is a routine
+       line, as the ask answer recovery tells its own. *)
+    Log.Keeper.routine
+      ~keeper_name
+      "composition result held by shutdown request_id=%s tool=%s operation=%s"
+      request_id
+      composition_tool
+      (Keeper_shutdown_types.Operation_id.to_string operation_id);
+    Error refusal
+  | Error (Keeper_composition_completion_outbox.Delivery_failed reason as refusal) ->
     Log.Keeper.error
       ~keeper_name
       "composition result commit failed request_id=%s tool=%s: %s"
       request_id
       composition_tool
       reason;
-    Error reason
+    Error refusal
   | Ok () ->
     (* The level comes from the outcome: the commit succeeded either way, but
        a composition that could not finish is not routine for the Keeper that
@@ -241,10 +254,12 @@ let on_worker_settled ~base_path ~composition_tool settlement =
            | Error error -> Log.Keeper.error ~keeper_name:entry.submitted_by
                "composition delivery acknowledged by queue but outbox retirement failed request_id=%s: %s"
                entry.request_id (Keeper_composition_completion_outbox.error_to_string error))
-        (* [deliver] already logged the reason. The pre-dispatch obligation
-           remains for canonical-result reconciliation; only delivery is
-           retried, while the result remains in the original request record. *)
-        | Error _ -> ()))))
+        (* [deliver] already logged the hold or the reason. The pre-dispatch
+           obligation remains for canonical-result reconciliation; only
+           delivery is retried, while the result remains in the original
+           request record. *)
+        | Error (Keeper_composition_completion_outbox.Intake_shutdown_reserved _
+                | Keeper_composition_completion_outbox.Delivery_failed _) -> ()))))
   (* The store does not hold this settlement as canonical truth. Telling the
      Keeper its work succeeded on evidence that may not survive would be worse
      than leaving it to read the record. *)
@@ -267,7 +282,9 @@ let on_worker_settled ~base_path ~composition_tool settlement =
 
 let deliver_entry ~base_path ~completion ~composition_tool (entry : Keeper_msg_async.entry) =
   match terminal_of_status entry.status with
-  | None -> Error "canonical composition completion has a nonterminal status"
+  | None ->
+    Error (Keeper_composition_completion_outbox.Delivery_failed
+             "canonical composition completion has a nonterminal status")
   | Some terminal ->
     match deliver ~base_path ~not_before:entry.submitted_at
         ~keeper_name:entry.submitted_by

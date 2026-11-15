@@ -1619,15 +1619,17 @@ let acting_pane_input (state : state) =
 
 
 (* A pane tone is a reading; the theme answers with the colour. *)
+(* Every coloured span here sits on the pane's own ground, so each is
+   measured against that ground rather than the page. *)
 let acting_pane_sgr (tone : Masc_tui_acting_pane.tone) =
   match tone with
   | Masc_tui_acting_pane.Plain -> ""
-  | Masc_tui_acting_pane.Dim -> Theme.recede ()
-  | Masc_tui_acting_pane.Accent -> Ansi.bold ^ Theme.info ()
-  | Masc_tui_acting_pane.Ok -> Theme.ok ()
-  | Masc_tui_acting_pane.Warn -> Theme.warn ()
-  | Masc_tui_acting_pane.Bad -> Theme.bad ()
-  | Masc_tui_acting_pane.Info -> Theme.info ()
+  | Masc_tui_acting_pane.Dim -> Theme.Side_pane.recede ()
+  | Masc_tui_acting_pane.Accent -> Ansi.bold ^ Theme.Side_pane.info ()
+  | Masc_tui_acting_pane.Ok -> Theme.Side_pane.ok ()
+  | Masc_tui_acting_pane.Warn -> Theme.Side_pane.warn ()
+  | Masc_tui_acting_pane.Bad -> Theme.Side_pane.bad ()
+  | Masc_tui_acting_pane.Info -> Theme.Side_pane.info ()
 
 
 (* The pane sits on its own ground. Every span's reset would drop the row
@@ -2361,12 +2363,23 @@ let keeper_roster_pane_shown (state : state) ~cols =
 (* The colour reinforces the runtime's suggested action; the selected Keeper
    also names that action in text, including when colours are unavailable.
    Pause, health and lifecycle remain separate readings. *)
-let keeper_action_color
+(* [surface] is the ground the glyph is drawn on: the chat header sits on the
+   page, the roster on its side pane, and a colour measured against one is
+   not readable on the other. *)
+let keeper_action_color ~(surface : Masc_tui_theme.surface)
     (action : Status.keeper_next_action_path option) =
+  let warn, action_probe, action_message =
+    match surface with
+    | Masc_tui_theme.Page -> Theme.warn, Theme.action_probe, Theme.action_message
+    | Masc_tui_theme.Side_pane ->
+      ( Theme.Side_pane.warn
+      , Theme.Side_pane.action_probe
+      , Theme.Side_pane.action_message )
+  in
   match action with
   | None -> Ansi.dim
-  | Some Status.Recover -> (Theme.warn ())
-  | Some Status.Probe -> Theme.action_probe ()
+  | Some Status.Recover -> warn ()
+  | Some Status.Probe -> action_probe ()
   (* Green until this measurement. The cell draws its readings in separate
      channels and this is the only one carried by colour alone, so the three
      action colours have to stay apart for a reader who cannot separate red
@@ -2380,7 +2393,7 @@ let keeper_action_color
      0.121 for ordinary vision, 0.015 to 0.044 for deuteranopia, 0.019 to
      0.027 for protanopia. Blue and white came out worse than green even for
      ordinary vision, because they close on [Probe]'s cyan. *)
-  | Some Status.Direct_message -> Theme.action_message ()
+  | Some Status.Direct_message -> action_message ()
 
 (* Preserve what was actually observed: a runtime that names no action is not
    evidence that nothing needs doing, and an unread roster is not absence. *)
@@ -2468,15 +2481,16 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
             then (if ko then "현재 대화" else "Current conversation")
             else (if ko then "선택한 키퍼" else "Selected Keeper")
           in
-          [ Theme.recede (), rule
-          ; Theme.recede (), "  " ^ label
+          [ Theme.Side_pane.recede (), rule
+          ; Theme.Side_pane.recede (), "  " ^ label
           ; Ansi.bold, "  " ^ Message_layout.fit_middle (max 0 (inner - 4))
               (Terminal_text.single_line keeper.k_name)
-          ; "", "  " ^ keeper_action_color (Keeper_control.next_action reading)
+          ; "", "  " ^ keeper_action_color ~surface:Masc_tui_theme.Side_pane
+                  (Keeper_control.next_action reading)
               ^ keeper_state_glyph ~paused:reading.paused
                   ~health:(Keeper_control.health reading)
-              ^ restore ^ " " ^ Theme.recede () ^ status
-          ; Theme.recede (), "  " ^ fit_runtime_id (max 0 (inner - 4))
+              ^ restore ^ " " ^ Theme.Side_pane.recede () ^ status
+          ; Theme.Side_pane.recede (), "  " ^ fit_runtime_id (max 0 (inner - 4))
               (Terminal_text.single_line runtime)
           ]
   in
@@ -2514,7 +2528,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
     else string_of_int count
   in
   let header = [ ""; sidebar_heading ~cols ~title:"KEEPERS" ~count:count_label; rule ] in
-  List.iter (draw ~style:(Theme.recede ())) (List.take header_rows header);
+  List.iter (draw ~style:(Theme.Side_pane.recede ())) (List.take header_rows header);
   for i = 0 to capacity - 1 do
     match Rows.at window (first + i) with
     | Some (keeper : keeper) ->
@@ -2529,11 +2543,12 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
           draw ~style:(Theme.sidebar_selection ()) (" › " ^ glyph ^ " " ^ name ^ " ")
         else
           let caret = if selected then " › " else "   " in
-          draw (caret ^ keeper_action_color (Keeper_control.next_action reading)
+          draw (caret ^ keeper_action_color ~surface:Masc_tui_theme.Side_pane
+                          (Keeper_control.next_action reading)
                 ^ glyph ^ restore ^ " "
                 ^ name ^ restore ^ " ")
     | None when i = 0 && count = 0 ->
-        draw ~style:(Theme.recede ())
+        draw ~style:(Theme.Side_pane.recede ())
           (match state.keeper_roster_error with
            | Some error -> "  " ^ Terminal_text.single_line error
            | None -> "  No Keepers listed")
@@ -2599,10 +2614,10 @@ let write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
   let draw ?style text = sidebar_line ?style buf ~cols text in
   draw "";
-  draw ~style:(Theme.recede ())
+  draw ~style:(Theme.Side_pane.recede ())
     (sidebar_heading ~cols ~title
        ~count:(list_count_text ~loaded:(List.length labels) ~holding));
-  draw ~style:(Theme.recede ()) (sidebar_rule ~cols);
+  draw ~style:(Theme.Side_pane.recede ()) (sidebar_rule ~cols);
   let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
     match selection with

@@ -776,7 +776,8 @@ let keeper_message_identity ~max_cells state keeper_name =
         | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
       in
       let status_color =
-        keeper_action_color (Keeper_control.next_action reading)
+        keeper_action_color ~surface:Masc_tui_theme.Page
+          (Keeper_control.next_action reading)
       in
       (* Two stances that decide what this Keeper does with a tool call, on
          the row an operator reads before typing to it. Show defaults too:

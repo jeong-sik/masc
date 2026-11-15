@@ -159,6 +159,13 @@ val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> 
     [state.msx_carts]. The caller fetches the inventory first. Selection starts
     once the menu has one. *)
 
+val reason_rows : cols:int -> room:int -> string -> string list
+(** A reason drawn one cell in from the left edge of a [cols]-wide screen,
+    wrapped at spaces, in at most [room] rows (at least one), each padded to
+    [cols] cells. A reason that needs more rows keeps the first ones, and its
+    last row ends with a whole word, a space and
+    {!Masc_tui_message_layout.cut_mark}, so the mark is always drawn. *)
+
 val render_menu :
   write:(string -> unit) -> ?status:string -> Masc_tui_types.state -> unit
 (** Redraw the picker. [status] is drawn above the list — used to show why a

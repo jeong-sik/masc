@@ -88,24 +88,31 @@ let fit_line width s =
 
 (* A reason drawn one cell in from the left edge, wrapped at spaces so it is
    read to its end, in at most [room] rows (at least one). A reason longer
-   than that ends its last row with the cut mark, as a single row did. *)
+   than that wraps its last row again, narrower by a space and the cut mark,
+   so the mark follows a whole word instead of being cut off a full row. *)
 let reason_rows ~cols ~room text =
+  let wrap cells line = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 cells) line in
   let wrapped =
-    match
-      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 1))
-        (Masc_tui_ansi.Terminal_text.single_line text)
-    with
+    match wrap (cols - 1) (Masc_tui_ansi.Terminal_text.single_line text) with
     | [] -> [ "" ]
     | rows -> rows
   in
   let room = max 1 room in
-  let cut = List.length wrapped > room in
-  List.mapi
-    (fun index row ->
-      let last = index = room - 1 in
-      fit_line cols
-        (" " ^ row ^ (if cut && last then " " ^ Masc_tui_message_layout.cut_mark else "")))
-    (List.take room wrapped)
+  let shown = List.take room wrapped in
+  if List.length wrapped <= room then List.map (fun row -> fit_line cols (" " ^ row)) shown
+  else
+    let mark = " " ^ Masc_tui_message_layout.cut_mark in
+    let mark_cells = Masc_tui_message_layout.display_width mark in
+    List.mapi
+      (fun index row ->
+        if index < room - 1 then fit_line cols (" " ^ row)
+        else
+          let last = match wrap (cols - 1 - mark_cells) row with
+            | [] -> ""
+            | first :: _ -> first
+          in
+          fit_line cols (" " ^ last ^ mark))
+      shown
 
 (* Boxed TUI surfaces reserve four columns in their shared geometry cache.
    This full-screen viewport has no borders: preserve the actual tty width,

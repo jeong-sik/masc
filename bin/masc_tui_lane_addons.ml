@@ -20,7 +20,7 @@ let document_rows ~width text =
    received text, so they are not sanitized here. *)
 let key_rows ?(indent = 0) ~width keys =
   let margin = String.make indent ' ' in
-  Masc_tui_message_layout.pack_clauses ~max_cells:(width - indent) keys
+  Masc_tui_message_layout.pack_clauses ~max_cells:(max 1 (width - indent)) keys
   |> List.map (fun row -> margin ^ row)
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type host_wait =

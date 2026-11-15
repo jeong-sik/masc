@@ -380,6 +380,11 @@ describe('KeeperDetailPage', () => {
     expect(detailCommand.textContent).toContain('상세')
     fireEvent.click(detailCommand)
     const statusTab = await screen.findByRole('tab', { name: '상태' })
+    // The detail body is on the page, on its first tab: the tabs are drawn by
+    // the body. The month efficiency belongs to the Status tab alone, so
+    // another tab does not draw it and does not read for it.
+    expect(statusTab.getAttribute('aria-selected')).toBe('false')
+    expect(screen.queryByTestId('keeper-month-efficiency')).toBeNull()
     fireEvent.click(statusTab)
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: '상태' }).getAttribute('aria-selected')).toBe('true')

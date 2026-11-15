@@ -1,0 +1,11 @@
+### Fixed
+
+- An unread tool result for a Keeper whose intake a shutdown holds now waits
+  instead of failing. Before, the notification turned the hold into a plain
+  error string: every maintenance pass logged `unread tool result retained`
+  as a warning, and the Execute background, schedule receipt and Codex
+  retained-result paths logged their `wake deferred` warning. The
+  notification now returns the holding shutdown operation as its own case,
+  each of those paths logs it as a routine line, the receipt stays in the
+  outbox, and the first pass after the shutdown releases the intake notifies
+  it. Any other notification failure is still a warning (#50874, #PENDING).

@@ -270,6 +270,77 @@ let test_admission_omits_turn_material () =
     (contains admission.rendered_prompt head)) heads;
   R.validate_admission_preparation ~batch ~retirement ~input:admission_input admission |> get
 
+(* Where the body places the two slots, and the blank line the runtime puts on
+   the far side of each. The expected prompt is built apart from the runtime's
+   slot rendering: the body is rendered around two markers and each marker is
+   then replaced by the slot text and its blank line. Moving a line break in
+   librarian.md or in the runtime fails here. *)
+let test_slots_join_the_body_with_one_blank_line () =
+  Prompt_registry.set_markdown_dir "../config/prompts";
+  Prompt_defaults.init ();
+  let durable=R.prepare_durable ~source_lines:[] ~now:123. (input ()) |> get in
+  let cut ~sep text=match Astring.String.cut ~sep text with
+    | Some parts -> parts
+    | None -> failf "%S is not in the text" sep in
+  let above,rest=cut ~sep:"{{working_context_input}}" durable.prompt.effective in
+  let goal,below=cut ~sep:"{{turn_inputs}}" rest in
+  let blank_line_then_slot text=Astring.String.is_suffix ~affix:"\n\n" text
+    && not (Astring.String.is_suffix ~affix:"\n\n\n" text) in
+  let edge_is_text c=not (Astring.Char.Ascii.is_white c) in
+  check bool "one blank line separates the current Memory from the pending-context slot" true
+    (blank_line_then_slot above);
+  check bool "the Goal heading starts where the pending-context slot ends" true
+    (goal<>"" && edge_is_text goal.[0]);
+  check bool "the turn slot starts where the Goal paragraph ends" true
+    (goal<>"" && edge_is_text goal.[String.length goal-1]);
+  check string "the turn slot ends the body" "" below;
+  let marker name="<<slot " ^ name ^ ">>" in
+  let slots=["working_context_input";"turn_inputs"] in
+  let marked=List.map (fun (name,value) ->
+    if List.mem name slots then name,marker name else name,value) durable.variables in
+  let around=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian durable.prompt marked
+    |> get in
+  let slot key resolution=Prompt_registry.render_resolved_prompt_template key resolution durable.variables
+    |> get in
+  let place name text into=let before,after=cut ~sep:(marker name) into in before ^ text ^ after in
+  let expected=around
+    |> place "working_context_input"
+      (slot Prompt_names.librarian_working_context_input durable.turn_prompts.working_context_input ^ "\n\n")
+    |> place "turn_inputs"
+      ("\n\n" ^ slot Prompt_names.librarian_turn_inputs durable.turn_prompts.turn_inputs) in
+  check string "a durable question joins each slot to the body with one blank line"
+    expected durable.rendered_prompt
+
+(* Admission renders neither slot, so an input that carries turn material would
+   be judged without it. Every kind of turn material is refused, both when the
+   question is prepared and when a captured one is checked. *)
+let test_admission_refuses_turn_material () =
+  Prompt_registry.set_markdown_dir "../config/prompts";
+  Prompt_defaults.init ();
+  let original=input () in
+  let empty={original with working_context=C.empty;messages=[];tool_observations=[]} in
+  let counterpart : Keeper_counterpart_observation.t =
+    {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "speaker";
+     user_name=Some "Speaker";authority=External;content="Original counterpart evidence"} in
+  let task_context : Keeper_librarian_task_context.t =
+    {scope={source=Boundary_only;attribution=Unattributed};first_message=0;after_message=0;
+     first_tool_observation=0;after_tool_observation=0} in
+  let batch=admission_batch () and retirement=Keeper_memory_admission_judgment.Available [] in
+  let prepared=R.prepare_admission ~batch ~retirement ~source_lines:[] empty |> get in
+  let refusal=Error "Admission input carries turn material that its prompt does not render" in
+  List.iter (fun (kind,(carrying : L.input)) ->
+    check bool ("the fixture carries " ^ kind) true (L.carries_turn_material carrying);
+    check (result unit string) ("preparing refuses " ^ kind) refusal
+      (R.prepare_admission ~batch ~retirement ~source_lines:[] carrying |> Result.map ignore);
+    check (result unit string) ("checking a capture refuses " ^ kind) refusal
+      (R.validate_admission_preparation ~batch ~retirement ~input:carrying prepared))
+    ["a pending working context",{empty with working_context=original.working_context};
+     "messages",{empty with messages=original.messages};
+     "tool observations",{empty with tool_observations=original.tool_observations};
+     "counterpart observations",{empty with counterpart_observations=[counterpart]};
+     "past Task/Goal records",{empty with historical_task_contexts=[task_context]}];
+  check bool "an input without turn material carries none" false (L.carries_turn_material empty)
+
 let () = run "Original history Memory preparation" ["preparation",[
   test_case "a restored question's facts budget counts source memory" `Quick
     test_restored_budget_counts_source_memory;
@@ -279,4 +350,8 @@ let () = run "Original history Memory preparation" ["preparation",[
   test_case "counterpart admission requires a substitution while legacy restores" `Quick
     test_counterpart_template_admission_and_legacy_restore;
   test_case "admission omits the turn-material slots that durable questions render" `Quick
-    test_admission_omits_turn_material]]
+    test_admission_omits_turn_material;
+  test_case "each slot joins the body with one blank line" `Quick
+    test_slots_join_the_body_with_one_blank_line;
+  test_case "admission refuses an input that carries turn material" `Quick
+    test_admission_refuses_turn_material]]

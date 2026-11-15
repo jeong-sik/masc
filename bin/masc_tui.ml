@@ -30175,15 +30175,16 @@ let enable_bracketed_paste () =
   output_string stdout bracketed_paste_enable;
   flush stdout
 
-(* Raw mode, and the keys the record cannot ask for.
+(* Raw mode, and the keys the record cannot turn off.
 
-   [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
-   filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
-   among them, so every call puts back the keys the tty layer takes for itself:
-   Ctrl-V (paste), and on BSD terminals Ctrl-O (Browser screenshot) and Ctrl-Y
-   (speak) -- see [Masc_tui_termios.reclaimed_key]. Reclaiming them here keeps
-   the three places that take raw mode back (session start, the return from
-   Ctrl-Z, the return from $EDITOR) from taking it back without the keys.
+   The tty layer takes some keys for itself: Ctrl-V (paste), Ctrl-backslash
+   (SIGQUIT, which ends the session unconfirmed), and on BSD terminals Ctrl-O
+   (Browser screenshot) and Ctrl-Y (speak) -- see
+   [Masc_tui_termios.reclaimed_key]. Every hand-off gives them back, and
+   [Unix.tcsetattr] writes [new_term]'s [c_vquit], the quit character it was
+   read with. Reclaiming them after it keeps the three places that take raw
+   mode back (session start, the return from Ctrl-Z, the return from $EDITOR)
+   from taking it back without the keys.
 
    The result is not checked because there is nothing left for it to report:
    the [tcsetattr] on the line above just succeeded on this descriptor, so it
@@ -30213,7 +30214,8 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
      session is over. Neither ends the process from the handler: the loop
      leaves through [Break], so the switch release that stops a server this
      TUI started runs whichever signal ended the session. See
-     [Masc_tui_exit_signals]. *)
+     [Masc_tui_exit_signals]. While raw mode holds, SIGQUIT comes from
+     [kill -QUIT]: [apply_raw_mode] takes Ctrl-backslash back from the tty. *)
   Sys.set_signal Sys.sigint (Sys.Signal_handle request_interrupt);
   Sys.set_signal Sys.sigterm (Sys.Signal_handle terminate);
   Sys.set_signal Sys.sighup (Sys.Signal_handle terminate);
@@ -30347,12 +30349,12 @@ let main
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
-  (* Read beside [old_term] because the record cannot carry them. The reclaimed
-     keys are turned off for as long as this program owns the terminal
-     ([apply_raw_mode]) and handed back whenever the terminal is -- at exit and
-     around Ctrl-Z. Restoring [old_term] alone leaves the shell without the
-     keys, which the PTY harness catches as a terminal this program did not put
-     back the way it found it. *)
+  (* Read beside [old_term] because the record carries only one of them,
+     Ctrl-backslash. The reclaimed keys are turned off for as long as this
+     program owns the terminal ([apply_raw_mode]) and handed back whenever the
+     terminal is -- at exit and around Ctrl-Z. Restoring [old_term] alone
+     leaves the shell without the other keys, which the PTY harness catches as
+     a terminal this program did not put back the way it found it. *)
   let old_reclaimed_keys = Masc_tui_termios.snapshot Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
@@ -30458,8 +30460,8 @@ let main
         Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term)
     in
     (* After the record, not before: [tcsetattr] is what puts the rest of the
-       terminal back, and these characters are the part it cannot reach. A
-       refusal here is the terminal already gone. *)
+       terminal back, and these characters, Ctrl-backslash aside, are the part
+       it cannot reach. A refusal here is the terminal already gone. *)
     Masc_tui_termios.restore Unix.stdin old_reclaimed_keys;
     outcome
   in

@@ -1,10 +1,11 @@
 (** Terminal settings this program needs that [Unix.terminal_io] cannot state.
 
-    The record [Unix.tcsetattr] takes has no IEXTEN field and no c_cc array, so
-    a key the tty layer claims for itself cannot be reclaimed through it -- and
-    cannot be handed back through it either. That is not a gap worth a whole
-    termios binding: the keys are taken at session start and returned at the
-    end. *)
+    The record [Unix.tcsetattr] takes has no IEXTEN field and no c_cc array.
+    It carries ten c_cc characters as plain [char]s, but not the value that
+    turns a key off: [_POSIX_VDISABLE], 0xff on macOS and 0 on Linux. So a key
+    the tty layer claims for itself cannot be reclaimed through it. That is
+    not a gap worth a whole termios binding: the keys are taken at session
+    start and returned at the end. *)
 
 (** A key the tty layer takes before a raw-mode reader sees it. *)
 type reclaimed_key =
@@ -17,6 +18,13 @@ type reclaimed_key =
       (** VDSUSP, Ctrl-Y, on BSD terminals. Read with ISIG on, it suspends the
           reader instead of arriving; on macOS it ended the TUI. Ctrl-Y is the
           speak key. *)
+  | Quit
+      (** VQUIT, Ctrl-backslash. Raw mode keeps ISIG on for Ctrl-C and Ctrl-Z,
+          so the tty turns this byte into SIGQUIT. SIGQUIT ends the session
+          without the confirmation q and Ctrl-C ask for. Turned off, the byte
+          reaches the key reader as 0x1c, the key [Masc_tui_csi] already
+          makes of a Kitty-protocol Ctrl-backslash, and no binding takes it.
+          [kill -QUIT] still ends the session. *)
 
 val key_char : Unix.file_descr -> reclaimed_key -> int
 (** The key's current character as 0..255, or [-1] when [fd] is not a terminal
@@ -36,15 +44,15 @@ type snapshot
 
 val snapshot : Unix.file_descr -> snapshot
 (** Read before the first {!reclaim}. Restoring the [Unix.terminal_io] captured
-    at startup does not restore these characters -- the record cannot carry
-    them -- so a session that skipped the pair would hand the operator back a
-    shell without them. *)
+    at startup puts back only [Quit] -- the record cannot carry the others --
+    so a session that skipped the pair would hand the operator back a shell
+    without them. *)
 
 val reclaim : Unix.file_descr -> unit
 (** Turn off every reclaimed key. Call after every [Unix.tcsetattr], not once:
-    OCaml's [tcsetattr] writes a C-side termios buffer and overwrites only the
-    fields the record names, so a later call leaves c_cc holding what the
-    kernel has. *)
+    OCaml's [tcsetattr] reads the kernel's termios and overwrites the fields
+    the record names. [c_vquit] is one of them, so a record read before this
+    call puts Ctrl-backslash back. *)
 
 val restore : Unix.file_descr -> snapshot -> unit
 (** Give back what {!snapshot} read, skipping keys it could not read. *)

@@ -49,7 +49,9 @@ val render :
     msx-surface-focus-mode stage 1) — the renderer reads pixels only through
     it and never from the meta's pixel fields.
 
-    [None] is drawn as an empty body under a line that says why it is empty.
+    [None] is drawn as an empty body under a title that says why it is empty,
+    wrapped over at most half the rows the notice and the footer leave, so
+    the reason reads to its end. A title over a picture stays one row.
     [live] is the last live read of the MSX machine: a failed read is drawn
     as its error, and before any answer [connection] decides the reason, so
     "no machine loaded" never stands for a server that is down. A frame with
@@ -159,8 +161,9 @@ val open_menu : write:(string -> unit) -> ?mode:Masc_tui_types.msx_menu_mode -> 
 
 val render_menu :
   write:(string -> unit) -> ?status:string -> Masc_tui_types.state -> unit
-(** Redraw the picker. [status] is a single line above the list — used to show
-    why a load was refused. *)
+(** Redraw the picker. [status] is drawn above the list — used to show why a
+    load was refused — wrapped over at most half the rows between the title
+    and the footer, so the list keeps a row whenever there are two. *)
 
 val menu_consume :
   write:(string -> unit) -> Masc_tui_types.state -> string -> menu_action

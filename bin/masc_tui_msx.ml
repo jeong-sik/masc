@@ -86,6 +86,27 @@ let rows_that_fit ~cols ~rows ~frame_width ~frame_height =
 let fit_line width s =
   Masc_tui_ansi.fit_width (Masc_tui_ansi.Terminal_text.single_line s) (max width 0)
 
+(* A reason drawn one cell in from the left edge, wrapped at spaces so it is
+   read to its end, in at most [room] rows (at least one). A reason longer
+   than that ends its last row with the cut mark, as a single row did. *)
+let reason_rows ~cols ~room text =
+  let wrapped =
+    match
+      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (cols - 1))
+        (Masc_tui_ansi.Terminal_text.single_line text)
+    with
+    | [] -> [ "" ]
+    | rows -> rows
+  in
+  let room = max 1 room in
+  let cut = List.length wrapped > room in
+  List.mapi
+    (fun index row ->
+      let last = index = room - 1 in
+      fit_line cols
+        (" " ^ row ^ (if cut && last then " " ^ Masc_tui_message_layout.cut_mark else "")))
+    (List.take room wrapped)
+
 (* Boxed TUI surfaces reserve four columns in their shared geometry cache.
    This full-screen viewport has no borders: preserve the actual tty width,
    including one-column windows, rather than printing beyond its edge. *)
@@ -249,7 +270,19 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
   let rows, cols = viewport_size () in
   let rows = max 1 rows and cols = max 1 cols in
   let notice = if rows >= 4 then notice else None in
-  let header_rows = if Option.is_some notice then 2 else 1 in
+  let notice_rows = if Option.is_some notice then 1 else 0 in
+  (* Over a picture the title is one row: the picture's size must not change
+     when a frame counter grows a digit. With no picture the title says why
+     the body is empty, so it wraps to be read to its end in at most half of
+     the rows the notice and the footer leave; the room and the activity keep
+     the rest. *)
+  let title_rows = match dims with
+    | Some _ -> [ fit_line cols title ]
+    | None ->
+        let footer_rows = if rows > 1 then 1 else 0 in
+        reason_rows ~cols ~room:((rows - notice_rows - footer_rows) / 2) title
+  in
+  let header_rows = List.length title_rows + notice_rows in
   let body_rows = max 0 (rows - header_rows - 1) in
   let room_side = Option.is_some room && cols >= 80 in
   let room_width = if room_side then min 48 (cols / 3) else cols in
@@ -310,9 +343,10 @@ let draw ~(write : string -> unit) ~title ~footer ~retain ?notice
   end;
   (* With DECAWM disabled the cursor stays on the last printed cell. Clear
      each row before writing it, otherwise EL would erase that final cell. *)
-  Buffer.add_string buf "\027[0K";
-  Buffer.add_string buf (fit_line cols title);
-  if rows > 1 then Buffer.add_string buf "\r\n";
+  List.iter (fun row ->
+    Buffer.add_string buf "\027[0K";
+    Buffer.add_string buf row;
+    if rows > 1 then Buffer.add_string buf "\r\n") title_rows;
   Option.iter (fun message ->
     Buffer.add_string buf "\027[0K";
     Buffer.add_string buf (fit_line cols (" " ^ message));
@@ -648,11 +682,14 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
     | Masc_tui_types.Boot_game -> menu_title
     | Change_disk -> " MSX — change disk (no reboot)"));
   let body_rows = max 0 (rows - 2) in
+  (* The reason takes at most half the body, so the list keeps a row whenever
+     the body has two and the highlighted row Enter acts on stays on screen. *)
   let status_rows =
     match status with
     | Some s when body_rows > 0 ->
-        line (fit_line cols (" " ^ s));
-        1
+        let shown = reason_rows ~cols ~room:(body_rows / 2) s in
+        List.iter line shown;
+        List.length shown
     | Some _ | None -> 0
   in
   let entry_rows = body_rows - status_rows in

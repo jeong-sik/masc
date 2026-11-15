@@ -1267,45 +1267,46 @@ let removal_block_reason view (instance : instance) =
        | _ -> refusal "Lane configuration inventory is incomplete")
   | _ -> refusal "Lane configuration owner is incomplete"
 
+(* One item per key or notice, the way [overview_hints] lists them. *)
 let instance_controls view (instance : instance) =
   let removal = match removal_block_reason view instance with
-    | Some reason -> "  " ^ reason
+    | Some reason -> reason
     | None -> match instance.source_path with
-    | Some _ -> "  d:remove TOML + worker"
-    | None -> "  d:remove worker" in
+    | Some _ -> "d:remove TOML + worker"
+    | None -> "d:remove worker" in
   match instance.phase with
   | Row.Attached | Row.Observing ->
       (if can_observe instance then
-         "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "")
-       else "worker execution unavailable") ^ removal
-  | Row.Detaching -> "worker cleanup pending"
-  | Row.Detached -> "retained history · D:details"
+         "o:observe" :: (if Option.is_some instance.action_schema then ["a:actions"] else [])
+       else ["worker execution unavailable"]) @ [removal]
+  | Row.Detaching -> ["worker cleanup pending"]
+  | Row.Detached -> ["retained history · D:details"]
   | Row.Failed _ ->
       (if can_observe instance then
-         "o:retry observation" ^ (if Option.is_some instance.action_schema then "  a:actions" else "")
-       else "worker execution unavailable") ^ removal
+         "o:retry observation" :: (if Option.is_some instance.action_schema then ["a:actions"] else [])
+       else ["worker execution unavailable"]) @ [removal]
 
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
-  if view.help_open then "Esc:close help"
+  let refresh = if view.loading then "Reading …" else "r:refresh" in
+  if view.help_open then ["Esc:close help"]
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  Space:on/off draft  E:edit  R:records  s:save  l:reload  u/U:revision  Colon:palette  A:command"
+    ["?:help"; "Esc:back"; "Space:on/off draft"; "E:edit"; "R:records"; "s:save"; "l:reload";
+     "u/U:revision"; "Colon:palette"; "A:command"]
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
-      "?:help  Esc:back"
-      ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
-      ^ "  Colon:palette  A:command"
-      ^ (if view.loading then "  Reading …" else "  r:refresh")
+      ["?:help"; "Esc:back"]
+      @ (if Option.is_some (selected_source_path view) then ["E:edit TOML"] else [])
+      @ ["Colon:palette"; "A:command"; refresh]
   | Overview ->
-      "?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command"
-      ^ (if view.loading then "  Reading …" else "  r:refresh")
+      ["?:help"; "Colon:palette"; "Esc:back"; "Enter:open"; "h:history/current"; "i:install";
+       "n:new"; "S:subs"; "A:command"; refresh]
   | Detail _ ->
-      "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
-      (match selected_instance view with None -> "" | Some instance -> instance_controls view instance ^ "  ") ^
-      "D:raw  J/K:scroll"
-      ^ (if view.loading then "  Reading …" else "  r:refresh")
+      ["?:help"; "Colon:palette"; "Esc:back"; "A:command"; "1-4:section"; "Tab:next section"; "j/k:move"]
+      @ (match selected_instance view with None -> [] | Some instance -> instance_controls view instance)
+      @ ["D:raw"; "J/K:scroll"; refresh]
 
 (* The advertised lane action tool, its name and its [action] property, the
    part the operator fills. The host checks a send under the package's tool
@@ -1763,7 +1764,7 @@ let instance_heading _snapshot (item : instance) =
 
 let empty_result_lines view (item : instance) =
   match item.phase with
-  | Row.Failed detail -> ["Plugin failed: " ^ detail; instance_controls view item]
+  | Row.Failed detail -> ["Plugin failed: " ^ detail; String.concat "  " (instance_controls view item)]
   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
       if item.observation_seq=0 then ["No completed observation received yet."]
       else if item.rows_count=0 then
@@ -1870,7 +1871,7 @@ let overview_lines ~width view =
                      | Row.Failed _ -> "failed"
                      | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
                    " · " ^ count_text) in
-                let controls = "    Enter:open  " ^ instance_controls view item in
+                let controls = "    " ^ String.concat "  " ("Enter:open" :: instance_controls view item) in
                 let detail = match item.phase with
                   | Row.Failed detail ->
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
@@ -1899,9 +1900,12 @@ let overview_lines ~width view =
                    else [])
                 @ [controls] @ detail)) items
   in
+  (* The keys are packed from whole items, so a row ends where a key ends. A
+     cut at the width would leave [n:n] on one row and [ew] on the next. *)
+  let keys = Masc_tui_message_layout.pack_clauses ~max_cells:width (overview_hints view) in
   List.concat_map (function Overview_text line -> wrap line | Overview_drawn rows -> rows)
     (texts (diagnostic_lines view) @ content
-     @ texts ([""; overview_hints view] @ action_lines view))
+     @ texts (("" :: keys) @ action_lines view))
 
 (* One line of the Plugins help. [Help_keys] names the keys of a screen or a
    task under a label, and [Help_note] explains the line above it. *)

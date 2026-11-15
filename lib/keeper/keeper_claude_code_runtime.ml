@@ -574,7 +574,7 @@ let recovery_failure_of_client_error = function
    §5.4). That is not an input rejection an operator can retry --
    [Retry_previous] would send into the same full session -- so it is
    recorded [Vendor_session_full]: the continuation
-   ends for good ({!Keeper_direct_gate_continuation.session_full} reads it) and
+   ends for good ({!Keeper_direct_gate_continuation.failed_run_end} reads it) and
    the next ordinary turn supersedes it with a fresh session. Whether a
    response or tool effect was observed first is kept in the record. *)
 let recovery_failure_of_attempt ~session_mode ~gate_continuation error =

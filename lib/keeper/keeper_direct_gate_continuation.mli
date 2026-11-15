@@ -41,15 +41,19 @@ val complete_native : config:Workspace.config -> keeper_name:string -> operation
 val record_completed : config:Workspace.config -> keeper_name:string -> admission ->
   (Keeper_approval_queue.continuation_projection_result, string) result
 
-(** [Some] when this admission's official-client session is durably
-    [Vendor_session_full]: the continuation's resume was refused as full, and
-    no session other than the one that captured the Gate may carry it. The
-    caller fails the operation with this cause instead of suspending it again.
-    An Agent Core admission, or any other session state, is [None]. *)
-val session_full : config:Workspace.config -> keeper_name:string -> admission ->
+(** The cause a failed official-client continuation ends its operation with.
+    Such a continuation cannot be suspended again: its lane returns no Agent
+    Core checkpoint and the failed resume left its session unsettled. The cause
+    is [Gate_session_full] when the session is durably [Vendor_session_full]
+    from this Gate's own resume, and [run_failure], the cause the failed run
+    names, otherwise. An Agent Core admission is [None]: its failed attempt's
+    checkpoint is what the caller suspends from. *)
+val failed_run_end : config:Workspace.config -> keeper_name:string ->
+  run_failure:Keeper_request_failure.cause -> admission ->
   (Keeper_request_failure.cause option, string) result
 
-(** The decision {!session_full} makes once the session is loaded: [Some] only
+(** The full-session decision {!failed_run_end} makes once the session is
+    loaded: [Some] only
     for a [Vendor_session_full] recovery on the checkpoint's own client kind and
     runtime whose failed claim resumed the checkpoint's own session and turn. *)
 val session_full_cause : checkpoint:Keeper_semantic_execution.official_client_checkpoint ->

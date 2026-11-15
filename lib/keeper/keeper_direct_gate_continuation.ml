@@ -502,13 +502,21 @@ let session_full_cause ~(checkpoint : Semantic.official_client_checkpoint) ~appr
       }
   | None -> None
 
-let session_full ~config ~keeper_name admission =
+(* A failed official-client continuation has nothing to yield from. Its lane
+   hands back no Agent Core checkpoint, because the session store owns resume,
+   and the failed Resume left that session unsettled, which
+   [Native.validate_continuation] refuses. So the operation ends here, and it
+   ends with what happened: the full session when the record says this Gate's
+   own resume found it full, and otherwise the run's own failure. *)
+let failed_run_end ~config ~keeper_name ~run_failure admission =
   match admission.authority with
   | Agent_core _ -> Ok None
   | Official_client checkpoint ->
     let* expected = Native.load ~base_path:config.Workspace.base_path ~keeper_name |> Result.map_error Native.read_error_to_string in
-    Ok (session_full_cause ~checkpoint
-      ~approval_id:admission.selected.obligation.approval_id expected)
+    match session_full_cause ~checkpoint
+        ~approval_id:admission.selected.obligation.approval_id expected with
+    | Some full -> Ok (Some full)
+    | None -> Ok (Some run_failure)
 
 let finish_run ~config ~keeper_name ~operation_id admission run_result =
   match admission.authority, run_result with

@@ -104,6 +104,16 @@ val librarian_working_context : string
     [working_contexts_rule] variable, so the rule has one text. *)
 val librarian_working_contexts_rule : string
 
+(** The pending working-context material of [librarian]: a pass that carries
+    turn material renders it into the [working_context_input] variable, and the
+    admission pass, which has none, leaves the variable empty. *)
+val librarian_working_context_input : string
+
+(** The turn material of [librarian] (past Task/Goal records, the conversation,
+    counterpart and tool observations, the continuity document): rendered into
+    the [turn_inputs] variable by every pass but admission. *)
+val librarian_turn_inputs : string
+
 val keeper_memory_selection : string
 val keeper_memory_selection_candidate : string
 val keeper_memory_selection_request_context : string

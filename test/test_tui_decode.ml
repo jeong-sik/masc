@@ -9789,6 +9789,38 @@ let test_decode_server_identity_survives_a_bare_health () =
       "an absent worktree verdict is unknown, not a lane" None
       identity.Tui_decode.sid_executable_in_worktree
 
+(* Which server answers: the single-user probe carries no account_mode, the
+   account server of a multi-account installation says Multi_account and
+   nothing of a workspace, and a value no build writes is refused. *)
+let test_decode_server_reading_tells_the_account_server_apart () =
+  let kind json =
+    match Tui_decode.decode_server_reading json with
+    | Ok (Tui_decode.Masc_server identity) -> `Masc identity.Tui_decode.sid_version
+    | Ok (Tui_decode.Account_server { account_server_version }) -> `Account account_server_version
+    | Error (_ : string) -> `Refused
+  in
+  let show = function
+    | `Masc version -> "masc " ^ version
+    | `Account version -> "account " ^ Option.value version ~default:"(none)"
+    | `Refused -> "refused"
+  in
+  let reading = Alcotest.testable (fun fmt value -> Format.pp_print_string fmt (show value)) ( = ) in
+  let account mode version =
+    `Assoc ([ ("server", `String "masc"); ("account_mode", mode) ] @ version)
+  in
+  Alcotest.check reading "the single-user probe" (`Masc "0.24.0") (kind health_probe);
+  Alcotest.check reading "the account server" (`Account (Some "0.24.0"))
+    (kind (account (`String "Multi_account") [ ("version", `String "0.24.0") ]));
+  Alcotest.check reading "an account server that names no version" (`Account None)
+    (kind (account (`String "Multi_account") []));
+  Alcotest.check reading "Single_user is a masc server" (`Masc "0.24.0")
+    (kind (account (`String "Single_user") [ ("version", `String "0.24.0") ]));
+  List.iter
+    (fun mode ->
+      Alcotest.check reading (Yojson.Safe.to_string mode) `Refused
+        (kind (account mode [ ("version", `String "0.24.0") ])))
+    [ `String "multi_account"; `String "Off"; `Null; `Bool true; `Assoc [] ]
+
 let test_decode_server_identity_reads_the_startup_readiness () =
   let with_ready value =
     `Assoc [ ("startup", `Assoc [ ("state_ready", `Bool value) ]) ]
@@ -14616,6 +14648,8 @@ let () =
           test_decode_server_identity_reads_a_probe;
         Alcotest.test_case "survives a bare health" `Quick
           test_decode_server_identity_survives_a_bare_health;
+        Alcotest.test_case "tells the account server apart" `Quick
+          test_decode_server_reading_tells_the_account_server_apart;
         Alcotest.test_case "reads the operator rollup" `Quick
           test_decode_server_identity_reads_the_operator_rollup;
         Alcotest.test_case "takes an integer age" `Quick

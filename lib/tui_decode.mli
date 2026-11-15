@@ -1704,6 +1704,21 @@ type server_identity = {
 
 val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
 
+(** What answers [/health] at the address the TUI was given. *)
+type server_reading =
+  | Masc_server of server_identity
+      (** A server the operator surfaces read. *)
+  | Account_server of { account_server_version : string option }
+      (** The account server of a multi-account installation
+          ([account_mode] [Multi_account]). It serves none of the operator
+          surfaces, so a TUI that asks it for them reads only 404s. *)
+
+(** [Masc_server] when the body has no [account_mode] member, as the single-user
+    probe never does, or the member says [Single_user]; [Account_server] when
+    it says [Multi_account]. Any other value of the member is [Error]. A body
+    that is not a JSON object is read by {!decode_server_identity}. *)
+val decode_server_reading : Yojson.Safe.t -> (server_reading, string) result
+
 type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment

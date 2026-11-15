@@ -5612,6 +5612,41 @@ let decode_server_identity json =
     }
 ;;
 
+type server_reading =
+  | Masc_server of server_identity
+  | Account_server of { account_server_version : string option }
+
+(* The account server of a multi-account installation answers [/health] with
+   its name, its version and [account_mode], and nothing of a workspace. The
+   single-user probe never carries the member, so its absence is a masc
+   server; a value no build writes is refused rather than read as either. *)
+let decode_server_reading json =
+  let masc_server () =
+    Result.map (fun identity -> Masc_server identity) (decode_server_identity json)
+  in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "account_mode" fields with
+     | None -> masc_server ()
+     | Some value ->
+       (match Masc_domain.account_mode_of_json value with
+        | Some Masc_domain.Single_user -> masc_server ()
+        | Some Masc_domain.Multi_account ->
+          Ok
+            (Account_server
+               { account_server_version =
+                   (match List.assoc_opt "version" fields with
+                    | Some (`String version) -> Some version
+                    | Some _ | None -> None)
+               })
+        | None ->
+          Error
+            (Printf.sprintf
+               "/health account_mode %s is neither Single_user nor Multi_account"
+               (Yojson.Safe.to_string value))))
+  | _ -> masc_server ()
+;;
+
 type prompt_operator_surface =
   | Prompt_primary
   | Prompt_fragment

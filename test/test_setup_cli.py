@@ -58,6 +58,20 @@ class Announcement:
     def alive(self):
         return self.process.poll() is None
 
+    def withdraw(self):
+        """Withdraws the announcement and keeps the lease, as a server does
+        once its listener closes on the way to its exit."""
+        self.process.stdin.write('withdraw\n')
+        self.process.stdin.flush()
+        answer = self.process.stdout.readline().strip()
+        if answer != 'withdrawn':
+            raise AssertionError('the announcer did not withdraw: ' + answer)
+
+    def leave(self):
+        """Ends the helper, so nothing holds the workspace any more."""
+        self.process.stdin.close()
+        self.process.wait(timeout=30)
+
     def __enter__(self):
         return self
 
@@ -69,14 +83,22 @@ class Announcement:
 
 
 class Recorder:
-    """An HTTP stand-in that answers every request 200 and records it."""
+    """An HTTP stand-in that answers every request 200 and records it.
+
+    `before` maps a path to what runs once, when that path is first asked
+    for and before it is answered.
+    """
 
     def __init__(self):
         requests = self.requests = []
+        before = self.before = {}
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def answer(self):
                 requests.append((self.command, self.path, self.headers.get('Authorization')))
+                hook = before.pop(self.path, None)
+                if hook is not None:
+                    hook()
                 data = json.dumps({'server': 'masc', 'version': '0.0.0'}).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')

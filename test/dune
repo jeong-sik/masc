@@ -72,6 +72,16 @@
  (deps (alias runtest-test_measure_tool_efficiency)))
 
 (rule
+ (alias runtest-test_ci_failing_suites)
+ (deps ../scripts/ci_failing_suites.py
+       ../scripts/tests/test_ci_failing_suites.py)
+ (action (run python3 %{dep:../scripts/tests/test_ci_failing_suites.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_ci_failing_suites)))
+
+(rule
  (alias runtest-test_keeper_remote_workspace_cleanup)
  (deps ../config/scripts/keeper-remote-workspace-cleanup.py
        test_keeper_remote_workspace_cleanup.py)

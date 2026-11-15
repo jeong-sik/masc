@@ -415,10 +415,34 @@ jobs:
           # or printing a misleading empty block.
           runner_log="${RUNNER_TEMP}/ci-run-tests.log"
           dune_log="${RUNNER_TEMP}/test-suite.log"
+          # An issue body holds 65536 characters; a run where most of the
+          # suite fails must still be filed.
+          max_listed_commands=200
+          # The runner log holds the runner's verdict and only the last 120
+          # lines of dune's output, so a suite that failed earlier in the run
+          # is not in it. The failing commands come from dune's full log.
+          # The digest script is absent when the job failed before Checkout.
           failing='(no failing-suite lines extracted; see the suite-runner-log artifact.)'
+          verdict=''
           if [ -s "$runner_log" ]; then
-            suites=$(grep -a -E '\[test-suite\] FAIL|\[FAIL\]|FAIL native\.fixture' "$runner_log" | head -n 30 || true)
-            [ -n "$suites" ] && failing="$suites"
+            verdict=$(grep -a -E '\[test-suite\] FAIL|FAIL native\.fixture' "$runner_log" | head -n 30 || true)
+          fi
+          commands=''
+          if [ -s "$dune_log" ] && [ -f scripts/ci_failing_suites.py ]; then
+            all_commands=$(python3 scripts/ci_failing_suites.py "$dune_log" || true)
+            if [ -n "$all_commands" ]; then
+              command_count=$(printf '%s\n' "$all_commands" | wc -l | tr -d ' ')
+              commands=$(printf '%s\n%s' \
+                "failing commands: ${command_count} (failed Alcotest cases, then the command; at most ${max_listed_commands} are listed)" \
+                "$(printf '%s\n' "$all_commands" | head -n "${max_listed_commands}")")
+            fi
+          fi
+          if [ -n "$verdict" ] && [ -n "$commands" ]; then
+            failing=$(printf '%s\n%s' "$verdict" "$commands")
+          elif [ -n "$verdict" ]; then
+            failing="$verdict"
+          elif [ -n "$commands" ]; then
+            failing="$commands"
           fi
           errors='(no Dune error block extracted.)'
           if [ -s "$dune_log" ]; then

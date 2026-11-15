@@ -52,6 +52,10 @@ let input () : Librarian.input =
   }
 ;;
 
+(* An admission run judges queued candidates, not a turn: its input carries no
+   turn material, and the runtime refuses one that does. *)
+let admission_input () = { (input ()) with messages = [] }
+
 let unchanged_memory_json =
   `Assoc ["new_claims", `List []; "dropped", `List []; "working_contexts", `List []]
 ;;
@@ -683,7 +687,7 @@ let test_admission_worker_requires_actual_input_capacity () =
         ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
         ~on_not_committed:(fun reason -> reports := reason :: !reports;
           outcome := Worker.For_testing.judgment_of_not_committed reason)
-        ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+        ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (admission_input ());
       !outcome in
     (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
      | Worker.Pending _ -> () | _ -> fail "failed candidate batch must remain pending");
@@ -825,7 +829,7 @@ let test_a_held_api_slot_keeps_an_admission_batch_whole () =
       ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
       ~on_not_committed:(fun reason -> reports := reason :: !reports;
         outcome := Worker.For_testing.judgment_of_not_committed reason)
-      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (admission_input ());
     !outcome in
   (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
    | Worker.Pending _ -> ()
@@ -953,7 +957,7 @@ let test_oversized_supporting_candidates_do_not_split_the_admission_batch () =
       ~on_admission_deferred:(fun () -> outcome := Worker.Awaiting_evidence)
       ~on_not_committed:(fun reason -> reports := reason :: !reports;
         outcome := Worker.For_testing.judgment_of_not_committed reason)
-      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+      ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (admission_input ());
     !outcome in
   (match Worker.For_testing.run_with ~keepers_dir ~keeper_name:keeper_id ~judge with
    | Worker.Pending _ -> () | _ -> fail "a batch whose judgment request failed must stay pending");
@@ -1013,7 +1017,7 @@ let test_explicit_admission_envelope ?(transport_failure=false) ~deferred () =
     ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun _ -> incr retained)
     ~on_admission_deferred:(fun () -> incr awaiting_evidence)
-    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (admission_input ());
   check int "one actual exact-lane dispatch" 1 !requests;
   check int "only settled answer commits" (if held then 0 else 1) !committed;
   check int "uncertainty is explicitly retained" (if held then 1 else 0) !retained;
@@ -1164,7 +1168,7 @@ let test_admission_unavailable_retirement_history () =
   Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission ~cli_runner:runner
     ~on_memory_committed:(fun () -> incr committed)
     ~on_not_committed:(fun _ -> incr deferred)
-    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some snapshot.revision) (input ());
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some snapshot.revision) (admission_input ());
   let prompt = match !captured with [prompt] -> prompt | _ -> fail "expected one captured request" in
   (* These checks run outside the runtime's exception-catching runner boundary. *)
   check bool "history read failure is represented explicitly" true
@@ -1317,7 +1321,7 @@ let test_admission_change_without_candidate_support shape () =
   let committed = ref 0 in
   Runtime.run_best_effort ~write_scope:(Runtime.Memory_maintenance Masc.Keeper_memory_commit_pass.Admission) ~admission
     ~cli_runner:runner ~on_memory_committed:(fun () -> incr committed)
-    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (input ());
+    ~base_path ~keepers_dir ~keeper_id ~expected_revision:(Some initial.revision) (admission_input ());
   check int "only drops and pure merges commit without support" (if commits then 1 else 0) !committed;
   Queue.acknowledge_committed ~keepers_dir ~keeper_id |> require;
   check bool "the settled candidate is consumed only with the commit" (not commits)

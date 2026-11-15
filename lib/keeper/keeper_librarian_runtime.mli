@@ -535,12 +535,15 @@ val prepare_admission : batch:Keeper_memory_admission_queue.batch ->
 (** Resolve the current template/fragments on the caller fiber; the host
     retains this complete preparation and original substitution bytes before
     dispatch. Retirement policy is absent when the captured batch/evidence
-    produces no retirement suffix. It is not a grant to a worker. *)
+    produces no retirement suffix. It is not a grant to a worker. The prompt
+    renders neither turn-material slot, so an input for which
+    {!Keeper_librarian.carries_turn_material} holds is an [Error]. *)
 val validate_admission_preparation : batch:Keeper_memory_admission_queue.batch ->
   retirement:Keeper_memory_admission_judgment.retirement_evidence ->
   input:Keeper_librarian.input -> admission_preparation -> (unit, string) result
 (** Pure captured-template/input/schema consistency check; never resolves a
-    current prompt. *)
+    current prompt. It refuses an input that carries turn material, as
+    {!prepare_admission} does. *)
 val validate_admission_proposal : now:float ->
   batch:Keeper_memory_admission_queue.batch -> input:Keeper_librarian.input ->
   Yojson.Safe.t -> (admission_proposal, Keeper_librarian.parse_error) result

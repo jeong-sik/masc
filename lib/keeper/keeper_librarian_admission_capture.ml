@@ -150,9 +150,9 @@ let destination_of_json = Destination.of_json ~context:"Original Librarian captu
 
 let input_json = Keeper_librarian_input_capture.to_json
 let check_pending_input (input:L.input) =
-  if input.historical_task_contexts=[] && input.working_context=Keeper_librarian_context.empty
-    && input.messages=[] && input.tool_observations=[] && input.counterpart_observations=[]
-  then Ok () else Error "Explicit-candidate execution cannot replace another Librarian pass's original input"
+  if L.carries_turn_material input
+  then Error "Explicit-candidate execution cannot replace another Librarian pass's original input"
+  else Ok ()
 let input_of_json json =
   let* input=Keeper_librarian_input_capture.of_json json in
   let* ()=check_pending_input input in

@@ -650,8 +650,13 @@ let prepare_durable_step ~now ~context ~source_lines input =
 let render_librarian_prompt ~source_lines input =
   prepare_durable ~now:(Time_compat.now ()) ~source_lines input
   |> Result.map (fun (preparation : durable_preparation) -> preparation.rendered_prompt)
+(* Admission renders neither turn-material slot. An input that carries turn
+   material would be judged without it, so that input is refused here rather
+   than answered from a prompt that left its material out. *)
 let validate_admission_preparation ~batch ~retirement ~input preparation =
   let open Result.Syntax in
+  let* ()=if Keeper_librarian.carries_turn_material input
+    then Error "Admission input carries turn material that its prompt does not render" else Ok () in
   let policy=preparation.policy in
   let* ()=if policy.facts_max_bytes>0 && policy.category_cap>0 && policy.facts_per_category_cap>0
     then Ok () else Error "Original Librarian advisory limits are invalid" in

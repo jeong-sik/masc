@@ -34,7 +34,7 @@ import quiz_grading as g
 import quiz_log as q
 import records
 from records import (  # noqa: F401  -- the names this package's modules and tests read from here
-    InvalidBinding, InvalidResult, digest, grants_of_binding, material)
+    InvalidBinding, InvalidResult, digest, grants_of_binding, material, since_of_binding)
 
 AUTHOR = "author"
 GRADE = "grade"
@@ -72,13 +72,23 @@ LESSON_PORT = "scenes"  # the output port of operator-lesson that holds its scen
 LESSON_LANE = "lesson/scenes"
 
 
-def lesson_source_of_binding(binding: dict) -> str | None:
-    """The source_id of the lesson output the binding names, or None when
-    it names none. The quiz reads no other source."""
+@dataclass(frozen=True, slots=True)
+class Lesson:
+    """The lesson output a binding names, and binding.since: where a session
+    that follows it reads from while no earlier session has asked (§3.8)."""
+    source_id: str
+    since: float
+
+
+def lesson_of_binding(binding: dict) -> Lesson | None:
+    """The lesson the binding names, or None when it names none. The quiz
+    reads no other source. since comes with a lesson and only with one."""
     sources = binding.get("sources")
     if not isinstance(sources, list) or len(sources) > 1:
         raise InvalidBinding("binding.sources must be empty or name one lesson output")
     if not sources:
+        if "since" in binding:
+            raise InvalidBinding("binding.since is read only with a lesson source")
         return None
     source = sources[0]
     keys = {"source_id", "kind", "installation_id", "output_id", "selection"}
@@ -87,7 +97,7 @@ def lesson_source_of_binding(binding: dict) -> str | None:
         raise InvalidBinding("a lesson source names source_id, kind, installation_id, output_id and selection")
     if (source["kind"], source["output_id"], source["selection"]) != ("lane_output", LESSON_PORT, "latest_completed"):
         raise InvalidBinding(f"a lesson source is the latest completed {LESSON_PORT} output of a lesson installation")
-    return source["source_id"]
+    return Lesson(source["source_id"], since_of_binding(binding))
 
 
 def _scene_of_row(row: Any, instance_id: str) -> q.Scene:
@@ -189,11 +199,10 @@ class Flow:
     # -- compose --------------------------------------------------------------
 
     def compose(self, action_request_id: str, questions: int, binding: dict, opened_at: float, *,
-                lesson: str | None = None) -> str:
+                lesson: Lesson | None = None) -> str:
         """Opens the session for one compose action; the same action again
-        names the same session and writes nothing. [lesson] is the lesson
-        source the binding names (lesson_source_of_binding): the session then
-        follows it."""
+        names the same session and writes nothing. [lesson] is the lesson the
+        binding names (lesson_of_binding): the session then follows it."""
         grants = grants_of_binding(binding)
         language = language_of_binding(binding)
         session_id = session_id_of(action_request_id)
@@ -207,7 +216,7 @@ class Flow:
                      for posed, response in zip(session.posed, _responses(session.answer, session.posed))
                      if _needs_grade(session.grading_of(posed.question_id), response)
                      for event in self._request_grade(session, posed, response)]
-            follows = [q.FollowsLesson(session_id, lesson)] if lesson is not None else []
+            follows = [q.FollowsLesson(session_id, lesson.source_id, lesson.since)] if lesson is not None else []
             self.log.append([q.SessionOpened(session_id, action_request_id, questions, grants, language, opened_at),
                              *follows, *again])
         elif lesson is not None:
@@ -217,7 +226,7 @@ class Flow:
             # session has read nothing yet.
             opened = next(session for session in sessions if session.session_id == session_id)
             if opened.state == "writing" and opened.follows is None and not opened.material and not opened.requests:
-                self.log.append([q.FollowsLesson(session_id, lesson)])
+                self.log.append([q.FollowsLesson(session_id, lesson.source_id, lesson.since)])
         return session_id
 
     # -- the lesson output, at an observation ---------------------------------
@@ -231,9 +240,10 @@ class Flow:
         author request is written while a result is consumed, so what the
         lesson cited is kept in the log between the two. The event says
         what was received; a repeated observation writes nothing."""
-        name = lesson_source_of_binding(binding)
-        if name is None:
+        lesson = lesson_of_binding(binding)
+        if lesson is None:
             return None
+        name = lesson.source_id
         source = next((item for item in sources if isinstance(item, dict) and item.get("source_id") == name), None)
         if source is None:
             return {"complete": False, "detail": "the host supplied no source of this name"}
@@ -342,8 +352,12 @@ class Flow:
                 return {"after": after}
             # No session has asked yet, so nothing marks where the last one
             # stopped: read what was made since the quiz began, not the
-            # workspace's whole history (#44537).
-            return {"after": None, "since": sessions[0].opened_at}
+            # workspace's whole history (#44537). A session that follows a
+            # lesson reads from the binding's since instead, so the records the
+            # lesson cited, older than the quiz's first session, are read too
+            # (RFC operator-quiz-follows-lesson §3.8).
+            since = session.follows.since if session.follows is not None else sessions[0].opened_at
+            return {"after": None, "since": since}
 
         return records.next_read(f"{session.session_id}-read-{len(session.material)}", session.grants,
                                  self._session_reads(session), start)

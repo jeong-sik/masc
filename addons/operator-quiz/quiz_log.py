@@ -470,9 +470,13 @@ class LessonUnreadable:
 @dataclass(frozen=True, slots=True)
 class FollowsLesson:
     """Written with session_opened when the binding names a lesson source:
-    the session's new questions come only from records a lesson cited."""
+    the session's new questions come only from records a lesson cited. While
+    no earlier session has asked, the session reads from since, the binding's
+    time, and not from the opening of the quiz's first session (RFC
+    operator-quiz-follows-lesson §3.8)."""
     session_id: str
     source_id: str
+    since: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,8 +538,8 @@ def event_to_json(event: Event) -> dict:
         case LessonUnreadable(instance_id, observation_seq, sha256, rows, reason):
             return {"event": "lesson_unreadable", "instance_id": instance_id, "observation_seq": observation_seq,
                     "sha256": sha256, "rows": rows, "reason": reason}
-        case FollowsLesson(session_id, source_id):
-            return {"event": "follows_lesson", "session_id": session_id, "source_id": source_id}
+        case FollowsLesson(session_id, source_id, since):
+            return {"event": "follows_lesson", "session_id": session_id, "source_id": source_id, "since": since}
         case LessonScopeApplied(session_id, request_id, kept):
             return {"event": "lesson_scope_applied", "session_id": session_id, "request_id": request_id,
                     "kept": [cite.to_json() for cite in kept]}
@@ -633,8 +637,9 @@ def event_of_json(value: Any) -> Event:
                                     _text(f["sha256"], "sha256"), _text(f["rows"], "rows"),
                                     _text(f["reason"], "reason"))
         case "follows_lesson":
-            f = _exact(value, {"event", "session_id", "source_id"}, "follows_lesson")
-            return FollowsLesson(_text(f["session_id"], "session_id"), _text(f["source_id"], "source_id"))
+            f = _exact(value, {"event", "session_id", "source_id", "since"}, "follows_lesson")
+            return FollowsLesson(_text(f["session_id"], "session_id"), _text(f["source_id"], "source_id"),
+                                 _time(f["since"], "since"))
         case "lesson_scope_applied":
             f = _exact(value, {"event", "session_id", "request_id", "kept"}, "lesson_scope_applied")
             if not isinstance(f["kept"], list):
@@ -705,7 +710,7 @@ class Session:
     answer: AnswerReceived | None
     grading: tuple[Grading, ...]  # in log order
     history_scope: str | None  # None means no domain context was recorded; never infer it from request wire.
-    follows: str | None  # the lesson source this session follows, from follows_lesson
+    follows: FollowsLesson | None  # the lesson this session follows and the time it first reads from
     scopes: tuple[LessonScopeApplied, ...]  # one per author request of a session that follows a lesson
     taught: frozenset[str]  # question ids whose source a lesson seen before the question had cited
 
@@ -788,11 +793,11 @@ def fold(events: list[Event]) -> list[Session]:
                 outputs.add((type(event), rows))
                 if isinstance(event, LessonSeen):
                     cited.update((cite.kind, cite.source_id, cite.pin) for scene in event.scenes for cite in scene.cites)
-            case FollowsLesson(session_id=session_id, source_id=source_id):
+            case FollowsLesson(session_id=session_id):
                 current = writing(session_id, "follows_lesson")
                 if current["follows"] is not None or current["material"] or current["requests"]:
                     raise LogError(f"follows_lesson for session {session_id} does not come with its opening")
-                current["follows"] = source_id
+                current["follows"] = event
             case LessonScopeApplied(session_id=session_id, request_id=request_id):
                 current = writing(session_id, "lesson_scope_applied")
                 latest = current["requests"][-1] if current["requests"] else None

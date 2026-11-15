@@ -6,6 +6,14 @@ module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Briefing = Dashboard_briefing_sections.For_test
 module Workspace = Masc.Workspace
 
+(* The readers the server registers at boot. Without them the briefing's
+   digest is unreadable, and the sections refuse to count its lists. *)
+let () =
+  Dashboard_projection_cache.register_operator_snapshot_json
+    { Dashboard_projection_cache.snapshot = Operator_control.snapshot_read };
+  Dashboard_projection_cache.register_operator_digest_observer
+    { Dashboard_projection_cache.observe_digest = Operator_control.observe }
+
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_briefing_sections_" "" in
   Unix.unlink dir;

@@ -78,19 +78,125 @@ let build_attention_queue incidents =
            (Operator_digest_types.severity_rank_of_string left.severity))
 
 
+(* The operator digest fields the briefing reads. *)
+type digest = {
+  health : string;
+  attention_items : Yojson.Safe.t list;
+  recommended_actions : Yojson.Safe.t list;
+}
+
+let digest_of_json json =
+  let list_of name =
+    match member_assoc name json with
+    | `List items -> Ok items
+    | other ->
+        Error
+          (Printf.sprintf "operator digest %s is not a list: %s" name
+             (Yojson.Safe.to_string other))
+  in
+  match member_assoc "health" json, list_of "attention_items", list_of "recommended_actions" with
+  | `String health, Ok attention_items, Ok recommended_actions ->
+      Ok { health; attention_items; recommended_actions }
+  | _, Error detail, _ | _, Ok _, Error detail -> Error detail
+  | other, Ok _, Ok _ ->
+      Error
+        (Printf.sprintf "operator digest health is not a word: %s"
+           (Yojson.Safe.to_string other))
+
+(* [Dashboard_cache] holds JSON, so a [Reuse] read hands it this module's own
+   encoding of the read outcome and decodes what comes back. The decoder
+   accepts exactly what the encoder writes: any other value is [None], never a
+   digest with empty lists. *)
+let cached_json_of_outcome = function
+  | Ok { health; attention_items; recommended_actions } ->
+      `Assoc
+        [
+          ( "read",
+            `Assoc
+              [
+                ("health", `String health);
+                ("attention_items", `List attention_items);
+                ("recommended_actions", `List recommended_actions);
+              ] );
+        ]
+  | Error detail -> `Assoc [ ("unreadable", `String detail) ]
+
+let outcome_of_cached_json = function
+  | `Assoc
+      [
+        ( "read",
+          `Assoc
+            [
+              ("health", `String health);
+              ("attention_items", `List attention_items);
+              ("recommended_actions", `List recommended_actions);
+            ] );
+      ] ->
+      Some (Ok { health; attention_items; recommended_actions })
+  | `Assoc [ ("unreadable", `String detail) ] -> Some (Error detail)
+  | _ -> None
+
+(* The briefing's lists built from a read digest. *)
+type digest_view = {
+  digest : digest;
+  incidents : Yojson.Safe.t list;  (* attention items, most severe first *)
+  attention_queue : attention_context list;
+  internal_signals : Yojson.Safe.t list;
+}
+
+let view_of_digest digest =
+  let incidents =
+    digest.attention_items
+    |> List.sort (fun left right ->
+           Int.compare
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" right))
+             (Operator_digest_types.severity_rank_of_string
+                (string_field ~default:"ok" "severity" left)))
+  in
+  {
+    digest;
+    incidents;
+    attention_queue = build_attention_queue incidents;
+    internal_signals =
+      Dashboard_briefing_assembly.build_internal_signals incidents
+        digest.recommended_actions;
+  }
+
+(* What one read of the operator digest produced. A digest that was read and
+   holds no attention item is [Read] with empty lists; the other two cases say
+   nothing about what needs attention. *)
+type digest_read =
+  | Read of digest_view
+  | Timed_out
+  | Unreadable of string
+
+let read_of_outcome = function
+  | Ok digest -> Read (view_of_digest digest)
+  | Error detail -> Unreadable detail
+
+let digest_read_field = "digest_read"
+let digest_read_error_field = "digest_read_error"
+
+let digest_read_to_wire = function
+  | Read _ -> "read"
+  | Timed_out -> "timed_out"
+  | Unreadable _ -> "unreadable"
+
+let digest_completeness = function
+  | Read _ -> Dashboard_projection_read.Complete
+  | Timed_out -> Dashboard_projection_read.Partial "operator digest: read timed out"
+  | Unreadable detail -> Dashboard_projection_read.Partial ("operator digest: " ^ detail)
+
 type briefing_projection = {
   generated_at : string;
   snapshot_json : Yojson.Safe.t;
-  digest_json : Yojson.Safe.t;
   namespace_json : Yojson.Safe.t;
-  incidents : Yojson.Safe.t list;
-  recommended_actions : Yojson.Safe.t list;
-  attention_queue : attention_context list;
+  digest_read : digest_read;
   agent_briefs : Yojson.Safe.t list;
   keeper_briefs : Yojson.Safe.t list;
   keepers_unread : Keeper_snapshot_unread.t list;
   keepers_listing : Keeper_snapshot_unread.listing;
-  internal_signals : Yojson.Safe.t list;
   next_deadline_unix : float option;
   completeness : Dashboard_projection_read.completeness;
 }
@@ -132,51 +238,63 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
         Observed {observation with json =
           Dashboard_projection_cache.with_current_keeper_observations ~config observation.json}
   in
+  (* The digest read, its next policy transition, and the completeness of the
+     read. Only a [Current] read carries a source observation of its own. *)
   let digest_compute () =
     match read_policy with
     | Dashboard_projection_read.Current ->
         (match Dashboard_projection_cache.operator_digest_observation ~actor:actor_name ctx with
-         | Ok observation -> observation
-         | Error message -> invalid_arg ("dashboard briefing digest: " ^ message))
+         | Ok observation ->
+             let read = read_of_outcome (digest_of_json observation.json) in
+             ( read,
+               observation.next_deadline_unix,
+               Dashboard_projection_read.combine_completeness observation.completeness
+                 (digest_completeness read) )
+         | Error detail ->
+             let read = Unreadable detail in
+             (read, None, digest_completeness read))
     | Reuse ->
-      let json = Dashboard_projection_cache.get_or_compute_digest_json
-      ~config ~actor:(Some actor_name) (fun actor_name ->
-        Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-          match Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx with
-          | Ok json -> json
-          | Error message ->
-              `Assoc
-                [
-                  ("health", `String "warn");
-                  ("attention_items", `List []);
-                  ("recommended_actions", `List []);
-                  ("error", `String message);
-                ])) in
-      {Dashboard_projection_cache.json; next_deadline_unix = None; completeness = Dashboard_projection_read.Complete}
+        let cached =
+          Dashboard_projection_cache.get_or_compute_digest_json
+            ~config ~actor:(Some actor_name) (fun actor_name ->
+              Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                cached_json_of_outcome
+                  (Result.bind
+                     (Dashboard_projection_cache.operator_digest_json ~actor:actor_name ctx)
+                     digest_of_json)))
+        in
+        let read =
+          if Dashboard_cache.is_timeout_envelope cached then Timed_out
+          else
+            match outcome_of_cached_json cached with
+            | Some outcome -> read_of_outcome outcome
+            | None ->
+                Unreadable
+                  (Printf.sprintf
+                     "digest cache entry for %s is neither a digest nor a timeout envelope"
+                     actor_name)
+        in
+        (read, None, digest_completeness read)
   in
-  let snapshot_read, digest_observation =
+  let snapshot_read, (digest_read, digest_next_deadline_unix, digest_read_completeness) =
     Eio.Fiber.pair snapshot_compute digest_compute
   in
   let snapshot_json, snapshot_observation = match snapshot_read with
     | Dashboard_projection_cache.Cached_json json -> json, None
     | Observed observation -> observation.json, Some observation in
-  let digest_json = digest_observation.Dashboard_projection_cache.json in
   let namespace_json =
     match member_assoc "workspace" snapshot_json with
     | `Assoc _ as value -> value
     | _ -> member_assoc "workspace" snapshot_json
   in
-  let incidents =
-    list_field "attention_items" digest_json
-    |> List.sort (fun left right ->
-           Int.compare
-             (Operator_digest_types.severity_rank_of_string
-                (string_field ~default:"ok" "severity" right))
-             (Operator_digest_types.severity_rank_of_string
-                (string_field ~default:"ok" "severity" left)))
+  (* Agent briefs count the attention entries that name them. An unread
+     digest leaves them nothing to count; the briefing's [digest_read] says
+     the counts were not read. *)
+  let attention_queue =
+    match digest_read with
+    | Read view -> view.attention_queue
+    | Timed_out | Unreadable _ -> []
   in
-  let recommended_actions = list_field "recommended_actions" digest_json in
-  let attention_queue = build_attention_queue incidents in
   let keeper_items =
     match member_assoc "keepers" snapshot_json |> member_assoc "items" with
     | `List items -> items
@@ -205,25 +323,20 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
     | Ok listing -> listing
     | Error detail -> invalid_arg ("dashboard briefing: " ^ detail)
   in
-  let internal_signals = Dashboard_briefing_assembly.build_internal_signals incidents recommended_actions in
   {
     generated_at = Masc_domain.now_iso ();
     snapshot_json;
-    digest_json;
     namespace_json;
-    incidents;
-    recommended_actions;
-    attention_queue;
+    digest_read;
     agent_briefs = agent_observation.json;
     keeper_briefs;
     keepers_unread;
     keepers_listing;
-    internal_signals;
-    completeness = Dashboard_projection_read.combine_completeness digest_observation.completeness
+    completeness = Dashboard_projection_read.combine_completeness digest_read_completeness
       (match snapshot_observation with
        | Some observation -> observation.completeness
        | None -> Dashboard_projection_read.keeper_completeness ~listing:keepers_listing ~unread:keepers_unread);
-    next_deadline_unix = (let digest_and_agents = match digest_observation.next_deadline_unix, agent_observation.next_deadline_unix with
+    next_deadline_unix = (let digest_and_agents = match digest_next_deadline_unix, agent_observation.next_deadline_unix with
       | None, deadline | deadline, None -> deadline
       | Some left, Some right -> Some (Float.min left right) in
       match digest_and_agents, Option.bind snapshot_observation (fun observation -> observation.next_deadline_unix) with
@@ -232,21 +345,46 @@ let build_projection ~read_policy ?actor ~config ~sw ~clock
 }
 
 let render_projection projection =
+  (* A digest that was not read says nothing about its lists, so they are
+     null, not the empty lists of a digest with no attention item. *)
+  let digest_list select =
+    match projection.digest_read with
+    | Read view -> `List (select view)
+    | Timed_out | Unreadable _ -> `Null
+  in
+  let digest_top select =
+    match projection.digest_read with
+    | Read view -> top_item (select view)
+    | Timed_out | Unreadable _ -> `Null
+  in
+  (* An unread digest names no health. The word is the health vocabulary's
+     own [unknown], which every reader of the health line already names. *)
+  let health =
+    `String
+      (match projection.digest_read with
+       | Read view -> view.digest.health
+       | Timed_out | Unreadable _ -> string_of_health_level Health_status.Unknown)
+  in
+  let digest_read_error =
+    match projection.digest_read with
+    | Read _ | Timed_out -> `Null
+    | Unreadable detail -> `String detail
+  in
   let summary_json =
     `Assoc
       [
-        ("workspace_health", `String (string_field ~default:"ok" "health" projection.digest_json));
+        ("workspace_health", health);
         ("project", Json_util.string_opt_to_json (Some (string_field "project" projection.namespace_json)));
       ]
   in
   let command_focus_json =
     `Assoc
       [
-        ("health", `String (string_field ~default:"ok" "health" projection.digest_json));
+        ("health", health);
         ("active_operations", `Int 0);
         ("pending_approvals", `Int 0);
-        ("top_attention", top_item projection.incidents);
-        ("top_action", top_item projection.recommended_actions);
+        ("top_attention", digest_top (fun view -> view.incidents));
+        ("top_action", digest_top (fun view -> view.digest.recommended_actions));
       ]
   in
   let operator_targets_json =
@@ -261,19 +399,21 @@ let render_projection projection =
       ("generated_at", `String projection.generated_at);
       ("summary", summary_json);
       ("candle", member_assoc "candle" (member_assoc "keepers" projection.snapshot_json));
-      ("incidents", `List projection.incidents);
-      ("recommended_actions", `List projection.recommended_actions);
+      (digest_read_field, `String (digest_read_to_wire projection.digest_read));
+      (digest_read_error_field, digest_read_error);
+      ("incidents", digest_list (fun view -> view.incidents));
+      ("recommended_actions", digest_list (fun view -> view.digest.recommended_actions));
       ("command_focus", command_focus_json);
       ("operator_targets", operator_targets_json);
       ( "attention_queue",
-        `List (List.map (fun (item : attention_context) -> item.json) projection.attention_queue)
-      );
+        digest_list (fun view ->
+            List.map (fun (item : attention_context) -> item.json) view.attention_queue) );
       ("agent_briefs", `List projection.agent_briefs);
       ("keeper_briefs", `List projection.keeper_briefs);
       ( "keepers_unread",
         `List (List.map Keeper_snapshot_unread.to_json projection.keepers_unread) );
       ("keepers_listing", Keeper_snapshot_unread.listing_to_json projection.keepers_listing);
-      ("internal_signals", `List projection.internal_signals);
+      ("internal_signals", digest_list (fun view -> view.internal_signals));
     ]
 
 type observation = Dashboard_projection_read.observation = {

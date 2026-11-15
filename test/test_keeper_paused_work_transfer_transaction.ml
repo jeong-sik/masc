@@ -39,19 +39,6 @@ let require_some label = function
   | None -> Alcotest.failf "%s: expected Some" label
 ;;
 
-let with_strict_executor f =
-  let env, sw = current_test_context () in
-  let pool =
-    Domain_pool.create
-      ~sw
-      ~domain_count:1
-      (Eio.Stdenv.domain_mgr env)
-  in
-  Executor_pool_ref.For_testing.with_pool
-    (Domain_pool.executor_pool pool)
-    f
-;;
-
 let rec remove_tree path =
   if Sys.file_exists path
   then if Sys.is_directory path

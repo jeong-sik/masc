@@ -143,23 +143,6 @@ let queue_length ~base_path ~keeper_name =
 
 (* --- pure post-tool boundary decision --------------------------------- *)
 
-let stimulus ~post_id ~urgency ~arrived_at ~payload : Q.stimulus =
-  { post_id; urgency; arrived_at; payload }
-;;
-
-let queue_of stimuli = List.fold_left Q.enqueue Q.empty stimuli
-
-let hitl_stimulus ~arrived_at ~approval_id =
-  let resolution : Q.hitl_resolution =
-    { approval_id; decision = Q.Hitl_approved; channel = unrouted }
-  in
-  stimulus
-    ~post_id:(Q.hitl_resolution_post_id resolution)
-    ~urgency:Q.Immediate
-    ~arrived_at
-    ~payload:(Q.Hitl_resolved resolution)
-;;
-
 let test_peek_projects_ready_resolution_without_consuming () =
   with_workspace
   @@ fun config ->

@@ -156,6 +156,7 @@ type http_error =
 let request_error_to_string : Llm_provider.Http_client.http_error -> string = function
   | HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
   | NetworkError { message; _ } -> "network: " ^ message
+  | Connect_failed { message; _ } -> "connect failed: " ^ message
   | TimeoutError { message; _ } -> "timeout: " ^ message
   | AcceptRejected { reason } -> "rejected: " ^ reason
   | ProviderTerminal { message; _ } -> "provider terminal: " ^ message

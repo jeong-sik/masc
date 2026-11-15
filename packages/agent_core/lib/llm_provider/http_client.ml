@@ -1668,6 +1668,45 @@ let connect_failed_after_dispatch = function
   | ProviderFailure _ -> false
 ;;
 
+(* The receipt [post_sync_once] returns for [error], read from how far the
+   request got. A phase and status that cannot go together raise
+   [Invalid_argument], and so does a connect failure after dispatch began. *)
+let post_sync_once_receipt ~phase ~status error =
+  match phase, status with
+  | Before_dispatch, None -> Error (Before_dispatch_error error)
+  | (Dispatch_started, None | Response_received, Some _)
+    when connect_failed_after_dispatch error ->
+    invalid_arg "Http_client.post_sync_once: a connect failure after dispatch started"
+  | Dispatch_started, None -> Error (Dispatch_started_error error)
+  | Response_received, Some status -> Error (Response_received_error { status; error })
+  | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->
+    invalid_arg "Http_client.post_sync_once: inconsistent receipt state"
+;;
+
+let%test "post_sync_once_receipt: Connect_failed before dispatch is Before_dispatch_error" =
+  let error = Connect_failed { message = "refused"; kind = Connection_refused } in
+  match post_sync_once_receipt ~phase:Before_dispatch ~status:None error with
+  | Error (Before_dispatch_error carried) -> carried == error
+  | Ok () | Error (Dispatch_started_error _ | Response_received_error _) -> false
+;;
+
+let%test "post_sync_once_receipt: Connect_failed after dispatch started is refused" =
+  let error = Connect_failed { message = "refused"; kind = Connection_refused } in
+  let refused phase status =
+    match post_sync_once_receipt ~phase ~status error with
+    | exception Invalid_argument _ -> true
+    | Ok () | Error _ -> false
+  in
+  refused Dispatch_started None && refused Response_received (Some 200)
+;;
+
+let%test "post_sync_once_receipt: NetworkError after dispatch started stays a receipt" =
+  let error = NetworkError { message = "reset"; kind = Connection_reset } in
+  match post_sync_once_receipt ~phase:Dispatch_started ~status:None error with
+  | Error (Dispatch_started_error carried) -> carried == error
+  | Ok () | Error (Before_dispatch_error _ | Response_received_error _) -> false
+;;
+
 let post_sync_once_after_validation
       ?cache
       ~connect_deadline
@@ -1685,17 +1724,7 @@ let post_sync_once_after_validation
   let connection = ref None in
   let wire = Request_wire.create () in
   let transport_eof_seen = Request_wire.eof_seen wire in
-  let fail error =
-    match !phase, !status with
-    | Before_dispatch, None -> Error (Before_dispatch_error error)
-    | (Dispatch_started, None | Response_received, Some _)
-      when connect_failed_after_dispatch error ->
-      invalid_arg "Http_client.post_sync_once: a connect failure after dispatch started"
-    | Dispatch_started, None -> Error (Dispatch_started_error error)
-    | Response_received, Some status -> Error (Response_received_error { status; error })
-    | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->
-      invalid_arg "Http_client.post_sync_once: inconsistent receipt state"
-  in
+  let fail error = post_sync_once_receipt ~phase:!phase ~status:!status error in
   let end_request_connection verdict =
     match !connection with
     | None -> ()

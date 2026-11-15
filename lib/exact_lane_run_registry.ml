@@ -205,19 +205,41 @@ type run =
   ; output_availability : payload_availability option
   }
 
-let slot_observations_of_json = Option.map (function
-  | `List values ->
-    let rec decode acc = function
-      | [] -> Ok (List.rev acc)
-      | value::rest ->
-        (match Exact_lane_slot_observation.of_yojson value with
-         | Ok value -> decode (value::acc) rest
-         | Error detail -> Error detail) in
-    decode [] values
-  | _ -> Error "exact slot observations must be a list")
+(* A completion's slot observations: the JSON its row carries and what that
+   JSON reads as. They are read once, when the value enters the registry from
+   a replayed row or from a completion this process writes. Every register
+   and completion rebuilds the projection over every retained run, and a
+   rebuild that read them again cost one [Exact_lane_slot_observation.of_yojson]
+   per retained observation: on 2026-11-15 the live server held 3,809 of them
+   and allocated about 72 MB on its main domain per rebuild, about 24 times a
+   minute. [completion_to_yojson] writes the JSON as it was read, whether it
+   reads or not. *)
+type stored_slot_observations =
+  { json : Yojson.Safe.t
+  ; decoded : (Exact_lane_slot_observation.t list, string) result
+  }
+
+let read_slot_observations json =
+  let decoded =
+    match json with
+    | `List values ->
+      let rec decode acc = function
+        | [] -> Ok (List.rev acc)
+        | value::rest ->
+          (match Exact_lane_slot_observation.of_yojson value with
+           | Ok value -> decode (value::acc) rest
+           | Error detail -> Error detail) in
+      decode [] values
+    | _ -> Error "exact slot observations must be a list"
+  in
+  { json; decoded }
 
 let slot_observations_to_json values =
   `List (List.map Exact_lane_slot_observation.to_yojson values)
+
+(* A run completed in this process shows what its row shows after a restart:
+   the written JSON goes through the read a replay does. *)
+let written_slot_observations values = read_slot_observations (slot_observations_to_json values)
 
 let lane_of_key key =
   match Lane_run_identity.of_id key with
@@ -295,7 +317,7 @@ module Payload = struct
     ; output_source : payload_source
     ; selected_slot : string option
     ; usage : usage option
-    ; slot_observations : Yojson.Safe.t option
+    ; slot_observations : stored_slot_observations option
     }
 
   let name = "exact_lane_run_registry"
@@ -423,7 +445,7 @@ module Payload = struct
        ]
        @ detail
        @ (match completion.slot_observations with
-          | None -> [] | Some value -> ["slot_observations",value]))
+          | None -> [] | Some stored -> ["slot_observations",stored.json]))
   ;;
 
   let completion_of_yojson json =
@@ -498,7 +520,7 @@ module Payload = struct
         if valid_outcome && inline && selected_slot=None && usage=None
            && Yojson.Safe.equal (Yojson.Safe.sort output) (Yojson.Safe.sort expected) then Ok ()
         else Error "restart completion does not match the original replay observation" in
-    let slot_observations=List.assoc_opt "slot_observations" fields in
+    let slot_observations=Option.map read_slot_observations (List.assoc_opt "slot_observations" fields) in
     Ok { outcome; origin; elapsed_s; output; output_source; selected_slot; usage; slot_observations }
   ;;
 end
@@ -511,7 +533,7 @@ type failed_completion =
   ; output : Yojson.Safe.t
   ; selected_slot : string option
   ; usage : usage option
-  ; slot_observations : Yojson.Safe.t option
+  ; slot_observations : stored_slot_observations option
   ; failure : persistence_failure
   }
 
@@ -660,7 +682,7 @@ let projected_run_of_entry failed_completions (entry : Store.entry) =
   ; started_at = entry.started_at
   ; input = Exact_input `Null
   ; status
-  ; slot_observations = slot_observations_of_json
+  ; slot_observations = Option.map (fun stored -> stored.decoded)
       (match entry.status,List.assoc_opt entry.id failed_completions with
        | Store.Completed completion,_ -> completion.slot_observations
        | Store.Running,Some failed -> failed.slot_observations
@@ -702,7 +724,7 @@ let full_run_of_entry failed_completions (entry : Store.entry) =
   ; started_at = entry.started_at
   ; input = entry.registration.input
   ; status
-  ; slot_observations = slot_observations_of_json
+  ; slot_observations = Option.map (fun stored -> stored.decoded)
       (match entry.status,List.assoc_opt entry.id failed_completions with
        | Store.Completed completion,_ -> completion.slot_observations
        | Store.Running,Some failed -> failed.slot_observations
@@ -955,7 +977,7 @@ let register_running t ~run_id ~lane ~actor ~started_at ~input =
 ;;
 
 let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~usage ~slot_observations ~output =
-  let slot_observations=Option.map slot_observations_to_json slot_observations in
+  let slot_observations=Option.map written_slot_observations slot_observations in
   (* Outside the lock, as in [register_running]. A run that stops being known
      before the lock is taken leaves this file for the replay sweep. *)
   let stored =
@@ -1207,7 +1229,7 @@ let reconcile_original t ~run_id ~lane ~actor ~started_at ~input ~completion =
         let* output_source=write Output_payload c.output in
         Ok {Payload.outcome=c.outcome;origin=Producer;elapsed_s=c.elapsed_s;output=c.output;
           output_source;selected_slot=c.selected_slot;usage=c.usage;
-          slot_observations=Option.map slot_observations_to_json c.slot_observations} in
+          slot_observations=Option.map written_slot_observations c.slot_observations} in
       match current,completion with
       | None,completion ->
         let* input_source=write Input_payload original_input in

@@ -1,0 +1,61 @@
+{
+ "baseline": {
+  "base": [
+   {
+    "synth": "rescore-a1/base-inkling-synth-1",
+    "drops": "rescore-a1/opus/base-inkling-1-drops",
+    "merges": "rescore-a1/opus/base-inkling-1-merges"
+   },
+   {
+    "synth": "rescore-a1/base-inkling-synth-2",
+    "drops": "rescore-a1/opus/base-inkling-2-drops",
+    "merges": "rescore-a1/opus/base-inkling-2-merges"
+   }
+  ]
+ },
+ "drafts": {
+  "F-1": [
+   {
+    "synth": "xtF-inkling-synth-1",
+    "drops": "xtF-inkling-drops-1",
+    "merges": "xtF-inkling-merges-1"
+   }
+  ],
+  "F-2": [
+   {
+    "synth": "xtF-inkling-synth-2",
+    "drops": "xtF-inkling-drops-2",
+    "merges": "xtF-inkling-merges-2"
+   }
+  ],
+  "F": [
+   {
+    "synth": "xtF-inkling-synth-1",
+    "drops": "xtF-inkling-drops-1",
+    "merges": "xtF-inkling-merges-1"
+   },
+   {
+    "synth": "xtF-inkling-synth-2",
+    "drops": "xtF-inkling-drops-2",
+    "merges": "xtF-inkling-merges-2"
+   }
+  ]
+ },
+ "expect": {
+  "base": "inkling"
+ },
+ "contrasts": [
+  [
+   "F",
+   "base"
+  ],
+  [
+   "F-1",
+   "base"
+  ],
+  [
+   "F-2",
+   "base"
+  ]
+ ]
+}

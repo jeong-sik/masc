@@ -15,15 +15,16 @@ describe('VirtualList', () => {
         items: few,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
-    expect(container.querySelector('.virtual-list-spacer')).toBeNull()
+    expect(container.querySelectorAll('[data-vl-key]')).toHaveLength(5)
     expect(container.textContent).toContain('Name 0')
     expect(container.textContent).toContain('Name 4')
   })
 
-  it('renders virtualization structure when above threshold', () => {
+  it('reserves the height of every row when above threshold', () => {
     const container = document.createElement('div')
     render(
       h(VirtualList<Item>, {
@@ -31,6 +32,7 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -46,6 +48,7 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
         className: 'my-list',
       }),
       container,
@@ -62,6 +65,7 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -77,6 +81,7 @@ describe('VirtualList', () => {
         estimatedItemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -93,6 +98,7 @@ describe('VirtualList', () => {
         items: few,
         renderItem,
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -107,6 +113,7 @@ describe('VirtualList', () => {
         items: [] as { id: string }[],
         renderItem: (item: { id: string }) => h('div', { key: item.id }, item.id),
         getKey: (item: { id: string }) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -121,6 +128,7 @@ describe('VirtualList', () => {
         estimatedItemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -128,7 +136,7 @@ describe('VirtualList', () => {
     expect(child).not.toBeNull()
   })
 
-  it('applies content-visibility to fallback rows using fixed itemHeight', () => {
+  it('applies content-visibility to the rows of a list that draws them all, using fixed itemHeight', () => {
     const container = document.createElement('div')
     const few = items.slice(0, 5)
     render(
@@ -137,10 +145,11 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
-    const rows = container.querySelectorAll('.virtual-list-fallback-row')
+    const rows = container.querySelectorAll('[data-vl-key]')
     expect(rows.length).toBe(5)
     for (const row of rows) {
       const style = (row as HTMLElement).style
@@ -149,7 +158,7 @@ describe('VirtualList', () => {
     }
   })
 
-  it('applies content-visibility to fallback rows using estimatedItemHeight', () => {
+  it('applies content-visibility to the rows of a list that draws them all, using estimatedItemHeight', () => {
     const container = document.createElement('div')
     const few = items.slice(0, 5)
     render(
@@ -158,10 +167,11 @@ describe('VirtualList', () => {
         estimatedItemHeight: 48,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
-    const row = container.querySelector('.virtual-list-fallback-row') as HTMLElement
+    const row = container.querySelector('[data-vl-key]') as HTMLElement
     expect(row.style.contentVisibility).toBe('auto')
     expect(row.style.containIntrinsicSize).toBe('auto 48px')
   })
@@ -175,6 +185,7 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
         onEndReached,
       }),
       container,
@@ -196,6 +207,7 @@ describe('VirtualList', () => {
         estimatedItemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
         onEndReached,
       }),
       container,
@@ -217,6 +229,7 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
         onEndReached,
       }),
       container,
@@ -243,6 +256,7 @@ describe('VirtualList', () => {
         itemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
         onEndReached,
       }),
       container,
@@ -293,6 +307,7 @@ describe('VirtualList', () => {
         estimatedItemHeight: 40,
         renderItem: (item) => h('div', { key: item.id }, item.name),
         getKey: (item) => item.id,
+        scrollBox: 'self',
       }),
       container,
     )
@@ -356,6 +371,7 @@ describe('VirtualList', () => {
           renderItem: (item) => h('div', null, item.name),
           // Inline on every render, as work.ts passes it.
           getKey: (item) => item.id,
+          scrollBox: 'self',
         }),
         container,
       )
@@ -416,6 +432,7 @@ describe('VirtualList', () => {
           ...heights,
           renderItem: (item) => h('div', null, item.name),
           getKey: (item) => item.id,
+          scrollBox: 'self',
         }),
         container,
       )
@@ -448,16 +465,208 @@ describe('VirtualList', () => {
       el.dispatchEvent(new Event('scroll'))
       await vi.waitFor(() => { expect(container.textContent).toContain('Name 299') })
 
-      // Below the threshold every row is in the DOM and the range goes unused.
+      // Below the threshold every row is in the DOM, and the browser has
+      // clamped the scroll position to the shorter list.
       draw(many.slice(0, 30))
-      await vi.waitFor(() => { expect(container.querySelector('.virtual-list-spacer')).toBeNull() })
-      const short = container.firstElementChild as HTMLElement
-      Object.defineProperty(short, 'clientHeight', { value: VIEWPORT_PX, configurable: true })
-      short.scrollTop = 0
+      await vi.waitFor(() => { expect(container.querySelectorAll('[data-vl-key]')).toHaveLength(30) })
+      el.scrollTop = 0
 
       draw(many.slice(0, 45))
       await beforeNextFrame()
       expect(container.textContent).toContain('Name 0')
+    })
+  })
+
+  describe('when the item count crosses the threshold', () => {
+    const ROW_PX = 40
+    const VIEWPORT_PX = 400
+    const all = Array.from({ length: 41 }, (_, i) => ({ id: `item-${i}`, name: `Name ${i}` }))
+
+    function mount(count: number) {
+      const container = document.createElement('div')
+      document.body.appendChild(container)
+      const draw = (length: number) => render(
+        h(VirtualList<Item>, {
+          items: all.slice(0, length),
+          estimatedItemHeight: ROW_PX,
+          renderItem: (item) => h('button', { type: 'button', 'data-row': item.id }, item.name),
+          getKey: (item) => item.id,
+          scrollBox: 'self',
+        }),
+        container,
+      )
+      draw(count)
+      const el = container.firstElementChild as HTMLElement
+      Object.defineProperty(el, 'clientHeight', { value: VIEWPORT_PX, configurable: true })
+      const button = (id: string) => container.querySelector<HTMLButtonElement>(`[data-row="${id}"]`)
+      const unmount = () => {
+        render(null, container)
+        container.remove()
+      }
+      return { container, draw, el, button, unmount }
+    }
+
+    it('keeps the root, the row and the focus in it from 40 to 41 items and back', async () => {
+      const { container, draw, el, button, unmount } = mount(40)
+      try {
+        const first = button('item-0')
+        expect(first).not.toBeNull()
+        first?.focus()
+        expect(document.activeElement).toBe(first)
+
+        draw(41)
+        await beforeNextFrame()
+        expect(container.firstElementChild).toBe(el)
+        expect(button('item-0')).toBe(first)
+        expect(document.activeElement).toBe(first)
+
+        draw(40)
+        await beforeNextFrame()
+        expect(container.firstElementChild).toBe(el)
+        expect(button('item-0')).toBe(first)
+        expect(document.activeElement).toBe(first)
+        expect(container.querySelectorAll('[data-vl-key]')).toHaveLength(40)
+      } finally {
+        unmount()
+      }
+    })
+
+    it('keeps the focused row of a list scrolled to its end when a 41st item arrives', async () => {
+      const { draw, el, button, unmount } = mount(40)
+      try {
+        // The list starts listening in a passive effect, and its scroll
+        // handler runs in the animation frame after the event.
+        const listen = vi.spyOn(el, 'addEventListener')
+        await vi.waitFor(() => {
+          expect(listen).toHaveBeenCalledWith('scroll', expect.any(Function), expect.anything())
+        })
+        el.scrollTop = 40 * ROW_PX - VIEWPORT_PX
+        el.dispatchEvent(new Event('scroll'))
+        await new Promise((resolve) => { requestAnimationFrame(resolve) })
+        await beforeNextFrame()
+        const last = button('item-39')
+        last?.focus()
+        expect(document.activeElement).toBe(last)
+
+        draw(41)
+        await beforeNextFrame()
+        expect(button('item-39')).toBe(last)
+        expect(document.activeElement).toBe(last)
+        // 41 items are windowed: the top of the list is off screen and gone.
+        expect(button('item-0')).toBeNull()
+      } finally {
+        unmount()
+      }
+    })
+  })
+
+  it('keeps a measured row height as the browser reported it', async () => {
+    const OriginalResizeObserver = global.ResizeObserver
+    const live = new Set<{ callback: ResizeObserverCallback; targets: Set<Element> }>()
+    global.ResizeObserver = class MockResizeObserver {
+      private readonly entry: { callback: ResizeObserverCallback; targets: Set<Element> }
+
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, targets: new Set() }
+        live.add(this.entry)
+      }
+
+      observe(target: Element) {
+        this.entry.targets.add(target)
+      }
+
+      disconnect() {
+        this.entry.targets.clear()
+        live.delete(this.entry)
+      }
+    } as unknown as typeof ResizeObserver
+
+    try {
+      const container = document.createElement('div')
+      render(
+        h(VirtualList<Item>, {
+          items,
+          estimatedItemHeight: 41,
+          renderItem: (item) => h('div', null, item.name),
+          getKey: (item) => item.id,
+          scrollBox: 'self',
+        }),
+        container,
+      )
+      const row = await vi.waitFor(() => {
+        const found = container.querySelector('[data-vl-key="item-0"]')
+        expect(found && [...live].some(o => o.targets.has(found))).toBe(true)
+        return found as HTMLElement
+      })
+      const entry = {
+        target: row,
+        borderBoxSize: [{ blockSize: 40.25 }],
+        contentRect: { height: 40.25 },
+      } as unknown as ResizeObserverEntry
+      for (const o of [...live]) {
+        if (o.targets.has(row)) o.callback([entry], o as unknown as ResizeObserver)
+      }
+
+      const spacer = container.querySelector('.virtual-list-spacer') as HTMLElement
+      await vi.waitFor(() => {
+        expect(spacer.style.height).toBe(`${49 * 41 + 40.25}px`)
+      })
+    } finally {
+      global.ResizeObserver = OriginalResizeObserver
+    }
+  })
+
+  describe('inside a scroll box the caller names', () => {
+    const ROW_PX = 40
+    const BOX_PX = 400
+    const many = Array.from({ length: 300 }, (_, i) => ({ id: `item-${i}`, name: `Name ${i}` }))
+
+    /** A box scrolled by `scrolled` shows the list that far above its own top. */
+    function mount() {
+      const box = document.createElement('div')
+      const container = document.createElement('div')
+      box.appendChild(container)
+      Object.defineProperty(box, 'clientHeight', { value: BOX_PX, configurable: true })
+      let scrolled = 0
+      box.getBoundingClientRect = () => new DOMRect(0, 100, 300, BOX_PX)
+      const onEndReached = vi.fn()
+      render(
+        h(VirtualList<Item>, {
+          items: many,
+          itemHeight: ROW_PX,
+          renderItem: (item) => h('div', null, item.name),
+          getKey: (item) => item.id,
+          scrollBox: box,
+          onEndReached,
+        }),
+        container,
+      )
+      const root = container.firstElementChild as HTMLElement
+      root.getBoundingClientRect = () => new DOMRect(0, 100 - scrolled, 300, many.length * ROW_PX)
+      Object.defineProperty(root, 'offsetHeight', { value: many.length * ROW_PX, configurable: true })
+      const scrollTo = (top: number) => {
+        scrolled = top
+        box.dispatchEvent(new Event('scroll'))
+      }
+      return { container, root, scrollTo, onEndReached }
+    }
+
+    it('draws the rows that box shows, not the rows at the top of the list', async () => {
+      const { container, scrollTo } = mount()
+      scrollTo(200 * ROW_PX)
+      await vi.waitFor(() => { expect(container.textContent).toContain('Name 200') })
+      expect(container.textContent).toContain('Name 209')
+      expect(container.textContent).not.toContain('Name 0')
+      expect(container.querySelectorAll('[data-vl-key]').length).toBeLessThan(30)
+    })
+
+    it('reports the end when that box reaches the end of the list', async () => {
+      const { container, scrollTo, onEndReached } = mount()
+      scrollTo(100 * ROW_PX)
+      await vi.waitFor(() => { expect(container.textContent).toContain('Name 100') })
+      expect(onEndReached).not.toHaveBeenCalled()
+      scrollTo(many.length * ROW_PX - BOX_PX)
+      await vi.waitFor(() => { expect(onEndReached).toHaveBeenCalledTimes(1) })
     })
   })
 })

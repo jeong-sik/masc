@@ -331,7 +331,7 @@ let other_scope config name =
    scope. [store_only] has the installed sink store the report for a scope
    of its own, then stores the same rows again under [scope]'s digest, so
    the rows are the sink's and the table holds nothing for [scope]. *)
-let store_only config scope ~observed_at report =
+let store_only ?(damage = fun row -> row) config scope ~observed_at report =
   let target = History.scope_id scope in
   let writer = other_scope config (Printf.sprintf "writer-%s-%.0f" target observed_at) in
   Usage.record ~scope:writer ~observed_at report;
@@ -341,11 +341,12 @@ let store_only config scope ~observed_at report =
       (function
         | `Assoc fields when List.assoc_opt "scope_id" fields = Some written ->
             Some
-              (`Assoc
-                 (List.map
-                    (fun (key, value) ->
-                      if String.equal key "scope_id" then key, `String target else key, value)
-                    fields))
+              (damage
+                 (`Assoc
+                    (List.map
+                       (fun (key, value) ->
+                         if String.equal key "scope_id" then key, `String target else key, value)
+                       fields)))
         | _ -> None)
       (stored_rows config)
   in
@@ -381,6 +382,16 @@ let zai ~tokens ~tokens_reset ~time ~time_reset =
        {|{"code":200,"msg":"Operation successful","success":true,"data":{"level":"max","limits":[{"type":"TIME_LIMIT","unit":5,"number":1,"percentage":%d%s},{"type":"TOKENS_LIMIT","unit":3,"number":5,"percentage":%d%s}]}}|}
        time (reset time_reset) tokens (reset tokens_reset))
 
+(* [week]/[short] are remaining fractions. Both windows state the reset
+   [antigravity_reset], far ahead. *)
+let antigravity_reset = 4070908800.
+
+let antigravity ~week ~short =
+  decode Usage.decode_antigravity_usage
+    (Printf.sprintf
+       {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"week","window":"weekly","remaining_fraction":%g,"reset_time":"2099-01-01T00:00:00Z"},{"id":"short","window":"5h","remaining_fraction":%g,"reset_time":"2099-01-01T00:00:00Z"}]}]}}}|}
+       week short)
+
 let restart_rests_a_scope_only_as_a_live_report_would () = fixture (fun config scope day ->
   let now = day +. 60. in
   let ahead = day +. 7200. in
@@ -399,11 +410,11 @@ let restart_rests_a_scope_only_as_a_live_report_would () = fixture (fun config s
   let open_ended = other_scope config "open-ended" in
   store_only config open_ended ~observed_at:(day +. 10.)
     (zai ~tokens:100 ~tokens_reset:None ~time:6 ~time_reset:(Some ahead));
-  (* Antigravity: one of two windows spent. *)
+  (* Antigravity: one of two windows spent, its reset ahead. A source that
+     one spent window refuses would rest here. *)
   let partly = other_scope config "partly" in
   store_only config partly ~observed_at:(day +. 10.)
-    (decode Usage.decode_antigravity_usage
-       {|{"status":"SUCCESS","num_turns":0,"command":{"name":"usage","data":{"groups":[{"buckets":[{"id":"week","window":"weekly","remaining_fraction":0},{"id":"short","window":"5h","remaining_fraction":0.5}]}]}}}|});
+    (antigravity ~week:0. ~short:0.5);
   (* Codex: a spent window is shown and rests nothing. *)
   let codex = other_scope config "codex" in
   store_only config codex ~observed_at:(day +. 10.)
@@ -437,6 +448,92 @@ let restart_reads_each_window_of_a_sparse_source () = fixture (fun config scope 
     [ day +. 10.; day +. 20. ]
     (List.sort Float.compare (List.map snd (restored scope))))
 
+(* The stored row of window [limit_id] with [key] rewritten. *)
+let rewrite ~limit_id key value = function
+  | `Assoc fields when List.assoc_opt "limit_id" fields = Some (`String limit_id) ->
+      `Assoc
+        (List.map
+           (fun (field, held) -> if String.equal field key then field, value else field, held)
+           fields)
+  | row -> row
+
+let unknown_role ~limit_id = rewrite ~limit_id "role" (`String "a_role_no_build_writes")
+
+(* A complete report says every window of its source. One whose rows could be
+   read only in part is not that report: the rows left over would rest an
+   account that has room, or call one with none. *)
+let restart_puts_back_no_part_of_a_complete_report () = fixture (fun config scope day ->
+  let now = day +. 60. in
+  let ahead = day +. 7200. in
+  (* Antigravity rests when every window is spent. The window with room
+     cannot be read, and the spent one alone would rest the account. *)
+  store_only config scope ~observed_at:(day +. 10.) ~damage:(unknown_role ~limit_id:"short")
+    (antigravity ~week:0. ~short:0.5);
+  (* Z.AI rests when the model-call window is spent. That window cannot be
+     read, and the other alone would show an account with room. *)
+  let spent_unread = other_scope config "spent-unread" in
+  store_only config spent_unread ~observed_at:(day +. 10.)
+    ~damage:(unknown_role ~limit_id:"TOKENS_LIMIT")
+    (zai ~tokens:100 ~tokens_reset:(Some ahead) ~time:6 ~time_reset:(Some ahead));
+  (* A row that reads but names a kind this build does not write. *)
+  let unknown_kind = other_scope config "unknown-kind" in
+  store_only config unknown_kind ~observed_at:(day +. 10.)
+    ~damage:(rewrite ~limit_id:"short" "kind" (`String "a_kind_no_build_writes"))
+    (antigravity ~week:0. ~short:0.5);
+  (* The whole earlier report is one the unread later report replaced. *)
+  let replaced = other_scope config "replaced" in
+  store_only config replaced ~observed_at:(day +. 10.) (antigravity ~week:0. ~short:0.);
+  store_only config replaced ~observed_at:(day +. 20.) ~damage:(unknown_role ~limit_id:"short")
+    (antigravity ~week:0. ~short:0.5);
+  (* A later report read whole replaces the unread one. *)
+  let recovered = other_scope config "recovered" in
+  store_only config recovered ~observed_at:(day +. 10.) ~damage:(unknown_role ~limit_id:"short")
+    (antigravity ~week:0. ~short:0.5);
+  store_only config recovered ~observed_at:(day +. 20.) (antigravity ~week:0. ~short:0.);
+  (* The earlier report stated no windows. The later one, whose marker cannot
+     be read, does not leave that empty report standing. *)
+  let emptied = other_scope config "emptied" in
+  store_only config emptied ~observed_at:(day +. 10.)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":null}}|});
+  store_only config emptied ~observed_at:(day +. 20.)
+    ~damage:(function
+      | `Assoc fields when List.mem_assoc "record" fields ->
+          `Assoc (("state", `Int 0) :: List.remove_assoc "state" fields)
+      | row -> row)
+    (decode Usage.decode_openrouter_key {|{"data":{"limit":20,"limit_remaining":0}}|});
+  (* A sparse report states windows one by one; the one that reads stands. *)
+  let sparse = other_scope config "sparse" in
+  store_only config sparse ~observed_at:(day +. 10.)
+    ~damage:(function
+      | `Assoc fields when List.assoc_opt "kind" fields = Some (`String "five_hour") ->
+          `Assoc (List.remove_assoc "unit" fields)
+      | row -> row)
+    (decode Usage.decode_codex_rate_limits_updated
+       {|{"rateLimits":{"primary":{"usedPercent":100,"windowDurationMins":300},"secondary":{"usedPercent":20,"windowDurationMins":10080}}}|});
+  restore config ~now
+    [ scope; spent_unread; unknown_kind; replaced; emptied; recovered; sparse ];
+  let windows = list (pair (option string) (float 0.)) in
+  check (option (float 0.)) "the spent window alone rests nothing" None (rest_end scope ~now);
+  check windows "no window of the unread report is put back" [] (restored scope);
+  check windows "the window with room is not shown without the spent one" []
+    (restored spent_unread);
+  check (option (float 0.)) "a kind no build writes leaves the report unread" None
+    (rest_end unknown_kind ~now);
+  check windows "and none of its windows is put back" [] (restored unknown_kind);
+  check (option (float 0.)) "the replaced report rests nothing" None (rest_end replaced ~now);
+  check windows "nor are its windows put back" [] (restored replaced);
+  check bool "an earlier report without windows is not put back either" true
+    (match Usage.state ~scope:emptied with
+     | Usage.Not_reported_since_start -> true
+     | Usage.Reported _ | Usage.Reported_no_windows _ -> false);
+  check (option (float 0.)) "a later whole report rests as it says"
+    (Some antigravity_reset) (rest_end recovered ~now);
+  check windows "and only its windows are put back"
+    [ Some "short", day +. 20.; Some "week", day +. 20. ]
+    (List.sort compare (restored recovered));
+  check (list (float 0.)) "a sparse window that reads is put back" [ day +. 10. ]
+    (List.map snd (restored sparse)))
+
 let restart_leaves_out_rows_without_a_role () = fixture (fun config scope day ->
   Dated_jsonl.append (usage_journal config) (`List [`Assoc [
     "scope_id", `String (History.scope_id scope);
@@ -455,6 +552,8 @@ let () = run "provider usage durable snapshots" ["history", [
     restart_rests_a_scope_only_as_a_live_report_would;
   test_case "a restart reads each window of a sparse source" `Quick
     restart_reads_each_window_of_a_sparse_source;
+  test_case "a restart puts back no part of a complete report" `Quick
+    restart_puts_back_no_part_of_a_complete_report;
   test_case "a restart leaves out rows without a role" `Quick
     restart_leaves_out_rows_without_a_role;
   test_case "damaged journal retains readable history through the typed decoder" `Quick

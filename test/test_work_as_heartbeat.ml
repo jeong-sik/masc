@@ -185,12 +185,53 @@ let test_config_invariant_sweep_independent () =
 
 
 let test_completed_cycle_records_and_refreshes () =
+  (match
+     Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+       Masc.Keeper_heartbeat_loop.Turn_cycle_turn_succeeded
+   with
+   | Masc.Keeper_heartbeat_loop.Record_turn_status
+       (Cycle_turn_succeeded, Refresh_work_heartbeat) -> ()
+   | _ -> fail "a succeeded turn must record success and refresh work-heartbeat");
   match
     Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
-      Masc.Keeper_heartbeat_loop.Turn_cycle_completed
+      Masc.Keeper_heartbeat_loop.Turn_cycle_turn_failed
   with
-  | Masc.Keeper_heartbeat_loop.Record_turn_status Refresh_work_heartbeat -> ()
-  | _ -> fail "completed cycle must record and refresh work-heartbeat"
+  | Masc.Keeper_heartbeat_loop.Record_turn_status
+      (Cycle_turn_failed, Refresh_work_heartbeat) -> ()
+  | _ -> fail "a failed turn must record failure and refresh work-heartbeat"
+;;
+
+(* #34673: a cycle that ran no turn says nothing about a turn. It renews the
+   lease, because the cycle itself ran, and dispatches no turn status, so a
+   failure streak the fiber inherited cannot move the Keeper to failing. *)
+let test_cycle_without_turn_records_no_turn_status () =
+  match
+    Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
+      Masc.Keeper_heartbeat_loop.Turn_cycle_without_turn
+  with
+  | Masc.Keeper_heartbeat_loop.Refresh_without_turn_status -> ()
+  | Masc.Keeper_heartbeat_loop.Record_turn_status _ ->
+    fail "a cycle without a turn must not dispatch Turn_succeeded or Turn_failed"
+  | Masc.Keeper_heartbeat_loop.Skip_interrupted_turn
+  | Masc.Keeper_heartbeat_loop.Skip_unadmitted_cycle
+  | Masc.Keeper_heartbeat_loop.Defer_autonomous_work _ ->
+    fail "a cycle without a turn still ran and renews the work-health lease"
+;;
+
+let test_unadmitted_cycle_records_nothing () =
+  List.iter
+    (fun status ->
+       match Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action status with
+       | Masc.Keeper_heartbeat_loop.Skip_unadmitted_cycle -> ()
+       | Masc.Keeper_heartbeat_loop.Record_turn_status _ ->
+         fail "an unadmitted cycle must not dispatch Turn_succeeded or Turn_failed"
+       | Masc.Keeper_heartbeat_loop.Refresh_without_turn_status
+       | Masc.Keeper_heartbeat_loop.Skip_interrupted_turn
+       | Masc.Keeper_heartbeat_loop.Defer_autonomous_work _ ->
+         fail "an unadmitted cycle leaves the work-health lease as it was")
+    [ Masc.Keeper_heartbeat_loop.Turn_cycle_lifecycle_blocked
+    ; Masc.Keeper_heartbeat_loop.Turn_cycle_owner_rejected
+    ]
 ;;
 
 let test_crashed_cycle_records_and_preserves_work_heartbeat () =
@@ -198,8 +239,9 @@ let test_crashed_cycle_records_and_preserves_work_heartbeat () =
     Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
       Masc.Keeper_heartbeat_loop.Turn_cycle_crashed
   with
-  | Masc.Keeper_heartbeat_loop.Record_turn_status Preserve_work_heartbeat -> ()
-  | _ -> fail "crashed cycle must record without refreshing work-heartbeat"
+  | Masc.Keeper_heartbeat_loop.Record_turn_status
+      (Cycle_turn_failed, Preserve_work_heartbeat) -> ()
+  | _ -> fail "crashed cycle must record failure without refreshing work-heartbeat"
 ;;
 
 let test_busy_cycle_defers_typed_block () =
@@ -221,10 +263,11 @@ let test_rested_cycle_records_no_turn_status () =
     Masc.Keeper_heartbeat_loop.decide_keepalive_cycle_action
       Masc.Keeper_heartbeat_loop.Turn_cycle_rested
   with
-  | Masc.Keeper_heartbeat_loop.Rest_without_turn_status -> ()
+  | Masc.Keeper_heartbeat_loop.Refresh_without_turn_status -> ()
   | Masc.Keeper_heartbeat_loop.Record_turn_status _ ->
     fail "a rested cycle must not dispatch Turn_succeeded or Turn_failed"
   | Masc.Keeper_heartbeat_loop.Skip_interrupted_turn
+  | Masc.Keeper_heartbeat_loop.Skip_unadmitted_cycle
   | Masc.Keeper_heartbeat_loop.Defer_autonomous_work _ ->
     fail "a rested cycle ran its turn and renews the work-health lease"
 ;;
@@ -306,6 +349,14 @@ let () =
         "completed records and refreshes work-heartbeat"
         `Quick
         test_completed_cycle_records_and_refreshes;
+      test_case
+        "a cycle without a turn records no turn status"
+        `Quick
+        test_cycle_without_turn_records_no_turn_status;
+      test_case
+        "an unadmitted cycle records nothing"
+        `Quick
+        test_unadmitted_cycle_records_nothing;
       test_case
         "crashed records and preserves work-heartbeat"
         `Quick

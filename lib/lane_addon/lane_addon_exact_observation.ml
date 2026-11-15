@@ -3,10 +3,16 @@ module Observation = Exact_lane_slot_observation
 let instance_id declaration_id =
   Yojson.Safe.to_string (`List [`String "exact-slot-observations";`String declaration_id])
 let directory ~declaration_id = Lane_addon_store.host_result_directory ~instance_id:(instance_id declaration_id)
+let store_root_field="store_root"
+let store_root = function
+  | `Assoc fields -> (match List.assoc_opt store_root_field fields with
+      | Some (`String root) -> Some root
+      | Some _ | None -> None)
+  | _ -> None
 let identity_for_digest ~store ~declaration_id ~request_id ~attempt_ordinal ~proof_digest =
   let instance_id=instance_id declaration_id in
   let key=Yojson.Safe.to_string (`List [`String request_id;`Int attempt_ordinal;`String proof_digest]) in
-  let fields=["version",`Int 1;"store_root",`String (Lane_addon_store.root store);
+  let fields=["version",`Int 1;store_root_field,`String (Lane_addon_store.root store);
     "declaration_id",`String declaration_id;"request_id",`String request_id;
     "attempt_ordinal",`Int attempt_ordinal;"proof_sha256",`String proof_digest] in
   Ok (instance_id,key,fields)

@@ -1,0 +1,217 @@
+{
+ "key": "multi-agent-orchestration",
+ "findings": [
+  {
+   "id": "multi-agent-orchestration-01",
+   "claim": "Cognition 은 2025년 '다중 에이전트를 만들지 말라'에서 2026년 '쓰기는 한 줄로 두고 다른 에이전트는 판단을 보탠다'로 입장을 좁혔다. 맥락을 미리 나누지 않은 리뷰어가 PR 당 평균 2개 버그를 잡고 그중 약 58% 가 심각하다고 적는다.",
+   "src": "Multi-Agents: What's Actually Working (Cognition, 2026-04-22) | https://cognition.ai/blog/multi-agents-working",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "Task claim(`docs/constitution.xml:88-89`)과 독립 리뷰(`:348-349`)가 이미 같은 모양이다. 새 장치는 없다. Keeper 사이 소통은 리뷰·반론·조언 자리에 두고, 결과물 쓰기는 claim 한 Keeper 하나가 한다.",
+   "caveat": "자사 제품 수치이고 독립 검증이 없다. 서로 협상하는 떼가 'mostly a distraction' 이라는 평가는 의견이다.",
+   "check": "verified 원문(2026-04-22)에 'writes stay single-threaded', 'average of 2 bugs per PR, of which roughly 58% are severe', 맥락 비공유 문장이 있다. 자사 수치로 표본·기간이 없다. 적용 좌표 :348-349 는 Release 독립이고 일반 PR 리뷰는 :374-375 다."
+  },
+  {
+   "id": "multi-agent-orchestration-02",
+   "claim": "에이전트 수십~수백이 한 저장소에 쓰면 병목은 CI·병합이다. Anthropic 은 하루 병합이 약 2,500건에서 30,000건 이상으로 늘자 병합 대기열이 맞지 않다고 보고 병합 뒤·배포 전 검사로 갔다. Yegge 는 30분 빌드에 대기열이 100건을 넘었다.",
+   "src": "Redesigning source control at Anthropic (2026-10-13) | https://www.anthropic.com/research/redesigning-source-control",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "헌법 build_and_ci(`docs/constitution.xml:330-336`)와 PR 수 비례 CI 금지 결정을 뒷받침한다. 새 제안은 없다. 스택당 CI 한 번(RFC #51521)은 in_flight 다. 빨간 main 은 이슈 하나로 모인다(`.github/workflows/main-minimal-build.yml:238-285`).",
+   "caveat": "자사 수치이고 monorepo 규모가 다르다. Cursor·Stripe·Yegge 도 각자의 보고다. Stripe 는 push 마다 CI 를 여전히 돌리고 횟수만 두 번으로 묶는다.",
+   "check": "verified 2,500→30,000건, 'A proper merge queue ... doesn't make much sense at agent scale', 병합 뒤·배포 전 검사, Yegge 30분 빌드·100 MR 이 원문과 같다. Anthropic 글에 에이전트 수는 없고 CI 를 줄였다는 말도 없다."
+  },
+  {
+   "id": "multi-agent-orchestration-03",
+   "claim": "Cursor 는 에이전트에게 남의 일을 기다리는 도구를 줬지만 'they rarely used it' 였다. 마지막 설계는 worker 가 쓴 handoff 를 시스템이 일을 낸 planner 에게 후속 메시지로 넣는다.",
+   "src": "Towards self-driving codebases (Cursor, 2026-02-05) | https://cursor.com/blog/self-driving-codebases",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "MASC 는 이미 `Delegate_completed`·`Composition_completed`·`Task_outcome` 으로 넣는다(`lib/keeper_runtime/keeper_event_queue.mli:167-189`, 주석에 자체 측정). 바깥 기다림은 in_flight(#51381, #51606). Task 를 만든 쪽이 완료 판정 글을 읽는지는 재 볼 것.",
+   "caveat": "수치 없는 서술이다. MASC 주석의 측정(위임 4건 중 상태 읽기 0건)은 2026-08 의 한 주 값이다.",
+   "check": "verified 'they rarely used it' 와 handoff 를 요청한 planner 에게 'follow-up message' 로 넣는다는 문장이 원문(2026-02-05)에 있다. HEAD 의 keeper_event_queue.mli:167-181 측정 주석(위임 4·읽기 0, 제출 22·읽기 12)도 맞다."
+  },
+  {
+   "id": "multi-agent-orchestration-04",
+   "claim": "검증자는 기본 상태로 너그럽다. Anthropic 은 'Out of the box, Claude is a poor QA agent' 라 적고 평가자를 사람 판단에 맞추는 일을 여러 번 했다. Project Vend 의 CEO 에이전트는 거절보다 승인을 약 8배 자주 했다.",
+   "src": "Harness design for long-running apps (Anthropic, 2026-03-24) | https://www.anthropic.com/engineering/harness-design-long-running-apps",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "`Eval_calibration` 원장이 `generator_runtime`·`evaluator_runtime` 과 사람 라벨을 이미 적는다(`lib/eval_calibration.mli:32-52`). runtime 쌍별 승인·거절 수와 사람과의 어긋남을 세는 projection 을 만든다. 새 필드와 Gate 는 없다.",
+   "caveat": "한 사람의 실험이다. Vend 수치는 'Project Vend: Phase two'(2025-12-18)에서 읽었고 한 매장의 값이다. 같은 계열 리뷰어에 대해 Cognition 은 반대로 보고한다. 원장에 사람 라벨이 얼마나 있는지는 확인 필요.",
+   "check": "verified 'Out of the box, Claude is a poor QA agent' 와 Vend 'about eight times as often' 이 원문에 있다. Seymour 는 QA 가 아니라 재무 승인자다. generator_runtime 은 option 이고 쌓인 사람 라벨 수는 확인 필요다."
+  },
+  {
+   "id": "multi-agent-orchestration-05",
+   "claim": "평평한 동료에게 공유 잠금을 준 설계는 실패했다. 에이전트가 잠금을 오래 쥐거나 풀기를 잊어 20개가 2~3개 몫의 처리량으로 떨어졌다. 품질을 맡긴 중앙 통합자도 병목이라 뺐다.",
+   "src": "Scaling long-running autonomous coding (Cursor, 2026-01-14) | https://cursor.com/blog/scaling-agents",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "요구사항 1 의 잠금 기준: 모델 호출을 사이에 둔 잠금을 만들지 않는다. 시스템이 짧게 쥐는 claim 버전 검사만 둔다. 오래 잡힌 claim 은 만료(`docs/constitution.xml:120-123` 이 금지) 대신 projection 으로 보인다(in_flight).",
+   "caveat": "자사 보고다. 결과물 품질은 2차 자료(The Register)가 빌드 실패를 전한다. 지금 MASC 코드에 그런 잠금이 있는지는 보지 않았다.",
+   "check": "misquoted 숫자와 integrator 문장은 맞다. 원문은 'Even when locking worked correctly, it became a bottleneck' 뒤에 20→2~3 을 적는다. 발견은 처리량 저하 원인을 '오래 쥐거나 풀기를 잊어'로 바꿔 적었다."
+  },
+  {
+   "id": "multi-agent-orchestration-06",
+   "claim": "MAST 는 실행 기록 1,642개에서 실패 모드 14개를 나눈다. 반복 15.7%, 추론·행동 어긋남 13.2%, 끝낼 조건 모름 12.4% 가 크다. 자동 라벨은 사람과 κ=0.77 이다. 검증 실패는 성공한 실행에도 자주 남는다.",
+   "src": "Why Do Multi-Agent LLM Systems Fail? (arXiv 2503.13657v3) | https://arxiv.org/html/2503.13657v3",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Keeper 턴 journal 표본에 MAST 어휘로 사후 라벨을 붙이고, 사람 라벨로 일치도를 먼저 잰다. 요구사항 12 의 되먹임 자료다. 실행 중 중단 근거로 쓰지 않는다(`docs/constitution.xml:450`).",
+   "caveat": "대상이 2024~25년 초 모델과 벤치마크 과제다. 오래 사는 Keeper 에 같은 몫이 나온다는 근거는 없다. 갈래 합(44.2·32.35·23.5%)은 내가 더한 값이다.",
+   "check": "verified v3(2025-10-26, 최신)에 1642 traces, 14 modes, 15.7·13.2·12.4%, κ=0.77, 'appear frequently even in successful runs' 가 있다. 분류는 기록 150개로 만들었고 1,642개는 o1 자동 라벨이다."
+  },
+  {
+   "id": "multi-agent-orchestration-07",
+   "claim": "다중 구조의 효과는 일의 모양에 달렸다. 나눌 수 있는 금융 추론은 +57~+80.8%, 순서가 묶인 계획은 −39~−70%, SWE-bench Verified 는 −15~−2% 다. 독립 구조는 오류를 17.2배, 중앙 구조는 4.4배로 키운다.",
+   "src": "Towards a Science of Scaling Agent Systems (arXiv 2512.08296v3) | https://arxiv.org/html/2512.08296",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Lane·Keeper 를 늘릴 때(`docs/constitution.xml:514`) Goal 별 조정 몫(메시지 수, 기다린 시간, 다시 한 횟수)을 projection 으로 본다. 문턱으로 쓰지 않는다. runtime 을 섞은 구성은 조합별로 잰다.",
+   "caveat": "코딩 벤치마크는 20문항 표본이고 칸마다 신뢰구간이 약 ±20%p 다. 계산 예산을 고정했고 에이전트는 9개까지만 봤다.",
+   "check": "overstated Figure 2 범위는 맞다. 17.2배·4.4배는 trace 수준 값(토큰 분석으로 잰 추가 계산량)이다. 과제 수준 오류율 비는 약 1.1~1.3 이고 통제 뒤 p=0.658 로 유의하지 않다. SWE-bench 는 20문항이다."
+  },
+  {
+   "id": "multi-agent-orchestration-08",
+   "claim": "A2A 1.0.0 은 2026-03-12 에 나왔다. `/.well-known/agent-card.json` 은 AgentCard 를 돌려줘야 한다(MUST). 필수 필드는 name, description, supportedInterfaces, version, capabilities, defaultInputModes, defaultOutputModes, skills 다.",
+   "src": "A2A Protocol Specification 1.0 (§4.4.1, §8.2, §14.3) | https://a2a-protocol.org/latest/specification/",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "MASC 가 내는 agent card 는 A2A 1.0 의 AgentCard 가 아니라 자체 형식이고 필수 필드 넷이 없다. 소유자 결정: 경로에서 내리거나 A2A 를 바깥 경계로 받는다.",
+   "caveat": "코딩 에이전트 벤더의 A2A 채택 근거는 못 찾았다. 그 경로를 읽는 저장소 밖 소비자는 확인 필요. `docs/spec/02-types-and-invariants.md:195-209` 의 `a2a_task` 는 코드에 없다.",
+   "check": "verified 'Latest Released Version 1.0.0', §14.3 MUST, §4.4.1 Required 여덟이 원문과 같다. v1.0.0 은 2026-03-12T16:34:41Z 이고 v1.0.1 은 버그 수정이다. MASC 쪽 서술도 HEAD 와 맞는다."
+  },
+  {
+   "id": "multi-agent-orchestration-09",
+   "claim": "MCP 는 2026-11-12 에도 2026-07-28 판이 current 다. Tasks 는 확장 `io.modelcontextprotocol/tasks` 로 빠졌고 되읽기(`tasks/get`)가 기본이다. 서버가 먼저 알리는 방식은 로드맵 단계다. 지원 표의 클라이언트 17개 중 4개가 Tasks 를 지원한다.",
+   "src": "MCP Tasks extension overview, roadmap (2026-08-22), extension support matrix | https://modelcontextprotocol.io/extensions/tasks/overview.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "MASC 클라이언트는 `complete`·`input_required` 밖의 resultType 을 거절한다(`lib/mcp_client/mcp_client.ml:823-845`). 확장을 선언하지 않아 규격과 맞다. 정석은 지금 받지 않고, 쓰는 서버가 task 를 내놓을 때 구현하는 쪽이다.",
+   "caveat": "지원 표는 커뮤니티가 관리한다. 로드맵은 약속이 아니다. 긴 바깥 MCP 도구를 MASC 가 지금 쓰는지는 확인 필요.",
+   "check": "misquoted current 2026-07-28, 확장 이동, 'Polling is the default', 17개 중 4개는 맞다. source_url 은 'Servers can push status updates via notifications/tasks' 라 적는다. 로드맵에 있는 것은 webhook 을 포함한 push 전달이다."
+  },
+  {
+   "id": "multi-agent-orchestration-10",
+   "claim": "Anthropic 은 조정 패턴 다섯과 각자의 실패를 적는다. message bus 는 라우터가 잘못 분류하면 'fails silently' 하고, shared state 는 서로 반응하는 고리가 생긴다. 고리를 끝내는 방법은 시간 예산, N 주기 수렴, 전담 판정자다.",
+   "src": "Multi-agent coordination patterns: Five approaches and when to use them (Anthropic, 2026-04-10) | https://claude.com/blog/multi-agent-coordination-patterns",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "Board 관련성 판정이 그 라우터다(`lib/keeper/keeper_board_attention_candidate.mli:68-69`). `Not_relevant` 표본을 다시 판정해 어긋남을 센다. 시간·횟수 종료는 금지라 전담 판정자만 맞고 MASC 가 이미 그 모양이다.",
+   "caveat": "측정 없는 설계 안내다. MASC 판정 기록이 표본을 뽑을 수 있는 형태인지는 확인 필요.",
+   "check": "verified 다섯 패턴, 'fails silently', reactive loops, 세 종료 방법이 원문(2026-04-10)과 같다. 원문의 전담 판정자는 답이 충분한지 정하고 Board 판정은 보낼 곳을 정한다. 'MASC 가 이미 그 모양'은 해석이다."
+  },
+  {
+   "id": "multi-agent-orchestration-11",
+   "claim": "Claude Code agent teams 문서는 한계를 적는다. 팀원이 끝낸 일을 표시하지 않아 의존하는 일이 막힌다('Task status can lag'). 같은 파일을 둘이 고치면 덮어쓴다. 다른 에이전트가 전한 승인은 믿지 않는 입력으로 다룬다.",
+   "src": "Claude Code docs: agent teams | https://code.claude.com/docs/en/agent-teams.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "dependency 를 scheduling Gate 로 쓰지 않는다는 결정과 Keeper 사이 요청은 일반 메시지라는 결정을 뒷받침한다. 팀원이 멈추면 lead 에 자동으로 알리는 모양은 `Delegate_completed` 와 같다.",
+   "caveat": "실험 기능이고 기본은 꺼져 있다. 한 세션 안의 팀이라 오래 사는 Keeper 와 조건이 다르다.",
+   "check": "verified 'Task status can lag', 'leads to overwrites', 'untrusted input' 이 문서에 있다. 'untrusted input' 은 auto mode 분류기 검사이고 일반 규칙은 'can't approve ... on your behalf' 다. 기능은 실험이고 기본은 꺼져 있다."
+  },
+  {
+   "id": "multi-agent-orchestration-12",
+   "claim": "오래 돈 실행이 결과를 낸 사례는 기계가 판정하는 성공 기준을 가졌다. 에이전트 16개가 약 2주, 세션 약 2,000개, $20,000 조금 못 미치게 써서 10만 줄 C 컴파일러를 만들었고 GCC 를 정답 기준으로 일을 쪼갰다.",
+   "src": "Building a C compiler with parallel Claudes (Anthropic, 2026-02-05) | https://www.anthropic.com/engineering/building-c-compiler",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "Goal 은 정량 성공 조건을 요구한다(`docs/constitution.xml:57-58`). 바깥 근거가 이 규칙을 뒷받침한다. 큰 과제 하나에 16개가 같은 버그로 몰린 사례는 Task 를 서로 독립이 되게 쪼개는 근거다.",
+   "caveat": "한 사람의 실험이다. Cursor 의 일주일 실행(정점 시간당 약 1,000 커밋)은 산출량이고 2차 자료가 빌드 실패를 전한다.",
+   "check": "verified 16 agents, 약 2,000 세션·2주, $20,000 조금 못 미침, 10만 줄, GCC oracle, 같은 버그로 서로 덮어씀이 원문(2026-02-05)과 같다. Cognition 은 실제 소프트웨어 대부분에 이런 기준이 없다고 적는다."
+  },
+  {
+   "id": "multi-agent-orchestration-13",
+   "claim": "Yegge 는 Gas Town 이 Opus 4.6 까지 잘 돌다가 4.7 에서 'fell apart at the seams' 했고 다시 쓸 하네스 만들기를 그만뒀다고 적는다. Anthropic 도 모델이 바뀌자 sprint 구성과 context reset 을 뺐다. AutoGen 은 보관됐다.",
+   "src": "The Shape of Things to Come, Part 1: The Continuous Thunderdome (Steve Yegge, 2026-08) | https://yegge.ai/essays/the-shape-of-things-to-come/",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "runtime·모델 판이 바뀌면 약점을 메우던 부품 하나를 골라 같은 과제 묶음을 넣은 쪽과 뺀 쪽으로 돌린다. 그 결과가 정리에 필요한 품질 근거가 된다. runtime 별로 본다.",
+   "caveat": "한 사람의 자기 보고다. 무너진 원인을 따로 검증한 자료는 없다. Anthropic 사례는 하네스 글 둘에서, AutoGen 보관은 그 저장소 README 에서 읽었다.",
+   "check": "verified Yegge(2026-08) 'fell apart at the seams', 'given up on building reusable harnesses', sprint·context reset 제거, AutoGen 보관이 원문과 같다. 셋의 원인은 서로 다르다(모델 버릇, 모델 개선, 제품 이전)."
+  },
+  {
+   "id": "multi-agent-orchestration-14",
+   "claim": "다중 에이전트는 같은 일에 토큰을 3~10배 쓴다. 나란히 돌려 얻는 것은 속도가 아니라 빠짐없음이다. 일을 종류(구현, 시험, 리뷰)로 나누면 넘길 때마다 맥락을 잃으니 문맥 경계로 나누라고 권한다.",
+   "src": "Building multi-agent systems: When and how to use them (Anthropic, 2026-01-23) | https://claude.com/blog/building-multi-agent-systems-when-and-how-to-use-them",
+   "depth": "full_text",
+   "kind": "experience_report",
+   "apply": "MASC stimulus 는 이미 pointer 만 싣는다(`Owned_job_completed`·`Task_outcome`, `lib/keeper_runtime/keeper_event_queue.mli:182-189`). 토큰 배수는 요구사항 12 의 관측 값으로만 쓰고 한도로 쓰지 않는다.",
+   "caveat": "자사 시험이라고만 적고 방법은 공개하지 않았다. 출력을 저장소에 두고 참조만 넘기라는 권고는 같은 회사의 2025-06 연구 시스템 글에 있다. LangChain 실험의 수치는 그림 안에 있어 옮기지 않았다.",
+   "check": "verified '3-10x more tokens', 'thoroughness, not speed', 종류별 분할의 맥락 손실, 'context boundaries' 가 원문(2026-01-23)에 있다. 같은 글은 검증 subagent 가 잘 된다고 적는다. 'pointer 만'은 일부 stimulus 에만 맞다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "횟수·시간 문턱으로 정체를 판정해 다시 계획하거나 끝낸다(Magentic-One 의 정체 횟수, generator-verifier 의 최대 반복, 공유 상태 고리의 시간 예산과 N 주기 수렴).",
+   "why_not": "헌법 forbidden#magic_number 와 budget_gate: 반복 횟수와 지난 시간은 정체·중단의 근거가 아니다(`docs/constitution.xml:450`, `:464`). 전담 판정자 방식만 맞고 MASC 에 이미 있다."
+  },
+  {
+   "idea": "프롬프트 문장으로 고친다(Cursor 의 'Constraints are more effective than instructions', Anthropic 의 난이도별 하위 에이전트 수 규칙, Vend 의 절차 강제).",
+   "why_not": "brief 2절 1번: Keeper 프롬프트 문장·금지 규칙·강제 제약을 제안하지 않는다."
+  },
+  {
+   "idea": "의존성이 안 끝난 일을 막는 작업 목록(Claude Code agent teams).",
+   "why_not": "brief 2절 2번: dependency 를 scheduling Gate 로 쓰지 않는다. 그 문서도 상태 표시가 늦어 뒤따르는 일이 막힌다고 적는다."
+  },
+  {
+   "idea": "일을 나눠 주고 감독하는 상시 관리자·CEO Keeper 또는 Goal 소유자(Cognition 의 manager, Vend 의 CEO, Cursor 의 root planner).",
+   "why_not": "Goal 은 소유자를 두지 않는다(`docs/constitution.xml:55-56`). Vend 의 CEO 는 도움이 안 됐고 Cognition 의 관리자는 지나치게 세세했다. 끝나면 일을 낸 쪽에 넣는 전달 모양만 쓰고 이미 있다."
+  },
+  {
+   "idea": "A2A 의 Task 계약(상태, 응답, 재전송)을 Keeper 사이 요청에 쓴다.",
+   "why_not": "brief 2절 2번: Keeper 사이 요청은 일반 메시지다. 응답·대기·재시도 의무를 만들지 않는다. A2A 는 바깥 경계에서만 선택지다."
+  },
+  {
+   "idea": "중앙 통합자, 저장소 전체 잠금을 쥔 병합 대기열, 커밋마다 100% 정확 요구.",
+   "why_not": "Cursor 가 병목이라 뺐고 Anthropic 이 에이전트 규모에 맞지 않다고 적었다. PR·병합 수에 비례하는 CI 비용을 금지한 결정(brief 2절 6번)과 어긋난다."
+  },
+  {
+   "idea": "대기열이 차면 전부를 main 에 넣고 나중에 고친다(Yegge 의 Land Rush). 사람 리뷰를 없앤다.",
+   "why_not": "MASC 는 현재 head 에 대한 독립 승인을 요구한다(`docs/constitution.xml:374-397`). 한 사람의 보고이고 리뷰가 내년에 끝난다는 말은 예측이다."
+  },
+  {
+   "idea": "서로 협상하는 떼(swarm)에게 쓰기를 맡긴다.",
+   "why_not": "Cognition 은 'mostly a distraction' 이라 적고 Cursor 의 평평한 설계는 실패했다. Silo-Bench 는 팀이 2개일 때부터 단일 에이전트 성능의 15~49% 를 잃는다고 잰다."
+  },
+  {
+   "idea": "토큰 배수(15배, 3~10배)나 팀 크기 권고('3-5 teammates', Gas Town 의 '20-30 agents')를 한도로 쓴다.",
+   "why_not": "비용은 제약이 아니고 누적 토큰 Gate 는 금지다(`docs/constitution.xml:519`, `:464`). MASC 에서 재지 않은 숫자다. 관측 값으로만 쓴다."
+  },
+  {
+   "idea": "계정 여럿을 돌려 쓰는 한도 우회(Yegge).",
+   "why_not": "그 스스로 회사가 하면 약관 위반일 것이라고 적는다. MASC 의 다계정 결정(brief 2절 11번)과 다른 문제다."
+  },
+  {
+   "idea": "자체 버전 관리 시스템(Anthropic 의 Scion).",
+   "why_not": "글 스스로 아주 큰 monorepo 밖에서는 맞지 않다고 적는다. 가져올 것은 병합 뒤 검사라는 방향뿐이고 MASC 가 이미 그렇다."
+  },
+  {
+   "idea": "'production 다중 에이전트 시스템의 41~87% 가 실패한다'는 문장을 근거로 쓴다(arXiv 2605.03310 초록).",
+   "why_not": "MAST 의 벤치마크 실패율(41~86.7%)을 운영 실패율로 잘못 옮긴 것이다."
+  }
+ ],
+ "unknowns": [
+  "OpenAI 'Harness engineering' 은 HTTP 403 으로 원문 미직독이다. 수치를 쓰지 않았다.",
+  "Cognition 'Verifying Agentic Development at Scale' 은 주소를 못 찾았다(추정 주소 404).",
+  "MAST 의 모드별 몫이 2026년 모델과 오래 사는 Keeper 에서도 같은지 근거가 없다.",
+  "코딩 과제에서 다중 구조의 효과: Scaling 논문의 코딩 표본은 20문항이고 계산 예산을 고정해 결론을 낼 수 없다.",
+  "같은 모델 리뷰어의 효과: Project Vend 와 Cognition 의 보고가 엇갈리고 통제된 측정을 찾지 못했다.",
+  "`<base-path>/.masc/verdicts`(파일 172개, 7.3M)에 사람 라벨이 얼마나 있는지 내용을 읽지 않아 모른다.",
+  "Task 를 만든 Keeper 가 승인된 완료의 Board 판정 글을 실제로 읽는지 측정이 없다.",
+  "agent card 를 내는 경로를 읽는 저장소 밖 소비자가 있는지 모른다.",
+  "main-build-health 이슈가 claim 되는 Task 하나로 이어지는지 확인하지 않았다.",
+  "모델 호출을 사이에 둔 잠금이 지금 MASC 코드에 있는지 보지 않았다.",
+  "MCP 다음 판의 날짜와 Tasks 가 코어로 들어가는 시점은 로드맵에 날짜가 없다.",
+  "코딩 에이전트 벤더의 A2A 채택 근거를 찾지 못했다. Linux Foundation 의 150개 조직 수치는 홍보 자료다.",
+  "METR 의 2026-01 이후 모델별 시간 지평은 2차 자료에서만 봤다.",
+  "queue 를 턴마다 하나씩 비울 때와 묶어 비울 때의 차이를 잰 바깥 자료를 찾지 못했다.",
+  "Cursor 브라우저 실험의 결과물 품질: Cursor 글과 The Register 가 엇갈리고 직접 빌드해 보지 않았다.",
+  "`ProactiveOutcome` 의 noop 몫 같은 운영 값은 읽지 않았다.",
+  "조사 도중 main 이 `efe98ca792c2` 에서 `77f7bec3039f` 로 올랐다. 인용한 파일은 두 커밋 사이에 바뀌지 않았다."
+ ],
+ "conflicts_with_brief": [
+  "multi-agent-orchestration-08 — brief 2절 4번: masc_application 이 소유자 결정을 선택지 둘(경로에서 내림 / A2A 를 바깥 경계로 받음)로만 올리고 정석·근거·대가를 적지 않는다. 보고서 4.8 의 '(가) 정석'과 대가 문장을 옮긴다. (가)는 정리 변경이라 2절 9번의 품질 근거도 함께 적어야 한다."
+ ]
+}

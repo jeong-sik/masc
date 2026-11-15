@@ -73,6 +73,10 @@ export interface Integration {
   readonly calls: Calls
 }
 
+/** The name the operator gave a subscription, or its id when the name is empty. */
+export const integrationName = (integration: Integration): string =>
+  integration.displayName === '' ? integration.id : integration.displayName
+
 /** A fact the server read, or the code of why it could not. A code this
     console does not know is kept apart as `unrecognised`. */
 export type Fact<T, Unread extends string> =
@@ -262,7 +266,7 @@ const refusal = (status: number, json: unknown): Problem =>
     : { kind: 'refused', status, reason: isRecord(json) ? text(json.error) : null }
 
 /** The JSON of a body, or undefined when the body is not JSON. */
-async function bodyOf(response: Response): Promise<unknown> {
+export async function bodyOf(response: Response): Promise<unknown> {
   try {
     return await response.json() as unknown
   } catch {
@@ -270,7 +274,11 @@ async function bodyOf(response: Response): Promise<unknown> {
   }
 }
 
-async function send(to: Send, path: string, init: RequestInit): Promise<Response | null> {
+/** Why the server refused a request, read from its answer. */
+export const problemOf = async (response: Response): Promise<Problem> => refusal(response.status, await bodyOf(response))
+
+/** Sends a request with the session cookie, or gives null when no answer came. */
+export async function deliver(to: Send, path: string, init: RequestInit): Promise<Response | null> {
   try {
     return await to(path, { ...init, credentials: 'same-origin' })
   } catch {
@@ -279,8 +287,8 @@ async function send(to: Send, path: string, init: RequestInit): Promise<Response
   }
 }
 
-async function get<T>(to: Send, path: string, read: (json: unknown) => T | null): Promise<Answer<T>> {
-  const response = await send(to, path, { method: 'GET', headers: { accept: 'application/json' } })
+export async function get<T>(to: Send, path: string, read: (json: unknown) => T | null): Promise<Answer<T>> {
+  const response = await deliver(to, path, { method: 'GET', headers: { accept: 'application/json' } })
   if (response === null) return { ok: false, problem: { kind: 'unreachable' } }
   const json = await bodyOf(response)
   if (!response.ok) return { ok: false, problem: refusal(response.status, json) }
@@ -295,9 +303,9 @@ export const owned = (to: Send): Promise<Answer<Owned>> => get(to, paths.owned, 
 
 /** Ends the session. The server answers 204 and clears the cookie. */
 export async function signOut(to: Send, csrfToken: string): Promise<Answer<null>> {
-  const response = await send(to, paths.signOut, { method: 'POST', headers: { accept: 'application/json', [csrfHeader]: csrfToken } })
+  const response = await deliver(to, paths.signOut, { method: 'POST', headers: { accept: 'application/json', [csrfHeader]: csrfToken } })
   if (response === null) return { ok: false, problem: { kind: 'unreachable' } }
   if (response.status === 204) return { ok: true, value: null }
-  if (!response.ok) return { ok: false, problem: refusal(response.status, await bodyOf(response)) }
+  if (!response.ok) return { ok: false, problem: await problemOf(response) }
   return { ok: false, problem: { kind: 'unreadable' } }
 }

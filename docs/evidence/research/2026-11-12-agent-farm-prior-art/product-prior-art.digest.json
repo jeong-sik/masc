@@ -1,0 +1,227 @@
+{
+ "key": "product-prior-art",
+ "findings": [
+  {
+   "id": "product-prior-art-01",
+   "claim": "Claude Code, Codex, Cursor, Factory, Hermes 의 hook 이 같은 모양이 됐다. exit code 2 가 막고, 턴 끝에 별도 판정자가 `{ok, reason}` 을 돌려주면 이어서 일한다. Claude Code `/goal` 판정자는 도구를 못 쓰고 대화에 적힌 것만 본다.",
+   "src": "Claude Code docs: Keep Claude working toward a goal (비교: Codex hooks·auto-review, Cursor hooks, Factory hooks, Hermes hooks) | https://code.claude.com/docs/en/goal.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "판정 확장은 exact-output lane 의 typed 판정으로 한다. 판정자는 이미 Keeper 밖(`completion_authority_agent.mli:1-6`, `goal_criterion_agent.mli:1-2`)이고 실패는 `Outcome_unknown` 으로 가른다. 기준 글은 `config/prompts/` 에 둔다. Keeper 턴을 강제로 잇는 Stop hook 은 brief 2절 1번과 충돌해 뺀다.",
+   "caveat": "판정 정확도를 잰 값은 어느 문서에도 없다. 다른 네 제품의 hook 문서는 필요한 절만 읽었다.",
+   "check": "overstated goal.md 두 문장과 exit 2 차단은 다섯 문서에 있다. `{ok, reason}` 모델 판정자는 Claude Code·Cursor 뿐이다. Codex 는 prompt·agent handler 를 'parsed but skipped', Factory 는 command 만, Hermes pre_verify 는 callback 의 continue 지시다."
+  },
+  {
+   "id": "product-prior-art-02",
+   "claim": "Codex 는 `codex mcp-server` 를 2026-08-24 deprecated, 2026-09-05 제거했다. 승인·이력·이벤트 스트림이 필요한 연동은 자체 JSON-RPC app server 로 보낸다. Hermes 도 `mcp-serve` 를 plugin 으로 내보냈고, Amp 는 도구 둘짜리 Puck MCP 를 냈다.",
+   "src": "OpenAI docs: Codex MCP server removal | https://learn.chatgpt.com/docs/mcp-server.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "Keeper As A Tools 는 `masc_keeper_msg` 같은 좁은 도구로 두고 승인·이력·스트림은 HTTP/SSE·Dashboard 에 둔다. MCP profile 은 `Full`/`Managed_agent`/`Operator_remote`(`mcp_server_eio_tool_profile.mli:8-11`). 다계정 S1b 는 in_flight.",
+   "caveat": "Codex 문서는 지운 이유를 적지 않는다. 이유는 대체물 용도 문장에서 끌어낸 해석이다. app server 는 문서가 experimental 이라고 적는다.",
+   "check": "verified 페이지 문장 그대로. 날짜는 changelog 2026-08-24·2026-09-05 항목에 있다. Hermes v0.23.0, Amp 2026-10-13 글도 일치. Hermes 는 plugin 으로 계속 제공하고 Codex 는 지운 이유를 적지 않는다."
+  },
+  {
+   "id": "product-prior-art-03",
+   "claim": "Hermes worker lane 은 신원(assignee)·띄우는 방법·계약 셋으로 정의되고 수명의 진실은 kanban 이 쥔다. 못 띄우는 담당자는 대체 없이 `ready` 에 남긴다. plugin capability 는 'a consent and audit layer, not isolation' 이다. kanban 은 한 호스트 전용이다.",
+   "src": "Hermes Agent docs: Kanban worker lanes (비교: plugins, kanban) | https://raw.githubusercontent.com/NousResearch/hermes-agent/main/website/docs/user-guide/features/kanban-worker-lanes.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "Multi Addon Lane 계약을 같은 세 칸으로 문서화한다. 바탕은 `lane_addon_manifest.mli:4-5`, `lane_addon_worker_protocol.mli:1-3`. 다계정에서 package 격리는 프로세스·sandbox 로 한다. 목록을 못 읽으면 설치를 거절한다.",
+   "caveat": "문서에 적힌 동작이고 재현하지 않았다. 한 호스트 전용 제약의 이유는 문서가 lane 계약과 연결해 설명하지 않는다.",
+   "check": "verified lanes 3·21·29행, plugins 653행, kanban 1484행에 그대로 있다. Hermes `plugins.isolation: host` 가 막는 것은 메모리 읽기이고 sandbox runner 는 선택 사항이다."
+  },
+  {
+   "id": "product-prior-art-04",
+   "claim": "OpenClaw 는 OSS 에서 사람별 model 계정을 주지만 문서가 'account-selection convenience inside one trust domain, not isolation' 이라고 적는다. 소유·표시는 'usability features, not security boundaries' 다. Anthropic 은 API key 만 받는다.",
+   "src": "OpenClaw docs: Multi-user | https://docs.openclaw.ai/concepts/multi-user.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "2026-11-10 조사 문서의 빈칸 1 문장을 고친다. 차별점은 계정 고르기가 아니라 증명된 격리다(brief 2절 11번). 다계정 권한 캠페인(authz S1b, #51635)은 in_flight 라 새 제안은 없다.",
+   "caveat": "문서는 main 기준일 수 있다. 어느 릴리즈에 들어갔는지 release 본문에서 못 찾았다.",
+   "check": "verified 15·75·94·134행에 인용문 그대로. Anthropic 줄은 'for personal setup' 한정이다. 어느 릴리즈부터인지는 문서에 없다."
+  },
+  {
+   "id": "product-prior-art-05",
+   "claim": "Codex: 여러 Linux 호스트가 NFS 로 home 을 나누면 SQLite WAL 이 깨질 수 있어 rollback-journal(`DELETE`)로 만든다. JSONL 은 한 프로세스가 써서 괜찮다. OpenClaw: `chat.send` ACK 765 ms 중 673 ms 가 main thread 쓰기 허가 대기였다.",
+   "src": "OpenAI docs: Run Codex with an NFS home directory (비교: OpenClaw Writer admission authority) | https://learn.chatgpt.com/docs/environments/network-file-systems.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "masc 는 WAL 셋(`keeper_tool_call_index.ml:256`, `play_room.ml:141`, `tool_metrics_store.ml:159`)과 DELETE 셋이 섞여 있다. BasePath 를 네트워크 FS·동기화에 두기 전에 저장소별 규칙을 하나로 정한다. main domain 정지 캠페인은 in_flight.",
+   "caveat": "masc 는 지금 BasePath lease 로 서버 하나만 쓰므로 당장 깨지는 것은 아니다. `Unix.lockf` lease 의 NFS 동작은 확인하지 않았다. OpenClaw 값은 제안 문서의 진단 측정이다.",
+   "check": "verified Codex 5·11·13행 그대로. 문서 범위는 Linux NFS 이고 호스트 간 file lock 확인을 요구한다. OpenClaw 수치는 trace 한 건이며 문서가 'do not predict production latency' 라 적는다."
+  },
+  {
+   "id": "product-prior-art-06",
+   "claim": "OpenClaw 는 예기치 않게 죽은 뒤 끊긴 root 실행에 재개 입력을 한 번 넣는다. 'the Gateway does not reconstruct or replay the old execution.' 2026-11-10 문서의 'a crash leaves the queue inert' 는 지금 문서와 맞지 않는다.",
+   "src": "OpenClaw docs: Restart recovery | https://docs.openclaw.ai/gateway/restart-recovery.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "끝난 턴 결과 마커 RFC(#51629, in_flight)의 대조 사례로 인용한다. 기록을 맥락으로 주고 다음 행동은 Keeper 가 고른다는 brief 2절 2번과 같다. 5분 고정 SIGKILL 과 crash-loop 숫자는 가져오지 않는다.",
+   "caveat": "문서만 읽었고 동작을 재현하지 않았다. 안정판에 반영됐는지 확인하지 않았다.",
+   "check": "overstated 재개 입력 한 번·재생 없음은 그대로. 그러나 지금 문서도 'Older queued rows left by a crash remain inert'(616행, queue.md 59행)라 적는다. 바뀐 것은 crash 뒤 root 실행 재개뿐이다."
+  },
+  {
+   "id": "product-prior-art-07",
+   "claim": "Claude Code `/usage` 는 최근 사용량을 skill·subagent·plugin·MCP 서버별 몫으로 나누고 prompt cache miss 의 추정 원인을 보여 준다. OpenClaw 는 provider 가 보고한 값만 쓰고 귀속을 모르면 'Quota account unknown' 이라고 적는다.",
+   "src": "Claude Code docs: Manage costs (비교: OpenClaw Usage tracking, Amp Explain Usage) | https://code.claude.com/docs/en/costs.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "skill·lane·MCP 서버·도구별 귀속 projection 과 cache miss 원인 표시를 더한다. 바탕은 `keeper_usage_trust.mli:3-6`, `runtime_provider_usage_read.mli`. 표시와 맥락 되먹임까지만 하고 게이트로 쓰지 않는다(`budget_gate`). 사용량 영속 RFC #51466 은 in_flight.",
+   "caveat": "Claude Code 문서는 귀속 계산 방법을 적지 않는다. masc 가 선언된 출처에서 규칙을 따로 정해야 한다.",
+   "check": "verified costs.md 62행(귀속)·50행(likely cause) 그대로. 귀속은 구독 plan 에서만 보이고 이 기기 로컬 기록으로 계산한 근삿값이다. OpenClaw 17~21·32행 일치."
+  },
+  {
+   "id": "product-prior-art-08",
+   "claim": "Hermes v0.23.0 은 내장 browser 도구 열 개와 agent-browser 를 지우고 `browser_exec` 하나만 남겼다. 유료 MCP 도구에 값과 한도를 붙였다. v0.23.1: plugin 목록이 2 MiB 상한을 넘자 설치가 조용히 옛 목록을 썼다.",
+   "src": "Hermes Agent v0.23.0 release notes (비교: v0.23.1, Tool Search 문서) | https://github.com/NousResearch/hermes-agent/releases/tag/v0.23.0",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "외부 도구 표면 수를 점검한다(`config/tools/` 선언 225개, browser 6개). 목록·설정을 못 읽으면 옛 값 대신 거절한다(`strict_parse_no_default`). 능력 검색은 이미 있다(`keeper_capability_search.mli:1-3`).",
+   "caveat": "도구를 줄여 얼마나 나아졌는지 잰 값은 release 글에 없다. masc 에서 턴마다 실리는 schema 수는 세지 않았다.",
+   "check": "verified v0.23.0 Upgrade notes 와 v0.23.1 본문에 그대로. 2 MiB 사건은 v0.23.0 이하 설치에서 났고 v0.23.1 이 상한을 16 MiB 로 올렸다."
+  },
+  {
+   "id": "product-prior-art-09",
+   "claim": "Claude Code 세션 사이 메시지는 평문이고 결과는 Delivered·Held·Refused 다. 'a message from another session never counts as your consent.' 보류는 100개까지이고 5분 뒤 버린다.",
+   "src": "Claude Code docs: Cross-session messaging | https://code.claude.com/docs/en/cross-session-messaging.md",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "brief 2절 2번과 같은 방향이다. `masc_keeper_msg` 에 전달 결과 세 갈래를 projection 으로 보여 주고 의무는 만들지 않는다. '메시지는 승인을 대신하지 못한다'를 권한 문서에 적는다. 영수증 기다림 RFC #51381 은 in_flight.",
+   "caveat": "5분 만료와 100개 상한은 `no_wall_clock_death`·`failure_keeps_evidence` 와 충돌해 가져오지 않는다.",
+   "check": "verified 61·72~74·165·224행 그대로. 5분은 `dialogExpiry` 기본값이고 'never' 로 바꿀 수 있다. 명시적 hold 로 보류한 메시지는 만료되지 않는다(235행)."
+  },
+  {
+   "id": "product-prior-art-10",
+   "claim": "OpenAI dots(2026-09-29), Cursor Grok Bot, Claude Code Projects, Amp Spaces 가 상시·조정 에이전트를 냈다. dots 와 Projects 는 개인 것, Amp Spaces 는 팀 공유다. dots 문서: 'A completed run doesn't by itself confirm that the requested result was achieved or delivered.'",
+   "src": "OpenAI docs: Meet dots (비교: dots tasks-and-memory, Cursor Grok Bot, Claude Code Projects, Amp Spaces) | https://learn.chatgpt.com/docs/dots.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "`docs/external-comparison-and-positioning.md` 의 비교 대상에 이들을 더하고 '영속 에이전트'를 차별점에서 뺀다. 남는 후보는 사람별 격리의 증명, Verifier 가 증명한 완료(`constitution.xml:66`), 자가 호스팅, provider 중립이다.",
+   "caveat": "제품들의 동시성·잠금·권한 모델은 문서에 없다. Claude Code Projects 는 beta 이고 Team·Enterprise 에 없다.",
+   "check": "verified 날짜는 DevDay 2026 쪽(September 29, 2026), 인용문은 dots/tasks-and-memory 45~47행에 있다. Projects 451행, Grok Bot 3·23행, Amp Spaces 2026-11-06 글 일치."
+  },
+  {
+   "id": "product-prior-art-11",
+   "claim": "Devin 은 Knowledge(2026-09-18)와 Playbooks(2026-10-23)를 Skills 로 옮겼고 Codex 는 custom prompts 를 deprecated 했다. Hermes profile distribution 은 에이전트 한 벌을 git 저장소로 주고받고 받는 쪽 memory·session·key 는 건드리지 않는다.",
+   "src": "Devin release notes (비교: Codex custom-prompts·import, Hermes profile distributions) | https://docs.devin.ai/release-notes/overview.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "내보내기 한 벌을 정의한다. 넣는 것: `config/prompts/`, `config/keepers/*.toml`, skill, lane 선언. 빼는 것: memory, 원장, 자격증명, 권한 로그. 가져오기는 변환기 없이 지우고 설치한다(brief 2절 8번).",
+   "caveat": "masc 에 BasePath 백업·내보내기 모듈이 있는지는 이름 검색으로 못 찾았다. 확인 필요.",
+   "check": "verified Devin 2026-09-18·10-23 항목, Codex custom-prompts 5행, Hermes 7·277행 일치. Devin 은 옮기는 중이다('rolling out gradually', 'accounts move one at a time')."
+  },
+  {
+   "id": "product-prior-art-12",
+   "claim": "OpenClaw 는 도는 턴에 새 입력을 도구 경계에서 넣는다. 'tool calls are a committed plan until one of them starts executing.' 건너뛴 호출마다 event 한 쌍과 합성 결과를 남긴다. Amp 도 2026-09-08 에 queue 대신 steer 로 바꿨다.",
+   "src": "OpenClaw docs: Steering queue (비교: Amp news Steer, Don't Queue) | https://docs.openclaw.ai/concepts/queue-steering.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "runtime 마다 입력 경계를 선언으로 둔다. 타입은 이미 있다(`runtime_codex_app_server.mli:319,340`, `runtime_muse_msp.mli:316`). 건너뛴 도구 호출마다 결과를 남기는 규칙을 더한다. 큐 소비·수명 감사는 in_flight.",
+   "caveat": "steer 가 주의력이나 완료율을 얼마나 바꾸는지 잰 값은 없다.",
+   "check": "verified 19·25행 그대로. 병렬 묶음은 건너뛰지 않는다(24·89행). Amp 2026-09-08 글 일치. 같은 글이 'you can still queue' 라 적어 queue 가 없어진 것은 아니다."
+  },
+  {
+   "id": "product-prior-art-13",
+   "claim": "OpenClaw 는 runner 등록 수를 희소 자원으로 세고(도착 묶음 5,110건, 목표 6,000건) 시험 건너뛰기는 shadow mode 로만 본다. 'The pilot never skips a test or changes a required check.' Cursor 는 디렉터리별 `APPROVAL_POLICY.md` 로 낮은 위험 PR 을 승인한다.",
+   "src": "OpenClaw docs: CI capacity and shard weights (비교: Adaptive CI experiments, Cursor PR Routing & Approval) | https://docs.openclaw.ai/ci/capacity.md",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "스택 CI RFC #51521 은 in_flight 다. 병합 worker 의 호출 수처럼 실제로 막히는 자원을 세는 방식과, 기존 로그만 읽는 그림자 선택이 brief 2절 6번과 맞는다. 정책 파일 모양은 brief 2절 12번과 같다.",
+   "caveat": "수치는 OpenClaw 가 자기 저장소에서 잰 값이다(`## Runner registration budget`). 문서가 절감 효과는 입증하지 않는다고 적는다. Cursor 의 위험 점수 임계값은 가져오지 않는다.",
+   "check": "overstated 5,110·6,000 과 인용문은 그대로. 5,110 은 실측 아닌 계획 envelope 다. 같은 문서 'Qualified Markdown skipping pilot' 은 PR 에서 시험 아홉 개를 실제로 뺀다. shadow 는 학습·이력 선택에만 해당한다."
+  },
+  {
+   "id": "product-prior-art-14",
+   "claim": "제품들이 횟수·시간 상한을 지웠다: Claude Code subagent 200개 상한(2.1.224), background 1시간 제한(2.1.260), Cursor 웹 Long-running 시간 제한. Amp 는 TUI sidebar 를 지웠다: 'multi-environment multiplexing on top proved to be a less-than-optimal user experience.'",
+   "src": "Claude Code changelog (비교: Cursor release notes Week of Sep 21 2026, Amp news So Long, TUI Sidebar) | https://code.claude.com/docs/en/changelog.md",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "헌법 `budget_gate`(`constitution.xml:464-471`)와 요구사항 7(TUI 핵심 위주)의 외부 사례로 쓴다. TUI 화면 문법 캠페인(스택 #51624)은 in_flight 라 새 제안은 없다.",
+   "caveat": "Amp 의 이유는 제작자 판단이고 측정이 없다. 상한 제거는 changelog 한 줄씩이라 배경 설명이 없다.",
+   "check": "overstated Claude Code 두 줄과 Amp 인용은 그대로. Cursor 는 상한이 아니라 Long-running mode 자체를 지웠다. Claude Code 2.1.285 가 background 명령 시간 제한(기본 30분)을 다시 넣었고 2.1.246 은 idle check-in 상한 3 을 더했다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "Keeper 턴 끝에 Stop hook 으로 막고 다시 돌리기(Claude Code `/goal`, Codex·Factory Stop hook, Hermes `pre_verify`)",
+   "why_not": "brief 2절 1번이 Keeper 에 강제 제약·yield 규칙을 금지한다. masc 의 판정 자리는 Goal·Task 검증이고 Keeper 턴이 아니다."
+  },
+  {
+   "idea": "횟수·시간 상한으로 흐름 끊기(Claude Code agent 1,000개·재시작 5번, Cursor `loop_limit` 5, Hermes `max_verify_nudges` 3, Codex 연속 거절 3번, OpenClaw 5분 고정 SIGKILL)",
+   "why_not": "헌법 `magic_number`·`budget_gate` 와 충돌한다. 제품들도 일부 상한을 스스로 지웠다."
+  },
+  {
+   "idea": "봇 사이 루프를 횟수 창·cooldown·중복 버리기로 누르기(OpenClaw 60초 20건, Claude Code 보낸 쪽별 rate limit)",
+   "why_not": "워크어라운드 거부 기준의 cap·cooldown·dedup 에 해당한다. 반복의 원인을 고쳐야 한다."
+  },
+  {
+   "idea": "시간이 지나면 버리기(Claude Code 보류 메시지 5분 뒤 삭제, Devin session 재개 14일)",
+   "why_not": "헌법 `no_wall_clock_death`·`failure_keeps_evidence` 와 충돌한다."
+  },
+  {
+   "idea": "위험 점수 임계값으로 PR 자동 승인, PR push 마다 도는 승인 에이전트(Cursor PR Routing & Approval)",
+   "why_not": "`magic_number` 에 걸린다. brief 2절 6번이 PR 수에 비례하는 CI 비용을 금지한다. 정책 파일 모양만 참고한다."
+  },
+  {
+   "idea": "한 trust domain 안의 계정 고르기를 다계정으로 삼기(OpenClaw), sandbox 없는 in-process hook·plugin(Hermes gateway hook)",
+   "why_not": "brief 2절 11번은 다른 사람의 home 을 안 읽는다고 증명된 posture 만 허용한다. OpenClaw 문서 스스로 격리가 아니라고 적는다."
+  },
+  {
+   "idea": "같은 provider 키를 pool 로 돌려 쓰기(Hermes credential pools)를 사람 사이에 적용",
+   "why_not": "brief 2절 11번과 충돌한다. 문서가 회전마다 prompt cache 가 초기화된다고 적는다."
+  },
+  {
+   "idea": "실패하면 통과시키는 hook 기본값(Hermes·Cursor fail-open)과 hook `if` 패턴 매칭",
+   "why_not": "silent failure 이고 헌법 `string_matching` 에 걸린다. Claude Code 도 `if` 필터를 best-effort 라고 적는다."
+  },
+  {
+   "idea": "에이전트를 MCP 서버로 통째 내놓고 승인·스트림·이력까지 MCP 도구로 처리",
+   "why_not": "Codex 가 2026-09-05 에 지운 길이다. 좁은 도구와 자체 프로토콜로 나눈다."
+  },
+  {
+   "idea": "비용 상한으로 실행 멈추기(Letta Code `maxCostUsd`, Devin Budgets 를 게이트로)",
+   "why_not": "헌법 `budget_gate` 와 충돌한다. 표시와 되먹임은 요구사항 12 로 한다."
+  },
+  {
+   "idea": "TUI 에 다중 환경 관리 화면 얹기",
+   "why_not": "Amp 가 2026-08-27 에 지운 것이다. 요구사항 7 은 TUI 핵심 위주다. 근거는 제작자 판단이고 측정은 없다."
+  },
+  {
+   "idea": "저장된 실행 결과를 재생해서 복구하기(Claude Code workflows replay)",
+   "why_not": "입력이 고정된 스크립트 실행에만 맞는다. Keeper 턴은 기록을 맥락으로 주고 다음 행동을 Keeper 가 고른다(brief 2절 2번)."
+  },
+  {
+   "idea": "목록·설정을 못 읽으면 조용히 옛 값 쓰기(Hermes catalog 2 MiB 사건)",
+   "why_not": "헌법 `strict_parse_no_default`·`authoritative_read_only` 와 충돌한다. Hermes 도 v0.23.1 에서 고쳤다."
+  },
+  {
+   "idea": "한 사람의 에이전트 전부가 computer 하나를 나눠 쓰기(Cursor Grok Bot)",
+   "why_not": "Keeper 별 sandbox 와 다계정 격리에 맞지 않는다(brief 2절 11·13번)."
+  },
+  {
+   "idea": "겉모습·화폐를 도구·모델·예산 구매와 묶기, Candle 경제 확장을 외부 제품 사례로 정당화하기",
+   "why_not": "헌법 candle 절이 장신구만 허용한다. 조사한 제품은 꾸미기를 화폐와 묶지 않는다. Stock 확장은 헌법 개정이 먼저다."
+  }
+ ],
+ "unknowns": [
+  "OpenClaw 사람별 model 계정이 어느 릴리즈에 들어갔고 안정판 v2026.11.3 에 있는지. 문서에서만 확인했다.",
+  "OpenClaw writer admission authority 가 구현됐는지. 문서는 제안 단계라고 적는다.",
+  "Codex 가 MCP 서버 명령을 지운 이유. 문서와 changelog 에 없다.",
+  "턴 끝 판정자(prompt hook, `/goal` 판정자, Codex Auto-review)의 오판율. 어느 문서에도 측정값이 없다.",
+  "Claude Code `/usage` 귀속을 계산하는 방법. 문서에 없다.",
+  "dots, Grok Bot, Amp Spaces 의 동시성·잠금·권한 모델과 메시지 전달 보장. 문서에 없다.",
+  "Hermes `messaging/a2a`, `web-dashboard` 문서는 받을 때 429 가 나서 원문 미직독.",
+  "Orca, OpenHands, Letta Code, Goose, Gas City 는 릴리즈 목록의 WebFetch 요약만 읽었다. Conductor 는 changelog 제목만 읽었고 Vibe Kanban 은 다시 열지 않았다.",
+  "Cursor Memories 기능이 지워졌는지. 문서 목차에 페이지가 없다는 것만 봤고 1차 출처를 못 찾았다.",
+  "masc: 원격 MCP 표면이 승인 응답까지 내놓는지, 턴마다 schema 가 실리는 도구 수. 이번에 읽지 않았다.",
+  "masc: `Unix.lockf` BasePath lease 가 네트워크 파일 시스템에서 지켜지는지, BasePath 백업·내보내기 모듈이 있는지. 확인 필요.",
+  "이번 조사에서 직접 재현하거나 잰 것은 없다. '측정'이라고 적은 값은 전부 그 제품 문서가 적은 값이다."
+ ],
+ "conflicts_with_brief": [
+  "product-prior-art-12 — brief 2절 1번(조건부). masc 인터페이스에서 steer 는 provider 가 알려 주는 값뿐이고(`runtime_muse_msp.mli:316`, `runtime_codex_app_server.mli:340`) 새 입력 때문에 도구 호출을 건너뛰는 장치는 없다. '건너뛴 호출마다 결과를 남기는 규칙'이 masc 쪽 건너뛰기를 새로 만든다는 뜻이면 강제 yield 장치다. provider 가 건너뛴 것을 기록하는 범위면 충돌 없다.",
+  "product-prior-art-13 — brief 2절 12번(부분). Cursor `APPROVAL_POLICY.md` 는 저장소 디렉터리에 두는 파일이고 자동 승인 에이전트가 읽는다. brief 는 리뷰 판정 기준을 서버마다 운영자가 정하는 정책으로 둔다. '같은 모양'이라는 문장은 맞지 않고, 저장소 파일을 기준의 권위로 삼으면 어긋난다.",
+  "product-prior-art-09 — brief 2절 2번(조건부). `masc_keeper_msg` 는 이미 수락(`state`, `queued_count`)과 거절을 돌려준다(`lib/keeper/keeper_tool_surface_ops.ml:784-811`). `Keeper_chat_operation.state` 에 보류는 없다(`lib/keeper_chat_operations/keeper_chat_operation.mli:30-41`). Delivered·Held·Refused 를 그대로 옮기면 받는 쪽 보류라는 새 상태·Gate 가 생긴다.",
+  "product-prior-art-03 — brief 2절 11번(조건부). '프로세스·sandbox 로 격리' 가운데 프로세스 분리만으로는 다른 사람의 home 을 안 읽는다는 증명이 안 된다. Hermes 문서도 host 모드가 막는 것은 메모리 읽기라고 적는다(`plugins.md` 928~930행). sandbox posture 로 한정해야 맞는다."
+ ]
+}

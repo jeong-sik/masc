@@ -38,7 +38,7 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
       Keeper_status_metrics.latest_tool_audit_snapshot_from_files config
         ~keeper_name
     with
-    | Some snapshot ->
+    | Ok (Some snapshot) ->
         Some
           {
             snapshot with
@@ -47,17 +47,26 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
                | Some _, None, Some updated_at -> Some updated_at
                | _ -> snapshot.tool_audit_at);
           }
-    | None -> None
+    | Ok None -> None
+    (* The brief has no audit of its own to show for an unread store. It falls
+       back to the dispatch tracking or the snapshot row below, and publishes
+       the row's own read state with the row's values. *)
+    | Error (_ : Dated_jsonl.read_error) -> None
+  in
+  let audit_read_json =
+    `String
+      Keeper_status_metrics.(tool_audit_read_state_to_wire Tool_audit_read)
   in
   let latest_tool_names, latest_tool_call_count, latest_action_source,
-      tool_audit_source, tool_audit_at =
+      tool_audit_source, tool_audit_at, tool_audit_read =
     (match file_snapshot with
         | Some snapshot ->
             ( snapshot.latest_tool_names,
               snapshot.latest_tool_call_count,
               snapshot.latest_action_source,
               snapshot.tool_audit_source,
-              snapshot.tool_audit_at )
+              snapshot.tool_audit_at,
+              audit_read_json )
         | None ->
             (* Use per-keeper tool tracking as last-resort fallback *)
             let tracked = Keeper_tools_agent_core.tool_usage_for_keeper agent_name in
@@ -68,13 +77,14 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
                 max acc e.Keeper_types.last_used_at) 0.0 tracked in
               let at_str = if latest_at > 0.0
                 then Some (Masc_domain.iso8601_of_unix_seconds latest_at) else None in
-              (names, Some total, None, Some "keeper_dispatch", at_str)
+              (names, Some total, None, Some "keeper_dispatch", at_str, audit_read_json)
             else
               ( fallback_latest,
                 fallback_count,
                 fallback_action_source,
                 fallback_source,
-                fallback_at ))
+                fallback_at,
+                member_assoc Keeper_status_metrics.tool_audit_read_field keeper ))
   in
   [
     ("latest_tool_names", Json_util.json_string_list latest_tool_names);
@@ -83,6 +93,7 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
     ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
     ("tool_audit_source", Json_util.string_opt_to_json tool_audit_source);
     ("tool_audit_at", Json_util.string_opt_to_json tool_audit_at);
+    (Keeper_status_metrics.tool_audit_read_field, tool_audit_read);
   ]
 
 let action_identity action =

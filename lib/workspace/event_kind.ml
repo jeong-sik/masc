@@ -12,6 +12,7 @@ module Task = struct
     | Approved
     | Rejected
     | Linked
+    | Restored_from_archive
 
   let to_string = function
     | Created -> "task.created"
@@ -24,6 +25,7 @@ module Task = struct
     | Approved -> "task.approved"
     | Rejected -> "task.rejected"
     | Linked -> "task.linked"
+    | Restored_from_archive -> "task.restored_from_archive"
 
   let of_string = function
     | "task.created" -> Some Created
@@ -36,11 +38,13 @@ module Task = struct
     | "task.approved" -> Some Approved
     | "task.rejected" -> Some Rejected
     | "task.linked" -> Some Linked
+    | "task.restored_from_archive" -> Some Restored_from_archive
     | _ -> None
 
   let all =
     [ Created; Claimed; Started; Released; Done; Cancelled;
-      Submit_for_verification; Approved; Rejected; Linked ]
+      Submit_for_verification; Approved; Rejected; Linked;
+      Restored_from_archive ]
 end
 
 module Message = struct

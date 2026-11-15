@@ -70,6 +70,13 @@ let write_source_memory ~keepers_dir ~keeper_id =
   | Ok () -> ()
   | Error detail -> Alcotest.fail detail
 
+let contains ~affix text =
+  let length = String.length affix in
+  let rec from index =
+    index + length <= String.length text
+    && (String.equal (String.sub text index length) affix || from (index + 1)) in
+  from 0
+
 let drop_first_fact = {|{"new_claims":[],"dropped":[{"memory_id":"m1","reason":"This constraint is no longer applicable."}],"working_contexts":[],"working_state":null}|}
 
 let consumed_source =
@@ -171,8 +178,10 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
     {unread_messages=[];receipt_scope="preflight-fixture";trace_id=name;history_start_boundary_line=1;
      start_atom=0;end_atom=1;last_atom_digest=String.make 64 'a';
      end_boundary_line=2;boundary_lines_seen=2} in
-  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+  let generation_prompt = ref None in
+  let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
     incr llm_calls;
+    generation_prompt := Some prompt;
     Ok (if maintenance || budget <> Within_budget then drop_first_fact
       else if context_only then {|{"working_contexts":[]}|} else generated) in
   let committed = ref false in
@@ -195,6 +204,34 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
      with_facts_budget facts_budget_between_one_fact_and_both);
   Alcotest.(check int) "actual JEV dispatches" expected_jev !jev_calls;
   Alcotest.(check int) "actual generation dispatches" expected_llm !llm_calls;
+  (* The generation prompt shows the facts budget as the commit measures it:
+     the stored facts joined with the source store's lines. *)
+  (match budget, !generation_prompt with
+   | Within_budget, _ -> ()
+   | (Ordinary_fact_over_budget | Source_memory_pushes_over_budget), None ->
+     Alcotest.fail "an over-budget pass reached no generation prompt"
+   | Ordinary_fact_over_budget, Some prompt ->
+     let shown = Printf.sprintf "max=%s bytes; current ordinary=%d bytes"
+       facts_budget_below_one_fact
+       (Keeper_memory_os_render.facts_payload_bytes ~ordinary_facts:stored.facts ~source_lines:[]) in
+     Alcotest.(check bool) ("a Keeper without source memory sees " ^ shown) true
+       (contains ~affix:shown prompt)
+   | Source_memory_pushes_over_budget, Some prompt ->
+     let source_lines = match Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir
+         ~keeper_id:name with
+       | Ok snapshot -> Keeper_memory_source_current.budget_lines snapshot
+       | Error detail -> Alcotest.fail detail in
+     let bytes ~ordinary_facts ~source_lines =
+       Keeper_memory_os_render.facts_payload_bytes ~ordinary_facts ~source_lines in
+     let committed_total = bytes ~ordinary_facts:stored.facts ~source_lines in
+     Alcotest.(check bool) "the fixture's commit total is over the budget" true
+       (committed_total > int_of_string facts_budget_between_one_fact_and_both);
+     let shown = Printf.sprintf "max=%s bytes; current=%d bytes (ordinary=%d bytes, source=%d bytes)"
+       facts_budget_between_one_fact_and_both committed_total
+       (bytes ~ordinary_facts:stored.facts ~source_lines:[])
+       (bytes ~ordinary_facts:[] ~source_lines) in
+     Alcotest.(check bool) ("the prompt shows the over-budget commit total: " ^ shown) true
+       (contains ~affix:shown prompt));
   if not lane_enabled then (
     Alcotest.(check bool) "off must not acknowledge memory consumption" false !committed;
     (match Current.committed_durable_range ~keepers_dir ~keeper_id:name ~receipt_scope:range.receipt_scope with

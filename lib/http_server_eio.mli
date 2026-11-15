@@ -136,8 +136,9 @@ module Response : sig
     -> unit
 
   (** Empty response.  Default status [`No_content].  Sends no
-      content-type header; always includes [content-length: 0] so
-      keep-alive clients and proxies see an explicit end-of-body. *)
+      content-type header.  It carries [content-length: 0], which
+      {!Http_reqd} takes off a 204 (RFC 9110 §8.6) and leaves on every
+      other status. *)
   val empty : ?status:Httpun.Status.t -> Http_reqd.t -> unit
 
   val etag_hex_chars : int
@@ -308,8 +309,9 @@ module Response : sig
   val not_found : Http_reqd.t -> unit
 
   (** Pinned ["405 Method Not Allowed"] body, status
-      [`Method_not_allowed]. *)
-  val method_not_allowed : Http_reqd.t -> unit
+      [`Method_not_allowed], with [allow] as the [Allow] field
+      (RFC 9110 §15.5.6). *)
+  val method_not_allowed : allow:Httpun.Method.t list -> Http_reqd.t -> unit
 
   (** [internal_error msg reqd] returns status
       [`Internal_server_error] with body of the form
@@ -601,7 +603,9 @@ module Router : sig
 
   (** [resolve routes request] returns [`Matched route] when
       either an exact path+method match exists OR the
-      longest prefix match for that method exists.  Returns
+      longest prefix match for that method exists.  A HEAD request is
+      looked up as a GET: the GET route answers it and {!Http_reqd} sends
+      the response without content (RFC 9110 §9.3.2).  Returns
       [`Method_not_allowed] when an exact path exists but no
       route for the request method exists, [`Not_found]
       otherwise. *)

@@ -76,15 +76,18 @@ let column = function
 ;;
 
 (* The config column of the table: no member and [Single_user] are one row. *)
-type config_column =
+type asked =
   | Asks_single_user
   | Asks_multi_account
-  | Asks_unknown of string
 
-let config_column = function
-  | Not_set | Requested Masc_domain.Single_user -> Asks_single_user
-  | Requested Masc_domain.Multi_account -> Asks_multi_account
-  | Unknown_value text -> Asks_unknown text
+(* HIGH-RISK-UNREVIEWED: the one reading of the request. The boot judgment and
+   every command that holds no lease take the account mode from here, so a
+   value the table does not know is a refusal to each of them and never a
+   single user. *)
+let asked = function
+  | Not_set | Requested Masc_domain.Single_user -> Ok Asks_single_user
+  | Requested Masc_domain.Multi_account -> Ok Asks_multi_account
+  | Unknown_value text -> Error (Unknown_account_mode text)
 ;;
 
 (* The log as the rows read it, once the cases that the log and the store decide
@@ -128,8 +131,8 @@ let multi_account_row : readable_log -> (mode, refusal * refusal list) result = 
 
 let settings_reasons config input =
   match config with
-  | Asks_single_user | Asks_unknown _ -> []
-  | Asks_multi_account ->
+  | Ok Asks_single_user | Error (_ : refusal) -> []
+  | Ok Asks_multi_account ->
     let settings =
       match input.settings with
       | Settings_unreadable detail -> [ Auth_settings_unreadable_in_multi_account detail ]
@@ -142,16 +145,15 @@ let settings_reasons config input =
 ;;
 
 let judge input =
-  let config = config_column input.requested in
+  let config = asked input.requested in
   let high_water = column input.high_water in
   let by_table =
     match config, readable_log input.log_mode high_water with
-    | Asks_unknown text, Ok (No_event | Made_multi _ | Off_matched _) ->
-      Error (Unknown_account_mode text, [])
-    | Asks_unknown text, Error by_log -> Error (Unknown_account_mode text, [ by_log ])
-    | (Asks_single_user | Asks_multi_account), Error by_log -> Error (by_log, [])
-    | Asks_single_user, Ok log -> single_user_row log
-    | Asks_multi_account, Ok log -> multi_account_row log
+    | Error unknown, Ok (No_event | Made_multi _ | Off_matched _) -> Error (unknown, [])
+    | Error unknown, Error by_log -> Error (unknown, [ by_log ])
+    | Ok (Asks_single_user | Asks_multi_account), Error by_log -> Error (by_log, [])
+    | Ok Asks_single_user, Ok log -> single_user_row log
+    | Ok Asks_multi_account, Ok log -> multi_account_row log
   in
   match by_table, settings_reasons config input with
   | Ok mode, [] -> Ok mode

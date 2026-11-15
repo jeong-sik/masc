@@ -1630,32 +1630,37 @@ let test_path_rest_follows_the_answer_not_the_cadence () =
 
 (* Audit S9: the Owner-registry rejection at shutdown comes in two shapes,
    the Owner itself stopping and the Owner inventory stopping. Both must
-   complete the cycle without a turn; only the second used to fall into the
-   crash arm. *)
+   end the cycle without a turn; only the second used to fall into the
+   crash arm. Every other rejection ran no turn either, so it is not a failed
+   turn (#34673). *)
 let test_owner_inventory_stopping_completes_the_cycle () =
   let status = Keeper_heartbeat_loop.owner_turn_rejection_cycle_status in
   let name = function
-    | Keeper_heartbeat_loop.Turn_cycle_completed -> "completed"
+    | Keeper_heartbeat_loop.Turn_cycle_turn_succeeded -> "turn_succeeded"
+    | Keeper_heartbeat_loop.Turn_cycle_turn_failed -> "turn_failed"
+    | Keeper_heartbeat_loop.Turn_cycle_without_turn -> "without_turn"
+    | Keeper_heartbeat_loop.Turn_cycle_lifecycle_blocked -> "lifecycle_blocked"
+    | Keeper_heartbeat_loop.Turn_cycle_owner_rejected -> "owner_rejected"
     | Keeper_heartbeat_loop.Turn_cycle_interrupted -> "interrupted"
     | Keeper_heartbeat_loop.Turn_cycle_crashed -> "crashed"
     | Keeper_heartbeat_loop.Turn_cycle_busy _ -> "busy"
     | Keeper_heartbeat_loop.Turn_cycle_rested -> "rested"
   in
-  check string "inventory stopping completes the cycle" "completed"
+  check string "inventory stopping ends the cycle without a turn" "without_turn"
     (name
        (status
           (Keeper_owner_registry.Command_lookup_failed
              Keeper_owner_registry.Inventory_stopping)));
-  check string "owner stopping completes the cycle" "completed"
+  check string "owner stopping ends the cycle without a turn" "without_turn"
     (name
        (status
           (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_stopping)));
-  check string "owner not found is a crash" "crashed"
+  check string "owner not found is an owner rejection" "owner_rejected"
     (name
        (status
           (Keeper_owner_registry.Command_lookup_failed
              (Keeper_owner_registry.Owner_not_found "keeper-a"))));
-  check string "owner closed is a crash" "crashed"
+  check string "owner closed is an owner rejection" "owner_rejected"
     (name
        (status (Keeper_owner_registry.Command_rejected Keeper_owner.Owner_closed)))
 ;;
@@ -1669,15 +1674,19 @@ let test_owner_inventory_stopping_refreshes_work_heartbeat () =
   in
   let refreshes =
     match action with
+    | Keeper_heartbeat_loop.Refresh_without_turn_status -> true
     | Keeper_heartbeat_loop.Record_turn_status
-        Keeper_heartbeat_loop.Refresh_work_heartbeat -> true
-    | Keeper_heartbeat_loop.Record_turn_status
-        Keeper_heartbeat_loop.Preserve_work_heartbeat
+        ( ( Keeper_heartbeat_loop.Cycle_turn_succeeded
+          | Keeper_heartbeat_loop.Cycle_turn_failed )
+        , ( Keeper_heartbeat_loop.Refresh_work_heartbeat
+          | Keeper_heartbeat_loop.Preserve_work_heartbeat ) )
     | Keeper_heartbeat_loop.Skip_interrupted_turn
-    | Keeper_heartbeat_loop.Defer_autonomous_work _
-    | Keeper_heartbeat_loop.Rest_without_turn_status -> false
+    | Keeper_heartbeat_loop.Skip_unadmitted_cycle
+    | Keeper_heartbeat_loop.Defer_autonomous_work _ -> false
   in
-  check bool "shutdown boundary does not preserve the lease as a crash would" true
+  check bool
+    "shutdown boundary renews the lease and records no turn status"
+    true
     refreshes
 ;;
 

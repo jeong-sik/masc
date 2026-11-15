@@ -184,7 +184,14 @@ let resolve_current_binding ~assigned_task_ids ~planning_current =
 
 let status_summary_string (ctx : context) =
   Workspace.ensure_initialized ctx.config;
-  let state = Workspace.read_state ctx.config in
+  let state_observation = Workspace.observe_state ctx.config in
+  let state = Workspace.state_of_observation state_observation in
+  let state_failures =
+    match state_observation with
+    | Workspace.State_absent _ | Workspace.State_decoded _ -> []
+    | Workspace.State_recovered { state = _; fault } ->
+      [ "workspace state read: " ^ Workspace.state_read_fault_to_string fault ]
+  in
   match Workspace.read_backlog_observation_with_source_r ctx.config with
   | Error error ->
     Error (Printf.sprintf "status snapshot unavailable: backlog read failed: %s" error)
@@ -232,7 +239,12 @@ let status_summary_string (ctx : context) =
   let roster, roster_failures = safe_get_agents_observed ctx in
   let observation_failures =
     List.concat
-      [ session_binding_failures; resolve_failures; task_failures; roster_failures ]
+      [ state_failures
+      ; session_binding_failures
+      ; resolve_failures
+      ; task_failures
+      ; roster_failures
+      ]
   in
   let agents =
     roster

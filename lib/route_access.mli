@@ -24,12 +24,12 @@ type self_authenticated_reason =
           without one. The IDE LSP proxy checks every request. *)
   | Browser_session
       (** The multi-account login routes and the routes a browser session calls
-          ([/auth/...], [/api/v1/auth/allowlist], [/api/v1/auth/invites] and
-          [/api/v1/auth/pats]): the
+          ([/auth/...], [/api/v1/auth/allowlist], [/api/v1/auth/invites],
+          [/api/v1/auth/members] and [/api/v1/auth/pats]): the
           start and the callback of a login run before the browser has a
-          session, and the others check the session cookie, the origin and the
-          CSRF token in their own code ([Authz_browser_request.check]),
-          answering 401 or 403. *)
+          session, and the others check the session cookie, the origin and,
+          for a request that changes something, the CSRF token in their own
+          code ([Authz_browser_request.check]), answering 401 or 403. *)
   | Person_mcp
       (** The MCP endpoint of a person on the account server ([POST /mcp],
           plan S1b): the handler judges the credential of every request by

@@ -912,7 +912,7 @@ provider did not state an explicit reset time. When the release time has
 already passed in a stale roster reading, the timestamp is omitted.
 
 Roster reads and pause/resume/wakeup requests bind to the complete workspace
-identity observed in `/health`: `paths.effective_base_path` and
+identity read from `/health` with the TUI's credential: `paths.effective_base_path` and
 `paths.effective_masc_root`. API clients bind `GET /api/v1/gate/keepers` with
 both URL-encoded query parameters `expected_workspace=<base_path>` and
 `expected_masc_root=<masc_root>`. Supplying only one, a blank value, or a

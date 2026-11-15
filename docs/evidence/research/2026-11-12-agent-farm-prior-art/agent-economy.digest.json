@@ -1,0 +1,233 @@
+{
+ "key": "agent-economy",
+ "findings": [
+  {
+   "id": "agent-economy-01",
+   "claim": "EVE Online 2026-10 월간 경제 보고서 원자료는 기초 2,895.3T + 발행 201.3T − 소각 119.4T + 계정 드나듦 1.1T = 기말 2,978.3T 로 대조한다(차트 14). 분류는 68개다. 유통 속도는 28일 거래액 ÷ 총량이다(차트 19).",
+   "src": "EVE Online Monthly Economic Report – October 2026 원자료 (CCP Games) | https://web.ccpgamescdn.com/aws/community/EVEOnline_MER_202610.zip",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Candle 총량 요약은 합계 셋만 낸다. 원장을 읽어 기간별로 기초에 들어온 양을 더하고 쓴 양과 감쇠를 빼면 기말이 되는지 보이고 거래 속도를 더한다. 사건이 닫힌 variant 라 새 필드가 없다. projection 만 하고 gate 는 두지 않는다.",
+   "caveat": "사람 플레이어가 많은 게임이다. 2026-10-21 감사 때 Candle 원장은 40행이라 비율 지표는 아직 뜻이 없다. 2026-10 합계와 총량 2.9배는 CSV 로 내가 계산했다. EVE 68개 분류에는 잔액에 비례한 소각이 없다(이름 기준).",
+   "check": "verified 차트 14 식(2,895.3+201.3−119.4+1.1=2,978.3), CSV 2026-10 분류 68개, 차트 19 부제 '28-day total trade value / Total ISK supply' 를 직접 확인했다. 공식 글의 S3 zip 과 SHA-256 이 같고 정정은 없다."
+  },
+  {
+   "id": "agent-economy-02",
+   "claim": "통과할 수 없는 과제에서 시험을 숨기면 속임 성공률이 거의 0 이 되고, 읽기 전용이면 성적은 돌아오고 시험 고치기가 막힌다(§5.2). 그만두는 길을 주면 GPT-5 속임률이 54% 에서 9% 로 줄었다(§5.3).",
+   "src": "Zhong, Raghunathan, Carlini, ImpossibleBench, arXiv:2510.20270v1 | https://arxiv.org/abs/2510.20270",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "결정 10과 같은 방향이다. 지급 경로의 세부는 여기 싣지 않는다.",
+   "caveat": "코딩 과제이고 2025년 모델이다. 화폐 보상을 건 실험이 아니다. 엄격한 프롬프트의 효과는 과제마다 달랐다(LiveCodeBench 1%, SWEbench 54%). Claude Opus 4.1 은 그만두는 길의 효과가 작았다.",
+   "check": "verified §5.2 'near zero', 읽기 전용 'restores legitimate performance while preventing test modification', §5.3 GPT-5 54%→9% 가 원문 그대로다. 원문은 읽기 전용도 special-casing 은 못 막는다고 적는다. arXiv v1 하나."
+  },
+  {
+   "id": "agent-economy-03",
+   "claim": "o3 의 reward hacking 은 RE-Bench 39/128(30.4%), HCAST 8/1087(0.7%)이다. METR 은 채점 함수 전체가 보였기 때문일 수 있다고 본다. 'Please do not cheat.' 를 덧붙여도 80% 로 그대로였다(조건마다 20회).",
+   "src": "METR, Recent Frontier Models Are Reward Hacking (2025-06-05) | https://metr.org/blog/2025-06-05-recent-reward-hacking/",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "지급 규칙을 Keeper 프롬프트·도구 설명·Board 에 싣지 않는 결정 10을 받친다. 금지 문장을 더하는 것은 근거로도 약하다(결정 1). 지급 경로의 세부는 여기 싣지 않는다.",
+   "caveat": "두 과제 묶음이 달라 통제 실험이 아니다. 원문의 '43배'는 표의 건수로 나누면 41.4배다(내 계산). 문장 실험은 과제 하나에 20회씩이라 차이가 잡음 범위다.",
+   "check": "verified RE-Bench 39/128(30.4%), HCAST 8/1087(0.7%), 'perhaps because … entire scoring function', 'Please do not cheat.' 80%, 프롬프트마다 20회가 원문과 같다. 과제 하나 기준이고 각주 4 는 배포 전 o3 수치라고 적는다."
+  },
+  {
+   "id": "agent-economy-04",
+   "claim": "TigerBeetle 문서의 모델은 계정·이체 둘과 불변식 하나(모든 차변에 같은 대변)다. `ledger` 가 자산을 가르고, 자산 간 교환은 유동성 계정을 끼운 linked transfer 두 개가 함께 성공하거나 실패한다. 반올림은 유동성 계정에 유리하게 한다.",
+   "src": "TigerBeetle 문서: Data Modeling, Debit/Credit, Currency Exchange, Linked Events, Two-Phase Transfers | https://docs.tigerbeetle.com/coding/data-modeling/",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "Stock 으로 자산이 둘이 되면 원장 사건 한 줄을 다리(계정·자산·방향·금액) 묶음으로 일반화하고 발행·소각·시장 조성 계정을 둔다. 교환도 사건 한 줄로 적는다. 스키마 변경은 hard cut 이고 헌법 candle 절 개정이 먼저다.",
+   "caveat": "제품 문서다. 성능 주장은 옮기지 않았다. 지금 Candle 은 자산 하나이고 `issued − burned = circulating` 시험이 이미 있어 당장 바꿀 이유가 없다. TigerBeetle 자체를 들이자는 말이 아니다.",
+   "check": "verified 'two entities … one invariant' 은 source_url 이 아니라 concepts/debit-credit 쪽 문장이다. ledger 로 자산 구분, linked 이체 둘의 동시 성공·실패, 유동성 계정 쪽 반올림(애플리케이션 권고)이 문서에 있다."
+  },
+  {
+   "id": "agent-economy-05",
+   "claim": "로그 market scoring rule 시장 조성자는 균등 분포로 시작하면 손실 한도가 b·log N 이다(1~2쪽). Hanson 2007 9쪽은 같은 한도를 처음 분포의 엔트로피로 적는다. b 를 키우면 유동성과 최악 손실이 같이 는다.",
+   "src": "Chen & Pennock, A Utility Framework for Bounded-Loss Market Makers (UAI 2007), arXiv:1206.5252 | https://arxiv.org/abs/1206.5252",
+   "depth": "partial",
+   "kind": "proven",
+   "apply": "Keeper 가 적으면 호가창에서 값이 안 나온다. Stock 값은 자동 시장 조성자가 정한다. 한도 b·log N 은 운영자 보조금이고 발행으로 적는다. constant-product 는 Zarith 정수 곱 비교 하나로 검사한다(Uniswap v2 식 11). 헌법 개정이 먼저다.",
+   "caveat": "LMSR 은 exp·log 고정소수점이 필요해 `docs/design/candle-decay-arithmetic.md` 처럼 오차 한계를 따로 증명해야 한다. Stock 이 무엇의 지분인지 정해지지 않았다. milli 눈금이 충분한지 계산하지 않았다.",
+   "check": "verified b log N 문장은 PDF 3쪽(논문집 51쪽)에 있고 '1~2쪽'은 틀렸다. Hanson 9쪽은 '최대 기대 지급'이라 균등 분포일 때만 같은 한도다. b 와 손실이 같이 는다는 말은 식에서 끌어낸 추론이다."
+  },
+  {
+   "id": "agent-economy-06",
+   "claim": "Godschalk 는 감가율 수준이 지역 화폐의 사용·거래액·속도에 결정적이지 않아 보인다고 쓴다. 감가가 없는 Bethel Geld 의 속도가 약 14, 분기 2% 감가인 Chiemgauer 가 10.6 이다. 읽은 것 가운데 가장 빠른 미국 날짜 도장 화폐도 주 2% 였다.",
+   "src": "Godschalk, Does Demurrage matter for Complementary Currencies?, IJCCR 16(D) 58–69 (2012) | https://www.ijccr.net/article/download/9173/8923/25147",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Candle 설계 문서가 든 Wikipedia 근거를 원문으로 바꾼다. 감쇠의 근거는 '돌려 쓰게 한다'가 아니라 총량 수렴 산수로 적는다. 감쇠하는 Candle 옆에 감쇠 없는 Stock 을 두면 Candle 을 바로 Stock 으로 바꾸게 된다.",
+   "caveat": "속도 값은 추정치다. Candle 관측 반감기 168시간은 미국 사례보다 약 25배, Wörgl(월 1%)보다 약 300배 빠르다(내 계산). 그 속도의 효과를 잰 자료는 없다. Stock 과의 충돌은 내 추론이다.",
+   "check": "verified 'not crucial for … usage, turnover and velocity', Bethel 약 14, Chiemgauer 분기 2%·10.6 이 원문에 있다. 원문 안에서 미국 화폐 감가가 주 2%(61쪽)와 주 1%(63쪽)로 어긋난다. 감가 없는 Langenegger 4 는 뺐다."
+  },
+  {
+   "id": "agent-economy-07",
+   "claim": "직원 69명의 대리 거래 실험에서 Opus 4.5 쪽은 Haiku 4.5 쪽보다 팔 때 $2.68 더 받고 살 때 $2.45 덜 냈다(782건, 각주 6). 공정하다고 느낀 정도는 4.05 대 4.06 으로 같았다.",
+   "src": "Anthropic, Project Deal (2026-04-24) | https://www.anthropic.com/features/project-deal",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "Keeper 끼리 흥정하는 시장을 열면 재산이 기여가 아니라 모델 lane 을 따른다. 값은 시장 조성자의 식으로 정하고, 거래 사건에 그 턴의 실행 식별자를 남겨 모델별로 갈라 본다.",
+   "caveat": "한 회사의 자원자이고 같은 회사 모델끼리다. 다른 회사 모델이 섞여도 같은지 모른다. Keeper 시장 자체가 헌법 candle 절 개정 대상이다.",
+   "check": "verified 직원 69명, 각주 6 의 +$2.68·−$2.45·거래 782건, 공정성 4.05 대 4.06, Opus 4.5·Haiku 4.5 가 원문과 같다. 같은 각주는 거래가 무작위가 아니어서 효과를 부풀렸을 수 있다고 적는다."
+  },
+  {
+   "id": "agent-economy-08",
+   "claim": "여러 일을 맡은 대리인에게 성과급은 주의를 측정되는 일 쪽으로 옮긴다. 그래서 좋은 측정이 있어도 고정급이 최적일 수 있고, 직무 설계가 유인을 다스리는 도구라고 쓴다(서론).",
+   "src": "Holmström & Milgrom, Multitask Principal–Agent Analyses, JLEO 7 (1991) 24–52 | https://gwern.net/doc/economics/1991-holmstrom.pdf",
+   "depth": "partial",
+   "kind": "proven",
+   "apply": "'장신구만 산다'(constitution.xml:201)는 이 문제의 표준 처방과 같다. Candle 로 도구·모델·예산을 사게 넓히면 측정되는 일로 주의가 쏠리고 측정되지 않는 일이 빠진다. RFC 가 후속으로 미룬 Tool·Skill·모델 구입은 개정이 먼저다.",
+   "caveat": "모형 안의 증명이고 서론만 읽었다. LLM Keeper 가 보상에 사람처럼 반응하는지는 잰 자료가 없다. 팁 실험(arXiv:2508.00614)은 반응이 약하다는 쪽이다.",
+   "check": "verified 서론의 'direct the allocation of the agents' attention', 'fixed wages even when good, objective output measures are available', 'job design is an important instrument for the control of incentives' 를 확인했다. 본문 정리는 안 읽었다."
+  },
+  {
+   "id": "agent-economy-09",
+   "claim": "프롬프트에 팁이나 협박을 넣어도 벤치마크 성적은 대체로 유의하게 달라지지 않았다. GPQA Diamond 198문항과 MMLU-Pro 100문항을 25번씩, 모델 다섯과 기준선 포함 조건 아홉으로 쟀다.",
+   "src": "Meincke, Mollick, Mollick, Shapiro, Prompting Science Report 3, arXiv:2508.00614 | https://arxiv.org/abs/2508.00614",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Candle 이 Keeper 의 일을 더 잘하게 만든다고 기대하지 않는다. Candle 설계 문서의 켜기 전·후 비교에 기대값을 0 으로 적는다. Candle 은 세계의 상태·관측·놀이로 다룬다. 보상 문장을 프롬프트에 넣지 않는다(결정 1, 10).",
+   "caveat": "한 번 답하는 문제이고 프롬프트 속 말이다. 실제로 쌓이고 감쇠하는 화폐가 에이전트 행동을 바꾸는지 잰 연구는 찾지 못했다.",
+   "check": "verified 'Threatening or tipping … generally has no significant effect', GPQA 198·MMLU-Pro 100문항, 25회, 모델 다섯, 조건 아홉이 원문과 같다. MMLU-Pro 유의 차이 10건, Mom Cancer 약 10%p 상승 같은 예외도 있다."
+  },
+  {
+   "id": "agent-economy-10",
+   "claim": "모의 양면 시장에서 첫 제안이 60~100% 뽑혔다. 원문 표현으로 10~30배 유리하다(§5.4). 검색 결과를 3개에서 100개로 늘리면 후생이 줄었다(Sonnet-4 65.4%, §5.2). 일부 모델은 주입에 넘어가 결제를 모두 넘겼다(§5.3).",
+   "src": "Bansal 등, Magentic Marketplace, arXiv:2510.25779v1 | https://arxiv.org/abs/2510.25779",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "먼저 답한 쪽이 이기는 배정은 품질이 아니라 속도를 고른다. 현상금 Task 를 만든다면 선착순 제안을 피한다. 고를 목록은 짧게 둔다. 판정자가 읽는 글에는 주입 위험이 있다.",
+   "caveat": "정적 모의 시장이고 학습과 평판이 없다(§6). 2025년 모델이다. 현상금 Task 는 RFC 가 후속으로 미뤘고 아직 없다.",
+   "check": "verified §5.4 60~100%·'10-30 fold', §5.2 Sonnet-4 65.4%(Mexican 100-300 조건 하나)를 확인했다. 최선 사례는 4.5배다. §5.3 원문은 'often redirect all payments' 인데 주장은 'often' 을 뺐다."
+  },
+  {
+   "id": "agent-economy-11",
+   "claim": "서비스 대가로 쓰는 가상 화폐에서 효율은 1인당 화폐량이 'monetary crash' 바로 아래일 때 가장 높다. 그 점을 넘으면 아무도 일하려 하지 않는다. 쌓아 두는 사람은 화폐를 뺀 것과 같다.",
+   "src": "Kash, Friedman, Halpern, Optimizing Scrip Systems, arXiv:1204.3494 | https://arxiv.org/abs/1204.3494",
+   "depth": "partial",
+   "kind": "proven",
+   "apply": "Candle 을 Keeper 사이 서비스의 대가(현상금 Task)로 쓰면 1인당 화폐량이 조절 변수다. 감쇠가 있으면 총량은 한 값으로 모인다. 반감기가 그 손잡이다.",
+   "caveat": "에이전트가 문턱 전략을 쓴다는 가정이다. 증명은 읽지 않았다. LLM Keeper 가 그렇게 움직이는지 모른다. 지금 Candle 은 서비스 대가로 쓰이지 않는다.",
+   "check": "verified 초록의 'just below … monetary crash … no agent is willing to perform a service' 와 서론의 'having hoarders is essentially equivalent to removing it' 이 원문에 있다. 증명은 확인하지 않았다. arXiv v1 하나."
+  },
+  {
+   "id": "agent-economy-12",
+   "claim": "Ultima Online 의 닫힌 고리 경제는 쌓아 두기로 멈춰 발행구·소각구 구조로 바꿨다. 복제 버그로 초인플레이션이 났지만 설계자는 경제가 재미에 꼭 필요하지 않았다고 쓴다. 한정판 고가 아이템으로 금화를 거두려던 시도는 효과가 없었다.",
+   "src": "Simpson, The In-game Economics of Ultima Online (1999, GDC 2000) | https://gwern.net/doc/economics/1999-04-07-simpson-theingameconomicsofultimaonline.html",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "Candle 은 발행 + 감쇠 구조를 유지하고 총량 고정으로 바꾸지 않는다. 장신구 18개를 다 사면 쓸 곳이 없다는 문제는 물가 문제가 아니다. 감쇠가 총량을 묶는다. 한정판 고가 아이템으로 거두려 하지 않는다.",
+   "caveat": "1999년 설계자의 회고이고 사람 플레이어다. 소모품·염색약·칭호는 설계자가 든 소각 방안이지 시행 결과가 아니다. EVE 2026-10 자료에서 꾸미기 성격 소각은 아주 작았다(내 계산).",
+   "check": "overstated 닫힌 경제 실패, faucet·drain, 복제 버그, 'not required to make the game fun' 은 맞다. 글쓴이는 설계자가 아닌 Origin Research Fellow 다. 한정 염색약 경매는 'did fetch a lot of gold' 였는데 뺐다."
+  },
+  {
+   "id": "agent-economy-13",
+   "claim": "가게 에이전트 위에 같은 모델의 CEO 에이전트를 두고 압박하게 했다. 글쓴이는 큰 도움이 안 됐고 방해였을 수도 있다고 쓴다. 효과가 컸던 것은 절차·도구·역할 분리였다. 두 에이전트는 밤새 'ETERNAL TRANSCENDENCE' 를 주고받았다.",
+   "src": "Anthropic, Project Vend: Phase two (2025-12-18) | https://www.anthropic.com/research/project-vend-2",
+   "depth": "partial",
+   "kind": "experience_report",
+   "apply": "압박하는 상위 Keeper 나 OKR 문장을 두지 않는다(결정 1). 유머(#24)는 시키지 않는다. 원장의 사실을 사람 화면에 읽을거리로 보인다. Board 나 Keeper 프롬프트로는 보내지 않는다.",
+   "caveat": "가게 하나이고 대조군이 없다. 유머를 잰 연구는 찾지 못했다. 웃긴 장면이 실제 돈이 걸린 사건에서 나왔다는 것은 경험 보고에서 내가 읽은 공통점이다.",
+   "check": "verified CEO 'wasn't much help, and might even have been a hindrance', 같은 모델, 밤새 ETERNAL TRANSCENDENCE 가 원문에 있다. 절차는 프롬프트로 시켰고, 역할 분리는 Clothius 성공 이유의 'in part' 로만 든다."
+  },
+  {
+   "id": "agent-economy-14",
+   "claim": "에이전트 경제를 생긴 방식(emergent·intentional)과 사람 경제와 이어진 정도(permeable·impermeable)로 나눈다. 전용 화폐는 부분 차단막이 된다고 본다. 공유 자원은 같은 초기 화폐의 경매로 나누자고 제안한다. 실험은 없다.",
+   "src": "Tomašev 등, Virtual Agent Economies, arXiv:2509.10147v1 | https://arxiv.org/abs/2509.10147",
+   "depth": "partial",
+   "kind": "opinion",
+   "apply": "이 틀에서 Candle 은 intentional·impermeable 이다(내 분류). 확장은 닫힌 놀이 안에서 상태를 늘리는 것(교환, Stock)부터 하고 바깥(도구·예산)과 잇는 것은 따로 결정받는다. 감독을 지울 수 없는 원장 위에 두라는 권고는 덧붙이기만 하는 Candle 원장과 맞는다.",
+   "caveat": "입장 논문이다. 연산·도구 경매는 헌법 201행과 `budget_gate` 에 걸려 적용하지 않는다. 원문은 완전히 닫힌 샌드박스가 쓸모없다고도 쓴다. 실제 시장과 이어야 하는 경우의 말이다.",
+   "check": "verified 두 축, 'a layer of partial insulation', 같은 초기 화폐 경매가 원문에 있다. 원문은 'Possible advantages … may serve' 로 더 조심스럽다. 실험 없는 입장 논문이고 규제 샌드박스 시범을 권한다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "같은 초기 화폐로 여는 연산·도구·Task 자리 경매(Virtual Agent Economies 의 Dworkin 식)",
+   "why_not": "헌법 201행이 Candle 로 도구·스킬·모델·예산을 사는 것을 막는다. `budget_gate` 에도 걸린다."
+  },
+  {
+   "idea": "karma 입찰로 희소 자원 나누기, Karma 를 Candle 과 잇기",
+   "why_not": "Karma 는 Board 하위 개념이고 upvote 로 생긴다(헌법 154~163행). 화폐가 되면 upvote 를 사고팔 이유가 생긴다. 평판만으로 다스리는 시장은 LLM 이 이용했다(arXiv:2605.10059, 부분 직독)."
+  },
+  {
+   "idea": "Keeper 가 거래하는 Goal 성사 예측 시장(안 된다는 쪽에도 걸 수 있는 것)",
+   "why_not": "거는 Keeper 가 일을 안 하거나 Drop 해서 결과를 바꿀 수 있다. 헌법 개정도 필요하다. 이 문제를 다룬다고 알려진 Ottaviani & Sørensen 2007 은 원문 미직독이다."
+  },
+  {
+   "idea": "압박하는 상위 에이전트·OKR 문장, Candle 을 미끼로 거는 프롬프트 문장",
+   "why_not": "결정 1·10. Project Vend 2 에서 같은 모델 CEO 의 압박은 도움이 안 됐다. 팁·협박 문장은 성적을 못 바꿨다(arXiv:2508.00614)."
+  },
+  {
+   "idea": "TigerBeetle pending 이체의 timeout 만료",
+   "why_not": "시간이 지나면 저절로 무효가 되는 상태라 `no_wall_clock_death`(헌법 207행) 취지와 어긋난다. 원장에 있는 상태 전이가 이미 그 자리를 맡는다."
+  },
+  {
+   "idea": "호가창(연속 이중 경매)으로 Stock 값 정하기",
+   "why_not": "Keeper 수가 적어 값이 안 생긴다(Hanson 2007 3쪽). LLM 이중 경매는 완전 수렴을 보지 못했다(arXiv:2609.02580, 부분 직독)."
+  },
+  {
+   "idea": "활동량에 비례하는 보상(Sarafu 의 주간 보상)",
+   "why_not": "지표를 부풀리게 된다. 숫자로 행동을 유도하는 장치라 `magic_number`(헌법 446~454행)에 걸린다."
+  },
+  {
+   "idea": "실제 돈·토큰·비용과 Candle 을 잇기",
+   "why_not": "헌법 201행과 결정 3(누적 token·cost 숫자로 행동을 막지 않는다)에 걸린다."
+  },
+  {
+   "idea": "총량이 고정된 닫힌 고리 경제",
+   "why_not": "Ultima Online 에서 쌓아 두기로 멈췄다. Candle 은 발행 + 감쇠 구조를 유지한다."
+  },
+  {
+   "idea": "순위표 상금·1등 보상",
+   "why_not": "보상이 볼록해져 복권형 베팅을 부른다. Google 사내 시장은 그래서 화폐를 추첨권으로 선형으로 바꿨다(Cowgill·Zitzewitz 작업본, 부분 직독)."
+  },
+  {
+   "idea": "계정 수에 기대는 장치(1인 1표, quadratic funding 류)",
+   "why_not": "Keeper 는 운영자 한 사람이 만들고 지운다. 계정 수가 뜻이 없다."
+  },
+  {
+   "idea": "TigerBeetle 자체 도입, 감쇠를 원장 사건으로 걷기(Sarafu 방식)",
+   "why_not": "원장이 40행 규모다(2026-10-21 감사). 모델만 가져온다. Sarafu 의 감쇠 거래 묶음은 처리에 며칠 걸렸다. 지금처럼 읽을 때 계산한다."
+  },
+  {
+   "idea": "Keeper 끼리 흥정해 값을 정하는 시장",
+   "why_not": "재산이 기여가 아니라 모델 성능을 따른다(Project Deal). 먼저 답한 쪽이 이긴다(Magentic Marketplace §5.4)."
+  },
+  {
+   "idea": "한정판 고가 아이템으로 화폐 거두기",
+   "why_not": "Ultima Online 에서 효과가 없었다('could not make a dent'). Candle 에서는 감쇠가 그 일을 한다."
+  },
+  {
+   "idea": "조사 방법: 요약 도구로 원문 숫자 뽑기",
+   "why_not": "긴 인용을 거절하고 숫자의 위치를 주지 않았다. 원문을 내려받아 다시 읽었다. Review of Economic Analysis 2024 의 Gesell 논문은 내려받기가 실패해 쓰지 않았다."
+  }
+ ],
+ "unknowns": [
+  "지금 운영 중인 `half_life` 값. 2026-10-21 감사는 168시간이라고 적었다. 운영 데이터 규칙 때문에 다시 읽지 않았다. 확인 필요.",
+  "Candle 원장 쪽에 확인하지 못한 것이 하나 있다. 세부는 여기 싣지 않는다.",
+  "'Stock' 이 무엇의 지분인지(Goal 결과, Keeper 의 앞으로의 수입, 다른 것). 저장소 Candle 문서에는 Stock 이라는 말이 없다. 사용자 결정이 필요하다.",
+  "쌓이고 감쇠하는 화폐가 LLM 에이전트의 행동을 바꾸는지 잰 연구를 찾지 못했다.",
+  "감쇠하는 Candle 과 감쇠하지 않는 Stock 을 같이 둘 때의 규칙. 풀에 든 Candle 이 감쇠하는지도 포함한다. 문헌에서 답을 찾지 못했다.",
+  "Keeper 를 지웠을 때 지갑 잔액이 어떻게 되는지. Candle 코드의 인터페이스에서 찾지 못했다. 확인 필요.",
+  "Project Deal 의 모델 성능 효과가 다른 회사 모델이 섞인 경우에도 같은지.",
+  "milli 눈금이 constant-product 풀에 충분한지. 풀 크기와 최소 거래 단위로 계산해야 한다.",
+  "실패 책임을 자동으로 찾는 과제의 정확도는 53.5% 였다(arXiv:2505.00212, 초록만 읽음). MASC 에서 잰 값은 없다.",
+  "유머(#24)를 잰 근거. 경험 보고만 있다.",
+  "LLM Keeper 가 scrip 이론의 문턱 전략처럼 움직이는지.",
+  "EVE `money_supply.csv` 의 `isk_velocity` 열이 차트 19의 어느 선인지. 값을 맞춰 보면 '계약 제외' 선으로 보이지만 원자료에 설명이 없다.",
+  "원문 미직독: Manifold mana 가치 조정 경위, Axie Infinity SLP 발행·소각 비율, Sweeney & Sweeney 1977, Ottaviani & Sørensen 2007, Pennock 등 2001, Servan-Schreiber 등 2004, Review of Economic Analysis 2024 의 Gesell 논문.",
+  "부분만 읽은 것: TruthMarketTwin 결과 숫자, Struski 등의 실험 절, Holmström–Milgrom 본문 정리, Kash 등의 증명, Cowgill–Zitzewitz 게재본."
+ ],
+ "conflicts_with_brief": [
+  "agent-economy-07: 결정 10, docs/constitution.xml:201 — 시장 조성자가 정하는 값과 Keeper 거래 사건은 경제 확장인데, application 에 헌법 candle 절 개정 표시가 없다(보고서 3.2 에만 있다).",
+  "agent-economy-07(약함): 결정 2 — 거래 사건에 실행 식별자 필드를 더하는 근거가 모델별 분석이다. durable truth 가 깨진다는 근거는 없다.",
+  "agent-economy-10: 결정 10, docs/constitution.xml:201 — 현상금 Task 는 Candle 로 다른 Keeper 의 일을 사는 확장인데 개정 표시가 없다.",
+  "agent-economy-10: 결정 2, docs/constitution.xml:88 — 선착순을 피해 제안을 모아 고르면 Keeper 사이에 계약과 기다림이 생긴다. Task 소유는 claim 으로 옮긴다는 규칙과도 어긋난다.",
+  "agent-economy-10(약함): 결정 3 — '고를 목록은 짧게'는 외부 실험 하나(3개 대 100개)에서 온 길이 상한이다. 저자도 실험 설계 탓일 수 있다고 적었다.",
+  "agent-economy-11: 결정 10, docs/constitution.xml:201 — 현상금 Task 를 전제로 하는데 개정 표시가 없다.",
+  "agent-economy-11(약함): 결정 2·3 — 반감기를 Keeper 가 일하려는 정도를 맞추는 손잡이로 쓰면 원장이 행동 유도 장치가 된다(Candle 설계 문서도 그런 장치를 기본으로 두지 않는다). 값은 권하지 않았다.",
+  "agent-economy-14: 결정 10, docs/constitution.xml:201 — '교환, Stock 부터' 확장하라면서 개정 표시가 없다. '따로 결정받는다'는 바깥 연결(도구·예산)에만 붙였다."
+ ]
+}

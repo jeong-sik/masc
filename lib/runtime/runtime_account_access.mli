@@ -277,6 +277,9 @@ val authorize_host : host_client -> (host_account, refusal) result
     send with the credential. *)
 type api_sealed
 
+(** Seals a configuration. The seal keeps a reader of the runtime table from
+    the credential. It does not vouch for where the configuration came from:
+    any caller seals any configuration. *)
 val seal_api : Llm_provider.Provider_config.t -> api_sealed
 
 (** The configuration without its credential: [api_key] and [headers] are

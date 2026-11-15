@@ -21,6 +21,7 @@ type guest_dispatch =
   ; runtime : Keeper_turn_sandbox_runtime.t
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
   ; network_mode : Keeper_types_profile_sandbox.network_mode
+  ; microvm_backend : Keeper_microvm_backend.t option
   ; observe_route : unit -> observe_route
   }
 
@@ -295,7 +296,14 @@ let guest_target
                      Masc_exec.Sandbox_target.micro_vm ~image ~runner ())
                    endpoint) )
     in
-    Ok { target; runtime; sandbox_profile; network_mode = binding.network_mode; observe_route }
+    Ok
+      { target
+      ; runtime
+      ; sandbox_profile
+      ; network_mode = binding.network_mode
+      ; microvm_backend = binding.microvm_backend
+      ; observe_route
+      }
 ;;
 
 let ssh_target ~endpoint ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt

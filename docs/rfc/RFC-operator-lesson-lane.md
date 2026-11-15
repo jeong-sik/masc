@@ -174,11 +174,12 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 | 사건 | 담는 것 |
 | --- | --- |
-| `Session_opened` | 세션 id, action 요청 id, 장면 수, 권한, 언어, 연 시각 |
+| `Session_opened` | 세션 id, action 요청 id, 장면 수, 권한, 언어, binding 의 `since`, 연 시각 |
 | `Material_read` | 세션 id, 요청 id, 보관한 요청·결과의 digest |
-| `Exact_requested` | 세션 id, 요청 id, 출력 이름, 요청 digest. 본문은 먼저 `requests/<digest>.json` 에 있다 |
-| `Outlined` | 세션 id, outline 요청 id, 통과한 항목(id, 제목, 요점, pin) |
+| `Outline_requested` | 세션 id, 요청 id, 요청 digest. 본문은 먼저 `requests/<digest>.json` 에 있다 |
 | `Entry_rejected` | 세션 id, outline 요청 id, 항목 index, 이유 |
+| `Outlined` | 세션 id, outline 요청 id, 통과한 항목(id, 제목, 요점, pin) |
+| `Scene_requested` | 세션 id, 항목 id, 요청 id, 요청 digest. `Outlined` 와 같은 쓰기에 들어간다 |
 | `Scene_written` | 세션 id, 항목 id, scene 요청 id, 쓴 시각, 제목, 문단과 출처(pin, 인용문, 그 기록을 담은 보존 페이지의 SHA-256) |
 | `Scene_rejected` | 세션 id, 항목 id, scene 요청 id, 이유 |
 | `Session_failed` | 세션 id, 이유 |
@@ -195,9 +196,13 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 `Session_failed` 의 이유(닫힌 집합): `not_allowed {request_id, reason}`, `outline_invalid_output`, `outline_input_refused`, `outline_outcome_unknown`, `outline_request_exceeds_frame`, `result_exceeds_frame`, `no_material`, `no_entry_passed`.
 
-`Entry_rejected` 의 이유(닫힌 집합): `source_not_read {source}`, `duplicate_entry_id`, `beyond_requested_scenes`.
+`Entry_rejected` 의 이유(닫힌 집합): `source_not_read {source}`, `duplicate_entry_id`, `beyond_requested_scenes`, `incomplete`, `not_recordable {detail}`.
 
-`Scene_rejected` 의 이유(닫힌 집합): `not_allowed {reason}`, `invalid_output`, `input_refused`, `outcome_unknown`, `request_exceeds_frame`, `result_exceeds_frame`, `quote_not_in_record {paragraph, source}`, `source_not_in_entry {paragraph, source}`, `paragraph_without_source {paragraph}`.
+`Scene_rejected` 의 이유(닫힌 집합): `not_allowed {reason}`, `invalid_output`, `input_refused`, `outcome_unknown`, `request_exceeds_frame`, `result_exceeds_frame`, `quote_not_in_record {paragraph, source}`, `source_not_in_entry {paragraph, source}`, `paragraph_without_source {paragraph}`, `incomplete`, `not_recordable {detail}`.
+
+- `incomplete` 는 공백뿐인 id·제목·요점·문단이거나, 요점·출처·문단이 하나도 없는 경우다. 스키마가 `minItems` 를 쓰지 않아서 빈 배열은 패키지가 거른다.
+- `not_recordable` 은 log 가 다시 읽지 못할 글(UTF-8 로 쓸 수 없는 글자 등)이다. 그 항목이나 장면 하나만 버린다. 퀴즈가 문항 하나를 버리는 것과 같다.
+- 요청이 둘로 나뉜 이유: outline 요청은 `reading` 세션에, scene 요청은 항목에 붙는다. fold 가 "항목마다 요청 하나, 결과 하나"를 사건 이름으로 검사한다.
 
 - host 의 최종 결과는 이렇게 받는다. `output_limit_reached` 는 `invalid_output` 으로, `request_id_reused` 는 `not_allowed` 로 적는다. 퀴즈가 받는 방식과 같다(`addons/operator-quiz/quiz_flow.py:701-708`). 설치 선언이 `exact_outputs = ["outline"]` 만 고르면 장면은 모두 `not_allowed` 로 끝난다.
 - 새 `compose` 는 `reading` 세션만 대체한다. `writing` 세션은 건드리지 않고, 그 장면 요청은 계속 나열된다. 퀴즈가 `asked` 세션을 건드리지 않는 것과 같다. 대체하면 `scene` lane 이 묶이지 않았거나 쉬는 동안 compose 마다 outline 만 받고 장면은 하나도 나오지 않는다. 대가: `scene` lane 이 오래 막혀 있으면 `writing` 세션이 compose 마다 하나씩 쌓이고, lane 이 열릴 때 한꺼번에 쓰인다. `lesson/sessions` 가 그 수를 보여 준다.
@@ -210,9 +215,16 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 ### 4.6 행
 
-- `lesson/scenes`: `Scene_written` 하나에 한 행. 제목, 본문(문단을 빈 줄로 이은 글), 출처(pin, 인용문, SHA-256), 세션 id, 쓴 시각. readings 의 첫 값이 본문이라 Results 가 이 lane 에서 열린다.
+- `lesson/scenes`: 최근 수업의 `Scene_written` 하나에 한 행. 어느 수업이 최근인지는 아래에 적었다. 제목, 본문(문단을 빈 줄로 이은 글), 출처(pin, 인용문, SHA-256), 세션 id, 쓴 시각. readings 의 첫 값이 본문이라 Results 가 이 lane 에서 열린다.
+  - 지금까지 쓴 장면을 모두 주지 않는 이유: 관측 응답은 `max_reply_bytes` 안에 들어가야 한다. 넘으면 host 가 응답을 받지 않고, 그 뒤로는 관측과 action 응답이 모두 오류다(#51941).
+  - 기준 세션은 `written_at` 이 가장 늦은 장면을 가진 세션이다. 같은 시각의 세션이 둘이면 나중에 연 쪽이다. 행에 나오는 것은 기준 세션을 연 시각 이후에 장면을 하나라도 쓴 모든 세션의 장면이다. 시각 값만 보고 세션 목록의 순서는 보지 않는다.
+  - 기준 세션 하나만 주지 않는 이유: host 는 이 패키지의 출력을 장면마다가 아니라 host 요청 주기가 끝날 때 한 번 확정한다(`lib/lane_addon/lane_addon_runtime.ml:1556-1560`). `scene` slot 이 쉬는 동안 `writing` 으로 남은 세션과 그 뒤에 연 세션은 slot 이 풀리면 한 주기에 같이 쓴다. 기준 세션만 주면 앞 세션의 장면은 어떤 확정 출력에도 나오지 않는다.
+  - 그래서 모든 장면은 그 장면을 쓴 주기가 끝날 때 확정되는 출력에 나온다. 기준 세션을 열기 전에 장면을 모두 쓴 세션은, 그 주기의 끝이나 기준 세션을 연 `compose` 의 출력에 이미 나왔다.
+  - 쉬는 동안 쌓인 `writing` 세션이 많으면 slot 이 풀린 주기의 출력에 그 세션들의 장면이 모두 실린다. 그 출력이 `max_reply_bytes` 를 넘는 경우는 이 절이 다루지 않는다.
+  - 지난 수업은 `export` 한 log 에서 읽는다. Results 에는 나오지 않는다.
 - `lesson/sessions`: compose 하나에 한 행. 상태, 장면 수(요청·통과·거절·아직 안 쓴 것), 거절 이유, 실패 이유, 대체한 세션.
-- `lesson/measures`: 세션 수(상태별, `superseded` 포함), 쓴 장면 수, 거절된 항목과 장면 수(이유별), 실패한 세션 수(이유별). 합격·불합격 필드는 없다.
+- `lesson/measures`: 세션 수(상태별, `superseded` 포함), 쓴 장면 수(모든 세션), 장면이 행으로 나온 세션의 id 목록(`shown_sessions`), 거절된 항목과 장면 수(이유별), 실패한 세션 수(이유별). 합격·불합격 필드는 없다.
+- `lesson/sessions` 는 세션마다 한 행이라 같은 한도에 훨씬 늦게 닿는다. 범위를 두지 않았다.
 
 ### 4.7 사실이 사는 곳
 
@@ -244,10 +256,14 @@ presentation = '''{ … 세 lane 의 readings. 첫 값은 lesson/scenes 의 본�
 
 이 RFC 는 뽑는 쪽을 따른다(§9 D1). 퀴즈 타입과 얽힌 정도가 달라서 셋으로 나뉜다.
 
-- 그대로 옮기는 것: `Grant`, pin 과 `parse_pin`, `Source`, `reads`, `material`, `InvalidResult`.
-- 인자를 받게 고쳐 옮기는 것: `Log` 와 `Blobs`. 지금은 폴더 이름 `operator-quiz` 와 퀴즈 사건 codec 이 박혀 있다(`addons/operator-quiz/quiz_log.py:832, 910`). 폴더 이름과 codec 을 받게 한다.
-- 함수로 떼어 옮기는 것: 인용문 검사. 지금은 `check_draft` 안에서 다시 묻기 출처와 섞여 있다(`quiz_flow.py:288-301`).
-- 옮기지 않는 것: cursor 와 읽기 진행. 퀴즈는 `Posed` 로, 수업은 `Outlined` 로 옮기므로(§4.8) 각자 쓴다. 퀴즈의 세션·채점·투영도 퀴즈에 남는다.
+- 그대로 옮기는 것: `Grant` 와 `grants_of_binding`, pin 과 `parse_pin`, `Source`, `reads`, `material`, `summary`, `digest`, `InvalidResult`, `InvalidBinding`, log 값을 엄격하게 읽는 함수들.
+- 인자를 받게 고쳐 옮기는 것: `Log` 와 `Blobs`. 폴더 이름 `operator-quiz` 와 퀴즈 사건 codec 이 박혀 있었다. 폴더와 codec 을 받는다.
+- 함수로 떼어 옮기는 것:
+  - 인용문 검사. `check_draft` 안에서 다시 묻기 출처와 섞여 있었다. `cited_record` 와 `holds_quote` 로 뗐다.
+  - 다음에 읽을 요청(`next_read`). 권한의 첫 페이지가 어디서 시작하는지만 패키지가 준다.
+  - 앞 세션이 멈춘 자리(`last_cursor`). 어느 세션이 cursor 를 옮기는지만 패키지가 준다. 퀴즈는 `Posed` 가 있는 세션, 수업은 `Outlined` 가 있는 세션이다(§4.8). host 가 거절한 cursor 를 건너뛰는 규칙은 하나다.
+  - 읽은 결과의 요약을 메모리에 두는 부분(`Pages`).
+- 옮기지 않는 것: 사건, 세션과 그 fold, 읽은 결과를 받아 사건으로 쓰는 일, 채점, 투영. 패키지마다 쓴다.
 
 `quiz_log` 와 `quiz_flow` 는 옮긴 이름을 공용 모듈에서 가져와 지금 이름 그대로 둔다. 시험은 `q.Log`, `q.Grant`, `f.material` 같은 지금 이름으로 부른다(`addons/tests/test_operator_quiz_flow.py:18`).
 
@@ -269,7 +285,7 @@ Native stack 이다. 층마다 PR 하나와 changelog 조각 하나다.
 | 층 | 종류 | 내용 | 시험 |
 | --- | --- | --- | --- |
 | L0 | 문서 | 조사 문서와 이 RFC | `scripts/rfc-generate-index.py --check` |
-| L1 | 패키지 | `addons/records.py` 로 뽑기(§5). 퀴즈가 그것을 쓴다. 퀴즈 이미지 `0.2.0`, revision `0.4.0` | 기존 `test_operator_quiz_*.py` 가 본문을 고치지 않고 통과한다. 시험이 `addons/` 를 import 경로에 넣는 줄만 더한다 |
+| L1 | 패키지 | `addons/records.py` 로 뽑기(§5). 퀴즈가 그것을 쓴다. 퀴즈 이미지 `0.2.0`, revision `0.4.0` | 기존 `test_operator_quiz_*.py` 116개가 본문을 고치지 않고 통과한다. 시험 파일 셋이 `addons/` 를 import 경로에 넣는 줄만 더한다 |
 | L2 | 패키지 | `addons/operator-lesson`: manifest, 스키마 둘, 프롬프트 둘, log, flow, 투영, worker | 가짜 host 로: `Exact_requested` 가 나열보다 먼저 디스크에 있다. 읽지 않은 pin 의 항목은 버려진다. 인용문이 없는 장면은 `quote_not_in_record` 다. 장면 하나의 `invalid_output` 이 다른 장면을 막지 않는다. 다시 뜬 worker 가 같은 digest 의 요청을 나열한다. 새 `compose` 가 `reading` 세션을 대체하고 `writing` 세션은 그대로 둔다. 첫 세션이 binding 의 `since` 부터 읽고, 다음 세션이 `Outlined` 세션의 cursor 부터 읽는다. `scenes` 를 넘는 항목은 `beyond_requested_scenes` 다. `not_allowed` 로 끝난 scene 이 `Scene_rejected` 가 된다. 읽을 수 없는 log 는 쓰기를 거절한다 |
 | L3 | 문서 | `docs/guides/operator-lesson.md`, 예제 선언, `runtime.toml` 표, `addons/README.md` 한 줄 | `test_lane_addon_config` 가 예제 선언을 검사한다 |
 

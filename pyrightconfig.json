@@ -9,7 +9,7 @@
     },
     {
       "root": "scripts",
-      "extraPaths": ["test"]
+      "extraPaths": ["test", "scripts/lib"]
     }
   ]
 }

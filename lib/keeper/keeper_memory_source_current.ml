@@ -359,6 +359,10 @@ let read_for_keepers_dir ~keepers_dir ~keeper_id =
     Error (Printf.sprintf "source-bound memory read failed path=%s: %s" path message)
 ;;
 
+let read_budget_lines ~keepers_dir ~keeper_id =
+  Result.map budget_lines (read_for_keepers_dir ~keepers_dir ~keeper_id)
+;;
+
 (* A microVM or remote Keeper writes its files on the endpoint, not on the
    host, so a host stat of the resolved path always answered ENOENT: on
    2026-09-17..23 every one of 86 microVM source_path writes failed and no

@@ -26,13 +26,13 @@ val read_journal_tail_indexed :
   keepers_dir:string ->
   keeper_id:string ->
   limit:int ->
-  (int * (journal_entry, string) result) list
+  ((int * (journal_entry, string) result) list, string) result
 
 val read_journal_tail :
   keepers_dir:string
   -> keeper_id:string
   -> limit:int
-  -> (journal_entry, string) result list
+  -> ((journal_entry, string) result list, string) result
 
 type removal_lookup =
   | Removed of removal

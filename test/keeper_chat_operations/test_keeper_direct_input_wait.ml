@@ -401,9 +401,14 @@ let test_branch_pins_after_consuming_continuation () = with_path @@ fun path -> 
       |> Result.map_error Semantic.error_to_string |> value
     | _ -> fail "expected semantic object" in
   rejected (Semantic.apply ~now:21. (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) unprepared)
+(* The branch is a later native call of the same execution. Its identity and
+   Core locator are its own: the history refuses one already published. *)
+let branch_call_id = "019a0010-1000-7000-8000-000000000032"
+let branch_locator = Agent.execution_locator_of_yojson
+  (`Assoc ["version",`Int 1;"run_id",`String "execution-run-direct-input-branch"]) |> value
 let bind_branch execution =
-  let call=Native.create ~call_id ~runtime_id:"native.primary" ~operation_digest:execution.Semantic.input_sha256
-    ~api:Native.Continue_from_checkpoint ~seed_checkpoint:response_candidate ~locator |> value in
+  let call=Native.create ~call_id:branch_call_id ~runtime_id:"native.primary" ~operation_digest:execution.Semantic.input_sha256
+    ~api:Native.Continue_from_checkpoint ~seed_checkpoint:response_candidate ~locator:branch_locator |> value in
   let execution=Semantic.update_native_call ~now:21. ~expected:Native.No_native_call ~replacement:(Native.Active call) execution
     |> Result.map_error Semantic.error_to_string |> value in
   call,execution

@@ -17,6 +17,7 @@ let is_success_status status = status >= 200 && status < 300
 type network_error_kind =
   | Connection_refused
   | Dns_failure
+  | Unreachable
   | Tls_error
   | Timeout
   | Local_resource_exhaustion
@@ -345,17 +346,17 @@ let classify_unix_error = function
   | Unix.ECONNRESET -> Connection_reset
   | Unix.EPIPE -> End_of_file
   | Unix.ETIMEDOUT -> Timeout
-  | Unix.ENETUNREACH -> Dns_failure
-  | Unix.EHOSTUNREACH -> Dns_failure
+  | Unix.ENETUNREACH | Unix.EHOSTUNREACH | Unix.ENETDOWN | Unix.EHOSTDOWN -> Unreachable
   | Unix.EMFILE | Unix.ENFILE | Unix.ENOBUFS -> Local_resource_exhaustion
   | Unix.EADDRNOTAVAIL -> Local_resource_exhaustion
-  | (Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.ENETDOWN | Unix.ENETRESET | Unix.ECONNABORTED | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.EHOSTDOWN | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _) as unclassified_unix_error -> let (_ : Unix.error) = unclassified_unix_error in
+  | (Unix.E2BIG | Unix.EACCES | Unix.EAGAIN | Unix.EBADF | Unix.EBUSY | Unix.ECHILD | Unix.EDEADLK | Unix.EDOM | Unix.EEXIST | Unix.EFAULT | Unix.EFBIG | Unix.EINTR | Unix.EINVAL | Unix.EIO | Unix.EISDIR | Unix.EMLINK | Unix.ENAMETOOLONG | Unix.ENODEV | Unix.ENOENT | Unix.ENOEXEC | Unix.ENOLCK | Unix.ENOMEM | Unix.ENOSPC | Unix.ENOSYS | Unix.ENOTDIR | Unix.ENOTEMPTY | Unix.ENOTTY | Unix.ENXIO | Unix.EPERM | Unix.ERANGE | Unix.EROFS | Unix.ESPIPE | Unix.ESRCH | Unix.EXDEV | Unix.EWOULDBLOCK | Unix.EINPROGRESS | Unix.EALREADY | Unix.ENOTSOCK | Unix.EDESTADDRREQ | Unix.EMSGSIZE | Unix.EPROTOTYPE | Unix.ENOPROTOOPT | Unix.EPROTONOSUPPORT | Unix.ESOCKTNOSUPPORT | Unix.EOPNOTSUPP | Unix.EPFNOSUPPORT | Unix.EAFNOSUPPORT | Unix.EADDRINUSE | Unix.ENETRESET | Unix.ECONNABORTED | Unix.EISCONN | Unix.ENOTCONN | Unix.ESHUTDOWN | Unix.ETOOMANYREFS | Unix.ELOOP | Unix.EOVERFLOW | Unix.EUNKNOWNERR _) as unclassified_unix_error -> let (_ : Unix.error) = unclassified_unix_error in
     Unknown
 ;;
 
 let network_error_kind_to_string = function
   | Connection_refused -> "connection_refused"
   | Dns_failure -> "dns_failure"
+  | Unreachable -> "unreachable"
   | Tls_error -> "tls_error"
   | Timeout -> "timeout"
   | Local_resource_exhaustion -> "local_resource_exhaustion"
@@ -367,6 +368,7 @@ let network_error_kind_to_string = function
 let network_error_kind_of_string = function
   | "connection_refused" -> Some Connection_refused
   | "dns_failure" -> Some Dns_failure
+  | "unreachable" -> Some Unreachable
   | "tls_error" -> Some Tls_error
   | "timeout" -> Some Timeout
   | "local_resource_exhaustion" -> Some Local_resource_exhaustion
@@ -382,6 +384,7 @@ let%test "network_error_kind: every kind reads back from its own spelling" =
   let (_ : network_error_kind -> unit) = function
     | Connection_refused
     | Dns_failure
+    | Unreachable
     | Tls_error
     | Timeout
     | Local_resource_exhaustion
@@ -392,6 +395,7 @@ let%test "network_error_kind: every kind reads back from its own spelling" =
   let every_kind =
     [ Connection_refused
     ; Dns_failure
+    ; Unreachable
     ; Tls_error
     ; Timeout
     ; Local_resource_exhaustion
@@ -463,21 +467,11 @@ let parse_uri url =
     Ok { uri; url; scheme; host; port }
 ;;
 
-let log_close_failure ~url ~message =
-  let json =
-    `Assoc
-      [ "event", `String "http_client_socket_close_failed"
-      ; "url", `String url
-      ; "error", `String message
-      ]
-  in
-  Diag.warn "http_client" "%s" (Yojson.Safe.to_string json)
-;;
-
 let known_network_error_kind = function
   | Unknown -> None
   | ( Connection_refused
     | Dns_failure
+    | Unreachable
     | Tls_error
     | Timeout
     | Local_resource_exhaustion
@@ -490,7 +484,8 @@ let known_network_error_kind = function
    This mirrors the severity ordering rather than the retry policy itself. *)
 let network_error_kind_is_non_retryable = function
   | Local_resource_exhaustion | Tls_error -> true
-  | Connection_refused | Dns_failure | Timeout | Connection_reset | End_of_file | Unknown ->
+  | Connection_refused | Dns_failure | Unreachable | Timeout | Connection_reset | End_of_file
+  | Unknown ->
     false
 ;;
 
@@ -745,6 +740,7 @@ let%test "prepare_sync_request rejects missing host before dispatch" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -768,6 +764,7 @@ let%test "prepare_sync_request rejects unsupported schemes before dispatch" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -936,65 +933,6 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
   Ok (net, addresses, tls_wrap)
 ;;
 
-(** Build a reusable client with explicit lifetime control.
-    Returns [Ok (client, close)] where [close] shuts down all transports
-    created by this client. The client is NOT bound to any switch; the
-    caller decides when to close it or park it in a cache. *)
-let make_client ~net ~origin =
-  let+ net, addresses, tls_wrap = resolve_origin net origin in
-  let tracked_transports : connection list Atomic.t = Atomic.make [] in
-  let connect ~sw:conn_sw _uri =
-    let sock = Tcp_address_race.connect ~sw:conn_sw ~net addresses in
-    let transport : connection =
-      try
-        match tls_wrap with
-        | Some wrap -> (wrap sock :> connection)
-        | None -> (sock :> connection)
-      with exn ->
-        let bt = Printexc.get_raw_backtrace () in
-        Eio.Resource.close sock;
-        Printexc.raise_with_backtrace exn bt
-    in
-    let rec push () =
-      let prev = Atomic.get tracked_transports in
-      if Atomic.compare_and_set tracked_transports prev (transport :: prev)
-      then ()
-      else push ()
-    in
-    push ();
-    Diag.debug
-      "http_client"
-      "connect: new transport #%d for %s"
-      (List.length (Atomic.get tracked_transports))
-      origin.url;
-    transport
-  in
-  let client = Cohttp_eio.Client.make_generic connect in
-  let close () =
-    let transports = Atomic.exchange tracked_transports [] in
-    let n = List.length transports in
-    if n > 0
-    then
-      Diag.debug
-        "http_client"
-        "close: closing %d transport(s) for %s"
-        n
-        origin.url;
-    Eio.Cancel.protect (fun () ->
-      List.iter
-        (fun t ->
-           try
-             Eio.Resource.close t;
-             Diag.debug "http_client" "transport closed for %s" origin.url
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             log_close_failure ~url:origin.url ~message:(Printexc.to_string exn))
-        transports)
-  in
-  client, close
-;;
-
 (** Create a single transport connection bound to [sw]. This is the unit
     stored in the connection cache and reused across requests. *)
 let make_connection ?tls_config ~sw ~net ~origin () : (connection, http_error) result =
@@ -1033,6 +971,7 @@ let backend_named_peer_close backend =
   | Some
       ( Connection_refused
       | Dns_failure
+      | Unreachable
       | Tls_error
       | Timeout
       | Local_resource_exhaustion
@@ -1046,6 +985,7 @@ let transport_named_peer_close = function
      | Connection_reset | End_of_file -> true
      | Connection_refused
      | Dns_failure
+     | Unreachable
      | Tls_error
      | Timeout
      | Local_resource_exhaustion
@@ -1091,16 +1031,154 @@ let rec leading_bytes limit = function
     else buffer :: leading_bytes (limit - length) rest
 ;;
 
+(* A connection's bytes from its final response on.
+
+   A server may send interim 1xx responses before the final one, and a client
+   has to read past them (RFC 9110 §15.2). cohttp-eio hands back the first
+   response head it reads and drops the buffer the rest arrived in, so the
+   final response cannot be read after it. The interim heads are taken off
+   here, below cohttp-eio. cohttp's own response reader parses each head. A
+   1xx head ends at its header section and carries no content, so it is
+   dropped whole, and everything from the first other head on is passed up
+   unchanged. 101 (Switching Protocols) is the last HTTP message on its
+   connection, so it is passed up as the answer.
+
+   The reader buffers ahead of the head it parses. [read_to_final_head] keeps
+   every byte the reader pulled, so the bytes from the final head on are
+   passed up before the connection is read again. *)
+module Final_response_bytes = struct
+  module Response_io = Cohttp.Response.Private.Make (Cohttp_eio.Private.IO)
+
+  type state =
+    | Before_final_head
+    | From_final_head of Cstruct.t (* read from the connection, not yet passed up *)
+
+  type t =
+    { read : Cstruct.t -> int
+    ; mutable state : state
+    }
+
+  let create read = { read; state = Before_final_head }
+
+  let is_interim response =
+    match Http.Response.status response with
+    | `Switching_protocols -> false
+    | status ->
+      let code = Http.Status.to_int status in
+      code >= 100 && code < 200
+  ;;
+
+  (* A final head that is cut short, and bytes that are not HTTP, are passed
+     up as they arrived: cohttp-eio reads them again and reports them as it
+     did before. After an interim head that is cut short nothing is left to
+     pass up, and cohttp-eio meets the end of file. *)
+  let read_to_final_head read =
+    let pulled = Buffer.create 0 in
+    let module Pulled = struct
+      type t = unit
+
+      let read_methods = []
+
+      let single_read () buffer =
+        let count = read buffer in
+        Buffer.add_string pulled (Cstruct.to_string ~len:count buffer);
+        count
+      ;;
+    end
+    in
+    let source = Eio.Resource.T ((), Eio.Flow.Pi.source (module Pulled)) in
+    (* No size limit, as where cohttp-eio reads a head. *)
+    let input = Eio.Buf_read.of_flow ~max_size:max_int source in
+    let rec final_head_offset () =
+      let offset = Eio.Buf_read.consumed_bytes input in
+      match Response_io.read input with
+      | `Ok response when is_interim response -> final_head_offset ()
+      | `Ok _ | `Eof | `Invalid _ -> offset
+    in
+    let offset = final_head_offset () in
+    Cstruct.of_string ~off:offset (Buffer.contents pulled)
+  ;;
+
+  let single_read t buffer =
+    let pulled =
+      match t.state with
+      | Before_final_head -> read_to_final_head t.read
+      | From_final_head pulled -> pulled
+    in
+    if Cstruct.is_empty pulled
+    then (
+      t.state <- From_final_head pulled;
+      t.read buffer)
+    else (
+      let count = min (Cstruct.length pulled) (Cstruct.length buffer) in
+      Cstruct.blit pulled 0 buffer 0 count;
+      t.state <- From_final_head (Cstruct.shift pulled count);
+      count)
+  ;;
+end
+
+(* Everything [Final_response_bytes] passes up when the connection delivers
+   [arrivals] one read at a time and then ends. *)
+let passed_up_from arrivals =
+  let arrivals = ref arrivals in
+  let read buffer =
+    match !arrivals with
+    | [] -> raise End_of_file
+    | arrival :: rest ->
+      arrivals := rest;
+      Cstruct.blit_from_string arrival 0 buffer 0 (String.length arrival);
+      String.length arrival
+  in
+  let final_response = Final_response_bytes.create read in
+  let passed_up = Buffer.create 0 in
+  let buffer = Cstruct.create 4096 in
+  let rec drain () =
+    let count = Final_response_bytes.single_read final_response buffer in
+    Buffer.add_string passed_up (Cstruct.to_string ~len:count buffer);
+    drain ()
+  in
+  try drain () with
+  | End_of_file -> Buffer.contents passed_up
+;;
+
+let%test "interim heads are dropped wherever the connection splits its bytes" =
+  let final = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok" in
+  let interim =
+    "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 103 Early Hints\r\nLink: </a>\r\n\r\n"
+  in
+  let wire = interim ^ final in
+  let split_at position =
+    [ String.sub wire 0 position
+    ; String.sub wire position (String.length wire - position)
+    ]
+  in
+  List.for_all
+    (fun position -> String.equal (passed_up_from (split_at position)) final)
+    (List.init (String.length wire - 1) (fun index -> index + 1))
+  && String.equal (passed_up_from [ interim; final ]) final
+  && String.equal (passed_up_from [ wire ]) final
+;;
+
+let%test "a response that is not interim is passed up as it arrived" =
+  let unchanged wire = String.equal (passed_up_from [ wire ]) wire in
+  unchanged "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n\r\n"
+  && unchanged "HTTP/1.1 200 OK\r\n\r\nHTTP/1.1 103 Early Hints\r\n\r\n"
+  && unchanged "HTTP/1.1 200 OK\r\nContent-Le"
+  && unchanged "not http"
+  && String.equal (passed_up_from [ "HTTP/1.1 103 Early Hints\r\nLink: <" ]) ""
+  && String.equal (passed_up_from []) ""
+;;
+
 let track_connection ~wire connection =
   let eof_seen = Request_wire.eof_seen wire in
   let module Flow = struct
     type t = unit
 
     (* Expose no alternate read path: every transport read must pass through
-       [single_read] below so raw EOF cannot bypass the observation. *)
+       [transport_read] below so raw EOF cannot bypass the observation. *)
     let read_methods = []
 
-    let single_read () buffer =
+    let transport_read buffer =
       match Eio.Flow.single_read connection buffer with
       | count ->
         Request_wire.bytes_read wire count;
@@ -1109,6 +1187,9 @@ let track_connection ~wire connection =
         eof_seen := true;
         raise End_of_file
     ;;
+
+    let final_response = Final_response_bytes.create transport_read
+    let single_read () buffer = Final_response_bytes.single_read final_response buffer
 
     (* Every write passes through here so an error a write raises is seen
        where it is raised, not guessed from the exception that finally
@@ -1275,71 +1356,49 @@ let end_connection held verdict =
   | Leased lease -> Http_client_cache.release lease verdict
 ;;
 
-(** Client wrapper that tracks the socket for explicit close.
-    The caller provides the concrete URI so host resolution and TLS
-    availability can be checked up front and reported as typed errors. *)
-(** Run [f client] with a client obtained either from [cache] or created
-    for one request. When [cache] is supplied, a hit reuses a parked
-    connection and a miss creates one; the connection then ends through
-    {!end_connection}. When [cache] is omitted the client is created for a
-    single request and closed immediately after [f] returns.
+(** Run [f client] over a connection leased from [cache], or opened for this
+    request alone when [cache] is omitted. The connection ends through
+    {!end_connection} either way.
 
-    [f] receives the caller switch and returns its result with the
-    {!Reuse_verdict.t} for the exchange it read. [Error] and exceptions close
-    the connection as [Request_not_delivered] when a write call raised an error
-    the transport named as the peer's close and no response byte came back
-    ({!Request_wire.delivery}), and as [Request_failed] otherwise. A cached
-    connection whose transport
-    reported end of file closes as [Transport_ended] even when [f] answered:
-    cohttp ends a body at the peer's close without an error. An exception
-    raised after that end of file is the peer's close, and is returned as
-    {!eof_error}. *)
+    [f] receives the caller switch and [transport_eof_seen], which is set
+    once a read of the connection met the transport's end of file, and
+    returns its result with the {!Reuse_verdict.t} for the exchange it read.
+    [Error] and exceptions close the connection as [Request_not_delivered]
+    when a write call raised an error the transport named as the peer's close
+    and no response byte came back ({!Request_wire.delivery}), and as
+    [Request_failed] otherwise. A connection whose transport reported end of
+    file closes as [Transport_ended] even when [f] answered: a body with no
+    declared length ends at the peer's close. An exception raised after that
+    end of file is the peer's close, and is returned as {!eof_error}. *)
 let with_client ?cache ~sw ~net ~origin f =
-  match cache with
-  | None ->
-    let* client, close = make_client ~net ~origin in
-    Fun.protect
-      ~finally:(fun () ->
-        try Eio.Cancel.protect close with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Diag.warn
-            "http_client"
-            "with_client one-shot close failed: %s"
-            (Printexc.to_string exn))
-      (fun () ->
-         let* result, (_ : Reuse_verdict.t) = f ~sw client in
-         Ok result)
-  | Some cache ->
-    let* conn = open_connection (Some cache) ~sw ~net ~origin in
-    let wire = Request_wire.create () in
-    let eof_seen = Request_wire.eof_seen wire in
-    let client = tracked_client ~wire (held_flow conn) in
-    let verdict = ref (Reuse_verdict.Close Request_failed) in
-    Fun.protect
-      ~finally:(fun () ->
-        try end_connection conn !verdict with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Diag.warn
-            "http_client"
-            "with_client cleanup failed: %s"
-            (Printexc.to_string exn))
-      (fun () ->
-         match f ~sw client with
-         | Ok (result, reuse) ->
-           verdict := if !eof_seen then Close Transport_ended else reuse;
-           Ok result
-         | Error error ->
-           verdict := Close (failure_close_reason wire);
-           Error error
-         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-         | exception exn ->
-           verdict := Close (failure_close_reason wire);
-           (match classify_network_exn exn with
-            | Some error -> Error error
-            | None when !eof_seen -> Error (eof_error exn)
-            | None -> raise exn))
+  let* conn = open_connection cache ~sw ~net ~origin in
+  let wire = Request_wire.create () in
+  let eof_seen = Request_wire.eof_seen wire in
+  let client = tracked_client ~wire (held_flow conn) in
+  let verdict = ref (Reuse_verdict.Close Request_failed) in
+  Fun.protect
+    ~finally:(fun () ->
+      try end_connection conn !verdict with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Diag.warn "http_client" "with_client cleanup failed: %s" (Printexc.to_string exn))
+    (fun () ->
+       match f ~sw ~transport_eof_seen:eof_seen client with
+       | Ok (result, reuse) ->
+         verdict := if !eof_seen then Close Transport_ended else reuse;
+         Ok result
+       | Error error ->
+         verdict := Close (failure_close_reason wire);
+         Error error
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn ->
+         verdict := Close (failure_close_reason wire);
+         (match classify_network_exn exn with
+          | Some error -> Error error
+          | None when !eof_seen -> Error (eof_error exn)
+          | None -> raise exn))
+;;
+
 module Safe_cohttp_response_flow = struct
   let min_chunk_read_len = 65_536
 
@@ -1401,12 +1460,42 @@ let safe_cohttp_response_flow (source : [> Eio.Flow.source_ty ] Eio.Resource.t)
   Eio.Resource.T (state, operations)
 ;;
 
-let read_response_body resp_body =
-  try
+(* Whether [body], read to where cohttp ended it, reached the end its
+   response's framing declares. cohttp ends a body at the peer's close as it
+   does at the framing's end, so the end is checked here (RFC 9112 §8). A
+   Content-Length body is complete at its declared length. A chunked body
+   that ends at its zero-sized chunk is read without meeting the transport's
+   end of file, so one that met it was cut. A response that declares neither
+   ends where the server closes the connection (RFC 9112 §6.3 rule 8): the
+   close is its end. *)
+let body_reached_its_end ~response ~transport_eof_seen body =
+  match Cohttp.Response.has_body response, Cohttp.Response.encoding response with
+  | `No, (Http.Transfer.Fixed _ | Http.Transfer.Chunked | Http.Transfer.Unknown) -> true
+  | (`Yes | `Unknown), Http.Transfer.Fixed declared ->
+    Int64.equal (Int64.of_int (String.length body)) declared
+  | (`Yes | `Unknown), Http.Transfer.Chunked -> not !transport_eof_seen
+  | (`Yes | `Unknown), Http.Transfer.Unknown -> true
+;;
+
+(* The whole body of [response]. A body the peer's close cut short is the
+   peer's close, not an answer: what arrived of it is not returned. *)
+let read_response_body ~response ~transport_eof_seen resp_body =
+  match
     let safe_body = safe_cohttp_response_flow resp_body in
-    Ok Eio.Buf_read.(of_flow ~max_size:Api_common.max_response_body safe_body |> take_all)
+    Eio.Buf_read.(of_flow ~max_size:Api_common.max_response_body safe_body |> take_all)
   with
-  | Eio.Buf_read.Buffer_limit_exceeded ->
+  | body when body_reached_its_end ~response ~transport_eof_seen body -> Ok body
+  | body ->
+    Error
+      (NetworkError
+         { message =
+             Printf.sprintf
+               "the peer closed the connection %d bytes into a response body, before \
+                the body's declared end"
+               (String.length body)
+         ; kind = End_of_file
+         })
+  | exception Eio.Buf_read.Buffer_limit_exceeded ->
     Error
       (ProviderFailure
          { kind = Response_body_too_large { limit_bytes = Api_common.max_response_body }
@@ -1428,14 +1517,16 @@ let get_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
   catch_network (fun () ->
     let* origin = parse_uri url in
     with_explicit_deadline deadline (fun () ->
-      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw ~transport_eof_seen client ->
         let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
         let resp, resp_body =
           Cohttp_eio.Client.get ~sw client ~headers:hdr origin.uri
         in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
         let resp_headers = Cohttp.Response.headers resp in
-        let* body_str = read_response_body resp_body in
+        let* body_str =
+          read_response_body ~response:resp ~transport_eof_seen resp_body
+        in
         Ok
           ( { status = code
             ; body = body_str
@@ -1459,14 +1550,16 @@ let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
   catch_network (fun () ->
     let* origin = parse_uri url in
     with_explicit_deadline deadline (fun () ->
-      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw ~transport_eof_seen client ->
         let hdr = Http.Header.of_list (maybe_add_connection_close ?cache headers) in
         let resp, resp_body =
           Cohttp_eio.Client.delete ~sw client ~headers:hdr origin.uri
         in
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
         let resp_headers = Cohttp.Response.headers resp in
-        let* body_str = read_response_body resp_body in
+        let* body_str =
+          read_response_body ~response:resp ~transport_eof_seen resp_body
+        in
         Ok
           ( { status = code
             ; body = body_str
@@ -1488,7 +1581,7 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
   catch_network (fun () ->
     let* origin = parse_uri url in
     with_explicit_deadline deadline (fun () ->
-      with_client ?cache ~sw ~net ~origin (fun ~sw client ->
+      with_client ?cache ~sw ~net ~origin (fun ~sw ~transport_eof_seen client ->
         (* Explicitly set Content-Length to prevent chunked transfer encoding.
            Ollama's yyjson parser rejects chunked bodies with
            "Value looks like object, but can't find closing '}' symbol". *)
@@ -1509,7 +1602,9 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
         let code = Cohttp.Response.status resp |> Cohttp.Code.code_of_status in
         Http_request_observer.response_headers_received observation ~status:code;
         let resp_headers = Cohttp.Response.headers resp in
-        let* body_str = read_response_body resp_body in
+        let* body_str =
+          read_response_body ~response:resp ~transport_eof_seen resp_body
+        in
         Http_client_diagnostics.profile_opaque_client_error
           ~url
           ~code
@@ -1692,7 +1787,7 @@ let post_sync_once_after_validation
       try
         match body_deadline, total_started_at with
         | Unbounded, None ->
-          (match read_response_body response_body with
+          (match read_response_body ~response ~transport_eof_seen response_body with
            | Ok body -> `Body body
            | Error error -> `Failed error)
         | Bounded (clock, timeout_s), Some (_, started_at) ->
@@ -1703,7 +1798,7 @@ let post_sync_once_after_validation
           else (
             match
               Under_deadline.run clock remaining (fun () ->
-                read_response_body response_body)
+                read_response_body ~response ~transport_eof_seen response_body)
             with
             | Ok (Ok body) -> `Body body
             | Ok (Error error) -> `Failed error
@@ -2074,7 +2169,9 @@ let with_post_stream
               (Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body))
           (fun () ->
              let read_body () =
-               match read_response_body resp_body with
+               match
+                 read_response_body ~response:resp ~transport_eof_seen resp_body
+               with
                | Ok refusal_body -> Ok refusal_body
                | Error err -> Error err
                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -2920,6 +3017,7 @@ let%test "catch_network maps End_of_file to NetworkError with kind" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -2971,6 +3069,7 @@ let%test "catch_network classifies Unix ECONNREFUSED" =
           { message = _
           ; kind =
               ( Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -2997,6 +3096,7 @@ let%test "catch_network classifies Unix ETIMEDOUT" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Local_resource_exhaustion
               | Connection_reset
@@ -3035,19 +3135,24 @@ let%test "classify_unix_error: ECONNRESET is Connection_reset" =
   classify_unix_error Unix.ECONNRESET = Connection_reset
 ;;
 
-let%test "classify_unix_error: ENETUNREACH is Dns_failure" =
-  classify_unix_error Unix.ENETUNREACH = Dns_failure
-;;
-
-let%test "classify_unix_error: EHOSTUNREACH is Dns_failure" =
-  classify_unix_error Unix.EHOSTUNREACH = Dns_failure
+(* No route to the network or host is not a name-lookup failure: connect
+   raises these after the name resolved (#52045). *)
+let%test "classify_unix_error: every no-route errno is Unreachable" =
+  List.for_all
+    (fun code -> classify_unix_error code = Unreachable)
+    [ Unix.ENETUNREACH; Unix.EHOSTUNREACH; Unix.ENETDOWN; Unix.EHOSTDOWN ]
 ;;
 
 let%test "oversized response is typed without draining" =
   let source =
     Eio.Flow.string_source (String.make (Api_common.max_response_body + 1) 'x')
   in
-  match read_response_body source with
+  match
+    read_response_body
+      ~response:(Cohttp.Response.make ())
+      ~transport_eof_seen:(ref false)
+      source
+  with
   | Error (ProviderFailure { kind = Response_body_too_large { limit_bytes }; _ }) ->
     limit_bytes = Api_common.max_response_body
   | Ok _
@@ -3089,6 +3194,7 @@ let%test "classify_network_exn: typed Eio refused" =
           { message = _
           ; kind =
               ( Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -3111,6 +3217,7 @@ let%test "classify_network_exn: typed Eio timeout" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Local_resource_exhaustion
               | Connection_reset
@@ -3132,6 +3239,7 @@ let%test "classify_network_exn: typed Eio Unix backend resource exhaustion" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Connection_reset
@@ -3169,6 +3277,7 @@ let%test "classify_network_exn: plain Tls_alert is Tls_error" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Timeout
               | Local_resource_exhaustion
               | Connection_reset
@@ -3187,6 +3296,7 @@ let%test "classify_network_exn: plain Tls_failure is Tls_error" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Timeout
               | Local_resource_exhaustion
               | Connection_reset
@@ -3219,6 +3329,7 @@ let%test "classify_network_exn: unknown backend printer text does not classify" 
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -3256,6 +3367,7 @@ let%test "classify_network_exn: Multiple_io prefers non-retryable kind" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Connection_reset
@@ -3280,6 +3392,7 @@ let%test "classify_network_exn: Multiple_io falls back to first known kind" =
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
@@ -3304,9 +3417,38 @@ let%test "classify_network_exn: Multiple_io keeps a leading reset as a known kin
           ; kind =
               ( Connection_refused
               | Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion
+              | End_of_file
+              | Unknown )
+          } | TimeoutError _ | AcceptRejected _)
+  | Some (ProviderTerminal _ | ProviderFailure _)
+  | None -> false
+;;
+
+(* ENETDOWN read as Unknown until #52045, and a composite dropped it. It now
+   names a missing route, so a leading one is the first known kind and wins
+   over a later reset, as any known kind does. *)
+let%test "classify_network_exn: Multiple_io keeps a leading no-route errno as a known kind" =
+  match
+    classify_network_exn
+      (multiple_io_exn
+         [ Eio.Exn.X (Eio_unix.Unix_error (Unix.ENETDOWN, "connect", ""))
+         ; Eio.Exn.X (Eio_unix.Unix_error (Unix.ECONNRESET, "read", ""))
+         ])
+  with
+  | Some (NetworkError { kind = Unreachable; _ }) -> true
+  | Some (HttpError _ | NetworkError
+          { message = _
+          ; kind =
+              ( Connection_refused
+              | Dns_failure
+              | Tls_error
+              | Timeout
+              | Local_resource_exhaustion
+              | Connection_reset
               | End_of_file
               | Unknown )
           } | TimeoutError _ | AcceptRejected _)
@@ -3327,6 +3469,7 @@ let%test "classify_network_exn: Multiple_io does not prefer a reset over a refus
           { message = _
           ; kind =
               ( Dns_failure
+              | Unreachable
               | Tls_error
               | Timeout
               | Local_resource_exhaustion

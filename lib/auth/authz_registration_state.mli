@@ -42,6 +42,9 @@ type t
 val empty : t
 val find : t -> Authz_types.Registration_id.t -> registration option
 
+(** Every registration with its id, in the order of the ids. *)
+val bindings : t -> (Authz_types.Registration_id.t * registration) list
+
 (** The open registration of this identity. *)
 val find_open
   :  t

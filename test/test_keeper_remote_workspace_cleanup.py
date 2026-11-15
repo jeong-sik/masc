@@ -366,46 +366,63 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
         self.assertEqual(self.report["skip"], "/proc unavailable")
         self.assertTrue((self.root / "clean").is_dir())
 
+    def unreadable_process(self, owner: int, session: int, leader: int | None):
+        """Patches under which process 4242 of user [owner] refuses its links,
+        as the kernel does for a process that turned inspection off or belongs
+        to another user. It is in [session]; [leader] is the user of the
+        process that leads that session, None when no such process is left."""
+        process = self.proc / "4242"
+        (process / "fd").mkdir(parents=True, exist_ok=True)
+        # The command name is written to read as a session of PID 1.
+        (process / "stat").write_text(f"4242 (x) S 1 1 1 (y) S 4000 4242 {session} 0 -1\n")
+        owners = {process: owner}
+        leader_entry = self.proc / str(session)
+        if leader is None:
+            shutil.rmtree(leader_entry, ignore_errors=True)
+        else:
+            leader_entry.mkdir(exist_ok=True)
+            owners[leader_entry] = leader
+        readlink, stat_of = os.readlink, Path.stat
+
+        def denied(path, *args, **kwargs):
+            if Path(path).parent == process:
+                raise PermissionError(13, "Permission denied", str(path))
+            return readlink(path, *args, **kwargs)
+
+        def owned(path, *args, **kwargs):
+            if path in owners:
+                return SimpleNamespace(st_uid=owners[path])
+            return stat_of(path, *args, **kwargs)
+
+        return (
+            patch.object(cleaner.os, "readlink", side_effect=denied),
+            patch.object(Path, "stat", owned),
+        )
+
     def test_unreadable_process_is_passed_over_only_when_it_cannot_be_inside(self) -> None:
         me = os.getuid()
         other = me + 1
-        # (root mode, process owner, owner of its /proc links, removed?)
+        root_user = 0
+        sshd_session, command_session = 4000, 4242
+        # (root mode, process owner, its session, that session's leader, removed?)
         cases = [
-            (0o700, other, other, True),  # another user cannot enter a private root
-            (0o755, other, other, False),  # a shared root lets it in
-            (0o700, me, 0, True),  # our sshd session: links belong to root
-            (0o700, me, me, False),  # our own inspectable process we cannot read
-            (0o755, me, me, False),  # the same, and the root's mode is not why
+            (0o700, other, command_session, other, True),  # another user cannot enter a private root
+            (0o755, other, command_session, other, False),  # a shared root lets it in
+            (0o700, me, sshd_session, root_user, True),  # the sshd side that dropped to our user
+            # A command of ours that turned inspection off (ssh-agent): its
+            # session was opened by our own user.
+            (0o700, me, command_session, me, False),
+            (0o700, me, sshd_session, me, False),  # the same, started by another command of ours
+            (0o700, me, sshd_session, None, False),  # the leader exited
+            (0o700, me, 0, None, False),  # the leader is in another PID namespace
+            (0o755, me, command_session, me, False),  # the root's mode is not why
         ]
-        process = self.proc / "4242"
-        (process / "fd").mkdir(parents=True)
-        readlink = os.readlink
-        stat_of, lstat_of = Path.stat, Path.lstat
-        for mode, owner, links, removed in cases:
-            with self.subTest(mode=oct(mode), owner=owner, links=links):
+        for mode, owner, session, leader, removed in cases:
+            with self.subTest(mode=oct(mode), owner=owner, session=session, leader=leader):
                 self.clone("clean")
-
-                def denied(path, *args, **kwargs):
-                    if Path(path).parent == process:
-                        raise PermissionError(path)
-                    return readlink(path, *args, **kwargs)
-
-                def owned(path, *args, _owner=owner, **kwargs):
-                    if path == process:
-                        return SimpleNamespace(st_uid=_owner)
-                    return stat_of(path, *args, **kwargs)
-
-                def linked(path, *args, _links=links, **kwargs):
-                    if path == process / "cwd":
-                        return SimpleNamespace(st_uid=_links)
-                    return lstat_of(path, *args, **kwargs)
-
                 self.root.chmod(mode)
-                with (
-                    patch.object(cleaner.os, "readlink", side_effect=denied),
-                    patch.object(Path, "stat", owned),
-                    patch.object(Path, "lstat", linked),
-                ):
+                links, owners = self.unreadable_process(owner, session, leader)
+                with links, owners:
                     entries = self.sweep()
                 if removed:
                     self.assert_removed(entries, "clean")
@@ -417,6 +434,41 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
                     self.assertEqual("mode 0755" in skip, shared)
                     self.assertEqual("chmod go-rwx" in skip, shared)
                     shutil.rmtree(self.root / "clean")
+
+    def test_process_that_exits_while_it_is_read_is_passed_over(self) -> None:
+        me = os.getuid()
+        self.clone("clean")
+        process = self.proc / "4242"
+        read_text = Path.read_text
+
+        def reaped(path, *args, **kwargs):
+            if path == process / "stat":
+                raise ProcessLookupError(3, "No such process", str(path))
+            return read_text(path, *args, **kwargs)
+
+        links, owners = self.unreadable_process(me, 4242, me)
+        with links, owners, patch.object(Path, "read_text", reaped):
+            self.assert_removed(self.sweep(), "clean")
+
+    def test_unreadable_process_whose_session_leader_is_gone_is_passed_over_once_it_exits(
+        self,
+    ) -> None:
+        me = os.getuid()
+        self.clone("clean")
+        process = self.proc / "4242"
+        links, owners = self.unreadable_process(me, 4000, None)
+        stat_of = Path.stat
+        seen: list[Path] = []
+
+        def gone_on_second_look(path, *args, **kwargs):
+            if path == process:
+                seen.append(path)
+                if len(seen) > 1:
+                    raise FileNotFoundError(2, "No such file or directory", str(path))
+            return stat_of(path, *args, **kwargs)
+
+        with links, patch.object(Path, "stat", gone_on_second_look):
+            self.assert_removed(self.sweep(), "clean")
 
 
 if __name__ == "__main__":

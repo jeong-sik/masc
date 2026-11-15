@@ -855,6 +855,40 @@ let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   else input
 ;;
 
+(* Decided on the raw input. [input_to_json] turns an oversized object into a
+   preview string, after which a reserved [_blob] key beside large fields can
+   no longer be read off the row. *)
+type input_form =
+  | Arguments_input
+  | Artifact_reference_input
+
+let input_form_key = "input_form"
+
+let input_form_to_string = function
+  | Arguments_input -> "arguments"
+  | Artifact_reference_input -> "artifact_reference"
+;;
+
+let input_form_of_string = function
+  | "arguments" -> Some Arguments_input
+  | "artifact_reference" -> Some Artifact_reference_input
+  | _ -> None
+;;
+
+let input_form_field input =
+  let form =
+    match Tool_output.normalized_artifact_ref_of_json input with
+    | Tool_output.Not_normalized_artifact_ref -> Arguments_input
+    | Tool_output.Decoded_normalized_artifact_ref _
+    | Tool_output.Invalid_normalized_artifact_ref _ -> Artifact_reference_input
+  in
+  input_form_key, `String (input_form_to_string form)
+;;
+
+let recorded_input_form row =
+  Option.bind (Safe_ops.json_string_opt input_form_key row) input_form_of_string
+;;
+
 let log_call
       ~keeper_name
       ~tool_name
@@ -1282,6 +1316,7 @@ let log_call
            ; "keeper", `String keeper_name
            ; "tool", `String tool_name
            ; "input", safe_input
+           ; input_form_field input
            ; "output", output_json
            ; "duration_ms", `Float duration_ms
            ; "runtime_contract", runtime_contract

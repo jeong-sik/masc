@@ -648,8 +648,24 @@ let test_telegram_connector_json_reads_runtime_status () =
           (json |> U.member "status_source" |> U.to_string);
         check bool "available" true (json |> U.member "available" |> U.to_bool);
         check bool "connected from the native poll" true (json |> U.member "connected" |> U.to_bool);
-        check bool "native bot identity" true (json |> U.member "bot_user_id" = `Intlit "4242");
+        check bool "native bot identity" true (json |> U.member "bot_user_id" = `String "4242");
         check bool "native poll cursor" true (json |> U.member "next_offset" = `Intlit "17");
+        (* The TUI reads the bot ID with the one string contract every
+           connector shares, so the row the server sends keeps its bot. *)
+        (match
+           Masc.Tui_decode_connectors.decode_connector_snapshot
+             (`Assoc
+               [ "connectors", `List [ json ]; "total", `Int 1; "active_count", `Int 1 ])
+         with
+         | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]; cs_refused = []; _ } ->
+             check (option string) "TUI bot ID" (Some "4242")
+               connector.Masc.Tui_decode_connectors.cn_bot_user_id
+         | Ok { Masc.Tui_decode_connectors.cs_refused = refusal :: _; _ } ->
+             fail ("TUI refused the Telegram row: "
+                   ^ refusal.Masc.Tui_decode_connectors.cr_reason)
+         | Ok { Masc.Tui_decode_connectors.cs_connectors = ([] | _ :: _ :: _); cs_refused = []; _ } ->
+             fail "TUI did not read exactly one Telegram row"
+         | Error detail -> fail detail);
         check bool "sidecar message count is not projected" true
           (json |> U.member "messages_processed" = `Null);
         check int "configured bindings count" 1

@@ -399,7 +399,8 @@ let test_contained_turns_an_exception_into_an_error_result () =
       (fun () -> raise (Eio.Cancel.Cancelled Exit))))
 
 (* Through the worker: a boot that makes the core raise is a completed load
-   whose boot says so, and its announcement rides in the call's events. *)
+   whose boot says so. The machine is installed either way, so the launch
+   line and the boot fault line both ride in the call's events. *)
 let test_a_core_exception_while_booting_is_a_completed_load () =
   let base_path = Filename.temp_dir "dos-addon-worker-boot-" "" in
   let game = Filename.concat (Filename.concat (Filename.concat
@@ -419,11 +420,13 @@ let test_a_core_exception_while_booting_is_a_completed_load () =
     check bool "and its boot says the core raised" true
       (Yojson.Safe.Util.member "status" boot = `String "faulted"
        && Yojson.Safe.Util.member "kind" boot = `String "core_exception");
-    check bool "the machine's announcement rides in the call's events" true
+    let by_the_loader event = Yojson.Safe.Util.member "author" event = `String "fixture" in
+    check bool "the launch and the boot fault both ride in the call's events" true
       (match loaded._meta with
        | Some (`Assoc fields) ->
            (match List.assoc_opt "io.github.jeong-sik/masc.machine.events" fields with
-            | Some (`List [ _ ]) -> true
+            | Some (`List [ launched; boot_faulted ]) ->
+                by_the_loader launched && by_the_loader boot_faulted
             | _ -> false)
        | _ -> false);
     check bool "the loader holds the controller" true

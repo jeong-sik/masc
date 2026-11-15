@@ -14,7 +14,6 @@ import type { KeeperRuntimeAssignmentRevision } from '../types'
 export interface DashboardRuntimeParameterPolicy {
   reasoning_toggle_wire?: string | null
   reasoning_replay_policy?: string | null
-  requires_reasoning_replay_on_tool_call?: boolean
   ignored_sampling_params: string[]
   always_ignored_sampling_params: string[]
 }
@@ -449,7 +448,6 @@ function decodeRuntimeParameterPolicy(raw: unknown): DashboardRuntimeParameterPo
   return {
     reasoning_toggle_wire: asNullableString(raw.reasoning_toggle_wire),
     reasoning_replay_policy: asNullableString(raw.reasoning_replay_policy),
-    requires_reasoning_replay_on_tool_call: asBoolean(raw.requires_reasoning_replay_on_tool_call),
     ignored_sampling_params: asStringArray(raw.ignored_sampling_params),
     always_ignored_sampling_params: asStringArray(raw.always_ignored_sampling_params),
   }

@@ -2603,6 +2603,7 @@
   masc_tui_frame
   masc_tui_hit
   masc_tui_markdown_render_cache
+  masc_tui_owed_read
   masc_tui_message_layout
   masc_tui_execute_result
   masc_tui_tool_detail

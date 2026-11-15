@@ -41,7 +41,7 @@ def fixture_server(status, body):
             self.wfile.write(payload)
             self.wfile.flush()
 
-        def log_message(self, *args):
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)

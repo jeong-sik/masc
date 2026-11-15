@@ -17,7 +17,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "operator-lesson"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # records.py
 
-from test_operator_quiz_flow import REPO, FakeHost, commit, exact_payload, post  # noqa: E402
+<<<<<<< HEAD
+from test_operator_quiz_flow import REPO, WIKI, FakeHost, commit, exact_payload, post, wiki_page  # noqa: E402
 import lesson_flow as f  # noqa: E402
 import lesson_log as l  # noqa: E402
 import lesson_projection as p  # noqa: E402
@@ -102,6 +103,16 @@ class Base(unittest.TestCase):
 
     def session(self, session_id) -> l.Session:
         return next(s for s in self.flow.sessions() if s.session_id == session_id)
+
+    def starts(self, session_id) -> dict[str, dict]:
+        """Where a session began reading each record source: after a cursor,
+        or from a time."""
+        first: dict[str, dict] = {}
+        for request in self.host.listed:
+            if request["kind"] == "read_records" and request["request_id"].startswith(session_id):
+                first.setdefault(request["source_id"],
+                                 {key: request[key] for key in ("after", "since") if key in request})
+        return first
 
     def lesson(self, action="act-1", scenes=3) -> l.Session:
         """A whole lesson with a host that outlines and writes."""
@@ -388,6 +399,59 @@ class Sessions(Base):
         reads = [r for r in self.host.listed if r["kind"] == "read_records"]
         self.assertEqual((reads[0]["after"], "since" in reads[0]), ("000002", False))
         self.assertEqual([e.sources[0].pin for e in self.session(third).entries], ["p-4"])
+
+    def test_a_source_no_outlined_lesson_read_is_read_from_the_since_of_the_lesson_reading_it(self):
+        """The cursor is one per record source. After a lesson was outlined,
+        a source added to the binding has none, and the next lesson reads it
+        from its own since: not from the time it opened, and not from the
+        since the first lesson had."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        first = self.compose("act-1", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.assertIsNotNone(self.session(first).outlined)
+        self.host.listed.clear()
+        second = self.compose("act-2", binding=BINDING | {"since": 1, "records": [BOARD, WIKI]})
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(second), {"board": {"after": "000002"}, "wiki": {"after": None, "since": 1.0}})
+
+    def test_a_lesson_that_did_not_reach_its_outline_does_not_hide_the_cursor_before_it(self):
+        """The cursor is looked for over every earlier lesson that was
+        outlined, not only the lesson just before. A lesson superseded
+        while it waited for its outline leaves the cursor where the
+        outlined lesson before it stopped."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        first = self.compose("act-1", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.host.outline = lambda payload: None
+        self.host.board.append(post(4, "a lane rests after a refusal"))
+        second = self.compose("act-2", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.host.listed.clear()
+        third = self.compose("act-3", binding=BINDING | {"since": 2})
+        self.host.run(self.flow)
+        self.assertEqual([self.session(s).outlined is not None for s in (first, second)], [True, False])
+        self.assertEqual(self.session(second).state, l.SUPERSEDED)
+        self.assertEqual(self.starts(third), {"board": {"after": "000002"}})
+
+    def test_a_source_taken_out_and_put_back_is_read_from_the_cursor_it_had(self):
+        """The cursor goes by source_id over every earlier lesson that was
+        outlined, whether or not the lessons between read that source. A
+        source_id an operator removes and adds again is read from the
+        cursor left before, not from since."""
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        self.host.wiki = [wiki_page("guide", 1, "a page of the wiki")]
+        both = BINDING | {"records": [BOARD, WIKI]}
+        first = self.compose("act-1", binding=both)
+        self.host.run(self.flow)
+        self.host.board.append(post(4, "a lane rests after a refusal"))
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual([self.session(s).outlined is not None for s in (first, second)], [True, True])
+        self.host.wiki.append(wiki_page("later", 1, "a page written later"))
+        self.host.listed.clear()
+        third = self.compose("act-3", binding=both)
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(third), {"board": {"after": "000003"}, "wiki": {"after": "000000"}})
 
     def test_a_refused_read_fails_the_session_with_the_hosts_reason(self):
         session_id = self.compose()

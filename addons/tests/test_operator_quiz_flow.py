@@ -791,6 +791,62 @@ class ReviewFindings(Base):
         (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(second)]
         self.assertEqual(request["after"], "000002")
 
+    def test_of_two_sessions_that_asked_the_later_one_gives_the_cursor(self):
+        first = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.host.board += [post(4, "the next decision"), post(5, "a decision after that one")]
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "asked"])
+        third = self.compose("act-3")
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(third)]
+        self.assertEqual(request["after"], "000004")
+
+    def test_a_session_that_failed_before_asking_does_not_hide_the_cursor_before_it(self):
+        """The cursor is where the last session that asked stopped, however
+        many sessions failed after it without asking."""
+        first = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.host.board.append(post(4, "the next decision"))
+        second = self.compose("act-2")
+        self.host.author = lambda payload: {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "failed"])
+        third = self.compose("act-3")
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(third)]
+        self.assertEqual(request["after"], "000002")
+
+    def test_a_cursor_refused_for_one_source_is_still_used_for_another(self):
+        """A cursor belongs to its record source. The board and the
+        repository each stopped at a cursor that reads the same, and the host
+        refusing the repository's does not drop the board's."""
+        self.host.commits = [commit(1, []), commit(2, []), commit(3, [])]
+        binding = BINDING | {"records": [BOARD, REPO]}
+        first = self.compose("act-1", binding=binding)
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        produce = self.host.produce
+        self.host.produce = lambda request: (
+            {"status": "not_allowed", "reason": "after is not a commit of the default branch"}
+            if request["kind"] == "read_records" and request["source_id"] == "masc" and request["after"] == "000002"
+            else produce(request))
+        second = self.compose("act-2", binding=binding)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(second).state, "failed")
+        self.host.listed.clear()
+        third = self.compose("act-3", binding=binding)
+        self.host.author = lambda payload: None
+        self.host.run(self.flow)
+        start: dict[str, dict] = {}
+        for request in self.host.listed:
+            if request["kind"] == "read_records" and request["request_id"].startswith(third):
+                start.setdefault(request["source_id"], request)
+        self.assertEqual(start["board"]["after"], "000002")
+        self.assertIsNone(start["masc"]["after"])
+
     def test_a_quote_taken_from_a_file_path_is_not_in_the_file(self):
         self.host.commits = [commit(1, ["changelog.d/a.md"])]
         self.host.files = {(f"{1:040x}", "changelog.d/a.md"): "the ledger records facts"}

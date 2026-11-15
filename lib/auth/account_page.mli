@@ -12,6 +12,10 @@
     writes no [style] attribute: a nonce covers a [<style>] element and never
     an attribute, so the policy would drop it. *)
 
+(** [/accounts/console], the address where a server of the accounts answers
+    the console of a signed-in person. *)
+val console_path : string
+
 (* HIGH-RISK-UNREVIEWED: a nonce is the one part of a policy that changes
    with each answer, and a browser runs and applies what carries it. [draw]
    is the only maker of one, so no caller can put another text there. *)

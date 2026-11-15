@@ -1,5 +1,7 @@
 (* HIGH-RISK-UNREVIEWED: see the interface. *)
 
+let console_path = "/accounts/console"
+
 module Nonce = struct
   (* HIGH-RISK-UNREVIEWED: only [draw] makes a [t], so a [t] holds the hex
      digits of Random_id.hex and nothing that ends a source or an attribute. *)

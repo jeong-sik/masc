@@ -315,9 +315,11 @@ let serve_preview ~base_path ~store ~port github =
           { Server_account_login.google = None; github = Some github }
       in
       let router =
-        Masc.Http_server_eio.Router.create ()
-        |> Server_login_http.add_routes routes
-        |> Server_login_http.add_person_routes routes ~env ~base_path
+        Server_accounts.add_routes_of_people
+          routes
+          ~env
+          ~base_path
+          (Masc.Http_server_eio.Router.create ())
       in
       let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
       match
@@ -333,12 +335,22 @@ let serve_preview ~base_path ~store ~port github =
         let base_url = Printf.sprintf "http://%s:%d" preview_host port in
         Printf.printf
           "The multi-account preview listens on %s. Open %s/ in a browser, or the link of \
-           masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes, \
-           the connection of a person's own subscription, and their Keepers, whose turns run \
-           on that subscription. Stop it with Ctrl-C.\n%!"
+           masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes \
+           and the console of a signed-in person at %s, where the person connects their own \
+           subscription and runs their Keepers on it. Stop it with Ctrl-C.\n%!"
           base_url
           base_url
-          base_url;
+          base_url
+          Server_account_console.page_path;
+        (* As the account server does at its start: the page that stands in
+           for the console names no reason to the browser. *)
+        (match Server_account_console.unreadable () with
+         | None -> ()
+         | Some reason ->
+           Printf.printf
+             "%s answers 503 in this preview: %s.\n%!"
+             Server_account_console.page_path
+             reason);
         (* The deletions of conversations a stopped preview left end beside
            the routes, as at the start of the account server. *)
         Eio.Fiber.fork ~sw (fun () -> Server_keeper_conversation_purge.resume ~env ~zone ~base_path);
@@ -351,7 +363,7 @@ let serve_preview ~base_path ~store ~port github =
         Ok ()))
 ;;
 
-let preview ~base_path ~port ~github_client_id =
+let preview ~select_dashboard ~base_path ~port ~github_client_id =
   let github =
     match Sys.getenv_opt github_client_secret_env with
     | None -> Error (github_client_secret_env ^ " is not set")
@@ -376,6 +388,9 @@ let preview ~base_path ~port ~github_client_id =
              ~config_dir:(Env_config_core.masc_config_dir_opt ())
              ~anonymous_mutations)
       in
+      (* As masc start does once it holds the lease: the console reads the
+         dashboard bundle this selects. *)
+      select_dashboard ();
       serve_preview ~base_path ~store ~port github)
   in
   match run with

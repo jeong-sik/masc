@@ -195,6 +195,16 @@ let count ~sub s =
   let rec go i acc = if i + n > m then acc else if String.sub s i n = sub then go (i + n) (acc + 1) else go (i + 1) acc in
   go 0 0
 
+let replace_all ~sub ~by s =
+  let n = String.length sub and m = String.length s in
+  let out = Buffer.create m in
+  let rec go i =
+    if i + n <= m && String.sub s i n = sub then (Buffer.add_string out by; go (i + n))
+    else if i < m then (Buffer.add_char out s.[i]; go (i + 1))
+  in
+  go 0;
+  Buffer.contents out
+
 let token_for base_path ~agent_name ~role =
   match Auth.create_token base_path ~agent_name ~role with
   | Ok (token, _) -> token
@@ -235,7 +245,14 @@ let test_the_page_is_public_and_self_contained () =
           String.sub csp start (String.index_from csp start '\'' - start)
         | None -> fail "no nonce in the CSP"
       in
-      check string "the CSP is the one the page is built with" (Page.csp_header nonce) csp;
+      (* Only Csp_nonce.draw makes a nonce, so the served one cannot be fed
+         back to the page. The served policy is compared with the policy the
+         page builds for a fresh draw, each nonce source written as one mark. *)
+      let shape policy ~source = replace_all ~sub:source ~by:"'nonce-N'" policy in
+      let drawn = Csp_nonce.draw () in
+      check string "the CSP is the one the page is built with"
+        (shape (Page.csp_header drawn) ~source:(Csp_nonce.source drawn))
+        (shape csp ~source:(Printf.sprintf "'nonce-%s'" nonce));
       check int "the nonce is on the one script and the one style" 2
         (count ~sub:(Printf.sprintf "nonce=\"%s\"" nonce) body);
       check int "one script tag" 1 (count ~sub:"<script" body);

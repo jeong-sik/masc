@@ -108,7 +108,9 @@ decodes each record with its body and the consumer's payload decoder, and
 follows parent, retry, partition and replacement links inside the scope. It does
 not run Memory parts discovery, publication recovery or a provider. Discovery
 reads a scope as a whole and fails it on one record it cannot read, so the
-`fresh state` line names both scope directories.
+`fresh state` line names the scope's owner records, request bodies, history
+fences and history resolutions that exist. A scope that no consumer of the
+build reads is refused the same way.
 
 A Librarian original's consumer also reads the original's Exact record and
 proof file. The check reads them as that consumer does, on the files the

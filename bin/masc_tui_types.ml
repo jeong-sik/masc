@@ -1392,6 +1392,19 @@ type keeper_history_owed = {
   kho_audit : bool;
 }
 
+(* Entering the chat pane owes one history read (#42012). The place that opens
+   the pane starts it; the surface-needs delta starts it for the ways in that
+   do not. The delta can run a loop pass after the opening, when that read has
+   already landed, so it asks whether one started rather than whether one is
+   in flight. *)
+type chat_entry_read =
+  | Chat_entry_unread
+      (** No history read has started for the pane since the delta last saw
+          a frame without it. *)
+  | Chat_entry_read_started of string
+      (** A history read of this Keeper started while its chat pane was on
+          screen. Landed or not, it answers the entry. *)
+
 (* Each requested source owns a result slot. Workers publish before returning;
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
@@ -11488,6 +11501,7 @@ type state = {
   mutable msg_history_load_generation: int;
   mutable msg_history_inflight: Keeper_history_read.t option;
   mutable msg_history_owed: keeper_history_owed option;
+  mutable msg_chat_entry_read: chat_entry_read;
   mutable msg_copy_generation: int;
   mutable chat_command_reads: (unit ref * unit ref * string) list;
   mutable msg_copy_pending: (int * string * unit ref) option;
@@ -19344,6 +19358,31 @@ let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : sur
           (match state.tool_series with Tool_series_unread -> true | Tool_series_read _ | Tool_series_error _ -> false))
   | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> false
 
+(* A history read of [keeper_name] is on the wire, started now or already in
+   flight. It answers the chat pane's entry only while that pane shows this
+   Keeper; a read started from another surface does not. *)
+let note_chat_entry_read (state : state) ~keeper_name =
+  if state.view = Keepers Keeper_message
+     && Option.equal String.equal state.msg_target_keeper_name (Some keeper_name)
+  then state.msg_chat_entry_read <- Chat_entry_read_started keeper_name
+
+(* The loop has taken [needs] as what is drawn. A frame without the chat pane
+   means the pane left the screen, so its next entry owes a read again. *)
+let note_drawn_surface_needs (state : state) (needs : surface_needs) =
+  if not needs.needs_keeper_chat then state.msg_chat_entry_read <- Chat_entry_unread
+
+(* The Keeper whose history read entering the chat pane still owes, when the
+   surface-needs delta [needs] brings the pane on screen. Only a pane at its
+   newest row reads on entry. *)
+let chat_entry_read_due (state : state) ~(needs : surface_needs) =
+  if needs.needs_keeper_chat && state.msg_scroll = 0 then
+    match state.msg_target_keeper_name, state.msg_chat_entry_read with
+    | Some keeper_name, Chat_entry_read_started started
+      when String.equal started keeper_name -> None
+    | Some keeper_name, (Chat_entry_unread | Chat_entry_read_started _) -> Some keeper_name
+    | None, (Chat_entry_unread | Chat_entry_read_started _) -> None
+  else None
+
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)
@@ -21423,6 +21462,7 @@ let create_state
   msg_history_load_generation = 0;
   msg_history_inflight = None;
   msg_history_owed = None;
+  msg_chat_entry_read = Chat_entry_unread;
   msg_copy_generation = 0;
   msg_copy_pending = None;
   chat_command_reads = [];

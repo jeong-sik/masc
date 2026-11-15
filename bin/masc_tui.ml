@@ -9223,6 +9223,8 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     | Some request -> String.equal (Keeper_history_read.keeper request) keeper_name
     | None -> false
   in
+  (* Joined or started below, a read of this Keeper is on the wire. *)
+  note_chat_entry_read state ~keeper_name;
   if already_inflight && not force then ()
   else begin
     (* An unforced read cannot settle an owed audit: the audit stays owed and
@@ -20983,11 +20985,10 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
     (* Chat history has its own generation-guarded loader rather than a field
        in the HTTP surface record. It still follows the same delta: entering
        chat asks once; moving among Keeper modes that share the roster does
-       not restart it. *)
-    (if needs.needs_keeper_chat && state.msg_scroll = 0 then
-       match state.msg_target_keeper_name with
-       | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
-       | None -> ());
+       not restart it. The read the opening started answers the entry even
+       when it landed before this delta ran. *)
+    Option.iter (fun keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name)
+      (chat_entry_read_due state ~needs);
     let currency_authority = {
       car_generation = state.candle_authority_generation;
       car_identity = state.server_identity;
@@ -43486,6 +43487,7 @@ Use relative paths for resources already held in the package. -->
           Masc_tui_types.surface_needs_delta ~previous:!drawn_needs ~next:needed
         in
         drawn_needs := needed;
+        Masc_tui_types.note_drawn_surface_needs state needed;
         if Masc_tui_types.surface_needs_any delta then
           start_http_scoped_refresh state ~host:(server_peer_host)
             ~port:state.port ~refresh_inflight:http_scoped_refresh_inflight

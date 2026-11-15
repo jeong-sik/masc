@@ -18,12 +18,16 @@ val insert :
   masc_root:string ->
   result_bytes:int ->
   failure_class:Tool_result.tool_failure_class option ->
+  ?caller:string ->
   row ->
   (unit, string) result
-(** [insert ~masc_root ~result_bytes ~failure_class row] stores the call, the
-    size of the result it returned and, for a failed call, its failure class in
-    one transaction. A [record_id] already stored is left as it is, size and
-    class included. [failure_class] is [None] for a call that did not fail and
+(** [insert ~masc_root ~result_bytes ~failure_class ?caller row] stores the
+    call, the size of the result it returned, for a failed call its failure
+    class and, for a call made by a Keeper, that Keeper's name in one
+    transaction. A [record_id] already stored is left as it is, size, class
+    and caller included. [caller] is absent for a call made outside any Keeper;
+    nothing is stored for it, so it reads back as a caller that was not
+    observed. [failure_class] is [None] for a call that did not fail and
     for a failure that carried no class. A class belongs to a failed call only;
     {!Tool_metrics_series.add} refuses a sample that breaks that. It returns
     [Error] for a negative [result_bytes]. *)

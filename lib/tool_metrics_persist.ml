@@ -26,7 +26,7 @@ let sample_of_row (row : Tool_metrics_store.row) =
 let announce_written ~base_path =
   Dashboard_observation_commit.written ~base_path ~scope:`Workspace `Tool_metrics
 
-let enqueue ~base_path (result : Tool_result.result) =
+let enqueue ~base_path ?caller (result : Tool_result.result) =
   let masc_root = Common.masc_dir_from_base_path ~base_path in
   let row : Tool_metrics_store.row =
     { record_id = Random_id.uuid_v7 ()
@@ -45,6 +45,7 @@ let enqueue ~base_path (result : Tool_result.result) =
           ~masc_root
           ~result_bytes
           ~failure_class:(Tool_result.failure_class result)
+          ?caller
           row) in
   (* An SQLite I/O failure can follow a visible commit. A read invalidation
      conveys no invented success and must not replace the write outcome. *)

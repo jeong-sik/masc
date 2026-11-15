@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import serverReceiptReasons from '../api/fixtures/receipt-operator-disposition-reasons.json'
 import {
   extractLaneValue,
   displayState,
@@ -13,6 +14,7 @@ import {
   initialHubState,
   isTurnTerminalFailureCode,
   operatorDispositionReasonLabel,
+  OPERATOR_DISPOSITION_REASONS,
 } from './fsm-hub-types'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 
@@ -187,6 +189,27 @@ describe('failureReasonLabel', () => {
 })
 
 describe('operatorDispositionReasonLabel', () => {
+  it('knows exactly the receipt reasons the server writes, in its order', () => {
+    // test_keeper_trust_disposition_reason pins this fixture to every OCaml
+    // Keeper_execution_receipt.operator_disposition_reason, so a reason added,
+    // renamed or removed on either side fails.
+    expect([...OPERATOR_DISPOSITION_REASONS]).toEqual(
+      serverReceiptReasons.operator_disposition_reasons,
+    )
+  })
+
+  it('gives every server reason a label instead of its wire string', () => {
+    for (const reason of OPERATOR_DISPOSITION_REASONS) {
+      expect(operatorDispositionReasonLabel(reason)).not.toBe(reason)
+    }
+  })
+
+  it('shows a reason the dashboard does not know as it came', () => {
+    expect(operatorDispositionReasonLabel('unknown_future_reason')).toBe('unknown_future_reason')
+    expect(operatorDispositionReasonLabel('')).toBeNull()
+    expect(operatorDispositionReasonLabel(null)).toBeNull()
+  })
+
   it('labels a fenced provider effect without exposing the raw token', () => {
     expect(operatorDispositionReasonLabel('provider_attempt_effect_fenced')).toBe(
       'Provider 효과 결과 확인 필요',

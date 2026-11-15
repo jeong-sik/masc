@@ -314,10 +314,47 @@ export function isTurnTerminalFailureCode(code: string | null | undefined): bool
 }
 
 
-/** Korean labels for `execution.operator_disposition_reason`. Backend
- *  emits closed-sum values via
- *  `Keeper_execution_receipt.operator_disposition_reason_to_string`. */
-const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
+/** The strings `Keeper_execution_receipt.operator_disposition_reason_to_string`
+ *  writes as `execution.operator_disposition_reason`, in its declaration
+ *  order. fsm-hub-types.test.ts and test_keeper_trust_disposition_reason each
+ *  check this against api/fixtures/receipt-operator-disposition-reasons.json,
+ *  so a reason added, renamed or removed on the server fails both until this
+ *  list, the fixture and the labels below follow. */
+export const OPERATOR_DISPOSITION_REASONS = [
+  'healthy',
+  'runtime_exhausted',
+  'config_invalid',
+  'authorization_refused',
+  'degraded_retry',
+  'runtime_fallback',
+  'transient_runtime_retry',
+  'provider_runtime_error',
+  'internal_error',
+  'input_required',
+  'cancelled',
+  'phase_skipped',
+  'transcript_corruption',
+  'official_client_recovery_required',
+  'provider_attempt_effect_fenced',
+  'tool_correction_lost',
+  'accept_rejected',
+  'terminal_effect_failed',
+  'unmapped_runtime_state',
+] as const
+
+export type OperatorDispositionReason = (typeof OPERATOR_DISPOSITION_REASONS)[number]
+
+const OPERATOR_DISPOSITION_REASON_SET: ReadonlySet<string> = new Set(
+  OPERATOR_DISPOSITION_REASONS,
+)
+
+function isOperatorDispositionReason(value: string): value is OperatorDispositionReason {
+  return OPERATOR_DISPOSITION_REASON_SET.has(value)
+}
+
+/** Korean labels for `execution.operator_disposition_reason`, one per
+ *  {@link OPERATOR_DISPOSITION_REASONS}: a missing or extra key fails tsc. */
+const OPERATOR_DISPOSITION_REASON_LABELS = {
   healthy: '정상',
   runtime_exhausted: '런타임 후보 소진',
   config_invalid: '실행 전 설정 오류 - toml 을 고쳐야 함',
@@ -339,13 +376,16 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   accept_rejected: '응답에 쓸 내용이 없어 거절 - 출력 예산 확인',
   terminal_effect_failed: '턴을 닫는 도구가 실패 - 결과가 나갔는지 불명',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
-}
+} satisfies Record<OperatorDispositionReason, string>
 
+/** The Korean label of a receipt reason the server writes. Any other
+ *  string is shown as it came, so a reason the dashboard does not know
+ *  stays visible. */
 export function operatorDispositionReasonLabel(
   value: string | null | undefined,
 ): string | null {
   if (!value) return null
-  return OPERATOR_DISPOSITION_REASON_LABELS[value] ?? value
+  return isOperatorDispositionReason(value) ? OPERATOR_DISPOSITION_REASON_LABELS[value] : value
 }
 
 /** Korean labels for `execution.runtime.outcome` /

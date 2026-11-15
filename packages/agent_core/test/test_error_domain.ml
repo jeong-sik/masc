@@ -268,6 +268,33 @@ let test_roundtrip_api_network_error () =
   | _ -> Alcotest.fail "roundtrip mismatch for NetworkError"
 ;;
 
+(* RFC #52028 §2.3: a connection that did not open keeps its family, kind and
+   text both ways. [None] is the [Retry] family, [Some provider] the provider
+   one; neither folds into [`Network_error], which would lose the kind. *)
+let test_roundtrip_connect_failed () =
+  let api = Error.Api (Retry.Connect_failed { message = "no route"; kind = Dns_failure }) in
+  let provider =
+    Error.Provider
+      (Llm_provider.Error.Connect_failed { provider = "p"; kind = Tls_error; detail = "alert" })
+  in
+  (match Error_domain.of_core_error api with
+   | `Connect_failed (None, Http_client.Dns_failure, "no route") -> ()
+   | _ -> Alcotest.fail "the Retry connect failure lost its family, kind or text");
+  (match Error_domain.of_core_error provider with
+   | `Connect_failed (Some "p", Http_client.Tls_error, "alert") -> ()
+   | _ -> Alcotest.fail "the provider connect failure lost its family, kind or text");
+  Alcotest.(check bool) "Retry family round trip is exact" true
+    (Error_domain.to_core_error (Error_domain.of_core_error api) = api);
+  Alcotest.(check bool) "provider family round trip is exact" true
+    (Error_domain.to_core_error (Error_domain.of_core_error provider) = provider);
+  (* The kind rule every network failure reads: a TLS error meets the same
+     certificate again, a name lookup failure may not. *)
+  Alcotest.(check bool) "Dns_failure is retryable" true
+    (Error_domain.is_retryable (`Connect_failed (None, Http_client.Dns_failure, "x")));
+  Alcotest.(check bool) "Tls_error is not retryable" false
+    (Error_domain.is_retryable (`Connect_failed (Some "p", Http_client.Tls_error, "x")))
+;;
+
 let test_roundtrip_api_timeout () =
   let orig = Error.Api (Retry.Timeout { message = "3s"; phase = None }) in
   let poly = Error_domain.of_core_error orig in
@@ -882,6 +909,7 @@ let () =
             test_roundtrip_api_authorization_error
         ; Alcotest.test_case "api server_error" `Quick test_roundtrip_api_server_error
         ; Alcotest.test_case "api network_error" `Quick test_roundtrip_api_network_error
+        ; Alcotest.test_case "connect_failed both families" `Quick test_roundtrip_connect_failed
         ; Alcotest.test_case "api timeout" `Quick test_roundtrip_api_timeout
         ; Alcotest.test_case
             "api timeout preserves phase"

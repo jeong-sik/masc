@@ -631,6 +631,50 @@ let test_connection_stage_table () =
     connection_stage_cases
 ;;
 
+(* The exact-output measurement transport opens its connections with its own
+   pair of connection functions, so the same table runs through it. It trusts
+   only the system's certificates, so the one case that needs the test
+   certificate to open a connection is left out. *)
+let test_measurement_connection_stage_table () =
+  let server_config = https_server_config () in
+  let module Measurement = Exact_output_measurement_transport in
+  List.iter
+    (fun { server; trust_test_certificate = _; expected; label } ->
+       with_cache
+       @@ fun ~sw ~net ~cache:_ ->
+       let url = serve ~sw ~net ~server_config server in
+       let dispatch_intent =
+         Measurement.create_dispatch_intent
+           ~commit_fence:(fun () -> Ok ())
+           ~mark_dispatch_started:(fun () -> ())
+       in
+       let result =
+         Measurement.post_sync_once
+           ~net
+           ~url
+           ~headers:[ "Content-Type", "application/json" ]
+           ~body:"{}"
+           ~dispatch_intent
+           ()
+       in
+       match result with
+       | Error (Measurement.Transport_failed error) ->
+         (match stage_of_result (Error error) with
+          | Some stage when stage = expected -> ()
+          | Some _ | None -> Alcotest.failf "%s: got %s" label (describe_post_error error))
+       | Error (Measurement.Commit_failed ()) -> Alcotest.failf "%s: the commit fence failed" label
+       | Ok _ -> Alcotest.failf "%s: the request was answered" label)
+    (List.filter
+       (fun { server; _ } ->
+          match server with
+          | Tls_resets_after_reading_the_request -> false
+          | Nothing_listening
+          | Tls_with_untrusted_certificate
+          | Closes_during_tls_handshake
+          | Resets_after_reading_the_request -> true)
+       connection_stage_cases)
+;;
+
 let () =
   Alcotest.run
     "HTTP Client request not delivered"
@@ -665,6 +709,10 @@ let () =
             "connection failures are Connect_failed, later failures NetworkError"
             `Quick
             test_connection_stage_table
+        ; Alcotest.test_case
+            "the measurement transport reads the same stages"
+            `Quick
+            test_measurement_connection_stage_table
         ] )
     ; ( "close reason over https"
       , [ Alcotest.test_case

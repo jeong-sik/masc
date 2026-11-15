@@ -172,8 +172,30 @@ export function InterleaveContractFixture() {
   `
 }
 
+// A joined row reads its output through the exact per-execution endpoint. The
+// page answers that read itself, as the component test does, so no request
+// leaves the fixture: the joined execution gets its row, and any other read
+// fails the way the test's lookup fails for an output it does not provide.
+function fixtureFetch(input: RequestInfo | URL): Promise<Response> {
+  const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin)
+  const executionId = url.searchParams.get('execution_id')
+  if (
+    url.pathname === `/api/v1/keepers/${INTERLEAVE_FIXTURE_KEEPER}/tool-calls`
+    && executionId !== null
+    && executionId === joinedToolOutput.execution_id
+  ) {
+    const body = { keeper: INTERLEAVE_FIXTURE_KEEPER, execution_id: executionId, entry: joinedToolOutput }
+    return Promise.resolve(new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  }
+  return Promise.reject(new Error(`Historical output not provided by this fixture: ${url.pathname}${url.search}`))
+}
+
 const root = document.getElementById('app')
 if (root) {
+  window.fetch = fixtureFetch
   installInterleaveFixtureToolOutputs()
   render(html`<${InterleaveContractFixture} />`, root)
 }

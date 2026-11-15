@@ -4,8 +4,10 @@ import { get } from './core'
 import {
   KEEPER_EFFICIENCY_GET_TIMEOUT_MS,
   KEEPER_EFFICIENCY_PATH,
+  KEEPER_EFFICIENCY_SCHEMA,
   decodeKeeperEfficiencyMonth,
   fetchKeeperEfficiencyCurrentMonth,
+  keeperEfficiencyDecodeErrorText,
   keeperEfficiencyRow,
   type KeeperEfficiencyDecodeError,
 } from './dashboard-keeper-efficiency'
@@ -230,6 +232,31 @@ describe('decodeKeeperEfficiencyMonth', () => {
   })
 })
 
+// A page draws this text as the reason of a failed read. It has to say where
+// the answer was refused and why: refusals of different kinds at one place
+// are different reasons.
+describe('keeperEfficiencyDecodeErrorText', () => {
+  it('names what was refused and tells one refusal from another', () => {
+    const at = 'keepers[3].calls'
+    const texts = [
+      keeperEfficiencyDecodeErrorText({ kind: 'not_an_object', at }),
+      keeperEfficiencyDecodeErrorText({ kind: 'missing_field', field: at }),
+      keeperEfficiencyDecodeErrorText({ kind: 'invalid_field', field: at, fault: 'negative' }),
+      keeperEfficiencyDecodeErrorText({ kind: 'invalid_field', field: at, fault: 'not_an_integer' }),
+    ]
+    for (const text of texts) expect(text).toContain(at)
+    expect(new Set(texts).size).toBe(texts.length)
+    expect(texts[2]).toContain('negative')
+    expect(texts[3]).toContain('not_an_integer')
+  })
+
+  it('names the schema it was given and the one it reads', () => {
+    const text = keeperEfficiencyDecodeErrorText({ kind: 'unexpected_schema', schema: 'masc.keeper-efficiency/v2' })
+    expect(text).toContain('masc.keeper-efficiency/v2')
+    expect(text).toContain(KEEPER_EFFICIENCY_SCHEMA)
+  })
+})
+
 describe('keeperEfficiencyRow', () => {
   it('picks the row of exactly that Keeper', () => {
     const decoded = decodeKeeperEfficiencyMonth(wire())
@@ -263,11 +290,23 @@ describe('fetchKeeperEfficiencyCurrentMonth', () => {
     expect(KEEPER_EFFICIENCY_GET_TIMEOUT_MS).toBeGreaterThan(DEFAULT_GET_TIMEOUT_MS)
   })
 
-  it('fails the read when the answer is not a month view', async () => {
+  // The failure carries what the decoder refused, so a page can say it.
+  it('fails the read with what the decoder refused when the answer is not a month view', async () => {
+    async function failureOfRead(): Promise<string> {
+      try {
+        await fetchKeeperEfficiencyCurrentMonth()
+      } catch (error) {
+        if (error instanceof Error) return error.message
+        throw error
+      }
+      throw new Error('the read did not fail')
+    }
     vi.mocked(get).mockResolvedValue({})
-    await expect(fetchKeeperEfficiencyCurrentMonth()).rejects.toThrow()
+    expect(await failureOfRead())
+      .toBe(keeperEfficiencyDecodeErrorText({ kind: 'missing_field', field: 'schema' }))
     vi.mocked(get).mockResolvedValue({ ...wire(), schema: 'masc.keeper-efficiency/v2' })
-    await expect(fetchKeeperEfficiencyCurrentMonth()).rejects.toThrow()
+    expect(await failureOfRead())
+      .toBe(keeperEfficiencyDecodeErrorText({ kind: 'unexpected_schema', schema: 'masc.keeper-efficiency/v2' }))
   })
 
   it('fails the read when the request fails', async () => {

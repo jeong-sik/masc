@@ -4,7 +4,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import type { ToolMetricsSeriesResponse } from '../../api/schemas/tool-metrics-series'
 import {
   ToolSeriesView,
+  FAILURE_CLASS_LINES,
   callSeries,
+  failureClassSeries,
   failureRatePercent,
   failureRateSeries,
   latencySeries,
@@ -27,6 +29,14 @@ afterEach(() => render(null, container))
 const busy = {
   call_count: 10,
   failure_count: 2,
+  failure_classes: {
+    dependency_unavailable: 2,
+    policy_rejection: 0,
+    runtime_failure: 0,
+    workflow_rejection: 0,
+    operator_cancelled: 0,
+  },
+  failure_unclassified_count: 0,
   deferred_count: 0,
   total_ms: 300_000,
   p50_ms: 300,
@@ -41,6 +51,14 @@ const busy = {
 const idle = {
   call_count: 0,
   failure_count: 0,
+  failure_classes: {
+    dependency_unavailable: 0,
+    policy_rejection: 0,
+    runtime_failure: 0,
+    workflow_rejection: 0,
+    operator_cancelled: 0,
+  },
+  failure_unclassified_count: 0,
   deferred_count: 0,
   total_ms: 0,
   p50_ms: null,
@@ -150,6 +168,27 @@ describe('picking a tool', () => {
 })
 
 describe('chart series', () => {
+  it('draws each failure class on its own line, and the unrecorded failures apart', () => {
+    const lines = failureClassSeries(series)
+    expect(lines.map(line => line.name)).toEqual([
+      '외부 의존 불가',
+      '인자·권한 거절',
+      '내부 오류',
+      '업무 규칙 거절',
+      '운영자 취소',
+      '종류 미기록',
+    ])
+    // The idle bucket first, then the busy one: two failures, both of one class.
+    expect(lines[0]?.readings.map(reading => reading.value)).toEqual([0, 2])
+    expect(lines[1]?.readings.map(reading => reading.value)).toEqual([0, 0])
+    expect(lines[5]?.readings.map(reading => reading.value)).toEqual([0, 0])
+    expect(lines[5]?.dashed).toBe(true)
+  })
+
+  it('has a line for every class the server sends', () => {
+    expect(FAILURE_CLASS_LINES.map(line => line.key).sort()).toEqual(Object.keys(busy.failure_classes).sort())
+  })
+
   it('draws failures beside calls, from the same buckets', () => {
     const [calls, failures] = callSeries(series)
     expect(calls?.readings.map(reading => reading.value)).toEqual([0, 10])
@@ -255,7 +294,7 @@ describe('failureRatePercent', () => {
 })
 
 describe('ToolSeriesView', () => {
-  it('draws the calls, the failure rate, the time spent and the latency, one chart each', () => {
+  it('draws the calls, the failure rate, the failure classes, the time spent and the latency, one chart each', () => {
     mount(view())
     const charts = Array.from(container.querySelectorAll('figure[aria-label]')).map(figure =>
       figure.getAttribute('aria-label'),
@@ -263,10 +302,18 @@ describe('ToolSeriesView', () => {
     expect(charts).toEqual([
       '구간별 호출 수',
       '구간별 실패율',
+      '구간별 실패 종류',
       '구간별 실행 시간 합계',
       '구간별 지연 p50 / p95',
       '구간별 결과 바이트 합계',
     ])
+  })
+
+  it('says how many failures recorded no class, and keeps the note out when none is missing', () => {
+    mount(view())
+    expect(container.textContent).not.toContain('종류가 없어서')
+    mount(view({ series: { ...series, total: { ...series.total, failure_unclassified_count: 1 } } }))
+    expect(container.textContent).toContain('종류가 없어서')
   })
 
   it('lists the tools that spent the most time, one row each', () => {

@@ -12,13 +12,29 @@
 // total covers fewer calls than `call_count` until the old rows age out.
 // `result_bytes_max` is null when no call in the set has a size: a set of calls
 // without sizes is not a set of calls that returned nothing.
+//
+// `failure_classes` counts the failed calls by the class they recorded, and
+// `failure_unclassified_count` the failed calls that recorded none (every
+// failure stored before classes were kept). The six numbers add up to
+// `failure_count`.
 // Fields the server adds later are dropped on decode.
 
 import { Schema } from 'effect'
 
+/** The classes of `Tool_result.tool_failure_class`, spelled as the server spells them. */
+const FailureClassCountsSchema = Schema.Struct({
+  dependency_unavailable: Schema.Finite,
+  policy_rejection: Schema.Finite,
+  runtime_failure: Schema.Finite,
+  workflow_rejection: Schema.Finite,
+  operator_cancelled: Schema.Finite,
+})
+
 const SeriesStatFields = {
   call_count: Schema.Finite,
   failure_count: Schema.Finite,
+  failure_classes: FailureClassCountsSchema,
+  failure_unclassified_count: Schema.Finite,
   deferred_count: Schema.Finite,
   total_ms: Schema.Finite,
   p50_ms: Schema.NullOr(Schema.Finite),
@@ -59,6 +75,7 @@ const ToolMetricsSeriesResponseSchema = Schema.Struct({
   top_by_time: Schema.Array(ToolMetricsSeriesToolSchema),
 })
 
+export type ToolMetricsFailureClassCounts = Schema.Schema.Type<typeof FailureClassCountsSchema>
 export type ToolMetricsSeriesBucket = Schema.Schema.Type<typeof ToolMetricsSeriesBucketSchema>
 export type ToolMetricsSeriesResponse = Schema.Schema.Type<typeof ToolMetricsSeriesResponseSchema>
 

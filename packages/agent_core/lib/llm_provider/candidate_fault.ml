@@ -21,6 +21,7 @@ type t =
   | Unattributed
   | Unknown_after_dispatch
   | Local_admission
+  | Not_sent
 
 (* [of_api_error] matches [Retry.api_error] without [_]: a new constructor
    stops compilation until its expected judgment is written here and in the
@@ -44,12 +45,14 @@ let of_api_error (api : Retry.api_error) : t =
      | Retry.Json_parse_error -> Binding Admission
      | Retry.Unknown_invalid_request -> Unattributed)
   (* A network failure is not a key, account or model fact: nothing the
-     provider answered says whose affair it is, and [Retry.NetworkError]
-     carries no dispatch fact to split "sent, then lost" from wiring every
-     candidate shares. The RFC §2.1 table has no network row, so it stays
-     unknown. The Keeper walk still rotates on it through
-     [Runtime_attempt_fsm.should_try_next]. *)
+     provider answered says whose affair it is. A connection function's failure
+     is its own constructor, so [Retry.NetworkError] is everything else, and it
+     may have been sent: it stays unknown. The Keeper walk still rotates on it
+     through [Runtime_attempt_fsm.should_try_next]. *)
   | Retry.NetworkError _ -> Unknown_after_dispatch
+  (* Only a connection function builds [Connect_failed], before any byte of the
+     request is written (RFC #52028 §2.3, operator decision 2026-11-15). *)
+  | Retry.Connect_failed _ -> Not_sent
   (* [Queue] and [Capacity_backpressure] expire in MASC's own permit queue or
      local capacity gate, before the request reaches this binding. *)
   | Retry.Timeout { phase; message = _ } ->

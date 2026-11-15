@@ -19,6 +19,9 @@ type failure_ownership =
 type evidence =
   | Http_status of int
   | Network of Llm_provider.Http_client.network_error_kind
+  | Connect_failed of Llm_provider.Http_client.network_error_kind
+  (** The connection did not open, so the request was not sent. Ownership is
+      read by the same kind rule as [Network]. *)
   | Timeout of Llm_provider.Http_client.timeout_phase
   | Accept_rejected
   | Provider_terminal of Llm_provider.Http_client.provider_terminal_kind

@@ -16,6 +16,7 @@ type failure_ownership =
 type evidence =
   | Http_status of int
   | Network of Http.network_error_kind
+  | Connect_failed of Http.network_error_kind
   | Timeout of Http.timeout_phase
   | Accept_rejected
   | Provider_terminal of Http.provider_terminal_kind
@@ -52,6 +53,8 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider 
     Error.Api (Retry.classify_refusal ~retry_after_header ~status:code ~body)
   | Http.NetworkError { message; kind } ->
     Error.Api (Retry.NetworkError { message; kind })
+  | Http.Connect_failed { message; kind } ->
+    Error.Api (Retry.Connect_failed { message; kind })
   | Http.TimeoutError _ -> Error.Provider (Llm_provider.Error.of_http_error ?provider err)
   | Http.AcceptRejected { reason } ->
     (match accept_rejected with
@@ -259,6 +262,11 @@ let attribution_of_http_error ~binding = function
     ; binding = Some binding
     ; evidence = Network kind
     }
+  | Http.Connect_failed { kind; _ } ->
+    { ownership = ownership_of_network kind
+    ; binding = Some binding
+    ; evidence = Connect_failed kind
+    }
   | Http.TimeoutError { phase; _ } ->
     { ownership = ownership_of_timeout phase
     ; binding = Some binding
@@ -387,6 +395,11 @@ let evidence_to_yojson = function
   | Http_status status -> `Assoc [ "kind", `String "http_status"; "status", `Int status ]
   | Network kind ->
     `Assoc [ "kind", `String "network"; "network_kind", `String (Http.network_error_kind_to_string kind) ]
+  | Connect_failed kind ->
+    `Assoc
+      [ "kind", `String "connect_failed"
+      ; "network_kind", `String (Http.network_error_kind_to_string kind)
+      ]
   | Timeout phase ->
     `Assoc
       [ "kind", `String "timeout"; "phase", `String (Http.timeout_phase_to_label phase) ]

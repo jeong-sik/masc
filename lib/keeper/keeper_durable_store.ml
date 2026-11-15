@@ -976,6 +976,63 @@ let keeper_tool_outbox_store =
   }
 ;;
 
+(* 2026-11-04 (#48087): #47996 made [audience] required on a Board stimulus,
+   and a ledger ACK row carries the transition receipt with the stimulus it
+   retired. No deploy check read the ledger, so an install passed while four
+   keepers' ledgers held such rows, and their once-only wakes were refused.
+   The read is the strict delivery evidence's own snapshot over the whole
+   ledger, and its verdict is the one those wakes get. *)
+let keeper_reaction_ledger_store =
+  { store = "keeper reaction ledger"
+  ; on_refusal =
+      "a once-only wake of that keeper that the ledger does not already show \
+       delivered is not queued, and its producer gets Stimulus_storage_error: \
+       connector attention and owned job completions read the whole ledger, \
+       ask answers and composition completions read it from the UTC day of \
+       the answer or submission on; the rows stay on disk as they are"
+  ; scan =
+      (fun ~base_path ->
+         let module Ledger = Keeper_reaction_ledger in
+         let* directories = store_directories (runtime_keepers_dir ~base_path) in
+         List.fold_left
+           (fun report keeper_dir ->
+              let* report = report in
+              let keeper_name = Filename.basename keeper_dir in
+              (* [0.] reads every day partition, as connector attention and
+                 owned job completions do. *)
+              let* snapshot =
+                Ledger.strict_source_delivery_snapshot_result
+                  ~base_path
+                  ~keeper_name
+                  ~since:0.
+                |> Result.map_error (fun error ->
+                  keeper_name ^ ": " ^ Ledger.strict_delivery_evidence_error_to_string error)
+              in
+              let rows = report.rows + Ledger.strict_source_delivery_snapshot_rows snapshot in
+              match Ledger.strict_source_delivery_snapshot_incomplete snapshot with
+              | None -> Ok { report with rows }
+              | Some
+                  ({ Ledger.malformed_row_count; semantic_invalid_row_count; _ } as
+                   incomplete) ->
+                Ok
+                  { report with
+                    rows
+                  ; refused = report.refused + malformed_row_count + semantic_invalid_row_count
+                  ; first_refusal =
+                      (match report.first_refusal with
+                       | Some _ as kept -> kept
+                       | None ->
+                         Some
+                           (Ledger.store_dir ~base_path ~keeper_name
+                            ^ ": "
+                            ^ Ledger.strict_delivery_evidence_error_to_string
+                                (Ledger.Evidence_incomplete incomplete)))
+                  })
+           (Ok empty_report)
+           directories)
+  }
+;;
+
 module Id = struct
   type t =
     | Keeper_meta
@@ -1003,6 +1060,7 @@ module Id = struct
     | Keeper_chat_transcripts
     | Keeper_chat_operations
     | Keeper_tool_outbox
+    | Keeper_reaction_ledger
   [@@deriving enumerate]
 end
 
@@ -1055,6 +1113,7 @@ let reader : Id.t -> reader = function
   | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store
   | Id.Keeper_chat_operations -> Preflight_only keeper_chat_operation_store
   | Id.Keeper_tool_outbox -> Preflight_only keeper_tool_outbox_store
+  | Id.Keeper_reaction_ledger -> Preflight_only keeper_reaction_ledger_store
 ;;
 
 let name id =

@@ -115,6 +115,19 @@ let runtime_keepers_dir ~base_path =
   Common.keepers_runtime_dir_of_base ~base_path
 ;;
 
+(* Memory keeps one flat [<keeper><suffix>] file per keeper beside its
+   snapshot, in the keepers directory every Memory reader and writer is
+   handed. That is the configured keepers directory, not the runtime one. *)
+let scan_memory_files ~base_path ~suffix scan_keeper =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let* keeper_ids = Keeper_memory_os_current.list_keeper_ids_with_suffix ~keepers_dir ~suffix in
+  Ok
+    (List.fold_left
+       (fun report keeper_id -> scan_keeper report ~keepers_dir ~keeper_id)
+       empty_report
+       keeper_ids)
+;;
+
 let keeper_meta_store =
   { store = "keeper meta"
   ; on_refusal =
@@ -188,7 +201,6 @@ let memory_journal_store =
        appending and the line stays on disk"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
          let complete_lines bytes =
            match List.rev (String.split_on_char '\n' bytes) with
            | [] -> []
@@ -207,25 +219,21 @@ let memory_journal_store =
                 | Ok (_ : Keeper_memory_os_current_types.journal_entry) -> Ok ()
                 | Error detail -> refusal detail)
          in
-         let* keeper_ids = Keeper_memory_os_current.list_journal_keeper_ids ~keepers_dir in
-         Ok
-           (List.fold_left
-              (fun report keeper_id ->
-                 let path =
-                   Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
-                 in
-                 match read_optional_regular_file path with
-                 | Error detail -> count_row report (Error detail)
-                 | Ok None -> report
-                 | Ok (Some bytes) ->
-                   List.fold_left
-                     (fun (report, line_number) line ->
-                        scan_line ~path report line_number line, line_number + 1)
-                     (report, 1)
-                     (complete_lines bytes)
-                   |> fst)
-              empty_report
-              keeper_ids))
+         scan_memory_files ~base_path ~suffix:Keeper_memory_os_current_layout.journal_suffix
+           (fun report ~keepers_dir ~keeper_id ->
+              let path =
+                Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
+              in
+              match read_optional_regular_file path with
+              | Error detail -> count_row report (Error detail)
+              | Ok None -> report
+              | Ok (Some bytes) ->
+                List.fold_left
+                  (fun (report, line_number) line ->
+                     scan_line ~path report line_number line, line_number + 1)
+                  (report, 1)
+                  (complete_lines bytes)
+                |> fst))
   }
 ;;
 
@@ -569,9 +577,9 @@ let event_queue_store =
 
 (* The three position stores the Librarian lifecycle writes per keeper (RFC
    librarian-lifecycle sections 4.6 and 10.3), the turn fragments it consumes,
-   and the two memory OS sidecars beside them (RFC-0456) decode field-exact,
-   and nothing read them before a deploy (#37019). Each entry reads with the
-   module's own decoder. A JSONL line a
+   and the two memory OS sidecars beside the Memory snapshot (RFC-0456)
+   decode field-exact, and nothing read them before a deploy (#37019). Each
+   entry reads with the module's own decoder. A JSONL line a
    store reports as [Incomplete_line] is an append a crash cut short, which the
    next durable append trims away; it is not a row the new binary refuses, so
    it is neither counted as a row nor held against the deploy. *)
@@ -762,8 +770,8 @@ let memory_absorbed_store =
        carries is not read"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+         scan_memory_files ~base_path ~suffix:Keeper_memory_absorbed.suffix
+           (fun report ~keepers_dir ~keeper_id ->
            match Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
            | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
            | Ok lines ->
@@ -795,8 +803,8 @@ let memory_os_events_store =
        it records drops out of the memory's summary"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+         scan_memory_files ~base_path ~suffix:Keeper_memory_os_events.suffix
+           (fun report ~keepers_dir ~keeper_id ->
            match Keeper_memory_os_events.read ~keepers_dir ~keeper_id with
            | Error file_error ->
              count_row

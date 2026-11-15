@@ -414,10 +414,13 @@ val list_preflight_keeper_ids : keepers_dir:string -> (string list, string) resu
     before a snapshot exists. An inaccessible inventory is an error, not an
     empty store. *)
 
-val list_journal_keeper_ids : keepers_dir:string -> (string list, string) result
-(** List journal owners, read like {!list_preflight_keeper_ids}. A keeper can
-    have a journal and no snapshot: a pass that failed before its first
-    commit records only its failure. *)
+val list_keeper_ids_with_suffix :
+  keepers_dir:string -> suffix:string -> (string list, string) result
+(** The owners of [<id><suffix>] files in [keepers_dir], read like
+    {!list_preflight_keeper_ids}. Memory's other per-keeper files (the
+    journal, the events and absorbed-fact sidecars) live in the same
+    directory and need not have a snapshot beside them: a pass that failed
+    before its first commit records only its failure in the journal. *)
 
 type preflight_observation =
   | Preflight_absent

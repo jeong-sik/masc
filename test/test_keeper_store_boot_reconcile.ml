@@ -1017,6 +1017,29 @@ let test_preflight_refuses_an_older_chat_operation_journal () =
   | Error detail -> failf "scan failed: %s" detail
 ;;
 
+(* Every store the deploy preflight reads that refuses a row, in [Id.all]
+   order, as [validate-stores] reads them. *)
+let preflight_refusals ~base_path =
+  List.filter_map
+    (fun id ->
+       match D.preflight_scan id with
+       | None -> None
+       | Some scan ->
+         (match D.run scan ~base_path with
+          | Ok { D.refused = 0; _ } -> None
+          | Ok report -> Some (D.name id, report)
+          | Error detail -> failf "%s: scan failed: %s" (D.name id) detail))
+    D.Id.all
+;;
+
+let show_refusals refusals =
+  String.concat "; "
+    (List.map
+       (fun (name, report) ->
+          Printf.sprintf "%s rows=%d refused=%d" name report.D.rows report.D.refused)
+       refusals)
+;;
+
 let replace_member key value = function
   | `Assoc fields ->
     `Assoc (List.map (fun (name, held) -> name, if String.equal name key then value else held) fields)
@@ -1099,19 +1122,7 @@ let test_preflight_names_the_journal_line_readers_refuse () =
     ^ "\n{\"outcome\":\"comm"
   in
   write_bytes (journal "unreadable") unreadable;
-  let refusals =
-    List.filter_map
-      (fun id ->
-         match D.preflight_scan id with
-         | None -> None
-         | Some scan ->
-           (match D.run scan ~base_path with
-            | Ok { D.refused = 0; _ } -> None
-            | Ok report -> Some (D.name id, report)
-            | Error detail -> failf "%s: scan failed: %s" (D.name id) detail))
-      D.Id.all
-  in
-  (match refusals with
+  (match preflight_refusals ~base_path with
    | [ (name, { D.rows = 5; refused = 1; first_refusal = Some detail; _ }) ] ->
      check string "the journal store refuses it" (D.name D.Id.Memory_journal) name;
      check bool ("the refusal names the file and line 3: " ^ detail) true
@@ -1120,13 +1131,70 @@ let test_preflight_names_the_journal_line_readers_refuse () =
        (String_util.contains_substring detail "reinforcement")
    | refusals ->
      failf "expected one store to refuse one of five journal rows, got [%s]"
-       (String.concat "; "
-          (List.map
-             (fun (name, report) ->
-                Printf.sprintf "%s rows=%d refused=%d" name report.D.rows report.D.refused)
-             refusals)));
+       (show_refusals refusals));
   check string "the preflight leaves the refused journal as it was" unreadable
     (Fs_compat.load_file (journal "unreadable"))
+;;
+
+(* #32504: Memory's events and absorbed-fact sidecars sit beside its snapshot
+   and journal, in the keepers directory every Memory reader and writer is
+   handed. Their preflight scans walked the runtime keepers directory
+   instead, where no writer puts them, so they read no row of a live
+   workspace. A keeper here has both directories, as a live keeper does. *)
+let test_preflight_reads_memory_sidecars_where_memory_writes_them () =
+  with_workspace
+  @@ fun config ->
+  let module Types = Keeper_memory_os_types in
+  let module Events = Keeper_memory_os_events in
+  let module Absorbed = Keeper_memory_absorbed in
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let keeper_id = "sidecars" in
+  Fs_compat.mkdir_p keepers_dir;
+  Fs_compat.mkdir_p (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_id);
+  let fact claim =
+    Types.observed ~claim ~category:Types.Fact ~now:10.
+      ~origin:{ kind = Types.Authored; trace_id = "sidecar-preflight" }
+  in
+  let kept = fact "kept memory" and absorbing = fact "absorbing memory" in
+  (match
+     Events.append_all ~keepers_dir ~keeper_id
+       [ { Events.recorded_at = 20.; memory_id = Types.memory_id kept; trace_id = "sidecar-preflight"
+         ; kind = Events.Retracted } ]
+   with
+   | [] -> ()
+   | error :: _ -> fail (Events.append_error_to_string error));
+  (match
+     Absorbed.append_all ~keepers_dir ~keeper_id
+       [ { Absorbed.recorded_at = 20.; trace_id = "sidecar-preflight"; memory_id = Types.memory_id kept
+         ; into = Types.memory_id absorbing; fact = kept } ]
+   with
+   | Ok () -> ()
+   | Error error -> fail (Absorbed.append_error_to_string error));
+  let with_unreadable_line path =
+    let bytes = Fs_compat.load_file path ^ "{\"unknown\":true}\n" in
+    write_bytes path bytes;
+    bytes
+  in
+  let events = with_unreadable_line (Events.path_for_keepers_dir ~keepers_dir ~keeper_id) in
+  let absorbed = with_unreadable_line (Absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id) in
+  (match preflight_refusals ~base_path with
+   | [ (first, { D.rows = 2; refused = 1; first_refusal = Some first_detail; _ })
+     ; (second, { D.rows = 2; refused = 1; first_refusal = Some second_detail; _ }) ] ->
+     check (list string) "the absorbed-fact and events stores refuse, nothing else"
+       [ D.name D.Id.Memory_absorbed; D.name D.Id.Memory_os_events ] [ first; second ];
+     List.iter
+       (fun detail ->
+          check bool ("the refusal names the keeper: " ^ detail) true
+            (String.starts_with ~prefix:(keeper_id ^ " line ") detail))
+       [ first_detail; second_detail ]
+   | refusals ->
+     failf "expected two stores to refuse one of two rows each, got [%s]"
+       (show_refusals refusals));
+  check string "the events sidecar is left as it was" events
+    (Fs_compat.load_file (Events.path_for_keepers_dir ~keepers_dir ~keeper_id));
+  check string "the absorbed-fact sidecar is left as it was" absorbed
+    (Fs_compat.load_file (Absorbed.path_for_keepers_dir ~keepers_dir ~keeper_id))
 ;;
 
 (* [Id.all] is derived. Each store boot refuses on or reports must be
@@ -2370,6 +2438,8 @@ let () =
             test_preflight_refuses_an_older_chat_operation_journal
         ; test_case "the preflight names the journal line Memory readers refuse" `Quick
             test_preflight_names_the_journal_line_readers_refuse
+        ; test_case "the preflight reads Memory sidecars where Memory writes them" `Quick
+            test_preflight_reads_memory_sidecars_where_memory_writes_them
         ; test_case "every boot store has exactly one id" `Quick
             test_every_boot_store_has_exactly_one_id
         ] )

@@ -397,8 +397,8 @@ let list_preflight_keeper_ids ~keepers_dir =
     [ suffix; publication_receipt_suffix; retraction_plan_receipt_suffix ]
 ;;
 
-let list_journal_keeper_ids ~keepers_dir =
-  list_keeper_ids_with_suffixes ~keepers_dir [ journal_suffix ]
+let list_keeper_ids_with_suffix ~keepers_dir ~suffix =
+  list_keeper_ids_with_suffixes ~keepers_dir [ suffix ]
 ;;
 
 let list_durable_range_receipt_keeper_ids ~keepers_dir =

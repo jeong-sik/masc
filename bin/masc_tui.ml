@@ -26900,7 +26900,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          let action = Masc_tui_account_login.event ~generation view event in
          (match event with
            | Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view
-           | Masc_tui_account_login.Output _ | Input_ready | Complete _ | Login_error -> ());
+           | Masc_tui_account_login.Output _ | Screen _ | Input_ready | Complete _ | Login_error -> ());
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ())
   | Account_msg (Account_login_json (view, generation, action, result)) ->

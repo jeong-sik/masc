@@ -253,6 +253,10 @@ val serve_tls :
     capacity shared by this listener's HTTP/2 connections, [http/1.1] and no
     ALPN run httpun. A handshake that ends in an alert, a protocol failure or
     a closed peer, or that is not completed within the preparation bound, is
-    counted in {!Https_listener_metrics} and logged at debug. The listener's state is {!Https_listener_metrics}, never the
+    counted in {!Https_listener_metrics} and logged at debug. After the
+    handshake the session has the preparation bound again to begin its first
+    request, as a cleartext connection has from its accept; one that does not,
+    or whose first bytes are the protocol ALPN did not settle on, is closed
+    and logged at debug. The listener's state is {!Https_listener_metrics}, never the
     cleartext listener's {!Transport_metrics} mode. [addr_label] is embedded
     as [[tls <addr_label>]] in log lines. *)

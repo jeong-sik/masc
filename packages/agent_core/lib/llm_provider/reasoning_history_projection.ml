@@ -195,21 +195,61 @@ type replay_exclusion =
   ; drops : reasoning_replay_drop list
   }
 
-let reasoning_replay_drop_to_json { message_index; reason } =
-  let reason_fields =
-    match reason with
-    | Replay_policy_excluded replay_policy ->
-      [ "reason", `String "replay_policy_excluded"
-      ; "replay_policy", Reasoning_replay_contract.replay_policy_to_yojson replay_policy
-      ]
-    | Missing_reasoning_source -> [ "reason", `String "missing_reasoning_source" ]
-    | Incompatible_reasoning_source stored ->
-      [ "reason", `String "incompatible_reasoning_source"
-      ; "stored", Types.Reasoning_source.to_yojson stored
-      ]
-    | Reasoning_on_non_assistant -> [ "reason", `String "reasoning_on_non_assistant" ]
+let drop_reason_fields = function
+  | Replay_policy_excluded replay_policy ->
+    [ "reason", `String "replay_policy_excluded"
+    ; "replay_policy", Reasoning_replay_contract.replay_policy_to_yojson replay_policy
+    ]
+  | Missing_reasoning_source -> [ "reason", `String "missing_reasoning_source" ]
+  | Incompatible_reasoning_source stored ->
+    [ "reason", `String "incompatible_reasoning_source"
+    ; "stored", Types.Reasoning_source.to_yojson stored
+    ]
+  | Reasoning_on_non_assistant -> [ "reason", `String "reasoning_on_non_assistant" ]
+;;
+
+let same_drop_reason left right =
+  match left, right with
+  | Replay_policy_excluded left, Replay_policy_excluded right ->
+    Reasoning_replay_contract.equal_replay_policy left right
+  | Incompatible_reasoning_source left, Incompatible_reasoning_source right ->
+    Types.Reasoning_source.equal left right
+  | Missing_reasoning_source, Missing_reasoning_source
+  | Reasoning_on_non_assistant, Reasoning_on_non_assistant -> true
+  | ( Replay_policy_excluded _
+    , (Missing_reasoning_source | Incompatible_reasoning_source _ | Reasoning_on_non_assistant) )
+  | ( Missing_reasoning_source
+    , (Replay_policy_excluded _ | Incompatible_reasoning_source _ | Reasoning_on_non_assistant) )
+  | ( Incompatible_reasoning_source _
+    , (Replay_policy_excluded _ | Missing_reasoning_source | Reasoning_on_non_assistant) )
+  | ( Reasoning_on_non_assistant
+    , (Replay_policy_excluded _ | Missing_reasoning_source | Incompatible_reasoning_source _) ) ->
+    false
+;;
+
+(* One entry per distinct reason, in the order each reason first appears,
+   with the messages it excluded in history order. A history that crossed
+   from one producer to another holds thousands of drops that share a
+   handful of reasons; writing the reason once per message made a single
+   record grow with the whole conversation (#52350). *)
+let drop_groups drops =
+  let add groups { message_index; reason } =
+    let rec place = function
+      | [] -> [ reason, [ message_index ] ]
+      | (group_reason, indexes) :: rest when same_drop_reason group_reason reason ->
+        (group_reason, message_index :: indexes) :: rest
+      | group :: rest -> group :: place rest
+    in
+    place groups
   in
-  `Assoc (("message_index", `Int message_index) :: reason_fields)
+  List.fold_left add [] drops
+  |> List.map (fun (reason, indexes) -> reason, List.rev indexes)
+;;
+
+let drop_group_to_json (reason, indexes) =
+  `Assoc
+    (drop_reason_fields reason
+     @ [ "message_indexes", `List (List.map (fun index -> `Int index) indexes) ])
 ;;
 
 let replay_exclusion_to_json { boundary; target; drops } =
@@ -222,7 +262,7 @@ let replay_exclusion_to_json { boundary; target; drops } =
   `Assoc
     (boundary_fields
      @ [ "target", Types.Reasoning_source.to_yojson target
-       ; "drops", `List (List.map reasoning_replay_drop_to_json drops)
+       ; "drop_groups", `List (List.map drop_group_to_json (drop_groups drops))
        ])
 ;;
 

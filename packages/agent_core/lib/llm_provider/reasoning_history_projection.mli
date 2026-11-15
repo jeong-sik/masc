@@ -118,7 +118,9 @@ type replay_exclusion =
   }
 
 (** The record form of {!replay_exclusion}: boundary, target identity, and
-    per message its index, reason and stored producer or replay policy. *)
+    one [drop_groups] entry per distinct reason (with its stored producer or
+    replay policy) listing the indexes of the messages it excluded. Every
+    drop's index appears in exactly one entry, in history order. *)
 val replay_exclusion_to_json : replay_exclusion -> Yojson.Safe.t
 
 val validate_replay_continuity_for_provider_config

@@ -237,11 +237,12 @@ readings 도 같은 경로 읽기를 쓴다. readings 가 값을 못 내는 이�
 - 설치 양식의 뿌리는 `installation_id`·`run_id`·`binding` 세 칸을 가진 닫힌 object 다. 바인딩 schema 는 `binding` 칸의 schema 다.
   - 바인딩 schema 가 properties 없는 `{"type":"object","oneOf":[…]}` 이면 `binding` 은 뿌리 아래의 `oneOf` 노드다. 그대로 두면 JSON 칸 하나가 된다. `fusion-compute` 의 설치 양식이 그랬다(#52310). `operator-quiz` 0.6.0 의 바인딩도 같은 모양이다.
   - 설치 양식은 그런 바인딩의 뿌리를 갈래마다 하나씩 만들어 `oneOf` 로 묶는다. 갈래 X 의 뿌리는 `binding` 칸의 schema 만 X 로 바꾼 같은 object 다.
-  - 묶은 뿌리와 원래 뿌리는 같은 값을 받는다. `installation_id`·`run_id` 는 뿌리 갈래마다 같다. 그래서 값이 뿌리 갈래 하나에만 맞는 것은 `binding` 이 바인딩 갈래 하나에만 맞는 것과 같다.
+  - host 검사기는 묶은 뿌리와 원래 뿌리에서 같은 값을 받는다. `installation_id`·`run_id` 는 뿌리 갈래마다 같다. 그래서 값이 뿌리 갈래 하나에만 맞는 것은 `binding` 이 바인딩 갈래 하나에만 맞는 것과 같다.
+  - 양식이 만드는 값은 고른 갈래가 선언한 칸을 채운 값이다. 갈래 없는 바인딩에서도 양식은 `properties` 가 있는 object 를 칸으로 펴고, 선언하지 않은 칸은 넣지 못한다. 그래서 `additionalProperties` 가 `true` 인 갈래를 묶으면 선언하지 않은 칸을 넣을 자리가 없어진다. 그런 칸은 선언 TOML 에 직접 쓴다. 지금 저장소 패키지에는 그런 갈래가 없다.
   - 묶는 조건은 셋이다. 하나라도 어긋나면 묶지 않는다.
-    - `oneOf` 노드가 `type`·`oneOf`·`title`·`description` 만 가진다. 묶으면 그 노드가 없어지고, 노드가 건 조건도 같이 없어진다. `enum`·`const` 는 object 값을 좁히므로 묶은 뿌리가 다른 값을 받게 된다. 나머지 키워드는 하나씩 따지지 않는다. 이 넷 밖의 키워드가 있으면 묶지 않는다.
+    - `oneOf` 노드가 `type`·`oneOf`·`title`·`description` 만 가지고, `title`·`description` 은 문자열이다. 묶으면 그 노드가 없어지고, 노드가 건 조건도 같이 없어진다. `enum`·`const` 는 object 값을 좁히므로 묶은 뿌리가 다른 값을 받게 된다. `description` 이 문자열이 아닌 노드는 host 검사기가 값을 모두 거절한다. 그 노드를 묶으면 양식이 host 가 거절할 초안을 낸다. 나머지 키워드는 하나씩 따지지 않는다. 이 넷 밖의 키워드가 있으면 묶지 않는다.
     - 갈래가 모두 object 다. 노드가 object 라서 object 아닌 갈래는 원래 아무 값도 받지 못한다. 묶으면 그 갈래가 `binding` 칸의 schema 가 되어 object 아닌 값을 받는다.
-    - 갈래마다 자기 schema 가 이름을 준다. 이름은 `title`, 없으면 `description`, 없으면 `const` 칸들이다. 양식은 칸 이름을 보여 주고 type 은 보여 주지 않는다. 이름 없는 갈래를 묶으면 "Alternative N" 으로만 보인다. 칸 이름이 같은 갈래끼리는 화면에서 가려낼 수 없다. `browser-ego`(`addons/browser/ego`)가 그렇다. 세 갈래에 이름이 없고, 두 갈래는 `space` 의 type(string, integer)만 다르다. 갈래가 하나뿐이어도 같은 조건을 쓴다.
+    - 갈래마다 자기 schema 가 이름을 주고, 그 이름이 서로 다르다. 이름은 `title`, 없으면 `description`, 없으면 `const` 칸들이다. 대시보드 바인딩 양식과 같은 순서다. 공백뿐인 `title`·`description` 은 이름이 아니다. 양식은 칸 이름을 보여 주고 type 은 보여 주지 않는다. 이름 없는 갈래를 묶으면 "Alternative N" 으로만 보이고, 이름이 같은 갈래는 `(1/2)`·`(2/2)` 로만 달라 보인다. 칸 이름이 같은 갈래끼리는 화면에서 가려낼 수 없다. `browser-ego`(`addons/browser/ego`)가 그렇다. 세 갈래에 이름이 없고, 두 갈래는 `space` 의 type(string, integer)만 다르다(#52353). 갈래가 하나뿐이어도 같은 조건을 쓴다.
   - 조건에 어긋난 바인딩의 `binding` 은 지금처럼 뿌리의 칸 하나다. JSON 으로 채운다. 노드에 `enum`·`const` 가 있으면 그 값 가운데서 고른다.
   - 뿌리 갈래의 이름은 바인딩 갈래의 그 이름이다. 뿌리 갈래의 `title` 로 싣는다.
   - 양식은 위 규칙대로 움직인다. 첫 칸에서 갈래를 고르고, 고른 갈래의 칸만 편다. 갈래를 바꾸면 `installation_id`·`run_id` 도 새로 쓴다.
@@ -310,7 +311,7 @@ L6 은 2026-11-15 에 더했다. L1~L4 와 따로 열고, 설치 양식만 바�
 | L3b | #51876 | TUI 행 동작: 동작 목록, 대상 instance, 보낼 때 행 다시 읽기, 패키지의 동작 도구 이름 | 보낸 요청의 `action` 과 instance, 바뀐 행의 거절 |
 | L4 | #51892 | operator-quiz 0.3.3, 안내서 | `addons/tests` 의 schema·projection 시험, 라이브에서 이의 한 번 |
 | L5 | | 대시보드 동작 판 (방향) | 따로 RFC 또는 PR |
-| L6 | #52328 (이슈 #52310) | TUI 설치 양식: 이름 있는 갈래 바인딩의 뿌리를 갈래마다 편다(§2.5) | 초안 TOML 의 `binding` 이 고른 갈래의 값, 갈래를 바꾼 뒤의 초안, 갈래 없는 바인딩과 묶지 않는 바인딩의 초안이 그대로 |
+| L6 | #52328 (이슈 #52310) | TUI 설치 양식: 갈래마다 이름이 다른 바인딩의 뿌리를 갈래마다 편다(§2.5) | 초안 TOML 의 `binding` 이 고른 갈래의 값, 갈래를 바꾼 뒤의 초안, 갈래 없는 바인딩과 묶지 않는 바인딩의 초안이 그대로 |
 
 ## 4. hard cut
 
@@ -350,12 +351,19 @@ masc 규칙대로 화면 글과 배치는 시험하지 않는다. 보낸 요청,
   - 갈래를 바꾸면 이전 갈래의 값이 보낸 값에 없다. 고른 갈래와 다른 갈래의 값은 거절한다.
   - 음수 갈래, 마지막 뒤 갈래, 두 번 잠근 칸은 열 때 거절한다.
 - TUI 설치 양식(L6)
-  - 갈래 바인딩에서 고른 갈래의 값이 초안 TOML 의 `binding` 이 된다. 갈래를 고르기 전에 친 값은 어느 칸에도 들어가지 않고, 초안이 나오지 않는다.
+  - 갈래 바인딩에서 고른 갈래의 값이 초안 TOML 의 `binding` 이 된다. 갈래를 고르기 전에는 무엇을 쳐도 초안이 나오지 않는다.
+  - 양식이 낸 초안마다 그 `binding` 을 host 검사기(`Lane_addon_action.validate_value`)에 패키지의 바인딩 schema 로 넣어, 받는지 본다.
   - 갈래를 바꾸면 이전 갈래에서 쓴 값이 초안에 없다. `installation_id`·`run_id` 도 다시 써야 초안이 나온다.
+  - 고른 갈래의 칸이 받지 않는 값은 초안이 되지 않는다. host 검사기도 그 `binding` 을 거절한다.
   - 바인딩 갈래의 칸 이름이 `installation_id` 여도 뿌리의 칸과 섞이지 않는다.
   - 갈래가 하나뿐인 바인딩은 고르지 않고 채운다. properties 와 `oneOf` 를 같이 가진 바인딩은 지금처럼 칸으로 채운다.
-  - `oneOf` 노드에 `title`·`description` 이 있어도 갈래를 고른다. 갈래 이름이 `title` 이나 `description` 뿐이어도 고른다.
-  - 묶지 않는 바인딩은 `binding` 칸 하나로 채운다. 노드에 다른 키워드(`minLength`)가 있거나, object 아닌 갈래가 있거나, 이름 없는 갈래가 하나라도 있으면 JSON 칸이다. 노드에 `const`·`enum` 이 있으면 고르는 칸이다.
+  - `oneOf` 노드에 `title`·`description` 이 있어도 갈래를 고른다. 갈래 이름이 `title` 이나 `description` 뿐이어도 고른다. 필수가 아닌 `const` 칸뿐이어도 고른다.
+  - 아래 바인딩은 묶지 않고 `binding` 칸 하나로 채운다. 한 줄씩 본다.
+    - 노드에 검사기가 아는 다른 키워드가 있다. `items`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `minLength`, `maxLength`, `minItems`, `maxItems` 는 JSON 칸이고 `const`·`enum` 은 고르는 칸이다.
+    - object 아닌 갈래가 첫 자리나 끝 자리에 있다.
+    - 이름 없는 갈래가 첫 자리나 끝 자리에 있다. 모든 갈래에 이름이 없다.
+    - `title` 이 공백뿐이다. 두 갈래의 `title` 이 같다. 두 갈래의 `const` 칸이 같다. 두 갈래의 `title` 이 같고 `description` 만 다르다.
+  - 노드의 `description` 이 문자열이 아니면 묶지 않는다. host 검사기는 그 노드의 `binding` 을 받지 않는다.
 - TUI 행 동작: 보낸 요청의 `action` 이 `{"kind":"dispute","ask_id":<행 값>,"question_id":<행 값>,"note":<입력>}` 이고, instance 가 그 행을 낸 instance 다. 행 값이 바뀌거나 행이 사라진 뒤 보내면 요청이 나가지 않는다.
 - 패키지: 0.3.3 schema 가 세 동작을 받고 `questions` 가 달린 dispute 를 거절한다. 채점 요청이 기다리는 질문 행에는 `dispute` 키가 없다. projection 과 `Flow.dispute` 가 같은 함수로 판단한다.
 
@@ -387,4 +395,4 @@ masc 규칙대로 화면 글과 배치는 시험하지 않는다. 보낸 요청,
 - 대시보드 바인딩 양식(`lane-binding-form.ts`)을 동작 schema 에 그대로 쓸 수 있는지. 동작 schema 는 닫힌 object 만 받는다(`Closed_objects`).
 - 라이브 worker 가 알리는 schema 로 낸 판정과 실제 TUI 화면의 행 동작 목록. L4(퀴즈 0.3.3) 전에는 행 동작을 선언한 패키지가 없다. masc 규칙대로 화면 글과 배치는 시험하지 않는다.
 - 라이브 서버가 이 RFC 를 쓰는 시점의 operator-quiz 설치판. 이 RFC 는 저장소의 0.3.2(`addons/operator-quiz/lane.toml`)를 기준으로 했다.
-- L6 의 시험은 양식이 내는 초안만 본다. 묶은 뿌리가 갈래 이름을 싣는지는 화면 글이라 시험하지 않는다. 실제 화면에서 갈래 바인딩 패키지의 설치 양식을 눌러 본 기록은 #52328 본문에 있다.
+- L6 의 시험은 양식이 내는 초안, 초안이 나오지 않는 경우, 초안의 `binding` 을 host 검사기가 받는지를 본다. 묶은 뿌리가 갈래 이름을 싣는지는 화면 글이라 시험하지 않는다. `additionalProperties` 가 `true` 인 갈래를 가진 패키지로는 설치 양식을 눌러 보지 않았다. 지금 그런 패키지가 없다. 실제 화면에서 갈래 바인딩 패키지의 설치 양식을 눌러 본 기록은 #52328 본문에 있다.

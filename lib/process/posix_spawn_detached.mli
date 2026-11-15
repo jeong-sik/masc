@@ -30,6 +30,14 @@ val spawn :
   output:Unix.file_descr ->
   (t, string) result
 
+(** Installs the handler that broadcasts [Eio_unix.Process.sigchld] when
+    SIGCHLD has no handler in this process, and writes nothing when it has
+    one. A spawn whose reaper waits on that condition calls it before the
+    child can exit. Calls from several domains install at most once. A
+    handler that does not broadcast the condition is left in place, and a
+    reaper then waits for one that does. *)
+val ensure_sigchld_handler : unit -> unit
+
 (** Whether a process is left in the group numbered [group]: a child's own
     children stay in its group unless they leave it. [false] for 0 and 1,
     which kill(2) reads as this process's own group and as every process, so

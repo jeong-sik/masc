@@ -159,12 +159,12 @@ function listWords(view: ListView): string {
   }
 }
 
-/** The alert of a list that could not be read. On a request from this page
-    the list answers 403 only when the browser now holds the session of
-    another account that is not an Admin: this build takes the role from no
-    one, and a disabled account gets 401. */
-function ListProblem({ failure }: { readonly failure: Failure }): VNode {
-  const title = '초대를 불러오지 못했어요'
+/** The alert of a list of an Admin that could not be read. On a request
+    from this page such a list answers 403 only when the browser now holds
+    the session of another account that is not an Admin: this build takes
+    the role from no one, and a disabled account gets 401. The members panel
+    says it the same way. */
+export function AdminListProblem({ title, failure }: { readonly title: string; readonly failure: Failure }): VNode {
   const { problem, attempts } = failure
   if (problem.kind !== 'refused' || problem.status !== forbidden) return html`<${ProblemNote} title=${title} failure=${failure} />`
   return html`<${Callout} title=${title} attempts=${attempts} reason=${problem.reason}
@@ -216,7 +216,7 @@ export function InvitesPanel({ model }: { readonly model: InvitesModel }): VNode
       <p class="hint" role="status">${listWords(view)}</p>
       ${view.kind === 'failed'
         ? html`
-            <${ListProblem} key=${view.failure.attempts} failure=${view.failure} />
+            <${AdminListProblem} key=${view.failure.attempts} title="초대를 불러오지 못했어요" failure=${view.failure} />
             <${Retry} label="다시 시도" next=${view.next} onRetry=${() => { void model.retry() }} />
           `
         : null}

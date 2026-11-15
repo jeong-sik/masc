@@ -108,6 +108,7 @@ type provider_refusal =
   | Context_overflow
   | Input_capacity
   | Network_error
+  | Connect_failed
   | Timeout
 
 let provider_refusal_to_string = function
@@ -124,6 +125,7 @@ let provider_refusal_to_string = function
   | Context_overflow -> "context_overflow"
   | Input_capacity -> "input_capacity"
   | Network_error -> "network_error"
+  | Connect_failed -> "connect_failed"
   | Timeout -> "timeout"
 ;;
 
@@ -702,6 +704,7 @@ let refusal_reason = function
   | Http_client.HttpError { code; body; retry_after_header = _ } ->
     Printf.sprintf "http %d: %s" code (Http_client.refusal_body_text body)
   | Http_client.NetworkError { message; kind = _ } -> message
+  | Http_client.Connect_failed { message; kind = _ } -> message
   | Http_client.TimeoutError { message; phase } ->
     Printf.sprintf "%s timeout: %s" (Http_client.timeout_phase_to_label phase) message
   | Http_client.ProviderTerminal { kind = Http_client.Session_conflict; message } ->
@@ -862,6 +865,9 @@ let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = functi
   | Retry.ContextOverflow _ -> Context_overflow
   | Retry.InputCapacity _ -> Input_capacity
   | Retry.NetworkError _ -> Network_error
+  (* Its own name, not folded into the stored [network_error]: the connection
+     did not open, so nothing was sent (RFC #52028 §2.3). *)
+  | Retry.Connect_failed _ -> Connect_failed
   | Retry.Timeout _ -> Timeout
 ;;
 
@@ -883,6 +889,7 @@ let retry_after_of_api_error ~body ~retry_after_header : Retry.api_error -> floa
   | Retry.ContextOverflow _
   | Retry.InputCapacity _
   | Retry.NetworkError _
+  | Retry.Connect_failed _
   | Retry.Timeout _ -> None
 ;;
 
@@ -927,7 +934,7 @@ let execution_error_cause ~http_status ~dispatch = function
      typed transport error travels with the cause so a consumer can tell a
      dropped connection from a hard quota or an empty completion. *)
   | Exec.Provider_error
-      (( Http_client.NetworkError _ | Http_client.TimeoutError _
+      (( Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
        | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
        | Http_client.ProviderFailure
            { kind =
@@ -1073,6 +1080,7 @@ let provider_refusal_is_binding_rest = function
   | Context_overflow
   | Input_capacity
   | Network_error
+  | Connect_failed
   | Timeout -> false
 ;;
 
@@ -1103,11 +1111,13 @@ let execution_cause_is_binding_rest = function
   | Completion_failed { error = Http_client.ProviderFailure { kind; message = _ }; dispatch = _ }
     -> provider_failure_is_binding_rest kind
   | Completion_failed
-      { error = Http_client.NetworkError _ | Http_client.TimeoutError _
+      { error =
+          Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
       ; dispatch = No_generation_dispatch
       } -> true
   | Completion_failed
-      { error = Http_client.NetworkError _ | Http_client.TimeoutError _
+      { error =
+          Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
       ; dispatch = Generation_dispatch_started
       } -> false
   | Completion_failed
@@ -1577,6 +1587,8 @@ let http_error_kind_to_string : Http_client.http_error -> string = function
     Printf.sprintf "http_status=%d" code
   | Http_client.NetworkError { kind; message = _ } ->
     "network_error:" ^ Http_client.network_error_kind_to_string kind
+  | Http_client.Connect_failed { kind; message = _ } ->
+    "connect_failed:" ^ Http_client.network_error_kind_to_string kind
   | Http_client.TimeoutError { phase; message = _ } ->
     "timeout:" ^ Http_client.timeout_phase_to_label phase
   | Http_client.AcceptRejected { reason = _ } -> "accept_rejected"

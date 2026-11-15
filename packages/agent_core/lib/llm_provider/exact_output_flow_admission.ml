@@ -89,7 +89,7 @@ let rejection_outcome dispatch = function
   | Measurement_rejected
       (Transport_failure
          ( Http_client.HttpError _
-         | Http_client.NetworkError _
+         | Http_client.NetworkError _ | Http_client.Connect_failed _
          | Http_client.TimeoutError _
          | Http_client.ProviderTerminal _
          | Http_client.ProviderFailure _ )) -> Measurement_transport_failed

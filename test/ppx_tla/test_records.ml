@@ -10,7 +10,8 @@
    that need to enumerate fields without knowing their types.
 
    Modules below wrap each record type so [field_names] / [field_count]
-   stay namespaced. *)
+   stay namespaced. The types are never built or read: the deriver reads
+   only their declarations, so each turns off the unused-field warning. *)
 
 module Conditions = struct
   type t = {
@@ -19,11 +20,11 @@ module Conditions = struct
     has_pending_work : bool;
     awaiting_approval : bool;
   }
-  [@@deriving tla]
+  [@@deriving tla] [@@warning "-69"]
 end
 
 module Single_field = struct
-  type t = { only : int } [@@deriving tla]
+  type t = { only : int } [@@deriving tla] [@@warning "-69"]
 end
 
 module Mixed_types = struct
@@ -33,7 +34,7 @@ module Mixed_types = struct
     active : bool;
     tags : string list;
   }
-  [@@deriving tla]
+  [@@deriving tla] [@@warning "-69"]
 end
 
 let test_conditions_field_names () =
@@ -56,7 +57,7 @@ let test_mixed_types () =
    not alphabetical or hash order. The deriver iterates the AST list
    in order. *)
 module Ordered = struct
-  type t = { z : int; a : int; m : int } [@@deriving tla]
+  type t = { z : int; a : int; m : int } [@@deriving tla] [@@warning "-69"]
 end
 
 let test_source_order_preserved () =

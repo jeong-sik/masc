@@ -177,11 +177,14 @@ let listed ~now_ms pats (pat_id, { State.scope; expires_at_ms; issued_at_ms; _ }
         ])
 ;;
 
+(* HIGH-RISK-UNREVIEWED: the list commits nothing, so it shows the PATs of the
+   trusted snapshot that judged the session ({!R.acting_reading}) and reads
+   the zone no second time. *)
 let list (t : R.t) request =
-  match R.acting t request with
+  match R.acting_reading t request with
   | Error answer -> answer
-  | Ok ((_ : Authz_browser_session.Cookie.t), { Authz_browser_session.user_id; _ }) ->
-    let pats = (Authz_zone.snapshot t.R.zone).Authz_zone.state.S.pats in
+  | Ok ({ Authz_browser_session.user_id; _ }, state) ->
+    let pats = state.S.pats in
     let now_ms = ms_of (t.R.now ()) in
     let entries =
       List.fold_right

@@ -31,7 +31,7 @@ let status : t -> Masc_tui_theme.status = function
   | Off | Not_set_up | Unobserved -> Muted
 
 let colour standing =
-  Masc_tui_theme.status_readable
+  Masc_tui_theme.status_readable ~surface:Masc_tui_theme.Page
     (Masc_tui_terminal_palette.snapshot_palette (Masc_tui_terminal_palette.snapshot ()))
     (status standing)
 

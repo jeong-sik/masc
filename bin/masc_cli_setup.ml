@@ -276,7 +276,7 @@ let prepare_server ~base_path ~port ~owned =
                fail (Printf.sprintf "A process began to hold %s while setup was checking it. Run \
                                      setup again." base_path)
              | Error (Upgrade.Owner_unavailable | Upgrade.Port_unavailable | Upgrade.Invalid_health
-                     | Upgrade.Admin_required | Upgrade.Server_starting
+                     | Upgrade.Sign_in_failed | Upgrade.Admin_required | Upgrade.Server_starting
                      | Upgrade.Admin_check_unanswered | Upgrade.Incumbent_changed
                      | Upgrade.Not_confirmed { listener = (_ : Upgrade.single_user_listener);
                                                departure = (_ : Upgrade.departure) }

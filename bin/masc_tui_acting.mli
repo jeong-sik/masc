@@ -69,16 +69,29 @@ type glyph =
 
 val glyph_text : glyph -> string
 
+(** Who a row is about. The event kind decides which: an event that carries
+    a Keeper or an agent name is [Actor_named] with that name, an agent_core
+    event that names neither is [Actor_unnamed], and a change of the whole
+    workspace (a queue, a dataset, a store, a snapshot) is [Actor_server]. A
+    Keeper named [server] is [Actor_named "server"], never the server. *)
+type actor =
+  | Actor_named of string
+  | Actor_unnamed
+  | Actor_server
+
+val actor_text : ko:bool -> actor -> string
+(** The ACTOR column's text: the name, the no-value mark, or [서버]/[server]. *)
+
 type row = {
   at : float;  (** the event's own timestamp *)
-  keeper : string;  (** who acted; the agent name as the feed gave it *)
+  actor : actor;  (** who acted; the agent name as the feed gave it *)
   glyph : glyph;
   label : string;  (** what happened, one or two words *)
   detail : string;  (** what it happened to: the tool, the turn, the cost *)
 }
 
-val keeper_of_event :
-  traces:(string * string) list -> Observer.event -> string
+val actor_of_event :
+  traces:(string * string) list -> Observer.event -> actor
 (** Who acted. The agent_core family names its runtime lane as the agent
     ([agent_core-glm-coding.glm-5-turbo] on the live runtime), not the
     keeper; the keeper is the one whose trace id the event's correlation id
@@ -87,7 +100,7 @@ val keeper_of_event :
 
 val label_of_event : ko:bool -> Observer.event -> string
 (** What happened, in the EVENT column's one or two words. The sibling of
-    {!keeper_of_event} for the other measured column: [row_of_event] reads
+    {!actor_of_event} for the other measured column: [row_of_event] reads
     its label here, so a measurement can ask for the word without building
     the detail sentence that would sit beside it. *)
 
@@ -99,10 +112,17 @@ val row_of_entry : ko:bool -> duration_ms:float option -> entry -> row
 val keeper_row_of_entry :
   ko:bool -> traces:(string * string) list -> duration_ms:float option -> entry -> row
 (** The row the Actions and Everything scopes draw: {!row_of_entry} under
-    {!keeper_of_event} instead of the agent name the feed gave, so an
+    {!actor_of_event} instead of the agent name the feed gave, so an
     agent_core lane row is drawn under the keeper whose trace it carries.
     {!measured_of_event} of the entry's event is {!measured_of_row} of this
     row. *)
+
+val search_text_of_entry :
+  ko:bool -> traces:(string * string) list -> entry -> string
+(** The text "/" matches a flat row against: the row's EVENT cell, label then
+    detail, followed by its ACTOR. A returned agent_core call is spelled
+    without the duration beside it, which only a pairing with its start
+    gives. *)
 
 val row_of_event :
   ko:bool -> at:float -> duration_ms:float option -> Observer.event -> row
@@ -224,7 +244,8 @@ type chunk = {
 val chunks : traces:(string * string) list -> entry list -> chunk list
 (** Every keeper's turns, newest activity first: the fold {!chunk_rows} draws,
     before it becomes rows. A running turn's wire calls carry their start and,
-    once returned, their duration. *)
+    once returned, their duration. An agent_core frame that names no trace
+    and no agent belongs to no turn; {!chunk_rows} draws it as its own row. *)
 
 type chunk_projection
 (** Immutable event-derived chunks retaining one source entry list and its
@@ -306,8 +327,9 @@ type measured = private {
     from an event or from a row that was drawn, never from a pair of strings
     assembled at the call site. *)
 
-val measured_of_row : row -> measured
-(** The measurement a drawn row already carries. *)
+val measured_of_row : ko:bool -> row -> measured
+(** The measurement a drawn row already carries, its actor spelled by
+    {!actor_text} in the screen's language. *)
 
 val measured_of_event :
   ko:bool -> traces:(string * string) list -> Observer.event -> measured

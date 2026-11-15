@@ -4,9 +4,11 @@
     A write to a file the row reads arrives through
     {!Keeper_memory_health_input} or {!Keeper_memory_commit_notifications},
     named by its keepers directory. When the directory is this workspace's
-    config or runtime keepers directory, the workspace's cached fleet answer
-    ({!Server_dashboard_http_keeper_memory_health.fleet_cache_key}) is emptied
-    first and then {!Workspace_dataset_event.Memory_health} is announced for
+    config or runtime keepers directory, the Keeper's cached row
+    ({!Server_dashboard_http_keeper_memory_health.invalidate_after_write}) and
+    then the workspace's cached fleet answer
+    ({!Server_dashboard_http_keeper_memory_health.fleet_cache_key}) are emptied
+    first, and then {!Workspace_dataset_event.Memory_health} is announced for
     the Keeper. A write under any other directory announces nothing: no reader
     of this workspace shows it.
 

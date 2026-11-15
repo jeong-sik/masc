@@ -28,7 +28,7 @@ let package dir max_bytes : Types.package = {
   model_access=Types.Model_disabled;exact_outputs=[];tool_hooks=[];operator_asks=false; web_search=false; worker_service=Types.Mcp_tools;
   binding_schema=None;presentation=Masc.Lane_addon_presentation.empty;
   execution=Types.Host_process {max_reply_bytes=max_bytes}}
-let no_browser ~route:_ ~tab_id:_ = Error "no browser owner in this fixture"
+let no_browser ~installation_id:_ ~route:_ ~tab_id:_ = Error "no browser owner in this fixture"
 let file_source id path = `Assoc ["kind", `String "snapshot_file";
   "source_id", `String id; "path", `String path]
 let binding sources = `Assoc ["sources", `List sources]
@@ -103,7 +103,7 @@ let test_combined_ingress_marks_omitted_sources () = with_store (fun dir store -
 
 let live_client = "0c000000-0000-4000-8000-000000000001"
 let browser_source ?client lane = `Assoc (["kind", `String "browser_document"; "source_id", `String "browser";
-  "lane", `String lane; "tab_id", `Int 4; "target_id", `String "service";
+  "installation_id", `String "browser-ego"; "lane", `String lane; "tab_id", `Int 4; "target_id", `String "service";
   "environment", `String "production"; "request_id", `String "verify-1"]
   @ match client with None -> [] | Some id -> ["client_id", `String id])
 let browser_payload ?(client=live_client) ~tab ~complete ~html () =
@@ -116,10 +116,12 @@ let route_name = function
   | Browser_lane.Live_route (Some id) -> "live:" ^ Browser_lane.client_id_to_string id
   | Browser_lane.Live_route None -> "live:unselected"
 (* The host's reader stands in for the browser Add-on worker. It records each
-   request so a test can see which route and tab the source asked for. *)
+   request so a test can see which installation, route and tab the source
+   asked for. *)
 let browser_reader answer =
   let requests = ref [] in
-  let read ~route ~tab_id = requests := (route_name route, tab_id) :: !requests; !answer in
+  let read ~installation_id ~route ~tab_id =
+    requests := (installation_id, route_name route, tab_id) :: !requests; !answer in
   read, requests
 let read_browser ~dir ~store ~read source =
   require (Sources.acquire ~read_browser_document:read ~access:Sources.Operator_configuration
@@ -133,7 +135,8 @@ let test_browser_identity_and_unknown_coverage () = with_store (fun dir store ->
   let read, requests = browser_reader response in
   let read () = read_browser ~dir ~store ~read (browser_source ~client:live_client "live") in
   let source = read () in
-  check (Alcotest.list (pair string int)) "the bound route and tab are asked once" ["live:" ^ live_client, 4] !requests;
+  check (Alcotest.list (triple string string int)) "the bound installation, route and tab are asked once"
+    ["browser-ego", "live:" ^ live_client, 4] !requests;
   let observation = member "observations" source |> list |> List.hd in
   check string "returned client is preserved" live_client (text (member "client_id" observation));
   check string "tab uses package string representation" "4" (text (member "tab_id" observation));
@@ -186,7 +189,8 @@ let test_live_document_from_another_client_is_refused () = with_store (fun dir s
   let read, requests = browser_reader response in
   let read () = read_browser ~dir ~store ~read (browser_source ~client:live_client "live") in
   let foreign = read () in
-  check (Alcotest.list (pair string int)) "the bound live client and tab are asked" ["live:" ^ live_client, 4] !requests;
+  check (Alcotest.list (triple string string int)) "the bound live client and tab are asked"
+    ["browser-ego", "live:" ^ live_client, 4] !requests;
   check bool "another client's document leaves the source unavailable" false
     (Yojson.Safe.Util.to_bool (member "complete" foreign));
   check int "another client's document is not observed" 0 (observation_count foreign);
@@ -437,6 +441,7 @@ let test_source_activity_does_not_infer_ownership () =
   let interest sources = Sources.refresh_interest (binding sources) |> require in
   let msx = interest [`Assoc ["source_id",`String "screen";"kind",`String "msx_capture"]] in
   let browser = interest [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
+    "installation_id",`String "browser-ego";
     "lane",`String "live";"client_id",`String live_client;"tab_id",`Int 1;"target_id",`String "project";
     "environment",`String "preview";"request_id",`String "capture"]] in
   let dependent = interest [`Assoc ["source_id",`String "metric";"kind",`String "lane_output";
@@ -459,7 +464,13 @@ let test_source_activity_does_not_infer_ownership () =
   check bool "unrelated completion does not refresh browser capture" false
     (Sources.interested browser Sources.Tool_completed);
   check bool "browser completion does not refresh MSX capture" false
-    (Sources.interested msx Sources.Browser_changed)
+    (Sources.interested msx Sources.Browser_changed);
+  check bool "a browser source reads the browser installation it names" true
+    (Sources.reads_browser_installation browser "browser-ego");
+  check bool "and no other browser installation" false
+    (Sources.reads_browser_installation browser "browser-other");
+  check bool "a producer output dependency is not a browser read" false
+    (Sources.reads_browser_installation dependent "producer")
 
 (* Each misc tool says which source it moves, beside the activity type rather
    than in the event bridge. A tool that moves nothing is a plain completion,
@@ -512,6 +523,7 @@ let test_built_in_lanes_offer_what_parse_accepts () =
     Standalone_lane.all;
   let document lane =
     binding [`Assoc ["source_id",`String "page";"kind",`String "browser_document";
+      "installation_id",`String "browser-ego";
       "lane",`String (Browser_lane.Lane_name.to_wire lane);"client_id",`String live_client;"tab_id",`Int 1;
       "target_id",`String "project";"environment",`String "preview";"request_id",`String "capture"]] in
   check bool "a live document source with its client is accepted" true

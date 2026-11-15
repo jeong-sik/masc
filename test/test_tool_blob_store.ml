@@ -1390,6 +1390,54 @@ let test_maintenance_keeps_host_receipt_blob_addresses () =
       [image; document; text])
 ;;
 
+(* A Codex receipt keeps the response frame written to the vendor: its image
+   is a base64 data: URL and its text is inline (#49697). Written as the
+   Codex runtime writes it, through Keeper_client_tool_outbox.codex_response,
+   the receipt file holds neither, and the addresses it names own the bytes
+   while it waits for a completed turn. *)
+let test_maintenance_keeps_codex_receipt_blob_addresses () =
+  with_temp_dir (fun base_path ->
+    let module Outbox = Masc.Keeper_client_tool_outbox in
+    let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+    let keeper_name = "reviewer" in
+    let store = B.create ~base_path in
+    let image = "\x89PNG\r\n\x1a\n" ^ String.make 4096 '\x07' in
+    let payload = Base64.encode_string image in
+    let text = String.make 4096 'c' in
+    let url = "https://example.test/screen.png" in
+    let item kind field value = `Assoc ["type",`String kind; field,`String value] in
+    let frame = `Assoc ["id",`Int 7; "result",`Assoc ["success",`Bool true;
+      "contentItems",`List [item "inputText" "text" text;
+        item "inputImage" "imageUrl" ("data:image/png;base64," ^ payload);
+        item "inputImage" "imageUrl" url]]] in
+    let response = require (Outbox.codex_response ~base_path
+        ~min_result_bytes:Masc.Keeper_turn_driver_try_provider.aged_result_min_bytes frame) in
+    require (Outbox.retain ~base_path ~keeper_name (outbox_vendor_receipt `Null response));
+    let directory = require (Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name) in
+    let file = match Sys.readdir directory with
+      | [|name|] -> In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all
+      | _ -> Alcotest.fail "one receipt file is expected" in
+    let contains part =
+      let n = String.length file and m = String.length part in
+      let rec matches i j = j = m || (file.[i + j] = part.[j] && matches i (j + 1)) in
+      let rec at i = i + m <= n && (matches i 0 || at (i + 1)) in
+      at 0 in
+    Alcotest.(check bool) "the receipt file holds no base64 image" false (contains payload);
+    Alcotest.(check bool) "the receipt file holds no long text body" false (contains text);
+    Alcotest.(check bool) "an image named by URL stays" true (contains url);
+    let unnamed = B.put_durable store ~bytes:"bytes no receipt names" ~mime:"text/plain" in
+    let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "only the unnamed bytes become a candidate" 1 first.candidates_recorded;
+    let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "only the unnamed bytes are collected" 1 second.deleted;
+    Alcotest.(check (option string)) "unnamed bytes are gone" None
+      (fetch_ok store ~sha256:unnamed.sha256);
+    List.iter (fun bytes ->
+      Alcotest.(check (option string)) "receipt-named bytes survive" (Some bytes)
+        (fetch_ok store ~sha256:Agent_core_sha256.(digest_string bytes |> to_hex)))
+      [image; text])
+;;
+
 let test_maintenance_outbox_opacity_requires_complete_receipt_authority () =
   let module Codec = Keeper_client_tool_outbox_codec in
   List.iter (fun shape -> with_temp_dir (fun base_path ->
@@ -2957,6 +3005,8 @@ let () =
             test_maintenance_outbox_payloads_are_tool_data;
           Alcotest.test_case "maintenance keeps the blob addresses a host receipt names" `Quick
             test_maintenance_keeps_host_receipt_blob_addresses;
+          Alcotest.test_case "maintenance keeps the blob addresses a Codex receipt names" `Quick
+            test_maintenance_keeps_codex_receipt_blob_addresses;
           Alcotest.test_case "maintenance outbox opacity requires complete receipt authority" `Quick
             test_maintenance_outbox_opacity_requires_complete_receipt_authority;
           Alcotest.test_case "maintenance opaque outbox payloads preserve reserved reference failures" `Quick

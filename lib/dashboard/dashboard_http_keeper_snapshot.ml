@@ -76,9 +76,12 @@ type system_prompt_preview_error =
   | Prompt_unrenderable of string
 
 (* Ledger lines the prompt left out. A turn renders only the lines that
-   decode and goes on without the rest, so the preview is where an operator
-   sees which line is missing and why. Read separately from the prompt
-   build: an unreadable answer here is this read's, not the prompt's. *)
+   decode and whose subject the roster holds, and goes on without the rest,
+   so the preview is where an operator sees which line is missing and why:
+   [rejected_lines] did not decode, [isolated_lines] decoded but name a
+   subject outside the roster and withhold the article ids they touch
+   (RFC-0504 §2.4). Read separately from the prompt build: an unreadable
+   answer here is this read's, not the prompt's. *)
 let constitution_ledger_json = function
   | Ok (ledger : World_constitution_store.ledger) ->
     `Assoc
@@ -96,6 +99,21 @@ let constitution_ledger_json = function
                    ; "detail", `String line.World_constitution_store.detail
                    ])
                ledger.World_constitution_store.rejected) )
+      ; ( "isolated_lines"
+        , `List
+            (List.map
+               (fun (line : World_constitution_store.isolated_line) ->
+                 `Assoc
+                   [ "line", `Int line.World_constitution_store.line_number
+                   ; "subject", `String line.World_constitution_store.subject
+                   ; ( "article_ids"
+                     , `List
+                         (List.map
+                            (fun id ->
+                              `String (World_constitution_types.Article_id.to_string id))
+                            line.World_constitution_store.article_ids) )
+                   ])
+               ledger.World_constitution_store.isolated) )
       ]
   | Error (World_constitution_store.Unreadable { path; detail }) ->
     `Assoc

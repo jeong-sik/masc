@@ -266,7 +266,26 @@ let surface_row_texts ~cols (state : state) : surface -> string list option =
   | Resources when state.resource_focus = Left_pane ->
       Option.map (List.map Masc_tui_resource_catalog.display_name) (visible_resources state)
   | Resources -> Masc_tui_resource_document.search_rows ~cols state
-  | Overview | Acting | Metrics
+  (* Under Actions and Everything the ring is read by a cursor, over the
+     entries the filter keeps in the order they are drawn, newest first:
+     [acting_flat_entries], the list [render_acting] walks and [row_list]
+     lands on. Turns folds the ring into per-turn rows with no cursor, and
+     an event's open evidence replaces the list, so neither has a row for a
+     match to name. *)
+  | Acting when Option.is_some state.acting_detail -> None
+  | Acting -> (
+      match state.acting_filter with
+      | Masc_tui_acting.Turns -> None
+      | Masc_tui_acting.Actions | Masc_tui_acting.Everything -> (
+          match acting_flat_entries state with
+          | [] -> None
+          | entries ->
+              let traces = (Tui_decode.keeper_trace_projection state.keepers).bindings in
+              Some
+                (List.map
+                   (Masc_tui_acting.search_text_of_entry ~ko:(state.ui_language = Lang_ko) ~traces)
+                   entries)))
+  | Overview | Metrics
   | Keepers
       ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
       | Keeper_runtime_pick )

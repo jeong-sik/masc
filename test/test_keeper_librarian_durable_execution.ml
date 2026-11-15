@@ -928,14 +928,14 @@ let test_retained_answer_with_invalid_working_context_recovers () = with_fixture
     (Result.is_error (Capture.validate_proposal capture invalid_memory));
   let hold=memory_action fixture (fun () ->
     Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[]
-      ~original:record ~request:capture
+      ~original:(Durable_owner.Read (record,capture))
       ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "proved host answer must not call the worker")
       ~publish:(fun ~original:_ ~request:_ ~proposal:_ ->
         Ok (Durable_owner.Publication_pending "fixture holds publication after judgment"))
       ~wake:(fun () -> ())) in
   (match hold with
-   | Ok (Durable_owner.Publication_waiting _) -> ()
-   | Ok (Pending _ | Refused _ | Finished _ | Basis_superseded _) -> fail "original did not retain its judgment"
+   | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
+   | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _),_)) -> fail "original did not retain its judgment"
    | Error error -> fail (Durable_owner.error_to_string error));
   let judged,_=only_original fixture in
   (match Progress.phase judged.Owner.progress with
@@ -1521,11 +1521,123 @@ let resume_with_settlement_fault fixture before_settlement = memory_action fixtu
       ~installation_id:expected.installation_id ~package_id:expected.package_id ~tool:expected.tool
       ~configuration_revision:expected.configuration_revision ~original ~arguments
     |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in
-  Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[] ~original ~request ~call
+  Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[]
+    ~original:(Durable_owner.Read (original,request)) ~call
     ~wake:(fun () -> ()) ~publish:(fun ~original ~request ~proposal ->
       Keeper_librarian_durable_commit.For_testing.publish ~before_settlement ~store:fixture.store
         ~config:fixture.config ~original ~request ~proposal ~fresh_authority
       |> Result.map_error (fun detail -> Durable_owner.Rejected detail)))
+let test_a_worker_call_reads_the_record_and_writes_nothing () = with_fixture (fun ~sw:_ fixture ->
+  drive_advanced fixture;
+  let original,capture=only_original fixture in
+  let destination=Capture.destination capture in
+  let root=Store.root fixture.store in
+  let body=Filename.concat root
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+  let record=Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest original.request_id ^ ".json"))) in
+  let call ()=Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
+    ~access:Lane_addon_sources.Operator_configuration ~installation_id:destination.installation_id
+    ~package_id:destination.package_id ~tool:destination.tool
+    ~configuration_revision:destination.configuration_revision ~original:(Owner.listed original)
+    ~arguments:(`Assoc ["kind",`String "read";"request_id",`String original.request_id]) in
+  check bool "the fixture's original has a body and a record" true (Sys.file_exists body && Sys.file_exists record);
+  Sys.remove body;
+  check bool "the call reaches the worker without the body" true (Result.is_ok (call ()));
+  check bool "and writes no body" false (Sys.file_exists body);
+  Sys.remove record;
+  check bool "an absent record is unavailable before the worker" true (match call () with
+    | Error (Runtime.Unavailable _) -> true
+    | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) | Ok _ -> false);
+  check bool "and no record is written" false (Sys.file_exists record))
+(* RFC librarian-waiting-pass-reads-records-not-bodies, section 8. The files of
+   the one history original: its body, its record, its host Exact record and
+   the proof of its latest execution. *)
+let original_files fixture (original:Owner.retained) capture =
+  let root=Store.root fixture.store in
+  Filename.concat root (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest),
+  Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest original.request_id ^ ".json"))),
+  Filename.concat root (Store.exact_request_path ~declaration_id:"librarian" ~request_id:original.request_id),
+  proof_path fixture (Capture.request capture |> get)
+let read_file path=io (fun () -> In_channel.with_open_bin path In_channel.input_all)
+let refused_pass fixture detail=match run_worker fixture with
+  | Error error -> Consumer.error_to_string error
+  | Ok _ -> fail detail
+let body_missing="original request body named by its record is missing"
+(* An original admitted to its worker goes on as its record and index while
+   its host record is open, so the pass reads no body. When the host record
+   holds the answer, the pass reads the body before anything else. *)
+let test_a_waiting_pass_reads_no_body () = with_fixture (fun ~sw:_ fixture ->
+  let arrived,reached=Eio.Promise.create () and released,release=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    ignore (Eio.Promise.try_resolve reached ());Eio.Promise.await released;
+    `OK,F.openai_response (answer capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve release ())) (fun () ->
+  assert_pending (run_worker fixture);
+  Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await arrived);
+  let original,capture=only_original fixture in
+  let body,record,_,_=original_files fixture original capture in
+  let honest=read_file body and positions=progress fixture and posts=F.post_count fixture.server in
+  io (fun () -> Sys.remove body);
+  (match run_worker fixture with
+   | Ok (Consumer.Pending (Keeper_librarian_pending.Worker {wait=Processing;request_id;_})) ->
+     check string "the pass waits on the listed original" original.request_id request_id
+   | Ok (Consumer.Pending _) -> fail "the waiting original did not reach its worker"
+   | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
+     fail "the waiting original did not stay pending"
+   | Error error -> fail (Consumer.error_to_string error));
+  check bool "the waiting pass writes no body" false (io (fun () -> Sys.file_exists body));
+  check int "and sends nothing more to the provider" posts (F.post_count fixture.server);
+  (* The host answers and the worker never hears it. *)
+  fixture.delivery_loss:=true;
+  let delivered= !(fixture.deliveries) in
+  ignore (Eio.Promise.try_resolve release ());
+  await_delivery fixture ~after:delivered;
+  let waited=read_file record in
+  let missing=refused_pass fixture "a host answer was taken without the original's body" in
+  check bool "the host answer needs the body" true (Astring.String.is_infix ~affix:body_missing missing);
+  check string "the refused pass leaves the record as it was" waited (read_file record);
+  check bool "and moves no read position" true (progress fixture=positions);
+  no_memory fixture;
+  io (fun () -> write body "{\"request\":\"another\"}");
+  check bool "a body of other bytes is not the original's" true
+    (Astring.String.is_infix ~affix:"original request body does not match its record's digest"
+      (refused_pass fixture "a host answer was taken with another body"));
+  io (fun () -> write body honest);
+  let changed=match Yojson.Safe.from_string waited with
+    | `Assoc fields -> `Assoc (List.map (fun (field,stored) -> match field,stored with
+        | "summary",`Assoc summary -> field,`Assoc (List.map (fun (key,old) -> match key,old with
+            | "destination",`Assoc destination -> key,`Assoc (List.map (fun (name,value) ->
+                if name="configuration_revision" then name,`String "another-revision" else name,value) destination)
+            | _ -> key,old) summary)
+        | _ -> field,stored) fields)
+    | _ -> fail "the original's record is not an object" in
+  io (fun () -> write record (Yojson.Safe.to_string changed));
+  let other_destination=refused_pass fixture "a host answer was taken under another destination" in
+  check bool "a summary whose destination is not the body's is refused where the body is read" true
+    (Astring.String.is_infix ~affix:"Original history index differs from its request" other_destination);
+  io (fun () -> write record waited);
+  check string "the refused passes leave the record as it was" waited (read_file record);
+  check bool "and move no read position" true (progress fixture=positions);
+  no_memory fixture))
+(* The host record of a finished original can be gone: the deploy check
+   deletes Exact records it cannot read. The worker's finished answer is then
+   read after the body, so a missing body writes nothing. *)
+let test_a_finished_worker_answer_reads_the_body_first () = with_fixture (fun ~sw:_ fixture ->
+  let delivered= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:delivered;
+  let original,capture=only_original fixture in
+  let body,record,exact,proof=original_files fixture original capture in
+  check bool "the host kept a record and a proof" true (io (fun () -> Sys.file_exists exact && Sys.file_exists proof));
+  io (fun () -> Sys.remove exact;Sys.remove proof;Sys.remove body);
+  let waited=read_file record and positions=progress fixture in
+  let missing=refused_pass fixture "a finished answer was taken without the original's body" in
+  check bool "the finished answer needs the body" true (Astring.String.is_infix ~affix:body_missing missing);
+  check string "and the record stays as it was" waited (read_file record);
+  check bool "no read position moves" true (progress fixture=positions);
+  no_memory fixture)
 let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixture (fun ~sw:_ fixture ->
   fixture.delivery_loss:=true;
   let before_delivery= !(fixture.deliveries) in
@@ -1544,8 +1656,9 @@ let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixtur
     let result=resume_with_settlement_fault fixture (fun () ->
       injected:=true;write cursor_path "{invalid cursor after actual Memory receipt}\n") in
     (match result with
-     | Ok (Durable_owner.Publication_waiting _) -> ()
-     | Ok (Pending _ | Refused _ | Finished _ | Basis_superseded _) -> fail "actual post-Memory cursor failure was not retained Pending"
+     | Ok (Durable_owner.Resumed (Publication_waiting _,_)) -> ()
+     | Ok (Waited _ | Resumed ((Refused _ | Finished _ | Basis_superseded _),_)) ->
+       fail "actual post-Memory cursor failure was not retained Pending"
      | Error error -> fail (Durable_owner.error_to_string error));
     check int "the original has nonempty admitted external evidence to acknowledge" 1
       (Keeper_librarian_input_sources.external_through (Source.counterparts source));
@@ -2098,7 +2211,8 @@ let fence_preview fixture request = io (fun () ->
 let refuse_fenced_resume fixture original request =
   let before = io (fun () -> current fixture.keepers_dir), progress fixture in
   let result = memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store
-    ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original ~request
+    ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ())
+    ~original:(Durable_owner.Read (original,request))
     ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "fenced original reached its worker")
     ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "fenced original reached Memory publication")
     ~wake:(fun () -> fail "fenced original scheduled a replacement")) in
@@ -2553,7 +2667,8 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
   let resume_descendant ()=
     let original,request=load_child descendant_id in
     memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
-      ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original ~request ~wake:(fun () -> ())
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) ~original:(Durable_owner.Read (original,request))
+      ~wake:(fun () -> ())
       ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:(Keeper_librarian_durable_edge.reserved ()))
       ~publish:(fun ~original ~request ~proposal ->
         Keeper_librarian_durable_commit.publish ~store:fixture.store ~config:fixture.config
@@ -2563,14 +2678,15 @@ let test_history_resolution_rejects_stale_then_continues_the_same_original () = 
         |> Result.map_error (fun detail -> Durable_owner.Rejected detail))) in
   let delivered= !(fixture.deliveries) in
   (match resume_descendant () with
-   | Ok (Durable_owner.Pending _) -> ()
+   | Ok (Durable_owner.Waited _) -> ()
    | Error error -> fail (Durable_owner.error_to_string error)
-   | Ok _ -> fail "descendant did not dispatch its actual worker request");
+   | Ok (Resumed _) -> fail "descendant did not dispatch its actual worker request");
   await_delivery fixture ~after:delivered;
   (match resume_descendant () with
-   | Ok (Durable_owner.Finished _) -> ()
+   | Ok (Durable_owner.Resumed (Finished _,_)) -> ()
    | Error error -> fail (Durable_owner.error_to_string error)
-   | Ok _ -> fail "descendant did not finish its actual Memory publication");
+   | Ok (Waited _ | Resumed ((Publication_waiting _ | Refused _ | Basis_superseded _),_)) ->
+     fail "descendant did not finish its actual Memory publication");
   check bool "the crash cut precedes durable completion observation" true
     ((observe ()).completion=Resolution_work.Not_observed);
   run_resolution ();
@@ -2718,6 +2834,15 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
          check string "parent confirmed the exact admitted child" child_record.request_id successor.request_id;
          check json "parent durably retains full child before its actual HTTP" (Lane_addon_action.canonical (Capture.to_json child) |> get) successor.request
        | None | Some (Preparation_pending _) -> fail "child provider ran without durable parent acknowledgement");
+      (* A child of a known-basis lineage is read with its body: the lineage
+         check compares that body with its parent's intent. *)
+      let child_body=Filename.concat (Store.root fixture.store)
+        (Store.tool_request_body_path ~scope:child_record.scope ~request_digest:child_record.request_digest) in
+      let child_bytes=read_file child_body in
+      io (fun () -> Sys.remove child_body);
+      check bool "a waiting child of a known-basis lineage reads its body" true
+        (Astring.String.is_infix ~affix:body_missing (refused_pass fixture "a lineage child went on without its body"));
+      io (fun () -> write child_body child_bytes);
       let retained_parent=Progress.to_json parent.progress in
       let path=Filename.concat (Store.root fixture.store)
         (Filename.concat Store.tool_request_owners_directory
@@ -3936,7 +4061,7 @@ let seed_legacy_original_answer fixture original request =
     Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
       ~access:Lane_addon_sources.Operator_configuration ~installation_id:destination.installation_id
       ~package_id:destination.package_id ~tool:destination.tool ~configuration_revision:destination.configuration_revision
-      ~original ~arguments:(`Assoc ["kind",`String "submit";"request",Exact.request_to_json (Capture.request request |> get)])
+      ~original:(Owner.listed original) ~arguments:(`Assoc ["kind",`String "submit";"request",Exact.request_to_json (Capture.request request |> get)])
       |> Result.map_error (fun _ -> "legacy fixture submit was refused before its modeled old effect") |> get |> ignore;
     await_delivery fixture ~after:before)
 let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
@@ -3963,7 +4088,8 @@ let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
     check int "no new Gate original is created" 0 (List.length (gate_records fixture request));
     let check_owner_phase original =
       let result=memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
-        ~reserved:[] ~original ~request ~wake:(fun () -> fail "unsafe publication cannot wake completion")
+        ~reserved:[] ~original:(Durable_owner.Read (original,request))
+        ~wake:(fun () -> fail "unsafe publication cannot wake completion")
         ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:[])
         ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "unsafe original cannot enter a publication callback")) in
       (match result with
@@ -4032,6 +4158,9 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "actual host result bridge resumes production queue" `Quick test_actual_result_bridge_uses_production_queue;
   test_case "host answer without original gate waits while Off" `Quick test_host_answer_without_gate_waits_while_off;
   test_case "actual Memory receipt with failed ACK settles while Off" `Quick test_real_memory_receipt_then_failed_ack_recovers_while_off;
+  test_case "a worker call reads the record and writes nothing" `Quick test_a_worker_call_reads_the_record_and_writes_nothing;
+  test_case "a waiting pass reads no body" `Quick test_a_waiting_pass_reads_no_body;
+  test_case "a finished worker answer reads the body first" `Quick test_a_finished_worker_answer_reads_the_body_first;
   test_case "changed checkpoint source cannot publish retained original answer" `Quick
     (test_source_replacement_cannot_publish_retained_answer Replaced_checkpoint);
   test_case "same-trace restart cannot publish old retained checkpoint answer" `Quick

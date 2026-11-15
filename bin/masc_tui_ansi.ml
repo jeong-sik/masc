@@ -118,6 +118,13 @@ module Theme = struct
        RFC-0431. *)
     ; slot_1 : string
     ; slot_2 : string
+    (* A row drawn behind the ones around it. Not a synonym for [Ansi.dim]:
+       SGR 2 modifies whatever colour is already open -- dim red stays red --
+       so it is the right thing where a coloured run needs to be quieter. This
+       replaces the colour outright, which is only what a row wants when the
+       whole row is the quiet thing. Measured against the same ground as the
+       hues above, because a quiet row on a side pane sits on that pane. *)
+    ; recede : string
     }
 
   (* A slot, so the accessor below is total. *)
@@ -147,20 +154,29 @@ module Theme = struct
 
   let all_categories = [ Slot_1; Slot_2 ]
 
-  let resolved_cache : resolved option Atomic.t = Atomic.make None
+  (* One answer per ground a colour is drawn on. A colour lifted against the
+     page is under the floor on the side pane one step off it (#47503), so
+     each ground keeps its own resolution. *)
+  let page_cache : resolved option Atomic.t = Atomic.make None
+  let side_pane_cache : resolved option Atomic.t = Atomic.make None
 
-  let rec resolved () =
+  let cache_on : Masc_tui_theme.surface -> resolved option Atomic.t = function
+    | Masc_tui_theme.Page -> page_cache
+    | Masc_tui_theme.Side_pane -> side_pane_cache
+
+  let rec resolved_on surface =
+    let cache = cache_on surface in
     let probed = Masc_tui_terminal_palette.snapshot () in
     let generation = Masc_tui_terminal_palette.snapshot_generation probed in
     let lift_enabled = Masc_tui_theme.lift_is_enabled () in
-    let previous = Atomic.get resolved_cache in
+    let previous = Atomic.get cache in
     match previous with
     | Some cached when cached.generation = generation && cached.lift_enabled = lift_enabled -> cached
     | Some _ | None ->
       let palette = Masc_tui_terminal_palette.snapshot_palette probed in
-      let of_state = Masc_tui_theme.status_readable palette in
-      let of_text = Masc_tui_theme.status_text_readable palette in
-      let of_colour = Masc_tui_theme.ansi_readable palette in
+      let of_state = Masc_tui_theme.status_readable ~surface palette in
+      let of_text = Masc_tui_theme.status_text_readable ~surface palette in
+      let of_colour = Masc_tui_theme.ansi_readable ~surface palette in
       let next =
         { generation
         ; lift_enabled
@@ -192,11 +208,14 @@ module Theme = struct
         (* See [category_colour]: the hues no status token draws. *)
         ; slot_1 = of_colour (category_colour Slot_1)
         ; slot_2 = of_colour (category_colour Slot_2)
+        ; recede = Masc_tui_theme.recede ~surface palette
         }
       in
-      if Atomic.compare_and_set resolved_cache previous (Some next) then next
-      else resolved ()
+      if Atomic.compare_and_set cache previous (Some next) then next
+      else resolved_on surface
   ;;
+
+  let resolved () = resolved_on Masc_tui_theme.Page
 
   (* Which slot a surface gives to which member is the surface's own
      business; this only promises the six are distinct and that all six
@@ -251,40 +270,7 @@ module Theme = struct
     |> Masc_tui_theme.sidebar_selection
   let border_focus = Masc_tui_theme.border_focus
 
-  (* A row drawn behind the ones around it.
-
-     Not a synonym for [Ansi.dim]. SGR 2 modifies whatever colour is already
-     open -- dim red stays red -- so it is the right thing where a coloured
-     run needs to be quieter. This replaces the colour outright, which is only
-     what a row wants when the whole row is the quiet thing. Those are
-     different jobs and both remain.
-
-     The palette arrives after start-up, from the terminal's answer to the
-     OSC query, and can arrive again; the generation is what says which. The
-     escape is rebuilt only when it changes, because this is read once per
-     drawn row. *)
-  let recede_cache : (int * string) option Atomic.t = Atomic.make None
-
-  let rec recede () =
-    (* Named for what it holds rather than [snapshot]: an AST guard counts the
-       palette reads inside the binding [Chat_theme.snapshot], and a local of
-       that name here joins its count. *)
-    let probed = Masc_tui_terminal_palette.snapshot () in
-    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
-    let previous = Atomic.get recede_cache in
-    match previous with
-    | Some (cached_generation, style) when cached_generation = generation ->
-      style
-    | Some _ | None ->
-      let style =
-        Masc_tui_theme.recede
-          (Masc_tui_terminal_palette.snapshot_palette probed)
-      in
-      if Atomic.compare_and_set recede_cache previous
-           (Some (generation, style))
-      then style
-      else recede ()
-  ;;
+  let recede () = (resolved ()).recede
 
   (* The Activity pane's ground, rebuilt only when the palette changes, for
      the same reason [recede] is: it is read once per drawn pane row. *)
@@ -308,6 +294,21 @@ module Theme = struct
       then style
       else side_pane_background ()
   ;;
+
+  (* What is drawn on {!side_pane_background}, measured against it: the same
+     names as the page's accessors, so a side-pane renderer asks for the same
+     reading and gets the answer for the ground it paints on. Only the
+     readings something draws on a side pane are here. *)
+  module Side_pane = struct
+    let resolved () = resolved_on Masc_tui_theme.Side_pane
+    let ok () = (resolved ()).ok
+    let warn () = (resolved ()).warn
+    let bad () = (resolved ()).bad
+    let info () = (resolved ()).info
+    let recede () = (resolved ()).recede
+    let action_probe () = (resolved ()).probe
+    let action_message () = (resolved ()).message
+  end
 
   module Syntax = struct
     (* Content, not state: "this word is green" says what a token is, not that

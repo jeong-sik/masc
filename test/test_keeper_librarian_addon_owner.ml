@@ -229,7 +229,14 @@ let timeout_diagnostic fixture =
     `Assoc ["pending_candidates",queue;"originals",originals;
       "http_posts",`Int (F.post_count fixture.server);"deliveries",`Int !(fixture.deliveries);
       "observations",`Int !(fixture.observations)])
-let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
+(* One worker behind both pool references, which the server points at the
+   same pool (Server_runtime_bootstrap). *)
+let with_one_worker_pool ~sw env f =
+  let pool=Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+    Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) f)
+let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) ?(one_worker_pool=false) f =
   let base_path=Filename.temp_dir "librarian-addon-owner-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path) (fun () ->
@@ -322,7 +329,8 @@ let with_fixture ?(initial=["a","Durable A";"b","Durable B"]) f =
         (* The export event precedes publication of the stable Runtime metadata.
            Reconcile once after that actual event before dispatching original work. *)
         reconcile fixture;
-        (match Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> f ~sw fixture) with
+        let body ()=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> f ~sw fixture) in
+        (match if one_worker_pool then with_one_worker_pool ~sw env body else body () with
          | () -> ()
          | exception Eio.Time.Timeout ->
            let backtrace=Printexc.get_raw_backtrace () in
@@ -599,6 +607,45 @@ let test_pass_without_new_input_after_commit_is_idle ()=with_fixture (fun ~sw:_ 
   check int "the idle pass starts no provider call" posts (F.post_count fixture.server);
   check int "the idle pass closes the fully committed forest" 0
     (io (fun () -> Owner.discover_all ~store:fixture.store |> owned |> List.length)))
+(* The owner's pool jobs, by the part of their name after the module. A job
+   is counted when a worker takes it, so work run in place inside another job
+   is not here. *)
+let owner_job_names ()=
+  let open Yojson.Safe.Util in
+  let rec after_module = function
+    | [] -> None
+    | part::rest when String.ends_with ~suffix:"Keeper_librarian_admission_owner" part -> Some (String.concat "." rest)
+    | _::rest -> after_module rest in
+  List.concat_map (fun lane -> match member lane (Pool_wait.to_json ()) with
+    | `Null -> []
+    | lane_json -> List.filter_map (fun entry ->
+        after_module (String.split_on_char '.' (to_string (member "name" entry))))
+        (to_list (member "by_name" lane_json))) ["read";"background"]
+  |> List.sort_uniq String.compare
+(* RFC-0474 L4·L4c (#48912). With one worker, as on a busy server, the owner's
+   jobs carry the name of the function that submits them, and closing a
+   finished forest, which reads and checks every record, holds the whole
+   worker instead of sharing it as I/O work. *)
+let test_owner_jobs_name_their_caller_and_declare_their_work ()=
+  with_fixture ~one_worker_pool:true (fun ~sw:_ fixture ->
+  drive_until fixture settled |> assert_settled;
+  let moved=ref [] in
+  let closed=memory_action fixture (fun () ->
+    Keeper_librarian_admission_owner.For_testing.run ~base_path:fixture.base_path ~keeper_name
+      ~after_settle:(fun _ ->
+        moved:=(Executor_pool_ref.in_worker_context (),Pool_wait.in_flight Pool_lane.Background) :: !moved;
+        Ok ())) in
+  check bool "the next pass closes the finished forest" true
+    (match closed with Worker.Idle -> true
+     | Disabled | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ -> false);
+  check bool "closing moves its members" true (!moved<>[]);
+  let whole_worker=Float.to_int (Domain_pool.weight_cpu *. 1_000_000.) in
+  check bool "each member moves inside a pool job that holds a whole worker" true
+    (List.for_all (fun (in_job,in_flight) -> in_job && in_flight>=whole_worker) !moved);
+  let names=owner_job_names () in
+  check bool "no job is named after a shared submit helper" false (List.mem "io" names);
+  List.iter (fun caller -> check bool (caller ^ " names its own jobs") true (List.mem caller names))
+    ["run_enabled";"run_queue";"run_queue.walk";"new_capture"])
 
 let test_production_lane_closes_without_another_external_event ()=with_fixture (fun ~sw:_ fixture ->
   Fun.protect ~finally:(fun () ->
@@ -2491,4 +2538,5 @@ let () =
   test_case "production refresh quiesces with a new tail while its provider remains pending" `Quick test_production_refresh_new_tail_quiesces_while_provider_pending;
   test_case "a purged pending original cannot block another Keeper in the same shared worker" `Quick test_purged_original_does_not_block_another_keeper;
   test_case "attachment wakes a persisted history owner without queue or original" `Quick test_attach_wakes_persisted_keeper_without_queue_or_original;
-  test_case "no attached Add-on reports explicit admission off and keeps every candidate" `Quick test_unattached_addon_reports_off_and_keeps_candidates]]
+  test_case "no attached Add-on reports explicit admission off and keeps every candidate" `Quick test_unattached_addon_reports_off_and_keeps_candidates;
+  test_case "owner pool jobs name their caller and declare their work" `Quick test_owner_jobs_name_their_caller_and_declare_their_work]]

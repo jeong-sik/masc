@@ -73,6 +73,10 @@ Startup moves interrupted Running records to Recovering without clearing their
 frames. This frees the execution slot for unrelated work. An empty frame is not
 proof that a partially transmitted request or tool had no effect. No arbitrary
 hash or checkpoint-presence escape hatch authorizes replay of Interrupted execution.
+History clear and the Keeper retirement check wait for records that are not
+settled. They do not wait for an Interrupted execution of a direct operation
+that already ended and that names no native call, checkpoint or Gate approval.
+Such a record keeps its input and origin.
 
 ## Evidence and remaining integration
 

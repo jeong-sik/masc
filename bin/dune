@@ -1433,6 +1433,14 @@
  (modules masc_tui_planning_proof_mark)
  (libraries masc masc_tui_message_layout))
 
+; Whether a Goal at work has passed its due date, read once for the Planning
+; list, its preview and the detail. Pure: the caller passes the moment.
+(library
+ (name masc_tui_planning_due)
+ (wrapped false)
+ (modules masc_tui_planning_due)
+ (libraries masc masc.masc_goal ptime))
+
 (library
  (name masc_tui_approval_detail)
  (wrapped false)
@@ -2190,7 +2198,7 @@
  (wrapped false)
  (modules masc_tui_surface_search)
  (libraries masc_tui_resource_document masc_tui_resource_catalog masc_tui_system_logs masc_tui_types masc_tui_fusion_model masc_tui_fetched masc_tui_pick_list
-  masc_tui_context_inspector masc_tui_overview_tasks masc_tui_mcp masc))
+  masc_tui_context_inspector masc_tui_overview_tasks masc_tui_mcp masc_tui_acting masc))
 
 (library
  (name masc_tui_identity_updates)
@@ -2695,6 +2703,12 @@
  (libraries masc masc.string_util markup angstrom uutf yojson))
 
 (library
+ (name masc_tui_workspace_precondition)
+ (wrapped false)
+ (modules masc_tui_workspace_precondition)
+ (libraries masc masc.fs_compat eio uri yojson))
+
+(library
  (name masc_tui_workspace_read)
  (wrapped false)
  (modules masc_tui_workspace_read)
@@ -2771,6 +2785,7 @@
   masc_tui_keeper_selection
   masc_tui_kept_reads
   masc_tui_workspace_read
+  masc_tui_workspace_precondition
   masc_tui_machine_live
   masc_tui_mcp
   masc_tui_memory_usage masc_tui_keeper_turns
@@ -2944,6 +2959,7 @@
   masc_tui_board_requests
   masc_tui_board_publication
   masc_tui_workspace_read
+  masc_tui_workspace_precondition
   masc_tui_workspace_job
   masc_tui_workspace_result
   masc_tui_candle
@@ -3190,6 +3206,7 @@
   masc_tui_config_mark
   masc_tui_memory_mark
   masc_tui_planning_proof_mark
+  masc_tui_planning_due
   masc_tui_context_bars
   masc_tui_chart
   masc_tui_tool_tree
@@ -3216,6 +3233,9 @@
   eio
   eio.unix
   mtime.clock.os
+  ; Planning reads the wall clock once per frame for a Goal's due standing.
+  ptime
+  ptime.clock
   masc.agent_core
   masc.agent_core.llm_provider))
 
@@ -3405,6 +3425,7 @@
   masc_tui_machine_live
   masc_tui_interactive
   masc_tui_ansi
+  masc_tui_message_layout
   masc_tui_graphics
   masc_tui_image_mosaic
   masc_tui_frame_timing

@@ -92,7 +92,8 @@ let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
 
-let git_failure_detail args status stdout stderr =
+(* [reason] is the output of the run that says why it failed. *)
+let git_failure_with_reason args status reason =
   let status_text =
     match status with
     | Unix.WEXITED code -> Printf.sprintf "exit %d" code
@@ -100,13 +101,18 @@ let git_failure_detail args status stdout stderr =
     | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
   in
   let detail =
-    let stderr = String.trim stderr in
-    let stdout = String.trim stdout in
-    if stderr <> "" then status_text ^ ": " ^ stderr
-    else if stdout <> "" then status_text ^ ": " ^ stdout
-    else status_text
+    match String.trim reason with
+    | "" -> status_text
+    | reason -> status_text ^ ": " ^ reason
   in
   Printf.sprintf "git %s failed: %s" (String.concat " " args) detail
+;;
+
+(* A run that printed nothing on standard error may have said why on standard
+   output. *)
+let git_failure_detail args status stdout stderr =
+  git_failure_with_reason args status
+    (if String.trim stderr <> "" then stderr else stdout)
 ;;
 
 type status_summary = {
@@ -1008,7 +1014,11 @@ let grep_in_scope ~timeout_sec ~local_path ~pathspec ~pattern ~ignore_case ~max_
       (* git grep exits 1 when nothing matched; that is an answer. *)
       Stdlib.Ok { gr_matches = []; gr_truncated = false }
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      Stdlib.Error (git_failure_detail args status stdout stderr)
+      (* HIGH-RISK-UNREVIEWED: standard output holds the rows git found before
+         it stopped, a timeout included: lines of files the workspace file
+         reader refuses to serve. The failure detail reaches the server log, so
+         standard error alone says why (#48500). *)
+      Stdlib.Error (git_failure_with_reason args status stderr)
 
 (* A tracked, non-ignored file is in both runs with the same rows; one copy of
    each path and line is kept. *)

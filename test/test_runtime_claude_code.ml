@@ -1445,6 +1445,77 @@ let test_a_known_frame_out_of_phase_is_named_by_its_own_tag () =
          (run_fixture path))
 ;;
 
+(* Claude Code can end its start-up with a result frame before it answers
+   initialize. Fourteen turns of six Keepers ended that way on 2026-11-13,
+   while another turn of the same lane read "Can't reach the API server" in
+   its result (#51901). The frame is read as a turn's result is, so the
+   failure keeps its status and sentence, and no turn input was sent. A
+   successful result, or one of another session, is still not part of the
+   start-up. *)
+let startup_auth_failure_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"startup-auth-1","result":"Invalid API key · Please run /login","api_error_status":401,"terminal_reason":"api_error"}|}
+;;
+
+let startup_unreachable_api_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"startup-net-1","result":"API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)","api_error_status":null,"terminal_reason":"api_error"}|}
+;;
+
+let startup_result_of_another_session =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"another-session","uuid":"startup-other-1","result":"Invalid API key · Please run /login","api_error_status":401}|}
+;;
+
+let run_with_startup_frame frame =
+  let prompt_sent = ref false in
+  let outcome =
+    with_fixture
+      ~before_initialize_response:[ Emit frame ]
+      [ Emit assistant; Emit result ]
+      (fun path -> run_fixture ~on_prompt_sent:(fun () -> prompt_sent := true) path)
+  in
+  check bool "no turn input was sent" false !prompt_sent;
+  outcome
+;;
+
+let test_a_startup_failure_result_keeps_its_typed_reason () =
+  (match run_with_startup_frame startup_auth_failure_result with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+         { api_error_status = Some 401
+         ; api_error_cause = None
+         ; tool_effect_attempted = false
+         ; response_emitted = false
+         ; detail
+         }) ->
+     check bool "the login refusal survives" true
+       (Astring.String.is_infix ~affix:"Invalid API key" detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "a start-up failure was reported as completion");
+  match run_with_startup_frame startup_unreachable_api_result with
+  | Error
+      (Runtime_claude_code.Turn_failed_with_observation
+        { api_error_status = None
+        ; api_error_cause = None
+        ; tool_effect_attempted = false
+        ; response_emitted = false
+        ; detail
+        }) ->
+    check bool "the connection failure survives" true
+      (Astring.String.is_infix ~affix:"ENOTFOUND" detail)
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "a start-up failure was reported as completion"
+;;
+
+let test_a_startup_result_outside_the_protocol_fails_closed () =
+  expect_protocol_error
+    ~stage:"initialize"
+    ~detail:(Printf.sprintf "unexpected message type %S before control response" "result")
+    (run_with_startup_frame result);
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:"session_id does not match the active Claude session"
+    (run_with_startup_frame startup_result_of_another_session)
+;;
+
 let test_quota_is_structurally_classified () =
   with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun path ->
     match run_fixture path with
@@ -5059,6 +5130,10 @@ let () =
             test_unknown_frame_types_fail_closed_in_both_phases
         ; test_case "a known frame out of phase is named by its own tag" `Quick
             test_a_known_frame_out_of_phase_is_named_by_its_own_tag
+        ; test_case "a start-up failure result keeps its typed reason" `Quick
+            test_a_startup_failure_result_keeps_its_typed_reason
+        ; test_case "a start-up result outside the protocol fails closed" `Quick
+            test_a_startup_result_outside_the_protocol_fails_closed
         ; test_case
             "rejected rate limit overrides success flag"
             `Quick

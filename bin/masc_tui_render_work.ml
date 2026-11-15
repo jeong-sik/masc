@@ -12,6 +12,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
 module Planning_detail = Masc_tui_planning_detail
+module Planning_due = Masc_tui_planning_due
 module Link = Masc_tui_link
 module Press = Masc_tui_press
 
@@ -699,7 +700,18 @@ let planning_open_note (state : state) (goal : planning_goal) =
       else count Masc_tui_value.Count.Open_task (List.length tasks),
         faint (if partial then Theme.warn () else Ansi.dim)
 
-let planning_preview_lines (state : state) ~cells ~rows (goal : planning_goal) =
+(* The words a Goal at work carries when its due date has passed or cannot be
+   read (#39571). The row, the preview and the detail print the same words for
+   the same standing; a Goal due later, without a due date or not at work
+   carries none. *)
+let planning_due_clause ~ko (standing : Planning_due.standing) =
+  let text korean english = if ko then korean else english in
+  match standing with
+  | Planning_due.Due_passed -> Some (text "기한 지남" "past due")
+  | Planning_due.Unreadable_due _ -> Some (text "기한 읽기 실패" "unreadable due date")
+  | Planning_due.Due_ahead | Planning_due.Not_in_progress | Planning_due.No_due -> None
+
+let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_goal) =
   if rows <= 0 then [] else
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
@@ -720,11 +732,15 @@ let planning_preview_lines (state : state) ~cells ~rows (goal : planning_goal) =
              Some (Theme.warn (), text "검증 요청 정보 미확인" "Verification request binding unavailable")
          | Executing | Verifying | Awaiting_confirmation | Completed | Dropped
          | Paused _ | Blocked _ -> None) in
-  let notice = Option.to_list (Option.map (fun (style, detail) ->
-      style ^ field "" detail ^ Ansi.reset) notice) in
-  let header =
-    (if rows >= 3 then [Theme.recede () ^ field "" phase ^ Ansi.reset] else [])
-    @ notice in
+  let due = Option.map (fun words -> (Theme.warn (), words))
+      (planning_due_clause ~ko (Planning_due.standing ~now goal)) in
+  let phase_row = if rows >= 3 then [Theme.recede () ^ field "" phase ^ Ansi.reset] else [] in
+  (* The notice above keeps the first row it always had; the due clause takes
+     the next one only when the preview has a row left for it. *)
+  let notices =
+    List.take (rows - List.length phase_row) (Option.to_list notice @ Option.to_list due)
+    |> List.map (fun (style, detail) -> style ^ field "" detail ^ Ansi.reset) in
+  let header = phase_row @ notices in
   let hint =
     if rows > List.length header && rows >= 2 then
       [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
@@ -742,6 +758,9 @@ let planning_preview_lines (state : state) ~cells ~rows (goal : planning_goal) =
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  (* One moment for the whole frame, so every row and the preview judge their
+     due dates against the same instant. *)
+  let now = Ptime_clock.now () in
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
   let list_page_rows = ref 1 in
@@ -820,6 +839,10 @@ let render_planning_list (state : state) =
                 |> List.drop window.first |> List.take window.capacity
                 |> List.concat_map (fun (index, (goal : planning_goal)) ->
                   let phase = planning_phase_label ~ko goal.pg_phase in
+                  (* Past due qualifies the phase, so it sits right after it. *)
+                  let due = match planning_due_clause ~ko (Planning_due.standing ~now goal) with
+                    | None -> ""
+                    | Some words -> " · " ^ words in
                   let open_note, open_style = planning_open_note state goal in
                   let linked = if open_note = "" then "" else " · " ^ open_note in
                   (* A Goal in verification is waiting for its verdict; the
@@ -838,23 +861,24 @@ let render_planning_list (state : state) =
                   let summary =
                     if current then
                       planning_phase_color goal.pg_phase ^ phase ^ Ansi.reset
+                      ^ Theme.warn () ^ due ^ Ansi.reset
                       ^ open_style ^ linked ^ Ansi.reset
                       ^ (match verdict with
                          | None -> ""
                          | Some (style, detail) -> " · " ^ style ^ Terminal_text.single_line detail ^ Ansi.reset)
                     else
-                      Theme.recede () ^ phase ^ linked
+                      Theme.recede () ^ phase ^ due ^ linked
                       ^ (match verdict with
                          | None -> ""
                          | Some (_, detail) -> " · " ^ Terminal_text.single_line detail)
                       ^ Ansi.reset in
                   work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                     ~selected:(index = state.planning_cursor) ~title:goal.pg_title ~summary
-                    ~compact:(phase ^ linked)))
+                    ~compact:(phase ^ due ^ linked)))
              @ work_list_position window ~count in
            let preview_lines = match List.nth_opt goals state.planning_cursor with
              | None -> [text "목표를 선택하세요" "Select a Goal"]
-             | Some goal -> planning_preview_lines state ~cells:geometry.preview_width ~rows:geometry.preview_rows goal in
+             | Some goal -> planning_preview_lines state ~now ~cells:geometry.preview_width ~rows:geometry.preview_rows goal in
            List.iter push (work_panel_lines geometry
              ~list_title:(text "목표" "Goals")
              ~list_lines ~preview_title:(text "목표와 성공 조건" "Goal and success criterion")
@@ -1014,6 +1038,12 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
       @ (Masc_tui_text_block.rows ~max_cells:width text |> List.map (fun line -> project ("  " ^ line)))
   in
   let optional = function Some value -> value | None -> Masc_tui_theme.Glyph.no_value in
+  (* The row this detail was opened from says past due; the Due field says it
+     too, in the plain foreground every field here keeps. *)
+  let due = optional goal.pg_due_date
+    ^ (match planning_due_clause ~ko (Planning_due.standing ~now:(Ptime_clock.now ()) goal) with
+       | None -> ""
+       | Some words -> " · " ^ words) in
   let _, next_text = planning_next_step ~ko goal in
   let section title =
     Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
@@ -1028,7 +1058,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     @ field (text "다음 행동" "Next") next_text in
   let metadata = gap @ section (text "상세 정보" "Details")
     @ field ~tone:Planning_detail.Quiet (text "목표 ID" "Goal") goal.pg_id
-    @ field (text "기한" "Due") (optional goal.pg_due_date)
+    @ field (text "기한" "Due") due
     @ field (text "우선순위" "Priority") (Printf.sprintf "P%d" goal.pg_priority)
     @ (List.concat_map (fun (label, value) -> match value with
          | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label (wire_moment value))
@@ -1876,7 +1906,8 @@ let render_schedule_list (state : state) =
                 ^ fit_width
                     (Terminal_text.single_line
                        (schedule_id ^ ": "
-                        ^ request_failure_text ~ko:(state.ui_language = Lang_ko) err))
+                        ^ request_failure_text ~ko:(state.ui_language = Lang_ko)
+                            ~request:Kept_request.Schedule_cancel err))
                     (framed_inner_width cols - 4)
                 ^ Ansi.reset)
           | None -> ())
@@ -2219,7 +2250,8 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
      | Some (schedule_id, error) when String.equal schedule_id row.sch_schedule_id ->
          [ Theme.bad ()
          , ui_text state ~ko:"취소 오류: " ~en:"Cancel error: "
-           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko) error) ]
+           ^ wire (request_failure_text ~ko:(state.ui_language = Lang_ko)
+                     ~request:Kept_request.Schedule_cancel error) ]
      | Some _ | None -> [])
     @ (match schedule_source_warning state with
        | None -> []

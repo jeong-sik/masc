@@ -58,7 +58,8 @@ let pending config =
 let only_selection config =
   match pending config with [selection] -> selection | _ -> fail "expected one pending receipt hint"
 let notify config =
-  get (Keeper_client_tool_outbox_wake.notify ~base_path:config.Workspace.base_path ~keeper_name)
+  get (Keeper_client_tool_outbox_wake.notify ~base_path:config.Workspace.base_path ~keeper_name
+       |> Result.map_error Keeper_client_tool_outbox_wake.notify_error_to_string)
 let pulse config =
   Eio.Switch.run (fun sw ->
     let recovery =
@@ -161,7 +162,9 @@ let test_unreadable_result_is_not_consumed () =
     Fs_compat.save_file receipt_path "{unreadable";
     (match Keeper_client_tool_outbox_wake.notify
        ~base_path:config.Workspace.base_path ~keeper_name with
-     | Error _ -> ()
+     | Error (Keeper_client_tool_outbox_wake.Notify_failed _) -> ()
+     | Error (Keeper_client_tool_outbox_wake.Intake_shutdown_reserved _) ->
+       fail "unreadable receipt was reported as a shutdown hold"
      | Ok () -> fail "unreadable receipt must remain an explicit recovery failure");
     check int "no hint is committed from unreadable state" 0 (List.length (pending config));
     check string "bad evidence remains available for diagnosis" "{unreadable"
@@ -171,6 +174,41 @@ let test_unreadable_result_is_not_consumed () =
     retain config result;
     pulse config;
     check int "original result is discovered after storage repair" 1 (List.length (pending config)))
+
+(* A shutdown that holds the owner's intake refuses the receipt's hint. That is
+   a hold, not a failure: notify names the operation, the receipt stays in the
+   outbox, a pass during the hold adds nothing, and the first pass after the
+   shutdown releases the intake notifies the receipt. *)
+let test_shutdown_hold_waits_then_notifies () =
+  with_workspace (fun config _ _ ->
+    let module Fence = Keeper_shutdown_intake_fence in
+    let base_path = config.Workspace.base_path in
+    retain config (receipt "turn-held");
+    let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+    (match Fence.begin_shutdown ~base_path ~keeper_name ~operation_id with
+     | Fence.Reserved _ -> ()
+     | Fence.Already_reserved _ -> fail "the fixture Keeper already held a shutdown");
+    (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
+     | Error (Keeper_client_tool_outbox_wake.Intake_shutdown_reserved held_by) ->
+       check string "notify names the holding shutdown"
+         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         (Keeper_shutdown_types.Operation_id.to_string held_by)
+     | Error (Keeper_client_tool_outbox_wake.Notify_failed detail) ->
+       fail ("a shutdown hold was reported as a failure: " ^ detail)
+     | Ok () -> fail "a held intake accepted the receipt hint");
+    pulse config;
+    check int "a pass during the hold adds nothing" 0 (List.length (pending config));
+    check int "the held receipt stays unread" 1
+      (List.length (Keeper_client_tool_outbox.receipt_ids (snapshot config)));
+    (match Fence.rollback_shutdown ~base_path ~keeper_name ~operation_id with
+     | Fence.Rolled_back -> ()
+     | Fence.Not_reserved | Fence.Reserved_by_other _ ->
+       fail "the test's own shutdown did not roll back");
+    pulse config;
+    let receipt_id = match Keeper_client_tool_outbox.receipt_ids (snapshot config) with
+      | [id] -> id | _ -> fail "expected the original receipt" in
+    check string "the first pass after the release notifies the original receipt"
+      ("keeper-tool-result:" ^ receipt_id) (only_selection config).source.post_id)
 
 let test_route_change_preserves_unrelated_work_and_receipt ?(corrupt=false) () =
   with_workspace (fun config meta env ->
@@ -414,6 +452,8 @@ let () =
       test_case "provider failure retries result delivery until exact ACK" `Quick test_failed_turn_can_be_notified_again;
       test_case "paused owner is preserved" `Quick test_paused_owner_keeps_its_result;
       test_case "unreadable result remains pending until owner repair" `Quick test_unreadable_result_is_not_consumed;
+      test_case "a shutdown hold waits and the first pass after its release notifies" `Quick
+        test_shutdown_hold_waits_then_notifies;
       test_case "route change preserves other work and later result recovery" `Quick
         (test_route_change_preserves_unrelated_work_and_receipt ~corrupt:false);
       test_case "corrupt receipt cannot block an unavailable route" `Quick

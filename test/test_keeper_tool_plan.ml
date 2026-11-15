@@ -1415,23 +1415,6 @@ let test_durable_request_encoding_rejects_unsubstituted_params () =
   | Ok _ -> fail "durable encoding admitted an unsubstituted parameter"
 ;;
 
-let add_field name value = function
-  | `Assoc fields -> `Assoc (fields @ [ name, value ])
-  | json -> json
-;;
-
-let update_field name update = function
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (field, value) ->
-            if String.equal field name then field, update value else field, value)
-         fields)
-  | json -> json
-;;
-
-let replace_field name value = update_field name (fun _ -> value)
-
 let test_request_defaults_missing_input_to_empty_object () =
   let json = request_of_string {|{"nodes":[{"id":"lane","tool":"keeper_lane_status"}]}|} in
   match parse_request json with

@@ -7,11 +7,6 @@
    judge the execute path already uses for cwd and redirects
    ([Exec_policy.validate_shell_ir_paths]'s own [validate_path_value]). *)
 
-let raws = function
-  | Execute_script_paths.Destinations ds -> Some (List.map (fun d -> d.Execute_script_paths.raw) ds)
-  | Outside_vocabulary -> None
-;;
-
 let dest_test name expected text =
   Alcotest.test_case name `Quick (fun () ->
       match Execute_script_paths.script_destinations ~limit:8 text with

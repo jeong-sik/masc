@@ -28,31 +28,46 @@ let item_not_found_exit = 44
 
 type run = Exited of int * string | Failed
 
-let rec wait_child pid =
-  match Unix.waitpid [] pid with
-  | _, status -> Some status
-  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_child pid
-  | exception Unix.Unix_error _ -> None
+(* The read and the wait poll against the deadline instead of select(2),
+   which refuses descriptors past FD_SETSIZE; the managed-keychain check runs
+   inside the server, which can hold more than that many. *)
+let poll_interval_s = 0.01
 
 let read_until_deadline fd ~deadline =
   let buffer = Buffer.create 4096 in
   let chunk = Bytes.create 4096 in
   let rec loop () =
-    let remaining = deadline -. Unix.gettimeofday () in
-    if remaining <= 0.0 then Error `Deadline
-    else match Unix.select [ fd ] [] [] remaining with
-      | [], _, _ -> loop ()
-      | _ -> (
-        match Unix.read fd chunk 0 (Bytes.length chunk) with
-        | 0 -> Ok (Buffer.contents buffer)
-        | n when Buffer.length buffer + n > output_limit -> Error `Too_long
-        | n -> Buffer.add_subbytes buffer chunk 0 n; loop ()
-        | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-        | exception Unix.Unix_error _ -> Error `Read_failed)
-      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-      | exception Unix.Unix_error _ -> Error `Read_failed
+    match Unix.read fd chunk 0 (Bytes.length chunk) with
+    | 0 -> Ok (Buffer.contents buffer)
+    | n when Buffer.length buffer + n > output_limit -> Error `Too_long
+    | n -> Buffer.add_subbytes buffer chunk 0 n; loop ()
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+      if Unix.gettimeofday () >= deadline then Error `Deadline
+      else (Unix.sleepf poll_interval_s; loop ())
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+    | exception Unix.Unix_error _ -> Error `Read_failed
   in
   loop ()
+
+let rec wait_until_deadline pid ~deadline =
+  match Unix.waitpid [ Unix.WNOHANG ] pid with
+  | 0, _ when Unix.gettimeofday () >= deadline -> `Running
+  | 0, _ -> Unix.sleepf poll_interval_s; wait_until_deadline pid ~deadline
+  | _, status -> `Ended status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_until_deadline pid ~deadline
+  | exception Unix.Unix_error _ -> `Lost
+
+(* After SIGKILL the child ends without further help; reap it so no zombie
+   is left. *)
+let rec reap pid =
+  match Unix.waitpid [] pid with
+  | _ -> ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap pid
+  | exception Unix.Unix_error _ -> ()
+
+let kill_and_reap pid =
+  (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+  reap pid
 
 (* HIGH-RISK-UNREVIEWED: the only place masc runs security(1) on a login
    item. Fixed argv, no shell, stdin and stderr closed to it; called only
@@ -75,16 +90,23 @@ let run_security args =
       match spawned with
       | Error () -> Failed
       | Ok pid ->
-        let output = read_until_deadline stdout_read
-            ~deadline:(Unix.gettimeofday () +. deadline_s) in
-        (match output with
-         | Ok _ -> ()
-         | Error _ -> (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ()));
-        match output, wait_child pid with
-        | Ok text, Some (Unix.WEXITED code) -> Exited (code, text)
-        (* Killed at the deadline, stopped, or reaped elsewhere: no answer. *)
-        | Ok _, Some (Unix.WSIGNALED _ | Unix.WSTOPPED _) | Ok _, None -> Failed
-        | Error (`Deadline | `Too_long | `Read_failed), _ -> Failed
+        let deadline = Unix.gettimeofday () +. deadline_s in
+        let output = match Unix.set_nonblock stdout_read with
+          | () -> read_until_deadline stdout_read ~deadline
+          | exception Unix.Unix_error _ -> Error `Read_failed in
+        match output with
+        | Error (`Deadline | `Too_long | `Read_failed) -> kill_and_reap pid; Failed
+        | Ok text ->
+          match wait_until_deadline pid ~deadline with
+          | `Ended (Unix.WEXITED code) -> Exited (code, text)
+          (* Already reaped: its pid may belong to another process now. *)
+          | `Ended (Unix.WSIGNALED _) -> Failed
+          (* Without WUNTRACED a stop is not reported; if it were, the child
+             is still ours and alive. *)
+          | `Ended (Unix.WSTOPPED _) -> kill_and_reap pid; Failed
+          | `Running -> kill_and_reap pid; Failed
+          (* Reaped by another waiter: the exit status, and so the answer, is lost. *)
+          | `Lost -> Failed
 
 (* security -w ends the value with one newline. *)
 let value_of_output text =

@@ -29,13 +29,28 @@ type held = {
 
 open Result.Syntax
 let digest value = Agent_core_sha256.(to_hex (digest_string value))
+
+let sha256_hex_length = 64
+let hex length value =
+  String.length value = length && String.for_all (function
+    | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) value
+
+(* Docker names a container by the 64-digit ID its create prints. Apple
+   container takes the name the host gives as the container ID and refuses a
+   name longer than 63 characters, the length of a DNS label
+   (ManagedContainer.nameValid, 1.2.0 through 1.7.1). The host names an Apple
+   container by the first 63 hex digits of a SHA-256 digest; 252 bits still
+   keep two names apart. *)
+let apple_container_name_length = 63
+let apple_container_name value = String.sub (digest value) 0 apple_container_name_length
+
 let owned_name runtime instance_id = match runtime with
   | Docker -> "masc-lane-" ^ digest instance_id
-  | Apple_container -> digest instance_id
+  | Apple_container -> apple_container_name instance_id
 
-let valid_id id =
-  String.length id = 64 && String.for_all (function
-    | '0' .. '9' | 'a' .. 'f' -> true | _ -> false) id
+let valid_id runtime id = match runtime with
+  | Docker -> hex sha256_hex_length id
+  | Apple_container -> hex apple_container_name_length id
 
 let mount_argument runtime ({ source; destination } : mount) =
   if Filename.is_relative source || Filename.is_relative destination then
@@ -115,7 +130,7 @@ let listed_id runtime lookup raw = match runtime with
       if String.trim raw = "" then Ok None else
       let* value = parse raw in
       (match value with
-       | `String id when valid_id id -> Ok (Some id)
+       | `String id when valid_id Docker id -> Ok (Some id)
        | _ -> Error "unexpected container identity")
   | Apple_container ->
       let wanted = match lookup with Name value | Id value -> value in
@@ -138,7 +153,7 @@ let verify_container runtime ~name ~resources ~image raw =
   | Docker, Docker_image_id expected_image ->
       (match member "Id" entry, member "Name" entry, member "HostConfig" entry with
        | Some (`String id), Some (`String actual), Some host
-         when valid_id id && String.equal actual ("/" ^ name) ->
+         when valid_id Docker id && String.equal actual ("/" ^ name) ->
            let cpus = Int64.of_float (Float.round (resources.cpus *. 1_000_000_000.)) in
            if integer ["NanoCpus"] host <> Some cpus
               || integer ["Memory"] host <> Some resources.memory_bytes
@@ -184,7 +199,7 @@ let held_of_inspect runtime raw =
   | Docker ->
       (match member "Id" entry, member "Name" entry with
        | Some (`String id), Some (`String name)
-         when valid_id id && String.length name > 1 && name.[0] = '/' ->
+         when valid_id Docker id && String.length name > 1 && name.[0] = '/' ->
            let labels = path ["Config"; "Labels"] entry in
            let* instance = label_value labels instance_label in
            let* state_owner = label_value labels state_owner_label in
@@ -209,7 +224,7 @@ let listed_scoped_ids runtime ~scope raw = match runtime with
         let* ids = result in
         let* value = parse line in
         match value with
-        | `String id when valid_id id -> Ok (id :: ids)
+        | `String id when valid_id Docker id -> Ok (id :: ids)
         | _ -> Error "unexpected container identity") (Ok []) lines
       |> Result.map List.rev
   | Apple_container ->
@@ -266,7 +281,7 @@ let image_arguments runtime image = match runtime with
   | Apple_container -> ["image"; "inspect"; image]
 let image_of_inspect runtime raw =
   let sha256 value = String.length value = 71
-    && String.starts_with ~prefix:"sha256:" value && valid_id (String.sub value 7 64) in
+    && String.starts_with ~prefix:"sha256:" value && hex sha256_hex_length (String.sub value 7 sha256_hex_length) in
   match runtime with
   | Docker -> let value = String.trim raw in
       if sha256 value then Ok (Docker_image_id value)

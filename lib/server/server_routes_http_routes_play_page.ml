@@ -162,7 +162,7 @@ let agent_note =
     ]
 
 let page_script =
-  {play|>
+  {play|">
 'use strict';
 const STREAM_RETRY_MS = Number(document.currentScript.dataset.retryMs);
 const EVENTS_PATH = '/api/v1/play/events';
@@ -1523,7 +1523,7 @@ if (token === '') {
 let page ~nonce =
   let attribute = Csp_nonce.attribute nonce in
   String.concat "" [ page_head; attribute; page_style; agent_note; attribute;
-    " data-retry-ms=\""; string_of_int Server_mcp_transport_http_headers.sse_retry_ms; "\"";
+    " data-retry-ms=\""; string_of_int Server_mcp_transport_http_headers.sse_retry_ms;
     page_script ]
 
 let serve_page _request reqd =

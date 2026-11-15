@@ -292,12 +292,6 @@ let test_prepare_messages_both_override_and_extra_context () =
   | _ -> Alcotest.fail "expected single Text block"
 ;;
 
-let starts_with ~prefix s =
-  let prefix_len = String.length prefix in
-  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
-;;
-
-
 (* ── accumulate_usage tests ──────────────────────────────── *)
 
 let test_accumulate_usage_with_response () =

@@ -136,51 +136,6 @@ let require_model_capabilities model_id =
   | None -> Alcotest.failf "missing declared capabilities for %S" model_id
 ;;
 
-let rec find_repo_root dir =
-  if Sys.file_exists (Filename.concat dir "dune-project")
-  then dir
-  else (
-    let parent = Filename.dirname dir in
-    if String.equal parent dir
-    then Alcotest.fail "could not locate dune-project"
-    else find_repo_root parent)
-;;
-
-let source_path rel = Filename.concat (find_repo_root (Sys.getcwd ())) rel
-
-let require_assoc label = function
-  | `Assoc fields -> fields
-  | json -> Alcotest.failf "expected %s object, got %s" label (Yojson.Safe.to_string json)
-;;
-
-let require_field label key json =
-  match List.assoc_opt key (require_assoc label json) with
-  | Some value -> value
-  | None -> Alcotest.failf "missing %s.%s" label key
-;;
-
-let require_string label key json =
-  match require_field label key json with
-  | `String value -> value
-  | value ->
-    Alcotest.failf "expected %s.%s string, got %s" label key (Yojson.Safe.to_string value)
-;;
-
-let optional_bool ~default label key json =
-  match List.assoc_opt key (require_assoc label json) with
-  | None -> default
-  | Some (`Bool value) -> value
-  | Some value ->
-    Alcotest.failf "expected %s.%s bool, got %s" label key (Yojson.Safe.to_string value)
-;;
-
-let require_list label key json =
-  match require_field label key json with
-  | `List values -> values
-  | value ->
-    Alcotest.failf "expected %s.%s list, got %s" label key (Yojson.Safe.to_string value)
-;;
-
 let response_json ?(content = `String "ok") ?(finish_reason = "stop") ?message_fields () =
   let message_fields =
     match message_fields with

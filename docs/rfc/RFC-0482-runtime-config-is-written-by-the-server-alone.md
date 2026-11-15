@@ -40,9 +40,9 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 
 ### 1.3 CLI 프로세스
 
-여섯 명령 모두 이 워크스페이스의 서버가 답하면 서버로 보내고, 없으면 직접 쓴다(3.2).
+여섯 명령은 쓸 곳을 커널에 묻는다(3.2). lease 를 쥔 프로세스가 이 port 를 한 사용자 서버로 알리면 서버로 보낸다. lease 를 쥔 프로세스가 없으면 직접 쓴다. 그 밖의 주인이면 쓰지 않고 멈춘다.
 
-| 명령 | 서버가 있을 때 | 서버가 없을 때 |
+| 명령 | 커널이 서버를 말할 때 | lease 를 쥔 프로세스가 없을 때 |
 |---|---|---|
 | `masc config set` | 원문 route (`Masc_cli_runtime_config_remote.save`) | `Runtime_setting_set.apply` |
 | `masc web-search-setup` | 원문 route (`Masc_cli_runtime_config_remote.save`) | `Web_search_setup.apply` |
@@ -51,7 +51,7 @@ Keeper 목록의 정렬과 보기(`submit_keeper_preference`)는 runtime.toml �
 | `masc browser-lane-setup` | 원문 route. bidi·automation·ego 표를 서버 원문에 계획하고 저장한다(`Masc_cli_runtime_config_remote.table_store`) | 같은 계획을 파일에 쓴다(`Runtime_table_edit.file_store`) |
 | `masc runtime-setup-batch` | 서버 원문으로 정하고 임시 사본에서 검증한 뒤, 저장만 원문 route 로(`Runtime_setup_batch.configure_text`, `Masc_cli_runtime_config_remote.publish_setup_text`) | `Runtime_setup_batch.configure`. 임시 사본에 `runtime-default-set` 을 돌려 검증한 뒤 원래 파일에 쓴다 |
 
-`runtime-setup-batch` 는 `scripts/install-runtime-setup.py` 가 `runtime-setup-inventory` 다음에 부른다. inventory 도 서버가 답하면 서버 원문을 읽어서, batch 가 비교하는 revision 과 같은 원문에서 나온다. batch 가 임시 사본에 부르는 `runtime-default-set` 은 그 사본의 서버를 찾지 못해서 사본에 직접 쓴다.
+`runtime-setup-batch` 는 `scripts/install-runtime-setup.py` 가 `runtime-setup-inventory` 다음에 부른다. inventory 도 같은 커널 읽기로 읽을 곳을 정한다. 커널이 말한 서버가 있으면 서버 원문을 읽는다. 그래서 batch 가 비교하는 revision 과 같은 원문에서 나온다. lease 를 쥔 프로세스가 없으면 파일을 읽고, 그 밖의 주인이면 읽지 않고 멈춘다. batch 가 임시 사본에 부르는 `runtime-default-set` 은 그 사본의 lease 를 쥔 프로세스가 없어서 사본에 직접 쓴다.
 
 ## 2. 문제
 

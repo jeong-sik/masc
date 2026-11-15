@@ -5068,6 +5068,12 @@
  (modules test_tui_planning_detail)
  (libraries alcotest masc masc.masc_goal masc.masc_types masc_tui_planning_detail masc_tui_fetched yojson))
 
+; #39571: a Goal at work past its due date stands apart from one due later.
+(test
+ (name test_tui_planning_due)
+ (modules test_tui_planning_due)
+ (libraries alcotest masc masc.masc_goal masc_tui_planning_due ptime))
+
 (test
  (name test_tui_roster_pane)
  (modules test_tui_roster_pane)

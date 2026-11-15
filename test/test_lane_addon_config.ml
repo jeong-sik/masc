@@ -373,14 +373,18 @@ visibilities = ["public"]
     check_error "a binding without a time zone is refused before install" path;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
     check_error "a binding key the package does not read is refused" path;
-    let following output = write path (Printf.sprintf {|id = "quiz"
+    (* since says where a quiz that follows a lesson reads from until a
+       session has asked (RFC operator-quiz-follows-lesson §3.8). *)
+    declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n";
+    check_error "a quiz on its own refuses since" path;
+    let following ?(since = "since = 1794441600\n") output = write path (Printf.sprintf {|id = "quiz"
 run_id = "quiz"
 manifest_path = %S
 
 [binding]
 language = "ko"
 timezone = "Asia/Seoul"
-
+%s
 [[binding.sources]]
 source_id = "lesson"
 kind = "lane_output"
@@ -392,9 +396,15 @@ selection = "latest_completed"
 source_id = "board"
 kind = "board"
 visibilities = ["public"]
-|} manifest output) in
+|} manifest since output) in
     following "scenes";
     ignore (unwrap (Config.load_file ~path));
+    following ~since:"" "scenes";
+    check_error "a quiz that follows a lesson without since is refused" path;
+    following ~since:"since = \"yesterday\"\n" "scenes";
+    check_error "a since that is not a number is refused" path;
+    following ~since:"since = -1\n" "scenes";
+    check_error "a since before 1970 is refused" path;
     following "lesson";
     check_error "a source that is not a lesson's scenes output is refused" path)
 

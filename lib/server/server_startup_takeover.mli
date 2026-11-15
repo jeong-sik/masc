@@ -286,7 +286,8 @@ val lease_file_present :
     The answer is of the moment it was read, and no lock is held over it. A
     lease file made after a [false] is not seen: the caller reads no owner and
     answers that once that nobody holds the BasePath
-    ({!Server_upgrade_preparation.holder}). The next ask finds the file. *)
+    ({!Server_upgrade_preparation.owner_without_making}). The next ask finds
+    the file. *)
 
 (** {1 The port announcements}
 

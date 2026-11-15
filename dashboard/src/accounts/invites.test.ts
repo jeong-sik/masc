@@ -105,11 +105,13 @@ describe('reading the answers about invitations', () => {
       one({ issuer: null }),
       one({ issuer: 'local_operator' }),
       one({ expires_at_ms: 8_640_000_000_000_001 }),
+      one({ status: 'open', user_id: '' }),
+      one({ status: 'paused', user_id: '' }),
       readInvites({ invites: [inviteJson('inv_1'), inviteJson('inv_1')] }),
       readInvites({ invites: ['inv_1'] }),
       readInvites({ invites: {} }),
       readInvites([]),
-    ]).toEqual(Array.from({ length: 19 }, () => null))
+    ]).toEqual(Array.from({ length: 21 }, () => null))
   })
 
   it('reads an invitation made only with a link to the invitation page that carries a token', () => {
@@ -139,11 +141,11 @@ describe('sending about invitations', () => {
     await revoke(send, 'token-1', 'inv_1/x')
     expect(sent.map(({ path, init }) => {
       const headers = new Headers(init.headers)
-      return [path, init.method, init.credentials, headers.get(csrfHeader), headers.has('authorization'), init.body ?? null]
+      return [path, init.method, init.credentials, headers.get(csrfHeader), headers.has('authorization'), headers.get('content-type'), init.body ?? null]
     })).toEqual([
-      [invitesPath, 'GET', 'same-origin', null, false, null],
-      [invitesPath, 'POST', 'same-origin', 'token-1', false, JSON.stringify({ role: 'admin' })],
-      [`${invitesPath}/inv_1%2Fx`, 'DELETE', 'same-origin', 'token-1', false, null],
+      [invitesPath, 'GET', 'same-origin', null, false, null, null],
+      [invitesPath, 'POST', 'same-origin', 'token-1', false, 'application/json', JSON.stringify({ role: 'admin' })],
+      [`${invitesPath}/inv_1%2Fx`, 'DELETE', 'same-origin', 'token-1', false, null, null],
     ])
   })
 
@@ -181,7 +183,69 @@ describe('the invitations an Admin sees', () => {
     await model.retry()
     const failed = model.view.value
     await model.retry()
-    expect([slow, failed.kind === 'failed' ? failed.failure.attempts : null, invitesOf(model)?.length]).toEqual([{ kind: 'reading', forUser: 'usr_first', slow: true }, 2, 1])
+    expect([slow, failed.kind === 'failed' ? failed.failure.attempts : null, invitesOf(model)?.length, vi.getTimerCount()]).toEqual([{ kind: 'reading', forUser: 'usr_first', slow: true }, 2, 1, 0])
+  })
+
+  it('says the reading of the latest person is slow on its own clock, not on that of one before', async () => {
+    vi.useFakeTimers()
+    const before = later()
+    const now = later()
+    const { send } = answering([before.answer, now.answer])
+    const model = createInvites({ send, leave: vi.fn() })
+    const firstRun = model.load(first)
+    await vi.advanceTimersByTimeAsync(200)
+    const run = model.load(second)
+    await vi.advanceTimersByTimeAsync(150)
+    const early = model.view.value
+    await vi.advanceTimersByTimeAsync(200)
+    const late = model.view.value
+    now.give(listed())
+    before.give(listed())
+    await Promise.all([run, firstRun])
+    expect([early, late]).toEqual([{ kind: 'reading', forUser: 'usr_second', slow: false }, { kind: 'reading', forUser: 'usr_second', slow: true }])
+  })
+
+  it('takes no reading that answers after it stopped, and sends nothing with the session it showed', async () => {
+    const wait = later()
+    const { send, sent } = answering([wait.answer])
+    const model = createInvites({ send, leave: vi.fn() })
+    const run = model.load(first)
+    model.stop()
+    await model.revoke('inv_1')
+    await model.make('member')
+    wait.give(listed(inviteJson('inv_1')))
+    await run
+    expect([model.view.value, methods(sent)]).toEqual([{ kind: 'waiting' }, [`GET ${invitesPath}`]])
+  })
+
+  it('forgets what came of the revokes of an Admin once it stopped', async () => {
+    const { model, sent } = await loaded([json(404, { error: 'no invitation' }), listed()])
+    await model.revoke('inv_1')
+    await settled(sent, 2)
+    const kept = model.revoking.value.size
+    model.stop()
+    expect([kept, model.revoking.value.size]).toEqual([1, 0])
+  })
+
+  it('stays leaving when a make answers after a revoke found that the session ended, and reads nothing more', async () => {
+    const wait = later()
+    const { model, sent, leave } = await loaded([wait.answer, noSession()])
+    const making = model.make('member')
+    await model.revoke('inv_1')
+    wait.give(issuedAnswer('inv_2'))
+    await making
+    expect([model.making.value, methods(sent).filter((one) => one.startsWith('GET')).length, leave.mock.calls.length]).toEqual([{ kind: 'leaving' }, 1, 1])
+  })
+
+  it('reads and writes again for an Admin shown after the browser had to leave', async () => {
+    const { send, sent } = answering([listed(inviteJson('inv_1')), noSession(), listed(), issuedAnswer('inv_2'), listed(inviteJson('inv_2'))])
+    const model = createInvites({ send, leave: vi.fn() })
+    await model.load(first)
+    await model.revoke('inv_1')
+    await model.load(second)
+    await model.make('member')
+    await settled(sent, 3)
+    expect([model.view.value.kind, model.making.value.kind]).toEqual(['read', 'issued'])
   })
 
   it('makes an invitation for the role asked, shows its link until the Admin took it, and reads the list again', async () => {

@@ -327,10 +327,13 @@ let runtime_path_rest_json ~now assignment_id =
       ]
 
 (* What one row of the Keeper list carries. A roster row answers which Keepers
-   exist and whether each can take work: name, status, phase, health and
-   paused. A detail row adds everything a Keeper pane shows: meta, last
-   failure, runtime blocker and lane, recent turns. A roster row also skips
-   the receipt, turn pulse and blocker reads the detail row needs. *)
+   exist and whether each can take work: name, status, phase, health, paused
+   and runtime_path_rest. A Running, healthy Keeper whose every path rests
+   cannot dispatch until a path releases, and only runtime_path_rest says so.
+   A detail row adds everything a Keeper pane shows: meta, last failure,
+   runtime blocker and lane, recent turns. A roster row also skips the
+   receipt, turn pulse and blocker reads the detail row needs; the path rest
+   reads in-memory rest records, not disk. *)
 type keeper_list_row_shape =
   | Roster_row
   | Detail_row
@@ -398,6 +401,9 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
         | Some p -> Keeper_state_machine.phase_to_string p
         | None -> "offline"
       in
+      let runtime_path_rest =
+        runtime_path_rest_json ~now:now_ts (Keeper_meta_contract.runtime_id_of_meta meta)
+      in
       match shape with
       | Roster_row ->
         Some
@@ -407,6 +413,7 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
             ; ("phase", `String phase)
             ; ("health", `String health)
             ; ("paused", `Bool meta.paused)
+            ; ("runtime_path_rest", runtime_path_rest)
             ])
       | Detail_row ->
       let last_failure =
@@ -497,10 +504,7 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
             ("runtime_blocker_summary", Json_util.string_opt_to_json runtime_blocker_summary);
             ("runtime_blocker_signature", Json_util.string_opt_to_json runtime_blocker_signature);
             ("runtime_lane_observation", runtime_lane_observation);
-            ( "runtime_path_rest"
-            , runtime_path_rest_json
-                ~now:now_ts
-                (Keeper_meta_contract.runtime_id_of_meta meta) );
+            ("runtime_path_rest", runtime_path_rest);
             ("operator_disposition", operator_disposition);
             ("operator_disposition_reason", operator_disposition_reason);
             ("failing_since", failing_since);

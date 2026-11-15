@@ -17,7 +17,10 @@ name = "detailed"
 type = "boolean"
 description = """
 Without it, keepers lists the names and items carries one short row per \
-keeper: name, status, phase, health and paused. With true, keepers carries \
+keeper: name, status, phase, health, paused and runtime_path_rest. \
+runtime_path_rest says whether the next dispatch waits on a resting path \
+(status resting, with release_at) or a path serves (status serving); a \
+healthy, running keeper can still be resting. With true, keepers carries \
 each keeper's whole row: meta, last failure, runtime blocker and lane, \
 recent turns. A name argument returns that keeper's whole row either way."""
 

@@ -1,4 +1,5 @@
 import { readKeeperCostCoverage } from '../lib/keeper-cost-coverage'
+import { attentionReasonLabel } from '../lib/keeper-attention-labels'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -103,7 +104,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       system_prompt_blocks: {
         system: { key: 'keeper', source: 'file', text: 'system text' },
       },
-      system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [] } },
+      system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [], isolated_lines: [] } },
       unified_user_message_preview: 'world state',
     },
     execution: {
@@ -1121,7 +1122,6 @@ const mocks = vi.hoisted(() => {
           parameter_policy: {
             reasoning_toggle_wire: 'chat_template_kwargs',
             reasoning_replay_policy: 'preserve_always',
-            requires_reasoning_replay_on_tool_call: true,
             ignored_sampling_params: ['temperature'],
             always_ignored_sampling_params: [],
           },
@@ -1533,6 +1533,27 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     expect(container.textContent).not.toContain('이 Keeper 는 네트워크가 없습니다')
+  })
+
+  // The trust snapshot names why a Keeper needs attention as a wire token in
+  // disposition_reason when the status bridge gives no attention_reason.
+  it('names the runtime trust reason by its label, not the wire token', async () => {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        runtime_trust: { needs_attention: true, disposition_reason: 'pending_operator_decision' },
+      }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '상태·진단')
+    await flush()
+
+    expect(container.textContent).toContain(
+      `ON · ${attentionReasonLabel('pending_operator_decision', false)}`,
+    )
+    expect(container.textContent).not.toContain('pending_operator_decision')
   })
 
   it('allows runtime config assignment writes when Keeper name is valid without a manifest path', async () => {
@@ -2685,7 +2706,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
   it('shows the assembled system prompt when it was built', async () => {
     await openSystemPromptPreview({
       state: 'available', effective: 'full prompt', assembled: 'assembled prompt',
-      constitution_ledger: { state: 'read', rejected_lines: [] },
+      constitution_ledger: { state: 'read', rejected_lines: [], isolated_lines: [] },
     })
     expect(container.textContent).toContain('assembled prompt')
     expect(container.querySelector('[data-testid="kcf-system-prompt-unavailable"]')).toBeNull()
@@ -2701,6 +2722,7 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
           { line: 2, line_end: 'newline_terminated', detail: 'Yojson error' },
           { line: 4, line_end: 'unterminated_final_line', detail: 'Unexpected end of input' },
         ],
+        isolated_lines: [],
       },
     })
     expect(container.textContent).toContain('assembled prompt')
@@ -2711,6 +2733,22 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     ])
     expect(rows[0]?.textContent).toContain('Yojson error')
     expect(rows[1]?.textContent).toContain('Unexpected end of input')
+  })
+
+  it('names each constitution line whose author left the roster beside the unreadable ones (#52169)', async () => {
+    await openSystemPromptPreview({
+      state: 'available', effective: 'full prompt', assembled: 'assembled prompt',
+      constitution_ledger: {
+        state: 'read',
+        rejected_lines: [{ line: 2, line_end: 'newline_terminated', detail: 'Yojson error' }],
+        isolated_lines: [{ line: 3, subject: 'departed-keeper', article_ids: ['a-0123456789abcdef0123456789abcdef'] }],
+      },
+    })
+    const rejected = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="kcf-constitution-rejected-line"]'))
+    expect(rejected.map(row => row.dataset.line)).toEqual(['2'])
+    const isolated = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="kcf-constitution-isolated-line"]'))
+    expect(isolated.map(row => [row.dataset.line, row.dataset.subject])).toEqual([['3', 'departed-keeper']])
+    expect(isolated[0]?.textContent).toContain('a-0123456789abcdef0123456789abcdef')
   })
 
   it('says the left-out lines are unknown when the ledger read failed', async () => {

@@ -3402,7 +3402,6 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
 (** Build routes for MCP server *)
 
 module For_testing = struct
-  let operation_heartbeat_decision = operation_heartbeat_decision
   let persist_batch_user_rows = persist_batch_user_rows
   let operation_execution_of_outcome = operation_execution_of_outcome
   let parse_request = parse_keeper_chat_stream_request

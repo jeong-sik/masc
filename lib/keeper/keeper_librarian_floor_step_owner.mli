@@ -10,7 +10,7 @@ type wait = Lane_addon_submit_once.wait =
   | Capacity | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
 type call = expected:Keeper_librarian_durable_request.destination ->
-  original:Lane_addon_tool_request_owner.retained -> arguments:Yojson.Safe.t ->
+  original:Lane_addon_tool_request_owner.Record.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_submit_once.call_error) result
 (** Actual Runtime call edge must recheck the original semantic destination and
     physical owner immediately before RPC. Only failures before RPC are Not_sent. *)

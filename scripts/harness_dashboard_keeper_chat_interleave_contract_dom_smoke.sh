@@ -21,7 +21,7 @@ ORDER_SIGNATURE='trace:think|tool:tc-context|trace:think|tool:tc-missing|chat:as
 STATUS_SELECTOR="[data-interleave-contract-fixture-status=\"ok\"][data-interleave-order-signature=\"${ORDER_SIGNATURE}\"][data-interleave-joined-tool-count=\"1\"][data-interleave-trace-only-tool-count=\"1\"]"
 TRACE_SELECTOR="[data-chat-work-trace][data-chat-turn-order-signature=\"${ORDER_SIGNATURE}\"][data-chat-tool-output-hydration-status=\"hydrated\"][data-chat-tool-output-covered-through=\"1783261210000\"]"
 JOINED_TOOL_SELECTOR='[data-chat-trace-step="tool"][data-chat-turn-order-index="1"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-context"][data-chat-trace-entry-id="tool-tc-context"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="ok"][data-chat-trace-output-coverage="covered"]'
-TRACE_ONLY_TOOL_SELECTOR='[data-chat-trace-step="tool"][data-chat-turn-order-index="3"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-missing"][data-chat-trace-link-state="trace-only"][data-chat-trace-output-state="pending"]'
+TRACE_ONLY_TOOL_SELECTOR='[data-chat-trace-step="tool"][data-chat-turn-order-index="3"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-missing"][data-chat-trace-link-state="trace-only"][data-chat-trace-output-state="unavailable"]'
 CHAT_SELECTOR='[data-chat-trace-step="chat"][data-chat-turn-order-index="4"][data-chat-turn-order-kind="chat"][data-chat-trace-entry-id="assistant-interleave"]'
 
 trap harness_dashboard_dev_server_stop_on_exit EXIT

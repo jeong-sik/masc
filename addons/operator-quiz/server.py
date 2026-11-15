@@ -172,7 +172,7 @@ class Worker:
                             or not isinstance(questions, int) or questions < 1:
                         return self.refuse(request_id, "compose names how many questions to write")
                     session_id = self.flow.compose(request_id, questions, self.binding, time.time(),
-                                                   lesson=f.lesson_source_of_binding(self.binding))
+                                                   lesson=f.lesson_of_binding(self.binding))
                     # The session is open now; a projection that cannot be read
                     # does not undo that, so the receipt still says confirmed.
                     try:

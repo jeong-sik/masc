@@ -583,6 +583,7 @@ type model_evidence =
 
 type model_message =
   { text : string
+  ; resolution_blocks : Agent_core.Types.content_block list
   ; resolutions : Keeper_event_queue.hitl_resolution list
   ; replay_evidence : model_evidence list
   ; instruction_resolutions : Keeper_event_queue.hitl_resolution list
@@ -629,8 +630,15 @@ let input_replay_execution = function
   | Approved_replay { execution; _ } -> Some execution
 
 let plain_model_message text =
-  { text; resolutions = []; replay_evidence = []; instruction_resolutions = []
-  ; approval_input_bindings = Ok [] }
+  { text; resolution_blocks = []; resolutions = []; replay_evidence = []
+  ; instruction_resolutions = []; approval_input_bindings = Ok [] }
+
+(* One fragment after the original input. [text] and [resolution_blocks]
+   hold the same fragment value, so a structured input that already carries
+   the original appends the fragment, never the original a second time. *)
+let resolved_model_message ~user_message fragment =
+  { (plain_model_message (String.concat "\n" [ user_message; ""; fragment ])) with
+    resolution_blocks = [ Agent_core.Types.Text fragment ] }
 
 let replay_evidence_effect_to_string = function
   | Evidence_applied -> "applied"
@@ -701,15 +709,9 @@ let replay_model_message
   let replay_evidence =
     { approval_id; operation; effect_kind; journal; artifact_ref }
   in
-  { text =
-      String.concat
-        "\n"
-        [ user_message; ""; canonical_replay_evidence_fragment replay_evidence ]
-  ; resolutions = []
-  ; replay_evidence = [ replay_evidence ]
-  ; instruction_resolutions = []
-  ; approval_input_bindings = Ok []
-  }
+  { (resolved_model_message ~user_message
+       (canonical_replay_evidence_fragment replay_evidence))
+    with replay_evidence = [ replay_evidence ] }
 ;;
 
 let append_model_evidence ~approval_id ~user_message = function
@@ -764,7 +766,7 @@ let append_model_evidence ~approval_id ~user_message = function
              ; Printf.sprintf "- detail_sha256: %s" (payload_fingerprint detail)
              ])
     in
-    plain_model_message (String.concat "\n" [ user_message; ""; repair_fragment ])
+    resolved_model_message ~user_message repair_fragment
   | Resolution_absent { absence } ->
     let store = Keeper_approval_queue_result.resolution_absence_to_string absence in
     let absent_fragment =
@@ -779,7 +781,7 @@ let append_model_evidence ~approval_id ~user_message = function
              ; "- state: no durable resolution to replay; not retried"
              ])
     in
-    plain_model_message (String.concat "\n" [ user_message; ""; absent_fragment ])
+    resolved_model_message ~user_message absent_fragment
 ;;
 
 let append_model_evidence_block evidence blocks =
@@ -832,36 +834,39 @@ let project_model_input ~base_path evidence messages =
   project_model_inputs ~base_path [ evidence ] messages
 ;;
 
+let approved_resolution_fragment ~approval_id ~tool_name ~input =
+  match replayable_of_operation tool_name with
+  | Some _ ->
+    render_gate_replay_prompt
+      Prompt_names.keeper_gate_replay_resolution_without_replay_outcome
+      [ "approval_id", approval_id; "operation", tool_name ]
+      ~fallback:
+        (String.concat
+           "\n"
+           [ Printf.sprintf "- approval_id: %s" approval_id
+           ; Printf.sprintf "- operation: %s" tool_name
+           ])
+  | None ->
+    let exact_input = Yojson.Safe.to_string input in
+    render_gate_replay_prompt
+      Prompt_names.keeper_gate_replay_resolution_exact_input
+      [ "approval_id", approval_id
+      ; "operation", tool_name
+      ; "exact_input", exact_input
+      ]
+      ~fallback:
+        (String.concat
+           "\n"
+           [ Printf.sprintf "- approval_id: %s" approval_id
+           ; Printf.sprintf "- operation: %s" tool_name
+           ; exact_input
+           ])
+;;
+
 let approved_resolution_message ~approval_id ~tool_name ~input ~user_message =
-  let resolution_fragment =
-    match replayable_of_operation tool_name with
-    | Some _ ->
-      render_gate_replay_prompt
-        Prompt_names.keeper_gate_replay_resolution_without_replay_outcome
-        [ "approval_id", approval_id; "operation", tool_name ]
-        ~fallback:
-          (String.concat
-             "\n"
-             [ Printf.sprintf "- approval_id: %s" approval_id
-             ; Printf.sprintf "- operation: %s" tool_name
-             ])
-    | None ->
-      let exact_input = Yojson.Safe.to_string input in
-      render_gate_replay_prompt
-        Prompt_names.keeper_gate_replay_resolution_exact_input
-        [ "approval_id", approval_id
-        ; "operation", tool_name
-        ; "exact_input", exact_input
-        ]
-        ~fallback:
-          (String.concat
-             "\n"
-             [ Printf.sprintf "- approval_id: %s" approval_id
-             ; Printf.sprintf "- operation: %s" tool_name
-             ; exact_input
-             ])
-  in
-  String.concat "\n" [ user_message; ""; resolution_fragment ]
+  String.concat
+    "\n"
+    [ user_message; ""; approved_resolution_fragment ~approval_id ~tool_name ~input ]
 ;;
 
 let message_for_stored_resolution ~base_path ~user_message = function
@@ -880,12 +885,11 @@ let message_for_stored_resolution ~base_path ~user_message = function
          ; state = Keeper_approval_queue_result.Resolution_unconsumed
          ; replay_outcome = None
          } ->
-       let message = plain_model_message
-         (approved_resolution_message
+       let message = resolved_model_message ~user_message
+         (approved_resolution_fragment
             ~approval_id
             ~tool_name:request.tool_name
-            ~input:request.input
-            ~user_message) in
+            ~input:request.input) in
        { message with instruction_resolutions = [ resolution ] }
      | Ok
          { request
@@ -910,22 +914,17 @@ let message_for_stored_resolution ~base_path ~user_message = function
          "approved Gate grant consumed without replay result approval=%s operation=%s"
          approval_id
          request.tool_name;
-       plain_model_message
-         (String.concat
-            "\n"
-            [ user_message
-            ; ""
-            ; render_gate_replay_prompt
-                Prompt_names.keeper_gate_replay_resolution_consumed_without_outcome
-                [ "approval_id", approval_id; "operation", request.tool_name ]
-                ~fallback:
-                  (String.concat
-                     "\n"
-                     [ Printf.sprintf "- approval_id: %s" approval_id
-                     ; Printf.sprintf "- operation: %s" request.tool_name
-                     ; "- state: authorization consumed, replay outcome unavailable"
-                     ])
-            ])
+       resolved_model_message ~user_message
+         (render_gate_replay_prompt
+            Prompt_names.keeper_gate_replay_resolution_consumed_without_outcome
+            [ "approval_id", approval_id; "operation", request.tool_name ]
+            ~fallback:
+              (String.concat
+                 "\n"
+                 [ Printf.sprintf "- approval_id: %s" approval_id
+                 ; Printf.sprintf "- operation: %s" request.tool_name
+                 ; "- state: authorization consumed, replay outcome unavailable"
+                 ]))
      | Ok
          { state = Keeper_approval_queue_result.Resolution_unconsumed
          ; replay_outcome = Some _
@@ -934,55 +933,40 @@ let message_for_stored_resolution ~base_path ~user_message = function
        Log.Keeper.error
          "approved Gate replay result exists before grant consumption approval=%s"
          approval_id;
-       plain_model_message
-         (String.concat
-            "\n"
-            [ user_message
-            ; ""
-            ; render_gate_replay_prompt
-                Prompt_names.keeper_gate_replay_resolution_invalid_replay_state
-                [ "approval_id", approval_id ]
-                ~fallback:
-                  (Printf.sprintf
-                     "- approval_id: %s\n- state: invalid durable replay state"
-                     approval_id)
-            ])
+       resolved_model_message ~user_message
+         (render_gate_replay_prompt
+            Prompt_names.keeper_gate_replay_resolution_invalid_replay_state
+            [ "approval_id", approval_id ]
+            ~fallback:
+              (Printf.sprintf
+                 "- approval_id: %s\n- state: invalid durable replay state"
+                 approval_id))
      | Error error ->
        Log.Keeper.error
          "approved Gate request unavailable approval=%s: %s"
          approval_id
          (Keeper_approval_queue_result.grant_error_to_string error);
-       plain_model_message
-         (String.concat
-            "\n"
-            [ user_message
-            ; ""
-            ; render_gate_replay_prompt
-                Prompt_names.keeper_gate_replay_resolution_journal_unreadable
-                [ "approval_id", approval_id ]
-                ~fallback:(Printf.sprintf "- approval_id: %s" approval_id)
-            ]))
+       resolved_model_message ~user_message
+         (render_gate_replay_prompt
+            Prompt_names.keeper_gate_replay_resolution_journal_unreadable
+            [ "approval_id", approval_id ]
+            ~fallback:(Printf.sprintf "- approval_id: %s" approval_id)))
   | Some
       ({ Keeper_event_queue.approval_id
        ; decision = Keeper_event_queue.Hitl_rejected rationale
        ; _
        } as resolution) ->
-    let message = plain_model_message
-      (String.concat
-         "\n"
-         [ user_message
-         ; ""
-         ; render_gate_replay_prompt
-             Prompt_names.keeper_gate_replay_resolution_rejected
-             [ "approval_id", approval_id; "rationale", rationale ]
-             ~fallback:
-               (String.concat
-                  "\n"
-                  [ Printf.sprintf "- approval_id: %s" approval_id
-                  ; "- decision: rejected"
-                  ; Printf.sprintf "- rationale: %s" rationale
-                  ])
-         ]) in
+    let message = resolved_model_message ~user_message
+      (render_gate_replay_prompt
+         Prompt_names.keeper_gate_replay_resolution_rejected
+         [ "approval_id", approval_id; "rationale", rationale ]
+         ~fallback:
+           (String.concat
+              "\n"
+              [ Printf.sprintf "- approval_id: %s" approval_id
+              ; "- decision: rejected"
+              ; Printf.sprintf "- rationale: %s" rationale
+              ])) in
     { message with instruction_resolutions = [ resolution ] }
   | None -> plain_model_message user_message
 ;;
@@ -1026,9 +1010,9 @@ let compose_model_message
       ~user_message
       ~inputs
   =
-  let text, resolutions_rev, evidence_rev, instructions_rev, bindings_rev =
+  let text, blocks_rev, resolutions_rev, evidence_rev, instructions_rev, bindings_rev =
     List.fold_left
-      (fun (text, resolutions_rev, evidence_rev, instructions_rev, bindings_rev) input ->
+      (fun (text, blocks_rev, resolutions_rev, evidence_rev, instructions_rev, bindings_rev) input ->
          let resolution =
            match input with
            | Stored_resolution resolution
@@ -1055,13 +1039,14 @@ let compose_model_message
              |> bind_model_fragment ~resolution
          in
          text ^ next.text,
+         List.rev_append next.resolution_blocks blocks_rev,
          resolution :: resolutions_rev,
          List.rev_append next.replay_evidence evidence_rev,
          List.rev_append next.instruction_resolutions instructions_rev,
          Result.bind bindings_rev (fun reversed ->
            Result.map (fun bindings -> List.rev_append bindings reversed)
              next.approval_input_bindings))
-      (user_message, [], [], [], Ok []) inputs
+      (user_message, [], [], [], [], Ok []) inputs
   in
   let approval_input_bindings = Result.bind bindings_rev (fun reversed ->
     let bindings = List.rev reversed in
@@ -1070,6 +1055,7 @@ let compose_model_message
     | _ :: _ -> Keeper_chat_delivery_identity.validate_approval_input_bindings bindings
       |> Result.map (fun () -> bindings)) in
   { text
+  ; resolution_blocks = List.rev blocks_rev
   ; resolutions = List.rev resolutions_rev
   ; replay_evidence = List.rev evidence_rev
   ; instruction_resolutions = List.rev instructions_rev

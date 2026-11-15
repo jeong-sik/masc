@@ -11,8 +11,11 @@ type source =
   | Msx_capture of { id : string }
   | Dos_capture of { id : string }
   | Lane_output of { id : string; installation_id : string; output_id : string option }
-  | Browser_document of { id : string; selection : browser_selection;
+  | Browser_document of { id : string; installation_id : string; selection : browser_selection;
       tab_id : int; target_id : string; environment : string; request_id : string }
+      (** [installation_id] is the declaration id of the browser Add-on
+          installation the document is read from. [parse] refuses a
+          [browser_document] source without it. *)
 val parse : Yojson.Safe.t -> (source list, string) result
 (** Typed source bindings shared by acquisition and read-only presentation. *)
 val validate : Yojson.Safe.t -> (unit, string) result
@@ -34,6 +37,9 @@ type activity = Tool_completed | Machine_changed of Machine_lane.t | Browser_cha
 type refresh_interest
 val refresh_interest : Yojson.Safe.t -> (refresh_interest, string) result
 val interested : refresh_interest -> activity -> bool
+val reads_browser_installation : refresh_interest -> string -> bool
+(** Whether a [browser_document] source of the binding names this browser
+    Add-on declaration id. *)
 val activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity
 (** The activity a finished misc tool stands for. Exhaustive over the
     operation type, so a new MSX, DOS or browser tool cannot be read as a generic
@@ -80,7 +86,7 @@ val authorize : access:access -> Yojson.Safe.t -> (unit, string) result
 val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
   resolve_machine_output:(Machine_lane.t -> (machine_output, string) result) ->
   resolve_lane_output:(installation_id:string -> (lane_output, string) result) ->
-  read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
+  read_browser_document:(installation_id:string -> route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
   binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result
 (** The complete returned source array fits the package's ingress envelope.
     Unavailable sources retain explicit coverage entries. Bound file snapshots
@@ -93,7 +99,8 @@ val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_ty
     claim completeness for one port independently of other producer inputs.
 
     A [browser_document] source asks [read_browser_document] for the document
-    of one existing tab on the bound route. The host answers from the browser
+    of one existing tab on the bound route, served by the bound browser Add-on
+    installation. The host answers from the browser
     owner without queueing behind another browser command; [Error] says why no
     document was read and becomes the source's unavailable detail. The
     returned document must name the bound tab and, on the live lane, the bound

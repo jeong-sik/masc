@@ -38,7 +38,9 @@ val issue : Login_routes.t -> Authz_browser_request.request -> body:string -> Lo
     "issued_at_ms", "status"}]. [status] is what {!Authz_pat_state.find_active}
     says now: ["open"], ["expired"] or ["revoked"]. ["unknown"] means the
     state lost an id that the same snapshot listed, which is a bug. No token
-    and no digest is in the answer. *)
+    and no digest is in the answer. The PATs come from the trusted snapshot
+    that judged the session ({!Login_routes.acting_reading}), so a zone that
+    cannot be trusted gives the 503 of {!Login_routes.zone_uncertain}. *)
 val list : Login_routes.t -> Authz_browser_request.request -> Login_routes.answer
 
 (** [pat_id] is the [<id>] of the path; one that is not an id is a 400. The

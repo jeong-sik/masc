@@ -21,16 +21,20 @@ type publish = original:Lane_addon_tool_request_owner.retained ->
     proved by the publication owner and grants no Memory or source ACK. No
     callback acceptance is a completed publication. *)
 type call = expected:Keeper_librarian_durable_request.destination ->
-  original:Lane_addon_tool_request_owner.retained -> arguments:Yojson.Safe.t ->
+  original:Lane_addon_tool_request_owner.Record.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result, Lane_addon_submit_once.call_error) result
 (** Actual Runtime call edge must recheck the original semantic destination and
     physical owner immediately before RPC. Only failures before RPC are Not_sent. *)
 type outcome =
-  | Pending of wait * Lane_addon_tool_request_owner.retained
   | Publication_waiting of string
   | Refused of Lane_addon_exact.final * Lane_addon_tool_request_owner.retained
   | Finished of Lane_addon_tool_request_owner.retained
   | Basis_superseded of Lane_addon_tool_request_owner.retained
+type resumed =
+  | Waited of wait * Lane_addon_tool_request_owner.Record.t
+      (** The original waits for its worker. Its body may not have been read. *)
+  | Resumed of outcome * Keeper_librarian_durable_request.t
+      (** The body was read, and the outcome is of this request. *)
 val retain : store:Lane_addon_store.t -> Keeper_librarian_durable_request.t ->
   (Lane_addon_tool_request_owner.retained, error) result
 (** Persist the full original before any dispatch, retaining its existing journal.
@@ -51,12 +55,19 @@ val load : store:Lane_addon_store.t -> listed ->
 (** Read and strictly restore one discovered original's body. The record read
     with the body must still hold the discovered index, and
     [Keeper_librarian_durable_request.restore] binds that index to the body. *)
+type held =
+  | Listed of listed
+      (** Its record and index. Its fence and predecessor are checked on them,
+          and {!load} reads the body only in the branches of
+          [Lane_addon_submit_once.resume] that need it, and for commit and
+          settled phases. *)
+  | Read of (Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t)
+      (** Already read with its body, which is checked before anything else. *)
 val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
-  original:Lane_addon_tool_request_owner.retained -> request:Keeper_librarian_durable_request.t ->
-  call:call -> publish:publish -> wake:(unit -> unit) -> (outcome, error) result
+  original:held -> call:call -> publish:publish -> wake:(unit -> unit) -> (resumed, error) result
 (** Host retained/latest proof and complete raw domain validation precede any
     publication callback, including recovery while Off. An actual host terminal
-    [Outcome_unknown] returns [Pending (Worker_unknown, original)] after its
+    [Outcome_unknown] returns [Waited (Worker_unknown, original)] after its
     immutable refusal is verified and retained. It never grants a fresh source
     selection or submission, including after restart or while Off. An
     [interrupted] cause also calls [wake]: inventory validation reads that

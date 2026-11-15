@@ -1959,6 +1959,81 @@ let test_config_snapshot_names_constitution_lines_the_prompt_left_out () =
     [ 2, "newline_terminated"; 3, "unterminated_final_line" ]
     (rejected_lines broken)
 
+(* #52169: a line whose author the roster does not name decodes, yet the turn
+   leaves its norm out (RFC-0504 §2.4). The preview names that line, its
+   author and the ids it withholds beside the lines that did not decode. *)
+let test_config_snapshot_names_constitution_lines_whose_author_left_the_roster () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  within_eio @@ fun () ->
+  let name = "rostered-constitution-author" in
+  write_file (Filename.concat keepers_dir (name ^ ".toml"))
+    "[keeper]\ninstructions = \"ledger fixture\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\n";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let ledger = Masc.World_constitution_store.ledger_path ~base_path:config.base_path in
+  mkdir_p (Filename.dirname ledger);
+  let added ~author ~text =
+    let id = Masc.World_constitution_types.Article_id.generate () in
+    match Masc.World_constitution_types.make ~id ~text ~author ~at:1.0 ~evidence:[] with
+    | Ok article ->
+      ( Masc.World_constitution_types.Article_id.to_string id
+      , Yojson.Safe.to_string
+          (Masc.World_constitution_wire.entry_to_json
+             (Masc.World_constitution_types.Added article)) )
+    | Error _ -> Alcotest.fail "fixture article was refused"
+  in
+  let kept_text = "norm from a rostered author" in
+  let departed_text = "norm from a departed author" in
+  let _, kept = added ~author:name ~text:kept_text in
+  let departed_id, departed = added ~author:"departed-keeper" ~text:departed_text in
+  write_file ledger (kept ^ "\n" ^ departed ^ "\n");
+  let system_prompt =
+    match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+    | `Not_found, _ -> Alcotest.fail "expected a keeper config snapshot"
+    | `OK, json -> json_assoc_field "prompt" json |> json_assoc_field "system_prompt"
+  in
+  Alcotest.(check (option string)) "the prompt is still built" (Some "available")
+    (json_string_field "state" system_prompt);
+  let effective =
+    match json_string_field "effective" system_prompt with
+    | Some text -> text
+    | None -> Alcotest.failf "no effective prompt in %s" (Yojson.Safe.to_string system_prompt)
+  in
+  Alcotest.(check (pair bool bool)) "the prompt renders only the rostered author's norm"
+    (true, false)
+    ( String_util.contains_substring effective kept_text
+    , String_util.contains_substring effective departed_text );
+  let ledger_json = json_assoc_field "constitution_ledger" system_prompt in
+  Alcotest.(check (option string)) "the ledger was read" (Some "read")
+    (json_string_field "state" ledger_json);
+  Alcotest.(check bool) "every line decoded" true
+    (json_field "rejected_lines" ledger_json = Some (`List []));
+  let isolated_lines =
+    match json_field "isolated_lines" ledger_json with
+    | Some (`List rows) ->
+      List.map
+        (fun row ->
+          match
+            json_int_field "line" row, json_string_field "subject" row,
+            json_field "article_ids" row
+          with
+          | Some line, Some subject, Some (`List ids) ->
+            ( line
+            , subject
+            , List.map
+                (function
+                  | `String id -> id
+                  | other -> Alcotest.failf "unreadable id %s" (Yojson.Safe.to_string other))
+                ids )
+          | _ -> Alcotest.failf "unreadable row %s" (Yojson.Safe.to_string row))
+        rows
+    | _ -> Alcotest.failf "no isolated_lines in %s" (Yojson.Safe.to_string ledger_json)
+  in
+  Alcotest.(check (list (triple int string (list string))))
+    "the departed author's line, its author and the id it withholds"
+    [ 2, "departed-keeper", [ departed_id ] ]
+    isolated_lines
+
 let test_config_snapshot_keeps_invalid_primary_prompt_editable () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   within_eio @@ fun () ->
@@ -2254,6 +2329,8 @@ let () =
             test_config_snapshot_reports_an_unbuildable_system_prompt;
           Alcotest.test_case "config snapshot names constitution lines the prompt left out" `Quick
             test_config_snapshot_names_constitution_lines_the_prompt_left_out;
+          Alcotest.test_case "config snapshot names constitution lines whose author left the roster" `Quick
+            test_config_snapshot_names_constitution_lines_whose_author_left_the_roster;
           Alcotest.test_case "invalid primary keeps config editable" `Quick
             test_config_snapshot_keeps_invalid_primary_prompt_editable;
           Alcotest.test_case

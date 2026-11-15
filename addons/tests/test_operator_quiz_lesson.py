@@ -23,7 +23,9 @@ import quiz_projection as p  # noqa: E402
 INSTANCE = "lesson-1"
 SOURCE = {"source_id": "lesson", "kind": "lane_output", "installation_id": "operator-lesson",
           "output_id": "scenes", "selection": "latest_completed"}
-FOLLOWING = BINDING | {"sources": [SOURCE]}
+FOLLOWING = BINDING | {"sources": [SOURCE], "since": 0}
+# The lesson a compose follows; since 0 reads every record, as before §3.8.
+LESSON = f.Lesson("lesson", 0.0)
 
 
 def cite(pin: str, source_id: str = "board", kind: str = "board_post") -> dict:
@@ -60,13 +62,25 @@ UNAVAILABLE = {"source_id": "lesson", "incarnation": "unobserved", "cursor": Non
 
 class Binding(unittest.TestCase):
     def test_a_binding_names_no_lesson_or_one_scenes_output(self):
-        self.assertIsNone(f.lesson_source_of_binding(BINDING | {"sources": []}))
-        self.assertEqual(f.lesson_source_of_binding(FOLLOWING), "lesson")
+        self.assertIsNone(f.lesson_of_binding(BINDING | {"sources": []}))
+        self.assertEqual(f.lesson_of_binding(FOLLOWING), LESSON)
         for sources in (None, [SOURCE, SOURCE], ["lesson"], [SOURCE | {"kind": "snapshot_file"}],
                         [SOURCE | {"output_id": "lesson"}], [{k: v for k, v in SOURCE.items() if k != "output_id"}],
                         [SOURCE | {"selection": "all"}], [SOURCE | {"source_id": ""}], [SOURCE | {"path": "x"}]):
             with self.assertRaises(f.InvalidBinding, msg=sources):
-                f.lesson_source_of_binding(BINDING | {"sources": sources})
+                f.lesson_of_binding(FOLLOWING | {"sources": sources})
+
+    def test_since_comes_with_a_lesson_and_only_with_one(self):
+        """RFC operator-quiz-follows-lesson §3.8: the time a session that
+        follows a lesson first reads from."""
+        self.assertEqual(f.lesson_of_binding(FOLLOWING | {"since": 1794528000}), f.Lesson("lesson", 1794528000.0))
+        self.assertEqual(f.lesson_of_binding(FOLLOWING | {"since": 2.5}).since, 2.5)
+        without = {k: v for k, v in FOLLOWING.items() if k != "since"}
+        for binding in (without, FOLLOWING | {"since": True}, FOLLOWING | {"since": "yesterday"},
+                        FOLLOWING | {"since": -1}, FOLLOWING | {"since": float("inf")},
+                        FOLLOWING | {"since": 10 ** 400}, BINDING | {"sources": [], "since": 0}):
+            with self.assertRaises(f.InvalidBinding, msg=binding):
+                f.lesson_of_binding(binding)
 
 
 class Seeing(Base):
@@ -162,27 +176,27 @@ class Following(Base):
 
     def test_the_author_sees_only_the_records_a_lesson_cited(self):
         self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-2"), cite("p-9")))])
-        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson="lesson")
+        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON)
         self.read()
         self.assertEqual(self.material(), ["p-2"])
         session = self.session(session_id)
-        self.assertEqual(session.follows, "lesson")
+        self.assertEqual(session.follows, q.FollowsLesson(session_id, "lesson", 0.0))
         self.assertEqual([[cite.pin for cite in scope.kept] for scope in session.scopes], [["p-2"]])
 
     def test_the_same_pin_under_another_source_id_or_kind_is_another_record(self):
         self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row(
             "e1", cite("p-1", source_id="notes"), cite("p-2", kind="wiki_page") | {"pin": "p-2@1"}))])
-        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson="lesson")
+        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON)
         self.read()
         self.assertEqual(self.session(session_id).failure, q.NoMaterial())
 
     def test_a_session_with_nothing_cited_fails_and_the_next_reads_the_same_records(self):
-        first = self.flow.compose("act-1", 1, BINDING, 0.0, lesson="lesson")
+        first = self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON)
         self.read()
         self.assertEqual((self.session(first).state, self.session(first).failure), ("failed", q.NoMaterial()))
         self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-3")))])
         self.host.listed.clear()
-        second = self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        second = self.flow.compose("act-2", 1, BINDING, 1.0, lesson=LESSON)
         self.host.author = answering(first_quote)
         self.host.run(self.flow)
         reads = [r for r in self.host.listed if r["kind"] == "read_records"]
@@ -190,6 +204,33 @@ class Following(Base):
         session = self.session(second)
         self.assertEqual((session.state, [posed.sources[0].pin for posed in session.posed]), ("asked", ["p-3"]))
         self.assertEqual(session.taught, frozenset({"q1"}))
+
+    def test_before_any_session_asked_a_follower_reads_from_since_not_its_opening(self):
+        """#52289: the lesson cited a record older than the quiz's first
+        session. Read from that opening (3.5), the session would hold no
+        record the lesson cited; read from since, it holds the one it cited."""
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-2")))])
+        session_id = self.flow.compose("act-1", 1, BINDING, 3.5, lesson=f.Lesson("lesson", 1.0))
+        self.read()
+        reads = [r for r in self.host.listed if r["kind"] == "read_records"]
+        self.assertEqual((reads[0]["after"], reads[0]["since"]), (None, 1.0))
+        self.assertEqual(self.material(), ["p-2"])
+        self.assertEqual(self.session(session_id).follows, q.FollowsLesson(session_id, "lesson", 1.0))
+
+    def test_once_a_session_has_asked_a_follower_reads_from_its_cursor_not_since(self):
+        plain = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(plain).state, "asked")
+        self.host.board.append(post(4, "a lane rests until its slot answers"))
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-2"), cite("p-4")))])
+        self.host.listed.clear()
+        follower = self.flow.compose("act-2", 1, BINDING, 1.0, lesson=f.Lesson("lesson", 0.0))
+        self.read()
+        reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(follower)]
+        self.assertEqual(reads[0]["after"], "000002")
+        self.assertNotIn("since", reads[0])
+        self.assertEqual(self.material(), ["p-4"])
 
     def test_with_nothing_cited_an_earlier_item_is_still_asked_again(self):
         plain = self.compose("act-1")
@@ -199,7 +240,7 @@ class Following(Base):
         self.host.board.append(post(4, "a lane rests until its slot answers"))
         seen = []
         self.host.author = lambda payload: seen.append(payload) or {"status": "invalid_output", "detail": "x"}
-        self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        self.flow.compose("act-2", 1, BINDING, 1.0, lesson=LESSON)
         self.host.run(self.flow)
         (payload,) = seen
         self.assertEqual((payload["material"], len(payload["items"])), ([], 1))
@@ -210,26 +251,26 @@ class Following(Base):
         self.host.run(self.flow)
         self.answer(plain, q.Chose(("b",)))
         self.flow.fits = lambda request: request["kind"] != "exact_output"
-        session_id = self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        session_id = self.flow.compose("act-2", 1, BINDING, 1.0, lesson=LESSON)
         self.host.run(self.flow)
         self.assertIsInstance(self.session(session_id).failure, q.AuthorRequestExceedsFrame)
 
     def test_a_compose_sent_again_completes_an_opening_cut_before_follows_lesson(self):
-        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson="lesson")
+        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON)
         log = self.state / "operator-quiz" / "log.jsonl"
         opened, follows = log.read_text().splitlines()
         log.write_text(opened + "\n" + follows[:10])
         cut = f.Flow(self.state, self.flow.prompts, lambda request: True)
         self.assertIsNone(next(s for s in cut.sessions() if s.session_id == session_id).follows)
-        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson="lesson"), session_id)
-        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson="lesson"), session_id)
+        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson=LESSON), session_id)
+        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson=LESSON), session_id)
         self.assertEqual([type(event) for event in cut.log.read()], [q.SessionOpened, q.FollowsLesson])
         # A session that has read already is left as it is.
         other = self.compose("act-2")
         self.host.author = lambda payload: None
         self.host.run(self.flow)
         before = q.Log(self.state).read()
-        self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        self.flow.compose("act-2", 1, BINDING, 1.0, lesson=LESSON)
         self.assertEqual((q.Log(self.state).read(), self.session(other).follows), (before, None))
 
     def test_a_question_is_taught_only_if_the_lesson_was_seen_before_it(self):
@@ -255,13 +296,23 @@ class History(unittest.TestCase):
         opened = q.SessionOpened("s", "a", 1, f.grants_of_binding(BINDING), "ko", 0.0)
         seen = q.LessonSeen(INSTANCE, 1, "a" * 64, "b" * 64, ())
         for events in ([seen, q.LessonUnreadable(INSTANCE, 2, "c" * 64, "b" * 64, "x")],
-                       [q.FollowsLesson("s", "lesson")],
-                       [opened, q.FollowsLesson("s", "lesson"), q.FollowsLesson("s", "lesson")],
-                       [opened, q.MaterialRead("s", "r", "d"), q.FollowsLesson("s", "lesson")],
+                       [q.FollowsLesson("s", "lesson", 0.0)],
+                       [opened, q.FollowsLesson("s", "lesson", 0.0), q.FollowsLesson("s", "lesson", 0.0)],
+                       [opened, q.MaterialRead("s", "r", "d"), q.FollowsLesson("s", "lesson", 0.0)],
                        [opened, q.LessonScopeApplied("s", "r", ())],
-                       [opened, q.FollowsLesson("s", "lesson"), q.LessonScopeApplied("s", "r", ())]):
+                       [opened, q.FollowsLesson("s", "lesson", 0.0), q.LessonScopeApplied("s", "r", ())]):
             with self.assertRaises(q.LogError, msg=events):
                 q.fold(events)
+
+    def test_follows_lesson_reads_back_only_with_since(self):
+        """§3.8 changed the line; the lines written before it are not read."""
+        event = q.FollowsLesson("s", "lesson", 2.5)
+        self.assertEqual(q.event_of_json(q.event_to_json(event)), event)
+        for value in ({"event": "follows_lesson", "session_id": "s", "source_id": "lesson"},
+                      {"event": "follows_lesson", "session_id": "s", "source_id": "lesson", "since": "2.5"},
+                      {"event": "follows_lesson", "session_id": "s", "source_id": "lesson", "since": True}):
+            with self.assertRaises(q.LogError, msg=value):
+                q.event_of_json(value)
 
     def test_a_cite_whose_pin_is_not_of_its_kind_does_not_read_back(self):
         for value in ({"kind": "tweet", "source_id": "board", "pin": "p-1"},
@@ -281,7 +332,7 @@ class Rows(Base):
         self.host.board.append(post(4, "a lane rests until its slot answers"))
         self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-4"), cite("p-9")))])
         self.flow.see_lesson(FOLLOWING, [lesson_output(2, scene_row("e2", cite("p-4", kind="tweet")))])
-        taught = self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        taught = self.flow.compose("act-2", 1, BINDING, 1.0, lesson=LESSON)
         self.host.run(self.flow)
         self.answer(taught, q.Chose(("a",)), at=20.0)
         sessions = self.flow.sessions()
@@ -312,7 +363,7 @@ class Rows(Base):
         self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-1")))])
         self.host.author = answering(lambda payload: t.draft(
             {"kind": "board_post", "source_id": "board", "pin": "p-1"}, "the ledg", reask=(item,)))
-        late = self.flow.compose("act-2", 1, BINDING, 1.0, lesson="lesson")
+        late = self.flow.compose("act-2", 1, BINDING, 1.0, lesson=LESSON)
         self.host.run(self.flow)
         self.assertEqual(self.session(late).taught, frozenset({"q1"}))
         self.answer(late, q.Chose(("a",)), at=10.0)
@@ -326,7 +377,7 @@ class Served(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             worker = Worker(Path(temporary))
             try:
-                binding = WORKER_BINDING | {"sources": [SOURCE]}
+                binding = WORKER_BINDING | {"sources": [SOURCE], "since": 0}
                 observe = lambda sources: worker.ok(  # noqa: E731
                     "lane_observe", {"context": CONTEXT, "binding": binding, "sources": sources})
                 measures = lambda output: next(  # noqa: E731

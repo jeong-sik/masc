@@ -87,6 +87,10 @@ type model_evidence
 
 type model_message = private
   { text : string
+  ; resolution_blocks : Agent_core.Types.content_block list
+      (** The fragments [text] appends after the original user input, one
+          [Text] block each in input order. A structured input already holds
+          the original, so it appends these blocks instead of [text]. *)
   ; resolutions : Keeper_event_queue.hitl_resolution list
       (** Every observed resolution, including repair/absence states that
           produce neither canonical evidence nor an exact-call instruction. *)

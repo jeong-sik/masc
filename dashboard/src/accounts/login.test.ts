@@ -65,12 +65,13 @@ const kept = (): AbortSignal => new AbortController().signal
 
 describe('connect', () => {
   it('reads a login that links an account, frame by frame as the bytes come', async () => {
-    const { send, sent } = sending(streamed(started + frame('output', { stream: 'terminal', text: '주소 https://example.com/x 🌐' })
-      + frame('input_ready', {}) + linked))
+    const { send, sent } = sending(streamed(started + frame('output', { stream: 'stdout', text: '주소 https://example.com/x 🌐' })
+      + frame('screen', { text: 'Select login method:' }) + frame('input_ready', {}) + linked))
     const progress: LoginProgress[] = []
     const signal = kept()
     expect(await connect(send, 'csrf', 'claude_code', signal, (one) => progress.push(one))).toEqual({ kind: 'linked' })
-    expect(progress).toEqual([{ kind: 'started', loginId: id }, { kind: 'output', text: '주소 https://example.com/x 🌐' }, { kind: 'input_ready' }])
+    expect(progress).toEqual([{ kind: 'started', loginId: id }, { kind: 'output', text: '주소 https://example.com/x 🌐' },
+      { kind: 'screen', text: 'Select login method:' }, { kind: 'input_ready' }])
     const request = only(sent)
     const headers = new Headers(request.init.headers)
     expect([request.path, request.init.method, request.init.credentials, request.init.body, request.init.signal]).toEqual(
@@ -125,6 +126,9 @@ describe('connect', () => {
     ['output before the start', frame('output', { stream: 'stdout', text: 'x' })],
     ['a second start', started + started],
     ['output of no known stream', started + frame('output', { stream: 'tty', text: 'x' })],
+    ['a terminal\'s bytes as output, not as a screen', started + frame('output', { stream: 'terminal', text: 'x' })],
+    ['a screen before the start', frame('screen', { text: 'x' })],
+    ['a screen with no text', started + frame('screen', {})],
     ['a wait that carries data', started + frame('input_ready', { text: 'x' })],
     ['an end with no linked account', started + frame('complete', receipt('complete', { authentication: 'login_completed' }))],
     ['an end whose authentication no receipt says', started + frame('complete', receipt('complete', { account: 'linked', authentication: 'guessed' }))],

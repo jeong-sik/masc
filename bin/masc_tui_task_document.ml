@@ -50,10 +50,12 @@ let document_palette () : Masc_tui_tool_detail.palette =
    note is prose and keeps the one colour. A block is lines drawn together, so
    a blank line inside a note stays between its neighbours and only the blank
    lines at the block's edges go. [Document_block] already carries its colour
-   and is safe to draw; [Plain_block] is neither. *)
+   and is safe to draw; [Plain_block] is neither. A document's lines carry
+   their indent as a count of cells, which the rows turn into only as many
+   spaces as they keep. *)
 type history_block =
   | Plain_block of string
-  | Document_block of string
+  | Document_block of (int * string) list
 
 (* The indent of a note under the event that owns it. Every line of the note
    takes it, not only the first. *)
@@ -63,6 +65,10 @@ let indented block =
   String.split_on_char '\n' block
   |> List.map (fun line -> note_indent ^ line)
   |> String.concat "\n"
+
+let indented_document lines =
+  let cells = String.length note_indent in
+  List.map (fun (indent, text) -> indent + cells, text) lines
 
 let history_blocks ~ko =
   let text korean english = if ko then korean else english in function
@@ -96,7 +102,7 @@ let history_blocks ~ko =
                 :: (match event.th_note with
                     | Some note ->
                         (match Masc_tui_tool_detail.document ~palette note with
-                         | Some document -> [ Document_block (indented document) ]
+                         | Some document -> [ Document_block (indented_document document) ]
                          | None -> [ Plain_block (indented note) ])
                     | None -> []))
               events
@@ -229,8 +235,8 @@ let prepare_input = function
       let max_cells = max 1 (framed_inner_width cols) in
       history_blocks ~ko events |> List.concat_map (function
         | Plain_block block -> Masc_tui_text_block.preformatted_rows ~max_cells block
-        | Document_block block ->
-            Masc_tui_text_block.preformatted_styled_rows ~max_cells block)
+        | Document_block lines ->
+            Masc_tui_text_block.preformatted_styled_rows ~max_cells lines)
   | Body_input (ko,cols,goals,task) ->
       let text korean english = if ko then korean else english in
       let field ?(style = "") label text =

@@ -20,14 +20,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
 import lesson_log as l
 import records
-from records import InvalidBinding, InvalidResult, digest, grants_of_binding, material  # noqa: F401
+from records import (  # noqa: F401  -- the names this package's modules and tests read from here
+    InvalidBinding, InvalidResult, digest, grants_of_binding, material, since_of_binding)
 
 OUTLINE = "outline"
 SCENE = "scene"
@@ -48,20 +48,6 @@ def language_of_binding(binding: dict) -> str:
     if not isinstance(language, str) or not language.strip():
         raise InvalidBinding("binding.language must name the language scenes are written in")
     return language
-
-
-def since_of_binding(binding: dict) -> float:
-    since = binding.get("since")
-    problem = InvalidBinding("binding.since must be the Unix time, in seconds, the first lesson reads from")
-    if isinstance(since, bool) or not isinstance(since, (int, float)):
-        raise problem
-    try:
-        seconds = float(since)
-    except OverflowError as error:
-        raise problem from error
-    if not math.isfinite(seconds) or seconds < 0:
-        raise problem
-    return seconds
 
 
 def _cite(value: dict) -> l.Cite:

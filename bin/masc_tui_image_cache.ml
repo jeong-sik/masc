@@ -432,19 +432,17 @@ let collect_decoder_bytes ?max_bytes ~run ~output_path command =
       | Ok "" -> Error No_frame_written
       | Ok bytes -> Ok bytes
 
-let run_decoder_bytes ~run ~output_path command =
-  discard output_path;
-  match collect_decoder_bytes ~run ~output_path command with
-  (* Public callers may share [output_path]. The caller must own the path to
-     remove it after an exception or runner failure. *)
-  | Error (Decoder_runner_failed _ as failure) -> Error failure
-  | Error ((Decoder_missing | Decoder_exit _ | Decoder_signaled _
-           | Decoder_stopped _ | No_frame_written | Frame_unreadable _) as failure) ->
-    discard output_path; Error failure
-  | Ok bytes -> Ok bytes
-
-let run_decoder ~run ~output_path command =
-  Result.map (fun _ -> output_path) (run_decoder_bytes ~run ~output_path command)
+(* [Filename.temp_file] creates the output with O_EXCL, and the empty file
+   stays in place until [f] returns. No other run -- a fallback started from
+   [f], or another TUI previewing the same URL -- can be handed this name in
+   that time, so a failed run's cleanup removes only its own output. The
+   decoder overwrites the empty file; one left empty is [No_frame_written]. *)
+let with_decoder_output ~run ~cache_dir ~prefix ~suffix command_of_path f =
+  match attempt_path ~cache_dir ~prefix ~suffix with
+  | Error detail -> f (Error (Frame_unreadable { detail }))
+  | Ok output_path ->
+    Fun.protect ~finally:(fun () -> discard output_path) (fun () ->
+      f (collect_decoder_bytes ~run ~output_path (command_of_path output_path)))
 
 type converter = Sips | Image_magick | Ffmpeg
 type conversion_failure = (converter * decode_failure) list
@@ -471,25 +469,24 @@ let convert_frame ~run ~cache_dir input =
           Printf.sprintf "ffmpeg -y -i %s -frames:v 1 %s >/dev/null 2>&1" source (Filename.quote out))
       ]
     in
-    match attempt_path ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" with
-    | Error detail -> Error [ Sips, Frame_unreadable { detail } ]
-    | Ok attempt_file ->
-      let rec attempt failures = function
-        | [] -> discard attempt_file; Error (List.rev failures)
-        | (converter, command) :: rest ->
-          (* Publish only a nonempty frame captured from this attempt. *)
-          match run_decoder_bytes ~run ~output_path:attempt_file (command attempt_file) with
-          | Ok bytes ->
-            Fun.protect ~finally:(fun () -> discard attempt_file) (fun () ->
-              Ok (converter, failures, bytes))
-          (* A signalled converter can leave a descendant writing to this
-             pathname. Do not give that pathname to a fallback converter. *)
+    let rec attempt failures = function
+      | [] -> Error (List.rev failures)
+      | (converter, command) :: rest ->
+        (* The fallback starts while this converter's output is still
+           reserved, so it is handed another name and a late write to this
+           one cannot land in its frame. *)
+        with_decoder_output ~run ~cache_dir ~prefix:"conv_attempt_" ~suffix:".png" command (function
+          | Ok bytes -> Ok (converter, failures, bytes)
+          (* A signal, a stop or a runner failure means the converter did not
+             finish on its own: the deadline, a shutdown or an OS error ended
+             it, and its descendants may still be running. The sequence ends
+             here rather than starting another converter beside them. *)
           | Error ((Decoder_runner_failed _ | Decoder_signaled _ | Decoder_stopped _) as failure) ->
             Error (List.rev ((converter, failure) :: failures))
           | Error ((Decoder_missing | Decoder_exit _ | No_frame_written | Frame_unreadable _) as failure) ->
-            attempt ((converter, failure) :: failures) rest
-      in
-      attempt [] commands
+            attempt ((converter, failure) :: failures) rest)
+    in
+    attempt [] commands
 
 let convert_and_publish ~run ~cache_dir ~target ~encode input =
   match convert_frame ~run ~cache_dir input with

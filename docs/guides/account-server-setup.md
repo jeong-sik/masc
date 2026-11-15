@@ -130,6 +130,10 @@ signs in through an Admin invitation becomes an Admin.
 
 ## 5. Let more people in
 
+An Admin does all of this in the account console at `/accounts/console`,
+signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist) and
+들어온 사람 (who is in) send the requests below.
+
 - **An invitation.** An Admin issues a Member or an Admin invitation and
   hands over its link. See
   [Invitations on the account server](account-server-invitations.md).
@@ -212,8 +216,8 @@ base path.
 ## What is not there yet
 
 - The TUI and the operator's dashboard do not connect to the account server.
-- No screen issues invitations, edits the allowlist or shows the lists. An
-  Admin calls the routes from the browser console of the page at `/`.
+- The 들어온 사람 panel only reads: no screen changes the role or the
+  status of a person.
 - `masc auth invite` writes Admin invitations only, and no command revokes
   one.
 - A workspace whose accounts were turned off is not activated again.

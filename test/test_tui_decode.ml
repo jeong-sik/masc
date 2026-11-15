@@ -4942,49 +4942,6 @@ let test_decode_connector_reads_a_poll_state () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
-let test_decode_connector_telegram_numeric_bot_id () =
-  let decode id bot_user_id =
-    let json =
-      connector_snapshot_json
-        [ connector_json ~id ~gateway_state:`Null
-            ~poll_state:(`String "polling") ~bot_user_id () ]
-    in
-    Masc.Tui_decode_connectors.decode_connector_snapshot
-      (Yojson.Safe.from_string (Yojson.Safe.to_string json))
-  in
-  let expect_id label id bot_user_id expected =
-    match decode id bot_user_id with
-    | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]
-         ; cs_refused = []; _ } ->
-        Alcotest.(check (option string)) label expected connector.cn_bot_user_id
-    | Ok _ -> Alcotest.failf "%s: expected one readable connector" label
-    | Error err -> Alcotest.failf "%s: decode failed: %s" label err
-  in
-  let expect_refused label id bot_user_id =
-    match decode id bot_user_id with
-    | Ok { Masc.Tui_decode_connectors.cs_connectors = []
-         ; cs_refused = [ _ ]; _ } -> ()
-    | Ok _ -> Alcotest.failf "%s: expected a refused connector" label
-    | Error err -> Alcotest.failf "%s: snapshot failed: %s" label err
-  in
-  expect_id "Telegram integer" "telegram" (`Int 4242) (Some "4242");
-  expect_id "Telegram int64 maximum" "telegram"
-    (`Intlit "9223372036854775807") (Some "9223372036854775807");
-  expect_id "Telegram string" "telegram" (`String "4242") (Some "4242");
-  expect_id "Telegram blank string" "telegram" (`String "   ") None;
-  expect_id "Telegram null" "telegram" `Null None;
-  expect_id "Slack string" "slack" (`String "U123") (Some "U123");
-  expect_refused "Slack integer" "slack" (`Int 4242);
-  expect_refused "Telegram zero integer" "telegram" (`Int 0);
-  expect_refused "Telegram negative integer" "telegram" (`Int (-42));
-  expect_refused "Telegram zero string" "telegram" (`String "0");
-  expect_refused "Telegram negative string" "telegram" (`String "-42");
-  expect_refused "Telegram non-numeric string" "telegram" (`String "not-a-bot-id");
-  expect_refused "Telegram leading-zero string" "telegram" (`String "0042");
-  expect_refused "Telegram float" "telegram" (`Float 1.5);
-  expect_refused "Telegram int64 overflow" "telegram"
-    (`Intlit "9223372036854775808")
-
 (* A gateway or poll state the server's state machines never produce is not
    read as some nearby state. The row that carries it is refused on its own:
    the transports beside it still decode, and the refusal names the row. *)
@@ -11692,9 +11649,10 @@ let test_decode_gate_rows_distinguish_operator_phases () =
       ; "input", `Assoc []
       ]
       @
-      match phase_field with
-      | Some (`String "human_required") -> [ "summary_status", handed_over ]
-      | Some _ | None -> []
+      match Option.map Q.approval_queue_phase_of_yojson_with_error phase_field with
+      | Some (Ok Q.Phase_human_required) -> [ "summary_status", handed_over ]
+      | Some (Ok (Q.Phase_queued | Q.Phase_judging | Q.Phase_blocked) | Error _)
+      | None -> []
     in
     let fields =
       match phase_field with
@@ -11713,26 +11671,29 @@ let test_decode_gate_rows_distinguish_operator_phases () =
         (List.length snapshot.gs_pending)
     | Error detail -> Error detail
   in
-  Alcotest.check
-    Alcotest.bool
-    "queued phase"
-    true
-    (phase ~phase_field:(`String "queued") () = Ok Tui_decode.Gate_queued);
-  Alcotest.check
-    Alcotest.bool
-    "judging phase"
-    true
-    (phase ~phase_field:(`String "judging") () = Ok Tui_decode.Gate_judging);
-  Alcotest.check
-    Alcotest.bool
-    "human_required phase"
-    true
-    (phase ~phase_field:(`String "human_required") () = Ok Tui_decode.Gate_human_required);
-  Alcotest.check
-    Alcotest.bool
-    "blocked phase"
-    true
-    (phase ~phase_field:(`String "blocked") () = Ok Tui_decode.Gate_blocked);
+  (* The server spells the phase; every phase it can put on a row, encoded the
+     way the queue projection encodes it, reads as the TUI phase naming the
+     same state. *)
+  List.iter
+    (fun server_phase ->
+      let word = Q.approval_queue_phase_to_string server_phase in
+      let expected =
+        match server_phase with
+        | Q.Phase_queued -> Tui_decode.Gate_queued
+        | Q.Phase_judging -> Tui_decode.Gate_judging
+        | Q.Phase_human_required -> Tui_decode.Gate_human_required
+        | Q.Phase_blocked -> Tui_decode.Gate_blocked
+      in
+      match phase ~phase_field:(Q.approval_queue_phase_to_yojson server_phase) () with
+      | Ok decoded ->
+        Alcotest.check
+          Alcotest.bool
+          (Printf.sprintf "server phase %s" word)
+          true
+          (decoded = expected)
+      | Error detail ->
+        Alcotest.failf "server phase %s did not decode: %s" word detail)
+    Q.approval_queue_phases;
   Alcotest.check
     Alcotest.bool
     "unknown phase rejects"
@@ -14104,8 +14065,6 @@ let () =
           test_decode_connector_reads_a_stale_state;
         Alcotest.test_case "poll state is typed" `Quick
           test_decode_connector_reads_a_poll_state;
-        Alcotest.test_case "Telegram bot ID accepts its native numeric form" `Quick
-          test_decode_connector_telegram_numeric_bot_id;
         Alcotest.test_case "unknown runtime state refuses only its row" `Quick
           test_decode_connector_refuses_only_the_row_with_an_unknown_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick

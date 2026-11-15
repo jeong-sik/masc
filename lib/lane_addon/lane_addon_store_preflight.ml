@@ -20,6 +20,7 @@ type decoder =
   | Exact_record
   | Exact_proof_link
   | Exact_slot_observation
+  | Exact_directory_entry
   | Tool_request_inventory
   | Tool_request_owner
   | Tool_request_payload
@@ -36,6 +37,7 @@ let decoder_name = function
   | Exact_record -> "Lane_addon_exact.check_retained_record"
   | Exact_proof_link -> "Lane_addon_exact.Retained_key.proof_path"
   | Exact_slot_observation -> "Lane_addon_exact_observation.request_id"
+  | Exact_directory_entry -> "Lane_addon_store.exact_directory_entry"
   | Tool_request_inventory -> "Lane_addon_store.tool_request_owner_entry"
   | Tool_request_owner -> "Lane_addon_tool_request_owner.Published_reader.read"
   | Tool_request_payload -> "consumer original request payload"
@@ -104,7 +106,8 @@ let on_refusal = function
     "the next run of that request fails before anything is sent, so the worker's \
      request is never answered; a proof link no record names fails the next run \
      of a request with its ID and digest the same way; the startup sweep stops at \
-     a slot observation it cannot read and removes nothing"
+     a slot observation it cannot read, or at an entry of an Exact directory that \
+     is not a regular <name>.json file, and removes nothing"
   | Tool_request_owners ->
     "discovering the original requests of that scope fails as a whole, and so \
      does reading that request; an original refused on its consumer's Exact \
@@ -198,8 +201,8 @@ type entry =
   | Skipped
   | Refused of decoder * string
 
-(* Bindings, action receipts and Exact requests: only [.json] names are
-   records, and their readers read nothing else in the directory. *)
+(* Bindings and action receipts: only [.json] names are records, and their
+   readers read nothing else in the directory. *)
 let json_entry name = if Filename.check_suffix name ".json" then Record else Skipped
 
 (* Discovery reads a whole scope and fails it on an entry it does not know. *)
@@ -339,13 +342,59 @@ let same_store store ~path roots =
   | Some found ->
     Error (Printf.sprintf "%s names the store root %s, and this check reads %s" path found own)
 
-let json_names names =
-  List.filter
-    (fun name ->
-       match json_entry name with
-       | Record -> true
-       | Skipped | Refused _ -> false)
-    names
+let lstat_failed path code = Error (path ^ ": lstat: " ^ Unix.error_message code)
+
+let entry_refusal = function
+  | Lane_addon_store.Not_a_json_name ->
+    "the startup sweep stops at an entry that is not a <name>.json file"
+  | Not_a_regular_file -> "the startup sweep stops at a <name>.json entry that is not a regular file"
+
+(* What one Exact directory holds as the startup sweep lists it
+   ([Lane_addon_store.exact_directory] and [exact_directory_entry]): the
+   names of its regular <name>.json files, and a refusal for each entry the
+   sweep stops at, which fresh state deletes alone. A path that is not a
+   directory is such an entry. *)
+let exact_listing ~dir =
+  let refusal path detail = { path; decoder = Exact_directory_entry; detail; delete = [ path ] } in
+  match Lane_addon_store.exact_directory dir with
+  | Error code -> lstat_failed dir code
+  | Ok Lane_addon_store.Exact_directory_absent -> Ok ([], [])
+  | Ok Exact_directory_refused ->
+    Ok ([], [ refusal dir "the startup sweep stops at an Exact directory that is not a directory" ])
+  | Ok Exact_directory_present ->
+    let* names = entries dir in
+    let+ files, refusals =
+      List.fold_left
+        (fun state name ->
+           let* files, refusals = state in
+           let path = Filename.concat dir name in
+           match Lane_addon_store.exact_directory_entry ~directory:dir name with
+           | Ok (Lane_addon_store.Exact_file _) -> Ok (name :: files, refusals)
+           | Ok (Exact_staged | Exact_gone) -> Ok (files, refusals)
+           | Ok (Exact_refused reason) -> Ok (files, refusal path (entry_refusal reason) :: refusals)
+           | Error code -> lstat_failed path code)
+        (Ok ([], []))
+        names
+    in
+    List.rev files, List.rev refusals
+
+(* What fresh state leaves at a path an Exact file is read by. [run] opens
+   that path and follows a symbolic link, but the listing refuses an entry
+   the startup sweep stops at and fresh state deletes it, so the check does
+   not open it either. *)
+type left_at_path =
+  | File_left
+  | Nothing_left
+  | Entry_refused of string
+
+let left_at path =
+  match
+    Lane_addon_store.exact_directory_entry ~directory:(Filename.dirname path) (Filename.basename path)
+  with
+  | Ok (Lane_addon_store.Exact_file _) -> Ok File_left
+  | Ok (Exact_staged | Exact_gone) -> Ok Nothing_left
+  | Ok (Exact_refused reason) -> Ok (Entry_refused (entry_refusal reason))
+  | Error code -> lstat_failed path code
 
 type keyed_record =
   { record_path : string
@@ -375,7 +424,8 @@ let read_first ~after_read ~group ~name path =
    it cannot read, so the check refuses that file. *)
 let read_slot_observations ~after_read store ~root report ~declaration_id =
   let dir = Filename.concat root (Exact_observation.directory ~declaration_id) in
-  let* names = entries dir in
+  let* names, stray = exact_listing ~dir in
+  let report = List.fold_left refused report stray in
   let* owned, report =
     List.fold_left
       (fun state name ->
@@ -396,7 +446,7 @@ let read_slot_observations ~after_read store ~root report ~declaration_id =
                     report
                     { path; decoder = Exact_slot_observation; detail; delete = record_alone path } )))
       (Ok ([], report))
-      (json_names names)
+      names
   in
   Ok (List.rev owned, report)
 
@@ -409,7 +459,9 @@ type record_judgment =
 (* One record with its proof link: the record, the link, then the record
    again. Fresh state deletes a refused record with its link and the slot
    observations of its request: [run] reads that link with the record, and the
-   observations are read with that link. *)
+   observations are read with that link. A link the startup sweep stops at is
+   judged before it is opened, and fresh state deletes it; like a link [run]
+   cannot read, it takes the record with it. *)
 let judge_record ~after_read store ~root ~observations { record_path; first; key } =
   let link = Filename.concat root (Exact.Retained_key.proof_path key) in
   let { Exact.Retained_key.request_id; _ } = key in
@@ -431,12 +483,18 @@ let judge_record ~after_read store ~root ~observations { record_path; first; key
     | Unreadable refusal -> Ok (Record_deleted refusal)
     | Read second -> Ok (Record_kept second)
   in
-  match read_file ~after_read ~delete ~path:link Result.ok with
-  | Gone -> read_second None
-  | Unreadable refusal -> Ok (Record_deleted refusal)
-  | Read proof ->
-    let* () = same_store store ~path:link (Exact.proof_store_roots proof) in
-    read_second (Some proof)
+  let* left = left_at link in
+  match left with
+  | Nothing_left -> read_second None
+  | Entry_refused detail ->
+    Ok (Record_deleted { path = link; decoder = Exact_directory_entry; detail; delete = delete link })
+  | File_left ->
+    (match read_file ~after_read ~delete ~path:link Result.ok with
+     | Gone -> read_second None
+     | Unreadable refusal -> Ok (Record_deleted refusal)
+     | Read proof ->
+       let* () = same_store store ~path:link (Exact.proof_store_roots proof) in
+       read_second (Some proof))
 
 let check_record ~after_read store ~root ~observations report record =
   let+ judgment = judge_record ~after_read store ~root ~observations record in
@@ -459,7 +517,9 @@ let deleted_state ~key ~found first =
 (* The Exact files of one original as the Exact scan leaves them (RFC
    exact-request-skips-a-slot-that-refused-its-input 3.3, item 5). The record
    at the original's path is judged as the Exact scan judges it, so a record
-   it deletes is absent here and so is the proof link deleted with it. The
+   it deletes is absent here and so is the proof link deleted with it. A
+   record the startup sweep stops at is deleted unread, so it shows nothing of
+   the original; such a link is unreadable. The
    proof link the original's request names is read otherwise, even when no
    kept record names it: whether the Exact scan finds such a link depends on
    the other records of the declaration. A link that names another store root
@@ -468,28 +528,39 @@ let read_exact ~after_read store ~root ~declaration_id request =
   let key = Exact.Retained_key.of_request ~declaration_id request in
   let stored = Lane_addon_store.exact_request_path ~declaration_id ~request_id:key.Exact.Retained_key.request_id in
   let group = Filename.basename (Filename.dirname stored) and name = Filename.basename stored in
+  let record_path = Filename.concat root stored in
+  let* left = left_at record_path in
   let* record, deleted, gone =
-    match read_first ~after_read ~group ~name (Filename.concat root stored) with
-    | Gone -> Ok (None, None, [])
-    | Unreadable refusal -> Ok (None, Some Deleted_unknown, refusal.delete)
-    | Read ({ key = found; first; _ } as keyed) ->
-      let+ judgment = judge_record ~after_read store ~root ~observations:[] keyed in
-      (match judgment with
-       | Record_gone -> None, None, []
-       | Record_kept second -> Some second, None, []
-       | Record_deleted refusal -> None, Some (deleted_state ~key ~found first), refusal.delete)
+    match left with
+    | Nothing_left -> Ok (None, None, [])
+    | Entry_refused _ -> Ok (None, Some Deleted_unknown, [ record_path ])
+    | File_left ->
+      (match read_first ~after_read ~group ~name record_path with
+       | Gone -> Ok (None, None, [])
+       | Unreadable refusal -> Ok (None, Some Deleted_unknown, refusal.delete)
+       | Read ({ key = found; first; _ } as keyed) ->
+         let+ judgment = judge_record ~after_read store ~root ~observations:[] keyed in
+         (match judgment with
+          | Record_gone -> None, None, []
+          | Record_kept second -> Some second, None, []
+          | Record_deleted refusal -> None, Some (deleted_state ~key ~found first), refusal.delete))
   in
   let path = Filename.concat root (Exact.Retained_key.proof_path key) in
   let+ proof =
     if List.mem path gone
     then Ok No_proof
     else
-      match read_file ~after_read ~delete:record_alone ~path Result.ok with
-      | Gone -> Ok No_proof
-      | Unreadable { detail; _ } -> Ok (Unreadable_proof detail)
-      | Read json ->
-        let+ () = same_store store ~path (Exact.proof_store_roots json) in
-        Proof json
+      let* left = left_at path in
+      match left with
+      | Nothing_left -> Ok No_proof
+      | Entry_refused detail -> Ok (Unreadable_proof detail)
+      | File_left ->
+        (match read_file ~after_read ~delete:record_alone ~path Result.ok with
+         | Gone -> Ok No_proof
+         | Unreadable { detail; _ } -> Ok (Unreadable_proof detail)
+         | Read json ->
+           let+ () = same_store store ~path (Exact.proof_store_roots json) in
+           Proof json)
   in
   { record; deleted; proof; store }
 
@@ -506,8 +577,8 @@ let link_name key = Filename.basename (Exact.Retained_key.proof_path key)
    refused. *)
 let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~named_links =
   let dir = Filename.concat root (Exact.proof_directory ~declaration_id) in
-  let* links = entries dir in
-  let* again = entries group_dir in
+  let* links, stray = exact_listing ~dir in
+  let* again, stray_again = exact_listing ~dir:group_dir in
   let deleted = List.concat_map (fun { delete; _ } -> delete) report.refusals in
   let later =
     List.filter_map
@@ -519,9 +590,17 @@ let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_
            match read_first ~after_read ~group ~name path with
            | Read { key; _ } -> Some (link_name key)
            | Gone | Unreadable _ -> None)
-      (json_names again)
+      again
   in
   let named = named_links @ later in
+  (* An entry a line already deletes is not refused again: a link the sweep
+     stops at goes with its record's line, and the records listed again hold
+     the entries their first listing refused. *)
+  let report =
+    List.fold_left refused report
+      (List.filter (fun (refusal : refusal) -> not (List.mem refusal.path deleted))
+         (stray @ stray_again))
+  in
   Ok
     (List.fold_left
        (fun report link ->
@@ -537,7 +616,7 @@ let unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_
               ; delete = [ path ]
               })
        report
-       (json_names links))
+       links)
 
 (* What the check keeps of one declaration between its records: the slot
    observations, read once the first record names the declaration, and the
@@ -554,7 +633,8 @@ type declaration_read =
    names. The declaration comes from a record whose ids name its own path; the
    links of a declaration none of whose records can be read are not found. *)
 let scan_exact_declaration ~after_read store ~root report ~group ~group_dir =
-  let* listed = entries group_dir in
+  let* listed, stray = exact_listing ~dir:group_dir in
+  let report = List.fold_left refused report stray in
   let* report, declaration =
     List.fold_left
       (fun state name ->
@@ -576,12 +656,26 @@ let scan_exact_declaration ~after_read store ~root report ~group ~group_dir =
            let* report = check_record ~after_read store ~root ~observations report record in
            Ok (report, Some { declaration with named_links = link_name record.key :: named_links }))
       (Ok (report, None))
-      (json_names listed)
+      listed
   in
   match declaration with
   | None -> Ok report
   | Some { declaration_id; named_links; _ } ->
     unnamed_proof_links ~after_read ~root report ~group ~group_dir ~declaration_id ~named_links
+
+(* Every entry below the Exact request store is a declaration's directory.
+   The startup sweep stops at one that is not a directory, so
+   [scan_exact_declaration] refuses it with its listing. *)
+let scan_exact_requests ~after_read root =
+  let store = Lane_addon_store.create ~root in
+  let dir = Filename.concat root Lane_addon_store.exact_requests_directory in
+  let* groups = entries dir in
+  List.fold_left
+    (fun result group ->
+       let* report = result in
+       scan_exact_declaration ~after_read store ~root report ~group ~group_dir:(Filename.concat dir group))
+    (Ok empty)
+    groups
 
 (* The namespaces of one tool request scope, each under the scope's digest:
    owner records, request bodies, history fences and history resolution
@@ -615,8 +709,7 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
         Lane_addon_store.actions_directory ~entry:json_entry
         (fun ~group ~name ~path:_ json -> check_action ~group ~name json |> decoded Action_receipt)
     | Exact_requests ->
-      scan_groups root Lane_addon_store.exact_requests_directory
-        (scan_exact_declaration ~after_read (Lane_addon_store.create ~root) ~root)
+      scan_exact_requests ~after_read root
     | Tool_request_owners ->
       (* One validator serves the whole scan, so it can keep what it already
          proved about an owner whose records it meets again. *)

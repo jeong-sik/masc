@@ -19,7 +19,7 @@
 ### 1. 이미지 만들기
 
 ```sh
-docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.0 addons
+docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.1 addons
 ```
 
 설치 조정(reconcile)은 이미지를 만들지 않는다. MASC 가 쓰는 엔진에 먼저 올려 둔다.
@@ -289,7 +289,7 @@ Results 에 일곱 lane 이 나온다.
 
    ```sh
    docker inspect <container_id> --format '{{range .Mounts}}{{.Name}} {{end}}'
-   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.2.0 /state/operator-quiz /state/operator-quiz-<날짜>
+   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.2.1 /state/operator-quiz /state/operator-quiz-<날짜>
    ```
 
 4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.

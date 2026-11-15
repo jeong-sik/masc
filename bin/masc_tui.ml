@@ -272,7 +272,6 @@ let frame_interval_ns = 16_000_000L
 let wheel_notch_rows = 3
 
 let maximum_input_wait_seconds = 0.016
-let nanoseconds_per_second = 1_000_000_000.0
 
 (* Point fd 2 at a file under the base path, so writing to stderr cannot land
    in the frame. Best effort by construction: a surface that cannot open its

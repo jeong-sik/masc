@@ -5,6 +5,15 @@ type t
 type error = No_owner | Owner_changed | Unsupported | Unavailable | Closed
 val capture : lease_fd:Unix.file_descr -> (t, error) result
 (** Uses F_GETLK, never PID-file contents. Capture does not signal the owner. *)
+val lease_holder : lease_fd:Unix.file_descr -> (int, error) result
+(** The F_GETLK read of {!capture} alone: the pid of the other process that
+    holds a lock on the lease, and no handle on it. No pidfd or audit token
+    is made, so a host where {!capture} is [Unsupported] answers too. The pid
+    is a number to compare with another kernel read of the same moment, such
+    as the holder of a byte lock; it signals nothing and authorizes no
+    signal. [Error No_owner] when no other process holds a lock there,
+    [Error Unavailable] when the kernel could not be asked or named no
+    process above pid 1. *)
 val request_termination : t -> (unit, error) result
 (** SIGTERM to the captured process incarnation only; never PID fallback or
     SIGKILL escalation. Success means requested, not drained or restarted. *)

@@ -177,22 +177,31 @@ let with_http f =
     Eio_context.set_net (Eio.Stdenv.net env); Eio_context.set_clock (Eio.Stdenv.clock env);
     Masc_http_client.with_scoped_pool ~sw ~env (fun () -> f sw (Eio.Stdenv.clock env))))
 
-let refusal_label = function
-  | Upgrade.No_lease_owner -> "refused: nobody holds the lease"
-  | Upgrade.Owner_announces_no_port { pid = (_ : int) } -> "refused: the owner announces no port"
-  | Upgrade.Owner_listens_on_another_port { pid = (_ : int); port } ->
-    Printf.sprintf "refused: the owner listens on port %d" port
-  | Upgrade.Listener_unread unread ->
-    "refused, unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
+let owner_label = function
+  | Upgrade.Single_user_server_here (_ : Upgrade.single_user_listener) -> "the owner listens on the port"
+  | Upgrade.Single_user_server_elsewhere { pid = (_ : int); port } ->
+    Printf.sprintf "the owner listens on port %d" port
+  | Upgrade.Account_server_here { pid = (_ : int) } -> "an account server announces the port"
+  | Upgrade.Account_server_elsewhere { pid = (_ : int); port } ->
+    Printf.sprintf "an account server announces port %d" port
+  | Upgrade.Owner_unannounced { pid = (_ : int) } -> "the owner announces no port"
+  | Upgrade.Unowned -> "nobody holds the lease"
+
+let departure_label = function
+  | Upgrade.Announcement_withdrawn { pid = (_ : int) } -> "the owner withdrew its announcement"
+  | Upgrade.Owner_now now -> "now " ^ owner_label now
+  | Upgrade.Owner_unreadable unread ->
+    "unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread
 
 let error_label = function
   | Upgrade.Invalid_health -> "invalid health"
-  | Different_workspace -> "different workspace"
   | Admin_required -> "admin required"
   | Server_starting -> "server starting"
   | Admin_check_unanswered -> "admin check unanswered"
   | Owner_unavailable -> "owner unavailable"
   | Incumbent_changed -> "incumbent changed"
+  | Not_confirmed { listener = (_ : Upgrade.single_user_listener); departure } ->
+    Printf.sprintf "not confirmed (%s)" (departure_label departure)
   | Already_requested -> "already requested"
   | Closed -> "closed"
   | Port_unavailable -> "port unavailable"
@@ -200,11 +209,18 @@ let error_label = function
 (* The stop of a command line up to the prepared owner: the kernel is asked,
    and its answer is what [Upgrade.prepare] takes. *)
 let prepared ~sw ~clock ~run_dir ~base_path ~port =
-  match Upgrade.single_user_listener ~run_dir ~base_path ~port with
-  | Error refusal -> Error (refusal_label refusal)
-  | Ok listener ->
+  match Upgrade.owner ~run_dir ~base_path ~port with
+  | Error unread ->
+    Error ("refused, unread: " ^ Server_startup_takeover.owner_capture_error_to_string unread)
+  | Ok (Upgrade.Single_user_server_here listener) ->
     Upgrade.prepare ~sw ~clock ~listener ~token ~agent
     |> Result.map_error (fun error -> "not prepared: " ^ error_label error)
+  | Ok
+      (( Upgrade.Single_user_server_elsewhere { pid = (_ : int); port = (_ : int) }
+       | Upgrade.Account_server_here { pid = (_ : int) }
+       | Upgrade.Account_server_elsewhere { pid = (_ : int); port = (_ : int) }
+       | Upgrade.Owner_unannounced { pid = (_ : int) }
+       | Upgrade.Unowned ) as owner) -> Error ("refused: " ^ owner_label owner)
 
 let stop ~run_dir ~base_path ~port =
   with_http (fun sw clock ->
@@ -271,7 +287,8 @@ let test_an_owner_that_left_gets_no_second_bearer () =
               Printf.sprintf "%s; bearers after the owner left: %d" answer
                 (List.length (bearer_paths ()) - sent_before))) in
         Alcotest.(check string) "the stop after the owner left"
-          "not asked to stop: incumbent changed; bearers after the owner left: 0" outcome)))
+          "not asked to stop: not confirmed (now nobody holds the lease); bearers after the owner \
+           left: 0" outcome)))
 
 let () = Alcotest.run "upgrade bearer destination"
   ["the bearer of the operator",

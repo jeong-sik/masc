@@ -43,8 +43,8 @@ start).
 | Item | Value |
 | --- | --- |
 | Window | 2026-11-14T16:16:16Z to 16:20:23Z (UTC) |
-| Harness | `scripts/eval-replayed-result-age.py` committed at `e7285ac8fb99` (sha256 `d83326fe…c73f`). The runs started from the working copy just before that commit; it lacked only the `score --rows` option, which the run path does not use |
-| Seed renderer | `test/replayed_result_age_seed.exe` (sha256 `cbc97004…bcb8`), built from that commit |
+| Harness | `scripts/eval-replayed-result-age.py` (sha256 `d83326fe…c73f`), added in this pull request's commit 「test(eval): fixed replayed-result-age eval judged by tool-call order」. The runs started from the working copy just before that commit; it lacked only the `score --rows` option, which the run path does not use |
+| Seed renderer | `test/replayed_result_age_seed.exe` (sha256 `cbc97004…bcb8`), built from that commit on its first base. A build on a newer `main` links other code and hashes differently; compare the rendered `seed-v4.txt` instead |
 | Fixture | `scripts/fixtures/replayed-result-age/fixture.json` (sha256 `d241ebe9…5230`) |
 | Client | Claude Code 2.1.325, `--print`, stream-json in and out, `--tools ToolSearch`, `ENABLE_TOOL_SEARCH=true`, `--permission-mode dontAsk`, `--setting-sources=`, `--no-session-persistence` |
 | Model | `claude-sonnet-5-5`, no `--effort` (the uncle runtime `claude_code_f2458adc.claude-sonnet-5-5_15df9d6b` sets none) |

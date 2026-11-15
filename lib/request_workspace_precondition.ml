@@ -62,6 +62,19 @@ let refusal_code = function
   | Server_booting -> "server_booting"
 ;;
 
+let refusal_http_status = function
+  | Invalid_precondition _ -> 400
+  | Workspace_mismatch -> 409
+  | Server_booting -> 503
+;;
+
+let refusal_of_answer ~status ~code ~error =
+  List.find_opt
+    (fun refusal ->
+       refusal_http_status refusal = status && String.equal (refusal_code refusal) code)
+    [ Invalid_precondition error; Workspace_mismatch; Server_booting ]
+;;
+
 let refusal_message = function
   | Invalid_precondition why -> "invalid workspace precondition: " ^ why
   | Workspace_mismatch -> "workspace precondition failed"

@@ -148,7 +148,7 @@ def addon_payload() -> dict:
             "action_schema": None,
             "configuration": {"id": "operator-quiz", "source_path": "/c/operator-quiz.toml", "revision": "r1"},
             "binding": {"sources": []},
-            "package": {"outputs": {"quiz": {"lanes": ["quiz/sessions"]}}, "skills_directory": None},
+            "package": {"outputs": {"quiz": {"lanes": ["quiz/sessions"]}}, "skills_directory": None, "action_tool": None},
         }],
         "rows": [],
         "coverage": [],

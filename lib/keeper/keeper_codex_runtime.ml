@@ -1698,7 +1698,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                 Startup and the existing maintenance pulse rediscover it. *)
              (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
               | Ok () -> ()
-              | Error detail -> Log.Keeper.warn ~keeper_name
+              | Error (Keeper_client_tool_outbox_wake.Intake_shutdown_reserved operation_id) ->
+                Log.Keeper.routine ~keeper_name
+                  "retained tool result notification held by shutdown operation=%s"
+                  (Keeper_shutdown_types.Operation_id.to_string operation_id)
+              | Error (Keeper_client_tool_outbox_wake.Notify_failed detail) -> Log.Keeper.warn ~keeper_name
                   "retained tool result notification deferred: %s" detail
               | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
               | exception exn -> Log.Keeper.warn ~keeper_name

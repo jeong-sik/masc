@@ -3263,12 +3263,6 @@ let keeper_create_port =
     & opt int (Env_config_core.masc_http_port_int ())
     & info [ "p"; "port" ] ~docv:"PORT" ~doc)
 
-let keeper_create_token =
-  let doc =
-    "Bearer to present instead of the one masc login persisted for --agent."
-  in
-  Arg.(value & opt (some string) None & info [ "token" ] ~docv:"TOKEN" ~doc)
-
 let keeper_create_edit =
   let doc =
     "Fill the declaration in the editor named by the EDITOR or VISUAL \
@@ -3390,14 +3384,15 @@ let keeper_create_declaration_from_editor () =
    only [A-Za-z0-9._-], which makes the encoding a no-op today -- and that is
    the reason to have it rather than to skip it: relying on the two staying in
    step leaves a widened name grammar to show up as a malformed request line.
-   The TUI's own keeper calls encode the same segment. *)
-let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_name
+   The TUI's own keeper calls encode the same segment.
+
+   The bearer is only ever the one [masc login] persisted for [agent] under
+   [base_path]. A bearer taken from argv would show in [ps] and shell history,
+   and a keeper's shell commands are logged whole, so another identity is
+   presented by logging it in with [masc login --agent] instead. *)
+let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~keeper_name
       ~declaration =
-  let bearer =
-    match token with
-    | Some raw -> Some raw
-    | None -> Auth_login.read_persisted_http_token ~base_path ~agent_name:agent
-  in
+  let bearer = Auth_login.read_persisted_http_token ~base_path ~agent_name:agent in
   let headers =
     ("content-type", "application/json")
     :: (match bearer with
@@ -3455,7 +3450,7 @@ let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_n
   if code = 0 then print_endline text else prerr_endline text;
   code
 
-let keeper_create_cmd_exit base_path host port flags_result token agent edit =
+let keeper_create_cmd_exit base_path host port flags_result agent edit =
   let declaration_result =
     match edit, flags_result with
     | true, Ok flags when not (keeper_create_flags_are_absent flags) ->
@@ -3479,7 +3474,7 @@ let keeper_create_cmd_exit base_path host port flags_result token agent edit =
       prerr_endline "Nothing was created.";
       2)
     else
-      keeper_lifecycle_post ~action:`Up ~base_path ~host ~port ~agent ~token ~keeper_name
+      keeper_lifecycle_post ~action:`Up ~base_path ~host ~port ~agent ~keeper_name
         ~declaration
 
 let keeper_create_cmd =
@@ -3508,6 +3503,10 @@ let keeper_create_cmd =
          running server of its own still sends the declaration to \
          --host/--port. Scoping a create to a scratch workspace means \
          pointing --host/--port at that workspace's server."
+    ; `P
+        "That persisted bearer is the only one this command presents. To \
+         send the declaration as another identity, sign it in with masc \
+         login --agent NAME and pass the same --agent here."
     ; `P
         "--network-mode is required, on the flags and in the --edit form \
          alike. The server's default for docker and microvm is none, which \
@@ -3543,7 +3542,6 @@ let keeper_create_cmd =
       $ keeper_create_host
       $ keeper_create_port
       $ keeper_create_flags_term
-      $ keeper_create_token
       $ login_agent
       $ keeper_create_edit)
 
@@ -4660,7 +4658,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     ~resume_models:(fun () -> Masc_cli_model_resume.run ~base_path ~port ~agent:default_login_agent)
     ~start_keeper:(fun () ->
       keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
-        ~agent:default_login_agent ~token:None ~keeper_name:"imp"
+        ~agent:default_login_agent ~keeper_name:"imp"
         ~declaration:(`Assoc ["name", `String "imp"]))
 
 let setup_preflight_cmd =

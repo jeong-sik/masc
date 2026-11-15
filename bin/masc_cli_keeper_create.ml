@@ -374,7 +374,7 @@ let render = function
     ( String.concat
         "\n"
         [ Printf.sprintf "the server refused this command's credential: %s" message
-        ; "Run masc login for this workspace, or pass --token."
+        ; "Run masc login for this workspace with the same --base-path and --agent."
         ]
     , 1 )
   | Refused message ->

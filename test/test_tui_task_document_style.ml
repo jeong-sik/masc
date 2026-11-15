@@ -1,9 +1,11 @@
-(** What the Task document does with styles, not where it puts them.
+(** What the Task document does with styles and what a note costs, not where
+    it puts them.
 
     A row the document prepares carries a style only when the document put it
-    there, and a style never outlives its row. Neither check reads a width, a
-    heading or a label: the constitution keeps those out of tests, and the
-    screen captures in the pull request are the evidence for them. *)
+    there, and a style never outlives its row. A note costs what its rows
+    show, however deep it nests. None of the checks reads a width, a heading
+    or a label: the constitution keeps those out of tests, and the screen
+    captures in the pull request are the evidence for them. *)
 
 open Alcotest
 
@@ -152,6 +154,35 @@ let test_a_note_with_a_number_json_cannot_write_is_drawn () =
       check_every_style_closes_in_its_row rows)
     [ "[NaN]", "NaN"; {|{"n": Infinity}|}, "Infinity"; "[1, -Infinity]", "-Infinity"; "[1E400]", "Infinity" ]
 
+(* A note costs what its rows show, not how deep it nests. A note nested
+   ten thousand deep is twenty thousand lines, and a row keeps a line's
+   indent only up to half its width. Spelling every indent out first made
+   the note's preparation build text that grew with the square of its depth
+   (200 MB at this depth, #48554), all of it thrown away row by row.
+
+   The bytes allocated per row are set against a flat note's, whose rows
+   are as many and as plain. Depth may only move a row's text further in,
+   and never past half the width, so a deep row may cost up to twice what a
+   flat one does; text that grew with depth costs the deep note hundreds of
+   times more. *)
+let allocated_per_row note =
+  let before = Gc.allocated_bytes () in
+  let rows = history_rows ~cols:100 [ Some note ] in
+  (Gc.allocated_bytes () -. before) /. float_of_int (List.length rows)
+
+let test_a_deep_note_costs_what_its_rows_show () =
+  let depth = 10_000 in
+  let deep = String.make depth '[' ^ String.make depth ']' in
+  (* As many lines as the deep note draws, [2 * depth - 1] with its innermost
+     [[]] on one: the elements and the two brackets around them. *)
+  let flat = "[" ^ String.concat "," (List.init ((2 * depth) - 3) (fun _ -> "0")) ^ "]" in
+  let deep_cost = allocated_per_row deep and flat_cost = allocated_per_row flat in
+  check bool
+    (Printf.sprintf "a deep note's row costs at most twice a flat one's (%.0f vs %.0f bytes)"
+       deep_cost flat_cost)
+    true
+    (deep_cost <= 2. *. flat_cost)
+
 let test_note_text_cannot_put_a_style_on_a_history_row () =
   let hostile_json = Some ("{\n  \"k\": \"" ^ hostile_style ^ "after\"\n}") in
   let hostile_prose = Some ("before " ^ hostile_style ^ "after") in
@@ -172,5 +203,9 @@ let () =
             test_note_text_cannot_put_a_style_on_a_history_row
         ; test_case "a note with a number JSON cannot write is drawn" `Quick
             test_a_note_with_a_number_json_cannot_write_is_drawn
+        ] )
+    ; ( "cost"
+      , [ test_case "a deep note costs what its rows show" `Quick
+            test_a_deep_note_costs_what_its_rows_show
         ] )
     ]

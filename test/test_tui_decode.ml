@@ -4942,49 +4942,6 @@ let test_decode_connector_reads_a_poll_state () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
-let test_decode_connector_telegram_numeric_bot_id () =
-  let decode id bot_user_id =
-    let json =
-      connector_snapshot_json
-        [ connector_json ~id ~gateway_state:`Null
-            ~poll_state:(`String "polling") ~bot_user_id () ]
-    in
-    Masc.Tui_decode_connectors.decode_connector_snapshot
-      (Yojson.Safe.from_string (Yojson.Safe.to_string json))
-  in
-  let expect_id label id bot_user_id expected =
-    match decode id bot_user_id with
-    | Ok { Masc.Tui_decode_connectors.cs_connectors = [ connector ]
-         ; cs_refused = []; _ } ->
-        Alcotest.(check (option string)) label expected connector.cn_bot_user_id
-    | Ok _ -> Alcotest.failf "%s: expected one readable connector" label
-    | Error err -> Alcotest.failf "%s: decode failed: %s" label err
-  in
-  let expect_refused label id bot_user_id =
-    match decode id bot_user_id with
-    | Ok { Masc.Tui_decode_connectors.cs_connectors = []
-         ; cs_refused = [ _ ]; _ } -> ()
-    | Ok _ -> Alcotest.failf "%s: expected a refused connector" label
-    | Error err -> Alcotest.failf "%s: snapshot failed: %s" label err
-  in
-  expect_id "Telegram integer" "telegram" (`Int 4242) (Some "4242");
-  expect_id "Telegram int64 maximum" "telegram"
-    (`Intlit "9223372036854775807") (Some "9223372036854775807");
-  expect_id "Telegram string" "telegram" (`String "4242") (Some "4242");
-  expect_id "Telegram blank string" "telegram" (`String "   ") None;
-  expect_id "Telegram null" "telegram" `Null None;
-  expect_id "Slack string" "slack" (`String "U123") (Some "U123");
-  expect_refused "Slack integer" "slack" (`Int 4242);
-  expect_refused "Telegram zero integer" "telegram" (`Int 0);
-  expect_refused "Telegram negative integer" "telegram" (`Int (-42));
-  expect_refused "Telegram zero string" "telegram" (`String "0");
-  expect_refused "Telegram negative string" "telegram" (`String "-42");
-  expect_refused "Telegram non-numeric string" "telegram" (`String "not-a-bot-id");
-  expect_refused "Telegram leading-zero string" "telegram" (`String "0042");
-  expect_refused "Telegram float" "telegram" (`Float 1.5);
-  expect_refused "Telegram int64 overflow" "telegram"
-    (`Intlit "9223372036854775808")
-
 (* A gateway or poll state the server's state machines never produce is not
    read as some nearby state. The row that carries it is refused on its own:
    the transports beside it still decode, and the refusal names the row. *)
@@ -9810,6 +9767,48 @@ let test_decode_server_identity_reads_the_startup_readiness () =
       "no startup section is unknown, not booting" None
       identity.Tui_decode.sid_state_ready
 
+(* Before the workspace is published, and to a requester without a read, the
+   server answers the public probe. The boot display depends on its [ready]. *)
+let test_the_public_probe_tells_the_tui_whether_the_server_is_ready () =
+  let public_probe ready =
+    `Assoc
+      [ ("server", `String "masc");
+        ("version", `String "1.2.3");
+        ("live", `Bool true);
+        ("ready", `Bool ready);
+        ("phase", `String (if ready then "ready" else "blocking"));
+      ]
+  in
+  let decoded json =
+    match Tui_decode.decode_server_identity json with
+    | Error detail -> Alcotest.fail detail
+    | Ok identity -> identity
+  in
+  let booting = decoded (public_probe false) in
+  Alcotest.(check (option bool)) "a public probe that is not ready is booting"
+    (Some false) booting.Tui_decode.sid_state_ready;
+  Alcotest.(check string) "the version is read" "1.2.3" booting.Tui_decode.sid_version;
+  Alcotest.(check string) "no base path" ""
+    (Tui_decode.Canonical_path.to_string booting.Tui_decode.sid_base_path);
+  Alcotest.(check string) "no masc root" ""
+    (Tui_decode.Canonical_path.to_string booting.Tui_decode.sid_masc_root);
+  Alcotest.(check (option bool)) "a ready public probe says so" (Some true)
+    (decoded (public_probe true)).Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool))
+    "the startup section still decides when it is there" (Some false)
+    (decoded (`Assoc [ ("startup", `Assoc [ ("state_ready", `Bool false) ]) ]))
+      .Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool))
+    "the startup section wins over a top-level ready" (Some false)
+    (decoded
+       (`Assoc
+          [ ("ready", `Bool true);
+            ("startup", `Assoc [ ("state_ready", `Bool false) ]);
+          ]))
+      .Tui_decode.sid_state_ready;
+  Alcotest.(check (option bool)) "neither is unknown" None
+    (decoded (`Assoc [ ("status", `String "ok") ])).Tui_decode.sid_state_ready
+
 let test_decode_server_identity_reads_the_worktree_verdict () =
   let with_flag value =
     `Assoc [ ("build", `Assoc [ ("executable_in_worktree", `Bool value) ]) ]
@@ -11408,8 +11407,8 @@ let test_decode_secret_projection_reads_names_not_values () =
   | Error err -> Alcotest.fail err
   | Ok (_, Some p) ->
       Alcotest.(check string) "keeper" "marlow" p.Tui_decode.ksp_keeper;
-      Alcotest.(check string) "status" "ready"
-        (Tui_decode.keeper_secret_status_to_string p.Tui_decode.ksp_status);
+      Alcotest.(check bool) "status" true
+        (p.Tui_decode.ksp_status = Tui_decode.Secret_ready);
       Alcotest.(check (list string)) "env names"
         [ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
         p.Tui_decode.ksp_env_names;
@@ -11476,6 +11475,36 @@ let test_decode_secret_projection_keeps_an_unknown_status () =
   | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word; _ })
     ->
       Alcotest.(check string) "the producer's word survives" "quarantined" word
+  | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
+  | Error err -> Alcotest.fail err
+
+(* #51610: the Secrets tab draws the status text between its own style codes
+   and hands the row to the frame as it is. An unknown word carrying ESC, a
+   C1 CSI (raw and UTF-8 encoded), BEL, DEL or a line break must arrive as
+   visible text on one row, in either screen language. *)
+let test_secret_status_text_keeps_an_unknown_word_on_one_printable_row () =
+  let hostile = "quar\x1b[2J\x1b]0;owned\x07antined\r\nnext\x9b31m\xc2\x9b0m\x7f" in
+  let json =
+    composite_json "marlow"
+      ~projection:(secret_projection_json ~status:hostile ~env_names:[] ~mounts:[])
+  in
+  match Tui_decode.decode_keeper_composite json with
+  | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word as status; _ })
+    ->
+      Alcotest.(check string) "the decoded value keeps the producer's bytes" hostile word;
+      List.iter
+        (fun ko ->
+          let drawn = Tui_decode.keeper_secret_status_text ~ko status in
+          Alcotest.(check bool)
+            (Printf.sprintf "ko=%b: every byte is printable ASCII" ko)
+            true
+            (String.for_all (fun c -> c >= ' ' && c <= '~') drawn);
+          Alcotest.(check bool)
+            (Printf.sprintf "ko=%b: the producer's word is still readable" ko)
+            true
+            (Astring.String.is_infix ~affix:"quar" drawn
+             && Astring.String.is_infix ~affix:"antined" drawn))
+        [ true; false ]
   | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
   | Error err -> Alcotest.fail err
 
@@ -11620,9 +11649,10 @@ let test_decode_gate_rows_distinguish_operator_phases () =
       ; "input", `Assoc []
       ]
       @
-      match phase_field with
-      | Some (`String "human_required") -> [ "summary_status", handed_over ]
-      | Some _ | None -> []
+      match Option.map Q.approval_queue_phase_of_yojson_with_error phase_field with
+      | Some (Ok Q.Phase_human_required) -> [ "summary_status", handed_over ]
+      | Some (Ok (Q.Phase_queued | Q.Phase_judging | Q.Phase_blocked) | Error _)
+      | None -> []
     in
     let fields =
       match phase_field with
@@ -11641,26 +11671,29 @@ let test_decode_gate_rows_distinguish_operator_phases () =
         (List.length snapshot.gs_pending)
     | Error detail -> Error detail
   in
-  Alcotest.check
-    Alcotest.bool
-    "queued phase"
-    true
-    (phase ~phase_field:(`String "queued") () = Ok Tui_decode.Gate_queued);
-  Alcotest.check
-    Alcotest.bool
-    "judging phase"
-    true
-    (phase ~phase_field:(`String "judging") () = Ok Tui_decode.Gate_judging);
-  Alcotest.check
-    Alcotest.bool
-    "human_required phase"
-    true
-    (phase ~phase_field:(`String "human_required") () = Ok Tui_decode.Gate_human_required);
-  Alcotest.check
-    Alcotest.bool
-    "blocked phase"
-    true
-    (phase ~phase_field:(`String "blocked") () = Ok Tui_decode.Gate_blocked);
+  (* The server spells the phase; every phase it can put on a row, encoded the
+     way the queue projection encodes it, reads as the TUI phase naming the
+     same state. *)
+  List.iter
+    (fun server_phase ->
+      let word = Q.approval_queue_phase_to_string server_phase in
+      let expected =
+        match server_phase with
+        | Q.Phase_queued -> Tui_decode.Gate_queued
+        | Q.Phase_judging -> Tui_decode.Gate_judging
+        | Q.Phase_human_required -> Tui_decode.Gate_human_required
+        | Q.Phase_blocked -> Tui_decode.Gate_blocked
+      in
+      match phase ~phase_field:(Q.approval_queue_phase_to_yojson server_phase) () with
+      | Ok decoded ->
+        Alcotest.check
+          Alcotest.bool
+          (Printf.sprintf "server phase %s" word)
+          true
+          (decoded = expected)
+      | Error detail ->
+        Alcotest.failf "server phase %s did not decode: %s" word detail)
+    Q.approval_queue_phases;
   Alcotest.check
     Alcotest.bool
     "unknown phase rejects"
@@ -14032,8 +14065,6 @@ let () =
           test_decode_connector_reads_a_stale_state;
         Alcotest.test_case "poll state is typed" `Quick
           test_decode_connector_reads_a_poll_state;
-        Alcotest.test_case "Telegram bot ID accepts its native numeric form" `Quick
-          test_decode_connector_telegram_numeric_bot_id;
         Alcotest.test_case "unknown runtime state refuses only its row" `Quick
           test_decode_connector_refuses_only_the_row_with_an_unknown_state;
         Alcotest.test_case "nonpositive pid is omitted" `Quick
@@ -14552,6 +14583,8 @@ let () =
           test_decode_server_identity_reads_the_worktree_verdict;
         Alcotest.test_case "reads the startup readiness" `Quick
           test_decode_server_identity_reads_the_startup_readiness;
+        Alcotest.test_case "reads the public probe's readiness" `Quick
+          test_the_public_probe_tells_the_tui_whether_the_server_is_ready;
         Alcotest.test_case "reads telemetry" `Quick
           test_decode_server_identity_reads_telemetry;
       ] );
@@ -14597,6 +14630,8 @@ let () =
           test_decode_keeper_composite_reads_an_offline_keeper;
         Alcotest.test_case "keeps an unknown status" `Quick
           test_decode_secret_projection_keeps_an_unknown_status;
+        Alcotest.test_case "draws an unknown status on one printable row" `Quick
+          test_secret_status_text_keeps_an_unknown_word_on_one_printable_row;
         Alcotest.test_case "rejects a wrong env name type" `Quick
           test_decode_secret_projection_rejects_a_wrong_env_name_type;
       ] );

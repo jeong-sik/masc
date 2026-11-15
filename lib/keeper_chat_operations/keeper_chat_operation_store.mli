@@ -61,7 +61,9 @@ type durable_snapshot =
 
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
 (** Read-only current-schema/integrity checked snapshot of queued/running
-    operations, nonterminal semantic executions, and every
+    operations, nonterminal semantic executions except a direct
+    [Interrupted_execution] whose operation already ended and which names no
+    native call, checkpoint or Gate approval, and every
     trace's current input checkpoint. A checkpoint whose pending_input is None
     is still ownership evidence. Never creates, upgrades or recovers a store.
     Missing files remain distinct from a validated empty queue. Mutation callers
@@ -149,7 +151,9 @@ val history_clear_input_checkpoint : t -> trace_id:Keeper_id.Trace_id.t ->
 (** Maintenance admission in a journal transaction. Refuse unavailable prior
     input, running operations and nonterminal semantic executions, whatever
     native call they hold. A settled execution never resumes, so the native
-    receipt it keeps does not refuse the clear. None is a genuinely unobserved
+    receipt it keeps does not refuse the clear. Neither does a direct
+    [Interrupted_execution] whose operation already ended and which names no
+    native call, checkpoint or Gate approval. None is a genuinely unobserved
     input, never a forgotten consumed request. *)
 
 val commit_history_clear_input_checkpoint : ?allow_turn_reset:bool -> t ->

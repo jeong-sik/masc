@@ -26,11 +26,13 @@ val call_error_of_runtime : Lane_addon_runtime.tool_call_error -> call_error
 
 type wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
-type 'final result =
-  | Awaiting of wait * Lane_addon_tool_request_owner.retained
+type ('original, 'final) result =
+  | Awaiting of wait * 'original
   | Final of 'final
-  | Commit_pending of Lane_addon_tool_request_owner.retained
-  | Settled of Lane_addon_tool_request_owner.retained
+  | Commit_pending of 'original
+  | Settled of 'original
+(** ['original] is what the caller resumed from: a record for {!resume}, a
+    retained original for {!resume_retained}. *)
 
 type publication =
   | New of Lane_addon_tool_request_owner.retained
@@ -40,14 +42,23 @@ val advance : store:Lane_addon_store.t -> Lane_addon_tool_request_owner.retained
 (** Blocking store write; offload it in Eio. [Unconfirmed] is [Uncertain]. *)
 val record : publication -> Lane_addon_tool_request_owner.retained
 
+type 'body source = {
+  identity : Lane_addon_exact.identity;
+      (** The request's ID and digest, as the owner kept them. *)
+  load : unit -> ('body, error) Stdlib.result;
+      (** Read and validate the original's body. Called at most once per
+          {!resume}, on entering a branch that needs it. *)
+  request : 'body -> Lane_addon_exact.request;
+  schema : 'body -> Yojson.Safe.t;
+}
+
 val resume : store:Lane_addon_store.t -> label:string ->
-  original:Lane_addon_tool_request_owner.retained -> request:Lane_addon_exact.request ->
-  schema:Yojson.Safe.t ->
-  decode_final:(Yojson.Safe.t -> (Lane_addon_exact.final, string) Stdlib.result) ->
+  original:Lane_addon_tool_request_owner.Record.t -> source:'body source ->
+  decode_final:('body -> Yojson.Safe.t -> (Lane_addon_exact.final, string) Stdlib.result) ->
   prepare:(unit -> (unit, error) Stdlib.result) -> call:call ->
-  terminal:(Lane_addon_tool_request_owner.retained -> Lane_addon_exact.final ->
+  terminal:('body -> Lane_addon_tool_request_owner.Record.t -> Lane_addon_exact.final ->
     ('final, error) Stdlib.result) ->
-  ('final result, error) Stdlib.result
+  ((Lane_addon_tool_request_owner.Record.t, 'final) result, error) Stdlib.result
 (** Existing judgments, refusals and commit progress need no live worker.
     Dispatch_pending first restores a proven terminal publication in the
     original host Exact record by its configured installation. Confirmed
@@ -81,3 +92,30 @@ val resume : store:Lane_addon_store.t -> label:string ->
     confirms [Retained_unknown]; missing/open or contradictory host state is
     rejected. [terminal] still receives the delivered worker-shaped result.
     No domain save, queue ACK, successor or scheduling runs here. *)
+
+(** The machine runs on the record. It reads the body through [source.load]
+    in these branches only, once, and before it writes anything for them:
+    admission (after [prepare], before Dispatch_intended); a retained
+    judgment; a refusal retained at execution; a Dispatch_pending original
+    whose host Exact record has a final or an execution link
+    ({!Lane_addon_exact.observe_open} answers [Needs_request]); and a worker
+    reply that says finished, whose state is read first and whose result is
+    read after the body. A failed [load] is returned as the error of this
+    call and leaves the journal unchanged. A finished result that does not
+    decode is still an observation of unknown outcome.
+
+    A Dispatch_pending original whose host record is open or absent and whose
+    worker answers pending or absent, commit progress and settled phases read
+    no body. [decode_final] and [terminal] cannot be called without one. *)
+
+val resume_retained : store:Lane_addon_store.t -> label:string ->
+  original:Lane_addon_tool_request_owner.retained -> request:Lane_addon_exact.request ->
+  schema:Yojson.Safe.t ->
+  decode_final:(Yojson.Safe.t -> (Lane_addon_exact.final, string) Stdlib.result) ->
+  prepare:(unit -> (unit, error) Stdlib.result) -> call:call ->
+  terminal:(Lane_addon_tool_request_owner.retained -> Lane_addon_exact.final ->
+    ('final, error) Stdlib.result) ->
+  ((Lane_addon_tool_request_owner.retained, 'final) result, error) Stdlib.result
+(** {!resume} for an owner that already holds the body: nothing is loaded, and
+    every record the machine returns is put back beside that body with
+    {!Lane_addon_tool_request_owner.rebind}. *)

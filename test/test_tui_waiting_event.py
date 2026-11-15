@@ -692,9 +692,8 @@ class WaitingEventTest(unittest.TestCase):
                     "confirmation observation failure did not trigger a read",
                 )
                 wait_until(
-                    # The native screen names the failure without the source's own
-                    # sentence (the sentence stays on the Approvals/detail views),
-                    # so accept either wording.
+                    # The native screen names the failure and then the source's own
+                    # sentence, which a narrow frame can cut, so accept either wording.
                     lambda: any(
                         marker in output[confirm_failure_start:]
                         for marker in (

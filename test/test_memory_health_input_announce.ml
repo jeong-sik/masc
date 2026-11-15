@@ -390,7 +390,11 @@ let test_a_notification_reloads_the_warm_row () =
     (fun () ->
       write_ordinary ();
       Eio.Switch.run (fun sw ->
+        (* Wired as the server wires it: the store hooks and the broadcast
+           can both empty a row for one write, and the row still reloads
+           once. *)
         Server_memory_health_broadcast.install ~sw ~mono_clock ~config;
+        Health.install ();
         let read_row () =
           ignore (Health.keeper_memory_health_row_http_json
                     ~base_path:config.Workspace.base_path ~keeper)
@@ -461,8 +465,12 @@ let test_a_notification_reloads_the_warm_row () =
                  ~mode:Keeper_vision_ingest.Store_only ~delegate:true ~keeper_name:keeper
                  [ unreadable ]));
           check_reload "unread ledger" (fun () ->
+            (* Each conversation message opens its own atom, so the hole at
+               atom 1 needs the message of atom 0 before it. *)
             let messages =
               [ Agent_core.Types.make_message ~role:Agent_core.Types.User
+                  [ Agent_core.Types.Text "prefix" ]
+              ; Agent_core.Types.make_message ~role:Agent_core.Types.User
                   [ Agent_core.Types.Text "unread original" ]
               ]
             in

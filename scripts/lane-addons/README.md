@@ -73,6 +73,7 @@ Web `binding.sources` may combine:
 [
   {
     "kind": "browser_document", "source_id": "existing-browser",
+    "installation_id": "browser-ego",
     "lane": "live", "client_id": "existing-native-client-UUID", "tab_id": 4,
     "target_id": "fixture-site", "environment": "qualification", "request_id": "verify-A"
   },
@@ -80,8 +81,10 @@ Web `binding.sources` may combine:
 ]
 ```
 
-Use the actual selected client and tab from the existing Browser Lane. The
-source refuses to switch to a different current tab. Attach does not open a
+Use the actual selected client and tab from the existing Browser Lane, and the
+declaration id of the browser Add-on installation that serves that client. The
+source refuses to switch to a different current tab, and it does not read a
+client another browser installation serves. Attach does not open a
 browser. The package binding's target, expected build and request must match the
 declared source mapping. See `addons/README.md` for exact domain payloads.
 

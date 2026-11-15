@@ -117,7 +117,13 @@ let deliver ~base_path ~keeper_name ~request_id ~arguments ending =
   | Ok () ->
     (match Keeper_client_tool_outbox_wake.notify ~base_path ~keeper_name with
      | Ok () -> ()
-     | Error detail ->
+     | Error (Keeper_client_tool_outbox_wake.Intake_shutdown_reserved operation_id) ->
+       Log.Keeper.routine
+         ~keeper_name
+         "execute background %s: wake held by shutdown operation=%s"
+         request_id
+         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+     | Error (Keeper_client_tool_outbox_wake.Notify_failed detail) ->
        Log.Keeper.warn
          ~keeper_name
          "execute background %s: wake deferred: %s"

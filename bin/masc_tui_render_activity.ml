@@ -527,10 +527,18 @@ let render_keeper_calls (state : state) =
   let inner_cells = max 1 (framed_inner_width cols) in
   let labeled_rows ~call_index ~style ~label value =
     let prefix = Printf.sprintf "  #%d %s " (call_index + 1) label in
-    let value = Terminal_text.single_line value in
     let value =
       if String.equal value "" then ui_text state ~ko:"(빈 값)" ~en:"(empty)"
       else value
+    in
+    (* A field is a block, not a line. [single_line] escapes every control
+       byte, and a newline is one: run over a tool's output whole it printed
+       "\x0A" at each break, and the run was then cut at the width in the
+       middle of a word. Each stored line is escaped on its own and wrapped at
+       spaces, keeping its indentation, so an ESC is still drawn as text. *)
+    let value_lines ~max_cells =
+      Message_layout.wrap_indented_body ~max_cells
+        ~sanitize:Terminal_text.single_line value
     in
     let narrow_rows () =
       (* Drop decorative indentation before wrapping the exact header. The
@@ -544,7 +552,7 @@ let render_keeper_calls (state : state) =
         |> List.map (fun part -> call_index, style, part)
       in
       let value_rows =
-        Message_layout.split_cells ~max_cells:inner_cells value
+        value_lines ~max_cells:inner_cells
         |> List.map (fun part -> call_index, style, part)
       in
       List.concat_map
@@ -553,7 +561,7 @@ let render_keeper_calls (state : state) =
     in
     if Message_layout.display_width prefix < inner_cells then
       let body_cells = inner_cells - Message_layout.display_width prefix in
-      let parts = Message_layout.split_cells ~max_cells:body_cells value in
+      let parts = value_lines ~max_cells:body_cells in
       if
         List.for_all
           (fun part -> Message_layout.display_width part <= body_cells)
@@ -1000,7 +1008,7 @@ let render_acting (state : state) =
   let table_columns =
     let measured =
       match chunked with
-      | Some rows -> List.map Acting.measured_of_row rows
+      | Some rows -> List.map (Acting.measured_of_row ~ko:(state.ui_language = Lang_ko)) rows
       | None ->
           List.map
             (fun (entry, _older) ->
@@ -1094,7 +1102,11 @@ let render_acting (state : state) =
           in
           let line =
             column_line ~glyph:(Acting.glyph_text row.Acting.glyph)
-              ~content ~actor:(Terminal_text.single_line row.Acting.keeper) ~clock
+              ~content
+              ~actor:
+                (Terminal_text.single_line
+                   (Acting.actor_text ~ko:(state.ui_language = Lang_ko) row.Acting.actor))
+              ~clock
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in
@@ -1107,12 +1119,14 @@ let render_acting (state : state) =
          (Masc_tui_scroll.window_text ~scroll ~height:content_height shown))
   else box_empty buf cols;
   box_bottom buf cols;
+  (* A Turns row is a fold with no cursor on it: "/" and n have no row to
+     land on there, and the dispatcher refuses both. *)
+  let cursor_rows = state.acting_filter <> Acting.Turns && shown > 0 in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
          (Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false
-            ~has_rows:(shown > 0)
-            ~has_reading:(state.acting_filter <> Acting.Turns && shown > 0) Acting));
+            ~has_rows:cursor_rows ~has_reading:cursor_rows Acting));
   let clamped = match state.acting_filter with
     | Acting.Turns -> Acting scroll
     | Actions | Everything -> Acting_selection (scroll, cursor) in

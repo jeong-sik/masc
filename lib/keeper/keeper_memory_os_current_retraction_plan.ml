@@ -207,50 +207,28 @@ let journal_line_records_rewrite fields ~revision_links =
   | Ok (Some Unchanged), _ | Error _, _ | Ok _, Error _ -> false
 ;;
 
-let journal_contains_entry ~keepers_dir ~keeper_id ~revision_links expected =
-  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  (* Only receipt reconciliation calls this, after proving the exact committed
-     snapshot. A process interrupted during its append may leave a partial
-     final row: recover that tail before deciding whether to append the
-     preserved removal. General archive reads never perform this repair. *)
-  match Fs_compat.recover_private_jsonl_durable_locked_result path with
-  | Ok snapshot ->
-    let content = snapshot.Fs_compat.bytes in
-    let rec scan line_number = function
-      | [] -> Ok false
-      | line :: rest when String.equal (String.trim line) "" ->
-        scan (line_number + 1) rest
-      | line :: rest ->
-        (match Yojson.Safe.from_string line with
-         | json ->
-           (match Journal_codec.journal_entry_of_json json with
-            | Ok observed when observed = expected ->
-              (match json with
-               | `Assoc fields when journal_line_records_rewrite fields ~revision_links -> Ok true
-               | _ -> scan (line_number + 1) rest)
-            | Ok _ -> scan (line_number + 1) rest
-            | Error detail ->
-              Error
-                (Printf.sprintf
-                   "memory journal line %d is undecodable during retraction reconciliation path=%s: %s"
-                   line_number
-                   path
-                   detail))
-         | exception Yojson.Json_error detail ->
-           Error
-             (Printf.sprintf
-                "memory journal line %d is not JSON during retraction reconciliation path=%s: %s"
-                line_number
-                path
-                detail))
-    in
-    scan 1 (String.split_on_char '\n' content)
-  | Error error ->
-    Error
-      (Printf.sprintf
-         "memory journal unreadable during retraction reconciliation path=%s: %s"
-         path
-         (Fs_compat.private_jsonl_transaction_error_to_string error))
+(* The removal's own line: the entry its snapshot and receipt name, written
+   as a rewrite with the receipt's links. *)
+let journal_contains_entry ~keepers_dir ~keeper_id ~(snapshot : t) receipt =
+  let expected =
+    Journal_committed
+      { recorded_at = snapshot.updated_at
+      ; revision = snapshot.revision
+      ; source = snapshot.source
+      ; change = snapshot.change
+      ; dropped = Some receipt.dropped_statements
+      ; program = None
+      }
+  in
+  journal_holds_receipt_target ~keepers_dir ~keeper_id
+    ~target_revision:snapshot.revision
+    ~is_target:(fun json entry ->
+      entry = expected
+      && (match json with
+          | `Assoc fields ->
+            journal_line_records_rewrite fields ~revision_links:receipt.revision_links
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false))
+  |> Result.map_error (fun detail -> "retraction reconciliation: " ^ detail)
 ;;
 
 let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
@@ -288,22 +266,8 @@ let reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot =
         |> Result.map_error (fun detail ->
           "retraction target Memory snapshot durability is unconfirmed; stores preserved: " ^ detail)
       in
-      let journal_entry =
-        Journal_committed
-          { recorded_at = current.updated_at
-          ; revision = current.revision
-          ; source = current.source
-          ; change = current.change
-          ; dropped = Some receipt.dropped_statements
-          ; program = None
-          }
-      in
       let* present =
-        journal_contains_entry
-          ~keepers_dir
-          ~keeper_id
-          ~revision_links:receipt.revision_links
-          journal_entry
+        journal_contains_entry ~keepers_dir ~keeper_id ~snapshot:current receipt
       in
       if present
       then remove_retraction_plan_receipt ~keepers_dir ~keeper_id

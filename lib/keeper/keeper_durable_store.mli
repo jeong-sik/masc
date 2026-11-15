@@ -41,6 +41,7 @@ module Id : sig
     | Gate_pending
     | Official_client_session
     | Memory_current
+    | Memory_journal
     | Goal_store
     | Librarian_range_receipts
     | Memory_admission_queue
@@ -61,6 +62,7 @@ module Id : sig
     | Keeper_chat_transcripts
     | Keeper_chat_operations
     | Keeper_tool_outbox
+    | Keeper_reaction_ledger
   val all : t list
   (** Every constructor in declaration order, derived by
       [\[@@deriving enumerate\]]. *)

@@ -178,6 +178,18 @@ val person_wait : row -> person_wait option
     human-in-the-loop wait; the open questions; the item whose source is the
     operator's pending confirmation. Never another item of the same row.
     [None] for every other activity. *)
+
+(** Why the fleet waiting read could not observe one source, as the server
+    put it. *)
+type waiting_failure_reason =
+  | Failure_sentence of string  (** The server's operator sentence ([what]). *)
+  | Failure_next_action of string
+      (** No sentence came; the action the server names next. *)
+  | Failure_unstated  (** The server sent neither. *)
+
+val waiting_failure_reasons : Masc.Tui_decode.waiting_item list -> waiting_failure_reason list
+(** One reason for each failed source, in the order the server sent them. A
+    field that holds only blanks counts as not sent. *)
 val badges_of_row : row -> badge list
 val group_of_row : row -> attention
 val trail_of_row : row -> Masc_tui_keeper_trail.trail

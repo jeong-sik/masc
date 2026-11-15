@@ -40,6 +40,10 @@ type report =
 
 type record_outcome = Retired | Waiting | Delivered
 
+type delivery_refusal =
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Delivery_failed of string
+
 let protect_io work =
   try work () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -229,9 +233,15 @@ let recover_obligation ~base_path ~expected ~deliver (obligation : obligation) =
           Ok Retired
         | Queued | Running | Cancelling _ | Lost _ | Cancelled _
         | Persistence_failed _ | Done _ ->
-        let* () = deliver ~completion ~composition_tool:tool entry |> Result.map_error (fun detail -> Storage_failed detail) in
-        let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:obligation.request_id in
-        Ok Delivered
+        match deliver ~completion ~composition_tool:tool entry with
+        (* The shutdown that holds the recipient's intake is not a failed
+           delivery. The obligation stays on disk, and the first pass after
+           the shutdown releases the intake delivers it. *)
+        | Error (Intake_shutdown_reserved _) -> Ok Waiting
+        | Error (Delivery_failed detail) -> Error (Storage_failed detail)
+        | Ok () ->
+          let* () = acknowledge ~base_path ~keeper_name:obligation.keeper_name ~request_id:obligation.request_id in
+          Ok Delivered
 
 (* A record that cannot be read or whose filename does not bind its request is
    labeled by that filename, because its decoded identity is unverified. Once

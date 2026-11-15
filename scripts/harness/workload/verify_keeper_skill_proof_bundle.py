@@ -18,12 +18,13 @@ import uuid
 import zlib
 
 import join_natural_keeper_skill_ledger as ledger_join
+import keeper_skill_effect_cells as effect_cells
 import keeper_skill_use_proof as proof_collector
 import capture_keeper_skill_tui_proof as tui_capture
 import skill_activation_events
 
 
-SCHEMA = "masc.keeper-skill-proof-verification/v1"
+SCHEMA = "masc.keeper-skill-proof-verification/v2"
 JOIN_SCHEMA = ledger_join.JOIN_SCHEMA
 PROOF_SCHEMA = proof_collector.PROOF_SCHEMA
 TUI_SCHEMA = tui_capture.TUI_SCHEMA
@@ -603,6 +604,113 @@ def validate_proof_authorities(
     return recomputed
 
 
+def verify_effect_cells(
+    *,
+    proof: dict[str, Any],
+    proof_root: Path,
+    receipt: dict[str, Any],
+    receipt_raw: bytes,
+    keeper: str,
+    turn_ref: str,
+    actions: list[Any],
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    """Recompute the scenario's cells from the copied authorities.
+
+    The scenario comes from the producer receipt, which was fixed before the
+    natural message was sent; the proof may only repeat it.  Every authority
+    the cells read is either a hashed artifact or recorded absent, and a
+    required cell that observed nothing fails the bundle with its typed gap.
+    """
+    declaration = object_field(receipt, "scenario", "producer receipt").get(
+        "declaration"
+    )
+    try:
+        scenario = effect_cells.decode_scenario(declaration)
+    except effect_cells.CellError as error:
+        raise VerificationError(f"producer scenario is invalid: {error}") from error
+    require(
+        object_field(proof, "scenario", "proof")
+        == {"producer_receipt_sha256": digest(receipt_raw), "declaration": declaration},
+        "proof scenario differs from the producer receipt",
+    )
+    authorities = object_field(proof, "authorities", "proof")
+    require(
+        set(authorities) == {"present", "absent"},
+        "proof authority field set differs",
+    )
+    present = object_field(authorities, "present", "proof authorities")
+    absent = object_field(authorities, "absent", "proof authorities")
+    require(
+        set(present).isdisjoint(absent),
+        "proof authority is recorded both present and absent",
+    )
+    verified: dict[str, dict[str, Any]] = {}
+    read: set[str] = set()
+
+    def payload(name: str) -> bytes | None:
+        read.add(name)
+        if name in present:
+            expected = object_field(present, name, "proof authorities.present")
+            require(
+                set(expected) == {"bytes", "sha256", "source"},
+                f"proof authority {name} field set differs",
+            )
+            identity, raw = verify_file(
+                root=proof_root,
+                name=name,
+                expected=expected,
+                context=f"proof authority {name}",
+            )
+            verified[name] = identity
+            return raw
+        require(name in absent, f"proof authority {name} is not recorded")
+        require(
+            set(object_field(absent, name, "proof authorities.absent"))
+            == {"source"},
+            f"proof absent authority {name} field set differs",
+        )
+        require(
+            not os.path.lexists(proof_root / name),
+            f"proof authority {name} is recorded absent but exists",
+        )
+        return None
+
+    names = effect_cells.authority_names(scenario)
+    raw = {name: payload(name) for name in names}
+    memory: effect_cells.MemoryAuthorities | None = None
+    if effect_cells.EVIDENCE_TOOL_CALLS in raw:
+        tool_calls = raw[effect_cells.EVIDENCE_TOOL_CALLS]
+        if tool_calls is None:
+            raise VerificationError("proof records no Keeper tool-calls answer")
+        memory = effect_cells.MemoryAuthorities(
+            tool_calls=tool_calls,
+            journal=raw[effect_cells.EVIDENCE_MEMORY_JOURNAL],
+            current=raw.get(effect_cells.EVIDENCE_MEMORY_CURRENT),
+        )
+    try:
+        cells = effect_cells.observe_cells(
+            scenario=scenario,
+            keeper=keeper,
+            turn_ref=turn_ref,
+            actions=actions,
+            memory=memory,
+        )
+    except effect_cells.CellError as error:
+        raise VerificationError(f"effect authority is invalid: {error}") from error
+    require(
+        set(present) | set(absent) == read,
+        "proof authority set differs from what the scenario reads",
+    )
+    cells_json = cells.to_json()
+    require(
+        object_field(proof, "cells", "proof") == cells_json,
+        "proof cells differ from raw authority",
+    )
+    unmet = cells.unmet()
+    require(unmet == [], "; ".join(unmet))
+    return cells_json, verified
+
+
 def verify_bundle(
     *,
     join: dict[str, Any],
@@ -765,6 +873,15 @@ def verify_bundle(
     proof_actions = list_field(proof_identity, "actions", "proof identity")
     require(proof_actions != [], "proof has no later model-selected action")
     require(match.get("actions") == proof_actions, "join and proof actions differ")
+    cells, authority_artifacts = verify_effect_cells(
+        proof=proof,
+        proof_root=proof_root,
+        receipt=receipt,
+        receipt_raw=receipt_raw,
+        keeper=string_field(join_producer, "keeper", "join producer"),
+        turn_ref=cast(str, identity["turn_ref"]),
+        actions=proof_actions,
+    )
     durable_activations = list_field(
         join_decoded[ledger_join.DURABLE_EVENTS_AFTER],
         "activations",
@@ -1123,12 +1240,14 @@ def verify_bundle(
     verified_count = (
         len(join_artifacts)
         + len(proof_artifacts_with_dashboard)
+        + len(authority_artifacts)
         + len(frame_screenshots)
     )
     artifact_paths = [
         *(join_root / name for name in JOIN_ARTIFACTS),
         *(proof_root / name for name in PROOF_ARTIFACTS),
         proof_root / dashboard_name,
+        *(proof_root / name for name in authority_artifacts),
         *frame_screenshot_paths,
     ]
     require(
@@ -1165,11 +1284,13 @@ def verify_bundle(
             "skill_use": identity,
         },
         "matrix": matrix,
+        "cells": cells,
         "artifacts": {
             "verified_count": verified_count,
             "mismatch_count": 0,
             "join": join_artifacts,
             "proof": proof_artifacts_with_dashboard,
+            "authorities": authority_artifacts,
             "tui": frame_screenshots,
         },
     }

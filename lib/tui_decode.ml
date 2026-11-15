@@ -3969,12 +3969,17 @@ let keeper_secret_status_of_string = function
   | "error" -> Secret_error
   | other -> Secret_status_unknown other
 
-let keeper_secret_status_to_string = function
-  | Secret_ready -> "ready"
-  | Secret_empty -> "empty"
-  | Secret_absent -> "absent"
-  | Secret_error -> "error"
-  | Secret_status_unknown other -> other
+(* HIGH-RISK-UNREVIEWED: terminal output boundary. The unknown word is the
+   producer's bytes; the Secrets tab draws this result between style codes
+   without another pass. *)
+let keeper_secret_status_text ~ko status =
+  let say korean english = if ko then korean else english in
+  match status with
+  | Secret_ready -> say "준비됨" "ready"
+  | Secret_empty -> say "비어 있음" "empty"
+  | Secret_absent -> say "미설정" "absent"
+  | Secret_error -> say "읽지 못함" "error"
+  | Secret_status_unknown other -> Tui_terminal_text.sanitize_terminal_text other
 
 let decode_string_list label items =
   decode_list label
@@ -4406,18 +4411,23 @@ let gate_input_preview ~operation ~server_preview envelope =
 (* The queue row is durable after Auto Judge stops. Calling every such row
    "waiting" made a completed [require_human] judgment look like a worker that
    had been computing for hours, and hid quarantined/failed attempts behind
-   the same word. Project only the closed backend states already carried by
-   the row; absent legacy fields remain queued rather than gaining invented
-   success. *)
+   the same word. The server projects the phase and owns its words
+   ([Keeper_approval_queue_rules_types]), so the row is read with the server's
+   decoder; a row without a phase or with a word the server never emits is a
+   wire error. The panes match on the TUI constructors, and naming every
+   server phase here makes a new one a compile error instead of a rejected
+   row. *)
+let gate_pending_phase_of_approval_queue_phase = function
+  | Keeper_approval_queue_rules_types.Phase_queued -> Gate_queued
+  | Keeper_approval_queue_rules_types.Phase_judging -> Gate_judging
+  | Keeper_approval_queue_rules_types.Phase_human_required -> Gate_human_required
+  | Keeper_approval_queue_rules_types.Phase_blocked -> Gate_blocked
+
 let gate_pending_phase_of_json json =
   let* raw = required_string_field json "phase" in
-  match raw with
-  | "queued" -> Ok Gate_queued
-  | "judging" -> Ok Gate_judging
-  | "human_required" -> Ok Gate_human_required
-  | "blocked" -> Ok Gate_blocked
-  | other ->
-    Error (Printf.sprintf "unknown gate pending phase: %S" other)
+  match Keeper_approval_queue_rules_types.approval_queue_phase_of_string raw with
+  | Some phase -> Ok (gate_pending_phase_of_approval_queue_phase phase)
+  | None -> Error (Printf.sprintf "unknown gate pending phase: %S" raw)
 
 let gate_auto_judge_detail_of_json json =
   let summary = member "summary_status" json in
@@ -5491,11 +5501,21 @@ let decode_server_identity json =
     | Some _ | None -> None
   in
   let sid_state_ready =
-    (* Three-valued like the worktree verdict: [None] is a probe without a
-       startup section, so the TUI neither waits on it nor calls it ready. *)
-    match Option.map (member "state_ready") startup with
-    | Some (`Bool value) -> Some value
-    | Some _ | None -> None
+    (* One server build answers [/health] in two shapes. The reader's body
+       carries a startup section and its [state_ready]. The public probe,
+       which is also what every requester gets before the workspace is
+       published, carries no startup section and says [ready] at the top
+       level. Three-valued like the worktree verdict: [None] is an answer
+       with neither, so the TUI neither waits on it nor calls it ready. *)
+    match startup with
+    | Some startup ->
+      (match member "state_ready" startup with
+       | `Bool value -> Some value
+       | _ -> None)
+    | None ->
+      (match member "ready" json with
+       | `Bool value -> Some value
+       | _ -> None)
   in
   let sid_uptime =
     match member "uptime" json with

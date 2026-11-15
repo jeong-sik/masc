@@ -566,7 +566,11 @@ val footer_hints_browser_observations : lang:Masc_tui_types.ui_language -> strin
 val footer_hints_client_detail : lang:Masc_tui_types.ui_language -> string
 val footer_hints_lane_activity : lang:Masc_tui_types.ui_language -> string
 val footer_hints_exact_model_order : lang:Masc_tui_types.ui_language -> string
-val footer_hints_lane_inventory_detail : lang:Masc_tui_types.ui_language -> string
+val footer_hints_lane_inventory_detail :
+  lang:Masc_tui_types.ui_language -> exact_models:bool -> string
+(** One Lane's inventory reading. [exact_models] adds [s], which opens the
+    model order editor over the reading, when the reading names an
+    exact-output lane. *)
 val footer_hints_link_preview_empty : lang:Masc_tui_types.ui_language -> string
 val footer_hints_play_invite : lang:Masc_tui_types.ui_language -> string
 val footer_hints_answering : lang:Masc_tui_types.ui_language -> string

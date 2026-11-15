@@ -33,9 +33,20 @@ let wake_hint ~base_path ~keeper_name =
   | exn -> Log.Keeper.warn ~keeper_name "tool result wake hint failed: %s"
       (Printexc.to_string exn)
 
+type notify_error =
+  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Notify_failed of string
+
+let notify_error_to_string = function
+  | Intake_shutdown_reserved operation_id ->
+    Keeper_registry_event_queue.shutdown_reserved_detail operation_id
+  | Notify_failed detail -> detail
+
+let failed result = Result.map_error (fun detail -> Notify_failed detail) result
+
 let notify ~base_path ~keeper_name =
   let config = Workspace.default_config base_path in
-  let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
+  let* meta = Keeper_meta_store.read_effective_meta config keeper_name |> failed in
   match meta with
   | None -> Ok ()
   | Some meta when not (route_can_consume meta) -> Ok ()
@@ -45,7 +56,7 @@ let notify ~base_path ~keeper_name =
        receipts no execution owns. *)
     let* snapshot =
       Keeper_client_tool_outbox.load ~base_path ~keeper_name
-        ~viewer:Keeper_client_tool_outbox.Unowned_only in
+        ~viewer:Keeper_client_tool_outbox.Unowned_only |> failed in
     let receipt_ids = Keeper_client_tool_outbox.receipt_ids snapshot in
     let* () = List.fold_left (fun acc receipt_id ->
       let* () = acc in
@@ -59,9 +70,10 @@ let notify ~base_path ~keeper_name =
       match Keeper_registry_event_queue.enqueue_stimulus_durable_result
           ~base_path keeper_name stimulus with
       | Keeper_registry_event_queue.Stimulus_enqueued | Stimulus_already_present -> Ok ()
-      | Stimulus_shutdown_reserved operation_id ->
-          Error (Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
-      | Stimulus_storage_error detail -> Error detail)
+      (* The receipt stays in the outbox until its client ACKs it, so the
+         first pass after the shutdown releases the intake notifies it. *)
+      | Stimulus_shutdown_reserved operation_id -> Error (Intake_shutdown_reserved operation_id)
+      | Stimulus_storage_error detail -> Error (Notify_failed detail))
         (Ok ()) receipt_ids in
     (* Retry a lost hint for the same still-pending queue row. Receipt ACK is
        the stopping condition, not a count of hints or model turn starts. *)
@@ -69,7 +81,7 @@ let notify ~base_path ~keeper_name =
     (* A receipt an execution owns is not offered to any run, so it gets no
        stimulus. The Owner is told instead, and it starts the execution's
        claim. *)
-    Keeper_receipt_wait_resolution.arrived ~base_path ~keeper_name
+    Keeper_receipt_wait_resolution.arrived ~base_path ~keeper_name |> failed
 
 type settle_lost_waits = base_path:string -> keeper_name:string -> (unit, string) result
 
@@ -86,7 +98,12 @@ let reconcile supervisor =
   List.iter (fun keeper_name ->
     (match notify ~base_path:supervisor.config.base_path ~keeper_name with
     | Ok () -> ()
-    | Error detail -> Log.Keeper.warn ~keeper_name "unread tool result retained: %s" detail
+    (* The shutdown announces itself, and this pass repeats while the hold
+       lasts, so the hold is a routine line rather than a warning. *)
+    | Error (Intake_shutdown_reserved operation_id) ->
+      Log.Keeper.routine ~keeper_name "unread tool result held by shutdown operation=%s"
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+    | Error (Notify_failed detail) -> Log.Keeper.warn ~keeper_name "unread tool result retained: %s" detail
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Log.Keeper.warn ~keeper_name "unread tool result recovery raised: %s"
         (Printexc.to_string exn));

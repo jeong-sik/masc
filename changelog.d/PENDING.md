@@ -1,0 +1,8 @@
+### Fixed
+
+- Pressing `R` (retry Auto Judge) on an operator confirmation or a held Keeper
+  tool call in the TUI Approvals view now says that `R` retries Auto Judge on
+  Gate rows only and that the row is decided with `y/n`. Before, it said the
+  approval list had changed, although the row was still listed; that sentence
+  now appears only when the row the operator saw has left the list
+  (#36599, #PENDING).

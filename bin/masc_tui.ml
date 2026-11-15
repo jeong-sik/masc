@@ -39088,13 +39088,17 @@ Use relative paths for resources already held in the package. -->
            Render_schedule.request render_schedule Render_schedule.Force
        | Some "R" when state.view = Approvals ->
            (match
-              Approval_authority.resolve ~presented:(!presented).approval
-                ~current:(Masc_tui_approvals_model.approval_items state) Confirm
+              Approval_authority.retry_target ~presented:(!presented).approval
+                ~current:(Masc_tui_approvals_model.approval_items state)
             with
-            | Some { Approval_authority.row = Masc_tui_approvals_model.Gate_row pending; _ } ->
+            | Approval_authority.Retry_gate pending ->
                 launch_gate_auto_judge_retry state ~mailbox:async_messages pending
-            | Some { Approval_authority.row = (Masc_tui_approvals_model.Operator_row _ | Masc_tui_approvals_model.Keeper_tool_row _); _ }
-            | None ->
+            | Approval_authority.Not_retryable ->
+                report_action state "system"
+                  (ui_text state
+                     ~ko:"Auto Judge 다시 시도는 Gate 행에서만 됨 · 이 행은 y/n 으로 결정"
+                     ~en:"R retries Auto Judge on Gate rows only; decide this row with y/n")
+            | Approval_authority.Row_gone ->
                 report_action state "system"
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->

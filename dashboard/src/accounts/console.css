@@ -80,3 +80,19 @@ legend { margin-bottom: 8px; padding: 0; color: var(--text-bright); font-weight:
 .keeper-form { display: grid; gap: 16px; max-width: 32rem; }
 .keeper-form > h3 { margin: 0; font-size: 1rem; color: var(--text-bright); }
 .field { display: grid; gap: 8px; }
+
+/* The conversation of a Keeper in its card: each turn is what the person
+   said over what came of it. A message and an answer keep the lines they
+   were written in. What the person said sits on the ground of a field; a
+   turn with no answer has a dashed border, so it differs by more than its
+   colour. */
+.talk > * + * { margin-top: 8px; }
+.talk-title { margin: 0; font-size: 1rem; color: var(--text-bright); }
+.turns { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; }
+.turn { display: grid; gap: 8px; }
+.turn-part { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-m); }
+.turn-part > * + * { margin-top: 4px; }
+.turn-said { background: var(--bg-field); }
+.turn-missed { border-style: dashed; }
+.turn-head { font-size: 0.875rem; color: var(--text-bright); }
+.turn-text { white-space: pre-wrap; }

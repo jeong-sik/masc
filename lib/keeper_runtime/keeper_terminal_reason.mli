@@ -184,8 +184,9 @@ val wire_provider_error_connect_failed_prefix : string
 val wire_provider_error_connect_failed_timeout : string
 
 (** [true] when [t] is a [Provider_runtime_failure] carrying one of the
-    transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
-    or a provider timeout marker. The API timeout matches remain exact, so
-    every other [api_error_*] code returns [false]. Every
+    transient wire codes: [wire_api_error_timeout], [wire_api_error_network],
+    [wire_api_error_connect_failed], a provider timeout or network-timeout
+    marker, or [wire_provider_error_connect_failed_timeout]. The [api_error_*]
+    matches remain exact, so every other [api_error_*] code returns [false]. Every
     non-[Provider_runtime_failure] variant is [false]. *)
 val is_transient_provider_runtime_failure : t -> bool

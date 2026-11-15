@@ -300,8 +300,8 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
      [observe_retry] arm forwards whatever hint the constructor carried
      through this one binding, and no arm picks the hint by class. Today
      only [RateLimited] carries one; Account ([PaymentRequired]), Capacity,
-     Server, Deadline and Unknown_after_dispatch ([NetworkError]) receive
-     [None]. When a constructor gains a hint in [api_error_retry_after],
+     Server, Deadline, Unknown_after_dispatch ([NetworkError]) and Not_sent
+     ([Connect_failed]) receive [None]. When a constructor gains a hint in [api_error_retry_after],
      its arm forwards it without an edit here. *)
   let observe = observe_retry ?retry_after:(api_error_retry_after api) in
   match Llm_provider.Candidate_fault.of_api_error api with
@@ -343,9 +343,10 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
     rotate Request_refused
   | Llm_provider.Candidate_fault.Unknown_after_dispatch ->
     (* A network failure is not a key, account or model fact: nothing the
-       provider answered says whose affair it is, and [Retry.NetworkError]
-       carries no dispatch fact to split "sent, then lost" from wiring every
-       candidate shares. The walk still rotates on it through
+       provider answered says whose affair it is. [Retry.NetworkError] comes
+       after the connection opened, so the request may have gone out, and
+       nothing splits "sent, then lost" from wiring every candidate shares. A
+       connection that never opened is [Not_sent] below. The walk still rotates on it through
        [Runtime_attempt_fsm.should_try_next]; the route answers the same
        observation it did when the match was hand-written. *)
     observe Network_transient

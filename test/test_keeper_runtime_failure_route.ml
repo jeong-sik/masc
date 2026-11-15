@@ -896,9 +896,6 @@ let test_route_factors_through_candidate_fault () =
     []
     splits
 
-(* A provider timeout carries its phase too. The route reads it with
-   [Llm_provider.Error.is_local_admission_timeout], the same question the
-   API-side judgment answers. *)
 (* RFC #52028 §2.3: a provider [Connect_failed] waits as a connection that
    did not open, whatever its kind; nothing was sent. *)
 let test_provider_connect_failed_is_connection_not_opened () =
@@ -914,6 +911,9 @@ let test_provider_connect_failed_is_connection_not_opened () =
   check_route "TLS handshake" not_opened (connect_failed Llm_provider.Http_client.Tls_error)
 ;;
 
+(* A provider timeout carries its phase too. The route reads it with
+   [Llm_provider.Error.is_local_admission_timeout], the same question the
+   API-side judgment answers. *)
 let test_provider_timeout_names_local_admission () =
   let timeout phase =
     Agent_core.Error.Provider

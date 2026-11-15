@@ -56,28 +56,15 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
   then true
   else match err with
   | Agent_core.Error.Api (NetworkError _) -> true
-  (* The connection did not open; the next attempt opens its own. The kind rule
-     is the one every network failure reads. *)
+  (* The connection did not open; the next attempt opens its own. Like the
+     [NetworkError] arm above, the Api arm reads no kind. *)
   | Agent_core.Error.Api (Connect_failed _) -> true
-  | Agent_core.Error.Provider (Llm_provider.Error.Connect_failed { kind; _ }) ->
-      not (Llm_provider.Http_client.network_error_kind_is_non_retryable kind)
   | Agent_core.Error.Api (Timeout _) -> true
-  | Agent_core.Error.Provider (Llm_provider.Error.NetworkError
-      { kind = Llm_provider.Http_client.Tls_error
-             | Llm_provider.Http_client.Local_resource_exhaustion; _ }) ->
-      false
+  (* A provider network or connect failure reads the one kind rule. *)
   | Agent_core.Error.Provider
-      (Llm_provider.Error.NetworkError
-         { kind =
-             ( Llm_provider.Http_client.Connection_refused
-             | Llm_provider.Http_client.Dns_failure
-             | Llm_provider.Http_client.Unreachable
-             | Llm_provider.Http_client.Timeout
-             | Llm_provider.Http_client.Connection_reset
-             | Llm_provider.Http_client.End_of_file
-             | Llm_provider.Http_client.Unknown )
-         ; _
-         }) -> true
+      ( Llm_provider.Error.NetworkError { kind; _ }
+      | Llm_provider.Error.Connect_failed { kind; _ } ) ->
+      not (Llm_provider.Http_client.network_error_kind_is_non_retryable kind)
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> true
   | Agent_core.Error.Api (Overloaded _) -> true
   | Agent_core.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->

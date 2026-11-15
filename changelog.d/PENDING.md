@@ -1,0 +1,11 @@
+### Fixed
+
+- TUI: while a Keeper runs a turn by itself, the chat header names the
+  runtime answering that turn (`turn: <runtime> · configured: <runtime>`),
+  read from the turn's journal, and the token counters and stop reason
+  beside it come from the same turn. Before, the header followed only
+  requests the TUI sent, so it said `configured: <runtime>` alone through
+  every autonomous turn, even after the lane moved on to another runtime.
+  The header now reads the same execution the chat status follows: a sent
+  request that is streaming comes first, and one still queued behind an
+  autonomous turn gives way to it (#37714, #PENDING).

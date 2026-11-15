@@ -843,10 +843,18 @@ let keeper_message_identity ~max_cells state keeper_name =
            in
            fit_identity (Ansi.dim ^ detail ^ Ansi.reset)
        | Some row ->
+           (* The runtime this row names belongs to the execution the pane
+              follows, the one its status follows too. A sent request is only
+              one kind: an autonomous turn has none, and a header that read
+              sent requests alone said "configured: ..." through every turn
+              the Keeper ran by itself, whichever runtime answered it. *)
+           let transcript =
+             Option.map (fun log -> log.tl_transcript)
+               (Masc_tui_types.keeper_message_status_log state)
+           in
            let runtime_id =
              Keeper_chat_transcript.runtime_identity_text ~keeper_name
-               ~configured_runtime:row.kr_runtime_id
-               (Option.map (fun live -> live.tl_transcript) state.msg_live)
+               ~configured_runtime:row.kr_runtime_id transcript
            in
            (* The phase and the runtime are two facts, and the runtime label
               starts with a word of its own ("configured:", "turn:"). Set side
@@ -867,9 +875,6 @@ let keeper_message_identity ~max_cells state keeper_name =
               word. A row with room for the counters but not for both keeps
               the counters: the newer fact must not take away the one the
               screen was already showing. *)
-           let transcript =
-             Option.map (fun live -> live.tl_transcript) state.msg_live
-           in
            let prefix_width = Message_layout.display_width prefix in
            with_suggested_action (if prefix_width >= max_cells then
              fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells

@@ -4,6 +4,7 @@ let http_error_detail = function
   | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
   | Http_client.AcceptRejected { reason } -> reason
   | Http_client.NetworkError { message; _ } -> message
+  | Http_client.Connect_failed { message; _ } -> message
   | Http_client.TimeoutError { message; _ } -> message
   | Http_client.ProviderTerminal { message; _ } -> message
   | Http_client.ProviderFailure { kind; message } ->

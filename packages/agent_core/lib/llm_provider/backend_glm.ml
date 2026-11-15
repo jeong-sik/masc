@@ -262,7 +262,7 @@ let%test "glm quota envelopes promote to hard quota" =
          | Some
              (Http_client.ProviderFailure
                 { kind = Http_client.Hard_quota { retry_after = None }; _ }) -> true
-         | Some (Http_client.HttpError _) | None | Some (Http_client.NetworkError _)
+         | Some (Http_client.HttpError _) | None | Some (Http_client.NetworkError _ | Http_client.Connect_failed _)
          | Some (Http_client.TimeoutError _) | Some (Http_client.AcceptRejected _)
          | Some (Http_client.ProviderTerminal _)
          | Some

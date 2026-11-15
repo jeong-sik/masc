@@ -596,6 +596,20 @@ let resolve_binding_for_message ~channel_id =
   State.resolve_keeper_for_channel_result ~channel_id
   |> Result.map (Option.map (fun resolution -> resolution, []))
 
+(* Mention rendering waits for the channel binding (#51900): one Discord
+   application serves every bound channel, so the bot's own mention means the
+   Keeper this channel is bound to and is written as that Keeper's name, as on
+   Slack (#28401). Decoding already judged [mentions_bot] on the wire text with
+   the same [bot_user_id]. *)
+let render_for_keeper ~bot_user_id ~keeper_name ~resolved_mentions raw_content =
+  let self : Connector_self_mention.t =
+    match bot_user_id with
+    | None -> Connector_self_mention.Bot_user_id_unknown
+    | Some bot_user_id ->
+      Connector_self_mention.Bound_keeper { bot_user_id; keeper_name }
+  in
+  Discord_gateway_state.render_content ~self ~resolved_mentions raw_content
+
 (* Files, said as references rather than carried as bytes.
 
    Discord gives a url, a name and a size; the bytes live behind that url and
@@ -612,7 +626,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(guild_id : string option)
       ~base_dir
       ~(author_id : string) ~(author_name : string option)
-      ~(content : string)
+      ~(raw_content : string)
+      ~(resolved_mentions : Discord_gateway_state.resolved_mention list)
+      ~(bot_user_id : string option)
       ~(attachments : Discord_gateway_state.inbound_attachment list)
       ~(mentions_bot : bool)
       ~(explicit_mentions_bot : bool)
@@ -640,7 +656,13 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
     let keeper_name = resolution.State.keeper_name in
     (* Same body on both paths. A mention that came with a photo is the same
        message as an ambient one that did; only the trigger differs. *)
-    let content = Discord_gateway_state.content_with_attachments ~content ~attachments in
+    let content =
+      Discord_gateway_state.content_with_attachments
+        ~content:
+          (render_for_keeper ~bot_user_id ~keeper_name ~resolved_mentions
+             raw_content)
+        ~attachments
+    in
     let metadata =
       discord_chat_metadata ~guild_id ~channel_id ~message_id
       @ [ ("discord.channel_id", channel_id)
@@ -784,7 +806,9 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
       ; guild_id
       ; author_id
       ; author_name
-      ; content
+      ; raw_content
+      ; resolved_mentions
+      ; bot_user_id
       ; mentions_bot
       ; explicit_mentions_bot
       ; author_is_bot = _
@@ -797,8 +821,8 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
        gateway-state layer; nothing extra to check here. *)
     accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
       ~message_id ~author_id
-      ~guild_id ~base_dir ~author_name ~content ~attachments ~mentions_bot
-      ~explicit_mentions_bot
+      ~guild_id ~base_dir ~author_name ~raw_content ~resolved_mentions
+      ~bot_user_id ~attachments ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
       ~referenced_message_author_id ()
   | Gw.Reaction_add _ ->
@@ -833,7 +857,10 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
    on the dispatch path. *)
 let handle_ambient ?resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
-      ~(author_id : string) ~(author_name : string option) ~(content : string)
+      ~(author_id : string) ~(author_name : string option)
+      ~(raw_content : string)
+      ~(resolved_mentions : Discord_gateway_state.resolved_mention list)
+      ~(bot_user_id : string option)
       ~(attachments : Discord_gateway_state.inbound_attachment list) () =
   let keeper_name =
     match resolved_keeper_name with
@@ -853,7 +880,11 @@ let handle_ambient ?resolved_keeper_name ~base_dir
        as empty and dropped it, so a file posted without words never reached
        the Keeper at all. *)
     let content =
-      Discord_gateway_state.content_with_attachments ~content ~attachments
+      Discord_gateway_state.content_with_attachments
+        ~content:
+          (render_for_keeper ~bot_user_id ~keeper_name ~resolved_mentions
+             raw_content)
+        ~attachments
     in
     if String.equal (String.trim content) "" then
       Discord_observability.record_ambient
@@ -938,12 +969,15 @@ let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
       ; message_id
       ; author_id
       ; author_name
-      ; content
+      ; raw_content
+      ; resolved_mentions
+      ; bot_user_id
       ; attachments
       ; _
       } ->
     handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
-      ~message_id ~author_id ~author_name ~content ~attachments ()
+      ~message_id ~author_id ~author_name ~raw_content ~resolved_mentions
+      ~bot_user_id ~attachments ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
 
 let submit_ingress ingress ~lane ~event_id run =
@@ -994,14 +1028,6 @@ let submit_ingress ingress ~lane ~event_id run =
       (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
 ;;
 
-module For_testing = struct
-  let submit_triggered_event = submit_triggered_event
-  let discord_channel_directory_entry = discord_channel_directory_entry
-  let discord_channel_directory_entries = discord_channel_directory_entries
-  let discord_member_directory_page = discord_member_directory_page
-  let discord_message_people_entries = discord_message_people_entries
-end
-
 let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create { channel_id; message_id; _ } ->
@@ -1024,6 +1050,15 @@ let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
   | Gw.Thread_removed _
   | Gw.Ignored _ -> on_ambient ~base_dir ev
 ;;
+
+module For_testing = struct
+  let submit_triggered_event = submit_triggered_event
+  let submit_ambient_event = submit_ambient_event
+  let discord_channel_directory_entry = discord_channel_directory_entry
+  let discord_channel_directory_entries = discord_channel_directory_entries
+  let discord_member_directory_page = discord_member_directory_page
+  let discord_message_people_entries = discord_message_people_entries
+end
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)

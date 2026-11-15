@@ -1,0 +1,231 @@
+{
+ "key": "memory-graph",
+ "findings": [
+  {
+   "id": "memory-graph-01",
+   "claim": "그래프는 원문을 가리키는 색인일 때 검색을 올리고 원문을 대신하면 내린다. HippoRAG 2 recall@5 평균 78.2(NV-Embed-v2 73.4), passage node 제거 시 87.1→81.0. 요약으로 corpus 를 넓히는 GraphRAG·LightRAG 는 QA F1 평균 49.6·6.6 으로 dense 57.0 보다 낮다(Table 2·3·4).",
+   "src": "From RAG to Memory: Non-Parametric Continual Learning for Large Language Models (HippoRAG 2) | https://arxiv.org/abs/2502.14802",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "그래프를 이미 선언된 edge(`premise_ids`, `superseded_by`, `absorbed_statement`, `board_ref`, `Wiki_graph.links_of`)의 읽기 전용 projection 으로 만들고 fact 에서 원문으로 가는 길을 연다. `Observed Transcript` 에는 원문 turn 참조가 없다(keeper_memory_os_types.mli:295-297).",
+   "caveat": "이득이 과제마다 다르다. F1 기준 NQ +1.4, HotpotQA +0.2, 2Wiki +9.5 다. 대상은 문서 QA 이고 에이전트 기억이 아니다. 표와 §2 만 읽었다.",
+   "check": "overstated Table 2·3·4 수치 일치. 원문 대비는 검색을 돕는 KG 대 corpus 를 넓히는 KG 다. 원문을 요약으로 대신한 조건은 없고, 색인형 HippoRAG(재현) recall@5 63.8 은 dense 73.4 아래다."
+  },
+  {
+   "id": "memory-graph-02",
+   "claim": "질문 종류가 갈림 조건이다. GraphRAG-Bench Novel 에서 Fact 질문은 RAG w/ rerank 60.92, MS-GraphRAG 49.29, HippoRAG2 60.14 이고 Complex 질문은 42.93, 50.93, 53.38 이다. Medical 에서는 MS-GraphRAG 가 네 종류 모두 RAG 보다 낮다(Table 2).",
+   "src": "When to use Graphs in RAG: A Comprehensive Analysis for Graph Retrieval-Augmented Generation (GraphRAG-Bench) | https://arxiv.org/abs/2506.05690",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "자체 recall 질문 세트를 단일 fact 조회, 여러 fact 연결, 바뀐 사실, 시간, 답 없는 질문으로 나눠 따로 채점한다. 그래프 후보 생성은 여러 fact 연결 slice 에서만 효과를 기대한다(RFC-0247 §-1).",
+   "caveat": "문서 corpus 실험이다. RAG vs. GraphRAG(2502.11371v4)는 답 entity 의 약 65.8% 만 KG 에 들어간다고 보고했다. EngramaBench 의 그래프 우위는 n=30 인 slice 하나뿐이다.",
+   "check": "verified Table 2 Novel·Medical 값과 Obs.1·Obs.2 결론이 원문과 같다. MS-GraphRAG 행은 local 검색이고, Medical 에서는 HippoRAG2 가 Fact 질문에서도 RAG 보다 높다(66.28 대 64.73)."
+  },
+  {
+   "id": "memory-graph-03",
+   "claim": "여러 세션 에이전트 과제에서 구조 기억이 긴 문맥과 단순 검색을 못 넘었다. MemoryArena 전 과제 평균 성공률: 긴 문맥 0.09~0.19, text-embedding-3-small 0.20, BM25 0.17, GraphRAG 0.17, Letta 0.14, Mem0 0.13, Mem0-g 0.12(Table 3). 검색형이 통합·추상화형보다 견고했다(§4.4).",
+   "src": "MemoryArena: Benchmarking Agent Memory in Interdependent Multi-Session Agentic Tasks | https://arxiv.org/abs/2602.16313",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Keeper 기억에 통합·요약 층을 더하기 전에 원문 검색 기준선과 비교한다. Librarian 흡수·drop 뒤 잃은 정보를 `source=dropped` 검색 적중과 같은 claim 재기록 수로 센다.",
+   "caveat": "성공률이 모두 0.2 아래라 방법 사이 차이가 작다. 과제는 저자가 만든 네 종류다. 기록이 120k tokens 를 넘는 과제에서는 외부 기억이 도왔다(§4.3).",
+   "check": "overstated Table 3 수치 일치. 같은 task agent 긴 문맥 0.16 보다 GraphRAG(2D) 0.17 이 높고, 0.09~0.19 는 네 모델의 범위다. 원문은 not consistently 이고 §4.4 는 precise reuse 과제 조건이다."
+  },
+  {
+   "id": "memory-graph-04",
+   "claim": "작업 궤적 기억에서 유사도 그래프는 BM25 아래이고, 상태·인과 그래프에 도구 검색을 붙인 쪽만 높다. AMA-Bench 평균 ACC: BM25 0.3436, GraphRAG 0.3258, Mem0 0.2104, AMA-Agent 0.5722(Table 5). 인과 그래프를 빼면 0.57→0.43(Table 6).",
+   "src": "AMA-Bench: Evaluating Long-Horizon Memory for Agentic Applications | https://arxiv.org/abs/2602.22769",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "`activity_graph` 의 `event.actor`·`subject` 처럼 runtime 이 이미 적는 인과 edge 를 그래프 projection 에 쓴다. 유사도 edge 는 넣지 않는다. `kind` 가 `string` 인 점은 확인 필요(activity_graph_types.mli:16-25).",
+   "caveat": "1위가 저자 시스템이고 채점은 Qwen3-32B judge 다. 한 episode 안의 기억만 쟀다. 기억 구성 단계에서만 정확도가 19.6~41.3% 줄었다(Table 3).",
+   "check": "overstated v4 Table 5 수치 일치, ablation 은 v4 에서 Table 7 이다. 유사도 edge 를 가진 HippoRAG2 0.4480 이 BM25 위이고 MemoRAG·EMem·Qwen3-Emb 도 위다. AMA-Agent 인과 그래프는 LLM 추출이다."
+  },
+  {
+   "id": "memory-graph-05",
+   "claim": "사건 시각과 기록 시각을 따로 둔 KG 가 시간 질문을 올렸다. Zep 은 edge 마다 시각 넷을 두고 옛 사실을 지우지 않고 무효 처리한다(§2.2.3). LongMemEval_s gpt-4o temporal 45.1→62.4, multi-session 44.3→57.9(Table 3).",
+   "src": "Zep: A Temporal Knowledge Graph Architecture for Agent Memory | https://arxiv.org/abs/2501.13956",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "`fact.first_seen`·`last_seen` 은 기록 시각이고 사건 시각 field 는 없다(keeper_memory_os_types.mli:331-339). 자체 세트의 시간 질문 오답 원인을 먼저 세고, 원인이 저장에 없는 사건 시각일 때 typed field RFC 를 쓴다.",
+   "caveat": "벤더 논문이다. single-session-assistant 는 94.6→80.4, gpt-4o-mini knowledge-update 는 76.9→74.4 로 내렸다. Keeper 당 fact 4~121개 규모에서의 효과는 모른다.",
+   "check": "overstated §2.2.3 시각 넷과 Table 3 값은 맞다. 비교 대상은 전체 문맥 115k 대 Zep 1.6k 이고 시각 field 만 뺀 실험이 없다. 가장 크게 오른 범주는 preference(20.0→56.7)다."
+  },
+  {
+   "id": "memory-graph-06",
+   "claim": "공유 기억 제품 문서의 패턴은 content hash 조건부 쓰기와 불변 version 이다. 같은 제품의 self-hosted sync 는 충돌 때 저장소 쪽을 남기고 에이전트에게 오류를 주지 않는다. CodeCRDT(2510.18893)는 600회 수렴 100% 에도 의미 충돌 약 5~10% 를 보고했다.",
+   "src": "Memory stores in self-hosted sandboxes (Claude Managed Agents docs) | https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes-memory",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "wiki 의 `revision` 조건부 쓰기와 거절 때 현재 본문 반환(lib/tool_wiki.ml:398-400), 충돌 양쪽을 남기는 `Conflict_member`(workspace_memory_ledger.mli:40-43)를 유지한다. 진 쪽에 알리지 않고 덮는 sync 는 만들지 않는다.",
+   "caveat": "동작 설명이고 효과 측정이 아니다. `content_sha256` 조건은 자매 문서 managed-agents/memory 에 있다. 여러 영속 에이전트가 한 기억 저장소에 동시에 쓰는 벤치마크는 찾지 못했다.",
+   "check": "verified self-hosted 문서의 store 우선·에이전트 오류 없음 문장이 원문에 있다. content_sha256 조건부 쓰기와 불변 version 은 옆 memory 문서의 API 선택 기능이다. CodeCRDT 5~10% 는 60회를 본 예비 값이다."
+  },
+  {
+   "id": "memory-graph-07",
+   "claim": "LLM 에이전트에게 abort 뒤 재시도는 비싸다. 경합 작업 열 가지에서 OCC 는 속도 0.93배·token 1.83배, 2PL 은 1.04배였다. 바뀐 내용을 알리고 에이전트가 영향을 판단하는 방식은 1.4배·token 1.15배, 정확도는 직렬보다 약 5% 낮았다(§7.2).",
+   "src": "CoAgent: Concurrency Control for Multi-Agent Systems | https://arxiv.org/abs/2606.15376",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "wiki `stale_revision` 발생 수와 재시도 수를 projection 으로 세어 OCC 비용이 실제로 큰지 본다. 공유 기억 log 를 Keeper 가 자기 위치부터 읽는 RFC(Draft)는 알림형과 같은 종류다.",
+   "caveat": "preprint 하나, 에이전트 둘, deepseek-v4-flash, 저자가 만든 충돌 상황이다. 대상은 기억 저장소가 아니다. 방식 전체는 도구마다 범위와 되돌리기 선언이 필요해 그대로 못 쓴다.",
+   "check": "overstated OCC·2PL·1.4배·1.15배·약 5% 수치는 맞다. 1.4배·1.15배는 시작 때 순서를 고정하고 어긋난 쓰기를 되돌리는 MTPO 전체 값이고, §5.2 는 알림만으로는 livelock 이 난다고 적었다."
+  },
+  {
+   "id": "memory-graph-08",
+   "claim": "기억 시스템의 쓰기 경로를 단계별로 재면 추출과 갱신이 먼저 무너진다. HaluMem 에서 MemOS 를 뺀 모든 시스템의 추출 recall 이 60% 아래, 갱신 누락은 대부분 50% 위였다. 원인은 갱신 전 사실을 추출하지 않은 것이다.",
+   "src": "HaluMem: Evaluating Hallucinations in Memory Systems of Agents | https://arxiv.org/abs/2511.03506",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "RFC-0517(in_flight)의 남는 기억 측정에 갱신 사례를 더한다. 바뀐 사실마다 옛 fact 가 있었는지, current 에서 빠졌는지, `Revised {superseded_by}` 가 생겼는지를 나눠 센다.",
+   "caveat": "벤치마크를 낸 MemTensor 가 1위 MemOS 를 만든 쪽이다. 독립 재현은 확인하지 못했다. 대상은 대화형 개인 기억이다.",
+   "check": "verified Table 3 추출 recall·갱신 누락 값과 초록의 추출·갱신 단계 오류 전파 문장이 원문에 있다. 원인 문장은 저자 해석(primarily stems from)이고 단계별 원인 표는 없다."
+  },
+  {
+   "id": "memory-graph-09",
+   "claim": "배경 통합은 정보를 잃을 수 있다. LightMem 의 offline 갱신 뒤 LongMemEval-S 정확도는 표의 여섯 쌍 중 넷에서 내렸다(예: 70.20→65.14). 논문은 LLM 이 모순 아닌 정보를 충돌로 읽고 지우면 되돌릴 수 없다고 적었다(§5.6).",
+   "src": "LightMem: Lightweight and Efficient Memory-Augmented Generation | https://arxiv.org/abs/2510.18866",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "흡수는 Jev 판정이 막지만 단순 drop 은 무조건이다(keeper_memory_os_disposition_core.mli:27-28). drop 된 fact 가 다시 기록되거나 `source=dropped` 로 찾아진 횟수를 세어 손실을 잰다. 새 Gate 는 아니다.",
+   "caveat": "하락 폭은 0.4~5.1p 이고 반복 실행 분산이 표에 없다. Sleep-time Compute 논문은 다음 질의를 예측하기 어려우면 이득이 작다고 적었다.",
+   "check": "overstated Table 2 여섯 쌍과 넷 하락은 맞다. §5.6 문장은 실시간 갱신을 두고 soft update 를 정당화하는 말이고, 논문은 offline 통합이 정보 손실을 줄인다고 주장한다. 하락은 논문이 다루지 않았다."
+  },
+  {
+   "id": "memory-graph-10",
+   "claim": "LoCoMo 점수는 합격선이 못 된다. 감사 결과 1,540문항 중 99개(6.4%)의 정답이 틀렸고, 채점 모델이 일부러 틀리게 쓴 모호한 답의 62.81% 를 통과시켰다. 전체 문맥 GPT-4.1-mini 가 92.62% 로 기억 시스템 보고값 92.32% 를 넘었다.",
+   "src": "locomo-audit (LoCoMo benchmark audit, README and AUDIT_REPORT.md) | https://github.com/dial481/locomo-audit",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "외부 벤치마크 점수를 목표로 삼지 않는다. 자체 질문 세트의 정답표를 사람이 검수하고, 채점 모델이 틀린 답을 통과시키는 비율을 먼저 잰다(`scripts/keeper-recall-baseline.py`, `memory-recall-evaluations.jsonl`).",
+   "caveat": "감사자는 LLM 과 사람 검토라고 적혀 있고 독립성은 확인하지 못했다. Mem0 논문도 전체 문맥 72.90 대 Mem0 66.88 을 보고했다(Table 2).",
+   "check": "verified 99/1,540(6.4%), 62.81%, 92.62% 대 92.32% 가 README·AUDIT_REPORT 에 있다. 62.81% 는 be generous 채점기, 92.62% 는 CoT prompt 값이고, 99개 중 13개는 AMBIGUOUS 다."
+  },
+  {
+   "id": "memory-graph-11",
+   "claim": "기억 도구 제품은 기억을 파일 명령으로 내주고 첫 읽기를 host 가 건다. Anthropic memory tool 은 명령 여섯 개의 client 쪽 도구이고, 도구가 있으면 API 가 system prompt 에 기억 디렉터리를 먼저 보라는 문장을 자동으로 넣는다.",
+   "src": "Memory tool (Claude API docs) | https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool",
+   "depth": "full_text",
+   "kind": "documented_behavior",
+   "apply": "`keeper_memory_search`·`select`·`write`·`retract` 가 이미 도구다. 첫 읽기는 프롬프트 문장이 아니라 host recall(`RFC-keeper-recall-reaches-the-turn.md` Draft, `keeper_memory_recall_*`)로 건다. brief §2-1 과 맞는다.",
+   "caveat": "동작 문서이고 효과 측정이 아니다. Letta 블로그의 파일 도구 74.0%(LoCoMo)는 벤더 수치이고 첫 호출을 tool rule 로 고정한 결과다.",
+   "check": "verified 명령 여섯, client 쪽 실행, API 의 system prompt 자동 삽입이 문서(stable)에 있다. 첫 읽기는 host 가 실행하지 않고, 삽입된 지시문을 본 모델이 view 를 부른다."
+  },
+  {
+   "id": "memory-graph-12",
+   "claim": "주제는 같지만 답이 아닌 방해 문장은 입력이 길수록 답을 더 깎는다. LongMemEval 306문항에서 관련 부분만 담은 약 300 tokens 입력이 약 113k tokens 전체 입력보다 평가한 모든 모델에서 높았다.",
+   "src": "Context Rot: How Increasing Input Tokens Impacts LLM Performance (Chroma) | https://research.trychroma.com/context-rot",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "낡은 fact 와 중복 fact 는 방해 문장이다. RFC-0517(in_flight)의 맞는 fact 하나와 recall 의 선택 주입을 지지한다. `RFC-keeper-context-window-in-tokens.md:235` 의 '요약본'은 '관련 부분 발췌'로 고쳐야 한다.",
+   "caveat": "정확한 점수는 그림에만 있다. focused 입력은 정답 표시에서 뽑은 발췌라 완벽한 선택의 상한이다. 벡터 DB 회사의 보고서이고 peer review 가 없다.",
+   "check": "verified 방해 문장 정의, 길이에 따른 증폭, 306문항·약 113k 대 약 300 tokens, Across all models 문장이 원문에 있다. LongMemEval 실험과 방해 문장 실험은 따로이고 점수는 그림에만 있다."
+  },
+  {
+   "id": "memory-graph-13",
+   "claim": "파생 지식은 전제를 선언해야 고칠 수 있다. MemTX 는 파생 DAG 를 따라 연쇄로 고치는 부품을 빼면 약 11점 떨어졌다. 에이전트가 부모를 선언하지 않고 옮겨 적는 계열은 모든 방법이 실패했다.",
+   "src": "MemTX: Transactional Belief Commit for Stateful Agent Memory | https://arxiv.org/abs/2607.23929",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "`Derived of derivation list` 와 연쇄 retract 는 이미 있다(keeper_memory_os_current.mli:987-994). Librarian `new_claims` 에는 전제 자리가 없어 live 2,334개 중 1개뿐이다(r1:92). derivation edge 에 기대는 기능은 미룬다.",
+   "caveat": "저자가 만든 90건 suite 와 재구현 기준선이다. 임계 0.6·0.9 와 action gate 는 brief §2-3 과 충돌해 옮기지 않는다.",
+   "check": "verified cascading rollback 등 세 부품이 each cost about eleven points(90건 suite, 두 backbone)이고 cascade 는 derivation DAG 를 따른다. source-scope 계열 전원 실패도 원문에 있다(계열당 4건)."
+  },
+  {
+   "id": "memory-graph-14",
+   "claim": "LLM 으로 그래프를 미리 만드는 비용은 크고 요약 그래프의 순이득은 작다. GraphRAG community 요약이 그래프 없는 원문 map-reduce 요약을 이긴 비율은 57%·64% 였다. HippoRAG 2 Table 12 에서 passage 11,656개 색인에 GraphRAG 는 입력 115.5M tokens·277분이 들었다.",
+   "src": "From Local to Global: A GraphRAG Approach to Query-Focused Summarization | https://arxiv.org/abs/2404.16130",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "요구 21 의 '모든 것이 그래프'는 LLM 추출이 아니라 저장된 typed edge 를 읽는 projection 으로 푼다. LLM 은 질의 때 후보를 고르는 판정에만 쓴다(RFC-0247 §-1).",
+   "caveat": "GraphRAG 승률은 LLM 이 만든 질문을 LLM 이 채점한 값이다. LazyGraphRAG 의 색인 비용 0.1% 주장은 블로그 글이고 표가 없다.",
+   "check": "verified 57%·64%(가장 잘 나온 층), small but consistent improvement 문장, HippoRAG 2 Table 12 의 115.5M tokens·277.0분이 원문에 있다. 최상위 층 요약은 개선이 없었다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "Generative Agents 점수식(가중치 1, 시간당 감쇠 0.995, reflection 임계 150)",
+   "why_not": "근거 없이 고른 상수다. 헌법 magic_number 와 brief §2-3 에 걸린다. RFC-0247 이 점수 기반 recall 을 이미 걷었다."
+  },
+  {
+   "idea": "Personalized PageRank·임베딩 top-k 를 recall 결정자로 쓰기",
+   "why_not": "점수 순위가 판정을 대신한다. RFC-0247 §-1 은 그래프·검색을 후보 생성까지만 쓴다. 지금 검색은 임베딩 없는 SQLite FTS5 trigram + BM25 다."
+  },
+  {
+   "idea": "LLM 이 뽑은 entity KG 를 authority 로 두기",
+   "why_not": "답 entity 의 약 65.8% 만 KG 에 들어가고(2502.11371v4), 구성 손실이 19.6~41.3% 이며(AMA-Bench Table 3), 색인 비용이 크다. authority 는 원문과 선언된 edge 에 둔다."
+  },
+  {
+   "idea": "GraphRAG·LightRAG 식 community 요약으로 원문 대신하기",
+   "why_not": "단일 사실 질문에서 dense 검색보다 낮다(HippoRAG 2 Table 2, GraphRAG-Bench Table 2). 원문을 잃으면 헌법 failure_keeps_evidence 와 어긋난다."
+  },
+  {
+   "idea": "공유 기억에 CRDT 자동 병합",
+   "why_not": "byte 는 수렴해도 의미 충돌 약 5~10% 가 조용히 남는다(CodeCRDT). 충돌은 양쪽을 남겨 Keeper 가 보게 한다."
+  },
+  {
+   "idea": "진 쪽에 알리지 않는 store-wins sync",
+   "why_not": "Anthropic self-hosted sandbox 문서의 방식이다. 쓰기가 사라진 것을 에이전트가 모른다. silent failure 다."
+  },
+  {
+   "idea": "LatticeMind 의 근거 종류 가중치, 최근성 동점 처리, regex 검사기",
+   "why_not": "magic_number, string_matching, 최근성 대리 지표(brief §2-3)에 걸린다. 진 주장을 Contested 로 남기는 생각만 참고한다."
+  },
+  {
+   "idea": "MemTX 의 action gate, 여덟 단계 생애, 임계 0.6·0.9",
+   "why_not": "Keeper 행동을 막는 새 Gate 와 상태다(brief §2-2, §2-3). 근거는 저자가 만든 suite 하나다."
+  },
+  {
+   "idea": "Governed Memory 의 recency 반감기 38일, 유사도 임계 0.92·0.95",
+   "why_not": "최근성 대리 지표와 경험으로 맞춘 상수다(brief §2-3). 헌법 no_wall_clock_death 와도 어긋난다."
+  },
+  {
+   "idea": "Graphiti 기본 임계(중복 0.7, 모순 0.8)를 판정 확률에 걸기",
+   "why_not": "MASC 흡수 판정은 닫힌 선택이다(keeper_librarian_absorb_gate.mli:123). 임계는 근거 없는 상수다."
+  },
+  {
+   "idea": "Zep 식 '새 정보가 늘 이긴다' 자동 무효화",
+   "why_not": "늦게 들어온 틀린 정보를 못 막는다. gpt-4o-mini 에서 knowledge-update 가 76.9→74.4 로 내렸다. Librarian 프롬프트도 기록 시각만으로 최신성을 정하지 않는다(librarian.md:128)."
+  },
+  {
+   "idea": "Anthropic memory tool 의 system prompt 강제 문장과 '오래 안 읽은 기억 파일 주기 삭제' 권고",
+   "why_not": "앞은 Keeper 프롬프트 필수 규칙이라 brief §2-1 과 충돌한다. 뒤는 최근성으로 지우는 TTL 이라 no_wall_clock_death 와 충돌한다."
+  },
+  {
+   "idea": "Mastra 의 token 임계로 관찰 log 전환",
+   "why_not": "누적 token 숫자에 건 전환이고 임계가 고른 상수다(brief §2-3). 관찰마다 날짜를 적는 생각만 사건 시각 검토에 참고한다."
+  },
+  {
+   "idea": "LoCoMo·LongMemEval 점수를 MASC 합격선으로 쓰기",
+   "why_not": "LoCoMo 는 정답표 6.4% 오류와 관대한 채점이 있고, LongMemEval_s 는 벤더 보고 94.87% 로 포화에 가깝다."
+  },
+  {
+   "idea": "CoAgent 의 MTPO 프로토콜 전체",
+   "why_not": "도구마다 읽기·쓰기 범위와 되돌리기 동작을 선언하고 직렬 순서를 고정해야 한다. Keeper 도구 계약 전체가 바뀌고 근거가 preprint 하나다."
+  },
+  {
+   "idea": "Google Research sleep framework(2026-10-27)",
+   "why_not": "모델 가중치를 바꾸는 continual learning 이다. 기억 저장소 설계와 층이 다르고 Librarian 학습은 RFC-0517(in_flight) 몫이다."
+  },
+  {
+   "idea": "TTL·decay 로 기억 지우기",
+   "why_not": "기존 문서(2026-06-23 forgetting policy)가 이미 기각했다. 헌법 no_wall_clock_death."
+  }
+ ],
+ "unknowns": [
+  "host 가 밀어 넣는 recall 과 모델이 도구로 당기는 recall 을 같은 조건에서 비교한 측정을 찾지 못했다.",
+  "여러 영속 에이전트가 한 기억 저장소에 동시에 쓰는 벤치마크를 찾지 못했다. Governed Memory(2603.17787) §9.1 도 미해결이라고 적었다.",
+  "사건 시각 field 가 Keeper 당 fact 4~121개 규모에서 답을 바꾸는지 모른다. 자체 시간 질문 측정이 필요하다.",
+  "Chroma 실험의 모델별 정확한 점수는 그림에만 있어 읽지 못했다.",
+  "LoCoMo 감사와 HaluMem 의 독립성·재현 여부를 확인하지 못했다. HaluMem 은 1위 제품을 만든 쪽이 냈다.",
+  "LightMem 표에서 GLM-4.6 FullText 가 36.71 로 낮은 이유(문맥 잘림 여부)가 원문에 없다.",
+  "Zep 의 single-session-assistant 하락(94.6→80.4) 원인은 논문에 없다.",
+  "여러 과제·여러 날에 걸친 작업 궤적 기억의 측정은 MemoryArena 뿐이고 성공률이 전부 0.2 아래다. AMA-Bench 는 한 episode 안만 쟀다.",
+  "MASC 확인 필요: `activity_graph` 의 `kind : string` 을 닫힌 타입으로 읽는 곳, 기존 recall harness 가 질문 종류를 나누는지, wiki `stale_revision` 발생 빈도, host recall 이 live 에서 도는 범위.",
+  "원문 미직독: HippoRAG 1 본문, Karpathy 발언 원문, Letta 현재 문서, Mem0 2026 보고서, Graphiti 문서 사이트, Memanto(2604.22085), MemPalace 의 LongMemEval 주장."
+ ],
+ "conflicts_with_brief": [
+  "memory-graph-04: 헌법 forbidden string_matching·불변식 closed_sum_over_string. entity_ref.kind·event.kind 가 string 이고(lib/activity_graph/activity_graph_types.mli:16-25) registry 도 List.mem value.kind filters 로 문자열을 비교한다(lib/activity_graph/activity_graph_registry.ml:31). projection 이 이 값으로 edge 종류를 가르면 위반이다. 닫힌 variant 로 올린 뒤 읽어야 한다.",
+  "memory-graph-01: brief §2-2(새 field 는 없으면 durable truth 가 깨질 때만)·§2-8(hard cut), 헌법 forbidden legacy_residue. '원문으로 가는 길을 연다'가 Observed Transcript(lib/keeper/keeper_memory_os_types.mli:295-297)에 turn 참조 field 를 더한다는 뜻이면 깨지는 durable truth 를 먼저 대야 하고, 옛 fact 용 기본값·호환 reader 를 둘 수 없다. 저장된 값만 읽는 projection 이면 충돌 없음. 읽는 쪽이 정해지지 않은 projection 은 §2-7(돌아가는 경로부터)과도 어긋난다."
+ ]
+}

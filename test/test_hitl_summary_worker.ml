@@ -3208,7 +3208,7 @@ let test_cli_quota_order_keeps_durable_dispatch_identity () =
            if String.equal runtime_id cli_primary then (
              let scope = match Runtime.quota_scope_of_runtime_id runtime_id with
                | Some scope -> scope | None -> fail "missing fixture scope" in
-             Runtime_quota_window.note_observed_exhausted ~scope;
+             Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
              Error (Masc.Fusion_official_client.Setup_failure "typed adapter quota already recorded"))
            else if String.equal runtime_id separate then
              Ok (Yojson.Safe.to_string (judgment_json "require_human"))
@@ -3293,7 +3293,7 @@ let with_stated_reset (runtime : Runtime_instance.t) f =
   Fun.protect
     ~finally:Runtime_quota_window.reset_for_testing
     (fun () ->
-       Runtime_quota_window.note_exhausted
+       Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
          ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
          ~resets_at:(Time_compat.now () +. 3600.0);
        f ())

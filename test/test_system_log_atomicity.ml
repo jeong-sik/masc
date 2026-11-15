@@ -59,9 +59,15 @@ let read_lines path =
    "}{"-concat lines on 2026-05-17 (logs/system_log_2026-05-17.jsonl
    lines 3498, 4635). *)
 
+let open_file_sink ?identity_recheck_interval_s dir =
+  match Log.Ring.init_file_sink ?identity_recheck_interval_s dir with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Log.Ring.file_sink_error_to_string error)
+;;
+
 let test_concurrent_threads () =
   let dir = tmpdir "system_log_atomicity" in
-  Log.Ring.init_file_sink dir;
+  open_file_sink dir;
   let n_threads = 16 in
   let n_records_per_thread = 500 in
   let threads =

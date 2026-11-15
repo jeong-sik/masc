@@ -453,8 +453,10 @@ type runtime_option = {
       (** The effort a request on this runtime carries; [None] is unset. *)
   ro_is_local : bool;
   ro_is_default : bool;
-  ro_quota_exhausted : bool;
-  ro_quota_resets_at : float option;
+  ro_quota_rest : Runtime_quota_window.spent option;
+      (** The quota window resting this runtime's credential scope: who set
+          it (a payment refusal, the provider's hard quota, or a usage read)
+          and when it ends. [None] when nothing rests the scope. *)
   ro_quota_scope : string option;
   ro_quota_scope_id : string option;
       (** Opaque credential/quota scope ID joined from Usage in this response.
@@ -469,7 +471,7 @@ type runtime_option = {
   ro_rate_limited : bool;
       (** This process observed a 429 that has neither reached its provider's
           Retry-After deadline nor been cleared by a successful answer.
-          Distinct from [ro_quota_exhausted], the provider's quota window. *)
+          Distinct from [ro_quota_rest], the provider's quota window. *)
   ro_rate_limit_resets_at : float option;
       (** The end of the provider's active wait; [None] when no limit remains
           or the active limit stated no wait. *)
@@ -1141,7 +1143,12 @@ type keeper_secret_status =
   | Secret_error
   | Secret_status_unknown of string
 
-val keeper_secret_status_to_string : keeper_secret_status -> string
+val keeper_secret_status_text : ko:bool -> keeper_secret_status -> string
+(** The status as the Secrets tab draws it. A known status is a word of the
+    screen language. An unknown one is the producer's own word, put through
+    {!Tui_terminal_text.sanitize_terminal_text} so an ESC, a control byte or
+    a line break in it reaches the terminal as visible escape text rather than
+    as a sequence or a new row. The decoded value keeps the raw word. *)
 
 (** One Keeper's credential surface, as the composite endpoint reports it.
 
@@ -1602,8 +1609,17 @@ type server_gc_health = {
   sgc_major_words : float;
 }
 
+(** The scheduler-lag probe's state, read by the module that writes it. A
+    word this build does not know is kept as it came, so a newer server's
+    state is drawn as written instead of dropped or read as another
+    (RFC tui-one-screen-grammar section 7.1). *)
+type scheduler_probe =
+  | Probe_reported of Scheduler_lag.probe_state
+  | Probe_unknown of string
+
 type server_scheduler_health = {
-  ssch_probe : string;
+  ssch_probe : scheduler_probe option;
+      (** [None] when the scheduler section carries no [probe]. *)
   ssch_samples : int;
   ssch_p50_ms : float;
   ssch_p95_ms : float;
@@ -1654,8 +1670,9 @@ type server_identity = {
           that does not carry the field — unknown, so no warning and no
           all-clear. *)
   sid_state_ready : bool option;
-      (** [/health] [startup.state_ready] or a ready scoped Observer receipt.
-          [None] means neither booting nor vouched ready. *)
+      (** [/health] [startup.state_ready], the public probe's top-level
+          [ready] when the answer has no [startup] section, or a ready scoped
+          Observer receipt. [None] means neither booting nor vouched ready. *)
   sid_uptime : string option;
       (** [/health] [uptime] human-readable elapsed duration (e.g. "1h 42m"). *)
   sid_sse_clients : int option;
@@ -1673,8 +1690,11 @@ type server_identity = {
           ordered diagnostic list. Missing typed evidence grants no target;
           its original valid diagnostic vector remains readable. *)
 }
-(** Which server the TUI is talking to, from [/health] or an attested scoped
-    Observer response. Fields absent from the latter remain unknown.
+(** Which server the TUI is talking to, from the reader's [/health] or an
+    attested scoped Observer response. Fields absent from the latter remain
+    unknown. The public probe, which the server answers to a requester it
+    gives no read, fills [sid_version] and [sid_state_ready] only; the paths
+    and the commit are empty.
 
     The footer said [Port: 8935] and nothing else, so two checkouts serving
     on the same port were indistinguishable from the screen -- and a binary

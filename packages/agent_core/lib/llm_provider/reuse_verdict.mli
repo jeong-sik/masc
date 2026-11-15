@@ -16,7 +16,8 @@ type close_reason =
       keep-alive, [connection: close] on any line of either side, an
       upgrade, or a body that only the close delimits (RFC 9112 §9.3, §9.6).
       An interim 1xx response is here too: the final response that follows
-      it is still unread on the connection. *)
+      it is still unread on the connection. {!Http_client} reads past
+      interim responses, so its requests are decided on the final one. *)
   | Body_not_drained  (** The response body was not read to its end. *)
   | Transport_ended  (** The transport reported end of file. *)
 

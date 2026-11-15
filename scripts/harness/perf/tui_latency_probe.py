@@ -13,13 +13,14 @@ import json
 import os
 from pathlib import Path
 import pty
-import re
 import select
 import signal
 import struct
 import termios
 import time
 from urllib.request import urlopen
+
+import tui_request_surfaces as surfaces
 
 
 def digest(path):
@@ -31,6 +32,25 @@ def health(port):
     with urlopen(f'http://127.0.0.1:{port}/health?full=1', timeout=10) as response:
         value = json.load(response)
     return {key: value.get(key) for key in ('build', 'paths', 'scheduler', 'gc')}
+
+
+def observed_surfaces(runs: surfaces.Runs | str) -> list[str | None] | None:
+    """The surfaces of the frames the TUI wrote, in the order each first
+    appeared, ending in `None` when the TUI stopped recording them before its
+    last frame; `None` when its surface runs cannot be read."""
+    if isinstance(runs, str):
+        return None
+    seen: list[str | None] = list(dict.fromkeys(runs.surfaces))
+    return seen if runs.unknown_from is None else [*seen, None]
+
+
+def surface_record(runs: surfaces.Runs | str) -> dict[str, object]:
+    """The runs `observed_surfaces` comes from, or why it is unknown."""
+    if isinstance(runs, str):
+        return {'frames_written': None, 'runs': None, 'unknown_from_written_frame': None,
+                'error': runs}
+    return {'frames_written': runs.written, 'runs': len(runs.starts),
+            'unknown_from_written_frame': runs.unknown_from, 'error': None}
 
 
 def main():
@@ -147,10 +167,16 @@ def main():
     same_runtime = (isinstance(after_build, dict) and before_build['runtime_instance_id']
                     == after_build.get('runtime_instance_id'))
     try:
-        timing = timing_path.read_text() if timing_path.exists() else ''
+        timing = timing_path.read_text()
+    except FileNotFoundError:
+        timing = ''
+        runs = surfaces.NO_REPORT
     except (OSError, UnicodeError) as exc:
         timing = ''
         error = f'{error + "; " if error else ""}frame timing read: {exc}'
+        runs = f'frame-timing report: {exc}'
+    else:
+        runs = surfaces.parse_runs(timing)
     exit_code = os.waitstatus_to_exitcode(status)
     observed = (ready is not None and len(sent) == args.tabs and exit_code == 0
                 and not forced and error is None and same_runtime
@@ -164,7 +190,8 @@ def main():
                   argv=argv, term=env['TERM'],
                   observation_options={key: value for key, value in vars(args).items()
                                        if not isinstance(value, Path)},
-                  observed_surfaces=re.findall(r'^  build\[([^\]]+)\]', timing, re.MULTILINE),
+                  observed_surfaces=observed_surfaces(runs),
+                  surface_record=surface_record(runs),
                   navigation_scope='Tab writes recorded; individual transitions are not acknowledged',
                   server_lifecycle='normal TUI behavior; connection failure can trigger its auto-start',
                   scope='PTY navigation and TUI frame timing; not display latency or target acceptance')

@@ -9,6 +9,9 @@ val read : store:Lane_addon_store.t -> declaration_id:string -> request_id:strin
   attempt_ordinal:int -> proof:Yojson.Safe.t ->
   (Exact_lane_slot_observation.t list option,string) result
 val directory : declaration_id:string -> string
+val store_root : Yojson.Safe.t -> string option
+(** The store root an observation file names, when it names one, read without
+    decoding the file. *)
 val request_id : store:Lane_addon_store.t -> declaration_id:string -> file_name:string ->
   Yojson.Safe.t -> (string,string) result
 (** Original request identity of this exact companion file, for the existing

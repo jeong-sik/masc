@@ -703,8 +703,6 @@ val render_repository_changes_diff :
   path:String.t ->
   Frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
-val runtime_quota_badge : ko:bool -> Masc.Tui_decode.runtime_option -> string option
-
 (** The lanes that list a runtime among their candidates, in resolved order.
     Both doors into the runtime detail read it, so neither can answer with a
     shorter list than the other. *)

@@ -257,11 +257,12 @@ let commit_runs_url =
 let run_url = "https://api.github.com/repos/jeong-sik/masc/actions/runs/41895911884"
 
 (* The answer for the commit: one approval run that ended, and one
-   [pull_request] run in [status]. *)
+   [pull_request] run in [status]. Each run carries its integer [id], as the
+   GitHub answer does; the reader refuses a run without one. *)
 let commit_runs status =
   let conclusion = if String.equal status "completed" then {|"success"|} else "null" in
   Printf.sprintf
-    {|{"total_count":2,"workflow_runs":[{"name":"Approval merge request","event":"pull_request_review","head_sha":%S,"status":"completed","conclusion":"success"},{"name":"PR type-check (dune build @check)","event":"pull_request","head_sha":%S,"status":%S,"conclusion":%s}]}|}
+    {|{"total_count":2,"workflow_runs":[{"id":41895911883,"name":"Approval merge request","event":"pull_request_review","head_sha":%S,"status":"completed","conclusion":"success"},{"id":41895911884,"name":"PR type-check (dune build @check)","event":"pull_request","head_sha":%S,"status":%S,"conclusion":%s}]}|}
     commit_sha
     commit_sha
     status
@@ -334,9 +335,11 @@ let test_pass_wakes_a_schedule_whose_commit_checks_completed () =
           ])
        ~original:"merge if green")
     (message_of woken);
-  check (list string) "one read of the commit" [ commit_runs_url ] (calls ());
+  (* A settled answer wakes the schedule only after a second read of the same
+     pages returns the same runs. *)
+  check (list string) "the commit is read and read again" [ commit_runs_url; commit_runs_url ] (calls ());
   check (float 0.0) "a second pass has nothing to read" Loop.poll_interval_sec (pass config http_get);
-  check int "still one read" 1 (List.length (calls ()))
+  check int "the second pass read nothing" 2 (List.length (calls ()))
 ;;
 
 let test_pass_leaves_a_schedule_whose_commit_checks_are_going () =
@@ -365,7 +368,8 @@ let test_pass_serves_a_run_watch_and_a_commit_watch_together () =
       ]
   in
   ignore (pass config http_get);
-  check (list string) "one read each" [ run_url; commit_runs_url ] (calls ());
+  check (list string) "the run once, the settled commit twice"
+    [ run_url; commit_runs_url; commit_runs_url ] (calls ());
   check (float 0.0) "the run watch woke" 200.0 (stored config "run").Schedule_domain.due_at;
   check (float 0.0) "the commit watch woke" 200.0 (stored config "commit").Schedule_domain.due_at
 ;;

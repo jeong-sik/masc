@@ -4,6 +4,7 @@ module AR = Task.Anti_rationalization
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Change = Verifier_review_authority_change
+module View = Goal_verifier_refusal
 
 open Result.Syntax
 let scope = "goal-proof-reviews"
@@ -384,7 +385,8 @@ let goal_admission_result (result : AR.review_result) =
       retryable_runtimes=[]}
   | None | Some (Approve _ | Reject _) -> result
 
-let refusal_receipt retained evidence =
+let refusal_receipt retained (refusal : View.reviewer_refusal) =
+  let evidence = refusal.evidence in
   let* fields = object_fields ["schema"; "receipt"; "disposition"] evidence in
   let* version = text "schema" fields in
   let* receipt_json = field "receipt" fields in
@@ -410,23 +412,38 @@ let restored_receipt retained =
     match receipt.result.AR.verdict with
     | Some _ -> Ok (Some receipt)
     | None -> invalid "Goal verifier judgment lacks a structured verdict" in
-  match Progress.phase (progress retained) with
-  | Progress.Judged json -> decode_judgment json
-  | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
+  match View.view (Progress.phase (progress retained)) with
+  | View.Judged json -> decode_judgment json
+  | View.Committing commit | View.Commit_unknown (commit,_) | View.Finished commit
+  | View.Conflicted (commit,_) ->
     decode_judgment commit.judgment
-  | Rejected refusal | Subdividing (refusal,_) | Subdivided (refusal,_) ->
-    (match refusal.Progress.stage with
-     | Progress.Execution ->
-       let* receipt, _ = decode (refusal_receipt retained refusal.evidence) in Ok (Some receipt)
-     | Before_dispatch -> let* _ = moved_authority retained refusal.evidence in Ok None)
-  | Captured | Admission_wait _ | Dispatch_pending _ -> Ok None
+  | View.Rejected {stage; refusal} ->
+    (match stage, refusal with
+     | View.Execution, View.Reviewer_refused r ->
+       let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
+     | View.Before_dispatch, View.Authority_moved _ ->
+       let* _ = moved_authority retained (View.evidence_json refusal) in Ok None
+     | (View.Execution,
+        (View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _))
+     | (View.Before_dispatch,
+        (View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _)) ->
+       invalid "Goal refusal evidence does not match its refusal stage")
+  | View.Subdividing (refusal,_) | View.Subdivided (refusal,_) ->
+    (match refusal with
+     | View.Reviewer_refused r ->
+       let* receipt, _ = decode (refusal_receipt retained r) in Ok (Some receipt)
+     | View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _ ->
+       invalid "Goal refusal evidence does not match its refusal stage")
+  | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ -> Ok None
 
 let retained_judgment retained =
-  let* judgment = match Progress.phase (progress retained) with
-    | Progress.Judged judgment -> Ok judgment
-    | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
+  let* judgment = match View.view (Progress.phase (progress retained)) with
+    | View.Judged judgment -> Ok judgment
+    | View.Committing commit | View.Commit_unknown (commit,_) | View.Finished commit
+    | View.Conflicted (commit,_) ->
       Ok commit.judgment
-    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+    | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Rejected _
+    | View.Subdividing _ | View.Subdivided _ ->
       Error (Execution_pending "Goal review has no retained structured judgment") in
   let* receipt = decode (receipt_of_json retained judgment) in
   match receipt.result.AR.verdict with
@@ -438,21 +455,23 @@ let observed_receipt retained =
   match receipt with
   | Some _ -> Ok receipt
   | None ->
-    match Progress.phase (progress retained) with
-    | Progress.Admission_wait evidence ->
-      let* receipt, _ = decode (refusal_receipt retained evidence) in Ok (Some receipt)
-    | Dispatch_pending (Some (Progress.Outcome_unknown (`Assoc fields)))
+    match View.view (Progress.phase (progress retained)) with
+    | View.Admission_wait evidence ->
+      let* receipt, _ = decode (refusal_receipt retained {evidence}) in Ok (Some receipt)
+    | View.Dispatch_pending (Some (View.Outcome_unknown (`Assoc fields)))
         when List.assoc_opt "schema" fields = Some (`String "goal_verifier_unknown/v1") ->
       let* _ = decode (object_fields ["schema"; "receipt"; "observations"] (`Assoc fields)) in
       let* encoded = decode (field "receipt" fields) in
       Result.map Option.some (decode (receipt_of_json retained encoded))
-    | Captured | Dispatch_pending None
-    | Dispatch_pending (Some (Outcome_unknown _ | Waiting _ | Absent _))
-    | Rejected {stage=Before_dispatch; _}
-    | Subdividing ({stage=Before_dispatch; _}, _) | Subdivided ({stage=Before_dispatch; _}, _) -> Ok None
-    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
-    | Rejected {stage=Execution; _}
-    | Subdividing ({stage=Execution; _}, _) | Subdivided ({stage=Execution; _}, _) ->
+    | View.Captured | View.Dispatch_pending None
+    | View.Dispatch_pending (Some (View.Outcome_unknown _ | View.Waiting _ | View.Absent _))
+    | View.Rejected {stage=View.Before_dispatch; _}
+    | View.Subdividing (View.Authority_moved _, _)
+    | View.Subdivided (View.Authority_moved _, _) -> Ok None
+    | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
+    | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
+    | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
+    | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
 
 let tool_observations retained =
@@ -460,8 +479,8 @@ let tool_observations retained =
   match receipt with
   | Some receipt -> Ok receipt.tools
   | None ->
-    match Progress.phase (progress retained) with
-    | Dispatch_pending (Some (Progress.Outcome_unknown evidence)) ->
+    match View.view (Progress.phase (progress retained)) with
+    | View.Dispatch_pending (Some (View.Outcome_unknown evidence)) ->
       (match evidence with
        | `Assoc fields when List.assoc_opt "schema" fields = Some (`String "goal_verifier_unknown/v1") ->
          let* fields = decode (object_fields ["schema"; "receipt"; "observations"] evidence) in
@@ -477,14 +496,16 @@ let tool_observations retained =
          if run = retained.run then decode (tools_of_json tools)
          else invalid "Goal interrupted observation differs from its fixed run"
        | _ -> invalid "Goal unknown observation is malformed")
-    | Captured | Admission_wait _ | Dispatch_pending None
-    | Rejected {stage=Before_dispatch; _}
-    | Subdividing ({stage=Before_dispatch; _}, _) | Subdivided ({stage=Before_dispatch; _}, _) -> Ok []
-    | Dispatch_pending (Some (Waiting _ | Absent _)) ->
+    | View.Captured | View.Admission_wait _ | View.Dispatch_pending None
+    | View.Rejected {stage=View.Before_dispatch; _}
+    | View.Subdividing (View.Authority_moved _, _)
+    | View.Subdivided (View.Authority_moved _, _) -> Ok []
+    | View.Dispatch_pending (Some (View.Waiting _ | View.Absent _)) ->
       invalid "Goal dispatch observation has no retained tool receipt"
-    | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
-    | Rejected {stage=Execution; _}
-    | Subdividing ({stage=Execution; _}, _) | Subdivided ({stage=Execution; _}, _) ->
+    | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _
+    | View.Conflicted _ | View.Rejected {stage=View.Execution; _}
+    | View.Subdividing ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _)
+    | View.Subdivided ((View.Reviewer_refused _ | View.Run_ended _ | View.Owner_exited _), _) ->
       invalid "Goal terminal observation lacks its original receipt"
 
 let advance ~store retained event =
@@ -551,27 +572,30 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
     let* encoded = Owner.load_successor_request ~store ~scope successor
       |> Result.map_error (fun error -> Store_unavailable (Owner.error_to_string error)) in
     let* child, run, explicit_retry = decode (request_of_json encoded) in
-    let* refusal = match Progress.phase (progress parent) with
-      | Subdividing (refusal,_) | Subdivided (refusal,_) -> Ok refusal
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid "Goal child lacks its terminal parent" in
+    let* refusal = match View.view (Progress.phase (progress parent)) with
+      | View.Subdividing (refusal,_) | View.Subdivided (refusal,_) -> Ok refusal
+      | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+      | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
+      | View.Rejected _ -> invalid "Goal child lacks its terminal parent" in
     (* The refusal's stage says which evidence authorizes the child: an
        execution refusal's receipt, or what moved before dispatch. *)
-    let* () = match refusal.Progress.stage with
-      | Progress.Execution ->
-        let* automatic_retry = retryable_refusal parent refusal.evidence in
-        let* _, disposition = decode (refusal_receipt parent refusal.evidence) in
+    let* () = match refusal with
+      | View.Reviewer_refused r ->
+        let* automatic_retry = retryable_refusal parent r in
+        let* _, disposition = decode (refusal_receipt parent r) in
         (match explicit_retry with
          | None when automatic_retry -> Ok ()
          | None -> invalid "Goal successor lacks a typed automatic retry"
          | Some grant when grant.parent_digest = parent.record.request_digest ->
            decode (Verifier_review_owner.terminal_result disposition)
          | Some _ -> invalid "Goal explicit retry names another parent")
-      | Before_dispatch ->
-        let* _ = moved_authority parent refusal.evidence in
+      | View.Authority_moved _ ->
+        let* _ = moved_authority parent (View.evidence_json refusal) in
         (match explicit_retry with
          | None -> Ok ()
-         | Some _ -> invalid "Goal explicit retry cannot follow a before-dispatch refusal") in
+         | Some _ -> invalid "Goal explicit retry cannot follow a before-dispatch refusal")
+      | View.Run_ended _ | View.Owner_exited _ ->
+        invalid "Goal refusal evidence does not match its refusal stage" in
     (* The parent's [Successor_intended] digest pins the child's whole body,
        so its lookup grants are the ones it was prepared with. Here the child
        must also ask the parent's question as its next attempt. *)
@@ -581,11 +605,12 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
         && run.run_id <> parent.run.run_id then Ok ()
       else invalid "Goal successor changed its question or reused the previous run" in
     let* child = retain_with_grant ~store ~installation_id ~package_id ~run ~explicit_retry child in
-    let* _ = match Progress.phase (progress parent) with
-      | Progress.Subdividing _ -> advance ~store parent (Progress.Successor_observed successor.request_id)
-      | Subdivided _ -> Ok parent
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected _ -> invalid "Goal successor has no original parent intent" in
+    let* _ = match View.view (Progress.phase (progress parent)) with
+      | View.Subdividing _ -> advance ~store parent (Progress.Successor_observed successor.request_id)
+      | View.Subdivided _ -> Ok parent
+      | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+      | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
+      | View.Rejected _ -> invalid "Goal successor has no original parent intent" in
     Ok child in
   let allocate parent =
     let* child = successor_of ~authority parent in
@@ -601,17 +626,18 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
     let* child = restore_child parent successor in
     Ok (Some child) in
   let rec walk parent rest =
-    match Progress.phase (progress parent), rest with
-    | (Progress.Subdividing (_, successor) | Subdivided (_, successor)), _ ->
+    match View.view (Progress.phase (progress parent)), rest with
+    | (View.Subdividing (_, successor) | View.Subdivided (_, successor)), _ ->
       let* () =
-        match Progress.phase (progress parent), rest with
-        | Subdivided _, [] ->
+        match View.view (Progress.phase (progress parent)), rest with
+        | View.Subdivided _, [] ->
           invalid "Goal successor original is missing after parent observed its intent"
-        | Subdivided _, existing::_ when existing.record.request_id <> successor.Progress.request_id ->
+        | View.Subdivided _, existing::_ when existing.record.request_id <> successor.Progress.request_id ->
           invalid "Goal successor original differs from its retained intent"
-        | (Subdividing _ | Subdivided _), _ -> Ok ()
-        | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-          | Finished _ | Conflicted _ | Rejected _), _ ->
+        | (View.Subdividing _ | View.Subdivided _), _ -> Ok ()
+        | (View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+          | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
+          | View.Rejected _), _ ->
           invalid "Goal successor parent changed during restoration"
       in
       let* child = restore_child parent successor in
@@ -622,19 +648,24 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
            && existing.record.request_id = child.record.request_id
            && Yojson.Safe.equal existing.record.summary child.record.summary
          then walk child tail else invalid "Goal inventory differs from its original linked child")
-    | Rejected {stage=Progress.Execution; evidence}, [] ->
-      let* retryable = retryable_refusal parent evidence in
+    | View.Rejected {stage=View.Execution; refusal=View.Reviewer_refused r}, [] ->
+      let* retryable = retryable_refusal parent r in
       if not retryable || not automatic then Ok (Some parent) else allocate parent
-    | Rejected {stage=Progress.Before_dispatch; evidence}, [] ->
+    | View.Rejected {stage=View.Execution;
+                     refusal=(View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _)}, [] ->
+      invalid "Goal refusal evidence does not match its refusal stage"
+    | View.Rejected {stage=View.Before_dispatch; refusal}, [] ->
       (* HIGH-RISK-UNREVIEWED: the same question met another lookup authority
          or answer format before dispatch. Its next attempt asks it again with
          the current authority, on a wake or an explicit request alike. *)
-      let* _ = moved_authority parent evidence in
+      let* _ = moved_authority parent (View.evidence_json refusal) in
       allocate parent
-    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _), [] -> Ok (Some parent)
-    | (Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-      | Finished _ | Conflicted _ | Rejected {stage=(Progress.Before_dispatch | Progress.Execution);_}), _::_ ->
+    | (View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+      | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _), [] ->
+      Ok (Some parent)
+    | (View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+      | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
+      | View.Rejected {stage=(View.Before_dispatch | View.Execution); _}), _::_ ->
       invalid "Goal child exists without the original successor intent" in
   match related with
   | [] -> Ok None
@@ -653,10 +684,10 @@ let request_retry ~authority ~store ~installation_id ~package_id ~goal_id ~reque
   match parent with
   | None -> Ok ()
   | Some parent ->
-    match Progress.phase (progress parent) with
-    | Rejected {stage=Progress.Execution; evidence} ->
-      let* _ = retryable_refusal parent evidence in
-      let* _, disposition = decode (refusal_receipt parent evidence) in
+    match View.view (Progress.phase (progress parent)) with
+    | View.Rejected {stage=View.Execution; refusal=View.Reviewer_refused r} ->
+      let* _ = retryable_refusal parent r in
+      let* _, disposition = decode (refusal_receipt parent r) in
       let* () = decode (Verifier_review_owner.terminal_result disposition) in
       let* child = successor_of ~authority parent in
       let run = new_run () in
@@ -670,12 +701,16 @@ let request_retry ~authority ~store ~installation_id ~package_id ~goal_id ~reque
       let* _ = advance ~store parent (Progress.Successor_intended successor) in
       let* _ = select_frontier ~automatic:false ~authority ~store ~installation_id ~package_id
         ~goal_id ~request_id ~new_run in Ok ()
-    | Dispatch_pending (Some (Progress.Outcome_unknown _)) ->
+    | View.Rejected {stage=View.Execution;
+                     refusal=(View.Authority_moved _ | View.Run_ended _ | View.Owner_exited _)} ->
+      invalid "Goal refusal evidence does not match its refusal stage"
+    | View.Dispatch_pending (Some (View.Outcome_unknown _)) ->
       Error (Execution_pending "The original Goal verification outcome is unknown; no new review was started. Inspect its original run.")
-    | Dispatch_pending (None | Some (Progress.Waiting _ | Progress.Absent _)) ->
+    | View.Dispatch_pending (None | Some (View.Waiting _ | View.Absent _)) ->
       Error (Execution_pending "The original Goal verification may still be running; no new review was started. Inspect its original run.")
-    | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _
-    | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ -> Ok ())
+    | View.Captured | View.Admission_wait _ | View.Judged _ | View.Committing _ | View.Commit_unknown _
+    | View.Finished _ | View.Conflicted _ | View.Rejected {stage=View.Before_dispatch; _}
+    | View.Subdividing _ | View.Subdivided _ -> Ok ())
 
 let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
   let* retained = reload ~store retained in
@@ -683,10 +718,10 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
   match restored with
   | Some receipt -> Ok receipt
   | None ->
-    let* () = match Progress.phase (progress retained) with
-      | Captured -> Ok ()
-      | Admission_wait evidence ->
-        let* receipt, disposition = decode (refusal_receipt retained evidence) in
+    let* () = match View.view (Progress.phase (progress retained)) with
+      | View.Captured -> Ok ()
+      | View.Admission_wait evidence ->
+        let* receipt, disposition = decode (refusal_receipt retained {evidence}) in
         let* () = decode (Verifier_review_owner.validate_admission disposition) in
         let agrees = match disposition with
           | `Assoc fields -> (match List.assoc_opt "result" fields with
@@ -694,13 +729,14 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
               | None -> false)
           | _ -> false in
         if agrees then Ok () else invalid "Goal admission observation differs from its original receipt"
-      | Dispatch_pending _ -> Error (Execution_pending "Goal reviewer may have dispatched; no automatic replay")
-      | Rejected {stage=Before_dispatch; evidence} ->
+      | View.Dispatch_pending _ -> Error (Execution_pending "Goal reviewer may have dispatched; no automatic replay")
+      | View.Rejected {stage=View.Before_dispatch; refusal} ->
         (* Already refused before dispatch: its next attempt asks again. *)
-        let* change = moved_authority retained evidence in
+        let* change = moved_authority retained (View.evidence_json refusal) in
         Error (Authority_changed change)
-      | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _
-      | Rejected {stage=Execution; _} | Subdividing _ | Subdivided _ -> invalid "Goal review frontier changed" in
+      | View.Judged _ | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
+      | View.Rejected {stage=View.Execution; _} | View.Subdividing _ | View.Subdivided _ ->
+        invalid "Goal review frontier changed" in
     let* () = if V.question_matches retained.original authority then Ok ()
       else Error Question_changed in
     (* HIGH-RISK-UNREVIEWED: a retained attempt whose lookup authority or answer
@@ -721,7 +757,6 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         else invalid "Goal retained lookup tools differ from their authority digest" in
     let* dispatching = advance ~store retained Progress.Dispatch_intended in
     let current = ref dispatching in
-    let unknown = ref false in
     let reached = ref false in
     let facts = ref [] in
     let tools = ref [] in
@@ -734,7 +769,7 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         let fact = match certainty with
           | AR.Before_dispatch -> "before_dispatch"
           | Definite_refusal -> reached := true; "definite_refusal"
-          | Outcome_unknown -> unknown := true; reached := true; "outcome_unknown" in
+          | Outcome_unknown -> reached := true; "outcome_unknown" in
         facts := `Assoc ["fact", `String fact; "runtime_id", `String runtime_id;
           "error_category", `String Agent_core.Error.(category error |> category_label)] :: !facts in
     let observed_tool ~input result =
@@ -753,13 +788,10 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         @ if !reached then ["certainty", `String "definite"] else []) in
       let refusal = `Assoc ["schema", `String "goal_verifier_refusal/v1";
         "receipt", encoded; "disposition", disposition] in
-      let event = match !unknown, admission.AR.verdict, !reached with
-        | true, _, _ -> Progress.Execution_observed (Progress.Outcome_unknown
-            (`Assoc ["schema", `String "goal_verifier_unknown/v1";
-              "receipt", encoded; "observations", `List (List.rev !facts)]))
-        | false, Some _, _ -> Progress.Judgment_retained encoded
-        | false, None, false -> Progress.Admission_declined refusal
-        | false, None, true -> Progress.Refused {stage=Progress.Execution; evidence=refusal} in
+      let event = match admission.AR.verdict, !reached with
+        | Some _, _ -> Progress.Judgment_retained encoded
+        | None, false -> Progress.Admission_declined refusal
+        | None, true -> Progress.Refused {stage=Progress.Execution; evidence=refusal} in
       match advance ~store !current event with
       | Ok saved -> current := saved
       | Error error -> raise (Retention_failed error) in
@@ -772,12 +804,12 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         ~log_warn:(fun message -> Log.Misc.warn "[goal-proof-review] goal_id=%s %s" subject.goal_id message)
         ~lookup:(A.goal_review_lookup authority) ~provider_rest
         ~base_path:(A.goal_review_base_path authority) ());
-      if !unknown then Error (Execution_pending "Goal reviewer outcome unknown; original retained")
-      else
-        (match Progress.phase (progress !current) with
-         | Admission_wait evidence -> let* receipt, _ = decode (refusal_receipt !current evidence) in Ok receipt
-         | Captured | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
-         | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+      (match View.view (Progress.phase (progress !current)) with
+         | View.Admission_wait evidence ->
+           let* receipt, _ = decode (refusal_receipt !current {evidence}) in Ok receipt
+         | View.Captured | View.Dispatch_pending _ | View.Judged _ | View.Committing _
+         | View.Commit_unknown _ | View.Finished _ | View.Conflicted _ | View.Rejected _
+         | View.Subdividing _ | View.Subdivided _ ->
            let* receipt = restored_receipt !current in
            match receipt with Some receipt -> Ok receipt | None -> invalid "Goal reviewer returned without retained reply")
     with
@@ -789,8 +821,8 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
         | _ -> Raised in
       Eio.Cancel.protect (fun () ->
         match reload ~store retained with
-        | Ok saved -> (match Progress.phase (progress saved) with
-            | Dispatch_pending _ ->
+        | Ok saved -> (match View.view (Progress.phase (progress saved)) with
+            | View.Dispatch_pending _ ->
               (match advance ~store saved (Progress.Execution_observed
                 (Progress.Outcome_unknown (`Assoc ["cause", `String (interruption_label cause);
                   "run", run_json retained.run;
@@ -798,8 +830,9 @@ let run ?on_tool_result ?sw ~store ~retained ~authority ~provider_rest () =
                   "observations", `List (List.rev !facts)]))) with
                | Ok _ -> ()
                | Error error -> Log.Misc.error "Goal interrupted review retention failed: %s" (error_to_string error))
-            | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
-            | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> ())
+            | View.Captured | View.Admission_wait _ | View.Judged _ | View.Committing _
+            | View.Commit_unknown _ | View.Finished _ | View.Conflicted _ | View.Rejected _
+            | View.Subdividing _ | View.Subdivided _ -> ())
         | Error error -> Log.Misc.error "Goal interrupted review reload failed: %s" (error_to_string error));
       Printexc.raise_with_backtrace exn backtrace
 
@@ -846,22 +879,24 @@ let commit ~store ~retained ~change ~observe ~apply =
       pending "Goal commit conflicts with the authoritative original subject" in
   let recover saved commit =
     let* () = validate commit in
-    let* saved = match Progress.phase (progress saved) with
-      | Progress.Committing _ -> advance ~store saved (Progress.Commit_uncertain
+    let* saved = match View.view (Progress.phase (progress saved)) with
+      | View.Committing _ -> advance ~store saved (Progress.Commit_uncertain
           (`Assoc ["cause", `String "original_goal_commit_requires_observation"]))
-      | Commit_unknown _ -> Ok saved
-      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Finished _
-      | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+      | View.Commit_unknown _ -> Ok saved
+      | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
+      | View.Finished _ | View.Conflicted _ | View.Rejected _ | View.Subdividing _
+      | View.Subdivided _ ->
         invalid "Goal commit recovery lacks its original intent" in
     confirm saved commit in
-  match Progress.phase (progress retained) with
-  | Progress.Finished commit -> validate commit
-  | Committing commit | Commit_unknown (commit, _) -> recover retained commit
-  | Judged judgment ->
+  match View.view (Progress.phase (progress retained)) with
+  | View.Finished commit -> validate commit
+  | View.Committing commit | View.Commit_unknown (commit, _) -> recover retained commit
+  | View.Judged judgment ->
     let commit = {Progress.judgment; change} in
     let* () = validate commit in
     let* saved = advance ~store retained (Progress.Commit_intended change) in
     recover saved commit
-  | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _ | Subdividing _ | Subdivided _ ->
+  | View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Rejected _
+  | View.Subdividing _ | View.Subdivided _ ->
     pending "Goal proof cannot commit without its original retained judgment"
-  | Conflicted _ -> pending "Goal proof is conflicted; the original host must resolve it"
+  | View.Conflicted _ -> pending "Goal proof is conflicted; the original host must resolve it"

@@ -147,10 +147,14 @@ let summary_count field json =
   |> to_int
 ;;
 
-(* One Keeper's activations answer (RFC-0483) reads that Keeper's ledger on
-   every request, so a recorded activation shows on the next read. *)
+(* One Keeper's activations answer (RFC-0483) keeps the session's ledger
+   between requests and is told of each commit, so a recorded activation shows
+   on the next read. The commit observer is the one the server installs. *)
 let test_keeper_activations_answer_reads_the_live_ledger () =
   with_workspace @@ fun config ->
+  Server_skill_usage_runtime.For_testing.with_runtime
+    ~ledger_loader:(fun ~config ~trace_id -> Ledger.load ~config ~trace_id)
+  @@ fun () ->
   let keeper_name = "projection-keeper" in
   let meta = persist_session config keeper_name in
   let live_tools () =

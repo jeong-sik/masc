@@ -227,7 +227,7 @@ let serve_dashboard_index request reqd =
   | Error _ ->
     Http.Response.html
       ~status:`Service_unavailable
-      "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dashboard unavailable</title><body><p>Dashboard assets unavailable. Inspect <code>/health</code> dashboard_surface.recovery.</p></body></html>"
+      "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Dashboard unavailable</title><body><p>Dashboard assets unavailable. Inspect <code>/health</code> dashboard_surface.recovery with the workspace credential.</p></body></html>"
       reqd
 
 let is_compressible_asset name =
@@ -517,7 +517,7 @@ let serve_dashboard_static name request reqd =
     ~unavailable:(fun reqd ->
       Http.Response.text
         ~status:`Service_unavailable
-        "Dashboard assets unavailable; inspect /health dashboard_surface.recovery"
+        "Dashboard assets unavailable; inspect /health dashboard_surface.recovery with the workspace credential"
         reqd)
     name
     request
@@ -594,6 +594,7 @@ let handle_post_graphql request reqd =
 
 let handle_graphql request reqd =
   match Http.Request.method_ request with
-  | `GET -> handle_get_graphql request reqd
+  | `GET | `HEAD -> handle_get_graphql request reqd
   | `POST -> handle_post_graphql request reqd
-  | _ -> Http.Response.method_not_allowed reqd
+  | `PUT | `DELETE | `CONNECT | `OPTIONS | `TRACE | `Other _ ->
+    Http.Response.method_not_allowed ~allow:[ `GET; `HEAD; `POST ] reqd

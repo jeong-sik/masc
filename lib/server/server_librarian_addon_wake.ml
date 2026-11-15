@@ -35,10 +35,14 @@ let admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original =
          only to notify the same physical owner; the lane reconfirms receipts. *)
       Capture.restore ~owner ~load_parent:(Parts.load_parent_payload ~read:view.read ~owner) original in
   Ok (Capture.keeper_id owner,(Capture.destination capture).installation_id)
-let history_keeper ~base_path ~keepers_dir original =
-  let* owner=History.observe_record_owner ~base_path ~keepers_dir original in
-  let* capture=History.restore ~owner original in
-  Ok (History.keeper_id owner,(History.destination capture).installation_id)
+(* The record's summary is the index of the history request: it names the
+   owner and the destination, so the wake reads no body. The index is bound
+   to the body where the Keeper's pass reads it. *)
+let history_keeper ~base_path ~keepers_dir record =
+  let* index=History.index_of_summary record in
+  let* owner=History.observe_index_owner ~base_path ~keepers_dir index in
+  let* ()=History.confirm_index_source_root index in
+  Ok (History.keeper_id owner,index.destination.installation_id)
 (* The step's header names its destination, so the wake needs neither the step's
    input nor its prompt. *)
 let floor_step_keeper ~base_path ~keepers_dir original =
@@ -64,7 +68,7 @@ let rec finish_rescan_pass state =
     if Atomic.compare_and_set state Rerun_needed Running then true
     else finish_rescan_pass state
   | Idle -> false
-let discover ~fold_originals ~config ~store =
+let discover ~fold_records ~on_original ~config ~store =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   function
@@ -81,21 +85,28 @@ let discover ~fold_originals ~config ~store =
       let parts_by_owner=ref [] in
       let original_keepers,original_refusals=
         let folded = Store.with_tool_request_settlement_barrier store (fun () ->
-          fold_originals ~store ~init:([],[]) ~f:(fun (keepers,refusals) (original:Owner.retained) ->
-          let keeper=match Namespace.of_request_id original.request_id with
-            | Namespace.Admission scope when scope=original.scope ->
-              admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original |> Result.map Option.some
-            | History scope when scope=original.scope ->
-              history_keeper ~base_path ~keepers_dir original |> Result.map Option.some
-            | Floor_step scope when scope=original.scope ->
-              floor_step_keeper ~base_path ~keepers_dir original |> Result.map Option.some
+          fold_records ~store ~init:([],[]) ~f:(fun (keepers,refusals) record ->
+          let scope=Owner.Record.scope record in
+          (* An admission or a floor step is restored from its body; a body
+             that cannot be read rejects the scan. *)
+          let with_body keeper =
+            let* original=Owner.load_listed ~store record in
+            on_original original;
+            Ok (keeper original |> Result.map Option.some) in
+          let* keeper=match Namespace.of_request_id (Owner.Record.request_id record) with
+            | Namespace.Admission owner when owner=scope ->
+              with_body (admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir)
+            | History owner when owner=scope ->
+              Ok (history_keeper ~base_path ~keepers_dir record |> Result.map Option.some)
+            | Floor_step owner when owner=scope ->
+              with_body (floor_step_keeper ~base_path ~keepers_dir)
             (* Gate/partition journals have their own domains. Only the exact
                execution scope derived by its typed ID decoder is this owner. *)
-            | Admission _ | History _ | Floor_step _ | Other -> Ok None in
-          match keeper with
+            | Admission _ | History _ | Floor_step _ | Other -> Ok (Ok None) in
+          Ok (match keeper with
           | Ok None -> keepers,refusals
           | Ok (Some (keeper,_installation)) -> keeper::keepers,refusals
-          | Error detail -> keepers,detail::refusals)) in
+          | Error detail -> keepers,detail::refusals))) in
         match folded with
         | Error detail -> [],[detail]
         | Ok (Error error) -> [],[Owner.error_to_string error]
@@ -106,13 +117,19 @@ let discover ~fold_originals ~config ~store =
       let* scope=match Namespace.of_request_id request_id with
         | Namespace.Admission scope | History scope | Floor_step scope -> Ok scope
         | Other -> Error "Librarian result hint has no original execution namespace" in
-      let* original=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
-      let* original=Option.to_result ~none:"Librarian result hint has no original owner" original in
+      let with_body keeper =
+        let* original=Owner.load ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
+        let* original=Option.to_result ~none:"Librarian result hint has no original owner" original in
+        on_original original;
+        keeper original in
       let parts_by_owner=ref [] in
       let* keeper,original_installation=match Namespace.of_request_id request_id with
-        | Namespace.Admission _ -> admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir original
-        | History _ -> history_keeper ~base_path ~keepers_dir original
-        | Floor_step _ -> floor_step_keeper ~base_path ~keepers_dir original
+        | Namespace.Admission _ -> with_body (admission_keeper ~store ~parts_by_owner ~base_path ~keepers_dir)
+        | History _ ->
+          let* record=Owner.load_record ~store ~scope ~request_id |> Result.map_error Owner.error_to_string in
+          let* record=Option.to_result ~none:"Librarian result hint has no original owner" record in
+          history_keeper ~base_path ~keepers_dir record
+        | Floor_step _ -> with_body (floor_step_keeper ~base_path ~keepers_dir)
         | Other -> Error "Librarian result hint has no original execution namespace" in
       if installation_id=original_installation
       then Ok {keepers=[keeper];refusals=[];original_keepers=[keeper]}
@@ -125,7 +142,7 @@ let install ~sw ~config =
   let run_discovery event =
     if not (Atomic.get stopped) then
       match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        discover ~fold_originals:Owner.fold_all ~config ~store event) with
+        discover ~fold_records:Owner.fold_all_records ~on_original:ignore ~config ~store event) with
       | Error detail -> Log.Server.warn "Librarian Addon wake discovery: %s" detail
       | Ok found ->
         List.iter (fun detail -> Log.Server.warn "Librarian Addon original wake refused: %s" detail) found.refusals;
@@ -158,9 +175,7 @@ let install ~sw ~config =
   Eio.Switch.on_release sw (fun () -> Atomic.set stopped true;unsubscribe ())
 module For_testing = struct
   let discover ~config ~store ~after_inventory ~on_original ~event =
-    let fold_originals ~store ~init ~f =
-      Owner.For_testing.fold_all ~store ~after_inventory ~init ~f:(fun acc original ->
-        on_original original; f acc original) in
+    let fold_records ~store ~init ~f = Owner.For_testing.fold_all_records ~store ~after_inventory ~init ~f in
     Result.map (fun found -> found.keepers,found.refusals,found.original_keepers)
-      (discover ~fold_originals ~config ~store event)
+      (discover ~fold_records ~on_original ~config ~store event)
 end

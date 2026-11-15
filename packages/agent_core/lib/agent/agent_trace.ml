@@ -1,6 +1,5 @@
 open Types
 open Agent_types
-open Result_syntax
 
 let _log = Log.create ~module_name:"agent_trace" ()
 
@@ -11,11 +10,44 @@ let report_observer_failure report message fields =
   | exn -> Llm_provider.Reserved_exn.reraise_if_reserved exn
 ;;
 
+(* Which raw-trace record a write belonged to.  The trace is diagnostic
+   evidence, never execution authority: the provider response, the tool result
+   and the hook decision are already decided when their record is written. *)
+type trace_boundary =
+  | Hook_invocation
+  | Tool_execution_started
+  | Tool_execution_finished
+  | Assistant_block of int
+
+let trace_boundary_fields = function
+  | Hook_invocation -> [ Log.S ("trace_boundary", "hook_invocation") ]
+  | Tool_execution_started -> [ Log.S ("trace_boundary", "tool_execution_started") ]
+  | Tool_execution_finished -> [ Log.S ("trace_boundary", "tool_execution_finished") ]
+  | Assistant_block block_index ->
+    [ Log.S ("trace_boundary", "assistant_block"); Log.I ("block_index", block_index) ]
+;;
+
+(* A record the sink refused is reported as missing evidence and nothing else:
+   it neither fails the stage that produced the fact nor reaches the tool
+   dispatcher as an observer failure. *)
+let report_missing_trace_record active boundary = function
+  | Ok () -> ()
+  | Error trace_error ->
+    report_observer_failure
+      Log.warn
+      "raw trace record not written"
+      (Log.S ("worker_run_id", Raw_trace.active_run_id active)
+       :: Log.S ("trace_error", Error.to_string trace_error)
+       :: trace_boundary_fields boundary)
+;;
+
 let record_hook_invocation active_run ?invocation ~hook_name ~decision ?detail () =
   match active_run with
   | None -> ()
   | Some active ->
-    Raw_trace.raise_if_error
+    report_missing_trace_record
+      active
+      Hook_invocation
       (Raw_trace.record_hook_invoked
          active
          ?invocation
@@ -63,7 +95,9 @@ let execute_tools_with_trace agent active_run ~turn ?before_tool_execution tool_
             ~first_progress_at:ts
             ~last_progress_at:ts
             Running;
-          Raw_trace.raise_if_error
+          report_missing_trace_record
+            active
+            Tool_execution_started
             (Raw_trace.record_tool_execution_started
                active
                ~invocation
@@ -83,7 +117,9 @@ let execute_tools_with_trace agent active_run ~turn ?before_tool_execution tool_
             ~first_progress_at:ts
             ~last_progress_at:ts
             Running;
-          Raw_trace.raise_if_error
+          report_missing_trace_record
+            active
+            Tool_execution_finished
             (Raw_trace.record_tool_execution_finished
                active
                ~invocation
@@ -116,18 +152,15 @@ let execute_tools_with_trace agent active_run ~turn ?before_tool_execution tool_
 
 let trace_assistant_blocks active_run blocks =
   match active_run with
-  | None -> Ok ()
+  | None -> ()
   | Some active ->
-    blocks
-    |> List.mapi (fun index block ->
-      Raw_trace.record_assistant_block active ~block_index:index block)
-    |> List.fold_left
-         (fun acc item ->
-            match acc, item with
-            | Ok (), Ok () -> Ok ()
-            | (Error _ as err), _ -> err
-            | _, (Error _ as err) -> err)
-         (Ok ())
+    List.iteri
+      (fun block_index block ->
+         report_missing_trace_record
+           active
+           (Assistant_block block_index)
+           (Raw_trace.record_assistant_block active ~block_index block))
+      blocks
 ;;
 
 (** Invoke the optional [on_run_complete] callback.

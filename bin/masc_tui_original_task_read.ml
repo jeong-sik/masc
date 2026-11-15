@@ -241,8 +241,9 @@ let prepare_evidence ~task_id ~verification_id evidence_value =
       | Ev_artifact_unreadable {ev_u_reference;ev_u_reason} ->
         [section "Submitted artifact unavailable" ((match ev_u_reference with None -> "Reference unavailable" | Some value -> value) ^ "\n" ^ ev_u_reason)]
       | Ev_binary {ev_b_reference;ev_b_bytes;ev_b_sha256;ev_b_format;ev_b_preview} ->
+        (* The original Task reading is written in English, its caption too. *)
         [section "Submitted binary artifact" (Masc_tui_evidence_picture.caption_of_preview
-          ~reference:ev_b_reference ~bytes:ev_b_bytes ~sha256:ev_b_sha256 ~format:ev_b_format ev_b_preview);
+          ~ko:false ~reference:ev_b_reference ~bytes:ev_b_bytes ~sha256:ev_b_sha256 ~format:ev_b_format ev_b_preview);
          section "Binary artifact identity" (ev_b_reference ^ "\nSHA-256: " ^ ev_b_sha256 ^
            "\nThis diagnostic reading shows metadata; image pixels are not drawn here.")]) items) in
   Result.map (fun evidence_sections -> {evidence_key={evidence_task=task_id;verification_id};evidence_value;

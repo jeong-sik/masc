@@ -2,9 +2,10 @@
     source kind, JSON and digest of a snapshot, the parse of snapshot text,
     the guard that refuses a read while publication recovery is pending, the
     classified read, the projection and cache of recall revisions read from
-    the journal with the commit observer, and the strict and plain appends of
-    a journal line and entry with the Librarian failure and the snapshot
-    quarantine records.
+    the journal with the commit observer, the check that a recovering
+    receipt's target line is already in the journal, and the strict and plain
+    appends of a journal line and entry with the Librarian failure and the
+    snapshot quarantine records.
 
     [Keeper_memory_os_current] includes this module. *)
 
@@ -119,6 +120,20 @@ val install_commit_observer :
 val append_journal_line_strict :
   keepers_dir:string ->
   keeper_id:string -> Yojson.Safe.t -> (unit, string) result
+
+val journal_holds_receipt_target :
+  keepers_dir:string ->
+  keeper_id:string ->
+  target_revision:int ->
+  is_target:(Yojson.Safe.t -> journal_entry -> bool) ->
+  (bool, string) result
+(** Whether the journal holds a recovering receipt's target line, read from
+    the newest line down to the newest quarantine line or the first committed
+    line below [target_revision], after recovering a partial final row. Lines
+    older than that stop are not decoded. [Ok true] means a line [is_target]
+    accepts is there. [Ok false] means every line above the stop decoded and
+    none was accepted. An undecodable line above the stop with no accepted
+    line is [Error], because it may be the target's own line. *)
 
 val append_journal_entry :
   keepers_dir:string ->

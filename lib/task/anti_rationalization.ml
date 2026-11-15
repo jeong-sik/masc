@@ -111,11 +111,20 @@ type gate =
   | Structured_tool
   | Invalid_verdict
   | Evaluator_unavailable
+[@@deriving enumerate]
 
 let gate_to_string = function
   | Structured_tool -> "structured_tool"
   | Invalid_verdict -> "invalid_verdict"
   | Evaluator_unavailable -> "evaluator_unavailable"
+;;
+
+(* The inverse of [gate_to_string], taken from it over every constructor, so a
+   new gate is readable the moment it is writable. *)
+let gate_of_string raw =
+  match List.find_opt (fun gate -> String.equal (gate_to_string gate) raw) all_of_gate with
+  | Some gate -> Ok gate
+  | None -> Error (Printf.sprintf "unknown gate %S" raw)
 ;;
 
 type review_result =
@@ -1084,7 +1093,7 @@ let review_rendered ~generator_runtime ~system_prompt ?execution_owner ?on_execu
 
 let run_retained ~system_prompt ~prompt ?on_execution ?on_verdict ?on_tool_result ?sw
     ~log_info ~log_warn ~lookup ~provider_rest ~base_path () =
-  run_with_execution_policy ~execution_policy:Retained_original
+  run_with_execution_policy ~execution_policy:Ordinary_review
     ~system_prompt ?on_execution ?on_verdict ?on_tool_result ?sw
     ~log_info ~log_warn ~render_prompt:(fun () -> Ok prompt)
     ~lookup:(lookup_with_evidence_observation lookup) ~provider_rest ~base_path ()

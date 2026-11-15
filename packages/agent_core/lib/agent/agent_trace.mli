@@ -10,10 +10,9 @@ open Agent_types
 
 (** {1 Hook recording} *)
 
-(** Record a hook invocation in the active raw-trace run (no-op when
-    [active_run] is [None]). *)
-
-(** Invoke a hook within a tracing span, recording the decision. *)
+(** Invoke a hook within a tracing span, recording the decision.  The returned
+    decision is the hook's own; a raw-trace record the sink refuses is reported
+    as a warning and changes neither the decision nor the control flow. *)
 val invoke_hook_with_trace
   :  t
   -> ?raw_trace_run:Raw_trace.active_run
@@ -26,8 +25,9 @@ val invoke_hook_with_trace
 (** {1 Tool execution with tracing} *)
 
 (** Execute tool-use blocks with full raw-trace recording (started/finished
-    events, lifecycle updates). Delegates to [Agent_tools.execute_tools],
-    retaining completed results when a trace observer fails. *)
+    events, lifecycle updates). Delegates to [Agent_tools.execute_tools].
+    A raw-trace record the sink refuses is reported as a warning and does not
+    become an [Agent_tools.Observer_failure]. *)
 val execute_tools_with_trace
   :  t
   -> Raw_trace.active_run option
@@ -38,11 +38,13 @@ val execute_tools_with_trace
 
 (** {1 Assistant block recording} *)
 
-(** Record assistant content blocks in the active run. *)
+(** Record assistant content blocks in the active run.  Every block is
+    attempted; a block the sink refuses is reported as a warning naming its
+    index and does not fail response collection. *)
 val trace_assistant_blocks
   :  Raw_trace.active_run option
   -> Llm_provider.Types.content_block list
-  -> (unit, Error.t) result
+  -> unit
 
 (** {1 Response inspection} *)
 

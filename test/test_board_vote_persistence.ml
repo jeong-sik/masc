@@ -913,7 +913,8 @@ let test_vote_survives_snapshot_before_persistence_release
     ; inc_dispatch_flusher_start_outcome = (fun () -> ())
     }
   in
-  (* The existing completion observer runs under persistence after its work.
+  (* The existing completion observer runs as soon as the persistence section
+     that did the work is released, before the cast continues.
      Reproduce a competing snapshot from the committed vote identities using
      the actual appended rows and the shared atomic writer. The private vote
      renderer stays private, and no recursive persistence lock is acquired.

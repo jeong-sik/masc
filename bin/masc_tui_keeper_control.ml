@@ -223,6 +223,11 @@ let health_label ~ko reading =
   | Absent -> if ko then "실시간 목록에 없음" else "absent from live roster"
   | Present runtime -> Decode.keeper_health_word ~ko (Some runtime.Decode.kr_health)
 
+let status_label ~ko reading =
+  let health = health_label ~ko reading in
+  if reading.paused then (if ko then "일시정지 · " else "paused · ") ^ health
+  else health
+
 type action =
   | Pause
   | Resume
@@ -247,21 +252,21 @@ let action_key = function
   | Wakeup -> "w"
   | Delete -> "x"
 
-let action_label = function
-  | Pause -> "pause"
-  | Resume -> "resume"
-  | Boot -> "boot"
-  | Shutdown -> "shutdown"
-  | Wakeup -> "wake"
-  | Delete -> "delete"
+let action_label ~ko = function
+  | Pause -> if ko then "일시 정지" else "pause"
+  | Resume -> if ko then "재개" else "resume"
+  | Boot -> if ko then "올리기" else "boot"
+  | Shutdown -> if ko then "내리기" else "shutdown"
+  | Wakeup -> if ko then "깨우기" else "wake"
+  | Delete -> if ko then "삭제" else "delete"
 
-let action_gerund = function
-  | Pause -> "pausing"
-  | Resume -> "resuming"
-  | Boot -> "booting"
-  | Shutdown -> "shutting down"
-  | Wakeup -> "waking"
-  | Delete -> "deleting"
+let action_gerund ~ko = function
+  | Pause -> if ko then "일시 정지하는 중" else "pausing"
+  | Resume -> if ko then "재개하는 중" else "resuming"
+  | Boot -> if ko then "올리는 중" else "booting"
+  | Shutdown -> if ko then "내리는 중" else "shutting down"
+  | Wakeup -> if ko then "깨우는 중" else "waking"
+  | Delete -> if ko then "삭제하는 중" else "deleting"
 
 (* Shutdown ends the fiber and latches a durable operator pause, so bringing
    the keeper back is a three-request sequence rather than an undo. The web
@@ -272,18 +277,21 @@ let action_gerund = function
    mirrors the server's own plan. Written out rather than fetched: the
    confirmation has to name what it removes before the request is sent, and
    there is no route that answers "what would a purge take". *)
-let purge_artifacts =
-  [ "metrics store"
-  ; "decision, feedback and state-transition logs including rotations"
-  ; "runtime directory"
-  ; "Memory OS snapshots and journal"
-  ; "turn boundary log and Librarian read position"
-  ; "sandbox workspaces"
-  ; "runtime assignment and Keeper egress configuration"
-  ; "TOML configuration"
-  ; "chat history"
-  ; "agent files and auth tokens"
-  ]
+let purge_artifacts ~ko =
+  List.map
+    (fun (korean, english) -> if ko then korean else english)
+    [ ("지표 기록", "metrics store")
+    ; ( "결정·피드백·상태 전이 로그(로테이션 파일 포함)"
+      , "decision, feedback and state-transition logs including rotations" )
+    ; ("런타임 디렉터리", "runtime directory")
+    ; ("Memory OS 스냅샷과 저널", "Memory OS snapshots and journal")
+    ; ("턴 경계 로그와 Librarian 읽기 위치", "turn boundary log and Librarian read position")
+    ; ("sandbox 작업 디렉터리", "sandbox workspaces")
+    ; ("런타임 배정과 키퍼 egress 설정", "runtime assignment and Keeper egress configuration")
+    ; ("TOML 설정", "TOML configuration")
+    ; ("대화 기록", "chat history")
+    ; ("agent 파일과 인증 토큰", "agent files and auth tokens")
+    ]
 
 let requires_confirmation = function
   | Shutdown | Delete -> true
@@ -354,6 +362,7 @@ type outcome =
   | Committed_followup_failed of string
   | Paused_owner_conflict of string
   | Rejected of { status : int; detail : string }
+  | Unbound_purge_receipt of { status : int }
 
 let classify_2xx_response ~status body =
   match Yojson.Safe.from_string body with
@@ -404,7 +413,7 @@ let classify_purge_response ~keeper_name ~status ~body =
   if status < 200 || status >= 300 then
     Rejected { status; detail = response_detail ~status body }
   else
-    let invalid () = Rejected { status; detail = "invalid Keeper purge acceptance: target or operation identity missing" } in
+    let invalid () = Unbound_purge_receipt { status } in
     match Yojson.Safe.from_string body with
     | `Assoc fields ->
       (match List.assoc_opt "ok" fields, List.assoc_opt "accepted" fields,
@@ -417,6 +426,27 @@ let classify_purge_response ~keeper_name ~status ~body =
        | _ -> invalid ())
     | _ -> invalid ()
     | exception Yojson.Json_error _ -> invalid ()
+
+type failure =
+  | Empty_plan
+  | Followup_failed of string
+  | Refused of { status : int; detail : string }
+  | Unbound_receipt of int
+  | No_answer of string
+
+let failure_text ~ko = function
+  | Empty_plan -> if ko then "보낼 요청 없음" else "no request to send"
+  | Followup_failed detail ->
+      (if ko then "저장된 일시정지 해제됨 · 실행 재개 실패: "
+       else "durable pause cleared, but live resume failed: ")
+      ^ detail
+  | Refused { status; detail } -> Printf.sprintf "HTTP %d: %s" status detail
+  | Unbound_receipt status ->
+      Printf.sprintf
+        (if ko then "HTTP %d: 삭제 응답이 키퍼나 요청 ID 를 밝히지 않음"
+         else "HTTP %d: invalid Keeper purge acceptance: target or operation identity missing")
+        status
+  | No_answer text -> text
 
 type pending = {
   pending_keeper : string;
@@ -569,3 +599,53 @@ let deletion_operation_id row = match row.operation with
 let deletion_json row = match row.operation with
   | Runtime_shutdown operation -> Masc.Keeper_shutdown_store.to_json operation
   | Configuration_removal receipt -> Masc.Keeper_configuration_removal.to_json receipt
+
+let shutdown_phase_word ~ko phase =
+  let say korean english = if ko then korean else english in
+  let open Masc.Keeper_shutdown_types in
+  match phase with
+  | Prepared -> say "종료 접수" "shutdown accepted"
+  | Joining_lanes -> say "실행 중인 레인 종료 대기" "waiting for running lanes to end"
+  | Joined_idle -> say "레인 종료 확인" "lanes ended"
+  | Finalizing_tasks _ -> say "소유한 작업 정리 중" "settling owned tasks"
+  | Cleanup_ready _ -> say "파일 정리 준비" "file cleanup ready"
+  | Reconciliation_required _ ->
+      say "진행 중이던 도구 실행 결과 확인 필요" "in-flight tool result needs review"
+  | Finalized _ -> say "종료 처리됨 · 추가 정리 완료 확인 중" "shut down · confirming cleanup"
+  | Owner_absent _ -> say "실행 소유자 부재" "runtime owner absent"
+  | Operator_absence_acknowledged _ ->
+      say "운영자가 소유자 부재 확인" "operator confirmed owner absence"
+  | Blocked _ -> say "종료 작업 중단" "shutdown blocked"
+  | Superseded _ -> say "다른 요청으로 대체됨" "superseded by another request"
+
+let deletion_status ~ko row =
+  let say korean english = if ko then korean else english in
+  match row.operation with
+  | Configuration_removal receipt ->
+      let label =
+        match receipt.Masc.Keeper_configuration_removal.state with
+        | Masc.Keeper_configuration_removal.Prepared ->
+            say "설정 삭제 접수" "configuration deletion accepted"
+        | Cleanup_required detail ->
+            say "설정 정리 실패: " "configuration cleanup failed: " ^ detail
+        | Artifacts_removed ->
+            say "설정 파일 제거 대기" "waiting to remove configuration files"
+        | Removed -> say "설정 삭제 및 정리 완료" "configuration deleted and cleaned up"
+      in
+      Option.fold ~none:label ~some:(fun error -> label ^ ": " ^ error)
+        receipt.last_error
+  | Runtime_shutdown operation -> (
+      let open Masc.Keeper_shutdown_types in
+      let phase = operation.phase in
+      match phase with
+      | Finalized { completion = Completion_delivery_failed { detail; _ }; _ } ->
+          say "파일·설정 정리 실패: " "file and configuration cleanup failed: " ^ detail
+      | Finalized { completion = Completion_pending _; _ } ->
+          say "파일·설정 정리 대기" "waiting for file and configuration cleanup"
+      | Blocked failure -> shutdown_phase_word ~ko phase ^ ": " ^ failure.detail
+      | Reconciliation_required _ -> shutdown_phase_word ~ko phase
+      | Finalized { completion = Completion_not_requested | Completion_delivered _; _ }
+      | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _ | Cleanup_ready _
+      | Owner_absent _ | Operator_absence_acknowledged _ | Superseded _ ->
+          if row.completed then say "삭제·정리 완료" "deleted and cleaned up"
+          else shutdown_phase_word ~ko phase)

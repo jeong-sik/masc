@@ -1604,6 +1604,68 @@ let test_unstreamed_text_before_a_refusal_is_not_replayed () =
        check (list string) "refused text is not streamed" [] !pieces)
 ;;
 
+(* agy's closing stderr sentence for a refused read. Its opening is the
+   sentence docs/evidence/2026-11-05-antigravity-mcp-tool-budget recorded and
+   its last 200 bytes are the tail #50291 quoted from a Keeper turn on
+   2026-11-09; the two overlap at "for, so it was auto-denied". *)
+let refused_read_stderr =
+  "no output produced \xe2\x80\x94 a tool required the \"read_file\" permission that \
+   headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under \
+   permissions.allow in settings.json (e.g. read_file(<target>)). Alternatively, \
+   re-run with --dangerously-skip-permissions to auto-approve all tools."
+;;
+
+(* #50291: the refusal detail began at " for, so it was auto-denied", so the
+   words that say what was refused never reached the operator. *)
+let test_refusal_detail_keeps_the_refusal_sentence_from_its_first_word () =
+  assert (String.length refused_read_stderr > 200);
+  with_fixture
+    ~stderr_line:refused_read_stderr
+    [ init (); result ~response:"" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Actions_denied { stderr_tail; _ } as error) ->
+         check string "whole sentence kept" refused_read_stderr stderr_tail;
+         check bool "detail opens the sentence at its first word" true
+           (String_util.contains_substring
+              (Runtime_antigravity.error_to_string error)
+              ("stderr tail: " ^ refused_read_stderr))
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a refused run completed")
+;;
+
+(* A stderr longer than the refusal budget keeps what the CLI said first and
+   its closing sentence, says how much it left out, and is masked before it is
+   cut: the credential sits in the kept head. *)
+let test_long_refusal_stderr_keeps_both_ends_and_masks_first () =
+  let first_line = "agy: 거부 직전 진단 token=opaque-fixture-value" in
+  let middle =
+    String.concat "\n" (List.init 200 (fun i -> Printf.sprintf "가운데 줄 %03d" i))
+  in
+  let stderr = String.concat "\n" [ first_line; middle; refused_read_stderr ] in
+  with_fixture
+    ~stderr_line:stderr
+    [ init (); result ~response:"" ~denied_actions_json:refused_read_json () ]
+    (fun path ->
+       match run_fixture path with
+       | Error (Runtime_antigravity.Actions_denied { stderr_tail; _ }) ->
+         check bool "shorter than what the CLI wrote" true
+           (String.length stderr_tail < String.length stderr);
+         check bool "first words kept and masked" true
+           (String.starts_with ~prefix:"agy: 거부 직전 진단 token=[REDACTED]" stderr_tail);
+         check bool "credential value is gone" false
+           (String_util.contains_substring stderr_tail "opaque-fixture-value");
+         check bool "closing sentence kept whole" true
+           (String.ends_with ~suffix:refused_read_stderr stderr_tail);
+         check bool "omitted middle is counted" true
+           (String_util.contains_substring stderr_tail "bytes omitted");
+         check bool "a middle line is left out" false
+           (String_util.contains_substring stderr_tail "가운데 줄 100");
+         check bool "cut at character boundaries" true (String.is_valid_utf_8 stderr_tail)
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "a refused run completed")
+;;
+
 (* A refusal ends the run whatever status the CLI reports, so an ERROR with a
    deliverable-looking sentence is not the answer either. *)
 let test_error_result_with_refusals_is_actions_denied () =
@@ -2451,6 +2513,10 @@ let () =
             test_malformed_refusal_entry_is_a_protocol_error
         ; test_case "unstreamed text before a refusal is not replayed" `Quick
             test_unstreamed_text_before_a_refusal_is_not_replayed
+        ; test_case "refusal detail keeps the refusal sentence from its first word" `Quick
+            test_refusal_detail_keeps_the_refusal_sentence_from_its_first_word
+        ; test_case "long refusal stderr keeps both ends and masks first" `Quick
+            test_long_refusal_stderr_keeps_both_ends_and_masks_first
         ; test_case "ERROR result with refusals is Actions_denied" `Quick
             test_error_result_with_refusals_is_actions_denied
         ; test_case "refusals keep the CLI order" `Quick test_refusals_keep_the_cli_order

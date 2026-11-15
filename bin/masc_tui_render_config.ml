@@ -155,7 +155,7 @@ let render_runtime_params (state : state) =
      end
      else if Option.is_none state.runtime_params
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미확인 · 작업공간 접근을 확인하고 새로고침하세요"
+       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미확인 · 워크스페이스 접근을 확인하고 새로고침하세요"
          ~en:"  Parameters unread · confirm workspace access and refresh" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
      end
@@ -866,7 +866,7 @@ let preset_confirmation_rows (state : state) ~cols =
   let rows = match state.preset_armed with
     | Some (Save_workspace_armed (name, workspace)) ->
       [P.heading (ui_text state ~ko:"▸ 저장 이름 · " ~en:"▸ Save name · " ^ Terminal_text.single_line name);
-       P.heading (ui_text state ~ko:"▸ 저장할 작업 공간" ~en:"▸ Save workspace");
+       P.heading (ui_text state ~ko:"▸ 저장할 워크스페이스" ~en:"▸ Save workspace");
        P.plain (ui_text state ~ko:"  기준 경로 · " ~en:"  Base · " ^ Terminal_text.single_line workspace.wi_base_path);
        P.plain (ui_text state ~ko:"  MASC 경로 · " ~en:"  MASC root · " ^ Terminal_text.single_line workspace.wi_masc_root)]
       @ description
@@ -910,9 +910,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
     | Some (Save_workspace_armed _ | Save_armed _) -> []
     | Some (Restore_armed _ | Delete_armed _) | None ->
       if Option.is_some state.preset_save_draft && state.preset_save_draft_workspace = None then
-        [P.heading (ui_text state ~ko:"▸ 이름 초안 · 작업 공간 미지정"
+        [P.heading (ui_text state ~ko:"▸ 이름 초안 · 워크스페이스 미지정"
            ~en:"▸ Name draft · workspace not selected");
-         P.detail (ui_text state ~ko:"  Enter로 저장할 작업 공간을 확인하세요"
+         P.detail (ui_text state ~ko:"  Enter로 저장할 워크스페이스를 확인하세요"
            ~en:"  Press Enter to check the save workspace"); P.plain ""]
       else [] in
   let pending_saves = List.map (fun pending ->

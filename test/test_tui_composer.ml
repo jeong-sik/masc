@@ -32,7 +32,8 @@ let test_unreachable_target_keeps_its_name_and_reason () =
     make
       ~target:
         (Composer.Unreachable
-           { keeper = "beta"; reason = "no longer in the roster" })
+           { keeper = "beta";
+             reason = Composer.Keeper_unavailable "no longer in the roster" })
       ()
   in
   Alcotest.(check string) "name and reason" "beta — no longer in the roster"
@@ -59,7 +60,8 @@ let test_focus_is_refused_without_a_reachable_target () =
        let composer = make ~target () in
        check_key composer Composer.focus_key Composer.Pass_to_surface)
     [ Composer.No_target
-    ; Composer.Unreachable { keeper = "beta"; reason = "gone" }
+    ; Composer.Unreachable
+        { keeper = "beta"; reason = Composer.Keeper_unavailable "gone" }
     ]
 
 let test_focused_composer_takes_the_printable_keys () =
@@ -97,7 +99,8 @@ let test_send_requires_a_reachable_target () =
     Composer.send_key Composer.Edit;
   check_key ~label:"unreachable with text"
     (make ~focus:Composer.Focused ~draft:"hi"
-       ~target:(Composer.Unreachable { keeper = "beta"; reason = "gone" })
+       ~target:(Composer.Unreachable
+        { keeper = "beta"; reason = Composer.Keeper_unavailable "gone" })
        ())
     Composer.send_key Composer.Edit
 

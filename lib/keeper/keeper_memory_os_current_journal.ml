@@ -200,6 +200,76 @@ let append_journal_line_strict ~keepers_dir ~keeper_id json =
          (Fs_compat.private_jsonl_transaction_error_to_string error))
 ;;
 
+(* Whether the journal already holds a receipt's target line, before a
+   recovery appends it. Both receipts that recover under the writer locks ask
+   this: a publication whose target snapshot is current, and a removal receipt
+   whose target snapshot is current. A process interrupted during its append
+   may leave a partial final row, so the tail is recovered first. General
+   archive reads never perform this repair.
+
+   The scan runs from the newest line and stops at the newest quarantine line
+   or the first committed line below [target_revision]. Revisions restart at
+   1 after a quarantine, and a line from before it cannot stand for the
+   current generation. The target snapshot is current, so it was written after
+   the last quarantine, after its generation journalled the prior revision;
+   both stops fall at or before that prior line. Lines older than the stop
+   are not decoded, so a line an earlier build wrote cannot hold the receipt.
+
+   Every line above the stop is decoded strictly. A line [is_target] accepts
+   answers present even beside an unreadable line. Without one, an unreadable
+   line may be the target's own, so the answer is that error, never absent. *)
+let journal_holds_receipt_target ~keepers_dir ~keeper_id ~target_revision ~is_target =
+  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  match Fs_compat.recover_private_jsonl_durable_locked_result path with
+  | Error error ->
+    Error
+      (Printf.sprintf
+         "memory journal unreadable path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_transaction_error_to_string error))
+  | Ok recovered ->
+    let absent = function
+      | None -> Ok false
+      | Some detail -> Error detail
+    in
+    let rec scan line_number unreadable = function
+      | [] -> absent unreadable
+      | line :: older when String.equal (String.trim line) "" ->
+        scan (line_number - 1) unreadable older
+      | line :: older ->
+        let next unreadable = scan (line_number - 1) unreadable older in
+        let note_unreadable detail =
+          match unreadable with
+          | None -> next (Some detail)
+          | Some _ -> next unreadable
+        in
+        (match Yojson.Safe.from_string line with
+         | json ->
+           (match Journal_codec.journal_entry_of_json json with
+            | Ok (Journal_quarantined _) -> absent unreadable
+            | Ok (Journal_committed { revision; _ }) when revision < target_revision ->
+              absent unreadable
+            | Ok entry when is_target json entry -> Ok true
+            | Ok (Journal_committed _ | Journal_failed _) -> next unreadable
+            | Error detail ->
+              note_unreadable
+                (Printf.sprintf
+                   "memory journal line %d is undecodable path=%s: %s"
+                   line_number
+                   path
+                   detail))
+         | exception Yojson.Json_error detail ->
+           note_unreadable
+             (Printf.sprintf
+                "memory journal line %d is not JSON path=%s: %s"
+                line_number
+                path
+                detail))
+    in
+    let lines = String.split_on_char '\n' recovered.Fs_compat.bytes in
+    scan (List.length lines) None (List.rev lines)
+;;
+
 (* Lines without actual reason-bearing removals are observations: their
    snapshot already reached disk, so append failure warns. Destructive
    removals below use [append_journal_line_strict] and a prepared receipt so

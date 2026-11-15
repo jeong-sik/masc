@@ -40,6 +40,55 @@ module Optional_read_for_testing = struct
 end
 ;;
 
+type regular_file_read_error =
+  | Not_a_regular_file of Unix.file_kind
+  | Regular_file_unreadable of string
+
+let regular_file_read_error_to_string = function
+  | Not_a_regular_file kind ->
+    Printf.sprintf "not a regular file (%s)" (Owned_directory_chain.file_kind_to_string kind)
+  | Regular_file_unreadable detail -> detail
+;;
+
+(* A blocking open of a FIFO waits for a writer that may never come, so the
+   open is nonblocking, and the kind is read from the descriptor that was
+   opened: checking the path first would let the entry change before the
+   open. A link to a regular file is followed. *)
+let load_regular_file_opt_unix (path : string)
+  : (string option, regular_file_read_error) result
+  =
+  let unreadable error = Error (Regular_file_unreadable (Unix.error_message error)) in
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (error, _, _) -> unreadable error
+  | fd ->
+    let close_and result =
+      (try Unix.close fd with
+       | Unix.Unix_error _ -> ());
+      result
+    in
+    (match Unix.fstat fd with
+     | exception Unix.Unix_error (error, _, _) -> close_and (unreadable error)
+     | { Unix.st_kind = Unix.S_REG; _ } ->
+       (match Unix.in_channel_of_descr fd with
+        | exception Unix.Unix_error (error, _, _) -> close_and (unreadable error)
+        | ic ->
+          (match read_channel_and_close ~before_read:ignore path ic with
+           | content -> Ok (Some content)
+           | exception Sys_error detail -> Error (Regular_file_unreadable detail)))
+     | { Unix.st_kind =
+           (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as
+           kind
+       ; _
+       } -> close_and (Error (Not_a_regular_file kind)))
+;;
+
+let load_regular_file_opt path =
+  let read () = load_regular_file_opt_unix path in
+  with_fs_or_fallback ~path ~fallback:read (fun _fs ->
+    on_systhread ~label:(labelled "fs-compat-load-regular-file-opt" path) read)
+;;
+
 let file_size (path : string) : int option =
   with_fs_or_fallback
     ~path

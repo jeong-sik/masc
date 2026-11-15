@@ -486,8 +486,9 @@ let test_dashboard_build_precedes_launch_binding () =
 (* The helper script on a checkout whose built output holds [output_files]
    (each under its name in assets/dashboard) and a stamp newer than every
    source, with a pnpm that records its calls: those calls and what the helper
-   said on stderr. *)
-let run_dashboard_build_helper ~output_files =
+   said on stderr. [changed_after_build] are files of the dashboard workspace
+   (each under its name in dashboard) written after that stamp. *)
+let run_dashboard_build_helper ?(changed_after_build = []) ~output_files () =
   with_temp_dir "run-local-script" (fun dir ->
       let repo_root = Filename.concat dir "repo" in
       let scripts_dir = Filename.concat repo_root "scripts" in
@@ -514,6 +515,14 @@ let run_dashboard_build_helper ~output_files =
           write_file file content)
         output_files;
       write_file (Filename.concat output_dir ".build-stamp") "fresh\n";
+      let after_build = Unix.time () +. 60.0 in
+      List.iter
+        (fun name ->
+          let file = Filename.concat dashboard_dir name in
+          mkdir_p (Filename.dirname file);
+          write_file file "changed\n";
+          Unix.utimes file after_build after_build)
+        changed_after_build;
       write_file pnpm_capture "";
       write_executable (Filename.concat fake_bin "pnpm")
         (Printf.sprintf
@@ -555,6 +564,7 @@ let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
     run_dashboard_build_helper
       ~output_files:
         [ "index.html", remote_font_index; "accounts/index.html", built_index ]
+      ()
   in
   check bool "stale generated index forced rebuild" true
     (String_util.contains_substring pnpm_calls "run build");
@@ -565,7 +575,7 @@ let test_dashboard_build_helper_rebuilds_remote_startup_resource_output () =
    second. *)
 let test_dashboard_build_helper_says_every_reason () =
   let pnpm_calls, stderr =
-    run_dashboard_build_helper ~output_files:[ "index.html", remote_font_index ]
+    run_dashboard_build_helper ~output_files:[ "index.html", remote_font_index ] ()
   in
   check bool "an output with both faults forced a rebuild" true
     (String_util.contains_substring pnpm_calls "run build");
@@ -578,7 +588,7 @@ let test_dashboard_build_helper_says_every_reason () =
    the stamp and the dashboard, and no console. *)
 let test_dashboard_build_helper_rebuilds_output_without_account_console () =
   let pnpm_calls, stderr =
-    run_dashboard_build_helper ~output_files:[ "index.html", built_index ]
+    run_dashboard_build_helper ~output_files:[ "index.html", built_index ] ()
   in
   check bool "an output without the console forced a rebuild" true
     (String_util.contains_substring pnpm_calls "run build");
@@ -589,8 +599,38 @@ let test_dashboard_build_helper_keeps_complete_fresh_output () =
   let pnpm_calls, stderr =
     run_dashboard_build_helper
       ~output_files:[ "index.html", built_index; "accounts/index.html", built_index ]
+      ()
   in
   check string "a complete output newer than its sources is not built again" "" pnpm_calls;
+  check bool "the helper says it is up to date" true
+    (String_util.contains_substring stderr "Up to date")
+
+let complete_output = [ "index.html", built_index; "accounts/index.html", built_index ]
+
+(* `pnpm build` reads the Vite config of the account console, so an output
+   older than that config was built from another one. *)
+let test_dashboard_build_helper_rebuilds_after_account_console_config_change () =
+  let pnpm_calls, stderr =
+    run_dashboard_build_helper
+      ~changed_after_build:[ "vite.accounts.config.ts" ]
+      ~output_files:complete_output
+      ()
+  in
+  check bool "a newer Vite config of the console forced a rebuild" true
+    (String_util.contains_substring pnpm_calls "run build");
+  check bool "the newer file was named" true
+    (String_util.contains_substring stderr "dashboard/vite.accounts.config.ts")
+
+(* What the build installs or what a tool leaves behind is not its input. *)
+let test_dashboard_build_helper_ignores_installed_packages_and_tool_scratch () =
+  let pnpm_calls, stderr =
+    run_dashboard_build_helper
+      ~changed_after_build:
+        [ "node_modules/.vite/deps/_metadata.json"; ".tmp/ide-acceptance/run.log" ]
+      ~output_files:complete_output
+      ()
+  in
+  check string "installed packages and tool scratch do not force a rebuild" "" pnpm_calls;
   check bool "the helper says it is up to date" true
     (String_util.contains_substring stderr "Up to date")
 
@@ -1087,6 +1127,10 @@ let () =
             test_dashboard_build_helper_says_every_reason;
           test_case "dashboard helper keeps a complete fresh output" `Quick
             test_dashboard_build_helper_keeps_complete_fresh_output;
+          test_case "dashboard build helper rebuilds after the account console config changes" `Quick
+            test_dashboard_build_helper_rebuilds_after_account_console_config_change;
+          test_case "dashboard build helper ignores installed packages and tool scratch" `Quick
+            test_dashboard_build_helper_ignores_installed_packages_and_tool_scratch;
           test_case "bootstrap-keepers flag is opt-in" `Quick
             test_bootstrap_keepers_flag_is_opt_in;
           test_case "existing target config is not overwritten" `Quick

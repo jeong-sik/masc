@@ -28,20 +28,15 @@ let target_of_state (state : Masc_tui_types.state) =
         match Masc_tui_types.keeper_message_availability state keeper with
         | Message_available -> Composer.Ready keeper
         | Message_unavailable unavailable ->
-            let say ko en = Masc_tui_types.ui_text state ~ko ~en in
+            let say ko en =
+              Composer.Keeper_unavailable (Masc_tui_types.ui_text state ~ko ~en) in
             let reason=match unavailable with
               | Keeper_missing -> say "목록에서 사라짐" "no longer in the roster"
               | Remote_keeper_observation ->
                   say "서버 관측에 로컬 키퍼 정보가 없음"
                     "server observation has no local Keeper metadata"
-              | Message_workspace_unobserved ->
-                  say "서버 작업 공간 미조회" "server workspace not observed"
-              | Message_workspace_unconfirmed ->
-                  say "서버 작업 공간 미확인 · 다음 조회 대기"
-                    "server workspace unconfirmed; waiting for the next read"
-              | Message_workspace_differs ->
-                  say "첨부와 붙여 넣은 파일 때문에 채팅은 서버 작업 공간이 필요함"
-                    "chat needs the server workspace for attachments and pasted files"
+              | Message_workspace_unobserved -> Composer.Workspace_unread
+              | Message_workspace_differs -> Composer.Workspace_differs
               | Keeper_metadata_unobserved ->
                   say "키퍼 정보 미조회" "Keeper metadata not observed"
               | Keeper_metadata_unavailable _ ->

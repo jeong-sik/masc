@@ -39,7 +39,6 @@ type 'kept private_jsonl_rows_read =
 type 'kept private_jsonl_rows_from_cursor =
   { read : 'kept private_jsonl_rows_read
   ; rows : string
-  ; incomplete_tail : string
   ; rows_end : Private_jsonl_cursor.t
   }
 

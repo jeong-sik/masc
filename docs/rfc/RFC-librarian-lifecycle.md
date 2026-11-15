@@ -221,7 +221,7 @@ rg -n 'String\.(equal|compare|starts_with|ends_with|contains)' lib/keeper/keeper
 | D4 | 프롬프트가 "오래 쓸 지식"만 남기라고 한다. 턴 진행과 현재 상태는 저장하지 말라고 한다. 읽은 위치를 지나간 "하던 일"은 어디에도 남지 않는다 | `config/prompts/librarian.md` §남길 지식과 증거 | §7 (라) |
 | D5 | "이 턴이 이력의 어디까지인가"가 저장되지 않는다. 프롬프트의 `turn=%d` 는 턴 번호가 아니라 메시지 순번이다 | `keeper_turn_driver_try_provider.ml` `initial_message_index`, `keeper_librarian.ml` `format_messages_for_prompt` | §4.6 의 턴 끝 기록 |
 | D6 | 도구 결과와 호출은 `[... omitted]` 로만 받고 thinking 은 빠진다. 공식 클라이언트 턴은 assistant 메시지 1개만 받는다 | `keeper_librarian.ml` `text_of_content`, `keeper_agent_run_finalize_response.ml` `librarian_messages` | 공식 클라이언트는 §4.8. 도구 결과 본문은 §6 |
-| D8 | 보낸 요청이 한 슬롯에서 실패하면 다음 슬롯으로 넘어가는지를 한 표가 정한다. 넘어가는 것: `Overloaded`·`Server_error`·`Rate_limited`·`Payment_required`·`Request_body_refused`·`Context_overflow` 거절, 성공 상태인데 본문이 기한을 넘긴 답, JSON 이 아니거나 내용이 빈 답, 헤더도 오기 전에 그 슬롯의 헤더 기한이나 전체 기한을 넘긴 요청. 회차를 끝내는 것: 그 밖의 거절(`Invalid_request`·`Refusal_body_not_received` 등)과 보낸 뒤 시간 초과가 아닌 전송 실패 | `exact_output.ml` `flow_execution_terminal_kind` | 시간 초과 #38418, 본문 없는 거절 #38913, 보낸 뒤 결과를 모르는 전송 실패 `RFC-exact-lane-walks-one-slot-list.md` Q1 |
+| D8 | 보낸 요청이 한 슬롯에서 실패하면 같은 입력이 선언된 다음 슬롯으로 넘어간다. 거절의 종류와 상관없이 같다. 성공 상태인데 본문이 기한을 넘긴 답, JSON 이 아니거나 내용이 빈 답, 보낸 뒤 시간 초과, 보낸 뒤 결과를 모르는 전송 실패도 같다. exact 요청에는 도구가 없어서 다음 슬롯이 효과를 두 번 내지 않는다. 걸음이 멈추는 것은 masc 자신의 기록·callback 이 실패한 경우(`Flow_before_dispatch_callback_failed` 등)와 취소뿐이다 | `exact_output.ml` `flow_execution_terminal_kind` | `RFC-exact-lane-walks-one-slot-list.md` §3.3, Q1 |
 
 이미 고쳐진 것은 다시 설계하지 않는다: 점호 제거와 `absorbs`(RFC-0456, #36936·#36937·#36948). 라이브에서 code-reviewer 의 facts 가 378개(09-16)에서 231개(09-18)로 줄었고 흡수 기록은 91건이다.
 
@@ -311,33 +311,33 @@ flowchart TD
 - 한가한 Keeper 의 밀린 턴은 다음 신호까지 다시 읽히지 않는다. 그동안 그 Keeper 는 턴을 돌지 않으므로 요청도 커지지 않는다. 다음 턴이 끝나면 그 신호에 밀린 구간을 같이 읽는다.
 - **읽기가 실패해도 받은 일 정리는 굶지 않는다.** 받은 일이 바뀌면 그 신호가 메시지 없는 회차를 Keeper 의 Librarian 레인에 바로 넣는다(`keeper_librarian_queue_refresh.ml` 의 `install`). 이 회차는 읽기 회차의 성패와 상관없이 돈다.
 - 범위가 비어 있으면 LLM 을 부르지 않고 위치만 옮긴다. 내부 생각을 이력에 남기지 않는 턴(`keeper_replay_checkpoint.ml` 의 `exclude_thought_from_replay`)이 도구를 쓰지 않았으면, 저장할 때 그 턴의 몫이 통째로 빠져 끝이 앞 턴과 같다. 읽을 것이 없는 턴이다.
-- **두 턴 이상을 읽다 실패했으면 가장 오래된 한 턴씩 읽어서 밀린 범위를 모두 비운다.** 좁힌 회차 하나가 성공했다고 곧바로 전부 읽기로 돌아가지 않는다. `Nothing_to_read`가 실제로 확인되거나 `All_unread`가 성공했을 때만 제한을 푼다. 범위가 커서 생긴 실패(모델 한도, 시간 초과, 출력 거절)를 숫자 없이 푸는 방법이다. 실패 표식은 루프의 메모리에만 둔다. 서버가 재시작하면 전부 읽기부터 다시 한다.
-- **연속성 회차도 좁힌 폭을 다음 회차로 넘긴다.** 읽은 위치를 옮기는 durable 회차와, 스냅숏이 덮는 앞부분을 다시 쓰는 연속성 회차는 "회차가 실패했으면 다음엔 얼마나 읽나"라는 한 질문에 답한다. durable 쪽은 위 규칙대로 실패 표식을 루프에 두고 가장 오래된 한 턴으로 좁힌다(`keeper_librarian_durable_consumer.ml` 의 `failed_before` 와 `To_first_cut_point`). 연속성 쪽은 한 회차 안에서 범위를 반으로 접고(`keeper_librarian_continuity.ml` 의 `narrow`), 크기 때문에 거절당한 폭을 루프 메모리에 남겨 다음 회차가 그 폭에서 시작한다(`keeper_librarian_queue_refresh.ml` 의 `limited_widths`). 걸음이 크기 때문에 실패했는지는 `walk_shows_size`(`keeper_librarian_runtime.mli`)가 들고, 아래 표가 정한다.
+- **두 턴 이상을 읽다 실패했으면 가장 오래된 한 턴씩 읽어서 밀린 범위를 모두 비운다.** 좁힌 회차 하나가 성공했다고 곧바로 전부 읽기로 돌아가지 않는다. `Nothing_to_read`가 실제로 확인되거나 `All_unread`가 성공했을 때만 제한을 푼다. 실패 종류는 보지 않는다. 숫자를 쓰지 않고 범위를 줄이는 방법이다. 실패 표식은 루프의 메모리에만 둔다. 서버가 재시작하면 전부 읽기부터 다시 한다.
+- **연속성 회차는 이름 붙은 입력 크기 거절이 있을 때만 다음 회차의 읽기를 줄인다.** 읽은 위치를 옮기는 durable 회차와, 스냅숏이 덮는 앞부분을 다시 쓰는 연속성 회차는 "회차가 실패했으면 다음엔 얼마나 읽나"라는 한 질문에 답한다. durable 쪽은 위 규칙대로 실패 표식을 루프에 두고 가장 오래된 한 턴으로 좁힌다(`keeper_librarian_durable_consumer.ml` 의 `failed_before` 와 `To_first_cut_point`). 연속성 쪽은 걸음 전체에 이름 붙은 입력 크기 거절(`input_capacity_evidence` 가 `Input_capacity_refused`)이 있고 `may_descend_messages` 가 허락할 때만 좁힌다(`keeper_librarian_queue_refresh.ml` 의 `named_input_refusal` 과 `may_descend`). 좁히기로 하면 거절당한 원본 범위와 읽기 방식(`Oldest_turn` 또는 `Oldest_turn_messages`)을 루프 메모리에 남기고(`remember_read_limit`), 다음 신호가 가장 오래된 완료 턴부터 읽는다. atom 개수는 남기지 않는다. 원본 범위가 커밋되면 메시지 방식만 풀리고, 남은 범위를 다 읽거나 이력 세대가 바뀌면 제한이 풀린다. CLI 가 글자 한도를 알려 준 회차는 한 회차 안에서 범위를 접어 맞춘다(`keeper_librarian_continuity.ml` 의 `fit` 과 `narrow`). 걸음이 크기 때문에 실패했는지는 `input_capacity_evidence` 가 들고, 아래 표가 정한다. `walk_shows_size`(`keeper_librarian_runtime.mli`)는 범위 창 힌트이고 접는 근거가 아니다. 조건 전체는 §4.12 에 있다.
 
-  durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라, 일시적인 실패에 잘못 좁혀도 비용은 회차 하나이고 성공하면 제한이 풀린다. 한쪽으로만 안전하게 틀리므로 분류가 필요 없다.
+  durable 회차는 실패 종류를 보지 않는다. 바닥이 한 턴이라, 일시적인 실패에 잘못 좁혀도 비용은 한 턴씩 읽는 회차들이고 남은 범위를 다 읽으면 제한이 풀린다. 한쪽으로만 안전하게 틀리므로 분류가 필요 없다.
 
-  atom 사다리는 다르다. 바닥이 1 atom 이고 소진 전에는 폭을 늘리지 않으므로, 일시적인 실패가 이어지면 폭이 1 로 무너지고 남은 범위만큼의 회차가 든다(goo-yang-bong 이면 약 12,000). "안전한 방향으로만 틀린다"는 같지만 그 비용이 회차 하나가 아니라 O(N) 이다. 실제로 일어나는 일이다 — 2026-09-22 00~05Z 에 `glm-coding` 한 슬롯에서 `rate_limited` 173 건이 여덟 Keeper 에 걸쳐 터졌고 05Z 에 스스로 멎었다. 그래서 사다리에서만 갈래를 본다. 재시작이 폭 기억을 지워 다시 걷는 비용의 하루 실측(재시작 27번, 최대 폭에서 다시 시작 8회)은 [2026-09-23 감사 기록](../audits/2026-09-23-week-change-audit-evidence-record.md)에 있다. 이 비용은 받아들이고, 재시작 횟수를 줄이는 쪽을 레버로 본다.
+  연속성 회차는 다르다. 좁힌 읽기는 남은 범위를 다 읽을 때까지 풀리지 않고, 한 턴 아래로는 메시지 단위로 읽는다. "안전한 방향으로만 틀린다"는 같지만 그 비용이 회차 하나가 아니라 남은 턴 수와 메시지 수만큼이다. 일시적인 실패가 길게 이어지는 일은 실제로 일어난다 — 2026-09-22 00~05Z 에 `glm-coding` 한 슬롯에서 `rate_limited` 173 건이 여덟 Keeper 에 걸쳐 터졌고 05Z 에 스스로 멎었다. 그래서 연속성 회차에서만 갈래를 본다. 재시작은 좁힌 읽기를 지우고 전부 읽기부터 다시 시작한다. 이 비용은 받아들이고, 재시작 횟수를 줄이는 쪽을 레버로 본다.
 
-  판정은 마지막 슬롯이 아니라 걸음 전체다. 모든 슬롯이 "기다린다"일 때만 기다리고, 하나라도 "접는다"이면 접는다. 후보 순서에 매이지 않는다. 갈래는 `Exact_output.provider_refusal` 의 exhaustive match 이고 `_` 를 쓰지 않는다. 거절 산문은 읽지 않는다.
+  판정은 마지막 슬롯이 아니라 걸음 전체다. 모든 슬롯이 "기다린다"일 때만 기다리고, 하나라도 "접는다"이면 접는다. 후보 순서에 매이지 않는다. 다만 걸음에 형식이 틀린 답이나 결과를 모르는 native 실행이 있으면 이름 붙은 거절이 있어도 접지 않는다(`message_descent` 의 `Invalid_output_blocks_descent`·`Unsettled_native_blocks_descent`). 갈래는 `Exact_output.provider_refusal` 의 exhaustive match(`keeper_exact_walk_failure.ml` 의 `of_api_observation`)이고 `_` 를 쓰지 않는다. 거절 산문은 읽지 않는다.
 
   | 갈래 | 한다 | 왜 |
   |---|---|---|
   | `Context_overflow` · `Input_capacity` · `Request_body_refused` | 접는다 | 크기 때문이라고 공급자가 말했다 |
-  | `Timeout` | 접는다 | §4.3 이 이미 "범위가 커서 생긴 실패"로 센 셋 중 하나다 |
-  | `Invalid_request` | 접는다 | 요청이 공급자에 닿은 뒤 이유 없이 거절됐다. 창 RFC §10.4 처럼 크기 거절로 읽는다 |
-  | `Refusal_body_not_received` | 접는다 | 같은 이유다. 상태 줄은 왔고 이유가 담긴 본문을 못 읽었다 |
+  | `Timeout` | 기다린다 | 입력 크기를 말하지 않았다. `walk_shows_size` 는 켜지지만 접는 근거가 아니다 |
+  | `Invalid_request` | 기다린다 | 요청이 공급자에 닿은 뒤 이유 없이 거절됐다. 크기를 말하지 않았으므로 `walk_shows_size` 만 켜진다 |
+  | `Refusal_body_not_received` | 기다린다 | 같은 이유다. 상태 줄은 왔고 이유가 담긴 본문을 못 읽었다 |
   | `Rate_limited` · `Overloaded` · `Server_error` · `Network_error` | 기다린다 | 요청 자체는 받아들여졌다. 접으면 폭만 잃는다 |
   | `Auth_failed` · `Authorization_refused` · `Payment_required` · `Not_found` | 기다린다 | 크기와 무관하고 운영자가 고쳐야 풀린다. 접어도 같은 거절이 온다 |
 
-  HTTP 거절이 아닌 공급자 오류는 `Exact_output.Completion_failed` 로 온다. 그 안에는 `Http_client.http_error` 갈래와, 요청이 나갔는지(`generation_dispatch_fact`)가 같이 들어 있다(#37899, `keeper_librarian_runtime.ml` 의 `completion_failure_shows_size`). 나가지 않은 요청은 어느 공급자도 판정하지 않았으므로 기다린다. transport 는 연결 수립 시간 초과도 `Http_operation` 으로 보고하므로, 나갔는지를 보지 않으면 한 번도 보내지 않은 요청이 폭을 줄인다. 나간 요청은 크기를 말한 경우에만 접는다. 공급자가 context overflow 라고 말했을 때, 응답 본문이 한도를 넘었을 때, 빈 완료의 stop reason 이 `ContextWindowExceeded`·`MaxTokens` 일 때, 그리고 공급자가 요청 전체를 쥐고 시간 안에 끝내지 못했을 때(`Wall_clock`·`Http_operation`·`First_token`·`Non_streaming_body`·`Stream_body`)다. 나머지는 기다린다. 연결 실패, DNS·TLS, 끊긴 연결, 하드 쿼터, 용량 소진, 설정 오류, provider terminal, 그 밖의 빈 완료가 그렇다. 조용해진 스트림(`Stream_idle`·`Cli_stdout_idle`), 한 단계의 시간 초과(`Provider_step`), 슬롯·용량을 기다린 시간 초과(`Queue`·`Capacity_backpressure`)도 입력 크기를 말하지 않는다.
+  HTTP 거절이 아닌 공급자 오류는 `Exact_output.Completion_failed` 로 온다. 그 안에는 `Http_client.http_error` 갈래와, 요청이 나갔는지(`generation_dispatch_fact`)가 같이 들어 있고, `Keeper_exact_walk_failure.of_completion` 이 갈래를 가른다. 나가지 않은 요청은 어느 공급자도 판정하지 않았으므로 기다린다. transport 는 연결 수립 시간 초과도 `Http_operation` 으로 보고하므로, 나갔는지를 보지 않으면 한 번도 보내지 않은 요청이 크기에 대한 말로 읽힌다. 나간 요청 중 접는 것은 공급자가 context overflow 라고 말한 경우(`Context_overflow_failure`)와 빈 완료의 stop reason 이 `ContextWindowExceeded` 인 경우뿐이다. 나머지는 기다린다. 응답 본문이 한도를 넘은 것(`Response_body_too_large`), 빈 완료의 stop reason 이 `MaxTokens` 인 것, 공급자가 요청 전체를 쥐고 시간 안에 끝내지 못한 것(`Wall_clock`·`Http_operation`·`First_token`·`Non_streaming_body`·`Stream_body`)은 크기를 말하지 않았으므로 `walk_shows_size` 만 켠다. 연결 실패, DNS·TLS, 끊긴 연결, 하드 쿼터, 용량 소진, 설정 오류, provider terminal, 그 밖의 빈 완료는 크기와 무관하다. 조용해진 스트림(`Stream_idle`·`Cli_stdout_idle`), 한 단계의 시간 초과(`Provider_step`), 슬롯·용량을 기다린 시간 초과(`Queue`·`Capacity_backpressure`)도 입력 크기를 말하지 않는다.
 
-  **모름의 자리가 판정을 가른다.** 요청이 공급자에 닿은 뒤 이유 없이 거절된 것(위 표의 `Invalid_request`·`Refusal_body_not_received`)만 크기 거절로 읽는다. 전송 계층과 provider 계층의 모름(`NetworkError Unknown`, `Unknown_timeout`, `Unknown_provider_failure`, stop reason 이 `Unknown` 인 빈 완료)은 크기에 대한 증거가 없으므로 기다린다. 2026-09-22 msx-retro-mania 는 이런 모름을 좁힘으로 읽어 폭이 130 에서 16 atom 까지 줄었다.
+  **모름의 자리가 판정을 가른다.** 접는 근거는 이름 붙은 크기 거절뿐이다. 요청이 공급자에 닿은 뒤 이유 없이 거절된 것(위 표의 `Invalid_request`·`Refusal_body_not_received`)과 시간 초과는 크기에 대한 증거가 없으므로 기다린다. 전송 계층과 provider 계층의 모름(`NetworkError Unknown`, `Unknown_timeout`, `Unknown_provider_failure`, stop reason 이 `Unknown` 인 빈 완료)도 같다. 2026-09-22 msx-retro-mania 는 이런 모름을 좁힘으로 읽어 폭이 130 에서 16 atom 까지 줄었다.
 
-  갈래를 보기 전에 무엇이 갈래를 가진 실패인지 먼저 가른다. 후보가 디스패치에 닿기 전에 걸러진 사전 거절(`Exact_output.Flow_advance_candidate_rejected`)은 요청을 보낸 적이 없으므로 접을지 기다릴지의 근거가 되지 못한다. 그 걸음은 아무 말도 하지 않은 것으로 둔다.
+  갈래를 보기 전에 무엇이 갈래를 가진 실패인지 먼저 가른다. 후보가 디스패치에 닿기 전에 걸러진 사전 거절(`Exact_output.Flow_advance_candidate_rejected`)은 요청을 보낸 적이 없으므로 공급자의 갈래가 없다. 입력 용량 때문에 걸러진 것(`Input_capacity`)만 이름 붙은 크기 거절로 센다. 슬롯을 쓸 수 없음, 런타임 계약 거절, 입력 계약 거절, 출력 요건 거절, 요청 준비 실패는 접을지 기다릴지의 근거가 되지 못한다. 그 걸음은 아무 말도 하지 않은 것으로 둔다(`of_local_rejection`).
 
   회차가 자기 자리에서 낸 오류도 접지 않는다. 렌더 실패, clock 없음, setup 실패, transport 미선언, 스냅숏 쓰기 실패, CLI 프롬프트 없음은 작게 보낸다고 달라지지 않는다. 스냅숏 쓰기 실패에서 접으면 특히 나쁘다 — 커밋이 안 되니 백로그가 비지 않고, 좁힌 표식은 소진에서만 풀리므로 영영 안 풀린다. 출력 거절(`Domain_output_invalid`, 형식이 틀린 답)도 접지 않는다. 형식이 틀린 답은 범위가 커서 생긴 일이라는 근거가 아니다. 연속성 사다리는 공급자가 크기를 말한 거절(위 표)에서만 접는다(2026-10-10 운영자 결정, #42023). durable 회차는 위 규칙대로 실패 종류를 보지 않는다.
 
-  마지막 줄이 없으면 자격증명 하나가 만료됐을 때 폭이 1 로 무너진다. 일시적인 실패와 원인은 다르지만 접어서 얻는 것이 없다는 점은 같다.
+  마지막 줄이 없으면 자격증명 하나가 만료됐을 때 읽기가 한 턴씩으로 좁아진다. 일시적인 실패와 원인은 다르지만 접어서 얻는 것이 없다는 점은 같다.
 
   이 표가 정하는 것은 접을지 기다릴지뿐이다. 바닥에서 지나갈지는 다른 문이 정한다(아래 바닥 규칙).
 
@@ -351,7 +351,7 @@ flowchart TD
 
   바닥 아래에 한 겹이 더 있다. atom 하나가 들어가지 않으면 그 atom 안에서 메시지 단위로 나눠 읽는다. 스냅숏의 끝은 atom 경계로 두고, 부분까지 읽은 자리는 회차 메모리에만 둔다. 메시지 하나까지 내려가서도 들어가지 않으면, 그때만 그 메시지를 읽지 않은 것으로 typed 기록하고 지나간다. 기록은 구간과 이유를 담고, 다음 요청은 working state 와 함께 그 기록을 싣는다. durable 회차의 바닥(한 턴)도 같은 규칙을 쓴다.
 
-  **내려가는 근거와 지나가는 근거는 다르다.** "모른다" 갈래(`Invalid_request`, `Refusal_body_not_received`)는 내려가는 근거는 되지만 지나가는 근거가 되지 못한다. 바닥에서 걸음의 어느 슬롯이든 typed 크기 거절(`Context_overflow`, `Input_capacity`, `Request_body_refused`)을 준 경우에만 기록하고 지나간다. 모르는 거절뿐이면 기록을 남기지 않고 다음 신호를 기다린다. 이 문이 없으면 우리가 만든 영구적인 400 하나에 Librarian 이 이력의 모든 메시지를 읽지 않은 것으로 적으며 지나간다. 한 줄로: 모름은 내려가고, 크기만 지나간다.
+  **내려가는 근거와 지나가는 근거는 다르다.** 내려가는 근거는 이름 붙은 입력 크기 거절(`input_capacity_evidence`)이다. "모른다" 갈래(`Invalid_request`, `Refusal_body_not_received`)와 시간 초과는 내려가는 근거도 지나가는 근거도 되지 못한다. 지나가는 근거는 더 좁다. 바닥에서 걸음의 어느 슬롯이든 typed 크기 거절(`Context_overflow`, `Input_capacity`, `Request_body_refused`)을 준 경우에만 기록하고 지나간다(`provider_input_refusals` 가 비지 않음). 모르는 거절뿐이면 기록을 남기지 않고 다음 신호를 기다린다. 이 문이 없으면 우리가 만든 영구적인 400 하나에 Librarian 이 이력의 모든 메시지를 읽지 않은 것으로 적으며 지나간다. 한 줄로: 내려가는 문은 이름 붙은 크기 거절에만 열리고, 지나가는 문은 typed 크기 거절에만 열린다.
 
   이것은 I3 를 고치는 결정이다(2026-09-22 운영자). 연속성을 잃은 채 전부 멈추는 것보다, 읽지 못한 조각을 기록하고 연속성을 얻는 쪽이 낫다. 그 전까지는 읽지 못한 조각 하나 앞에 위치가 서고, 그동안 요청이 턴마다 자랐다 — #37793 의 성장이 그것이다. 판정의 근거는 구조(더 나눌 수 없는 바닥)와 typed 거절이지 문턱이 아니다. 바닥에 남는 것은 글뿐이다. 도구 호출과 결과는 `keeper_librarian.ml` 의 `text_of_content` 가 이미 한 줄 마커로 줄였다.
 

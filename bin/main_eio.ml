@@ -529,8 +529,23 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)
   let log_dir = Filename.concat masc_dir "logs" in
-  Fs_compat.mkdir_p log_dir;
-  Log.Ring.init_file_sink log_dir;
+  (* No Eio loop runs here, so [Fs_compat.mkdir_p] takes its [Unix] path and
+     a refused mkdir is a [Unix_error]. Both failures end the boot like the
+     refusals around them: one [FATAL] sentence and exit 1. Left to escape,
+     the exception reaches the command line parser, which exits 125 (#51246).
+     The file sink is not up, and a record emitted now would retry the
+     directory that was just refused, so the sentence goes to stderr. *)
+  (match Fs_compat.mkdir_p log_dir with
+   | () -> ()
+   | exception Unix.Unix_error (error, call, path) ->
+     Printf.eprintf "[FATAL] cannot create the log directory %s: %s (%s %s)\n%!"
+       log_dir (Unix.error_message error) call path;
+     exit 1);
+  (match Log.Ring.init_file_sink log_dir with
+   | Ok () -> ()
+   | Error error ->
+     Printf.eprintf "[FATAL] %s\n%!" (Log.Ring.file_sink_error_to_string error);
+     exit 1);
   (* Before any keeper boots, as for the console mirror below: the JSONL
      append and flush move to one OS thread, so a slow write() no longer
      stops the producing domain. They were the main thread's largest
@@ -1911,10 +1926,10 @@ let runtime_default_set_cmd_exit base_path port agent runtime_id setup_lanes fal
      config writer checks deployment-local provider/model bindings. This
      command edits the resolved runtime file, so its sibling overlay must come
      from that same config root. No server services are started. *)
-  match Server_runtime_bootstrap.configure_agent_core_model_catalog_env () with
+  match Runtime_model_catalog_boot.configure_agent_core_model_catalog_env () with
   | exception Env_config_core.Config_error message -> fail message
   | (_ : string option) ->
-  (* With no server answering on the port, the command writes the file
+  (* With no process holding the workspace lease, the command writes the file
      itself: then nothing else writes it and no reader is waiting to be told. *)
   let write_locally () =
     let result =
@@ -1970,8 +1985,9 @@ let runtime_default_set_cmd_exit base_path port agent runtime_id setup_lanes fal
 let runtime_default_set_cmd =
   let doc =
     "Validate and update [runtime].default in runtime.toml using the runtime \
-     config writer. While this workspace's server answers on the port, the \
-     edit is saved through that server."
+     config writer. While a server holds this workspace and announces the \
+     port, the edit is saved through that server; with nothing holding the \
+     workspace the command writes the file; any other holder stops it."
   in
   let info = Cmd.info "runtime-default-set" ~doc in
   let setup_lanes = Arg.(value & flag & info ["setup-lanes"]
@@ -2199,11 +2215,7 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
     unavailable "invalid_timeout" "Verification timeout must be finite and positive."
   else
     let config_path = runtime_config_path_for_base_path base_path in
-    let loaded = try
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      Runtime.load_list ~config_path
-      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
-      with Env_config_core.Config_error message -> Error message in
+    let loaded = Runtime_model_catalog_boot.load_standalone_list ~config_path in
     match loaded with
     | Error message ->
       unavailable
@@ -2498,9 +2510,9 @@ let voice_local_changes ~refuse (ground : Masc_cli_runtime_config_remote.voice_g
           Error 2
       | changes -> Ok changes
 
-(* With no server answering on the port, the command is the writer: it reads
-   the file, decides, and writes it itself. Then nothing else writes it and no
-   reader is waiting to be told. *)
+(* With no process holding the workspace lease, the command is the writer: it
+   reads the file, decides, and writes it itself. Then nothing else writes it
+   and no reader is waiting to be told. *)
 let voice_local_setup_locally ~refuse ~base_path speak_voice hear_model =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   (* Voice is a section of the configuration [masc init] writes, so a directory
@@ -2553,11 +2565,11 @@ let voice_local_setup_locally ~refuse ~base_path speak_voice hear_model =
            print_endline "voice is configured";
            0)
 
-(* RFC-0482 §3.2: while this workspace's server answers on the port, it is the
-   writer. The changes are decided against what the server holds, read from its
-   voice route, because the server may resolve a different configuration file
-   than this process would; they go back to the same route with the revision
-   they were decided on. *)
+(* RFC-0482 §3.2: while the process that holds the workspace lease announces
+   the port as its server, it is the writer. The changes are decided against
+   what the server holds, read from its voice route, because the server may
+   resolve a different configuration file than this process would; they go
+   back to the same route with the revision they were decided on. *)
 let voice_local_setup_exit base_path ~port ~agent speak_voice hear_model =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let refuse message = prerr_endline message; 1 in
@@ -2678,12 +2690,13 @@ let browser_lane_setup_cmd =
               existing table keeps its values unless they are named. \
               The server reads the table when it starts."
          ; `P
-             "While this workspace's server answers on its port, the ego table is \
-              planned against the runtime.toml the server holds and saved through it; \
-              with no server answering it is written to the file. The server's port is \
-              MASC_HTTP_PORT, the workspace's saved port or the default. While the server \
-              is still starting, or no sign-in is stored for --agent (masc login), nothing \
-              is set up."
+             "While a server holds this workspace and announces its port, the ego table \
+              is planned against the runtime.toml the server holds and saved through it; \
+              with nothing holding the workspace it is written to the file. The server's \
+              port is MASC_HTTP_PORT, the workspace's saved port or the default. While \
+              the server is still starting, while the workspace is held by a process that \
+              does not announce that port as the server of a single user, or while no \
+              sign-in is stored for --agent (masc login), nothing is set up."
          ])
     Term.(
       const (fun base_path requested_base_path named_agent modes no_addon
@@ -2758,11 +2771,12 @@ let voice_local_setup_cmd =
               formula. Both run once and exit, so neither needs a server -- which is why \
               this can run during setup, before there is anything to talk to over HTTP."
          ; `P
-             "While this workspace's server answers on the port, the changes go to its \
-              voice setup route, which saves them and tells its readers. With no server \
-              answering, the command writes the file itself with the same writer: the \
-              same revision guard, and the same refusal to publish a section the loader \
-              would reject."
+             "While a server holds this workspace and announces the port, the changes go \
+              to its voice setup route, which saves them and tells its readers. With \
+              nothing holding the workspace, the command writes the file itself with the \
+              same writer: the same revision guard, and the same refusal to publish a \
+              section the loader would reject. A workspace held by any other process \
+              stops the command."
          ])
     Term.(
       const (fun base_path requested_base_path cli_port agent voice model list_voices ->
@@ -2843,9 +2857,10 @@ let web_search_setup_cmd =
               provider that is missing."
          ; `P
              "Writes only the [web_search] section of runtime.toml, keeping comments \
-              and other tables as they are. While this workspace's server answers on the \
-              port, the section is saved through that server; otherwise the command \
-              writes the file itself. An API key is never written: it is read from the \
+              and other tables as they are. While a server holds this workspace and \
+              announces the port, the section is saved through that server; with nothing \
+              holding the workspace the command writes the file itself; any other holder \
+              stops the command. An API key is never written: it is read from the \
               environment of the process that starts the server."
          ])
     Term.(
@@ -2889,10 +2904,13 @@ let config_set_cmd =
               does not name, or a value that is not the kind the key holds, is \
               refused and nothing is written."
          ; `P
-             "When the workspace's server answers on the port, the keys are saved \
-              through it: it is the one writer of runtime.toml while it runs, and it \
-              tells its readers. This needs the sign-in masc login keeps. With no \
-              server answering, the file is written here."
+             "When a server holds the workspace and announces the port, the keys are \
+              saved through it: it is the one writer of runtime.toml while it runs, and \
+              it tells its readers. This needs the sign-in masc login keeps. With \
+              nothing holding the workspace, the file is written here. A workspace held \
+              by a process that does not announce the port as the server of a single \
+              user (another port, an account server, a server that announces none) \
+              stops the command, and nothing is written."
          ; `P
              "A workspace with no runtime.toml is seeded the way server start seeds \
               it, so a script can set a key before the first start. What a value \
@@ -2932,10 +2950,9 @@ let runtime_probe_refused (first, rest) =
 
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
-  match Runtime.load_list ~config_path:runtime_config_path with
-  | Error failure ->
-      Printf.eprintf "runtime-probe failed: %s\n"
-        (Runtime_config_error.to_diagnostic_text ~config_path:runtime_config_path failure);
+  match Runtime_model_catalog_boot.load_standalone_list ~config_path:runtime_config_path with
+  | Error detail ->
+      Printf.eprintf "runtime-probe failed: %s\n" detail;
       1
   | Ok (runtimes, _default, _, _, _) -> (
       match
@@ -3246,12 +3263,6 @@ let keeper_create_port =
     & opt int (Env_config_core.masc_http_port_int ())
     & info [ "p"; "port" ] ~docv:"PORT" ~doc)
 
-let keeper_create_token =
-  let doc =
-    "Bearer to present instead of the one masc login persisted for --agent."
-  in
-  Arg.(value & opt (some string) None & info [ "token" ] ~docv:"TOKEN" ~doc)
-
 let keeper_create_edit =
   let doc =
     "Fill the declaration in the editor named by the EDITOR or VISUAL \
@@ -3365,7 +3376,7 @@ let keeper_create_declaration_from_editor () =
        Error
          (Printf.sprintf
             "masc keeper-create --edit: %s. Nothing was created."
-            (Masc_tui_editor.abort_detail abort))
+            (Masc_tui_editor.abort_detail ~ko:false abort))
      | Ok edited -> Masc_cli_keeper_create.declaration_of_form edited)
 
 (* The keeper name becomes a path segment in the request URL, so it is both
@@ -3373,14 +3384,15 @@ let keeper_create_declaration_from_editor () =
    only [A-Za-z0-9._-], which makes the encoding a no-op today -- and that is
    the reason to have it rather than to skip it: relying on the two staying in
    step leaves a widened name grammar to show up as a malformed request line.
-   The TUI's own keeper calls encode the same segment. *)
-let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_name
+   The TUI's own keeper calls encode the same segment.
+
+   The bearer is only ever the one [masc login] persisted for [agent] under
+   [base_path]. A bearer taken from argv would show in [ps] and shell history,
+   and a keeper's shell commands are logged whole, so another identity is
+   presented by logging it in with [masc login --agent] instead. *)
+let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~keeper_name
       ~declaration =
-  let bearer =
-    match token with
-    | Some raw -> Some raw
-    | None -> Auth_login.read_persisted_http_token ~base_path ~agent_name:agent
-  in
+  let bearer = Auth_login.read_persisted_http_token ~base_path ~agent_name:agent in
   let headers =
     ("content-type", "application/json")
     :: (match bearer with
@@ -3438,7 +3450,7 @@ let keeper_lifecycle_post ~action ~base_path ~host ~port ~agent ~token ~keeper_n
   if code = 0 then print_endline text else prerr_endline text;
   code
 
-let keeper_create_cmd_exit base_path host port flags_result token agent edit =
+let keeper_create_cmd_exit base_path host port flags_result agent edit =
   let declaration_result =
     match edit, flags_result with
     | true, Ok flags when not (keeper_create_flags_are_absent flags) ->
@@ -3462,7 +3474,7 @@ let keeper_create_cmd_exit base_path host port flags_result token agent edit =
       prerr_endline "Nothing was created.";
       2)
     else
-      keeper_lifecycle_post ~action:`Up ~base_path ~host ~port ~agent ~token ~keeper_name
+      keeper_lifecycle_post ~action:`Up ~base_path ~host ~port ~agent ~keeper_name
         ~declaration
 
 let keeper_create_cmd =
@@ -3491,6 +3503,10 @@ let keeper_create_cmd =
          running server of its own still sends the declaration to \
          --host/--port. Scoping a create to a scratch workspace means \
          pointing --host/--port at that workspace's server."
+    ; `P
+        "That persisted bearer is the only one this command presents. To \
+         send the declaration as another identity, sign it in with masc \
+         login --agent NAME and pass the same --agent here."
     ; `P
         "--network-mode is required, on the flags and in the --edit form \
          alike. The server's default for docker and microvm is none, which \
@@ -3526,7 +3542,6 @@ let keeper_create_cmd =
       $ keeper_create_host
       $ keeper_create_port
       $ keeper_create_flags_term
-      $ keeper_create_token
       $ login_agent
       $ keeper_create_edit)
 
@@ -4448,7 +4463,7 @@ let runtime_setup_render_cmd =
     Term.(const (fun base_path spec_path -> Masc_cli_runtime_setup.render ~base_path ~spec_path) $ workspace $ spec)
 
 let runtime_setup_inventory_cmd =
-  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read setup choices and their configuration revision together, from the workspace's running server while it answers.")
+  Cmd.v (Cmd.info "runtime-setup-inventory" ~doc:"Read setup choices and their configuration revision together, from the server that holds the workspace and announces the port while there is one.")
     Term.(const (fun base_path port agent -> Masc_cli_runtime_setup.inventory ~base_path ~port ~agent)
       $ base_path $ port $ login_agent)
 
@@ -4560,13 +4575,7 @@ let runtime_model_info_cmd =
 
 let setup_validate_runtime base_path =
   let config_path = runtime_config_path_for_base_path base_path in
-  let loaded =
-    try
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      Runtime.load_list ~config_path
-      |> Result.map_error (Runtime_config_error.to_diagnostic_text ~config_path)
-    with Env_config_core.Config_error message -> Error message
-  in
+  let loaded = Runtime_model_catalog_boot.load_standalone_list ~config_path in
   match loaded with
   | Error message ->
     prerr_endline (Server_runtime_bootstrap.config_load_failure_diagnostic ~detail:message);
@@ -4649,7 +4658,7 @@ let setup_cmd_exit base_path port no_tui sandbox_profile microvm_backend network
     ~resume_models:(fun () -> Masc_cli_model_resume.run ~base_path ~port ~agent:default_login_agent)
     ~start_keeper:(fun () ->
       keeper_lifecycle_post ~action:`Boot ~base_path ~host:"127.0.0.1" ~port
-        ~agent:default_login_agent ~token:None ~keeper_name:"imp"
+        ~agent:default_login_agent ~keeper_name:"imp"
         ~declaration:(`Assoc ["name", `String "imp"]))
 
 let setup_preflight_cmd =

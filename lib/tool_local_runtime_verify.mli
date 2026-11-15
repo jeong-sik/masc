@@ -28,7 +28,11 @@ val runtime_verify_json :
     verification pipeline against the AGENT_CORE discovery cache.
 
     Returns a JSON object with health/slot/ctx/model
-    diagnostics + the {!classify_runtime_blocker} verdict.  [?runtime_pool]
+    diagnostics + the [runtime_blocker] verdict ([null] when the pool passes).
+    Each [runtimes] row reports what the discovery snapshot holds for one
+    endpoint: [props_observed] and [models_observed] say whether that
+    answer is present. The snapshot keeps no HTTP status, so a row carries
+    none.  [?runtime_pool]
     selects the pool by name; default behaviour verifies every discovered
     endpoint. An explicit pool that matches no endpoint fails closed rather
     than probing the full pool. When discovery has no resolvable endpoints,

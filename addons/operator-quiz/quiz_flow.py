@@ -24,7 +24,6 @@ and only as far as one request can hold (#44537).
 """
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 from dataclasses import dataclass
@@ -33,6 +32,9 @@ from typing import Any, Callable
 
 import quiz_grading as g
 import quiz_log as q
+import records
+from records import (  # noqa: F401  -- the names this package's modules and tests read from here
+    InvalidBinding, InvalidResult, digest, grants_of_binding, material)
 
 AUTHOR = "author"
 GRADE = "grade"
@@ -41,15 +43,6 @@ SCOPE_OPEN_DEBT = "open_debt_only"
 CHOICES_ONLY = {"kind": "choices_only"}
 WRITTEN = {"kind": "allowed", "hint": None}
 TEXT = "text"  # the author schema's mode for a question answered in words
-
-
-class InvalidResult(ValueError):
-    """A delivered result this package cannot consume. It is not accepted, so
-    the host keeps it and shows the failed delivery."""
-
-
-class InvalidBinding(ValueError):
-    """The installation's binding does not name what a session reads."""
 
 
 class DisputeRefused(ValueError):
@@ -62,45 +55,8 @@ class Prompts:
     grade: str
 
 
-def digest(value: Any) -> str:
-    encoded = json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
 def session_id_of(action_request_id: str) -> str:
     return "s-" + hashlib.sha256(action_request_id.encode("utf-8")).hexdigest()[:16]
-
-
-def covers(paths: tuple[str, ...], path: str) -> bool:
-    """The host's grant rule: a path ending in / covers what is under it."""
-    return any(path.startswith(granted) if granted.endswith("/") else path == granted for granted in paths)
-
-
-def grants_of_binding(binding: dict) -> tuple[q.Grant, ...]:
-    """The grants a session reads. The host checks the grant itself; the
-    package keeps the source ids, kinds and paths it lists requests for."""
-    records = binding.get("records")
-    if not isinstance(records, list) or not records:
-        raise InvalidBinding("binding.records must name at least one grant")
-    grants = []
-    for record in records:
-        if not isinstance(record, dict) or not isinstance(record.get("source_id"), str):
-            raise InvalidBinding("each binding.records entry needs a source_id")
-        match record.get("kind"):
-            case "board":
-                grants.append(q.Grant(record["source_id"], "board", ()))
-            case "repository":
-                paths = record.get("paths")
-                if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
-                    raise InvalidBinding(f"repository grant {record['source_id']} needs paths")
-                grants.append(q.Grant(record["source_id"], "repository", tuple(paths)))
-            case "wiki" | "github_pulls":
-                grants.append(q.Grant(record["source_id"], record["kind"], ()))
-            case other:
-                raise InvalidBinding(f"grant kind {other!r} is not one this package reads")
-    if len({grant.source_id for grant in grants}) != len(grants):
-        raise InvalidBinding("binding.records names a source twice")
-    return tuple(grants)
 
 
 def language_of_binding(binding: dict) -> str:
@@ -110,146 +66,49 @@ def language_of_binding(binding: dict) -> str:
     return language
 
 
-# -- Read results, put back together. ---------------------------------------
+# -- The lesson a quiz follows (RFC operator-quiz-follows-lesson §3). --------
 
-def _assemble(marker: dict, chunks: list[dict]) -> dict:
-    """The original result of a read that came back in pieces."""
-    data = b""
-    for chunk in chunks:
-        if chunk.get("offset") != len(data) or chunk.get("encoding") != "base64":
-            raise InvalidResult("result pieces do not follow each other")
-        try:
-            data += base64.b64decode(chunk["content"], validate=True)
-        except (KeyError, TypeError, ValueError) as error:
-            raise InvalidResult(f"a result piece is not base64: {error}") from error
-    if len(data) != marker["bytes"] or hashlib.sha256(data).hexdigest() != marker["retained_sha256"]:
-        raise InvalidResult("the result put together does not match its digest")
-    try:
-        result = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise InvalidResult(f"the result put together is not JSON: {error}") from error
-    if not isinstance(result, dict):
-        raise InvalidResult("the result put together is not an object")
-    return result
+LESSON_PORT = "scenes"  # the output port of operator-lesson that holds its scene rows
+LESSON_LANE = "lesson/scenes"
 
 
-def _assemble_whole(item: dict) -> dict:
-    return _assemble(item["marker"], item["chunks"])
+def lesson_source_of_binding(binding: dict) -> str | None:
+    """The source_id of the lesson output the binding names, or None when
+    it names none. The quiz reads no other source."""
+    sources = binding.get("sources")
+    if not isinstance(sources, list) or len(sources) > 1:
+        raise InvalidBinding("binding.sources must be empty or name one lesson output")
+    if not sources:
+        return None
+    source = sources[0]
+    keys = {"source_id", "kind", "installation_id", "output_id", "selection"}
+    if not isinstance(source, dict) or set(source) != keys or any(
+            not isinstance(source[key], str) or not source[key] for key in keys):
+        raise InvalidBinding("a lesson source names source_id, kind, installation_id, output_id and selection")
+    if (source["kind"], source["output_id"], source["selection"]) != ("lane_output", LESSON_PORT, "latest_completed"):
+        raise InvalidBinding(f"a lesson source is the latest completed {LESSON_PORT} output of a lesson installation")
+    return source["source_id"]
 
 
-def reads(entries: list[tuple[str, dict]], assemble: Callable[[dict], dict] = _assemble_whole) -> list[dict]:
-    """Each read request of a session with its result, or with the pieces
-    received so far when it came back too large for the frame. [entries]
-    pairs each kept body with its digest, and each read names the digests it
-    was put together from. [assemble] gives the result of a read whose last
-    piece came."""
-    out: list[dict] = []
-    by_request: dict[str, dict] = {}
-    for key, entry in entries:
-        request, result = entry["request"], entry["result"]
-        if request["kind"] == "read_result":
-            target = by_request.get(request["original_request_id"])
-            if target is None or target["marker"] is None:
-                raise q.LogError(f"a piece of {request['original_request_id']}, which was not read in pieces")
-            target["chunks"].append(result)
-            target["digests"].append(key)
-            continue
-        item = {"request": request, "marker": None, "chunks": [], "result": None, "digests": [key]}
-        if result["status"] == "result_exceeds_frame":
-            item["marker"] = result
-        else:
-            item["result"] = result
-        out.append(item)
-        by_request[request["request_id"]] = item
-    for item in out:
-        if item["marker"] is not None and item["chunks"] and item["chunks"][-1].get("eof") is True:
-            item["result"] = assemble(item)
-    return out
-
-
-# -- Material the author output may cite. ----------------------------------
-
-def _cite(pin: q.Pin) -> str:
-    """The pin of a record the host named, as the log will read it back. A
-    record this package could not cite later is refused now, while it is
-    still a result the host keeps."""
-    text = q.pin_text(pin)
-    try:
-        q.parse_pin(q.pin_kind(pin), text)
-    except q.LogError as error:
-        raise InvalidResult(f"the host named a record this package cannot cite: {error}") from error
-    return text
-
-
-def _entry(pin: q.Pin, result: dict, author: Any, at: Any, title: str, text: str) -> dict:
-    return {"kind": q.pin_kind(pin), "source_id": result["source_id"], "pin": _cite(pin),
-            "sha256": result["sha256"], "author": author, "at": at, "title": title, "text": text}
-
-
-def _records_of(grant: q.Grant, result: dict, record: dict) -> list[dict]:
-    """The citable records one host record holds. A pull request gives
-    itself, each review that says something, and each review comment."""
-    match grant.kind, record.get("kind"):
-        case "board", "post":
-            return [_entry(q.BoardPostPin(record["id"]), result, record["author"], record["created_at"],
-                           record["title"], record["body"])]
-        case "board", "comment":
-            return [_entry(q.BoardCommentPin(record["post_id"], record["id"]), result, record["author"],
-                           record["created_at"], "", record["body"])]
-        case "repository", "commit":
-            return [_entry(q.CommitPin(record["sha"]), result, record["author"], record["committed_at"],
-                           record["subject"], record["body"])]
-        case "wiki", "page":
-            return [_entry(q.WikiPagePin(record["name"], record["revision"]), result, record["author"], 0,
-                           record["title"], record["body"])]
-        case "github_pulls", "pull_request":
-            number = record["number"]
-            reviews = record["reviews"]
-            return ([_entry(q.PrPin(number, record["merge_commit"]), result, record["author"], record["merged_at"],
-                            record["title"], record["body"])]
-                    + [_entry(q.PrReviewPin(number, review["id"]), result, review["author"], review["submitted_at"],
-                              "", review["body"]) for review in reviews if review["body"].strip()]
-                    + [_entry(q.PrCommentPin(number, comment["id"]), result, comment["author"],
-                              comment["created_at"], "", comment["body"])
-                       for review in reviews for comment in review["comments"]])
-        case kind, other:
-            raise InvalidResult(f"a {kind} page holds a record of kind {other!r}")
-
-
-def material(session_reads: list[dict], grants: dict[str, q.Grant]) -> list[dict]:
-    """The records an author request may cite, in the order read: what each
-    grant's pages hold, and the text files read at a commit. The grant a read
-    names says what its records are."""
-    out: list[dict] = []
-    for read in session_reads:
-        request, result = read["request"], read["result"]
-        grant = grants.get(request["source_id"])
-        if grant is None:
-            raise InvalidResult(f"a read of {request['source_id']}, which the session does not grant")
-        if request["kind"] == "read_records" and result["status"] == "records":
-            out += [entry for record in result["records"] for entry in _records_of(grant, result, record)]
-        elif request["kind"] == "read_file" and result["status"] == "file" and result["encoding"] == "utf-8":
-            out.append(_entry(q.RepoFilePin(result["commit"], result["path"]), result, "", 0, "", result["content"]))
-    return out
-
-
-def summary(request: dict, result: dict, paths: tuple[str, ...]) -> dict:
-    """What the listing uses of a result: its status and where reading goes
-    next. Board records and file contents are left out; they are read again
-    from disk only for the author request. A repository page keeps, of each
-    commit, its id and the changed paths the grant covers [paths], which
-    name the files still to read."""
-    match request["kind"], result["status"]:
-        case "read_records", "records":
-            if paths:
-                return result | {"records": [{"sha": record["sha"],
-                                              "paths": [path for path in record["paths"] if covers(paths, path)]}
-                                             for record in result["records"]]}
-            return {key: value for key, value in result.items() if key != "records"}
-        case ("read_file", "file") | ("read_result", "result_chunk"):
-            return {key: value for key, value in result.items() if key != "content"}
-        case _:
-            return result
+def _scene_of_row(row: Any, instance_id: str) -> q.Scene:
+    """The scene a row of the lesson's port is, read strictly in what the
+    quiz uses of it. A row of another shape is a LogError."""
+    if not isinstance(row, dict) or row.get("lane_id") != f"{instance_id}/{LESSON_LANE}":
+        raise q.LogError(f"a row that is not on {LESSON_LANE} of the producer")
+    fields = row.get("fields")
+    if not isinstance(fields, dict) or not isinstance(fields.get("sources"), list):
+        raise q.LogError("a scene row without its sources")
+    cites: list[q.Cite] = []
+    for source in fields["sources"]:
+        if not isinstance(source, dict):
+            raise q.LogError("a scene source that is not an object")
+        records.text(source.get("quote"), "scene source quote")
+        records.text(source.get("sha256"), "scene source sha256")
+        cite = q.Cite.of_json({key: source.get(key) for key in ("kind", "source_id", "pin")})
+        if cite not in cites:
+            cites.append(cite)
+    return q.Scene.of_json({"session_id": fields.get("session_id"), "entry_id": fields.get("entry_id"),
+                            "cites": [cite.to_json() for cite in cites]})
 
 
 # -- Drafts (RFC §4.9 Compose, step 3). -------------------------------------
@@ -293,10 +152,9 @@ def check_draft(draft: dict, input_material: list[dict],
     for cited in draft["sources"]:
         if not cited["quote"].strip():
             return f"the quote cited from {cited['pin']} is only whitespace"
-        record = next((m for m in input_material if (m["kind"], m["source_id"], m["pin"])
-                       == (cited["kind"], cited["source_id"], cited["pin"])), None)
+        record = records.cited_record(cited, input_material)
         if record is not None:
-            if cited["quote"] not in record["text"] and cited["quote"] not in record["title"]:
+            if not records.holds_quote(record, cited["quote"]):
                 return f"the quote is not in {cited['pin']}"
             sources.append(q.Source(cited["kind"], cited["source_id"], cited["pin"], cited["quote"], record["sha256"]))
             continue
@@ -318,11 +176,8 @@ class Flow:
         self.requests = q.Blobs(state, "requests")
         self.prompts = prompts
         self.fits = fits
-        # Kept bodies are named by their digest, so what is derived from one
-        # never goes stale. The fold is redone only when the log grew.
-        self._entries: dict[tuple[str, tuple[str, ...]], dict] = {}
-        self._summaries: dict[tuple[str, tuple[str, ...]], dict] = {}
-        self._sources: dict[str, str | None] = {}
+        # The fold is redone only when the log grew.
+        self._reads = records.Pages(self.pages)
         self._folded: tuple[int, list[q.Session]] = (-1, [])
 
     def sessions(self) -> list[q.Session]:
@@ -331,47 +186,14 @@ class Flow:
             self._folded = (len(events), q.fold(events))
         return self._folded[1]
 
-    @staticmethod
-    def _paths(grants: dict[str, q.Grant], source: Any) -> tuple[str, ...]:
-        grant = grants.get(source) if isinstance(source, str) else None
-        return grant.paths if grant is not None and grant.kind == "repository" else ()
-
-    def _entry(self, digest: str, grants: dict[str, q.Grant]) -> dict:
-        """A kept read as the listing uses it: the request and a summary of
-        its result (see summary()). Only summaries stay in memory, so what
-        the worker holds does not grow with what its sessions read (#44537).
-        The kept body on disk stays whole."""
-        source = self._sources.get(digest)
-        paths = self._paths(grants, source)
-        cached = self._entries.get((digest, paths))
-        if cached is not None:
-            return cached
-        entry = self.pages.read(digest)
-        source = entry["request"].get("source_id")
-        self._sources[digest] = source
-        paths = self._paths(grants, source)
-        self._entries[(digest, paths)] = {"request": entry["request"],
-                                          "result": summary(entry["request"], entry["result"], paths)}
-        return self._entries[(digest, paths)]
-
-    def _assembled(self, grants: dict[str, q.Grant], item: dict) -> dict:
-        """The summary of a read whose pieces have all come. The pieces are
-        read again from disk once and dropped; the summary is kept under the
-        digest of the whole result, so it never goes stale."""
-        paths = self._paths(grants, item["request"].get("source_id"))
-        key = (item["marker"]["retained_sha256"], paths)
-        cached = self._summaries.get(key)
-        if cached is None:
-            pieces = [self.pages.read(digest)["result"] for digest in item["digests"][1:]]
-            cached = summary(item["request"], _assemble(item["marker"], pieces), paths)
-            self._summaries[key] = cached
-        return cached
-
     # -- compose --------------------------------------------------------------
 
-    def compose(self, action_request_id: str, questions: int, binding: dict, opened_at: float) -> str:
+    def compose(self, action_request_id: str, questions: int, binding: dict, opened_at: float, *,
+                lesson: str | None = None) -> str:
         """Opens the session for one compose action; the same action again
-        names the same session and writes nothing."""
+        names the same session and writes nothing. [lesson] is the lesson
+        source the binding names (lesson_source_of_binding): the session then
+        follows it."""
         grants = grants_of_binding(binding)
         language = language_of_binding(binding)
         session_id = session_id_of(action_request_id)
@@ -385,17 +207,96 @@ class Flow:
                      for posed, response in zip(session.posed, _responses(session.answer, session.posed))
                      if _needs_grade(session.grading_of(posed.question_id), response)
                      for event in self._request_grade(session, posed, response)]
+            follows = [q.FollowsLesson(session_id, lesson)] if lesson is not None else []
             self.log.append([q.SessionOpened(session_id, action_request_id, questions, grants, language, opened_at),
-                             *again])
+                             *follows, *again])
+        elif lesson is not None:
+            # The opening and follows_lesson are two lines of one write. A
+            # write cut between them leaves a session that asks about every
+            # record; the same action, sent again, completes it while the
+            # session has read nothing yet.
+            opened = next(session for session in sessions if session.session_id == session_id)
+            if opened.state == "writing" and opened.follows is None and not opened.material and not opened.requests:
+                self.log.append([q.FollowsLesson(session_id, lesson)])
         return session_id
+
+    # -- the lesson output, at an observation ---------------------------------
+
+    def see_lesson(self, binding: dict, sources: list) -> dict | None:
+        """Records the lesson output an observation carries, once per
+        distinct set of rows, and returns what the host said of the source:
+        complete and detail. None when the binding names no lesson.
+
+        Only an observation carries another installation's output, and the
+        author request is written while a result is consumed, so what the
+        lesson cited is kept in the log between the two. The event says
+        what was received; a repeated observation writes nothing."""
+        name = lesson_source_of_binding(binding)
+        if name is None:
+            return None
+        source = next((item for item in sources if isinstance(item, dict) and item.get("source_id") == name), None)
+        if source is None:
+            return {"complete": False, "detail": "the host supplied no source of this name"}
+        status = {"complete": source.get("complete") is True, "detail": source.get("detail")}
+        observations = source.get("observations")
+        outputs = [item for item in observations if isinstance(item, dict) and item.get("kind") == "lane_output"] \
+            if isinstance(observations, list) else []
+        if not outputs:
+            return status
+        if len(outputs) != 1:
+            raise InvalidResult("a lesson source carries one completed output")
+        try:
+            producer, evidence = outputs[0]["producer"], outputs[0]["evidence"]
+            instance_id = records.text(producer["instance_id"], "producer.instance_id")
+            seq = records.count(producer["observation_seq"], "producer.observation_seq")
+            sha256 = records.text(evidence[0]["sha256"], "evidence.sha256")
+            rows = outputs[0]["output"]["rows"]
+            if not isinstance(rows, list):
+                raise q.LogError("output.rows must be an array")
+        except (KeyError, TypeError, IndexError, q.LogError) as error:
+            raise InvalidResult(f"a lane_output observation does not have the host's shape: {error}") from error
+        # The lesson completes an output at every observation of its own, so
+        # the same scenes arrive under many sequence numbers; they are kept
+        # once. The host puts that number in each row id, so the key is taken
+        # over what the lesson wrote: each row's lane and fields.
+        try:
+            key = digest([[row.get("lane_id"), row.get("fields")] if isinstance(row, dict) else row for row in rows])
+        except ValueError as error:
+            raise InvalidResult(f"the rows of a lane_output observation cannot be written as JSON: {error}") from error
+        recorded = [event for event in self.log.read()
+                    if isinstance(event, (q.LessonSeen, q.LessonUnreadable)) and event.rows == key]
+        if any(isinstance(event, q.LessonSeen) for event in recorded):
+            return status
+        event = self._lesson_event(instance_id, seq, sha256, key, rows)
+        # Rows an earlier revision of this package could not read are read
+        # again, and recorded once this one can.
+        if not recorded or isinstance(event, q.LessonSeen):
+            self.log.append([event])
+        return status
+
+    @staticmethod
+    def _lesson_event(instance_id: str, seq: int, sha256: str, key: str, rows: list) -> q.Event:
+        """The output as scenes, or as unreadable when one row is not a
+        scene or the log could not read the event back."""
+        try:
+            seen = q.LessonSeen(instance_id, seq, sha256, key,
+                                tuple(_scene_of_row(row, instance_id) for row in rows))
+            problem = q.unreadable(seen)
+        except q.LogError as error:
+            problem = str(error)
+        else:
+            if problem is None:
+                return seen
+        unreadable = q.LessonUnreadable(instance_id, seq, sha256, key, problem)
+        if q.unreadable(unreadable) is None:
+            return unreadable
+        return q.LessonUnreadable(instance_id, seq, sha256, key, "a row the log cannot keep")
 
     # -- listing --------------------------------------------------------------
 
     def _session_reads(self, session: q.Session) -> list[dict]:
         """The session's reads, each with the summary of its result."""
-        grants = {grant.source_id: grant for grant in session.grants}
-        return reads([(event.digest, self._entry(event.digest, grants)) for event in session.material],
-                     lambda item: self._assembled(grants, item))
+        return self._reads.summaries([event.digest for event in session.material], session.grants)
 
     def _material(self, session: q.Session, sessions: list[q.Session]) -> list[dict]:
         """The material of a session that has read everything, in the order
@@ -408,9 +309,15 @@ class Flow:
         out: list[dict] = []
         checked = 0
         grants = {grant.source_id: grant for grant in session.grants}
+        # A session that follows a lesson asks only about records a lesson
+        # cited (RFC operator-quiz-follows-lesson §3.5).
+        cited = q.cited(self.log.read()) if session.follows is not None else None
         for read in reversed(self._session_reads(session)):
-            whole = reads([(digest, self.pages.read(digest)) for digest in read["digests"]])
-            out = material(whole, grants) + out
+            page = material(self._reads.whole(read), grants)
+            if cited is not None:
+                page = [record for record in page
+                        if q.Cite(record["kind"], record["source_id"], record["pin"]) in cited]
+            out = page + out
             if out and len(out) >= 2 * checked:
                 checked = len(out)
                 if not self.fits(self._author_body(session, sessions, scope=SCOPE_ALL, records=out)):
@@ -423,58 +330,23 @@ class Flow:
         the host later refused its ask, so the start of a session never moves.
         Material of a session that failed before asking is read again.
 
-        A cursor the host refused for this grant (the branch no longer
-        reaches it, or the grant now names another repository) is skipped, so
-        the next session starts from the cursor before it, or the beginning."""
+        A cursor the host refused is skipped (records.last_cursor)."""
         position = next(i for i, session in enumerate(sessions) if session.session_id == session_id)
-        refused = {(r["request"]["source_id"], r["request"]["after"])
-                   for session in sessions[:position] for r in self._session_reads(session)
-                   if r["request"]["kind"] == "read_records" and r["result"] is not None
-                   and r["result"]["status"] == "not_allowed"}
-        for session in reversed(sessions[:position]):
-            if not session.posed:
-                continue
-            pages = [r for r in self._session_reads(session) if r["request"]["kind"] == "read_records"
-                     and r["request"]["source_id"] == grant.source_id and r["result"] is not None
-                     and r["result"]["status"] == "records"]
-            if pages and (grant.source_id, pages[-1]["result"]["next_cursor"]) not in refused:
-                return pages[-1]["result"]["next_cursor"]
-        return None
+        return records.last_cursor(grant, [(bool(session.posed), self._session_reads(session))
+                                           for session in sessions[:position]])
 
     def _next_read(self, session: q.Session, sessions: list[q.Session]) -> dict | None:
-        request_id = f"{session.session_id}-read-{len(session.material)}"
-        session_reads = self._session_reads(session)
-        for read in session_reads:
-            if read["marker"] is not None and read["result"] is None:
-                offset = read["chunks"][-1]["next_offset"] if read["chunks"] else 0
-                return {"kind": "read_result", "request_id": request_id,
-                        "original_request_id": read["request"]["request_id"],
-                        "source_id": read["marker"]["source_id"], "sha256": read["marker"]["retained_sha256"],
-                        "offset": offset}
-        for grant in session.grants:
-            pages = [r for r in session_reads if r["request"]["kind"] == "read_records"
-                     and r["request"]["source_id"] == grant.source_id]
-            if not pages or not pages[-1]["result"]["complete"]:
-                after = (pages[-1]["result"]["next_cursor"] if pages
-                         else self._start_cursor(grant, sessions, session.session_id))
-                request = {"kind": "read_records", "request_id": request_id, "source_id": grant.source_id,
-                           "after": after}
-                if after is None:
-                    # No session has asked yet, so nothing marks where the
-                    # last one stopped: read what was made since the quiz
-                    # began, not the workspace's whole history (#44537).
-                    request["since"] = sessions[0].opened_at
-                return request
-            if grant.kind == "repository":
-                done = {(r["request"]["commit"], r["request"]["path"]) for r in session_reads
-                        if r["request"]["kind"] == "read_file" and r["request"]["source_id"] == grant.source_id}
-                for page in pages:
-                    for record in page["result"]["records"]:
-                        for path in record["paths"]:
-                            if covers(grant.paths, path) and (record["sha"], path) not in done:
-                                return {"kind": "read_file", "request_id": request_id, "source_id": grant.source_id,
-                                        "commit": record["sha"], "path": path}
-        return None
+        def start(grant: q.Grant) -> dict:
+            after = self._start_cursor(grant, sessions, session.session_id)
+            if after is not None:
+                return {"after": after}
+            # No session has asked yet, so nothing marks where the last one
+            # stopped: read what was made since the quiz began, not the
+            # workspace's whole history (#44537).
+            return {"after": None, "since": sessions[0].opened_at}
+
+        return records.next_read(f"{session.session_id}-read-{len(session.material)}", session.grants,
+                                 self._session_reads(session), start)
 
     @staticmethod
     def _ask(session: q.Session) -> dict:
@@ -525,9 +397,14 @@ class Flow:
             if self.fits(body):
                 key = digest(body)
                 self.requests.write(key, body)
+                kept = (q.LessonScopeApplied(session.session_id, body["request_id"], tuple(
+                    q.Cite(record["kind"], record["source_id"], record["pin"]) for record in records)),) \
+                    if session.follows is not None else ()
                 return (q.ExactRequested(session.session_id, body["request_id"], AUTHOR, key),
-                        q.AuthorContextRecorded(session.session_id, body["request_id"], scope))
-            if len(records) == 1:
+                        q.AuthorContextRecorded(session.session_id, body["request_id"], scope), *kept)
+            # With no record left to drop, the history alone is too large;
+            # halving an empty material would never end.
+            if len(records) <= 1:
                 return (q.SessionFailed(session.session_id, q.AuthorRequestExceedsFrame(body["request_id"])),)
             records = records[len(records) // 2:]
 
@@ -552,14 +429,20 @@ class Flow:
                     return following.request_id
         if not note.strip():
             raise DisputeRefused("a dispute says what is wrong with the grade")
-        session = next((s for s in sessions if s.ask_id == ask_id and s.state == "answered"), None)
-        posed = next((p for p in session.posed if p.question_id == question_id), None) if session else None
-        if session is None or session.answer is None or posed is None:
-            raise DisputeRefused(f"{ask_id}/{question_id} is not an answered question of this package")
-        if session.outstanding_grade(question_id) is not None:
-            raise DisputeRefused(f"a grade request for {ask_id}/{question_id} is still waiting")
-        response = dict(zip((p.question_id for p in session.posed),
-                            _responses(session.answer, session.posed)))[question_id]
+        not_answered = f"{ask_id}/{question_id} is not an answered question of this package"
+        # An ask belongs to one session (the log refuses a second), so the
+        # first session with this ask is the only one.
+        session = next((s for s in sessions if s.ask_id == ask_id), None)
+        if session is None:
+            raise DisputeRefused(not_answered)
+        match session.dispute_standing(question_id):
+            case q.NotAnswered():
+                raise DisputeRefused(not_answered)
+            case q.GradeWaiting():
+                raise DisputeRefused(f"a grade request for {ask_id}/{question_id} is still waiting")
+            case q.Disputable(posed=posed, answer=answer):
+                pass
+        response = dict(zip((p.question_id for p in session.posed), _responses(answer, session.posed)))[question_id]
         prior = g.verdict(posed, response, session.judgments_of(question_id))
         texts = self._record_texts(sessions, posed.sources)
         records = [texts[(s.kind, s.source_id, s.pin)] for s in posed.sources if (s.kind, s.source_id, s.pin) in texts]
@@ -581,8 +464,7 @@ class Flow:
             for read in self._session_reads(session):
                 if read["result"] is None or read["result"].get("sha256") not in cited:
                     continue
-                whole = reads([(digest, self.pages.read(digest)) for digest in read["digests"]])
-                for record in material(whole, grants):
+                for record in material(self._reads.whole(read), grants):
                     out[(record["kind"], record["source_id"], record["pin"])] = {
                         key: record[key] for key in ("kind", "source_id", "pin", "sha256", "title", "text")}
         return out

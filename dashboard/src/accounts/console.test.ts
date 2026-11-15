@@ -8,9 +8,15 @@ import { signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
+import { createChecks } from './check'
+import { createConnect } from './connect'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
+import { createKeepers } from './keepers'
+import type { KeepersModel } from './keepers'
+import { createTokens } from './tokens'
+import type { TokensModel } from './tokens'
 import { csrfHeader, paths } from './wire'
 import type { Send } from './wire'
 
@@ -73,7 +79,14 @@ const waitingPanel = (): SubscriptionsModel => ({
   view: signal<PanelView>({ kind: 'waiting' }),
   load: vi.fn(() => Promise.resolve()),
   retry: vi.fn(() => Promise.resolve()),
+  connecting: createConnect({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  checking: createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
 })
+
+/** A Keepers panel that waits for someone to be signed in. It has its own
+    tests; here it only has to be there. */
+const waitingKeepers = (): KeepersModel => createKeepers({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn() })
+const waitingTokens = (): TokensModel => createTokens({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), now: () => 0 })
 
 /** Longer than any wait the console announces or times. */
 const longMs = 1000
@@ -363,7 +376,7 @@ describe('the frame', () => {
   const drawn = (view: View) => {
     const state = signal(view)
     const model = { view: state, load: vi.fn(() => Promise.resolve()), signOut: vi.fn(() => Promise.resolve()) } satisfies ConsoleModel
-    return { container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} />`).container, model, state }
+    return { container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} />`).container, model, state }
   }
   const count = (selector: string) => views.map(([name, view]) => [name, drawn(view).container.querySelectorAll(selector).length])
 
@@ -421,7 +434,7 @@ describe('the frame', () => {
   const live = (answers: readonly Scripted[]) => {
     const { send } = scripted(answers)
     const model = createConsole({ send, leave: vi.fn() })
-    return { model, container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} />`).container }
+    return { model, container: render(html`<${ConsoleFrame} model=${model} subscriptions=${waitingPanel()} keepers=${waitingKeepers()} tokens=${waitingTokens()} />`).container }
   }
 
   it('puts a new note on the page when a reading fails again', async () => {

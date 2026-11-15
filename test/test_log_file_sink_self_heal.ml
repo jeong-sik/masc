@@ -76,9 +76,15 @@ let contains hay needle =
 
 (* Normal path: init + emit → file has the message. Sanity check that the
    harness itself is wired up. *)
+let open_file_sink ?identity_recheck_interval_s dir =
+  match R.init_file_sink ?identity_recheck_interval_s dir with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (R.file_sink_error_to_string error)
+;;
+
 let normal_emit_lands_on_disk () =
   let dir = fresh_dir "normal" in
-  R.init_file_sink dir;
+  open_file_sink dir;
   L.info "test_log_file_sink_self_heal:normal:hello %s" "world";
   let path = log_path dir in
   check bool "file exists" true (Sys.file_exists path);
@@ -93,7 +99,7 @@ let normal_emit_lands_on_disk () =
    proof that no stat check ran. *)
 let unlink_within_window_is_throttled () =
   let dir = fresh_dir "throttled" in
-  R.init_file_sink ~identity_recheck_interval_s:60.0 dir;
+  open_file_sink ~identity_recheck_interval_s:60.0 dir;
   (* First emit consumes the initial identity check (armed at init). *)
   L.info "test_log_file_sink_self_heal:throttled:before";
   let path = log_path dir in
@@ -110,7 +116,7 @@ let unlink_within_window_is_throttled () =
    correct path, and record its own message. *)
 let unlink_after_window_recreates () =
   let dir = fresh_dir "unlinked" in
-  R.init_file_sink ~identity_recheck_interval_s:0.05 dir;
+  open_file_sink ~identity_recheck_interval_s:0.05 dir;
   L.info "test_log_file_sink_self_heal:unlinked:before";
   let path = log_path dir in
   check bool "file exists before unlink" true (Sys.file_exists path);

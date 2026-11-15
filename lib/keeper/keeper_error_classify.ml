@@ -15,6 +15,7 @@ let is_transient_internal_transport_error = function
   | Llm_provider.Http_client.Tls_error -> true
   | Llm_provider.Http_client.Connection_refused
   | Llm_provider.Http_client.Dns_failure
+  | Llm_provider.Http_client.Unreachable
   | Llm_provider.Http_client.Timeout
   | Llm_provider.Http_client.Local_resource_exhaustion
   | Llm_provider.Http_client.Connection_reset
@@ -65,6 +66,7 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
          { kind =
              ( Llm_provider.Http_client.Connection_refused
              | Llm_provider.Http_client.Dns_failure
+             | Llm_provider.Http_client.Unreachable
              | Llm_provider.Http_client.Timeout
              | Llm_provider.Http_client.Connection_reset
              | Llm_provider.Http_client.End_of_file

@@ -172,9 +172,9 @@ let test_rows_know_their_comment () =
 let check_press label expected actual =
   let show = function
     | Vote.Arm (target, up) ->
-        Printf.sprintf "arm %s %b" (Vote.describe target) up
+        Printf.sprintf "arm %s %b" (Vote.describe ~ko:false target) up
     | Vote.Send (target, up) ->
-        Printf.sprintf "send %s %b" (Vote.describe target) up
+        Printf.sprintf "send %s %b" (Vote.describe ~ko:false target) up
   in
   Alcotest.(check string) label (show expected) (show actual)
 

@@ -251,14 +251,30 @@ let lag_percentiles_to_yojson (lag : lag_percentiles) : Yojson.Safe.t =
       ]
 ;;
 
+(* The [probe] word for each state. [to_fields] writes it and
+   [probe_state_of_fields] reads it back, so a reader of [/health] parses the
+   spelling this module writes. *)
+let probe_word = function
+  | Not_started -> "not_started"
+  | Running -> "running"
+  | Stopped _ -> "stopped"
+  | Cancelled -> "cancelled"
+;;
+
+let probe_state_of_fields ~probe ~stopped_reason =
+  let named state = String.equal (probe_word state) probe in
+  match stopped_reason with
+  | Some reason when named (Stopped reason) -> Some (Stopped reason)
+  | Some _ | None -> List.find_opt named [ Not_started; Running; Cancelled ]
+;;
+
 let to_fields t : (string * Yojson.Safe.t) list =
+  let state = Atomic.get t.state in
   let probe =
-    match Atomic.get t.state with
-    | Not_started -> [ "probe", `String "not_started" ]
-    | Running -> [ "probe", `String "running" ]
-    | Stopped reason ->
-      [ "probe", `String "stopped"; "stopped_reason", `String reason ]
-    | Cancelled -> [ "probe", `String "cancelled" ]
+    ("probe", `String (probe_word state))
+    :: (match state with
+        | Stopped reason -> [ "stopped_reason", `String reason ]
+        | Not_started | Running | Cancelled -> [])
   in
   let shape =
     [ "interval_ms", `Float (t.interval_s *. milliseconds_per_second)

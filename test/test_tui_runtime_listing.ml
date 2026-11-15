@@ -24,7 +24,7 @@ let runtime id : Masc.Tui_decode.runtime_option =
     ro_effective_max_context = 200000; ro_max_context_source = Runtime_context_capability;
     ro_max_output_tokens = Some 8192; ro_declared_reasoning_effort = None; ro_is_local = false;
     ro_is_default = false;
-    ro_quota_exhausted = false; ro_quota_resets_at = None; ro_quota_scope = None; ro_quota_scope_id = None;
+    ro_quota_rest = None; ro_quota_scope = None; ro_quota_scope_id = None;
     ro_credential_refused_at = None;
     ro_rate_limited = false; ro_rate_limit_resets_at = None;
     ro_failed_attempt = None }
@@ -145,7 +145,7 @@ let test_refusing_runtimes_are_deemphasized_and_toggle_keeps_order () =
   let state = lane_state () in
   let snapshot = match state.runtime_surface with
     | Some snapshot -> snapshot | None -> Alcotest.fail "missing fixture" in
-  let exhausted = { (runtime "b") with ro_quota_exhausted = true } in
+  let exhausted = { (runtime "b") with ro_quota_rest = Some { Runtime_quota_window.cause = Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused; rest = Runtime_quota_window.Observed_until infinity } } in
   let limited = { (runtime "c") with ro_rate_limited = true } in
   let resolved = { snapshot.rss_resolved with
     rrs_runtimes = [runtime "a"; exhausted; limited] } in

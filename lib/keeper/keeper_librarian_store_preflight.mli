@@ -26,3 +26,27 @@ val validator : unit ->
   read_fence:Keeper_librarian_history_resolution_lineage.reader ->
   read_resolution:Keeper_librarian_history_resolution_lineage.reader ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
+
+val preflight : unit -> Lane_addon_store_preflight.payload_validator
+(** The deploy check of a Librarian original: {!validator}, then the reads its
+    consumer makes of Exact files, on the files the Exact check leaves (RFC
+    exact-request-skips-a-slot-that-refused-its-input 3.3, item 5). An
+    original whose consumer stops on those files is refused with every scope
+    of its owner, and with its proof link when no record of it is left. The
+    consumer's own rules decide: a Dispatch_pending original recovers its
+    record and confirms the final it finishes with, a phase that holds a
+    judgment decodes and confirms it, and an execution refusal confirms the
+    final its evidence names. Admission then reads the size evidence of a body
+    refusal ([Request_body_refused]) through the original's record, so an
+    admission original whose record the Exact check deletes is refused for
+    that final too; history and floor build its evidence from the final
+    alone. A gate follows its parent execution. A
+    partition and a root that replaces an earlier frontier compare the
+    evidence they retain with what their executions show. A manual
+    installation, a fenced history original and a member of a Closing or
+    Closed closure are read by no consumer. A proof that names another store
+    root stops the scan. Live owner state is not observed.
+
+    A check belongs to one scan, like {!validator}. It keeps each owner's
+    forest of parts and partitions for the scan, and reads it again before it
+    refuses a record. *)

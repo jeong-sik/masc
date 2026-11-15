@@ -19,7 +19,7 @@ let max_width = 200
 
 let row_at ~status width =
   let line =
-    Masc_tui_footer.line ~status ~dim:"" ~reset:"" ~max_cells:width ~port:8935
+    Masc_tui_footer.line ~ko:false ~status ~dim:"" ~reset:"" ~max_cells:width ~port:8935
       ~hints ()
     |> Masc_tui_theme.strip_sgr
   in
@@ -85,7 +85,14 @@ let test_the_count_is_kept_when_the_reason_does_not_fit () =
    notice steps down first. *)
 let test_a_notice_without_a_shorter_text_outranks_the_operator_notice () =
   let local = "/srv/example/workspace" in
-  let whole_mismatch = "MISMATCH local " ^ local ^ " (r:retry)" in
+  let whole_mismatch =
+    match
+      Masc_tui_footer.status_item_projection ~ko:false
+        (Masc_tui_footer.Workspace_mismatch local)
+    with
+    | Some item -> item.Masc_tui_footer.text
+    | None -> Alcotest.fail "a mismatch with a local path has no footer item"
+  in
   let narrowest_row_with_the_mismatch =
     cells ("  " ^ whole_mismatch ^ "  Enter:open  q:quit  \xe2\x80\xa6?")
   in
@@ -104,7 +111,7 @@ let test_a_notice_without_a_shorter_text_outranks_the_operator_notice () =
       check_bool (label "the row fits") true (cells row <= width);
       check_bool (label "the mismatch is whole or left out") true
         (contains ~needle:whole_mismatch row
-         || not (contains ~needle:"MISMATCH" row));
+         || not (contains ~needle:local row));
       check_bool (label "drawn from the narrowest row that can carry the mismatch")
         true
         (contains ~needle:whole_mismatch row
@@ -129,7 +136,7 @@ let fallback = "Resize to confirm quit"
 (* The row as drawn, and the same row without its colour marks. *)
 let marked_and_plain_row_with ~preferred_action ~status width =
   let line =
-    Masc_tui_footer.line ~preferred_action ~action_text:fallback ~status ~dim:""
+    Masc_tui_footer.line ~ko:false ~preferred_action ~action_text:fallback ~status ~dim:""
       ~reset:"" ~max_cells:width ~port:8935 ~hints ()
   in
   match String.split_on_char '\n' line with

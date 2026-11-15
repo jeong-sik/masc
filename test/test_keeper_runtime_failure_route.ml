@@ -41,7 +41,7 @@ let test_api_quota_message_does_not_override_rate_limit () =
     err;
   check_route
     "PaymentRequired is the typed API hard-quota signal"
-    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
+    (KFR.Retry_after_observed { retry_class = (KFR.Hard_quota KFR.Payment_refused); retry_after = None })
     (Agent_core.Error.Api
        (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
 
@@ -176,7 +176,7 @@ let test_api_input_capacity_is_terminal_judgment () =
 let test_provider_quota_family_threads_hint () =
   check_route
     "provider HardQuota preserves retry-after"
-    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 3600.0 })
+    (KFR.Retry_after_observed { retry_class = (KFR.Hard_quota KFR.Provider_quota_refused); retry_after = Some 3600.0 })
     (Agent_core.Error.Provider
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
@@ -443,7 +443,7 @@ let test_response_observed_per_class () =
   List.iter
     (check_observed false)
     [ retry KFR.Rate_limited
-    ; retry KFR.Hard_quota
+    ; retry (KFR.Hard_quota KFR.Provider_quota_refused)
     ; retry KFR.Provider_capacity
     ; retry KFR.Server_error
     ; retry KFR.Network_transient
@@ -617,11 +617,11 @@ let test_route_resumes_on_same_path_per_class () =
     ; "", retry KFR.Network_transient
     ; "", retry KFR.Provider_timeout
     ; "", retry KFR.Local_admission_timeout
-    ; "with a reset", retry ~retry_after:3600.0 KFR.Hard_quota
+    ; "with a reset", retry ~retry_after:3600.0 (KFR.Hard_quota KFR.Provider_quota_refused)
     ];
   List.iter
     (check_resumes false)
-    [ "without a reset", retry KFR.Hard_quota
+    [ "without a reset", retry (KFR.Hard_quota KFR.Provider_quota_refused)
     ; "refusal", retry (empty_completion Agent_core.Types.Refusal)
     ; "content filter", retry (empty_completion Agent_core.Types.ContentFilter)
     ; ( "repetition truncation"
@@ -634,9 +634,9 @@ let test_route_resumes_on_same_path_per_class () =
     ; "unmatched tool calls", retry (empty_completion Agent_core.Types.UnmatchedToolCalls)
     ; ( "unknown"
       , retry (empty_completion (Agent_core.Types.Unknown "future_provider_reason")) )
-    ; "with a zero reset", retry ~retry_after:0.0 KFR.Hard_quota
-    ; "with a negative reset", retry ~retry_after:(-5.0) KFR.Hard_quota
-    ; "with a NaN reset", retry ~retry_after:Float.nan KFR.Hard_quota
+    ; "with a zero reset", retry ~retry_after:0.0 (KFR.Hard_quota KFR.Provider_quota_refused)
+    ; "with a negative reset", retry ~retry_after:(-5.0) (KFR.Hard_quota KFR.Provider_quota_refused)
+    ; "with a NaN reset", retry ~retry_after:Float.nan (KFR.Hard_quota KFR.Provider_quota_refused)
     ; "", rotate KFR.Auth_failed
     ; "", rotate KFR.Authorization_refused
     ; "", rotate KFR.Model_unavailable
@@ -733,7 +733,7 @@ let test_candidate_fault_route_agreement () =
       , rotate KFR.Authorization_refused )
     ; ( "PaymentRequired"
       , Llm_provider.Retry.PaymentRequired { message = "402" }
-      , retry KFR.Hard_quota )
+      , retry (KFR.Hard_quota KFR.Payment_refused) )
     ; "NotFound", Llm_provider.Retry.NotFound { message = "404" }, rotate KFR.Model_unavailable
     ; ( "RateLimited with hint"
       , Llm_provider.Retry.RateLimited { retry_after = Some 30.0; message = "slow down" }

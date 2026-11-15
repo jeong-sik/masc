@@ -3,7 +3,9 @@ import type { ArtifactWorkspace } from '../../api/published-artifacts'
 import { isRecord } from '../common/normalize'
 
 /** Read the actual pair so a mismatched response is distinguishable from a
- * transport failure. This public health read does not authorize receipt data. */
+ * transport failure. The server answers the pair only to a requester it gives
+ * a read; any other answer carries no paths and is rejected below. Reading
+ * the pair does not authorize receipt data. */
 export async function observeReceiptWorkspace(onResponseStatus?: (status: number) => void): Promise<ArtifactWorkspace> {
   const { data: health } = await getWithResponse<unknown>('/health?full=1', { consumeWithinTimeout: true,
     reportCredentialRefusal: false,

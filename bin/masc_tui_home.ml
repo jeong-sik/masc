@@ -47,6 +47,7 @@ let ordered_decision_rows rows =
    reachable through their source reading, never offered as current requests. *)
 let decision_rows_of_state (state : state) =
   let reading = approvals_reading state in
+  let ko = state.ui_language = Lang_ko in
   let text ko en = ui_text state ~ko ~en in
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   let approval_rows =
@@ -90,7 +91,7 @@ let decision_rows_of_state (state : state) =
        them waits for a read that matches again. *)
     let identity = match state.workspace_identity with
       | Workspace_identity_match_unconfirmed _ ->
-          [text "워크스페이스 식별 미확인 · 응답 보류" "workspace identity unconfirmed · decisions wait"]
+          [workspace_identity_unconfirmed ~ko ^ text " · 응답 보류" " · decisions wait"]
       | Workspace_identity_unread | Workspace_identity_match
       | Workspace_identity_mismatch _ -> []
     in
@@ -198,6 +199,7 @@ let reconcile_home_request_detail state =
                          ~sort:state.planning_sort planning.pl_goals)))
 
 let continue_rows_of_state (state : state) =
+  let ko = state.ui_language = Lang_ko in
   let text ko en = ui_text state ~ko ~en in
   let last =
     match state.home_last_chat, state.opening_mode with
@@ -259,11 +261,11 @@ let continue_rows_of_state (state : state) =
                     text "최근 대화 " "Last conversation " ^ Masc_tui_ansi.Terminal_text.single_line name
                     ^ (match state.workspace_identity with
                        | Workspace_identity_unread ->
-                           text " 이용 불가 · 워크스페이스 식별 미조회 · 키퍼 선택"
-                             " unavailable · workspace identity not read · choose a Keeper"
+                           text " 이용 불가 · " " unavailable · " ^ workspace_identity_unread ~ko
+                           ^ text " · 키퍼 선택" " · choose a Keeper"
                        | Workspace_identity_match_unconfirmed _ ->
-                           text " 이용 불가 · 워크스페이스 식별 미확인 · 키퍼 선택"
-                             " unavailable · workspace identity unconfirmed · choose a Keeper"
+                           text " 이용 불가 · " " unavailable · " ^ workspace_identity_unconfirmed ~ko
+                           ^ text " · 키퍼 선택" " · choose a Keeper"
                        | Workspace_identity_match | Workspace_identity_mismatch _ ->
                            text " 이용 불가 · 키퍼 선택" " unavailable · choose a Keeper")
                 | (No_chat_receipt | Recorded_chat _ | Session_chat _ | Unconfirmed_chat _

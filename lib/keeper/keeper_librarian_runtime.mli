@@ -6,14 +6,18 @@
     mutation authority. *)
 
 val messages_for_librarian
-  :  Keeper_librarian.input
+  :  source_lines:string list
+  -> Keeper_librarian.input
   -> (Llm_provider.Types.message list, string) result
 
 (** Every variable the [librarian] template is rendered with for a Memory
     pass, with the [continuity] range when one is attached: the input's own
-    variables and the shared [working_contexts_rule] fragment. *)
+    variables and the shared [working_contexts_rule] fragment. [source_lines]
+    are the file-source store's {!Keeper_memory_source_current.budget_lines},
+    which the facts budget counts with the input's current facts. *)
 val librarian_prompt_variables
   :  ?continuity:Keeper_librarian_continuity.prepared
+  -> source_lines:string list
   -> Keeper_librarian.input
   -> ((string * string) list, string) result
 
@@ -271,6 +275,7 @@ val infer_memory_step
 
 val fit_continuity :
   capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
+  source_lines:string list ->
   input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->
   Keeper_librarian_continuity.prepared ->
   (Keeper_librarian_continuity.prepared option, string) result
@@ -364,6 +369,11 @@ type accepted =
     from explicit-candidate admission and grants no publication authority. *)
 type durable_policy = {
   facts_max_bytes : int;
+  facts_source_lines : string list;
+      (** The file-source store's {!Keeper_memory_source_current.budget_lines}
+          when the question was prepared. The facts budget the prompt shows
+          counts them with the input's current facts, as the commit does, so a
+          restored question renders the budget it was sent. *)
   category_cap : int;
   facts_per_category_cap : int;
 }
@@ -377,7 +387,7 @@ type durable_preparation = {
   rendered_prompt : string;
   output_schema : Yojson.Safe.t;
 }
-val prepare_durable : now:float -> Keeper_librarian.input ->
+val prepare_durable : now:float -> source_lines:string list -> Keeper_librarian.input ->
   (durable_preparation, string) result
 (** Resolve the original policy and both prompt assets once, on the caller
     fiber. When counterpart input is present, the resolved prompt must reference
@@ -450,7 +460,8 @@ type durable_step_preparation = {
 val durable_step_source_input : Keeper_librarian.input -> Keeper_librarian.input
 (** The input a step's preparation holds for a floor question's input: the
     Runtime floor's volatile Memory pass reads it with its working context cleared. *)
-val prepare_durable_step : now:float -> context:durable_step_context -> Keeper_librarian.input ->
+val prepare_durable_step : now:float -> context:durable_step_context ->
+  source_lines:string list -> Keeper_librarian.input ->
   (durable_step_preparation, string) result
 (** Resolve the policy and both prompt assets once, on the caller fiber, for one
     floor question. [input] is the question as {!Keeper_librarian_message_floor.Machine}
@@ -488,6 +499,8 @@ val durable_memory_step : run_id:string -> durable_step_preparation -> durable_s
     These ports perform no provider call or Memory/queue mutation. *)
 type admission_policy = {
   facts_max_bytes : int;
+  facts_source_lines : string list;
+      (** As {!durable_policy.facts_source_lines}. *)
   category_cap : int;
   facts_per_category_cap : int;
 }
@@ -504,6 +517,7 @@ type admission_preparation = {
 type admission_proposal = Deferred | Accepted of accepted
 val prepare_admission : batch:Keeper_memory_admission_queue.batch ->
   retirement:Keeper_memory_admission_judgment.retirement_evidence ->
+  source_lines:string list ->
   Keeper_librarian.input -> (admission_preparation, string) result
 (** Resolve the current template/fragments on the caller fiber; the host
     retains this complete preparation and original substitution bytes before

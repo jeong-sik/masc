@@ -625,7 +625,7 @@ let test_wake_prompt_resolution_order () =
   Alcotest.check_raises
     "a blank fleet value raises instead of falling back"
     (Env_config_core.Config_error
-       "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: autonomous wake prompt must not be blank")
+       "autonomous.wake_prompt: autonomous wake prompt must not be blank")
     (fun () -> ignore (resolve ()))
 ;;
 

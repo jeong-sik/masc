@@ -14,7 +14,16 @@ let rec remove_tree path =
     Unix.rmdir path)
   else Sys.remove path
 
+(* [Server_auth.http_auth_strict_enabled] is also true for a bind host or a
+   base URL that is not loopback. The fixture serves loopback, so a case
+   decides strict auth with [strict] alone and a shell that exports either
+   variable does not decide it instead (#51058). *)
+let with_loopback_identity run =
+  Masc_test_deps.with_process_env Env_config_core.http_base_url_env_key None (fun () ->
+    Masc_test_deps.with_process_env Env_config_core.host_env_key None run)
+
 let with_gateway ?https_port ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ run -> run ()) ~make_routes run =
+  with_loopback_identity @@ fun () ->
   let base_path = Filename.temp_dir "h2-gateway-" "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
@@ -116,6 +125,15 @@ let production ~sw ~clock = Server_routes_http.make_routes ~port:0 ~host:"127.0.
 
 let strict value run =
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" value run
+
+(* The three inputs strict auth is read from, pinned together: the health
+   route answers by posture, so a setting inherited from the shell must not
+   decide which body a test sees. *)
+let health_posture ~strict run =
+  Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT"
+    (Some (if strict then "true" else "false")) @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HOST" (Some "127.0.0.1") @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1:8935") run
 
 (* A browser fetches discovery over its HTTPS/h2 connection before opening
    the separate HTTP/1.1 WebSocket. This does not request RFC 8441 CONNECT. *)
@@ -555,7 +573,7 @@ let test_a_cut_request_body_reaches_no_route () =
               !lines)))
 
 let test_fusion_workspace_admission () =
-  with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
+  with_gateway ~make_routes:production (fun ~player ~reader client ->
     strict None (fun () ->
       let state = match Server_auth.For_testing.snapshot_server_state () with
         | Some state -> state | None -> fail "fixture server has no workspace" in
@@ -566,7 +584,10 @@ let test_fusion_workspace_admission () =
       let expected = [ "expected_base_path", [ base ]; "expected_masc_root", [ root ] ] in
       let foreign = [ "expected_base_path", [ base ^ "/foreign" ]; "expected_masc_root", [ root ] ] in
       let receipt = Masc.Workspace.read_precondition_admission_header in
-      let read path fields = request_with_headers ~token:player ~meth:`GET client (target path fields) in
+      (* Fusion runs are read through [Server_auth.with_board_access]
+         (#50387): a token needs CanReadState, which a Player lacks. *)
+      let read_as token path fields = request_with_headers ~token ~meth:`GET client (target path fields) in
+      let read = read_as reader in
       Masc.Board.reset_global_for_test ();
       Masc.Board_dispatch.reset_for_test ();
       Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:base
@@ -578,6 +599,10 @@ let test_fusion_workspace_admission () =
       let code, headers, _ = read "/api/v1/dashboard/fusion-runs" expected in
       check int "bound list succeeds" 200 code;
       check bool "bound list attests workspace" true (List.mem receipt headers);
+      let code, _, _ = read_as player "/api/v1/dashboard/fusion-runs" expected in
+      check int "a Player token lacks the CanReadState a Fusion read requires" 403 code;
+      let code, _, _ = read_as player "/api/v1/dashboard/fusion-runs/unknown" expected in
+      check int "a Player token is refused before the Fusion detail lookup" 403 code;
       let code, headers, _ = read "/api/v1/dashboard/fusion-runs" foreign in
       check int "foreign list is refused before projection" 409 code;
       check bool "foreign list has no admission receipt" false (List.mem receipt headers);
@@ -600,9 +625,9 @@ let test_fusion_workspace_admission () =
       let code, headers, _ = read_board foreign in
       check int "foreign Board original is refused before lookup" 409 code;
       check bool "foreign Board original has no receipt" false (List.mem receipt headers);
-      let code, _, _ = read board expected in
+      let code, _, _ = read_as player board expected in
       check int "optional reaction actor still rejects the Player token" 403 code;
-      let code, _, _ = read board foreign in
+      let code, _, _ = read_as player board foreign in
       check int "foreign workspace is refused before reaction auth, as on HTTP/1.1" 409 code;
       strict (Some "1") (fun () ->
         let code, _, _ = read_board expected in
@@ -939,12 +964,59 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
    This exchange is HTTP/2, so the body says so; the table's handler once
    answered "http/1.1" for both protocols. *)
 let test_health_names_the_h2_listener () =
+  health_posture ~strict:false @@ fun () ->
   with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     let code, body = request ~meth:`GET client "/health" in
     check int "health answers" 200 code;
     check string "the body names h2" "h2"
       Yojson.Safe.Util.(
         Yojson.Safe.from_string body |> member "protocol" |> member "listener" |> to_string))
+
+(* HTTP/2 runs the same table, so the health route splits its requesters the
+   same way: without a credential under strict auth the public probe, a
+   verified reader the body that names the listener, and a credential that
+   may not read state its refusal. *)
+let test_health_over_h2_follows_the_same_split () =
+  health_posture ~strict:true @@ fun () ->
+  with_gateway ~make_routes:production (fun ~player ~reader client ->
+    let code, body = request ~meth:`GET client "/health" in
+    check int "no credential is answered" 200 code;
+    check (list string) "with the public probe and no other key"
+      [ "live"; "phase"; "ready"; "server"; "version" ]
+      (Yojson.Safe.from_string body |> Yojson.Safe.Util.keys |> List.sort String.compare);
+    let code, body = request ~token:reader ~meth:`GET client "/health" in
+    check int "a reader is answered" 200 code;
+    check string "with the body that names the listener" "h2"
+      Yojson.Safe.Util.(
+        Yojson.Safe.from_string body |> member "protocol" |> member "listener" |> to_string);
+    check int "a credential that may not read state is refused" 403
+      (status ~token:player ~meth:`GET client "/health"))
+
+(* A method other than GET carries neither health body. OPTIONS is answered
+   by the ingress before the table. HEAD runs the GET route of the path
+   (#51921) and is answered with the status of GET and no content, so neither
+   the public probe nor the reader's body goes out with it.
+   [test_server_runtime_bootstrap] reads the same over HTTP/1.1. *)
+let test_other_methods_carry_no_health_body () =
+  health_posture ~strict:true @@ fun () ->
+  with_gateway ~make_routes:production (fun ~player:_ ~reader client ->
+    let code, body = request ~meth:`OPTIONS client Server_health_paths.health in
+    check int "OPTIONS is answered" 204 code;
+    check string "without a body" "" body;
+    List.iter
+      (fun (who, token) ->
+        List.iter
+          (fun path ->
+            let name = Printf.sprintf "HEAD %s, %s" path who in
+            let get_code = status ?token ~meth:`GET client path in
+            let code, body = request ?token ~meth:`HEAD client path in
+            check int (name ^ ": the status of GET") get_code code;
+            check string (name ^ ": no body") "" body)
+          [ Server_health_paths.health
+          ; Server_health_paths.liveness
+          ; Server_health_paths.readiness
+          ])
+      [ "no credential", None; "a reader", Some reader ])
 
 (* Strict auth opens a request without a credential only when the route it
    reaches asks for none: [Always_public] or [Public_read Open_when_strict].
@@ -1011,6 +1083,10 @@ let () =
         ; test_case "a path the router lacks is not found" `Quick
             test_a_path_the_router_lacks_is_not_found
         ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
+        ; test_case "health follows the same split over h2" `Quick
+            test_health_over_h2_follows_the_same_split
+        ; test_case "other methods carry no health body" `Quick
+            test_other_methods_carry_no_health_body
         ; test_case "a route failure follows the response state" `Quick
             test_route_failure_follows_the_response_state
         ; test_case "the HTTP/1.1 error handler answers a fixed body" `Quick

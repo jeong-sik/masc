@@ -25,8 +25,8 @@ let window_exn ~since ~until ~width ~offset =
   | Error error -> Alcotest.failf "window: %s" error
 ;;
 
-let sample ?(disposition = S.Completed) ~ts ~tool duration_ms : S.sample =
-  { ts; tool_name = tool; disposition; duration_ms; result_bytes = None }
+let sample ?(disposition = S.Completed) ?failure_class ?caller ~ts ~tool duration_ms : S.sample =
+  { ts; tool_name = tool; disposition; duration_ms; result_bytes = None; failure_class; caller }
 ;;
 
 let add_exn builder sample =
@@ -485,6 +485,123 @@ let test_a_negative_result_size_is_refused () =
   Alcotest.(check int) "nothing counted" 0 series.total.call_count
 ;;
 
+let test_failures_are_counted_by_class_and_unclassified_ones_apart () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+  in
+  let failed ?failure_class tool = sample ~disposition:S.Failed ?failure_class ~ts:utc_midnight ~tool 1.0 in
+  let series =
+    series_of
+      window
+      [ failed ~failure_class:Tool_result.Dependency_unavailable "a"
+      ; failed ~failure_class:Tool_result.Dependency_unavailable "a"
+      ; failed ~failure_class:Tool_result.Policy_rejection "b"
+      ; failed "b"
+      ; sample ~ts:utc_midnight ~tool:"a" 1.0
+      ]
+  in
+  let total = series.total in
+  Alcotest.(check (list int))
+    "failures, then each class, then the unclassified"
+    [ 4; 2; 1; 0; 0; 0; 1 ]
+    [ total.failure_count
+    ; total.failure_classes.dependency_unavailable
+    ; total.failure_classes.policy_rejection
+    ; total.failure_classes.runtime_failure
+    ; total.failure_classes.workflow_rejection
+    ; total.failure_classes.operator_cancelled
+    ; total.failure_unclassified_count
+    ];
+  let json = S.to_json ~generated_at:0.0 series in
+  let total_json = Yojson.Safe.Util.(json |> member "total") in
+  Alcotest.(check (list (pair string int)))
+    "the json names each class as Tool_result does"
+    [ "dependency_unavailable", 2
+    ; "policy_rejection", 1
+    ; "runtime_failure", 0
+    ; "workflow_rejection", 0
+    ; "operator_cancelled", 0
+    ]
+    Yojson.Safe.Util.(
+      total_json |> member "failure_classes" |> to_assoc |> List.map (fun (key, value) -> key, to_int value))
+;;
+
+let test_callers_are_counted_apart_and_calls_without_one_are_left_out () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+  in
+  let call ?(disposition = S.Completed) ?caller () =
+    sample ~disposition ?caller ~ts:utc_midnight ~tool:"a" 1.0
+  in
+  let series =
+    series_of
+      window
+      [ call ~caller:"quiet" ()
+      ; call ~caller:"busy" ()
+      ; call ~caller:"busy" ()
+      ; call ~disposition:S.Failed ~caller:"flaky" ()
+      ; call ~disposition:S.Failed ~caller:"flaky" ()
+      ; call ~disposition:S.Failed ~caller:"busy" ()
+      ; call ()
+      ; call ~disposition:S.Failed ()
+      ]
+  in
+  Alcotest.(check (list (triple string int int)))
+    "most failures first, then most calls"
+    [ "flaky", 2, 2; "busy", 3, 1; "quiet", 1, 0 ]
+    (List.map
+       (fun (row : S.caller_usage) -> row.caller, row.usage.call_count, row.usage.failure_count)
+       series.by_caller);
+  Alcotest.(check int) "the calls with no caller" 2 series.caller_unobserved_count;
+  Alcotest.(check int)
+    "every call is a Keeper's or unobserved"
+    series.total.call_count
+    (series.caller_unobserved_count
+     + List.fold_left (fun sum (row : S.caller_usage) -> sum + row.usage.call_count) 0 series.by_caller);
+  let json = S.to_json ~generated_at:0.0 series in
+  Alcotest.(check (list string))
+    "the json names the Keepers in the same order"
+    [ "flaky"; "busy"; "quiet" ]
+    Yojson.Safe.Util.(json |> member "by_caller" |> to_list |> List.map (fun row -> row |> member "caller" |> to_string));
+  Alcotest.(check int)
+    "and counts the calls with no caller"
+    2
+    Yojson.Safe.Util.(json |> member "caller_unobserved_count" |> to_int)
+;;
+
+let test_by_caller_keeps_the_limit_without_hiding_calls () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+  in
+  let callers = List.init (S.top_caller_limit + 5) (Printf.sprintf "keeper-%02d") in
+  let series =
+    series_of window (List.map (fun caller -> sample ~caller ~ts:utc_midnight ~tool:"a" 1.0) callers)
+  in
+  Alcotest.(check int) "keeps the limit" S.top_caller_limit (List.length series.by_caller);
+  Alcotest.(check int)
+    "a Keeper cut from the list is not a call without a caller"
+    0
+    series.caller_unobserved_count
+;;
+
+let test_a_class_on_a_call_that_did_not_fail_is_refused () =
+  let window =
+    window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+  in
+  let builder = S.builder window in
+  List.iter
+    (fun disposition ->
+       match
+         S.add
+           builder
+           (sample ~disposition ~failure_class:Tool_result.Runtime_failure ~ts:utc_midnight ~tool:"a" 1.0)
+       with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "a class on a call that did not fail was counted")
+    [ S.Completed; S.Deferred ];
+  Alcotest.(check int) "nothing counted" 0 (S.finish builder).total.call_count
+;;
+
 let test_json_carries_result_sizes_and_null_for_unsized_buckets () =
   let window =
     window_exn ~since:utc_midnight ~until:(utc_midnight +. (2.0 *. hour)) ~width:S.Hour ~offset:0
@@ -544,11 +661,23 @@ let with_masc_root f =
            f ~masc_root:(Filename.concat base ".masc"))))
 ;;
 
-let insert_exn ?(result_bytes = 0) ~masc_root ~record_id ~ts ~tool_name ~disposition duration_ms =
+let insert_exn
+      ?(result_bytes = 0)
+      ?failure_class
+      ?caller
+      ~masc_root
+      ~record_id
+      ~ts
+      ~tool_name
+      ~disposition
+      duration_ms
+  =
   match
     Tool_metrics_store.insert
       ~masc_root
       ~result_bytes
+      ~failure_class
+      ?caller
       { Tool_metrics_store.record_id; ts; tool_name; disposition; duration_ms }
   with
   | Ok () -> ()
@@ -656,12 +785,90 @@ let test_insert_keeps_the_first_size_of_a_record_id () =
     Alcotest.(check int) "the first size stays" 7 series.total.result_bytes_total)
 ;;
 
+let test_read_series_counts_stored_callers () =
+  with_masc_root (fun ~masc_root ->
+    let insert = insert_exn ~masc_root in
+    insert ~caller:"keeper-a" ~record_id:"a1" ~ts:(utc_midnight +. 1.0) ~tool_name:"Execute" ~disposition:"completed" 1.0;
+    insert ~caller:"keeper-a" ~record_id:"a2" ~ts:(utc_midnight +. 2.0) ~tool_name:"Read" ~disposition:"failed" 1.0;
+    insert ~caller:"keeper-b" ~record_id:"b1" ~ts:(utc_midnight +. 3.0) ~tool_name:"Execute" ~disposition:"completed" 1.0;
+    (* A call made outside any Keeper, or stored before callers were kept. *)
+    insert ~record_id:"old" ~ts:(utc_midnight +. 4.0) ~tool_name:"Execute" ~disposition:"completed" 1.0;
+    (* A record id stored twice keeps its first caller. *)
+    insert ~caller:"keeper-b" ~record_id:"a1" ~ts:(utc_midnight +. 1.0) ~tool_name:"Execute" ~disposition:"completed" 1.0;
+    let window =
+      window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+    in
+    let callers (series : S.t) =
+      List.map (fun (row : S.caller_usage) -> row.caller, row.usage.call_count) series.by_caller
+    in
+    let all = read_series_exn ~masc_root ~window () in
+    Alcotest.(check (list (pair string int)))
+      "each Keeper's calls"
+      [ "keeper-a", 2; "keeper-b", 1 ]
+      (callers all);
+    Alcotest.(check int) "the call with no caller" 1 all.caller_unobserved_count;
+    let executes = read_series_exn ~masc_root ~window ~tool_name:"Execute" () in
+    Alcotest.(check (list (pair string int)))
+      "a tool filter narrows the Keepers to the calls of that tool"
+      [ "keeper-a", 1; "keeper-b", 1 ]
+      (callers executes))
+;;
+
+let test_read_series_counts_stored_failure_classes () =
+  with_masc_root (fun ~masc_root ->
+    let insert = insert_exn ~masc_root in
+    insert ~record_id:"ok" ~ts:(utc_midnight +. 1.0) ~tool_name:"Execute" ~disposition:"completed" 1.0;
+    insert
+      ~failure_class:Tool_result.Dependency_unavailable
+      ~record_id:"dep"
+      ~ts:(utc_midnight +. 2.0)
+      ~tool_name:"Execute"
+      ~disposition:"failed"
+      1.0;
+    insert
+      ~failure_class:Tool_result.Policy_rejection
+      ~record_id:"policy"
+      ~ts:(utc_midnight +. 3.0)
+      ~tool_name:"Read"
+      ~disposition:"failed"
+      1.0;
+    (* A failure stored without a class, as every failure was before classes. *)
+    insert ~record_id:"old" ~ts:(utc_midnight +. 4.0) ~tool_name:"Read" ~disposition:"failed" 1.0;
+    (* A record id stored twice keeps its first class. *)
+    insert
+      ~failure_class:Tool_result.Runtime_failure
+      ~record_id:"dep"
+      ~ts:(utc_midnight +. 2.0)
+      ~tool_name:"Execute"
+      ~disposition:"failed"
+      1.0;
+    let window =
+      window_exn ~since:utc_midnight ~until:(utc_midnight +. hour) ~width:S.Hour ~offset:0
+    in
+    let all = read_series_exn ~masc_root ~window () in
+    Alcotest.(check (list int))
+      "failures, dependency, policy, runtime, unclassified"
+      [ 3; 1; 1; 0; 1 ]
+      [ all.total.failure_count
+      ; all.total.failure_classes.dependency_unavailable
+      ; all.total.failure_classes.policy_rejection
+      ; all.total.failure_classes.runtime_failure
+      ; all.total.failure_unclassified_count
+      ];
+    let only_read = read_series_exn ~masc_root ~window ~tool_name:"Read" () in
+    Alcotest.(check (list int))
+      "one tool: policy and unclassified"
+      [ 1; 1 ]
+      [ only_read.total.failure_classes.policy_rejection; only_read.total.failure_unclassified_count ])
+;;
+
 let test_insert_refuses_a_negative_size () =
   with_masc_root (fun ~masc_root ->
     match
       Tool_metrics_store.insert
         ~masc_root
         ~result_bytes:(-1)
+        ~failure_class:None
         { Tool_metrics_store.record_id = "negative"
         ; ts = utc_midnight
         ; tool_name = "read"
@@ -811,6 +1018,22 @@ let () =
             test_result_sizes_are_summed_where_they_are_known
         ; Alcotest.test_case "a negative result size is refused" `Quick test_a_negative_result_size_is_refused
         ; Alcotest.test_case
+            "failures are counted by class and unclassified ones apart"
+            `Quick
+            test_failures_are_counted_by_class_and_unclassified_ones_apart
+        ; Alcotest.test_case
+            "callers are counted apart and calls without one are left out"
+            `Quick
+            test_callers_are_counted_apart_and_calls_without_one_are_left_out
+        ; Alcotest.test_case
+            "by_caller keeps the limit without hiding calls"
+            `Quick
+            test_by_caller_keeps_the_limit_without_hiding_calls
+        ; Alcotest.test_case
+            "a class on a call that did not fail is refused"
+            `Quick
+            test_a_class_on_a_call_that_did_not_fail_is_refused
+        ; Alcotest.test_case
             "json carries result sizes and null for unsized buckets"
             `Quick
             test_json_carries_result_sizes_and_null_for_unsized_buckets
@@ -826,6 +1049,11 @@ let () =
             "insert keeps the first size of a record id"
             `Quick
             test_insert_keeps_the_first_size_of_a_record_id
+        ; Alcotest.test_case
+            "read_series counts stored failure classes"
+            `Quick
+            test_read_series_counts_stored_failure_classes
+        ; Alcotest.test_case "read_series counts the stored callers" `Quick test_read_series_counts_stored_callers
         ; Alcotest.test_case "insert refuses a negative size" `Quick test_insert_refuses_a_negative_size
         ; Alcotest.test_case
             "read_series without a database is empty and creates none"

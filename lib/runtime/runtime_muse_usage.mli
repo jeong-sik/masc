@@ -37,7 +37,7 @@ val observe :
   Runtime_muse_msp.subscription_usage ->
   unit
 (** When a window is spent, rest [scope] until it resets
-    ({!Runtime_quota_window.note_exhausted}); then record the windows
+    ({!Runtime_quota_window.note_read_spent_until}); then record the windows
     ({!Runtime_provider_usage_window.record}, stamped with the observation
     time the host stated in [observed_at_ms], so the report's own "is this
     reset ahead of the moment we saw it" question is answered inside one

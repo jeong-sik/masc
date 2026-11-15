@@ -372,6 +372,73 @@ visibilities = ["public"]
     declaration "";
     check_error "a binding without a time zone is refused before install" path;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
+    check_error "a binding key the package does not read is refused" path;
+    let following output = write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+language = "ko"
+timezone = "Asia/Seoul"
+
+[[binding.sources]]
+source_id = "lesson"
+kind = "lane_output"
+installation_id = "operator-lesson"
+output_id = %S
+selection = "latest_completed"
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest output) in
+    following "scenes";
+    ignore (unwrap (Config.load_file ~path));
+    following "lesson";
+    check_error "a source that is not a lesson's scenes output is refused" path)
+
+(* The shipped operator lesson: the example declaration loads with the
+   package's own manifest, and the binding contract refuses a binding without
+   the time the first lesson reads from. *)
+let shipped_operator_lesson_declaration_loads () =
+  let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
+  let package = loaded.package in
+  check string "the declaration names the package" "operator-lesson" package.id;
+  check (list string) "the package declares the outline and scene outputs"
+    ["outline"; "scene"]
+    (List.sort String.compare
+       (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs));
+  check bool "the package does not ask the operator" false package.operator_asks;
+  check bool "the scenes port selects the scene lane alone" true
+    (List.assoc_opt "scenes" package.outputs = Some (Lane_addon_types.Selected_lanes ["lesson/scenes"]));
+  check bool "the lesson log lives on persistent state" true (package.state_storage = Lane_addon_types.Persistent);
+  check (option string) "compose and export arrive through lane_act" (Some "lane_act") package.action_tool;
+  check int "the example grants a Board and a repository" 2
+    (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true loaded.binding)));
+  with_directory (fun _root _packages directory ->
+    let path = Filename.concat directory "lesson.toml" in
+    let manifest = Unix.realpath (repo_file "addons/operator-lesson/lane.toml") in
+    let declaration binding = write path (Printf.sprintf {|id = "lesson"
+run_id = "lesson"
+manifest_path = %S
+
+[binding]
+sources = []
+language = "ko"
+%s
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest binding) in
+    declaration "since = 1794441600\n";
+    ignore (unwrap (Config.load_file ~path));
+    declaration "";
+    check_error "a binding without since is refused before install" path;
+    declaration "since = \"yesterday\"\n";
+    check_error "a since that is not a number is refused" path;
+    declaration "since = 1794441600\ntimezone = \"Asia/Seoul\"\n";
     check_error "a binding key the package does not read is refused" path)
 
 (* The operator quiz worker itself, read with the host's own decoders: the
@@ -404,7 +471,33 @@ let operator_quiz_worker_speaks_the_host_contract () = with_directory (fun _root
   let tools = Yojson.Safe.Util.(result 1 |> member "tools" |> to_list) in
   let tool name = List.find (fun tool -> Yojson.Safe.Util.(member "name" tool) = `String name) tools in
   check int "the worker advertises its four tools" 4 (List.length tools);
-  ignore (unwrap (Lane_addon_action.validate_schema (Yojson.Safe.Util.member "inputSchema" (tool "lane_act"))));
+  let schema = Yojson.Safe.Util.member "inputSchema" (tool "lane_act") in
+  ignore (unwrap (Lane_addon_action.validate_schema schema));
+  (* Each kind is its own closed alternative, so the host refuses a member
+     another kind uses before the worker sees the action. *)
+  let send action = Lane_addon_action.validate ~schema ~name:"lane_act"
+    (`Assoc [ "context", Yojson.Safe.from_string context; "request_id", `String "act-2";
+              "action", Yojson.Safe.from_string action ]) in
+  List.iter (fun (label, action) -> check bool label true (Result.is_ok (send action)))
+    [ "a compose with a count", {|{"kind":"compose","questions":2}|};
+      "a dispute with its three members", {|{"kind":"dispute","ask_id":"a","question_id":"q1","note":"n"}|};
+      "an export alone", {|{"kind":"export"}|} ];
+  List.iter (fun (label, action) -> check bool label true (Result.is_error (send action)))
+    [ "a dispute that names questions",
+      {|{"kind":"dispute","ask_id":"a","question_id":"q1","note":"n","questions":1}|};
+      "a compose without a count", {|{"kind":"compose"}|};
+      "a dispute without a note", {|{"kind":"dispute","ask_id":"a","question_id":"q1"}|} ];
+  (* The shipped dispute row action is offered on the Dispute alternative of
+     the schema this worker advertises, and leaves only the note. *)
+  let package = (unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml"))).package in
+  (match package.action_tool, package.presentation.Lane_addon_presentation.actions with
+   | Some tool_name, [ action ] ->
+       (match Lane_addon_row_action.judge ~tool_name ~tool_schema:schema action with
+        | Lane_addon_row_action.Offered
+            { branch = Some 1; human = [ { Lane_addon_row_action.name = "note"; required = true } ] } -> ()
+        | Lane_addon_row_action.(Offered _ | Refused _) ->
+            fail "the dispute row action is offered on the Dispute alternative and leaves the note")
+   | (Some _ | None), _ -> fail "the quiz declares one row action and its action tool");
   ignore (unwrap (Lane_addon_packet.decode (structured 2)));
   check string "compose is confirmed" "confirmed" Yojson.Safe.Util.(structured 3 |> member "status" |> to_string);
   (match unwrap (Lane_addon_host_request.listing_of_json (structured 4)) with
@@ -1057,6 +1150,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;
      test_case "the operator quiz worker speaks the host contract" `Quick operator_quiz_worker_speaks_the_host_contract;
+     test_case "the shipped operator lesson declaration loads with its manifest" `Quick shipped_operator_lesson_declaration_loads;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
      test_case "package interface validates bindings before installation" `Quick package_interface;
      test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;

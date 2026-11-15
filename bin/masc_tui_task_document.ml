@@ -3,15 +3,17 @@ module Tui_decode = Masc.Tui_decode
 module Message_layout = Masc_tui_message_layout
 module Planning_detail = Masc_tui_planning_detail
 
-let status_label ~ko (status : Masc_domain.task_status) =
+let status_tag_label ~ko (tag : Masc_domain.Task_status_tag.t) =
   let text korean english = if ko then korean else english in
-  match status with
-  | Masc_domain.Todo -> text "할 일" "Todo"
-  | Claimed _ -> text "담당됨" "Claimed"
-  | InProgress _ -> text "진행 중" "In progress"
-  | AwaitingVerification _ -> text "검증 대기" "Awaiting verification"
-  | Done _ -> text "완료" "Done"
-  | Cancelled _ -> text "취소" "Cancelled"
+  match tag with
+  | Todo -> text "할 일" "Todo"
+  | Claimed -> text "담당됨" "Claimed"
+  | In_progress -> text "진행 중" "In progress"
+  | Awaiting_verification -> text "검증 대기" "Awaiting verification"
+  | Done -> text "완료" "Done"
+  | Cancelled -> text "취소" "Cancelled"
+
+let status_label ~ko status = status_tag_label ~ko (Masc_domain.task_status_tag status)
 
 (* A Task opened from its Goal reads like the Goal: the same section title
    style (info colour, bold) and the same receded rows for where a fact came

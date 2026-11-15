@@ -204,7 +204,7 @@ is-default=true
   (match initial_pressure with
    | None -> Runtime_candidate_backpressure.note_rate_limit ~candidate:secondary.candidate_backpressure ~retry_after:None
    | Some `Rate_limit -> Runtime_candidate_backpressure.note_rate_limit ~candidate:primary.candidate_backpressure ~retry_after:None
-   | Some `Quota -> Runtime_quota_window.note_observed_exhausted ~scope:(Runtime_instance.quota_scope_of_runtime primary)
+   | Some `Quota -> Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:(Runtime_instance.quota_scope_of_runtime primary)
    | Some `Failed -> Runtime_candidate_backpressure.note_failed_attempt ~candidate:primary.candidate_backpressure
        ~failure:Server_error ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"other-keeper"));
   let manifest = Filename.concat root "lane.toml" in

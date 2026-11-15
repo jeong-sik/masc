@@ -211,13 +211,27 @@ let host_media store ~kind ~media_type encoded =
     let* reference = host_put store ~bytes:encoded ~mime:host_text_mime in
     Ok (named "undecodable_base64" reference ["detail", `String detail])
 
-let host_response producer ~min_result_bytes ~success ~content ~content_blocks =
-  let store = Tool_blob_store.create ~base_path:producer.base_path in
+(* The blob rules of one retained receipt response, host or Codex: base64
+   media goes by artifact address, and when the result carries at least
+   [min_result_bytes] bytes of text, each text body shorter as its marker goes
+   as that marker. [text_bytes] is that text, as the receipt kind measures it. *)
+type response_blobs =
+  { media : kind:string -> media_type:string -> string -> (Yojson.Safe.t, string) result
+  ; text_body : string -> (string, string) result
+  }
+
+let response_blobs ~base_path ~min_result_bytes ~text_bytes =
+  let store = Tool_blob_store.create ~base_path in
   let stored = ref [] in
-  let text_body =
-    if host_result_text_bytes ~content content_blocks >= min_result_bytes
-    then host_text_body store ~stored
-    else Result.ok in
+  { media = host_media store
+  ; text_body =
+      (if text_bytes >= min_result_bytes then host_text_body store ~stored else Result.ok)
+  }
+
+let host_response producer ~min_result_bytes ~success ~content ~content_blocks =
+  let blobs = response_blobs ~base_path:producer.base_path ~min_result_bytes
+      ~text_bytes:(host_result_text_bytes ~content content_blocks) in
+  let text_body = blobs.text_body in
   let provider_json block =
     Agent_core.Checkpoint.wire_content_block_to_json_result
       ~scope:"official_client_original_tool_result" block
@@ -228,11 +242,11 @@ let host_response producer ~min_result_bytes ~success ~content ~content_blocks =
       let* text = text_body text in
       provider_json (Llm_provider.Types.Text text)
     | Image {media_type; source=Llm_provider.Types.Base64 encoded} ->
-      host_media store ~kind:"image" ~media_type encoded
+      blobs.media ~kind:"image" ~media_type encoded
     | Document {media_type; source=Llm_provider.Types.Base64 encoded} ->
-      host_media store ~kind:"document" ~media_type encoded
+      blobs.media ~kind:"document" ~media_type encoded
     | Audio {media_type; source=Llm_provider.Types.Base64 encoded} ->
-      host_media store ~kind:"audio" ~media_type encoded
+      blobs.media ~kind:"audio" ~media_type encoded
     | Image {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
     | Document {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
     | Audio {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
@@ -248,6 +262,33 @@ let host_response producer ~min_result_bytes ~success ~content ~content_blocks =
         Ok (block :: encoded)) (Ok []) blocks
       |> Result.map (fun blocks -> `List (List.rev blocks)) in
   Ok (`Assoc ["success", `Bool success; "content", `String content; "content_blocks", content_blocks])
+
+(* A Codex result has no [content] beside its items: its text is the sum of
+   its [inputText] items. *)
+let codex_text_bytes items =
+  List.fold_left (fun sum (_, held) ->
+    match (held : Keeper_client_tool_outbox_media.codex_item) with
+    | Input_text text -> sum + String.length text
+    | Data_url_image _ | Other_item -> sum) 0 items
+
+let codex_response ~base_path ~min_result_bytes response =
+  match Keeper_client_tool_outbox_media.codex_items response with
+  | None -> Ok response
+  | Some items ->
+    let blobs = response_blobs ~base_path ~min_result_bytes
+        ~text_bytes:(codex_text_bytes items) in
+    let item_json (item, (held : Keeper_client_tool_outbox_media.codex_item)) =
+      match held with
+      | Input_text text ->
+        let* text = blobs.text_body text in
+        Ok (Keeper_client_tool_outbox_media.with_input_text text item)
+      | Data_url_image {media_type; payload} -> blobs.media ~kind:"image" ~media_type payload
+      | Other_item -> Ok item in
+    let* items = List.fold_left (fun acc item ->
+        let* written = acc in
+        let* item = item_json item in
+        Ok (item :: written)) (Ok []) items in
+    Ok (Keeper_client_tool_outbox_media.with_codex_items (List.rev items) response)
 
 let rec mark_response_sent delivery =
   let current = Atomic.get delivery.producer.delivery in
@@ -280,7 +321,9 @@ let retain_confirmed_calls snapshot ~call_ids =
     | _ -> false in
   { snapshot with entries = List.filter is_confirmed snapshot.entries }
 
-let load_committed ~base_path ~keeper_name =
+(* Every entry of the outbox directory is a receipt: staging and producer
+   leases live in sibling directories. *)
+let committed_paths ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
   let* names =
     match Fs_compat.path_kind ~follow:false directory with
@@ -290,6 +333,26 @@ let load_committed ~base_path ~keeper_name =
       |> Result.map (List.sort String.compare)
       |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
     | Fs_compat.Other -> Error "tool outbox is not a directory" in
+  Ok (directory, List.map (Filename.concat directory) names)
+
+let read_committed path =
+  let* json = read path in
+  match json with
+  | None -> Error "tool outbox receipt disappeared during load"
+  | Some json ->
+    let* () = validate path json in
+    Ok json
+
+let inspect_committed ~base_path ~keeper_name =
+  let* _directory, paths = committed_paths ~base_path ~keeper_name in
+  Ok
+    (List.map
+       (fun path ->
+          path, Result.map (fun (_ : Yojson.Safe.t) -> ()) (read_committed path))
+       paths)
+
+let load_committed ~base_path ~keeper_name =
+  let* directory, paths = committed_paths ~base_path ~keeper_name in
   let inactive_producers = ref Producer_map.empty in
   let producer_inactive json =
     match json with
@@ -313,16 +376,11 @@ let load_committed ~base_path ~keeper_name =
             Ok inactive)
        | Some _ -> Error "invalid host result producer identity")
     | _ -> Error "tool result receipt must be an object" in
-  let* entries = List.fold_left (fun acc name ->
+  let* entries = List.fold_left (fun acc path ->
     let* acc = acc in
-    let path = Filename.concat directory name in
-    let* json = read path in
-    match json with
-    | None -> Error "tool outbox receipt disappeared during load"
-    | Some json ->
-      let* () = validate path json in
-      let* inactive = producer_inactive json in
-      if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) names in
+    let* json = read_committed path in
+    let* inactive = producer_inactive json in
+    if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) paths in
   Ok {directory; entries = List.rev entries}
 
 (* A receipt with no [call_id] names no request, so no execution owns it. *)

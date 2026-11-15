@@ -77,7 +77,14 @@ val decode_response : status_code:int -> body:string -> response
     proof. Unknown or malformed fields retain an unanswered observation. *)
 val unanswered : string -> response
 val committed_post_id : response -> Board_types.Post_id.t option
-val response_diagnostic : response -> string option
+val response_diagnostic : ko:bool -> response -> string option
+(** What to say about a response beyond whether it took: the server's own
+    message for a failure, or why no readable answer came back. *)
+
+val outcome_unknown : ko:bool -> string
+(** A post that may or may not have been created. The Board row that asks
+    for a look before retrying and the diagnostic that says why name it in
+    these words. *)
 val response_effect : response -> Failure_effect.t
 
 type 'authority outcome = private

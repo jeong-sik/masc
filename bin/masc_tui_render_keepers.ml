@@ -3093,7 +3093,13 @@ let secret_lines (state : state) (k : keeper) =
   match keeper_composite_of state ~keeper_name:k.k_name with
   | None | Some { kcr_secret = None; _ } -> None
   | Some { kcr_secret = Some p; _ } ->
-      let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
+      (* HIGH-RISK-UNREVIEWED: [keeper_secret_status_text] already makes an
+         unknown producer word one printable row; the styles below wrap it
+         as it is. *)
+      let status =
+        Masc.Tui_decode.keeper_secret_status_text
+          ~ko:(state.ui_language = Lang_ko) p.ksp_status
+      in
       let status_label = t "  상태:    " "  Status:  " in
       let status_line =
         match p.ksp_status with
@@ -3133,7 +3139,7 @@ let secret_lines (state : state) (k : keeper) =
       @ [ ""
         ; dim
             (if p.ksp_values_validated then
-               t "  값을 읽고 검증했음. 값은 여기로 보내지지 않음."
+               t "  값을 읽고 검증했음. 값은 여기로 보내지 않음."
                  "  Values were read and validated. They are never sent here."
              else
                t "  마지막 읽기에서 값을 검증하지 못함."
@@ -4204,7 +4210,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                     state.keepers
                 in
                 let binding_reference (binding : Masc.Tui_decode_connectors.connector_binding) =
-                  Masc_tui_connector_unbind.channel_label
+                  Masc_tui_connector_unbind.channel_label ~ko
                     ~channel_id:binding.cb_channel_id
                     ~channel_name:binding.cb_channel_name
                 in
@@ -4398,7 +4404,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | Some _ | None -> None in
       let error_lines = match error with
         | Some detail ->
-            [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
+            [ (Theme.bad ()) ^ "  "
+              ^ (if observed then ui_text state ~ko:"이전 관측 · " ~en:"STALE · " else "")
               ^ Terminal_text.single_line detail ^ Ansi.reset ]
         | None -> [] in
       let progress = match pending with
@@ -4715,25 +4722,30 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           let error = keeper_composite_error_of state ~keeper_name:k.k_name in
           let reading_now = keeper_composite_reading_now state ~keeper_name:k.k_name in
           let observed = Option.is_some reading in
+          let t korean english = ui_text state ~ko:korean ~en:english in
           let failure = match error with
             | None -> []
             | Some detail ->
-                [ (Theme.bad ()) ^ "  " ^ (if observed then "STALE · " else "")
+                [ (Theme.bad ()) ^ "  " ^ (if observed then t "이전 관측 · " "STALE · " else "")
                   ^ Terminal_text.single_line detail ^ Ansi.reset ] in
           let progress = if reading_now then
               [ loading_row (if observed
-                  then "refreshing execution snapshot · last observation"
-                  else "reading execution snapshot") ]
+                  then t "실행 상태 갱신 중 · 마지막 관측"
+                      "refreshing execution snapshot · last observation"
+                  else t "실행 상태 읽는 중" "reading execution snapshot") ]
             else [] in
           let lines = match secret_lines state k with
             | Some lines -> lines
             | None ->
                 (match reading, error, reading_now with
                  | None, None, false ->
-                     [ Ansi.dim ^ "  Execution snapshot not observed" ^ Ansi.reset ]
+                     [ Ansi.dim ^ t "  실행 상태 미관측" "  Execution snapshot not observed" ^ Ansi.reset ]
                  | None, (Some _ | None), true | None, Some _, false -> []
                  | Some _, (Some _ | None), (true | false) ->
-                     [ Ansi.dim ^ "  (no projection reported for this Keeper)" ^ Ansi.reset ]) in
+                     [ Ansi.dim
+                       ^ t "  (이 Keeper 시크릿 상태 보고 없음)"
+                           "  (no projection reported for this Keeper)"
+                       ^ Ansi.reset ]) in
           failure @ progress @ lines
       | Detail_github ->
           let base =
@@ -4787,9 +4799,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
        surface you are on. Bold and underline said it alone before, so the
        answer was gone from a monochrome terminal, from one that drops
        underline, and from every text capture -- a frame dump, a screenshot
-       pasted into an issue, the keyboard-input fixtures. Info's own body
-       opens with a section called "Identity", which is also the name of
-       another tab, so a reader with no mark had a wrong guess waiting.
+       pasted into an issue, the keyboard-input fixtures.
 
        Drawn through [tab_strip] with the row's width: ten tabs are wider
        than the row beside the roster pane, and cut from the right the mark

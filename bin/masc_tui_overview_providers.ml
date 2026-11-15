@@ -292,13 +292,13 @@ let scope_name (account : Masc.Tui_decode_usage.provider_usage_account) =
               providers))
       ^ " · " ^ id
 
-(* The runtime catalogue's own [quota_exhausted], joined by quota scope,
+(* The runtime catalogue's own [quota_rest], joined by quota scope,
    with the reopen time the catalogue states for it. That time is the
    catalogue's, not the provider's window reset, and is drawn apart from it. *)
 type observed =
   | Not_observed_exhausted
   | Observed_exhausted of float option
-      (** The latest [quota_resets_at] among the scope's exhausted runtimes;
+      (** The latest stated reset among the scope's resting runtimes;
           [None] when none of them states one. *)
 
 let later left right =
@@ -312,15 +312,19 @@ let observed_exhaustion ~runtimes scope =
   | Types.Quota_read options ->
       List.fold_left
         (fun observed (option : Tui_decode.runtime_option) ->
-          if
-            option.ro_quota_exhausted
-            && Option.equal String.equal option.ro_quota_scope (Some scope)
-          then
-            match observed with
-            | Not_observed_exhausted -> Observed_exhausted option.ro_quota_resets_at
-            | Observed_exhausted at ->
-                Observed_exhausted (later at option.ro_quota_resets_at)
-          else observed)
+          match option.ro_quota_rest with
+          | Some spent when Option.equal String.equal option.ro_quota_scope (Some scope) ->
+              (* Only a reset the provider stated is a reopen time; a rest
+                 without one states none. *)
+              let stated =
+                match spent.Runtime_quota_window.rest with
+                | Runtime_quota_window.Reset_stated at -> Some at
+                | Runtime_quota_window.Observed_until _ -> None
+              in
+              (match observed with
+               | Not_observed_exhausted -> Observed_exhausted stated
+               | Observed_exhausted at -> Observed_exhausted (later at stated))
+          | Some _ | None -> observed)
         Not_observed_exhausted options
   | Types.Quota_unread | Types.Quota_failed _ -> Not_observed_exhausted
 

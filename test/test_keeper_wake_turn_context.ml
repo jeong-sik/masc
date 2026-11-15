@@ -212,7 +212,7 @@ let action_turn turn_id calls : Masc.Keeper_own_recent_actions.turn =
 ;;
 
 let call ~source_position ~tool ~input ~outcome : Masc.Keeper_own_recent_actions.call =
-  { Masc.Keeper_own_recent_actions.tool; input; outcome;
+  { Masc.Keeper_own_recent_actions.tool; input = Masc.Keeper_own_recent_actions.Arguments input; outcome;
     provenance = { task_id=Some "fixture-task"; trace_id=Some "fixture-trace" };
     source_position }
 ;;
@@ -320,6 +320,7 @@ let test_action_provenance_survives_task_switch () =
   let row ?task ?trace turn =
     `Assoc (["keeper", `String "me"; "keeper_turn_id", `Int turn;
              "tool", `String "read_file"; "input", `Assoc ["path", `String "file"];
+             Masc.Keeper_tool_call_log.input_form_field (`Assoc ["path", `String "file"]);
              "disposition", `String "failed"; "wire_outcome", `String "error";
              "output", `String "unavailable"]
             @ (match task with None -> [] | Some id -> ["task_id", `String id])
@@ -361,6 +362,7 @@ let test_action_occurrences_keep_source_order () =
   let row ?trace turn tool =
     `Assoc (["keeper", `String "me"; "keeper_turn_id", `Int turn;
       "task_id", `String "task-A"; "tool", `String tool; "input", `Assoc [];
+      Masc.Keeper_tool_call_log.input_form_field (`Assoc []);
       "disposition", `String "failed"; "wire_outcome", `String "error"]
       @ (match trace with None -> [] | Some id -> ["trace_id", `String id])) in
   let project ~clipped rows = Actions.turns_of_rows ~keeper_name:"me" ~max_turns:10
@@ -408,6 +410,64 @@ let test_no_digest_without_failures () =
   let section = own_recent_actions_section body in
   check bool "no digest heading without refusals" true
     (Option.is_none (Astring.String.find_sub ~sub:"Rejected already" section))
+;;
+
+(* An earlier build's rows carry no [input_form]. Their input may carry the
+   reserved [_blob] key or be a preview string, so it is not read as
+   arguments, and dropping the rows would render their turn with calls
+   missing. The calls stay; a refusal says its record does not state the
+   form, and shows neither the input nor the refusal text. *)
+let test_a_row_without_its_input_form_is_not_read_as_arguments () =
+  let module Actions = Masc.Keeper_own_recent_actions in
+  let row ~tool ~input outcome =
+    `Assoc
+      ([ "keeper", `String "me"; "keeper_turn_id", `Int 9
+       ; "trace_id", `String "trace-old"; "task_id", `String "task-A"
+       ; "tool", `String tool; "input", input ]
+       @ outcome)
+  in
+  let refused input =
+    [ "wire_outcome", `String "error"
+    ; "output", `String ("Your call to the tool:\n" ^ Yojson.Safe.to_string input) ]
+  in
+  let reference =
+    `Assoc [ "_blob", `Assoc [ "bytes", `Int 1024; "mime", `String "application/json"
+                             ; "preview", `String "{}" ] ]
+  in
+  let arguments = `Assoc [ "path", `String "/old/file.ml" ] in
+  let turns =
+    Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 ~window_saturated:false
+      [ row ~tool:"masc_board_comment" ~input:reference (refused reference)
+      ; row ~tool:"tool_read_file" ~input:arguments (refused arguments)
+      ; row ~tool:"masc_board_list" ~input:(`Assoc [])
+          [ "disposition", `String "completed"; "wire_outcome", `String "ok" ] ]
+  in
+  (match turns with
+   | [ { Actions.calls; _ } ] ->
+     check (list string) "every call stays in its turn"
+       [ "masc_board_comment"; "tool_read_file"; "masc_board_list" ]
+       (List.map (fun (call : Actions.call) -> call.tool) calls);
+     check bool "no call is read as arguments or as a reference" true
+       (List.for_all
+          (fun (call : Actions.call) ->
+             match call.input with
+             | Actions.Unstated_input -> true
+             | Actions.Arguments _ | Actions.Artifact_reference -> false)
+          calls)
+   | other -> failf "expected one turn, got %d" (List.length other));
+  let section =
+    user_message { base_observation with WO.own_recent_actions = Ok turns }
+    |> own_recent_actions_section
+  in
+  check bool "the refusal says its record does not state the form" true
+    (contains ~needle:"[turn 9] tool_read_file -> REJECTED (input and reason not shown" section);
+  check bool "the digest says the same" true
+    (contains ~needle:"tool_read_file ×1 (last turn 9) — input and reason not shown" section);
+  check bool "the old input is not shown as arguments" false
+    (contains ~needle:"/old/file.ml" section);
+  check bool "nor as a stored reference object" false (contains ~needle:{|{"_blob"|} section);
+  check bool "a call that landed is still listed" true
+    (contains ~needle:"[turn 9] masc_board_list -> ok" section)
 ;;
 
 (* --- 1. Current Task layer --- *)
@@ -464,7 +524,11 @@ let test_failed_payloads_remain_retrievable () =
   let reference text = match Tool_output.decode_from_agent_core text with
     | Tool_output.Decoded reference -> reference
     | _ -> fail "failed payload was not externalized" in
-  let argument_ref = reference projected_call.input in
+  let projected_input = match projected_call.input with
+    | Actions.Arguments text -> text
+    | Actions.Artifact_reference | Actions.Unstated_input ->
+      fail "argument text lost its arguments form" in
+  let argument_ref = reference projected_input in
   let detail_ref = match projected_call.outcome with
     | Actions.Failed_call (Some detail) -> reference detail
     | _ -> fail "projection changed the failed outcome" in
@@ -490,12 +554,127 @@ let test_failed_payloads_remain_retrievable () =
   check bool "call identity and rejected outcome remain visible" true
     (contains ~needle:"[turn 42] Edit" body && contains ~needle:"REJECTED" body);
   check bool "digest and ordinary row both retain the complete argument reference" true
-    (count_occurrences ~needle:projected_call.input body >= 3);
+    (count_occurrences ~needle:projected_input body >= 3);
   check string "original source remains unchanged" original (render source);
   let blocked = Filename.concat base_path "blocked-store" in
   Out_channel.with_open_bin blocked (fun channel -> output_string channel "not a directory");
   check string "storage failure keeps the complete briefing" original
     (render (project ~base_path:blocked ~tools:[reader]))
+;;
+
+(* #47642: the request history stores an earlier call's arguments as the
+   reserved [_blob] reference, and on 2026-11-02 377 calls sent that object as
+   their arguments and were refused before execution. Each refusal row replayed
+   the object, through the input and again through the refusal text, which
+   prints the arguments back, so the next turn copied it once more. The rows go
+   through the writer, which keeps only a preview of an oversized input: the
+   reserved key beside a large field survives there only as the form the writer
+   recorded. *)
+let test_refused_artifact_reference_input_is_not_replayed () =
+  let open Masc in
+  let module Actions = Masc.Keeper_own_recent_actions in
+  let module V = Agent_core.Tool_input_validation in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "action-references-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Fs_compat.remove_tree base_path)
+  @@ fun () ->
+  Keeper_tool_call_log.init ~base_path ();
+  let sha256 = String.make 64 'a' in
+  let reference_fields =
+    match
+      Tool_output.make_artifact_ref ~sha256 ~bytes:1024
+        ~preview:{|{"post_id":"p-1","body":"status"}|} ~mime:"application/json"
+    with
+    | Ok reference ->
+      (match Tool_output.normalized_artifact_ref_to_json reference with
+       | `Assoc fields -> fields
+       | _ -> fail "a normalized reference is an object")
+    | Error error -> fail (Tool_output.make_error_to_string error)
+  in
+  (* After the copied reference: a copy without its digest, the key with a
+     value that is not an object, the key beside a field large enough that
+     the writer keeps only a preview, and an ordinary refusal. *)
+  let calls =
+    [ 1, "masc_board_comment", `Assoc reference_fields
+    ; 2, "masc_board_comment", `Assoc reference_fields
+    ; 2, "Write", `Assoc [ "_blob", `Assoc [ "bytes", `Int 2412; "mime", `String "application/json"
+                                          ; "preview", `String {|{"path":"notes.md"}|} ] ]
+    ; 3, "keeper_memory_write", `Assoc [ "_blob", `String "stored" ]
+    ; 3, "keeper_task_create",
+      `Assoc (reference_fields @ [ "content", `String (String.make 5000 'c') ])
+    ; 4, "tool_read_file", `Assoc [ "path", `String "/missing/file.ml" ] ]
+  in
+  List.iter
+    (fun (turn, tool, input) ->
+       Keeper_tool_call_log.log_call ~keeper_name:"me" ~tool_name:tool ~input
+         ~output_text:
+           (V.format_errors_inline ~tool_name:tool ~args:input
+              [ { V.path = "/post_id"; expected = V.Expected_types [ "string" ]; actual = V.Missing } ])
+         ~duration_ms:1.0 ~wire_outcome:Tool_result.Error
+         ~trace_id:"trace-A" ~task_id:"task-A" ~keeper_turn_id:turn ())
+    calls;
+  Keeper_tool_call_log.flush_now ();
+  let rows =
+    match Keeper_tool_call_log.read_recent ~keeper_name:"me" ~n:50 () with
+    | Ok rows -> rows
+    | Error (Keeper_tool_call_log.Index_unavailable detail) -> fail detail
+  in
+  check bool "the writer kept only a preview of the oversized input" true
+    (List.exists
+       (fun row ->
+          Yojson.Safe.Util.member "tool" row = `String "keeper_task_create"
+          && (match Yojson.Safe.Util.member "input" row with
+              | `String _ -> true
+              | _ -> false))
+       rows);
+  let turns =
+    Actions.turns_of_rows ~keeper_name:"me" ~max_turns:10 ~window_saturated:false rows
+  in
+  let section turns =
+    user_message { base_observation with WO.own_recent_actions = Ok turns }
+    |> own_recent_actions_section
+  in
+  let source = section turns in
+  let replays_no_reference label section =
+    check bool (label ^ ": no stored reference object") false
+      (contains ~needle:{|{"_blob"|} section);
+    check bool (label ^ ": no reference address") false (contains ~needle:sha256 section)
+  in
+  replays_no_reference "briefing" source;
+  List.iter
+    (fun tool ->
+       check bool (tool ^ " is still named as refused") true
+         (contains ~needle:(tool ^ " -> REJECTED") source))
+    [ "masc_board_comment"; "Write"; "keeper_memory_write"; "keeper_task_create" ];
+  check int "both reference refusals of one tool are one counted digest row" 1
+    (count_occurrences
+       ~needle:"masc_board_comment with the reserved `_blob` key in its input ×2 " source);
+  check bool "an ordinary refusal still shows what it sent" true
+    (contains ~needle:{|tool_read_file {"path":"/missing/file.ml"} -> REJECTED|} source);
+  let projected =
+    Actions.externalize_failures ~base_path ~keeper_name:"me"
+      ~tools:[ artifact_reader ~base_path ] turns
+  in
+  let reference_calls turns =
+    List.concat_map
+      (fun (turn : Actions.turn) ->
+         List.filter
+           (fun (call : Actions.call) ->
+              match call.input with
+              | Actions.Artifact_reference -> true
+              | Actions.Arguments _ | Actions.Unstated_input -> false)
+           turn.calls)
+      turns
+  in
+  check int "every reserved-key input is read as a reference" 5
+    (List.length (reference_calls turns));
+  check bool "the transmission view leaves reference calls as they are" true
+    (reference_calls projected = reference_calls turns);
+  replays_no_reference "transmission view" (section projected)
 ;;
 
 let test_current_task_section_renders () =
@@ -1710,6 +1889,10 @@ let () =
             test_action_provenance_survives_task_switch;
           test_case "no digest block without refusals" `Quick
             test_no_digest_without_failures;
+          test_case "a refused input carrying the reserved _blob key is named, never replayed" `Quick
+            test_refused_artifact_reference_input_is_not_replayed;
+          test_case "a row without its input form is kept, never read as arguments" `Quick
+            test_a_row_without_its_input_form_is_not_read_as_arguments;
         ] );
       ( "goal titles",
         [

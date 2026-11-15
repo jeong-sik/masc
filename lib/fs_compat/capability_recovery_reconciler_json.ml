@@ -261,6 +261,12 @@ let core_subject_to_yojson = function
   | Core.Registry_root -> `Assoc [ "kind", `String "registry_root" ]
   | Core.Recovery_root -> `Assoc [ "kind", `String "recovery_root" ]
   | Core.Lanes_root -> `Assoc [ "kind", `String "lanes_root" ]
+  | Core.Staging_root -> `Assoc [ "kind", `String "staging_root" ]
+  | Core.Staged_lane owner ->
+    `Assoc
+      [ "kind", `String "staged_lane"
+      ; "owner", `String (Core.owner_to_string owner)
+      ]
   | Core.Lane_root owner ->
     `Assoc
       [ "kind", `String "lane_root"

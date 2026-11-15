@@ -1,0 +1,220 @@
+{
+ "key": "storage-sync",
+ "findings": [
+  {
+   "id": "storage-sync-01",
+   "claim": "POSIX 잠금(fcntl·lockf)은 같은 프로세스가 그 파일의 descriptor 를 하나만 닫아도 전부 풀린다. flock 과 OFD 잠금은 연 descriptor 에 묶여 풀리지 않는다. 이 Mac(macOS 27.2)에서 OS 동작을 재현했다.",
+   "src": "fcntl(2) manual page, XNU (apple-oss-distributions) | https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/man/man2/fcntl.2",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "Fs_compat 잠금이 두 방식이다. 곁 파일 잠금(lib/fs_compat/fs_compat_private_jsonl_transaction.ml:686-707, 18곳)과 데이터 파일 잠금(fs_compat_private_file_update.ml:82-104·547-597, 32곳). 뒤쪽 파일은 load_jsonl·fold_jsonl_lines 가 mutex 없이 열고 닫는다. 곁 파일 방식 하나로 합친다.",
+   "caveat": "MASC 코드 경로로는 재현하지 않았다. 같은 파일을 두 프로세스가 잠가야 드러난다. 프로세스 안 배제는 get_append_path_mutex 로 유지된다. 옛·새 방식은 서로 배제하지 않아 서버와 TUI 를 함께 바꿔야 한다.",
+   "check": "verified XNU fcntl(2) 문장 그대로다. 독립 probe(macOS 27.2, APFS)에서 lockf 는 둘째 close 뒤 풀리고 flock·OFD 는 유지됐다. 적용 좌표는 HEAD 와 맞다. 적용문은 'MASC 함수로 먼저 재현' 전제를 뺐다."
+  },
+  {
+   "id": "storage-sync-02",
+   "claim": "ext4·XFS·Btrfs 는 fsync 가 실패해도 페이지를 clean 으로 표시한다(Table 1, §3.3.4). 다시 부른 fsync 는 쓰지 않고 성공할 수 있다. 논문은 어떤 앱의 재시도 전략도 충분하지 않았다고 적는다(§5).",
+   "src": "Rebello et al., Can Applications Recover from fsync Failures? (USENIX ATC 2020) | https://www.usenix.org/conference/atc20/presentation/rebello",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "내용이 같으면 다시 쓰지 않고 sync_file_and_parent_strict 만 부르는 갈래가 같은 유형이다(lib/keeper/keeper_librarian_unread_ledger.ml:36-40, keeper_memory_os_current_publication.ml:367-377). fsync 오류 뒤의 재시도는 Atomic_replace 로 새 inode 에 다시 쓴다.",
+   "caveat": "Linux 5.2.11 측정이고 APFS 는 다루지 않았다. 프로세스가 fsync 전에 죽은 경우에는 sync 만 하는 것이 맞다. 호출부가 두 경우를 가르는지는 확인하지 않았다.",
+   "check": "misquoted Table 1·§3.3.4·§2(두 번째 fsync 가 쓰지 않고 성공)는 맞다. §5 #7 은 실패 처리 전략이 모두 불충분하다고 하고 'none of the applications retry fsync' 라고 적는다. '재시도 전략'은 원문과 다르다."
+  },
+  {
+   "id": "storage-sync-03",
+   "claim": "macOS fsync 는 장치 캐시를 비우지 않는다. F_BARRIERFSYNC 는 순서만, F_FULLFSYNC 는 매체 기록까지 보장한다. F_FULLFSYNC 한 번은 같은 장치에 앞서 fsync 된 데이터도 확정한다. SQLite fullfsync 기본값은 off 다.",
+   "src": "fcntl(2) manual page, XNU: F_FULLFSYNC and F_BARRIERFSYNC | https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/man/man2/fcntl.2",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "Unix.fsync(lib/fs_compat/atomic_replace.ml:8-29)와 SQLite EXTRA store(lib/keeper_chat_operations/keeper_chat_operation_store.ml:794-805)는 전원 손실을 못 견딘다. .mli 열 개 파일의 산문 선언을 store 별 내구성 등급 variant 하나로 바꾼다.",
+   "caveat": "이 Mac 한 번 측정의 중앙값: fsync 0.16 ms, F_BARRIERFSYNC 2.7 ms, F_FULLFSYNC 8.3 ms(40회, 부하 높음). Apple 배포 SQLite 의 실제 sync 방식은 1차 출처로 확인하지 못했다.",
+   "check": "verified F_BARRIERFSYNC·F_FULLFSYNC 문장은 fcntl(2) 그대로다. 'fullfsync 기본 off' 는 source_url 이 아니라 SQLite pragma.html 에 있다. XNU fsync(2) 는 OS crash 때도 잃을 수 있다고 적어 보고서 3.3 의 (b) 가정과 어긋난다."
+  },
+  {
+   "id": "storage-sync-04",
+   "claim": "Durable Objects 는 쓰기가 진행 중이면 밖으로 나가는 메시지를 쓰기 완료까지 붙잡고(output gate) 쓰기를 자동으로 묶는다. PostgreSQL 비동기 commit 도 손실은 있어도 손상은 없다고 적는다(§28.4).",
+   "src": "Kenton Varda, Durable Objects: Easy, Fast, Correct — Choose three (Cloudflare blog, 2021-08-03) | https://blog.cloudflare.com/durable-objects-easy-fast-correct-choose-three/",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "헌법 persist_before_model_call 이 같은 자리다. 전원 손실 등급이 필요한 store 는 append 마다가 아니라 모델 호출·외부 쓰기 직전에 F_FULLFSYNC 한 번으로 확정한다. RFC-async-log-sink-durable-append-offload·RFC-0450 은 진행 중이라 다시 제안하지 않는다.",
+   "caveat": "Cloudflare 구현은 원격 복제 위에 있다. 로컬 디스크 하나에 옮긴 공개 측정은 찾지 못했다. fsync 등급만 필요하면 이 구조는 필요 없다.",
+   "check": "verified output gate 와 자동 coalescing 문장이 2021-08-03 글에 그대로 있다. PostgreSQL §28.4 'data loss, not data corruption' 은 source_url 밖이고 PG 18 문서에서 확인했다. F_FULLFSYNC 한 번은 앞서 fsync 한 쓰기만 확정한다."
+  },
+  {
+   "id": "storage-sync-05",
+   "claim": "64-bit counter 를 5억 번 올리는 시험에서 thread 하나는 300 ms, lock 을 쓰는 thread 둘은 118,000 ms 였다. 글은 자원마다 writer 를 하나로 두라고 권한다. SQLite·LMDB·irmin-pack 도 writer 가 하나다.",
+   "src": "Martin Thompson, Single Writer Principle (2011-09-22) | https://mechanical-sympathy.blogspot.com/2011/09/single-writer-principle.html",
+   "depth": "full_text",
+   "kind": "measured",
+   "apply": "docs/IMMORTAL-SERVER-ROADMAP.md:27 은 서버 하나가 .masc 를 소유한다고 적지만 TUI 가 직접 쓴다(bin/masc_tui_play_pending.ml:52). store 마다 쓰는 프로세스를 하나로 정하면 데이터 파일의 프로세스 간 잠금이 필요 없어진다.",
+   "caveat": "수치는 메모리 안 counter 이고 파일 I/O 가 아니다. 서버가 내려간 동안 TUI·CLI 가 할 수 있는 일이 줄어든다. 범위가 넓어 RFC 대상이다.",
+   "check": "verified 표의 300 ms·118,000 ms, 5억 번, 2.4GHz Westmere 와 권고 문장이 원문에 있다. 메모리 counter 수치다. writer 하나는 SQLite wal.html, LMDB 문서, Tarides 2020 글에서 따로 확인했다."
+  },
+  {
+   "id": "storage-sync-06",
+   "claim": "transaction 중인 SQLite 파일을 복사하면 옛 내용과 새 내용이 섞여 손상될 수 있다(§1.2). 안전한 방법은 sqlite3_rsync, VACUUM INTO, backup API 다. journal 은 DB 와 짝으로 있어야 한다(§1.4).",
+   "src": "How To Corrupt An SQLite Database File | https://www.sqlite.org/howtocorrupt.html",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "BasePath 전체 백업 명령이 없다. 파일시스템 snapshot 을 복사하면 복원 상태가 서버가 죽은 직후와 같아 기존 boot 복구 경로를 탄다. .masc 는 217.3 GiB, 디스크 여유는 161 GiB 라 외부 대상이 필요하다.",
+   "caveat": "snapshot 은 crash 일관성만 준다. boot 복구가 맞아야 백업이 맞다. tmutil localsnapshot 권한과 fs_snapshot_create entitlement 는 확인하지 못했다.",
+   "check": "verified §1.2·§1.4 문장과 안전한 세 방법이 원문 그대로다. snapshot 이 '죽은 직후'와 같다는 근거는 이 문서가 아니라 PostgreSQL §25.2 다. 디스크 여유는 12:22Z 에 132.5 GiB 로 보고서보다 줄었다."
+  },
+  {
+   "id": "storage-sync-07",
+   "claim": "PostgreSQL 은 복구가 끝나면 새 timeline 을 만들어 원본과 사본의 기록을 가른다(§25.3.6). tablespace 는 절대 경로로 기록돼 다른 장비에서 어긋난다고 경고한다(§25.3.8). system identifier 로 같은 cluster 인지 확인한다.",
+   "src": "PostgreSQL 18 Documentation: Continuous Archiving and Point-in-Time Recovery | https://www.postgresql.org/docs/current/continuous-archiving.html",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "Durable_file_identity {path; inode} 와 TUI journal 의 base_path(bin/masc_tui_play_pending.ml:46-48)는 복사·이동 뒤 달라진다. 디렉터리 안 식별자와 복원 뒤 계보 구분을 별도 RFC 로 정한다.",
+   "caveat": "RFC-0496 은 디렉터리 안 id 를 기각했지만 재부팅 식별 문제에 한해서다. 절대 경로·inode·pid 를 저장하는 곳의 전체 목록은 만들지 않았다.",
+   "check": "verified §25.3.6·§25.3.8 문장이 PostgreSQL 18(현재판)에 그대로 있다. system identifier 는 protocol-replication.html 에 있다. timeline 은 WAL 보관소 안 이력을 가른다. RFC-0496 §4 B 가 .masc 안 id 파일을 재부팅 문제로 기각했다."
+  },
+  {
+   "id": "storage-sync-08",
+   "claim": "XDG 는 사용자 파일을 data·config·state·cache 로 나눈다. cache 는 없어도 되는 데이터다. CACHEDIR.TAG 는 캐시 디렉터리에 서명 파일을 두어 백업 도구가 건너뛰게 한다.",
+   "src": "XDG Base Directory Specification v0.8 | https://specifications.freedesktop.org/basedir/latest/",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": ".masc 217.3 GiB 중 official-clients 가 92.5 GiB, tool_blobs 가 28.6 GiB 다. 최상위 store 마다 백업 등급을 선언한다. 자리는 RFC-every-durable-store-has-one-boot-policy 의 store 표에 열 하나다.",
+   "caveat": "크기는 du 한 번(11-12 10:44Z)이다. 내용은 읽지 않았다. 어느 store 가 어느 등급인지는 소유자 결정이다.",
+   "check": "overstated XDG v0.8 의 네 분류와 cache 'non-essential' 은 맞다. CACHEDIR.TAG 는 별도 규격이고, 백업 도구가 'if configured to do so' 뺄 수 있으며 태그는 'hints' 라고 적는다. 자동으로 건너뛰지 않는다."
+  },
+  {
+   "id": "storage-sync-09",
+   "claim": "11개 앱에서 crash 취약점 60개를 찾았다. LevelDB 1.10 은 10, Git 9, Mercurial 10, SQLite-WAL 0 이다(Table 3). 앱이 log 끝의 쓰레기 내용을 놓치고 복구 코드가 시험되지 않았다고 적는다(§4.4.2, §4.7).",
+   "src": "Pillai et al., All File Systems Are Not Created Equal (OSDI 2014) | https://research.cs.wisc.edu/adsl/Publications/alice-osdi14.pdf",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Fs_compat durable 경로에는 I/O 주입 seam 이 있다(lib/fs_compat/fs_compat_durable_append.ml:120-121, *_with_io_for_testing). 연산마다 실패·중단을 열거해 확인 응답한 record 가 남는지 본다. 50곳이 부르는 경로다.",
+   "caveat": "2014년 Linux 파일시스템 대상이다. OCaml 수준 seam 은 파일시스템의 순서 바뀜을 만들지 못한다. PR 마다 도는 CI 에 넣지 않는다.",
+   "check": "verified Table 3(a) 값(LevelDB 1.10 10, Git 9, Mercurial 10, SQLite-WAL 0, 합 60)과 §4.4.2·§4.7 문장이 원문에 있다. 60 은 ALICE 의 약한 persistence model 기준이다. 적용 좌표 :120-121 맞다."
+  },
+  {
+   "id": "storage-sync-10",
+   "claim": "eio_posix 는 일반 파일 read·write 를 부른 domain 에서 바로 실행하고 open·rename·fsync 는 systhread 로 넘긴다. 주석은 blocking 연산이 모두 sys-thread 에서 일어나야 이상적이라고 적는다.",
+   "src": "Eio lib_eio_posix/low_level.ml (main, 설치본 1.3 과 대조) | https://raw.githubusercontent.com/ocaml-multicore/eio/main/lib_eio_posix/low_level.ml",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "fold_jsonl_lines 의 Eio 갈래(lib/fs_compat/fs_compat_jsonl_read.ml:210-213)는 읽는 동안 그 domain 을 막는다. load_file 과 durable transaction 은 이미 systhread 로 넘긴다. 정지 구간 캠페인의 귀속 측정에 넣는다.",
+   "caveat": "설치본 eio_posix 1.3 과 main 에서 확인했다. Linux io_uring backend 는 읽지 않았다. 막는 시간은 재지 않았다.",
+   "check": "verified main 과 설치본 모두 read·write 는 부른 domain 에서 Unix.read/write 를, openat·rename·fsync 는 systhread 를 쓴다. 머리 주석도 그대로다. eio_posix 동작이라 Linux io_uring 백엔드에는 그대로 옮기지 못한다."
+  },
+  {
+   "id": "storage-sync-11",
+   "claim": "불변식이 I-confluent 할 때에만 조율 없이 실행하면서 그 불변식을 지킬 수 있다(Theorem 1). 특정 값 유일성, AUTO_INCREMENT insert, foreign key delete 는 해당하지 않는다(Table 2).",
+   "src": "Bailis et al., Coordination Avoidance in Database Systems (PVLDB 8(3), 2015) | http://www.vldb.org/pvldb/vol8/p185-bailis.pdf",
+   "depth": "partial",
+   "kind": "proven",
+   "apply": "Task claim 하나, 한 사람 한 표, cursor 전제 append(append_private_jsonl_durable_locked_at_cursor_result, 11곳)는 두 곳에서 쓰고 합치면 깨진다. 외부 동기화는 소유자 한 곳에서 한 방향 복제로 한다.",
+   "caveat": "MASC 불변식을 표에 대입한 것은 추론이다. 불변식 전체를 보지 않았다. 여러 사람이 서버 하나를 쓰는 다계정은 이 문제가 아니다.",
+   "check": "verified Theorem 1 과 Table 2 의 세 행(No)이 원문 그대로다. I-confluence 는 불변식 하나가 아니라 transaction 집합과 불변식 쌍의 성질이고 Theorem 은 필요충분이다. cursor 호출 11곳은 HEAD 에서 셌다."
+  },
+  {
+   "id": "storage-sync-12",
+   "claim": "SQLite WAL 은 네트워크 파일시스템에서 동작하지 않고 모든 프로세스가 같은 host 에 있어야 한다(§1). LMDB 도 원격 파일시스템을 금한다. Linux 는 NFS 에서 잠금을 잃을 수 있다고 적는다.",
+   "src": "SQLite Write-Ahead Logging, §1 Overview | https://www.sqlite.org/wal.html",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "microVM·RemoteSSH 를 먼저 쓰기로 했으므로 BasePath 는 소유 host 의 로컬 파일시스템에 두고 guest·원격은 서버 API 로 접근한다. WAL store 는 lib/keeper_tool_call_index/keeper_tool_call_index.ml:256-261 등 세 곳이다.",
+   "caveat": "virtiofs 같은 microVM 공유 디렉터리의 잠금 의미는 확인하지 않았다. 지금 배치가 공유 mount 를 쓰는지도 보지 않았다.",
+   "check": "verified SQLite wal §1, LMDB Caveats, Linux fcntl_locking(2) 'Lost locks' 문장이 각 원문에 있다. 뒤 둘은 source_url 밖 문서다. WAL store 세 곳도 HEAD 에서 확인했다."
+  },
+  {
+   "id": "storage-sync-13",
+   "claim": "WAL-reset 버그는 3.7.0 부터 3.51.2 까지 있고 3.51.3(2026-03-13)에서 고쳤다. WAL 모드에서 두 연결이 같은 순간 쓰거나 checkpoint 할 때만 생긴다. 문서는 급한 일이 아니라고 적는다(§11).",
+   "src": "SQLite Write-Ahead Logging, §11 The WAL-Reset Bug | https://www.sqlite.org/wal.html",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "Linux release 는 SQLite 3.53.4 를 고정한다(scripts/build-release-sqlite.sh:6). macOS binary 는 시스템 libsqlite3 를, Dockerfile.oneclick 은 Ubuntu 24.04 의 3.45.1 계열을 쓴다. boot 때 Sqlite3.sqlite_version 을 사실로 기록한다.",
+   "caveat": "Ubuntu 가 3.45.1 에 수정을 넣었는지 확인하지 않았다. 이 Mac 의 시스템 SQLite 는 3.54.0 이다. WAL store 셋에 동시 연결이 있는지는 보지 않았다.",
+   "check": "verified 판 범위, 3.51.3 수정, 발생 조건, 'not an emergency' 가 원문에 있다. 원문은 'likely present' 라고 적고 바로 앞에서 'should upgrade' 를 권한다. 2026-08-24 에 hack 없는 재현이 나왔다."
+  },
+  {
+   "id": "storage-sync-14",
+   "claim": "SQLite 는 약 10 KB blob 을 개별 파일보다 35% 빠르게 읽고 쓰고 디스크를 약 20% 덜 쓴다고 측정했다(§1, 2017년). 파일마다 fsync 하면 직접 저장이 10배 넘게 느리다(§2.2). 큰 blob 은 파일시스템이 빠르다(§2.3).",
+   "src": "SQLite: 35% Faster Than The Filesystem | https://www.sqlite.org/fasterthanfs.html",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "tool_blobs 는 2,462,539개 20.0GB(docs/rfc/RFC-0499-tool-blobs-are-swept-inside-the-server.md:22)로 평균 약 8 KB 다. 전환을 권하지 않는다. RFC-0499 sweep 뒤에도 파일 수가 병목이면 그때 MASC 부하로 잰다.",
+   "caveat": "2017년 다른 장비·파일시스템의 측정이다. 파일 하나로 모으면 파일 단위 증분 백업이 나빠진다. 기존 연구 문서 §4.5 는 SQLite 전환을 권하지 않았다.",
+   "check": "verified 35%(근사치), 약 20%, 파일마다 fsync 하면 '약 10배 이상' 느림, 큰 blob 은 대체로 파일시스템이 빠름이 원문에 있다. 2017-06-05 주 측정이다. RFC-0499:22 수치도 맞다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "Irmin(irmin-pack)을 저장 엔진으로 쓰기",
+   "why_not": "최신 3.11.0 의 irmin-pack 은 lwt 에 의존한다. Eio 판은 eio branch 에만 있고 Irmin 4 는 나오지 않았다. GC 가 도는 동안 디스크와 메모리가 두 배가 된다(Tarides 2022-11-10). 이 디스크 여유는 161 GiB 다."
+  },
+  {
+   "idea": "LMDB·RocksDB 도입",
+   "why_not": "SQLite 가 이미 의존성이고 새로 얻는 능력이 없다. LMDB 는 같은 프로세스 이중 open 금지, 긴 read transaction 이 파일을 키움, 원격 파일시스템 금지다. ocaml.org 에 rocksdb package 페이지가 없고 lmdb 1.1.3 의 reverse dependency 는 0 이다."
+  },
+  {
+   "idea": "cr-sqlite·Automerge 로 Ledger 를 여러 writer 가 쓰고 합치기",
+   "why_not": "claim·투표·cursor 불변식은 I-confluent 가 아니다(VLDB'15 Table 2). cr-sqlite 는 insert 가 2.5배 느리다고 README 가 적는다. CRDT 는 이력이 계속 쌓인다. 소유자 하나 모델과 충돌한다."
+  },
+  {
+   "idea": "실행 중인 .masc 를 Dropbox·iCloud·Syncthing 같은 파일 동기화 폴더에 두기",
+   "why_not": "파일 단위로 충돌 사본이 생긴다(Ink & Switch). SQLite 의 DB 와 journal 짝이 깨질 수 있다(howtocorrupt §1.4). 한 시점의 상태가 아니다."
+  },
+  {
+   "idea": "append 마다 F_FULLFSYNC 부르기",
+   "why_not": "이 Mac 한 번 측정에서 중앙값 8.3 ms 였다. 정지 구간 캠페인과 반대 방향이다. 밖으로 나가는 효과 직전에 한 번이면 같은 보장을 낸다."
+  },
+  {
+   "idea": "fsync 가 실패하면 같은 파일에 fsync 를 다시 부르기",
+   "why_not": "ext4·XFS·Btrfs 는 실패 뒤 페이지를 clean 으로 표시한다(ATC'20 Table 1). 두 번째 성공은 디스크 상태를 말해 주지 않는다."
+  },
+  {
+   "idea": "JSONL 전체를 SQLite 로 한 번에 옮기기",
+   "why_not": "기존 연구 문서(2026-10-26 librarian history validation cost) §4.5 가 권하지 않았다. RFC-0437 은 ledger 를 authority 로 두고 파생 index 만 SQLite 로 둔다. hard cut 비용이 크고 MASC 부하로 잰 근거가 없다."
+  },
+  {
+   "idea": "Litestream 을 BasePath 백업으로 쓰기",
+   "why_not": "SQLite 파일만 다뤄 JSONL 과 blob 이 빠진다. 비동기라 복제 창만큼 잃는다. DB 하나에 대상 하나다. MASC 의 주요 journal 은 DELETE 모드다."
+  },
+  {
+   "idea": "잠금·쓰기 대기에 횟수 상한, cooldown, 시간 상수 넣기",
+   "why_not": "헌법 magic_number·budget_gate 와 brief §2 가 금한다. 대기의 원인인 잠금 방식과 writer 수를 고친다. RFC-0348 이 대기 문제를 이미 다룬다."
+  },
+  {
+   "idea": "판 선언 파일을 호환 reader·migration 과 묶기",
+   "why_not": "brief §2 의 hard cut 은 지우고 설치다. 판 선언의 쓰임은 다른 판의 디렉터리를 읽지 않고 거절하는 것이다."
+  },
+  {
+   "idea": "tool_blobs 를 irmin-pack 식 복사 GC 로 정리하기",
+   "why_not": "GC 동안 디스크가 두 배 필요하다. RFC-0499 가 두 번 스캔과 touch 기록으로 제자리 sweep 을 이미 설계했다."
+  },
+  {
+   "idea": "BasePath 를 NFS·SMB·공유 mount 에 두기",
+   "why_not": "SQLite WAL 은 네트워크 파일시스템에서 동작하지 않는다. NFS 에서는 잠금을 잃을 수 있다(Linux fcntl_locking(2)). LMDB 도 원격 파일시스템을 금한다."
+  },
+  {
+   "idea": "검증 결과 캐시, stat 키 캐시",
+   "why_not": "기존 연구 문서가 이미 다뤘고 설계 문서가 막았다. 이 조사에서 되풀이하지 않는다."
+  }
+ ],
+ "unknowns": [
+  "APFS 가 fsync 실패 뒤 페이지를 어떻게 다루는지. 논문은 ext4·XFS·Btrfs 만 봤다.",
+  "데이터 파일 잠금(방식 B)이 MASC 에서 실제로 풀리는 조합이 있는지. 같은 파일을 두 프로세스가 잠그고 같은 프로세스가 일반 read 를 하는 경우의 목록을 만들지 않았다. OS 동작만 재현했다.",
+  "Apple 이 배포하는 SQLite(/usr/lib/libsqlite3.dylib)가 commit 때 부르는 sync. F_BARRIERFSYNC 라는 말은 2차 인용뿐이다.",
+  "F_OFD_SETLK 가 되는 macOS 최저 버전. 이 Mac 의 SDK 헤더에 정의는 있다.",
+  "Linux 의 fsync 가 장치 캐시까지 내리는지와 배포 대상 파일시스템 설정. Apple silicon 내장 저장 장치가 OS panic 뒤 캐시를 지키는지.",
+  "sync 비용의 제대로 된 측정. 이번 값은 부하가 높은 상태에서 40회 한 번이다. Hector Martin 의 공개 IOPS 수치는 원문 미직독이라 뺐다.",
+  ".masc 최상위 165개 항목 각각의 백업 등급과 파일 수. 내용을 읽지 않았다.",
+  "durable record 가 절대 경로·inode·pid·hostname 을 사실로 저장하는 곳의 전체 목록.",
+  "Ubuntu 24.04 의 SQLite 3.45.1 계열에 WAL-reset 수정이 들어갔는지. 지원하는 macOS 버전들의 시스템 SQLite 판.",
+  "microVM·RemoteSSH 배치에서 공유 mount 를 쓰는지, 쓴다면 그 잠금 의미(virtiofs 등).",
+  "tmutil localsnapshot 의 권한 요건과 fs_snapshot_create 의 entitlement 요건. 1차 출처를 열지 못했다.",
+  "sync_file_and_parent_strict 를 부르는 나머지 아홉 파일이 '내용이 같으면 sync 만' 유형인지. 하나씩 읽지 않았다.",
+  "Irmin 4(Eio) 출시 시기와 cr-sqlite 최신 release(v0.16.3)의 연도.",
+  "LangGraph 의 기본 durability mode.",
+  "fold_jsonl_lines 가 domain 을 막는 시간과 연산마다 SQLite 를 여닫는 비용. 재지 않았다."
+ ],
+ "conflicts_with_brief": [
+  "storage-sync-01: brief §2.9(정리 변경은 제품 품질을 높인다는 명확한 증거가 있을 때만) — '곁 파일 방식 하나로 합친다'를 MASC 경로에서 잠금이 풀리는 조합을 재현하기 전에 결정으로 적었다. 보고서 3.1 도 재현을 먼저 둔다. 재현되면 해소된다.",
+  "storage-sync-13: brief §2.2(새 상태·필드는 없으면 durable truth 가 깨질 때만 더하고, 가시성은 projection 으로 준다) — boot 때 SQLite 판을 '사실로 기록'하는 것은 durable truth 를 지키지 않는다. 가시성은 health 같은 projection 으로 주고, 수리는 원문 권고(should upgrade)대로 링크 판을 올리는 것이다."
+ ]
+}

@@ -84,8 +84,23 @@ type divergence = {
   notes_hash : string;
   evaluator_verdict : Task.Anti_rationalization.verdict;
   human_verdict : label_verdict;
-  gate : string;
+  gate : Task.Anti_rationalization.gate;
   task_title : string;
+}
+
+type stored_record =
+  | Verdict of verdict_record
+  | Label of label_record
+
+type window = {
+  verdicts : verdict_record list;
+  labels : label_record list;
+  unreadable_rows : int;
+}
+
+type divergence_scan = {
+  divergences : divergence list;
+  unreadable_rows : int;
 }
 
 type calibration_example = {
@@ -213,76 +228,209 @@ let record_human_label
   (Atomic.get written_observer) ~base_path
 
 (* ================================================================ *)
-(* JSON deserialization (for analysis)                                *)
+(* JSON deserialization                                              *)
 (* ================================================================ *)
 
-let string_field json key =
-  Json_util.get_string_with_default json ~key ~default:""
+(* [stored_record_of_json] is the inverse of [verdict_record_to_json] and
+   [label_record_to_json], and the only way a stored row becomes a record. A
+   key is read the way its writer writes it: always-written keys are required,
+   [fallback_reason] is absent for [None], the nullable keys are [null] for
+   [None]. A row neither writer produces is an [Error] naming the first key
+   that does not fit. *)
+
+let ( let* ) = Result.bind
+
+let field fields name =
+  match List.filter (fun (key, _) -> String.equal key name) fields with
+  | [ _, value ] -> Ok (Some value)
+  | [] -> Ok None
+  | _ :: _ :: _ -> Error (Printf.sprintf "%s: written more than once" name)
+
+let required_field fields name =
+  let* value = field fields name in
+  match value with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s: missing" name)
+
+let string_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `String text -> Ok text
+  | _ -> Error (Printf.sprintf "%s: not a string" name)
+
+let timestamp_field fields =
+  let* value = required_field fields "timestamp" in
+  match value with
+  | `Float seconds -> Ok seconds
+  | _ -> Error "timestamp: not a float"
+
+let nullable_string_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `Null -> Ok None
+  | `String text -> Ok (Some text)
+  | _ -> Error (Printf.sprintf "%s: neither null nor a string" name)
+
+let nullable_identity_field fields name =
+  let* value = required_field fields name in
+  match value with
+  | `Null -> Ok None
+  | json ->
+    (match Runtime_response_identity.of_yojson json with
+     | Ok identity -> Ok (Some identity)
+     | Error detail -> Error (Printf.sprintf "%s: %s" name detail))
+
+let fallback_reason_field fields =
+  let* value = field fields "fallback_reason" in
+  match value with
+  | None -> Ok None
+  | Some (`String reason) -> Ok (Some reason)
+  | Some _ -> Error "fallback_reason: not a string"
+
+let verdict_record_of_fields fields : (verdict_record, string) result =
+  let* notes_hash = string_field fields "notes_hash" in
+  let* task_id = string_field fields "task_id" in
+  let* task_title = string_field fields "task_title" in
+  let* agent_name = string_field fields "agent_name" in
+  let* raw_verdict = string_field fields "verdict" in
+  let* verdict =
+    match verdict_of_string raw_verdict with
+    | Some verdict -> Ok verdict
+    | None -> Error (Printf.sprintf "verdict: unknown value %S" raw_verdict)
+  in
+  let* raw_gate = string_field fields "gate" in
+  let* gate =
+    Task.Anti_rationalization.gate_of_string raw_gate
+    |> Result.map_error (fun detail -> "gate: " ^ detail)
+  in
+  let* evaluator_runtime = string_field fields "evaluator_runtime" in
+  let* generator_runtime = nullable_string_field fields "generator_runtime" in
+  let* producer_execution = nullable_identity_field fields "producer_execution" in
+  let* evaluator_execution = nullable_identity_field fields "evaluator_execution" in
+  let* fallback_reason = fallback_reason_field fields in
+  let* timestamp = timestamp_field fields in
+  Ok
+    { record_type = Verdict_record
+    ; notes_hash
+    ; task_id
+    ; task_title
+    ; agent_name
+    ; verdict
+    ; gate
+    ; evaluator_runtime
+    ; generator_runtime
+    ; producer_execution
+    ; evaluator_execution
+    ; fallback_reason
+    ; timestamp
+    }
+
+let label_record_of_fields fields : (label_record, string) result =
+  let* notes_hash = string_field fields "notes_hash" in
+  let* raw_verdict = string_field fields "human_verdict" in
+  let* human_verdict =
+    match label_verdict_of_string raw_verdict with
+    | Some verdict -> Ok verdict
+    | None -> Error (Printf.sprintf "human_verdict: unknown value %S" raw_verdict)
+  in
+  let* labeler = string_field fields "labeler" in
+  let* reason = string_field fields "reason" in
+  let* timestamp = timestamp_field fields in
+  Ok { record_type = Label_record; notes_hash; human_verdict; labeler; reason; timestamp }
+
+let stored_record_of_json (json : Yojson.Safe.t) : (stored_record, string) result =
+  match json with
+  | `Assoc fields ->
+    let* raw_type = string_field fields "record_type" in
+    (match record_type_of_string raw_type with
+     | Some Verdict_record ->
+       Result.map (fun record -> Verdict record) (verdict_record_of_fields fields)
+     | Some Label_record ->
+       Result.map (fun record -> Label record) (label_record_of_fields fields)
+     | None -> Error (Printf.sprintf "record_type: unknown value %S" raw_type))
+  | _ -> Error "row is not an object"
+
+(* ================================================================ *)
+(* Window reader                                                     *)
+(* ================================================================ *)
+
+(* Row bounds for the two windowed calibration readers. *)
+let divergence_scan_rows = 1000
+let calibration_scan_rows = 5000
+
+(* Both branches read at most [max_rows] rows. [read_range] carries no row
+   bound, so supplying a date -- which narrows the request -- would remove the
+   cap, and a one-sided date widens it further because the missing side is
+   filled with 2020-01-01 / 2099-12-31 below. *)
+let read_window ?(since = "") ?(until = "") ~base_path ~max_rows () : window =
+  let store = store ~base_path in
+  let decode json = Some (stored_record_of_json json) in
+  let rows =
+    if since = "" && until = "" then
+      Dated_jsonl.filter_map_recent store max_rows ~f:decode
+    else
+      let s = if since = "" then "2020-01-01" else since in
+      let u = if until = "" then "2099-12-31" else until in
+      Dated_jsonl.filter_map_range_recent store ~since:s ~until:u max_rows ~f:decode
+  in
+  let verdicts, labels, unreadable_rows =
+    List.fold_left
+      (fun (verdicts, labels, unreadable_rows) row ->
+         match row with
+         | Ok (Verdict record) -> record :: verdicts, labels, unreadable_rows
+         | Ok (Label record) -> verdicts, record :: labels, unreadable_rows
+         | Error (_ : string) -> verdicts, labels, unreadable_rows + 1)
+      ([], [], 0)
+      rows
+  in
+  { verdicts = List.rev verdicts; labels = List.rev labels; unreadable_rows }
+
+(* Later rows replace earlier ones under the same hash: the window is
+   chronological, so each hash keeps its newest record. *)
+let newest_by_hash (type a) (hash_of : a -> string) (records : a list) : a StringMap.t =
+  List.fold_left
+    (fun newest record -> StringMap.add (hash_of record) record newest)
+    StringMap.empty
+    records
 
 (* ================================================================ *)
 (* Divergence analysis                                               *)
 (* ================================================================ *)
 
-(* Row bounds for the two windowed calibration readers. Both branches of each
-   reader use its bound: the filtered branch previously had none. *)
-let divergence_scan_rows = 1000
-let calibration_scan_rows = 5000
-
-let find_divergences ?(since = "") ?(until = "") ~base_path () : divergence list =
-  let store = store ~base_path in
-  let records =
-    if since = "" && until = "" then
-      Dated_jsonl.read_recent store divergence_scan_rows
-    else
-      (* Same bound as the unfiltered branch above. [read_range] carries no
-         row bound, so supplying a date -- which narrows the request -- used to
-         remove the cap, and a one-sided date widens it further because the
-         missing side is filled with 2020-01-01 / 2099-12-31 below. *)
-      let s = if since = "" then "2020-01-01" else since in
-      let u = if until = "" then "2099-12-31" else until in
-      Dated_jsonl.read_range_recent store ~since:s ~until:u divergence_scan_rows
+let find_divergences ?since ?until ~base_path () : divergence_scan =
+  let window = read_window ?since ?until ~base_path ~max_rows:divergence_scan_rows () in
+  let verdicts =
+    newest_by_hash (fun (record : verdict_record) -> record.notes_hash) window.verdicts
   in
-  (* Separate verdicts and labels *)
-  let (verdicts, labels) : Yojson.Safe.t StringMap.t * Yojson.Safe.t StringMap.t =
-    List.fold_left (fun (vs, ls) json ->
-      let rt = string_field json "record_type" |> record_type_of_string in
-      let hash = string_field json "notes_hash" in
-      match rt with
-      | Some Verdict_record -> (StringMap.add hash json vs, ls)
-      | Some Label_record -> (vs, StringMap.add hash json ls)
-      | None -> (vs, ls)
-    ) (StringMap.empty, StringMap.empty) records
+  let labels =
+    newest_by_hash (fun (record : label_record) -> record.notes_hash) window.labels
   in
-  (* Find disagreements *)
-  StringMap.fold (fun hash v_json acc ->
-    match StringMap.find_opt hash labels with
-    | None -> acc
-    | Some l_json ->
-      (match
-         verdict_of_string (string_field v_json "verdict"),
-         label_verdict_of_string (string_field l_json "human_verdict")
-       with
-      | Some ev, Some hv ->
-          if label_verdict_of_verdict ev <> hv then
-            {
-              notes_hash = hash;
-              evaluator_verdict = ev;
-              human_verdict = hv;
-              gate = string_field v_json "gate";
-              task_title = string_field v_json "task_title";
-            }
-            :: acc
-          else
-            acc
-      | _ -> acc)
-  ) verdicts []
+  let divergences =
+    StringMap.fold (fun hash (verdict : verdict_record) acc ->
+      match StringMap.find_opt hash labels with
+      | None -> acc
+      | Some (label : label_record) ->
+        if label_verdict_of_verdict verdict.verdict <> label.human_verdict then
+          {
+            notes_hash = hash;
+            evaluator_verdict = verdict.verdict;
+            human_verdict = label.human_verdict;
+            gate = verdict.gate;
+            task_title = verdict.task_title;
+          }
+          :: acc
+        else
+          acc
+    ) verdicts []
+  in
+  { divergences; unreadable_rows = window.unreadable_rows }
 
 (* ================================================================ *)
 (* Few-shot example selection                                        *)
 (* ================================================================ *)
 
 let select_examples ~base_path ~(max_examples : int) : calibration_example list =
-  let divs = find_divergences ~base_path () in
+  let divs = (find_divergences ~base_path ()).divergences in
   (* Prioritize false positives: evaluator approved but human rejected *)
   let false_positives, others = List.partition (fun d ->
     match d.evaluator_verdict, d.human_verdict with
@@ -350,101 +498,68 @@ let format_few_shot_block (examples : calibration_example list) : string =
 (* Statistics                                                        *)
 (* ================================================================ *)
 
-let calibration_stats ?(since = "") ?(until = "") ~base_path () : Yojson.Safe.t =
-  let store = store ~base_path in
-  let records =
-    if since = "" && until = "" then
-      Dated_jsonl.read_recent store calibration_scan_rows
-    else
-      (* Same bound as the unfiltered branch; see [find_divergences]. *)
-      let s = if since = "" then "2020-01-01" else since in
-      let u = if until = "" then "2099-12-31" else until in
-      Dated_jsonl.read_range_recent store ~since:s ~until:u calibration_scan_rows
-  in
+let calibration_stats ?since ?until ~base_path () : Yojson.Safe.t =
+  let window = read_window ?since ?until ~base_path ~max_rows:calibration_scan_rows () in
   let max_failure_reasons = 5 in
-  let evaluator_failure_tags =
-    [ Task.Anti_rationalization.Invalid_verdict
-    ; Task.Anti_rationalization.Evaluator_unavailable
-    ]
-    |> List.map Task.Anti_rationalization.gate_to_string
-  in
   (* Single fold to accumulate all counters and maps immutably *)
-  let total_verdicts, approve_count, reject_count,
-      gate_counts, verdict_hashes, labeled_hashes,
+  let approve_count, reject_count,
+      gate_counts, fallback_count,
       recent_fallback_reasons,
       verdicts_with_generator, distinct_runtime_count =
-    List.fold_left (fun (tv, ac, rc, gc, vh, lh, fbr, vwg, drc) json ->
-      let rt = string_field json "record_type" |> record_type_of_string in
-      let hash = string_field json "notes_hash" in
-      match rt with
-      | Some Verdict_record -> begin
-          match verdict_of_string (string_field json "verdict") with
-          | Some v ->
-              let ac', rc' =
-                match v with
-                | Task.Anti_rationalization.Approve _ -> ac + 1, rc
-                | Task.Anti_rationalization.Reject _ -> ac, rc + 1
-              in
-              let gate = string_field json "gate" in
-              let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
-              let gc' = StringMap.add gate (prev + 1) gc in
-              let vh' = StringMap.add hash v vh in
-              let ev_runtime = string_field json "evaluator_runtime" in
-              let gen_runtime = string_field json "generator_runtime" in
-              let vwg', drc' =
-                if gen_runtime <> "" && ev_runtime <> "" then
-                  vwg + 1,
-                  (if not (String.equal gen_runtime ev_runtime) then drc + 1 else drc)
-                else
-                  vwg, drc
-              in
-              let fbr' =
-                if List.mem gate evaluator_failure_tags
-                   && List.length fbr < max_failure_reasons
-                then
-                  let reason = string_field json "fallback_reason" in
-                  if reason <> "" then reason :: fbr else fbr
-                else
-                  fbr
-              in
-              (tv + 1, ac', rc', gc', vh', lh, fbr', vwg', drc')
-          | None ->
-              (tv, ac, rc, gc, vh, lh, fbr, vwg, drc)
-        end
-      | Some Label_record -> begin
-          match label_verdict_of_string (string_field json "human_verdict") with
-          | Some v ->
-              (tv, ac, rc, gc, vh, StringMap.add hash v lh, fbr, vwg, drc)
-          | None ->
-              (tv, ac, rc, gc, vh, lh, fbr, vwg, drc)
-        end
-      | None ->
-          (tv, ac, rc, gc, vh, lh, fbr, vwg, drc)
-    ) (0, 0, 0, StringMap.empty, StringMap.empty, StringMap.empty,
-       [], 0, 0) records
+    List.fold_left (fun (ac, rc, gc, fc, fbr, vwg, drc) (record : verdict_record) ->
+      let ac', rc' =
+        match record.verdict with
+        | Task.Anti_rationalization.Approve _ -> ac + 1, rc
+        | Task.Anti_rationalization.Reject _ -> ac, rc + 1
+      in
+      let gate = Task.Anti_rationalization.gate_to_string record.gate in
+      let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
+      let gc' = StringMap.add gate (prev + 1) gc in
+      let vwg', drc' =
+        match record.generator_runtime with
+        | Some gen_runtime when gen_runtime <> "" && record.evaluator_runtime <> "" ->
+          vwg + 1,
+          (if not (String.equal gen_runtime record.evaluator_runtime) then drc + 1 else drc)
+        | Some _ | None -> vwg, drc
+      in
+      let evaluator_failed =
+        match record.gate with
+        | Task.Anti_rationalization.Invalid_verdict
+        | Task.Anti_rationalization.Evaluator_unavailable -> true
+        | Task.Anti_rationalization.Structured_tool -> false
+      in
+      let fc' = if evaluator_failed then fc + 1 else fc in
+      let fbr' =
+        if evaluator_failed && List.length fbr < max_failure_reasons
+        then (
+          match record.fallback_reason with
+          | Some reason when reason <> "" -> reason :: fbr
+          | Some _ | None -> fbr)
+        else fbr
+      in
+      (ac', rc', gc', fc', fbr', vwg', drc')
+    ) (0, 0, StringMap.empty, 0, [], 0, 0) window.verdicts
+  in
+  let total_verdicts = List.length window.verdicts in
+  let verdict_hashes =
+    newest_by_hash (fun (record : verdict_record) -> record.notes_hash) window.verdicts
+  in
+  let labeled_hashes =
+    newest_by_hash (fun (record : label_record) -> record.notes_hash) window.labels
   in
   (* Count divergences *)
   let false_pos, false_neg, agree =
-    StringMap.fold (fun hash ev (fp, fn, ag) ->
+    StringMap.fold (fun hash (verdict : verdict_record) (fp, fn, ag) ->
       match StringMap.find_opt hash labeled_hashes with
       | None -> (fp, fn, ag)
-      | Some hv ->
-          if label_verdict_of_verdict ev = hv then
-            (fp, fn, ag + 1)
-          else (
-            (* Every disagreement pair is written out. The wildcard this
-               replaces asserted "false negative" for anything that was not
-               (Approve, Reject_label); a third label_verdict would have been
-               counted as a false negative and quietly lowered
-               agreement_rate. Listing the pairs makes the compiler ask
-               instead. *)
-            match ev, hv with
-            | Task.Anti_rationalization.Approve _, Reject_label -> (fp + 1, fn, ag)
-            | Task.Anti_rationalization.Reject _, Approve_label -> (fp, fn + 1, ag)
-            | Task.Anti_rationalization.Approve _, Approve_label
-            | Task.Anti_rationalization.Reject _, Reject_label ->
-                (* [label_verdict_of_verdict ev = hv] already returned above. *)
-                (fp, fn, ag + 1))
+      | Some (label : label_record) ->
+          (* Every pair is written out, so a third label_verdict makes the
+             compiler ask where it counts instead of landing in a wildcard. *)
+          (match verdict.verdict, label.human_verdict with
+           | Task.Anti_rationalization.Approve _, Reject_label -> (fp + 1, fn, ag)
+           | Task.Anti_rationalization.Reject _, Approve_label -> (fp, fn + 1, ag)
+           | Task.Anti_rationalization.Approve _, Approve_label
+           | Task.Anti_rationalization.Reject _, Reject_label -> (fp, fn, ag + 1))
     ) verdict_hashes (0, 0, 0)
   in
   let labeled_total = false_pos + false_neg + agree in
@@ -453,34 +568,19 @@ let calibration_stats ?(since = "") ?(until = "") ~base_path () : Yojson.Safe.t 
     else float_of_int agree /. float_of_int labeled_total
   in
   let gate_json = StringMap.bindings gate_counts |> List.map (fun (k, v) -> (k, `Int v)) in
-  let fallback_count =
-    List.fold_left
-      (fun total gate ->
-         total + Option.value ~default:0 (StringMap.find_opt gate gate_counts))
-      0
-      evaluator_failure_tags
-  in
   let distinct_runtime_rate =
     if verdicts_with_generator = 0 then `Null
     else `Float (float_of_int distinct_runtime_count /. float_of_int verdicts_with_generator)
   in
-  let identity_field name row =
-    match row with
-    | `Assoc fields ->
-      (match List.filter (fun (key, _) -> String.equal key name) fields with
-       | [ _, json ] -> (match Runtime_response_identity.of_yojson json with Ok value -> Some value | Error _ -> None)
-       | [] | _ :: _ -> None)
-    | _ -> None in
   let identity_observation =
-    List.filter_map (fun row ->
-      if string_field row "record_type" <> record_type_to_string Verdict_record
-         || Option.is_none (verdict_of_string (string_field row "verdict")) then None
-      else
-        let producer_identity = identity_field "producer_execution" row
-          |> identity_matching (fun identity -> String.equal identity.Runtime_response_identity.actor (string_field row "agent_name")) in
-        let evaluator_identity = identity_field "evaluator_execution" row
-          |> identity_matching (fun identity -> String.equal identity.Runtime_response_identity.runtime_id (string_field row "evaluator_runtime")) in
-        Some (producer_identity, evaluator_identity)) records
+    List.map (fun (record : verdict_record) ->
+      let producer_identity =
+        record.producer_execution
+        |> identity_matching (fun identity -> String.equal identity.Runtime_response_identity.actor record.agent_name) in
+      let evaluator_identity =
+        record.evaluator_execution
+        |> identity_matching (fun identity -> String.equal identity.Runtime_response_identity.runtime_id record.evaluator_runtime) in
+      (producer_identity, evaluator_identity)) window.verdicts
     |> Runtime_response_identity.summarize_pairs
     |> Runtime_response_identity.pair_summary_to_yojson in
   `Assoc [
@@ -499,4 +599,5 @@ let calibration_stats ?(since = "") ?(until = "") ~base_path () : Yojson.Safe.t 
     ("model_identity_observation", identity_observation);
     ("recent_fallback_reasons",
      `List (List.rev_map (fun s -> `String s) recent_fallback_reasons));
+    ("unreadable_record_count", `Int window.unreadable_rows);
   ]

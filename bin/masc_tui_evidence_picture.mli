@@ -43,8 +43,9 @@ type reading =
 val reading : Masc.Tui_decode.evidence_preview -> reading
 (** The server's preview, read. No bytes are converted or measured. *)
 
-val cause_text : cause -> string
-(** The cause in a sentence, with the numbers it was decided on. *)
+val cause_text : ko:bool -> cause -> string
+(** The cause in a sentence of the screen language, with the numbers it was
+    decided on. *)
 
 val short_sha_length : int
 (** Hex digits of the SHA-256 a line shows; the evidence identity lines use
@@ -114,6 +115,7 @@ val prepare :
     converted or given a slot: every image is {!Undrawn_image}. *)
 
 val caption :
+  ko:bool ->
   reference:string ->
   bytes:int ->
   sha256:string ->
@@ -126,6 +128,7 @@ val caption :
     its reference. The only thing a terminal that draws no pixels shows. *)
 
 val caption_of_preview :
+  ko:bool ->
   reference:string ->
   bytes:int ->
   sha256:string ->

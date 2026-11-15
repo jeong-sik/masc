@@ -76,6 +76,21 @@ let catalog_reading ~model (catalog : Msp.model_catalog) =
 
 let model_not_in_account_catalog = "model_not_in_account_catalog"
 
+(* RFC-0520 D2. MASC names this failure itself from the bridge's phase; no
+   host sentence is read. *)
+let session_mcp_not_connected_type = "session_mcp_not_connected"
+
+let session_mcp_not_connected detail =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.ProviderReportedError
+       { provider = provider_name
+       ; error_type = Some session_mcp_not_connected_type
+       ; detail =
+           "Muse Code completed the turn without connecting the required MASC MCP server: "
+           ^ detail
+       })
+;;
+
 (* The host's typed refusal of a turn's input (RFC-librarian-lifecycle §4.10):
    a model error it judged would not succeed on the same input, with no quota
    detail. The error sentence is not read. The caller joins it to the range
@@ -925,7 +940,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
-    ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
+    ~turn_start ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ~workspace_origin ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input
     ~on_model_input_refused ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
@@ -1587,6 +1602,30 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
             recovery_failure := Session_store.Pre_dispatch_failed;
             internal_error ("Muse Code storage root setup failed: " ^ detail))
         in
+        (* The caller read the directory before this turn's claim. A session of
+           this Keeper that held the claim then may have written it since, so
+           the read that decides workspace trust is this one, under the
+           claim and before the host starts. *)
+        let* workspace_origin =
+          match workspace_origin with
+          | Serve.Other_tree -> Ok Serve.other_tree
+          | Serve.Masc_private ->
+            let* read =
+              Eio_guard.run_in_systhread ~label:"muse workspace read under claim" (fun () ->
+                Serve.origin_of_masc_directory workspace_root)
+              |> Result.map_error (fun detail ->
+                recovery_failure := Session_store.Pre_dispatch_failed;
+                internal_error ("Muse Code private workspace read failed: " ^ detail))
+            in
+            (match read with
+             | Serve.Masc_private -> ()
+             | Serve.Other_tree ->
+               Log.Keeper.warn ~keeper_name
+                 "Muse private workspace %s gained files after the turn first read it; \
+                  the host starts without workspace trust and does not connect the MASC tools"
+                 workspace_root);
+            Ok read
+        in
         let* (mcp_servers, bridge) =
           try Ok (
           match dynamic_tools with
@@ -1703,6 +1742,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                     ~account
                     client_config
                     ~workspace_root
+                    ~workspace_origin
                     ~prompt
                     ~images))
             ~watcher:(fun () ->
@@ -1714,8 +1754,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                 `Abort stop)
         with
         | `Runtime client_result ->
+          (* Read while the bridge is still up; [None] when the turn had no
+             MASC tool and so no bridge. *)
+          let bridge_phase = Option.map Mcp_http.client_phase bridge in
           client_result
-          |> Result.map (fun turn -> `Completed turn)
+          |> Result.map (fun turn -> `Completed (turn, bridge_phase))
           |> Result.map_error (fun error ->
             let usage_after_refusal =
               match error with
@@ -1868,12 +1911,27 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
              Error (internal_error detail)
            | Host.Terminal_tool_boundary _, None ->
              settle_host_stop stop)
-        | Ok (`Completed (turn : Serve.turn_result)) ->
+        | Ok (`Completed ((turn : Serve.turn_result), bridge_phase)) ->
           natural_completion := true;
           recovery_failure := Session_store.Protocol_failed;
           let* () =
             record_turn_identity ~session_id:turn.session_id ~turn_id:turn.turn_id
             |> Result.map_error internal_error
+          in
+          (* RFC-0520 D2, D4: the host completed a turn whose MASC tools it
+             never connected. The bridge refuses [tools/list] and [tools/call]
+             before [Ready], so the model ran without them. The turn is not a
+             success, and its session is not the one the next turn resumes. *)
+          recovery_failure := Session_store.Provider_rejected;
+          let* () =
+            match bridge_phase with
+            | None | Some Runtime_official_client_mcp.Ready -> Ok ()
+            | Some Runtime_official_client_mcp.Awaiting_initialize ->
+              Error (session_mcp_not_connected "the host sent no MCP initialize")
+            | Some Runtime_official_client_mcp.Awaiting_initialized ->
+              Error
+                (session_mcp_not_connected
+                   "the host sent MCP initialize and never confirmed it")
           in
           recovery_failure := Session_store.Host_hook_failed;
           let* () =
@@ -2001,7 +2059,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
 
 let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
-    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root ?native_workspace_context ~goal
+    ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~workspace_root
+    ?(workspace_origin = Serve.other_tree) ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
     ?(loading_plan = Keeper_official_client_host.All_on_demand)
     ~initial_messages ~model_input_projection
@@ -2067,6 +2126,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~pre_tool_rejects
         ~base_path
         ~workspace_root
+        ~workspace_origin
         ~native_workspace_context
         ~goal
         ~goal_blocks

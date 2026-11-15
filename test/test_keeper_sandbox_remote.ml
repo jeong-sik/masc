@@ -207,6 +207,16 @@ let stub_main () =
   | "malformed" ->
     write_all Unix.stderr "guest-err\x1ebad\x1e";
     exit 0
+  | "hold-until-eof" ->
+    (* A transport that stays up until its input closes, as ssh does while
+       the remote command runs. The pid is published whole, by rename. *)
+    let pid_path = frame_path ^ ".pid" in
+    save (pid_path ^ ".partial") (string_of_int (Unix.getpid ()));
+    Sys.rename (pid_path ^ ".partial") pid_path;
+    let byte = Bytes.create 1 in
+    let rec until_eof () = if Unix.read Unix.stdin byte 0 1 > 0 then until_eof () in
+    until_eof ();
+    exit 0
   | other -> failwith ("unknown container stub mode: " ^ other)
 ;;
 
@@ -1387,6 +1397,51 @@ let test_interrupted_wire_publishes_unknown_receipt () =
     fail "an interrupted wire did not publish its uncertain effect"
 ;;
 
+let process_alive pid =
+  match Unix.kill pid 0 with
+  | () -> true
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
+;;
+
+(* #32910: a request whose caller is cancelled ends its local transport
+   process -- ssh, on a Remote_ssh lane. That end closes the channel, and the
+   closed channel is what tells the endpoint's shim to stop the remote command
+   (Exec_shim's On_eof kill). A transport left running would keep the remote
+   command, and the endpoint's session, until the request's own timeout. *)
+let test_cancelled_request_ends_its_transport_process () =
+  with_eio_env @@ fun env ->
+  let base_path = temp_dir () in
+  let cli, frame_path = make_stub ~dir:base_path ~mode:"hold-until-eof" in
+  let pid_path = frame_path ^ ".pid" in
+  (* Far past the test's own patience: only the cancellation can end it. *)
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec:600.0 (make_state ~base_path ~cli) in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let cancel_context, provide_context = Eio.Promise.create () in
+  let result, finish = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let outcome =
+      try Eio.Cancel.sub (fun context ->
+        Eio.Promise.resolve provide_context context;
+        ignore (runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None
+                  ~argv:["gh"; "auth"; "login"] ~env:[||] ~cwd:None);
+        `Returned)
+      with Eio.Cancel.Cancelled _ -> `Cancelled in
+    Eio.Promise.resolve finish outcome);
+  let context = Eio.Promise.await cancel_context in
+  Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+    while not (Sys.file_exists pid_path) do Eio.Time.sleep clock 0.05 done);
+  let pid = int_of_string (String.trim (read_file pid_path)) in
+  check bool "the transport process is running before the cancellation" true
+    (process_alive pid);
+  Eio.Cancel.cancel context Exit;
+  (match Eio.Time.with_timeout_exn clock 10.0 (fun () -> Eio.Promise.await result) with
+   | `Cancelled -> ()
+   | `Returned -> fail "the runner swallowed cancellation");
+  check bool "the cancelled request ended and reaped its transport process" false
+    (process_alive pid)
+;;
+
 let test_trusted_remote_timeout_retains_receipt () =
   with_eio @@ fun () ->
   let base_path = temp_dir () in
@@ -1713,6 +1768,8 @@ let () =
               test_trusted_remote_timeout_retains_receipt
           ; test_case "interrupted wire retains unknown receipt" `Quick
               test_interrupted_wire_publishes_unknown_receipt
+          ; test_case "a cancelled request ends its transport process" `Quick
+              test_cancelled_request_ends_its_transport_process
           ; test_case "transport + probe argv" `Quick test_transport_and_probe_argv
           ; test_case "latest probe and boot comparison" `Quick test_fresh_probe_and_boot_comparison
           ; test_case "shared endpoint probes cannot reorder boots" `Quick test_concurrent_probes_do_not_reorder_boots

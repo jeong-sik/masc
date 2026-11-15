@@ -1,13 +1,5 @@
 open Alcotest
 
-let member name = function
-  | `Assoc fields ->
-    (match List.assoc_opt name fields with
-     | Some value -> value
-     | None -> failf "missing field %s" name)
-  | _ -> fail "expected JSON object"
-;;
-
 let has_field name = function
   | `Assoc fields -> Option.is_some (List.assoc_opt name fields)
   | _ -> false

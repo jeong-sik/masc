@@ -14,11 +14,6 @@ module Persistence = struct
     | Error detail -> Alcotest.fail detail
   ;;
 
-  let load_pending ~base_path ~keeper_name =
-    match load_pending_result ~base_path ~keeper_name with
-    | Ok queue -> queue
-    | Error detail -> Alcotest.fail detail
-  ;;
 end
 module Queue = Keeper_event_queue
 

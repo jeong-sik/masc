@@ -4102,6 +4102,49 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
           let selected_index =
             max 0 (min state.connectors_cursor (List.length connectors - 1))
           in
+          (* The list the open arm or pause offer would send for this Keeper
+             now, read through the decision its key reads. The footer cuts
+             from the right and any other key ends the arm, so this pane is
+             where the operator reads every channel before confirming. *)
+          let unbind_confirmation =
+            Masc_tui_connector_unbind.confirmation
+              ~armed:state.connector_unbind_all_armed
+              ~offer:state.connector_unbind_offer ~keeper_name:k.k_name
+              (Masc_tui_connector_unbind.targets ~keeper_name:k.k_name connectors)
+          in
+          let confirmation_lines =
+            match unbind_confirmation with
+            | None -> []
+            | Some { Masc_tui_connector_unbind.confirm_key; confirm_targets } ->
+                let count = List.length confirm_targets in
+                let unreadable =
+                  Masc_tui_connector_unbind.unreadable_transports connectors
+                in
+                ((Theme.warn ())
+                 ^ (if ko then
+                      Printf.sprintf
+                        "  %s 를 누르면 아래 바인딩 %d개를 제거 · 다른 키는 그대로 둠"
+                        confirm_key count
+                    else
+                      Printf.sprintf
+                        "  %s removes these %d binding%s · any other key keeps them"
+                        confirm_key count (if count = 1 then "" else "s"))
+                 ^ Ansi.reset)
+                :: List.concat_map
+                     (fun (target : Masc_tui_connector_unbind.target) ->
+                        Terminal_text.single_line target.connector_name ^ " · "
+                        ^ Masc_tui_connector_unbind.target_label target
+                        |> Message_layout.wrap_styled_words ~max_cells:(max 1 (inner - 4))
+                        |> List.map (fun line -> "    " ^ line))
+                     confirm_targets
+                @ (match unreadable with
+                   | [] -> []
+                   | names ->
+                       [ (Theme.warn ())
+                         ^ t "    빠짐 · 바인딩 목록 읽지 못함: "
+                             "    not included, binding list unreadable: "
+                         ^ String.concat ", " names ^ Ansi.reset ])
+          in
           (* The list row and the detail badge spell the same connection, so
              they read the same table. This pane kept a byte-identical copy of
              it, which meant a change to the vocabulary could land in one
@@ -4222,8 +4265,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                       let missing_keeper =
                         not (keeper_is_present binding.cb_keeper_name)
                       in
+                      let removal =
+                        match
+                          Masc_tui_connector_unbind.row_mark unbind_confirmation
+                            connector binding
+                        with
+                        | Masc_tui_connector_unbind.Will_unbind key ->
+                            Printf.sprintf (if ko then "  · %s 로 제거" else "  · %s removes") key
+                        | Masc_tui_connector_unbind.Not_targeted -> ""
+                      in
                       let line =
-                        Printf.sprintf "    %s %s → %s%s"
+                        Printf.sprintf "    %s %s → %s%s%s"
                           (if selected then Masc_tui_theme.Glyph.current_entry else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
@@ -4232,6 +4284,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                              t "  (없는 Keeper · e 다시 배정 · u u 제거)"
                                "  (MISSING KEEPER · e reassign · u u remove)"
                            else "")
+                          removal
                       in
                       if selected then Ansi.reverse ^ line ^ Ansi.reset
                       else if missing_keeper then
@@ -4377,7 +4430,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  [ (Theme.bad ()) ^ t "  이전 관측 · " "  STALE · "
                    ^ Terminal_text.single_line detail ^ Ansi.reset
                  ])
-          @ transport_rows @ refused_rows @ selected_lines
+          @ confirmation_lines @ transport_rows @ refused_rows @ selected_lines
       in
       match connectors_read_notice state with
       | None -> rows

@@ -31344,7 +31344,8 @@ let main
          | Runtime | Config | Resources | Tools | System_logs -> submit "")
   in
   (* [U] twice: every binding the selected Keeper holds, on every transport.
-     The first press names each channel; the second sends exactly those, each
+     The first press arms, and the Channels tab names each channel while the
+     arm stands; the second sends exactly those, each
      conditional on the Keeper still owning it. A snapshot that changed in
      between re-arms with the new list instead of sending a list the operator
      never read. *)
@@ -31370,19 +31371,20 @@ let main
         let unreadable =
           Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
         in
-        match targets, state.connector_unbind_all_armed with
-        | [], _ ->
+        match
+          Masc_tui_connector_unbind.next_press
+            ~named:state.connector_unbind_all_armed ~keeper_name targets
+        with
+        | Masc_tui_connector_unbind.Nothing_bound ->
             state.connector_unbind_all_armed <- None;
             report_action state "system"
               (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
                  ~unreadable)
-        | _ :: _, Some (armed_keeper, armed_targets)
-          when String.equal armed_keeper keeper_name && armed_targets = targets
-          ->
+        | Masc_tui_connector_unbind.Sends targets ->
             state.connector_unbind_all_armed <- None;
             launch_connector_unbind_all state ~mailbox:async_messages
               ~keeper_name targets
-        | _ :: _, (Some _ | None) ->
+        | Masc_tui_connector_unbind.Asks targets ->
             state.connector_unbind_all_armed <- Some (keeper_name, targets);
             report_action state "system"
               (Masc_tui_connector_unbind.arm_prompt ~keeper_name
@@ -31420,15 +31422,19 @@ let main
         let unreadable =
           Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
         in
-        match targets with
-        | [] ->
+        match
+          Masc_tui_connector_unbind.next_press
+            ~named:(Some (offer.offer_keeper, offer.offer_targets))
+            ~keeper_name targets
+        with
+        | Masc_tui_connector_unbind.Nothing_bound ->
             report_action state "system"
               (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
                  ~unreadable)
-        | _ :: _ when targets = offer.offer_targets ->
+        | Masc_tui_connector_unbind.Sends targets ->
             launch_connector_unbind_all state ~mailbox:async_messages
               ~keeper_name targets
-        | _ :: _ ->
+        | Masc_tui_connector_unbind.Asks targets ->
             state.connector_unbind_offer <-
               Some { offer with offer_targets = targets
                               ; offered_at = state.frames_presented };

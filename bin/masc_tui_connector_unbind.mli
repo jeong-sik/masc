@@ -39,6 +39,25 @@ val target_label : target -> string
     order. *)
 val targets : keeper_name:string -> Masc.Tui_decode_connectors.connector list -> target list
 
+(** What the confirming key does for [keeper_name], given the list an earlier
+    prompt named ([named]: whose, and which) and the snapshot's
+    {!targets} now. The [U] handler, the pause offer's key and the Channels
+    tab all read this one answer, so the screen marks exactly what the key
+    sends. *)
+type next_press =
+  | Nothing_bound  (** No readable binding names the Keeper. *)
+  | Asks of target list
+      (** Nothing was named for this Keeper, or the named list is not the
+          snapshot's list: the key names this list instead of sending one
+          the operator never read. *)
+  | Sends of target list
+      (** The named list is still every binding the Keeper holds: the key
+          sends exactly these. *)
+
+val next_press :
+  named:(string * target list) option -> keeper_name:string -> target list ->
+  next_press
+
 (** Display names of the transports whose binding store the server could not
     read ([binding_store_read_ok = false]). Their bindings are unknown, so
     {!targets} cannot include them and the prompts say so. *)
@@ -62,8 +81,10 @@ val summary : keeper_name:string -> (target * outcome) list -> string
 
 val any_failed : (target * outcome) list -> bool
 
-(** The line shown after the first press, naming each channel it will remove
-    and any transport left out because its binding list is unreadable. *)
+(** The line shown after the first press: the key, how many bindings and
+    whose, and any transport left out because its binding list is
+    unreadable. The channels are listed on the Channels tab, which a footer
+    cannot cut. *)
 val arm_prompt :
   keeper_name:string -> confirm_key:string -> unreadable:string list ->
   target list -> string
@@ -98,6 +119,32 @@ type offer_reading =
 val read_offer_input :
   offer -> frames_presented:int -> input_seen:bool -> key:string option ->
   offer_reading
+
+(** A list on screen that one key sends as it stands. *)
+type confirmation = {
+  confirm_key : string;  (** {!unbind_all_key} for the arm, {!offer_key} for the offer. *)
+  confirm_targets : target list;
+}
+
+(** The arm or the pause offer for [keeper_name] whose key would send now
+    ({!next_press} answers [Sends]). [None] when neither is open for this
+    Keeper, or the one that is open names a list the snapshot no longer
+    holds -- that key asks again rather than sending. *)
+val confirmation :
+  armed:(string * target list) option -> offer:offer option ->
+  keeper_name:string -> target list -> confirmation option
+
+(** One binding row on the Channels tab. *)
+type row_mark =
+  | Will_unbind of string
+      (** The confirmation's key removes this binding; carries that key. *)
+  | Not_targeted
+
+(** Read by the binding's own target value, the one the key sends: transport,
+    channel and owning Keeper as the snapshot holds them. *)
+val row_mark :
+  confirmation option -> Masc.Tui_decode_connectors.connector ->
+  Masc.Tui_decode_connectors.connector_binding -> row_mark
 
 (** The line shown after the operator paused or shut down a Keeper that still
     holds bindings: {!offer_key}, then the channels it would answer on again

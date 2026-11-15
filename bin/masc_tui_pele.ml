@@ -1,4 +1,4 @@
-type format = Mermaid | Svg
+type format = Mermaid | Svg | Graph
 type scene = { format : format; source : string; max_width : int;
   font_size : int; now_ms : int64; colors : (string * string) option }
 type crop = { left : float; top : float; right : float; bottom : float }
@@ -56,7 +56,7 @@ let render ~cache_dir ?raster ?(runner=default_runner) {format;source;max_width;
       let output = temporary ".png" in
       let errors = temporary ".err" in
       let fields = ["protocol", `Int protocol_version;
-                    "format", `String (match format with Mermaid -> "mermaid" | Svg -> "svg");
+                    "format", `String (match format with Mermaid -> "mermaid" | Svg -> "svg" | Graph -> "graph");
                     "source", `String source; "maxWidth", `Int max_width;
                     "fontSize", `Int font_size; "now", `Intlit (Int64.to_string now_ms)] in
       let fields = match raster with

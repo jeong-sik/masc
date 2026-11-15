@@ -1,6 +1,7 @@
 import { render } from 'pele';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { Resvg } from '@resvg/resvg-js';
+import { renderGraphSvg } from './graph.mjs';
 
 const logicalFontSize = 16;
 
@@ -266,8 +267,17 @@ export function renderDocument(request) {
       });
       break;
     }
+    case 'graph': {
+      svg = retainedSvg(renderGraphSvg(request.source, { colors: request.colors }));
+      const original = new Resvg(svg, { background });
+      result = { width: original.width, height: original.height };
+      renderer = raster !== undefined || original.width <= request.maxWidth ? original : new Resvg(svg, {
+        background, fitTo: { mode: 'width', value: request.maxWidth },
+      });
+      break;
+    }
     default:
-      throw new TypeError('format must be mermaid or svg');
+      throw new TypeError('format must be mermaid, svg, or graph');
   }
   if (raster !== undefined) {
     if (renderer.imagesToResolve().length) throw new Error('Diagram contains unresolved images');

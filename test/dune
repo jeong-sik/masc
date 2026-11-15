@@ -4818,7 +4818,7 @@
 (test
  (name test_tui_memory_lineage)
  (modules test_tui_memory_lineage)
- (libraries alcotest masc masc_tui_memory_lineage))
+ (libraries alcotest masc masc_tui_memory_lineage masc_tui_terminal_palette yojson))
 
 (test
  (name test_tui_memory_facts_explorer)

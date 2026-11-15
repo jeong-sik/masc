@@ -11,7 +11,7 @@ let is_vector = function
       Masc_tui_image_payload.format_of_mime attachment.Masc_tui_keeper_chat_projection.mime_type = Svg
   | Retained {format;_} -> format = Svg
   | Generated (Inline_data data) -> Masc_tui_image_payload.format data = Svg
-  | Generated (Inline_svg _ | Inline_mermaid _) -> true
+  | Generated (Inline_svg _ | Inline_mermaid _ | Inline_graph _) -> true
   | Local_file _ | Board_artifact _ | Generated (Remote_uri _ | Server_path _) -> false
 
 let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_size
@@ -99,6 +99,8 @@ let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_siz
     in_thread ~label:"tui-output-svg-convert" (fun () -> vector Svg svg)
   | Generated (Masc_tui_image_preview.Inline_mermaid source) ->
     in_thread ~label:"tui-pele-render" (fun () -> vector Mermaid source)
+  | Generated (Masc_tui_image_preview.Inline_graph source) ->
+    in_thread ~label:"tui-pele-graph-render" (fun () -> vector Graph source)
   | Generated (Masc_tui_image_preview.Remote_uri url) ->
     in_thread ~label:"tui-output-image-download" (fun () ->
       present (Masc_tui_image_cache.prepare_png ~run ~cache_dir:(cache_dir ()) url))

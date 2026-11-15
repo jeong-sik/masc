@@ -25,10 +25,10 @@ val change_reading :
 
 val change_diagram :
   Masc_tui_types.state -> keeper_name:string -> Masc_tui_image_preview.preview option
-(** Immutable Mermaid source for the selected change's observed identity
-    neighbourhood. Uses the existing offline Pele image acquisition path. *)
+(** Structured rich graph source for the selected change's connected identity
+    neighbourhood with full wrapped claims, rendered via the offline Pele path. *)
 
 val change_focus_diagram :
   Masc_tui_types.state -> keeper_name:string -> Masc_tui_image_preview.preview option
-(** Three-stage SVG for only the selected transition. Uses the observed
-    terminal palette; when unavailable, retains the Mermaid reading. *)
+(** Three-stage SVG for the selected transition with full wrapped claims. Uses
+    the observed terminal palette; when unavailable, retains the Mermaid reading. *)

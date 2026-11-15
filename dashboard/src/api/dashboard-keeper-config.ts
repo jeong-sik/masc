@@ -8,7 +8,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConstitutionLedgerPreview, KeeperConstitutionRejectedLine, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile, RemoteSshEndpoint, RemoteSshEndpointCatalog, RemoteSshProbe } from '../types'
+import type { KeeperConfig, KeeperConstitutionIsolatedLine, KeeperConstitutionLedgerPreview, KeeperConstitutionRejectedLine, KeeperSystemPromptPreview, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision, KeeperConfigRevisionState, KeeperConfigRuntimeSync, SandboxProfile, RemoteSshEndpoint, RemoteSshEndpointCatalog, RemoteSshProbe } from '../types'
 import { UNKNOWN_NETWORK_MODE, UNKNOWN_SANDBOX_PROFILE } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
@@ -87,6 +87,17 @@ function decodeConstitutionRejectedLine(value: unknown): KeeperConstitutionRejec
   return { line: value.line, line_end: value.line_end, detail: value.detail }
 }
 
+function decodeConstitutionIsolatedLine(value: unknown): KeeperConstitutionIsolatedLine | null {
+  if (!isRecord(value) || !isPositiveSafeInteger(value.line) || typeof value.subject !== 'string') return null
+  if (!Array.isArray(value.article_ids)) return null
+  const articleIds: string[] = []
+  for (const id of value.article_ids) {
+    if (typeof id !== 'string') return null
+    articleIds.push(id)
+  }
+  return { line: value.line, subject: value.subject, article_ids: articleIds }
+}
+
 // An absent or unknown ledger answer is a decode failure, never "no broken
 // lines": the panel would otherwise hide the lines the prompt left out.
 function decodeConstitutionLedgerPreview(value: unknown): KeeperConstitutionLedgerPreview | string {
@@ -99,7 +110,14 @@ function decodeConstitutionLedgerPreview(value: unknown): KeeperConstitutionLedg
       if (line === null) return `constitution_ledger has an unreadable row ${JSON.stringify(raw)}`
       lines.push(line)
     }
-    return { state: 'read', rejected_lines: lines }
+    if (!Array.isArray(value.isolated_lines)) return 'constitution_ledger has no isolated_lines array'
+    const isolated: KeeperConstitutionIsolatedLine[] = []
+    for (const raw of value.isolated_lines) {
+      const line = decodeConstitutionIsolatedLine(raw)
+      if (line === null) return `constitution_ledger has an unreadable isolated row ${JSON.stringify(raw)}`
+      isolated.push(line)
+    }
+    return { state: 'read', rejected_lines: lines, isolated_lines: isolated }
   }
   if (value.state === 'unreadable' && typeof value.path === 'string' && typeof value.detail === 'string') {
     return { state: 'unreadable', path: value.path, detail: value.detail }

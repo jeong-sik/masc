@@ -1549,13 +1549,22 @@ function renderConstitutionLedger(ledger: KeeperConstitutionLedgerPreview) {
       <div class="font-mono">${ledger.detail}</div>
     </div>`
   }
-  if (ledger.rejected_lines.length === 0) return null
-  return html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-rejected-lines">
+  const rejected = ledger.rejected_lines.length === 0 ? null : html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-rejected-lines">
     헌법 원장에서 읽지 못한 줄은 이 프롬프트에 들어가지 않아요.
     ${ledger.rejected_lines.map((line) => html`<div class="font-mono mt-1" data-testid="kcf-constitution-rejected-line" data-line=${line.line} data-line-end=${line.line_end}>
       ${line.line}번째 줄${line.line_end === 'unterminated_final_line' ? ' (마지막 줄, 줄바꿈 없음)' : ''}: ${line.detail}
     </div>`)}
   </div>`
+  // RFC-0504 §2.4: a line written under a name the roster does not hold
+  // withholds the articles it touches, so it is named here beside the
+  // unreadable lines instead of the norm vanishing.
+  const isolated = ledger.isolated_lines.length === 0 ? null : html`<div class="text-2xs text-[var(--color-danger-fg)]" data-testid="kcf-constitution-isolated-lines">
+    쓴 사람이 Keeper 명단에 없는 원장 줄의 조항은 이 프롬프트에서 빠져요.
+    ${ledger.isolated_lines.map((line) => html`<div class="font-mono mt-1" data-testid="kcf-constitution-isolated-line" data-line=${line.line} data-subject=${line.subject}>
+      ${line.line}번째 줄 (${line.subject}): ${line.article_ids.join(', ')}
+    </div>`)}
+  </div>`
+  return html`${rejected}${isolated}`
 }
 
 function renderSystemPromptPreview(preview: KeeperSystemPromptPreview) {

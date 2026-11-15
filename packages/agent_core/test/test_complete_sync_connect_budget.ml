@@ -55,6 +55,7 @@ let describe = function
   | Ended (Error (Http_client.TimeoutError { phase; message })) ->
     Printf.sprintf "TimeoutError phase=%s (%s)" (Http_client.timeout_phase_to_label phase) message
   | Ended (Error (Http_client.NetworkError { message; _ })) -> "NetworkError " ^ message
+  | Ended (Error (Http_client.Connect_failed { message; _ })) -> "Connect_failed " ^ message
   | Ended (Error (Http_client.AcceptRejected { reason })) -> "AcceptRejected " ^ reason
   | Ended (Error (Http_client.HttpError { code; _ })) -> Printf.sprintf "HttpError %d" code
   | Ended (Error (Http_client.ProviderTerminal _ | Http_client.ProviderFailure _)) ->
@@ -130,7 +131,7 @@ let test_a_silent_server_ends_the_sync_call_at_the_connect_budget () =
 
 (* A budget the caller cannot enforce is refused before any byte is sent,
    as the streaming path refuses it, rather than dropped. Nothing listens on
-   the port: had the client dialled, the result would be a NetworkError. *)
+   the port: had the client dialled, the result would be a Connect_failed. *)
 let closed_port = 9
 
 let test_a_connect_budget_without_a_clock_is_refused_before_dispatch () =

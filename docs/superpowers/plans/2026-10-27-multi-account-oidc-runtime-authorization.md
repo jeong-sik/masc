@@ -1049,7 +1049,7 @@ S1은 둘로 나눈다(2026-11-10 사용자). 다 만든 뒤에 여는 대신 �
 - 하지 않는 것.
   - `masc-tui`를 직접 띄우는 길은 계정 서버를 알아보지 못한다.
   - `account_mode`가 표에 없는 값인 config와, 로그는 다계정인데 config가 청하지 않는 workspace는 doctor가 전처럼 읽는다. 둘 다 부팅이 자기 문장으로 거절한다. 앞의 것은 #51320이다.
-  - 다른 포트를 물었을 때 주인이 알린 포트를 읽는 길은 같은 사용자의 다른 프로세스가 건 lock 뒤에서 주인을 놓칠 수 있다(S1a-2c의 한계). 그때는 `Held_without_announcement`다.
+  - 다른 포트를 물었을 때 주인이 알린 포트를 읽는 길은 같은 사용자의 다른 프로세스가 건 lock 뒤에서 주인을 놓칠 수 있다(S1a-2c의 한계). 그때는 `Owner_unannounced`다. 주인의 pid를 말하고 거절한다.
   - `scripts/install.sh`는 journey 전에 `masc init --config-only`로 config를 심고, journey가 exit 0이면 "Setup finished"라고 적는다. 계정 설치에서도 같다(#51362).
 
 **S1a-3a 범위**

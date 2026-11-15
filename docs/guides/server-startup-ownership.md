@@ -45,9 +45,9 @@ after `scripts/install-local-build.sh`:
    that process as a `Server_upgrade_preparation.single_user_listener`, which
    only `Server_upgrade_preparation.owner` makes. Nothing is forced down.
    When the kernel no longer names that server at one of these checks,
-   restart and `masc setup` say what it names now: the pid that withdrew its
-   announcement, as a server does when it shuts down, or the owner that took
-   its place.
+   restart and `masc setup-stop-previous-owner` say what it names now: the
+   pid that withdrew its announcement, as a server does when it shuts down,
+   or the owner that took its place.
 3. It starts `masc start --wait-for-previous-owner` in its own process group
    with its output appended to `<base>/.masc/logs/masc-start-<UTC time>.log`
    (`--log` chooses another file). That process sleeps on the lease until

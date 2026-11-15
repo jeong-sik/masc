@@ -9,7 +9,19 @@ on:
   schedule:
     # The half-hour interval of the main build, 15 minutes apart from it.
     - cron: '22,52 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    # The quota re-dispatch from the worker rides these inputs (#52140): the
+    # dispatch API rejects inputs the target workflow does not declare, so
+    # without this block the retry path can never actually start.
+    inputs:
+      pr:
+        description: 'One pull request number: the sweep walks only this scope.'
+        required: false
+        default: ''
+      quota_retry:
+        description: 'Quota attempts already spent on this pull request.'
+        required: false
+        default: ''
 
 # What the worker needs: it merges, dispatches the main build and its own
 # receipt follow-up, deletes merged branches and closes linked issues.
@@ -42,4 +54,5 @@ jobs:
       - name: Run the merge worker on every approved scope still open
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/review/approval-merge-sweep.py
+        # An empty --pr (the scheduled sweep) walks every approved scope.
+        run: python3 scripts/review/approval-merge-sweep.py --pr '${{ inputs.pr }}'

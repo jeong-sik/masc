@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import types
@@ -1951,6 +1952,33 @@ class QuotaRedispatchOnFailure(unittest.TestCase):
         self.assertEqual(code, MERGE.QUOTA_EXIT)
         self.assertEqual(sleeps, [])
         self.assertEqual(commands, [])
+
+
+class SweepDispatchContract(unittest.TestCase):
+    """A dispatch can only start when the target workflow declares the inputs
+    the caller passes: the dispatch API rejects undeclared inputs ("Unexpected
+    inputs provided"), so the -f keys of the quota re-dispatch must appear in
+    approval-merge-sweep.yml's workflow_dispatch inputs.
+    """
+
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def test_worker_dispatch_keys_are_declared(self):
+        workflow = (self.ROOT / '.github/workflows/approval-merge-sweep.yml'
+                    ).read_text(encoding='utf-8')
+        block = workflow.split('workflow_dispatch:', 1)[1]
+        for stop in ('\npermissions:', '\njobs:'):
+            block = block.split(stop, 1)[0]
+        self.assertIn('inputs:', block)
+        declared = set(re.findall(r'^ {6}([a-z_]+):', block, re.MULTILINE))
+        worker = (HERE / 'approval-auto-merge.py').read_text(encoding='utf-8')
+        # Only the quota re-dispatch call site: other workflow dispatches in
+        # the worker target their own workflows and inputs.
+        site = worker.split("'approval-merge-sweep.yml'", 1)[1][:400]
+        keys = set(re.findall(r"'-f', f?'([a-z_]+)=", site))
+        self.assertTrue(keys, 'no -f keys found at the sweep dispatch site')
+        self.assertLessEqual(keys, declared,
+                             f'{keys - declared} dispatched but not declared')
 
 
 if __name__ == '__main__':

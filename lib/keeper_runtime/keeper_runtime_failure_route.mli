@@ -53,6 +53,10 @@ type retry_class =
           telemetry, and the model observed the input *)
   | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
+  | Connection_not_opened
+      (** the connection to the candidate's host did not open, so the request
+          was not sent ([Candidate_fault.Not_sent], provider [Connect_failed]).
+          Kept apart from [Network_transient], which may have been sent. *)
   | Provider_timeout  (** provider or transport deadline expiry *)
   | Local_admission_timeout
       (** the wait expired in MASC's own permit queue or local capacity gate,
@@ -300,7 +304,8 @@ val route_resumes_on_same_path : route -> bool
 
     [true]: [Rate_limited], [Provider_capacity], [Empty_completion] with
     [EndTurn], [MaxTokens], or [StopSequence], [Server_error],
-    [Network_transient], [Provider_timeout], [Local_admission_timeout], and
+    [Network_transient], [Connection_not_opened], [Provider_timeout],
+    [Local_admission_timeout], and
     [Hard_quota] with a usable reset hint (positive, not NaN). The
     empty-completion reasons resume a direct operation once so its saved tool
     results are not discarded; another resume still requires a newly saved

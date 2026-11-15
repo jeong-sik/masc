@@ -568,7 +568,8 @@ let failure_of_agent_core_error error =
   | Route.Retry_after_observed
       { retry_class = Route.Provider_capacity | Route.Server_error; retry_after } ->
     Provider_overloaded (with_retry_after retry_after detail)
-  | Route.Retry_after_observed { retry_class = Route.Network_transient; _ } ->
+  | Route.Retry_after_observed
+      { retry_class = Route.Network_transient | Route.Connection_not_opened; _ } ->
     Provider_unreachable detail
   | Route.Retry_after_observed
       { retry_class = Route.Provider_timeout | Route.Local_admission_timeout; _ } -> Timed_out
@@ -906,7 +907,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                         | Agent_core.Retry.NotFound _
                         | Agent_core.Retry.ContextOverflow _
                         | Agent_core.Retry.InputCapacity _
-                        | Agent_core.Retry.NetworkError _ )
+                        | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Connect_failed _ )
                     | Agent_core.Error.Provider
                         ( Llm_provider.Error.MissingApiKey _
                         | Llm_provider.Error.InvalidConfig _
@@ -922,7 +923,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                         | Llm_provider.Error.AuthError _
                         | Llm_provider.Error.AuthorizationError _
                         | Llm_provider.Error.ServerError _
-                        | Llm_provider.Error.NetworkError _
+                        | Llm_provider.Error.NetworkError _ | Llm_provider.Error.Connect_failed _
                         | Llm_provider.Error.InvalidRequest _
                         | Llm_provider.Error.NotFound _
                         | Llm_provider.Error.ProviderTerminal _ )

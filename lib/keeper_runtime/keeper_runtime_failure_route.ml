@@ -11,6 +11,7 @@ type retry_class =
   | Empty_completion of { stop_reason : Llm_provider.Types.stop_reason }
   | Server_error
   | Network_transient
+  | Connection_not_opened
   | Provider_timeout
   | Local_admission_timeout
 
@@ -79,7 +80,7 @@ let hard_quota_source (err : Agent_core.Error.t) =
   | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)
   | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
   | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
-  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _)
   | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
@@ -95,6 +96,7 @@ let hard_quota_source (err : Agent_core.Error.t) =
   | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
   | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
   | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Connect_failed _)
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
   | Agent_core.Error.Provider (Llm_provider.Error.NotFound _)
@@ -124,7 +126,7 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (Llm_provider.Retry.InvalidRequest _)
   | Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)
   | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
-  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _)
   | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
@@ -141,6 +143,7 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _)
   | Agent_core.Error.Provider (Llm_provider.Error.ServerError _)
   | Agent_core.Error.Provider (Llm_provider.Error.NetworkError _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Connect_failed _)
   | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidRequest _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal _)
@@ -275,7 +278,7 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.NotFound _
   | Llm_provider.Retry.ContextOverflow _
   | Llm_provider.Retry.InputCapacity _
-  | Llm_provider.Retry.NetworkError _
+  | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _
   | Llm_provider.Retry.Timeout _ -> None
 ;;
 
@@ -286,11 +289,11 @@ let api_error_retry_after (api : Llm_provider.Retry.api_error) =
    step 4): a new [Retry.api_error] constructor stops
    [Candidate_fault.of_api_error] from compiling, which forces a route
    decision here instead of a silent default. No wildcard: every
-   [binding_fact] maps to exactly one route action, and the two non-binding
-   judgments ([Unattributed], [Unknown_after_dispatch]) each answer one as
-   well. The rich per-class comments from the previous hand-written match
-   live on the [rotate_class] / [retry_class] / [terminal_class] type
-   declarations and the .mli docstrings. *)
+   [binding_fact] maps to exactly one route action, and the non-binding
+   judgments ([Unattributed], [Unknown_after_dispatch], [Local_admission],
+   [Not_sent]) each answer one as well. The rich per-class comments from the
+   previous hand-written match live on the [rotate_class] / [retry_class] /
+   [terminal_class] type declarations and the .mli docstrings. *)
 let route_of_api_error (api : Llm_provider.Retry.api_error) =
   (* Intended, not a pass-through: the wait hint belongs to the source
      constructor and the class belongs to [Candidate_fault], so every
@@ -346,6 +349,12 @@ let route_of_api_error (api : Llm_provider.Retry.api_error) =
        [Runtime_attempt_fsm.should_try_next]; the route answers the same
        observation it did when the match was hand-written. *)
     observe Network_transient
+  | Llm_provider.Candidate_fault.Not_sent ->
+    (* The connection to this binding's host did not open, so this request was
+       not sent. The class keeps it apart from [Network_transient]: the host
+       name may be this binding's own (RFC #52028 §3.5). The walk rotates on it
+       through [Runtime_attempt_fsm.should_try_next], as before. *)
+    observe Connection_not_opened
 
 let route_of_provider_error (p : Llm_provider.Error.provider_error) =
   match p with
@@ -372,6 +381,9 @@ let route_of_provider_error (p : Llm_provider.Error.provider_error) =
        -> rotate Server_error_not_transient
      | None -> exhaust Provider_integration)
   | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
+  (* The connection did not open, so nothing was sent: the record keeps it apart
+     from "sent, then lost" (RFC #52028 §2.3). *)
+  | Llm_provider.Error.Connect_failed _ -> observe_retry Connection_not_opened
   | Llm_provider.Error.Timeout _ ->
     observe_retry
       (if Llm_provider.Error.is_local_admission_timeout p
@@ -505,6 +517,7 @@ let path_rest_sec ~cap_sec ~retry_class ~retry_after_hint =
     | Empty_completion _
     | Server_error
     | Network_transient
+    | Connection_not_opened
     | Provider_timeout
     | Local_admission_timeout ->
       Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec
@@ -527,6 +540,7 @@ let retry_class_label = function
     "empty_completion_" ^ Llm_provider.Types.stop_reason_to_metric_label stop_reason
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
+  | Connection_not_opened -> "connection_not_opened"
   | Provider_timeout -> "provider_timeout"
   | Local_admission_timeout -> "local_admission_timeout"
 
@@ -601,6 +615,8 @@ let response_observed = function
      (* 5xx or provider unavailable: nothing the model said is on record. *)
      | Network_transient
      (* the transport failed; no answer arrived. *)
+     | Connection_not_opened
+     (* the connection did not open; nothing was sent. *)
      | Provider_timeout
      (* the deadline expired before an answer. *)
      | Local_admission_timeout ->
@@ -730,6 +746,8 @@ let route_resumes_on_same_path = function
      (* 5xx or provider unavailable. *)
      | Network_transient
      (* the transport dropped. *)
+     | Connection_not_opened
+     (* the connection did not open; the same path may open it next time. *)
      | Provider_timeout
      (* a deadline expired. *)
      | Local_admission_timeout ->

@@ -328,12 +328,6 @@ let test_hot_metadata_fifo () = with_fifo_workspace @@ fun base_path ->
     ~token:(Some "internal-reader-fixture") ~permission:D.CanReadState) in
   ()
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some value -> Unix.putenv name value | None -> Unix.unsetenv name) f
-
 let oauth_ok = function
   | Ok value -> value | Error error -> fail (Auth_oauth.show_error error)
 

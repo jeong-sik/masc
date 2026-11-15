@@ -6,7 +6,6 @@ module Spectator = Server_browser_spectator
 let client_a = "01a16363-ef67-7000-ad62-05bcd0320d99"
 let client_b = "01a16363-ef68-7000-aee1-37e1be230202"
 let revision_a = String.make 64 'a'
-let revision_b = String.make 64 'b'
 
 let viewport client_id : Dataset.browser_scope =
   { source = Browser_lane.Lane_name.Live; client_id = Some client_id; tab_id = 2

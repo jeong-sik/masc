@@ -109,11 +109,6 @@ let lookup_of task_id = function
   | Error detail -> failf "%s" detail
 ;;
 
-let is_error label = function
-  | Ok _ -> failf "%s: expected an error" label
-  | Error (_ : string) -> ()
-;;
-
 let error_names label ~needle = function
   | Ok _ -> failf "%s: expected an error" label
   | Error detail ->

@@ -45,7 +45,6 @@ let ok = function
 ;;
 
 let at = ok (Candle_time.of_rfc3339 "2026-09-29T10:00:00Z")
-let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
 let payout_config =
   {|[payout]

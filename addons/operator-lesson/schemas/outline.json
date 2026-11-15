@@ -1,0 +1,80 @@
+{
+  "type": "object",
+  "description": "What each scene of the lesson is about, and the records it may quote.",
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A short id, different for each entry."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The scene's title."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "At least one point the scene must make."
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "board_post",
+                    "board_comment",
+                    "repo_file",
+                    "commit",
+                    "wiki_page",
+                    "pr",
+                    "pr_comment"
+                  ]
+                },
+                "source_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The record's source_id, copied exactly."
+                },
+                "pin": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The record's pin, copied exactly."
+                }
+              },
+              "required": [
+                "kind",
+                "source_id",
+                "pin"
+              ],
+              "additionalProperties": false
+            },
+            "description": "At least one record of the material the scene quotes from."
+          }
+        },
+        "required": [
+          "entry_id",
+          "title",
+          "points",
+          "sources"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "entries"
+  ],
+  "additionalProperties": false
+}

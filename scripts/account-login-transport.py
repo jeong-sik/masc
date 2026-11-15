@@ -7,11 +7,13 @@ Authentication is observed by the caller, never inferred from terminal text.
 """
 import codecs
 import errno
+import fcntl
 import json
 import os
 import pty
 import select
 import signal
+import struct
 import subprocess
 import sys
 import termios
@@ -45,7 +47,8 @@ def kill_group(pid):
             raise
 
 
-def run(argv, terminal):
+def run(argv, size):
+    terminal = size is not None
     child = None
     pid = None
     input_fd = None
@@ -70,6 +73,8 @@ def run(argv, terminal):
                 try:
                     # Configure the slave before the client can print a prompt
                     # or receive a code. Disable newline echo independently.
+                    # The size is the screen the caller reads the output into.
+                    fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack('HHHH', *size, 0, 0))
                     suppress_echo(0)
                     os.execvpe(argv[0], argv, os.environ)
                 except OSError:
@@ -192,9 +197,17 @@ def run(argv, terminal):
 if __name__ == '__main__':
     try:
         mode, *command = sys.argv[1:]
-        if mode not in ('pipe', 'pty') or not command:
+        size = None
+        if mode == 'pty':
+            rows, cols, *command = command
+            size = (int(rows), int(cols))
+            if not all(0 < n < 65536 for n in size):
+                raise ValueError('invalid terminal size')
+        elif mode != 'pipe':
             raise ValueError('invalid invocation')
-        run(command, mode == 'pty')
+        if not command:
+            raise ValueError('invalid invocation')
+        run(command, size)
     except (OSError, ValueError, TypeError, KeyError):
         # No traceback, argv, input, or provider diagnostics in server logs.
         emit('transport_error')

@@ -258,6 +258,7 @@ let test_close_before_response_is_typed_eof () =
         message
     | Error
         ( Http_client.HttpError _
+        | Http_client.Connect_failed _
         | Http_client.TimeoutError _
         | Http_client.AcceptRejected _
         | Http_client.ProviderTerminal _

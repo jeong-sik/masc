@@ -159,6 +159,7 @@ let describe = function
   | Ended (Error (Http_client.TimeoutError { phase; message })) ->
     Printf.sprintf "TimeoutError phase=%s (%s)" (Http_client.timeout_phase_to_label phase) message
   | Ended (Error (Http_client.NetworkError { message; _ })) -> "NetworkError " ^ message
+  | Ended (Error (Http_client.Connect_failed { message; _ })) -> "Connect_failed " ^ message
   | Ended (Error (Http_client.AcceptRejected { reason })) -> "AcceptRejected " ^ reason
   | Ended (Error (Http_client.HttpError { code; _ })) -> Printf.sprintf "HttpError %d" code
   | Ended (Error (Http_client.ProviderTerminal _ | Http_client.ProviderFailure _)) ->

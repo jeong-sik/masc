@@ -1,0 +1,29 @@
+### Fresh state required
+
+- A Keeper reaction ledger row that this build's once-only wakes cannot read
+  stops `validate-stores`, for example an ACK row written before #47996 whose
+  transition receipt holds a Board stimulus without `audience`. With the
+  server stopped, delete the
+  `<base-path>/.masc/keepers/<keeper>/reaction-ledger/<generation>/` directory
+  the refusal names and run the check again until every store passes, then
+  install. The ledger records which once-only wakes
+  were delivered, so the next ask answer pass queues that Keeper's answered
+  asks again. See [the stored-state
+  guide](../docs/guides/DURABLE-STORE-HARD-CUT.md#keeper-reaction-ledgers)
+  (#48087, #PENDING).
+
+### Fixed
+
+- `deployment_preflight_helper.exe validate-stores` reads each Keeper's
+  reaction ledger and prints `keeper reaction ledger rows=<n> refused=<n>`.
+  The first refusal names the ledger directory with the counts and reason the
+  server logs, for example `first_reason=invalid_transition_receipt`. A ledger
+  that cannot be read is `scan_failed`, not a refusal. The check did not read
+  this store, so an install passed while a ledger held such rows, and the
+  Keeper's connector attention, owned job completion, ask answer and
+  composition completion wakes were then refused with `Stimulus_storage_error`.
+  The check reads the whole ledger with
+  `Keeper_reaction_ledger.strict_source_delivery_snapshot_result` and takes
+  its verdict from the new `strict_source_delivery_snapshot_incomplete`,
+  which `source_delivery_seen_in_snapshot` now uses as well. It changes no
+  file (#48087, #PENDING).

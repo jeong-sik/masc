@@ -61,6 +61,7 @@ module Id : sig
     | Keeper_chat_transcripts
     | Keeper_chat_operations
     | Keeper_tool_outbox
+    | Keeper_reaction_ledger
   val all : t list
   (** Every constructor in declaration order, derived by
       [\[@@deriving enumerate\]]. *)

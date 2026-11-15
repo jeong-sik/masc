@@ -88,8 +88,8 @@ type answer = Read of (Yojson.Safe.t, string) result | Withdrawn
 (* What [Masc_tui.launch_workspace_request] runs once the workspace is
    confirmed: the read in a scope, and one [/health] read after a workspace
    refusal. *)
-let confirmed_read ~port ~refused =
-  Scope.run ~host ~port ~expected:confirmed
+let confirmed_read ?(kind = Scope.Observation) ~port ~refused () =
+  Scope.run ~kind ~host ~port ~expected:confirmed
     ~on_workspace_refused:(fun refusal ->
       refused := !refused @ [ refusal ];
       ignore (Masc_tui_loader.load_server_identity ~host ~port))
@@ -115,13 +115,17 @@ let test_confirmed_read_sends_one_request env =
   let received = with_server env
       ~served:{ base_path = "/owned-workspace"; masc_root = "/owned-workspace/.masc" } ~ready:true
       (fun ~port ->
-         answer := confirmed_read ~port ~refused;
+         answer := confirmed_read ~port ~refused ();
          Alcotest.(check bool) "outside the scope nothing is expected" false (Scope.expects confirmed);
-         Scope.run ~host ~port ~expected:confirmed ~on_workspace_refused:(fun _ -> ())
-           ~withdrawn:(fun () -> ()) (fun () ->
+         Scope.run ~kind:Scope.Observation ~host ~port ~expected:confirmed
+           ~on_workspace_refused:(fun _ -> ()) ~withdrawn:(fun () -> ()) (fun () ->
              Alcotest.(check bool) "the scope expects its workspace" true (Scope.expects confirmed);
              Alcotest.(check bool) "the scope does not expect another" false
-               (Scope.expects (identity "/other-workspace")))) in
+               (Scope.expects (identity "/other-workspace")));
+         Scope.run ~kind:Scope.Operation ~host ~port ~expected:confirmed
+           ~on_workspace_refused:(fun _ -> ()) ~withdrawn:(fun () -> ()) (fun () ->
+             Alcotest.(check bool) "an operation keeps its /health admission" false
+               (Scope.expects confirmed))) in
   (match !answer with
    | Read (Ok _) -> ()
    | Read (Error detail) -> Alcotest.fail detail
@@ -133,7 +137,7 @@ let refused_read env ~served ~ready ~expected_refusal =
   let refused = ref [] in
   let answer = ref (Read (Error "not run")) in
   let received = with_server env ~served ~ready (fun ~port ->
-    answer := confirmed_read ~port ~refused) in
+    answer := confirmed_read ~port ~refused ()) in
   (match !answer with
    | Withdrawn -> ()
    | Read _ -> Alcotest.fail "a refused read kept its own answer");
@@ -149,6 +153,23 @@ let test_booting_reads_health_once env =
   refused_read env ~served:{ base_path = "/owned-workspace"; masc_root = "/owned-workspace/.masc" }
     ~ready:false ~expected_refusal:"booting"
 
+(* An operation's receipt is its own: a refused write is reported as the
+   request read it, after the same single /health read. *)
+let test_refused_operation_keeps_its_receipt env =
+  let refused = ref [] in
+  let answer = ref Withdrawn in
+  let received = with_server env
+      ~served:{ base_path = "/other-workspace"; masc_root = "/other-workspace/.masc" } ~ready:true
+      (fun ~port -> answer := confirmed_read ~kind:Scope.Operation ~port ~refused ()) in
+  (match !answer with
+   | Read (Error _) -> ()
+   | Read (Ok _) -> Alcotest.fail "a refused operation read an answer"
+   | Withdrawn -> Alcotest.fail "an operation receipt was replaced");
+  Alcotest.(check (list string)) "one workspace refusal" [ "mismatch" ]
+    (List.map refusal_name !refused);
+  check_received "the refused request carried the precondition, then one /health"
+    (triples [ carried; health ]) (triples received)
+
 let () =
   Eio_main.run (fun env ->
     Alcotest.run "tui_workspace_precondition"
@@ -158,4 +179,6 @@ let () =
           ; Alcotest.test_case "409 reads /health once and withdraws the read" `Quick
               (fun () -> test_mismatch_reads_health_once env)
           ; Alcotest.test_case "503 reads /health once and withdraws the read" `Quick
-              (fun () -> test_booting_reads_health_once env) ] ) ])
+              (fun () -> test_booting_reads_health_once env)
+          ; Alcotest.test_case "a refused operation keeps its own receipt" `Quick
+              (fun () -> test_refused_operation_keeps_its_receipt env) ] ) ])

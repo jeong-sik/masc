@@ -9,7 +9,16 @@
 
 type refusal = Masc.Request_workspace_precondition.refusal
 
+(** What the scope's work is. An [Observation] reads; its guard trusts the
+    precondition and asks no [/health] first. An [Operation] keeps the
+    [/health] admission before it dispatches, so its receipt can still tell
+    "not sent" from "sent, outcome unknown"; its requests carry the
+    precondition as well, which closes the gap between that admission and the
+    request. *)
+type kind = Observation | Operation
+
 val run :
+  kind:kind ->
   host:string ->
   port:int ->
   expected:Masc.Tui_decode.server_identity ->
@@ -20,15 +29,17 @@ val run :
 (** Run [request] in the scope and answer as the server did:
     - no request refused: [request]'s own result;
     - [Invalid_precondition]: [request]'s own result, the failure it read;
-    - [Workspace_mismatch] or [Server_booting]: [on_workspace_refused] once,
-      then [withdrawn ()] when that request was the first to leave, or
-      [request]'s own result when an earlier one may have reached a handler.
+    - [Workspace_mismatch] or [Server_booting]: [on_workspace_refused] once.
+      An [Observation] then answers [withdrawn ()] when that request was the
+      first to leave, or [request]'s own result when an earlier one may have
+      reached a handler. An [Operation] keeps [request]'s own result, the
+      receipt it formed from the refusal.
     Only the first refusal counts. Outside Eio there is no fiber to own the
     scope, and [request] runs without one. *)
 
 val expects : Masc.Tui_decode.server_identity -> bool
-(** Whether the current fiber runs inside a scope whose requests carry these
-    canonical paths. *)
+(** Whether the current fiber runs inside an [Observation] scope whose
+    requests carry these canonical paths. *)
 
 val without : (unit -> 'a) -> 'a
 (** Run [load] outside any scope: its requests carry no precondition and

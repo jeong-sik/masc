@@ -3,6 +3,8 @@ module Canonical_path = Masc.Tui_decode.Canonical_path
 
 type refusal = Precondition.refusal
 
+type kind = Observation | Operation
+
 (* What the scope's requests met so far. A request that got anything but a
    precondition refusal, or no answer at all, may have reached its handler. *)
 type progress =
@@ -11,6 +13,7 @@ type progress =
   | Refused of { refusal : refusal; maybe_handled_before : bool }
 
 type scope = {
+  kind : kind;
   host : string;
   port : int;
   expected : Masc.Tui_decode.server_identity;
@@ -31,7 +34,8 @@ let same_paths (a : Masc.Tui_decode.server_identity) (b : Masc.Tui_decode.server
 let expects identity =
   match current () with
   | None -> false
-  | Some scope -> same_paths scope.expected identity
+  | Some { kind = Observation; expected; _ } -> same_paths expected identity
+  | Some { kind = Operation; _ } -> false
 
 let without load =
   match Fs_compat.execution_context () with
@@ -51,20 +55,26 @@ let rec record scope step =
 
 (* Outside Eio there is no fiber to own a scope: [request] runs unscoped, and
    [expects] stays false, so the guard keeps asking [/health] first. *)
-let run ~host ~port ~expected ~on_workspace_refused ~withdrawn request =
+let run ~kind ~host ~port ~expected ~on_workspace_refused ~withdrawn request =
   match Fs_compat.execution_context () with
   | Fs_compat.Non_eio -> request ()
   | Eio_fiber ->
-  let scope = { host; port; expected; progress = Atomic.make Nothing_left } in
+  let scope = { kind; host; port; expected; progress = Atomic.make Nothing_left } in
   let result = Eio.Fiber.with_binding scope_key (Some scope) request in
-  match Atomic.get scope.progress with
-  | Nothing_left | Maybe_handled -> result
-  | Refused { refusal = Precondition.Invalid_precondition _; maybe_handled_before = _ } -> result
+  match Atomic.get scope.progress, kind with
+  | (Nothing_left | Maybe_handled), (Observation | Operation) -> result
+  | Refused { refusal = Precondition.Invalid_precondition _; maybe_handled_before = _ },
+    (Observation | Operation) -> result
   | Refused
       { refusal = (Precondition.Workspace_mismatch | Precondition.Server_booting) as refusal
-      ; maybe_handled_before } ->
+      ; maybe_handled_before }, Observation ->
     on_workspace_refused refusal;
     if maybe_handled_before then result else withdrawn ()
+  | Refused
+      { refusal = (Precondition.Workspace_mismatch | Precondition.Server_booting) as refusal
+      ; maybe_handled_before = _ }, Operation ->
+    on_workspace_refused refusal;
+    result
 
 type prepared = {
   sent_headers : (string * string) list;

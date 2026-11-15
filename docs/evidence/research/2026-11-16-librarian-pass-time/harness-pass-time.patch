@@ -1,0 +1,57 @@
+--- a/scripts/tinker/librarian/admission_template.py
++++ b/scripts/tinker/librarian/admission_template.py
+@@ -18,7 +18,7 @@
+ 
+ from ocaml_text import ocaml_trim
+ 
+-type TextVariable = Literal["keeper_id", "keeper_instructions", "facts_budget"]
++type TextVariable = Literal["keeper_id", "keeper_instructions", "facts_budget", "pass_time"]
+ 
+ 
+ type JsonVariable = Literal["memory_limits", "goal_context", "current_memory"]
+@@ -27,9 +27,13 @@
+ type Variable = TextVariable | JsonVariable
+ 
+ 
+-TEXT_VARIABLES: frozenset[str] = frozenset({"keeper_id", "keeper_instructions", "facts_budget"})
++TEXT_VARIABLES: frozenset[str] = frozenset({"keeper_id", "keeper_instructions", "facts_budget", "pass_time"})
+ 
+ 
++# Research copy (time_harness_patch.py): a template may show the pass time, and need not.
++OPTIONAL_VARIABLES: frozenset[str] = frozenset({"pass_time"})
++
++
+ JSON_VARIABLES: frozenset[str] = frozenset({"memory_limits", "goal_context", "current_memory"})
+ 
+ 
+@@ -84,7 +88,7 @@
+ 
+ def _as_variable(name: str) -> Variable | None:
+     match name:
+-        case "keeper_id" | "keeper_instructions" | "facts_budget":
++        case "keeper_id" | "keeper_instructions" | "facts_budget" | "pass_time":
+             return name
+         case "memory_limits" | "goal_context" | "current_memory":
+             return name
+@@ -140,7 +144,7 @@
+             return TemplateError(f"unknown template variable {name}")
+     literal.append(main[last:])
+     pieces.append("".join(literal))
+-    missing = (TEXT_VARIABLES | JSON_VARIABLES) - seen
++    missing = (TEXT_VARIABLES | JSON_VARIABLES) - seen - OPTIONAL_VARIABLES
+     if missing:
+         return TemplateError("template does not show " + ", ".join(sorted(missing)))
+     return AdmissionTemplate(main, admission_policy, rule, retirement_policy, tuple(pieces))
+--- a/scripts/tinker/librarian/admission_request.py
++++ b/scripts/tinker/librarian/admission_request.py
+@@ -156,6 +156,10 @@
+             return prompt.keeper_instructions
+         case "facts_budget":
+             return prompt.facts_budget
++        case "pass_time":
++            # Research copy (time_harness_patch.py): the time of the last candidate, the
++            # value e_synth_audit.request_time gives the blind judges as `now`.
++            return rfc3339_of_unix(max(c.proposed_fact.last_seen for c in prompt.candidates))
+         case "memory_limits":
+             return prompt.memory_limits
+         case "goal_context":

@@ -232,6 +232,41 @@ class Following(Base):
         self.assertNotIn("since", reads[0])
         self.assertEqual(self.material(), ["p-4"])
 
+    def test_a_source_no_asked_session_read_is_read_from_since(self):
+        """The cursor is one per record source. A source added after a
+        session asked has none: a follower reads it from since, and the source
+        that session read from its cursor."""
+        plain = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(plain).state, "asked")
+        self.host.listed.clear()
+        binding = BINDING | {"records": [t.BOARD, t.WIKI]}
+        follower = self.flow.compose("act-2", 1, binding, 1.0, lesson=f.Lesson("lesson", 2.5))
+        self.read()
+        first: dict[str, dict] = {}
+        for request in self.host.listed:
+            if request["kind"] == "read_records" and request["request_id"].startswith(follower):
+                first.setdefault(request["source_id"], request)
+        self.assertEqual(first["board"]["after"], "000002")
+        self.assertNotIn("since", first["board"])
+        self.assertEqual((first["wiki"]["after"], first["wiki"]["since"]), (None, 2.5))
+
+    def test_a_follower_reads_from_since_when_it_is_later_than_the_first_opening(self):
+        """since is where the read starts, not a bound on the first opening:
+        a session opened before the lesson was bound, which failed without
+        asking, moves no cursor and does not move the start either."""
+        self.flow.compose("act-1", 1, BINDING, 0.5)
+        self.host.author = lambda payload: {"status": "outcome_unknown"}
+        self.host.run(self.flow)
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-3")))])
+        self.host.listed.clear()
+        follower = self.flow.compose("act-2", 1, BINDING, 5.0, lesson=f.Lesson("lesson", 2.5))
+        self.read()
+        reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(follower)]
+        self.assertEqual((reads[0]["after"], reads[0]["since"]), (None, 2.5))
+        self.assertEqual(self.material(), ["p-3"])
+
     def test_with_nothing_cited_an_earlier_item_is_still_asked_again(self):
         plain = self.compose("act-1")
         self.host.author = answering(first_quote)
@@ -256,15 +291,18 @@ class Following(Base):
         self.assertIsInstance(self.session(session_id).failure, q.AuthorRequestExceedsFrame)
 
     def test_a_compose_sent_again_completes_an_opening_cut_before_follows_lesson(self):
-        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON)
+        lesson = f.Lesson("lesson", 2.5)
+        session_id = self.flow.compose("act-1", 1, BINDING, 0.0, lesson=lesson)
         log = self.state / "operator-quiz" / "log.jsonl"
         opened, follows = log.read_text().splitlines()
         log.write_text(opened + "\n" + follows[:10])
         cut = f.Flow(self.state, self.flow.prompts, lambda request: True)
         self.assertIsNone(next(s for s in cut.sessions() if s.session_id == session_id).follows)
-        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson=LESSON), session_id)
-        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson=LESSON), session_id)
+        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson=lesson), session_id)
+        self.assertEqual(cut.compose("act-1", 1, BINDING, 0.0, lesson=lesson), session_id)
+        # The line written again holds the binding's since, as the cut one did.
         self.assertEqual([type(event) for event in cut.log.read()], [q.SessionOpened, q.FollowsLesson])
+        self.assertEqual(cut.log.read()[1], q.FollowsLesson(session_id, "lesson", 2.5))
         # A session that has read already is left as it is.
         other = self.compose("act-2")
         self.host.author = lambda payload: None

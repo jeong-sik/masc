@@ -389,11 +389,12 @@ visibilities = ["public"]
     check_error "a binding without a time zone is refused before install" path;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
     check_error "a binding key the package does not read is refused" path;
-    (* since says where a quiz that follows a lesson reads from until a
-       session has asked (RFC operator-quiz-follows-lesson §3.8). *)
+    (* since says where a quiz that follows a lesson reads a record source
+       from until a session that asked has read that source (RFC
+       operator-quiz-follows-lesson §3.8). *)
     declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n";
     check_error "a quiz on its own refuses since" path;
-    let following ?(since = "since = 1794441600\n") output = write path (Printf.sprintf {|id = "quiz"
+    let following ?(since = "since = 1794441600\n") ?(more = "") output = write path (Printf.sprintf {|id = "quiz"
 run_id = "quiz"
 manifest_path = %S
 
@@ -407,13 +408,18 @@ kind = "lane_output"
 installation_id = "operator-lesson"
 output_id = %S
 selection = "latest_completed"
-
+%s
 [[binding.records]]
 source_id = "board"
 kind = "board"
 visibilities = ["public"]
-|} manifest since output) in
+|} manifest since output more) in
     following "scenes";
+    ignore (unwrap (Config.load_file ~path));
+    (* The worker takes zero and a fraction of a second, so the host does. *)
+    following ~since:"since = 0\n" "scenes";
+    ignore (unwrap (Config.load_file ~path));
+    following ~since:"since = 1794441600.5\n" "scenes";
     ignore (unwrap (Config.load_file ~path));
     following ~since:"" "scenes";
     check_error "a quiz that follows a lesson without since is refused" path;
@@ -423,6 +429,10 @@ visibilities = ["public"]
     check_error "a since before 1970 is refused" path;
     following "lesson";
     check_error "a source that is not a lesson's scenes output is refused" path;
+    following ~more:"\n[[binding.sources]]\nsource_id = \"lesson-2\"\nkind = \"lane_output\"\n\
+                     installation_id = \"operator-lesson-2\"\noutput_id = \"scenes\"\n\
+                     selection = \"latest_completed\"\n" "scenes";
+    check_error "a second lesson source is refused" path;
     (* The example, changed as its comment says: without sources = [], and with
        since and the lesson source uncommented. Every uncommented key has to
        land in [binding] or in the source, not in a table after it. *)

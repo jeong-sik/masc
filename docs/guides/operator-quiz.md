@@ -30,9 +30,9 @@ docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.2
 
 ```toml
 [binding]
-sources = []
 language = "ko"
 timezone = "Asia/Seoul"
+sources = []
 
 [[binding.records]]
 source_id = "board"
@@ -53,7 +53,7 @@ paths = ["changelog.d/"]
 - Board 글은 공개 범위를 따로 정하지 않으면 `internal` 이다. `public`, `unlisted` 만 적으면 그렇게 정한 글만 읽으므로, 문제 재료가 거의 없을 수 있다.
 - `repository` 권한은 등록된 저장소 clone 의 기본 브랜치를 읽고, fetch 하지 않는다. 새 changelog 조각을 문제로 내려면 그 저장소의 `auto_sync` 를 켜 둔다.
 - `repository` 권한의 커밋 메시지도 문제 재료가 된다. `paths` 에는 `changelog.d/` 말고도 `CHANGELOG.md`, `docs/rfc/` 처럼 읽힐 파일이나 폴더를 더 적을 수 있다.
-- `sources` 는 늘 빈 배열이다. 이 패키지는 관측 source 를 읽지 않는다.
+- `sources` 는 수업을 묶지 않으면 빈 배열이다. 수업을 묶는 법은 아래 「수업 뒤에 묻기」에 있다.
 
 wiki 와 merge 된 PR 도 읽게 하려면 권한을 더한다.
 
@@ -169,9 +169,11 @@ selection = "latest_completed"
 
 `since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
+`[binding]` 이 패키지의 스키마에 맞지 않아 저장되지 않을 때 나오는 문구는 `lane binding must match exactly one schema alternative` 하나다. `since` 를 뺐을 때도, 수업을 묶지 않은 선언에 `since` 를 적었을 때도, 다른 칸이 틀렸을 때(빠진 `timezone`, 모르는 키, 틀린 `output_id`)도 같은 문구가 나온다. 어느 칸이 틀렸는지는 나오지 않는다(#52319).
+
 맞춰야 하는 것이 넷이다.
 
-- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. 질문을 낸 세션이 아직 없으면 퀴즈는 이 시각부터 읽는다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
+- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. 질문을 낸 세션이 아직 읽지 않은 기록은 이 시각부터 읽는다. 처음에는 `records` 의 모든 항목이 그렇고, 나중에 더한 항목도 그렇다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.
 - 두 선언이 같은 기록에 같은 `source_id` 를 써야 한다. 수업이 `board` 라고 부른 기록을 퀴즈가 `notes` 라고 부르면 같은 글이어도 맞지 않는다.
 - 퀴즈 Schedule 을 수업 Schedule 바로 뒤에 둔다. 이유는 아래 표에 있다.
@@ -253,7 +255,7 @@ Results 에 일곱 lane 이 나온다.
 | `kind` | 뜻 |
 |---|---|
 | `not_allowed` | host 가 규칙으로 요청을 거절했다(권한이 없는 기록, 선언하지 않은 출력, `[world.asks]` 없음). 질문을 낸 세션도 그 질문이 거절되면 여기서 끝난다. |
-| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. |
+| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. 수업을 묶은 설치는 binding 의 `since` 부터 읽고, 읽은 기록 가운데 수업이 인용한 것이 없을 때도 이렇게 끝난다. |
 | `author_invalid_output` | `author` 답이 schema 에 맞지 않았다. |
 | `author_input_refused` | provider 가 입력이 크다고 거절했고, 줄일 것이 더 없었다. |
 | `author_outcome_unknown` | 호출이 갔는지 알 수 없다. |

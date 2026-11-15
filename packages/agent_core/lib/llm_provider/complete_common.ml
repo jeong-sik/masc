@@ -842,7 +842,7 @@ let%test "stream finalization refuses an unstreamable body before dispatch" =
        | Error (Http_client.AcceptRejected _) -> true
        | Ok _
        | Error
-           (Http_client.HttpError _ | NetworkError _ | TimeoutError _
+           (Http_client.HttpError _ | NetworkError _ | Connect_failed _ | TimeoutError _
             | ProviderTerminal _ | ProviderFailure _) -> false)
     [ Provider_config.Anthropic
     ; Provider_config.Ollama
@@ -1086,7 +1086,7 @@ let provider_refusal ~(http_codec : Provider_http_codec.t) (refusal : Http_clien
         body the caller's window cut has none to read and keeps the class the
         status alone supports. *)
      | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
-     | Http_client.NetworkError _
+     | Http_client.NetworkError _ | Http_client.Connect_failed _
      | Http_client.TimeoutError _
      | Http_client.AcceptRejected _
      | Http_client.ProviderTerminal _

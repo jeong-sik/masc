@@ -59,8 +59,9 @@ let returned_error_terminal_label wire_format (err : Http_client.http_error) =
     "%s_stream_error: %s"
     (Http_client.provider_wire_format_to_string wire_format)
     (match err with
-     | Http_client.NetworkError { message; _ } | Http_client.TimeoutError { message; _ } ->
-       message
+     | Http_client.NetworkError { message; _ }
+     | Http_client.Connect_failed { message; _ }
+     | Http_client.TimeoutError { message; _ } -> message
      | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
      | Http_client.AcceptRejected { reason } -> reason
      | Http_client.ProviderTerminal { message; _ } -> message
@@ -135,7 +136,7 @@ let%test "oversized payload remains a typed wire fact" =
       ; message = "NDJSON payload of 11 bytes exceeded the 10 byte limit"
       } -> true
   | Http_client.HttpError _
-  | Http_client.NetworkError _
+  | Http_client.NetworkError _ | Http_client.Connect_failed _
   | Http_client.TimeoutError _
   | Http_client.AcceptRejected _
   | Http_client.ProviderTerminal _
@@ -333,7 +334,7 @@ let%test "an errored choice with no object reads as an interrupted generation" =
          ; _
          }
      | Http_client.HttpError _
-     | Http_client.NetworkError _ | Http_client.TimeoutError _
+     | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
      | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false)
   | Openai_wire.Openai_chunk _
   | Openai_wire.Openai_done
@@ -359,7 +360,7 @@ let%test "generic stream provider type stays diagnostic" =
       ; _
       } -> true
   | Http_client.HttpError _
-  | Http_client.NetworkError _
+  | Http_client.NetworkError _ | Http_client.Connect_failed _
   | Http_client.TimeoutError _
   | Http_client.AcceptRejected _
   | Http_client.ProviderTerminal _
@@ -415,10 +416,10 @@ let%test "a choice-level 429 is a rate limit classified from its error object al
         | Retry.RateLimited { retry_after = None; message = _ } | Retry.Overloaded _
         | Retry.ServerError _ | Retry.AuthError _ | Retry.AuthorizationError _
         | Retry.PaymentRequired _ | Retry.InvalidRequest _ | Retry.NotFound _
-        | Retry.ContextOverflow _ | Retry.InputCapacity _ | Retry.NetworkError _ | Retry.Timeout _ -> false)
+        | Retry.ContextOverflow _ | Retry.InputCapacity _ | Retry.NetworkError _ | Retry.Connect_failed _ | Retry.Timeout _ -> false)
      | Http_client.HttpError
          { body = Http_client.Received _ | Http_client.Not_received_in_window; _ }
-     | Http_client.NetworkError _
+     | Http_client.NetworkError _ | Http_client.Connect_failed _
      | Http_client.TimeoutError _
      | Http_client.AcceptRejected _
      | Http_client.ProviderTerminal _
@@ -481,13 +482,13 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
       | Retry.NotFound _
       | Retry.ContextOverflow _
       | Retry.InputCapacity _
-      | Retry.NetworkError _
+      | Retry.NetworkError _ | Retry.Connect_failed _
       | Retry.Timeout _ -> false)
    | None
    | Some
        ( Http_client.HttpError
            { body = Http_client.Received _ | Http_client.Not_received_in_window; _ }
-       | Http_client.NetworkError _
+       | Http_client.NetworkError _ | Http_client.Connect_failed _
        | Http_client.TimeoutError _
        | Http_client.AcceptRejected _
        | Http_client.ProviderTerminal _
@@ -519,7 +520,7 @@ let%test "a top-level 502 is a server error and a 4xx code stays provider-owned"
   | None
   | Some
       ( Http_client.HttpError _
-      | Http_client.NetworkError _
+      | Http_client.NetworkError _ | Http_client.Connect_failed _
       | Http_client.TimeoutError _
       | Http_client.AcceptRejected _
       | Http_client.ProviderTerminal _
@@ -556,7 +557,7 @@ let%test "provider error diagnostic uses the active wire format" =
   with
   | Http_client.ProviderFailure { message; _ } ->
     message = "NDJSON stream error: provider refused raw=\"{}\""
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -567,7 +568,7 @@ let[@warning "-32"] maps_to_sse_wire_failure ~expected_kind stream_error =
       { kind = Http_client.Provider_wire_error { format = Http_client.Sse; kind }; _ } ->
     kind = expected_kind
   | Http_client.HttpError _
-  | Http_client.NetworkError _
+  | Http_client.NetworkError _ | Http_client.Connect_failed _
   | Http_client.TimeoutError _
   | Http_client.AcceptRejected _
   | Http_client.ProviderTerminal _
@@ -658,7 +659,7 @@ let%test "semantic parse failure uses the active NDJSON wire format" =
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -712,7 +713,7 @@ let%test "stream incompleteness remains distinct from malformed payload" =
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -722,7 +723,7 @@ let%test "parse failure echoes the offending raw buffer for diagnosis" =
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->
     message = Printf.sprintf "SSE parse failed: %s raw=%S" reason raw
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -732,7 +733,7 @@ let%test "parse failure raw excerpt is bounded" =
   match http_error_of_stream_error (Types.Stream_parse_failed { reason; raw }) with
   | Http_client.ProviderFailure { message; _ } ->
     String.length message < String.length raw
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -746,7 +747,7 @@ let%test "parse failure redacts authorization values in the echoed raw buffer" =
         "SSE parse failed: %s raw=%S"
         reason
         {|{"auth":"Bearer [REDACTED]"}{}|}
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -786,7 +787,7 @@ let%test "unsupported content part is a capability mismatch" =
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;
 
@@ -819,6 +820,6 @@ let%test "unsupported response is a capability mismatch" =
           | Http_client.Unknown_provider_failure _ )
       ; message = _
       }
-  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.TimeoutError _
+  | Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _ | Http_client.TimeoutError _
   | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _ -> false
 ;;

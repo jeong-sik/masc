@@ -360,7 +360,7 @@ let complete_prepared_sync
              ~provider:(Provider_registry.provider_name_of_config config)
              ~model_id
              ~status:code
-         | Error (Http_client.NetworkError _) | Error (Http_client.TimeoutError _)
+         | Error (Http_client.NetworkError _ | Http_client.Connect_failed _) | Error (Http_client.TimeoutError _)
          | Error (Http_client.AcceptRejected _) | Error (Http_client.ProviderTerminal _)
          | Error (Http_client.ProviderFailure _) -> ());
        let result = ensure_nonempty_completion result in
@@ -417,7 +417,7 @@ let complete_prepared_sync
             | Http_client.TimeoutError _ -> Metrics.Timeout
             | Http_client.HttpError _
             | Http_client.AcceptRejected _
-            | Http_client.NetworkError _
+            | Http_client.NetworkError _ | Http_client.Connect_failed _
             | Http_client.ProviderTerminal _
             | Http_client.ProviderFailure _ -> Metrics.Unknown
           in
@@ -426,6 +426,7 @@ let complete_prepared_sync
             | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
             | Http_client.AcceptRejected { reason } -> reason
             | Http_client.NetworkError { message; _ } -> message
+            | Http_client.Connect_failed { message; _ } -> message
             | Http_client.TimeoutError { message; _ } -> message
             | Http_client.ProviderTerminal { message; _ } -> message
             | Http_client.ProviderFailure { kind; message } ->

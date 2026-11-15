@@ -406,7 +406,28 @@ visibilities = ["public"]
     following ~since:"since = -1\n" "scenes";
     check_error "a since before 1970 is refused" path;
     following "lesson";
-    check_error "a source that is not a lesson's scenes output is refused" path)
+    check_error "a source that is not a lesson's scenes output is refused" path;
+    (* The example, changed as its comment says: without sources = [], and with
+       since and the lesson source uncommented. Every uncommented key has to
+       land in [binding] or in the source, not in a table after it. *)
+    let example = In_channel.with_open_bin
+        (repo_file "docs/examples/lane-addons/operator-quiz.toml") In_channel.input_all in
+    let _, lines = List.fold_left (fun (inside, kept) line ->
+        let starts prefix = String.starts_with ~prefix line in
+        let inside = inside || starts "# since = " in
+        let kept =
+          if line = "sources = []" then kept
+          else if starts "manifest_path = " then Printf.sprintf "manifest_path = %S" manifest :: kept
+          else if inside && starts "# " then String.sub line 2 (String.length line - 2) :: kept
+          else line :: kept in
+        (inside && not (starts "# selection = "), kept))
+        (false, []) (String.split_on_char '\n' example) in
+    write path (String.concat "\n" (List.rev lines));
+    let binding = (unwrap (Config.load_file ~path)).binding in
+    check bool "the example bound to a lesson keeps its time zone and since" true
+      Yojson.Safe.Util.(member "timezone" binding = `String "Asia/Seoul" && member "since" binding <> `Null);
+    check int "and reads the lesson's scenes output" 1
+      (List.length (Yojson.Safe.Util.(member "sources" binding |> to_list))))
 
 (* The shipped operator lesson: the example declaration loads with the
    package's own manifest, and the binding contract refuses a binding without

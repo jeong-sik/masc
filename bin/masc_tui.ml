@@ -13227,21 +13227,6 @@ let observer_browser_scope state =
 let terminal_draws_no_images =
   "this terminal does not draw images (it did not answer the graphics query)"
 
-(* Read a whole file. Images are the only thing this reads off disk, and a
-   picture is not a thing to stream: it goes to the terminal in one write or
-   not at all. *)
-let read_file_bytes path =
-  match open_in_bin path with
-  | exception Sys_error detail -> Error detail
-  | channel ->
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr channel)
-        (fun () ->
-          match really_input_string channel (in_channel_length channel) with
-          | contents -> Ok contents
-          | exception End_of_file ->
-              Error "the file ended sooner than its length said")
-
 (* Pixel-graphics payloads go through here, wrapped for tmux when this process
    is inside one. tmux eats an escape it does not recognise, so
    these reach the terminal underneath only when they are wrapped -- and only
@@ -14185,18 +14170,12 @@ let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview
       Masc_tui_link_preview.(Refused (Cache_unreadable {
         detail=Masc_tui_image_cache.download_error_text error }))
   | Ok body ->
+    let cache_dir = ensure_img_cache_dir () in
     let decode local_path =
-      let raw =
-        Filename.concat
-          (ensure_img_cache_dir ())
-          ("mosaic_"
-          ^ Digest.to_hex (Digest.string (Printf.sprintf "%s_ar%d" url cols))
-          ^ ".raw")
-      in
       (* Width is fixed at [cols]; height follows the image's own aspect ratio.
          scale=cols:-2 keeps the ratio and rounds to an even height for the
          half-block pairing, so the picture is never stretched. *)
-      let cmd =
+      let cmd raw =
         Printf.sprintf
           "ffmpeg -y -loglevel error -i %s -vf scale=%d:-2 -frames:v 1 -f rawvideo -pix_fmt \
            rgb24 %s"
@@ -14206,21 +14185,19 @@ let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview
         Masc_tui_link_preview.(
           Refused (Decode_failed { detail = Masc_tui_image_cache.decode_failure_text failure }))
       in
-      match
-        Masc_tui_image_cache.run_decoder ~run:Unix.system ~output_path:raw cmd
-      with
-      | Error failure -> refuse failure
-      | Ok _ -> (
-          match read_file_bytes raw with
-          | Error detail -> refuse (Masc_tui_image_cache.Frame_unreadable { detail })
-          | Ok data -> (
-              let rows = String.length data / (cols * 3) in
-              match Masc_tui_image_mosaic.render ~cols ~rows data with
-              | [] -> refuse Masc_tui_image_cache.No_frame_written
-              | lines -> Masc_tui_link_preview.Mosaic lines))
+      (* The raw frame is read once, right after the decode, and nothing reuses
+         its file. Each decode writes a file of its own, so another TUI
+         decoding the same URL and width cannot remove it. *)
+      Masc_tui_image_cache.with_decoder_output ~run:Unix.system ~cache_dir
+        ~prefix:"mosaic_" ~suffix:".raw" cmd (function
+        | Error failure -> refuse failure
+        | Ok data -> (
+            let rows = String.length data / (cols * 3) in
+            match Masc_tui_image_mosaic.render ~cols ~rows data with
+            | [] -> refuse Masc_tui_image_cache.No_frame_written
+            | lines -> Masc_tui_link_preview.Mosaic lines))
     in
-    match Masc_tui_image_cache.with_download_snapshot
-        ~cache_dir:(ensure_img_cache_dir ()) body decode with
+    match Masc_tui_image_cache.with_download_snapshot ~cache_dir body decode with
     | Ok entry -> entry
     | Error detail -> Masc_tui_link_preview.(Refused (Cache_unreadable { detail }))
 

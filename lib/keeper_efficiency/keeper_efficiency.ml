@@ -864,7 +864,14 @@ let month_view_to_json (view : month_view) =
     ]
 ;;
 
-let compute_mutex = Stdlib.Mutex.create ()
+(* One month is aggregated at a time. The aggregation suspends while it
+   holds this lock: once an Eio filesystem is installed, [Fs_compat] asks Eio
+   about each day file and makes the cache directory through it. The
+   dashboard route runs [read_month] as a job of a pool worker, where several
+   jobs are fibers of one domain, so the next read has to wait as a fiber.
+   An OS mutex is locked again by the thread that already holds it, which
+   [Stdlib.Mutex] refuses with [Sys_error] (#52360). *)
+let compute_mutex = Cross_context_mutex.create ()
 
 let open_tool_store ~masc_root =
   let location =
@@ -879,9 +886,7 @@ let open_tool_store ~masc_root =
 let read_month ~masc_root ~month =
   if not (valid_month month) then Error ("invalid month: " ^ month)
   else begin
-    Stdlib.Mutex.lock compute_mutex;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock compute_mutex)
+    Cross_context_mutex.with_lock compute_mutex
       (fun () ->
          let open_store label open_ =
            try Ok (open_ ()) with

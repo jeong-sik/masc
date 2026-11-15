@@ -1284,6 +1284,11 @@ let auth_cmd =
           "MASC_HTTP_BASE_URL must be the http(s) address the person opens, as \
            for masc auth bootstrap. The command takes the workspace lease, so \
            stop the server first."
+      ; `P
+          "While the account server runs, an Admin who has signed in issues \
+           Member and Admin invitations from the 초대 링크 (invitations) panel \
+           of the console at /accounts/console, with no stop of the server. \
+           When the lease is held, the refusal of this command points there."
       ]
     in
     Cmd.v

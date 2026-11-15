@@ -104,7 +104,10 @@ masc auth bootstrap --base-path <base> --external-store <absolute path of a new 
 - For a link that expired or was lost, stop the server and run
   `masc auth invite --base-path <base>` with `MASC_HTTP_BASE_URL` set as
   above. It writes one more Admin invitation and revokes none. While a
-  server runs on the workspace, the command is refused for the lease.
+  server runs on the workspace, the command is refused for the lease and
+  says where else to go: once an Admin has signed in, the 초대 링크
+  (invitations) panel of the console issues invitations with no stop of the
+  server (step 5).
 
 ## 3. Start the account server
 

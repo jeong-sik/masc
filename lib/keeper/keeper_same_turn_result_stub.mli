@@ -9,11 +9,12 @@
     therefore a stub from the first request that carries it, and the same stub
     on every later request (RFC-0510 D5).
 
-    Nothing calls this yet. The caller that wires it into request assembly
-    owns three things this module does not: which tools are on ([enabled]),
-    running it off the main domain (it hashes every eligible body with
-    sha256), and where it sits relative to the window cut and
-    {!Keeper_model_input_demotion}. *)
+    The request assembly ([Keeper_turn_driver_try_provider]) calls it and
+    owns three things this module does not: which tools are on ([enabled],
+    from each tool file's [same_turn_result_stub] key), running it off the
+    main domain (it hashes every eligible body with sha256), and where it
+    sits: after the range start is chosen from the checkpoint history and
+    before {!Keeper_model_input_demotion.plan}. *)
 
 val encode : first_tool_use_id:string -> bytes:int -> sha256:string -> string
 (** The stub text:

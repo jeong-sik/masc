@@ -550,6 +550,15 @@ let loading_to_string = function
   | Deferrable -> "deferrable"
 ;;
 
+type same_turn_result =
+  | Repeat_sent_whole
+  | Repeat_sent_as_pointer
+
+let same_turn_result_to_string = function
+  | Repeat_sent_whole -> "repeat_sent_whole"
+  | Repeat_sent_as_pointer -> "repeat_sent_as_pointer"
+;;
+
 type loaded =
   { schema : Masc_domain.tool_schema
   ; title : string option
@@ -558,6 +567,7 @@ type loaded =
   ; agent_core_projection : Masc_domain.tool_schema option
   ; help : help option
   ; loading : loading
+  ; same_turn_result : same_turn_result
   ; operator_remote_description : string option
   ; shell_command : string list option
         (** RFC tools-as-shell-commands: the sub-command path this tool is
@@ -833,6 +843,13 @@ let tool_of_pairs ~name pairs =
       let* flag = as_bool ~context:"defer_loading" value in
       Ok (if flag then Deferrable else Always_loaded)
   in
+  let* same_turn_result =
+    match List.assoc_opt "same_turn_result_stub" pairs with
+    | None -> Ok Repeat_sent_whole
+    | Some value ->
+      let* flag = as_bool ~context:"same_turn_result_stub" value in
+      Ok (if flag then Repeat_sent_as_pointer else Repeat_sent_whole)
+  in
   let* operator_remote_description =
     match List.assoc_opt "operator_remote_description" pairs with
     | None -> Ok None
@@ -902,6 +919,7 @@ let tool_of_pairs ~name pairs =
         ; "agent_core_projection"
         ; "help"
         ; "defer_loading"
+        ; "same_turn_result_stub"
         ; "operator_remote_description"
         ; "shell_command"
         ]
@@ -926,6 +944,7 @@ let tool_of_pairs ~name pairs =
     ; agent_core_projection
     ; help
     ; loading
+    ; same_turn_result
     ; operator_remote_description
     ; shell_command
     ; path_params =

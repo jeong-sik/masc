@@ -53,6 +53,22 @@ type loading =
 
 val loading_to_string : loading -> string
 
+(** What a tool declares about a result whose text repeats an earlier result
+    of the same turn (RFC-0510). The request assembly reads it; nothing here
+    changes a result. *)
+type same_turn_result =
+  | Repeat_sent_whole
+      (** Every result rides as it is. This is the default: a tool that says
+          nothing keeps its repeats. *)
+  | Repeat_sent_as_pointer
+      (** A result of 2,048 bytes or more whose text is byte-equal to an
+          earlier result of the same turn leaves as a short pointer to that
+          turn's first one ({!Keeper_same_turn_result_stub}). For tools that
+          only read: the model is told the text is the same as before and is
+          not sent it again. *)
+
+val same_turn_result_to_string : same_turn_result -> string
+
 (** One decoded tool definition. [schema] is the canonical schema published
     to MCP clients; [keeper_projection], when the file declares a
     [keeper_projection] table, is the deliberately narrower shape handed to
@@ -78,6 +94,9 @@ type loaded =
   ; help : help option
   ; loading : loading
     (** From the file's [defer_loading] key; [Always_loaded] when absent. *)
+  ; same_turn_result : same_turn_result
+    (** From the file's [same_turn_result_stub] key; [Repeat_sent_whole] when
+        absent or [false]. *)
   ; operator_remote_description : string option
     (** From the file's [operator_remote_description] key: the sentence the
         operator-remote subset publishes for this tool, when the file
@@ -112,7 +131,7 @@ val load
     [[params]], [keeper_projection]
     (a table of [description] / [additional_properties] / [[params]]),
     [agent_core_projection] (the same table grammar), [defer_loading]
-    (bool), [operator_remote_description] (non-empty string), and
+    (bool), [same_turn_result_stub] (bool), [operator_remote_description] (non-empty string), and
     [help] (a table of [short_description] / [when_to_use] /
     [details_markdown] strings and [key_constraints] / [doc_refs] /
     [prompt_hints] / [examples] / [alternatives] string lists, at least one

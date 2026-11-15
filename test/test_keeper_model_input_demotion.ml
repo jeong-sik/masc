@@ -1986,11 +1986,13 @@ let current_batch ~id_prefix ~fill sizes =
 ;;
 
 let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results
+      ?same_turn_result_as_pointer
       ?(measure_wire_bytes = stored_wire_bytes) ~base_path ~current_turn_results ~turn_boundary
       messages =
   Try_provider.For_testing.compose_carried_model_input
     ?completed_arguments
     ?finished_turn_results
+    ?same_turn_result_as_pointer
     ~measure_message_bytes
     ~measure_wire_bytes
     ~accepted:None ~front:
@@ -2168,6 +2170,87 @@ let call_with_input ~id input : Types.message =
 ;;
 
 let take count list = List.filteri (fun index _ -> index < count) list
+
+(* --- A repeated result of one turn leaves as a pointer (RFC-0510) --- *)
+
+let conversation_user text : Types.message =
+  Types.make_message ~origin:Types.Conversation ~role:Types.User [ Types.Text text ]
+;;
+
+let named_call ~name ~id : Types.message =
+  Types.make_message ~role:Types.Assistant [ Types.ToolUse { id; name; input = `Assoc [] } ]
+;;
+
+let repeated_tool = "masc_board_post_get"
+let repeated_body = String.make 6_000 'r'
+
+(* One turn that reads the same text twice, then the turn after it. *)
+let turn_with_a_repeat () =
+  [ conversation_user "read the post"
+  ; named_call ~name:repeated_tool ~id:"read-1"
+  ; tool_message ~id:"read-1" repeated_body
+  ; named_call ~name:repeated_tool ~id:"read-2"
+  ; tool_message ~id:"read-2" repeated_body
+  ]
+;;
+
+let pointer_to_the_first =
+  Masc.Keeper_same_turn_result_stub.encode
+    ~first_tool_use_id:"read-1"
+    ~bytes:(String.length repeated_body)
+    ~sha256:Agent_core_sha256.(digest_string repeated_body |> to_hex)
+;;
+
+let a_repeat_in_the_running_turn_leaves_as_a_pointer () =
+  let messages = turn_with_a_repeat () in
+  let compose ?same_turn_result_as_pointer () =
+    compose_from_the_oldest_atom ?same_turn_result_as_pointer ~base_path:""
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      messages
+  in
+  let off = compose () in
+  Alcotest.(check (list string)) "no tool declares it: both results ride whole"
+    [ repeated_body; repeated_body ]
+    (markers off.Try_provider.projection.Window.messages);
+  let on = compose ~same_turn_result_as_pointer:(String.equal repeated_tool) () in
+  Alcotest.(check (list string)) "the first rides whole and the repeat points at it"
+    [ repeated_body; pointer_to_the_first ]
+    (markers on.Try_provider.projection.Window.messages);
+  Alcotest.(check int) "the range opens where it did" off.Try_provider.projection.Window.dropped_atoms
+    on.Try_provider.projection.Window.dropped_atoms;
+  Alcotest.(check int) "the history has the same atoms" off.Try_provider.history_atom_count
+    on.Try_provider.history_atom_count
+;;
+
+(* The pointer a request sent while the turn ran is the pointer it sends
+   after the turn ended: the plan that turns the ended turn's results into
+   markers takes the first result and leaves the pointer. *)
+let a_pointer_stays_after_its_turn_ended () =
+  let ended = turn_with_a_repeat () in
+  let messages = ended @ [ conversation_user "and now" ] in
+  let turn_start = Window.first_atom_at_or_after messages ~message_index:(List.length ended) in
+  let base_path = Filename.temp_dir "demote" "" in
+  let composed =
+    compose_from_the_oldest_atom ~finished_turn_results:Try_provider.Finished_turns_as_markers
+      ~same_turn_result_as_pointer:(String.equal repeated_tool) ~base_path
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = turn_start })
+      messages
+  in
+  Alcotest.(check int) "only the first result is planned as a marker" 1
+    (List.length composed.Try_provider.planned.Demotion.pending);
+  match markers (materialized ~base_path composed) with
+  | [ first; repeat ] ->
+    (match Tool_output.decode_from_agent_core first with
+     | Tool_output.Decoded reference ->
+       Alcotest.(check int) "the first result is a marker for the whole text"
+         (String.length repeated_body) reference.Tool_output.bytes
+     | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+       Alcotest.fail "the ended turn's first result is not a marker");
+    Alcotest.(check string) "the repeat is the pointer it was" pointer_to_the_first repeat
+  | sent -> Alcotest.failf "expected two results, got %d" (List.length sent)
+;;
 
 (* The longest run of messages the two requests share from the start. *)
 let rec shared_prefix first second =
@@ -2746,6 +2829,16 @@ let () =
             "a front that opens with another message starts over"
             `Quick
             a_front_that_opens_with_another_message_starts_over
+        ] )
+    ; ( "same_turn_result_as_pointer"
+      , [ Alcotest.test_case
+            "a repeat in the running turn leaves as a pointer"
+            `Quick
+            a_repeat_in_the_running_turn_leaves_as_a_pointer
+        ; Alcotest.test_case
+            "a pointer stays after its turn ended"
+            `Quick
+            a_pointer_stays_after_its_turn_ended
         ] )
     ; ( "finished_turn_results"
       , [ Alcotest.test_case

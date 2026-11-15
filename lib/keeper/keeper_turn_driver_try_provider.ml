@@ -1382,6 +1382,7 @@ let compose_carried_model_input
       ?completed_arguments
       ?(finished_turn_results = Finished_turns_verbatim)
       ?(history_at_start = Keeper_turn_boundaries.Continued_history)
+      ?(same_turn_result_as_pointer = fun (_ : string) -> false)
       ~measure_message_bytes
       ~measure_wire_bytes
       ~(front : Keeper_carried_front.seed option)
@@ -1402,6 +1403,22 @@ let compose_carried_model_input
   let { start; outlived_seed } =
     choose_range_start ~continuity ~front ~accepted ~history_digest_at ~turn_boundary
       ~history_at_start
+  in
+  (* A result whose text repeats an earlier result of its own turn leaves as
+     a pointer to that turn's first one, for the tools that declare it
+     (RFC-0510). It runs after the range start is chosen, because the carried
+     position is a digest of the checkpoint history as stored, and before the
+     demotion plan: the plan then sees the pointer, which is below
+     [aged_result_min_bytes], and leaves it, so a pointer is the same text
+     while its turn runs and after the turn ended. Planned first, the repeat
+     would go as the whole text during its turn and as a blob marker after.
+     The atoms, the messages and every block but the replaced results are
+     the ones [messages] holds. *)
+  let messages =
+    Keeper_same_turn_result_stub.apply
+      ~enabled:same_turn_result_as_pointer
+      ~min_bytes:aged_result_min_bytes
+      messages
   in
   (* The resend that answers a size refusal demotes every atom of the refused
      request with the completed arguments the attempt bound: the resend is the
@@ -1512,6 +1529,7 @@ let unchecked_request_view
       ?completed_arguments
       ?finished_turn_results
       ?history_at_start
+      ?same_turn_result_as_pointer
       ~provider_config
       ~measure_message_bytes
       ~measure_wire_bytes
@@ -1529,6 +1547,7 @@ let unchecked_request_view
     offload_model_input_cpu (fun () ->
       compose_carried_model_input
         ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
+        ?same_turn_result_as_pointer
         ~measure_message_bytes
         ~measure_wire_bytes
         ~front
@@ -1563,6 +1582,7 @@ let unchecked_request_view
 ;;
 
 module Message_indices = Set.Make (Int)
+module Same_turn_result_tool_names = Set.Make (String)
 
 (* Composition removes old unread carriers, retains pinned messages and the
    selected atom suffix, and adds only prefix carriers (unread, working state,
@@ -1586,13 +1606,14 @@ let carried_source_indices ~messages (view : request_view) =
 
 let request_view
       ?continuity ?completed_arguments ?finished_turn_results ?history_at_start
+      ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
       ~turn_boundary ~materialize ~to_wire messages =
   let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
     unchecked_request_view ~tools ?continuity ?completed_arguments ?finished_turn_results
-      ?history_at_start
+      ?history_at_start ?same_turn_result_as_pointer
       ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
@@ -1880,6 +1901,15 @@ let bounded_model_input_projection
   (* The results of turns that ended go as markers on every request, for a
      Keeper that can read them back. *)
   let finished_turn_results = finished_turn_results_for ~reader_available in
+  (* Read once per attempt, on this fiber: the request closure below asks it
+     from the CPU pool, and the tool files are constant for the process. *)
+  let same_turn_result_as_pointer =
+    let names =
+      Keeper_tool_descriptor.same_turn_result_pointer_model_names ()
+      |> Same_turn_result_tool_names.of_list
+    in
+    fun name -> Same_turn_result_tool_names.mem name names
+  in
   Log.Keeper.info ~keeper_name:ctx.keeper_name
     "model input references runtime=%s context_owner=agent_core turn_boundary=%s blob_reader_available=%b argument_references_enabled=%b finished_turn_results=%s"
     ctx.runtime_id
@@ -2000,6 +2030,7 @@ let bounded_model_input_projection
         ?continuity:(input_continuity ctx.request_input) ?completed_arguments:view_arguments
         ~finished_turn_results
         ~history_at_start:ctx.history_at_start
+        ~same_turn_result_as_pointer
         ~tools:prefix_tools
         ~provider_config
         ~measure_message_bytes
@@ -2066,6 +2097,7 @@ let bounded_model_input_projection
                compose_carried_model_input
                  ?continuity:(input_continuity ctx.request_input) ?completed_arguments
                  ~history_at_start:ctx.history_at_start
+                 ~same_turn_result_as_pointer
                  ~measure_message_bytes
                  ~measure_wire_bytes
                  ~front

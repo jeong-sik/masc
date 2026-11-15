@@ -48,7 +48,7 @@ paths = ["changelog.d/"]
 
 - `language`: 장면을 쓰는 언어다.
 - `since`: Unix 시각(초)이다. 첫 수업은 이 시각부터 만든 기록을 읽는다. 꼭 적는다. 기본값이 없다. `date -u -j -f "%Y-%m-%d" 2026-11-12 +%s`(macOS)나 `date -u -d 2026-11-12 +%s`(Linux)로 얻는다.
-- 다음 수업부터는 `since` 를 쓰지 않는다. outline 까지 간 마지막 수업이 멈춘 자리부터 읽는다.
+- 다음 수업부터는 `records` 의 항목마다, outline 까지 간 지난 수업이 멈춘 자리(cursor)부터 읽는다. 그 자리가 없는 항목은 다시 `since` 부터 읽는다. 뒤에 더한 항목과, `since` 부터 읽었는데 기록이 하나도 없던 항목이 그렇다.
 - `records`: 읽을 기록이다. 운영자가 쓴 TOML 선언만 기록 권한을 가질 수 있다. 권한의 종류와 규칙은 [운영자 퀴즈](operator-quiz.md)의 "설치 선언"과 같다. wiki 와 `github_pulls` 권한도 같은 모양으로 더한다.
 - `visibilities` 에 적은 공개 범위의 글은 `outline` 과 `scene` 출력에 묶인 slot 의 provider 에게 간다. `internal` 을 넣거나 `direct` 를 적기 전에, 그 provider 가 그런 글을 받아도 되는지 확인한다.
 - `sources` 는 늘 빈 배열이다. 이 패키지는 관측 source 를 읽지 않는다.

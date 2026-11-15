@@ -23,8 +23,9 @@ installation in the same run. The quiz then keeps the pins each lesson output
 cited (`lesson_seen`), and a session opened under that binding asks new
 questions only from records it read that a lesson cited. That binding also
 gives `since`, the lesson's own: a session that follows the lesson reads a
-record source from it (`follows_lesson`) until a session that asked has read
-that source, so the records the lesson cited are read. Design:
+record source from it (`follows_lesson`) until a session that asked has left
+a cursor on that source, so the records the lesson cited are read. A read
+from `since` that finds no record leaves no cursor. Design:
 [RFC](../../docs/rfc/RFC-operator-quiz-follows-lesson.md).
 
 - `quiz_log.py`: the log's events, the session fold, and the body store.

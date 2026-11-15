@@ -167,7 +167,7 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 
 고친다.
 
-- 수업을 묶은 퀴즈의 binding 은 `since` 를 받는다. 뜻은 수업의 `since` 와 같다: 첫 세션이 읽기 시작하는 Unix 시각(초)이다. 가이드는 수업 선언과 같은 값을 적으라고 쓴다.
+- 수업을 묶은 퀴즈의 binding 은 `since` 를 받는다. 뜻은 수업의 `since` 와 같다: 지난 세션이 남긴 cursor 가 없는 기록 source 를 읽기 시작하는 Unix 시각(초)이다. 가이드는 수업 선언과 같은 값을 적으라고 쓴다.
 - 수업 source 가 있으면 `since` 가 꼭 있어야 하고, 없으면 `since` 를 받지 않는다. binding 스키마를 object 의 `oneOf` 두 갈래로 쓴다: `sources` 가 빈 배열이고 `since` 가 없는 갈래, `sources` 가 하나이고 `since` 가 있는 갈래. host 의 검사기는 object 단위 `oneOf` 를 받고, 값이 갈래 하나에만 맞아야 통과시킨다(`lib/lane_addon/lane_addon_action.ml:82-85, 137-143`). 그래서 틀린 선언은 저장할 때 거절된다.
   - 갈래로 나누면 거절 문구가 `lane binding must match exactly one schema alternative` 하나가 된다. 검사기가 갈래마다의 거절 이유를 버려서다(#52319). 수업을 묶지 않은 선언의 실수(`timezone` 없음, 모르는 키)도 어느 칸이 틀렸는지 나오지 않는다. 통과와 거절은 그대로다.
 - 값 검사는 수업과 같다. 정수나 실수이고, 유한하고, 0 이상이다. 수업의 `since_of_binding` 을 `addons/records.py` 로 옮겨 두 패키지가 같이 쓴다.
@@ -181,7 +181,13 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 
 `FollowsLesson` 의 모양이 바뀐다. 이 사건이 적힌 log 는 #52003 병합(2026-11-15) 뒤의 시험 설치 하나뿐이다. `since` 가 없는 `FollowsLesson` 은 읽지 않는다(hard cut). 시험 설치의 퀴즈 volume 은 지우고 다시 만든다. 옛 모양을 읽는 코드나 변환 코드는 만들지 않는다.
 
-질문을 낸 세션이 읽은 source 에는 `since` 를 다시 쓰지 않는다. 그때부터 빠지는 기록은 §3.6 이다. 그런 세션이 아직 읽지 않은 source 는 `since` 부터 읽는다. 뒤에 더한 source 와, host 가 남은 cursor 를 모두 거절한 source 가 그렇다. 수업의 첫 읽기도 source 마다 고른다.
+질문을 낸 세션이 cursor 를 남긴 source 에는 `since` 를 다시 쓰지 않는다. 그때부터 빠지는 기록은 §3.6 이다. 그런 cursor 가 없는 source 는 `since` 부터 읽는다. 세 경우가 그렇다.
+
+- 뒤에 더한 source.
+- `since` 부터 읽었는데 기록이 하나도 없던 source. host 는 그런 읽기에 cursor 를 주지 않는다(`lib/lane_addon/lane_addon_records.ml` 121·232행). 질문을 낸 세션이 읽었어도 cursor 가 남지 않아, 다음 세션이 다시 `since` 부터 읽는다.
+- host 가 남은 cursor 를 모두 거절한 source(`addons/records.py` `last_cursor`).
+
+수업의 첫 읽기도 source 마다 같은 함수로 고른다. 수업에서는 outline 까지 간 세션이 cursor 를 남긴다.
 
 ## 4. 수업 출력의 크기가 먼저다
 
@@ -240,7 +246,7 @@ L2 의 Python 시험(`addons/tests/`):
 L1 의 시험:
 
 1. 수업을 묶고 질문을 낸 세션이 없으면 첫 읽기는 `FollowsLesson.since` 부터다.
-2. 질문을 낸 세션이 있으면 `since` 와 상관없이 그 cursor 부터 읽는다.
+2. 질문을 낸 세션이 cursor 를 남긴 source 는 `since` 와 상관없이 그 cursor 부터 읽는다.
 3. 묶지 않은 퀴즈는 지금처럼 첫 세션을 연 시각부터 읽는다. 지금 있는 시험을 본문 수정 없이 통과한다.
 4. 수업을 묶었는데 `since` 가 없거나, 묶지 않았는데 `since` 가 있으면 binding 스키마가 거절한다. 같은 경우를 OCaml 선언 시험(`test_lane_addon_config`)에도 둔다. 그 시험은 `since = 0` 과 소수 `since` 를 받고, 수업 source 둘을 거절하는 것도 본다. #52004 가 더한 수업 source 선언 case 에는 `since` 를 넣는다.
 5. `since` 가 없는 `FollowsLesson` 줄은 log 오류로 읽지 않는다.
@@ -249,6 +255,9 @@ L1 의 시험:
 8. 질문을 낸 세션이 읽은 source 는 cursor 부터, 그 뒤에 더한 source 는 `since` 부터 읽는다.
 9. `since` 가 첫 세션을 연 시각보다 뒤여도 `since` 부터 읽는다.
 10. 끊긴 opening 을 같은 compose 가 채울 때 `FollowsLesson.since` 는 binding 의 값이다.
+11. 처음부터 수업을 묶은 설치에서, 질문을 낸 세션 다음의 세션은 `since` 없이 그 cursor 부터 읽는다. 수업을 따르는 세션도 cursor 를 옮긴다.
+12. `since` 부터 읽었는데 기록이 하나도 없던 source 는 다음 세션도 `since` 부터 읽는다. 첫 세션을 연 시각부터가 아니다.
+13. 운영자가 binding 의 `since` 를 바꾼 뒤 연 세션은 자기 `FollowsLesson.since` 부터 읽는다. 앞 세션에 적힌 값은 그대로다.
 
 운영자가 하는 일: 수업을 묶은 퀴즈 선언에 수업과 같은 `since` 를 적어 저장한다. 지금 수업을 묶은 설치는 시험 설치 하나뿐이다.
 

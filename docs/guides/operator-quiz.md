@@ -169,11 +169,14 @@ selection = "latest_completed"
 
 `since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
-`[binding]` 이 패키지의 스키마에 맞지 않아 저장되지 않을 때 나오는 문구는 `lane binding must match exactly one schema alternative` 하나다. `since` 를 뺐을 때도, 수업을 묶지 않은 선언에 `since` 를 적었을 때도, 다른 칸이 틀렸을 때(빠진 `timezone`, 모르는 키, 틀린 `output_id`)도 같은 문구가 나온다. 어느 칸이 틀렸는지는 나오지 않는다(#52319).
+선언이 저장되지 않을 때 나오는 문구는 두 갈래다. host 는 `sources` 항목의 모양을 먼저 보고, 그다음 `[binding]` 을 패키지의 스키마에 대어 본다.
+
+- `sources` 항목이 틀리면 그 항목을 말하는 문구가 나온다. 위처럼 `language`·`timezone` 이 source 항목 아래에 놓이면 `lane_output contains duplicate or unknown fields` 다. `selection` 이 빠지면 `lane_output selection must be latest_completed`, `sources` 가 배열이 아니면 `binding.sources requires an array of observation sources` 다.
+- `[binding]` 이 패키지의 스키마에 맞지 않으면 문구는 `lane binding must match exactly one schema alternative` 하나다. `since` 를 뺐을 때도, 수업을 묶지 않은 선언에 `since` 를 적었을 때도, 다른 칸이 틀렸을 때(빠진 `timezone`, 모르는 키, 틀린 `output_id`)도 같은 문구가 나온다. 어느 칸이 틀렸는지는 나오지 않는다(#52319).
 
 맞춰야 하는 것이 넷이다.
 
-- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. 질문을 낸 세션이 아직 읽지 않은 기록은 이 시각부터 읽는다. 처음에는 `records` 의 모든 항목이 그렇고, 나중에 더한 항목도 그렇다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
+- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. `records` 의 항목마다, 질문을 낸 세션이 멈춘 자리(cursor)가 남아 있으면 거기서부터 읽고 없으면 이 시각부터 읽는다. 처음에는 모든 항목에 그 자리가 없고, 나중에 더한 항목에도 없다. 이 시각부터 읽었는데 기록이 하나도 없던 항목에도 자리가 남지 않아, 다음 세션이 다시 이 시각부터 읽는다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.
 - 두 선언이 같은 기록에 같은 `source_id` 를 써야 한다. 수업이 `board` 라고 부른 기록을 퀴즈가 `notes` 라고 부르면 같은 글이어도 맞지 않는다.
 - 퀴즈 Schedule 을 수업 Schedule 바로 뒤에 둔다. 이유는 아래 표에 있다.
@@ -255,7 +258,7 @@ Results 에 일곱 lane 이 나온다.
 | `kind` | 뜻 |
 |---|---|
 | `not_allowed` | host 가 규칙으로 요청을 거절했다(권한이 없는 기록, 선언하지 않은 출력, `[world.asks]` 없음). 질문을 낸 세션도 그 질문이 거절되면 여기서 끝난다. |
-| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. 수업을 묶은 설치는 binding 의 `since` 부터 읽고, 읽은 기록 가운데 수업이 인용한 것이 없을 때도 이렇게 끝난다. |
+| `no_material` | 모든 권한을 읽었지만 새 기록이 없었고, 전에 낸 문제도 없었다. 아직 문제를 낸 세션이 없으면 퀴즈를 켠 뒤(첫 세션이 열린 뒤) 생긴 기록만 읽으므로, 켜자마자 보낸 `compose` 는 이렇게 끝나기 쉽다. 수업을 묶은 설치는 binding 의 `since` 부터 읽는다. 읽은 기록 가운데 수업이 인용한 것이 없고 전에 낸 문제도 없으면 이렇게 끝난다. |
 | `author_invalid_output` | `author` 답이 schema 에 맞지 않았다. |
 | `author_input_refused` | provider 가 입력이 크다고 거절했고, 줄일 것이 더 없었다. |
 | `author_outcome_unknown` | 호출이 갔는지 알 수 없다. |
@@ -308,7 +311,7 @@ Results 에 일곱 lane 이 나온다.
    ```
 
 4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.
-5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다. 수업을 묶은 설치는 첫 세션을 연 시각이 아니라 binding 의 `since` 부터 읽는다. 질문을 낸 세션이 생길 때까지 세션마다 그 시각부터 읽으므로, `since` 가 오래될수록 한 번에 읽는 기록이 많다.
+5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다. 수업을 묶은 설치는 첫 세션을 연 시각이 아니라 binding 의 `since` 부터 읽는다. `records` 의 항목마다, 질문을 낸 세션이 멈춘 자리를 남길 때까지 세션마다 그 시각부터 읽는다. 그래서 `since` 가 오래될수록 한 번에 읽는 기록이 많다.
 
 - 옮긴 log 는 volume 안에 그대로 남는다. 새 package 는 그 파일을 읽지 않는다.
 - 옮기기 전에 답한 문제의 풀이와 판정은 옮긴 log 에만 있다. 새 package 의 R, G, P 는 빈 log 에서 다시 센다.

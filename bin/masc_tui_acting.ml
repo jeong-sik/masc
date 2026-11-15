@@ -843,7 +843,7 @@ let search_text_of_entry ~ko ~traces entry =
   let row = keeper_row_of_entry ~ko ~traces ~duration_ms:None entry in
   row.label
   ^ (if row.detail = "" then "" else " \xc2\xb7 " ^ row.detail)
-  ^ " " ^ row.keeper
+  ^ " " ^ actor_text ~ko row.actor
 
 (* ── Turn chunks ────────────────────────────────────────────────────────
    [Turns] draws one row per keeper turn instead of the up-to-seven

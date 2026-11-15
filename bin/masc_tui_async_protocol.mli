@@ -858,6 +858,10 @@ type observer_msg =
   | Observer_closed of unit ref * Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
+  (* An MCP session would not open, and the address answered /health as the
+     account server of a multi-account installation. The ref is the owner of
+     the observer stream or of the recovery that asked. *)
+  | Observer_found_account_server of workspace_authority * unit ref
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
 

@@ -1037,6 +1037,11 @@ let compact_connection_state (state : state) =
         interrupted || counts.interrupted > 0, unfinished,
         (match progress.phase with In_flight -> true | Finished _ -> false) in
   let scoped_reading = surface_reads_pending state <> [] in
+  match state.connection_status with
+  (* An account server serves no surface, so what a pass left unread there
+     is not a failed read. *)
+  | Account_server _ as status -> Compact_http status
+  | Connected | Degraded | Connecting | Booting | Disconnected ->
   match state.workspace_identity with
   | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
   | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed

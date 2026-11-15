@@ -1917,8 +1917,17 @@ let same_server_workspace (expected : Tui_decode.server_identity)
   && Tui_decode.Canonical_path.equal expected.sid_base_path actual.sid_base_path
   && Tui_decode.Canonical_path.equal expected.sid_masc_root actual.sid_masc_root
 
+(* A [/health] read that neither carries nor records a request scope's
+   workspace precondition: it observes which workspace answers. *)
+let read_server_identity_unscoped ~host ~port =
+  Masc_tui_workspace_precondition.without (fun () ->
+    Masc_tui_loader.load_server_identity ~host ~port)
+
+(* Inside a request scope that expects [expected], the requests carry it and
+   the server compares it, so no [/health] goes first. *)
 let probe_expected_workspace ~host ~port expected =
-  match Masc_tui_loader.load_server_identity ~host ~port with
+  if Masc_tui_workspace_precondition.expects expected then Ok ()
+  else match read_server_identity_unscoped ~host ~port with
   | Ok actual when same_server_workspace expected actual -> Ok ()
   | Ok _ -> Error "workspace changed before the action completed"
   | Error detail -> Error detail
@@ -1970,22 +1979,37 @@ let wrap_original answer =
   match Original_results.answer_kind answer with
   | Original_results.Read -> Original_msg answer
 
+(* A [/health] reading taken for a request, handed to the screen as it was
+   read; [next_workspace_identity] decides what the screen says. *)
+let report_workspace_reading state ~mailbox ~authority ~reading_authority
+    ~prior_contact ~refresh_ticket ~refusal reading =
+  if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
+    enqueue_async mailbox
+      (Workspace_scoped (authority, Some reading_authority,
+        Workspace_msg (Workspace_identity_unconfirmed
+          { detail = workspace_guard_refusal_english refusal; latest = reading
+          ; prior_contact; refresh_ticket })))
+
 (* Whether a request captured under [authority] for [identity] may still go
-   out. The guard withdraws it when the workspace moved, when the server
-   identity is not confirmed, or when the server, asked again just before
-   sending, names another workspace or none. *)
+   out. The guard withdraws it when the workspace moved or when the server
+   identity is not confirmed. Inside a request scope that expects
+   [identity], the server compares it when it answers. Outside one, the
+   server is asked just before sending and the guard withdraws the request
+   when it names another workspace or none. *)
 let admit_workspace_request ?schedule_form_change ?refresh_ticket
     ?(prior_contact = Masc_tui_server_lifecycle.Nothing_answered) state ~mailbox ~authority ~identity ~host ~port () =
   let refresh_ticket = Option.value refresh_ticket ~default:state.http_refresh_order in
   if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
   else if not (server_authority_ready state) then Error Workspace_identity_not_confirmed
-  else
+  else match identity with
+  | Some expected when Masc_tui_workspace_precondition.expects expected -> Ok ()
+  | Some _ | None ->
     let reading_authority = state.workspace_read_authority in
     (* Health observes the endpoint identity; the comparison below decides
        whether this request still owns it. A payload's admission proof must
        neither require a health receipt nor erase a foreign observation. *)
     let reading = Masc_tui_workspace_read.without_binding (fun () ->
-      Masc_tui_loader.load_server_identity ~host ~port) in
+      read_server_identity_unscoped ~host ~port) in
     if authority <> state.workspace_authority then Error Workspace_authority_withdrawn
     else if reading_authority != state.workspace_read_authority || not (server_authority_ready state)
     then Error Workspace_identity_not_confirmed
@@ -2000,12 +2024,8 @@ let admit_workspace_request ?schedule_form_change ?refresh_ticket
             Schedule_msg (Schedule_form_authority_refused
               { change; refusal; workspace = workspace_input_identity_of_server identity }))))
         schedule_form_change;
-      if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
-        enqueue_async mailbox
-          (Workspace_scoped (authority, Some reading_authority,
-            Workspace_msg (Workspace_identity_unconfirmed
-              { detail = workspace_guard_refusal_english refusal; latest = reading
-              ; prior_contact; refresh_ticket })));
+      report_workspace_reading state ~mailbox ~authority ~reading_authority
+        ~prior_contact ~refresh_ticket ~refusal reading;
       Error refusal
     end
 
@@ -2154,15 +2174,41 @@ let launch_workspace_result ?key ?(operation = false) ?(observation = false)
       let message = deliver result in
       scoped message) perform
 
-(* Existing request/effect callers still recheck the endpoint before dispatch. *)
+(* The requests of [read] carry the workspace this TUI last confirmed, and the
+   server refuses them before routing when it serves another one or is still
+   booting (#43356). Only that refusal costs a [/health] read, whose reading
+   goes to the screen; the request is not sent again. Before any confirmed
+   workspace there is nothing to carry, and the guard asks [/health] first. *)
+let in_workspace_request_scope state ~mailbox ~authority ~identity ~host ~port ~withdrawn request =
+  match identity with
+  | None -> request ()
+  | Some expected ->
+    let reading_authority = state.workspace_read_authority in
+    let refresh_ticket = state.http_refresh_order in
+    let refusal = Workspace_identity_changed in
+    Masc_tui_workspace_precondition.run ~host ~port ~expected
+      ~on_workspace_refused:(fun (_ : Masc_tui_workspace_precondition.refusal) ->
+        let reading = read_server_identity_unscoped ~host ~port in
+        if authority = state.workspace_authority
+           && reading_authority == state.workspace_read_authority
+           && server_authority_ready state then
+          report_workspace_reading state ~mailbox ~authority ~reading_authority
+            ~prior_contact:Masc_tui_server_lifecycle.Server_reached ~refresh_ticket
+            ~refusal reading)
+      ~withdrawn:(fun () -> withdrawn (workspace_guard_refusal_english refusal))
+      request
+
 let launch_workspace_request ?(operation = false) ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~deliver read =
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   let host = server_peer_host and port = state.port in
   launch_workspace_result ~operation ?cancelled ?cancelled_by state ~mailbox ~boundary_error ~deliver (fun () ->
-    match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
-    | Error detail -> Error (boundary_error detail)
-    | Ok () -> read ())
+    in_workspace_request_scope state ~mailbox ~authority ~identity ~host ~port
+      ~withdrawn:(fun detail -> Error (boundary_error detail))
+      (fun () ->
+        match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+        | Error detail -> Error (boundary_error detail)
+        | Ok () -> read ()))
 
 (* These read-only consumers carry their expected roots through the actual GET
    and require the server's admission receipt, including for cache reuse. Local
@@ -9125,6 +9171,8 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_native_tasks_loaded (keeper_name,result))))
       (fun () -> Masc_tui_native_tasks.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
+          in_workspace_request_scope state ~mailbox ~authority ~identity ~host ~port
+            ~withdrawn:Result.error (fun () ->
           let open Result.Syntax in
           let* () = if read_authority == state.workspace_read_authority then Ok ()
             else Error "workspace observation read was retired" in
@@ -9133,7 +9181,7 @@ let launch_keeper_native_tasks_load ?(mode=Masc_tui_native_tasks.Poll) state ~ma
           let* () = if read_authority == state.workspace_read_authority then Ok ()
             else Error "workspace observation read was retired" in
           let* () = check_workspace_request state ~mailbox ~authority ~identity ~host ~port () in
-          result))
+          result)))
   end
 
 let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~mailbox ~keeper_name =
@@ -9166,6 +9214,8 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
       ~deliver:(fun result -> enqueue_async mailbox (Keeper_msg (Keeper_child_content_loaded (keeper_name,result))))
       (fun () -> Masc_tui_child_content.read ~mode ~keeper_name ~previous
         ~fetch:(fun path ->
+          in_workspace_request_scope state ~mailbox ~authority ~identity ~host ~port
+            ~withdrawn:Result.error (fun () ->
           let open Result.Syntax in
           let check () =
             if reading != state.workspace_read_authority then
@@ -9174,7 +9224,7 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
           let* () = check () in
           let result = Masc_tui_http.http_get ~host ~port ~path in
           let* () = check () in
-          result))
+          result)))
   end
 
 (* The owed history read of [keeper_name] under the current workspace

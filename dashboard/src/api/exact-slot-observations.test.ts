@@ -44,6 +44,15 @@ describe('passive exact-slot observations', () => {
     expect(state.state).toBe('unavailable')
     expect(JSON.stringify(state)).not.toContain('secret')
   })
+  it('decodes a connection that did not open apart from a network failure after sending', () => {
+    const failure = (cause: unknown[]) => parseSlotObservations({ state: 'available', observations: [
+      slotObservation({ outcome: ['Execution_failed', ['Completion_failed', { sent: false, cause }]] })] })
+    expect(failure(['Connection_not_opened', ['Dns_failure']])).toMatchObject({ state: 'available',
+      observations: [{ outcome: { kind: 'execution_failed', cause: 'Completion_failed / Connection_not_opened / Dns_failure' } }] })
+    expect(failure(['Network_failure', ['Connection_reset']])).toMatchObject({ state: 'available',
+      observations: [{ outcome: { cause: 'Completion_failed / Network_failure / Connection_reset' } }] })
+    expect(failure(['Connection_not_opened', ['Not_a_kind']]).state).toBe('unavailable')
+  })
   it('decodes official-client causes without treating client invocation as a provider address', () => {
     const state = parseSlotObservations({ state: 'available', observations: [slotObservation({
       binding: ['Official_client'], outcome: ['Cli_failed', { runtime_id: 'A',

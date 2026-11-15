@@ -3,7 +3,7 @@ rfc: "one-slot-fault-judgment-for-every-walk"
 title: "다음 후보로 넘길지는 한 곳에서 정한다 — exact 걸음과 Keeper 걸음이 같은 오류에 같은 답을 한다"
 status: Draft
 created: 2026-09-24
-updated: 2026-11-14
+updated: 2026-11-15
 author: claude
 related: ["librarian-lifecycle", "0440", "0454", "0492", "typed-terminal-reason", "exact-lane-walks-one-slot-list"]
 ---
@@ -16,6 +16,7 @@ related: ["librarian-lifecycle", "0440", "0454", "0492", "typed-terminal-reason"
   agent_core 에 판정 하나를 두고 두 걸음이 그것을 읽는다.
 - 기준: main `39a4173e41`. 계기: #38472.
 - 2026-11-14 추가: §1.4·§2.3·§3.5·§4 의 5단계. 기준 main `be09733135`. 계기: #38403.
+- 2026-11-15 고침: 구현 리뷰에서 나온 두 가지. 없는 one-shot 클라이언트를 적은 세 문장(§1.4·§2.3·§5)을 고쳤다. 같은 실행 안의 다시 잇기가 바뀐다는 사실을 §3.5 에 적었다.
 
 ## 1. 지금 모양
 
@@ -101,8 +102,8 @@ exact 걸음이 이것으로 멈춘 53번은 모두 Librarian lane 이었고, �
   TLS handshake 예외(`Tls_alert`·`Tls_failure`·`End_of_file`)는 다시 던진다
   (`http_client.ml:1004~1021`, 측정 전송 `:190~207`). 그 예외는 밖에서 `classify_network_exn` 을 거쳐 `NetworkError` 가 된다.
 - 이름 찾기·TCP·TLS 모두 요청을 쓰기 전에 끝난다.
-- one-shot 클라이언트는 TCP 와 TLS 를 Cohttp 의 `post` 안에서 연다 (`connect` closure, `http_client.ml:946`).
-  이름 찾기만 그 전에 한다.
+- `get_sync`·`post_sync`·스트림 길은 모두 `with_client` 로 `open_connection` 을 거쳐 `make_connection` 을 부른다.
+  연결을 따로 여는 one-shot 클라이언트는 없다.
 - `post_sync_once` 는 연결이 열린 뒤에야 `Dispatch_started` 로 넘어간다 (`http_client.ml:1647`).
   스트림 길도 연결이 열린 뒤에 `dispatch_entered` 를 부른다 (`:2004`).
 
@@ -227,8 +228,8 @@ exact 걸음은 판정을 가리지 않고 모두 넘기므로 이 판정을 읽
      `classify_network_exn` 이 `NetworkError` 로 읽는 예외는 같은 `kind` 의 `Connect_failed` 로 돌려준다.
      `Eio.Time.Timeout` 은 기한이라 지금처럼 밖으로 보낸다 (§5). 취소 같은 예약 예외도 다시 던진다.
    - `classify_network_exn` 은 바꾸지 않는다. 예외만 보고는 연결 전인지 모른다.
-   - one-shot 클라이언트(`make_client`)는 TCP 연결을 Cohttp 의 `post` 안에서 연다 (`http_client.ml:947`).
-     그 연결 실패는 지금처럼 `NetworkError` 다. 이름 찾기는 `post` 전에 하므로 `Connect_failed` 가 된다.
+   - 동기 요청과 스트림이 같은 `make_connection` 을 지나므로 새 연결의 TCP·TLS 실패는 모두 `Connect_failed` 가 된다.
+     캐시에서 다시 쓴 연결의 실패는 연결 함수를 지나지 않는다. 그래서 지금처럼 `NetworkError` 다.
 2. **놓일 수 없는 짝.**
    - `Connect_failed` 는 `Before_dispatch_error` 안에만 온다. 연결 함수는 `phase := Dispatch_started` 보다 먼저 끝난다.
    - `post_sync_once` 의 `fail` 은 `Dispatch_started_error`·`Response_received_error` 안의 `Connect_failed` 를
@@ -298,7 +299,12 @@ exact 걸음의 동작은 바뀌지 않는다. 이 실패는 지금처럼 `Befor
 5. **연결을 열지 못한 실패는 `Not_sent` 다 (2026-11-15).**
    `Local_admission` 에 접지 않는다. 그건 MASC 자신의 대기열이라 어느 바인딩의 이야기도 아니다.
    `Not_sent` 는 이 바인딩의 host 이름이 틀렸을 수도 있다. route 가 두 class 를 따로 적어야 운영자가 가른다.
-   Keeper 걸음의 넘김은 바뀌지 않는다. 바뀌는 것은 요청 하나의 판정, route class, 증거 이름이다.
+   Keeper 걸음의 넘김은 바뀌지 않는다. 바뀌는 것은 요청 하나의 판정, route class, 증거 이름, 같은 실행 안의 다시 잇기다.
+   - 다시 잇기(`connection_recovery_sequence`)는 다시 쓴 연결을 상대가 닫았을 때의 처방이다.
+     열리지 않은 연결은 다시 쓴 연결이 아니다. 그래서 `Connect_failed` 는 `kind` 와 상관없이 다시 잇지 않는다.
+   - 전에는 새 연결의 TLS handshake 중 EOF·reset 이 `NetworkError {End_of_file | Connection_reset}` 로 읽혀 새 연결로 한 번 더 보냈다.
+     이제 걸음은 다음 후보로 넘어간다. 후보가 하나뿐이면 턴이 끝나고, route `Connection_not_opened` 의 쉼(`rate_limit_backoff_floor_sec`)을 기다린다.
+   - 이 경우가 얼마나 자주 일어나는지는 재지 않았다. **[확인 필요]**
 
 ## 4. 단계
 
@@ -347,7 +353,7 @@ exact 걸음의 동작은 바뀌지 않는다. 이 실패는 지금처럼 `Befor
 - 연결 전인지를 `kind`·오류 문장·errno 로 짐작하지 않는다. 오류를 만든 함수만 본다.
 - 기한 초과에는 연결 여부를 싣지 않는다. 기한 값은 어느 기한이 끝났는지를 말한다 (`retry.ml:118`).
   연결 전에 끝난 기한도 지금처럼 자기 phase 로 끝나고, 판정도 그대로다.
-  - one-shot `post_sync` 의 기한은 본문 읽기까지 감싼다 (`http_client.ml:1490`). 그 클라이언트는 `open_connection` 을 부르지 않는다.
+  - `post_sync` 의 기한은 연결을 여는 일과 본문 읽기를 함께 감싼다 (`http_client.ml:1606`). 기한 값만으로는 연결이 열렸는지 모른다.
     기한 쪽에서 연결 여부를 가리면 보낸 요청을 "안 보냄"으로 적는 길이 생긴다.
   - 기한에 연결 여부를 싣으려면 따로 제안한다.
 - attempt 의 dispatch 사실(`Runtime_attempt_dispatch`)은 바꾸지 않는다. 그 값은 후보의 클라이언트를 불렀는지를 말한다.

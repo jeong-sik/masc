@@ -109,9 +109,11 @@ function observationBinding(value: unknown): SlotBinding {
 }
 const REFUSALS = ['Request_body_refused', 'Refusal_body_not_received', 'Rate_limited', 'Overloaded',
   'Server_error', 'Auth_failed', 'Authorization_refused', 'Payment_required', 'Invalid_request',
-  'Not_found', 'Context_overflow', 'Input_capacity', 'Network_error', 'Timeout']
+  'Not_found', 'Context_overflow', 'Input_capacity', 'Network_error', 'Connect_failed', 'Timeout']
 const LOCAL_REJECTIONS = ['Runtime_unavailable', 'Runtime_contract', 'Input_contract',
   'Output_requirement', 'Local_input_capacity', 'Preparation_failed']
+const NETWORK_KINDS = ['Connection_refused', 'Dns_failure', 'Unreachable', 'Tls_error', 'Network_timeout',
+  'Local_resource_exhaustion', 'Connection_reset', 'End_of_file', 'Unknown_network']
 const COMPLETION_CAUSES = ['Http_failure', 'Accept_rejected', 'Provider_terminal', 'Capacity_exhausted',
   'Hard_quota', 'Capability_mismatch', 'Cli_policy_invalid', 'Cli_startup_failed', 'Provider_parse_error',
   'Provider_wire_error', 'Provider_reported_error', 'Provider_interrupted', 'Response_body_too_large',
@@ -119,9 +121,8 @@ const COMPLETION_CAUSES = ['Http_failure', 'Accept_rejected', 'Provider_terminal
 function completionCause(value: unknown): string {
   const [tag, nested] = variant(value)
   switch (tag) {
-    case 'Network_failure': return `${tag} / ${nullary(nested, ['Connection_refused', 'Dns_failure', 'Unreachable',
-      'Tls_error', 'Network_timeout', 'Local_resource_exhaustion', 'Connection_reset', 'End_of_file',
-      'Unknown_network'])}`
+    // Connection_not_opened: the connection did not open, so nothing was sent.
+    case 'Network_failure': case 'Connection_not_opened': return `${tag} / ${nullary(nested, NETWORK_KINDS)}`
     // Keep the measured failure family. No inference from an exception message.
     case 'Deadline': case 'Empty_completion': {
       const [detail] = variant(nested)

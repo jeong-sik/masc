@@ -123,14 +123,6 @@ let make_test_ctx_with_agent agent_name =
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
 
-let make_temp_dir prefix =
-  incr test_counter;
-  let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "%s-%d-%d" prefix
-       (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  dir
-
 let str_contains s substring =
   let len_s = String.length s in
   let len_sub = String.length substring in

@@ -822,7 +822,6 @@ let effective_rows routes =
 let rows_t = list (triple string (list string) string)
 let public_read = access_json (Route_access.Public_read Route_access.Credential_when_strict)
 let read_auth = access_json Route_access.Read_auth
-let admin = access_json (Route_access.Permission Masc_domain.CanAdmin)
 
 (* A router that was passed to a registration function and is used afterwards
    describes the same table in the list, the count and the lookup. *)

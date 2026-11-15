@@ -10,8 +10,6 @@ module Checks = Schedule_checks_watch
    pause it asks for. Every case answers from a stub transport; none reaches
    GitHub. *)
 
-let now_s = 1_790_000_000.0
-
 let response ?(remaining = Some 4990) ?(reset = None) ?(retry_after = None) status body
   : Pulls.response
   =

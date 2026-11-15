@@ -1,3 +1,0 @@
-### Fixed
-
-- TUI: a paste no field takes goes to the chat draft only while no overlay holds the keys, the same `modal_owns_keys` question a key asks before it reaches the draft. With Git Changes or a client detail open, a paste used to change the draft hidden under it, where a voice `send_on_stop` could send it to the Keeper; it is now refused with the same notice the queue panel gives (#52155, #PENDING).

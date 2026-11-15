@@ -1,9 +1,9 @@
 ---
 rfc: "0489"
 title: "Goal 검증이 판정 없이 끝나면 새 시도로 다시 판정한다"
-status: Draft
+status: Accepted
 created: 2026-11-05
-updated: 2026-11-05
+updated: 2026-11-15
 author: claude
 supersedes: []
 superseded_by: null

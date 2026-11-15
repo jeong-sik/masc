@@ -142,6 +142,7 @@ READ_ONLY_BY_TEST_RUNS = frozenset({
     ("test/dune", "docs/examples/lane-addons/output-statistics.toml"),
     ("test/dune", "docs/examples/lane-addons/fusion-compute/*.toml"),
     ("test/dune", "docs/examples/lane-addons/operator-quiz.toml"),
+    ("test/dune", "docs/examples/lane-addons/operator-lesson.toml"),
     ("test/dune", "docs/evidence/2026-09-30-candle-grade-explicit-outcome"),
     ("test/dune", "docs/evidence/2026-09-30-candle-grade-scope-survey"),
 })

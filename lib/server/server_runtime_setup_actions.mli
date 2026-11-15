@@ -1,7 +1,11 @@
 (** Authenticated setup route implementation. Call only after CanAdmin and bind
     [base_path] to the authenticated workspace. Requests never accept credential
     file paths; references are resolved from selected native catalog entries. *)
-type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
+type config_unread = Unreadable of string | Unparsable of Runtime_toml.parse_error list
+(** Why the workspace runtime.toml could not be used: [Unreadable] carries the
+    loader's account of a file it could not read, [Unparsable] the parser's
+    errors for a file it read. *)
+type error = Invalid_request | Configuration_unavailable of config_unread | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
   | Account_refused of Runtime_account_access.refusal
@@ -42,8 +46,11 @@ val login_target_of_config : Runtime_schema.config -> integration_id:string -> (
 (** {!login_target} on a runtime.toml already read with {!config}. *)
 
 val config : base_path:string -> (Runtime_schema.config, error) result
-(** The runtime.toml of the workspace, parsed. A missing or unparsable file is
-    [Configuration_unavailable]. *)
+(** The runtime.toml of the workspace, parsed. A file that cannot be read is
+    [Configuration_unavailable (Unreadable _)] and one that does not parse is
+    [Configuration_unavailable (Unparsable _)]; either way the reason, with the
+    file's path, goes to the server log, and {!error_message} keeps it out of
+    the answer. *)
 val import_account : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Explicit selected Antigravity account import; returns only a workspace-bound
     opaque reference and projected metadata. Original source auth is untouched. *)

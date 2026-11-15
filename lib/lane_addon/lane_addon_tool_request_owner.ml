@@ -349,7 +349,9 @@ let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary
       |> Result.map_error (fun detail -> Store_unavailable detail)
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
 type publication = Stored of retained | Already_stored of retained | Unconfirmed of string
-let advance_events_with ~save ~store ~(expected : retained) ~events =
+type record_publication = Record_stored of Record.t | Record_already_stored of Record.t
+  | Record_unconfirmed of string
+let advance_record_events_with ~save ~store ~(expected : Record.t) ~events =
   let rec append_events progress = function
     | [] -> Ok progress
     | event :: rest ->
@@ -368,20 +370,43 @@ let advance_events_with ~save ~store ~(expected : retained) ~events =
   | Some json ->
     (* Progress reads and rewrites only the record. A record naming another
        body differs from [expected] in its digest. *)
-    let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json
+    let* previous = decode ~scope:expected.scope ~request_id:expected.request_id json
       |> Result.map_error unavailable in
-    if not (String.equal stored.request_digest expected.request_digest) then Error State_conflict else
-    let previous = with_request stored expected.request in
-    if same_record previous next then Ok (Already_stored previous)
-    else if not (same_record previous expected) then Error State_conflict
+    if same_listed previous next then Ok (Record_already_stored previous)
+    else if not (same_listed previous expected) then Error State_conflict
     else match save store
-        ~scope:expected.scope ~request_id:expected.request_id (to_json next) with
-      | Ok () -> Ok (Stored next)
-      | Error detail -> Ok (Unconfirmed detail)
+        ~scope:expected.scope ~request_id:expected.request_id (record_to_json next) with
+      | Ok () -> Ok (Record_stored next)
+      | Error detail -> Ok (Record_unconfirmed detail)
+let advance_record_events ~store ~expected ~events =
+  advance_record_events_with ~save:Lane_addon_store.save_tool_request_owner ~store ~expected ~events
+let advance_record ~store ~expected ~event =
+  advance_record_events ~store ~expected ~events:[event]
+(* The same test [reload] makes: a record of the same ID naming the same
+   digest names the body [original] already read and checked. *)
+let rebind (original : retained) (record : Record.t) =
+  if same_identity record (listed original) then Some (with_request record original.request)
+  else None
+let advance_events_with ~save ~store ~(expected : retained) ~events =
+  let+ published = advance_record_events_with ~save ~store ~expected:(listed expected) ~events in
+  (* The record written or acknowledged passed [same_listed] against
+     [expected] or its next progress, so it names the request [expected] holds. *)
+  match published with
+  | Record_stored record -> Stored (with_request record expected.request)
+  | Record_already_stored record -> Already_stored (with_request record expected.request)
+  | Record_unconfirmed detail -> Unconfirmed detail
 let advance_events ~store ~expected ~events =
   advance_events_with ~save:Lane_addon_store.save_tool_request_owner ~store ~expected ~events
 let advance ~store ~expected ~event =
   advance_events ~store ~expected ~events:[event]
+(* What a worker call checks of the original it carries: the record of that ID
+   still names the same installation, package, tool, digest and summary. *)
+let confirm_listed ~store (expected : Record.t) =
+  let* record = load_record ~store ~scope:expected.scope ~request_id:expected.request_id in
+  match record with
+  | Some record when same_identity record expected -> Ok ()
+  | Some _ -> Error Binding_conflict
+  | None -> Error (Store_unavailable "an original request named by a worker call has no record")
 module For_testing = struct
   let fold_all ~store ~(after_inventory : unit -> unit) ~init ~f =
     fold_all_with ~after_inventory ~store ~init ~f

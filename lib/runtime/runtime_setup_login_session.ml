@@ -2,6 +2,8 @@ type key = Enter | Up | Down | Tab | Eof
 type input = Text of string | Key of key
 type error = Already_running | Not_found | Not_running | Input_pending | Invalid_input
   | Cancelled | Transport_failed | Process_failed of int | Interpreter_missing
+type pipe = Stdout | Stderr
+type output = Piped of pipe * string | Screen of string
 type command = Input of input | Cancel
 type phase = Preparing | Running | Observing | Closed
 type actor = Agent of string | Person of string
@@ -130,6 +132,38 @@ let python ~binary =
         if executable candidate then Some candidate else None))
 ;;
 
+(* 80 x 24 is the VT100's screen and the window xterm and macOS Terminal open
+   with. The helper gives the PTY this size, so the program lays out the
+   screen this module reads. *)
+let screen_rows = 24
+let screen_cols = 80
+
+(* A full-screen login redraws in place: it moves the cursor up and writes
+   over what it drew. Only a terminal's screen shows what the program meant.
+   This terminal answers nothing, because the helper writes only the
+   person's input to the program, so it models no extension a reply would
+   announce. It keeps no scrollback: only the screen is sent, and agy draws
+   its login on the alternate screen, which has none. *)
+let terminal_screen () =
+  Vte.create ~extensions:[] ~scrollback:0 ~rows:screen_rows ~cols:screen_cols ()
+
+(* The rows down to the last one that shows text, each with its SGR styles
+   and OSC 8 hyperlinks, one per line. A row the terminal wrapped goes on in the next row, so it
+   keeps its trailing spaces and joins the next row without a line break:
+   an address longer than the screen stays one line. *)
+let screen_text screen =
+  let row = Matrix_grid.create ~width:(Vte.cols screen) ~height:1 () in
+  let rec last y = if y < 0 || Vte.text screen y <> "" then y else last (y - 1) in
+  let last = last (Vte.rows screen - 1) in
+  let buffer = Buffer.create (Vte.rows screen * Vte.cols screen) in
+  for y = 0 to last do
+    Vte.blit_row screen y row ~y:0;
+    let wrapped = Vte.wrapped screen y in
+    Buffer.add_string buffer (Matrix_grid.to_ansi ~trim:(not wrapped) row);
+    if y < last && not wrapped then Buffer.add_char buffer '\n'
+  done;
+  Buffer.contents buffer
+
 let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_ready ~on_input_ready ~on_output =
   let clock = Eio.Stdenv.clock env in
   Atomic.set t.terminal terminal;
@@ -142,8 +176,9 @@ let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_r
     let _proc = Eio.Process.spawn ~sw mgr ~env:child_env
       ~cwd:Eio.Path.(Eio.Stdenv.fs env / cwd)
       ~stdin:stdin_r ~stdout:stdout_w ~stderr:stderr_w
-      ([interpreter; "-I"; "-B"; "-c"; Embedded_account_login.script;
-        (if terminal then "pty" else "pipe")] @ argv) in
+      ([interpreter; "-I"; "-B"; "-c"; Embedded_account_login.script]
+       @ (if terminal then ["pty"; string_of_int screen_rows; string_of_int screen_cols] else ["pipe"])
+       @ argv) in
     Eio.Flow.close stdin_r; Eio.Flow.close stdout_w; Eio.Flow.close stderr_w;
     (* Close only: a release-hook await can deadlock after Eio cancels its
        reaper daemon. The foreground manager owns TERM, grace and protected
@@ -167,15 +202,27 @@ let run_with interpreter t ~env ~child_env ~cwd ~argv ~terminal ~is_closed ~on_r
     (* The helper reads at most 64 KiB per chunk; JSON escaping expands one
        byte at most sixfold. This is a wire-frame bound, never a login budget. *)
     let reader = Eio.Buf_read.of_flow ~max_size:(6 * 65536 + 1024) stdout_r in
+    let screen = if terminal then Some (terminal_screen ()) else None in
+    let draw screen text =
+      (* Replies are dropped: see [terminal_screen]. So are requests to the
+         host (bell, notification, clipboard), which nothing here performs;
+         kept, each would stay in [screen] for the rest of the login. *)
+      ignore (Vte.feed_string screen text);
+      Vte.clear_requests screen;
+      (* A cursor move or a new pen alone changes no row, so nothing new shows. *)
+      let changed = Vte.dirty_rows screen <> [] in
+      Vte.clear_dirty screen;
+      if changed then on_output (Screen (screen_text screen)) in
     let rec receive () =
       let json = Yojson.Safe.from_string (Eio.Buf_read.line reader) in
       match json with
       | `Assoc fields ->
         (match List.assoc_opt "event" fields with
          | Some (`String "output") ->
-           (match List.assoc_opt "stream" fields, List.assoc_opt "text" fields with
-            | Some (`String (("stdout" | "stderr" | "terminal") as stream)), Some (`String text) ->
-              on_output stream text; receive ()
+           (match List.assoc_opt "stream" fields, List.assoc_opt "text" fields, screen with
+            | Some (`String "stdout"), Some (`String text), None -> on_output (Piped (Stdout, text)); receive ()
+            | Some (`String "stderr"), Some (`String text), None -> on_output (Piped (Stderr, text)); receive ()
+            | Some (`String "terminal"), Some (`String text), Some screen -> draw screen text; receive ()
             | _ -> Error Transport_failed)
          | Some (`String "input_ready") ->
            Atomic.set t.input_pending false; on_input_ready (); receive ()

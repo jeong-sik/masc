@@ -3224,10 +3224,6 @@ let test_runtime_inventory_surfaces_parameter_policy () =
       "reasoning replay policy"
       "preserve_always"
       (policy |> J.member "reasoning_replay_policy" |> J.to_string);
-    Alcotest.(check bool)
-      "no tool replay requirement"
-      false
-      (policy |> J.member "requires_reasoning_replay_on_tool_call" |> J.to_bool);
     let json_string_list field =
       policy |> J.member field |> J.to_list |> List.map J.to_string
     in

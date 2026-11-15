@@ -240,7 +240,11 @@ let start ~owner ~base_path ~body request reqd =
             Workspace_dataset_event.Account_emails in
         Server_sse_response.close_after response (fun () ->
           let on_ready () = send "started" (Receipt.to_json !receipt) in
-          let on_output stream text = send "output" (`Assoc ["stream", `String stream; "text", `String text]) in
+          let on_output = function
+            | Session.Piped (pipe, text) ->
+              let stream = match pipe with Session.Stdout -> "stdout" | Stderr -> "stderr" in
+              send "output" (`Assoc ["stream", `String stream; "text", `String text])
+            | Screen text -> send "screen" (`Assoc ["text", `String text]) in
           let on_input_ready () = send "input_ready" (`Assoc []) in
           let completed =
             try

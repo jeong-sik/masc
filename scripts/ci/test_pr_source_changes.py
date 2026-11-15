@@ -92,6 +92,8 @@ class Sources(unittest.TestCase):
             ".github/workflows/pr-type-check.yml",
             "scripts/ci/pr_source_changes.py",
             "scripts/ci/test_pr_source_changes.py",
+            "scripts/ci/pr_changelog_fragments.py",
+            "scripts/ci/test_pr_changelog_fragments.py",
             # Inputs of build rules that are not OCaml (#51595).
             "lib/auth/account_page.css",
             "lib/exec/parser/bash_subset.mly",
@@ -142,6 +144,7 @@ READ_ONLY_BY_TEST_RUNS = frozenset({
     ("test/dune", "docs/examples/lane-addons/output-statistics.toml"),
     ("test/dune", "docs/examples/lane-addons/fusion-compute/*.toml"),
     ("test/dune", "docs/examples/lane-addons/operator-quiz.toml"),
+    ("test/dune", "docs/examples/lane-addons/operator-lesson.toml"),
     ("test/dune", "docs/evidence/2026-09-30-candle-grade-explicit-outcome"),
     ("test/dune", "docs/evidence/2026-09-30-candle-grade-scope-survey"),
 })

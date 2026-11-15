@@ -15,7 +15,9 @@ export interface LoginReceipt {
 }
 export type LoginEvent =
   | { event: 'started'; login_id: string; integration_id: string; account_ref?: string }
-  | { event: 'output'; stream: 'stdout' | 'stderr' | 'terminal'; text: string }
+  | { event: 'output'; stream: 'stdout' | 'stderr'; text: string }
+  /** The whole screen of a CLI that runs in a terminal; it replaces the one before. */
+  | { event: 'screen'; text: string }
   | { event: 'input_ready' }
   | { event: 'complete'; source: Source; authentication: Authentication }
   | { event: 'error'; login_id?: string; source?: Source }
@@ -50,8 +52,10 @@ export async function streamSetupLogin(source: Source, onEvent: (event: LoginEve
           && (payload.account_ref === undefined || reference(payload.account_ref))) {
           started = true
           onEvent({ event, login_id: payload.login_id, integration_id: source.integration_id, account_ref: payload.account_ref as string | undefined })
-        } else if (event === 'output' && started && ['stdout', 'stderr', 'terminal'].includes(String(payload.stream)) && typeof payload.text === 'string') {
-          onEvent({ event, stream: payload.stream as 'stdout' | 'stderr' | 'terminal', text: payload.text })
+        } else if (event === 'output' && started && (payload.stream === 'stdout' || payload.stream === 'stderr') && typeof payload.text === 'string') {
+          onEvent({ event, stream: payload.stream, text: payload.text })
+        } else if (event === 'screen' && started && typeof payload.text === 'string') {
+          onEvent({ event, text: payload.text })
         } else if (event === 'input_ready' && started) {
           onEvent({ event })
         } else if (event === 'complete' && started && payload.integration_id === source.integration_id && reference(payload.account_ref)

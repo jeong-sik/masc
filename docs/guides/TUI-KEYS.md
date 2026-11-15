@@ -363,6 +363,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `f` | cycle Turns / Actions / Everything; Turns has no individual event evidence |
 | `Enter` | Actions/Everything: exact selected event; Turns are aggregates |
 | `Esc` | close event evidence; from the list, back to Dashboard |
+| `/` | Actions/Everything: jump the cursor to a matching event, tool or keeper, over the rows the filter leaves; Turns has no cursor to land on |
+| `n / N` | next / previous match |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
 
 ## Keeper detail
@@ -495,7 +497,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Right / Enter` | open exact runs, the selected Browser or machine, or a package configuration/instance |
 | `a` | add a candidate to the selected exact-output lane's walk order |
 | `Space` | open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off |
-| `s` | edit the model order: r replaces the selected model/effort, a adds a fallback, 1 makes it first within its HTTP/CLI group, x removes, J/K reorders, Enter/d opens the selected slot's config table, e opens the lane table, Esc closes; HTTP runs before CLI |
+| `s` | edit the model order of the selected exact-output lane, from the list or from its reading (d): r replaces the selected model/effort, a adds a fallback, 1 makes it first within its HTTP/CLI group, x removes, J/K reorders, Enter/d opens the selected slot's config table, e opens the lane table, Esc closes back to the screen it opened from; HTTP runs before CLI |
 | `e` | open this lane's runtime.exact_output_lanes section in the preview-checked runtime.toml editor; slots is a catalog-ref array and cli_slots an official-client runtime-id array, either may be left out, and an enabled lane needs one slot across the two |
 | `[ / ]` | on a Lane Add-on package row, choose one of its exact outputs; the preview lists each with its binding: bound, unbound, off, or a table the package does not declare. e then opens that output's runtime.addon_exact_lanes table, or says runtime.toml has none yet |
 | `p` | open the Runtime surface |

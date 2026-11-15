@@ -101,6 +101,7 @@ related: ["0480", "0482", "provider-path-rest", "librarian-absorb-gate"]
 ### 3.3 TUI 꼬리말
 
 - 일반 `/health` 에 캐시된 경보 필드 셋을 같이 싣는다. `overall_status`, `operator_action_required`, `operator_action_reasons` 다. 이미 캐시된 값이라 새로 계산하지 않는다.
+- 이 필드 셋은 서버 상태를 읽을 수 있는 요청이 받는 `/health` 본문에만 있다. credential 없는 요청이 strict 서버에서 받는 공개 probe 에는 없다. TUI 는 자기 credential 로 읽는다.
 - `Masc_tui_footer.status_item` 에 `Operator_action of string list` 를 더한다. `operator_action_required=true` 일 때만 나온다.
 - 꼬리말에는 이유의 수와 첫 이유를 보여 준다.
 

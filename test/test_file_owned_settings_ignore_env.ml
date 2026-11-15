@@ -1,7 +1,9 @@
 (* A setting the runtime file alone feeds never reads the process environment.
 
-   The probe runs against every such registry row, so a row added later is
-   covered without a line here. Each row is probed from a shell that exports
+   The probe runs against every such registry row. Which rows those are is
+   written out below as their runtime.toml keys, so a row that goes back to the
+   environment fails a case instead of dropping out of the probe unseen, and
+   a row added later needs its key there. Each row is probed from a shell that exports
    nothing for its name. A candidate value that changes what the row's reader
    returns, while the name is not declared, proves the reader consults the
    environment. Once the loader has declared the names, the same environment
@@ -36,6 +38,52 @@ let candidates (row : R.setting) =
 
 let file_owned_rows =
   List.filter (fun row -> not (R.reads_process_env row)) R.toml_settings
+;;
+
+(* The runtime.toml key of every row the file alone feeds, in registry order.
+   [file_owned_rows] is derived from the registry, so a row that goes back to
+   the environment would leave every case here without a failure; this list
+   is what notices. A change that moves a row to the file adds its key here,
+   and one that moves a row back to the environment or removes it takes the
+   key out. *)
+let file_owned_keys =
+  [ "reactive.enabled"
+  ; "autonomous.wake_prompt"
+  ; "heartbeat.snapshot_sec"
+  ; "heartbeat.work_as_heartbeat"
+  ; "heartbeat.sleep_chunk_sec"
+  ; "wire_capture.enabled"
+  ; "wire_capture.retention_days"
+  ; "wire_capture.max_bytes"
+  ; "debug.enabled"
+  ; "turn.batch_limit"
+  ; "turn.temperature"
+  ; "turn.enable_thinking"
+  ; "turn.stream_idle_timeout_sec"
+  ; "turn.first_event_timeout_sec"
+  ; "turn.provider_call_deadline_sec"
+  ; "turn.admission_max_events"
+  ; "supervisor.sweep_sec"
+  ; "metrics.max_bytes"
+  ; "metrics.max_rotated"
+  ; "metrics.store_max_bytes"
+  ; "memory.category_cap"
+  ; "memory.facts_per_category_cap"
+  ; "wiki_contents.enabled"
+  ; "vision.max_output_tokens"
+  ; "vision.max_dimension"
+  ; "transport.h2_max_concurrent_streams"
+  ; "transport.h2_max_pending_response_bytes"
+  ; "transport.h2_initial_window_size"
+  ; "sandbox.microvm_memory"
+  ; "sandbox.microvm_cpus"
+  ; "sandbox.microvm_dns"
+  ; "web_search.provider"
+  ; "web_search.provider_order"
+  ; "web_search.fallbacks"
+  ; "web_search.timeout_sec"
+  ; "web_search.cache_ttl_sec"
+  ]
 ;;
 
 (* These two readers take the boot store directly, never the environment, so
@@ -84,6 +132,26 @@ let test_the_environment_does_not_reach_a_file_owned_reader () =
     probed;
   check bool "the probe moved at least one reader" true
     (List.exists (fun (_, outcome) -> Option.is_some outcome) probed)
+;;
+
+let test_the_file_owned_keys_are_the_written_ones () =
+  let registry_keys =
+    List.map
+      (fun (row : R.setting) ->
+         match R.toml_key_opt row with
+         | Some key -> key
+         | None -> failf "%s is file-owned but has no runtime.toml key" row.env_name)
+      file_owned_rows
+  in
+  let absent_from keys = List.filter (fun key -> not (List.mem key keys)) in
+  let not_written = absent_from file_owned_keys registry_keys in
+  let no_longer_file_owned = absent_from registry_keys file_owned_keys in
+  if not_written <> [] || no_longer_file_owned <> []
+  then
+    failf
+      "the file-owned runtime.toml keys are not the written ones. File-owned but not written: [%s]. Written but not file-owned: [%s]. Update file_owned_keys in the change that moves the row."
+      (String.concat "; " not_written)
+      (String.concat "; " no_longer_file_owned)
 ;;
 
 let with_empty_base_path f =
@@ -356,6 +424,92 @@ let test_the_load_refuses_a_turn_admission_bound_outside_its_range () =
   Config_boot_overrides.reset_for_tests ()
 ;;
 
+(* A float literal the file reads back as [value]. *)
+let float_literal value =
+  let text = R.display_file_float value in
+  if String.exists (fun c -> Char.equal c '.' || Char.equal c 'e') text
+  then text
+  else text ^ ".0"
+;;
+
+(* One step past each end of the row's declared range: the integer next to a
+   bound, the float next to it, or an excluded bound itself. Nothing is past
+   an end of [int]. *)
+let past_the_range (row : R.setting) =
+  match row.value_range with
+  | R.Unbounded -> []
+  | R.Integer_range { min_inclusive; max_inclusive } ->
+    List.filter_map
+      Fun.id
+      [ Option.bind min_inclusive (fun minimum ->
+          if minimum = min_int then None else Some (string_of_int (minimum - 1)))
+      ; Option.bind max_inclusive (fun maximum ->
+          if maximum = max_int then None else Some (string_of_int (maximum + 1)))
+      ]
+  | R.Float_range { min_inclusive; min_exclusive; max_inclusive } ->
+    List.filter_map
+      (Option.map float_literal)
+      [ Option.map Float.pred min_inclusive
+      ; min_exclusive
+      ; Option.map Float.succ max_inclusive
+      ]
+;;
+
+let runtime_toml_setting key literal =
+  match String.index_opt key '.' with
+  | None -> failf "%s has no table" key
+  | Some dot ->
+    Printf.sprintf
+      "[%s]\n%s = %s\n"
+      (String.sub key 0 dot)
+      (String.sub key (dot + 1) (String.length key - dot - 1))
+      literal
+;;
+
+let refuse_past_the_range (row : R.setting) key literal =
+  Config_boot_overrides.reset_for_tests ();
+  let source = runtime_toml_setting key literal in
+  (match Keeper_runtime_config.validate_source_text source with
+   | Error detail -> failf "%s = %s did not parse: %s" key literal detail
+   | Ok report ->
+     (match report.Keeper_runtime_config.issues with
+      | [ issue ] ->
+        check string "the issue is the row's key" key issue.Keeper_runtime_config.key;
+        check bool (key ^ " = " ^ literal ^ " is out of the row's range") true
+          (issue.Keeper_runtime_config.kind = Keeper_runtime_config.Out_of_range);
+        check bool "the issue refuses the load" true
+          (issue.Keeper_runtime_config.severity = Keeper_runtime_config.Error)
+      | issues -> failf "%s = %s gave %d issues, not one" key literal (List.length issues)));
+  with_runtime_toml source (fun base_path ->
+    match Keeper_runtime_config.load_and_apply ~base_path with
+    | Ok _ -> failf "%s = %s was applied" key literal
+    | Error failure ->
+      check bool (key ^ ": the load fails in validation") true
+        (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
+      check (option string) (key ^ ": nothing is stored") None
+        (Config_boot_overrides.get_opt row.env_name))
+;;
+
+(* Every written key, one step past its row's range, read from the registry.
+   A number row with nothing past its range would skip the case unseen, so it
+   fails; a boolean or string row has no range, and what its value has to
+   mean is judged by the text check above. *)
+let test_the_load_refuses_a_file_owned_value_past_its_range () =
+  List.iter
+    (fun key ->
+       match R.find_by_toml_key key with
+       | None -> failf "the registry has no row for %s" key
+       | Some row ->
+         (match row.value_kind, past_the_range row with
+          | (R.Boolean | R.String), [] -> ()
+          | (R.Integer | R.Float), [] ->
+            failf "%s is a number with nothing past its declared range" key
+          | (R.Boolean | R.Integer | R.Float | R.String), (_ :: _ as literals) ->
+            List.iter (refuse_past_the_range row key) literals))
+    file_owned_keys;
+  Config_boot_overrides.reset_for_tests ()
+;;
+
 let test_a_declared_name_answers_from_the_file_only () =
   match file_owned_rows with
   | [] -> fail "the registry has no file-owned row"
@@ -391,6 +545,8 @@ let () =
     [ ( "file_owned"
       , [ test_case "the environment does not reach a file-owned reader" `Quick
             test_the_environment_does_not_reach_a_file_owned_reader
+        ; test_case "the file-owned keys are the written ones" `Quick
+            test_the_file_owned_keys_are_the_written_ones
         ; test_case "the loader declares the file-owned names" `Quick
             test_the_loader_declares_the_file_owned_names
         ; test_case "a load that fails declares nothing" `Quick
@@ -409,6 +565,8 @@ let () =
             test_the_turn_admission_bound_comes_from_the_file
         ; test_case "the load refuses a turn admission bound outside its range" `Quick
             test_the_load_refuses_a_turn_admission_bound_outside_its_range
+        ; test_case "the load refuses a file-owned value past its range" `Quick
+            test_the_load_refuses_a_file_owned_value_past_its_range
         ; test_case "a declared name answers from the file only" `Quick
             test_a_declared_name_answers_from_the_file_only
         ; test_case "a name that is not declared still reads the environment" `Quick

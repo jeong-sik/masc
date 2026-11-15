@@ -281,6 +281,22 @@ let refresh_policy_is_explicit () = with_directory (fun _root packages directory
   write manifest (package () ^ "\n[interface]\nrefresh_policy = \"guess\"\n");
   check_error "unknown refresh policy is rejected" path)
 
+(* A browser_document source names the browser Add-on installation it reads.
+   A declaration written before that field is refused when it is read; it is
+   not attached with a source that names no browser. *)
+let browser_document_names_its_browser_installation () = with_directory (fun _root packages directory ->
+  ignore (install_package packages);
+  let path = Filename.concat directory "reader.toml" in
+  let page installation = Printf.sprintf {|[binding]
+sources = [{source_id = "page", kind = "browser_document",%s lane = "live", client_id = "0c000000-0000-4000-8000-000000000001", tab_id = 4, target_id = "fixture", environment = "fixture", request_id = "read"}]
+|} installation in
+  write path (declaration (page ""));
+  check_error "a document source without its browser installation is refused" path;
+  write path (declaration (page {| installation_id = "",|}));
+  check_error "a blank browser installation is refused" path;
+  write path (declaration (page {| installation_id = "browser-ego",|}));
+  ignore (unwrap (Config.load_file ~path)))
+
 
 (* The shipped DOS chain: every package declares the binding contract that
    `load_file` enforces, and the checked-in declarations satisfy it. Without
@@ -372,6 +388,104 @@ visibilities = ["public"]
     declaration "";
     check_error "a binding without a time zone is refused before install" path;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
+    check_error "a binding key the package does not read is refused" path;
+    (* since says where a quiz that follows a lesson reads from until a
+       session has asked (RFC operator-quiz-follows-lesson §3.8). *)
+    declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n";
+    check_error "a quiz on its own refuses since" path;
+    let following ?(since = "since = 1794441600\n") output = write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+language = "ko"
+timezone = "Asia/Seoul"
+%s
+[[binding.sources]]
+source_id = "lesson"
+kind = "lane_output"
+installation_id = "operator-lesson"
+output_id = %S
+selection = "latest_completed"
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest since output) in
+    following "scenes";
+    ignore (unwrap (Config.load_file ~path));
+    following ~since:"" "scenes";
+    check_error "a quiz that follows a lesson without since is refused" path;
+    following ~since:"since = \"yesterday\"\n" "scenes";
+    check_error "a since that is not a number is refused" path;
+    following ~since:"since = -1\n" "scenes";
+    check_error "a since before 1970 is refused" path;
+    following "lesson";
+    check_error "a source that is not a lesson's scenes output is refused" path;
+    (* The example, changed as its comment says: without sources = [], and with
+       since and the lesson source uncommented. Every uncommented key has to
+       land in [binding] or in the source, not in a table after it. *)
+    let example = In_channel.with_open_bin
+        (repo_file "docs/examples/lane-addons/operator-quiz.toml") In_channel.input_all in
+    let _, lines = List.fold_left (fun (inside, kept) line ->
+        let starts prefix = String.starts_with ~prefix line in
+        let inside = inside || starts "# since = " in
+        let kept =
+          if line = "sources = []" then kept
+          else if starts "manifest_path = " then Printf.sprintf "manifest_path = %S" manifest :: kept
+          else if inside && starts "# " then String.sub line 2 (String.length line - 2) :: kept
+          else line :: kept in
+        (inside && not (starts "# selection = "), kept))
+        (false, []) (String.split_on_char '\n' example) in
+    write path (String.concat "\n" (List.rev lines));
+    let binding = (unwrap (Config.load_file ~path)).binding in
+    check bool "the example bound to a lesson keeps its time zone and since" true
+      Yojson.Safe.Util.(member "timezone" binding = `String "Asia/Seoul" && member "since" binding <> `Null);
+    check int "and reads the lesson's scenes output" 1
+      (List.length (Yojson.Safe.Util.(member "sources" binding |> to_list))))
+
+(* The shipped operator lesson: the example declaration loads with the
+   package's own manifest, and the binding contract refuses a binding without
+   the time the first lesson reads from. *)
+let shipped_operator_lesson_declaration_loads () =
+  let loaded = unwrap (Config.load_file ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
+  let package = loaded.package in
+  check string "the declaration names the package" "operator-lesson" package.id;
+  check (list string) "the package declares the outline and scene outputs"
+    ["outline"; "scene"]
+    (List.sort String.compare
+       (List.map (fun (output : Lane_addon_types.exact_output) -> output.name) package.exact_outputs));
+  check bool "the package does not ask the operator" false package.operator_asks;
+  check bool "the scenes port selects the scene lane alone" true
+    (List.assoc_opt "scenes" package.outputs = Some (Lane_addon_types.Selected_lanes ["lesson/scenes"]));
+  check bool "the lesson log lives on persistent state" true (package.state_storage = Lane_addon_types.Persistent);
+  check (option string) "compose and export arrive through lane_act" (Some "lane_act") package.action_tool;
+  check int "the example grants a Board and a repository" 2
+    (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true loaded.binding)));
+  with_directory (fun _root _packages directory ->
+    let path = Filename.concat directory "lesson.toml" in
+    let manifest = Unix.realpath (repo_file "addons/operator-lesson/lane.toml") in
+    let declaration binding = write path (Printf.sprintf {|id = "lesson"
+run_id = "lesson"
+manifest_path = %S
+
+[binding]
+sources = []
+language = "ko"
+%s
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest binding) in
+    declaration "since = 1794441600\n";
+    ignore (unwrap (Config.load_file ~path));
+    declaration "";
+    check_error "a binding without since is refused before install" path;
+    declaration "since = \"yesterday\"\n";
+    check_error "a since that is not a number is refused" path;
+    declaration "since = 1794441600\ntimezone = \"Asia/Seoul\"\n";
     check_error "a binding key the package does not read is refused" path)
 
 (* The operator quiz worker itself, read with the host's own decoders: the
@@ -1083,7 +1197,9 @@ let () = run "Lane Add-on declarative composition"
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;
      test_case "the operator quiz worker speaks the host contract" `Quick operator_quiz_worker_speaks_the_host_contract;
+     test_case "the shipped operator lesson declaration loads with its manifest" `Quick shipped_operator_lesson_declaration_loads;
      test_case "refresh suppression is an explicit package contract" `Quick refresh_policy_is_explicit;
+     test_case "a browser document source names its browser installation" `Quick browser_document_names_its_browser_installation;
      test_case "package interface validates bindings before installation" `Quick package_interface;
      test_case "output ports have exact selections and semantic revisions" `Quick output_ports_are_typed_and_revisioned;
      test_case "relative package and source preserve typed bindings" `Quick relative_package_and_source;

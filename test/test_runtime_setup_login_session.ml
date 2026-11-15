@@ -26,19 +26,49 @@ let normal_exit () = run_process (fun env path session ->
   let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
     ~argv:["python3";"-c";"print('ready')"] ~terminal:false ~is_closed:(fun () -> false)
     ~on_ready:(fun () -> ()) ~on_input_ready:(fun () -> ())
-    ~on_output:(fun _ text -> Buffer.add_string output text) in
+    ~on_output:(function S.Piped (_, text) -> Buffer.add_string output text
+                         | S.Screen _ -> fail "a pipe login drew a screen") in
   get result; check string "output delivered before exit" "ready\n" (Buffer.contents output); Ok ())
+(* The program overwrites a line the way a full-screen login redraws: a
+   carriage return, then the cursor moved up. The screen shows the result,
+   not the bytes, in the size the PTY reports, and a line longer than the
+   screen, which the terminal wrapped, stays one line. *)
+let terminal_screen () = run_process (fun env path session ->
+  let screen = ref None in
+  let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
+    ~argv:["python3";"-c";
+           "import os,sys\nsize=os.get_terminal_size(0)\n"
+           ^ "sys.stdout.write('%d %d\\nwait\\rdone\\nlast\\n' % (size.lines, size.columns)"
+           ^ " + 'a' * 90 + '\\n\\x1b[3A\\rup')"]
+    ~terminal:true ~is_closed:(fun () -> false)
+    ~on_ready:(fun () -> ()) ~on_input_ready:(fun () -> ())
+    ~on_output:(function S.Screen text -> screen := Some text
+                         | S.Piped _ -> fail "a terminal login wrote to a pipe") in
+  get result;
+  let plain text =
+    (* Drop the SGR styles, each ESC up to its final 'm': this checks what
+       the screen shows. *)
+    let buffer = Buffer.create (String.length text) in
+    let rec copy i =
+      if i < String.length text then
+        if text.[i] = '\027' then
+          Option.iter (fun m -> copy (m + 1)) (String.index_from_opt text i 'm')
+        else (Buffer.add_char buffer text.[i]; copy (i + 1)) in
+    copy 0; Buffer.contents buffer in
+  check (option string) "the last screen, as a terminal shows it"
+    (Some ("24 80\ndone\nupst\n" ^ String.make 90 'a')) (Option.map plain !screen);
+  Ok ())
 let explicit_cancel () = run_process (fun env path session ->
   let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
     ~argv:["python3";"-c";"import time; time.sleep(60)"] ~terminal:false ~is_closed:(fun () -> false)
     ~on_ready:(fun () -> S.cancel ~workspace:path ~actor:(S.Agent "operator") ~login_id:(S.id session) |> get)
-    ~on_input_ready:(fun () -> ()) ~on_output:(fun _ _ -> ()) in
+    ~on_input_ready:(fun () -> ()) ~on_output:(fun _ -> ()) in
   check bool "cancelled promptly" true (result=Error S.Cancelled); Ok ())
 let disconnect () = run_process (fun env path session ->
   let closed = ref false in
   let result = S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
     ~argv:["python3";"-c";"import time; time.sleep(60)"] ~terminal:false ~is_closed:(fun () -> !closed)
-    ~on_ready:(fun () -> closed := true) ~on_input_ready:(fun () -> ()) ~on_output:(fun _ _ -> ()) in
+    ~on_ready:(fun () -> closed := true) ~on_input_ready:(fun () -> ()) ~on_output:(fun _ -> ()) in
   check bool "disconnect cancels" true (result=Error S.Cancelled); Ok ())
 let pipe_eof () = run_process (fun env path session ->
   let acknowledged = ref false in
@@ -49,7 +79,7 @@ let pipe_eof () = run_process (fun env path session ->
       acknowledged := true;
       check bool "input after pipe EOF refused" true
         (S.submit ~workspace:path ~actor:(S.Agent "operator") ~login_id:(S.id session) (S.Text "discarded")=Error S.Not_running))
-    ~on_output:(fun _ _ -> ()) in get result;
+    ~on_output:(fun _ -> ()) in get result;
   check bool "EOF acknowledged" true !acknowledged; Ok ())
 let server_shutdown () = run_process (fun env path session ->
   let interrupted = ref false in
@@ -57,7 +87,7 @@ let server_shutdown () = run_process (fun env path session ->
      S.run session ~env ~child_env:(Unix.environment ()) ~cwd:path
        ~argv:["python3";"-c";"import time; time.sleep(60)"] ~terminal:false ~is_closed:(fun () -> false)
        ~on_ready:(fun () -> Eio.Cancel.cancel cancellation (Failure "fixture server shutdown"))
-       ~on_input_ready:(fun () -> ()) ~on_output:(fun _ _ -> ()) |> get)
+       ~on_input_ready:(fun () -> ()) ~on_output:(fun _ -> ()) |> get)
    with Eio.Cancel.Cancelled _ -> interrupted := true);
   check bool "server cancellation propagates after cleanup" true !interrupted;
   Ok ())
@@ -123,7 +153,8 @@ let python_ignores_relative_path_before_workspace_change () = temporary (fun roo
         check string "selection keeps its identity from the child cwd"
           (Unix.realpath expected) (Unix.realpath path))))
 let () = run "setup-login-session" ["ownership", [test_case "scope and physical account locks" `Quick isolated_scope];
-  "process lifetime", [test_case "normal exit" `Quick normal_exit; test_case "cancel" `Quick explicit_cancel;
+  "process lifetime", [test_case "normal exit" `Quick normal_exit;
+    test_case "terminal screen" `Quick terminal_screen; test_case "cancel" `Quick explicit_cancel;
     test_case "disconnect" `Quick disconnect; test_case "pipe EOF" `Quick pipe_eof; test_case "server shutdown" `Quick server_shutdown];
   "interpreter", [test_case "bundled release preferred" `Quick python_prefers_the_bundled_release;
     test_case "PATH fallback" `Quick python_falls_back_to_path;

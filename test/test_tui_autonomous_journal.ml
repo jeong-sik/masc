@@ -133,9 +133,81 @@ let test_history_closes_only_matching_autonomous_progress () =
   check bool "distinct sources do not share a rail" true
     (List.map snd (Types.mark_turn_edges [direct; autonomous]) = [Types.Turn_alone; Types.Turn_alone])
 
+(* The chat header names the runtime of the execution the pane follows. An
+   autonomous turn has no request the TUI sent, so only its journal can say
+   which runtime is answering; a header fed by sent requests alone said
+   "configured: ..." for every autonomous turn (#37714). *)
+let test_pane_execution_names_the_answering_runtime () =
+  let module Chat = Masc_tui_keeper_chat_projection in
+  let module Live = Masc_tui_keeper_chat_live in
+  let module Transcript = Masc_tui_keeper_chat_transcript in
+  let state () =
+    let state = Types.create_state ~workspace:"test" ~port:8935 () in
+    state.msg_target_keeper_name <- Some "alpha";
+    state in
+  let turn_row ktr_state : Masc.Tui_decode.keeper_turn_row =
+    {ktr_keeper_name="alpha"; ktr_chat_control_token=None; ktr_state} in
+  let running = turn_row (Keeper_turn_running {lane=Turn_lane_autonomous; started_at_unix=10.;
+    interrupt_token="stop-token"; turn_ref=Some turn_ref; preview=None}) in
+  let running_without_ref = turn_row (Keeper_turn_running {lane=Turn_lane_autonomous;
+    started_at_unix=10.; interrupt_token="stop-token"; turn_ref=None; preview=None}) in
+  let hold_autonomous state =
+    let log = Types.turn_log_create_for_source ~keeper_name:"alpha" ~source ~started_at:10. in
+    let line seq ts event : Journal.journaled_event = {seq; ts; event} in
+    ignore (Types.turn_log_add_journaled log [
+      line 0 10. (E.Run_started {run_id="autonomous-run"; thread_id="keeper:alpha"});
+      line 1 11. (E.Agent_core_runtime_attempt_started
+        {runtime_id=Some "runtime.autonomous"; attempt_index=Some 0})]);
+    Types.hold_settled_log state log in
+  let send state deltas =
+    let log = Types.turn_log_create ~keeper_name:"alpha" ~request_id:"sent" ~started_at:20. in
+    List.iteri (fun seq delta -> Types.turn_log_add ~now:20. log ~seq:(Some seq) delta) deltas;
+    state.Types.msg_inflight <- [{ Types.sent_request =
+        { Chat.request_id="sent"; keeper_name="alpha"; message="request"; attachments=[]; references=[] }
+      ; submitted_at=20.; sent_at=20.; control_generation=0; phase=Types.Turn_streaming; log }];
+    state.msg_live <- Some log in
+  let streaming = Live.[Run_started;
+    Runtime_attempt_started {runtime_id=Some "runtime.sent"; attempt_index=Some 0}] in
+  let queued = Live.[Accepted {admission=Queued; queue_length=1; interactive=None}] in
+  let followed state =
+    Option.map (fun (log : Types.turn_log) ->
+      Log.source log.tl_log, Transcript.current_runtime_id log.tl_transcript)
+      (Types.keeper_message_status_log state) in
+  let check_followed label expected state =
+    check bool label true (followed state = expected) in
+  let sent_runtime = Some (Log.Operation "sent", Some "runtime.sent") in
+  let autonomous_runtime = Some (source, Some "runtime.autonomous") in
+  check_followed "nothing running names no turn runtime" None (state ());
+  let only_sent = state () in
+  send only_sent streaming;
+  check_followed "a sent request names its own runtime" sent_runtime only_sent;
+  let only_autonomous = state () in
+  hold_autonomous only_autonomous;
+  only_autonomous.keeper_turns <- [running];
+  check_followed "a running autonomous turn names the runtime its journal reported"
+    autonomous_runtime only_autonomous;
+  List.iter (fun (label, row) ->
+    only_autonomous.keeper_turns <- [row];
+    check_followed label None only_autonomous)
+    ["a journal whose turn is idle is not the answering turn", turn_row Keeper_turn_idle;
+     "a running turn without a turn ref opens no journal", running_without_ref];
+  let queued_behind = state () in
+  hold_autonomous queued_behind;
+  queued_behind.keeper_turns <- [running];
+  send queued_behind queued;
+  check_followed "a sent request queued behind an autonomous turn yields to it"
+    autonomous_runtime queued_behind;
+  let both = state () in
+  hold_autonomous both;
+  both.keeper_turns <- [running];
+  send both streaming;
+  check_followed "a streaming sent request comes before an autonomous journal"
+    sent_runtime both
+
 let () =
   run "TUI autonomous journal"
     ["consumer", [test_case "typed history closes visuals without retiring replay" `Quick test_history_closes_only_matching_autonomous_progress;
+      test_case "the pane names the runtime of the turn answering" `Quick test_pane_execution_names_the_answering_runtime;
       test_case "typed sources select separate routes" `Quick test_source_routes_and_decodes;
       test_case "observer only triggers ordered journal reads" `Quick test_notification_only_triggers_journal_read;
       test_case "cold open discovers current and historical journals" `Quick test_cold_open_discovery;

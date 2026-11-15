@@ -323,6 +323,21 @@ let person_wait row =
   | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting | Idle
   | Paused | Offline | Unknown -> None
 
+type waiting_failure_reason =
+  | Failure_sentence of string
+  | Failure_next_action of string
+  | Failure_unstated
+
+let waiting_failure_reasons items =
+  let sent value = if String.equal (String.trim value) "" then None else Some value in
+  List.map
+    (fun (item : Masc.Tui_decode.waiting_item) ->
+      match sent item.kwi_what, sent item.kwi_next_action with
+      | Some sentence, (Some _ | None) -> Failure_sentence sentence
+      | None, Some action -> Failure_next_action action
+      | None, None -> Failure_unstated)
+    items
+
 let badges_of_row row =
   let items = waiting_items row in
   let running, ownership_unknown, queued, cancelling = async_counts row.async_requests in

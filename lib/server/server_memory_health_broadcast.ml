@@ -32,10 +32,14 @@ let install ~sw ~mono_clock ~(config : Workspace.config) =
       (Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path);
     enqueue Workspace_dataset_event.World_memory
   in
+  (* The row goes first: the fleet answer is computed from the rows, and a
+     writer may run on another domain than the publisher, so a reader the
+     announcement wakes must already find both empty. *)
   let written ~keepers_dir ~keeper_id =
     if String.equal keepers_dir config_keepers_dir
        || String.equal keepers_dir runtime_keepers_dir
     then (
+      Server_dashboard_http_keeper_memory_health.invalidate_after_write ~keepers_dir ~keeper_id;
       Dashboard_cache.invalidate
         (Server_dashboard_http_keeper_memory_health.fleet_cache_key ~base_path);
       world_changed ();

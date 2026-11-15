@@ -321,6 +321,72 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
     ]
     |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
 
+type session_entry = { event : event; run : int; rows : string list }
+type session_block = { earlier : int; kept : session_entry list }
+
+(* One TUI session event as the rows it takes at [width]: the clock and the
+   error mark lead the first row, and the sentence wraps under its own first
+   word. The events that run long are the ones that put the cause and the
+   next step after the subject -- "runtime event feed closed: " and then
+   why -- so a row cut at the pane's edge loses the part that says what to
+   do, at any width. *)
+let session_entry_rows ~width ((event : event), run) =
+  let mark =
+    match session_event_mark event with
+    | None -> ""
+    | Some glyph ->
+      Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph Ansi.reset
+  in
+  let lead =
+    Printf.sprintf "    %s[%s]%s %s" Ansi.dim event.timestamp Ansi.reset mark
+  in
+  let lead_cells = Layout.display_width lead in
+  let content = Terminal_text.single_line event.content in
+  let text =
+    if run > 1 then
+      Printf.sprintf "%s %s\xc3\x97%d%s" content Ansi.dim run Ansi.reset
+    else content
+  in
+  match Layout.wrap_styled_words ~max_cells:(max 1 (width - lead_cells)) text with
+  | [] -> [ lead ]
+  | first :: continued ->
+    let indent = String.make lead_cells ' ' in
+    (lead ^ first) :: List.map (fun row -> indent ^ row) continued
+
+(* Which events the block draws in [room] rows. Room is spent in rows, and an
+   event is kept or left out whole: past the room the oldest ones go first
+   and one row counts them, so the newest event is the last thing drawn. The
+   newest event is kept even when it alone is taller than the room beside
+   that count; the section scrolls, and a row pushed below the fold can be
+   reached where a sentence cut at the edge cannot. *)
+let session_block ~width ?room events =
+  let entries =
+    Masc_tui_render_schedule.collapse_consecutive ~key:session_event_collapse_key
+      events
+    |> List.rev
+    |> List.map (fun ((event : event), run) ->
+           { event; run; rows = session_entry_rows ~width (event, run) })
+  in
+  let rows_of entry = List.length entry.rows in
+  let all = { earlier = 0; kept = entries } in
+  match room, List.rev entries with
+  | None, _ | Some _, [] -> all
+  | Some room, _ when List.fold_left (fun used e -> used + rows_of e) 0 entries <= room ->
+    all
+  | Some room, (newest :: _ as newest_first) ->
+    (* One row goes to the count of what was left out. *)
+    let rec take used kept = function
+      | entry :: older when used + rows_of entry <= room - 1 ->
+        take (used + rows_of entry) (entry :: kept) older
+      | _ :: _ | [] -> kept
+    in
+    let kept =
+      match take 0 [] newest_first with
+      | [] -> [ newest ]
+      | _ :: _ as kept -> kept
+    in
+    { earlier = List.length entries - List.length kept; kept }
+
 let render_section_fleet ?session_rows ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
@@ -433,49 +499,21 @@ let render_section_fleet ?session_rows ~cols (state : state) =
         say "시작 실패 · " "failed to open · " ^ Terminal_text.single_line reason
   in
   (* This TUI's own log: what it did and what it was told, oldest first so the
-     newest line is last. The log holds eleven lines ([add_event]); a run of
-     the same line folds into one row with a ×N tail. First in the section,
-     so the block starts on screen. [session_rows] is how many rows the frame
-     can give it: past that the block keeps its newest rows and says how many
-     earlier ones it left out, so the newest line is never below the fold. *)
+     newest event is last. The log holds eleven events ([add_event]); a run of
+     the same event folds into one with a ×N tail. First in the section, so
+     the block starts on screen. [session_rows] is how many rows the frame
+     can give it, and [session_block] spends them on whole events. *)
   let session_lines =
     match state.events with
     | [] -> [ say "    (아직 이벤트 없음)" "    (no events yet)" ]
     | events ->
-      let rows =
-        Masc_tui_render_schedule.collapse_consecutive
-          ~key:session_event_collapse_key events
-        |> List.rev
-        |> List.map (fun ((event : event), run) ->
-               let mark =
-                 match session_event_mark event with
-                 | None -> ""
-                 | Some glyph ->
-                   Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph
-                     Ansi.reset
-               in
-               let tail =
-                 if run > 1 then
-                   Printf.sprintf " %s\xc3\x97%d%s" Ansi.dim run Ansi.reset
-                 else ""
-               in
-               Printf.sprintf "    %s[%s]%s %s%s%s" Ansi.dim event.timestamp
-                 Ansi.reset mark
-                 (Terminal_text.single_line event.content)
-                 tail)
-      in
-      let count = List.length rows in
-      (match session_rows with
-       | Some room when count > room && room >= 2 ->
-         (* One row goes to the count of what was left out. *)
-         let earlier = count - (room - 1) in
-         (Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
-            Ansi.dim (Count.grouped earlier) Ansi.reset)
-         :: List.filteri (fun index _ -> index >= earlier) rows
-       | Some room when count > room ->
-         (* No room for the count as well: the newest row alone. *)
-         List.filteri (fun index _ -> index = count - 1) rows
-       | Some _ | None -> rows)
+      let block = session_block ~width:inner_width ?room:session_rows events in
+      let rows = List.concat_map (fun entry -> entry.rows) block.kept in
+      if block.earlier > 0 then
+        Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
+          Ansi.dim (Count.grouped block.earlier) Ansi.reset
+        :: rows
+      else rows
   in
   List.map clip
     ([ title (say "TUI 세션" "TUI session") ] @ session_lines

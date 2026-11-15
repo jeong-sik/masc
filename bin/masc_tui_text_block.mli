@@ -17,13 +17,20 @@ val preformatted_rows : max_cells:int -> string -> string list
     of [max_cells], and the rows it wraps to start at the same indent. {!rows}
     reads the same text as prose and drops those spaces. *)
 
-val preformatted_styled_rows : max_cells:int -> string -> string list
+val preformatted_styled_rows : max_cells:int -> (int * string) list -> string list
 (** {!preformatted_rows} for lines that already carry their colour, such as
-    the text of {!Masc_tui_tool_detail.document}. Nothing here makes the text
+    the lines of {!Masc_tui_tool_detail.document}. Nothing here makes the text
     safe: its writer has done that, and the escapes in it are the writer's
     own. A wrapped row that starts inside a style opens it again and a row
     that ends inside one closes it, as
-    {!Masc_tui_message_layout.wrap_styled_words} does. *)
+    {!Masc_tui_message_layout.wrap_styled_words} does.
+
+    Each line is [(indent, text)]: [indent] cells, then [text], which holds
+    no line break and may open with spaces of its own. The line's indent is
+    the two together, kept up to half of [max_cells] as {!preformatted_rows}
+    keeps one, and only the cells kept are ever made into spaces. The edges
+    are those of the whole list, as they are of the whole text for
+    {!preformatted_rows}. *)
 
 val lines : string -> string list
 (** Split at LF, removing a trailing CR only when it belongs to that LF's

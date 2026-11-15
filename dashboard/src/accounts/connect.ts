@@ -239,6 +239,9 @@ export function createConnect({ send, leave, token, refresh }: ConnectDeps): Con
         case 'output':
           if (at.kind === 'running' || at.kind === 'cancelling') view.value = { ...at, transcript: kept(at.transcript + progress.text) }
           return
+        case 'screen':
+          if (at.kind === 'running' || at.kind === 'cancelling') view.value = { ...at, transcript: progress.text }
+          return
         case 'input_ready':
           if (at.kind === 'running' || at.kind === 'cancelling') view.value = { ...at, input: 'ready' }
       }

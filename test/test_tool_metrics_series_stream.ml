@@ -58,6 +58,7 @@ let test_native_snapshots_expire_rows_without_writes () =
     let get_ok = function Ok value -> value | Error error -> Alcotest.fail error in
     Tool_metrics_store.insert ~masc_root:(Masc.Workspace.masc_dir config)
       ~result_bytes:0
+      ~failure_class:None
       { record_id = "expires"; ts; tool_name = "read"; disposition = "completed";
         duration_ms = 2.0 } |> get_ok;
     let observe now = Stream.read_snapshot ~config ~request ~now |> get_ok in

@@ -51,6 +51,8 @@ button[aria-disabled="true"] { opacity: 0.5; cursor: progress; }
 .chip-todo { border-style: dashed; }
 .models { margin: 0; padding-left: 20px; }
 .mono { font-family: var(--mono); }
+/* A word of a command a person types: a hyphen or a slash in it is no place to break the line. */
+.nowrap { white-space: nowrap; }
 
 /* Connecting a subscription: the steps under the button that opens them. */
 .connect-steps > h3 { margin: 0; font-size: 1rem; color: var(--text-bright); }

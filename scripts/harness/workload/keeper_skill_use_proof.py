@@ -3,6 +3,10 @@
 
 The caller supplies the invocation identity.  This script never selects the
 latest activation by time or guesses from Skill names.
+
+The producer receipt's scenario says which further authorities to copy: the
+Keeper's tool-call answer and Memory journal for a declared Memory write, and
+its current Memory snapshot for a declared retained-memory postcondition.
 """
 
 from __future__ import annotations
@@ -20,17 +24,20 @@ import uuid
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request
 
+import keeper_skill_effect_cells as effect_cells
 import proof_http
 import skill_activation_events
 
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-PROOF_SCHEMA = "masc.keeper-skill-use-proof.v4"
+PROOF_SCHEMA = "masc.keeper-skill-use-proof.v5"
 # One Keeper's activation ledger is its own read (RFC-0483); the tools answer
 # carries the Keeper's effective surface only.
 KEEPER_SKILL_ACTIVATIONS_SCHEMA = "masc.keeper-skill-activations/v1"
 KEEPER_SKILL_ACTIVATIONS_ARTIFACT = "keeper-skill-activations.json"
+# lib/server/server_dashboard_http_keeper_tool_calls.ml tool_calls_limit_max
+TOOL_CALLS_LIMIT = 200
 DASHBOARD_SKILL_RECEIPTS_ROUTE = "#lab?section=tools"
 
 
@@ -877,6 +884,132 @@ def read_durable_ledger(events_path: Path) -> tuple[dict[str, Any], bytes]:
     return durable_ledger, durable_raw
 
 
+def read_producer_receipt(path: Path, expected_sha256: str) -> dict[str, Any]:
+    require(
+        SHA256_RE.fullmatch(expected_sha256) is not None,
+        "expected producer receipt SHA is not sha256",
+    )
+    require(not path.is_symlink(), "producer receipt must not be a symlink")
+    try:
+        require(stat.S_ISREG(path.stat().st_mode), "producer receipt must be regular")
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ProofError(f"cannot read producer receipt: {error}") from error
+    require(
+        digest_bytes(raw) == expected_sha256,
+        "producer receipt does not match the expected SHA",
+    )
+    return decode_json(raw, f"producer receipt {path}")
+
+
+def read_optional(path: Path, context: str) -> bytes | None:
+    require(not path.is_symlink(), f"{context} must not be a symlink")
+    try:
+        return path.read_bytes() if path.exists() else None
+    except OSError as error:
+        raise ProofError(f"cannot read {context}: {error}") from error
+
+
+def keeper_tool_calls_url(base_url: str, keeper: str) -> str:
+    return (
+        f"{base_url}/api/v1/keepers/{quote(keeper, safe='')}/tool-calls"
+        f"?limit={TOOL_CALLS_LIMIT}"
+    )
+
+
+def keeper_turn_records_url(base_url: str, keeper: str) -> str:
+    return f"{base_url}/api/v1/keepers/{quote(keeper, safe='')}/turn-records?limit=1"
+
+
+def memory_snapshot_store(turn_records: dict[str, Any], keeper: str) -> Path:
+    """The current Memory snapshot path the server itself reads and writes.
+
+    ``turn-records`` reports ``memory_os.snapshot_store`` from the same
+    ``Config_dir_resolver.keepers_dir_for_base_path`` the write uses, so the
+    collector never guesses the Keepers directory.
+    """
+    require(turn_records.get("keeper") == keeper, "turn-records answer names another Keeper")
+    memory_os = object_field(turn_records, "memory_os", "turn-records answer")
+    require(memory_os.get("keeper") == keeper, "turn-records memory_os names another Keeper")
+    path = Path(string_field(memory_os, "snapshot_store", "turn-records memory_os"))
+    require(path.is_absolute(), "server Memory snapshot path is not absolute")
+    require(
+        path.name == keeper + effect_cells.MEMORY_CURRENT_SUFFIX,
+        "server Memory snapshot path is not this Keeper's snapshot",
+    )
+    return path
+
+
+def collect_effect_authorities(
+    *,
+    scenario: effect_cells.Scenario,
+    keeper: str,
+    turn_ref: str,
+    actions: list[Any],
+    tool_calls: tuple[str, bytes] | None,
+    memory_current_path: Path | None,
+    out: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Copy the scenario's authorities into ``out``; return cells and manifest.
+
+    ``tool_calls`` is the source URL and raw answer of the Keeper's tool-call
+    read.  Each Memory file is read twice and must not change in between, so
+    the copied Memory state is one consistent capture.  A file that does not
+    exist is recorded as absent, which the cells read as no record.
+    """
+    names = effect_cells.authority_names(scenario)
+    needs_memory = effect_cells.EVIDENCE_TOOL_CALLS in names
+    require(
+        (tool_calls is not None) == needs_memory
+        and (memory_current_path is not None) == needs_memory,
+        "Memory authorities are read exactly when the scenario declares a Memory write",
+    )
+    captured: dict[str, tuple[str, bytes | None]] = {}
+    memory: effect_cells.MemoryAuthorities | None = None
+    if tool_calls is not None and memory_current_path is not None:
+        files = {
+            effect_cells.EVIDENCE_MEMORY_JOURNAL: memory_current_path.with_name(
+                keeper + effect_cells.MEMORY_JOURNAL_SUFFIX
+            ),
+            effect_cells.EVIDENCE_MEMORY_CURRENT: memory_current_path,
+        }
+        selected = {name: path for name, path in files.items() if name in names}
+        first = {name: read_optional(path, name) for name, path in selected.items()}
+        second = {name: read_optional(path, name) for name, path in selected.items()}
+        require(first == second, "Memory state changed during proof capture")
+        source, answer = tool_calls
+        captured[effect_cells.EVIDENCE_TOOL_CALLS] = (source, answer)
+        for name, path in selected.items():
+            captured[name] = (str(path), first[name])
+        memory = effect_cells.MemoryAuthorities(
+            tool_calls=answer,
+            journal=first[effect_cells.EVIDENCE_MEMORY_JOURNAL],
+            current=first.get(effect_cells.EVIDENCE_MEMORY_CURRENT),
+        )
+    try:
+        cells = effect_cells.observe_cells(
+            scenario=scenario,
+            keeper=keeper,
+            turn_ref=turn_ref,
+            actions=actions,
+            memory=memory,
+        )
+    except effect_cells.CellError as error:
+        raise ProofError(f"effect authority is invalid: {error}") from error
+    manifest: dict[str, Any] = {"present": {}, "absent": {}}
+    for name, (source, payload) in sorted(captured.items()):
+        if payload is None:
+            manifest["absent"][name] = {"source": source}
+            continue
+        (out / name).write_bytes(payload)
+        manifest["present"][name] = {
+            "bytes": len(payload),
+            "sha256": digest_bytes(payload),
+            "source": source,
+        }
+    return cells.to_json(), manifest
+
+
 def write_json(path: Path, value: Any, *, sort_keys: bool = True) -> bytes:
     payload = (
         json.dumps(value, indent=2, ensure_ascii=False, sort_keys=sort_keys) + "\n"
@@ -894,6 +1027,8 @@ def main() -> int:
     parser.add_argument("--tui-build-evidence", required=True, type=Path)
     parser.add_argument("--expected-tui-build-evidence-sha256", required=True)
     parser.add_argument("--skill-tool-use-id", required=True)
+    parser.add_argument("--producer-receipt", required=True, type=Path)
+    parser.add_argument("--expected-producer-receipt-sha256", required=True)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--timeout", type=float, default=10.0)
     args = parser.parse_args()
@@ -918,6 +1053,18 @@ def main() -> int:
         expected_source_sha=args.expected_source_sha,
         expected_source_tree=source_before["tree"],
     )
+
+    receipt = read_producer_receipt(
+        args.producer_receipt, args.expected_producer_receipt_sha256
+    )
+    require(receipt.get("keeper") == args.keeper, "producer receipt names another Keeper")
+    try:
+        scenario = effect_cells.decode_scenario(
+            object_field(receipt, "scenario", "producer receipt").get("declaration")
+        )
+    except effect_cells.CellError as error:
+        raise ProofError(f"producer scenario is invalid: {error}") from error
+    receipt_operation = object_field(receipt, "operation", "producer receipt")
 
     health, health_raw = read_json(f"{base_url}/health?full=1", args.timeout, token)
     dashboard_url = (
@@ -951,6 +1098,11 @@ def main() -> int:
         expected_source_sha=args.expected_source_sha,
         skill_tool_use_id=args.skill_tool_use_id,
     )
+    require(
+        string_field(receipt_operation, "turn_ref", "producer operation")
+        == proof["turn_ref"],
+        "producer Turn_ref differs from the exact activation",
+    )
 
     args.out.mkdir(parents=True)
     incomplete = args.out / "INCOMPLETE"
@@ -971,6 +1123,28 @@ def main() -> int:
     copied_tui.write_bytes(tui_executable_raw)
     copied_tui.chmod(
         copied_tui.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    )
+    needs_memory = effect_cells.EVIDENCE_TOOL_CALLS in effect_cells.authority_names(
+        scenario
+    )
+    tool_calls: tuple[str, bytes] | None = None
+    memory_current_path: Path | None = None
+    if needs_memory:
+        tool_calls_url = keeper_tool_calls_url(base_url, args.keeper)
+        _tool_calls, tool_calls_raw = read_json(tool_calls_url, args.timeout, token)
+        tool_calls = (tool_calls_url, tool_calls_raw)
+        turn_records, _turn_records_raw = read_json(
+            keeper_turn_records_url(base_url, args.keeper), args.timeout, token
+        )
+        memory_current_path = memory_snapshot_store(turn_records, args.keeper)
+    cells, authorities = collect_effect_authorities(
+        scenario=scenario,
+        keeper=args.keeper,
+        turn_ref=proof["turn_ref"],
+        actions=proof["actions"],
+        tool_calls=tool_calls,
+        memory_current_path=memory_current_path,
+        out=args.out,
     )
     dashboard_capture = capture_dashboard(
         base_url=base_url,
@@ -1039,6 +1213,12 @@ def main() -> int:
             "activations_projection_equals_ledger": True,
         },
         "dashboard": dashboard_capture,
+        "scenario": {
+            "producer_receipt_sha256": args.expected_producer_receipt_sha256,
+            "declaration": effect_cells.scenario_to_json(scenario),
+        },
+        "authorities": authorities,
+        "cells": cells,
         "artifacts": {
             "health.json": {
                 "bytes": len(health_file),
@@ -1090,6 +1270,10 @@ def main() -> int:
                 "keeper": args.keeper,
                 "skill_tool_use_id": args.skill_tool_use_id,
                 "actions": len(proof["actions"]),
+                "cells": {
+                    cell.value: cells[cell.value]["observed"]
+                    for cell in effect_cells.Cell
+                },
             },
             sort_keys=True,
         )

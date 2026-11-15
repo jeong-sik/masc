@@ -173,7 +173,9 @@ let ownership_of_network = function
   | Http.Connection_reset
   | Http.End_of_file -> Endpoint
   | Http.Local_resource_exhaustion -> Attempt_local
-  | Http.Timeout | Http.Unknown -> Unclassified
+  (* [Unreachable]: the kernel found no route. That is this host's network
+     as often as the endpoint's path, so it names neither (#52045). *)
+  | Http.Unreachable | Http.Timeout | Http.Unknown -> Unclassified
 ;;
 
 let ownership_of_timeout = function

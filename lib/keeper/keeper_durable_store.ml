@@ -115,6 +115,19 @@ let runtime_keepers_dir ~base_path =
   Common.keepers_runtime_dir_of_base ~base_path
 ;;
 
+(* Memory keeps one flat [<keeper><suffix>] file per keeper beside its
+   snapshot, in the keepers directory every Memory reader and writer is
+   handed. That is the configured keepers directory, not the runtime one. *)
+let scan_memory_files ~base_path ~suffix scan_keeper =
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let* keeper_ids = Keeper_memory_os_current.list_keeper_ids_with_suffix ~keepers_dir ~suffix in
+  Ok
+    (List.fold_left
+       (fun report keeper_id -> scan_keeper report ~keepers_dir ~keeper_id)
+       empty_report
+       keeper_ids)
+;;
+
 let keeper_meta_store =
   { store = "keeper meta"
   ; on_refusal =
@@ -168,6 +181,59 @@ let memory_os_current_store =
                     | Error detail ->
                       count_row report (Error (keeper_id ^ ": " ^ detail)))
                  empty_report))
+  }
+;;
+
+(* 2026-09-05 (#32504): #33241 removed [reinforcement] from the fact codec.
+   No snapshot kept the field but 15 of 17 journals did, and the scan above
+   reads only the snapshot. Each journal line is decoded with the decoder
+   every journal reader applies, and a refusal names the physical line. The
+   text after the last newline is an append a crash cut short; the next
+   append truncates it, so it is not a line this build refuses. *)
+let memory_journal_store =
+  { store = "keeper memory journal"
+  ; on_refusal =
+      "the keeper's turns still run, because turn recall reads only the \
+       snapshot; every Librarian Memory program stops, because capturing its \
+       anchor decodes the whole journal; an admission commit that carries \
+       recall bindings refuses, and superseding a removed memory, the archive \
+       and successor recall report the journal unreadable; writes keep \
+       appending and the line stays on disk"
+  ; scan =
+      (fun ~base_path ->
+         let complete_lines bytes =
+           match List.rev (String.split_on_char '\n' bytes) with
+           | [] -> []
+           | _after_last_newline :: lines -> List.rev lines
+         in
+         let scan_line ~path report line_number line =
+           let refusal detail = Error (Printf.sprintf "%s line %d: %s" path line_number detail) in
+           match Dated_jsonl.entry_of_physical_line ~path line with
+           | None -> report
+           | Some (Dated_jsonl.Malformed_json { detail; _ }) ->
+             count_row report (refusal ("not JSON: " ^ detail))
+           | Some (Dated_jsonl.Parsed json) ->
+             count_row
+               report
+               (match Keeper_memory_os_journal_codec.journal_entry_of_json json with
+                | Ok (_ : Keeper_memory_os_current_types.journal_entry) -> Ok ()
+                | Error detail -> refusal detail)
+         in
+         scan_memory_files ~base_path ~suffix:Keeper_memory_os_current_layout.journal_suffix
+           (fun report ~keepers_dir ~keeper_id ->
+              let path =
+                Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
+              in
+              match read_optional_regular_file path with
+              | Error detail -> count_row report (Error detail)
+              | Ok None -> report
+              | Ok (Some bytes) ->
+                List.fold_left
+                  (fun (report, line_number) line ->
+                     scan_line ~path report line_number line, line_number + 1)
+                  (report, 1)
+                  (complete_lines bytes)
+                |> fst))
   }
 ;;
 
@@ -511,9 +577,9 @@ let event_queue_store =
 
 (* The three position stores the Librarian lifecycle writes per keeper (RFC
    librarian-lifecycle sections 4.6 and 10.3), the turn fragments it consumes,
-   and the two memory OS sidecars beside them (RFC-0456) decode field-exact,
-   and nothing read them before a deploy (#37019). Each entry reads with the
-   module's own decoder. A JSONL line a
+   and the two memory OS sidecars beside the Memory snapshot (RFC-0456)
+   decode field-exact, and nothing read them before a deploy (#37019). Each
+   entry reads with the module's own decoder. A JSONL line a
    store reports as [Incomplete_line] is an append a crash cut short, which the
    next durable append trims away; it is not a row the new binary refuses, so
    it is neither counted as a row nor held against the deploy. *)
@@ -704,8 +770,8 @@ let memory_absorbed_store =
        carries is not read"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+         scan_memory_files ~base_path ~suffix:Keeper_memory_absorbed.suffix
+           (fun report ~keepers_dir ~keeper_id ->
            match Keeper_memory_absorbed.read ~keepers_dir ~keeper_id with
            | Error detail -> count_row report (Error (keeper_id ^ ": " ^ detail))
            | Ok lines ->
@@ -737,8 +803,8 @@ let memory_os_events_store =
        it records drops out of the memory's summary"
   ; scan =
       (fun ~base_path ->
-         let keepers_dir = runtime_keepers_dir ~base_path in
-         scan_keeper_dirs ~base_path (fun report ~keeper_id ->
+         scan_memory_files ~base_path ~suffix:Keeper_memory_os_events.suffix
+           (fun report ~keepers_dir ~keeper_id ->
            match Keeper_memory_os_events.read ~keepers_dir ~keeper_id with
            | Error file_error ->
              count_row
@@ -910,12 +976,70 @@ let keeper_tool_outbox_store =
   }
 ;;
 
+(* 2026-11-04 (#48087): #47996 made [audience] required on a Board stimulus,
+   and a ledger ACK row carries the transition receipt with the stimulus it
+   retired. No deploy check read the ledger, so an install passed while four
+   keepers' ledgers held such rows, and their once-only wakes were refused.
+   The read is the strict delivery evidence's own snapshot over the whole
+   ledger, and its verdict is the one those wakes get. *)
+let keeper_reaction_ledger_store =
+  { store = "keeper reaction ledger"
+  ; on_refusal =
+      "a once-only wake of that keeper that the ledger does not already show \
+       delivered is not queued, and its producer gets Stimulus_storage_error: \
+       connector attention and owned job completions read the whole ledger, \
+       ask answers and composition completions read it from the UTC day of \
+       the answer or submission on; the rows stay on disk as they are"
+  ; scan =
+      (fun ~base_path ->
+         let module Ledger = Keeper_reaction_ledger in
+         let* directories = store_directories (runtime_keepers_dir ~base_path) in
+         List.fold_left
+           (fun report keeper_dir ->
+              let* report = report in
+              let keeper_name = Filename.basename keeper_dir in
+              (* [0.] reads every day partition, as connector attention and
+                 owned job completions do. *)
+              let* snapshot =
+                Ledger.strict_source_delivery_snapshot_result
+                  ~base_path
+                  ~keeper_name
+                  ~since:0.
+                |> Result.map_error (fun error ->
+                  keeper_name ^ ": " ^ Ledger.strict_delivery_evidence_error_to_string error)
+              in
+              let rows = report.rows + Ledger.strict_source_delivery_snapshot_rows snapshot in
+              match Ledger.strict_source_delivery_snapshot_incomplete snapshot with
+              | None -> Ok { report with rows }
+              | Some
+                  ({ Ledger.malformed_row_count; semantic_invalid_row_count; _ } as
+                   incomplete) ->
+                Ok
+                  { report with
+                    rows
+                  ; refused = report.refused + malformed_row_count + semantic_invalid_row_count
+                  ; first_refusal =
+                      (match report.first_refusal with
+                       | Some _ as kept -> kept
+                       | None ->
+                         Some
+                           (Ledger.store_dir ~base_path ~keeper_name
+                            ^ ": "
+                            ^ Ledger.strict_delivery_evidence_error_to_string
+                                (Ledger.Evidence_incomplete incomplete)))
+                  })
+           (Ok empty_report)
+           directories)
+  }
+;;
+
 module Id = struct
   type t =
     | Keeper_meta
     | Gate_pending
     | Official_client_session
     | Memory_current
+    | Memory_journal
     | Goal_store
     | Librarian_range_receipts
     | Memory_admission_queue
@@ -936,6 +1060,7 @@ module Id = struct
     | Keeper_chat_transcripts
     | Keeper_chat_operations
     | Keeper_tool_outbox
+    | Keeper_reaction_ledger
   [@@deriving enumerate]
 end
 
@@ -963,6 +1088,7 @@ type reader =
 let reader : Id.t -> reader = function
   | Id.Keeper_meta -> Refuse_boot (Refusing.Keeper_meta, keeper_meta_store)
   | Id.Memory_current -> Refuse_boot (Refusing.Memory_current, memory_os_current_store)
+  | Id.Memory_journal -> Preflight_only memory_journal_store
   | Id.Goal_store -> Degrade_typed Reported.Goal_store
   | Id.Gate_pending -> Preflight_only gate_pending_store
   | Id.Official_client_session ->
@@ -987,6 +1113,7 @@ let reader : Id.t -> reader = function
   | Id.Keeper_chat_transcripts -> Preflight_only keeper_chat_transcript_store
   | Id.Keeper_chat_operations -> Preflight_only keeper_chat_operation_store
   | Id.Keeper_tool_outbox -> Preflight_only keeper_tool_outbox_store
+  | Id.Keeper_reaction_ledger -> Preflight_only keeper_reaction_ledger_store
 ;;
 
 let name id =

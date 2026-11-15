@@ -23,9 +23,9 @@ HYDRATION_SIGNATURE='tool:tc-hydration-failed|chat:assistant-hydration-failed'
 COVERAGE_SIGNATURE='tool:tc-coverage-gap|chat:assistant-coverage-gap'
 STATUS_SELECTOR='[data-tool-output-failure-contract-fixture-status="ok"][data-tool-output-failure-hydration-failed-count="1"][data-tool-output-failure-coverage-gap-count="1"]'
 HYDRATION_TRACE_SELECTOR="[data-tool-output-failure-scenario=\"hydration-failed\"] [data-chat-work-trace][data-chat-turn-order-signature=\"${HYDRATION_SIGNATURE}\"][data-chat-tool-output-hydration-source=\"tool_calls_endpoint\"][data-chat-tool-output-hydration-status=\"failed\"][data-chat-tool-output-hydration-failure=\"tool_calls_endpoint_502\"]"
-HYDRATION_TOOL_SELECTOR='[data-tool-output-failure-scenario="hydration-failed"] [data-chat-trace-step="tool"][data-chat-turn-order-index="0"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-hydration-failed"][data-chat-trace-entry-id="tool-tc-hydration-failed"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="hydration-failed"][data-chat-trace-output-coverage="hydration-failed"]'
+HYDRATION_TOOL_SELECTOR='[data-tool-output-failure-scenario="hydration-failed"] [data-chat-trace-step="tool"][data-chat-turn-order-index="0"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-hydration-failed"][data-chat-trace-entry-id="tool-tc-hydration-failed"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="pending"][data-chat-trace-output-coverage="hydration-failed"]'
 COVERAGE_TRACE_SELECTOR="[data-tool-output-failure-scenario=\"coverage-gap\"] [data-chat-work-trace][data-chat-turn-order-signature=\"${COVERAGE_SIGNATURE}\"][data-chat-tool-output-hydration-source=\"tool_calls_endpoint\"][data-chat-tool-output-hydration-status=\"hydrated\"][data-chat-tool-output-covered-through=\"1783264270000\"]"
-COVERAGE_TOOL_SELECTOR='[data-tool-output-failure-scenario="coverage-gap"] [data-chat-trace-step="tool"][data-chat-turn-order-index="0"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-coverage-gap"][data-chat-trace-entry-id="tool-tc-coverage-gap"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="coverage-gap"][data-chat-trace-output-coverage="coverage-gap"]'
+COVERAGE_TOOL_SELECTOR='[data-tool-output-failure-scenario="coverage-gap"] [data-chat-trace-step="tool"][data-chat-turn-order-index="0"][data-chat-turn-order-kind="tool"][data-chat-trace-tool-call-id="tc-coverage-gap"][data-chat-trace-entry-id="tool-tc-coverage-gap"][data-chat-trace-link-state="joined"][data-chat-trace-output-state="pending"][data-chat-trace-output-coverage="coverage-gap"]'
 
 trap harness_dashboard_dev_server_stop_on_exit EXIT
 
@@ -104,8 +104,8 @@ hydration_expanded_screenshot = os.environ["HYDRATION_EXPANDED_SCREENSHOT"]
 coverage_expanded_screenshot = os.environ["COVERAGE_EXPANDED_SCREENSHOT"]
 mobile_expanded_screenshot = os.environ["MOBILE_EXPANDED_SCREENSHOT"]
 status_selector = '[data-tool-output-failure-contract-fixture-status="ok"][data-tool-output-failure-hydration-failed-count="1"][data-tool-output-failure-coverage-gap-count="1"]'
-hydration_tool_selector = '[data-tool-output-failure-scenario="hydration-failed"] [data-chat-trace-step="tool"][data-chat-trace-output-state="hydration-failed"][data-chat-trace-output-coverage="hydration-failed"]'
-coverage_tool_selector = '[data-tool-output-failure-scenario="coverage-gap"] [data-chat-trace-step="tool"][data-chat-trace-output-state="coverage-gap"][data-chat-trace-output-coverage="coverage-gap"]'
+hydration_tool_selector = '[data-tool-output-failure-scenario="hydration-failed"] [data-chat-trace-step="tool"][data-chat-trace-output-state="pending"][data-chat-trace-output-coverage="hydration-failed"]'
+coverage_tool_selector = '[data-tool-output-failure-scenario="coverage-gap"] [data-chat-trace-step="tool"][data-chat-trace-output-state="pending"][data-chat-trace-output-coverage="coverage-gap"]'
 hydration_explanation = '출력 hydration 실패 — tool_calls_endpoint_502'
 coverage_explanation = '출력 tail 범위 밖'
 expected_title = 'MASC - Keeper Chat Tool Output Failure Contract Fixture'

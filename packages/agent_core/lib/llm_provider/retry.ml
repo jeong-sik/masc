@@ -107,6 +107,7 @@ let error_message = function
       ; kind =
           ( Http_client.Connection_refused
           | Http_client.Dns_failure
+          | Http_client.Unreachable
           | Http_client.Tls_error
           | Http_client.Timeout
           | Http_client.Local_resource_exhaustion
@@ -140,6 +141,7 @@ let is_retryable = function
      | Http_client.Local_resource_exhaustion -> false
      | Http_client.Connection_refused
      | Http_client.Dns_failure
+     | Http_client.Unreachable
      | Http_client.Timeout
      | Http_client.Connection_reset
      | Http_client.End_of_file

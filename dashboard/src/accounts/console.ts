@@ -12,7 +12,13 @@ import type { VNode } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { Callout, ProblemNote, Retry, idTail, slowAfterMs } from './notes'
 import type { Failure, Next, Shown } from './notes'
+import type { AllowlistModel } from './allowlist'
+import { AllowlistPanel } from './allowlist-rows'
+import { InvitesPanel } from './invite-rows'
+import type { InvitesModel } from './invites'
 import { KeepersPanel } from './keeper-rows'
+import { MembersPanel } from './member-rows'
+import type { MembersModel } from './members'
 import type { KeepersModel } from './keepers'
 import { SubscriptionsPanel } from './subscriptions'
 import { TokensPanel } from './token-rows'
@@ -188,11 +194,14 @@ function Account({ who, signOut, onSignOut }: { readonly who: Who; readonly sign
 /** What is under the heading of the page in one state. A note of a failure
     is made anew for each failure (its key is the count), so a screen reader
     says the second one as it said the first. */
-function Body({ view, subscriptions, keepers, tokens, onRetry }: {
+function Body({ view, subscriptions, keepers, tokens, invites, allowlist, members, onRetry }: {
   readonly view: View
   readonly subscriptions: SubscriptionsModel
   readonly keepers: KeepersModel
   readonly tokens: TokensModel
+  readonly invites: InvitesModel
+  readonly allowlist: AllowlistModel
+  readonly members: MembersModel
   readonly onRetry: () => void
 }): VNode {
   switch (view.kind) {
@@ -219,6 +228,9 @@ function Body({ view, subscriptions, keepers, tokens, onRetry }: {
         <${SubscriptionsPanel} model=${subscriptions} />
         <${KeepersPanel} model=${keepers} subscriptions=${subscriptions} />
         <${TokensPanel} model=${tokens} />
+        ${view.who.role === 'admin'
+          ? html`<${InvitesPanel} model=${invites} /><${AllowlistPanel} model=${allowlist} /><${MembersPanel} model=${members} />`
+          : null}
         <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `
@@ -231,11 +243,17 @@ function Body({ view, subscriptions, keepers, tokens, onRetry }: {
 const takesThePressedButton = (from: View['kind'], to: View['kind']): boolean =>
   ((from === 'failed' || from === 'changed') && to === 'signed_in') || (from === 'signed_in' && to === 'changed')
 
-export function ConsoleFrame({ model, subscriptions, keepers, tokens }: {
+export function ConsoleFrame({ model, subscriptions, keepers, tokens, invites, allowlist, members }: {
   readonly model: ConsoleModel
   readonly subscriptions: SubscriptionsModel
   readonly keepers: KeepersModel
   readonly tokens: TokensModel
+  /** The invitations, the allowlist and the members are drawn for an Admin
+      only, and read nothing for anyone else (`followInvites`,
+      `followAllowlist`, `followMembers`). */
+  readonly invites: InvitesModel
+  readonly allowlist: AllowlistModel
+  readonly members: MembersModel
 }): VNode {
   const view = model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
@@ -255,7 +273,7 @@ export function ConsoleFrame({ model, subscriptions, keepers, tokens }: {
     </header>
     <main>
       <h1 ref=${heading} tabindex="-1">내 계정</h1>
-      <${Body} view=${view} subscriptions=${subscriptions} keepers=${keepers} tokens=${tokens} onRetry=${() => { void model.load() }} />
+      <${Body} view=${view} subscriptions=${subscriptions} keepers=${keepers} tokens=${tokens} invites=${invites} allowlist=${allowlist} members=${members} onRetry=${() => { void model.load() }} />
     </main>
   `
 }

@@ -17031,7 +17031,10 @@ let reconcile_system_log_stream state ~mailbox =
 
    The facts are named. Twelve positions in two nested tuples left a new fact
    to be added by counting slots, and a reader could not tell which slot was
-   which without the render site open beside it. *)
+   which without the render site open beside it. The loop compares whole
+   records, so a new field joins the comparison with no edit there. That
+   comparison reads every field and no projection does, which the
+   unused-field warning cannot see. *)
 type reads_in_flight =
   { rif_clients : bool
   ; rif_lane_runs : bool
@@ -17047,6 +17050,7 @@ type reads_in_flight =
   ; rif_memory_facts : bool
   ; rif_status_sources : Surface_read_order.source list
   }
+[@@warning "-69"]
 
 let reads_in_flight (state : state) =
   { rif_clients = state.clients_surface_inflight

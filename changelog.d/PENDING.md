@@ -1,0 +1,12 @@
+### Fixed
+
+- The Keeper detail alert strip no longer shows an earlier success as
+  "종료 코드 · success" or the last attempt's `completed` outcome next to a
+  current `heartbeat_failures`, `turn_failures`, `turn_configuration_error`
+  or `exception` blocker. The dashboard listed `heartbeat_consecutive_failures`
+  and `turn_consecutive_failures`, which the server never sends, instead of the
+  blocker labels it does send. The blocker side is now a table keyed on the
+  closed blocker-label union, so a label added there fails type checking until
+  it is classified. `operator_interrupt` keeps its previous classification;
+  the removed `turn_timeout` code has not been sent since #24386 (#43060,
+  #PENDING).

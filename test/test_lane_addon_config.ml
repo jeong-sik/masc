@@ -848,16 +848,19 @@ memory_bytes = %s
 max_reply_bytes = 4096
 |} runtime cpus memory pids);
     Lane_addon_manifest.load ~path in
-  let apple = match load "apple_container" "1" "67108864" "" with
+  (* 200 MiB is the least Apple container creates (#52244). *)
+  let apple = match load "apple_container" "1" "209715200" "" with
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check bool "explicit microVM runtime" true ((unwrap (Lane_addon_types.container apple)).runtime = Lane_addon_types.Apple_container);
   check bool "no imaginary PID cgroup" true ((unwrap (Lane_addon_types.container apple)).resources.pids = None);
   List.iter (fun (runtime,cpus,memory,pids) ->
     check bool "unsupported resource contract refused" true
       (Result.is_error (load runtime cpus memory pids)))
-    ["apple_container","0.5","67108864","";
-     "apple_container","1","67108865","";
-     "apple_container","1","67108864","pids = 16";
+    ["apple_container","0.5","209715200","";
+     "apple_container","1","209715201","";
+     "apple_container","1","208666624","";
+     "apple_container","1","134217728","";
+     "apple_container","1","209715200","pids = 16";
      "docker","1","67108864","";
      "unknown","1","67108864",""];
   let docker = match load "docker" "0.5" "67108864" "pids = 16" with

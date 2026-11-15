@@ -60,23 +60,23 @@ after `scripts/install-local-build.sh`:
    Nothing in the answer is read. Ctrl-C stops the waiting, not the new
    server.
 
-`masc setup-server` and `masc setup-stop-previous-owner`, the read and the
-stop the setup journey runs, find the server the same way and refuse the
-same owners. The sentence for each owner is
-`Server_upgrade_preparation.owner_sentence`, followed by what the command
-did not do; restart words the account server itself, because it is the
-command that replaces one. These reads compare pids and take no handle on
-the lease owner, so a Linux host without `pidfd_open` still runs `masc
-setup-server`. Only the stop takes a handle, to send its SIGTERM.
+`masc setup`, `masc runtime-resume` and the commands that save runtime.toml
+through the running server (`masc config set` and the setup commands) find
+the server the same way and refuse the same owners. The sentence for each
+owner is `Server_upgrade_preparation.owner_sentence`, followed by what the
+command did not do; restart words the account server itself, because it is
+the command that replaces one. These reads compare pids and take no handle
+on the lease owner, so a Linux host without `pidfd_open` still runs them.
+Only the stop takes a handle, to send its SIGTERM.
 
 All of this reads the lease under one lease root: `<base>/.masc-owner`, or
 the directory `MASC_BASE_PATH_LEASE_DIR` names. A command sees the server
 only when both run with the same lease root. With another one the command
-finds no lease and takes the workspace for unheld: restart refuses a port
-that is busy and starts a second server on a free one. None of these
-commands falls back to asking the port. A sentence that says no process
-holds the lease names the directory it was read in, so a mismatch can be
-seen there.
+finds no lease and takes the workspace for unheld: restart and setup refuse
+a port that is busy and start a second server on a free one, and `masc
+config set` writes runtime.toml itself. No command falls back to asking the
+port. A sentence that says no process holds the lease names the directory
+it was read in, so a mismatch can be seen there.
 
 Plain `masc start` still refuses at once while another process holds the
 lease: a running server that was not asked to stop does not exit.

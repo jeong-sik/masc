@@ -5,15 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperEfficiencyMonth } from '../api/dashboard-keeper-efficiency'
 import { keeperMonthEfficiencyView, type KeeperMonthEfficiencyRead } from './keeper-month-efficiency'
 
+// Every number a tile draws for `alpha` differs from every other one and from
+// the fleet's, so a tile that draws the number of another tile is seen. The
+// fleet row is written by hand; it is not the sum of these rows.
 const month: KeeperEfficiencyMonth = {
   month: '2026-11',
+  // 2026-11-16T00:00:00Z
   generated_at: 1794787200,
   days_covered: 15,
   fleet: {
     turns_total: 40,
     calls_per_turn: 5.5,
-    tool_s_per_turn: 12.25,
-    output_tokens_per_turn: 800,
+    tool_s_per_turn: 12.5,
+    output_tokens_per_turn: 777,
     input_tokens_per_turn: 90000,
     cost_usd_per_turn: 0,
   },
@@ -22,12 +26,12 @@ const month: KeeperEfficiencyMonth = {
       keeper: 'alpha',
       turns: 30,
       input_tokens: 3000000,
-      output_tokens: 24000,
+      output_tokens: 24090,
       cost_usd: 0,
-      calls: 180,
+      calls: 195,
       failed: 6,
       deferred: 2,
-      tool_ms: 420000,
+      tool_ms: 426000,
     },
     {
       keeper: 'tools-only',
@@ -46,8 +50,10 @@ const month: KeeperEfficiencyMonth = {
 const nothing: KeeperMonthEfficiencyRead = { data: null, loading: false, error: null }
 
 describe('keeperMonthEfficiencyView', () => {
-  it('says nothing in the frame before the read was asked', () => {
-    expect(keeperMonthEfficiencyView(nothing, 'alpha', true)).toEqual({ kind: 'not_asked' })
+  // The panel reads when it is drawn, so a resource that holds nothing under
+  // a confirmed workspace is a read the same render sends.
+  it('is reading in the render that sends the read', () => {
+    expect(keeperMonthEfficiencyView(nothing, 'alpha', true)).toEqual({ kind: 'reading' })
   })
 
   // Without a confirmed workspace the resource asks nothing. That is neither
@@ -67,30 +73,38 @@ describe('keeperMonthEfficiencyView', () => {
       .toEqual({ kind: 'unread', reason: 'the read timed out' })
   })
 
-  it('divides the totals of the Keeper by its turns', () => {
+  it('divides the totals of the Keeper by its turns and sets the fleet value of the same kind beside each', () => {
     const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'alpha', true)
     expect(view).toEqual({
       kind: 'read',
       month: '2026-11',
       daysCovered: 15,
-      generatedAt: 1794787200,
-      fleet: month.fleet,
+      generatedAt: '2026-11-16T00:00:00.000Z',
+      fleetTurns: 40,
       share: {
         kind: 'measured',
-        turns: 30,
-        callsPerTurn: 6,
-        toolSecondsPerTurn: 14,
-        outputTokensPerTurn: 800,
-        calls: 180,
-        failed: 6,
+        tiles: [
+          { id: 'turns', value: 30 },
+          { id: 'calls_per_turn', value: 6.5, fleet: 5.5 },
+          { id: 'tool_seconds_per_turn', value: 14.2, fleet: 12.5 },
+          { id: 'output_tokens_per_turn', value: 803, fleet: 777 },
+          { id: 'calls', value: 195 },
+          { id: 'failed_calls', value: 6 },
+        ],
       },
       refresh: { kind: 'settled' },
     })
   })
 
-  it('does not divide for a row with no counted turn', () => {
+  it('does not divide for a row with no counted turn, and counts its calls', () => {
     const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'tools-only', true)
-    expect(view.kind === 'read' && view.share).toEqual({ kind: 'no_turn_counted', calls: 4, failed: 1 })
+    expect(view.kind === 'read' && view.share).toEqual({
+      kind: 'no_turn_counted',
+      tiles: [
+        { id: 'calls', value: 4 },
+        { id: 'failed_calls', value: 1 },
+      ],
+    })
   })
 
   it('tells a Keeper with no row from a Keeper with a row', () => {
@@ -184,6 +198,22 @@ describe('KeeperMonthEfficiency', () => {
     await act(async () => { button.click() })
     await flushUi()
   }
+  /** What each tile shows, in the order the tiles are drawn. */
+  const tiles = () => Array.from(container.querySelectorAll('.kpi-cell'), cell => ({
+    label: cell.querySelector('.kpi-label')?.textContent ?? null,
+    value: cell.querySelector('.kpi-value')?.textContent ?? null,
+    fleet: cell.querySelector('.kpi-delta')?.textContent ?? null,
+  }))
+  /** The element that tells a screen reader of a read of numbers already on
+   *  the page. The line of the first read is a status too; it is not this. */
+  const spoken = (): Element => {
+    const status = container.querySelector('.sr-only[role="status"]')
+    if (status === null) throw new Error('no spoken status is drawn')
+    return status
+  }
+  /** Whether numbers on the page are being read again; null when the page
+   *  holds no numbers. */
+  const numbersBusy = () => container.querySelector('[aria-busy]')?.getAttribute('aria-busy') ?? null
 
   async function draw(
     fetchMonth: FetchMonth,
@@ -224,11 +254,43 @@ describe('KeeperMonthEfficiency', () => {
     expect(state()).toBe('read')
     expect(drawn('data-efficiency-share')).toBe('measured')
     expect(drawn('data-efficiency-refresh')).toBe('settled')
+    // The line of the month: which month, how many of its days hold a row,
+    // the turns of the fleet, and when the server counted.
+    const counted = container.querySelector('[data-efficiency-state] time')
+    expect(counted?.getAttribute('datetime')).toBe('2026-11-16T00:00:00.000Z')
+    const line = counted?.parentElement?.textContent ?? ''
+    expect(line).toContain('2026-11')
+    expect(line).toContain('15일')
+    expect(line).toContain('40턴')
   })
 
-  // The Keeper page closes its detail when the Keeper changes, but the render
-  // that carries the new name still draws this panel once. That render must
-  // show the new Keeper's row and send no request the unmount would withdraw.
+  // A wrong number under a label is what this panel can do worst: failed
+  // calls read as calls, the fleet's value read as the Keeper's.
+  it('draws each number of the Keeper under its label, and the fleet beside the values per turn', async () => {
+    const fetchMonth = vi.fn<FetchMonth>(async () => month)
+    const { show } = await draw(fetchMonth, 'alpha')
+    expect(tiles()).toEqual([
+      { label: '턴', value: '30', fleet: null },
+      { label: '턴당 도구 호출', value: '6.5', fleet: '전체 5.5' },
+      { label: '턴당 도구 시간', value: '14.2초', fleet: '전체 12.5초' },
+      { label: '턴당 출력 토큰', value: '803', fleet: '전체 777' },
+      { label: '도구 호출', value: '195', fleet: null },
+      { label: '실패한 호출', value: '6', fleet: null },
+    ])
+
+    await show('tools-only')
+    expect(tiles()).toEqual([
+      { label: '도구 호출', value: '4', fleet: null },
+      { label: '실패한 호출', value: '1', fleet: null },
+    ])
+    await show('beta')
+    expect(tiles()).toEqual([])
+  })
+
+  // The Keeper page closes its detail when the Keeper changes, so the page
+  // hands this panel one name. A caller that hands it another gets that
+  // Keeper's row out of the month the panel holds: the month holds every
+  // Keeper, so there is nothing to ask.
   it('picks the row of a new Keeper out of the answer it holds, without another request', async () => {
     const fetchMonth = vi.fn<FetchMonth>(async () => month)
     const { show } = await draw(fetchMonth, 'alpha')
@@ -268,6 +330,45 @@ describe('KeeperMonthEfficiency', () => {
     expect(drawn('data-efficiency-share')).toBe('measured')
     expect(drawn('data-efficiency-refresh')).toBe('failed')
     expect(container.querySelector('[role="alert"]')).not.toBeNull()
+    // The alert says it. The status does not say a read has ended well.
+    expect(spoken().textContent).toBe('')
+  })
+
+  // A sighted reader sees the button's text change. A screen reader is told
+  // of a change only in an element that was on the page before the change,
+  // and the lines of the month are the same after a refresh as before it.
+  it('tells a screen reader, in one element that stays, that a read runs and that it has ended', async () => {
+    const first = pending<KeeperEfficiencyMonth>()
+    const refresh = pending<KeeperEfficiencyMonth>()
+    const fetchMonth = vi.fn<FetchMonth>()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(refresh.promise)
+    await draw(fetchMonth, 'alpha')
+    expect(state()).toBe('reading')
+    const status = spoken()
+    // The line of the first read speaks for it, and no numbers are drawn.
+    expect(status.textContent).toBe('')
+    expect(numbersBusy()).toBeNull()
+
+    first.resolve(month)
+    await flushUi()
+    expect(spoken()).toBe(status)
+    const ended = status.textContent
+    expect(ended).not.toBe('')
+    expect(numbersBusy()).toBe('false')
+
+    await press('keeper-month-efficiency-read')
+    expect(drawn('data-efficiency-refresh')).toBe('refreshing')
+    expect(spoken()).toBe(status)
+    expect(status.textContent).not.toBe('')
+    expect(status.textContent).not.toBe(ended)
+    expect(numbersBusy()).toBe('true')
+
+    refresh.resolve(month)
+    await flushUi()
+    expect(spoken()).toBe(status)
+    expect(status.textContent).toBe(ended)
+    expect(numbersBusy()).toBe('false')
   })
 
   it('sends nothing for a press while a read runs', async () => {
@@ -325,6 +426,62 @@ describe('KeeperMonthEfficiency', () => {
     expect(drawn('data-efficiency-refresh')).toBe('settled')
     held()
     expect(fetchMonth).toHaveBeenCalledTimes(3)
+  })
+
+  // The page withdraws the workspace each time the credential changes, and
+  // confirms one again a moment later. A button that left the page with the
+  // numbers would take the keyboard focus with it. It stays, and a press
+  // while there is no workspace sends nothing.
+  it('keeps the button on the page while the workspace is withdrawn and after another is confirmed', async () => {
+    const under = pending<KeeperEfficiencyMonth>()
+    const fetchMonth = vi.fn<FetchMonth>()
+      .mockResolvedValueOnce(month)
+      .mockReturnValueOnce(under.promise)
+    const page = await draw(fetchMonth, 'alpha')
+    expect(state()).toBe('read')
+    const button = buttonOf('keeper-month-efficiency-read')
+    const held = () => {
+      expect(buttonOf('keeper-month-efficiency-read')).toBe(button)
+      expect(button.isConnected).toBe(true)
+      expect(button.disabled).toBe(false)
+    }
+
+    await page.withdrawWorkspace()
+    expect(state()).toBe('no_workspace')
+    held()
+    await press('keeper-month-efficiency-read')
+    expect(fetchMonth).toHaveBeenCalledTimes(1)
+    held()
+
+    await page.confirmWorkspace()
+    expect(fetchMonth).toHaveBeenCalledTimes(2)
+    expect(state()).toBe('reading')
+    held()
+    under.resolve(month)
+    await flushUi()
+    expect(state()).toBe('read')
+    held()
+  })
+
+  // A workspace replaced in one step gives the panel a new resource, which
+  // holds nothing until its read is sent. That render is a read too.
+  it('reads again under a replaced workspace without a render that says nothing', async () => {
+    const under = pending<KeeperEfficiencyMonth>()
+    const fetchMonth = vi.fn<FetchMonth>()
+      .mockResolvedValueOnce(month)
+      .mockReturnValueOnce(under.promise)
+    const page = await draw(fetchMonth, 'alpha')
+    const button = buttonOf('keeper-month-efficiency-read')
+
+    await page.confirmWorkspace()
+    expect(fetchMonth).toHaveBeenCalledTimes(2)
+    expect(state()).toBe('reading')
+    expect(buttonOf('keeper-month-efficiency-read')).toBe(button)
+
+    under.resolve(month)
+    await flushUi()
+    expect(state()).toBe('read')
+    expect(buttonOf('keeper-month-efficiency-read')).toBe(button)
   })
 
   it('draws the answer of a refresh in place of the one before', async () => {

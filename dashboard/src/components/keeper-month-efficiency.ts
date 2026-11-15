@@ -12,13 +12,16 @@
 // numbers and says so beside them. Cost is not drawn: the view writes 0 for a
 // lane that reports no money, so "nothing spent" and "not reported" look the
 // same in it.
+//
+// Which number stands in which tile, and which value of the fleet beside it,
+// is decided in keeperMonthEfficiencyView, where a test reads it. The drawing
+// walks the tiles it is handed.
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect } from 'preact/hooks'
 import {
   fetchKeeperEfficiencyCurrentMonth,
   keeperEfficiencyRow,
-  type KeeperEfficiencyFleet,
   type KeeperEfficiencyMonth,
 } from '../api/dashboard-keeper-efficiency'
 import { formatNumber } from '../lib/format-number'
@@ -41,21 +44,25 @@ export interface KeeperMonthEfficiencyRead {
   readonly error: string | null
 }
 
+/** One number of the Keeper, as a tile draws it. A value per turn stands
+ *  beside the fleet's value of the same kind. A count stands alone: the month
+ *  holds no fleet total of calls, and the fleet's turns are in the line above
+ *  the tiles. */
+export type KeeperMonthEfficiencyTile =
+  | { readonly id: 'turns' | 'calls' | 'failed_calls'; readonly value: number }
+  | {
+      readonly id: 'calls_per_turn' | 'tool_seconds_per_turn' | 'output_tokens_per_turn'
+      readonly value: number
+      readonly fleet: number
+    }
+
 /** What one Keeper has in a month that was read. */
 export type KeeperMonthEfficiencyShare =
   /** The month holds no row of this Keeper: no counted turn, no tool call. */
   | { readonly kind: 'absent' }
-  /** A row with no counted turn. It can still hold tool calls. */
-  | { readonly kind: 'no_turn_counted'; readonly calls: number; readonly failed: number }
-  | {
-      readonly kind: 'measured'
-      readonly turns: number
-      readonly callsPerTurn: number
-      readonly toolSecondsPerTurn: number
-      readonly outputTokensPerTurn: number
-      readonly calls: number
-      readonly failed: number
-    }
+  /** A row with no counted turn. Nothing is divided; its calls are counted. */
+  | { readonly kind: 'no_turn_counted'; readonly tiles: readonly KeeperMonthEfficiencyTile[] }
+  | { readonly kind: 'measured'; readonly tiles: readonly KeeperMonthEfficiencyTile[] }
 
 /** Whether the numbers on the page are the latest answer of the server. */
 export type KeeperMonthEfficiencyRefresh =
@@ -64,19 +71,19 @@ export type KeeperMonthEfficiencyRefresh =
   | { readonly kind: 'failed'; readonly reason: string }
 
 export type KeeperMonthEfficiencyView =
-  /** The panel was drawn and has not asked yet: one frame, nothing to say. */
-  | { readonly kind: 'not_asked' }
   /** No workspace is confirmed, so the resource asks nothing
    *  (use-managed-async-resource.ts). It is not a month without numbers. */
   | { readonly kind: 'no_workspace' }
+  /** The first read is in flight, or the render that draws this sends it. */
   | { readonly kind: 'reading' }
   | { readonly kind: 'unread'; readonly reason: string }
   | {
       readonly kind: 'read'
       readonly month: string
       readonly daysCovered: number
-      readonly generatedAt: number
-      readonly fleet: KeeperEfficiencyFleet
+      /** When the server counted the month, as ISO 8601. */
+      readonly generatedAt: string
+      readonly fleetTurns: number
       readonly share: KeeperMonthEfficiencyShare
       readonly refresh: KeeperMonthEfficiencyRefresh
     }
@@ -84,15 +91,29 @@ export type KeeperMonthEfficiencyView =
 function shareOf(month: KeeperEfficiencyMonth, keeperName: string): KeeperMonthEfficiencyShare {
   const row = keeperEfficiencyRow(month, keeperName)
   if (row === null) return { kind: 'absent' }
-  if (row.turns === 0) return { kind: 'no_turn_counted', calls: row.calls, failed: row.failed }
+  const calls: readonly KeeperMonthEfficiencyTile[] = [
+    { id: 'calls', value: row.calls },
+    { id: 'failed_calls', value: row.failed },
+  ]
+  if (row.turns === 0) return { kind: 'no_turn_counted', tiles: calls }
+  const { fleet } = month
   return {
     kind: 'measured',
-    turns: row.turns,
-    callsPerTurn: row.calls / row.turns,
-    toolSecondsPerTurn: row.tool_ms / MS_PER_SECOND / row.turns,
-    outputTokensPerTurn: row.output_tokens / row.turns,
-    calls: row.calls,
-    failed: row.failed,
+    tiles: [
+      { id: 'turns', value: row.turns },
+      { id: 'calls_per_turn', value: row.calls / row.turns, fleet: fleet.calls_per_turn },
+      {
+        id: 'tool_seconds_per_turn',
+        value: row.tool_ms / MS_PER_SECOND / row.turns,
+        fleet: fleet.tool_s_per_turn,
+      },
+      {
+        id: 'output_tokens_per_turn',
+        value: row.output_tokens / row.turns,
+        fleet: fleet.output_tokens_per_turn,
+      },
+      ...calls,
+    ],
   }
 }
 
@@ -102,24 +123,35 @@ function refreshOf(read: KeeperMonthEfficiencyRead): KeeperMonthEfficiencyRefres
   return { kind: 'settled' }
 }
 
+/** The decoder holds `generated_at` within what a Date holds, so this does
+ *  not throw. TimeAgo reads a bare number by its size, as seconds or as
+ *  milliseconds; a string says which instant is meant. */
+function isoOfUnixSeconds(seconds: number): string {
+  return new Date(seconds * MS_PER_SECOND).toISOString()
+}
+
 /** What the panel draws for one Keeper from what the read has come to.
- *  `workspaceConfirmed` says whether the resource can ask at all. */
+ *  `workspaceConfirmed` says whether the resource can ask at all.
+ *
+ *  The panel reads when it is drawn and again when its resource is replaced.
+ *  So a resource that holds nothing and has failed at nothing, under a
+ *  confirmed workspace, is reading: its read is in flight, or the render
+ *  that draws this sends it. */
 export function keeperMonthEfficiencyView(
   read: KeeperMonthEfficiencyRead,
   keeperName: string,
   workspaceConfirmed: boolean,
 ): KeeperMonthEfficiencyView {
   if (read.data === null) {
-    if (read.loading) return { kind: 'reading' }
     if (read.error !== null) return { kind: 'unread', reason: read.error }
-    return workspaceConfirmed ? { kind: 'not_asked' } : { kind: 'no_workspace' }
+    return workspaceConfirmed ? { kind: 'reading' } : { kind: 'no_workspace' }
   }
   return {
     kind: 'read',
     month: read.data.month,
     daysCovered: read.data.days_covered,
-    generatedAt: read.data.generated_at,
-    fleet: read.data.fleet,
+    generatedAt: isoOfUnixSeconds(read.data.generated_at),
+    fleetTurns: read.data.fleet.turns_total,
     share: shareOf(read.data, keeperName),
     refresh: refreshOf(read),
   }
@@ -128,74 +160,84 @@ export function keeperMonthEfficiencyView(
 const PANEL_TITLE = '이번 달 효율'
 const PER_TURN_DIGITS = 1
 
-/** The decoder holds `generated_at` within what a Date holds, so this does
- *  not throw. TimeAgo reads a bare number by its size, as seconds or as
- *  milliseconds; a string says which instant is meant. */
-function isoOfUnixSeconds(seconds: number): string {
-  return new Date(seconds * MS_PER_SECOND).toISOString()
+type TileId = KeeperMonthEfficiencyTile['id']
+
+const TILE_LABEL: Record<TileId, string> = {
+  turns: '턴',
+  calls_per_turn: '턴당 도구 호출',
+  tool_seconds_per_turn: '턴당 도구 시간',
+  output_tokens_per_turn: '턴당 출력 토큰',
+  calls: '도구 호출',
+  failed_calls: '실패한 호출',
 }
 
-function fleetNote(text: string) {
-  return { direction: 'flat' as const, text: `전체 ${text}` }
+const whole = (value: number): string => formatNumber(value)
+
+/** How a tile writes its number. The fleet's value beside it is written the
+ *  same way. */
+const TILE_TEXT: Record<TileId, (value: number) => string> = {
+  turns: whole,
+  calls_per_turn: value => formatNumber(value, PER_TURN_DIGITS),
+  tool_seconds_per_turn: value => `${formatNumber(value, PER_TURN_DIGITS)}초`,
+  output_tokens_per_turn: whole,
+  calls: whole,
+  failed_calls: whole,
 }
 
-function Share({ share, fleet }: { share: KeeperMonthEfficiencyShare; fleet: KeeperEfficiencyFleet }) {
+function Tile({ tile }: { tile: KeeperMonthEfficiencyTile }) {
+  const text = TILE_TEXT[tile.id]
+  return html`
+    <${StatTile}
+      label=${TILE_LABEL[tile.id]}
+      value=${text(tile.value)}
+      delta=${'fleet' in tile ? { direction: 'flat', text: `전체 ${text(tile.fleet)}` } : undefined}
+    />
+  `
+}
+
+/** The columns follow the width of the panel, not of the window: beside the
+ *  page's other columns the panel is narrow in a wide window. StatTile cuts a
+ *  number that does not fit its row, so a tile too narrow for a number with
+ *  the fleet's beside it puts the fleet's on a line of its own. A tile starts
+ *  its label and number at the top, so the numbers of one row of tiles stand
+ *  on one line whether or not a fleet value is below them.
+ *
+ *  Both rules reach into the classes of StatTile (styles/kpi.css). That file
+ *  is outside the cascade layers, so the rule that replaces one of its
+ *  declarations carries `!`. */
+function Tiles({ tiles }: { tiles: readonly KeeperMonthEfficiencyTile[] }) {
+  return html`
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2 [&_.kpi-row]:flex-wrap [&_.kpi-cell]:!justify-start">
+      ${tiles.map(tile => html`<${Tile} key=${tile.id} tile=${tile} />`)}
+    </div>
+  `
+}
+
+function Share({ share }: { share: KeeperMonthEfficiencyShare }) {
   switch (share.kind) {
     case 'absent':
       return html`<div class="text-xs text-[var(--color-fg-secondary)]">이 달에 이 Keeper 의 턴 없음</div>`
     case 'no_turn_counted':
       return html`
-        <div class="text-xs text-[var(--color-fg-secondary)]">
-          센 턴 없음 · 도구 호출 ${formatNumber(share.calls)}회, 실패 ${formatNumber(share.failed)}회
-        </div>
+        <div class="text-xs text-[var(--color-fg-secondary)]">센 턴 없음</div>
+        <${Tiles} tiles=${share.tiles} />
       `
     case 'measured':
-      return html`
-        <div class="grid grid-cols-2 sm:grid-cols-5 gap-2">
-          <${StatTile} label="턴" value=${formatNumber(share.turns)} />
-          <${StatTile}
-            label="턴당 도구 호출"
-            value=${formatNumber(share.callsPerTurn, PER_TURN_DIGITS)}
-            delta=${fleetNote(formatNumber(fleet.calls_per_turn, PER_TURN_DIGITS))}
-          />
-          <${StatTile}
-            label="턴당 도구 시간"
-            value=${`${formatNumber(share.toolSecondsPerTurn, PER_TURN_DIGITS)}초`}
-            delta=${fleetNote(`${formatNumber(fleet.tool_s_per_turn, PER_TURN_DIGITS)}초`)}
-          />
-          <${StatTile}
-            label="턴당 출력 토큰"
-            value=${formatNumber(share.outputTokensPerTurn)}
-            delta=${fleetNote(formatNumber(fleet.output_tokens_per_turn))}
-          />
-          <${StatTile}
-            label="실패 / 호출"
-            value=${`${formatNumber(share.failed)} / ${formatNumber(share.calls)}`}
-          />
-        </div>
-      `
-  }
-}
-
-/** A view that draws the month or what became of its read. */
-type DrawnView = Exclude<KeeperMonthEfficiencyView, { kind: 'not_asked' | 'no_workspace' }>
-
-function readRuns(view: DrawnView): boolean {
-  switch (view.kind) {
-    case 'reading':
-      return true
-    case 'unread':
-      return false
-    case 'read':
-      return view.refresh.kind === 'refreshing'
+      return html`<${Tiles} tiles=${share.tiles} />`
   }
 }
 
 /** The line beside the button. Each state has an element of its own, so an
  *  alert is a new element when it appears. The lines are not paragraphs: the
  *  page's rule for `p` sets a colour over the colour classes. */
-function Headline({ view }: { view: DrawnView }) {
+function Headline({ view }: { view: KeeperMonthEfficiencyView }) {
   switch (view.kind) {
+    case 'no_workspace':
+      return html`
+        <div key="no_workspace" class="text-xs text-[var(--color-fg-secondary)]" role="status">
+          현재 작업 공간을 확인하는 중…
+        </div>
+      `
     case 'reading':
       return html`
         <div key="reading" class="text-xs text-[var(--color-fg-secondary)]" role="status">
@@ -207,40 +249,42 @@ function Headline({ view }: { view: DrawnView }) {
     case 'read':
       return html`
         <div key="read" class="text-xs text-[var(--color-fg-secondary)]">
-          ${view.month} · ${formatNumber(view.daysCovered)}일 · 전체 ${formatNumber(view.fleet.turns_total)}턴 · 집계 <${TimeAgo} timestamp=${isoOfUnixSeconds(view.generatedAt)} />
+          ${view.month} · ${formatNumber(view.daysCovered)}일 · 전체 ${formatNumber(view.fleetTurns)}턴 · 집계 <${TimeAgo} timestamp=${view.generatedAt} />
         </div>
       `
   }
 }
 
-function readButtonText(view: DrawnView): string {
-  if (readRuns(view)) return '읽는 중…'
-  return view.kind === 'unread' ? '다시 읽기' : '새로고침'
+/** What a press would do, or what the panel waits for when a press sends
+ *  nothing. */
+function readButtonText(view: KeeperMonthEfficiencyView): string {
+  switch (view.kind) {
+    case 'no_workspace':
+      return '기다리는 중…'
+    case 'reading':
+      return '읽는 중…'
+    case 'unread':
+      return '다시 읽기'
+    case 'read':
+      return view.refresh.kind === 'refreshing' ? '읽는 중…' : '새로고침'
+  }
 }
 
-/** The month, or what became of its read, with the button that reads again.
- *  The three states share one tree, so the button is one element through
- *  all of them. */
-function Drawn({ view, onRead }: { view: DrawnView; onRead: () => void }) {
-  return html`
-    <${KpiSection} title=${PANEL_TITLE}>
-      <div
-        class="flex flex-col gap-2"
-        data-efficiency-state=${view.kind}
-        data-efficiency-share=${view.kind === 'read' ? view.share.kind : undefined}
-        data-efficiency-refresh=${view.kind === 'read' ? view.refresh.kind : undefined}
-      >
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <${Headline} view=${view} />
-          <${Btn} size="xs" variant="ghost" onClick=${onRead} testId="keeper-month-efficiency-read">${readButtonText(view)}<//>
-        </div>
-        ${view.kind === 'read' ? html`<${Share} share=${view.share} fleet=${view.fleet} />` : null}
-        ${view.kind === 'read' && view.refresh.kind === 'failed'
-          ? html`<div class="text-xs text-[var(--color-status-warn)]" role="alert">마지막 새로고침 실패: ${view.refresh.reason}</div>`
-          : null}
-      </div>
-    <//>
-  `
+/** What a screen reader is told of a read of numbers already on the page:
+ *  that it runs, and that it has ended. The lines a sighted reader sees do
+ *  not change when such a read ends with the same month. Waiting for a
+ *  workspace, the first read and a failed read have lines of their own, a
+ *  status or an alert. */
+function spokenRefresh(view: KeeperMonthEfficiencyView): string {
+  if (view.kind !== 'read') return ''
+  switch (view.refresh.kind) {
+    case 'refreshing':
+      return '읽는 중'
+    case 'settled':
+      return '읽음'
+    case 'failed':
+      return ''
+  }
 }
 
 interface KeeperMonthEfficiencyProps {
@@ -256,10 +300,8 @@ export function KeeperMonthEfficiency({ keeperName }: KeeperMonthEfficiencyProps
   // the credential it was read under changes (a new resource). The resource
   // withdraws its request when the panel goes away.
   useEffect(() => { read() }, [read])
-  // The button is never disabled and never leaves the page while the month
-  // or its read is drawn: a disabled button drops keyboard focus, and so does
-  // one that is removed when it is pressed. A press while a read runs sends
-  // nothing; the button says a read runs.
+  // A press while a read runs sends nothing. Without a confirmed workspace
+  // the resource asks nothing either (use-managed-async-resource.ts).
   const readAgain = useCallback(() => {
     if (resource.state.peek().loading) return
     read()
@@ -267,20 +309,36 @@ export function KeeperMonthEfficiency({ keeperName }: KeeperMonthEfficiencyProps
 
   const workspaceConfirmed = dashboardObservationOwnerHasWorkspace(readDashboardObservationOwner())
   const view = keeperMonthEfficiencyView(resource.state.value, keeperName, workspaceConfirmed)
-  switch (view.kind) {
-    case 'not_asked':
-      return null
-    case 'no_workspace':
-      return html`
-        <${KpiSection} title=${PANEL_TITLE}>
-          <div class="text-xs text-[var(--color-fg-secondary)]" role="status" data-efficiency-state="no_workspace">
-            현재 작업 공간을 확인하는 중…
-          </div>
-        <//>
-      `
-    case 'reading':
-    case 'unread':
-    case 'read':
-      return html`<${Drawn} view=${view} onRead=${readAgain} />`
-  }
+  // Every state is drawn in this one tree, so the button is one element
+  // through all of them, and it is never disabled. A disabled button drops
+  // keyboard focus, and so does one that leaves the page: when it is pressed,
+  // or when the page withdraws the workspace under it, as it does each time
+  // the credential changes. The button says what a press would do, or what
+  // the panel waits for.
+  return html`
+    <${KpiSection} title=${PANEL_TITLE}>
+      <div
+        class="flex flex-col gap-2"
+        data-efficiency-state=${view.kind}
+        data-efficiency-share=${view.kind === 'read' ? view.share.kind : undefined}
+        data-efficiency-refresh=${view.kind === 'read' ? view.refresh.kind : undefined}
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <${Headline} view=${view} />
+          <${Btn} size="xs" variant="ghost" onClick=${readAgain} testId="keeper-month-efficiency-read">${readButtonText(view)}<//>
+        </div>
+        <span class="sr-only" role="status">${spokenRefresh(view)}</span>
+        ${view.kind === 'read'
+          ? html`
+              <div class="flex flex-col gap-2" aria-busy=${view.refresh.kind === 'refreshing' ? 'true' : 'false'}>
+                <${Share} share=${view.share} />
+              </div>
+            `
+          : null}
+        ${view.kind === 'read' && view.refresh.kind === 'failed'
+          ? html`<div class="text-xs text-[var(--color-status-warn)]" role="alert">마지막 새로고침 실패: ${view.refresh.reason}</div>`
+          : null}
+      </div>
+    <//>
+  `
 }

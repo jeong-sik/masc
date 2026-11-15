@@ -6,6 +6,7 @@ import { StatusDot } from './common/status-dot'
 import { KeeperMetricsPanel } from './keeper-metrics-panel'
 import { RawDataDebug } from './keeper-detail-debug'
 import { KpiGrid } from './keeper-detail-kpi'
+import { KeeperMonthEfficiency } from './keeper-month-efficiency'
 import {
   EquipmentList,
   RelationshipList,
@@ -153,6 +154,9 @@ export function KeeperDetailBody({
 
       ${'' /* ── KPIs ── */}
       <${KpiGrid} keeper=${keeper} />
+
+      ${'' /* What the Keeper did with this month's turns, beside the fleet. It reads when this tab is opened. */}
+      <${KeeperMonthEfficiency} keeperName=${keeper.name} />
 
       <${KeeperMetricsPanel} key=${keeper.name} keeper=${keeper} />
 

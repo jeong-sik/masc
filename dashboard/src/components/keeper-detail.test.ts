@@ -87,6 +87,10 @@ vi.mock('./keeper-detail-kpi', () => ({
   KpiGrid: () => null,
 }))
 
+vi.mock('./keeper-month-efficiency', () => ({
+  KeeperMonthEfficiency: () => null,
+}))
+
 vi.mock('./keeper-detail-lists', () => ({
   EquipmentList: () => null,
   RelationshipList: () => null,

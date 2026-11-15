@@ -32,7 +32,10 @@ With no files configured the server uses a self-signed pair under
 `::1` and the bind host when that is one address, and is valid for 365
 days. A boot generates the pair again when a file is missing or unreadable,
 or when the certificate expires within 30 days. `/health` carries the
-expiry under `https_listener.certificate.not_after`.
+expiry under `https_listener.certificate.not_after` in the body it gives a
+requester that may read the server's state: any request on a loopback server
+without strict auth, a request with a verified credential on a server that
+requires a token.
 
 A browser warns about a self-signed certificate. For a local browser without
 the warning, make a certificate the machine trusts with
@@ -83,7 +86,9 @@ The startup banner has a line `HTTPS :8938 → TLS 1.3, ALPN h2 + http/1.1
 TLS 1.3, ALPN h2 and http/1.1` once the accept loop runs.
 
 `/health` and `/api/v1/dashboard/transport-health` carry an `https_listener`
-object:
+object. On `/health` it is in the body of a requester that may read the
+server's state, not in the public probe a server that requires a token gives
+a request without a credential:
 
 | Field | Meaning |
 | --- | --- |

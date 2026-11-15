@@ -58,7 +58,7 @@ type t = {
   mutable account_groups : account_group list;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
-type event = Started of string * string option | Output of string | Input_ready
+type event = Started of string * string option | Output of string | Screen of string | Input_ready
   | Complete of string * authentication | Login_failed of string * string option | Login_error
 type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry | Select_existing of provider
   | Start of { provider : provider; existing : bool }
@@ -561,6 +561,9 @@ let event ~generation t message =
     let text = t.output ^ text in
     (* Visible terminal tail only; this never limits or persists the login. *)
     t.output <- if String.length text>65536 then String.sub text (String.length text-65536) 65536 else text; Nothing
+  | Screen text ->
+    (* The server's terminal drew the whole screen; it replaces the last one. *)
+    t.output <- text; Nothing
   | Input_ready -> t.input_pending <- false; Nothing
   | Complete (reference, authentication) ->
     t.account_ref <- Some reference; t.draft <- ""; t.phase <- Loading;
@@ -914,8 +917,10 @@ let decoder ~integration_id on_event =
            | _ -> Login_error)
         | "output" when !started ->
           (match field "stream" json, field "text" json with
-           | `String ("stdout" | "stderr" | "terminal"), `String text -> Output text
+           | `String ("stdout" | "stderr"), `String text -> Output text
            | _ -> Login_error)
+        | "screen" when !started ->
+          (match field "text" json with `String text -> Screen text | _ -> Login_error)
         | "input_ready" when !started -> Input_ready
         | "error" when field "integration_id" json=`String integration_id && field "invocation_verified" json=`Bool false ->
           (match reference (field "login_id" json), field "account_ref" json with
@@ -927,7 +932,7 @@ let decoder ~integration_id on_event =
            | _ -> Login_error)
         | _ -> Login_error
         with Yojson.Json_error _ -> Login_error in
-      (match ev with Complete _ | Login_failed _ | Login_error -> ended:=true | Started _ | Output _ | Input_ready -> ());
+      (match ev with Complete _ | Login_failed _ | Login_error -> ended:=true | Started _ | Output _ | Screen _ | Input_ready -> ());
       on_event ev);
     name:=""; Buffer.clear data in
   let feed chunk = String.iter (fun c ->

@@ -522,6 +522,118 @@ let test_system_prompt_decodes_workspace_unavailable () =
        | Masc_tui_keeper_config.System_prompt_unavailable _ -> "other unavailable reason"
        | Masc_tui_keeper_config.System_prompt_undecodable d -> "undecodable: " ^ d)
 
+(* The available prompt as dashboard_http_keeper_snapshot.ml system_prompt_json
+   sends it since #48420: the ledger answer always rides beside the text. *)
+let available_prompt ?constitution_ledger () =
+  `Assoc
+    ([ "state", `String "available"
+     ; "effective", `String "be exact"
+     ; "assembled", `String "be exact\n\nworld"
+     ]
+     @ match constitution_ledger with
+       | None -> []
+       | Some ledger -> [ "constitution_ledger", ledger ])
+
+let rejected_row ~line ~line_end ~detail =
+  `Assoc [ "line", `Int line; "line_end", `String line_end; "detail", `String detail ]
+
+let read_ledger rows = `Assoc [ "state", `String "read"; "rejected_lines", `List rows ]
+
+let decoded_ledger label value =
+  match system_prompt_view_of_json (Some value) with
+  | System_prompt_available { effective; constitution_ledger } ->
+    Alcotest.(check string) (label ^ ": prompt text is kept") "be exact" effective;
+    constitution_ledger
+  | System_prompt_unavailable _ -> Alcotest.failf "%s: decoded as unavailable" label
+  | System_prompt_undecodable detail -> Alcotest.failf "%s: undecodable: %s" label detail
+
+let line_end_name = function
+  | Newline_terminated -> "newline_terminated"
+  | Unterminated_final_line -> "unterminated_final_line"
+
+let test_system_prompt_names_the_ledger_lines_it_left_out () =
+  let rejected =
+    available_prompt
+      ~constitution_ledger:
+        (read_ledger
+           [ rejected_row ~line:3 ~line_end:"newline_terminated" ~detail:"expected an object"
+           ; rejected_row ~line:7 ~line_end:"unterminated_final_line" ~detail:"unexpected end"
+           ])
+      ()
+  in
+  (match decoded_ledger "rejected lines" rejected with
+   | Ledger_read lines ->
+     Alcotest.(check (list (triple int string string)))
+       "every rejected line keeps its number, ending and reason"
+       [ 3, "newline_terminated", "expected an object"
+       ; 7, "unterminated_final_line", "unexpected end"
+       ]
+       (List.map (fun { line; line_end; detail } -> line, line_end_name line_end, detail) lines)
+   | Ledger_unreadable { path; _ } -> Alcotest.failf "a read ledger decoded as unreadable %s" path);
+  match decoded_ledger "clean ledger" (available_prompt ~constitution_ledger:(read_ledger []) ()) with
+  | Ledger_read [] -> ()
+  | Ledger_read lines ->
+    Alcotest.failf "a clean ledger decoded %d rejected lines" (List.length lines)
+  | Ledger_unreadable { path; _ } -> Alcotest.failf "a clean ledger decoded as unreadable %s" path
+
+let test_system_prompt_names_a_ledger_it_could_not_reread () =
+  let unreadable =
+    available_prompt
+      ~constitution_ledger:
+        (`Assoc
+           [ "state", `String "unreadable"
+           ; "path", `String "/base/.masc/constitution/articles.jsonl"
+           ; "detail", `String "permission denied"
+           ])
+      ()
+  in
+  match decoded_ledger "unreadable ledger" unreadable with
+  | Ledger_unreadable { path; detail } ->
+    Alcotest.(check (pair string string))
+      "path and detail are carried through"
+      ("/base/.masc/constitution/articles.jsonl", "permission denied")
+      (path, detail)
+  | Ledger_read lines ->
+    Alcotest.failf "an unreadable ledger decoded as read with %d lines" (List.length lines)
+
+let check_prompt_undecodable label value =
+  match system_prompt_view_of_json (Some value) with
+  | System_prompt_undecodable _ -> ()
+  | System_prompt_available _ ->
+    Alcotest.failf "%s decoded as an available prompt: %s" label (Yojson.Safe.to_string value)
+  | System_prompt_unavailable _ ->
+    Alcotest.failf "%s decoded as an unavailable prompt: %s" label (Yojson.Safe.to_string value)
+
+(* Before this reader knew the field, an available prompt decoded the same
+   with or without it, so a TUI operator saw no omission at all (#48421). *)
+let test_system_prompt_without_ledger_is_a_decode_failure () =
+  check_prompt_undecodable "available prompt without constitution_ledger" (available_prompt ())
+
+let test_malformed_ledger_is_a_decode_failure () =
+  List.iter
+    (fun (label, ledger) ->
+      check_prompt_undecodable label (available_prompt ~constitution_ledger:ledger ()))
+    [ "null ledger", `Null
+    ; "ledger without state", `Assoc [ "rejected_lines", `List [] ]
+    ; "unknown ledger state", `Assoc [ "state", `String "partial"; "rejected_lines", `List [] ]
+    ; "read ledger without rejected_lines", `Assoc [ "state", `String "read" ]
+    ; "rejected_lines not a list", `Assoc [ "state", `String "read"; "rejected_lines", `Null ]
+    ; ( "unknown line_end"
+      , read_ledger [ rejected_row ~line:2 ~line_end:"crlf" ~detail:"bad" ] )
+    ; ( "line 0 in a 1-based ledger"
+      , read_ledger [ rejected_row ~line:0 ~line_end:"newline_terminated" ~detail:"bad" ] )
+    ; ( "row without detail"
+      , read_ledger
+          [ `Assoc [ "line", `Int 2; "line_end", `String "newline_terminated" ] ] )
+    ; ( "one bad row among good ones"
+      , read_ledger
+          [ rejected_row ~line:2 ~line_end:"newline_terminated" ~detail:"bad"
+          ; `String "line 5"
+          ] )
+    ; ( "unreadable ledger without path"
+      , `Assoc [ "state", `String "unreadable"; "detail", `String "permission denied" ] )
+    ]
+
 let changed_proactive =
   `Assoc [ "activation_mode", `String "on_demand" ]
 
@@ -852,6 +964,14 @@ let () =
             test_runtime_picker_refuses_unavailable_revision
         ; Alcotest.test_case "system prompt names workspace_unavailable" `Quick
             test_system_prompt_decodes_workspace_unavailable
+        ; Alcotest.test_case "system prompt names the ledger lines it left out" `Quick
+            test_system_prompt_names_the_ledger_lines_it_left_out
+        ; Alcotest.test_case "system prompt names a ledger it could not re-read" `Quick
+            test_system_prompt_names_a_ledger_it_could_not_reread
+        ; Alcotest.test_case "available prompt without the ledger is a decode failure" `Quick
+            test_system_prompt_without_ledger_is_a_decode_failure
+        ; Alcotest.test_case "malformed ledger is a decode failure" `Quick
+            test_malformed_ledger_is_a_decode_failure
         ; Alcotest.test_case "strict composite revision" `Quick
             test_strict_config_revision_decoder
         ; Alcotest.test_case "strict runtime picker revision" `Quick

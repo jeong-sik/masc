@@ -68,7 +68,7 @@ let resolve_tool_read_cwd
   let resolved =
     if raw_cwd = ""
     then Ok (Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta)
-    else resolve_keeper_read_cwd ~config ~meta ~raw_path:raw_cwd
+    else resolve_keeper_read_path ~config ~meta ~raw_path:raw_cwd
   in
   match resolved with
   | Error _ as err -> err
@@ -82,15 +82,23 @@ let resolve_tool_read_cwd
             (Keeper_alerting_path.Cwd_is_file { cwd })))
 
 let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
-  let raw_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
-  if raw_cwd = ""
-  then
+  (* A write-enabled Execute materializes the Keeper's sandbox root before it
+     names any cwd, so a relative cwd such as "." on a fresh Keeper resolves
+     inside it; a read-only one creates nothing. The cwd itself is never
+     created. *)
+  let root =
     if write_enabled
     then keeper_default_write_root ~config ~meta
     else Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta
-  else if Filename.is_relative raw_cwd
-  then Filename.concat (keeper_default_write_root ~config ~meta) raw_cwd
-  else raw_cwd
+  in
+  match
+    host_path_of_keeper_visible_path
+      ~config
+      ~meta
+      (Safe_ops.json_string ~default:"" "cwd" args)
+  with
+  | Some cwd -> cwd
+  | None -> root
 
 (* Existence is asked of the filesystem that holds the tree
    ([cwd_existence], RFC-0427 A-1). On a shared mount the allowed-root
@@ -101,10 +109,7 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
 let resolve_tool_execute_cwd_typed ~remote_workspace_root ~config ~meta ~write_enabled ~args =
   let open Result.Syntax in
   let caller_cwd = Safe_ops.json_string ~default:"" "cwd" args |> String.trim in
-  let raw_path =
-    requested_tool_execute_cwd ~config ~meta ~write_enabled ~args
-    |> keeper_observation_host_path_of_visible_path ~config ~meta
-  in
+  let raw_path = requested_tool_execute_cwd ~config ~meta ~write_enabled ~args in
   let* raw_path = match remote_workspace_root with
     | Some remote_workspace_root ->
       (* Omitted and relative cwd have already become internal coordinates.
@@ -117,8 +122,9 @@ let resolve_tool_execute_cwd_typed ~remote_workspace_root ~config ~meta ~write_e
        | Remote_ssh -> Error (Cwd_namespace_unavailable "remote_ssh_namespace_unresolved")
        | Docker | Micro_vm -> Ok raw_path) in
   (* Execute returns the container-visible cwd. A caller may use that exact
-     directory again; project it through the admitted Keeper's own mount
-     before applying the same confinement and root-identity checks. *)
+     directory again: [requested_tool_execute_cwd] mapped it through the
+     admitted Keeper's own mount, and the same confinement and root-identity
+     checks apply here. *)
   match resolve_keeper_execute_cwd_typed ~config ~meta ~raw_path with
   | Error rejection -> Error (Cwd_rejected rejection)
   | Ok confined ->
@@ -147,12 +153,4 @@ let resolve_tool_read_path
   | Ok cwd ->
     if raw_path = ""
     then Ok cwd
-    else
-      let projected_path =
-        if Filename.is_relative raw_path then Filename.concat cwd raw_path else raw_path
-      in
-      resolve_projected_keeper_read_path
-        ~config
-        ~meta
-        ~raw_for_error:raw_path
-        ~projected_path
+    else resolve_keeper_read_path_in_cwd ~config ~meta ~host_cwd:cwd ~raw_path

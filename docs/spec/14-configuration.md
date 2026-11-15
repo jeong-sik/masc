@@ -422,7 +422,10 @@ explicitly reauthenticates that selection. The server catalog chooses the
 executable. Browser paths and shell commands are not accepted.
 
 The response is SSE: `started` identifies the login and its recovery receipt;
-`output` carries the CLI's instructions; `input_ready` acknowledges delivered
+`output` carries what a CLI writes to its pipes, chunk by chunk; `screen`
+carries the 80 x 24 screen of a CLI that runs in a terminal, its rows down to
+the last that shows text with SGR styles and OSC 8 hyperlinks, and replaces
+the screen before it; `input_ready` acknowledges delivered
 input; `complete` returns an account reference and an authentication observation;
 `error` reports an incomplete operation. These instructions and inputs are
 transient and are not copied into logs or transcripts.

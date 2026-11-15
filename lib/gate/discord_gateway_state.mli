@@ -97,6 +97,17 @@ type resolved_mention =
   ; raw_mention : string
   }
 
+val render_content :
+  self:Connector_self_mention.t ->
+  resolved_mentions:resolved_mention list ->
+  string ->
+  string
+(** Renders a message's [raw_content] for the Keeper bound to its channel.
+    A user mention whose id equals [self]'s [bot_user_id] becomes
+    [@keeper_name]; any other user mention becomes [@name] with the name in
+    [resolved_mentions], and keeps its wire form when Discord supplied none.
+    Role and channel mentions keep their wire form. *)
+
 (** {1 Dispatched events surfaced to caller} *)
 
 (** Re-exported from Discord_gateway_client. Closed sum. *)
@@ -119,7 +130,6 @@ type dispatched_event =
         (** Display name: [author.global_name] when set, else
             [author.username]; [None] only when the payload carries
             neither (RFC-0223 P1). *)
-      ; content : string
       ; attachments : inbound_attachment list
         (** Files Discord says came with the message. Required fields per the
             Attachment object are [id], [filename], [size], [url] and
@@ -132,9 +142,14 @@ type dispatched_event =
             [default_intents], which is what makes this field mean what it
             says. *)
       ; raw_content : string
-        (** Original content before mention resolution. *)
+        (** The message text as Discord sent it, mentions still
+            [<@snowflake>]. {!render_content} names them once the channel
+            binding says who the bot is. *)
       ; resolved_mentions : resolved_mention list
         (** Structured mentions found in [raw_content]. *)
+      ; bot_user_id : string option
+        (** The bot identity this message was decoded against; [mentions_bot]
+            and [explicit_mentions_bot] were judged with it. *)
       ; mention_user_ids : string list
             (* RFC-0232 §3.3: the structured [mentions] member ids are
                kept at decode instead of being reduced to a bot bool;

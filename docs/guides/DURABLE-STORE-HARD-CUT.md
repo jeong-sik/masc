@@ -99,6 +99,28 @@ The files are `.masc/traces/<trace>/history.jsonl` and
 `history.internal.jsonl`. The first refusal names the file and line. The pair
 is the trace's conversation history and the Librarian's named-turn input.
 
+### Keeper reaction ledgers
+
+Files live under
+`.masc/keepers/<keeper>/reaction-ledger/<generation>/YYYY-MM/DD.jsonl`
+(`Keeper_reaction_ledger.store_dir`). A directory of another generation beside
+it is not read. The check reads each Keeper's whole ledger with the read the
+once-only wakes use. `refused` counts lines that are not JSON and rows the
+current decoder refuses. The first refusal names the Keeper's ledger
+directory, then the counts and first reason the server logs. An ACK row whose
+transition receipt holds a Board stimulus without `audience` (#47996) reports
+`first_reason=invalid_transition_receipt`.
+
+The ledger records which once-only wakes were delivered. While a refused row is
+on disk, a wake the ledger does not show delivered is not queued. Connector
+attention and owned job completions read the whole ledger. Ask answers and
+composition completions read it from the UTC day of the answer or submission
+on. Choosing fresh state for a Keeper's ledger deletes that record as well. The
+next ask answer pass then queues again every answered ask the Keeper's ask
+store holds. A first refusal names one Keeper's ledger; run the check again
+after deleting it, since another Keeper's ledger may hold refused rows too. A
+separate fresh base path keeps the old workspace and its ledgers intact.
+
 ### Lane Add-on tool request owners
 
 Librarian original executions and absorption gates are owner records under

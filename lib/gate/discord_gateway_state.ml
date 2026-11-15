@@ -109,17 +109,20 @@ type dispatched_event =
       ; message_id : string
       ; author_id : string
       ; author_name : string option
-      ; content : string
       ; attachments : inbound_attachment list
       ; raw_content : string
-            (* Original message content before mention resolution. Kept so
-               downstream consumers can fall back to snowflakes or render
-               their own mention UI without re-parsing. *)
+            (* The message text as Discord sent it. Mentions stay
+               [<@snowflake>] here; [render_content] names them once the
+               channel binding says who the bot is (#51900). *)
       ; resolved_mentions : resolved_mention list
             (* Structured mentions discovered in [raw_content]. Populated
                for user mentions when names are available; role/channel
                mentions are recorded with [mention_name = None] so callers
                can identify their positions without parsing again. *)
+      ; bot_user_id : string option
+            (* The bot identity this message was decoded against, the same
+               one [mentions_bot] and [explicit_mentions_bot] were judged
+               with. *)
       ; mention_user_ids : string list
             (* RFC-0232 §3.3: the structured [mentions] member ids are
                kept at decode instead of being reduced to a bot bool;
@@ -360,13 +363,11 @@ let content_mentions_user ~user_id content =
 
 (* Discord sends user mentions as [<@snowflake>] (or [<@!snowflake>] for
    nickname-ping).  The structured [mentions] array carries the matching
-   user objects, including [global_name] / [username].  Resolve those
-   snowflakes to human-readable [@DisplayName] so downstream consumers
-   (keeper prompt, dashboard chat) see names instead of raw ids.
-
-   The resolver also records every user/role/channel mention it sees as a
-   structured [resolved_mention], so callers can render tooltips, profile
-   links, or fall back to raw ids without re-parsing the original text. *)
+   user objects, including [global_name] / [username].  Decoding records
+   every user/role/channel mention it sees as a structured
+   [resolved_mention] with the name Discord supplied; [render_content]
+   turns the snowflakes into [@name] text later, once the channel binding
+   is known. *)
 let user_display_name user_json =
   match field_string_opt "global_name" user_json with
   | Some _ as name -> name
@@ -381,33 +382,49 @@ let mention_kind_of_prefix = function
   | "#" -> Some Channel_mention
   | _ -> None
 
-let resolve_mentions ~mentions content =
-  let resolved = ref [] in
-  let content =
-    Re.replace discord_mention_re content ~f:(fun group ->
-      let raw = Re.Group.get group 0 in
-      let prefix = Re.Group.get group 1 in
-      let id = Re.Group.get group 2 in
-      match mention_kind_of_prefix prefix with
-      | None -> raw
-      | Some kind ->
-          let name_opt =
-            match kind with
-            | User_mention -> List.assoc_opt id mentions
-            | Role_mention | Channel_mention -> None
-          in
-          resolved :=
-            { mention_id = id
-            ; mention_name = name_opt
-            ; mention_kind = kind
-            ; raw_mention = raw
-            }
-            :: !resolved;
-          match name_opt with
-          | Some name -> "@" ^ name
-          | None -> raw)
+let parse_mentions ~mentions content =
+  Re.all discord_mention_re content
+  |> List.filter_map (fun group ->
+       let raw = Re.Group.get group 0 in
+       let id = Re.Group.get group 2 in
+       match mention_kind_of_prefix (Re.Group.get group 1) with
+       | None -> None
+       | Some kind ->
+         let mention_name =
+           match kind with
+           | User_mention -> List.assoc_opt id mentions
+           | Role_mention | Channel_mention -> None
+         in
+         Some
+           { mention_id = id; mention_name; mention_kind = kind
+           ; raw_mention = raw })
+
+(* The bot's own mention names the Keeper [self] is bound to; every other
+   user mention takes the name Discord supplied for it, and one without a
+   name keeps its exact wire form. Role and channel mentions stay raw until
+   a guild cache is wired in. *)
+let render_content ~self ~resolved_mentions raw_content =
+  let supplied_name user_id =
+    List.find_map
+      (fun (mention : resolved_mention) ->
+        match mention.mention_kind with
+        | User_mention when String.equal mention.mention_id user_id ->
+          mention.mention_name
+        | User_mention | Role_mention | Channel_mention -> None)
+      resolved_mentions
   in
-  (content, List.rev !resolved)
+  Re.replace discord_mention_re raw_content ~f:(fun group ->
+    let raw = Re.Group.get group 0 in
+    let user_id = Re.Group.get group 2 in
+    match mention_kind_of_prefix (Re.Group.get group 1) with
+    | Some User_mention ->
+      (match Connector_self_mention.label self ~user_id with
+       | Some keeper_name -> "@" ^ keeper_name
+       | None ->
+         (match supplied_name user_id with
+          | Some name -> "@" ^ name
+          | None -> raw))
+    | Some (Role_mention | Channel_mention) | None -> raw)
 
 (* ── Frame parse / encode ──────────────────────────────────────── *)
 
@@ -601,7 +618,7 @@ let decode_message_create ~bot_user_id ~payload =
     | None -> false
     | Some bot_id -> content_mentions_user ~user_id:bot_id raw_content
   in
-  let content, resolved_mentions = resolve_mentions ~mentions raw_content in
+  let resolved_mentions = parse_mentions ~mentions raw_content in
   (* An automated author is either a bot user ([author.bot] = true) or a
      webhook ([webhook_id] present on the message). Discord's own guidance
      is for bots to ignore both so they do not loop on each other. *)
@@ -642,9 +659,9 @@ let decode_message_create ~bot_user_id ~payload =
            ; guild_id
            ; author_id
            ; author_name
-           ; content
            ; raw_content
            ; resolved_mentions
+           ; bot_user_id
            ; mention_user_ids
            ; mentions_bot
            ; explicit_mentions_bot

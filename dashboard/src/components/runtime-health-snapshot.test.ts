@@ -163,7 +163,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
         parameter_policy: {
           reasoning_toggle_wire: 'chat_template_kwargs',
           reasoning_replay_policy: 'preserve',
-          requires_reasoning_replay_on_tool_call: true,
           ignored_sampling_params: ['min_p'],
           always_ignored_sampling_params: ['frequency_penalty'],
         },

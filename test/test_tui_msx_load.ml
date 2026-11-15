@@ -308,6 +308,29 @@ let test_empty_menu_takes_the_first_arriving_row () =
      | Masc_tui_msx.Watch Masc.Machine_lane.Dos -> true
      | _ -> false)
 
+(* A refusal reason above the list wraps so it can be read to its end. However
+   long it is, the list keeps rows: the highlighted row stays drawn, so Enter
+   still loads it instead of answering nothing. *)
+let test_long_reason_keeps_the_highlighted_row () =
+  let state = a_state () in
+  state.msx_carts <- Carts (List.init 30 (Printf.sprintf "cart %02d"));
+  let write _ = () in
+  Masc_tui_msx.open_menu ~write state;
+  for _ = 1 to 24 do
+    ignore (Masc_tui_msx.menu_consume ~write state "down" : Masc_tui_msx.menu_action)
+  done;
+  let reason = String.concat " " (List.init 600 (fun _ -> "refused")) in
+  Masc_tui_msx.render_menu ~write ~status:reason state;
+  check bool "Enter loads the highlighted cartridge" true
+    (is_load "cart 24" (Masc_tui_msx.menu_consume ~write state "\r"));
+  (* Ten words fill a 79-cell row exactly, so the row the mark ends has no
+     room left for it unless that row is wrapped narrower. *)
+  let rows = Masc_tui_msx.reason_rows ~cols:80 ~room:3 reason in
+  check int "the reason keeps to its room" 3 (List.length rows);
+  check bool "its last row ends after a whole word with the cut mark" true
+    (String.ends_with ~suffix:(" refused " ^ Masc_tui_message_layout.cut_mark)
+       (String.trim (List.nth rows 2)))
+
 let () =
   run "MSX screen"
     [ ( "spectator"
@@ -330,6 +353,8 @@ let () =
             test_dos_row_arriving_keeps_the_highlight
         ; test_case "an empty menu takes the first arriving row" `Quick
             test_empty_menu_takes_the_first_arriving_row
+        ; test_case "a long reason keeps the highlighted row" `Quick
+            test_long_reason_keeps_the_highlighted_row
         ] )
     ; ( "live"
       , [] )

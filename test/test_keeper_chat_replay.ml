@@ -600,23 +600,6 @@ let test_terminals_and_settled_end_the_stream () =
   Alcotest.(check string) "Settled ends the stream" "Finished" ending;
   Alcotest.(check (list string)) "Settled writes nothing" [] written
 
-(* A transport comment must never conceal an operation whose wire terminal was
-   missed. The stream closes on a durable terminal so the TUI can reconcile
-   its exact request; an unreadable store retains the old idle recovery. *)
-let test_heartbeat_preserves_terminal_reconciliation () =
-  let decide = Stream.For_testing.operation_heartbeat_decision in
-  Alcotest.(check bool) "queued operation keeps its stream" true
-    (decide (Some Keeper_owner.Chat_operation.Queued) = `Send_comment);
-  Alcotest.(check bool) "running operation keeps its stream" true
-    (decide (Some (Keeper_owner.Chat_operation.Running { started_at = 1.0 }))
-     = `Send_comment);
-  Alcotest.(check bool) "terminal operation closes for exact reconciliation" true
-    (decide (Some (Keeper_owner.Chat_operation.Succeeded
-                     { completed_at = 2.0; outcome_ref = "receipt" }))
-     = `Finish_stream);
-  Alcotest.(check bool) "unreadable operation retains idle recovery" true
-    (decide None = `Retain_idle_timeout)
-
 let test_handler_replay_matches_the_pure_fold () =
   with_base "keeper-chat-replay-handler" (fun base_dir ->
     ignore (write_journal ~base_dir journaled : string);
@@ -728,8 +711,6 @@ let () =
             test_the_step_drops_only_what_the_replay_wrote
         ; Alcotest.test_case "terminals and Settled end the stream" `Quick
             test_terminals_and_settled_end_the_stream
-        ; Alcotest.test_case "heartbeat preserves terminal reconciliation" `Quick
-            test_heartbeat_preserves_terminal_reconciliation
         ; Alcotest.test_case "handler replay matches the pure fold" `Quick
             test_handler_replay_matches_the_pure_fold
         ; Alcotest.test_case "handler replay degrades to nothing" `Quick

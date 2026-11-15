@@ -6,7 +6,8 @@
 
     A client that addresses one workspace sends both headers, each holding the
     absolute, canonical path it expects -- the [paths.effective_base_path] and
-    [paths.effective_masc_root] that [/health] reports. The server compares
+    [paths.effective_masc_root] that the reader's [/health] reports, the body
+    the server gives a requester that may read its state. The server compares
     them as strings with the paths it serves, resolved for that request the
     way [/health] resolves them. A path spelled another way (a trailing slash,
     a symlink) is a different workspace. A request without either header is
@@ -55,6 +56,16 @@ val refusal_code : refusal -> string
 (** The [code] a refusal carries in its [Server_refusal] body:
     ["invalid_workspace_precondition"], ["workspace_precondition_failed"] or
     ["server_booting"]. Clients branch on it. *)
+
+val refusal_http_status : refusal -> int
+(** 400 for a malformed precondition, 409 for another workspace, 503 while
+    booting: the status [Server_workspace_precondition] answers with. *)
+
+val refusal_of_answer : status:int -> code:string -> error:string -> refusal option
+(** The refusal a client reads back from an answer: the one whose
+    {!refusal_http_status} is [status] and whose {!refusal_code} is [code], or
+    [None] when the answer is not one of these refusals. [error] is the
+    body's sentence, kept as the reason of [Invalid_precondition]. *)
 
 val refusal_message : refusal -> string
 (** The sentence a person reads. It names no server path. *)

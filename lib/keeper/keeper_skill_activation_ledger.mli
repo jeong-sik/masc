@@ -261,7 +261,9 @@ val install_commit_state_observer :
     successful commit, delivered under the session lock. [None] means an
     append was attempted but its outcome is uncertain, delivered after the
     lock; consumers must invalidate rather than retain a guessed ledger.
-    Returns a restoration that affects only this registration. *)
+    Either call comes before the commit observer and the dataset event, so a
+    reader they wake sees the new state. Returns a restoration that affects
+    only this registration. *)
 
 val store_error_to_string : store_error -> string
 val store_error_code : store_error -> string

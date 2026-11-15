@@ -16,22 +16,26 @@ let sanitize_log_value ?(max_bytes = 240) s =
     without_controls
   |> String_util.to_string
 
+(* [error] arrives already bounded by [sanitize_log_value]. *)
+let record_workspace_route_failure ~warn_on_failure ~site ~path error =
+  let site = sanitize_log_value ~max_bytes:64 site in
+  let path = sanitize_log_value ~max_bytes:180 path in
+  Otel_metric_store.inc_counter Otel_metric_store.metric_workspace_route_failures
+    ~labels:[("site", site)]
+    ();
+  if warn_on_failure then
+    Log.Server.warn "workspace route %s failed path=%s err=%s"
+      site path error
+  else
+    Log.Server.debug "workspace route %s failed path=%s err=%s"
+      site path error
+
 let observe_workspace_route_failure ?(warn_on_failure = true) ~site ~path exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      let site = sanitize_log_value ~max_bytes:64 site in
-      let path = sanitize_log_value ~max_bytes:180 path in
-      let error = sanitize_log_value (Printexc.to_string exn) in
-      Otel_metric_store.inc_counter Otel_metric_store.metric_workspace_route_failures
-        ~labels:[("site", site)]
-        ();
-      if warn_on_failure then
-        Log.Server.warn "workspace route %s failed path=%s err=%s"
-          site path error
-      else
-        Log.Server.debug "workspace route %s failed path=%s err=%s"
-          site path error
+      record_workspace_route_failure ~warn_on_failure ~site ~path
+        (sanitize_log_value (Printexc.to_string exn))
 
 let workspace_or_default ?(warn_on_failure = true) ~site ~path ~default f =
   try f () with
@@ -121,6 +125,23 @@ let json_error message =
 
 let json_response ~status req reqd json =
   Http.Response.json_value ~status ~request:req json reqd
+
+(* A failed Git run is logged as its whole argv and then its standard error. A
+   search's argv carries a query of up to 200 bytes after about a hundred bytes
+   of flags, so the 240 bytes an exception's text is given would cut the reason
+   off; 4 KiB keeps it. *)
+let read_failure_log_max_bytes = 4096
+
+(* HIGH-RISK-UNREVIEWED: the 500 of a Public_read workspace route whose Git run
+   or file system read failed. [detail] is Git's argv and standard error or an
+   exception's text, and either can name a file of the host. It goes to the
+   server log only; the body is the fixed sentence of every 500 the HTTP layer
+   writes (#48500, #51902). *)
+let respond_read_failed ~site ~path request reqd detail =
+  record_workspace_route_failure ~warn_on_failure:true ~site ~path
+    (sanitize_log_value ~max_bytes:read_failure_log_max_bytes detail);
+  json_response ~status:`Internal_server_error request reqd
+    (json_error Http_error_body.internal_server_error)
 
 (* Strip CR/LF and other control characters from a value before placing
    it into an HTTP response header. RFC 7230 §3.2.4 prohibits CR/LF in
@@ -1480,16 +1501,17 @@ let handle_workspace_files_get
                                       catalog.catalog_paths))
                    ])
           | Error error ->
-              let status, message =
-                match error with
-                | Catalog_invalid_path -> `Bad_request, "Invalid path"
-                | Catalog_directory_unavailable ->
-                    `Not_found, "The selected directory is unavailable"
-                | Catalog_repository_unavailable ->
-                    `Not_found, "Open a Git repository directory to find files"
-                | Catalog_scan_failed detail -> `Internal_server_error, detail
+              let refuse status message =
+                json_response ~status request reqd (json_error message)
               in
-              json_response ~status request reqd (json_error message)
+              (match error with
+               | Catalog_invalid_path -> refuse `Bad_request "Invalid path"
+               | Catalog_directory_unavailable ->
+                   refuse `Not_found "The selected directory is unavailable"
+               | Catalog_repository_unavailable ->
+                   refuse `Not_found "Open a Git repository directory to find files"
+               | Catalog_scan_failed detail ->
+                   respond_read_failed ~site:"workspace_files" ~path request reqd detail)
 
 let handle_git_branches_get
     (state : Server_route.state)
@@ -1517,16 +1539,17 @@ let handle_git_branches_get
               json_response_with_source ~status:`OK ~source request reqd
                 (workspace_branches_json found)
           | Error error ->
-              let status, message =
-                match error with
-                | Branches_invalid_path -> `Bad_request, "Invalid path"
-                | Branches_directory_unavailable ->
-                    `Not_found, "The selected directory is unavailable"
-                | Branches_repository_unavailable ->
-                    `Not_found, "Open a Git repository directory to list branches"
-                | Branches_failed detail -> `Internal_server_error, detail
+              let refuse status message =
+                json_response ~status request reqd (json_error message)
               in
-              json_response ~status request reqd (json_error message)
+              (match error with
+               | Branches_invalid_path -> refuse `Bad_request "Invalid path"
+               | Branches_directory_unavailable ->
+                   refuse `Not_found "The selected directory is unavailable"
+               | Branches_repository_unavailable ->
+                   refuse `Not_found "Open a Git repository directory to list branches"
+               | Branches_failed detail ->
+                   respond_read_failed ~site:"git_branches" ~path request reqd detail)
 
 let handle_git_worktrees_get
     (state : Server_route.state)
@@ -1554,16 +1577,17 @@ let handle_git_worktrees_get
               json_response_with_source ~status:`OK ~source request reqd
                 (workspace_worktrees_json found)
           | Error error ->
-              let status, message =
-                match error with
-                | Worktrees_invalid_path -> `Bad_request, "Invalid path"
-                | Worktrees_directory_unavailable ->
-                    `Not_found, "The selected directory is unavailable"
-                | Worktrees_repository_unavailable ->
-                    `Not_found, "Open a Git repository directory to list worktrees"
-                | Worktrees_failed detail -> `Internal_server_error, detail
+              let refuse status message =
+                json_response ~status request reqd (json_error message)
               in
-              json_response ~status request reqd (json_error message)
+              (match error with
+               | Worktrees_invalid_path -> refuse `Bad_request "Invalid path"
+               | Worktrees_directory_unavailable ->
+                   refuse `Not_found "The selected directory is unavailable"
+               | Worktrees_repository_unavailable ->
+                   refuse `Not_found "Open a Git repository directory to list worktrees"
+               | Worktrees_failed detail ->
+                   respond_read_failed ~site:"git_worktrees" ~path request reqd detail)
 
 (* HIGH-RISK-UNREVIEWED: this route returns lines of file content. Every
    path in the answer has passed [vetted_regular_file], the same guard the
@@ -1623,21 +1647,22 @@ let handle_workspace_search_get
                      ; ("truncated", `Bool found.search_truncated)
                      ])
             | Error error ->
-                let status, message =
-                  match error with
-                  | Search_invalid_query ->
-                      ( `Bad_request
-                      , Printf.sprintf
-                          "q must be %d to %d bytes of valid UTF-8 without line breaks or control characters"
-                          search_query_min_bytes search_query_max_bytes )
-                  | Search_invalid_path -> `Bad_request, "Invalid path"
-                  | Search_directory_unavailable ->
-                      `Not_found, "The selected directory is unavailable"
-                  | Search_repository_unavailable ->
-                      `Not_found, "Open a Git repository directory to search"
-                  | Search_failed detail -> `Internal_server_error, detail
+                let refuse status message =
+                  json_response ~status request reqd (json_error message)
                 in
-                json_response ~status request reqd (json_error message)))
+                (match error with
+                 | Search_invalid_query ->
+                     refuse `Bad_request
+                       (Printf.sprintf
+                          "q must be %d to %d bytes of valid UTF-8 without line breaks or control characters"
+                          search_query_min_bytes search_query_max_bytes)
+                 | Search_invalid_path -> refuse `Bad_request "Invalid path"
+                 | Search_directory_unavailable ->
+                     refuse `Not_found "The selected directory is unavailable"
+                 | Search_repository_unavailable ->
+                     refuse `Not_found "Open a Git repository directory to search"
+                 | Search_failed detail ->
+                     respond_read_failed ~site:"workspace_search" ~path request reqd detail)))
 
 let handle_git_status_get
     (state : Server_route.state)
@@ -1673,8 +1698,7 @@ let handle_git_status_get
       else
         (match Repo_git.status_snapshot_at ~local_path:base () with
          | Error detail ->
-             json_response ~status:`Internal_server_error request reqd
-               (json_error detail)
+             respond_read_failed ~site:"git_status" ~path:base request reqd detail
          | Ok (changes, branch) ->
              json_response_with_source ~status:`OK ~source request reqd
                (Server_git_status_json.snapshot ~scope ~branch ~changes))

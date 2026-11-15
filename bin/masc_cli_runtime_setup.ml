@@ -139,8 +139,8 @@ let configure ~base_path ~port ~agent ~request_path =
       Eio_context.set_net (Eio.Stdenv.net env);
       Eio_context.set_clock (Eio.Stdenv.clock env);
       let clock = Eio.Stdenv.clock env in
-      (* With no server answering on the port, the command is the writer:
-         then nothing else writes the file and no reader is waiting. *)
+      (* With no process holding the workspace lease, the command is the
+         writer: then nothing else writes the file and no reader is waiting. *)
       let locally () =
         report
           (Batch.configure ~binary:Sys.executable_name ~base_path

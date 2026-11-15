@@ -3,11 +3,11 @@ rfc: "provider-path-rest"
 title: "사용량 제한은 그 경로만 쉬게 하고, Keeper 는 다음에 보낼 경로의 쉼만 기다린다"
 status: Draft
 created: 2026-09-15
-updated: 2026-11-10
+updated: 2026-11-15
 author: claude
 supersedes: []
 superseded_by: null
-related: ["0433", "0370", "exact-lane-waits-for-a-stated-reset"]
+related: ["0433", "0370", "exact-lane-waits-for-a-stated-reset", "a-restarted-server-keeps-the-resets-providers-stated"]
 ---
 
 # RFC: 사용량 제한은 그 경로만 쉬게 한다 (provider-path-rest)
@@ -360,11 +360,133 @@ terminal 로 끝내게 한다. RFC-0433 의 "새 fail-closed 경로를 만들지
 > 2026-11-10: exact lane 부분은 RFC-exact-lane-waits-for-a-stated-reset 이 정한다. provider 가
 > 말한 시각 전에는 그 slot 을 부르지 않고, 모두 기다리면 호출 없이 typed 결과로 끝낸다.
 > 시각 없는 쉼은 순서만 바꾼다. Keeper turn walk 부분은 이 절에 남는다.
+>
+> 2026-11-15: Keeper turn walk 의 말한 시각 부분은 6.1 이 정한다. 시각 없는 쉼은 그대로 순서만 바꾼다.
+
+### 6.1 Keeper walk 도 provider 가 말한 시각 전에는 부르지 않는다 (2026-11-15)
+
+#### 계기
+
+2026-11-15 07:36Z 에 같은 claude_code 계정으로 Keeper 셋이 20초 사이에 차례로 거절당했다.
+
+- 07:36:57 `kidsnote-slack-reader` 가 거절당했다. 계정의 7일 한도가 찼다. provider 는 풀리는 시각을 말했고, masc 는 그 시각을 한도 표(`Runtime_quota_window`)에 적었다.
+- `masc-productor-owner` 는 07:36:54 에 시도를 시작했고 07:37:00 에 요청을 보냈다. 07:37:04 에 거절당했다.
+- `wkbl-data` 는 07:37:12 에 턴을 시작했다. 07:37:17 에 거절당했다.
+
+뒤의 두 호출은 보내기 전에 결과가 정해져 있었다. 표에 그 계정의 풀리는 시각이 이미 있었다.
+
+#### 왜 부르나
+
+- Keeper 는 자기 턴이 실패한 뒤에만 그 시각을 기다린다. heartbeat 는 실패하거나 쉰 턴 뒤에만 대기를 정한다(`Keeper_heartbeat_loop.after_failure_of_cycle_outcome`). 턴이 쉼(`Turn_rested`)으로 끝나는 것도 그 턴의 호출이 거절된 뒤다(`Keeper_turn_driver.provider_rest_of_failure`).
+- 턴 안의 walk 는 표를 순서로만 읽는다(`Runtime_candidate_standing.order`). 쉬는 후보를 뒤로 밀 뿐이고, 앞에 부를 후보가 없으면 쉬는 후보를 부른다.
+- 그래서 다른 Keeper 의 거절이 적은 시각은 이 Keeper 의 첫 호출을 막지 못한다. 첫 호출이 실패한 뒤의 대기만 그 시각에 맞춘다.
+- exact lane 은 같은 표를 읽고 그 시각 전에는 부르지 않는다(RFC-exact-lane-waits-for-a-stated-reset R1). 판정 함수 `Runtime_candidate_standing.stated_until` 이 이미 있다.
+
+#### 잰 것
+
+`docs/evidence/stated-reset-refusals-2026-11/` 의 스크립트로 서버 로그를 읽었다. 기간은 2026-11-10 00:00Z 부터 11-15 10:00Z 까지이고, 그동안 서버가 29번 시작했다. 같은 provider 행에 같거나 늦은 시각이 보내기 전에 적혀 있었는지 본다.
+
+| heartbeat 턴의 한도 거절(풀리는 시각까지 기다린 것) | 보낸 때 기준 | 시도 시작 기준 |
+|---|---:|---:|
+| 전체 | 155 | 155 |
+| 같은 프로세스의 다른 Keeper 가 먼저 적었다 | 41 | 33 |
+| 자기 앞선 거절만 적었다 | 1 | 1 |
+| 앞선 프로세스만 적었다(재시작이 잊었다) | 69 | 77 |
+| 처음 들은 시각 | 39 | 39 |
+| 보낸 때를 모른다(Agent Core HTTP) | 5 | 5 |
+
+- 「보낸 때」는 공식 client 의 `turn composition:` 줄이다. 그 줄을 쓰지 않는 runtime 은 시도 시작이다. 「시도 시작」은 후보 시도 안에서 찍히는 `agent started` 줄이다.
+- 41건은 Keeper 17명이 냈다. provider 는 claude_code 39건, muse_serve 2건이다. 앞선 거절과 이 호출 사이는 중앙값 39초, 가장 길게 26분이다.
+- K1 은 후보를 부르기 직전, 시도를 시작하기 전에 표를 읽는다. 그래서 막는 몫은 「시도 시작 기준」 33건에 가깝다. 나머지 8건은 시도를 시작한 뒤 보내기 전에 다른 Keeper 가 시각을 적은 경우다. 계기의 `masc-productor-owner` 가 여기에 든다. 아래 「받아들이는 틈」에 적는다.
+- 이 숫자는 아래 한계다.
+  - 표는 scope 로 묶는데 스크립트는 provider 행으로 묶는다. 두 행이 scope 를 나눠 쓰면 따로 센다.
+  - 채팅 턴, 다음 후보로 넘어가 성공한 턴의 거절, lane 실행은 세지 못했다. 그 로그 줄은 provider 행을 적지 않는다.
+  - 같은 기간 agent-core 기록(`agent_failed`, `provider_error_hard_quota`)은 506번이고, 그중 451번이 시각을 말했다.
+- 69건은 이 절이 줄이지 않는다. 재시작 뒤 첫 거절은 RFC-a-restarted-server-keeps-the-resets-providers-stated 가 다룬다. 그 RFC §6 의 첫 결정에 이 숫자를 보탠다.
+
+#### 규칙
+
+- **K1.** Keeper walk 는 후보를 부르기 직전에 `Runtime_candidate_standing.stated_until` 을 읽는다. 값이 있으면 그 후보를 부르지 않는다. exact lane 과 같은 함수이고 같은 표다. 읽는 자리는 `attempt_runtime_candidates` 에서 후보마다 한 번이다. walk 를 시작할 때 한 번만 읽지 않는다. 같은 walk 의 앞 후보가 거절되면서 뒤 후보의 scope 에 시각을 적을 수 있다.
+- **K2.** 건너뛴 후보는 「불러서 자기 계정 사정으로 거절된 후보」와 같게 다룬다. 호출만 없다(exact lane R5). walk 는 다음 후보로 간다. 실패 시도 표시(`note_failed_attempt`)는 남기지 않는다. 한도 거절도 지금 그 표시를 남기지 않는다.
+- **K3.** walk 의 모든 후보를 건너뛰면 호출 없이 끝난다.
+  - 결과는 typed 오류 하나다. 가장 이른 풀리는 시각과 그 시각의 후보를 싣는다. walk 는 이 오류를 lane 오류(`lane_terminal`)로 내고, 오류의 후보는 그 후보다.
+  - 이 턴은 실패가 아니라 쉼(`Turn_rested`)으로 끝난다. `provider_rest_of_failure` 는 오류에 실린 시각과 후보로 쉼을 만든다. assignment 의 새 walk 를 다시 읽지 않는다. 턴의 walk 가 assignment 의 walk 보다 좁을 수 있기 때문이다(미디어로 거른 walk, 이어가는 suffix). 머리를 다시 읽으면 넓은 walk 의 머리가 쉬지 않는다는 이유로 쉼이 사라지고, 같은 좁은 walk 가 다시 돈다.
+  - heartbeat 의 대기는 그 시각이 지나거나 dispatch snapshot 이 바뀔 때(배정, lane, binding 편집) 끝난다. walk 머리가 쉬지 않는다는 이유로는 끝나지 않는다. 대기 근거(`wait_basis`)에 이 경우의 갈래를 하나 더한다. 호출이 없었으므로 `Failure_response` 가 아니다.
+  - 불러서 Retry-After 와 함께 429 를 받은 턴은 지금처럼 실패로 끝나고, heartbeat 가 3.1 표로 기다린다. 호출이 없는 K3 만 쉼이다. 두 경우 모두 다음 호출은 그 시각 뒤다.
+  - 쉰 턴은 지금처럼 자극을 소비하지 않는다.
+- **K4.** masc 가 정한 쉼은 지금처럼 순서만 바꾼다. 시각 없는 고갈(`Observed_until`)과 Retry-After 없는 rate limit 이 여기에 든다(RFC-0433). `stated_until` 은 이 둘에 값을 주지 않는다.
+- **K5.** 「마지막 후보」는 「남은 후보 중 지금 부를 수 있는 후보가 없다」로 읽는다. 실패를 기록한 뒤에 판정한다. 그래서 앞 후보가 실제로 불려 실패했고 남은 후보가 모두 기다리면, 실패한 후보가 마지막 후보다. 그 뒤는 지금의 마지막 후보와 같다. lane 을 대표하는 overflow 가 이기고, 같은 경로 이어가기(`defer_to_the_failed_path`)를 보고, 그 실패로 끝난다. 지금 코드는 마지막을 `rest = []` 로 판정한다. 그대로 두면 기다리는 후보만 남은 walk 가 「exhausted all candidates」 문자열 오류로 끝난다.
+
+새 저장 상태는 없다. 표는 프로세스 메모리에 있고 재시작하면 잊는다(exact lane 3.5). 지우는 규칙도 그대로다. 시각이 지나면 읽을 때 지운다. 성공은 말한 리셋을 지우지 않는다(`Runtime_quota_window.note_succeeded`). K1 은 `attempt_runtime_candidates` 를 지나는 walk 모두에 걸린다. heartbeat 턴, 채팅 턴, `One_shot_walk` 가 같다.
+
+scope 는 계정이 아니다. credential 참조, client home, 또는 provider 행이다(`Runtime_quota_window.scope_of_credential`, `scope_of_claude_code_home`). 두 runtime 행이 credential 하나를 나눠 쓰면 함께 기다린다. 같은 계정이라도 scope 가 다르면 따로 판정되고, 각 scope 가 한 번씩 거절된다. 지금과 같다.
+
+#### 상황별 동작
+
+| 상황 | 지금 | 바뀐 뒤 |
+|---|---|---|
+| tick N 에 Keeper A 가 거절됨, tick N+1..N+M 에 B·C 가 같은 scope 의 후보를 가진 채 턴 시작 | 순서가 그 후보를 뒤로 민다. 앞 후보가 모두 실패하거나 그 후보뿐이면 B·C 가 한 번씩 거절된 뒤 기다린다 | 그 후보를 부르지 않는다. 앞 후보가 모두 실패했으면 그 실패로 끝난다(K5). 그 후보뿐이면 호출 없이 그 시각까지 쉰다(K3) |
+| 쉬는 동안 wake 가 옴 | 첫 거절 전에는 턴이 떠서 부른다 | K3 로 쉰 턴 뒤의 대기는 wake 가 끊지 못한다(4절 P) |
+| 풀리는 시각이 지남 | 부른다 | 부른다 |
+| 위임: B 가 새 채팅 작업을 받았고 B 의 후보가 모두 기다림 | 부르고 거절된다. 작업은 실패로 끝난다. 도구 결과를 저장한 뒤의 같은 경로 이어가기만 `retry_not_before` 로 미룬다 | 부르지 않는다. 작업은 K3 오류로 끝난다. 이어가는 작업은 지금처럼 suffix 머리가 쉬면 그 시각까지 미룬다(3.4) |
+| context window 초과로 다음 후보로 넘어갔는데 다음 후보가 기다림 | 그 후보를 부르고 거절된다 | 건너뛴다. 남은 후보가 없으면 초과 오류로 끝난다(K5) |
+| 공식 CLI(home h) → API(credential k) → 공식 CLI(home h), 첫 CLI 가 시각과 함께 거절되고 API 가 다시 시도할 수 있는 오류로 실패 | 세 번째 후보를 불러 또 거절된다 | 세 번째 호출만 없어진다. walk 는 API 의 실패로 끝난다(K5) |
+
+새 채팅 작업을 그 시각까지 Queued 로 미루는 일은 이 절에 넣지 않는다. 미루려면 이어갈 체크포인트가 있어야 하는데, 호출 전의 새 작업에는 없다.
+
+#### 받아들이는 틈
+
+- **시도 시작과 보내기 사이.** K1 은 시도를 시작하기 전에 읽는다. 공식 client 는 그 뒤 prompt 를 짓고 프로세스를 띄운 다음 보낸다. 그 사이 다른 Keeper 가 같은 scope 에 시각을 적으면 이번 호출은 나간다. 잰 기간에 8건이었다. 호출 하나마다 한 번이고 반복되지 않는다. 다음 턴은 K1 이 걸러 낸다. exact lane 의 「HTTP 의 틈」(exact lane 3.5)과 같은 종류다. 막으려면 client 가 보내기 직전에 다시 읽고 typed 결과로 돌아와야 한다. runtime 마다 보내는 자리가 달라서 이 절에 넣지 않는다.
+- **이미 떠 있는 호출.** 적히기 전에 보낸 호출은 그대로 거절된다.
+
+#### 하지 않는 것
+
+- 시각 없는 쉼을 배제로 바꾸지 않는다(K4).
+- 표를 저장하지 않는다.
+- 운영자가 한도를 일찍 올렸을 때 푸는 장치를 만들지 않는다. exact lane 3.5 와 같다.
+- 새 Gate, 새 저장 상태, 새 설정 값을 더하지 않는다.
+
+RFC-0433 과는 exact lane RFC 2절과 같은 이유로 부딪히지 않는다. RFC-0433 의 안전선은 시각 없는 표시가 배제로 바뀌는 것을 막는다. K1 은 provider 가 말한 시각만 읽고, 그 쉼은 그 시각에 끝난다.
+
+#### 고치는 문장 (구현과 같이)
+
+구현 PR 이 같이 고친다. 이 RFC 만으로는 동작이 바뀌지 않으므로 지금은 고치지 않는다.
+
+- RFC-0433 8절 앞의 2026-11-11 메모. 지금은 exact lane 만 적는다. Keeper walk 도 같은 범위라고 적는다.
+- RFC-a-restarted-server-keeps-the-resets-providers-stated 1.2 「Keeper walk 에서 이 표는 순서 선호다. 미뤄진 후보도 남은 후보가 없으면 부른다」와 3절 「Keeper 를 막기 … 순서 선호다」. 말한 시각은 Keeper walk 도 지킨다고 적는다. 3절 「재시작과 무관한 반복 거절 … 따로 조사할 일이다」에는 이 절의 측정을 잇는다.
+- `runtime_quota_window.mli` 모듈 설명 「For a Keeper walk it is an ordering preference, not an admission gate」. 시각 없는 쉼에만 맞는 말로 좁힌다.
+- RFC-exact-lane-waits-for-a-stated-reset 1.3 과 4절의 「Keeper turn walk」 줄.
+
+#### 구현 순서
+
+1. `Runtime_candidate_standing.stated_until` 을 `.mli` 로 내보낸다. 지금은 `order_exact` 만 부른다.
+2. `attempt_runtime_candidates` 에 K1·K2·K5 를 넣고, K3 의 typed 오류를 `Keeper_internal_error` 에 더한다.
+3. `Keeper_runtime_failure_route` 에 K3 의 class 를, `Keeper_turn_driver.wait_basis` 에 K3 대기의 갈래를 더한다. `provider_rest_of_failure`, `next_dispatch_after_failure`, heartbeat 의 대기 끊기(`provider_wait_interrupt`)의 match 를 컴파일러가 멈춘 곳마다 이름으로 채운다.
+4. 위 「고치는 문장」.
+
+#### 검증
+
+- `attempt_runtime_candidates`:
+  - 머리 후보에 말한 시각이 있으면 `run_attempt` 가 그 후보로 불리지 않고 다음 후보로 불린다.
+  - 모든 후보가 기다리면 `run_attempt` 가 한 번도 불리지 않는다. K3 오류가 가장 이른 시각과 그 후보를 싣는다.
+  - 앞 후보의 거절이 같은 scope 에 시각을 적으면, 같은 walk 의 뒤 후보를 부르지 않는다.
+  - 실제 실패 뒤 남은 후보가 모두 기다리면 그 실패로 끝난다. overflow 가 있으면 overflow 로 끝난다(K5).
+  - 시각 없는 고갈과 Retry-After 없는 429 는 지금처럼 부른다(K4).
+- `provider_rest_of_failure`: K3 오류는 오류에 실린 시각의 쉼이다. assignment 의 walk 머리가 쉬지 않아도 쉼이다. 그 대기는 wake 로도, 머리가 쉬지 않는다는 이유로도 끊기지 않고, dispatch snapshot 이 바뀌면 끊긴다(#34653 회귀 시험 유지).
+- 채팅: 새 작업은 K3 오류로 끝난다. 이어가는 작업의 `retry_not_before` 는 그 시각이다.
+- `One_shot_walk`: K3 오류를 받은 호출처가 그것을 후보의 실패로 읽는지 시험으로 정한다. 건너뛴 후보에는 `on_attempt_error` 가 불리지 않는다.
+- 배포 뒤 실측: 이 절의 스크립트를 다시 돌린다. 「시도 시작 기준」의 다른 Keeper 몫이 0 인지 본다. 「보낸 때 기준」에 남는 것이 받아들이는 틈뿐인지 본다.
+
+#### 확인 못 한 것
+
+- 채팅 턴과 다음 후보로 넘어간 거절이 scope 별로 몇 번인지. 로그가 provider 행을 적지 않는다.
+- `known_from_itself` 1건이 어느 길로 나갔는지. 자기 대기 중에 같은 행을 다시 불렀다. wake 로 뜬 턴인지 채팅 턴인지 보지 않았다.
+- Agent Core HTTP 실행 5건의 보낸 때. 시작 줄이 Keeper 이름을 적지 않는다.
 
 ## 7. 고르지 않은 대안
 
 - **cap·floor 숫자만 줄이기**: 누가 쉬는가를 그대로 두고 증상만 누른다. 거부한다.
-- **Phase 2 를 먼저**: walk 에 admission 을 넣는 일은 RFC-0433 을 뒤집는다. 드라이버가 이미
+- **Phase 2 를 먼저**: 시각 없는 쉼까지 walk 에서 빼는 admission 은 RFC-0433 을 뒤집는다. 말한 시각만 빼는 일은 6.1 이 다룬다. 드라이버가 이미
   고른 경로를 heartbeat 가 읽게 하는 것만으로 측정한 13건 중 6건이 풀린다.
 - **cadence 유지**: 힌트가 있어도 cadence 로 올리는 것은 provider 가 말한 사실을 버리는 일이다.
 

@@ -3,7 +3,7 @@ rfc: "exact-lane-waits-for-a-stated-reset"
 title: "exact lane 은 provider 가 말한 시각 전에는 그 slot 을 부르지 않는다"
 status: Draft
 created: 2026-11-09
-updated: 2026-11-10
+updated: 2026-11-15
 author: claude
 supersedes: []
 superseded_by: null
@@ -64,7 +64,7 @@ Keeper turn walk 는 바꾸지 않는다.
 - RFC-exact-lane-walks-one-slot-list §3.5 는 「어느 슬롯도 목록에서 지우지 않는다. 쉬는 슬롯도 차례가 오면 부른다」고 정했다(:179). 근거로 헌법 `no_wall_clock_death` 를 든다(:181).
 - `runtime_quota_window.mli:13-16` 과 `runtime_exact_lane_backpressure.mli:13-15` 도 같은 결정을 적는다. 뒤쪽은 근거로 RFC-0370 §3.3 을 든다. 그런데 RFC-0370 §3.3 본문은 반대다. 「소진된 창의 runtime은 후보 목록에 이름이 오르지 않고, `resets_at` 경과로 자연 복귀」(RFC-0370:160-165).
 - RFC-provider-path-rest §6 은 「walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed terminal 로 끝내게 한다」를 Phase 2 로 미뤘다(:356-358). RFC-0433 과 부딪힌다는 이유였다.
-- Keeper turn walk 는 이미 provider 가 말한 시각까지 기다린다. 쉬는 경로는 그 시각까지 뒤로 가고, 맨 앞 경로가 쉬면 걷기를 가장 이른 시각까지 미룬다(`keeper_turn_driver.ml:416-421`, `:491-494`). 성공은 말한 리셋 기록을 지우지 않는다(`runtime_quota_window.ml:80-88`). 말한 시각을 순서로만 읽는 것은 exact lane 뿐이다.
+- Keeper turn walk 는 자기 턴이 실패한 뒤에만 provider 가 말한 시각까지 기다린다. 쉬는 경로는 그 시각까지 뒤로 가고, 실패한 턴 뒤 새 walk 의 맨 앞 경로가 쉬면 다음 턴을 가장 이른 시각까지 미룬다(`Keeper_turn_driver.next_dispatch_after_failure`). 턴 안의 walk 는 말한 시각도 순서로만 읽는다. 그래서 다른 Keeper 의 거절이 적은 시각은 이 Keeper 의 첫 호출을 막지 못한다(RFC-provider-path-rest 6.1). 성공은 말한 리셋 기록을 지우지 않는다(`Runtime_quota_window.note_succeeded`).
 
 ## 2. 왜 기존 원칙과 부딪히지 않나
 
@@ -72,7 +72,7 @@ Keeper turn walk 는 바꾸지 않는다.
 - **RFC-0433 의 안전선**은 「표시가 배제로 바뀌면 provider 하나의 일시적 장애가 레인을 통째로 죽인다」이다(RFC-0433 §7). 이 RFC 는 시각 없는 표시를 건드리지 않는다. 시각이 정해진 쉼만 다룬다. 그 쉼은 정해진 시각에 끝난다.
 - **budget_gate**(헌법 460-465)는 provider 의 hard limit 을 금지 대상에서 뺀다.
 - **게이트 정책**(헌법 499-504)은 하드 게이팅을 기본으로 두지 않는다. 실익이 크고 기능이 더 잘 돌고 연속성이 생길 때만 고려하고, 게이트 추가는 success_bar 를 모두 넘은 뒤로 미룬다.
-  - 이 규칙은 새 종류의 게이트가 아니다. Keeper walk(1.3)와 verifier(헌법 104-107)가 이미 같은 기록으로 같은 시각까지 기다린다. exact lane 만 그 시각을 순서로 읽었다.
+  - 이 규칙은 새 종류의 게이트가 아니다. Keeper 는 자기 턴이 실패한 뒤(1.3), verifier 는 헌법 104-107 대로 같은 기록으로 같은 시각까지 기다린다. exact lane 과 Keeper 의 턴 안 walk 는 그 시각을 순서로만 읽었다.
   - 실익: 그 시각 전 호출은 provider 가 거절한다고 이미 말했다. 11-09 에는 85번 중 85번이 거절이었다.
   - 연속성: 요청은 남고, 시각이 지나면 다시 걷는다. 시각 전의 실행은 그 사이 다른 slot 을 먼저 쓴다.
   - 드문 경우가 아니다. 한도를 다 쓴 계정의 exact lane 은 모두 이 길을 탄다.
@@ -253,7 +253,7 @@ L1(구현):
 
 ## 4. 하지 않는 것
 
-- **Keeper turn walk.** 맨 앞 경로가 쉬면 기다리는 지금 동작(1.3)을 그대로 둔다. 쉬는 경로를 걸음에서 빼는 일은 RFC-provider-path-rest §6 Phase 2 의 나머지이고, #39190 의 Keeper 부분이다.
+- **Keeper turn walk.** 실패한 턴 뒤 맨 앞 경로가 쉬면 기다리는 지금 동작(1.3)을 그대로 둔다. 말한 시각인 경로를 걸음에서 빼는 일은 RFC-provider-path-rest 6.1 이 정하고, #39190 의 Keeper 부분이다.
 - **성공으로 리셋 기록 지우기** (5장).
 - **리셋 기록 저장** (3.5).
 - **기다리는 slot 을 깨우는 타이머** (R3).

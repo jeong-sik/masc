@@ -44,11 +44,19 @@ Inputs are the fixed-format lines the server writes:
   `lib/keeper/keeper_unified_turn_success.ml`).
 - The `[Startup] retained checkpoint sweep` summary line marks a server start.
 
-A wait takes the dispatch mark of the turn that just ended. A turn that wrote
-no mark under the Keeper's name has none, even when an earlier turn did, so a
-wait never pairs with an earlier turn's mark. One Keeper runs one turn at a
-time, so its marks between two turn ends belong to one turn. The output names no Keeper and no provider
-row, only the provider named in the error.
+A wait takes the last dispatch mark written since the Keeper's previous turn
+end line. One Keeper runs one turn at a time (`lib/keeper/keeper_owner.mli`).
+Chat turns write marks under the Keeper's name but no turn end line, so a
+heartbeat turn that writes no mark of its own (Agent Core HTTP) can take the
+mark of a chat turn that ran in between. That mark is earlier than the real
+dispatch, so it can only lower a verdict toward `first`; it never makes
+another Keeper's note look earlier than it was.
+
+A note's time is the noting Keeper's wait line. The quota table was written
+at its refusal, which is earlier, so the `known_*` counts are lower bounds.
+
+The output names no Keeper and no provider row, only the provider named in
+the error.
 """
 
 from __future__ import annotations

@@ -41,12 +41,14 @@ provider 행은 runtime id 의 첫 `.` 앞이에요.
 
 - 보낸 때는 그 턴 안에서 Keeper 이름으로 찍힌 마지막 `turn composition:` 줄이에요. 공식 client runtime 만 이 줄을 써요.
 - 그 줄이 없으면 Keeper 이름으로 찍힌 마지막 `agent started` 줄이에요(`lib/keeper/keeper_event_bridge.ml`). 후보 시도마다 시도 안에서 찍혀요.
-- 「그 턴 안」은 앞선 턴 끝 줄 뒤부터예요. Keeper 하나는 한 번에 턴 하나만 돌려요. 그래서 대기는 앞선 턴의 표시와 짝지어지지 않아요.
+- 「그 턴 안」은 앞선 턴 끝 줄 뒤부터예요. Keeper 하나는 한 번에 턴 하나만 돌려요(`lib/keeper/keeper_owner.mli`).
+- 채팅 턴은 Keeper 이름으로 표시를 쓰지만 턴 끝 줄은 쓰지 않아요. 그래서 자기 표시가 없는 heartbeat 턴(Agent Core HTTP)은 그 사이 채팅 턴의 표시를 가져갈 수 있어요. 그 표시는 실제로 보낸 때보다 앞이에요. 판정을 「처음」 쪽으로만 옮기고, 「이미 알던 시각」을 늘리지 않아요. 이번 기간의 glm-coding 5건은 모두 「보낸 때를 모름」으로 남았어요.
 - 「시도 시작」 열은 composition 줄을 버리고 모두 `agent started` 로 잡은 값이에요. 후보를 부르기 직전에 표를 읽는 walk 가 막을 수 있는 몫에 가까워요.
 - 서버 시작은 `[Startup] retained checkpoint sweep` 요약 줄이에요(`bin/main_eio.ml`). 같은 머리의 sweep 실패 줄은 서버 시작으로 세지 않아요.
 
 ## 세지 못한 것
 
+- 「먼저 적은 때」는 먼저 거절된 Keeper 의 대기 줄 시각이에요. 표에 실제로 적히는 때는 거절 때라서 그보다 앞이에요. 거절 줄(`turn terminal`) 시각으로 다시 세면 `known_from_another_keeper` 가 보낸 때 기준 43건, 시도 시작 기준 34건이에요.
 - 한도 표는 scope(credential 참조, client home, provider 행)로 묶어요. provider 행 하나는 scope 하나라서, 두 행이 scope 를 나눠 쓰면 여기서는 따로 세요. 그래서 위 숫자는 아래 한계예요.
 - 채팅 턴의 거절, 다음 후보로 넘어가 성공한 턴의 거절, lane 실행의 거절은 세지 않았어요. 그 로그 줄은 provider 행을 적지 않아요.
 - 같은 기간(11-15 10:00Z 까지) agent-core 기록(`agent-core-events/2026-11/{10..15}.jsonl` 의 `agent_failed`, `error_code = provider_error_hard_quota`)은 506번이고 그중 451번이 시각을 말했어요. 이 기록은 provider 이름만 적어요.

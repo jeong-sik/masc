@@ -59,6 +59,10 @@ jobs:
       # builds in place; Linux builds in a container and exports here, so the
       # steps below must not name dune's output directory directly.
       MASC_BIN_DIR: _build/default/bin
+      # Where the test helpers a step below runs next to those binaries are,
+      # the same way. They are built with the release binaries and shipped in
+      # no asset.
+      MASC_TEST_BIN_DIR: _build/default/test
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -155,7 +159,8 @@ jobs:
             bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe \
             bin/masc_exec_ssh_bootstrap.exe \
-            bin/masc_antigravity_path_hook.exe
+            bin/masc_antigravity_path_hook.exe \
+            test/hold_workspace_announcement.exe
 
       # Built in a container whose glibc is the support floor, not on the
       # runner. A binary records the oldest glibc that provides each symbol it
@@ -178,6 +183,7 @@ jobs:
           # toolchain, so anywhere else leaves start-masc.sh trying to build
           # from source and exiting "dune not found".
           scripts/build-linux-release.sh --out "$PWD/$MASC_BIN_DIR" \
+            --test-helper-out "$PWD/$MASC_TEST_BIN_DIR" \
             --lifecycle-out "$RUNNER_TEMP/masc-release-lifecycle" $contract_test
 
       # Manual branch runs also serve isolated runtime/TUI experiments. Keep
@@ -219,8 +225,12 @@ jobs:
       - name: Runtime setup validates each supported connection
         run: python3 test/test_install_runtime_setup.py --binary "$MASC_BIN_DIR"/main_eio.exe
 
+      # The announcer holds the workspace lease and announces a port, so the
+      # kernel names the HTTP stand-in of the test as the workspace's server.
       - name: First conversation setup CLI
-        run: python3 test/test_setup_cli.py --binary "$MASC_BIN_DIR"/main_eio.exe
+        run: |
+          python3 test/test_setup_cli.py --binary "$MASC_BIN_DIR"/main_eio.exe \
+            --announcer "$MASC_TEST_BIN_DIR"/hold_workspace_announcement.exe
 
       - name: Keeper creation CLI exits after HTTP response
         run: python3 test/test_keeper_create_cli_exit.py "$MASC_BIN_DIR"/main_eio.exe

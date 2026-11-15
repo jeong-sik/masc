@@ -478,6 +478,52 @@ let test_peer_that_keeps_a_closed_session_open_is_cut () =
   until (fun () -> metric "active_connections" = active)
 ;;
 
+(* A client that completes the handshake and sends nothing, as a browser's
+   preconnect does. Once the listener has counted what ALPN settled on, the
+   next timer is the preparation bound again, counted from the end of the
+   handshake; when it runs out the client sees the connection end. The
+   handshake itself succeeded, so no handshake failure is counted. *)
+let test_session_without_a_request_is_given_up () =
+  with_bounded_listener @@ fun ~sw ~net ~clock ~port ->
+  let failures = metric "handshake_failures_total" in
+  List.iter
+    (fun (alpn, counter) ->
+      let negotiated = metric counter in
+      let chosen, session = tls_client ~sw ~net ~port ~alpn in
+      check (option string) "the server chose the client's protocol" (Some alpn) chosen;
+      until (fun () -> metric counter = negotiated + 1);
+      let handshake_end = Eio.Time.now clock in
+      to_next_timer clock;
+      check (float 0.0) "the next timer is the preparation bound"
+        (handshake_end +. Server_connection_socket.preparation_bound_s)
+        (Eio.Time.now clock);
+      match Eio.Flow.single_read session (Cstruct.create 16) with
+      | (_ : int) -> fail "the listener answered a client that sent nothing"
+      | exception End_of_file -> ()
+      | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ())
+    [ "http/1.1", "alpn_http1_total"; "h2", "alpn_h2_total" ];
+  check int "no handshake failure" failures (metric "handshake_failures_total")
+;;
+
+(* A client whose first bytes are the protocol ALPN did not settle on: an
+   HTTP/1.1 request on an h2 session, the HTTP/2 preface on an http/1.1
+   session. Neither handler is given the connection; it ends unanswered. *)
+let test_first_bytes_of_the_other_protocol_are_not_served () =
+  with_bounded_listener @@ fun ~sw ~net ~clock:_ ~port ->
+  List.iter
+    (fun (alpn, first_bytes) ->
+      let chosen, session = tls_client ~sw ~net ~port ~alpn in
+      check (option string) "the server chose the client's protocol" (Some alpn) chosen;
+      Eio.Flow.copy_string first_bytes session;
+      match Eio.Flow.single_read session (Cstruct.create 16) with
+      | (_ : int) -> fail "the listener served a protocol ALPN did not settle on"
+      | exception End_of_file -> ()
+      | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ())
+    [ "h2", Printf.sprintf "GET / HTTP/1.1\r\nhost: localhost:%d\r\n\r\n" port
+    ; "http/1.1", "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+    ]
+;;
+
 let test_h2_settings () =
   let config = Server_bootstrap_http.h2_config () in
   check bool "server push is never advertised" false config.H2.Config.enable_server_push;
@@ -506,6 +552,10 @@ let () =
             test_handshake_not_completed_is_given_up
         ; test_case "a peer that keeps a closed session open is cut at the bound" `Quick
             test_peer_that_keeps_a_closed_session_open_is_cut
+        ; test_case "a session that sends no request is given up at the bound" `Quick
+            test_session_without_a_request_is_given_up
+        ; test_case "first bytes of the protocol ALPN did not choose are not served" `Quick
+            test_first_bytes_of_the_other_protocol_are_not_served
         ] )
     ]
 ;;

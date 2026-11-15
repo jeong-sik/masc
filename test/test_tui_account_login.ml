@@ -19,12 +19,14 @@ let decoder_fragments () =
   let events=ref [] in
   let feed, finished = Login.decoder ~integration_id:"codex" (fun event -> events:=event :: !events) in
   let output=frame "output" (`Assoc ["stream",`String "stdout";"text",`String "browser code 안내"]) in
-  String.iter (fun c -> feed (String.make 1 c)) (started ^ output ^ frame "input_ready" (`Assoc []) ^ complete);
+  let screen=frame "screen" (`Assoc ["text",`String "Select login method:\n> 1. Google OAuth"]) in
+  String.iter (fun c -> feed (String.make 1 c)) (started ^ output ^ screen ^ frame "input_ready" (`Assoc []) ^ complete);
   check bool "terminal event survives byte fragmentation" true (finished ());
   check bool "ordered events preserve Unicode and identity" true
-    (List.rev !events=[Login.Started(session,Some account);Login.Output "browser code 안내";Login.Input_ready;Login.Complete(account,Login.Authenticated)]);
+    (List.rev !events=[Login.Started(session,Some account);Login.Output "browser code 안내";
+                       Login.Screen "Select login method:\n> 1. Google OAuth";Login.Input_ready;Login.Complete(account,Login.Authenticated)]);
   feed output;
-  check int "nothing can follow terminal completion" 4 (List.length !events)
+  check int "nothing can follow terminal completion" 5 (List.length !events)
 let decoder_failures () =
   List.iter (fun invalid ->
     let events=ref [] in
@@ -33,6 +35,9 @@ let decoder_failures () =
     check bool "invalid event permanently fails stream" true (finished ());
     check bool "no completion after failure" true (List.rev !events=[Login.Started(session,Some account);Login.Login_error]))
     ["event: output\ndata: {\n\n";frame "output" (`Assoc ["stream",`String "unknown";"text",`String "x"]);
+     (* A terminal's output reaches the client only as the screen the server drew. *)
+     frame "output" (`Assoc ["stream",`String "terminal";"text",`String "x"]);
+     frame "screen" (`Assoc ["stream",`String "terminal"]);
      frame "complete" (`Assoc ["integration_id",`String "codex";"account_ref",`String account;"invocation_verified",`Bool false])];
   let feed,finished=Login.decoder ~integration_id:"codex" (fun _ -> ()) in
   feed started; feed "event: complete\ndata: {";
@@ -53,6 +58,11 @@ let account_and_default () =
   check string "selected account survives model save" account
     (body |> member "connections" |> to_list |> List.hd |> member "source" |> member "account_ref" |> to_string);
   check bool "slash login is never Keeper text" true (Masc_tui_command.parse "/login muse"=Masc_tui_command.Account_login "muse")
+let screen_replaces_the_last () =
+  let t=Login.create "antigravity" in t.phase<-Login.Logging;t.generation<-1;
+  ignore (Login.event ~generation:1 t (Login.Screen "Signing in..."));
+  ignore (Login.event ~generation:1 t (Login.Screen "Select login method:"));
+  check string "a screen replaces the one before instead of piling up" "Select login method:" t.output
 let input_and_epoch () =
   let t=Login.create "codex" in t.phase<-Login.Logging;t.generation<-2;t.login_id<-Some session;
   Login.paste t "private-code";
@@ -1128,6 +1138,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "malformed and unfinished streams" `Quick decoder_failures;
   test_case "explicit provider and preserved default" `Quick account_and_default;
   test_case "private input and superseded attempt" `Quick input_and_epoch;
+  test_case "terminal screen replaces the last" `Quick screen_replaces_the_last;
   test_case "declared fallback inventory contract" `Quick inventory_selection_contract;
   test_case "account emails beside provider rows" `Quick account_emails_beside_providers;
   test_case "clients first, then a client's accounts" `Quick clients_then_accounts;

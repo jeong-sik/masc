@@ -310,6 +310,9 @@ let test_admission_commit_faults () =
       | _ -> fail "commit fault produced a partial or missing admission")))
     Store.For_testing.[Fail_before_commit; Fail_after_commit]
 
+(* #46918: the interrupted record keeps its input and the fact that its effect
+   is unknown, and still does not hold back history clear or the Keeper
+   retirement check once the restart has failed its operation. *)
 let test_restart_interrupted_execution_releases_the_running_slot () =
   with_store (fun path store ->
     let input = `Assoc ["message", `String "resume the checkpointed work"] in
@@ -329,6 +332,19 @@ let test_restart_interrupted_execution_releases_the_running_slot () =
        | Execution.Recovering {origin = Execution.Interrupted_execution; _} -> ()
        | _ -> fail "interrupted Running was not marked Recovering");
       check bool "restart preserved execution identity" true (Scope.equal (Execution.scope running) (Execution.scope recovered));
+      check bool "the interrupted record keeps its input" true (Option.is_some recovered.input);
+      (match Store.get reopened a.operation_id |> store_ok with
+       | Some {Chat.state = Chat.Failed {failure = {kind = Chat.Interrupted_by_restart; _}; _}; _} -> ()
+       | Some _ | None -> fail "the restart did not fail the operation");
+      ignore (Store.history_clear_input_checkpoint reopened ~trace_id:cp.trace_id |> store_ok
+              : Keeper_checkpoint_ref.t option);
+      (match Store.inspect_outstanding ~path |> store_ok with
+       | Store.Stored_operations {chat_operations = []; semantic_executions = []; _} -> ()
+       | Store.Stored_operations _ | Store.Missing_store ->
+         fail "the retirement check still finds outstanding work");
+      (match Store.inspect_native_history ~path ~operation_id:a.operation_id |> store_ok with
+       | Some {Store.calls = []; _} -> ()
+       | Some _ | None -> fail "the failed operation's native history is unreadable");
       submit reopened ~now:31. "after-restart" input;
       let b = claim reopened ~now:32. in
       ignore (defer_checkpoint reopened ~now:33. b cp);
@@ -336,6 +352,63 @@ let test_restart_interrupted_execution_releases_the_running_slot () =
       resume_checkpoint reopened ~now:35. b cp;
       check string "unrelated work runs after restart" "running"
         (Execution.phase_name (get reopened (direct_scope b)).phase)))
+
+(* Nothing interrupts an execution while its operation still runs, so this
+   writes the record a restart leaves beside an operation that has not ended. *)
+let replace_execution path (record : Execution.t) =
+  with_db path (fun db ->
+    let key = List.find_map (function
+      | [Some key; Some text] ->
+        (match Execution.of_json (Yojson.Safe.from_string text) with
+         | Ok stored when Scope.equal stored.id record.id -> Some key
+         | Ok _ | Error _ -> None)
+      | _ -> None) (rows db "SELECT scope_key, record_json FROM semantic_executions") in
+    match key with
+    | None -> fail "execution row not found"
+    | Some key ->
+      let stmt = Sqlite3.prepare db
+          "UPDATE semantic_executions SET revision=?, phase=?, record_json=? WHERE scope_key=?" in
+      Fun.protect ~finally:(fun () -> check bool "statement finalized" true (Sqlite3.finalize stmt = Sqlite3.Rc.OK))
+        (fun () ->
+          check bool "revision bound" true (Sqlite3.bind_int64 stmt 1 record.revision = Sqlite3.Rc.OK);
+          check bool "phase bound" true
+            (Sqlite3.bind_text stmt 2 (Execution.phase_name record.phase) = Sqlite3.Rc.OK);
+          check bool "record bound" true
+            (Sqlite3.bind_text stmt 3 (canonical (Execution.to_json record)) = Sqlite3.Rc.OK);
+          check bool "key bound" true (Sqlite3.bind_text stmt 4 key = Sqlite3.Rc.OK);
+          check bool "record stored" true (Sqlite3.step stmt = Sqlite3.Rc.DONE)))
+
+(* The opposite of #46918: an interruption whose operation still runs holds
+   work back, and the same record stops holding it once the operation ends. *)
+let test_interruption_of_a_running_operation_holds_work_back () =
+  with_store (fun path store ->
+    let input = `Assoc ["message", `String "resume the checkpointed work"] in
+    let cp = checkpoint () in
+    submit store ~now:1. "still-running" input;
+    let a = claim store ~now:2. in
+    ignore (defer_checkpoint store ~now:3. a cp);
+    let a = claim store ~now:4. in
+    resume_checkpoint store ~now:5. a cp;
+    let running = get store (direct_scope a) in
+    Store.close store |> store_ok;
+    replace_execution path (Execution.apply ~now:6.
+      (Execution.Require_reconciliation "process restarted during semantic execution") running |> exec_ok);
+    let outstanding () = match Store.inspect_outstanding ~path |> store_ok with
+      | Store.Stored_operations {semantic_executions; _} ->
+        List.map (fun (execution : Execution.t) -> execution.id) semantic_executions
+      | Store.Missing_store -> fail "the store disappeared" in
+    with_open path (fun reopened ->
+      (match (get reopened running.id).phase, Store.get reopened a.operation_id |> store_ok with
+       | Execution.Recovering {origin = Execution.Interrupted_execution; _}, Some {Chat.state = Chat.Running _; _} -> ()
+       | _ -> fail "the fixture is not an interruption of a running operation");
+      check bool "the retirement check still finds the interruption" true
+        (List.exists (Scope.equal running.id) (outstanding ()));
+      assert_execution_error (Store.history_clear_input_checkpoint reopened ~trace_id:cp.trace_id);
+      check int "the restart fails the operation" 1
+        (List.length (Store.settle_running_without_executor ~cause:Store.After_process_restart reopened ~now:30. |> store_ok));
+      check bool "the same record no longer holds work back" true (outstanding () = []);
+      ignore (Store.history_clear_input_checkpoint reopened ~trace_id:cp.trace_id |> store_ok
+              : Keeper_checkpoint_ref.t option)))
 
 let test_terminal_record_is_immutable () =
   with_store (fun path store ->
@@ -1112,6 +1185,7 @@ let () =
         test_case "waiting is admitted only while the execution holds the slot" `Quick test_await_receipt_is_admitted_only_while_the_execution_holds_the_slot ];
       "owner isolation", [
         test_case "startup marks an interrupted execution and releases the running slot" `Quick test_restart_interrupted_execution_releases_the_running_slot;
+        test_case "an interruption of a running operation holds work back" `Quick test_interruption_of_a_running_operation_holds_work_back;
         test_case "readonly inventory includes every unsettled phase" `Quick test_readonly_inventory_includes_every_unsettled_phase;
         test_case "corrupt owned frame refuses unsafe inspection" `Quick test_corrupt_semantic_frame_refuses_unsafe_inspection;
         test_case "a Gate record that names a session scope is refused" `Quick test_gate_record_with_a_session_scope_is_refused;

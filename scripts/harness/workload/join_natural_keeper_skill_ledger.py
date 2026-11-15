@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request
 
+import keeper_skill_effect_cells as effect_cells
 import keeper_skill_use_proof as proof
 import proof_http
 import produce_natural_keeper_skill_proof as natural_producer
@@ -178,6 +179,7 @@ def validate_receipt(
             "unresolved_identity",
             "producer_calls",
             "server",
+            "scenario",
         },
         "producer receipt",
     )
@@ -294,6 +296,26 @@ def validate_receipt(
         isinstance(message.get("sha256"), str)
         and proof.SHA256_RE.fullmatch(cast(str, message.get("sha256"))) is not None,
         "producer message SHA is invalid",
+    )
+    scenario = required_object(receipt, "scenario", "producer receipt")
+    require_exact_fields(
+        scenario, {"bytes", "sha256", "declaration"}, "producer scenario"
+    )
+    require(
+        isinstance(scenario.get("bytes"), int)
+        and not isinstance(scenario.get("bytes"), bool)
+        and scenario.get("bytes", -1) > 0
+        and isinstance(scenario.get("sha256"), str)
+        and proof.SHA256_RE.fullmatch(cast(str, scenario.get("sha256"))) is not None,
+        "producer scenario file identity is invalid",
+    )
+    try:
+        declared = effect_cells.decode_scenario(scenario.get("declaration"))
+    except effect_cells.CellError as error:
+        raise JoinError(f"producer scenario is invalid: {error}") from error
+    require(
+        scenario.get("declaration") == effect_cells.scenario_to_json(declared),
+        "producer scenario declaration is not canonical",
     )
     unresolved = required_object(receipt, "unresolved_identity", "producer receipt")
     require_exact_fields(

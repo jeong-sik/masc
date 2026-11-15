@@ -14,7 +14,8 @@ const headingId = 'tokens-heading'
 
 const clock = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })
 
-function When({ ms }: { readonly ms: number }): VNode {
+/** A moment as the console writes it. The invitations panel writes its times with it too. */
+export function When({ ms }: { readonly ms: number }): VNode {
   const at = new Date(ms)
   return html`<time datetime=${at.toISOString()}>${clock.format(at)}</time>`
 }

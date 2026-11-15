@@ -20,7 +20,7 @@
     the server has no GitHub login. An address with no token shows how to open
     the invitation again in place of the form. The pages start no Google
     login. *)
-val invite_page : nonce:string -> github:bool -> Login_routes.answer
+val invite_page : nonce:Account_page.Nonce.t -> github:bool -> Login_routes.answer
 
 (** [GET /]: for a browser with no session, a form that starts a GitHub
     login and no answer of a route. When the session routes do not say whether
@@ -33,7 +33,7 @@ val invite_page : nonce:string -> github:bool -> Login_routes.answer
     makes a Keeper and gives it a Runtime through {!Auth_preview_keeper}, and
     a form that sends the Keeper a message through
     {!Auth_preview_keeper.turn_path} and shows its answer. *)
-val home_page : nonce:string -> github:bool -> Login_routes.answer
+val home_page : nonce:Account_page.Nonce.t -> github:bool -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}
     on a snapshot the zone could be trusted for ({!Authz_zone.read}), as

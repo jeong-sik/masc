@@ -1,6 +1,7 @@
 // A person's login to a subscription. POST /api/v1/setup/accounts/login
 // answers an event stream (lib/server/server_setup_account_login.ml, `start`):
-// `started` once the official client runs, `output` for what it prints,
+// `started` once the official client runs, `output` for what it prints to a
+// pipe, `screen` for the whole screen of a client that runs in a terminal,
 // `input_ready` once the client took a reply, and last `complete` or `error`.
 // A person's login always makes a new account, which the authorization log
 // links to them: no frame names an account reference, and the last frame of
@@ -22,6 +23,8 @@ export const loginPath = '/api/v1/setup/accounts/login'
 export type LoginProgress =
   | { readonly kind: 'started'; readonly loginId: string }
   | { readonly kind: 'output'; readonly text: string }
+  /** The whole screen of a client that runs in a terminal: it replaces the one before. */
+  | { readonly kind: 'screen'; readonly text: string }
   /** The client took the last reply: the server takes another. */
   | { readonly kind: 'input_ready' }
 
@@ -117,8 +120,14 @@ function read(frame: Frame, integrationId: string, loginId: string | null, onPro
     case 'output': {
       const data = frame.data
       if (loginId === null || !isRecord(data) || typeof data.text !== 'string') return null
-      if (data.stream !== 'stdout' && data.stream !== 'stderr' && data.stream !== 'terminal') return null
+      if (data.stream !== 'stdout' && data.stream !== 'stderr') return null
       onProgress({ kind: 'output', text: data.text })
+      return { kind: 'next', loginId }
+    }
+    case 'screen': {
+      const data = frame.data
+      if (loginId === null || !isRecord(data) || typeof data.text !== 'string') return null
+      onProgress({ kind: 'screen', text: data.text })
       return { kind: 'next', loginId }
     }
     case 'input_ready':

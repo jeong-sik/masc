@@ -36,12 +36,18 @@ type owned_regular_file_reread =
    file, and its result is returned only when the entry chain and the file
    still have the identity they were opened with. *)
 let with_single_link_regular_file_beneath ~root ?excluded_directory ~of_regular_file relative =
+  (* The tree has no entry of exactly the name asked for: a held directory
+     lists no name of the same bytes, a component before the last is a
+     regular file, or the entry went before it was opened. *)
   let missing error = match error.close_failure with
     | Some _ -> false
     | None ->
       (match error.failure with
        | Owned_file_operation_failed {cause;_} ->
-         (match cause with Unix.Unix_error (code, _, _) -> code = Unix.ENOENT | _ -> false)
+         (match cause with
+          | Unix.Unix_error (code, _, _) -> code = Unix.ENOENT
+          | No_exactly_named_entry -> true
+          | _ -> false)
        | Ownership_boundary_rejected _ | Path_is_not_regular_file _
        | Filesystem_identity_changed _ | Owned_path_owner_mismatch _
        | Owned_path_writable_by_others _ -> false) in
@@ -49,11 +55,14 @@ let with_single_link_regular_file_beneath ~root ?excluded_directory ~of_regular_
     with_owned_inventory_root root (fun inventory_root ->
       let path = owned_inventory_path inventory_root relative in
       let read_entry ?excluded_stat () =
-        match with_owned_inventory_entry ~single_link:true ?excluded_stat inventory_root path
+        match with_owned_inventory_entry
+          ~single_link:true ~exact_names:true ?excluded_stat inventory_root path
           (fun fd stat _parent ->
-            if stat.Unix.st_kind <> Unix.S_REG then
-              owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})
-            else Result.map Option.some (of_regular_file ~path fd stat)) with
+            match stat.Unix.st_kind with
+            | Unix.S_REG -> Result.map Option.some (of_regular_file ~path fd stat)
+            | Unix.S_DIR -> Ok None
+            | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+              owned_file_error (Path_is_not_regular_file {path;kind=stat.st_kind})) with
         | Error error when missing error -> Ok None
         | Error error -> Error error
         | Ok body -> Ok body in

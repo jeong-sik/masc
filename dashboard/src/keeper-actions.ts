@@ -90,6 +90,7 @@ import {
   applyKeeperLiveSendEvent,
   failKeeperStreamOperation,
   flushPendingKeeperStreamDeltas,
+  keeperLiveSendReplyRow,
 } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
@@ -1531,8 +1532,17 @@ export async function sendKeeperThreadMessage(
     })
 
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
-    const finalEntry =
-      (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
+    // The reply is read from the row that holds it now, resolved once here.
+    // Only the placeholder this send created is settled by the tail. A stored
+    // row that history put in its place is the server's record of the reply,
+    // so its text, time and delivery stay as stored, the same rule its frames
+    // follow. With no row left there is nothing to settle and the reply reads
+    // as empty, as it did when the tail looked the placeholder up by id.
+    const reply = keeperLiveSendReplyRow(keeperName, assistantId, operationId)
+    const finalEntry = reply.kind === 'absent' ? null : reply.entry
+    const settlePlaceholder = (patch: Partial<KeeperConversationEntry>): void => {
+      if (reply.kind === 'placeholder') finalizeAssistantEntry(keeperName, assistantId, patch)
+    }
     const finalText = finalEntry?.text ?? ''
     const hasFinalText = finalText.trim().length > 0
 
@@ -1564,7 +1574,7 @@ export async function sendKeeperThreadMessage(
       // keep the partial text but mark the entry so the operator can
       // tell a cut stream from a completed reply.
       const cutMessage = droppedFrame ?? '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
-      finalizeAssistantEntry(keeperName, assistantId, {
+      settlePlaceholder({
         text: finalText,
         delivery: 'interrupted',
         streamState: null,
@@ -1591,7 +1601,7 @@ export async function sendKeeperThreadMessage(
       && !toolCallEnded
       && !hasContinuationStatus
     ) {
-      finalizeAssistantEntry(keeperName, assistantId, {
+      settlePlaceholder({
         text: EMPTY_VISIBLE_REPLY_TEXT,
         rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,
         delivery: 'error',
@@ -1613,7 +1623,7 @@ export async function sendKeeperThreadMessage(
       emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
     }
 
-    finalizeAssistantEntry(keeperName, assistantId, {
+    settlePlaceholder({
       text: hasFinalText ? finalText : emptyTerminalText,
       delivery: finalDelivery,
       streamState: null,

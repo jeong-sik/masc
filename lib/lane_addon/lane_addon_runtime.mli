@@ -200,12 +200,15 @@ val call_exported_tool_with_authority :
 val call_captured_tool_request : config:Workspace.config ->
   access:Lane_addon_sources.access -> reserved:string list -> export:tool_export ->
   installation_id:string -> package_id:string -> tool:string ->
-  configuration_revision:string -> original:Lane_addon_tool_request_owner.retained ->
+  configuration_revision:string -> original:Lane_addon_tool_request_owner.Record.t ->
   arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Call the original configured tool while holding the existing configuration
     and action serializers from fresh complete declaration verification through
     the worker RPC. Validate the immutable logical destination and semantic
-    configuration revision, plus the original retained owner, before the call.
+    configuration revision, plus the original owner record, before the call.
+    The record of that ID is read again and must name the same installation,
+    package, tool, digest and summary; an absent record or one naming anything
+    else is [Unavailable]. The request body is neither read nor written here.
     Raw source revision stays original provenance; formatting does not transfer
     an original request. The host caller still restores physical input authority
     and publishes its dispatch intent first. No model is called by this port;
@@ -540,24 +543,29 @@ module For_testing : sig
   type visibility = Shared | Operator_only | Keeper_only of string
   type 'service document_service =
     | Document_service of 'service
-    | No_browser_service  (** No browser Add-on this installation may read. *)
+    | No_browser_service  (** No browser Add-on this installation may read serves the route. *)
+    | Another_installation_serves
+        (** The route is served by a browser Add-on other than the named installation. *)
     | Browser_narrower_than_consumer
-        (** Every such browser is visible to fewer readers than the consumer's output. *)
-    | Several_browser_services
+        (** The named browser is visible to fewer readers than the consumer's output. *)
   val document_route_services :
     services:'service list -> unready:Browser_lane.Backend.t list ->
     backend:('service -> Browser_lane.Backend.t) ->
     clients:('service -> Browser_addon_observation.client_observation) ->
-    Browser_lane.route -> ('service list, string) result
-  (** The browser services a [browser_document] read on a route may go to;
-      duplicate client IDs and conflicting native Space controllers are refused.
-      An unreadable live publisher is unknown, not an empty client list, and
-      prevents an Ego document read. Owned backend reads remain independent. *)
+    Browser_lane.route -> ('service option, string) result
+  (** The browser service a [browser_document] read on a route may go to;
+      duplicate client IDs and conflicting native Space controllers are refused,
+      so at most one service remains. An unreadable live publisher is unknown,
+      not an empty client list, and prevents an Ego document read. Owned
+      backend reads remain independent. *)
   val choose_document_service :
-    visibility:visibility -> ('service * visibility) list -> 'service document_service
-  (** Which browser Add-on a [browser_document] source reads: only one whose
-      readers include every reader of the consumer's output, the rule
-      [lane_output] already follows. *)
+    visibility:visibility -> installation_id:string ->
+    ('service * Lane_addon_tool_request_owner.installation * visibility) option ->
+    'service document_service
+  (** Whether a [browser_document] source reads the route's service: only when
+      it is the declared installation [installation_id] names and its readers
+      include every reader of the consumer's output, the rule [lane_output]
+      already follows. *)
   val with_tool_change_handler : (unit -> unit) -> (unit -> 'a) -> 'a
   (** Temporarily observe the original MCP bridge without replacing owner
       subscriptions; restores the preceding handler on exit. *)
@@ -607,7 +615,7 @@ module For_testing : sig
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
-    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
+    read_browser_document:(installation_id:string -> route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
       binding:Yojson.Safe.t -> (Yojson.Safe.t, string) result;
     recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
       authority:Lane_addon_lifecycle.authority -> resource:Lane_addon_lifecycle.resource option ->

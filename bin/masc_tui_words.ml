@@ -66,9 +66,67 @@ let queued_input_retained ~ko = if ko then "대기 입력 남아 있음" else "q
    decision or a vote has nothing to keep. *)
 type kept = Draft_kept | Queued_input_kept | Nothing_kept
 
-let kept_back ~ko reason kept =
+(* Which request a kept-back notice is about, so several notices in "show all
+   notices" say which is which (RFC section 2). A chat command is named as
+   the operator typed it. *)
+module Kept_request = struct
+  type t =
+    | Command of string
+    | Message
+    | Board_post
+    | Board_comment
+    | Board_vote
+    | Tool_approval
+    | Gate_decision
+    | Auto_judge_retry
+    | Approval_decision
+    | Ask_answer
+    | Ask_source
+    | Task_cancel
+    | Keeper_action
+    | Keeper_creation
+    | Keeper_deletion
+    | Account_login
+    | Goal_transition
+    | Schedule_cancel
+    | Schedule_change
+    | Skill_evidence
+    | Report_check
+    | Addon_request
+
+  let name ~ko request =
+    let text korean english = if ko then korean else english in
+    match request with
+    | Command typed -> typed
+    | Message -> text "메시지" "message"
+    | Board_post -> text "게시글" "post"
+    | Board_comment -> text "댓글" "comment"
+    | Board_vote -> text "투표" "vote"
+    | Tool_approval -> text "도구 승인" "tool approval"
+    | Gate_decision -> text "게이트 판정" "gate decision"
+    | Auto_judge_retry -> text "Auto Judge 재시도" "Auto Judge retry"
+    | Approval_decision -> text "승인 판정" "approval decision"
+    | Ask_answer -> text "질문 답" "answer"
+    | Ask_source -> text "질문 출처 읽기" "question source read"
+    | Task_cancel -> text "작업 취소" "Task cancellation"
+    | Keeper_action -> text "키퍼 동작" "Keeper action"
+    | Keeper_creation -> text "키퍼 만들기" "Keeper creation"
+    | Keeper_deletion -> text "키퍼 삭제" "Keeper deletion"
+    | Account_login -> text "계정 로그인" "account login"
+    | Goal_transition -> text "목표 상태 변경" "Goal transition"
+    | Schedule_cancel -> text "일정 취소" "schedule cancellation"
+    | Schedule_change -> text "일정 변경" "schedule change"
+    | Skill_evidence -> text "스킬 증거 읽기" "Skill evidence read"
+    | Report_check -> text "보고서 확인 표시" "report check"
+    | Addon_request -> text "기능 요청" "add-on request"
+end
+
+(* reason · <request> not sent · what stayed. The reason leads, so a cut row
+   keeps it. *)
+let kept_back ~ko ~request reason kept =
   let kept = match kept with
     | Draft_kept -> [ draft_retained ~ko ]
     | Queued_input_kept -> [ queued_input_retained ~ko ]
     | Nothing_kept -> [] in
-  String.concat " · " (String.capitalize_ascii reason :: not_sent ~ko :: kept)
+  let not_sent = Kept_request.name ~ko request ^ " " ^ not_sent ~ko in
+  String.concat " · " (String.capitalize_ascii reason :: not_sent :: kept)

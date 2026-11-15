@@ -162,7 +162,6 @@ let handle_trajectory_get state req reqd name =
            `Assoc [
              ("keeper", `String name);
              ("trace_id", `String trace_id);
-             ("total_entries", `Int total);
              ("showing", `Int (List.length recent));
              ("entries", `List (List.map
                (Trajectory.trajectory_line_to_json ~result_max_len) recent));

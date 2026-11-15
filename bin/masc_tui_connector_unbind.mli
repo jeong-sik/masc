@@ -30,9 +30,12 @@ type outcome =
   | Failed of string  (** Any other refusal, or no answer, in its own words. *)
 
 (** ["name (id)"] when the name directory knows the channel, otherwise
-    ["id (name unknown)"]. Both parts are made single-line for the terminal. *)
-val channel_label : channel_id:string -> channel_name:string option -> string
+    ["id (name unknown)"], Korean when [ko]. Both parts are made single-line
+    for the terminal. *)
+val channel_label :
+  ko:bool -> channel_id:string -> channel_name:string option -> string
 
+(** The English label, for the English sentences this module writes. *)
 val target_label : target -> string
 
 (** Every binding naming [keeper_name], across all transports, in snapshot

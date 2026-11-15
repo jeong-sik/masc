@@ -48,7 +48,9 @@ type resources = {
 
 (** The one definition of a resource declaration the host can run. The manifest
     reader, the retained binding reader and the Docker worker all use it, so a
-    declaration is refused where it is read rather than where it is installed. *)
+    declaration is refused where it is read rather than where it is installed.
+    An Apple container declaration needs whole vCPUs, an exact number of MiB of
+    at least 200 MiB (the least Apple [container] creates), and no [pids]. *)
 val check_resources : ?runtime:runtime -> resources -> (unit, string) result
 type container = { runtime : runtime; image : string; resources : resources }
 type execution = Container of container | Host_process of { max_reply_bytes : int }

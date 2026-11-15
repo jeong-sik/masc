@@ -66,7 +66,7 @@ memory_bytes = 268435456
 max_reply_bytes = 16777216
 ```
 
-Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pids`를 생략한다. Docker의 PID·swap·no-new-privileges 제한과 같은 보장이라고 표시하지 않는다. 두 실행기 모두 guest 네트워크를 닫고 root filesystem을 읽기 전용으로 연결하며 capability를 제거한다. Keeper의 작업 디스크·토큰을 Addon에 연결하지 않는다.
+Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pids`를 생략한다. 메모리는 200 MiB(`209715200`) 이상이어야 한다. Apple `container`는 그보다 작은 microVM을 만들지 않으므로, 더 작은 값은 선언을 읽을 때 거절한다. Docker의 PID·swap·no-new-privileges 제한과 같은 보장이라고 표시하지 않는다. 두 실행기 모두 guest 네트워크를 닫고 root filesystem을 읽기 전용으로 연결하며 capability를 제거한다. Keeper의 작업 디스크·토큰을 Addon에 연결하지 않는다.
 
 `world.state.mode = "persistent"`인 기존 설치의 runtime을 바꿀 때는 새 설치 ID를 사용한다. 서로 다른 실행기의 같은 이름 volume은 동일한 데이터가 아니다. 기존 설치의 runtime 전환을 거절하여 빈 상태로 교체되는 일을 막고, 과거 worker 정리는 저장된 원래 runtime으로 수행한다.
 

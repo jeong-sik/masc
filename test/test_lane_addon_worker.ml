@@ -390,12 +390,17 @@ let with_apple_fixture f = with_fixture (fun env sw dir _ ->
   Unix.chmod command 0o700;
   f env sw dir command)
 
+(* The base package's resources as Apple container accepts them: whole vCPUs,
+   no pids limit, and the 200 MiB it creates at least (#52244). *)
+let apple_resources base =
+  {(container base).resources with cpus=1.;pids=None;memory_bytes=209_715_200L}
+
 let start_apple ?state_owner ?(instance_id = Random_id.uuid_v7 ()) env sw dir command mode =
   let base = package dir mode in
   let package = { base with
     state_storage = (match state_owner with None -> Types.Ephemeral | Some _ -> Types.Persistent);
     execution = Types.Container {(container base) with runtime=Types.Apple_container;
-      resources={(container base).resources with cpus=1.;pids=None}} } in
+      resources=apple_resources base} } in
   Worker.start ~sw ~clock:(Eio.Stdenv.clock env) ~control_timeout_sec
     ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id ~package ?state_owner
     ~container_command:command ()
@@ -1137,7 +1142,7 @@ let test_an_apple_dead_predecessor_is_cleared_from_the_writer_slot () =
       ~mgr:(Eio.Stdenv.process_mgr env) ~instance_id:"new-writer"
       ~package:{base with state_storage=Types.Persistent;
                 execution=Types.Container {(container base) with runtime=Types.Apple_container;
-                  resources={(container base).resources with cpus=1.;pids=None}}}
+                  resources=apple_resources base}}
       ~state_owner:owner ~is_live_instance:(fun id -> String.equal id "new-writer")
       ~container_command:command ()) in
     let labels = match List.assoc "configuration" (read_container path) with

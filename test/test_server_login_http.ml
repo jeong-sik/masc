@@ -66,6 +66,17 @@ let split_once ~on text =
    a browser parses it. *)
 let login_of page = Account_page_reading.login ~start:"/auth/github/start" page
 
+(* Where a login started from [page] comes back to: the value of each
+   return_to field, read from the page as a browser parses it. *)
+let return_to_of page =
+  Markup_document.parse_html page
+  |> Markup_document.elements_named "input"
+  |> List.filter_map (fun input ->
+    match Markup_document.attribute "name" input with
+    | Some "return_to" -> Markup_document.attribute "value" input
+    | Some _ | None -> None)
+;;
+
 (* ---- GitHub, as the test plays it ---- *)
 
 type github =
@@ -646,6 +657,25 @@ let the_preview_follows_a_login () =
       "the invitation page starts one"
       (Ok Account_page_reading.Open)
       (login_of invitation.body);
+    (* A login started from either page comes back to the console, and the
+       script of the home page sends a signed-in browser to the same place:
+       the address the form returns to (test_auth_preview_session.js). *)
+    Alcotest.(check (list string))
+      "a login from the home page comes back to the console"
+      [ Account_page.console_path ]
+      (return_to_of home.body);
+    Alcotest.(check (list string))
+      "a login from the invitation page comes back to the console"
+      [ Account_page.console_path ]
+      (return_to_of invitation.body);
+    (* The sign-out the home page offers when the console cannot be opened
+       sends the token in the header the logout route reads. *)
+    Alcotest.(check bool)
+      "the sign-out of the home page sends the CSRF header"
+      true
+      (contains
+         ~sub:(Printf.sprintf {|headers: { "%s": token }|} Authz_browser_request.csrf_header)
+         home.body);
     (* A server with no GitHub login client serves the same pages, and the
        button of the login cannot be pressed. *)
     (let no_github =

@@ -507,7 +507,8 @@ let test_decode_message_create_with_mention () =
         ; guild_id = Some "G1"
         ; author_id = "USER1"
         ; author_name = None
-        ; content = "<@BOT> hi"
+        ; raw_content = "<@BOT> hi"
+        ; bot_user_id = Some "BOT"
         ; mentions_bot = true
         ; explicit_mentions_bot = true
         ; message_reference_channel_id = Some "CH0"
@@ -848,6 +849,12 @@ let test_decode_message_create_reply_ping_is_not_explicit_mention () =
 
 (* Discord mention -> display-name resolution. *)
 
+(* The text a Keeper reads when no bot identity claims a mention: every user
+   mention takes the name Discord supplied. *)
+let render_by_names ~resolved_mentions raw_content =
+  S.render_content ~self:Connector_self_mention.Bot_user_id_unknown
+    ~resolved_mentions raw_content
+
 let test_decode_message_create_resolves_mention_global_name () =
   let alice_id = "111111111111111111" in
   let payload =
@@ -868,11 +875,14 @@ let test_decode_message_create_resolves_mention_global_name () =
   with
   | Ok
       (S.Message_create
-        { content = "hello @Alice"
+        { raw_content
+        ; resolved_mentions
         ; mentions_bot = false
         ; explicit_mentions_bot = false
         ; _
-        }) ->
+        })
+    when String.equal "hello @Alice"
+           (render_by_names ~resolved_mentions raw_content) ->
       ()
   | Ok _ -> fail "expected resolved mention using global_name"
   | Error msg -> fail msg
@@ -897,11 +907,14 @@ let test_decode_message_create_resolves_mention_username_fallback () =
   with
   | Ok
       (S.Message_create
-        { content = "@bob_user check this"
+        { raw_content
+        ; resolved_mentions
         ; mentions_bot = false
         ; explicit_mentions_bot = false
         ; _
-        }) ->
+        })
+    when String.equal "@bob_user check this"
+           (render_by_names ~resolved_mentions raw_content) ->
       ()
   | Ok _ -> fail "expected resolved mention using username fallback"
   | Error msg -> fail msg
@@ -923,8 +936,9 @@ let test_decode_message_create_leaves_unknown_mention_untouched () =
       ~event_name:"MESSAGE_CREATE"
       ~payload
   with
-  | Ok (S.Message_create { content; _ })
-    when String.equal content ("hey <@" ^ unknown_id ^ ">") ->
+  | Ok (S.Message_create { raw_content; resolved_mentions; _ })
+    when String.equal (render_by_names ~resolved_mentions raw_content)
+           ("hey <@" ^ unknown_id ^ ">") ->
       ()
   | Ok _ -> fail "expected unknown mention left as raw snowflake"
   | Error msg -> fail msg
@@ -948,9 +962,9 @@ let test_decode_message_create_leaves_malformed_mention_unresolved () =
       ~payload
   with
   | Ok
-      (S.Message_create
-        { content; raw_content; resolved_mentions = []; _ })
-    when String.equal content raw && String.equal raw_content raw ->
+      (S.Message_create { raw_content; resolved_mentions = []; _ })
+    when String.equal (render_by_names ~resolved_mentions:[] raw_content) raw
+         && String.equal raw_content raw ->
       ()
   | Ok _ -> fail "expected malformed mention left unresolved"
   | Error msg -> fail msg
@@ -975,10 +989,13 @@ let test_decode_message_create_preserves_raw_content () =
   with
   | Ok
       (S.Message_create
-        { content = "hello @Alice"
-        ; raw_content
+        { raw_content
+        ; resolved_mentions
         ; _
-        }) when String.equal raw_content ("hello <@" ^ alice_id ^ ">") ->
+        })
+    when String.equal raw_content ("hello <@" ^ alice_id ^ ">")
+         && String.equal "hello @Alice"
+              (render_by_names ~resolved_mentions raw_content) ->
       ()
   | Ok _ -> fail "expected raw_content preserved and content resolved"
   | Error msg -> fail msg

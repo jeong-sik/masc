@@ -76,13 +76,16 @@ val next_change_at :
 
 (** One recorded tool call. [result_bytes] is the size of the result the call
     returned; [None] is a call recorded before sizes were kept, whose size is
-    unknown. It is not a call that returned nothing. *)
+    unknown. It is not a call that returned nothing. [failure_class] is why a
+    failed call failed; [None] is a call that did not fail, or a failure
+    recorded without a class (every failure recorded before classes were kept). *)
 type sample =
   { ts : float
   ; tool_name : string
   ; disposition : disposition
   ; duration_ms : float
   ; result_bytes : int option
+  ; failure_class : Tool_result.tool_failure_class option
   }
 
 type builder
@@ -92,13 +95,23 @@ val builder : window -> builder
 val add : builder -> sample -> (unit, string) result
 (** [add builder sample] counts [sample]. It returns [Error] and counts
     nothing when the timestamp is outside the window, the duration is
-    negative or not finite, or the result size is negative. *)
+    negative or not finite, the result size is negative, or a call that did
+    not fail carries a failure class. *)
 
 val long_call_threshold_ms : float
 (** A call that ran at least this long (one minute) is a long call. A
     foreground call holds the turn that issued it until it ends. A call that
     returns a receipt and finishes later, such as a background Execute, is
     timed up to the receipt. *)
+
+(** How many failed calls recorded each failure class. *)
+type failure_class_counts =
+  { dependency_unavailable : int
+  ; policy_rejection : int
+  ; runtime_failure : int
+  ; workflow_rejection : int
+  ; operator_cancelled : int
+  }
 
 (** Totals of a set of calls. [p50_ms], [p95_ms] and [max_ms] are [None] when
     the set is empty. Durations of completed, deferred and failed calls are
@@ -110,10 +123,16 @@ val long_call_threshold_ms : float
     is how many calls that is, so a total over fewer calls than [call_count] is
     visible as such. [result_bytes_total] adds up their sizes and
     [result_bytes_max] is the largest; it is [None], and the total zero, when no
-    call in the set has a size. *)
+    call in the set has a size.
+
+    [failure_classes] counts the failed calls by the class they recorded, and
+    [failure_unclassified_count] the failed calls that recorded none. The six
+    numbers add up to [failure_count]. *)
 type stat =
   { call_count : int
   ; failure_count : int
+  ; failure_classes : failure_class_counts
+  ; failure_unclassified_count : int
   ; deferred_count : int
   ; total_ms : float
   ; p50_ms : float option

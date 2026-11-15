@@ -102,7 +102,7 @@ let test_retained_metric_time_windows () =
       let row : Tool_metrics_store.row =
         { record_id; ts; tool_name = "windowed"; disposition = "completed"; duration_ms = 1.0 }
       in
-      Tool_metrics_store.insert ~masc_root:root ~result_bytes:0 row |> get_ok "insert window fixture")
+      Tool_metrics_store.insert ~masc_root:root ~result_bytes:0 ~failure_class:None row |> get_ok "insert window fixture")
       ["older", 10.; "same-a", 20.; "same-b", 20.; "newer", 30.];
     let read ?since_ts ?until_ts ?(n = 10) () =
       Tool_metrics_store.read_recent ~masc_root:root ?since_ts ?until_ts ~n ()
@@ -170,6 +170,7 @@ let insert_old_row ~base_path =
   Tool_metrics_store.insert
     ~masc_root:(masc_root base_path)
     ~result_bytes:0
+    ~failure_class:None
     { record_id = "old-record"
     ; ts = 1.0
     ; tool_name = "expired"
@@ -261,6 +262,10 @@ let test_enqueue_stores_the_size_of_the_result_message () =
     let sized = read "sized" in
     Alcotest.(check int) "bytes of the message" (String.length message) sized.total.result_bytes_total;
     Alcotest.(check int) "one sized call" 1 sized.total.result_observed_count;
+    Alcotest.(check (list int))
+      "the failure class the result carried, and no failure left unclassified"
+      [ 1; 0 ]
+      [ sized.total.failure_classes.runtime_failure; sized.total.failure_unclassified_count ];
     let empty = read "empty" in
     Alcotest.(check int) "an empty message is a size of zero, observed" 1 empty.total.result_observed_count;
     Alcotest.(check int) "and adds no bytes" 0 empty.total.result_bytes_total)
@@ -299,9 +304,9 @@ let test_duplicate_record_id_is_idempotent () =
       ; duration_ms = 1.0
       }
     in
-    Tool_metrics_store.insert ~masc_root:(masc_root base_path) ~result_bytes:0 row
+    Tool_metrics_store.insert ~masc_root:(masc_root base_path) ~result_bytes:0 ~failure_class:None row
     |> get_ok "first insert";
-    Tool_metrics_store.insert ~masc_root:(masc_root base_path) ~result_bytes:0 row
+    Tool_metrics_store.insert ~masc_root:(masc_root base_path) ~result_bytes:0 ~failure_class:None row
     |> get_ok "duplicate insert";
     Alcotest.(check int)
       "duplicate record id keeps one row"

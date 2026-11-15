@@ -24,7 +24,7 @@ let seoul_offset_min = 540
 let daily_until = seoul_midnight +. (2.0 *. 86400.0) -. 1.0
 
 let sample ?(disposition = S.Completed) ~ts duration_ms : S.sample =
-  { ts; tool_name = "tool_read_file"; disposition; duration_ms; result_bytes = None }
+  { ts; tool_name = "tool_read_file"; disposition; duration_ms; result_bytes = None; failure_class = None }
 ;;
 
 let series_json ~width ~offset ~since ~until samples =

@@ -6,6 +6,10 @@ message file unchanged through ``masc_keeper_msg`` exactly once, then observes
 the returned operation through ``masc_keeper_delegate_status``.  The operation
 surface does not expose a Skill invocation identity, so the receipt preserves
 the exact turn reference needed by a later ledger join instead of guessing one.
+
+The scenario declaration is read and validated before the message is sent and
+kept in the receipt, so how far the proof must reach (selected action, applied
+effect, retained state) is fixed before the Keeper acts.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request
 
+import keeper_skill_effect_cells as effect_cells
 import proof_http
 
 
@@ -36,7 +41,7 @@ GIT_TREE_RE = re.compile(r"^[0-9a-f]{40}$")
 OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 OPERATION_SCHEMA = "masc.keeper_chat_operation.v1"
-RECEIPT_SCHEMA = "masc.natural-keeper-skill-proof-producer/v1"
+RECEIPT_SCHEMA = "masc.natural-keeper-skill-proof-producer/v2"
 # Where a tool call's trace sits in the result: CallToolResult is a closed
 # shape, so the server hangs its own fields off _meta under this vendor key.
 CALL_META_KEY = "com.github.yousleepwhen.masc/call"
@@ -245,6 +250,26 @@ def read_message(path: Path) -> tuple[str, bytes]:
         raise ProducerError(f"cannot read UTF-8 message file: {error}") from error
     require(message.strip() != "", "message file is blank")
     return message, raw
+
+
+def read_scenario(path: Path) -> dict[str, Any]:
+    require(not path.is_symlink(), "scenario file must not be a symlink")
+    try:
+        require(stat.S_ISREG(path.stat().st_mode), "scenario file must be regular")
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ProducerError(f"cannot read scenario file: {error}") from error
+    try:
+        scenario = effect_cells.decode_scenario(
+            effect_cells.decode_json(raw, "scenario file")
+        )
+    except effect_cells.CellError as error:
+        raise ProducerError(f"scenario file is invalid: {error}") from error
+    return {
+        "bytes": len(raw),
+        "sha256": digest_bytes(raw),
+        "declaration": effect_cells.scenario_to_json(scenario),
+    }
 
 
 def auth_headers(token: str) -> dict[str, str]:
@@ -708,6 +733,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keeper", required=True)
     parser.add_argument("--runtime-id", required=True)
     parser.add_argument("--message-file", type=Path, required=True)
+    parser.add_argument("--scenario-file", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--mcp-protocol-version", required=True)
     parser.add_argument("--request-timeout-seconds", type=float, required=True)
@@ -732,6 +758,7 @@ def main() -> int:
         expected_base_path = str(Path(args.expected_base_path).resolve(strict=True))
         token = read_secret(args.token_file)
         message, message_raw = read_message(args.message_file)
+        scenario = read_scenario(args.scenario_file)
         args.out.mkdir(parents=True, exist_ok=False)
         incomplete = args.out / "INCOMPLETE"
         incomplete.write_text(
@@ -771,6 +798,7 @@ def main() -> int:
             ),
         )
         receipt["server"] = health_identity
+        receipt["scenario"] = scenario
         raw = (
             json.dumps(receipt, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         ).encode()

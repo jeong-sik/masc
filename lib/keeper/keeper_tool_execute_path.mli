@@ -13,10 +13,11 @@ val resolve_tool_execute_cwd :
   write_enabled:bool ->
   args:Yojson.Safe.t ->
   (string, string) result
-(** Resolve typed Execute cwd. Uses the keeper write boundary default
-    for omitted cwd only when write execution is enabled; read-only
-    Execute uses the no-create playground root. Explicit cwd resolution
-    never creates directories or changes repo/worktree state. For a
+(** Resolve typed Execute cwd. A write-enabled Execute materializes the
+    keeper's sandbox root and defaults an omitted cwd to it; read-only
+    Execute creates nothing and defaults to the no-create playground root.
+    The requested cwd itself is never created, and repo/worktree state is
+    never changed. For a
     shared-mount tree (docker) a successful resolution also checks that the
     directory exists here and verifies the immutable allowed-root identity.
     For a tree the endpoint owns (microvm, remote_ssh) the host is not asked

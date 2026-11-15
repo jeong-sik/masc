@@ -372,7 +372,31 @@ visibilities = ["public"]
     declaration "";
     check_error "a binding without a time zone is refused before install" path;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
-    check_error "a binding key the package does not read is refused" path)
+    check_error "a binding key the package does not read is refused" path;
+    let following output = write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+language = "ko"
+timezone = "Asia/Seoul"
+
+[[binding.sources]]
+source_id = "lesson"
+kind = "lane_output"
+installation_id = "operator-lesson"
+output_id = %S
+selection = "latest_completed"
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest output) in
+    following "scenes";
+    ignore (unwrap (Config.load_file ~path));
+    following "lesson";
+    check_error "a source that is not a lesson's scenes output is refused" path)
 
 (* The shipped operator lesson: the example declaration loads with the
    package's own manifest, and the binding contract refuses a binding without

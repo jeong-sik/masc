@@ -21568,26 +21568,31 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
    here so the callers of this module name them as before. *)
 include Masc_tui_words
 
-(* What the workspace guard says when it withdraws a request, in the shape of
-   every request kept back. The English sentences are the ones the surfaces
-   still in English have always drawn. *)
-let workspace_refusal_text ~ko refusal =
-  if ko then
-    kept_back ~ko
-      (match refusal with
-       | Workspace_authority_withdrawn -> "워크스페이스가 바뀜"
-       | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
-       | Workspace_identity_changed -> "워크스페이스 식별이 바뀌었거나 읽히지 않음")
-      Nothing_kept
-  else
-    match refusal with
-    | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
-    | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
-    | Workspace_identity_changed ->
-        "Workspace identity changed or is unavailable; request withdrawn"
+(* Why the workspace guard withdrew a request. *)
+let workspace_refusal_reason ~ko = function
+  | Workspace_authority_withdrawn ->
+      if ko then "워크스페이스가 바뀜" else "workspace authority withdrawn"
+  | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
+  | Workspace_identity_changed ->
+      if ko then "워크스페이스 식별이 바뀌었거나 읽히지 않음"
+      else "workspace identity changed or unavailable"
 
-let request_failure_text ~ko = function
-  | Request_withdrawn refusal -> workspace_refusal_text ~ko refusal
+(* The guard's refusal of a request its caller names, in the shape of every
+   request kept back. *)
+let workspace_refusal_text ~ko ~request refusal =
+  kept_back ~ko ~request (workspace_refusal_reason ~ko refusal) Nothing_kept
+
+(* The guard's refusal for the callers that do not name their request yet:
+   the English sentences those surfaces, still English, have always drawn.
+   They move to [workspace_refusal_text] with the surface (#52022). *)
+let workspace_guard_refusal_english = function
+  | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
+  | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
+  | Workspace_identity_changed ->
+      "Workspace identity changed or is unavailable; request withdrawn"
+
+let request_failure_text ~ko ~request = function
+  | Request_withdrawn refusal -> workspace_refusal_text ~ko ~request refusal
   | Request_failed detail -> detail
 
 let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
@@ -21598,7 +21603,8 @@ let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
         (if ko then "JSON 이 아님: " else "body is not JSON: ") ^ message
     | Schedule_form_not_an_object ->
         if ko then "양식이 JSON 객체가 아님" else "the editor form must be a JSON object"
-    | Schedule_form_request failure -> request_failure_text ~ko failure
+    | Schedule_form_request failure ->
+        request_failure_text ~ko ~request:Kept_request.Schedule_change failure
   in
   schedule_change_name ~ko sfr_change ^ ": " ^ reason
 

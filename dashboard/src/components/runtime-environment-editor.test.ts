@@ -495,7 +495,6 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
       parameter_policy: {
         reasoning_toggle_wire: 'responses.reasoning',
         reasoning_replay_policy: 'preserve',
-        requires_reasoning_replay_on_tool_call: true,
         ignored_sampling_params: ['temperature'],
         always_ignored_sampling_params: ['top_k'],
       },
@@ -522,7 +521,7 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     expect(text).toContain('responses-api')
     expect(text).toContain('api:chat-completions')
     expect(text).toContain('wire:responses.reasoning')
-    expect(text).toContain('tool-call-replay:required')
+    expect(text).toContain('replay:preserve')
 
     render(null, container)
   })

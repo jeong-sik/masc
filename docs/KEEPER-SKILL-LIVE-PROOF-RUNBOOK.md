@@ -27,6 +27,54 @@ Keeper, `Turn_ref`, and `skill_tool_use_id`.
 | source/server/process identity changes during proof | 0 | source and `/health?full=1` snapshots |
 | `INCOMPLETE` markers after success | 0 | every evidence directory |
 
+## Scenario cells
+
+A later model-selected action proves that the Keeper chose a tool with the
+Skill content available. It does not prove that the tool's effect landed, or
+that the state the task asked for is still there. The verifier reports
+three cells separately under `cells`, and the scenario declaration decides
+which of them must be at least 1:
+
+| Cell | Observed when | Authority |
+|---|---|---|
+| `action_selected` | the exact activation's later actions select `keeper_memory_write` (any action for `action_selected` scenarios) | activation actions |
+| `external_effect_applied` | the one selected call's tool-call row (same `tool_use_id`, Keeper, trace and Keeper turn) holds a `persisted_current_snapshot` receipt, and the Memory journal holds that revision's `explicit_write` commit from the same trace | `GET /api/v1/keepers/<keeper>/tool-calls`, `<keeper>.memory-journal.jsonl` |
+| `requested_postcondition_observed` | the receipt's `memory_id` is a fact of the captured current Memory snapshot | `<keeper>.memory-current.json` |
+
+The scenario file is a closed declaration; one of:
+
+```json
+{"schema": "masc.keeper-skill-proof-scenario/v1", "requires": "action_selected"}
+{"schema": "masc.keeper-skill-proof-scenario/v1", "requires": "external_effect_applied",
+ "effect": {"kind": "current_memory_write"}}
+{"schema": "masc.keeper-skill-proof-scenario/v1", "requires": "requested_postcondition_observed",
+ "effect": {"kind": "current_memory_write"},
+ "postcondition": {"kind": "keeper_memory_retained"}}
+```
+
+The producer reads it before it sends the natural message and keeps it in the
+receipt, so the requirement is fixed before the Keeper acts. A cell the
+scenario does not declare is `observed: null`, not 0.
+
+`keeper_memory_write` runs in process and never enters the Gate, which keys
+only its own operations (`lib/keeper/keeper_gate_types.ml`). Its effect
+authority is the Memory store's own journal. The chain is activation → the
+selected call's `call_id` → the tool-call row with that `tool_use_id` → the
+receipt's revision and `memory_id` → the journal commit. Two selections, two
+rows or two matching commits are reported as gaps instead of being paired. A
+receipt whose revision the journal does not hold as this trace's explicit
+write counts 0. A Librarian revision that removes the written memory is a
+legitimate state transition; the cell records its revision and source as
+`removed` and counts 0, so a durability scenario fails while an effect
+scenario over the same workspace passes.
+
+Only `current_memory_write` has an authority here. A write that ends in
+`persisted_pending_admission` or a source-bound store counts 0
+(`write_not_current`). Effects the Gate replays (`tool_execute`,
+`filesystem_write`, …) are not read: the Gate entry names its operation, not
+the model's tool name, so pairing one with a call needs the call's own
+approval id.
+
 `no_skill_observed`, `multiple_skill_activations`,
 `operator_selection_required`, and `historical_projection_unavailable` are
 truthful join observations, but none passes this matrix — only
@@ -43,7 +91,7 @@ exact historical projection remains typed and stable.
 | t3 | Keeper | choose whether to call a Skill and continue acting | operation `Turn_ref` |
 | t4 | runtime | record activation, delivery, and later actions (including `async_result_delivered` v6 and `async_action_observed` v7 events) | session Skill activation event log `traces/<session>/skill-activation-events.jsonl` and `.masc/skill-activation-events.jsonl` |
 | t5 | join | load t3's trace through the OCaml typed decoder and compare it with the event log's rows applied in order | exact 0/1/many result |
-| t6 | collector | require one exact id, delivery, action, and zero invalid transitions | proof JSON + Dashboard PNG |
+| t6 | collector | require one exact id, delivery, action, and zero invalid transitions; copy the tool-call and Memory authorities the scenario names and count its cells | proof JSON + Dashboard PNG + authority copies |
 | t7 | TUI capture | select the exact Keeper and observe its ledger-bound receipt identity | TUI JSON + connected PNG carrying the exact digest |
 | t8 | verifier | compare all manifest hashes and identity tuples | pass/fail matrix |
 
@@ -59,6 +107,9 @@ or environment-variable fallbacks.
 - one existing Keeper and its declarative runtime id
 - MCP protocol version accepted by the running server/client pair
 - one message file containing the natural task, without prescribing a Skill
+- one scenario declaration file (see Scenario cells)
+- for a `requested_postcondition_observed` scenario, the absolute Keeper
+  config directory that holds `<keeper>.memory-current.json`
 - fresh output directories
 - explicit request, observation, polling, and capture durations
 
@@ -76,6 +127,7 @@ KEEPER=exact-existing-keeper
 RUNTIME_ID=keeper-declarative-runtime
 MCP_PROTOCOL_VERSION=validated-protocol-version
 MESSAGE_FILE=/absolute/path/to/natural-task.txt
+SCENARIO_FILE=/absolute/path/to/scenario.json
 EVIDENCE_ROOT=/absolute/path/to/fresh-evidence-root
 SOURCE_SHA=$(git -C "$REPO" rev-parse HEAD)
 SOURCE_TREE=$(git -C "$REPO" rev-parse HEAD^{tree})
@@ -104,6 +156,7 @@ python3 "$REPO/scripts/harness/workload/produce_natural_keeper_skill_proof.py" \
   --keeper "$KEEPER" \
   --runtime-id "$RUNTIME_ID" \
   --message-file "$MESSAGE_FILE" \
+  --scenario-file "$SCENARIO_FILE" \
   --out "$EVIDENCE_ROOT/natural" \
   --mcp-protocol-version "$MCP_PROTOCOL_VERSION" \
   --request-timeout-seconds 30 \
@@ -146,10 +199,17 @@ PROOF_SUMMARY=$(python3 "$REPO/scripts/harness/workload/keeper_skill_use_proof.p
   --tui-build-evidence "$EVIDENCE_ROOT/tui-build/build-evidence.json" \
   --expected-tui-build-evidence-sha256 "$TUI_BUILD_SHA" \
   --skill-tool-use-id "$SKILL_TOOL_USE_ID" \
+  --producer-receipt "$EVIDENCE_ROOT/natural/receipt.json" \
+  --expected-producer-receipt-sha256 "$PRODUCER_SHA" \
   --out "$EVIDENCE_ROOT/proof" \
   --timeout 30)
 PROOF_SHA=$(jq -er '.sha256' <<<"$PROOF_SUMMARY")
 ```
+
+For a Memory scenario the collector also reads
+`/api/v1/keepers/<keeper>/tool-calls` (needs a `CanAdmin` token) and takes
+the Memory file paths from `turn-records`' `memory_os.snapshot_store`, the
+path the server itself writes. It never guesses the Keepers directory.
 
 Finally capture the same exact receipt in the TUI. The fixed-width
 `receipt_sha256` binds the full UTF-8 `skill_tool_use_id` to the exact ledger
@@ -171,8 +231,10 @@ TUI_SHA=$(jq -er '.sha256' <<<"$TUI_SUMMARY")
 Verify the complete bundle offline. This step performs no HTTP, browser, TUI,
 or executable call. It checks the out-of-band manifest hashes, every stored
 artifact, the seven-part Skill identity, source/server process identity,
-delivery and later actions, and both screenshots before emitting the numeric
-completion matrix. `JOIN_SHA`, `PROOF_SHA`, and `TUI_SHA` are the values each
+delivery and later actions, the scenario cells recomputed from the copied
+authorities, and both screenshots before emitting the numeric completion
+matrix and `cells`. A required cell that observed nothing fails verification
+with its typed gap. `JOIN_SHA`, `PROOF_SHA`, and `TUI_SHA` are the values each
 producer printed at completion; do not substitute a hash recomputed from the
 files here — a manifest edited after production would then verify against
 itself.
@@ -189,7 +251,7 @@ python3 "$REPO/scripts/harness/workload/verify_keeper_skill_proof_bundle.py" \
 ```
 
 Only `verified/verification.json` with schema
-`masc.keeper-skill-proof-verification/v1`, `status = passed`, and no sibling
+`masc.keeper-skill-proof-verification/v2`, `status = passed`, and no sibling
 `INCOMPLETE` marker is the completed bundle index.
 
 ## Three execution paths
@@ -212,7 +274,8 @@ failure and recovery; this runbook never infers failover from different labels.
 
 This bundle proves observable ordering: Skill content was invoked, reached a
 typed delivery boundary, and a later model-selected action occurred with that
-content available. It does not claim access to private chain-of-thought or prove
+content available. The effect and postcondition cells prove only what their
+scenario declared, at capture time. It does not claim access to private chain-of-thought or prove
 that one hidden token caused the action.
 
 Do not call the result deployed or live until the source commit is merged, the

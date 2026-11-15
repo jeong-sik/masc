@@ -787,6 +787,79 @@ let guided_installation () =
   check string "native draft retains the reviewed binding" "Native interaction"
     (Otoml.find_opt native_document Otoml.get_string ["binding";"topic"] |> Option.get)
 
+(* RFC lane-row-offers-actions §2.5 (L6): a binding schema with alternatives is
+   chosen in the install form's first slot, and the draft carries the binding
+   of the chosen alternative alone. *)
+let installation_chooses_a_binding_alternative () =
+  let module Install = Masc_tui_lane_installer in
+  let edit key state = match Install.handle ~key state |> ok with
+    | Install.Updated next -> next | _ -> fail "editing must not invoke a request" in
+  let closed members = Printf.sprintf
+    {|{"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|}
+    (String.concat "," (List.map (fun (name,_) -> Printf.sprintf {|"%s"|} name) members))
+    (String.concat "," (List.map (fun (name,schema) -> Printf.sprintf {|"%s":%s|} name schema) members)) in
+  let text = {|{"type":"string","minLength":1}|} in
+  let kind value = Printf.sprintf {|{"type":"string","const":"%s"}|} value in
+  let file = closed ["kind",kind "file";"path",text] in
+  (* This member is named like the form's own installation_id on purpose. *)
+  let port = closed ["kind",kind "port";"installation_id",text] in
+  let union alternatives = Printf.sprintf {|{"type":"object","oneOf":[%s]}|} (String.concat "," alternatives) in
+  let opened binding_schema =
+    let response = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+      "execution",`Assoc ["kind",`String "host_process"];
+      "package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
+        "runtime",`String "host_process";"binding_schema",Yojson.Safe.from_string binding_schema]] in
+    match Install.accept_preview response |> ok with
+    | Some form -> form | None -> fail "a package with a binding schema opens its form" in
+  let refused state = Result.is_error (Install.handle ~key:"\019" state) in
+  let draft state = match Install.handle ~key:"enter" (edit "\019" state) |> ok with
+    | Install.Draft session ->
+        (match Otoml.Parser.from_string_result session.text with
+         | Ok document -> document | Error _ -> fail "generated TOML must parse")
+    | _ -> fail "expected local declaration draft" in
+  let at document path = Otoml.find_opt document Otoml.get_string path in
+  (* Each value goes into the slot under the cursor, then Tab moves on. [None]
+     leaves a slot as the form filled it. *)
+  let typed values state = List.fold_left (fun state value ->
+      (match value with Some text -> Install.paste ~text state | None -> state) |> edit "tab") state values in
+  let form = opened (union [file;port]) in
+  check bool "nothing is drafted before an alternative is chosen" true (refused form);
+  let as_port = form |> edit "right" |> edit "right" |> edit "tab"
+    |> typed [Some "consumer";Some "shared-run";None;Some "producer"] in
+  let document = draft as_port in
+  check (list (option string)) "the draft carries the chosen alternative's binding"
+    [Some "consumer";Some "shared-run";Some "port";Some "producer";None]
+    (List.map (at document) [["id"];["run_id"];["binding";"kind"];["binding";"installation_id"];["binding";"path"]]);
+  let as_file = List.fold_left (fun state key -> edit key state) as_port ["up";"up";"up";"up";"left"] in
+  check bool "another alternative starts empty, the two ids included" true (refused as_file);
+  let document = draft (as_file |> edit "tab" |> typed [Some "reader";Some "shared-run";None;Some "/data/in.txt"]) in
+  check (list (option string)) "what was typed for the previous alternative is not in the draft"
+    [Some "reader";Some "shared-run";Some "file";Some "/data/in.txt";None]
+    (List.map (at document) [["id"];["run_id"];["binding";"kind"];["binding";"path"];["binding";"installation_id"]]);
+  let document = draft (opened (union [file]) |> typed [Some "solo";Some "shared-run";None;Some "/data/in.txt"]) in
+  check (list (option string)) "a single alternative is filled without choosing"
+    [Some "solo";Some "file";Some "/data/in.txt"]
+    (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]);
+  (* Members beside oneOf keep the binding a plain member of the root. *)
+  let with_members = Printf.sprintf
+    {|{"type":"object","additionalProperties":false,"required":["topic"],"properties":{"topic":%s,"note":%s},"oneOf":[%s,%s]}|}
+    text text (closed ["topic",text]) (closed ["topic",text;"note",text]) in
+  let document = draft (opened with_members |> typed [Some "flat";Some "shared-run";Some "notes"]) in
+  check (list (option string)) "a binding with members beside oneOf is filled member by member"
+    [Some "flat";Some "notes"] (List.map (at document) [["id"];["binding";"topic"]]);
+  (* The spread would drop the node that holds the alternatives. A node that
+     says more than its alternatives, or an alternative that is not an object,
+     keeps the binding one JSON field. *)
+  let as_json = {|{"kind":"file","path":"/data/in.txt"}|} in
+  List.iter (fun (label,binding_schema) ->
+    let document = draft (opened binding_schema |> typed [Some "whole";Some "shared-run";Some as_json]) in
+    check (list (option string)) label [Some "whole";Some "file";Some "/data/in.txt"]
+      (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]))
+    ["a node with another keyword is typed as JSON",
+       Printf.sprintf {|{"type":"object","minLength":1,"oneOf":[%s,%s]}|} file port;
+     "an alternative that is not an object is typed as JSON",
+       Printf.sprintf {|{"type":"object","oneOf":[{"type":"string"},%s]}|} file]
+
 let object_array_fields () =
   let module Form = Masc_tui_schema_form in
   let schema = Yojson.Safe.from_string
@@ -2009,6 +2082,7 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "a row form refuses bad requests and keeps given values" `Quick schema_form_refuses_and_keeps;
   test_case "a row's action is filled from it and aimed at its instance" `Quick row_actions_fill_from_the_row;
   test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
+  test_case "choose a binding alternative in the install form" `Quick installation_chooses_a_binding_alternative;
   test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
   test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
   test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;

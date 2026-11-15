@@ -299,6 +299,12 @@ let alternative_label index schema =
             key ^ ": " ^ Yojson.Safe.to_string value) (member "const" child)) properties
         | Some _ | None -> [] in
       if constants=[] then Printf.sprintf "Alternative %d" (index+1) else String.concat " · " constants
+(* For a caller whose own root holds such a schema one member down. The form
+   edits alternatives only at its root, so that caller spreads its root over
+   these and keeps the names. *)
+let named_alternatives schema =
+  Option.map (List.mapi (fun index alternative -> alternative_label index alternative,alternative))
+    (alternatives schema)
 let locked_lines form = List.map (fun (name,value) ->
   "  " ^ name ^ ": " ^ Yojson.Safe.to_string value ^ " · locked") form.locked
 let union_lines form =

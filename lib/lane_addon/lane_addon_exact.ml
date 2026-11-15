@@ -661,6 +661,9 @@ let observe_retained ~store ~declaration_id ~schema request =
   Result.map_error describe_recovery_error
     (observe_retained_classified ~store ~declaration_id ~schema (Digested.make request))
 
+let confirm_original_schema ~declaration_id ~schema request =
+  Result.map (fun _ -> ()) (original_schema ~declaration_id ~schema request)
+
 let observe_record ~declaration_id ~schema request record =
   let* schema = original_schema ~declaration_id ~schema request in
   observation ~declaration_id ~schema (Digested.make request) record

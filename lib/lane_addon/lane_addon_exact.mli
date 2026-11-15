@@ -457,6 +457,13 @@ val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
     In Eio, protect the complete system-thread call from cancellation so
     publication and confirmation finish before returning its observation. *)
 
+val confirm_original_schema : declaration_id:string -> schema:Yojson.Safe.t -> request ->
+  (unit, string) result
+(** The check {!recover_retained} makes of the caller's own schema before it
+    reads anything: the output names a lane of [declaration_id], [schema] is
+    a canonical object, and it equals the grant the request holds, if any.
+    Reads nothing. *)
+
 type identity = private { identity_request_id : string; identity_digest : string }
 (** What names one original Exact request without holding it: its ID and
     {!digest}. *)

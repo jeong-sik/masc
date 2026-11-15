@@ -14,8 +14,9 @@ let readiness_fields ~ready ~phase =
 (* HIGH-RISK-UNREVIEWED [H3]: this is the whole answer to a requester the
    server gives no read. A key added here is said to every requester on every
    listener, one that asks for a credential on its other routes included. It
-   never carries the account mode: [Server_accounts.health_version] reads that
-   key to know an account server, and would take this server for one. *)
+   never carries the account mode: [Server_accounts.health_version] and
+   masc-tui ([Tui_decode.decode_server_reading]) read that key to know an
+   account server, and would take this server for one or refuse it. *)
 let health_json ~ready ~phase =
   `Assoc
     ([ server_field, `String server_name

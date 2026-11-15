@@ -975,7 +975,7 @@ let test_serves_its_table_alone () =
             Alcotest.(check (option string))
               "masc-tui reads the version of the account server"
               (Server_accounts.health_version body)
-              account_server_version
+              (Some account_server_version)
           | Ok (Masc.Tui_decode.Masc_server (_ : Masc.Tui_decode.server_identity)) ->
             Alcotest.fail "masc-tui reads the account server as a masc server"
           | Error detail -> Alcotest.failf "masc-tui refuses the health answer: %s" detail)

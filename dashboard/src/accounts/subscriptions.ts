@@ -19,7 +19,7 @@ import type { ConnectModel } from './connect'
 import { ConnectArea } from './connect-area'
 import type { View } from './console'
 import { AccountList, runnable } from './account-rows'
-import { ProblemNote, Retry, sessionEndedWords, slowAfterMs } from './notes'
+import { ProblemNote, Retry, fell, sessionEndedWords, slowAfterMs } from './notes'
 import type { Failure, Next } from './notes'
 import { integrationName, integrations as readIntegrations, owned as readOwned } from './wire'
 import type { Integration, Owned, Problem, Send, Session } from './wire'
@@ -195,9 +195,8 @@ export function SubscriptionsPanel({ model }: { readonly model: SubscriptionsMod
   useEffect(() => {
     const before = shown.current
     shown.current = view.kind
-    const fell = document.activeElement === null || document.activeElement === document.body
     const hadControls = before === 'failed' || before === 'read'
-    if (before !== view.kind && hadControls && fell) heading.current?.focus()
+    if (before !== view.kind && hadControls && fell()) heading.current?.focus()
   }, [view.kind])
   return html`
     <section aria-labelledby="subscriptions-heading">

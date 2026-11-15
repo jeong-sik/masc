@@ -5,14 +5,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
-import { ProblemNote, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, sessionEndedWords } from './notes'
 import type { Next } from './notes'
 import type { TalkFailure, TalkModel, TalkView } from './talk'
-import { Callout, SayPart } from './talk-say'
+import { SayPart } from './talk-say'
 import type { Conversation, Outcome, TalkRefusal, Turn, TurnFailure } from './talk-wire'
-
-/** Whether the focus is on nothing: the control that held it went away. */
-const fell = (): boolean => document.activeElement === null || document.activeElement === document.body
 
 const clock = new Intl.DateTimeFormat('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })
 

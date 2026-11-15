@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { accountFacts } from './account-rows'
 import type { Assign, Keeper, KeepersModel, Make } from './keepers'
-import { ProblemNote, Retry, idTail, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, Retry, fell, idTail, sessionEndedWords } from './notes'
 import type { Shown } from './notes'
 import type { SubscriptionsModel } from './subscriptions'
 import { TalkPart } from './talk-area'
@@ -101,22 +101,6 @@ function refusedWords(status: number, step: 'make' | 'assign'): string | null {
   return null
 }
 
-function Note({ title, lines, reason, attempts }: {
-  readonly title: string
-  readonly lines: readonly string[]
-  readonly reason: string | null
-  readonly attempts: number
-}): VNode {
-  return html`
-    <div class="callout" role="alert">
-      <p class="callout-title">${title}</p>
-      ${lines.map((line) => html`<p>${line}</p>`)}
-      ${reason === null ? null : html`<p class="hint">서버가 알려 준 이유: <span lang="en">${reason}</span></p>`}
-      ${attempts > 1 ? html`<p class="hint">${attempts}번 시도했어요.</p>` : null}
-    </div>
-  `
-}
-
 /** What the page heard of a request whose end it does not know. */
 function unknownWords(problem: Shown): string {
   switch (problem.kind) {
@@ -137,12 +121,12 @@ function Outcome({ title, step, outcome }: {
   const { problem, attempts } = outcome
   const reason = problem.kind === 'refused' ? problem.reason : null
   if (outcome.kind === 'unknown') {
-    return html`<${Note} title=${title} attempts=${attempts} reason=${reason}
+    return html`<${Callout} title=${title} attempts=${attempts} reason=${reason}
       lines=${[`${unknownWords(problem)} 서버가 했을 수도 있어요.`, '목록을 다시 불러왔어요. 목록이 그대로면 다시 해 주세요.']} />`
   }
   const words = refusedWords(outcome.problem.status, step)
   if (words === null) return html`<${ProblemNote} title=${title} failure=${{ problem, attempts }} />`
-  return html`<${Note} title=${title} lines=${[words]} attempts=${attempts} reason=${reason} />`
+  return html`<${Callout} title=${title} lines=${[words]} attempts=${attempts} reason=${reason} />`
 }
 
 // ---- a card ----
@@ -263,7 +247,7 @@ function MakeForm({ model, choices }: { readonly model: KeepersModel; readonly c
     </form>
     <p class="hint" role="status">${makeWords(making)}</p>
     ${making.kind === 'not_sent'
-      ? html`<${Note} key=${making.attempts} attempts=${making.attempts} reason=${null}
+      ? html`<${Callout} key=${making.attempts} attempts=${making.attempts} reason=${null}
           title=${making.why === 'blank' ? 'Keeper 이름을 적어 주세요' : `${making.name} Keeper는 이미 있어요`}
           lines=${[making.why === 'blank' ? nameRuleWords : '다른 이름을 적어 주세요. 그 Keeper의 모델은 목록의 카드에서 바꿔요.']} />`
       : null}
@@ -277,9 +261,6 @@ function MakeForm({ model, choices }: { readonly model: KeepersModel; readonly c
 // ---- the panel ----
 
 const headingId = 'keepers-heading'
-
-/** Whether the focus is on nothing: the control that held it went away. */
-const fell = (): boolean => document.activeElement === null || document.activeElement === document.body
 
 export function KeepersPanel({ model, subscriptions }: { readonly model: KeepersModel; readonly subscriptions: SubscriptionsModel }): VNode {
   const view = model.view.value

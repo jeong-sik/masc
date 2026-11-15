@@ -1095,6 +1095,36 @@ let completed_delegate_reply ~base_dir ~keeper_name ~delivery_key ~outcome_ref =
                 ; "replies", `List replies ]))
 ;;
 
+let keeper_completion_wake_notice =
+  "Its reply is put in your event queue and wakes you when it ends; asking again \
+   returns only this state"
+;;
+
+(* A Keeper that delegated work gets the reply on its own event queue and is
+   woken for it ([Keeper_delegate_completion_wake.deliver]), and the tool
+   description says so. Over 2026-11-14..15 one Keeper still asked
+   [masc_keeper_delegate_status_many] 2,354 times about 13 operations, 1,000
+   times inside one 118-minute turn. A Keeper that is polling reads the answer
+   and may not read the description, so a still-pending answer says it too.
+   Only an operation whose reply is routed to a Keeper says it: for any other
+   channel nothing is queued for the reader and the line would be false.
+   [delegate_status_read] has already read this source to check ownership, so
+   the [Error] arm is not reached from there. *)
+let completion_wake_fields (operation : Keeper_owner.Chat_operation.t) =
+  match Keeper_chat_operation_payload.source_of_json operation.source with
+  | Error _ -> []
+  | Ok { Keeper_chat_operation_payload.continuation_channel; _ } ->
+    (match continuation_channel with
+     | Keeper_continuation_channel.Keeper _ ->
+       [ "on_completion", `String keeper_completion_wake_notice ]
+     | Keeper_continuation_channel.Dashboard _
+     | Keeper_continuation_channel.Discord _
+     | Keeper_continuation_channel.Slack _
+     | Keeper_continuation_channel.Telegram _
+     | Keeper_continuation_channel.Imessage _
+     | Keeper_continuation_channel.Unrouted _ -> [])
+;;
+
 (* The read of one operation. The tool that reads one and the tool that reads
    several both return this, so an operation reads the same either way. A
    failure is the class and the error object the single-operation tool
@@ -1154,7 +1184,10 @@ let delegate_status_read ~(config : Workspace.config) ~caller (keeper_name, oper
               @ target_turn_age_fields
                   ~now:(Time_compat.now ())
                   ~base_path:config.base_path
-                  ~keeper_name)
+                  ~keeper_name
+              @ completion_wake_fields operation)
+         | Keeper_owner.Chat_operation.Running _, `Assoc fields ->
+           `Assoc (fields @ completion_wake_fields operation)
          | ( Keeper_owner.Chat_operation.Queued
            | Keeper_owner.Chat_operation.Running _
            | Keeper_owner.Chat_operation.Failed _

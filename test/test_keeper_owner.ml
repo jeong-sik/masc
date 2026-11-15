@@ -5591,6 +5591,8 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
             check bool ("agent status omits the submitted " ^ field) false
               (List.mem field (field_names status)))
          [ "input"; "source" ];
+       check bool "a caller watching a screen is not told it will be woken" false
+         (List.mem "on_completion" (field_names status));
        (* Several operations in one call: each entry is what the one-operation
           tool returned, an operation that is not found answers with its own
           error without stopping the others, and a malformed element rejects
@@ -5793,7 +5795,58 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
            (`Assoc [ "target", target ])
        in
        check int "cancelled operation leaves queued list" 0
-         Yojson.Safe.Util.(Tool_result.data listed_after_cancel |> to_list |> List.length)
+         Yojson.Safe.Util.(Tool_result.data listed_after_cancel |> to_list |> List.length);
+       (* A Keeper that delegates is answered on its own event queue and woken
+          for it, so a still-pending answer says so in the result it reads.
+          The caller above watches a screen and is not told it. *)
+       let asker_meta = make_meta "agent-operation-asker" in
+       Keeper_meta_store.replace_snapshot config asker_meta |> Result.get_ok;
+       ignore
+         (Keeper_registry.For_testing.register ~base_path asker_meta.name asker_meta);
+       let asker_invocation_ref =
+         let request_id =
+           Mcp_transport_protocol.request_id_of_yojson (`String "delegate-asker")
+           |> Result.get_ok
+         in
+         Tool_invocation_ref.external_mcp
+           ~request_id
+           ~session_id:"owner-tool-session"
+         |> Result.get_ok
+       in
+       let submitted =
+         Keeper_tool_surface_ops.handle_keeper_delegate
+           ~invocation_ref:asker_invocation_ref
+           ~submitted_by:asker_meta.name
+           ctx
+           args
+       in
+       check bool "a Keeper's delegate is accepted" true (Tool_result.is_success submitted);
+       let asker_reference =
+         `Assoc
+           [ "target", target
+           ; "operation_id"
+           , Yojson.Safe.Util.member "operation_id" (Tool_result.data submitted)
+           ]
+       in
+       let asker_read () =
+         Keeper_tool_surface_ops.keeper_delegate_status_body
+           ~config
+           ~caller:asker_meta.name
+           asker_reference
+         |> Tool_result.data
+       in
+       let check_woken_notice state data =
+         check string ("the Keeper's operation is " ^ state) state
+           Yojson.Safe.Util.(data |> member "state" |> to_string);
+         check string
+           ("a " ^ state ^ " answer to a Keeper says it will be woken")
+           Keeper_tool_surface_ops.keeper_completion_wake_notice
+           Yojson.Safe.Util.(data |> member "on_completion" |> to_string)
+       in
+       check_woken_notice "Queued" (asker_read ());
+       let owner = Owner_registry.get ~base_path ~keeper_name:meta.name |> Result.get_ok in
+       ignore (owner_ok (Owner.claim_next_operation owner));
+       check_woken_notice "Running" (asker_read ())
        end)
 ;;
 

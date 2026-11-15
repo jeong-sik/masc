@@ -267,6 +267,62 @@ class Following(Base):
         self.assertEqual((reads[0]["after"], reads[0]["since"]), (None, 2.5))
         self.assertEqual(self.material(), ["p-3"])
 
+    def test_a_follower_that_asked_moves_the_cursor_for_the_next_follower(self):
+        """A session that follows a lesson moves the cursor like any session
+        that asked. Bound to a lesson from its first session, the quiz reads
+        from since once and then from where that session stopped."""
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-2"), cite("p-4")))])
+        first = self.flow.compose("act-1", 1, BINDING, 3.5, lesson=f.Lesson("lesson", 1.0))
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        self.host.board.append(post(4, "a lane rests until its slot answers"))
+        self.host.listed.clear()
+        second = self.flow.compose("act-2", 1, BINDING, 4.5, lesson=f.Lesson("lesson", 1.0))
+        self.read()
+        reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(second)]
+        self.assertEqual(reads[0]["after"], "000002")
+        self.assertNotIn("since", reads[0])
+        self.assertEqual(self.material(), ["p-4"])
+
+    def test_a_source_read_from_since_that_held_nothing_is_read_from_since_again(self):
+        """The host gives no cursor for a read from since that found no
+        record. A session that asked then leaves none on that source, and the
+        next session reads it from since again: not from a cursor, and not
+        from the quiz's first opening (3.5)."""
+        binding = BINDING | {"records": [t.BOARD, t.WIKI]}
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-2")))])
+        first = self.flow.compose("act-1", 1, binding, 3.5, lesson=f.Lesson("lesson", 1.0))
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        self.host.listed.clear()
+        second = self.flow.compose("act-2", 1, binding, 4.5, lesson=f.Lesson("lesson", 1.0))
+        self.read()
+        start: dict[str, dict] = {}
+        for request in self.host.listed:
+            if request["kind"] == "read_records" and request["request_id"].startswith(second):
+                start.setdefault(request["source_id"], request)
+        self.assertEqual(start["board"]["after"], "000002")
+        self.assertNotIn("since", start["board"])
+        self.assertEqual((start["wiki"]["after"], start["wiki"]["since"]), (None, 1.0))
+
+    def test_a_follower_reads_from_the_since_its_own_opening_recorded(self):
+        """since is read from the binding when a session opens and is kept
+        with that session. After the operator moves it, a new session reads
+        from the new time, and the earlier session keeps the one it had."""
+        first = self.flow.compose("act-1", 1, BINDING, 3.5, lesson=f.Lesson("lesson", 0.5))
+        self.read()
+        self.assertEqual((self.session(first).state, self.session(first).failure), ("failed", q.NoMaterial()))
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-3")))])
+        self.host.listed.clear()
+        second = self.flow.compose("act-2", 1, BINDING, 4.5, lesson=f.Lesson("lesson", 2.5))
+        self.read()
+        reads = [r for r in self.host.listed if r["kind"] == "read_records" and r["request_id"].startswith(second)]
+        self.assertEqual((reads[0]["after"], reads[0]["since"]), (None, 2.5))
+        self.assertEqual((self.session(first).follows.since, self.session(second).follows.since), (0.5, 2.5))
+        self.assertEqual(self.material(), ["p-3"])
+
     def test_with_nothing_cited_an_earlier_item_is_still_asked_again(self):
         plain = self.compose("act-1")
         self.host.author = answering(first_quote)

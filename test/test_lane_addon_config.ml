@@ -390,7 +390,7 @@ visibilities = ["public"]
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
     check_error "a binding key the package does not read is refused" path;
     (* since says where a quiz that follows a lesson reads a record source
-       from until a session that asked has read that source (RFC
+       from until a session that asked has left a cursor on that source (RFC
        operator-quiz-follows-lesson §3.8). *)
     declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n";
     check_error "a quiz on its own refuses since" path;

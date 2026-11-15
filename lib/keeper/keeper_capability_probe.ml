@@ -118,6 +118,8 @@ let detail_of_http_error (err : Llm_provider.Http_client.http_error) : string =
       (String.trim (Llm_provider.Http_client.refusal_body_text body))
   | Llm_provider.Http_client.NetworkError { message; _ } ->
     Printf.sprintf "network: %s" message
+  | Llm_provider.Http_client.Connect_failed { message; _ } ->
+    Printf.sprintf "connect failed: %s" message
   | Llm_provider.Http_client.TimeoutError { message; _ } ->
     Printf.sprintf "timeout: %s" message
   | Llm_provider.Http_client.AcceptRejected { reason } ->

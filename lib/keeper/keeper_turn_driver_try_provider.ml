@@ -3042,7 +3042,7 @@ let is_size_refusal = function
       | AuthorizationError _
       | PaymentRequired _
       | NotFound _
-      | NetworkError _
+      | NetworkError _ | Connect_failed _
       | Timeout _ )
   | Agent_core.Error.Provider _
   | Agent_core.Error.Agent _
@@ -3178,7 +3178,7 @@ let boundary_resend_on = function
       | AuthorizationError _
       | PaymentRequired _
       | NotFound _
-      | NetworkError _
+      | NetworkError _ | Connect_failed _
       | Timeout _ )
   | Agent_core.Error.Provider _
   | Agent_core.Error.Agent _
@@ -3687,6 +3687,9 @@ let connection_recovery_sequence ~same_run_retry_authorized ~on_reconnect
       | Some (Llm_provider.Http_client.NetworkError
           { kind = (Connection_refused | Dns_failure | Unreachable | Tls_error | Timeout
                    | Local_resource_exhaustion | Unknown); _ })
+      (* A connection that never opened was not reused, so fresh connections
+         are not its remedy; the walk moves to the next candidate instead. *)
+      | Some (Connect_failed _)
       | Some (HttpError _ | TimeoutError _ | AcceptRejected _ | ProviderTerminal _
              | ProviderFailure _)
       | None -> None

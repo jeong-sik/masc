@@ -286,7 +286,7 @@ let err_json ?detail ~failure_class code =
    same wiring, so this one still ends the walk. *)
 let wiring_rejected = function
   | Llm_provider.Http_client.AcceptRejected _ -> true
-  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _
   | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.ProviderTerminal _
   | Llm_provider.Http_client.ProviderFailure _ -> false
 
@@ -297,7 +297,7 @@ let candidate_capacity_http_error = function
   | Llm_provider.Http_client.HttpError { code = 413; _ }
   | Llm_provider.Http_client.ProviderFailure
       { kind = Llm_provider.Http_client.Context_overflow _; _ } -> true
-  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _
   | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.AcceptRejected _
   | Llm_provider.Http_client.ProviderTerminal _
   | Llm_provider.Http_client.ProviderFailure
@@ -332,7 +332,7 @@ let candidate_policy_http_error err =
     && code < 500
     && (not (candidate_capacity_http_error err))
     && not (Runtime_attempt_fsm.should_try_next err)
-  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.TimeoutError _
+  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _ | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _
   | Llm_provider.Http_client.ProviderFailure _ -> false
 
@@ -805,7 +805,7 @@ let run_candidates_outcome
             continue_with Candidate_timeout
        | Error
            (( Llm_provider.Http_client.HttpError _
-            | Llm_provider.Http_client.NetworkError _
+            | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _
             | Llm_provider.Http_client.AcceptRejected _
             | Llm_provider.Http_client.ProviderTerminal _
             | Llm_provider.Http_client.ProviderFailure _ ) as err) ->

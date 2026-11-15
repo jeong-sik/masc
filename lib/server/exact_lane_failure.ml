@@ -37,8 +37,8 @@ let account_refusal retry_after =
   | None -> Configuration_refused
 
 let refusal ~retry_after_s = function
-  | Exact.Rate_limited | Exact.Overloaded | Exact.Server_error | Exact.Network_error | Exact.Timeout
-  | Exact.Refusal_body_not_received -> Transient
+  | Exact.Rate_limited | Exact.Overloaded | Exact.Server_error | Exact.Network_error
+  | Exact.Connect_failed | Exact.Timeout | Exact.Refusal_body_not_received -> Transient
   | Exact.Auth_failed | Exact.Authorization_refused -> Auth_refused
   | Exact.Payment_required -> account_refusal retry_after_s
   | Exact.Not_found -> Configuration_refused
@@ -62,7 +62,8 @@ let completion (error : Http.http_error) =
   | Http.ProviderFailure
       { kind = Http.Capacity_exhausted _ | Http.Provider_interrupted | Http.Provider_reported_error _; _ } ->
     Transient
-  | Http.HttpError _ | Http.NetworkError _ | Http.TimeoutError _ | Http.AcceptRejected _ | Http.ProviderTerminal _
+  | Http.HttpError _ | Http.NetworkError _ | Http.Connect_failed _ | Http.TimeoutError _
+  | Http.AcceptRejected _ | Http.ProviderTerminal _
   | Http.ProviderFailure
       { kind =
           ( Http.Capability_mismatch _ | Http.Cli_policy_invalid _ | Http.Cli_startup_failed _

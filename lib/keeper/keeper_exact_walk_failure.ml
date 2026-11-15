@@ -81,7 +81,8 @@ let of_input_refusal = provider_input_size
 type provider_cause = Exact_output.provider_refusal =
   | Request_body_refused | Refusal_body_not_received | Rate_limited | Overloaded
   | Server_error | Auth_failed | Authorization_refused | Payment_required
-  | Invalid_request | Not_found | Context_overflow | Input_capacity | Network_error | Timeout
+  | Invalid_request | Not_found | Context_overflow | Input_capacity | Network_error
+  | Connect_failed | Timeout
 [@@deriving yojson]
 
 type stop =
@@ -95,8 +96,12 @@ type network =
   | Local_resource_exhaustion | Connection_reset | End_of_file | Unknown_network
 [@@deriving yojson]
 
+(* [Connection_not_opened] is [Http_client.Connect_failed]: the connection did
+   not open, so nothing was sent (RFC #52028 §2.3). Its own name keeps it apart
+   from the provider refusal [Connect_failed] above. *)
 type completion =
-  | Http_failure | Network_failure of network | Deadline of Http_client.timeout_phase
+  | Http_failure | Network_failure of network | Connection_not_opened of network
+  | Deadline of Http_client.timeout_phase
   | Accept_rejected | Provider_terminal | Capacity_exhausted | Hard_quota
   | Capability_mismatch | Cli_policy_invalid | Cli_startup_failed | Provider_parse_error
   | Provider_wire_error | Provider_reported_error | Provider_interrupted
@@ -118,13 +123,16 @@ let stop = function
   | ContextWindowExceeded -> Context_window_exceeded | UnmatchedToolCalls -> Unmatched_tool_calls
   | Unknown detail -> Unknown_stop detail
 
+let network (kind : Http_client.network_error_kind) = match kind with
+  | Connection_refused -> Connection_refused | Dns_failure -> Dns_failure
+  | Unreachable -> Unreachable | Tls_error -> Tls_error
+  | Timeout -> Network_timeout | Local_resource_exhaustion -> Local_resource_exhaustion
+  | Connection_reset -> Connection_reset | End_of_file -> End_of_file | Unknown -> Unknown_network
+
 let completion (error : Http_client.http_error) = match error with
   | HttpError _ -> Http_failure
-  | NetworkError {kind;_} -> Network_failure (match kind with
-      | Connection_refused -> Connection_refused | Dns_failure -> Dns_failure
-      | Unreachable -> Unreachable | Tls_error -> Tls_error
-      | Timeout -> Network_timeout | Local_resource_exhaustion -> Local_resource_exhaustion
-      | Connection_reset -> Connection_reset | End_of_file -> End_of_file | Unknown -> Unknown_network)
+  | NetworkError {kind;_} -> Network_failure (network kind)
+  | Connect_failed {kind;_} -> Connection_not_opened (network kind)
   | TimeoutError {phase;_} -> Deadline phase
   | AcceptRejected _ -> Accept_rejected | ProviderTerminal _ -> Provider_terminal
   | ProviderFailure {kind;_} -> match kind with
@@ -156,7 +164,8 @@ let of_completion = function
   | Response_body_too_large | Empty_completion Max_tokens -> historical_size
   | Context_overflow_failure | Empty_completion Context_window_exceeded -> provider_input_size Context_overflow
   | Deadline (Stream_idle _ | Cli_stdout_idle | Provider_step | Queue | Capacity_backpressure | Unknown_timeout)
-  | Http_failure | Network_failure _ | Accept_rejected | Provider_terminal | Capacity_exhausted | Hard_quota
+  | Http_failure | Network_failure _ | Connection_not_opened _ | Accept_rejected | Provider_terminal
+  | Capacity_exhausted | Hard_quota
   | Capability_mismatch | Cli_policy_invalid | Cli_startup_failed | Provider_parse_error
   | Provider_wire_error | Provider_reported_error | Provider_interrupted
   | Unknown_provider_failure
@@ -169,7 +178,7 @@ let of_api_observation = function
       | Input_capacity -> provider_input_size Input_capacity
       | Request_body_refused -> provider_input_size Request_body_refused
       | Timeout | Invalid_request | Refusal_body_not_received -> historical_size
-      | Rate_limited | Overloaded | Server_error | Network_error
+      | Rate_limited | Overloaded | Server_error | Network_error | Connect_failed
       | Auth_failed | Authorization_refused | Payment_required | Not_found -> size_independent)
   | Completion_failed {sent=false;_} -> size_independent
   | Completion_failed {sent=true;cause} -> of_completion cause

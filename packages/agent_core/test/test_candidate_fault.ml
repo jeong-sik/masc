@@ -40,6 +40,9 @@ let expected_of_api_error (api : Llm_provider.Retry.api_error)
        Llm_provider.Candidate_fault.Unattributed)
   | Llm_provider.Retry.NetworkError _ ->
     Llm_provider.Candidate_fault.Unknown_after_dispatch
+  (* RFC §2.3: a connection function failed, so no byte of the request was
+     written. The decision is the operator's (§3.5, 2026-11-15). *)
+  | Llm_provider.Retry.Connect_failed _ -> Llm_provider.Candidate_fault.Not_sent
   | Llm_provider.Retry.Timeout
       { phase = Some (Llm_provider.Http_client.Queue | Llm_provider.Http_client.Capacity_backpressure)
       ; message = _ } ->
@@ -84,6 +87,7 @@ let ordinal (t : Llm_provider.Candidate_fault.t) : int =
   | Llm_provider.Candidate_fault.Unattributed -> 100
   | Llm_provider.Candidate_fault.Unknown_after_dispatch -> 101
   | Llm_provider.Candidate_fault.Local_admission -> 102
+  | Llm_provider.Candidate_fault.Not_sent -> 103
 ;;
 
 let assert_api name api =
@@ -151,6 +155,15 @@ let api_cases : (string * Llm_provider.Retry.api_error) list =
   ; ( "network_error"
     , Llm_provider.Retry.NetworkError
         { message = ""; kind = Llm_provider.Http_client.Connection_refused } )
+  ; ( "connect_failed_refused"
+    , Llm_provider.Retry.Connect_failed
+        { message = ""; kind = Llm_provider.Http_client.Connection_refused } )
+  ; ( "connect_failed_tls"
+    , Llm_provider.Retry.Connect_failed
+        { message = ""; kind = Llm_provider.Http_client.Tls_error } )
+  ; ( "connect_failed_dns"
+    , Llm_provider.Retry.Connect_failed
+        { message = ""; kind = Llm_provider.Http_client.Dns_failure } )
   ; "timeout", Llm_provider.Retry.Timeout { message = ""; phase = None }
   ; ( "timeout_first_token"
     , Llm_provider.Retry.Timeout

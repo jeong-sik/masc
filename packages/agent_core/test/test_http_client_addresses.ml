@@ -110,7 +110,7 @@ let test_failed_attempts_do_not_accumulate = with_runtime (fun env sw ->
             Eio.Promise.resolve fail_last ();
             raise (Unix.Unix_error (Unix.ENETUNREACH, "connect", "last")))) in
     (match post ~cache net with
-     | Error (Http_client.Before_dispatch_error (Http_client.NetworkError {kind = Unreachable; _})) -> ()
+     | Error (Http_client.Before_dispatch_error (Http_client.Connect_failed {kind = Unreachable; _})) -> ()
      | _ -> Alcotest.fail "expected last DNS-order error even when it fails first");
     Alcotest.(check bool) "all real attempt descriptors closed before next request" true (all_closed fds)
   done;
@@ -322,7 +322,7 @@ let test_last_eio_failure_kind =
           let failure = if address = last then Eio.Net.Timeout else Eio.Net.No_matching_addresses in
           raise (Eio.Net.err (Eio.Net.Connection_failure failure))) in
     (match post net with
-     | Error (Http_client.Before_dispatch_error (Http_client.NetworkError {kind = Timeout; _})) -> ()
+     | Error (Http_client.Before_dispatch_error (Http_client.Connect_failed {kind = Timeout; _})) -> ()
      | _ -> Alcotest.fail "last typed Eio connection error must survive classification");
     Eio.Switch.check sw)
 

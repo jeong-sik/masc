@@ -218,6 +218,24 @@ let frozen_observation snapshot target =
   }
 ;;
 
+(* Names every field, so a field added to [frozen_observation] has to be
+   compared here. Polymorphic [=] would also compare it, but a field met only
+   by [=] reads as unread to the compiler (warning 69). *)
+let same_observation left right =
+  String.equal left.snapshot_generation right.snapshot_generation
+  && String.equal left.snapshot_evidence right.snapshot_evidence
+  && String.equal left.selected_generation right.selected_generation
+  && String.equal left.selected_evidence right.selected_evidence
+  && String.equal left.selected_identity right.selected_identity
+  && String.equal left.provenance_generation right.provenance_generation
+  && String.equal left.provenance_evidence right.provenance_evidence
+  && String.equal left.provenance_identity right.provenance_identity
+  && String.equal left.receipt_generation right.receipt_generation
+  && String.equal left.receipt_evidence right.receipt_evidence
+  && String.equal left.receipt_identity right.receipt_identity
+  && String.equal left.plan_fingerprint right.plan_fingerprint
+;;
+
 let check_observation_is_coherent label observation =
   check
     string
@@ -362,16 +380,6 @@ let with_temp_catalog contents f =
        f path)
 ;;
 
-let replacement_snapshot contents =
-
-  let document : EO.catalog_document =
-    { source = "in-memory full replacement"; contents }
-  in
-  match EO.load_resolver_snapshot ~catalog:(EO.Full_replacement document) () with
-  | Ok snapshot -> snapshot
-  | Error _ -> fail "full replacement snapshot should load"
-;;
-
 let test_full_replacement_path_is_frozen_and_suppresses_embedded () =
   let first_contents =
     target_catalog
@@ -408,7 +416,7 @@ let test_full_replacement_path_is_frozen_and_suppresses_embedded () =
     bool
     "first handle remains coherent after source overwrite"
     true
-    (first_expected = frozen_observation first_snapshot (resolve_admitted first_handle));
+    (same_observation first_expected (frozen_observation first_snapshot (resolve_admitted first_handle)));
   let second_snapshot = load () in
   let second_handle = admit second_snapshot "replacement-b-target" in
   let second_expected =
@@ -419,17 +427,17 @@ let test_full_replacement_path_is_frozen_and_suppresses_embedded () =
     bool
     "first handle remains coherent after source deletion"
     true
-    (first_expected = frozen_observation first_snapshot (resolve_admitted first_handle));
+    (same_observation first_expected (frozen_observation first_snapshot (resolve_admitted first_handle)));
   check
     bool
     "second handle remains coherent after source deletion"
     true
-    (second_expected = frozen_observation second_snapshot (resolve_admitted second_handle));
+    (same_observation second_expected (frozen_observation second_snapshot (resolve_admitted second_handle)));
   check
     bool
     "separately loaded file snapshots remain distinct"
     true
-    (first_expected <> second_expected);
+    (not (same_observation first_expected second_expected));
   let expect_absent snapshot id =
     match EO.admit_target_ref snapshot id with
     | Error (EO.Target_not_in_catalog actual) -> check string "exact absence" id actual
@@ -656,7 +664,7 @@ let test_one_fresh_handle_is_immutably_shareable_across_domains () =
     bool
     "one freshly admitted handle yields identical immutable Domain observations"
     true
-    (first_observation = second_observation)
+    (same_observation first_observation second_observation)
 ;;
 
 let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
@@ -678,17 +686,17 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
     bool
     "immutable handle A crosses a Domain without rebinding"
     true
-    (old_domain_observation = expected_old);
+    (same_observation old_domain_observation expected_old);
   check
     bool
     "immutable handle B crosses a Domain without rebinding"
     true
-    (new_domain_observation = expected_new);
+    (same_observation new_domain_observation expected_new);
   check
     bool
     "cross-Domain handles preserve distinct whole tuples"
     true
-    (old_domain_observation <> new_domain_observation);
+    (not (same_observation old_domain_observation new_domain_observation));
   let observe snapshot admitted signal_arrived gate =
     let target = resolve_admitted admitted in
     Eio.Promise.resolve signal_arrived ();
@@ -728,13 +736,17 @@ let test_old_and_new_whole_tuples_never_mix_across_domains_and_fibers () =
     bool
     "old selected/provenance/receipt tuple is exactly snapshot A"
     true
-    (old_observation = expected_old);
+    (same_observation old_observation expected_old);
   check
     bool
     "new selected/provenance/receipt tuple is exactly snapshot B"
     true
-    (new_observation = expected_new);
-  check bool "A and B whole tuples differ" true (old_observation <> new_observation)
+    (same_observation new_observation expected_new);
+  check
+    bool
+    "A and B whole tuples differ"
+    true
+    (not (same_observation old_observation new_observation))
 ;;
 
 let expect_endpoint_error label expected_cause contents =

@@ -883,10 +883,16 @@ let librarian_round
     selection, disposition, events, absorbed_rows)
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 (* The drops the newest journal line names, which must be a committed
    Librarian pass that states its drops. *)
 let journaled_drop_ids ~keepers_dir ~keeper_id =
-  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
+  match readable_journal_tail ~keepers_dir ~keeper_id ~limit:1 with
   | [ Ok
         (Current.Journal_committed
            { source = { kind = Current.Librarian; _ }; dropped = Some statements; _ })

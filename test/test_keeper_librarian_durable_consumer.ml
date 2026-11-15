@@ -3602,6 +3602,12 @@ type checkpoint_memory_floor_case =
   | Moved_checkpoint_progress
   | Interrupted_checkpoint_progress
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Masc.Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 (* The ordinary durable pass starts after a real stored atom position. A
    single completion cut spans two further atoms: its tool result shares the
    assistant's atom, so message coordinates cannot be a flattened index. *)
@@ -3851,7 +3857,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
     List.iter (fun marker -> check bool "only selected source content reaches the actual transport request" false
       (contains ~sub:marker body))
       [prefix_marker;next_trace_marker;"checkpoint-private-argument";"checkpoint-private-result"]) !requests;
-  let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
+  let publications () = readable_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
     |> List.map get |> List.filter_map (function
       | Current.Journal_committed {program=Some proof;_} -> Some proof
       | Current.Journal_committed {program=None;_} | Current.Journal_failed _
@@ -4145,7 +4151,7 @@ let test_runtime_official_memory_floor ?native case () =
   check int "one whole-turn attempt precedes the exact-message floor" expected_calls (List.length !requests);
   check int "official native descent dispatches no undeclared HTTP target"
     (if Option.is_some native then 0 else expected_calls) (F.post_count server);
-  let publications () = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
+  let publications () = readable_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:20
     |> List.map get |> List.filter_map (function
       | Current.Journal_committed {program=Some proof;_} -> Some proof
       | Current.Journal_committed {program=None;_} | Current.Journal_failed _

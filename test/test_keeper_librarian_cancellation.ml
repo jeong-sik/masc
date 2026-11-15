@@ -18,6 +18,12 @@ let check_json label expected actual =
   Alcotest.(check string) label
     (Yojson.Safe.to_string expected) (Yojson.Safe.to_string actual)
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~registry stage () =
   Eio_main.run @@ fun env ->
   let previous_pool = Domain_pool_ref.get () in
@@ -269,7 +275,7 @@ let test_cancel ?(observer_checks = true) ?(closed_pool = false) ~base_path ~reg
   (match previous_pool with
    | None -> Domain_pool_ref.clear_for_tests ()
    | Some pool -> Domain_pool_ref.set pool);
-  let journal = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10 in
+  let journal = readable_journal_tail ~keepers_dir ~keeper_id ~limit:10 in
   let cancellations = List.filter (function
     | Ok (Current.Journal_failed { kind = Current.Lane_cancelled; _ }) -> true
     | Ok _ -> false

@@ -600,6 +600,22 @@ let load_tail_lines path ~max_lines =
   map_tail_rows path ~max_lines ~f:(fun row -> row.line)
 ;;
 
+let tail_rows_of_input_result ~path input ~max_lines =
+  match load_tail_rows_from_channel input ~max_lines with
+  | rows -> Ok rows
+  | exception Sys_error detail ->
+    Error (Io_error { operation = Read_file; path; detail })
+  | exception End_of_file ->
+    Error
+      (Io_error
+         { operation = Read_file
+         ; path
+         ; detail = "file changed while reading its tail"
+         })
+  | exception Invalid_argument detail ->
+    Error (Io_error { operation = Read_file; path; detail })
+;;
+
 let load_tail_lines_result_inline path ~max_lines =
   if max_lines <= 0
   then Ok []
@@ -610,19 +626,44 @@ let load_tail_lines_result_inline path ~max_lines =
       Fun.protect
         ~finally:(fun () -> close_in_noerr input)
         (fun () ->
-           match load_tail_rows_from_channel input ~max_lines with
-           | rows -> Ok (tail_lines rows)
-           | exception Sys_error detail ->
-             Error (Io_error { operation = Read_file; path; detail })
-           | exception End_of_file ->
-             Error
-               (Io_error
-                  { operation = Read_file
-                  ; path
-                  ; detail = "file changed while reading its tail"
-                  })
-           | exception Invalid_argument detail ->
-             Error (Io_error { operation = Read_file; path; detail }))
+           tail_rows_of_input_result ~path input ~max_lines |> Result.map tail_lines)
+;;
+
+(* The open itself tells a missing file from one that cannot be opened, so no
+   existence check stands between the two. The path is followed as
+   [load_tail_rows_inline] follows it; what was opened is then inspected. *)
+let load_tail_rows_result_inline path ~max_lines =
+  if max_lines <= 0
+  then Ok []
+  else
+    match
+      Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0
+    with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+    | exception Unix.Unix_error (error, _, _) ->
+      Error
+        (Io_error { operation = Open_file; path; detail = Unix.error_message error })
+    | descriptor ->
+      (match Unix.fstat descriptor with
+       | exception Unix.Unix_error (error, _, _) ->
+         close_file_descriptor_noerr descriptor;
+         Error
+           (Io_error { operation = Inspect; path; detail = Unix.error_message error })
+       | stats ->
+         (match non_regular_file_kind_of_stats stats with
+          | Some kind ->
+            close_file_descriptor_noerr descriptor;
+            Error (Non_regular_file { path; kind })
+          | None ->
+            let input = Unix.in_channel_of_descr descriptor in
+            Fun.protect
+              ~finally:(fun () -> close_in_noerr input)
+              (fun () -> tail_rows_of_input_result ~path input ~max_lines)))
+;;
+
+let map_tail_rows_result path ~max_lines ~f =
+  off_fiber ~name:__FUNCTION__ (fun () ->
+    load_tail_rows_result_inline path ~max_lines |> Result.map (List.map f))
 ;;
 
 let recent_entry_of_line ~path ?line_number line =

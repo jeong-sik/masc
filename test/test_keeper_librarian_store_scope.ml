@@ -86,6 +86,12 @@ let test_progress_is_not_a_metadata_record () =
   check (list string) "progress introduces no fake Keeper" [ keeper_name ] names
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Masc.Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 (* The purge is the one place that stops a Librarian unit early, and it does
    so before any file goes, whichever operation asked for the purge. *)
 let test_purge_stops_the_running_librarian_unit_first () =
@@ -140,7 +146,7 @@ let test_purge_stops_the_running_librarian_unit_first () =
   check bool "no boundaries after the purge" true (read_boundaries a = []);
   append_failure "trace-after";
   check bool "a same-name successor recreates the lock" true (Sys.file_exists journal_lock);
-  match Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:10 with
+  match readable_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:10 with
   | [Ok (Current.Journal_failed entry)] ->
     check string "successor sees only its own journal entry" "trace-after" entry.trace_id
   | _ -> fail "successor journal did not contain exactly its new failure"

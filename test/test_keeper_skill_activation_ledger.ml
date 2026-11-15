@@ -1719,16 +1719,21 @@ let test_failed_append_notifies_and_invalidates_cache () =
       let loads_during_notification = ref [] in
       let observer ~config:_ ~trace_id:changed =
         heard := changed :: !heard;
-        loads_during_notification := !loads :: !loads_during_notification;
-        read ()
+        read ();
+        loads_during_notification := !loads :: !loads_during_notification
       in
       Ledger.install_commit_observer observer;
       Fun.protect ~finally:(fun () -> Ledger.withdraw_commit_observer observer)
       @@ fun () ->
-      Fs_compat.mkdir_p (events_file session_dir);
+      (* The store is read before it is appended to, and a read that fails
+         attempts no append. An empty store this process may read but not
+         write passes the read and fails where the append opens it. *)
+      write_file (events_file session_dir) "";
+      Unix.chmod (events_file session_dir) 0o400;
       (match Ledger.record ~keeper_name:"alpha" ~config ~trace_id (activation ()) with
-       | Ok _ -> fail "a directory accepted the event log"
-       | Error _ -> ());
+       | Ok _ -> fail "a read-only event log accepted the append"
+       | Error (Ledger.Event_log_failed _) -> ()
+       | Error error -> fail (Ledger.store_error_to_string error));
       check int "the attempted append notifies the legacy observer" 1 (List.length !heard);
       check (list int) "the notification already sees the cold reload" [ 2 ]
         (List.rev !loads_during_notification);

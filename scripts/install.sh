@@ -81,6 +81,9 @@ WIZARD="${MASC_WIZARD:-auto}"
 WIZARD_PROVIDER=""
 SHELL_PATH_MODE=auto
 RUN_SETUP_JOURNEY=0
+# Set when the journey stopped at a workspace whose config asks for accounts.
+# It prepared nothing there, so the summary does not say setup finished.
+SETUP_JOURNEY_FOUND_ACCOUNTS=0
 # Whether the config root was already here before this run. This is what makes
 # the setup wizard a first-time step rather than one that runs on every install.
 CONFIG_PREEXISTING=0
@@ -100,6 +103,11 @@ readonly MASC_INSTALL_RELEASE_METADATA_TIMEOUT_S=30
 readonly MASC_INSTALL_CONFIG_FETCH_TIMEOUT_S=60
 readonly MASC_INSTALL_BINARY_DOWNLOAD_TIMEOUT_S=300
 readonly MASC_INSTALL_CURL_RETRIES=3
+# The status `masc setup` exits with when its journey stopped at a workspace
+# whose config asks for accounts (ACCOUNT_INSTALLATION_EXIT in
+# install-runtime-setup.py). The summary reads this status, never the lines
+# the journey printed.
+readonly MASC_SETUP_ACCOUNT_INSTALLATION_EXIT=3
 
 # --- provider catalog ---------------------------------------------------------
 # The catalog is a flat list of NUL-delimited records with no record separator,
@@ -704,14 +712,23 @@ print_install_summary() {
   printf '\n%smasc %s installed.%s\n' "$c_grn" "$VERSION" "$c_off"
   printf 'Installed: server, TUI, dashboard and preflight tools\n'
   printf 'Workspace: %s\n\n' "$BASE_PATH"
-  if [ "$RUN_SETUP_JOURNEY" -eq 1 ]; then
-    printf 'Setup finished. Reopen this workspace:\n  '
-    print_workspace_command
+  if [ "$SETUP_JOURNEY_FOUND_ACCOUNTS" -eq 1 ]; then
+    # The journey above said what the config asks for and whether an account
+    # server runs. A boot of this workspace runs that server or stops.
+    printf 'This workspace asks for accounts, so setup prepared no model or sandbox here.\n'
+    printf 'Start or replace its account server with the installed build:\n  '
+    print_workspace_command restart
+    printf '\nNot activated yet? masc auth bootstrap activates it first, while no server runs.\n'
   else
-    printf 'Next: choose a model and sandbox, then meet imp:\n  '
-    print_workspace_command setup
+    if [ "$RUN_SETUP_JOURNEY" -eq 1 ]; then
+      printf 'Setup finished. Reopen this workspace:\n  '
+      print_workspace_command
+    else
+      printf 'Next: choose a model and sandbox, then meet imp:\n  '
+      print_workspace_command setup
+    fi
+    printf '\nSetup guides CLI sign-in or API credentials and sandbox preparation.\n'
   fi
-  printf '\nSetup guides CLI sign-in or API credentials and sandbox preparation.\n'
   printf 'Install, upgrade and optional MCP/browser setup:\n  https://github.com/%s/blob/%s/docs/INSTALL.md\n\n' "$REPO" "$VERSION"
 }
 
@@ -724,12 +741,18 @@ finish_setup_journey() {
   # The journey asks for a model and a sandbox, so it needs the terminal the
   # workspace check already borrows: an installer read from a pipe leaves this
   # child reading the pipe, and the wizard reports a cancellation nobody asked for.
-  if ! with_terminal_input "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2; then
-    warn "MASC is installed; setup did not finish. Resume with:"
-    printf '  ' >&2
-    print_workspace_command setup >&2
-    return 1
-  fi
+  local status=0
+  with_terminal_input "$DEST" setup --base-path "$BASE_PATH" --port "$MASC_PORT" >&2 || status=$?
+  case "$status" in
+    0) ;;
+    "$MASC_SETUP_ACCOUNT_INSTALLATION_EXIT") SETUP_JOURNEY_FOUND_ACCOUNTS=1 ;;
+    *)
+      warn "MASC is installed; setup did not finish. Resume with:"
+      printf '  ' >&2
+      print_workspace_command setup >&2
+      return 1
+      ;;
+  esac
 }
 
 run_wizard() {

@@ -283,7 +283,7 @@ let test_model_catalog_configuration_installs_explicit_env_override () =
   let load_calls = ref [] in
   let set_calls = ref 0 in
   let result =
-    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
       ~env
       ~load_catalog:(fun path ->
         load_calls := path :: !load_calls;
@@ -318,7 +318,7 @@ auth = "none"
     let env = function
       | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/rejected-catalog.toml"
       | _ -> None in
-    (match Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    (match Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
        ~env ~load_catalog:(fun _ -> invalid) () with
      | _ -> Alcotest.fail "invalid provider admission must stop bootstrap"
      | exception Env_config_core.Config_error detail ->
@@ -340,7 +340,7 @@ let test_model_catalog_configuration_replaces_whole_selection () =
     let env = function
       | "AGENT_CORE_MODEL_CATALOG" -> Some "/fixture/replacement-catalog.toml"
       | _ -> None in
-    ignore (Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    ignore (Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
       ~env ~load_catalog:(fun _ -> Ok Llm_provider.Model_catalog.empty) ());
     let models, providers = Snapshot.sources (Snapshot.current ()) in
     Alcotest.(check bool) "replacement installs explicit model facts" true
@@ -378,7 +378,7 @@ let test_config_load_failure_diagnostic_attributes_to_config () =
 let test_model_catalog_configuration_delegates_to_agent_core_ambient () =
   let env _ = None in
   let result =
-    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
+    Runtime_model_catalog_boot.configure_agent_core_model_catalog_env
       ~env
       ~agent_core_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
       ()
@@ -664,28 +664,79 @@ let curl_request_capture ?(headers = []) ~output_dir ~name ~method_ ~url ?payloa
   | Unix.WSTOPPED signal ->
       Alcotest.failf "curl %s stopped %d" name signal
 
-let process_alive pid =
-  match Unix.waitpid [Unix.WNOHANG] pid with
-  | 0, _ -> true
-  | _ -> false
-  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> false
+(* What the kernel says about a child this test spawned. [Reaped] is a child
+   whose exit status an earlier poll already collected. *)
+type child_state =
+  | Running
+  | Exited of Unix.process_status
+  | Reaped
 
-let wait_for_health ~pid ~port ~timeout_s =
+let poll_child pid =
+  match Unix.waitpid [Unix.WNOHANG] pid with
+  | 0, _ -> Running
+  | _, status -> Exited status
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> Reaped
+
+let process_alive pid =
+  match poll_child pid with
+  | Running -> true
+  | Exited _ | Reaped -> false
+
+(* How a wait on a spawned server ended. A server that died while starting and
+   a server that is still starting are different findings, and neither one is
+   "this machine cannot run the test" (#48992). *)
+type server_wait =
+  | Reached
+  | Died of Unix.process_status
+  | Gone
+  | Timed_out
+
+let wait_for_server ~pid ~timeout_s ~interval_s reached =
   let deadline = Unix.gettimeofday () +. timeout_s in
   let rec loop () =
-    match curl_health_status ~port with
-    | Some 200 -> true
-    | _ ->
-      if not (process_alive pid) then
-        false
-      else if Unix.gettimeofday () >= deadline then
-        false
-      else begin
-        Unix.sleepf 0.1;
-        loop ()
-      end
+    if reached () then Reached
+    else
+      match poll_child pid with
+      | Exited status -> Died status
+      | Reaped -> Gone
+      | Running ->
+        if Unix.gettimeofday () >= deadline then Timed_out
+        else begin
+          Unix.sleepf interval_s;
+          loop ()
+        end
   in
   loop ()
+
+let wait_for_health ~pid ~port ~timeout_s =
+  wait_for_server ~pid ~timeout_s ~interval_s:0.1 (fun () ->
+    match curl_health_status ~port with
+    | Some 200 -> true
+    | Some _ | None -> false)
+
+let describe_process_status = function
+  | Unix.WEXITED code -> Printf.sprintf "exited with status %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "was killed by signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "was stopped by signal %d" signal
+
+(* A spawned server that did not reach [what] fails the test. [wait] is one of
+   the waits above without its [~timeout_s]. The log is printed with the
+   failure because the temp dir is removed when the test returns. *)
+let require_server_reached ~what ~timeout_s ~log_file wait =
+  match wait ~timeout_s with
+  | Reached -> ()
+  | Died status ->
+    Alcotest.failf "%s was not reached: the server %s.\nlog:\n%s" what
+      (describe_process_status status)
+      (read_file log_file)
+  | Gone ->
+    Alcotest.failf
+      "%s was not reached: the server is no longer a child of this test, so its exit \
+       status was already collected.\nlog:\n%s"
+      what (read_file log_file)
+  | Timed_out ->
+    Alcotest.failf "%s was not reached: the server was still running after %.0fs.\nlog:\n%s"
+      what timeout_s (read_file log_file)
 
 let wait_for_process_exit ~pid ~timeout_s =
   let deadline = Unix.gettimeofday () +. timeout_s in
@@ -702,38 +753,16 @@ let wait_for_process_exit ~pid ~timeout_s =
   loop ()
 
 let wait_for_startup_phase ~pid ~port ~timeout_s expected_phase =
-  let deadline = Unix.gettimeofday () +. timeout_s in
-  let rec loop () =
+  wait_for_server ~pid ~timeout_s ~interval_s:0.2 (fun () ->
     match curl_health_json ~port with
+    | None -> false
     | Some json -> (
-        let phase =
-          match Yojson.Safe.Util.member "startup" json with
-          | `Assoc _ as startup ->
-              Yojson.Safe.Util.(startup |> member "phase" |> to_string_option)
-          | _ -> None
-        in
-        match phase with
-        | Some phase when String.equal phase expected_phase -> true
-        | _ ->
-            if not (process_alive pid) then
-              false
-            else if Unix.gettimeofday () >= deadline then
-              false
-            else begin
-              Unix.sleepf 0.2;
-              loop ()
-            end)
-    | None ->
-        if not (process_alive pid) then
-          false
-        else if Unix.gettimeofday () >= deadline then
-          false
-        else begin
-          Unix.sleepf 0.2;
-          loop ()
-        end
-  in
-  loop ()
+        match Yojson.Safe.Util.member "startup" json with
+        | `Assoc _ as startup -> (
+            match Yojson.Safe.Util.(startup |> member "phase" |> to_string_option) with
+            | Some phase -> String.equal phase expected_phase
+            | None -> false)
+        | _ -> false))
 
 (* These fixtures reach runtime catalog admission, rather than failing the
    TOML parser or exercising retired profile/route syntax. The optional model
@@ -5061,14 +5090,18 @@ let test_startup_state_readiness_after_init () =
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
 
-let startup_http_response router path =
+let startup_http_response ?(meth = "GET") ?(headers = []) router path =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
   in
+  let header_lines =
+    List.map (fun (name, value) -> Printf.sprintf "%s: %s\r\n" name value) headers
+    |> String.concat ""
+  in
   let wire =
-    Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n\r\n" path
+    Printf.sprintf "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n%s\r\n" meth path header_lines
   in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length wire) wire in
   ignore
@@ -5091,6 +5124,14 @@ let startup_http_response router path =
   in
   drain ();
   Buffer.contents output
+
+(* Whether the server asks every reader for a credential follows three
+   settings; a test of the health routes pins all three so the shell it runs
+   in decides nothing. *)
+let with_health_posture ~strict f =
+  with_env "MASC_HTTP_AUTH_STRICT" (Some (if strict then "true" else "false")) @@ fun () ->
+  with_env "MASC_HOST" (Some "127.0.0.1") @@ fun () ->
+  with_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1:8935") f
 
 (* The OpenAPI document names the listener a request was admitted on. The TLS
    listener admits a port-less Host at the https default port, and the
@@ -5158,6 +5199,9 @@ let test_openapi_servers_url_follows_the_admitted_authority () =
          (String_util.contains_substring tls "\"url\":\"https://127.0.0.1:443\""))
 
 let test_mcp_transport_requires_explicit_readiness () =
+  (* The body read below is the one a server that asks for no credential
+     gives a request without one, published and before readiness. *)
+  with_health_posture ~strict:false @@ fun () ->
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   let previous_startup = Server_startup_state.snapshot () in
   Fun.protect
@@ -5227,6 +5271,366 @@ let test_mcp_transport_requires_explicit_readiness () =
        let readiness = startup_http_response router "/health/ready" in
        Alcotest.(check bool) "/health/ready admits published owner" true
          (String.starts_with ~prefix:"HTTP/1.1 200" readiness))
+
+(* The health routes through the router, as the HTTP/1.1 listener runs them.
+   [/health] answers one of three ways by who asks; the two sibling probes
+   say the same to everyone. *)
+
+let health_answer ?meth ?headers router path =
+  let response = startup_http_response ?meth ?headers router path in
+  let separator = "\r\n\r\n" in
+  let head, body =
+    let rec find from =
+      if from + String.length separator > String.length response
+      then Alcotest.failf "no complete response on %s: %S" path response
+      else if String.equal (String.sub response from (String.length separator)) separator
+      then
+        ( String.sub response 0 from
+        , String.sub response (from + String.length separator)
+            (String.length response - from - String.length separator) )
+      else find (from + 1)
+    in
+    find 0
+  in
+  match String.split_on_char '\n' head |> List.map String.trim with
+  | [] -> Alcotest.failf "no status line on %s" path
+  | status_line :: header_lines ->
+    let status =
+      match String.split_on_char ' ' status_line with
+      | _ :: code :: _ ->
+        (match int_of_string_opt code with
+         | Some code -> code
+         | None -> Alcotest.failf "unreadable status line on %s: %S" path status_line)
+      | _ -> Alcotest.failf "unreadable status line on %s: %S" path status_line
+    in
+    let header line =
+      match String.index_opt line ':' with
+      | None -> None
+      | Some colon ->
+        Some
+          ( String.lowercase_ascii (String.sub line 0 colon)
+          , String.trim (String.sub line (colon + 1) (String.length line - colon - 1)) )
+    in
+    status, List.filter_map header header_lines, body
+;;
+
+let health_json path body =
+  match Yojson.Safe.from_string body with
+  | json -> json
+  | exception Yojson.Json_error error ->
+    Alcotest.failf "the body of %s is not JSON (%s): %S" path error body
+;;
+
+let json_keys = function
+  | `Assoc fields -> List.sort String.compare (List.map fst fields)
+  | json -> Alcotest.failf "expected a JSON object, got %s" (Yojson.Safe.to_string json)
+;;
+
+let public_health_keys = [ "live"; "phase"; "ready"; "server"; "version" ]
+let bearer token = [ "Authorization", "Bearer " ^ token ]
+let server_timing_header = "server-timing"
+
+type health_routes =
+  { health_base_path : string
+  ; health_router : Http_server_eio.Router.t
+  ; admin_token : string
+  ; worker_token : string
+  ; player_token : string
+  }
+
+let health_admin_name = "health-admin"
+
+(* A published, ready workspace with one stored credential of each role, and
+   the production table of the health routes. *)
+let with_health_routes ~strict f =
+  with_temp_dir "health-requester" @@ fun dir ->
+  let config_root = make_config_root dir in
+  with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+  with_config_input "MASC_BASE_PATH" (Some dir) @@ fun () ->
+  with_health_posture ~strict @@ fun () ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Server_startup_state.snapshot () in
+  Config_dir_resolver.reset ();
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Server_startup_state.For_testing.restore previous_startup;
+      Config_dir_resolver.reset ();
+      Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
+    (fun () ->
+       let state = Mcp_server.For_testing.create_state ~base_path:dir in
+       ignore (Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
+       Auth.save_auth_config dir
+         { Masc_domain.default_auth_config with enabled = true; require_token = true };
+       let token agent_name role =
+         match Auth.create_token dir ~agent_name ~role with
+         | Ok (token, (_ : Masc_domain.agent_credential)) -> token
+         | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+       in
+       let admin_token = token health_admin_name Masc_domain.Admin in
+       let worker_token = token "health-worker" Masc_domain.Worker in
+       let player_token = token "health-player" Masc_domain.Player in
+       Server_startup_state.reset ();
+       Server_startup_state.mark_blocking ();
+       Server_auth.For_testing.restore_server_state (Some state);
+       Server_startup_state.mark_state_ready () |> Result.get_ok;
+       let authority =
+         match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+         | Ok authority -> authority
+         | Error `Malformed -> Alcotest.fail "fixture authority must be valid"
+       in
+       Server_request_authority.with_current authority @@ fun () ->
+       f
+         { health_base_path = dir
+         ; health_router =
+             Server_routes_http_routes_frontend.add_routes (Http_server_eio.Router.create ())
+         ; admin_token
+         ; worker_token
+         ; player_token
+         })
+;;
+
+let both_postures f = List.iter (fun strict -> f ~strict) [ true; false ]
+let posture_name ~strict = if strict then "strict" else "not strict"
+
+let check_public_health ~name ~ready ~phase (status, headers, body) =
+  let open Yojson.Safe.Util in
+  let json = health_json name body in
+  Alcotest.(check int) (name ^ ": status") 200 status;
+  Alcotest.(check (list string)) (name ^ ": the five public keys") public_health_keys
+    (json_keys json);
+  Alcotest.(check string) (name ^ ": server") "masc" (json |> member "server" |> to_string);
+  Alcotest.(check string) (name ^ ": version") Runtime_build_version.current
+    (json |> member "version" |> to_string);
+  Alcotest.(check bool) (name ^ ": live") true (json |> member "live" |> to_bool);
+  Alcotest.(check bool) (name ^ ": ready") ready (json |> member "ready" |> to_bool);
+  Alcotest.(check string) (name ^ ": phase") phase (json |> member "phase" |> to_string);
+  Alcotest.(check bool) (name ^ ": no timing header") false
+    (List.mem_assoc server_timing_header headers)
+;;
+
+let test_health_says_only_the_public_probe_without_a_credential_under_strict_auth () =
+  with_health_routes ~strict:true @@ fun routes ->
+  List.iter
+    (fun path ->
+       check_public_health ~name:path ~ready:true ~phase:"ready"
+         (health_answer routes.health_router path))
+    [ Server_health_paths.health; Server_health_paths.full ]
+;;
+
+let test_health_answers_a_reader_in_full () =
+  let open Yojson.Safe.Util in
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  let readers =
+    [ "an admin bearer", bearer routes.admin_token
+    ; "a worker bearer", bearer routes.worker_token
+    ]
+    @ if strict then [] else [ "no credential", [] ]
+  in
+  List.iter
+    (fun (who, headers) ->
+       let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+       let status, response_headers, body =
+         health_answer ~headers routes.health_router Server_health_paths.health
+       in
+       let json = health_json name body in
+       Alcotest.(check int) (name ^ ": status") 200 status;
+       Alcotest.(check string) (name ^ ": names the served workspace")
+         (Unix.realpath routes.health_base_path)
+         (Unix.realpath (json |> member "paths" |> member "effective_base_path" |> to_string));
+       Alcotest.(check bool) (name ^ ": startup section") true
+         (json |> member "startup" |> member "state_ready" |> to_bool);
+       Alcotest.(check string) (name ^ ": status field") "ok"
+         (json |> member "status" |> to_string);
+       Alcotest.(check bool) (name ^ ": timing header") true
+         (List.mem_assoc server_timing_header response_headers);
+       Alcotest.(check (option string)) (name ^ ": the command line reads its version")
+         (Some Runtime_build_version.current)
+         (Server_upgrade_preparation.compact_health_version body);
+       let full_status, (_ : (string * string) list), full_body =
+         health_answer ~headers routes.health_router Server_health_paths.full
+       in
+       let full = health_json name full_body in
+       Alcotest.(check int) (name ^ ": full status") 200 full_status;
+       Alcotest.(check string) (name ^ ": full detail") "full"
+         (full |> member "health_detail" |> to_string);
+       (match full |> member "full_health_snapshot" with
+        | `Assoc _ -> ()
+        | json ->
+          Alcotest.failf "%s: full_health_snapshot is %s" name (Yojson.Safe.to_string json)))
+    readers
+;;
+
+let test_health_refuses_a_credential_it_cannot_accept () =
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  let workspace_secret = Auth.init_workspace_secret routes.health_base_path in
+  let refused ~who ~expected headers =
+    let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+    let status, (_ : (string * string) list), body =
+      health_answer ~headers routes.health_router Server_health_paths.health
+    in
+    Alcotest.(check int) (name ^ ": status") expected status;
+    (match health_json name body with
+     | `Assoc fields ->
+       List.iter
+         (fun key ->
+            Alcotest.(check bool) (name ^ ": no " ^ key) false (List.mem_assoc key fields))
+         ("paths" :: "build" :: "startup" :: public_health_keys)
+     | json -> Alcotest.failf "%s: the refusal is %s" name (Yojson.Safe.to_string json));
+    Alcotest.(check bool) (name ^ ": does not name the workspace") false
+      (String_util.contains_substring body routes.health_base_path)
+  in
+  refused ~who:"a header that is not a bearer" ~expected:401 [ "Authorization", "Basic x" ];
+  refused ~who:"an unknown bearer" ~expected:401 (bearer "no-such-token");
+  refused ~who:"the workspace secret as a bearer" ~expected:401 (bearer workspace_secret);
+  refused ~who:"a credential that may not read state" ~expected:403
+    (bearer routes.player_token);
+  (* A credential the store cannot read is the server's failure. A mode-0
+     file stands in for the failed open; root opens it, so there is nothing
+     to make unreadable. *)
+  if Unix.geteuid () <> 0
+  then (
+    let credential_file = Auth.credential_file routes.health_base_path health_admin_name in
+    Unix.chmod credential_file 0o000;
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.chmod credential_file 0o600 with
+        | Unix.Unix_error _ -> ())
+      (fun () ->
+         refused ~who:"a credential the store cannot read" ~expected:503
+           (bearer routes.admin_token)))
+;;
+
+let test_the_sibling_probes_say_the_same_to_everyone () =
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  List.iter
+    (fun (who, headers) ->
+       let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+       let live_status, (_ : (string * string) list), live_body =
+         health_answer ~headers routes.health_router Server_health_paths.liveness
+       in
+       Alcotest.(check int) (name ^ ": liveness status") 200 live_status;
+       Alcotest.(check (list string)) (name ^ ": liveness keys") [ "live" ]
+         (json_keys (health_json name live_body));
+       let ready_status, (_ : (string * string) list), ready_body =
+         health_answer ~headers routes.health_router Server_health_paths.readiness
+       in
+       Alcotest.(check int) (name ^ ": readiness status") 200 ready_status;
+       Alcotest.(check (list string)) (name ^ ": readiness keys") [ "phase"; "ready" ]
+         (json_keys (health_json name ready_body)))
+    [ "no credential", []
+    ; "an admin bearer", bearer routes.admin_token
+    ; "an unknown bearer", bearer "no-such-token"
+    ]
+;;
+
+(* HEAD runs the GET route of each of the three paths (#51921) and is
+   answered with the status of GET and no content, so it carries neither the
+   public probe nor the reader's body, nor the body of a refusal. *)
+let test_head_on_a_health_route_carries_no_body () =
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  List.iter
+    (fun path ->
+       List.iter
+         (fun (who, headers) ->
+            let name = Printf.sprintf "%s, %s, HEAD %s" (posture_name ~strict) who path in
+            let get_status, (_ : (string * string) list), (_ : string) =
+              health_answer ~headers routes.health_router path
+            in
+            let status, (_ : (string * string) list), body =
+              health_answer ~meth:"HEAD" ~headers routes.health_router path
+            in
+            Alcotest.(check int) (name ^ ": the status of GET") get_status status;
+            Alcotest.(check string) (name ^ ": no body") "" body)
+         [ "no credential", []
+         ; "an admin bearer", bearer routes.admin_token
+         ; "an unknown bearer", bearer "no-such-token"
+         ])
+    [ Server_health_paths.health; Server_health_paths.liveness; Server_health_paths.readiness ]
+;;
+
+let test_health_before_the_workspace_is_published_is_the_public_probe () =
+  let open Yojson.Safe.Util in
+  both_postures @@ fun ~strict ->
+  with_health_routes ~strict @@ fun routes ->
+  Server_startup_state.reset ();
+  Server_startup_state.mark_blocking ();
+  Server_auth.For_testing.restore_server_state None;
+  List.iter
+    (fun (who, headers) ->
+       let name = Printf.sprintf "%s, %s" (posture_name ~strict) who in
+       check_public_health ~name ~ready:false ~phase:"blocking"
+         (health_answer ~headers routes.health_router Server_health_paths.health);
+       let status, (_ : (string * string) list), body =
+         health_answer ~headers routes.health_router Server_health_paths.readiness
+       in
+       let json = health_json name body in
+       Alcotest.(check int) (name ^ ": readiness status") 503 status;
+       Alcotest.(check (list string)) (name ^ ": readiness keys") [ "phase"; "ready" ]
+         (json_keys json);
+       Alcotest.(check bool) (name ^ ": not ready") false (json |> member "ready" |> to_bool))
+    [ "no credential", []
+    ; "an admin bearer", bearer routes.admin_token
+    ; "an unknown bearer", bearer "no-such-token"
+    ]
+;;
+
+let test_public_ready_follows_the_readiness_probe () =
+  with_health_routes ~strict:true @@ fun routes ->
+  let state = Server_auth.For_testing.snapshot_server_state () in
+  Server_startup_state.reset ();
+  Server_startup_state.mark_blocking ();
+  Server_auth.For_testing.restore_server_state state;
+  let readiness_status () =
+    let status, (_ : (string * string) list), (_ : string) =
+      health_answer routes.health_router Server_health_paths.readiness
+    in
+    status
+  in
+  check_public_health ~name:"published, before readiness" ~ready:false ~phase:"blocking"
+    (health_answer routes.health_router Server_health_paths.health);
+  Alcotest.(check int) "readiness refuses before the startup flag" 503 (readiness_status ());
+  Server_startup_state.mark_state_ready () |> Result.get_ok;
+  check_public_health ~name:"published and ready" ~ready:true ~phase:"ready"
+    (health_answer routes.health_router Server_health_paths.health);
+  Alcotest.(check int) "readiness admits after the startup flag" 200 (readiness_status ())
+;;
+
+let test_only_a_reader_gets_the_rollup_and_asks_for_a_refresh () =
+  with_health_routes ~strict:true @@ fun routes ->
+  let module Refresh = Server_routes_http_runtime.For_testing in
+  let refresh_requested () =
+    let (_ : int), (_ : int), (_ : bool), (_ : int), (_ : bool), requested =
+      Refresh.full_health_refresh_worker_stats ()
+    in
+    requested
+  in
+  let get ?headers path = health_answer ?headers routes.health_router path in
+  let admin = bearer routes.admin_token in
+  Refresh.refresh_full_health_snapshot_now (Httpun.Request.create `GET Server_health_paths.full);
+  let (_ : int), (_ : (string * string) list), reader_body =
+    get ~headers:admin Server_health_paths.health
+  in
+  Alcotest.(check bool) "a reader's probe carries the rollup" true
+    (List.mem "overall_status" (json_keys (health_json "reader" reader_body)));
+  check_public_health ~name:"no credential, with a snapshot held" ~ready:true ~phase:"ready"
+    (get Server_health_paths.health);
+  Refresh.reset_full_health_snapshot ();
+  check_public_health ~name:"no credential asking for the full body" ~ready:true ~phase:"ready"
+    (get Server_health_paths.full);
+  Alcotest.(check bool) "a request without a read asks for no refresh" false
+    (refresh_requested ());
+  let status, (_ : (string * string) list), (_ : string) =
+    get ~headers:admin Server_health_paths.full
+  in
+  Alcotest.(check int) "a reader's full body" 200 status;
+  Alcotest.(check bool) "a reader asks for the refresh" true (refresh_requested ())
+;;
 
 let test_startup_state_lazy_inventory_does_not_publish_readiness () =
   Server_startup_state.reset ();
@@ -5621,13 +6025,8 @@ let test_main_eio_serves_health_before_lazy_startup () =
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end))
+          require_server_reached ~what:"main_eio /health" ~timeout_s:5.0 ~log_file
+            (wait_for_health ~pid ~port)))
 
 let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
   with_temp_dir "startup-fresh-boot-e2e" (fun dir ->
@@ -5713,11 +6112,9 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
-            Alcotest.failf
-              "main_eio fresh boot did not reach startup.phase=ready within timeout.\nlog:\n%s"
-              (read_file log_file)
-          end;
+          require_server_reached ~what:"main_eio fresh boot startup.phase=ready"
+            ~timeout_s:10.0 ~log_file
+            (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready");
           let health_headers, health_body =
             curl_request_capture ~output_dir:dir ~name:"health" ~method_:"GET"
               ~url:(Printf.sprintf "http://127.0.0.1:%d/health" port) ()
@@ -5894,13 +6291,9 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
       Fun.protect
         ~finally:(fun () -> stop_process pid)
         (fun () ->
-          if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio codex token preserve test did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
-          end;
+          require_server_reached ~what:"main_eio codex token preserve startup.phase=ready"
+            ~timeout_s:10.0 ~log_file
+            (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready");
           let preserved_raw = String.trim (read_file token_path) in
           let preserved_mode = (Unix.stat token_path).Unix.st_perm land 0o777 in
           Alcotest.(check string) "startup preserves unmanaged client token file"
@@ -6298,14 +6691,9 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
            | None -> ());
           stop_process primary_pid)
         (fun () ->
-          if not (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:5.0)
-          then begin
-            prerr_endline
-              (Printf.sprintf
-                 "primary main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                 (read_file primary_log));
-            Alcotest.skip ()
-          end;
+          require_server_reached ~what:"primary main_eio /health" ~timeout_s:5.0
+            ~log_file:primary_log
+            (wait_for_health ~pid:primary_pid ~port:primary_port);
           let run_dir =
             match
               Server_startup_takeover.lease_run_dir
@@ -6369,8 +6757,9 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
           Alcotest.(check bool) "secondary log mentions recorded primary pid" true
             (String_util.contains_substring secondary_text
               (Printf.sprintf "The lease records PID %d;" primary_pid));
-          Alcotest.(check bool) "primary server stays healthy" true
-            (wait_for_health ~pid:primary_pid ~port:primary_port ~timeout_s:1.0);
+          require_server_reached ~what:"primary main_eio stays healthy" ~timeout_s:1.0
+            ~log_file:primary_log
+            (wait_for_health ~pid:primary_pid ~port:primary_port);
           (* A command line asks the kernel, not the server, which process
              serves the workspace (#51075). The primary served /health, so it
              passed the announcement of its boot. *)
@@ -6489,10 +6878,8 @@ let main_eio_stops_when_its_port_cannot_be_announced ~serving_domain () =
                false)))
 
 let require_startup_ready ~pid ~port ~log_file =
-  if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then
-    Alcotest.failf
-      "main_eio did not reach startup.phase=ready; startup failure is not a skip.\nlog:\n%s"
-      (read_file log_file)
+  require_server_reached ~what:"main_eio startup.phase=ready" ~timeout_s:10.0 ~log_file
+    (fun ~timeout_s -> wait_for_startup_phase ~pid ~port ~timeout_s "ready")
 
 let read_startup_health ~output_dir ~port =
   let headers, body =
@@ -6721,21 +7108,15 @@ let test_main_eio_start_does_not_record_default_without_flag () =
           Fun.protect
             ~finally:(fun () -> stop_process pid)
             (fun () ->
-              if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
-                prerr_endline
-                  (Printf.sprintf
-                     "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                     (read_file log_file));
-                Alcotest.skip ()
-              end else begin
-                let record_file =
-                  Filename.concat (Filename.concat config_home "masc") "default-base-path"
-                in
-                Alcotest.(check bool)
-                  "default-base-path record does not exist without --record-default"
-                  false
-                  (Sys.file_exists record_file)
-              end)))
+              require_server_reached ~what:"main_eio start /health" ~timeout_s:5.0 ~log_file
+                (wait_for_health ~pid ~port);
+              let record_file =
+                Filename.concat (Filename.concat config_home "masc") "default-base-path"
+              in
+              Alcotest.(check bool)
+                "default-base-path record does not exist without --record-default"
+                false
+                (Sys.file_exists record_file))))
 
 let test_main_eio_start_records_default_with_flag () =
   with_temp_dir "start-with-record-default" (fun dir ->
@@ -6775,40 +7156,34 @@ let test_main_eio_start_records_default_with_flag () =
           Fun.protect
             ~finally:(fun () -> stop_process pid)
             (fun () ->
-              if not (wait_for_health ~pid ~port ~timeout_s:5.0) then begin
-                prerr_endline
-                  (Printf.sprintf
-                     "main_eio did not expose /health within timeout in this environment.\nlog:\n%s"
-                     (read_file log_file));
-                Alcotest.skip ()
-              end else begin
-                let record_file =
-                  Filename.concat (Filename.concat config_home "masc") "default-base-path"
-                in
-                (* /health is available during initialization. Recording waits
-                   until both the owner and its listener are ready. *)
-                let deadline = Unix.gettimeofday () +. 10.0 in
-                let rec await_record () =
-                  if Sys.file_exists record_file then true
-                  else if not (process_alive pid) || Unix.gettimeofday () >= deadline
-                  then false
-                  else (Unix.sleepf 0.1; await_record ())
-                in
-                Alcotest.(check bool)
-                  "default-base-path record exists with --record-default"
-                  true
-                  (await_record ());
-                let recorded = String.trim (read_file record_file) in
-                let expected =
-                  match Unix.realpath dir with
-                  | canonical -> canonical
-                  | exception _ -> dir
-                in
-                Alcotest.(check string)
-                  "recorded path matches workspace base path"
-                  expected
-                  recorded
-              end)))
+              require_server_reached ~what:"main_eio start /health" ~timeout_s:5.0 ~log_file
+                (wait_for_health ~pid ~port);
+              let record_file =
+                Filename.concat (Filename.concat config_home "masc") "default-base-path"
+              in
+              (* /health is available during initialization. Recording waits
+                 until both the owner and its listener are ready. *)
+              let deadline = Unix.gettimeofday () +. 10.0 in
+              let rec await_record () =
+                if Sys.file_exists record_file then true
+                else if not (process_alive pid) || Unix.gettimeofday () >= deadline
+                then false
+                else (Unix.sleepf 0.1; await_record ())
+              in
+              Alcotest.(check bool)
+                "default-base-path record exists with --record-default"
+                true
+                (await_record ());
+              let recorded = String.trim (read_file record_file) in
+              let expected =
+                match Unix.realpath dir with
+                | canonical -> canonical
+                | exception _ -> dir
+              in
+              Alcotest.(check string)
+                "recorded path matches workspace base path"
+                expected
+                recorded)))
 
 let test_main_eio_failed_start_preserves_default () =
   with_temp_dir "failed-start-record-default" (fun dir ->
@@ -6985,6 +7360,39 @@ let install_suite_watchdog () =
   end
 ;;
 
+(* #45358: nothing in the server retired an expired bearer credential, so each
+   one stayed in the store until an operator ran `masc token prune`. The 24h
+   maintenance block now retires them. The live credential beside it must
+   keep authenticating. *)
+let test_daily_retention_retires_only_expired_credentials () =
+  with_temp_dir "daily-credential-prune" (fun dir ->
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:None);
+    let mint name =
+      match Auth.create_token dir ~agent_name:name ~role:Masc_domain.Worker with
+      | Ok minted -> minted
+      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
+    in
+    let _, expired_credential = mint "claude-expired" in
+    Auth.save_credential dir
+      { expired_credential with expires_at = Some "2000-01-01T00:00:00Z" };
+    let live_token, _ = mint "claude-live" in
+    let stored name = Option.is_some (Auth.load_credential dir name) in
+    Alcotest.(check bool) "expired credential is stored before the pass"
+      true (stored "claude-expired");
+    Server_bootstrap_maintenance.run_daily_retention config
+      ~task_archive_retention_days:30 ~now:(Time_compat.now ());
+    Alcotest.(check bool) "expired credential left the store"
+      false (stored "claude-expired");
+    match Auth.find_static_credential_by_token dir ~token:live_token with
+    | Ok (credential : Masc_domain.agent_credential) ->
+      Alcotest.(check string) "live bearer still authenticates its agent"
+        "claude-live" credential.agent_name
+    | Error error ->
+      Alcotest.failf "live bearer was refused after the pass: %s"
+        (Masc_domain.masc_error_to_string error))
+;;
+
 (* F-06 / D6-11: the 24h maintenance block runs one archive-first task-only
    GC pass, so the backlog shrinks without an operator running the manual
    masc_gc tool. The pass archives terminal tasks past the retention window
@@ -7100,6 +7508,10 @@ let () =
       ( "periodic task gc",
         [ Alcotest.test_case "archives only stale terminal tasks" `Quick
             test_periodic_task_gc_archives_only_stale_terminal_tasks
+        ] );
+      ( "daily credential prune",
+        [ Alcotest.test_case "retires only expired credentials" `Quick
+            test_daily_retention_retires_only_expired_credentials
         ] );
       ( "manual configuration health",
         let configuration = Keeper_registry.Turn_configuration_error
@@ -7440,6 +7852,26 @@ let () =
             test_mcp_transport_requires_explicit_readiness;
           Alcotest.test_case "OpenAPI servers url follows the admitted authority" `Quick
             test_openapi_servers_url_follows_the_admitted_authority;
+          Alcotest.test_case
+            "health says only the public probe without a credential under strict auth"
+            `Quick
+            test_health_says_only_the_public_probe_without_a_credential_under_strict_auth;
+          Alcotest.test_case "health answers a reader in full" `Quick
+            test_health_answers_a_reader_in_full;
+          Alcotest.test_case "health refuses a credential it cannot accept" `Quick
+            test_health_refuses_a_credential_it_cannot_accept;
+          Alcotest.test_case "the sibling probes say the same to everyone" `Quick
+            test_the_sibling_probes_say_the_same_to_everyone;
+          Alcotest.test_case "HEAD on a health route carries no body" `Quick
+            test_head_on_a_health_route_carries_no_body;
+          Alcotest.test_case
+            "health before the workspace is published is the public probe" `Quick
+            test_health_before_the_workspace_is_published_is_the_public_probe;
+          Alcotest.test_case "public ready follows the readiness probe" `Quick
+            test_public_ready_follows_the_readiness_probe;
+          Alcotest.test_case
+            "only a reader gets the rollup and asks for a refresh" `Quick
+            test_only_a_reader_gets_the_rollup_and_asks_for_a_refresh;
           Alcotest.test_case
             "lazy inventory stays blocking until explicit readiness"
             `Quick

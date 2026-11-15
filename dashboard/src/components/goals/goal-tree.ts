@@ -18,6 +18,7 @@ import { currentCanonicalDashboardActor, dashboardActorRevision, managedDashboar
 import { executionError, executionLoading, executionWorkspaceAuthority, refreshExecution, refreshShell, type ExecutionWorkspaceAuthority } from '../../store'
 import { artifactWorkspaceBody, captureArtifactWorkspace, type ArtifactWorkspace } from '../../api/published-artifacts'
 import { approvalInputText } from '../../lib/keeper-approval-input-text'
+import { attentionReasonLabel } from '../../lib/keeper-attention-labels'
 import { callMcpToolAtIdentity, mcpCallFailureDisposition, mcpIdentityRequiresGoalRefresh } from '../../api/mcp'
 import { replaceRoute, route } from '../../router'
 import {
@@ -1484,12 +1485,13 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const trust = keeper.runtime_trust
   const execution = trust?.execution_summary ?? null
   const latestEvent = keeper.latest_causal_event ?? trust?.latest_causal_event ?? null
-  const trustSummary =
-    trust?.snapshot_error?.trim()
-    || trust?.attention_reason?.trim()
-    || trust?.disposition_reason?.trim()
-    || execution?.sandbox_summary?.trim()
-    || null
+  const snapshotError = trust?.snapshot_error?.trim() || null
+  const trustReason = trust?.attention_reason?.trim() || trust?.disposition_reason?.trim() || null
+  const sandboxSummary = execution?.sandbox_summary?.trim() || null
+  // The operator cause below repeats the summary when both carry the same
+  // wire token, so the comparison reads tokens and only the display is labelled.
+  const trustSummaryToken = snapshotError ?? trustReason ?? sandboxSummary
+  const trustSummary = snapshotError ?? attentionReasonLabel(trustReason, false) ?? sandboxSummary
   const runtimeAttemptCount = execution?.provider_attempt_count
   const runtimeFailoverApplied = execution?.provider_fallback_applied
   const runtimeSelectedLane = execution?.provider_selected_model?.trim() || null
@@ -1505,7 +1507,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
   const pendingApprovalTask = pendingApproval?.task_id?.trim() || null
   const pendingApprovalBlocker = pendingApproval?.blocker_class?.trim() || null
   const shouldShowOperatorDispositionReason =
-    operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
+    operatorDispositionReason !== null && operatorDispositionReason !== trustSummaryToken
   const shouldShowTrustSummary =
     Boolean(trustSummary)
     || Boolean(trust?.snapshot_status)

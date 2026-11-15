@@ -819,7 +819,9 @@ def post(message, protocol=None):
         return None if not body else json.loads(body)
 
 version = "2025-11-25"
-if server is not None:
+# A host that takes the required server in its session config and never
+# connects it (Muse Code 1.4.15+ on a host started without workspace trust).
+if server is not None and not FIXTURE.get("skip_mcp_connect", False):
     post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
         "protocolVersion": version, "capabilities": {},
         "clientInfo": {"name": "muse-fixture", "version": "1"}}})
@@ -2922,6 +2924,23 @@ let test_commentary_is_never_the_reply () =
     | Error error -> fail (Agent_core.Error.to_string error))
 ;;
 
+(* RFC-0520: the host completed the turn and never connected the MASC tools
+   it was given as required. The model ran without them, so the turn is a
+   named failure, and the next turn starts a new session. *)
+let test_a_turn_that_never_connected_its_tools_is_not_a_success () =
+  with_scripted_host
+    ~fixture:(scenario "commentary_then_answer" @ [ "skip_mcp_connect", `Bool true ])
+    (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      match run.outcome.result with
+      | Ok _ -> fail "a turn that never connected its tools must not succeed"
+      | Error
+          (Agent_core.Error.Provider
+             (Llm_provider.Error.ProviderReportedError { error_type; _ })) ->
+        check (option string) "the named failure" (Some "session_mcp_not_connected") error_type
+      | Error error -> fail (Agent_core.Error.to_string error))
+;;
+
 (* A turn whose final message MASC may have missed must not read as the
    model's silence: the reply could exist on the host. *)
 let test_an_unobserved_final_message_is_not_silence () =
@@ -4142,6 +4161,8 @@ let () =
         ; test_case "a turn without a message settles with no content" `Quick
             test_a_turn_without_a_message_settles_with_no_content
         ; test_case "commentary is never the reply" `Quick test_commentary_is_never_the_reply
+        ; test_case "a turn that never connected its tools is not a success" `Quick
+            test_a_turn_that_never_connected_its_tools_is_not_a_success
         ; test_case "an unobserved final message is not silence" `Quick
             test_an_unobserved_final_message_is_not_silence
         ; test_case "gap before acknowledgement reconciles quiet completion" `Quick

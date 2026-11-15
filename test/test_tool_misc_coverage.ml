@@ -226,20 +226,56 @@ let () = test "dispatch_dashboard_compact" (fun () ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
 )
 
-let () = test "dispatch_dashboard_current_scope" (fun () ->
+(* #51211: [scope] was parsed, checked against an enum and then dropped, so
+   "current" and "all" answered byte for byte the same. A key the tool does not
+   declare is refused instead of read past. *)
+let () = test "dispatch_dashboard_refuses_an_argument_it_does_not_declare" (fun () ->
   let ctx = make_test_ctx () in
-  ignore (Workspace.init ctx.config ~agent_name:None);
-  let focused = ctx.config in
-  ignore (Workspace.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
-      assert (Tool_result.is_success result);
-      assert (str_contains (Tool_result.message result) "MASC Dashboard");
-      assert (not (str_contains (Tool_result.message result) "focus-workspace"))
+      assert (not (Tool_result.is_success result));
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (str_contains (Tool_result.message result) "scope")
   | None -> failwith "dispatch returned None"
-  | exception Effect.Unhandled _ ->
-      Printf.printf "  (skipped: Eio runtime not available)\n"
+)
+
+(* The same call through the check that runs before a Keeper's or an MCP
+   client's call reaches the handler: every declared argument passes it, so
+   [compact] is reachable and not only readable by the handler. *)
+let () = test "dashboard_declared_arguments_pass_the_pre_dispatch_check" (fun () ->
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_dashboard")
+        Config.raw_all_tool_schemas
+    with
+    | Some schema -> schema.input_schema
+    | None -> failwith "masc_dashboard is not registered"
+  in
+  let check args =
+    Tool_input_validation.validate_args ~schema ~name:"masc_dashboard" ~args ()
+  in
+  assert (Result.is_ok (check (`Assoc [])));
+  assert (Result.is_ok (check (`Assoc [ Dashboard.compact_argument, `Bool true ])));
+  assert (Result.is_error (check (`Assoc [ "scope", `String "current" ])))
+)
+
+(* Leaving [compact] out answers with the view the schema names as default. *)
+let () = test "dispatch_dashboard_without_compact_is_the_declared_default" (fun () ->
+  let ctx = make_test_ctx () in
+  let message args =
+    match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
+    | Some result ->
+        assert (Tool_result.is_success result);
+        Tool_result.message result
+    | None -> failwith "dispatch returned None"
+  in
+  let default = Dashboard.compact_of_view Dashboard.default_view in
+  let is_compact text = str_contains text "ATTENTION:" && not (str_contains text "MASC Dashboard") in
+  assert (is_compact (message (`Assoc [])) = default);
+  assert (is_compact (message (`Assoc [ Dashboard.compact_argument, `Bool default ])) = default);
+  assert (is_compact (message (`Assoc [ Dashboard.compact_argument, `Bool (not default) ])) = not default)
 )
 
 let () = test "dispatch_keeper_waiting_inventory" (fun () ->
@@ -274,13 +310,13 @@ let () = test "dispatch_keeper_waiting_inventory_rejects_unexpected_args" (fun (
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_dashboard_invalid_scope" (fun () ->
+let () = test "dispatch_dashboard_refuses_a_compact_that_is_not_a_boolean" (fun () ->
   let ctx = make_test_ctx () in
-  let args = `Assoc [("scope", `String "everywhere")] in
+  let args = `Assoc [(Dashboard.compact_argument, `String "yes")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      assert (str_contains (Tool_result.message result) "Invalid dashboard scope")
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
   | None -> failwith "dispatch returned None"
 )
 
@@ -483,7 +519,10 @@ let () = test "parse_ollama_search_json" (fun () ->
   in
   assert
     (Tool_misc.parse_ollama_search_json payload
-     = Ok [ ("Effect Handlers", "https://example.com/effects", "OCaml 5 effects.") ]);
+     = Ok
+         [ ( "Effect Handlers"
+           , "https://example.com/effects"
+           , Tool_misc_web_search.Engine_text "OCaml 5 effects." ) ]);
   assert (Result.is_error (Tool_misc.parse_ollama_search_json "not json"))
 )
 
@@ -500,8 +539,10 @@ let zai_first_row =
 
 let () = test "parse_zai_search_text reads the nested array and keeps link as url" (fun () ->
   (match Tool_misc_web_search.parse_zai_search_text zai_nested_text with
-   | Ok [ first; (title2, url2, snippet2) ] ->
-     assert (first = zai_first_row);
+   | Ok
+       [ (title1, url1, Tool_misc_web_search.Engine_summary snippet1)
+       ; (title2, url2, Tool_misc_web_search.Engine_summary snippet2) ] ->
+     assert ((title1, url1, snippet1) = zai_first_row);
      assert (url2 = "https://ocaml.org/p/eio/latest/doc/index.html");
      assert (snippet2 = "Eio 1.6");
      assert (String.length title2 > 0)
@@ -510,7 +551,7 @@ let () = test "parse_zai_search_text reads the nested array and keeps link as ur
   assert
     (Tool_misc_web_search.parse_zai_search_text
        {|[{"title":"T","link":"https://example.com/a","content":"C","refer":"ref_1"}]|}
-     = Ok [ ("T", "https://example.com/a", "C") ])
+     = Ok [ ("T", "https://example.com/a", Tool_misc_web_search.Engine_summary "C") ])
 )
 
 let () = test "parse_zai_search_text refuses what is not a usable array" (fun () ->
@@ -1290,6 +1331,101 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
           | None -> failwith "dispatch returned None"))
 )
 
+(* #38729: Ollama sends text from the page in [content]. The snippet keeps
+   1 KiB of it. A page that can be fetched is the content; when it cannot,
+   [content_text] gives the engine's whole text under its own source line
+   instead of a failure note. The second call is served from the search
+   cache (no provider is configured outside the simulation), so the cached
+   answer must keep the engine text; its other [contentMaxChars] keeps it
+   out of WebFetch's own cache of the first page. *)
+let () = test "dispatch_web_search_include_content_keeps_engine_text_when_fetch_fails" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content engine text regression" in
+  let url = "https://example.com/masc-web-search-engine-text" in
+  let tail = "Closing sentence past the snippet bound." in
+  let engine_text =
+    String.concat " "
+      (List.init 80 (fun i -> Printf.sprintf "Sentence %d of the page." i))
+    ^ "\n\n" ^ tail
+  in
+  assert (String.length engine_text > 1024);
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ ( "results"
+          , `List
+              [ `Assoc
+                  [ ("title", `String "Engine page")
+                  ; ("url", `String url)
+                  ; ("content", `String engine_text) ] ] ) ])
+  in
+  let args ~content_max_chars =
+    `Assoc
+      [ ("query", `String query)
+      ; ("limit", `Int 1)
+      ; ("includeContent", `Bool true)
+      ; ("contentMaxChars", `Int content_max_chars)
+      ]
+  in
+  let fetches = ref 0 in
+  let result_of ~content_max_chars ~fetch_answer =
+    let args = args ~content_max_chars in
+    Tool_misc.with_web_fetch_http_get_for_test
+      (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url_arg ->
+        incr fetches;
+        assert (url_arg = url);
+        fetch_answer)
+      (fun () ->
+        match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+        | Some result ->
+            assert (Tool_result.is_success result);
+            parse_json (Tool_result.message result) |> Yojson.Safe.Util.member "result"
+        | None -> failwith "dispatch returned None")
+  in
+  let open Yojson.Safe.Util in
+  let html =
+    {|<!doctype html><html><head><title>Fetched</title></head>
+<body><article><p>Fetched page body.</p></article></body></html>|}
+  in
+  let fetched =
+    Tool_misc.with_web_search_simulation_for_test
+      ~outcomes:[ ("ollama", `Ollama_body body) ]
+      (fun () -> result_of ~content_max_chars:3000 ~fetch_answer:(Ok (Some 200, html)))
+  in
+  assert (!fetches = 1);
+  let snippet =
+    fetched |> member "results" |> to_list |> List.hd |> member "snippet" |> to_string
+  in
+  assert (String.length snippet <= 1024);
+  assert (not (str_contains snippet tail));
+  assert (fetched |> member "content_result_count" |> to_int = 1);
+  assert (fetched |> member "content_engine_text_count" |> to_int = 0);
+  let content_text = fetched |> member "content_text" |> to_string in
+  assert (str_contains content_text "Content source: fetched page");
+  assert (str_contains content_text "Fetched page body.");
+  assert (not (str_contains content_text tail));
+  let failed =
+    result_of ~content_max_chars:2500
+      ~fetch_answer:(Error (Masc.Tool_local_runtime_http.Curl_exited 6))
+  in
+  assert (!fetches = 2);
+  assert (failed |> member "content_result_count" |> to_int = 0);
+  assert (failed |> member "content_engine_text_count" |> to_int = 1);
+  assert (failed |> member "content_error_count" |> to_int = 0);
+  let content_text = failed |> member "content_text" |> to_string in
+  assert (str_contains content_text "ok=0, engine_text=1, unavailable=0");
+  assert
+    (str_contains content_text
+       "Content source: text the ollama search engine returned with this \
+        result, not the fetched page");
+  assert (str_contains content_text "Content status: engine_text (chars=");
+  assert
+    (str_contains content_text
+       "page fetch failed: fetch failed: curl exit 6 (could not resolve host)");
+  assert (str_contains content_text tail);
+  assert (not (str_contains content_text "_Failed to retrieve page content:"))
+)
+
 (* Pins the named default (was inline 30.0): a keeper research loop must
    be able to repeat a query inside one 15-minute window without paying
    the provider again. *)
@@ -1316,10 +1452,11 @@ let () = test "parse_official_provider_json_payloads" (fun () ->
     Tool_misc.parse_bing_search_json
       {|{"webPages":{"value":[{"name":"Bing title","url":"https://example.com/bing","snippet":"Bing snippet"}]}}|}
   in
-  assert (brave = Ok [ ("Brave title", "https://example.com/brave", "Brave snippet") ]);
-  assert (tavily = Ok [ ("Tavily title", "https://example.com/tavily", "Tavily snippet") ]);
-  assert (exa = Ok [ ("Exa title", "https://example.com/exa", "Exa snippet") ]);
-  assert (bing = Ok [ ("Bing title", "https://example.com/bing", "Bing snippet") ])
+  let open Tool_misc_web_search in
+  assert (brave = Ok [ ("Brave title", "https://example.com/brave", Engine_summary "Brave snippet") ]);
+  assert (tavily = Ok [ ("Tavily title", "https://example.com/tavily", Engine_text "Tavily snippet") ]);
+  assert (exa = Ok [ ("Exa title", "https://example.com/exa", Engine_text "Exa snippet") ]);
+  assert (bing = Ok [ ("Bing title", "https://example.com/bing", Engine_summary "Bing snippet") ])
 )
 
 let () = test "parse_official_provider_json_payloads_tolerate_malformed_json" (fun () ->

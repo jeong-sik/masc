@@ -89,7 +89,7 @@ type backend = {
   acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
     resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
-    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
+    read_browser_document:(installation_id:string -> route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
     binding:Yojson.Safe.t ->
     (Yojson.Safe.t, string) result;
   recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->
@@ -693,7 +693,14 @@ let depends_on ~(consumer : entry) ~(producer : entry) =
     List.mem (machine_export_name machine) producer.package.exported_tools
     && Lane_addon_sources.interested consumer.refresh_interest (Lane_addon_sources.Machine_changed machine))
     Machine_lane.all in
-  lane_changed || machine_changed
+  (* A [browser_document] source reads the browser installation it names, so
+     that installation's first and later observations, failure and detach
+     change what the consumer can read. *)
+  let browser_changed = match producer.package.worker_service, producer.configuration with
+    | Browser_service _, Some owner ->
+        Lane_addon_sources.reads_browser_installation consumer.refresh_interest owner.id
+    | Browser_service _, None | Mcp_tools, (Some _ | None) -> false in
+  lane_changed || machine_changed || browser_changed
 let resolve_machine_output m ~consumer_id machine =
   let name = machine_export_name machine in
   let candidates = entries m |> List.filter (fun (e : entry) ->
@@ -2295,26 +2302,32 @@ let call_browser_service ~config ~access ~service ~command =
     | Some m -> call_manager_browser_service m ~access ~service ~command
     | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable"))
 (* A consuming installation's [browser_document] source. The browser Add-on
-   worker process holds the browser connections, so the read goes to the one
-   browser Add-on this installation may read. The answer and every refusal
+   worker process holds the browser connections, so the read goes to the
+   browser Add-on installation the source names. The answer and every refusal
    become the consuming worker's input, which can reach Keepers, so an unready
    installation is named by its caller rendering, never the operator's. *)
-(* Which browser Add-on a [browser_document] source reads. As with
-   [lane_output], the consumer's output must not reach more readers than the
-   browser it reads, so a browser narrower than the consumer is no candidate. *)
+(* Whether the browser Add-on serving the bound client is the one a
+   [browser_document] source names. Another installation serving the same
+   client is not read in its place. As with [lane_output], the consumer's
+   output must not reach more readers than the browser it reads. *)
 type 'service document_service =
   | Document_service of 'service
   | No_browser_service
+  | Another_installation_serves
   | Browser_narrower_than_consumer
-  | Several_browser_services
-let choose_document_service ~visibility candidates =
-  match List.filter_map (fun (service, producer) ->
-      if visibility_covers visibility producer then Some service else None) candidates with
-  | [service] -> Document_service service
-  | _ :: _ :: _ -> Several_browser_services
-  | [] -> (match candidates with [] -> No_browser_service | _ :: _ -> Browser_narrower_than_consumer)
+let choose_document_service ~visibility ~installation_id = function
+  | None -> No_browser_service
+  | Some (service, (installation : Lane_addon_tool_request_owner.installation), producer) ->
+      let named = match installation with
+        | Configuration id -> String.equal id installation_id
+        | Manual _ -> false in
+      if not named then Another_installation_serves
+      else if visibility_covers visibility producer then Document_service service
+      else Browser_narrower_than_consumer
 (* A live document read uses the exact observed publisher. The same native
-   identity conflict policy is used by public discovery and Page dispatch. *)
+   identity conflict policy is used by public discovery and Page dispatch.
+   At most one service publishes a route's client: two that list the same
+   client are refused as a conflict. *)
 let document_route_services ~services ~unready ~backend ~clients route =
   let live=List.filter (fun service -> Browser_addon_observation.serves_live (backend service)) services in
   let observed=List.map (fun service -> service,clients service) live in
@@ -2325,7 +2338,8 @@ let document_route_services ~services ~unready ~backend ~clients route =
   | Browser_lane.Live_route None -> (match knowledge,live with
       | Browser_addon_observation.Unknown_ego_identities,_ ->
           Error "live browser controller identities are incomplete; the document read requires an explicit observed non-Ego client"
-      | Known_ego_identities,([]|[_]) -> Ok live
+      | Known_ego_identities,[] -> Ok None
+      | Known_ego_identities,[service] -> Ok (Some service)
       | Known_ego_identities,_::_::_ -> Error "a live document read requires an explicit client when multiple workers are visible")
   | Live_route (Some client_id) ->
       let listed=List.concat_map (function
@@ -2337,11 +2351,12 @@ let document_route_services ~services ~unready ~backend ~clients route =
            let* ()=Browser_addon_observation.check_ego_identity knowledge client in
            (match List.find_opt (Browser_addon_observation.conflicts_with client) conflicts with
             | Some conflict -> Error (Browser_addon_observation.conflict_message conflict)
-            | None -> Ok (List.filter_map (function
+            (* No conflict names this client, so exactly one service lists it. *)
+            | None -> Ok (List.find_map (function
                 | service,Browser_addon_observation.Observed_clients clients
                   when List.exists (fun (client:Browser_lane.client_info) -> client.client_id=client_id) clients -> Some service
                 | _,(Observed_clients _|Unobserved_clients) -> None) observed))
-       | None -> Ok [])
+       | None -> Ok None)
 let document_services m (reading : browser_reading) route =
   let clients (service : browser_service) = match Hashtbl.find_opt m.entries service.instance_id with
     | None -> Browser_addon_observation.Unobserved_clients
@@ -2352,16 +2367,30 @@ let document_services m (reading : browser_reading) route =
     | Browser_service backend -> Some backend | Mcp_tools -> None) reading.unready in
   document_route_services ~services:reading.services ~unready ~backend:(fun (service : browser_service) -> service.backend)
     ~clients route
-let read_browser_document m ~access ~visibility ~route ~tab_id =
+(* Why the named browser installation serves no document on this route: it is
+   starting, failing or leaving; it is ready and lists no such client; or no
+   installation this caller may read has that declaration id. *)
+let named_browser_absence m (reading : browser_reading) ~installation_id =
+  let named instance_id = match Hashtbl.find_opt m.entries instance_id with
+    | Some ({configuration=Some owner;_} : entry) -> String.equal owner.id installation_id
+    | Some {configuration=None;_} | None -> false in
+  match Lane_addon_unready.summary (List.filter (fun (unready : Lane_addon_unready.t) ->
+      named unready.instance_id) reading.unready) with
+  | Some summary -> summary
+  | None ->
+      if List.exists (fun (service : browser_service) -> named service.instance_id) reading.services
+      then "browser Add-on installation " ^ installation_id ^ " does not serve the bound browser client"
+      else "browser Add-on installation " ^ installation_id ^ " is not attached"
+let read_browser_document m ~access ~visibility ~installation_id ~route ~tab_id =
   with_tool_call_owner (fun () ->
     let reading=browser_reading (live_reading m access) in
     match document_services m reading route with
     | Error detail -> Error detail
-    | Ok services ->
-    let candidates=List.filter_map (fun (service:browser_service) ->
+    | Ok service ->
+    let candidate=Option.bind service (fun (service:browser_service) ->
       Hashtbl.find_opt m.entries service.instance_id
-      |> Option.map (fun (browser:entry) -> service, browser.visibility)) services in
-    match choose_document_service ~visibility candidates with
+      |> Option.map (fun (browser:entry) -> service, service.installation, browser.visibility)) in
+    match choose_document_service ~visibility ~installation_id candidate with
     | Document_service service ->
         (* The existing transport deadline; the worker never creates a
            session, selects another document or waits for a primary action. *)
@@ -2384,14 +2413,11 @@ let read_browser_document m ~access ~visibility ~route ~tab_id =
              Log.Misc.warn "Lane Add-on browser document read got no usable answer from browser Add-on %s: %s"
                service.instance_id detail;
              Error "the browser Add-on gave no usable answer to the document read")
-    | No_browser_service ->
-        (match Lane_addon_unready.summary reading.unready with
-         | Some summary -> Error summary
-         | None -> Error "no browser Add-on is attached")
+    | No_browser_service -> Error (named_browser_absence m reading ~installation_id)
+    | Another_installation_serves ->
+        Error ("the bound browser client is served by a browser Add-on installation other than " ^ installation_id)
     | Browser_narrower_than_consumer ->
-        Error "the attached browser Add-on is visible to fewer readers than this installation's output, so its document is not read"
-    | Several_browser_services ->
-        Error "more than one attached browser Add-on serves this browser, so the document source cannot choose one")
+        Error "the attached browser Add-on is visible to fewer readers than this installation's output, so its document is not read")
 
 let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~summary ~request =
   with_tool_call_owner (fun () ->
@@ -2575,7 +2601,7 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
     ~authorize ~principal ~config ~access ~reserved ~export ~arguments)
 
 let call_captured_tool_request ~config ~access ~reserved ~export ~installation_id
-    ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.retained)
+    ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.Record.t)
     ~arguments =
   with_tool_call_owner (fun () ->
     with_tool_request_destination_on_owner ~config ~access ~reserved ~export
@@ -2583,14 +2609,17 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
         let* () = if destination.installation_id=installation_id
             && destination.package_id=package_id && destination.tool=tool
             && destination.configuration_revision=configuration_revision
-            && original.installation_id=installation_id && original.package_id=package_id
-            && original.tool=tool
+            && Lane_addon_tool_request_owner.Record.installation_id original=installation_id
+            && Lane_addon_tool_request_owner.Record.package_id original=package_id
+            && Lane_addon_tool_request_owner.Record.tool original=tool
           then Ok () else Error (Host_refusal (Lane_addon_call_context.Rejected
             "Captured request no longer owns this configured tool destination")) in
         let store=Lane_addon_store.of_config config in
-        let* ()=offload (fun () -> Lane_addon_tool_request_owner.retain ~store
-          ~scope:original.scope ~request_id:original.request_id ~installation_id ~package_id ~tool
-          ~summary:original.summary ~request:original.request) |> Result.map_error (fun error ->
+        (* The caller retained this original before it could reach a call, so
+           the call writes nothing: it reads the record again and checks that
+           it still names what the caller holds. *)
+        let* ()=offload (fun () -> Lane_addon_tool_request_owner.confirm_listed ~store original)
+          |> Result.map_error (fun error ->
             Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
         Ok ())
       ~use:(fun () -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
@@ -3678,10 +3707,32 @@ let removable_declaration ~directory (owner : configuration_owner) =
 let check_configuration_removable ~directory owner =
   Result.map (fun (_ : string option) -> ()) (removable_declaration ~directory owner)
 
+(* What one Detach did to the declaration that wanted its worker. Deleting the
+   file edits the operator's configuration, so the answer names the file. *)
+type declaration_kept = Instance_already_detached | Applied_by_another_instance
+type declaration_outcome =
+  | Not_declared  (* attached by request; no declaration wanted it *)
+  | Declaration_removed of string  (* this Detach deleted the file at this path *)
+  | Declaration_absent  (* declared, but no file declares it any more *)
+  | Declaration_kept of declaration_kept
+(* Decided before anything stops: the declaration to delete once the cleanup
+   is confirmed, or why this Detach leaves the directory as it is. *)
+type declaration_plan = Remove_declaration of configuration_owner | Leave_declaration of declaration_outcome
+
+let declaration_outcome_json outcome =
+  `Assoc (match outcome with
+    | Not_declared -> ["outcome", `String "not_declared"]
+    | Declaration_removed path -> ["outcome", `String "removed"; "path", `String path]
+    | Declaration_absent -> ["outcome", `String "absent"]
+    | Declaration_kept Instance_already_detached ->
+        ["outcome", `String "kept"; "reason", `String "instance_already_detached"]
+    | Declaration_kept Applied_by_another_instance ->
+        ["outcome", `String "kept"; "reason", `String "applied_by_another_instance"])
+
 let remove_configuration_file ~directory (owner : configuration_owner) =
     let* path = removable_declaration ~directory owner in
     match path with
-    | None -> Ok ()
+    | None -> Ok Declaration_absent
     | Some path ->
         (* Take ownership of the directory entry before validating the bytes
            to remove. An editor can replace it while the inventory is read.
@@ -3701,11 +3752,11 @@ let remove_configuration_file ~directory (owner : configuration_owner) =
            Unix.rename path staged;
            match Lane_addon_config.load_file ~path:staged with
            | Ok current when current.id = owner.id && current.revision = owner.revision ->
-               Unix.unlink staged; Ok ()
+               Unix.unlink staged; Ok (Declaration_removed path)
            | Ok _ -> restore "Lane configuration changed during removal; detach was not applied"
            | Error message -> restore ("Lane declaration could not be verified during removal: " ^ message)
          with
-         | Unix.Unix_error (Unix.ENOENT, _, _) when not (Sys.file_exists staged) -> Ok ()
+         | Unix.Unix_error (Unix.ENOENT, _, _) when not (Sys.file_exists staged) -> Ok Declaration_absent
          | Unix.Unix_error (error, call, _) -> Error (call ^ ": " ^ Unix.error_message error))
 
 let retained_action_unlocked m ~instance_id ~request_id =
@@ -4245,25 +4296,38 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
            returns the failure. *)
         let check owner = runtime_result (offload (fun () -> check_configuration_removable ~directory owner)) in
         let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~directory owner)) in
+        (* The reply carries what happened to the declaration; the server log
+           repeats a deletion for whoever looks for the file later. *)
+        let answer ~instance_id fields outcome =
+          (match outcome with
+           | Declaration_removed path ->
+               Log.Misc.warn "Lane Add-on Detach of instance %s removed its declaration file %s" instance_id path
+           | Not_declared | Declaration_absent | Declaration_kept _ -> ());
+          `Assoc (fields @ ["declaration", declaration_outcome_json outcome]) in
         match Hashtbl.find_opt m.entries id with
         | None ->
             let* fields = persisted_binding m id in
             let* state = runtime_result (lifecycle_of_fields fields) in
             let* owner = runtime_result (configuration_of_fields fields) in
             let removing = match state, owner with
-              | (Lifecycle.Detached _, _) | (Lifecycle.Attached, None) | (Lifecycle.Observing, None)
-              | (Lifecycle.Failed _, None) | (Lifecycle.Detaching _, None) -> None
+              | (Lifecycle.Detached _, None) | (Lifecycle.Attached, None) | (Lifecycle.Observing, None)
+              | (Lifecycle.Failed _, None) | (Lifecycle.Detaching _, None) -> Leave_declaration Not_declared
+              | (Lifecycle.Detached _, Some _) -> Leave_declaration (Declaration_kept Instance_already_detached)
               | (Lifecycle.Attached, Some owner) | (Lifecycle.Observing, Some owner)
               | (Lifecycle.Failed _, Some owner) | (Lifecycle.Detaching _, Some owner) ->
                   let another_owner = List.exists (fun e -> match e.configuration with
                     | Some current -> current.id = owner.id | None -> false) (entries m) in
-                  if another_owner then None else Some owner in
-            let* () = match removing with None -> Ok () | Some owner -> check owner in
+                  if another_owner then Leave_declaration (Declaration_kept Applied_by_another_instance)
+                  else Remove_declaration owner in
+            let* () = match removing with Leave_declaration _ -> Ok () | Remove_declaration owner -> check owner in
             let* detaching, outcome = runtime_result (historical_detach ~sw ~wait:true m fields) in
-            let remove_declaration () = match removing with None -> Ok () | Some owner -> remove owner in
+            let remove_declaration () = match removing with
+              | Leave_declaration untouched -> Ok untouched | Remove_declaration owner -> remove owner in
             (match outcome with
              | Already_detached | Finished (Lifecycle.Detached _) ->
-                 let* () = remove_declaration () in Ok detaching
+                 let* outcome = remove_declaration () in
+                 let* detaching = runtime_result (object_ detaching) in
+                 Ok (answer ~instance_id:id detaching outcome)
              | Finished (Lifecycle.Failed failed) ->
                  Error (Runtime_failed (Lifecycle.failed_to_string failed))
              | Finished (Lifecycle.Attached | Lifecycle.Observing | Lifecycle.Detaching _) | Started ->
@@ -4274,8 +4338,8 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
             let* () = match e.configuration with None -> Ok () | Some owner -> check owner in
             let* _ = runtime_result (detach_entry ~sw m e) in
             let* () = runtime_result (await_settled e) in
-            let* () = match e.configuration with None -> Ok () | Some owner -> remove owner in
-            Ok (entry_json e)))
+            let* outcome = match e.configuration with None -> Ok Not_declared | Some owner -> remove owner in
+            Ok (answer ~instance_id:e.instance_id (entry_fields e) outcome)))
 
 let retain_configured_document_owner m (d : Lane_addon_config.declaration) visibility =
   match visibility with
@@ -4827,8 +4891,8 @@ module For_testing = struct
   type nonrec 'service document_service = 'service document_service =
     | Document_service of 'service
     | No_browser_service
+    | Another_installation_serves
     | Browser_narrower_than_consumer
-    | Several_browser_services
   let choose_document_service = choose_document_service
   let document_route_services = document_route_services
   let await_run_stopped ~config ~instance_id =
@@ -4878,7 +4942,7 @@ module For_testing = struct
     acquire : access:Lane_addon_sources.access -> store:Lane_addon_store.t -> package:package ->
       resolve_machine_output:(Machine_lane.t -> (Lane_addon_sources.machine_output, string) result) ->
     resolve_lane_output:(installation_id:string -> (Lane_addon_sources.lane_output, string) result) ->
-    read_browser_document:(route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
+    read_browser_document:(installation_id:string -> route:Browser_lane.route -> tab_id:int -> (Browser_lane.answer, string) result) ->
       binding:Yojson.Safe.t ->
       (Yojson.Safe.t, string) result;
     recover_stop : state_owner:Lane_addon_worker_state.owner option -> instance_id:string ->

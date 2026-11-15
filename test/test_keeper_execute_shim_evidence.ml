@@ -205,6 +205,11 @@ let assert_payload ~ordinal ~exit_code (payload, evidence) =
     (match field "execution_location" payload |> field "scope" with
      | `String _ -> true
      | _ -> false);
+  (* #32799: the network the command ran under is read beside its exit, as a
+     failed Execute already shows it. *)
+  check (option string) "the model reads the network mode the call ran under"
+    (Some "inherit")
+    (field "network_mode" payload |> Yojson.Safe.Util.to_string_option);
   List.iter (fun name ->
     check string (name ^ " is recorded as evidence") "remote_ssh" (text name evidence);
     check bool (name ^ " is not sent to the model") true (field name payload = `Null))

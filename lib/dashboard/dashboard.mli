@@ -22,10 +22,10 @@ type section = {
   empty_msg : string;
 }
 
-type scope =
-  | Dashboard_scope_all
-  | Dashboard_scope_current
-(** The [scope] argument of the [masc_dashboard] tool. *)
+type view =
+  | Full
+  | Compact
+(** Which rendering a [masc_dashboard] call asks for. *)
 
 type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
   workspace_id : string;
@@ -35,13 +35,16 @@ type workspace_snapshot = Dashboard_labels.workspace_snapshot = {
   locks : int;
 }
 
-(** {1 Scope Helpers} *)
+(** {1 Tool Arguments} *)
 
-val valid_scope_strings : string list
+val compact_argument : string
+(** The one argument the tool takes: a boolean, [true] for {!Compact}. *)
 
-val scope_of_string_opt : string -> scope option
-(** Parses what the tool schema advertises. Exposed so a test can check
-    the enum and the parser against each other. *)
+val default_view : view
+(** The view a call gets when it leaves {!compact_argument} out. *)
+
+val compact_of_view : view -> bool
+(** The {!compact_argument} value that asks for a view. *)
 
 (** {1 Formatting} *)
 
@@ -69,10 +72,10 @@ val render_within : limit:int -> row_count:int -> (int option -> string) -> stri
     [limit] bytes, else [render (Some n)] for the largest [n < row_count] that
     fits, else [render (Some 0)]. *)
 
-val generate : ?scope:scope -> ?max_bytes:int -> Workspace_utils.config -> string
+val generate : ?max_bytes:int -> Workspace_utils.config -> string
 (** With [max_bytes] the Tasks section gives up rows from its tail until the
     text is at most that many bytes; the other sections stay whole. *)
 
-val generate_compact : ?scope:scope -> Workspace_utils.config -> string
+val generate_compact : Workspace_utils.config -> string
 
 val force_link : unit

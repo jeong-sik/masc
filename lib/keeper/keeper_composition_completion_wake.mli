@@ -30,12 +30,17 @@ val deliver
   -> request_id:string
   -> composition_tool:string
   -> terminal:Keeper_event_queue.composition_terminal
-  -> (unit, string) result
+  -> (unit, Keeper_composition_completion_outbox.delivery_refusal) result
 (** [not_before] is the request's submission time as a Unix timestamp; it is
     forwarded as the floor of the negative-delivery-evidence scan so a torn
     write in an older, unrelated ledger partition cannot reject this
     delivery. Both production callers pass the canonical request's
-    [submitted_at]; [0.] means no floor and scans the whole ledger. *)
+    [submitted_at]; [0.] means no floor and scans the whole ledger.
+
+    [Intake_shutdown_reserved] carries the shutdown operation that holds the
+    submitter's intake and is logged as a routine line; recovery counts it
+    as waiting. Every other refusal is [Delivery_failed], logged as an
+    error. *)
 
 val terminal_of_status :
   Keeper_msg_async.request_status -> Keeper_event_queue.composition_terminal option

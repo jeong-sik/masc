@@ -97,6 +97,32 @@ let fork_session_ready ~child_setup ~child_exec =
            reap_failed_child ();
            Printexc.raise_with_backtrace exn backtrace))
 
+(* Wires the fork child's standard descriptors. dup2 runs one call at a time,
+   so a source numbered 0, 1 or 2 -- what a process whose standard descriptors
+   were closed gets for its next pipe or file -- would be overwritten by an
+   earlier call before it is read, and a source already at its own target
+   would keep its close-on-exec flag and vanish at exec (#47475). Each such
+   source is first copied above the standard range, so the three calls are
+   independent of their order. The child has one thread: dup(2) taking the
+   lowest free number races with nothing here, and a copy left on a standard
+   number is overwritten by the dup2 for that number.
+
+   The sources are not closed afterwards. One numbered 0, 1 or 2 now names
+   the child's standard stream, and every descriptor this module opens is
+   close-on-exec. *)
+let connect_standard ~stdin ~stdout ~stderr =
+  let rec above_standard fd =
+    if fd = Unix.stdin || fd = Unix.stdout || fd = Unix.stderr
+    then above_standard (resume_syscall (fun () -> Unix.dup ~cloexec:true fd))
+    else fd
+  in
+  let stdin = above_standard stdin in
+  let stdout = above_standard stdout in
+  let stderr = above_standard stderr in
+  resume_syscall (fun () -> Unix.dup2 stdin Unix.stdin);
+  resume_syscall (fun () -> Unix.dup2 stdout Unix.stdout);
+  resume_syscall (fun () -> Unix.dup2 stderr Unix.stderr)
+
 let spawn_detached ~argv ~env ~cwd =
   match argv with
   | [] -> Error "spawn_detached: empty argv"
@@ -135,11 +161,7 @@ let spawn_detached ~argv ~env ~cwd =
          let pid = fork_session_ready
            ~child_setup:(fun () ->
              if cwd <> "" then resume_syscall (fun () -> Unix.chdir cwd);
-             resume_syscall (fun () -> Unix.dup2 devnull Unix.stdin);
-             resume_syscall (fun () -> Unix.dup2 out_w Unix.stdout);
-             resume_syscall (fun () -> Unix.dup2 err_w Unix.stderr);
-             close_quietly out_r; close_quietly err_r;
-             close_quietly out_w; close_quietly err_w; close_quietly devnull)
+             connect_standard ~stdin:devnull ~stdout:out_w ~stderr:err_w)
            ~child_exec:(fun () -> Unix.execvpe bin (Array.of_list argv) env)
          in
          begin
@@ -197,10 +219,7 @@ let spawn_detached_quiet ~label ~argv ~env ~cwd ~output =
          let pid = fork_session_ready
            ~child_setup:(fun () ->
              if cwd <> "" then resume_syscall (fun () -> Unix.chdir cwd);
-             resume_syscall (fun () -> Unix.dup2 devnull Unix.stdin);
-             resume_syscall (fun () -> Unix.dup2 out Unix.stdout);
-             resume_syscall (fun () -> Unix.dup2 out Unix.stderr);
-             close_quietly devnull)
+             connect_standard ~stdin:devnull ~stdout:out ~stderr:out)
            ~child_exec:(fun () -> Unix.execvpe bin (Array.of_list argv) env)
          in
          begin

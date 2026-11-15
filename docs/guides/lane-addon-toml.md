@@ -48,11 +48,14 @@ Fusion 상태 갱신 시 해당 run을 연결한 설치만 다시 관측한다. 
 결과는 발표 시점의 보존 캡처이며 Board 카드의 나중 편집을 자동 추적하지 않는다.
 `lane_output`은 같은 run의 다른 설치가 완료한 출력을 읽는다. `browser_document`는 이미 열린
 정확한 Browser 대상을 요구하며, 선언을 추가한다고 새 세션이나 탭을 만들지 않는다.
+`browser_document`의 `installation_id`에는 문서를 읽을 browser Add-on 설치의 선언 `id`(예: `browser-ego`)를
+적는다. 이 필드가 없는 선언은 읽을 때 거절한다. 그 browser 설치가 관측을 새로 올리거나, 실패하거나,
+분리되면 이 소스를 쓰는 설치가 다시 읽는다. run이 달라도 같다.
 MSX 예제는 incarnation을 고정하지 않으므로 기존 머신의 load/restore를 구분해서 계속 관측한다.
 
 ## 실행기 선택
 
-패키지 `lane.toml`에 `runtime = "apple_container"`를 선언하면 Apple `container`의 전용 microVM에서 실행한다. 생략하면 기존 Docker 실행을 유지한다. 이미지도 선택한 실행기의 저장소에 준비해야 한다. Docker에만 있는 이미지는 Apple 실행기가 읽을 수 없다.
+패키지 `lane.toml`에 `runtime = "apple_container"`를 선언하면 Apple `container`의 전용 microVM에서 실행한다. 생략하면 기존 Docker 실행을 유지한다. 이미지도 선택한 실행기의 저장소에 준비해야 한다. Docker에만 있는 이미지는 Apple 실행기가 읽을 수 없다. Apple `container`는 1.4.1 이상이어야 한다. 그 전 버전은 `container system status`에서 실행 위치를 다른 자리에 출력한다. 그러면 호스트가 엔진을 알아보지 못해 설치를 시작하지 않는다.
 
 ```toml
 runtime = "apple_container"

@@ -28,6 +28,20 @@ it('does not let a delayed cancel response abort a newer login', async () => {
   resolveCancel(); await waitFor(() => expect(signals[0]?.aborted).toBe(true))
   expect(signals[1]?.aborted).toBe(false)
 })
+it('shows the last terminal screen in place of the one before, its links as their text', async () => {
+  vi.mocked(api.streamSetupLogin).mockImplementation((_source, receive) => {
+    receive({ event: 'started', login_id: id, integration_id: 'antigravity' })
+    receive({ event: 'screen', text: '\x1b[0m ⣷  Signing in...\x1b[0m' })
+    // Matrix_grid.to_ansi ends each OSC 8 with ST and closes the link at the row's end.
+    receive({ event: 'screen', text: '\x1b[0m Open \x1b]8;;https://x.example/a\x1b\\https://x.example/a\x1b]8;;\x1b\\ then\x1b[0m\n\x1b[0m > 1. Google OAuth\x1b[0m' })
+    return new Promise(() => undefined)
+  })
+  render(html`<${SetupAccountLogin} ...${props()} integrationId="antigravity" />`)
+  fireEvent.click(screen.getByText('새 계정 로그인'))
+  const output = await screen.findByLabelText('로그인 안내')
+  await waitFor(() => expect(output.textContent).toBe(' Open https://x.example/a then\n > 1. Google OAuth'))
+  expect(output.classList.contains('setup-login-screen')).toBe(true)
+})
 it('uses the current parent selection instead of an older recovered account', async () => {
   const callbacks = props()
   vi.mocked(api.streamSetupLogin).mockImplementation(async (_source, emit) => {

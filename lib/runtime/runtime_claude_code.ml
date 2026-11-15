@@ -1266,52 +1266,6 @@ let parse_control_response ~expected_request_id fields =
       protocol_error stage (Printf.sprintf "unknown response subtype %S" other)
 ;;
 
-let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
-    ~on_stream_event =
-  let* json = io.receive () in
-  let* kind, fields = wire_fields json in
-  match kind with
-  | Frame_control_response ->
-    parse_control_response ~expected_request_id:request_id fields
-  | Frame_control_request ->
-    let* () =
-      handle_control_request
-        io
-        ~control_phase:Before_turn_admission
-        ~mcp_session
-        ~tools
-        ~tool_call_count
-        ~assistant_usage
-        ~on_stream_event
-        fields
-    in
-    await_initialize
-      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-  | Frame_control_cancel_request ->
-    let* () = observe_control_cancel_request fields in
-    await_initialize
-      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
-  | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
-    (* Informational frames before the control response. The admission
-       deadline bounds a client that never answers; a count of these frames
-       does not change what
-       the client is doing. *)
-    await_initialize
-      io
-      ~mcp_session
-      ~tools
-      ~tool_call_count
-      ~assistant_usage
-      ~request_id
-      ~on_stream_event
-  | Frame_stream_event | Frame_assistant | Frame_result | Frame_user | Frame_tool_progress | Frame_other _ ->
-    protocol_error
-      "initialize"
-      (Printf.sprintf
-         "unexpected message type %S before control response"
-         (frame_kind_to_tag kind))
-;;
-
 (* The stream-json user message always carries a content-block array, never the
    bare-string form. Both are valid on the wire, but one shape means one code
    path: an image turn and a text turn differ only in how many blocks precede
@@ -2292,6 +2246,81 @@ let parse_result ~rate_limits ~api_error_cause ~tool_effect_attempted ~response_
     else Ok (turn_id, result, usage)
 ;;
 
+(* Claude Code can end its start-up with a result frame before it answers
+   initialize: fourteen turns ended there on 2026-11-13 while another turn of
+   the same lane read "Can't reach the API server" in its result (#51901).
+   The frame goes through the decoder a turn's result does, so the failure
+   keeps its status and sentence. No turn input has been sent, and no
+   response or diagnostic envelope is accepted before the control response,
+   so the frame reports no tool effect, no response and no diagnostic cause;
+   rate-limit evidence starts empty, as it does once the turn is admitted.
+   A result that reports success is not part of the start-up. *)
+let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_id
+    ~request_id ~on_stream_event =
+  let* json = io.receive () in
+  let* kind, fields = wire_fields json in
+  let out_of_phase () =
+    protocol_error
+      "initialize"
+      (Printf.sprintf
+         "unexpected message type %S before control response"
+         (frame_kind_to_tag kind))
+  in
+  match kind with
+  | Frame_control_response ->
+    parse_control_response ~expected_request_id:request_id fields
+  | Frame_control_request ->
+    let* () =
+      handle_control_request
+        io
+        ~control_phase:Before_turn_admission
+        ~mcp_session
+        ~tools
+        ~tool_call_count
+        ~assistant_usage
+        ~on_stream_event
+        fields
+    in
+    await_initialize
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_id ~request_id
+      ~on_stream_event
+  | Frame_control_cancel_request ->
+    let* () = observe_control_cancel_request fields in
+    await_initialize
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_id ~request_id
+      ~on_stream_event
+  | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
+    (* Informational frames before the control response. The admission
+       deadline bounds a client that never answers; a count of these frames
+       does not change what
+       the client is doing. *)
+    await_initialize
+      io
+      ~mcp_session
+      ~tools
+      ~tool_call_count
+      ~assistant_usage
+      ~session_id
+      ~request_id
+      ~on_stream_event
+  | Frame_result ->
+    let* turn_id = result_turn_id ~expected_session_id:session_id fields in
+    (match
+       parse_result
+         ~rate_limits:Turn_rate_limits.empty
+         ~api_error_cause:None
+         ~tool_effect_attempted:false
+         ~response_emitted:false
+         ~turn_id
+         ~usage:(turn_usage_of_fields fields)
+         fields
+     with
+     | Error failure -> Error failure
+     | Ok (_turn_id, _result, _usage) -> out_of_phase ())
+  | Frame_stream_event | Frame_assistant | Frame_user | Frame_tool_progress | Frame_other _ ->
+    out_of_phase ()
+;;
+
 (* Partial SDK frames precede the complete assistant block. Keep the current
    text block so its later complete envelope contributes only missing bytes.
    Complete blocks remain the source for terminal text and usage accounting. *)
@@ -3052,6 +3081,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
       ~tools:dynamic_tools
       ~tool_call_count
       ~assistant_usage
+      ~session_id
       ~request_id:initialize_id
       ~on_stream_event
   in
@@ -3454,6 +3484,10 @@ let purge_project ~mgr ~clock ~cwd ~account ~cli_path ~timeout_s ~project =
              (version_label version)
              (version_label purge_minimum_version))
       | Some (_ : int * int * int) ->
+        (* The two runs share one buffer. Whatever [--version] wrote there is
+           not about purge, so a failing purge must not report it as its
+           own stderr. *)
+        Buffer.clear stderr_buf;
         let (_ : string) =
           run
             [ cli_path

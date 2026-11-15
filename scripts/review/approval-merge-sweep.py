@@ -10,10 +10,12 @@ where the worker would certainly hold; admission stays in the worker.
 One GraphQL walk of the open pull requests feeds the selection, so its cost
 grows with pages of 100, not with pull requests.
 
-It also deletes the branches merges left behind (see `merged_leftovers`).
+It also deletes the branches merges left behind (see `merged_leftovers`) and
+closes the issues they left open (see `close_merged_issues`).
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -41,6 +43,11 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         number isDraft mergeable isCrossRepository
         baseRefName headRefName headRefOid
+        statusCheckRollup { state }
+        files(first: 100) {
+          totalCount
+          nodes { path }
+        }
         autoMergeRequest { enabledAt }
         latestOpinionatedReviews(first: 20) {
           nodes { state author { login } commit { oid } }
@@ -67,8 +74,36 @@ query($owner: String!, $name: String!, $cursor: String) {
   }
 }
 '''
+OPEN_ISSUES = '''
+query($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    issues(states: OPEN, first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number url
+        closedByPullRequestsReferences(first: 20, includeClosedPrs: true) {
+          totalCount
+          nodes { number merged repository { nameWithOwner } }
+        }
+      }
+    }
+  }
+}
+'''
 PUSH_TIMEOUT_SECONDS = 120
 MERGER = 'github-actions'  # the account the merge worker's token merges as
+
+
+def sibling(name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + '.py'))
+    if spec is None or spec.loader is None:
+        raise ImportError(f'cannot load review helper {name}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ISSUES = sibling('linked-issues')
 
 
 def gh(arguments):
@@ -84,19 +119,27 @@ def gh(arguments):
     return json.loads(operation.stdout)
 
 
+def graphql(document, **variables):
+    """Run one GraphQL document and return its data.
+
+    A call gh refuses and an answer that carries errors are a ValueError.
+    """
+    arguments = ['api', 'graphql', '-f', f'query={document}']
+    for key, value in variables.items():
+        arguments += ['-f', f'{key}={value}']
+    answer = gh(arguments)
+    if answer.get('errors'):
+        raise ValueError(json.dumps(answer['errors'])[:ERROR_CHARACTERS])
+    return answer['data']
+
+
 def walk(repo, document, connection):
     """Every node of one repository connection, 100 to a GraphQL call."""
     owner, name = repo.split('/')
     rows, cursor = [], None
     while True:
-        arguments = ['api', 'graphql', '-f', f'query={document}',
-                     '-f', f'owner={owner}', '-f', f'name={name}']
-        if cursor is not None:
-            arguments += ['-f', f'cursor={cursor}']
-        answer = gh(arguments)
-        if answer.get('errors'):
-            raise ValueError(json.dumps(answer['errors'])[:ERROR_CHARACTERS])
-        page = answer['data']['repository'][connection]
+        after = {} if cursor is None else {'cursor': cursor}
+        page = graphql(document, owner=owner, name=name, **after)['repository'][connection]
         rows.extend(page['nodes'])
         if not page['pageInfo']['hasNextPage']:
             return rows
@@ -192,12 +235,96 @@ def clean_branches(repo, started, dry_run):
     return record
 
 
+DECISIVE_CHECK_FAILURES = frozenset({'FAILURE', 'ERROR'})
+
+
+def merged_closers(repo, issues):
+    """The merged pull requests of `repo` that open issues name as closing.
+
+    Returns their numbers and one record per issue whose closing pull
+    requests were not all read. Whether a merge landed on the default branch
+    and whether the issue was reopened after it is left to linked-issues: a
+    layer of a native stack merges into its parent branch and lands on main
+    only with the stack. A pull request of another repository is not passed,
+    because linked-issues reads a number in `repo`.
+    """
+    numbers, records = set(), []
+    for issue in issues:
+        closers = issue['closedByPullRequestsReferences']
+        nodes = closers['nodes']
+        if closers['totalCount'] > len(nodes):
+            records.append({'issue': issue['url'], 'closed': False,
+                            'reason': f'{closers["totalCount"]} closing pull requests; only '
+                                      f'the first {len(nodes)} were read'})
+        # The schema lets an entry of the list be null, as for a pull request
+        # of a repository the token cannot read.
+        unreadable = sum(1 for node in nodes if node is None)
+        if unreadable:
+            records.append({'issue': issue['url'], 'closed': False,
+                            'reason': f'{unreadable} closing pull requests are not readable'})
+        numbers.update(node['number'] for node in nodes
+                       if node is not None and node['merged'] is True and
+                       node['repository']['nameWithOwner'] == repo)
+    return sorted(numbers), records
+
+
+def close_merged_issues(repo, started, dry_run):
+    """Close the issues that merged pull requests left open (#52092).
+
+    The worker closes them when it sees the merge. A pull request it only
+    reserves for GitHub's auto-merge is merged later with the Actions token,
+    which starts no workflow, so no run sees that merge. On 2026-11-15, 31
+    of 600 open issues were left open this way. They are found by their
+    state, with no time window, so a sweep that missed one leaves it to the
+    next. Never part of the sweep's verdict: every failure is a record.
+    """
+    try:
+        numbers, records = merged_closers(repo, walk(repo, OPEN_ISSUES, 'issues'))
+    except (ValueError, KeyError, TypeError) as error:
+        return {'error': str(error)}
+    record = {'pull_requests': numbers, 'not_reached': 0, 'issues': records}
+    if dry_run or time.monotonic() - started >= SWEEP_SECONDS:
+        record['not_reached'] = len(numbers)
+    elif numbers:
+        try:
+            record['issues'] += ISSUES.close_linked_issues(repo, numbers, graphql)
+        except (ValueError, KeyError, TypeError) as error:
+            # Only the read of linked-issues raises, and it raises before any close.
+            record['issues'].append({
+                'prs': numbers, 'closed': False,
+                'reason': f'{type(error).__name__}: {error}'[:ERROR_CHARACTERS]})
+    return record
+
+
 def ready(row):
     """Two accounts approve the current head and nothing certainly blocks it."""
     reviews = row['latestOpinionatedReviews']['nodes']
     approvers = {review['author']['login'] for review in reviews
                  if review['state'] == 'APPROVED' and review['author'] is not None and
                  review['commit'] is not None and review['commit']['oid'] == row['headRefOid']}
+    # A completed FAILURE or ERROR check is a merge refusal GitHub has
+    # already decided; selecting the pull request again spends a worker run
+    # on the same answer every 30 minutes (#51479 family 1). Pending and
+    # expected rolls stay selectable — the worker still holds on them, but a
+    # later run can see them pass without new evidence.
+    roll = row.get('statusCheckRollup') or []
+    if isinstance(roll, dict):
+        # GitHub can collapse a single-member rollup to the object itself
+        # (run 43618358575): iterating that object yields its keys, not the
+        # checks — wrap it so the members stay dicts.
+        roll = [roll]
+    if any(isinstance(check, dict) and check.get('state') in DECISIVE_CHECK_FAILURES
+           for check in roll):
+        return False
+    # Workflow-file pull requests cannot be merged by this token at all
+    # (#51452 family 3): GitHub refuses the arming itself, and only the human
+    # merge path owns them. Selecting one again spends a worker run on the
+    # same refusal every 30 minutes. The listing is capped at 100 paths; a
+    # truncated scope falls through and the worker's distinct refusal answer
+    # still records the case.
+    if any((changed.get('path') or '').startswith('.github/workflows/')
+           for changed in (row.get('files', {}).get('nodes') or [])):
+        return False
     return (row['isDraft'] is False and not row['headRefName'].startswith('release/') and
             row['mergeable'] != 'CONFLICTING' and len(approvers) >= REQUIRED_APPROVALS and
             not any(review['state'] == 'CHANGES_REQUESTED' for review in reviews))
@@ -274,7 +401,10 @@ def main():
         return 1
     report.update(open=len(rows), candidates=candidates, runs=[], not_reached=[])
     worker = Path(__file__).with_name('approval-auto-merge.py')
-    environment = dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', DISPATCH_RECEIPT='')
+    environment = dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', DISPATCH_RECEIPT='',
+                       # The worker's kill budget, so its cleanup keeps a
+                       # reserve inside it (#51479 family 2).
+                       DISPATCH_WORKER_BUDGET_SECONDS=str(WORKER_TIMEOUT_SECONDS))
     environment.pop('GITHUB_STEP_SUMMARY', None)  # one summary for the sweep, not one per run
     stop = 'dry run' if dry_run else None
     for number in candidates:
@@ -297,6 +427,7 @@ def main():
             stop = 'quota reached'
     report['stopped'] = stop
     report['merged_branches'] = clean_branches(repo, started, dry_run)
+    report['linked_issues'] = close_merged_issues(repo, started, dry_run)
     report['quota_after'] = quota()
     output = json.dumps(report, ensure_ascii=False, indent=2)
     print(output, flush=True)

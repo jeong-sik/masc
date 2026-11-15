@@ -2009,22 +2009,83 @@ let proof_mirror_presence_scenario () =
   check string "memory check leaves the original primary alone" before_primary (Fs_compat.load_file primary_saved)
 ;;
 
-let test_proof_mirror_presence_guarded () =
+(* #47589: a FIFO at the primary path has no writer. Before the ledger read
+   took the kind from the opened descriptor, the open waited for one while the
+   ledger lock was held; the scenario runs under the process hang guard. *)
+let proof_primary_fifo_scenario () =
+  with_workspace @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Keep a proof ledger behind a FIFO" in
+  ignore (must_succeed "request" (transition ctx goal_id "request_complete"));
+  let request_id, criterion = proof_identity config goal_id in
+  let primary = Goal_verification.verifications_path config in
+  let mirror = primary ^ ".last-good" in
+  let primary_saved = primary ^ ".saved-for-test" in
+  let before_primary = Fs_compat.load_file primary in
+  let before_mirror = Fs_compat.load_file mirror in
+  Unix.rename primary primary_saved;
+  Unix.mkfifo primary 0o600;
+  Fun.protect ~finally:(fun () -> Unix.unlink primary) (fun () ->
+    (match Goal_verification.get_record_authoritative config ~goal_id with
+     | Error _ -> () | Ok _ -> fail "a FIFO primary was read as a ledger");
+    (match Goal_verification.bind_review config ~goal_id with
+     | Error (Goal_verification.Binding_unavailable _) -> ()
+     | Error (Goal_verification.No_current_review _) | Ok _ ->
+       fail "verifier admission did not retain uncertainty");
+    (match Goal_verification.mark_proof_pending config ~goal_id ~criterion with
+     | Error _ -> () | Ok _ -> fail "a FIFO primary admitted a new proof request");
+    (match Goal_verification.record_proof_verdict config ~goal_id
+        (verdict ~request_id ~criterion Goal_verification.Proven) with
+     | Error _ -> () | Ok _ -> fail "a FIFO primary admitted a proof commit");
+    check bool "the FIFO is not replaced" true
+      ((Unix.lstat primary).Unix.st_kind = Unix.S_FIFO));
+  check string "original primary preserved" before_primary (Fs_compat.load_file primary_saved);
+  check string "mirror preserved" before_mirror (Fs_compat.load_file mirror);
+  Unix.rename primary_saved primary;
+  let link_target = primary ^ ".link-target" in
+  Unix.rename primary link_target;
+  Unix.symlink (Filename.basename link_target) primary;
+  match Goal_verification.get_record_authoritative config ~goal_id with
+  | Ok (Some _) -> ()
+  | Ok None -> fail "a link to the regular ledger lost its record"
+  | Error detail -> fail ("a link to the regular ledger was refused: " ^ detail)
+;;
+
+let run_scenario_guarded ~flag ~label () =
   let program = "import os,signal,subprocess,sys\n" ^
-    "child=subprocess.Popen([sys.argv[1],'--proof-mirror-presence'],start_new_session=True)\n" ^
+    "child=subprocess.Popen([sys.argv[1],sys.argv[2]],start_new_session=True)\n" ^
     "try: code=child.wait(timeout=40)\n" ^
     "except subprocess.TimeoutExpired:\n" ^
     " os.killpg(child.pid,signal.SIGKILL); child.wait(); sys.exit(124)\n" ^
     "sys.exit(code if code>=0 else 128-code)\n" in
   let executable = Unix.realpath Sys.executable_name in
-  let pid = Unix.create_process "python3" [|"python3"; "-c"; program; executable|]
+  let pid = Unix.create_process "python3" [|"python3"; "-c"; program; executable; flag|]
       Unix.stdin Unix.stdout Unix.stderr in
-  match snd (Unix.waitpid [] pid) with
+  (* A signal that arrives during the wait ends it with EINTR. On macOS the
+     full suite reaches this wait with a handler installed by earlier cases,
+     and the wait was interrupted on every run; the case alone was not. *)
+  let rec exit_status () =
+    match Unix.waitpid [] pid with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> exit_status ()
+  in
+  match exit_status () with
   | Unix.WEXITED 0 -> ()
-  | Unix.WEXITED 124 -> fail "Goal mirror presence check exceeded its process hang guard"
-  | Unix.WEXITED code -> fail (Printf.sprintf "Goal mirror presence check exited %d" code)
+  | Unix.WEXITED 124 -> fail (label ^ " exceeded its process hang guard")
+  | Unix.WEXITED code -> fail (Printf.sprintf "%s exited %d" label code)
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
-    fail (Printf.sprintf "Goal mirror presence check ended with signal %d" signal)
+    fail (Printf.sprintf "%s ended with signal %d" label signal)
+;;
+
+let proof_mirror_presence_flag = "--proof-mirror-presence"
+let proof_primary_fifo_flag = "--proof-primary-fifo"
+
+let test_proof_mirror_presence_guarded =
+  run_scenario_guarded ~flag:proof_mirror_presence_flag ~label:"Goal mirror presence check"
+;;
+
+let test_proof_primary_fifo_guarded =
+  run_scenario_guarded ~flag:proof_primary_fifo_flag ~label:"Goal proof FIFO primary check"
 ;;
 
 let test_memory_proof_cannot_supply_authority () =
@@ -2712,8 +2773,10 @@ let test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to () =
 ;;
 
 let () =
-  if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) "--proof-mirror-presence" then
+  if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) proof_mirror_presence_flag then
     proof_mirror_presence_scenario ()
+  else if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) proof_primary_fifo_flag then
+    proof_primary_fifo_scenario ()
   else run
     "goal_verification_gate"
     [ ( "temp directory cleanup"
@@ -2769,6 +2832,8 @@ let () =
             test_recovery_proof_cannot_authorize_mutation
         ; test_case "unknown proof mirror refuses admission without reading it" `Quick
             test_proof_mirror_presence_guarded
+        ; test_case "FIFO primary is an unreadable ledger, not a blocked read" `Quick
+            test_proof_primary_fifo_guarded
         ; test_case "Memory cannot authorize a durable Goal proof" `Quick
             test_memory_proof_cannot_supply_authority
         ] )

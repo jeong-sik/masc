@@ -134,8 +134,6 @@ let test_context_overflow_is_not_auto_recoverable () =
        (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
 
-module Budget = Masc.Keeper_turn_runtime_budget
-
 let request_body_refused_by_provider ~status =
   Agent_core.Error.Api
     (InvalidRequest
@@ -144,65 +142,18 @@ let request_body_refused_by_provider ~status =
        })
 ;;
 
-(* The byte axis used to fall through [| _ -> None] and produce no capacity
-   refusal at all. The provider's refusal of the body is the only byte
-   verdict; nothing measures the body against a limit before dispatch. *)
-let test_provider_byte_refusal_is_a_capacity_refusal () =
-  (match
-     Budget.capacity_refusal_of_error
-       (request_body_refused_by_provider ~status:413)
-   with
-   | Some (Budget.Provider_request_body_refusal { status = 413 }) -> ()
-   | Some _ | None -> fail "provider refusal status was not preserved");
-  match
-    Budget.capacity_refusal_of_error
-      (Agent_core.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 }))
-  with
-  | Some (Budget.Provider_context_window { limit_tokens = Some 32768 }) -> ()
-  | Some _ | None -> fail "the context window axis regressed"
-;;
-
-let test_typed_capacity_transition_preserves_axes () =
-  let constraint_ = serving_constraint () in
-  let boundary =
-    input_capacity
-      constraint_
-      (Llm_provider.Serving_constraint.Boundary_unknown
-         { input_tokens = 524_299
-         ; accepted_through = 524_298
-         ; rejected_from = None
-         })
-  in
-  (* A serving-constraint boundary is provider capacity evidence, not a
-     measured token or byte limit. It must stay outside the two refusal
-     axes rather than being folded into one of them. *)
-  (match Budget.capacity_refusal_of_error boundary with
-   | None -> ()
-   | Some _ -> fail "a serving boundary was folded into a capacity refusal");
-  match
-    Budget.capacity_refusal_of_error
-      (request_body_refused_by_provider ~status:413)
-  with
-  | Some (Budget.Provider_request_body_refusal { status = 413 }) -> ()
-  | _ -> fail "provider refusal did not keep its status"
-;;
-
 (* Serving-evidence validity and unmeasurable tokens are facts about the
-   measurement, not a capacity limit. Neither may be guessed into one. *)
-let test_unusable_capacity_evidence_is_ignored () =
+   measurement, not a context window. Neither may be guessed into one. *)
+let test_unusable_capacity_evidence_is_not_context_overflow () =
   let constraint_ = serving_constraint () in
-  (match
-     Budget.capacity_refusal_of_error
+  check bool "expired serving evidence is not a context overflow" false
+    (is_provider_context_overflow
        (input_capacity
           constraint_
           (Llm_provider.Serving_constraint.Evidence_expired
-             { now_unix_s = 200; expires_at_unix_s = 199 }))
-   with
-   | None -> ()
-   | Some _ -> fail "expired serving evidence became a capacity refusal");
-  match Budget.capacity_refusal_of_error (measurement_unavailable constraint_) with
-  | None -> ()
-  | Some _ -> fail "measurement-unavailable became a capacity refusal"
+             { now_unix_s = 200; expires_at_unix_s = 199 })));
+  check bool "unmeasurable tokens are not a context overflow" false
+    (is_provider_context_overflow (measurement_unavailable constraint_))
 ;;
 
 (* The classifier feeding the cascade path publishes
@@ -243,17 +194,9 @@ let () =
             `Quick
             test_input_capacity_is_not_context_overflow
         ; test_case
-            "provider byte refusal is a capacity refusal"
+            "unusable capacity evidence is not context overflow"
             `Quick
-            test_provider_byte_refusal_is_a_capacity_refusal
-        ; test_case
-            "typed capacity transition preserves axes"
-            `Quick
-            test_typed_capacity_transition_preserves_axes
-        ; test_case
-            "unusable capacity evidence is ignored"
-            `Quick
-            test_unusable_capacity_evidence_is_ignored
+            test_unusable_capacity_evidence_is_not_context_overflow
         ; test_case
             "lane classifier admits only the token axis"
             `Quick

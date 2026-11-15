@@ -266,6 +266,20 @@ let test_the_recall_blocks_sit_around_the_dynamic_context () =
   before Block_id.Recalled_memory_status Block_id.Temporal_summary
 ;;
 
+(* The source of an admitted direct operation is issued behind the Goal
+   snapshot and in front of the proof and Task decisions that change within
+   a turn. *)
+let test_the_direct_input_source_follows_the_goal_snapshot () =
+  let before a b =
+    Alcotest.(check bool)
+      (Printf.sprintf "%s is assembled before %s" (Block_id.to_string a) (Block_id.to_string b))
+      true
+      (Block_id.cache_rank a < Block_id.cache_rank b)
+  in
+  before Block_id.Active_goals Block_id.Direct_input_source;
+  before Block_id.Direct_input_source Block_id.Goals_awaiting_proof
+;;
+
 (* [Operator_note] is someone speaking mid-turn. It follows the retained Goal
    snapshot and every other block, so it stays last in the assembly. *)
 let test_the_operator_note_stays_last () =
@@ -312,6 +326,8 @@ let () =
             test_rarely_changing_blocks_come_first
         ; Alcotest.test_case "the recall blocks sit around the dynamic context" `Quick
             test_the_recall_blocks_sit_around_the_dynamic_context
+        ; Alcotest.test_case "the direct input source follows the Goal snapshot" `Quick
+            test_the_direct_input_source_follows_the_goal_snapshot
         ; Alcotest.test_case "the operator note stays last" `Quick
             test_the_operator_note_stays_last
         ] )

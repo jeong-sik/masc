@@ -330,13 +330,13 @@ val append_librarian_failure :
 
 (** Last [limit] journal lines, oldest first, one result per line. A line this
     build cannot parse is [Error] with the reason rather than being dropped.
-    A missing journal file is an empty list, which is why the result is a list
-    and not [(list, string) result]. *)
+    A missing journal file is [Ok []]. A journal that exists and cannot be
+    opened or read, or whose path is not a regular file, is [Error]. *)
 val read_journal_tail :
   keepers_dir:string
   -> keeper_id:string
   -> limit:int
-  -> (journal_entry, string) result list
+  -> ((journal_entry, string) result list, string) result
 
 (** [Removed]: the latest journal line naming the identity removed it.
     [No_removal_recorded]: no line removed it, or the latest line naming it
@@ -394,9 +394,12 @@ val source_kind_to_string : source_kind -> string
 (** Dashboard projection of the last [limit] lines. Every row carries a
     producer-stable [structural_id] derived from the keeper and the byte offset
     its line starts at in the journal, including rows this build cannot
-    decode. *)
+    decode. An unreadable journal is [Error], as in {!read_journal_tail}. *)
 val read_journal_tail_projection :
-  keepers_dir:string -> keeper_id:string -> limit:int -> Yojson.Safe.t list
+  keepers_dir:string
+  -> keeper_id:string
+  -> limit:int
+  -> (Yojson.Safe.t list, string) result
 
 val keeper_id_of_filename : string -> string option
 (** Parse this store's filename suffix without filesystem access. [None] means
@@ -410,6 +413,14 @@ val list_preflight_keeper_ids : keepers_dir:string -> (string list, string) resu
     without changing any of them. A first publication may have a receipt
     before a snapshot exists. An inaccessible inventory is an error, not an
     empty store. *)
+
+val list_keeper_ids_with_suffix :
+  keepers_dir:string -> suffix:string -> (string list, string) result
+(** The owners of [<id><suffix>] files in [keepers_dir], read like
+    {!list_preflight_keeper_ids}. Memory's other per-keeper files (the
+    journal, the events and absorbed-fact sidecars) live in the same
+    directory and need not have a snapshot beside them: a pass that failed
+    before its first commit records only its failure in the journal. *)
 
 type preflight_observation =
   | Preflight_absent

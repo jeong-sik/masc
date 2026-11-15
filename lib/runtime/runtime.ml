@@ -2129,8 +2129,53 @@ let validate_exact_slot_body_deadline_change ~config_path ~validated =
   | added -> Error (Exact_slot_body_deadlines_absent added)
 ;;
 
+(* A line editor opens a [\[table\]] header where it finds none. When the
+   file writes that table, or one above it, as an inline table or by dotted
+   keys, the header defines the table a second time: TOML 1.0 forbids it and
+   Otoml merges it, so the save would load here and fail every strict reader
+   (#46981: [runtime = { ... }] and then [\[runtime.assignments\]]). Every
+   writer of this file commits through here, so the text is judged once, as
+   a strict reader would read it, before it replaces the file.
+
+   The change is judged, as rule 3 above does: a declaration the file on
+   disk already has is the operator's and does not block an unrelated save.
+   A file on disk that cannot be read offers nothing to compare against, so
+   every declaration in the new text counts as added. *)
+let validate_table_redefinition_change ~config_path content =
+  let on_disk =
+    match load_file_result config_path with
+    | Error _ -> []
+    | Ok text ->
+      (match Toml_table_redefinition.violations text with
+       | Ok found -> found
+       | Error (_ : Toml_table_redefinition.unreadable) -> [])
+  in
+  match Toml_table_redefinition.violations content with
+  | Error unreadable ->
+    Error
+      (Printf.sprintf
+         "runtime config save refused (%s): %s"
+         config_path
+         (Toml_table_redefinition.unreadable_to_string unreadable))
+  | Ok found ->
+    (match
+       List.filter
+         (fun declared ->
+            not (List.exists (Toml_table_redefinition.same_violation declared) on_disk))
+         found
+     with
+     | [] -> Ok ()
+     | added ->
+       Error
+         (Printf.sprintf
+            "runtime config save refused (%s): %s"
+            config_path
+            (String.concat "; " (List.map Toml_table_redefinition.to_string added))))
+;;
+
 let validate_save_text ~config_path content =
   let* validated = parse_and_validate_config_text ~config_path content in
+  let* () = validate_table_redefinition_change ~config_path content in
   let* () =
     validate_exact_slot_body_deadline_change ~config_path ~validated
     |> Result.map_error (to_diagnostic_text ~config_path)
@@ -2981,6 +3026,41 @@ let normalized_assignment = function
     else Ok (Assignment_present runtime_id)
 ;;
 
+let assignment_state_to_string = function
+  | Assignment_missing -> "unassigned"
+  | Assignment_present runtime_id -> Printf.sprintf "assigned to %S" runtime_id
+;;
+
+(* The assignment writer edits the rows under a [\[runtime.assignments\]]
+   header. A file that holds the rows in an inline table or in dotted keys
+   has no such header, so a removal finds nothing to remove and returns the
+   text as it was. The edited text is read back with the loader before it
+   is offered to the commit: an edit the loader does not see is refused
+   rather than reported as "unchanged" while the keeper keeps its old route
+   (#46981). A text that does not load at all is the commit's to refuse,
+   with the loader's own message. *)
+let assignment_edit_read_back ~path ~keeper_name ~requested text =
+  match Runtime_toml.parse_string text with
+  | Error (_ : Runtime_toml.parse_error list) -> Ok text
+  | Ok config ->
+    let read_back = assignment_state_of_config config keeper_name in
+    if read_back = requested
+    then Ok text
+    else
+      Error
+        (Printf.sprintf
+           "keeper %S would still read as %s in %s after this edit, not %s. The \
+            assignment writer edits rows under a [%s] header, and this file holds the \
+            keeper's row outside one (an inline table or dotted keys). Write the \
+            assignments under a [%s] header"
+           keeper_name
+           (assignment_state_to_string read_back)
+           path
+           (assignment_state_to_string requested)
+           assignments_table
+           assignments_table)
+;;
+
 let commit_keeper_assignment_using ?egress_allow ~commit_text transaction ~runtime_id =
   let* requested = normalized_assignment runtime_id in
   match transaction with
@@ -2994,13 +3074,16 @@ let commit_keeper_assignment_using ?egress_allow ~commit_text transaction ~runti
     | Runtime_config_present { assignment; _ } -> assignment
     | Runtime_config_missing -> Assignment_missing
   in
-  let assigned_source =
-    if requested = current_assignment then transaction.source_text
-    else match requested with
-      | Assignment_missing -> remove_runtime_assignment_text transaction.source_text
-          ~keeper_name:transaction.keeper_name
-      | Assignment_present runtime_id -> update_runtime_assignment_text transaction.source_text
-          ~keeper_name:transaction.keeper_name ~runtime_id
+  let* assigned_source =
+    if requested = current_assignment then Ok transaction.source_text
+    else
+      (match requested with
+       | Assignment_missing -> remove_runtime_assignment_text transaction.source_text
+           ~keeper_name:transaction.keeper_name
+       | Assignment_present runtime_id -> update_runtime_assignment_text transaction.source_text
+           ~keeper_name:transaction.keeper_name ~runtime_id)
+      |> assignment_edit_read_back ~path:transaction.path
+           ~keeper_name:transaction.keeper_name ~requested
   in
   let next = match egress_allow with
     | None -> assigned_source
@@ -3031,11 +3114,13 @@ let commit_keeper_removal transaction =
   match transaction with
   | Missing_runtime_config _ -> Ok (Assignment_unchanged Runtime_config_missing)
   | Present_runtime_config transaction ->
-    let next =
+    let* unassigned =
       remove_runtime_assignment_text transaction.source_text
         ~keeper_name:transaction.keeper_name
-      |> fun source -> remove_egress_allow_text source ~keeper_name:transaction.keeper_name
+      |> assignment_edit_read_back ~path:transaction.path
+           ~keeper_name:transaction.keeper_name ~requested:Assignment_missing
     in
+    let next = remove_egress_allow_text unassigned ~keeper_name:transaction.keeper_name in
     if String.equal next transaction.source_text
     then Ok (Assignment_unchanged transaction.revision)
     else

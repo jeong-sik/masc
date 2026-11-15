@@ -112,6 +112,109 @@ let test_tool_outbox_receipts exe () = with_workspace (fun root _keepers _traces
     (read refused);
   check bool "the readable receipt is still there" true (Sys.file_exists readable))
 
+(* #48087: #47996 made [audience] required on a Board stimulus and the deploy
+   check did not read the reaction ledger. An ACK row carries the transition
+   receipt with the stimulus it retired, so an install passed with ledgers
+   holding earlier Board receipts, and once-only wakes of those Keepers were
+   refused after the start. The rows are what the production writers leave
+   for a Board post a turn consumed: its dispatch row and the projected ACK. *)
+let write_consumed_board_post ~base_path ~keeper_name =
+  let ok label = function Ok value -> value | Error detail -> fail (label ^ ": " ^ detail) in
+  let module Queue = Keeper_event_queue_persistence in
+  let source : Keeper_event_queue.stimulus =
+    { post_id = "post-read-before-rollout"
+    ; urgency = Keeper_event_queue.Immediate
+    ; arrived_at = Unix.gettimeofday ()
+    ; payload = Keeper_event_queue.Board_signal
+        { kind = Keeper_event_queue.Post_created; author = "operator"; title = "Ship"
+        ; content = "Please react"; hearth = None; updated_at = None
+        ; audience = Keeper_event_queue.Audience_discoverable } } in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name source;
+  let (_ : Queue.enqueue_stimulus_result) =
+    Queue.enqueue_stimulus_if_absent_result ~base_path ~keeper_name source |> ok "enqueue" in
+  let selection =
+    match Queue.pending_selections_result ~base_path ~keeper_name |> ok "read the queue" with
+    | [ selection ] -> selection
+    | _ -> fail "the queue holds the one source" in
+  let receipt =
+    match Queue.terminalize_pending_turn_completed_result ~base_path ~keeper_name
+            ~applied_at:(Unix.gettimeofday ()) ~selection () |> ok "complete the turn" with
+    | Queue.Turn_terminal_committed
+        (Queue.Transition_applied receipt | Queue.Transition_already_applied receipt) -> receipt
+    | Queue.Turn_terminal_committed (Queue.Transition_committed_followup_failed { detail; _ }) ->
+      fail detail
+    | Queue.Turn_selection_withdrawn -> fail "the source was withdrawn" in
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result ~base_path ~keeper_name
+    ~expected_transition_id:receipt.transition_id |> ok "project the ACK";
+  Dated_jsonl.range_day_file_paths_result
+    (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name))
+    ~since:"1970-01-01" ~until:"9999-12-31"
+  |> Result.map_error Dated_jsonl.read_error_to_string |> ok "list the ledger"
+
+let ledger_lines paths = List.concat_map (fun path ->
+  In_channel.with_open_bin path In_channel.input_lines) paths
+
+let test_reaction_ledger_refusal exe () = with_workspace (fun root _keepers _traces ->
+  let keeper_name = "keeper" in
+  let paths = write_consumed_board_post ~base_path:root ~keeper_name in
+  (* The receipt as a build before #47996 wrote it: its Board stimulus has no
+     [audience]. *)
+  let rec without_audience = function
+    | `Assoc fields ->
+      `Assoc (List.filter_map (fun (key, value) ->
+        if String.equal key "audience" then None else Some (key, without_audience value)) fields)
+    | `List items -> `List (List.map without_audience items)
+    | json -> json in
+  let ack = Keeper_reaction_ledger.(reaction_kind_to_string Event_queue_ack) in
+  let earlier line = match Yojson.Safe.from_string line with
+    | `Assoc fields ->
+      (match List.assoc_opt "reaction" fields with
+       | Some (`Assoc reaction) when List.assoc_opt "kind" reaction = Some (`String ack) ->
+         let reaction = List.map (fun (key, value) ->
+           if String.equal key "transition_receipt" then key, without_audience value
+           else key, value) reaction in
+         Some (Yojson.Safe.to_string (`Assoc (List.map (fun (key, value) ->
+           if String.equal key "reaction" then key, `Assoc reaction else key, value) fields)))
+       | Some _ | None -> None)
+    | json -> fail ("a ledger row is not an object: " ^ Yojson.Safe.to_string json) in
+  let changed = List.fold_left (fun changed path ->
+    let lines = In_channel.with_open_bin path In_channel.input_lines in
+    let rewritten = List.map (fun line -> Option.value (earlier line) ~default:line) lines in
+    if rewritten = lines then changed
+    else (write path (String.concat "\n" rewritten ^ "\n"); path :: changed)) [] paths in
+  let refused_file = match changed with
+    | [ path ] -> path
+    | _ -> fail "the one ACK row is in one day file" in
+  let refused_bytes = read refused_file in
+  let status, output = invoke exe root in
+  check bool ("a ledger row this build cannot decode stops deployment: " ^ output) true
+    (status <> Unix.WEXITED 0);
+  check bool ("every row is counted and the ACK is refused: " ^ output) true
+    (String_util.contains_substring output
+       (Printf.sprintf "keeper reaction ledger rows=%d refused=1"
+          (List.length (ledger_lines paths))));
+  check bool ("the refusal names the ledger and the reason once-only wakes get: " ^ output) true
+    (String_util.contains_substring output
+       (Keeper_reaction_ledger.store_dir ~base_path:root ~keeper_name
+        ^ ": reaction ledger delivery evidence incomplete: malformed_rows=0 \
+           semantic_invalid_rows=1 first_reason=invalid_transition_receipt"));
+  check string "the refused row is left as it was" refused_bytes (read refused_file))
+
+let test_reaction_ledger_reads exe () = with_workspace (fun root _keepers _traces ->
+  let status, output = invoke exe root in
+  check bool ("a keeper without a ledger does not stop deployment: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool ("a keeper without a ledger has no rows: " ^ output) true
+    (String_util.contains_substring output "keeper reaction ledger rows=0 refused=0");
+  let paths = write_consumed_board_post ~base_path:root ~keeper_name:"keeper" in
+  let status, output = invoke exe root in
+  check bool ("a ledger this build reads does not stop deployment: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool ("the dispatch and the ACK are counted: " ^ output) true
+    (String_util.contains_substring output
+       (Printf.sprintf "keeper reaction ledger rows=%d refused=0"
+          (List.length (ledger_lines paths)))))
+
 (* The logger stamps a line with the second it was written, and a second run
    starts a second later. *)
 let without_log_stamp line =
@@ -472,6 +575,39 @@ let test_lane_addon_exact_requests () = with_lane_store (fun base root ->
     expect_refusals P.Store.Exact_requests ~base_path:base ~rows:2
       [path "string-messages", P.Exact_record])))
 
+(* validate-stores resolves --base-path as the server resolves its workspace,
+   so the workspace's .masc directory, a ./ suffix and a symlink to the
+   workspace all read the store the server serves. The proof file names the
+   root the server writes under, through symlinks: a check that read the store
+   under another root would stop on it before it refuses the record. *)
+let test_base_path_forms_read_the_served_store exe () = with_lane_store (fun base root ->
+  let record = exact_record ~declaration_id:"quiz" ~request_id:"served"
+      ~messages:[`Assoc ["role", `String "user"; "text", `String "hello"]] in
+  let path = grouped root Lane_addon_store.exact_requests_directory ~group:"quiz" ~id:"served" in
+  put path record;
+  let link = match Lane_addon_exact.Retained_key.of_record record with
+    | Ok key -> Filename.concat root (Lane_addon_exact.Retained_key.proof_path key)
+    | Error detail -> failf "the record names no proof file: %s" detail in
+  let served = Lane_addon_store.directory
+      ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base)) in
+  (* The link holds nothing but its root. Once the root matches, the link
+     does not decode, and the check refuses the record with it. *)
+  put link (`Assoc ["executions", `List [`Assoc ["store_root", `String served]]]);
+  let alias = Filename.temp_file "preflight-lane-addons-alias-" "" in
+  Sys.remove alias;
+  Unix.symlink base alias;
+  Fun.protect ~finally:(fun () -> Sys.remove alias) (fun () ->
+    List.iter (fun base_path ->
+      let status, output = invoke_with_args exe base ["validate-stores"; "--base-path"; base_path] in
+      let words = diagnostic_words output in
+      check bool ("--base-path " ^ base_path ^ " refuses the record: " ^ output) true
+        (status <> Unix.WEXITED 0);
+      check bool ("--base-path " ^ base_path ^ " reads the served store: " ^ output) true
+        (String_util.contains_substring words "lane-addon exact requests rows=1 refused=1"
+         && String_util.contains_substring words (Filename.basename path)
+         && String_util.contains_substring words (Filename.basename link)))
+      [Filename.concat base ".masc/"; Filename.concat base "./"; alias]))
+
 let owner_request = `Assoc ["query", `String "rows"]
 let owner_request_bytes = Yojson.Safe.to_string owner_request
 
@@ -804,6 +940,44 @@ type librarian_payload_fixture = {
   base:string; root:string; store:Lane_addon_store.t; owner:Admission.owner;
   capture:Admission.t; parent:Original.retained; gate_id:string; gate_request:Yojson.Safe.t;
 }
+(* The host retains an original's Exact record and proof when it answers.
+   The deploy check reads them as the original's consumer does (RFC
+   exact-request-skips-a-slot-that-refused-its-input, section 3.3), so the
+   fixture's judgment is the final [run] retains. The store is the one the
+   server serves, so the proof names the root the check reads. *)
+let host_answer ~base ~(declared:Lane_addon_types.exact_output) request answer =
+  let module Exact=Lane_addon_exact in
+  let module Receipt=Keeper_exact_walk_receipt in
+  let store=Lane_addon_store.create ~root:(Lane_addon_store.directory
+    ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base))) in
+  let package:Lane_addon_types.package =
+    { id = Keeper_librarian_admission_capture.package_id; revision = "1"; title = "Librarian fixture"
+    ; ui_category = None; contributions = [ Lane_addon_types.Observe ]; command = [ "unused" ]
+    ; directory = "/nonexistent"; skills_directory = None; action_tool = None
+    ; state_storage = Lane_addon_types.Ephemeral; tool_invocation = Lane_addon_types.Direct; tool_hooks = []
+    ; worker_service = Lane_addon_types.Mcp_tools; exported_tools = []; outputs = []
+    ; refresh_policy = Lane_addon_types.Every_hint; model_access = Lane_addon_types.Model_disabled
+    ; exact_outputs = [ declared ]; operator_asks = false; web_search = false
+    ; binding_schema = None; presentation = Lane_addon_presentation.empty
+    ; execution = Lane_addon_types.Container { runtime = Lane_addon_types.Docker; image = "unused"
+        ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } } in
+  let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+        before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
+  let slot="fixture" in
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate ->
+      require (before_dispatch Exact.Generation);
+      let receipt=Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:[slot]
+        ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+        ~cli:(Receipt.cli ~visited:[slot] ~dispatched:[slot] ~failures:[] ~result:(Receipt.Answered slot))
+        |> require in
+      {Exact.outcome=Exact.Call_ended (Exact.Answered {output=require (validate answer);slot;usage=None});receipt}) in
+  match Eio_main.run (fun _ ->
+      Exact.run ~store ~declaration_id:"librarian" ~package ~runner ~authorize_request request) with
+  | Ok (Exact.Final final) -> final
+  | Ok (Exact.Not_final _) -> fail "the host must end the fixture original"
+  | Error detail -> fail detail
 let with_librarian_payload f = with_lane_store (fun base root ->
   let module Queue=Keeper_memory_admission_queue in
   let module L=Keeper_librarian in
@@ -830,7 +1004,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
     working_context=Keeper_librarian_context.empty;messages=[];tool_observations=[];counterpart_observations=[]} in
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   let retirement=Keeper_memory_admission_judgment.Available [] in
-  let preparation=Keeper_librarian_runtime.prepare_admission ~batch ~retirement input |> require in
+  let preparation=Keeper_librarian_runtime.prepare_admission ~source_lines:[] ~batch ~retirement input |> require in
   let destination:Admission.destination={installation_id=Original.installation_id (Original.Configuration "librarian");
     package_id=Admission.package_id;tool=Admission.tool;source_revision="source";configuration_revision="configuration"} in
   let capture=Admission.create ~request_id:(Admission.fresh_request_id owner) ~parent_part_id:"part"
@@ -858,9 +1032,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
   let exact=Admission.request capture |> require in
   let output:Lane_addon_types.exact_output={name=exact.output;schema=Option.get exact.schema;
     request_schema=Lane_addon_types.Consumer_request_schema} in
-  let checked=Lane_addon_exact.validate_answer ~output exact proposal |> require in
-  let judgment=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final
-    (Lane_addon_exact.Answered {output=checked;slot="fixture";usage=None})) in
+  let judgment=Lane_addon_exact.final_to_json (host_answer ~base ~declared:output exact proposal) in
   let parent=advance_original store parent [Progress.Dispatch_intended;Progress.Judgment_retained judgment] in
   let gate_id="captured-gate" in
   let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-admission-gate";
@@ -1073,6 +1245,10 @@ let () =
       test_case "zero scan jobs are refused" `Quick (test_zero_scan_jobs_are_refused exe);
       test_case "tool outbox receipts are read before rollout" `Quick
         (test_tool_outbox_receipts exe);
+      test_case "a reaction ledger row once-only wakes refuse stops rollout" `Quick
+        (test_reaction_ledger_refusal exe);
+      test_case "reaction ledgers are read before rollout" `Quick
+        (test_reaction_ledger_reads exe);
       test_case "transcript inventory failure stops deployment" `Quick
         (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
@@ -1093,7 +1269,9 @@ let () =
       test_case "a record settled while it is checked is absent" `Quick
         test_a_record_settled_while_it_is_checked_is_absent;
       test_case "a refused record stops validate-stores" `Quick
-        (test_lane_addon_record_refuses_deploy exe)];
+        (test_lane_addon_record_refuses_deploy exe);
+      test_case "--base-path forms read the store the server serves" `Quick
+        (test_base_path_forms_read_the_served_store exe)];
      "Memory publication preflight",
      [test_case "preserves each interrupted publication for its owner" `Quick
         (test_memory_publication_preflight exe);

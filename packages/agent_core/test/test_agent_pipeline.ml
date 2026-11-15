@@ -75,14 +75,26 @@ let make_agent
       ?tool_choice
       ?pre_dispatch_serialization_observer
       ?serialization_executor
+      ?(native_streaming = false)
       ?(model_id = "mock-model")
       base_url
   =
+  let agent_model = "test-model" in
   let config =
-    { (Types.default_config ~model:"test-model") with name = "test-agent"; tool_choice }
+    { (Types.default_config ~model:agent_model) with name = "test-agent"; tool_choice }
+  in
+  (* A capability declaration belongs to the model it names, and the agent
+     drops it when the turn runs another model. So an endpoint that answers
+     with server-sent events declares streaming for the model the agent
+     sends. *)
+  let model_id, model_capabilities_override =
+    if native_streaming
+    then agent_model, Some Provider_mock.native_streaming_capabilities
+    else model_id, None
   in
   let provider_config =
     Provider_mock.local_provider_config
+      ?model_capabilities_override
       ~base_url
       ~model_id
       ~request_path:"/v1/chat/completions"
@@ -300,7 +312,12 @@ let test_agent_run_stream () =
     let url =
       start_sse_mock ~sw ~net:env#net ~port:20006 (openai_sse "stream pipeline")
     in
-    let agent = make_agent ~net:env#net url in
+    let agent =
+      make_agent
+        ~net:env#net
+        ~native_streaming:true
+        url
+    in
     let events = ref [] in
     match
       Agent.run_stream ~sw ~on_event:(fun e -> events := e :: !events) agent "stream test"
@@ -427,6 +444,7 @@ let test_agent_run_stream_observes_pre_dispatch_serialization () =
         ~pre_dispatch_serialization_observer:(fun observation ->
           observations := observation :: !observations;
           Ok ())
+        ~native_streaming:true
         url
     in
     (match

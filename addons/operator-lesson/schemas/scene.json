@@ -1,0 +1,78 @@
+{
+  "type": "object",
+  "description": "One scene of the lesson, each paragraph backed by verbatim quotes.",
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The scene's title."
+    },
+    "paragraphs": {
+      "type": "array",
+      "description": "At least one paragraph of plain text.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plain text. Markup is not rendered."
+          },
+          "sources": {
+            "type": "array",
+            "description": "At least one source.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "board_post",
+                    "board_comment",
+                    "repo_file",
+                    "commit",
+                    "wiki_page",
+                    "pr",
+                    "pr_comment"
+                  ]
+                },
+                "source_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The record's source_id, copied exactly."
+                },
+                "pin": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "The record's pin, copied exactly."
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Words copied byte for byte from the record's title or text."
+                }
+              },
+              "required": [
+                "kind",
+                "source_id",
+                "pin",
+                "quote"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "text",
+          "sources"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "title",
+    "paragraphs"
+  ],
+  "additionalProperties": false
+}

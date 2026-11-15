@@ -17,14 +17,16 @@ function serve(body: string, size = 7) {
 }
 it.each(['codex', 'claude', 'antigravity', 'muse'])('streams fragmented %s login and keeps invocation unverified', async integration_id => {
   serve(frame('started', { login_id: id, integration_id, account_ref: account })
-    + frame('output', { stream: 'terminal', text: '계정 안내 🌐' }) + frame('input_ready', {})
+    + frame('output', { stream: 'stdout', text: '계정 안내 🌐' }) + frame('screen', { text: 'Select login method:\n> 1. Google OAuth' })
+    + frame('input_ready', {})
     + frame('complete', { integration_id, account_ref: account, authentication: 'authenticated', invocation_verified: false }))
   const events: LoginEvent[] = []
   const signal = new AbortController().signal
   await streamSetupLogin({ integration_id, account_ref: account }, event => events.push(event), signal)
-  expect(events.map(event => event.event)).toEqual(['started', 'output', 'input_ready', 'complete'])
-  expect(events[1]).toEqual({ event: 'output', stream: 'terminal', text: '계정 안내 🌐' })
-  expect(events[3]).toEqual({ event: 'complete', source: { integration_id, account_ref: account }, authentication: 'authenticated' })
+  expect(events.map(event => event.event)).toEqual(['started', 'output', 'screen', 'input_ready', 'complete'])
+  expect(events[1]).toEqual({ event: 'output', stream: 'stdout', text: '계정 안내 🌐' })
+  expect(events[2]).toEqual({ event: 'screen', text: 'Select login method:\n> 1. Google OAuth' })
+  expect(events[4]).toEqual({ event: 'complete', source: { integration_id, account_ref: account }, authentication: 'authenticated' })
   expect(fetch).toHaveBeenCalledWith('/api/v1/setup/accounts/login', expect.objectContaining({ signal,
     body: JSON.stringify({ integration_id, account_ref: account }) }))
 })
@@ -32,6 +34,9 @@ it('rejects lost completion and wrong-account responses, retaining no output in 
   serve(frame('started', { login_id: id, integration_id: 'codex' }))
   await expect(streamSetupLogin({ integration_id: 'codex' }, vi.fn(), new AbortController().signal)).rejects.toThrow('Login result not received')
   serve(frame('started', { login_id: id, integration_id: 'another-client' }))
+  await expect(streamSetupLogin({ integration_id: 'codex' }, vi.fn(), new AbortController().signal)).rejects.toThrow('Invalid login event')
+  // A terminal's bytes reach the client only as the screen the server drew.
+  serve(frame('started', { login_id: id, integration_id: 'codex' }) + frame('output', { stream: 'terminal', text: 'x' }))
   await expect(streamSetupLogin({ integration_id: 'codex' }, vi.fn(), new AbortController().signal)).rejects.toThrow('Invalid login event')
 })
 it('returns recoverable account references on a failed login without exposing server errors', async () => {

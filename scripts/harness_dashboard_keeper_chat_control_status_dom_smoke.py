@@ -12,6 +12,12 @@ FIXTURE_SELECTOR = (
     '[data-control-status-count="1"]'
 )
 STATUS_SELECTOR = '[data-chat-control-status="external_effect_pending"]'
+# The address of the approvals list, from the router module the page already
+# runs. The button calls navigate('approvals'), which sets this hash.
+APPROVALS_HASH_SCRIPT = (
+    "async () => (await import(new URL('../src/router.ts', location.href).href))"
+    ".hashForRoute('approvals')"
+)
 
 
 def verify(page: Page, screenshot: str) -> None:
@@ -39,9 +45,13 @@ def verify(page: Page, screenshot: str) -> None:
     ):
         raise RuntimeError("control state rendered as an assistant speech bubble")
 
-    status.get_by_role("button", name="승인 화면 열기").click()
+    approvals_hash = page.evaluate(APPROVALS_HASH_SCRIPT)
+    if page.evaluate("location.hash") == approvals_hash:
+        raise RuntimeError(f"fixture opened at the approvals address {approvals_hash}")
+    status.get_by_role("button", name="전체 승인 목록").click()
     page.wait_for_function(
-        "() => location.hash.includes('command') && location.hash.includes('view=gate')",
+        "expected => location.hash === expected",
+        arg=approvals_hash,
         timeout=5_000,
     )
     page.screenshot(path=screenshot, full_page=True)

@@ -72,6 +72,13 @@ there:
   an https URL with a host and no query or fragment, when its path is not
   the callback of its provider, or when its origin is not that of
   `MASC_HTTP_BASE_URL` (when that is set).
+- A redirect is read as it is written. The path has to be the callback
+  byte for byte: `/%61uth/github/callback` or `/auth/../auth/github/callback`
+  stops the boot, because the server answers 404 on a path that only decodes
+  or resolves to the callback. The scheme and the host may be in another
+  case, and `:443` may be written out. A redirect with a userinfo
+  (`https://name@<host>/…`), an empty port (`https://<host>:/…`) or a port
+  above 65535 stops the boot.
 
 ## 2. Activate the workspace and invite the first Admin
 
@@ -123,6 +130,10 @@ signs in through an Admin invitation becomes an Admin.
 
 ## 5. Let more people in
 
+An Admin does all of this in the account console at `/accounts/console`,
+signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist) and
+들어온 사람 (who is in) send the requests below.
+
 - **An invitation.** An Admin issues a Member or an Admin invitation and
   hands over its link. See
   [Invitations on the account server](account-server-invitations.md).
@@ -135,6 +146,17 @@ signs in through an Admin invitation becomes an Admin.
   A GitHub login can change, so the key is the numeric user id:
   `gh api users/<login> --jq .id`. The answer names a `registration_id`;
   `DELETE /api/v1/auth/allowlist/<registration_id>` removes the entry.
+- **Who is in.** An Admin's browser session reads three lists, with no
+  CSRF token: `GET /api/v1/auth/allowlist` (`{"registrations": [...]}`),
+  `GET /api/v1/auth/invites` (`{"invites": [...]}`, with no token) and
+  `GET /api/v1/auth/members` (`{"members": [...]}`). Each item has a
+  `status`. An entry that is `removal_pending`, an invitation that is
+  `revocation_pending` and a member whose `held` is not empty carry a
+  change the log did not record: the store holds it, nobody joins or acts
+  through it, and making the same change again closes it (for a member,
+  `held` names which: `revoke`, `disable` or `delete`). With no session
+  the answer is 401; a session of a person who is not an Admin, or a
+  request from another origin, gets 403.
 
 ## 6. Declare what people connect
 
@@ -194,8 +216,8 @@ base path.
 ## What is not there yet
 
 - The TUI and the operator's dashboard do not connect to the account server.
-- No screen issues invitations or edits the allowlist. An Admin calls the
-  routes from the browser console of the page at `/`.
+- The 들어온 사람 panel only reads: no screen changes the role or the
+  status of a person.
 - `masc auth invite` writes Admin invitations only, and no command revokes
   one.
 - A workspace whose accounts were turned off is not activated again.

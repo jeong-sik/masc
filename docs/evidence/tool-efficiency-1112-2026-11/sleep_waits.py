@@ -17,13 +17,19 @@
 - `turns`: per Keeper, the `sleep+gh` calls grouped by `keeper_turn_id`: how many turns they fill, how many
   follow a `git push`, `gh workflow run` or `gh pr create|merge|ready` earlier in the same turn, how many sit in
   a turn with two or more of them, and how many `until_github_run` or `until_github_checks` schedules the Keeper
-  created in the window.
+  created in the window. Also the p10, p50 and p90 of the literal `sleep` seconds of one call, by nearest rank
+  (the smallest value with at least that share of the calls at or below it, so always a value some call had),
+  and the turn with the most `sleep+gh` calls: its `keeper_turn_id`, the hours from the start of its first
+  `sleep+gh` call to the end of its last, and the hours of those calls added up. A row's `ts` is the end of its
+  call (`ledger_window.py`), so a call starts at `ts - duration_ms / 1000`. Of two turns with as many calls the
+  one with more call time is taken, and of two with both equal the one whose first row the ledger holds first.
 - `kinds`: the Execute calls, the `sleep+gh` calls and the loop polls of GitHub by `turn_kind`. A loop poll is a
   foreground call of 60 s or more with a `sleep` in a loop of unknown count (`for i in ...; do gh ...; sleep 30; done`)
   that reads GitHub; its literal sleeps are under half of the call, so `sleep+gh` does not count it. `keeper_receipt_wait` is offered to a turn
   that serves a chat execution (`direct`) and not to an `autonomous` one (`descriptors_for_run` in
   `lib/keeper/keeper_run_tools_setup.ml`), so the `direct` share of the `sleep+gh` hours is the most the
-  receipt wait can reach.
+  receipt wait can reach. Also the loop polls by what their `gh` reads (the split of `shapes`), and the
+  `masc_schedule_create` calls and those of them with `until_github_run` or `until_github_checks` by `turn_kind`.
 
 The classes come from the command text and are for counting. `Execute` does not interpret a command
 (`config/tools/Execute.toml`), and no product rule uses them. A turn that reaches over an edge of the window is
@@ -33,6 +39,7 @@ counted from the rows inside it.
 from __future__ import annotations
 
 import collections
+import dataclasses
 import json
 import pathlib
 import re
@@ -61,6 +68,7 @@ WATCH_FIELDS = ("until_github_run", "until_github_checks")
 SCHEDULE_TOOLS = ("masc_schedule_create", "masc_schedule_update")
 MARKERS = ('"tool":"Execute"', '"tool":"masc_schedule_create"', '"tool":"masc_schedule_update"')
 TOP_KEEPERS = 8
+PERCENTILES = (10, 50, 90)
 
 type Row = dict[str, object]
 
@@ -105,10 +113,20 @@ def is_long_foreground(row: Row) -> bool:
     return row.get("tool") == "Execute" and number(row, "duration_ms") >= LONG_MS and not is_background(row)
 
 
+def literal_sleep_s(command: str) -> float:
+    """The `sleep <n>` seconds written in the command, added up."""
+    return sum(float(value) for value in SLEEP.findall(command))
+
+
+def nearest_rank(values: list[float], percent: int) -> float:
+    """The smallest of `values` with at least `percent` % of them at or below it. `values` is not empty."""
+    ordered = sorted(values)
+    return ordered[(percent * len(ordered) + 99) // 100 - 1]
+
+
 def sleep_group(command: str, duration_s: float) -> str | None:
     """`sleep+gh`, `sleep+own background job` or `sleep only` when the literal sleeps are half of the call."""
-    literal = sum(float(value) for value in SLEEP.findall(command))
-    if literal < 0.5 * duration_s:
+    if literal_sleep_s(command) < 0.5 * duration_s:
         return None
     if GH.search(command):
         return "sleep+gh"
@@ -181,6 +199,11 @@ def is_loop_sleep_gh(row: Row) -> bool:
     )
 
 
+def has_watch(row: Row) -> bool:
+    """Whether the row's input holds `until_github_run` or `until_github_checks`."""
+    return any(field in input_text(row) for field in WATCH_FIELDS)
+
+
 def hours_by_kind(ms: dict[str, float]) -> dict[str, float]:
     return {kind: round(value / 3.6e6, 2) for kind, value in ms.items()}
 
@@ -198,10 +221,18 @@ def kinds_of(rows: Iterable[Row]) -> dict[str, object]:
     loop_ms: collections.defaultdict[str, float] = collections.defaultdict(float)
     github_ms: collections.defaultdict[str, float] = collections.defaultdict(float)
     per_keeper: collections.defaultdict[str, collections.Counter[str]] = collections.defaultdict(collections.Counter)
+    loop_reads: collections.Counter[str] = collections.Counter()
+    creates: collections.Counter[str] = collections.Counter()
+    watch_creates: collections.Counter[str] = collections.Counter()
     for row in rows:
+        kind = str(row.get("turn_kind"))
+        if row.get("tool") == "masc_schedule_create":
+            creates[kind] += 1
+            if has_watch(row):
+                watch_creates[kind] += 1
+            continue
         if row.get("tool") != "Execute":
             continue
-        kind = str(row.get("turn_kind"))
         execute[kind] += 1
         duration = number(row, "duration_ms")
         if is_sleep_gh(row):
@@ -210,6 +241,7 @@ def kinds_of(rows: Iterable[Row]) -> dict[str, object]:
         elif is_loop_sleep_gh(row):
             loop_calls[kind] += 1
             loop_ms[kind] += duration
+            loop_reads[gh_wait_kind(command_of(row))] += 1
         else:
             continue
         github_ms[kind] += duration
@@ -221,12 +253,15 @@ def kinds_of(rows: Iterable[Row]) -> dict[str, object]:
         "sleep_gh_hours_percent_by_turn_kind": percent_by_kind(ms),
         "loop_sleep_gh_calls_by_turn_kind": dict(loop_calls),
         "loop_sleep_gh_hours_by_turn_kind": hours_by_kind(loop_ms),
+        "loop_sleep_gh_calls_by_what_gh_reads": dict(loop_reads.most_common()),
         "github_wait_hours_by_turn_kind": hours_by_kind(github_ms),
         "github_wait_hours_percent_by_turn_kind": percent_by_kind(github_ms),
         "github_wait_by_keeper": [
             {"keeper": keeper, **dict(counts)}
             for keeper, counts in sorted(per_keeper.items(), key=lambda item: -sum(item[1].values()))[:TOP_KEEPERS]
         ],
+        "schedule_create_calls_by_turn_kind": dict(creates),
+        "until_github_schedule_create_calls_by_turn_kind": dict(watch_creates),
     }
 
 
@@ -268,13 +303,34 @@ def shapes_of(rows: Iterable[Row]) -> dict[str, object]:
     }
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class Turn:
+    """The `sleep+gh` calls of one turn of one Keeper, each as (start, end) in seconds since the epoch."""
+
+    turn_id: str
+    spans: tuple[tuple[float, float], ...]
+
+    @property
+    def call_s(self) -> float:
+        return sum(end - start for start, end in self.spans)
+
+    def summary(self) -> dict[str, object]:
+        first_to_last_s = max(end for _, end in self.spans) - min(start for start, _ in self.spans)
+        return {
+            "keeper_turn_id": self.turn_id,
+            "sleep_gh_calls": len(self.spans),
+            "first_to_last_hours": round(first_to_last_s / 3600, 2),
+            "call_hours": round(self.call_s / 3600, 2),
+        }
+
+
 def turns_of(rows: Iterable[Row]) -> dict[str, object]:
     by_turn: collections.defaultdict[tuple[str, str], list[Row]] = collections.defaultdict(list)
     watches: collections.Counter[str] = collections.Counter()
     for row in rows:
         keeper = str(row.get("keeper"))
         tool = row.get("tool")
-        if tool in SCHEDULE_TOOLS and any(field in input_text(row) for field in WATCH_FIELDS):
+        if tool in SCHEDULE_TOOLS and has_watch(row):
             watches[keeper] += 1
         by_turn[(keeper, str(row.get("keeper_turn_id")))].append(row)
     calls: collections.Counter[str] = collections.Counter()
@@ -283,27 +339,36 @@ def turns_of(rows: Iterable[Row]) -> dict[str, object]:
     after_push: collections.Counter[str] = collections.Counter()
     multi: collections.Counter[str] = collections.Counter()
     max_in_turn: collections.defaultdict[str, int] = collections.defaultdict(int)
-    for (keeper, _), turn_rows in by_turn.items():
+    literal: collections.defaultdict[str, list[float]] = collections.defaultdict(list)
+    busiest: dict[str, Turn] = {}
+    for (keeper, turn_id), turn_rows in by_turn.items():
         turn_rows.sort(key=lambda row: (number(row, "ts"), number(row, "planned_index")))
         pushed = False
-        sleeps = 0
+        spans: list[tuple[float, float]] = []
         for row in turn_rows:
             if row.get("tool") != "Execute":
                 continue
             command = command_of(row)
             if is_long_foreground(row) and sleep_group(command, number(row, "duration_ms") / 1000) == "sleep+gh":
-                sleeps += 1
+                end = number(row, "ts")
+                spans.append((end - number(row, "duration_ms") / 1000, end))
+                literal[keeper].append(literal_sleep_s(command))
                 calls[keeper] += 1
                 ms[keeper] += number(row, "duration_ms")
                 if pushed:
                     after_push[keeper] += 1
             if PUSH.search(command):
                 pushed = True
+        sleeps = len(spans)
         if sleeps:
             turns[keeper] += 1
             max_in_turn[keeper] = max(max_in_turn[keeper], sleeps)
             if sleeps >= 2:
                 multi[keeper] += sleeps
+            turn = Turn(turn_id, tuple(spans))
+            best = busiest.get(keeper)
+            if best is None or (sleeps, turn.call_s) > (len(best.spans), best.call_s):
+                busiest[keeper] = turn
     keepers = sorted(calls, key=lambda name: ms[name], reverse=True)[:TOP_KEEPERS]
     return {
         "sleep_gh_calls": sum(calls.values()),
@@ -321,6 +386,8 @@ def turns_of(rows: Iterable[Row]) -> dict[str, object]:
                 "in_turns_with_2_or_more": multi[name],
                 "most_in_one_turn": max_in_turn[name],
                 "until_github_schedules_created": watches[name],
+                "literal_sleep_s": {f"p{percent}": round(nearest_rank(literal[name], percent)) for percent in PERCENTILES},
+                "busiest_turn": busiest[name].summary(),
             }
             for name in keepers
         ],

@@ -921,7 +921,7 @@ let run_turn
     let user_blocks =
       match user_blocks, prepared_gate_input.replay_evidence with
       | Some blocks, _ when Option.is_some official_client_continuation ->
-        Some (blocks @ [Agent_core.Types.Text prepared_gate_input.text])
+        Some (blocks @ prepared_gate_input.resolution_blocks)
       | Some blocks, evidence ->
         Some
           (List.fold_left

@@ -123,10 +123,15 @@ val refused_before_host : final -> bool
 (** [true] only for [Call_final (Input_refused Request_body_refused)]. The
     worker refuses a request no host listing reply can carry before the host
     retains it ([submit] in addons/exact_worker.py, the [fits] check that
-    precedes [store.write accepted]). So no host terminal and no latest
-    execution proof can exist for this final, and it carries no answer.
-    Every consumer that confirms a worker final against the host store asks
-    this one question when the host holds no record. *)
+    precedes [store.write accepted]); that request has no host terminal and
+    no latest execution proof. The host also ends a request with this final
+    when no slot it called may pass again (a slot held for its provider's
+    stated wait is noted as [Transient]) and the body refusal ranks first
+    among the input refusals left ([ending] in server_lane_addon_exact.ml,
+    [Exact_lane_failure.ending_input_refusal]); slots that left no usable
+    answer may also be among the slots it called. The host then keeps both. The final carries no
+    answer. Every consumer that confirms a worker final against the host
+    store asks this one question when the host holds no record. *)
 val retained_final_to_json : retained_final -> Yojson.Safe.t
 val retained_final_of_json : schema:Yojson.Safe.t -> Yojson.Safe.t -> (retained_final, string) result
 (** Strict host evidence codec. Unknown outcomes require one of [interrupted],
@@ -289,16 +294,49 @@ type execution_authority =
     started marker, later guard vetoes stop the actual walk. Retained terminal
     replay uses only original validation and never invokes this guard. *)
 
-val check_retained_record : Yojson.Safe.t -> (unit, string) result
-(** Decode one retained record of the Exact store with the reads {!run}
-    applies before reusing it: the record envelope, its original request, the
-    declaration and request identity it names, and every attempt and final.
-    Started markers are exactly [{"started":"<32 lowercase hex>"}] and only
-    occur last in an open record. Unknown terminal attempts require their
-    cause, and [raised] requires nonblank exception evidence. Old null markers
-    and cause-less unknown attempts are refused: deployment requires a hard
-    cut of those records and their consumer originals. Reads nothing else and
-    writes nothing. *)
+module Retained_key : sig
+  type t = private { declaration_id : string; request_id : string; digest : string }
+
+  val of_record : Yojson.Safe.t -> (t, string) result
+  (** The declaration, request ID and request digest a retained record of the
+      Exact store names, read without decoding the rest of the record. *)
+
+  val of_request : declaration_id:string -> request -> t
+  (** The key [declaration_id] keeps this request's record and proof link
+      under. *)
+
+  val equal : t -> t -> bool
+
+  val proof_path : t -> string
+  (** The proof link of that request, below {!Lane_addon_store.root}. *)
+end
+
+val retained_final : Yojson.Safe.t -> (final option, string) result
+(** The final a retained record of the Exact store holds, [None] while it is
+    open. Reads the record's shape only; it binds the record to no request. *)
+
+val proof_store_roots : Yojson.Safe.t -> string list
+(** The store roots the entries of a proof link name, read without decoding
+    the link. *)
+
+val check_retained_record : store:Lane_addon_store.t -> first:Yojson.Safe.t ->
+  proof:Yojson.Safe.t option -> second:Yojson.Safe.t -> (unit, string) result
+(** Decode one retained record of the Exact store and its proof link with the
+    reads {!run} applies before reusing them: the record envelope, its
+    original request, the declaration and request identity it names, every
+    attempt and final, and every proof of the link against [store] and its
+    attempt. Started markers are exactly [{"started":"<32 lowercase hex>"}]
+    and only occur last in an open record. Unknown terminal attempts require
+    their cause, and [raised] requires nonblank exception evidence. Old null
+    markers and cause-less unknown attempts are refused: deployment requires a
+    hard cut of those records and their consumer originals.
+
+    [first] is the record as read before the link, [proof] the link ([None]
+    when the request has none) and [second] the record read again after it.
+    Both records are bound to the request and digest [first] names; the link
+    is bound to the attempts of [second]. The server writes attempt n before
+    proof n, so a link read between two reads of a live record matches the
+    second one. Reads nothing and writes nothing. *)
 
 type retained_observation = Retained_absent | Retained_open | Retained_terminal of retained_final
 
@@ -314,7 +352,10 @@ val read_original_execution : store:Lane_addon_store.t -> declaration_id:string 
     unproven; malformed, conflicting and unreadable evidence returns [Error].
     Package-only answers use the declared value schema; consumer-schema
     answers use the same partial shape guard as {!validate_answer}. The
-    original request and canonical schema remain bound to the proof. This
+    proof names the original request by its [request_id] and [digest] and
+    keeps the canonical schema; it holds no request body. A proof of another
+    version returns [Error] before its receipt, schema or outcome is
+    decoded. This
     read does not establish full consumer-dialect compliance or replace the
     fresh package baseline and consumer authority checks before delivery.
     A complete proof may precede final publication. This read never claims,
@@ -339,6 +380,14 @@ val read_latest_original_execution : store:Lane_addon_store.t -> declaration_id:
     no retry, partition, worker delivery, Memory or ACK authority. Offload the
     complete blocking scope in Eio contexts. *)
 
+val latest_of_files : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
+  proof:Yojson.Safe.t option -> (latest_original_execution, string) result
+(** What {!read_latest_original_execution} answers when the original's Exact
+    record and proof link hold [record] and [proof] ([None] when a file is
+    absent). [store] names only the root each proof must name. Reads nothing
+    and writes nothing. *)
+
 val read_latest_slot_observations : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (Exact_lane_slot_observation.t list option,string) result
 (** Validate the actual latest original execution first, then read only its
@@ -352,8 +401,9 @@ val proof_directory : declaration_id:string -> string
 val proof_request_id : declaration_id:string -> file_name:string -> Yojson.Safe.t ->
   (string, string) result
 (** The original request ID of the link stored as [file_name] in
-    {!proof_directory}. [Error] when the link names no request, or names one
-    whose link has another file name. Checks nothing else in the link. *)
+    {!proof_directory}, read from the [request_id] and [digest] of its first
+    proof. [Error] when that proof names no request, or names one whose link
+    has another file name. Checks nothing else in the link. *)
 val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
   schema:Yojson.Safe.t -> request -> (retained_observation, string) result
 (** Read only the original host Exact record under the caller's workspace
@@ -372,6 +422,12 @@ val observe_retained : store:Lane_addon_store.t -> declaration_id:string ->
     and acknowledged ancestry, supplies the original request/schema, validates
     the full domain answer and rechecks authority before its separate effects.
     Run the complete blocking read/validation scope on a system thread in Eio. *)
+
+val observe_record : declaration_id:string -> schema:Yojson.Safe.t -> request ->
+  Yojson.Safe.t option -> (retained_observation, string) result
+(** What {!observe_retained} answers when the original's Exact record holds
+    this JSON ([None] when there is no record). Reads nothing and writes
+    nothing. *)
 
 type recovery_error =
   | Recovery_unavailable of string
@@ -400,6 +456,59 @@ val recover_retained : store:Lane_addon_store.t -> declaration_id:string ->
     the immutable original consumer still validates its answer and authority.
     In Eio, protect the complete system-thread call from cancellation so
     publication and confirmation finish before returning its observation. *)
+
+val confirm_original_schema : declaration_id:string -> schema:Yojson.Safe.t -> request ->
+  (unit, string) result
+(** The check {!recover_retained} makes of the caller's own schema before it
+    reads anything: the output names a lane of [declaration_id], [schema] is
+    a canonical object, and it equals the grant the request holds, if any.
+    Reads nothing. *)
+
+type identity = private { identity_request_id : string; identity_digest : string }
+(** What names one original Exact request without holding it: its ID and
+    {!digest}. *)
+val identity : request -> identity
+val identity_of_digest : request_id:string -> digest:string -> identity
+(** For an owner that kept the digest of a request it validated and retained.
+    Nothing is checked here; {!observe_open} compares the digest with the host
+    record. *)
+
+type open_observation =
+  | No_record      (** Neither a host record nor an execution link exists. *)
+  | Open           (** A host record exists with no final and no execution link. *)
+  | Needs_request  (** A final or an execution link exists. Read it again with
+                       the whole request through {!recover_retained}. *)
+val observe_open : store:Lane_addon_store.t -> declaration_id:string -> identity ->
+  (open_observation, recovery_error) result
+(** Read the original host Exact record and whether its execution link exists,
+    for a caller that holds only the request's identity. Nothing is written
+    and no claim is held.
+
+    The record is checked against itself as {!recover_retained} checks it:
+    the complete canonical envelope, declaration and request ID, the stored
+    request decoding to the same canonical body, that request's digest equal
+    to the record's, and the attempt order. It is bound to the caller by
+    comparing the record's digest with [identity_digest]. Any mismatch is
+    [Recovery_invalid]; a file that cannot be read is [Recovery_unavailable].
+
+    An execution link is found by request ID and digest and is not decoded:
+    decoding and binding it to an attempt need the whole request, so its
+    existence alone answers [Needs_request], as does a record with a final.
+    [Open] and [No_record] therefore say only that there is nothing for the
+    whole request to read yet. Each read of an [Open] record still parses the
+    stored request and hashes it once. Run the blocking read on a system
+    thread in Eio. *)
+
+val recovery_of_files : store:Lane_addon_store.t -> declaration_id:string ->
+  schema:Yojson.Safe.t -> request -> record:Yojson.Safe.t option ->
+  proof:Yojson.Safe.t option -> (Yojson.Safe.t option, string) result
+(** The original's Exact record as {!recover_retained} leaves it when it holds
+    the claim and the original's record and proof link hold [record] and
+    [proof] ([None] when a file is absent). An open record it finishes from
+    its proof is the record it saves; any other record stays as it is.
+    {!observe_record} reads the result as {!recover_retained} answers. Every
+    [Error] is one it returns as [Recovery_invalid]. [store] names only the
+    root each proof must name. Reads nothing and writes nothing. *)
 
 val run :
   store:Lane_addon_store.t ->

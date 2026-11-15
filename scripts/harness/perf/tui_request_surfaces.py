@@ -25,6 +25,7 @@ FRAME_START = b'\x1b[?7l'
 RUN_SCHEMA = 'masc.tui.surface_run.v1'
 COUNT_SCHEMA = 'masc.tui.surface_runs.v1'
 FIRST_WRITTEN_FRAME = 1
+NO_REPORT = 'the TUI wrote no frame-timing report'
 
 
 class FrameClock:

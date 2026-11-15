@@ -13,7 +13,14 @@ module Runtime = Lane_addon_runtime
 module Current = Keeper_memory_os_current
 module Queue = Keeper_memory_admission_queue
 open Result.Syntax
-let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
+(* RFC-0474 L4·L4c. Each submit declares its work where it is written and is
+   named by the function that writes it. A submit inside another pool job
+   runs in place, so only the outermost one sets the weight. Work that reads
+   and checks every record of a scope (discovery, a gate chain, a journal
+   scan, a digest-checked body) holds a whole worker: it parses and hashes
+   without yielding, and at I/O weight the jobs its worker had admitted
+   beside it waited until it finished (#48912). Work that reads or moves a
+   few small files is I/O. *)
 let owned result = Result.map_error Owner.error_to_string result
 let require value detail = if value then Ok () else Error detail
 let runtime_error = function
@@ -43,14 +50,15 @@ let with_destination ~config ~reserved publish =
 let admit ~config ~reserved ~destination:expected ~publish =
   with_destination ~config ~reserved (fun actual ->
     let* ()=require (Destination.same_semantic actual expected) "Original Librarian semantic configuration changed" in
-    io publish)
-let check_owner owner = io (fun () ->
+    Pool_work.submit publish)
+let check_owner owner = Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
   let* actual=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in
-  Capture.owner_matches_json actual (Capture.owner_to_json owner))
+  Capture.owner_matches_json actual (Capture.owner_to_json owner)))
 let fresh_authority ~config ~reserved owner capture =
   let* ()=check_owner owner in
-  admit ~config ~reserved ~destination:(Capture.destination capture) ~publish:(fun () -> Ok ())
+  admit ~config ~reserved ~destination:(Capture.destination capture)
+    ~publish:(Pool_work.io ~name:__FUNCTION__ (fun () -> Ok ()))
 
 type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
   | Pending of string | Awaiting_worker of Keeper_librarian_pending.worker
@@ -87,7 +95,8 @@ let discover ~store ~owner =
 let for_part inventory part=List.find_opt (fun original ->
   Capture.parent_part_id original.capture=Parts.part_id part) inventory.executions
 let last_gate ~store ~owner original =
-  io (fun () -> Gate_journal.latest ~store ~owner ~capture:original.capture)
+  Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    Gate_journal.latest ~store ~owner ~capture:original.capture))
 
 let original_answer ~store original =
   let* judgment=match Progress.phase original.record.progress with
@@ -95,7 +104,8 @@ let original_answer ~store original =
     | Committing commit | Commit_unknown (commit,_) | Finished commit -> Ok commit.judgment
     | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
     | Subdividing _ | Subdivided _ -> Error "Original execution has no answered proposal" in
-  let* final=io (fun () -> Capture.decode_final ~store original.capture judgment) in
+  let* final=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    Capture.decode_final ~store original.capture judgment)) in
   match final with
   | Exact.Call_final (Answered {output;_}) -> Ok (Exact.checked_json output)
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
@@ -103,26 +113,32 @@ let original_answer ~store original =
 let new_capture ~config ~reserved ~owner part =
   let keepers_dir=Capture.keepers_dir owner and keeper_name=Capture.keeper_id owner in
   let* ()=check_owner owner in
-  let* keeper_id,meta=io (fun () ->
+  let* keeper_id,meta=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
     match Keeper_meta_store.read_effective_meta_presence_named config keeper_name with
     | Error detail | Ok (_,Keeper_meta_store.Meta_not_current detail) -> Error detail
     | Ok (_,Meta_absent) -> Error "Keeper metadata is absent"
-    | Ok (keeper_id,Meta_present meta) -> Ok (keeper_id,meta)) in
-  let* snapshot=io (fun () -> Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name) in
+    | Ok (keeper_id,Meta_present meta) -> Ok (keeper_id,meta))) in
+  let* snapshot=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+    Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)) in
   let expected_revision=Option.map (fun (value : Current.t) -> value.revision) snapshot in
   let input : Keeper_librarian.input={keeper_id;keeper_instructions=meta.instructions;
     turn_ref=Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~absolute_turn:meta.runtime.usage.total_turns;
     current=Option.map (fun (value : Current.t) -> ({Keeper_librarian.facts=value.facts} : Keeper_librarian.current_selection)) snapshot;
-    historical_task_contexts=[];goal_context=io (fun () -> Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id);
+    historical_task_contexts=[];goal_context=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+      Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id));
     working_context=Keeper_librarian_context.empty;messages=[];tool_observations=[];counterpart_observations=[]} in
-  let* retirement=io (fun () -> match Current.read_retirement_context ~keepers_dir ~keeper_id:keeper_name
+  let* retirement=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    match Current.read_retirement_context ~keepers_dir ~keeper_id:keeper_name
     ~expected_revision ~current_facts:(match input.current with None -> [] | Some current -> current.facts) with
     | Current.Retirement_source_changed -> Error "Memory changed before original admission capture"
     | Retirement_source_unavailable detail -> Error detail
     | Retirement_archive (Ok archive) -> Ok (Keeper_memory_admission_judgment.Available archive)
-    | Retirement_archive (Error detail) -> Ok (Keeper_memory_admission_judgment.Unavailable detail)) in
-  let* preparation=Keeper_librarian_runtime.prepare_admission ~batch:(Parts.batch part) ~retirement input in
+    | Retirement_archive (Error detail) -> Ok (Keeper_memory_admission_judgment.Unavailable detail))) in
+  let* source_lines=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+    Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id:keeper_name)) in
+  let* preparation=Keeper_librarian_runtime.prepare_admission ~batch:(Parts.batch part) ~retirement
+    ~source_lines input in
   let now=Time_compat.now () in
   let* export=resolve ~config ~reserved in
   let request_id=Capture.fresh_request_id owner in
@@ -135,7 +151,8 @@ let new_capture ~config ~reserved ~owner part =
       let* capture=Capture.create ~request_id ~parent_part_id:(Parts.part_id part) ~owner ~destination
         ~batch:(Parts.batch part) ~input ~expected_revision ~now ~retirement ~preparation in
       Ok (capture,Capture.to_json capture,`Null)) |> Result.map_error runtime_error in
-  let* record=io (fun () -> owned (Owner.load ~store:(Lane_addon_store.of_config config) ~scope:(Capture.scope owner) ~request_id)) in
+  let* record=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    owned (Owner.load ~store:(Lane_addon_store.of_config config) ~scope:(Capture.scope owner) ~request_id))) in
   let* record=Option.to_result ~none:"Original captured admission disappeared" record in
   Ok {capture;record}
 let call ~config ~reserved ~expected ~(original : Owner.retained) ~arguments =
@@ -144,7 +161,7 @@ let call ~config ~reserved ~expected ~(original : Owner.retained) ~arguments =
   | Ok export -> Runtime.call_captured_tool_request ~config ~reserved ~export
     ~access:Lane_addon_sources.Operator_configuration ~installation_id:expected.Destination.installation_id
     ~package_id:expected.package_id ~tool:expected.tool ~configuration_revision:expected.configuration_revision
-    ~original ~arguments |> Result.map_error Lane_addon_submit_once.call_error_of_runtime
+    ~original:(Owner.listed original) ~arguments |> Result.map_error Lane_addon_submit_once.call_error_of_runtime
 
 type part_result =
   | Terminal of Parts.terminal_source * bool
@@ -161,9 +178,9 @@ let local_admit actual ~destination:expected ~publish =
 let partition ~store ~config ~reserved ~owner part evidence =
   let id ()=Capture.fresh_request_id owner in
   with_destination ~config ~reserved (fun actual ->
-    io (fun () -> Parts.partition ~store ~owner
+    Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> Parts.partition ~store ~owner
       ~parent:part ~evidence ~partition_id:(id ()) ~left_id:(id ()) ~right_id:(id ())
-      ~admit:(local_admit actual)))
+      ~admit:(local_admit actual))))
   |> Result.map (fun (left,right) -> Children (left,right))
 (* The retained refusal of an execution the execution stage rejected. A
    subdivision names a successor, so it is not read here; admission writes
@@ -188,8 +205,9 @@ let refusal_label = function
   | Retained_not_allowed _ -> "not_allowed"
   | Retained_request_id_reused -> "request_id_reused"
 let size_refused ~store ~config ~reserved ~owner ~inventory ~refusal part original =
-  match io (fun () -> Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
-    ~parent:part ~execution_id:original.record.request_id) with
+  match Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
+      ~parent:part ~execution_id:original.record.request_id)) with
   | Error _ ->
     let cause=Option.fold ~none:"" ~some:(fun retained -> ": " ^ refusal_label retained) refusal in
     Ok (Waiting ("Original host execution has no exclusive input-capacity proof" ^ cause))
@@ -207,8 +225,10 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
       (match prepared with
        | Commit.Reload_original -> Error "Reload the original gate disposition intent before proceeding"
        | Prepared _ ->
-         let* parent=io (fun () -> Gate_journal.recover_root ~store ~owner ~capture) in
-         let* record=io (fun () -> Gate_journal.latest ~store ~owner ~capture) in
+         let* parent=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+           Gate_journal.recover_root ~store ~owner ~capture)) in
+         let* record=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+           Gate_journal.latest ~store ~owner ~capture)) in
          let* record=Option.to_result ~none:"Original gate root publication disappeared" record in
          Ok ({original with record=parent},record))
     | Some record -> Ok (original,record) in
@@ -233,8 +253,9 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
     (* A completed failed gate is not an unknown dispatch. A later real wake
        may retain one new attempt on the same immutable parent/proposal. *)
     let retry authority =
-       let* next=io (fun () -> Gate_journal.retain ~store ~owner ~capture ~parent:original.record ~proposal
-         ~request_id:(Capture.fresh_request_id owner) ~authority ~predecessor:(Some record.request_id)) in
+       let* next=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+         Gate_journal.retain ~store ~owner ~capture ~parent:original.record ~proposal
+           ~request_id:(Capture.fresh_request_id owner) ~authority ~predecessor:(Some record.request_id))) in
        let* retried=resume next in
        (match retried with
         | Pending _ -> Ok (Waiting "Original absorption retry awaits its first unstarted question")
@@ -262,7 +283,8 @@ let answered ~store ~config ~reserved ~owner ~inventory part original =
    this process cuts is [Cut] and keeps blocking. *)
 let settle_interrupted ~store ~owner part original =
   let* date=Capture.minted_on original.record.request_id in
-  let* ()=io (fun () -> Owner.settle ~store ~date (Owner.listed original.record))
+  let* ()=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+    Owner.settle ~store ~date (Owner.listed original.record)))
     |> Result.map_error Owner.settle_error_to_string in
   Log.Keeper.info ~keeper_name:(Capture.keeper_id owner)
     "Librarian explicit admission settled interrupted execution %s; part %s is prepared again"
@@ -322,8 +344,9 @@ let frontier ~store ~owner inventory =
             | Keeper_librarian_runtime.Deferred -> continue (source original part)
             | Accepted _ -> Ok None)
          | Rejected _ ->
-           (match io (fun () -> Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
-             ~parent:part ~execution_id:original.record.request_id),Queue.split (Parts.batch part) with
+           (match Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+             Parts.execution_size_evidence ~store ~owner ~inventory:inventory.parts
+               ~parent:part ~execution_id:original.record.request_id)),Queue.split (Parts.batch part) with
             | Ok _,None -> continue (source original part)
             | (Ok _ | Error _),(None | Some _) -> Ok None)
          (* Only a destination-absent conflict can end an admission here, and
@@ -336,9 +359,9 @@ let frontier ~store ~owner inventory =
   all [] (Parts.runnable inventory.parts)
 let retain_root ~store ~config ~reserved ~owner ?supersession batch =
   with_destination ~config ~reserved (fun destination ->
-    io (fun () -> Parts.retain_root ~store ~owner
+    Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> Parts.retain_root ~store ~owner
       ?supersession ~part_id:(Capture.fresh_request_id owner) ~destination ~batch
-      ~admit:(local_admit destination) ()))
+      ~admit:(local_admit destination) ())))
 module Candidate_ids = Set.Make (struct
   type t = Current.explicit_candidate_id
   let compare=Stdlib.compare
@@ -461,27 +484,36 @@ let run_queue ~after_settle ~base_path ~keeper_name =
   let reserved=reserved () in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let store=Lane_addon_store.of_config config in
-  let read ()=io (fun () -> Queue.read_pending ~keepers_dir ~keeper_id:keeper_name) in
-  let* _anchor=io (fun () -> Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name) in
-  let* owner=io (fun () -> Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name) in
-  let* ()=io (fun () -> recover_closure ~store ~owner ~after_settle) in
+  let read ()=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+    Queue.read_pending ~keepers_dir ~keeper_id:keeper_name)) in
+  let* _anchor=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name)) in
+  let* owner=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+    Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name)) in
+  let* ()=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    recover_closure ~store ~owner ~after_settle)) in
   (* Complete discovery precedes every local repair or new publication. *)
-  let* initial=io (fun () -> discover ~store ~owner) in
-  let* ()=io (fun () -> Queue.acknowledge_committed ~keepers_dir ~keeper_id:keeper_name) in
+  let* initial=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> discover ~store ~owner)) in
+  let* ()=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    Queue.acknowledge_committed ~keepers_dir ~keeper_id:keeper_name)) in
   let* pending=read () in
-  let* _recovered=io (fun () -> Parts.recover_partitions ~store ~owner) in
-  let* ()=io (fun () -> List.fold_left (fun result original ->
+  let* _recovered=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    Parts.recover_partitions ~store ~owner)) in
+  let* ()=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> List.fold_left (fun result original ->
     let* ()=result in
     match Progress.preparation original.record.progress with
     | Some (Preparation_pending _) ->
       Gate_journal.recover_root ~store ~owner ~capture:original.capture |> Result.map (fun _ -> ())
-    | None | Some (Preparation_confirmed _) -> Ok ()) (Ok ()) initial.executions) in
-  let* ()=io (fun () -> List.fold_left (fun result original ->
+    | None | Some (Preparation_confirmed _) -> Ok ()) (Ok ()) initial.executions)) in
+  let* ()=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> List.fold_left (fun result original ->
     let* ()=result in Gate_journal.recover_retries ~store ~owner ~capture:original.capture)
-    (Ok ()) initial.executions) in
-  let* inventory=io (fun () -> discover ~store ~owner) in
-  let* closed=io (fun () -> close_completed_forest ~store ~owner ~after_settle inventory) in
-  let* inventory=if closed then io (fun () -> discover ~store ~owner) else Ok inventory in
+    (Ok ()) initial.executions)) in
+  let* inventory=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> discover ~store ~owner)) in
+  let* closed=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+    close_completed_forest ~store ~owner ~after_settle inventory)) in
+  let* inventory=if closed
+    then Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> discover ~store ~owner))
+    else Ok inventory in
   (* A new root needs the live destination, so without the Add-on the
      pending candidates stay queued and the pass reports the Add-on off. *)
   let root ?supersession batch =
@@ -507,8 +539,8 @@ let run_queue ~after_settle ~base_path ~keeper_name =
       (match frontier with
        | None -> Ok existing
        | Some frontier ->
-         let* supersession=io (fun () -> Parts.prove_supersession ~store ~owner
-           ~inventory:inventory.parts ~batch ~frontier) in
+         let* supersession=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+           Parts.prove_supersession ~store ~owner ~inventory:inventory.parts ~batch ~frontier)) in
          match supersession with
          | None -> Ok existing
          | Some supersession -> root ~supersession batch) in
@@ -529,8 +561,8 @@ let run_queue ~after_settle ~base_path ~keeper_name =
          qualifies, never merely because the queue is empty or one sibling
          reconfirmed a prior commit. Keep the actual commit outcome even if
          this subsequent maintenance observation fails. *)
-      let closing=io (fun () ->
-        let* current=discover ~store ~owner in completed_forest ~store ~owner current) in
+      let closing=Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+        let* current=discover ~store ~owner in completed_forest ~store ~owner current)) in
       (match closing with
        | Ok (Some _) -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
        | Ok None -> ()
@@ -547,7 +579,8 @@ let run_queue ~after_settle ~base_path ~keeper_name =
     | part::rest ->
       let* inventory=match held with
         | Read_after_last_write inventory -> Ok inventory
-        | Written_since_read -> io (fun () -> discover ~store ~owner) in
+        | Written_since_read -> Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+          discover ~store ~owner)) in
       (match evaluate ~store ~config ~reserved ~owner ~inventory part with
        | Error detail -> Error detail
        | Ok (Waiting reason) ->
@@ -566,7 +599,8 @@ let run_queue ~after_settle ~base_path ~keeper_name =
   walk ~committed:false ~held parts
 let run_enabled ~after_settle ~base_path ~keeper_name =
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let* generation=io (fun () -> Queue.read_generation ~keepers_dir ~keeper_id:keeper_name) in
+  let* generation=Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+    Queue.read_generation ~keepers_dir ~keeper_id:keeper_name)) in
   match generation with None -> Ok Idle | Some _ -> run_queue ~after_settle ~base_path ~keeper_name
 let run_with ~after_settle ~base_path ~keeper_name =
   match Env_config.KeeperMemoryOs.librarian_config_state () with

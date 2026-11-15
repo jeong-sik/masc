@@ -99,6 +99,28 @@ The files are `.masc/traces/<trace>/history.jsonl` and
 `history.internal.jsonl`. The first refusal names the file and line. The pair
 is the trace's conversation history and the Librarian's named-turn input.
 
+### Keeper reaction ledgers
+
+Files live under
+`.masc/keepers/<keeper>/reaction-ledger/<generation>/YYYY-MM/DD.jsonl`
+(`Keeper_reaction_ledger.store_dir`). A directory of another generation beside
+it is not read. The check reads each Keeper's whole ledger with the read the
+once-only wakes use. `refused` counts lines that are not JSON and rows the
+current decoder refuses. The first refusal names the Keeper's ledger
+directory, then the counts and first reason the server logs. An ACK row whose
+transition receipt holds a Board stimulus without `audience` (#47996) reports
+`first_reason=invalid_transition_receipt`.
+
+The ledger records which once-only wakes were delivered. While a refused row is
+on disk, a wake the ledger does not show delivered is not queued. Connector
+attention and owned job completions read the whole ledger. Ask answers and
+composition completions read it from the UTC day of the answer or submission
+on. Choosing fresh state for a Keeper's ledger deletes that record as well. The
+next ask answer pass then queues again every answered ask the Keeper's ask
+store holds. A first refusal names one Keeper's ledger; run the check again
+after deleting it, since another Keeper's ledger may hold refused rows too. A
+separate fresh base path keeps the old workspace and its ledgers intact.
+
 ### Lane Add-on tool request owners
 
 Librarian original executions and absorption gates are owner records under
@@ -108,7 +130,52 @@ decodes each record with its body and the consumer's payload decoder, and
 follows parent, retry, partition and replacement links inside the scope. It does
 not run Memory parts discovery, publication recovery or a provider. Discovery
 reads a scope as a whole and fails it on one record it cannot read, so the
-`fresh state` line names both scope directories.
+`fresh state` line names the scope's owner records, request bodies, history
+fences and history resolutions that exist. A scope that no consumer of the
+build reads is refused the same way.
+
+A Librarian original's consumer also reads the original's Exact record and
+proof file. The check reads them as that consumer does, on the files the
+exact-request check below leaves. When the consumer would stop on them, the
+original is refused (`consumer Exact reads of the original`). Its `fresh state`
+line names, for every scope of the original's owner, the owner records, request
+bodies, settled originals, history fences and history resolutions that exist.
+When no record of the original is left, the line also names its proof file. A
+member of a Closing or Closed admission closure and a fenced history original
+are read by no consumer, so neither is refused. A body refusal
+(`Request_body_refused`) passes without a record, except for an admission
+original whose record the exact-request check deletes: admission reads the
+size evidence of that refusal through the record, and without it the part and
+every later candidate of that Keeper wait. A proof file that names another
+store root stops this check as it stops the exact-request check. Delete the
+exact-request lines and these lines together: once both files are gone, the
+next check passes two kinds of original it refused. A Dispatch_pending original that
+lost its finished record looks like one the host never ran. An admission
+original the host ended with the body refusal looks like one the worker
+refused before the host.
+
+### Lane Add-on exact requests
+
+Exact request records are
+`.masc/lane-addons/exact-requests/<declaration digest>/<request ID digest>.json`.
+The original execution proofs of a request are one file under
+`.masc/lane-addons/host-results/`, named from the record's declaration ID,
+request ID and request digest. Its slot observations are files in the
+declaration's observation directory under `host-results`. The check reads a
+record, its proof file and the record again, with the decoder the exact lane
+uses when it runs the request. A refused record's `fresh state` line names the
+record, its proof file and the slot observations of its request. A record
+stored at a path its own IDs do not name, a proof file that no record names and
+a slot observation the startup sweep cannot read are each refused alone.
+
+Proof files and slot observations name the store root they were written
+under. When one names another root than the check reads, the scan fails
+(`scan_failed`) with both roots and prints no `fresh state` line: the
+workspace was moved or restored, or the check reads another path than the
+server serves.
+`--base-path` resolves like the server's workspace path, through symlinks, so
+the workspace, its `.masc` directory and a symlink to the workspace read the
+same store.
 
 ### Run registries
 

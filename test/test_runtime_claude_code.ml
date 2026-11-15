@@ -1175,6 +1175,40 @@ let test_auth_status_reaches_a_regular_file () =
     | Error error -> fail (Runtime_claude_code.error_to_string error))
 ;;
 
+(* [purge_project] runs [--version] and then [purge]. A stand-in that warns
+   on [--version] and fails [purge] shows whose stderr the failure carries
+   (#51877). *)
+let test_failed_purge_reports_only_purge_stderr () =
+  let path = Filename.temp_file "masc-claude-purge-" ".sh" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun output ->
+      output_string output "#!/bin/sh\n";
+      output_string output "case \"$*\" in\n";
+      output_string output
+        "  --version) echo '2.1.322 (Claude Code)'; echo version-warning >&2; exit 0 ;;\n";
+      output_string output "  *purge*) echo purge-refused >&2; exit 1 ;;\n";
+      output_string output "esac\n";
+      output_string output "exit 80\n");
+    Unix.chmod path 0o700;
+    let outcome =
+      Eio_main.run (fun env ->
+        Runtime_claude_code.purge_project
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~account:(fixture_account ())
+          ~cli_path:path
+          ~timeout_s:10.0
+          ~project:"/tmp/masc-purge-fixture-project")
+    in
+    match outcome with
+    | Runtime_claude_code.Project_purged -> fail "a purge that exited 1 was reported as done"
+    | Runtime_claude_code.Project_not_purged detail ->
+      let has needle = String_util.contains_substring detail needle in
+      check bool ("purge's stderr is in: " ^ detail) true (has "purge-refused");
+      check bool ("--version's stderr is not: " ^ detail) false (has "version-warning"))
+;;
+
 let rate_limit_rejected =
   {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
 ;;
@@ -1409,6 +1443,77 @@ let test_a_known_frame_out_of_phase_is_named_by_its_own_tag () =
          ~stage:"initialize"
          ~detail:(Printf.sprintf "unexpected message type %S before control response" "assistant")
          (run_fixture path))
+;;
+
+(* Claude Code can end its start-up with a result frame before it answers
+   initialize. Fourteen turns of six Keepers ended that way on 2026-11-13,
+   while another turn of the same lane read "Can't reach the API server" in
+   its result (#51901). The frame is read as a turn's result is, so the
+   failure keeps its status and sentence, and no turn input was sent. A
+   successful result, or one of another session, is still not part of the
+   start-up. *)
+let startup_auth_failure_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"startup-auth-1","result":"Invalid API key · Please run /login","api_error_status":401,"terminal_reason":"api_error"}|}
+;;
+
+let startup_unreachable_api_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"startup-net-1","result":"API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)","api_error_status":null,"terminal_reason":"api_error"}|}
+;;
+
+let startup_result_of_another_session =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"another-session","uuid":"startup-other-1","result":"Invalid API key · Please run /login","api_error_status":401}|}
+;;
+
+let run_with_startup_frame frame =
+  let prompt_sent = ref false in
+  let outcome =
+    with_fixture
+      ~before_initialize_response:[ Emit frame ]
+      [ Emit assistant; Emit result ]
+      (fun path -> run_fixture ~on_prompt_sent:(fun () -> prompt_sent := true) path)
+  in
+  check bool "no turn input was sent" false !prompt_sent;
+  outcome
+;;
+
+let test_a_startup_failure_result_keeps_its_typed_reason () =
+  (match run_with_startup_frame startup_auth_failure_result with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+         { api_error_status = Some 401
+         ; api_error_cause = None
+         ; tool_effect_attempted = false
+         ; response_emitted = false
+         ; detail
+         }) ->
+     check bool "the login refusal survives" true
+       (Astring.String.is_infix ~affix:"Invalid API key" detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "a start-up failure was reported as completion");
+  match run_with_startup_frame startup_unreachable_api_result with
+  | Error
+      (Runtime_claude_code.Turn_failed_with_observation
+        { api_error_status = None
+        ; api_error_cause = None
+        ; tool_effect_attempted = false
+        ; response_emitted = false
+        ; detail
+        }) ->
+    check bool "the connection failure survives" true
+      (Astring.String.is_infix ~affix:"ENOTFOUND" detail)
+  | Error error -> fail (Runtime_claude_code.error_to_string error)
+  | Ok _ -> fail "a start-up failure was reported as completion"
+;;
+
+let test_a_startup_result_outside_the_protocol_fails_closed () =
+  expect_protocol_error
+    ~stage:"initialize"
+    ~detail:(Printf.sprintf "unexpected message type %S before control response" "result")
+    (run_with_startup_frame result);
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:"session_id does not match the active Claude session"
+    (run_with_startup_frame startup_result_of_another_session)
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -4975,6 +5080,10 @@ let () =
             "auth status reaches a regular file"
             `Quick
             test_auth_status_reaches_a_regular_file
+        ; test_case
+            "a failed purge reports only purge's stderr"
+            `Quick
+            test_failed_purge_reports_only_purge_stderr
         ] )
     ; ( "terminal"
       , [ test_case
@@ -5021,6 +5130,10 @@ let () =
             test_unknown_frame_types_fail_closed_in_both_phases
         ; test_case "a known frame out of phase is named by its own tag" `Quick
             test_a_known_frame_out_of_phase_is_named_by_its_own_tag
+        ; test_case "a start-up failure result keeps its typed reason" `Quick
+            test_a_startup_failure_result_keeps_its_typed_reason
+        ; test_case "a start-up result outside the protocol fails closed" `Quick
+            test_a_startup_result_outside_the_protocol_fails_closed
         ; test_case
             "rejected rate limit overrides success flag"
             `Quick

@@ -282,18 +282,18 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
       Alcotest.(check bool)
         "initial current-schema negative lookup"
         true
-        (Option.is_none
-           (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
-              config
-              ~keeper_name));
+        (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
+           config
+           ~keeper_name
+         = Ok None);
       Dated_jsonl.append store (heartbeat 2);
       Alcotest.(check bool)
         "appended heartbeat preserves cached negative result"
         true
-        (Option.is_none
-           (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
-              config
-              ~keeper_name));
+        (Keeper_status_metrics.latest_tool_audit_snapshot_from_files
+           config
+           ~keeper_name
+         = Ok None);
       Dated_jsonl.append store
         (`Assoc
           (Keeper_metrics_record.fields Keeper_metrics_record.Turn
@@ -311,12 +311,13 @@ let test_tool_audit_cache_advances_from_negative_by_appended_rows () =
           config
           ~keeper_name
       with
-      | Some snapshot ->
+      | Ok (Some snapshot) ->
           Alcotest.(check (list string))
             "new turn advances the incremental audit snapshot"
             [ "masc_status" ]
             snapshot.latest_tool_names
-      | None -> Alcotest.fail "expected appended current-schema turn audit")
+      | Ok None | Error _ ->
+          Alcotest.fail "expected appended current-schema turn audit")
 ;;
 
 let test_tool_audit_cache_invalidation_for_recreated_keeper () =
@@ -355,8 +356,8 @@ let test_tool_audit_cache_invalidation_for_recreated_keeper () =
             config
             ~keeper_name
         with
-        | Some snapshot -> snapshot.latest_tool_names
-        | None -> Alcotest.fail "expected current Keeper tool audit"
+        | Ok (Some snapshot) -> snapshot.latest_tool_names
+        | Ok None | Error _ -> Alcotest.fail "expected current Keeper tool audit"
       in
       Dated_jsonl.append store (turn "old_tool");
       Alcotest.(check (list string))

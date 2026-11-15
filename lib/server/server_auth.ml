@@ -221,7 +221,11 @@ let mcp_unauthorized ?(reason = Masc_domain.Auth_error.Generic) message =
 
 (** Verify Bearer token for MCP endpoints. [permission] is what the endpoint's
     profile asks of the credential: [CanReadState] for /mcp and /mcp/managed,
-    [CanPlayMachine] for the seat door /mcp/play. *)
+    [CanPlayMachine] for the seat door /mcp/play.
+
+    HIGH-RISK-UNREVIEWED: this verdict and the observer and operator ones
+    below answer [Ok ()]. They carry no value, so a caller cannot read
+    "a credential was checked" out of an admission (#51752). *)
 let verify_mcp_auth_unscoped ~permission ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
@@ -231,11 +235,11 @@ let verify_mcp_auth_unscoped ~permission ~base_path request =
   in
   let* () = reject_malformed_request_credential credential in
   if not auth_config.Masc_domain.enabled then
-    Ok None  (* Auth disabled - allow all *)
+    Ok ()  (* Auth disabled - allow all *)
   else
     match token_of_request_auth_credential credential with
     | None when not auth_config.require_token ->
-        Ok None  (* Token not required *)
+        Ok ()  (* Token not required *)
     | None ->
         Error
           (mcp_unauthorized
@@ -259,8 +263,7 @@ let verify_mcp_auth_unscoped ~permission ~base_path request =
                     "Bearer token did not resolve to a credential identity."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission
-            |> Result.map (fun () -> None))
+              ~permission)
 
 let verify_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -288,11 +291,11 @@ let verify_mcp_observer_stream_auth_unscoped ~base_path request =
   in
   let* () = reject_malformed_request_credential credential in
   if not auth_config.Masc_domain.enabled then
-    Ok None
+    Ok ()
   else
     match token_of_request_auth_credential credential with
     | None when not auth_config.require_token ->
-        Ok None
+        Ok ()
     | None ->
         Error
           (mcp_unauthorized
@@ -313,8 +316,7 @@ let verify_mcp_observer_stream_auth_unscoped ~base_path request =
                      any agent."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanReadState
-            |> Result.map (fun () -> None))
+              ~permission:Masc_domain.CanReadState)
 
 let verify_mcp_observer_stream_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -355,8 +357,7 @@ let verify_operator_mcp_auth_unscoped ~base_path request =
                      any agent."))
         | Some agent_name ->
             Auth.check_permission base_path ~agent_name ~token:(Some token)
-              ~permission:Masc_domain.CanAdmin
-            |> Result.map (fun () -> None))
+              ~permission:Masc_domain.CanAdmin)
 
 let verify_operator_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->

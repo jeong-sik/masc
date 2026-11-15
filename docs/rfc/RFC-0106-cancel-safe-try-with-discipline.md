@@ -3,7 +3,7 @@ rfc: "0106"
 title: "Cancel-safe try-with discipline (Eio.Cancel.Cancelled propagation)"
 status: Active
 created: 2026-05-17
-updated: 2026-09-21
+updated: 2026-11-15
 author: vincent
 supersedes: []
 superseded_by: null
@@ -21,8 +21,8 @@ remain.
 | P0 helper module + canary | ✅ | `lib/cancel_safe/cancel_safe.{ml,mli}` exists; 1-site canary migration landed across the first 6 implementation_prs |
 | P1 high-risk subsystem | ⏳ in flight | Recent batch: #16949 (`masc_http_client/pool` re-raise) + #16951 (`fd_accountant` re-raise) added two more violation fixes |
 | P2 observability / dashboard / governance callbacks | ⏳ in flight | 2026-09-21: #37371 moved `Otel_metric_store.best_effort` onto `Cancel_safe.observe` — the metric store was the one catch-all every counter in the tree passed through. `lib/inference_inflight_observation.ml` (#37373) and the dashboard/governance callbacks are still open |
-| P3 ppxlib AST lint | ❌ | `scripts/lint/cancel-guard-ast*` absent; only the regex variant exists. 2026-09-21: the regex variant also misses a `try ... with` whose handler arm is on the next line (#37372), which is how the P2 site above stayed invisible |
-| P4 regex lint deprecation | ❌ | `scripts/lint-cancel-guard.sh` still active; deprecation blocked on P3 |
+| P3 ppxlib AST lint | ❌ | No AST lint exists. 2026-09-21: the regex variant missed a `try ... with` whose handler arm is on the next line (#37372); #37495 replaced it the same day with `scripts/ci/check-cancel-guard.py`, which judged by the handler arm list. 2026-09-30: #40298 deleted that scanner with the other bulk source lints, which are not release gates (`docs/CI-REVIEW-WORKFLOW.md`). Since then main has no check for a handler that swallows `Cancelled`. The draft RFC in #52201 proposes a typed-tree check in `tools/ocaml_boundary_audit`, which this phase could share |
+| P4 regex lint deprecation | removed | `scripts/lint-cancel-guard.sh` was replaced by #37495 and its replacement deleted by #40298, without P3 |
 
 ### implementation_prs reconciliation
 

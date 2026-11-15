@@ -153,7 +153,7 @@ related: ["0512", "0493", "0350"]
 - **서버가 보내기 쪽을 닫은 뒤에도 같은 상한을 둔다.** 그 안에 상대가 닫지 않으면 연결을 끊는다. gluten 의 마지막 EOF 읽기에는 기한이 없다(gluten_eio.ml 122~145줄).
   - TLS 연결에서는 감싸개가 이 shutdown 을 보지 못한다. tls-eio 의 `shutdown` 은 close_notify 만 쓰고 아래 flow 를 닫지 않는다(tls_eio.ml 177~185줄). `Tls_stream_socket.shutdown` 도 tls 로만 넘긴다(tls_stream_socket.ml 11줄).
   - 그래서 TLS 의 이 상한은 `Tls_stream_socket.shutdown` 이 감싸개에 알려서 건다. 리스너가 `Tls_stream_socket.wrap ~on_send_shutdown` 에 `Server_connection_socket.send_side_closed` 를 넘긴다.
-- **gRPC 리스너의 accept 루프는 D4·D6 밖이다**(`server_grpc_listener.ml` 40~57줄). D1 의 변화는 닿는다(§7.9).
+- **gRPC 리스너의 accept 루프도 같은 감싸개를 쓴다**(`server_grpc_listener.ml` `serve_socket`, #50487). accept 한 소켓을 감싸고, 감싼 소켓만 `serve_h2_connection` 에 넘긴다. 상수와 함수는 HTTP 리스너와 같다. 응답 본문의 D2·D3 은 여전히 밖이다(§7.9).
 
 ### D5. 바뀌지 않는 본문은 참조로 보내고 원장을 쓰지 않는다
 
@@ -180,7 +180,8 @@ related: ["0512", "0493", "0350"]
 ### D6. 연결 준비는 30초 안에 끝나야 한다
 
 - 상한을 거는 곳: TLS handshake, 평문 프로토콜 판별, HTTP/1.1 전용·h2c 리스너의 첫 바이트. 모두 `Server_connection_socket.prepare` 를 거친다(`server_bootstrap_http.ml` 의 `serve_tls`·`serve_auto`·`serve`·`serve_h2`).
-- HTTP/1.1 전용·h2c 리스너는 첫 바이트를 읽지 않고, 읽을 수 있을 때까지만 기다린다(`await_first_bytes`). 바이트는 httpun 과 h2 가 읽는다.
+- TLS 는 handshake 뒤 첫 요청에도 같은 30초를 다시 건다. auto 리스너처럼 `Http_protocol_detect.detect` 로 기다린다. handshake 가 끝난 때부터 센다. 판별한 프로토콜이 ALPN 이 정한 것과 다르면 어느 쪽으로도 받지 않고 끊는다. handshake 실패 카운터는 올리지 않는다(#50483).
+- HTTP/1.1 전용·h2c 리스너는 첫 바이트를 읽지 않고, 읽을 수 있을 때까지만 기다린다(`await_first_bytes`). 바이트는 httpun 과 h2 가 읽는다. gRPC 리스너도 h2c 리스너와 같은 방법으로 첫 바이트를 기다린다(`server_grpc_listener.ml` `serve_socket`).
 - 기한을 넘기면 연결을 끊고(D4 와 같은 방법) debug 한 줄을 남긴다. TLS 는 리스너의 handshake 실패 카운터도 올린다.
 - 근거: piaf `accept_timeout` 30 s, nginx `client_header_timeout` 60 s. Go 는 `ReadTimeout`·`ReadHeaderTimeout`·`WriteTimeout` 중 양수 최솟값을 handshake 에 건다(조사 §2.3, §3.1).
 
@@ -233,7 +234,7 @@ related: ["0512", "0493", "0350"]
 | 대시보드 asset | 요청마다 읽고, `accept-encoding` 이 있으면 압축하고, 사본을 원장에 넣는다 | 요청마다 검증하고, 압축본 하나를 참조로 보낸다 |
 | 로그·초안·실행 출력 생산자 | 다음 이벤트나 핑까지 산다 | 응답이 닫히면 바로 끝난다 |
 | 소켓 쓰기 | 기한 없음 | 256 KiB 조각마다 90초 |
-| TLS handshake·평문 첫 읽기 | 기한 없음 | 30초. TLS handshake 뒤의 첫 읽기는 그대로다(§7.4) |
+| TLS handshake·평문 첫 읽기 | 기한 없음 | 30초. TLS handshake 뒤의 첫 읽기도 30초다(#50483) |
 | TLS 쓰기 | 암호문 4 KiB 마다 `writev` | tls-eio 가 넘긴 암호문을 256 KiB 조각으로 |
 
 ## 3. 왜 이 모양인가
@@ -280,7 +281,8 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 고칠 곳은 `w
 - 소켓 쓰기 조각 하나(256 KiB 이하)가 90초 안에 커널에 다 들어가지 않는 연결은 끊긴다. 리스너와 상대 주소가 든 warn 한 줄이 남는다. 상대는 RST 를 받고, 보내지 못한 바이트는 버려진다. shutdown 의 FIN 은 밀린 바이트 뒤에 줄을 서므로 나가지 않는다. 연결을 놓으며 fd 를 닫을 때(`server_bootstrap_http.ml` `on_connection_release`) `SO_LINGER 0` 이라 RST 가 간다.
 - 서버가 보내기 쪽을 닫은 뒤 90초 안에 닫지 않는 연결은 끊긴다. info 한 줄이 남는다. TLS 연결에서는 서버가 close_notify 를 보낸 때부터 센다(D4).
 - HTTP/1.1 SSE 프레임이 나가길 기다리는 동안 클라이언트가 떠나면, 그 `send` 는 바로 `Closed` 로 끝난다. 전에는 90초 뒤 `Stalled` 로 끝났고 warn 한 줄이 남았다. 쓰기가 EPIPE·ECONNRESET 으로 실패하면 이제 gluten 이 기다리던 flush 에 답하기 때문이다(D4).
-- TLS 연결은 handshake 가 30초 안에 끝나지 않으면 끊긴다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 끊긴다. auto 리스너는 30초 안에 HTTP/1.1 요청 줄인지 HTTP/2 preface 인지 가릴 만큼 받지 못해도 끊는다. 셋 다 debug 한 줄이 남는다. TLS handshake 뒤의 첫 읽기에는 기한이 없다(§7.4).
+- TLS 연결은 handshake 가 30초 안에 끝나지 않으면 끊긴다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 끊긴다. auto 리스너는 30초 안에 HTTP/1.1 요청 줄인지 HTTP/2 preface 인지 가릴 만큼 받지 못해도 끊는다. 셋 다 debug 한 줄이 남는다. TLS 연결은 handshake 가 끝난 뒤 30초 안에 첫 요청을 보내지 않거나, ALPN 이 정한 것과 다른 프로토콜로 시작해도 끊긴다. 이것도 debug 한 줄이다(#50483).
+- gRPC 리스너의 연결에도 같은 상한이 걸린다. 30초 안에 첫 바이트를 보내지 않는 연결은 debug 한 줄을 남기고 끊긴다. 쓰기 조각을 90초 동안 받지 않는 연결은 `[grpc]` 로 시작하는 warn 한 줄을 남기고 끊긴다(D4, D6).
 - 대시보드 asset 응답은 원장을 쓰지 않는다. 압축은 asset 판마다 한 번 한다.
 - TLS 처리량과 서버 CPU 가 바뀐다. 설치 뒤 같은 탐침으로 잰 값을 기록한다.
 - 설정 칸은 더하지 않는다. 상한은 코드 상수다.
@@ -351,7 +353,7 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 고칠 곳은 `w
     - 준비 단계는 제때 온 첫 바이트를 통과시키고, 안 오면 상한에 끊는다. 상대가 먼저 떠난 연결에서 준비를 포기해도 예외가 나지 않는다.
     - HTTP/1.1 전용, h2c, auto 리스너에 아무것도 안 보내는 연결은 준비 상한에 끝난다. auto 리스너에 HTTP/2 preface 앞부분만 보낸 연결도 같다.
   - HTTP/1.1 SSE 프레임이 나가길 기다리는 동안 클라이언트가 떠나면 `send` 가 `Closed` 로 끝난다(`test_server_sse_response.ml`, 실제 리스너).
-  - TLS 리스너(`test_https_listener.ml`). ClientHello 를 보내지 않는 연결은 준비 상한에 끝나고 handshake 실패가 하나 늘어난다. 응답과 close_notify 를 받고도 자기 쪽을 열어 두는 클라이언트는 상한에 끊긴다.
+  - TLS 리스너(`test_https_listener.ml`). ClientHello 를 보내지 않는 연결은 준비 상한에 끝나고 handshake 실패가 하나 늘어난다. 응답과 close_notify 를 받고도 자기 쪽을 열어 두는 클라이언트는 상한에 끊긴다. handshake 만 끝내고 아무것도 보내지 않는 세션은 ALPN h2·http/1.1 둘 다 준비 상한에 끝나고, handshake 실패는 늘지 않는다. ALPN 과 다른 프로토콜로 시작한 세션은 답 없이 끝난다(#50483).
   - 큰 프레임 뒤에 건 flush 는 마지막 조각이 나간 뒤에 답을 받는다.
   - 창이 조각 하나 반인 클라이언트가 프레임 하나를 읽고 창을 돌려주면, 다음 프레임은 조각 끝을 넘어 16 KiB 를 채운다.
   - 느린 소켓을 긴 응답과 짧은 응답이 나눠 쓰면, 짧은 응답은 긴 본문의 조각 둘 뒤에 나간다. 본문을 통째로 넣으면 긴 본문이 다 나갈 때까지 기다린다.
@@ -371,12 +373,12 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 고칠 곳은 `w
 1. 사전 압축 JSON 스냅샷(`Http_response_payload.prepared` 사용처)을 공유 본문으로 옮긴다(#50480).
 2. artifact 바이트를 범위 읽기로 바꾼다. 지금은 32 MiB blob 을 요청마다 통째로 올린다(#50481).
 3. h2 포크 정리: `on_close_stream` 의 본문 drain, `Reqd.stream_id`·`Reqd.is_closed` 공개(D1), #278 조건 고침으로 `close_after_flush` 와 frame tap 을 지움, #278 을 고칠 때 정체한 오류 응답을 끊을 길(§5), 오류 응답 뒤 RST_STREAM 을 §5.1·§8.1 에 맞추기와 끊은 스트림에 RST_STREAM 을 다시 쓰지 않기(§5), 스트림이 한 번에 넘기는 양의 상한(§5), upstream h2#265 이식(#50482).
-4. 연결 수, idle, 헤더 시간 상한. TLS 뒤 h2 preface 대기, 여러 연결이 같이 읽지 않을 때의 소유 본문과 descriptor 고갈도 여기 든다. h2 가 reader fiber 에서 연 오류 응답과 그 뒤에 남는 범위(§5)도 여기 든다(#50483).
+4. 연결 수, idle, 헤더 시간 상한. 여러 연결이 같이 읽지 않을 때의 소유 본문과 descriptor 고갈도 여기 든다. h2 가 reader fiber 에서 연 오류 응답과 그 뒤에 남는 범위(§5)도 여기 든다(#50483).
 5. 들어오는 창 2^27(연결당 128 MiB)을 줄인다. Go 는 1 MiB, Envoy edge 권장은 스트림 64 KiB 다(#50484).
 6. HTTP/2 DoS 완화: rapid reset(양방향 reset 세기), CONTINUATION, 헤더 개수(#50485).
 7. keep-alive HTTP/1.1 스트리밍 중 이탈 감지(#50486).
 8. pump 와 HTTP/1.1 생산자의 domain 문제(#48907 의 나머지).
-9. gRPC 리스너의 연결 쓰기·준비 상한(D4·D6 밖, #50487).
+9. gRPC 리스너 응답 본문의 flush 상한(D2)과 본문 큐(D3). 연결 쓰기·준비 상한(D4·D6)은 이 리스너에도 건다(#50487).
 10. D2·D4 의 상한을 단조 시계로 잰다(§5 의 시계, #51174).
 11. accept 루프가 연결 switch 의 예외를 연결 하나로 가둔다(§5 의 연결 fiber 의 예외, #51173).
 

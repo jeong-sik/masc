@@ -101,6 +101,17 @@ let observe_execution projection =
       Execution_terminal (execution_terminal_evidence (terminal, evidence)))
 ;;
 
+(* The operator-facing record of an admitted source change. Restore and
+   dispatch both write it from the typed value their admission returned, so
+   the record names each excluded message instead of counting them. *)
+let record_reasoning_replay_exclusion exclusion =
+  Log.info _log "reasoning replay exclusion admitted locally"
+    [ Log.J
+        ( "reasoning_replay_exclusion"
+        , Llm_provider.Reasoning_history_projection.replay_exclusion_to_json exclusion )
+    ]
+;;
+
 let project_detailed_error result =
   Result.map_error (fun detailed -> detailed.error) result
 ;;
@@ -143,6 +154,7 @@ let run_turn_core_detailed
            ?raw_trace_run
            ?before_tool_execution
            ~on_provider_failure:(fun attribution -> provider_failure := attribution)
+           ~on_reasoning_replay_exclusion:record_reasoning_replay_exclusion
            ~frontier
            agent
        with
@@ -789,9 +801,8 @@ let resume
   Log.debug _log "checkpoint resume admitted"
     [Log.S ("binding_disposition", Agent_checkpoint.binding_disposition_to_string binding_disposition)];
   (match binding_disposition with
-   | Agent_checkpoint.Rebound_pending_dispatch drops ->
-     Log.info _log "checkpoint source change awaits dispatch admission"
-       [Log.I ("pending_message_count", List.length drops)]
+   | Agent_checkpoint.Rebound_pending_dispatch exclusion ->
+     record_reasoning_replay_exclusion exclusion
    | Unconfigured_target | Unrecorded_producer | Identical_source
    | Declared_endpoint_rotation | Rebound_without_replay_loss
    | Replay_disabled_by_caller -> ());

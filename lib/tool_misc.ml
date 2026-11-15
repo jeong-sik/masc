@@ -25,7 +25,7 @@ type context = {
 
 (* RFC-0189 PR-1b.10 — facade handlers return typed [Tool_result.result].
    Failure-class mapping (caller-input violations only in this cluster):
-   - [Workflow_rejection] : invalid dashboard scope; missing
+   - [Workflow_rejection] : undeclared dashboard argument; missing
                             tool_name; unknown tool.
    - No [Runtime_failure] / [Dependency_unavailable] sites here — the
      [Workspace.gc] / [Dashboard.generate]
@@ -190,12 +190,7 @@ let handle_tool_help ~schemas ~tool_name ~start_time _ctx args : Tool_result.res
    With dispatch lifting internally now, these wrappers can pass
    the typed result straight through. *)
 let handle_web_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  let result = Tool_misc_web_search.handle ~tool_name ~start_time args in
-  Tool_misc_web_enrichment.enrich_result_if_requested
-    ~tool_name
-    ~start_time
-    args
-    result
+  Tool_misc_web_enrichment.handle ~tool_name ~start_time args
 
 let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args

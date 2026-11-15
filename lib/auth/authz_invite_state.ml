@@ -32,6 +32,7 @@ type t =
 
 let empty = { by_id = Invite_map.empty; by_digest = Digest_map.empty }
 let find t invite_id = Invite_map.find_opt invite_id t.by_id
+let bindings t = Invite_map.bindings t.by_id
 
 let find_by_token_digest t digest =
   match Digest_map.find_opt (E.Token_digest.to_hex digest) t.by_digest with

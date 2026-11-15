@@ -12,7 +12,9 @@ open Keeper_skill_activation_ledger_load
    append attempt after the session lock is released, including an uncertain
    failure. The commit-state observer receives the exact ledger after a
    successful commit under the lock, or [None] for an uncertain append after
-   the lock, so a cached projection can invalidate instead of guessing. *)
+   the lock, so a cached projection can invalidate instead of guessing. Either
+   way the cache holds its new state before any reader is told to read again:
+   a reader the notification wakes would otherwise read the old ledger. *)
 type writer = { mutable appended : bool; mutable committed : bool }
 
 let no_commit_observer ~config:_ ~trace_id:_ = ()
@@ -45,10 +47,10 @@ let with_write_lock ~config ~keeper_name ~trace_id operation =
   (* An attempted append may have landed even when the write raised. *)
   let announce () =
     if writer.appended then begin
+      if not writer.committed then announce_commit_state ~config ~keeper_name trace_id None;
       (Atomic.get commit_observer) ~config ~trace_id;
       Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
-        (Workspace_dataset_event.Skill_activations { keeper = keeper_name });
-      if not writer.committed then announce_commit_state ~config ~keeper_name trace_id None
+        (Workspace_dataset_event.Skill_activations { keeper = keeper_name })
     end
   in
   match with_lock ~config ~trace_id (operation writer) with

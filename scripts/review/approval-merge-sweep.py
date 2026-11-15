@@ -60,6 +60,7 @@ query($owner: String!, $name: String!, $cursor: String) {
 BRANCHES = '''
 query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
     refs(refPrefix: "refs/heads/", first: 100, after: $cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
@@ -104,6 +105,7 @@ def sibling(name):
 
 
 ISSUES = sibling('linked-issues')
+KEEP = sibling('branch-deletion')  # the worker keeps the same branches
 
 
 def gh(arguments):
@@ -134,20 +136,25 @@ def graphql(document, **variables):
 
 
 def walk(repo, document, connection):
-    """Every node of one repository connection, 100 to a GraphQL call."""
+    """Every node of one repository connection, 100 to a GraphQL call.
+
+    The repository's other fields that the document reads come back beside
+    the nodes, as the last page answered them.
+    """
     owner, name = repo.split('/')
     rows, cursor = [], None
     while True:
         after = {} if cursor is None else {'cursor': cursor}
-        page = graphql(document, owner=owner, name=name, **after)['repository'][connection]
+        repository = graphql(document, owner=owner, name=name, **after)['repository']
+        page = repository[connection]
         rows.extend(page['nodes'])
         if not page['pageInfo']['hasNextPage']:
-            return rows
+            return repository, rows
         cursor = page['pageInfo']['endCursor']
 
 
 def open_pulls(repo):
-    return walk(repo, OPEN_PULLS, 'pullRequests')
+    return walk(repo, OPEN_PULLS, 'pullRequests')[1]
 
 
 def protected_branches(repo):
@@ -166,7 +173,7 @@ def protected_branches(repo):
         page += 1
 
 
-def merged_leftovers(refs, rows, protected):
+def merged_leftovers(refs, rows, protected, default):
     """Branches a worker merge left behind, as (name, tip).
 
     The worker deletes a head branch when it sees the merge, and that misses
@@ -175,9 +182,10 @@ def merged_leftovers(refs, rows, protected):
     worker had merged 87 pull requests whose branch was still there.
 
     A branch goes only when a pull request of this repository that the worker
-    merged ended at exactly its tip, so no commit is lost. It stays when an
-    open pull request names it as head or base, when a protection rule or a
-    ruleset applies to it, or when its pull requests were not all read.
+    merged ended at exactly its tip, so no commit is lost. It stays for the
+    rules the worker keeps it for too (branch-deletion.py), when an open pull
+    request names it as head or base, or when its pull requests were not all
+    read.
     GitHub deletes the branch itself after a merge made by a user account.
     """
     in_use = {row[side] for row in rows for side in ('baseRefName', 'headRefName')}
@@ -185,8 +193,8 @@ def merged_leftovers(refs, rows, protected):
     for ref in refs:
         name, tip = ref['name'], ref['target']['oid']
         pulls = ref['associatedPullRequests']
-        if (name == 'main' or name.startswith('release/') or name in in_use or
-                name in protected or pulls['pageInfo']['hasNextPage'] or
+        if (KEEP.kept_by_rule(name, default, name in protected) is not None or
+                name in in_use or pulls['pageInfo']['hasNextPage'] or
                 any(pull['state'] == 'OPEN' for pull in pulls['nodes'])):
             continue
         if any(pull['state'] == 'MERGED' and pull['headRefOid'] == tip and
@@ -213,13 +221,20 @@ def delete_branch(repo, name, tip):
 def clean_branches(repo, started, dry_run):
     """Never part of the sweep's verdict: every failure is a record.
 
-    The open pull requests are read again here. The listing the sweep began
-    with can be 20 minutes old by now, and a pull request opened since then
-    on a merged layer's branch would be closed by deleting that branch.
+    The open pull requests are read again here, and once more for each branch
+    right before its delete. The listing the sweep began with can be 20
+    minutes old by now, the deletes themselves take time, and a pull request
+    opened since either read on a merged layer's branch would be closed by
+    deleting that branch. A branch whose open pull requests cannot be read
+    stays, and so does every branch when the default branch cannot be read.
     """
     try:
-        leftovers = merged_leftovers(walk(repo, BRANCHES, 'refs'), open_pulls(repo),
-                                     protected_branches(repo))
+        repository, refs = walk(repo, BRANCHES, 'refs')
+        default = repository['defaultBranchRef']
+        if default is None:
+            return {'error': 'the repository answered no default branch'}
+        leftovers = merged_leftovers(refs, open_pulls(repo), protected_branches(repo),
+                                     default['name'])
     except (ValueError, KeyError, TypeError) as error:
         return {'error': str(error)}
     record = {'found': len(leftovers), 'deleted': 0, 'refused': [], 'not_reached': 0}
@@ -227,6 +242,15 @@ def clean_branches(repo, started, dry_run):
         if dry_run or time.monotonic() - started >= SWEEP_SECONDS:
             record['not_reached'] = len(leftovers) - position
             break
+        try:
+            kept = KEEP.kept_by_open_pull(repo, name, lambda path: gh(['api', path]))
+        except (ValueError, KeyError, TypeError) as error:
+            record['refused'].append(
+                {'branch': name, 'reason': f'its open pull requests were not read: {error}'})
+            continue
+        if kept is not None:
+            record['refused'].append({'branch': name, 'reason': kept})
+            continue
         refusal = delete_branch(repo, name, tip)
         if refusal is None:
             record['deleted'] += 1
@@ -279,7 +303,7 @@ def close_merged_issues(repo, started, dry_run):
     next. Never part of the sweep's verdict: every failure is a record.
     """
     try:
-        numbers, records = merged_closers(repo, walk(repo, OPEN_ISSUES, 'issues'))
+        numbers, records = merged_closers(repo, walk(repo, OPEN_ISSUES, 'issues')[1])
     except (ValueError, KeyError, TypeError) as error:
         return {'error': str(error)}
     record = {'pull_requests': numbers, 'not_reached': 0, 'issues': records}
@@ -390,7 +414,7 @@ def main():
         raise SystemExit('invalid repository')
     dry_run = '--dry-run' in sys.argv[1:]
     started = time.monotonic()
-    report = {'quota_before': quota()}
+    report: dict[str, object] = {'quota_before': quota()}
     try:
         rows = open_pulls(repo)
         candidates = select(rows, lambda number: in_native_stack(repo, number))
@@ -399,7 +423,9 @@ def main():
         print(f'approval-merge-sweep: cannot read the open pull requests: {error}\n'
               f'{json.dumps(report)}', file=sys.stderr)
         return 1
-    report.update(open=len(rows), candidates=candidates, runs=[], not_reached=[])
+    runs: list[dict[str, object]] = []
+    not_reached: list[int] = []
+    report.update(open=len(rows), candidates=candidates, runs=runs, not_reached=not_reached)
     worker = Path(__file__).with_name('approval-auto-merge.py')
     environment = dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch', DISPATCH_RECEIPT='',
                        # The worker's kill budget, so its cleanup keeps a
@@ -411,7 +437,7 @@ def main():
         if stop is None and time.monotonic() - started >= SWEEP_SECONDS:
             stop = 'sweep time used up'
         if stop is not None:
-            report['not_reached'].append(number)
+            not_reached.append(number)
             continue
         print(f'::group::#{number}', flush=True)
         try:
@@ -422,7 +448,7 @@ def main():
         except subprocess.TimeoutExpired:
             code = 'timeout'
         print('::endgroup::', flush=True)
-        report['runs'].append({'pr': number, 'exit': code})
+        runs.append({'pr': number, 'exit': code})
         if code == QUOTA_EXIT:
             stop = 'quota reached'
     report['stopped'] = stop

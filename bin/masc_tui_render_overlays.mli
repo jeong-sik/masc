@@ -117,6 +117,14 @@ val render_account_login :
   Masc_tui_account_login.t ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+(** The screen that covers the others while the address answers as the
+    account server of a multi-account installation, with the version that
+    server names. *)
+val render_account_server :
+  Masc_tui_types.state ->
+  version:string ->
+  Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
 val render_collab :
   Masc_tui_types.state ->
   Masc_tui_collab.t ->

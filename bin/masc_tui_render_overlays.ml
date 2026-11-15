@@ -1546,6 +1546,60 @@ let render_account_login state view =
             Masc_tui_sgr_text.render ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line) in
       List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))) lines)
 
+(* The address answers as the account server of a multi-account installation
+   ([Masc_tui_types.Account_server]), which serves none of the screens. This
+   one says what the address is for, where people and Admins go, and where
+   the operator screens are. A browser opens the same address: its page at /
+   signs a person in. Each value wraps under itself rather than being cut,
+   since the words are what the screen is for. *)
+let render_account_server state ~version =
+  let terminal_rows, cols = get_terminal_size () in
+  let say ko_text en_text = ui_text state ~ko:ko_text ~en:en_text in
+  let address =
+    Masc_tui_http.url_of ~host:Masc_network_defaults.masc_http_loopback_peer
+      ~port:state.port ~path:""
+  in
+  let rows =
+    [ say "주소" "Address", address
+    ; say "버전" "Version", version
+    ; say "사람" "People",
+      say "브라우저로 주소를 열고 로그인해 자기 구독과 키퍼를 써요."
+        "Open the address in a browser, sign in, and use your own subscriptions and Keepers."
+    ; "Admin",
+      say "같은 곳에서 로그인한 뒤 초대 링크와 허용 계정을 관리해요."
+        "Sign in there too, then manage invitation links and allowed accounts."
+    ; say "운영 화면" "Operator screens",
+      say "이 주소에서는 열 수 없어요. 단일 사용자 masc 서버라면 그 포트로 masc-tui 를 다시 열어요(--port)."
+        "Not served at this address. For a single-user masc server, open masc-tui again on its port (--port)."
+    ]
+  in
+  let label_cells =
+    List.fold_left (fun widest (label, _) -> max widest (Message_layout.display_width label)) 0 rows
+  in
+  (* [?] opens nothing here: the screen takes every key. *)
+  surface_chrome ~overflow:Fits ~help_door:false ~frame:Chrome_overlay state ~terminal_rows ~cols
+    ~surface_key:"account-server"
+    ~title:(screen_title (" " ^ say "다계정 설치" "Multi-account installation"))
+    ~hints:(say "r:다시 확인  q:종료" "r:check again  q:quit")
+    ~body:(fun ~budget:_ c ->
+      let width = framed_inner_width cols in
+      let wrapped ~indent text =
+        Message_layout.split_styled_cells ~max_cells:(max 1 (width - indent)) text
+      in
+      List.iter (fun line -> c.push (fit_width (" " ^ line) width))
+        (wrapped ~indent:1
+           (say "이 주소는 다계정 설치의 계정 서버예요. 운영 화면(키퍼·작업·저장소)은 여기에 없어요."
+              "This address is the account server of a multi-account installation. The operator screens (Keepers, Tasks, Repositories) are not served here."));
+      c.push_empty ();
+      let value_indent = 1 + label_cells + 2 in
+      List.iter (fun (label, value) ->
+        match wrapped ~indent:value_indent value with
+        | [] -> c.push (fit_width (" " ^ label) width)
+        | first :: rest ->
+          c.push (fit_width (" " ^ fit_width label label_cells ^ "  " ^ first) width);
+          List.iter (fun line -> c.push (fit_width (String.make value_indent ' ' ^ line) width)) rest)
+        rows)
+
 
 let render_collab state view =
   let terminal_rows, cols = get_terminal_size () in

@@ -674,6 +674,7 @@ let render_agenda = Masc_tui_render_overlays.render_agenda
 let render_terminal_too_small =
   Masc_tui_render_overlays.render_terminal_too_small
 let render_account_login = Masc_tui_render_overlays.render_account_login
+let render_account_server = Masc_tui_render_overlays.render_account_server
 let render_collab = Masc_tui_render_overlays.render_collab
 let render_lane_addons = Masc_tui_render_overlays.render_lane_addons
 (* Whether a frame is a surface or something drawn over one. An overlay
@@ -724,13 +725,21 @@ let compact_frame_required (state : state) ~terminal_rows ~terminal_cols ~now =
 let frame_choice (state : state) ~terminal_rows ~terminal_cols ~now =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   if compact_frame_required state ~terminal_rows ~terminal_cols ~now then `Too_small rows
-  else match play_card_shown state with
-  | Some card -> `Play_card card
-  | None -> frame_choice_after_play state
+  else match state.connection_status with
+  (* The account server serves none of the screens below, so its own covers
+     them all, the modals included. *)
+  | Account_server { version } -> `Account_server version
+  | Disconnected | Connecting | Booting | Degraded | Connected ->
+    (match play_card_shown state with
+     | Some card -> `Play_card card
+     | None -> frame_choice_after_play state)
 
 let queue_below_play state ~terminal_rows ~terminal_cols ~now =
   if compact_frame_required state ~terminal_rows ~terminal_cols ~now then None
-  else match frame_choice_after_play state with
+  else match state.connection_status with
+  | Account_server _ -> None
+  | Disconnected | Connecting | Booting | Degraded | Connected ->
+  match frame_choice_after_play state with
     | `Queue panel -> Some panel
     | `Account_login _ | `Palette | `Collab _ | `Lane_addons _ | `Detail_reading _
     | `About | `Context | `Keeper_deletions | `Help | `Agenda | `Answering
@@ -748,6 +757,7 @@ let panel_input_owner (state : state) ~terminal_rows ~terminal_cols ~now =
             else Presented.Context)
   | `Agenda -> Some Presented.Agenda
   | `Answering -> Some Presented.Answering
+  | `Account_server _ -> Some Presented.Account_server
   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
   | `Lane_addons _ | `Detail_reading _ | `Keeper_deletions
   | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
@@ -791,6 +801,9 @@ let render ~home ~compact_recovery_notice (state : state) =
   | `Too_small _ ->
     let frame, clamped = render_terminal_too_small state
         ~recovery_notice:compact_recovery_notice ~rows:terminal_rows ~cols in
+    (frame, clamped, None, Overlay_drawn)
+  | `Account_server version ->
+    let frame, clamped = render_account_server state ~version in
     (frame, clamped, None, Overlay_drawn)
   | `Play_card card ->
     let frame, clamped = render_play_card state card in

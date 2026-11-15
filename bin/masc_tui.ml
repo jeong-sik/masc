@@ -914,16 +914,23 @@ let store_preference state change =
   note_session_pick state change;
   match state.connection_status with
   (* The account server of a multi-account installation keeps no [tui]
-     table: the pick stays with this session, and nothing is sent to it. That
-     is said once, as a credential that may not write is. *)
+     table: the pick stays with this session, and nothing is sent to it. A
+     pick the person made is said once, as a credential that may not write
+     is. The first key retires the help hint and a chat records its visit on
+     its own; said after [r], that notice would answer a key it has nothing
+     to do with. *)
   | Masc_tui_types.Account_server _ ->
-    if not state.preference_refusal_said then begin
-      state.preference_refusal_said <- true;
-      report_action state "error"
-        (ui_text state
-           ~ko:"계정 서버는 화면 설정을 저장하지 않아요. 이번 세션에만 적용돼요."
-           ~en:"The account server keeps no screen settings. They last this session only.")
-    end
+    (match change with
+     | Masc.Tui_preference.Help_hint_retired | Masc.Tui_preference.Chat_visited _ -> ()
+     | Masc.Tui_preference.Theme_chosen _ | Masc.Tui_preference.Language_chosen _
+     | Masc.Tui_preference.Board_sort_chosen _ | Masc.Tui_preference.Candle_chosen _ ->
+       if not state.preference_refusal_said then begin
+         state.preference_refusal_said <- true;
+         report_action state "error"
+           (ui_text state
+              ~ko:"계정 서버는 화면 설정을 저장하지 않아요. 이번 세션에만 적용돼요."
+              ~en:"The account server keeps no screen settings. They last this session only.")
+       end)
   | Masc_tui_types.Disconnected | Masc_tui_types.Connecting | Masc_tui_types.Booting
   | Masc_tui_types.Degraded | Masc_tui_types.Connected ->
     ignore
@@ -14885,7 +14892,7 @@ let resource_surface_visible state =
       ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
       ~now:(Unix.gettimeofday ()) with
     | `Surface -> true
-    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
     | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ -> false
 
@@ -19023,6 +19030,11 @@ let account_server_reason =
 
 let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket =
   if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  (* The footer's last notice was said on the screen this one covers, such
+     as the settings this server could not answer at start. *)
+  (match state.connection_status with
+   | Masc_tui_types.Account_server _ -> ()
+   | Disconnected | Connecting | Booting | Degraded | Connected -> set_last_action state None);
   apply_refused_workspace_identity state ~mailbox ~detail:account_server_reason None;
   apply_server_identity_reading ~withdraw_on_error:true state ~mailbox (Error account_server_reason);
   tui_auto_start_spent := true;
@@ -19858,7 +19870,7 @@ let press_marked_target state ~mailbox (target : press_target) =
       let panel = match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
        | `Queue panel -> Some panel
        | `Play_card _ -> Masc_tui_render.queue_below_play state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ())
-       | `Surface | `Too_small _ | `Account_login _ | `Palette
+       | `Surface | `Too_small _ | `Account_login _ | `Account_server _ | `Palette
        | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
        | `Keeper_deletions | `Help | `Agenda | `Answering | `Patch | `Link
        | `Client_detail _ -> None in
@@ -30541,7 +30553,7 @@ let main
     let _, terminal_cols = Masc_tui_ansi.get_terminal_size () in
     match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols ~now:(Unix.gettimeofday ()) with
     | `Surface -> Masc_tui_approvals_model.detail_presentation state
-    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `Detail_reading _ | `Keeper_deletions | `Help | `About
     | `Context | `Queue _ | `Agenda | `Answering | `Patch | `Link | `Client_detail _ -> None in
   let approval_detail_changed () =
@@ -30908,7 +30920,7 @@ let main
   let peer_frame_owner_on_screen ~terminal_rows =
     match Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
     | `Detail_reading reading -> keeper_peer_frame_owner state reading
-    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
     | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
   in
@@ -30928,7 +30940,7 @@ let main
              let width = Masc_tui_render_overlays.detail_reading_action_width content_cols in
              if Masc_tui_detail_reading.section_fully_visible ~width ~height ~index:0 reading
              then Some target else None)
-    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
     | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
   in
@@ -33493,7 +33505,7 @@ Use relative paths for resources already held in the package. -->
         && not state.image_open && not state.msx_open in
       let help_owns_input = panel_owns_input && current_panel = Some Presented.Help in
       let panel_owns_commands = panel_owns_input && (match current_panel with
-            | Some (Presented.Help | About | Context | Agenda | Answering) -> true
+            | Some (Presented.Help | About | Context | Agenda | Answering | Account_server) -> true
             | Some Context_search | None -> false) in
       if rejected_operator_input then begin
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
@@ -34448,7 +34460,7 @@ Use relative paths for resources already held in the package. -->
                   else (match Masc_tui_render.frame_choice state ~terminal_rows:rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
                    | `Queue _ -> true
                    | `Agenda | `Answering | `Help -> not command_reading
-                   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette
+                   | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
                    | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About
                    | `Context | `Keeper_deletions | `Patch | `Link
                    | `Client_detail _ | `Surface -> false)
@@ -35326,6 +35338,17 @@ Use relative paths for resources already held in the package. -->
            if quit_key && Option.is_some (Frame_presenter.presented_rows frame_presenter)
            then handle_quit_key ()
        | Some k when help_owns_input -> handle_help_key k
+       (* The account server screen takes every key: r reads /health again, q
+          quits, and no operator binding fires under it. *)
+       | Some k when panel_owns_input && current_panel = Some Presented.Account_server ->
+           if quit_key then handle_quit_key ()
+           else (match k with
+             | "r" ->
+                 start_http_refresh state ~host:server_peer_host ~port:state.port
+                   ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
+                   ~scoped_refresh_inflight:http_scoped_refresh_inflight
+                   ~scoped_refresh_followup ~mailbox:async_messages
+             | _ -> ())
        | Some "?" when Option.is_some current_panel
                        && current_panel <> Some Presented.Context_search ->
            state.help_open <- true;
@@ -43792,12 +43815,12 @@ Use relative paths for resources already held in the package. -->
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
       let owned_frame = match frame_choice with
         | `Queue _ | `Play_card _ | `Help -> true
-        | `Too_small _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
+        | `Too_small _ | `Account_login _ | `Account_server _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
       let compact_recovery = match frame_choice with
         | `Too_small _ -> not ready_input
-        | `Queue _ | `Play_card _ | `Account_login _ | `Palette | `Collab _ | `Lane_addons _
+        | `Queue _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
         | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
       let panel_changed = Presented.panel_presentation_changed !presented
@@ -43846,7 +43869,7 @@ Use relative paths for resources already held in the package. -->
                          ~input_pending:(asynchronous_input_pending ()) with
                  | Peer_waiting_input -> Render_schedule.request render_schedule Render_schedule.Background
                  | Peer_no_result | Peer_result_applied -> ())
-            | (`Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+            | (`Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
               | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
               | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _
               | `Surface), (Some _ | None) -> ());
@@ -43898,7 +43921,7 @@ Use relative paths for resources already held in the package. -->
                       state.home_decision_scroll <- body.hb_first;
                       Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()
-                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | (`Queue _ | `Patch))))))))))))))))
+                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | `Account_server _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | (`Queue _ | `Patch))))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
                  let compact_recovery_notice =
                    if input_holds_incomplete_sequence input_reader then
@@ -43909,7 +43932,7 @@ Use relative paths for resources already held in the package. -->
                  let content_rows, _ = Masc_tui_render_prim.get_terminal_size () in
                  drawn_detail_reading := (match Masc_tui_render.frame_choice state ~terminal_rows:content_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
                    | `Detail_reading reading -> Some reading
-                   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+                   | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
                    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
                    | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None);
                  render ~home ~compact_recovery_notice state)

@@ -1137,7 +1137,12 @@ let surface_strip (state : state) ~cols =
      label and the cell each read entry [i], and a list answers that by
      walking. The short ring makes that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
-  let ring = Array.of_list Masc_tui_types.surface_ring in
+  (* An account server serves none of the surfaces, so there is no ring to
+     walk: the strip keeps the connection and the clock. *)
+  let ring = match state.connection_status with
+    | Account_server _ -> [||]
+    | Disconnected | Connecting | Booting | Degraded | Connected ->
+        Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
   let active = Masc_tui_surface_navigation.surface_ring_index state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
@@ -1752,9 +1757,13 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        ~ko:(state.ui_language = Lang_ko) ~cols:full_cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
+  (* An account server has no Keeper to write to, so no composer is drawn. *)
   let composer, cursor =
-    if state.keeper_navigation_open then ("", Frame_presenter.Hidden)
-    else composer_row state ~rows ~cols:full_cols in
+    match state.connection_status with
+    | Account_server _ -> ("", Frame_presenter.Hidden)
+    | Disconnected | Connecting | Booting | Degraded | Connected ->
+      if state.keeper_navigation_open then ("", Frame_presenter.Hidden)
+      else composer_row state ~rows ~cols:full_cols in
   Buffer.add_string framed (composer ^ "\n");
   Masc_tui_frame_timing.finish_stage ~name:"surface.chrome" chrome_started;
   Masc_tui_frame_timing.time_stage ~name:"surface.strip_frame" (fun () ->

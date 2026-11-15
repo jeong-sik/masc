@@ -14,7 +14,10 @@ related: ["0106", "0126", "0518", "typed-route-auth"]
 
 - 상태: 초안.
 - 이슈: #51903. 관련 이슈: #51908, #48500.
-- 먼저 있는 변경: #51902 가 ingress 의 500 을 `Http_error_body` 의 고정 문구로 바꾸고 예외는 `Log.Http.error` 로 남긴다. 열린 PR #52174 가 workspace route 의 Git 읽기 실패를 같은 식으로 고친다.
+- 먼저 있는 변경:
+  - #51902 가 ingress 의 500 을 `Http_error_body` 의 고정 문구로 바꾸고 예외는 `Log.Http.error` 로 남긴다.
+  - 열린 PR #52174 가 workspace route 의 Git 읽기 실패를 같은 식으로 고친다.
+  - 로컬 커밋 `10d9b799ab37`(올리지 않음)이 #51908 의 REST 인증 거절을 고친다. `/mcp` 거절은 고치지 않는다(§6 의 L2a).
 - 먼저 있는 결정:
   - RFC-0106: `Eio.Cancel.Cancelled` 는 switch 경계까지 가야 한다.
   - 헌법 `build_and_ci`: 기능 고장과 연결되지 않는 검사를 만들지 않는다. 실제 API·프로토콜·보안·자원 경계의 권위 있는 제한값만 검사한다.
@@ -23,7 +26,7 @@ related: ["0106", "0126", "0518", "typed-route-auth"]
 
 ## 0. 요약
 
-route 의 catch-all 이 `Printexc.to_string exn` 을 응답에 싣는다. 예외 글에는 서버의 파일 경로와 OS 오류가 들어갈 수 있다. 같은 원인을 이슈와 PR 다섯 개가 자리마다 따로 다뤘다(§1.1). 그 뒤에도 확인한 자리만 14곳(7개 파일)이 남았다(부록 A).
+route 의 catch-all 이 `Printexc.to_string exn` 을 응답에 싣는다. 예외 글에는 서버의 파일 경로와 OS 오류가 들어갈 수 있다. 같은 원인을 이슈와 PR 다섯 개가 자리마다 따로 다뤘다(§1.1). 그 뒤에도 확인한 자리만 16곳(9개 파일)이 남았다. 예외 글 14곳과, 인증 거절이 저장소 오류 글을 싣는 2곳이다(부록 A).
 
 자리마다 고치면 다시 생긴다. 응답을 만드는 함수가 `string` 과 `Yojson.Safe.t` 를 받고, 예외를 글로 바꾸는 식은 한 줄이라서다.
 
@@ -45,7 +48,7 @@ route 의 catch-all 이 `Printexc.to_string exn` 을 응답에 싣는다. 예외
 | #50613 | 이슈, 2026-11-14 닫힘 | HTTP/1.1 오류 처리기가 예외를 로그에 남기지 않았다 |
 | #51902 | PR, 2026-11-14 병합 | 위 둘과 handler·본문 콜백 경로까지 네 길을 `Http_error_body` 의 고정 문구로 바꿨다 |
 | #52174 | PR, 열림 | workspace route 의 Git 읽기 실패 500 이 Git 출력을 본문에 싣는 것을 고친다 |
-| #51908 | 이슈, 열림 | 인증 정보 저장소를 읽지 못하면 503 본문에 저장소 오류 글이 실린다 |
+| #51908 | 이슈, 열림 | 인증 정보 저장소를 읽지 못하면 503 본문에 저장소 오류 글이 실린다. 로컬 커밋 `10d9b799ab37` 이 REST 쪽만 고쳤다 |
 
 #51902 은 ingress 에 닿은 예외만 고쳤다. route 가 먼저 잡아 글로 바꾼 예외는 ingress 에 닿지 않는다. #51903 은 2026-11-13 에 그런 자리 여덟 곳을 셌다.
 
@@ -55,13 +58,16 @@ route 의 catch-all 이 `Printexc.to_string exn` 을 응답에 싣는다. 예외
 
 | 묶음 | 뜻 | 자리 |
 |---|---|---|
-| A | 오류 응답(4xx·5xx·JSON-RPC error)이나 실패 항목에 예외 글이 실린다. 직접 읽어 확인했다 | 14곳, 7개 파일 |
+| A1 | 오류 응답(4xx·5xx·JSON-RPC error)이나 실패 항목에 예외 글이 실린다. 직접 읽어 확인했다 | 14곳, 7개 파일 |
+| A2 | 인증 거절이 저장소 오류 글(`masc_error_to_string`)을 싣는다. 직접 읽어 확인했다 | 2곳, 2개 파일 |
 | B | 타입이 정해진 실패 값이 예외 글을 `string` 필드로 담는다. 응답까지 끝까지 따라가지 못했다 | 21곳, 3개 파일 |
 | C | 운영자 진단 화면의 필드(`last_error` 등)가 예외 글을 보여 준다 | 18곳, 15개 파일 |
 | D | 본문은 고정 문구지만 예외 글이 로그에도 남지 않는다 | 1곳 |
 | 미확인 | `Error (Printexc.to_string exn)` 이 응답에 닿는지 따라가지 못했다 | 6곳, 5개 파일 |
 
-A 의 일곱 파일 가운데 넷은 #51903 의 목록에 없었다(`server_routes_http_dashboard_handlers.ml`, `server_routes_http_keeper_control.ml`, `server_mcp_transport_http.ml`, `server_routes_http_routes_msx.ml`). 그 가운데 `/api/v1/keepers/turns` 는 `Public_read` 라 기본 설정에서 인증 없이 열린다.
+A1 의 일곱 파일 가운데 넷은 #51903 의 목록에 없었다(`server_routes_http_dashboard_handlers.ml`, `server_routes_http_keeper_control.ml`, `server_mcp_transport_http.ml`, `server_routes_http_routes_msx.ml`). 그 가운데 `/api/v1/keepers/turns` 는 `Public_read` 라 기본 설정에서 인증 없이 열린다.
+
+A2 는 `Printexc.to_string` 이 아니라 아래 층이 돌려준 오류 글이다. REST 거절은 #51908 이다. `/mcp` 거절도 같은 글을 401 JSON-RPC `error.message` 로 싣는다. 둘 다 bearer 를 실은 요청이 저장소 읽기에 실패할 때 경로가 나간다.
 
 ### 1.3 자리마다 고치면 다시 생기는 이유
 
@@ -218,7 +224,7 @@ C 는 dashboard projection 이 실패를 보여 주는 필드다(`snapshot_error
 2. `Cancelled` 갈래는 receipt 를 정리한 뒤 같은 backtrace 로 다시 던진다(RFC-0106). 정리를 먼저 하는 이유는 receipt 가 `pending` 으로 남지 않게 하려는 것이다. 지금 주석(「HTTP 호출자가 기다림을 멈춰도 worker 가 발행한다」)이 지키려는 것이 이것이다.
 3. 다시 던진 `Cancelled` 는 `Executor_pool_ref.submit_strict` 에서 `Work_failed` 로 돌아온다. 그 응답은 §3.4 의 고정 문장 500 이다. 지금은 `strict_submit_error_to_string failure` 를 그대로 싣는다(:469).
 
-확인: worker 가 `Eio.Fiber.first` 의 진 쪽 하위 문맥에서 `Cancelled` 를 내는 시험을 L2 에 둔다. receipt 는 `Unknown Worker_cancelled` 로 정리되고, 본문에는 예외 글이 없다. 그 경로를 시험으로 만들 수 없으면 `Cancelled` 갈래를 지우고 `Cancel_safe.protect` 로 바꾼다.
+확인: worker 가 `Eio.Fiber.first` 의 진 쪽 하위 문맥에서 `Cancelled` 를 내는 시험을 L2c 에 둔다. receipt 는 `Unknown Worker_cancelled` 로 정리되고, 본문에는 예외 글이 없다. 그 경로를 시험으로 만들 수 없으면 `Cancelled` 갈래를 지우고 `Cancel_safe.protect` 로 바꾼다.
 
 ## 6. 층
 
@@ -228,11 +234,44 @@ L0 이 Draft 인 동안 L1 부터 같은 native stack 으로 묶는다(헌법 `w
 |---|---|---|
 | L0 | 이 RFC | `python3 scripts/rfc-generate-index.py --check` |
 | L1 | `Server_refusal` 에 `Diagnostic`·`Sentence`·`Incident_id`·`Failure`·`Private` 를 더한다. `keeper_memory_history_resolution.ml` 의 `private_failure` 를 이 모듈로 옮긴다 | 경로가 든 `Sys_error` 로 만든 `Diagnostic.t` 를 넘긴 응답에 그 경로가 없고 `code`·`incident_id` 가 있다. 로그 한 줄에 같은 `incident_id` 와 경로가 있다. 옮긴 route 의 응답 모양은 그대로다 |
-| L2a | A: `routes_activity`(4곳), `dashboard_http_keeper_api_post`(1곳), `dashboard_handlers`(1곳), `keeper_control`(1곳) | route 마다 예외를 내는 입력을 넣는다. 본문에 예외 글이 없고 정한 상태·`code` 가 온다. 고치기 전 코드에서는 같은 시험이 실패한다 |
-| L2b | A·D: `link_preview`(3곳, `Preview_error of string` 을 닫힌 사유로), `mcp_transport_http`(2곳), `routes_msx`(2곳, §5), `oauth_http`(1곳, 로그만 더한다) | L2a 와 같다. link preview 는 cache 에 저장된 실패 항목에도 예외 글이 없다. MCP 는 JSON-RPC `error.data.incident_id` 와 로그 한 줄이 짝이 된다. oauth 는 본문이 그대로이고 로그에 예외 글이 남는다 |
+| L2a | A2: 인증 거절. 첫 커밋은 `10d9b799ab37` 이고, 분류를 `Server_refusal` 로 옮겨 `/mcp` 도 같이 쓴다(아래 「L2a」) | bearer 를 실은 요청이 저장소 읽기에 실패하면 REST 503 본문과 `/mcp` 401 `error.message` 에 경로가 없다. 거절 로그 줄 하나에 같은 `incident_id` 와 원문이 있다. 상태 코드와 `auth_error_code` 는 그대로다. 고치기 전 코드에서는 `/mcp` 시험이 실패한다 |
+| L2b | A1: `routes_activity`(4곳), `dashboard_http_keeper_api_post`(1곳), `dashboard_handlers`(1곳), `keeper_control`(1곳) | route 마다 예외를 내는 입력을 넣는다. 본문에 예외 글이 없고 정한 상태·`code` 가 온다. 고치기 전 코드에서는 같은 시험이 실패한다 |
+| L2c | A1·D: `link_preview`(3곳, `Preview_error of string` 을 닫힌 사유로), `mcp_transport_http`(2곳), `routes_msx`(2곳, §5), `oauth_http`(1곳, 로그만 더한다) | L2b 와 같다. link preview 는 cache 에 저장된 실패 항목에도 예외 글이 없다. MCP 는 JSON-RPC `error.data.incident_id` 와 로그 한 줄이 짝이 된다. oauth 는 본문이 그대로이고 로그에 예외 글이 남는다 |
 | L3 | B: `Keeper_request_failure.Raised.exn`, `skill_editor` 의 `Write_failed`·`Source_root_create_failed`·`Recovery_operation_failed`·`Package_directory_remove_failed`, `dashboard_dev_token` 의 `detail`. 미확인 6곳을 먼저 끝까지 따라가 A·B·로그로 다시 나눈다 | 묶음마다 응답과 저장된 기록에 예외 글이 없다. 저장 모양은 hard cut 이다(헌법 `legacy_residue`) |
-| L4 | typed-tree 검사(아래) | L3 head 에서 위반 0. `origin/main` 에 돌리면 A 가운데 함수 안에서 응답 함수에 닿는 9곳(`routes_activity` 4, `keeper_api_post` 1, `dashboard_handlers` 1, `keeper_control` 1, `mcp_transport_http` 2)을 찾는다. 나머지 5곳은 아래 4 의 흐름이라 찾지 못하는 것이 맞다 |
+| L4 | typed-tree 검사(아래) | L3 head 에서 위반 0. `origin/main` 에 돌리면 A1 가운데 함수 안에서 응답 함수에 닿는 9곳(`routes_activity` 4, `keeper_api_post` 1, `dashboard_handlers` 1, `keeper_control` 1, `mcp_transport_http` 2)을 찾는다. A1 의 나머지 5곳과 A2 는 아래 4 의 흐름이라 찾지 못하는 것이 맞다 |
 | L5 | §4 에서 안 2 를 고르면 C 를 고친다 | C 필드에 예외 글이 없고 `incident_id` 가 로그와 짝이 된다 |
+
+### L2a: 인증 거절 (#51908 과 `/mcp`)
+
+지금 상태(`origin/main`):
+
+- REST: `server_auth.ml:882` 의 `auth_error_json` 이 `masc_error_to_string` 원문을 `error` 에 싣는다. 저장소 읽기가 실패하면 `System (IoError _)` 의 글에 workspace 아래 파일 경로와 OS 오류가 들어간다. bearer 를 실은 요청이면 읽기 권한을 확인하기 전에 503 으로 나간다(#51908).
+- `/mcp`: `server_mcp_transport_http_types.ml:12-15` 의 `auth_failure_of_masc_error` 가 같은 원문을 `message` 에 담는다. `server_mcp_transport_http_respond.ml:137` 이 그 글을 JSON-RPC `error.message` 로 싣는다. 상태는 401 이다(`Mcp_error_code.to_http_status Auth_error`).
+  - 이 변환은 `server_routes_http_common.ml:115-133` 의 verifier 넷이 쓴다(`/mcp`, observer stream, operator, seat).
+  - 같은 글은 `MCP auth rejected` 로그 줄(`server_mcp_transport_http_respond.ml:121`)에도 남는다.
+
+로컬 커밋 `10d9b799ab37`(worktree `.worktrees/fix/51908-auth-refusal-fixed-body`, 올리지 않음)이 REST 쪽을 고쳤다.
+
+- `server_auth.ml` 의 `auth_refusal_text` 가 `masc_error` 의 모든 생성자를 이름으로 가른다.
+- `System` 갈래는 상태의 고정 문구(`Http_error_body.service_unavailable`·`bad_request`)를 본문에 싣는다. 원문은 거절 로그의 `server_error` 로 보낸다.
+- `Auth`·`Task`·`Agent` 갈래는 코드가 쓴 문장이라 그대로 싣는다(R3).
+- 상태 코드와 `auth_error_code` 는 바뀌지 않는다.
+- `auth_refusal_text` 는 `.mli` 에 없다. `/mcp` 는 이 커밋의 범위 밖이다.
+
+의존 순서:
+
+- `Server_auth` 는 `Server_mcp_transport_http_headers` 를 쓴다(`server_auth.ml:826`). `_headers` 는 `Server_mcp_transport_http_types` 를 쓴다.
+- 그래서 `_types` 가 `Server_auth` 의 분류를 부르면 순환이 생긴다.
+- `Server_refusal` 은 지금 `Workspace` 만 쓰고, 세 모듈 어느 것도 부르지 않는다. 분류를 `Server_refusal` 로 옮기면 `Server_auth` 와 `_types` 가 같은 분류를 부른다.
+
+정하는 것:
+
+1. 이 커밋은 L1 이 아니다. `auth_refusal_text` 는 `Masc_domain.masc_error` 하나에 묶인 분류이고 `incident_id` 를 만들지 않는다. route 마다 닫힌 타입을 받는 L1 의 공용 함수 자리를 채우지 못한다.
+2. 이 커밋을 L2a 의 첫 커밋으로 쓴다. L1 위로 다시 올린 뒤 같은 층에서 셋을 더한다.
+   - `auth_refusal_text` 를 `Server_refusal` 로 옮기고 `.mli` 에 낸다. `server_error : string option` 은 `Diagnostic.t option` 이 된다.
+   - `auth_failure_of_masc_error` 가 같은 분류를 쓴다. `auth_failure.message` 는 분류의 문장이 되고, 원문은 `Diagnostic.t` 로 `record_mcp_auth_reject` 의 로그 줄에만 간다.
+   - REST 와 `/mcp` 의 거절 로그 줄에 `incident_id` 를 남긴다. REST 본문에도 싣는다. JSON-RPC 쪽은 §8 의 4 를 따른다.
+3. L2a 를 L2b 보다 먼저 두는 이유: A2 는 bearer 하나로 닿고, 고칠 커밋이 이미 있다.
 
 ### L4 검사와 RFC-0106 P3
 
@@ -250,7 +289,7 @@ L0 이 Draft 인 동안 L1 부터 같은 native stack 으로 묶는다(헌법 `w
    - 응답 함수는 해석된 경로로 선언한다. 바탕은 `Http_server_eio.Response` 의 함수, `Server_sse_response.send`, `Server_refusal.json`, `Server_mcp_transport_http_respond.respond_mcp_error`, `Keeper_chat_events.publish` 다.
    - 인자를 응답 함수에 넘기는 함수도 응답 함수로 친다. 이 요약은 더 늘지 않을 때까지 넓힌다. `Server_auth.respond_json_value_with_cors`, 지역 함수 `bad_request`(`routes_activity.ml:477`), `stream_post_sse_json` → `send_post_sse` → `Server_sse_response.send`(`mcp_transport_http.ml:175`)가 여기에 든다.
 3. 위반 0 을 기준으로 한다. 기준선 파일도, 예외 개수 예산도 두지 않는다. 그래서 #40298 이 지운 「예외 허용 개수 예산」과 모양이 다르다. 로그 인자와 서버 안 상태의 `Printexc.to_string` 은 응답 함수에 닿지 않으니 위반이 아니다.
-4. 이 검사는 값이 함수 밖으로 나가는 흐름을 보지 못한다. 함수의 반환값이나 생성자에 담겨 다른 함수의 응답 함수에 닿는 흐름이다. A 의 `link_preview` 3곳과 `msx` 2곳, B 전부, 아래 층의 `Error detail` 이 그렇다. 이 흐름은 L2b·L3 이 생성자를 닫힌 사유로 바꿔 닫는다.
+4. 이 검사는 값이 함수 밖으로 나가는 흐름을 보지 못한다. 함수의 반환값이나 생성자에 담겨 다른 함수의 응답 함수에 닿는 흐름이다. A1 의 `link_preview` 3곳과 `msx` 2곳, A2, B 전부, 아래 층의 `Error detail` 이 그렇다. 이 흐름은 L2a·L2c·L3 이 생성자를 닫힌 사유로 바꿔 닫는다.
 
 어디서 돌릴지는 운영자가 정한다(§8 의 2).
 
@@ -258,7 +297,7 @@ L0 이 Draft 인 동안 L1 부터 같은 native stack 으로 묶는다(헌법 `w
 
 - `lib/server`·`lib/dashboard` 밖의 `Printexc.to_string`(1,089곳, 448개 파일). 도구 결과(`Tool_result`)에 실리는 예외 글이 여기에 있다. 이 RFC 의 `Diagnostic` 을 쓸 수 있지만 따로 다룬다.
 - `Server_refusal.json` 의 문장 인자를 `Sentence.t` 로 바꾸는 일(60곳, 18개 파일). 검증 문장은 요청 값을 담아 R3 에 맞는다. 바꾸는 이득이 이 RFC 의 문제와 다르다.
-- 아래 층이 `Error detail` 로 돌려준 글이 본문으로 가는 자리의 목록. R2 는 이 자리에도 적용된다. 예: `server_dashboard_http_keeper_api_post.ml:192·197`, `server_routes_http_keeper_control.ml:157`, #51908 의 인증 저장소 오류. 함수를 건너는 흐름이라 `rg` 로 셀 수 없어서 세지 않았다.
+- 아래 층이 `Error detail` 로 돌려준 글이 본문으로 가는 자리의 목록. R2 는 이 자리에도 적용된다. 예: `server_dashboard_http_keeper_api_post.ml:192·197`, `server_routes_http_keeper_control.ml:157`. 함수를 건너는 흐름이라 `rg` 로 셀 수 없어서 세지 않았다. 인증 거절 2곳(A2)만 따로 확인해 L2a 에 넣었다.
 - ingress 의 고정 500 에 `incident_id` 를 싣는 일. #51902 은 H2 응답 원장 예약을 고정 문구 길이로 잡는다. 길이가 바뀌는 값을 넣으려면 그 예약을 다시 봐야 한다.
 - workspace route. #52174 가 다룬다.
 - 예외 글을 지우거나 가리는 장치(R5).
@@ -274,11 +313,11 @@ L0 이 Draft 인 동안 L1 부터 같은 native stack 으로 묶는다(헌법 `w
 
 ## 부록 A. 자리 표
 
-셈: `rg -n 'Printexc.to_string' lib/server lib/dashboard` 는 266곳(101개 파일)이다(`807a5e46ab99`). 아래 표가 60곳이다. `server_routes_http_routes_workspace.ml` 의 8곳은 #52174 가 다루는 파일이라 표에 넣지 않았다. 나머지 198곳은 로그 호출의 인자이거나 서버 안 상태(시작 인계, bootstrap, gRPC, gateway)다. 줄마다 끝까지 따라가지 않았고, 근처에 응답을 만드는 코드가 없는 것을 보고 나눴다.
+셈: `rg -n 'Printexc.to_string' lib/server lib/dashboard` 는 266곳(101개 파일)이다(`807a5e46ab99`). A1·B·C·D·미확인 표가 그 가운데 60곳이다. A2 의 2곳은 `masc_error_to_string` 자리라 이 셈 밖이다. `server_routes_http_routes_workspace.ml` 의 8곳은 #52174 가 다루는 파일이라 표에 넣지 않았다. 나머지 198곳은 로그 호출의 인자이거나 서버 안 상태(시작 인계, bootstrap, gRPC, gateway)다. 줄마다 끝까지 따라가지 않았고, 근처에 응답을 만드는 코드가 없는 것을 보고 나눴다.
 
 인증은 `Route_access` 의 종류다. 「확인 못함」은 route 등록까지 따라가지 못한 것이다.
 
-### A. 오류 응답이나 실패 항목에 실린다 (14곳, 7개 파일)
+### A1. 오류 응답이나 실패 항목에 예외 글이 실린다 (14곳, 7개 파일)
 
 | 파일:줄 | route | 인증 | 응답 |
 |---|---|---|---|
@@ -296,6 +335,13 @@ L0 이 Draft 인 동안 L1 부터 같은 native stack 으로 묶는다(헌법 `w
 | `lib/server/server_mcp_transport_http.ml:716` | `POST /mcp` | 같음 | JSON-RPC error `Internal error: <예외>`. 로그 없음 |
 | `lib/server/server_routes_http_routes_msx.ml:446` | `POST /api/v1/msx/save`, `/api/v1/msx/restore`(`operation_id` 가 있을 때) | `Tool` | 200 receipt `message`(:369). 저장된 receipt 를 `POST /api/v1/msx/checkpoint-operation`(`Read_auth`)이 다시 읽는다 |
 | `lib/server/server_routes_http_routes_msx.ml:447` | 같음 | 같음 | 같음 |
+
+### A2. 인증 거절이 저장소 오류 글을 싣는다 (2곳, 2개 파일)
+
+| 파일:줄 | route | 인증 | 응답 |
+|---|---|---|---|
+| `lib/server/server_auth.ml:882` (`auth_error_json`) | 인증하는 route 의 공용 거절 응답 | 거절 응답 자체. bearer 를 실은 요청이면 읽기 권한 확인 전에 닿는다 | 503 `{error: <저장소 오류 글>}`(#51908). 로컬 커밋 `10d9b799ab37` 이 고쳤고 올리지 않았다 |
+| `lib/server/server_mcp_transport_http_types.ml:13` (`auth_failure_of_masc_error`) | `/mcp` 와 그 profile, observer stream(`server_routes_http_common.ml:115-133` 의 verifier 넷) | `Self_authenticated Mcp_transport` | 401 JSON-RPC `error.message`(`server_mcp_transport_http_respond.ml:137`) |
 
 ### B. 실패 값의 `string` 필드가 예외 글을 담는다 (21곳, 3개 파일)
 

@@ -234,9 +234,60 @@ let with_working_contexts_rule variables =
     (render_prompt Prompt_names.librarian_working_contexts_rule [])
 ;;
 
+(* The turn material of the Memory prompt (the pending working context, past
+   Task/Goal records, the conversation, counterpart and tool observations, the
+   continuity document) and the text that reads it live in two slots of
+   librarian.md. A pass that carries turn material renders both into the body.
+   Admission carries none, so it leaves both variables empty and its prompt
+   holds neither the empty material nor the text about it (RFC-0517 §7.3). *)
+let working_context_input_variable = "working_context_input"
+let turn_inputs_variable = "turn_inputs"
 
+type turn_input_prompts = {
+  working_context_input : Prompt_registry.prompt_resolution;
+  turn_inputs : Prompt_registry.prompt_resolution;
+}
+
+let resolve_turn_input_prompt key =
+  let resolution = Prompt_registry.resolve_prompt key in
+  if String.trim resolution.effective = "" then Error (Printf.sprintf "%s is missing or blank" key)
+  else Ok resolution
+
+let resolve_turn_input_prompts () =
+  let open Result.Syntax in
+  let* working_context_input =
+    resolve_turn_input_prompt Prompt_names.librarian_working_context_input in
+  let+ turn_inputs = resolve_turn_input_prompt Prompt_names.librarian_turn_inputs in
+  { working_context_input; turn_inputs }
+
+(* A slot's text is trimmed when the file is read, so the blank lines that set
+   the material apart are added here. The body places [working_context_input]
+   right before the Goal heading and [turn_inputs] right after the Goal
+   paragraph; with both empty the body reads as if the material were never
+   there. *)
+let with_turn_input_prompts (prompts : turn_input_prompts) variables =
+  let open Result.Syntax in
+  let* context = Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_working_context_input prompts.working_context_input variables in
+  let+ turn = Prompt_registry.render_resolved_prompt_template
+    Prompt_names.librarian_turn_inputs prompts.turn_inputs variables in
+  (working_context_input_variable, context ^ "\n\n") :: (turn_inputs_variable, "\n\n" ^ turn)
+  :: variables
+
+let with_turn_inputs variables =
+  Result.bind (resolve_turn_input_prompts ()) (fun prompts -> with_turn_input_prompts prompts variables)
+
+let without_turn_inputs variables =
+  (working_context_input_variable, "") :: (turn_inputs_variable, "") :: variables
+
+
+(* [turn_inputs] is the turn-material slot the prompt was rendered with, so a
+   check of that material reads the bytes that were sent. A pass that renders
+   no turn material (admission, continuity, pending-input organization) has
+   none. *)
 type librarian_prompt_material =
   { resolution : Prompt_registry.prompt_resolution
+  ; turn_inputs : Prompt_registry.prompt_resolution option
   ; rendered : string
   }
 
@@ -368,8 +419,10 @@ let prompt_variables_of_pass ~source_lines pass input =
 let librarian_prompt_variables ?continuity ~source_lines input =
   let pass = Memory_pass (continuity, ()) in
   Result.bind
-    (prompt_variables_of_pass ~source_lines:(Ok source_lines) pass (input_for_pass pass input))
-    with_working_contexts_rule
+    (Result.bind
+       (prompt_variables_of_pass ~source_lines:(Ok source_lines) pass (input_for_pass pass input))
+       with_working_contexts_rule)
+    with_turn_inputs
 ;;
 
 let resolve_librarian_prompt ~source_lines pass input =
@@ -379,15 +432,21 @@ let resolve_librarian_prompt ~source_lines pass input =
   | Ok variables ->
   let variables_with_rule =
     match pass with
-    | Memory_pass _ | Volatile_memory_pass _ | Working_context_pass -> with_working_contexts_rule variables
-    | Continuity_state_pass _ | Volatile_state_pass _ -> Ok variables
+    | Memory_pass _ | Volatile_memory_pass _ ->
+      Result.bind (with_working_contexts_rule variables) (fun variables ->
+        Result.bind (resolve_turn_input_prompts ()) (fun prompts ->
+          Result.map (fun variables -> variables, Some prompts.turn_inputs)
+            (with_turn_input_prompts prompts variables)))
+    | Working_context_pass ->
+      Result.map (fun variables -> variables, None) (with_working_contexts_rule variables)
+    | Continuity_state_pass _ | Volatile_state_pass _ -> Ok (variables, None)
   in
   match variables_with_rule with
   | Error detail -> variables, Error detail
-  | Ok variables ->
+  | Ok (variables, turn_inputs) ->
     ( variables
     , Result.map
-        (fun (resolution, rendered) -> { resolution; rendered })
+        (fun (resolution, rendered) -> { resolution; turn_inputs; rendered })
         (Prompt_registry.resolve_and_render_prompt_template
            (prompt_key_of_pass pass)
            variables) )
@@ -404,6 +463,7 @@ type durable_preparation = {
   parsing_now : float;
   policy : durable_policy;
   rule_prompt : Prompt_registry.prompt_resolution;
+  turn_prompts : turn_input_prompts;
   prompt : Prompt_registry.prompt_resolution;
   variables : (string * string) list;
   rendered_prompt : string;
@@ -453,7 +513,7 @@ let validate_resolution (resolution : Prompt_registry.prompt_resolution) =
 (* [continuity] is the document a floor step carries in the prompt's continuity
    slot, the same one the Runtime floor's Volatile_memory_pass renders there.
    Without it the slot keeps the placeholder every durable question has. *)
-let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~prompt source_input =
+let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~turn_prompts ~prompt source_input =
   let open Result.Syntax in
   let* rule=Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_working_contexts_rule rule_prompt [] in
@@ -465,7 +525,7 @@ let durable_substitutions ?continuity ~(policy:durable_policy) ~rule_prompt ~pro
     | None -> base
     | Some continuity ->
       ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
-  let variables=(working_contexts_rule_variable,String.trim rule)::base in
+  let* variables=with_turn_input_prompts turn_prompts ((working_contexts_rule_variable,String.trim rule)::base) in
   let+ rendered=Prompt_registry.render_resolved_prompt_template Prompt_names.librarian prompt variables in
   rule,variables,rendered
 let check_durable_preparation ?continuity ~expected_schema (preparation : durable_preparation) =
@@ -476,8 +536,11 @@ let check_durable_preparation ?continuity ~expected_schema (preparation : durabl
   let* ()=if policy.facts_max_bytes>0 && policy.category_cap>0 && policy.facts_per_category_cap>0
     then Ok () else Error "Original history Memory advisory limits are invalid" in
   let* ()=validate_resolution preparation.rule_prompt in
+  let* ()=validate_resolution preparation.turn_prompts.working_context_input in
+  let* ()=validate_resolution preparation.turn_prompts.turn_inputs in
   let* ()=validate_resolution preparation.prompt in
   let* rule,variables,rendered=durable_substitutions ?continuity ~policy ~rule_prompt:preparation.rule_prompt
+    ~turn_prompts:preparation.turn_prompts
     ~prompt:preparation.prompt preparation.source_input in
   let* ()=if preparation.variables=variables then Ok ()
     else Error "Original history Memory substitutions differ from captured input" in
@@ -489,22 +552,30 @@ let check_durable_preparation ?continuity ~expected_schema (preparation : durabl
 let validate_durable_preparation preparation =
   check_durable_preparation
     ~expected_schema:Keeper_structured_output_schema.librarian_current_output_schema preparation
-let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema =
+let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt
+    ~output_schema =
   let open Result.Syntax in
-  let* _rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~prompt source_input in
-  let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;prompt;
+  let* _rule,variables,rendered_prompt=durable_substitutions ~policy ~rule_prompt ~turn_prompts ~prompt
+    source_input in
+  let preparation : durable_preparation = {source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;
     variables;rendered_prompt;output_schema} in
   let+ ()=validate_durable_preparation preparation in preparation
 (* This is an admission check, not a restoration rule: old captures must keep
-   their original prompt and remain decodable even if it omitted the input. *)
-let require_counterpart_source ~(source_input : Keeper_librarian.input) ~prompt =
-  if source_input.counterpart_observations = []
-    || Prompt_registry.resolution_references_variable prompt
-         ~variable:"counterpart_observations"
-  then Ok ()
+   their original prompt and remain decodable even if it omitted the input.
+   The counterpart observations are turn material: they reach the model only
+   when the body places the turn-material slot and that slot places them. A
+   prompt rendered with no turn material shows no counterpart input. *)
+let require_counterpart_source ~(source_input : Keeper_librarian.input) ~prompt ~turn_inputs =
+  let shown = match turn_inputs with
+    | None -> false
+    | Some slot ->
+      Prompt_registry.resolution_references_variable prompt ~variable:turn_inputs_variable
+      && Prompt_registry.resolution_references_variable slot ~variable:"counterpart_observations" in
+  if source_input.counterpart_observations = [] || shown then Ok ()
   else Error "Librarian prompt must include {{counterpart_observations}} while counterpart input is pending"
 let require_counterpart_template (preparation : durable_preparation) =
   require_counterpart_source ~source_input:preparation.source_input ~prompt:preparation.prompt
+    ~turn_inputs:(Some preparation.turn_prompts.turn_inputs)
 let prepare_durable_with ?continuity ~output_schema ~now ~source_lines source_input =
   let open Result.Syntax in
   let policy : durable_policy = {
@@ -521,9 +592,10 @@ let prepare_durable_with ?continuity ~output_schema ~now ~source_lines source_in
     | None -> base
     | Some continuity ->
       ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
-  let variables=(working_contexts_rule_variable,String.trim rule)::base in
+  let* turn_prompts=resolve_turn_input_prompts () in
+  let* variables=with_turn_input_prompts turn_prompts ((working_contexts_rule_variable,String.trim rule)::base) in
   let* prompt,rendered_prompt=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
-  let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;prompt;
+  let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;turn_prompts;prompt;
     variables;rendered_prompt;output_schema} in
   let* ()=check_durable_preparation ?continuity ~expected_schema:output_schema preparation in
   let* ()=require_counterpart_template preparation in
@@ -553,13 +625,13 @@ let validate_durable_step_preparation (step : durable_step_preparation) =
     else Error "Original history floor step must not carry a working context" in
   check_durable_preparation ~continuity:(durable_step_continuity step.context)
     ~expected_schema:Keeper_structured_output_schema.librarian_continuity_output_schema step.preparation
-let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy ~rule_prompt ~prompt
-    ~output_schema =
+let restore_durable_step_preparation ~context ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts
+    ~prompt ~output_schema =
   let open Result.Syntax in
   let continuity=durable_step_continuity context in
-  let* _rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~prompt
-    source_input in
-  let step={context;preparation={source_input;parsing_now;policy;rule_prompt;prompt;variables;
+  let* _rule,variables,rendered_prompt=durable_substitutions ~continuity ~policy ~rule_prompt ~turn_prompts
+    ~prompt source_input in
+  let step={context;preparation={source_input;parsing_now;policy;rule_prompt;turn_prompts;prompt;variables;
     rendered_prompt;output_schema}} in
   let+ ()=validate_durable_step_preparation step in step
 (* A floor step reads the input the Runtime floor's volatile Memory pass reads.
@@ -589,10 +661,10 @@ let validate_admission_preparation ~batch ~retirement ~input preparation =
     ~retirement_prompt:preparation.retirement_prompt ~batch ~retirement in
   let* rule=Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_working_contexts_rule preparation.rule_prompt [] in
-  let variables=(working_contexts_rule_variable,String.trim rule)
+  let variables=without_turn_inputs ((working_contexts_rule_variable,String.trim rule)
     ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
       ~source_lines:policy.facts_source_lines
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input) in
   let* ()=if preparation.variables=variables then Ok ()
     else Error "Original Librarian prompt variables differ from captured input" in
   let* rendered=Prompt_registry.render_resolved_prompt_template
@@ -611,10 +683,10 @@ let prepare_admission ~batch ~retirement ~source_lines input =
   let* rule_prompt,rule=Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian_working_contexts_rule [] in
   let* ()=if String.trim rule<>"" then Ok () else Error "Librarian working-context rule rendered empty" in
-  let variables=(working_contexts_rule_variable,String.trim rule)
+  let variables=without_turn_inputs ((working_contexts_rule_variable,String.trim rule)
     ::Keeper_librarian.prompt_variables_with_policy ~facts_max_bytes:policy.facts_max_bytes
       ~source_lines:policy.facts_source_lines
-      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input in
+      ~category_cap:policy.category_cap ~facts_per_category_cap:policy.facts_per_category_cap input) in
   let* prompt,rendered=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
   let* admission_prompt,_=Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian_admission_policy [] in
@@ -1508,7 +1580,7 @@ let current_selection_registry_summary = function
 ;;
 
 let prompt_material_payload ~key = function
-  | Ok ({ resolution; rendered } : librarian_prompt_material) ->
+  | Ok ({ resolution; rendered; turn_inputs = _ } : librarian_prompt_material) ->
     `Assoc
       [ "key", `String key
       ; ( "source"
@@ -1818,12 +1890,13 @@ let run_pass
                    Result.bind material (fun (material : librarian_prompt_material) ->
                      Result.map (fun () -> material)
                        (require_counterpart_source ~source_input:prompt_input
-                          ~prompt:material.resolution))
+                          ~prompt:material.resolution ~turn_inputs:material.turn_inputs))
                  | Memory_pass (None, _) | Continuity_state_pass _ | Volatile_state_pass _
                  | Working_context_pass -> material in
                variables, material
              | Some (_, Ok prepared) -> prepared.variables,
-               Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
+               Ok {resolution=prepared.prompt;turn_inputs=Some prepared.turn_prompts.turn_inputs;
+                   rendered=prepared.rendered_prompt}
              | Some (_, Error detail) -> [],Error detail)
           | Some (batch, _) ->
             let prepared =
@@ -1839,7 +1912,8 @@ let run_pass
               let* source_lines = source_lines in
               prepare_admission ~batch ~retirement ~source_lines prompt_input in
             (match prepared with
-             | Ok prepared -> prepared.variables,Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
+             | Ok prepared -> prepared.variables,
+               Ok {resolution=prepared.prompt;turn_inputs=None;rendered=prepared.rendered_prompt}
              | Error detail -> [],Error detail) in
         let parsing_now=match durable_preparation with
           | Some (_, Ok prepared) -> prepared.parsing_now

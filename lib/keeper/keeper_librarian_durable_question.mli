@@ -1,5 +1,6 @@
 (** The host form of a durable Memory question. An original freezes the parse
-    time, the policy, both prompt resolutions and the output schema of its
+    time, the policy, the prompt resolutions (the rule, the two turn-material
+    slots and the [librarian] body) and the output schema of its
     [durable_preparation] and names the prompt it sent by digest. The input and
     the substitutions repeat other facts of the original, so a restored original
     renders them again from its own input and checks the digest. *)
@@ -7,6 +8,7 @@ type frozen = {
   parsing_now : float;
   policy : Keeper_librarian_runtime.durable_policy;
   rule_prompt : Prompt_registry.prompt_resolution;
+  turn_prompts : Keeper_librarian_runtime.turn_input_prompts;
   prompt : Prompt_registry.prompt_resolution;
   rendered_prompt_sha256 : string;
   output_schema : Yojson.Safe.t;

@@ -127,8 +127,9 @@ let destination_of_json json =
   destination
 let preparation_json = Question.to_json
 let preparation_of_json ~source_input json =
-  let* ({Question.parsing_now;policy;rule_prompt;prompt;output_schema;_} as frozen)=Question.of_json json in
-  let* p=Runtime.restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~prompt ~output_schema in
+  let* ({Question.parsing_now;policy;rule_prompt;turn_prompts;prompt;output_schema;_} as frozen)=Question.of_json json in
+  let* p=Runtime.restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt
+    ~output_schema in
   let+ ()=Question.rendered_matches frozen p in p
 
 type predecessor = {request_id:string;request_digest:string}

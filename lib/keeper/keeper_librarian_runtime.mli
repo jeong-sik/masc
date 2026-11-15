@@ -12,7 +12,9 @@ val messages_for_librarian
 
 (** Every variable the [librarian] template is rendered with for a Memory
     pass, with the [continuity] range when one is attached: the input's own
-    variables and the shared [working_contexts_rule] fragment. [source_lines]
+    variables, the shared [working_contexts_rule] fragment, and the turn
+    material rendered from the [librarian.working_context_input] and
+    [librarian.turn_inputs] slots. [source_lines]
     are the file-source store's {!Keeper_memory_source_current.budget_lines},
     which the facts budget counts with the input's current facts. *)
 val librarian_prompt_variables
@@ -377,11 +379,19 @@ type durable_policy = {
   category_cap : int;
   facts_per_category_cap : int;
 }
+(** The two slots of [librarian] that hold the turn material and the text that
+    reads it. Every pass but admission renders them into the body; admission
+    carries no turn material and leaves both variables empty (RFC-0517 §7.3). *)
+type turn_input_prompts = {
+  working_context_input : Prompt_registry.prompt_resolution;
+  turn_inputs : Prompt_registry.prompt_resolution;
+}
 type durable_preparation = {
   source_input : Keeper_librarian.input;
   parsing_now : float;
   policy : durable_policy;
   rule_prompt : Prompt_registry.prompt_resolution;
+  turn_prompts : turn_input_prompts;
   prompt : Prompt_registry.prompt_resolution;
   variables : (string * string) list;
   rendered_prompt : string;
@@ -389,15 +399,16 @@ type durable_preparation = {
 }
 val prepare_durable : now:float -> source_lines:string list -> Keeper_librarian.input ->
   (durable_preparation, string) result
-(** Resolve the original policy and both prompt assets once, on the caller
-    fiber. When counterpart input is present, the resolved prompt must reference
-    its substitution. The synchronous Memory pass consumes this same preparation. *)
+(** Resolve the original policy and the prompt assets once, on the caller
+    fiber. When counterpart input is present, the resolved turn-material slot
+    must reference its substitution. The synchronous Memory pass consumes this same preparation. *)
 val validate_durable_preparation : durable_preparation -> (unit, string) result
 (** Pure restoration check of the complete captured input, policy, resolutions,
     substitutions, rendered prompt and schema. No environment/prompt lookup. *)
 val require_counterpart_template : durable_preparation -> (unit, string) result
-(** Pure live-effect policy: a nonempty counterpart input requires its variable
-    in this frozen prompt, using the renderer's own placeholder parser. No
+(** Pure live-effect policy: a nonempty counterpart input requires the frozen
+    body to place the turn-material slot and that slot to place its variable,
+    using the renderer's own placeholder parser. No
     current prompt lookup or rewriting occurs. New questions, fresh dispatch,
     and unfinished publication must pass it, including a receipt-proved Memory
     commit whose external ACK is still pending. It grants no execution effect.
@@ -407,6 +418,7 @@ val require_counterpart_template : durable_preparation -> (unit, string) result
     receipts; fixing today's override cannot rewrite or replay that question. *)
 val restore_durable_preparation : source_input:Keeper_librarian.input -> parsing_now:float ->
   policy:durable_policy -> rule_prompt:Prompt_registry.prompt_resolution ->
+  turn_prompts:turn_input_prompts ->
   prompt:Prompt_registry.prompt_resolution -> output_schema:Yojson.Safe.t ->
   (durable_preparation, string) result
 (** Render the substitutions and prompt again from the captured input and the
@@ -473,7 +485,8 @@ val validate_durable_step_preparation : durable_step_preparation -> (unit, strin
     context and retained resolutions. No environment or prompt lookup. *)
 val restore_durable_step_preparation : context:durable_step_context ->
   source_input:Keeper_librarian.input -> parsing_now:float -> policy:durable_policy ->
-  rule_prompt:Prompt_registry.prompt_resolution -> prompt:Prompt_registry.prompt_resolution ->
+  rule_prompt:Prompt_registry.prompt_resolution -> turn_prompts:turn_input_prompts ->
+  prompt:Prompt_registry.prompt_resolution ->
   output_schema:Yojson.Safe.t -> (durable_step_preparation, string) result
 (** Render the substitutions and prompt again from the captured input, context
     and retained resolutions, then {!validate_durable_step_preparation}. *)

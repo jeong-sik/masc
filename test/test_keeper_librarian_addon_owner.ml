@@ -1536,7 +1536,7 @@ let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixt
       (`Assoc (("preparation",`Assoc (("retirement_prompt",`Assoc [])::
         List.remove_assoc "retirement_prompt" prepared_fields))::List.remove_assoc "preparation" fields));
     refuse "capture-with-old-schema" "Unknown original Librarian execution schema/kind"
-      (`Assoc (("schema",`Int 1)::List.remove_assoc "schema" fields))))
+      (`Assoc (("schema",`Int 2)::List.remove_assoc "schema" fields))))
 
 let test_missing_admission_policy_refuses_before_capture ()=with_fixture (fun ~sw:_ fixture ->
   with_missing_librarian_fragment "admission_policy" (fun () ->

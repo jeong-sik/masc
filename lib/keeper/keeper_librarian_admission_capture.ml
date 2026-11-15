@@ -254,7 +254,10 @@ let batch capture=capture.original_batch
 let input capture=capture.original_input
 let expected_revision capture=capture.revision
 let now capture=capture.parsing_now
-let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "execution";
+(* Schema 3: the preparation's substitutions carry the two turn-material slot
+   names, both empty. A schema 2 capture was prepared without them. *)
+let capture_schema=3
+let to_json capture = `Assoc ["schema",`Int capture_schema;"kind",`String "execution";
   "request_id",`String capture.id;"parent_part_id",`String capture.parent;"owner",owner_to_json capture.owner;
   "destination",Destination.to_json capture.destination;
   "candidate_ids",`List (List.map candidate_json (Queue.candidate_ids capture.original_batch));
@@ -314,7 +317,8 @@ let restore ~owner ~load_parent (retained:Owner.retained) =
     "candidate_ids";"batch_text";"input_text";"expected_revision";"now";"retirement_text";"preparation"] retained.request in
   let* schema=integer (value "schema" fields) in
   let* kind=nonblank (value "kind" fields) in
-  let* ()=if schema=2 && kind="execution" then Ok () else Error "Unknown original Librarian execution schema/kind" in
+  let* ()=if schema=capture_schema && kind="execution" then Ok ()
+    else Error "Unknown original Librarian execution schema/kind" in
   let* id=nonblank (value "request_id" fields) in
   let* parent=nonblank (value "parent_part_id" fields) in
   let* ()=owner_matches_json owner (value "owner" fields) in

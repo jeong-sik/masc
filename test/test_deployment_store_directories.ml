@@ -1073,7 +1073,7 @@ let test_current_librarian_payloads exe () = with_librarian_payload (fun fixture
     (String_util.contains_substring output "lane-addon tool request owners rows=3 refused=0"))
 let test_old_librarian_execution exe () = with_librarian_payload (fun fixture ->
   let record=replace_original_request fixture.root fixture.store fixture.parent
-    (fixture.parent.request |> replace_member "schema" (`Int 1)) in
+    (fixture.parent.request |> replace_member "schema" (`Int 2)) in
   assert_domain_refusal exe fixture record "Unknown original Librarian execution schema/kind")
 let test_missing_librarian_policy exe () = with_librarian_payload (fun fixture ->
   let prepared=Yojson.Safe.Util.member "preparation" fixture.parent.request |> Yojson.Safe.Util.to_assoc in

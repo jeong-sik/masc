@@ -33,6 +33,8 @@ import {
   emptyState,
   type FleetRow,
 } from './fleet-telemetry-utils'
+import { operatorDispositionReasonLabel } from './fsm-hub-types'
+import { attentionReasonLabel } from '../lib/keeper-attention-labels'
 
 // --- Helpers ---
 
@@ -239,6 +241,25 @@ describe('buildFleetRows runtime labels', () => {
       source: 'runtime_blocker_class',
       summary: 'no provider can satisfy tool surface',
     })
+  })
+
+  // The row hint is the only place the fleet table names why a Keeper needs
+  // attention, and the trust snapshot sends that reason as a wire token.
+  it.each([
+    ['attention_reason', { attention_reason: 'keeper_dashboard_worker_exception' }, attentionReasonLabel('keeper_dashboard_worker_exception', false)],
+    ['operator_disposition_reason', { operator_disposition_reason: 'runtime_fallback' }, operatorDispositionReasonLabel('runtime_fallback')],
+    ['disposition_reason', { disposition_reason: 'pending_operator_decision' }, attentionReasonLabel('pending_operator_decision', false)],
+  ] as const)('names the trust %s by its label, not the wire token', (_field, trust, label) => {
+    const [row] = buildFleetRows([
+      {
+        name: 'trust-keeper',
+        status: 'active',
+        keepalive_running: true,
+        trust: { needs_attention: true, ...trust },
+      },
+    ], EMPTY_TOOL_QUALITY)
+
+    expect(row?.runtime_trust_reason).toBe(label)
   })
 
 })

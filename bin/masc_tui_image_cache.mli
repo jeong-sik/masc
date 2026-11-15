@@ -139,21 +139,23 @@ val wait_bounded : ?cancelled:(unit -> bool) -> deadline_seconds:float -> int ->
 val stop_subprocesses : unit -> unit
 (** Prevent future bounded subprocesses and cancel and reap existing ones. *)
 
-val run_decoder :
-  run:(string -> Unix.process_status) -> output_path:string -> string ->
-  (string, decode_failure) result
-(** Run one command after discarding any old output, returning a nonempty
-    output file. Output from a failed command is removed. After a runner OS
-    failure or unexpected exception, the output is left for its owner to
-    remove, since callers may share the path. Never removes input bytes. *)
+val with_decoder_output :
+  run:(string -> Unix.process_status) -> cache_dir:string -> prefix:string -> suffix:string ->
+  (string -> string) -> ((string, decode_failure) result -> 'a) -> 'a
+(** [with_decoder_output ~run ~cache_dir ~prefix ~suffix command f] runs
+    [command output] and passes [f] the nonempty bytes it wrote. [output] is a
+    new empty file in [cache_dir], created with O_EXCL, so no other run is
+    handed its name while it exists. It stays in place while [f] runs and is
+    removed when [f] returns or raises. A failure to create it is
+    [Frame_unreadable]. Never removes input bytes. *)
 
 val convert_to_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->
   (string, conversion_failure) result
 (** Try the existing converter sequence, preserving every failed attempt's
-    typed status. A runner failure, signal or stop ends the sequence: a
-    descendant could still be writing the attempt path. Input is retained even
-    when no converter succeeds. *)
+    typed status. Each converter writes its own reserved output. A runner
+    failure, signal or stop ends the sequence: a descendant could still be
+    running. Input is retained even when no converter succeeds. *)
 
 val prepare_png :
   run:(string -> Unix.process_status) -> cache_dir:string -> string ->

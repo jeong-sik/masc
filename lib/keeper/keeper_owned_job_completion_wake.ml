@@ -27,25 +27,33 @@ let deliver ~on_result_ready (record : Store.record) =
   let stimulus : Keeper_event_queue.stimulus =
     {post_id=Keeper_event_queue.owned_job_completion_post_id completion;
      urgency=Immediate;arrived_at=Time_compat.now ();payload=Owned_job_completed completion} in
-  let* () = match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
+  match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
       ~base_path:record.base_path record.keeper_name stimulus with
-    | Keeper_registry_event_queue.Stimulus_enqueued | Stimulus_already_present -> Ok ()
-    | Stimulus_shutdown_reserved operation_id ->
-        Error (Store.Io_failed (Keeper_registry_event_queue.shutdown_reserved_detail operation_id))
-    | Stimulus_storage_error detail -> Error (Store.Io_failed detail) in
-  (* The exact completed output and notification are already durable. The
-     continuation observer can schedule its original DAG without a model turn. *)
-  (try on_result_ready record with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
-   | exn -> Log.Keeper.warn ~keeper_name:record.keeper_name
-       "owned job result observer failed job_id=%s: %s"
-       (Store.Job_id.to_string record.job_id) (Printexc.to_string exn));
-  (* Cleanup or producer ACK failure cannot suppress the committed queue's hint. *)
-  wake_hint record;
-  let* _ = Store.acknowledge_completion record in
-  (* Result delivery ends before cleanup I/O. Retain this discovery marker:
-     a later maintenance fiber settles the same acknowledged terminal owner. *)
-  Ok Delivered
+  (* A shutdown that holds the Keeper's intake is not a store failure. Nothing
+     is committed or acknowledged, so the delivery marker stays and the first
+     pass after the shutdown releases the intake delivers this result. The
+     shutdown announces itself, so the hold is a routine line. *)
+  | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
+    Log.Keeper.routine ~keeper_name:record.keeper_name
+      "owned job completion held by shutdown job_id=%s operation=%s"
+      (Store.Job_id.to_string record.job_id)
+      (Keeper_shutdown_types.Operation_id.to_string operation_id);
+    Ok (Waiting None)
+  | Stimulus_storage_error detail -> Error (Store.Io_failed detail)
+  | Stimulus_enqueued | Stimulus_already_present ->
+    (* The exact completed output and notification are already durable. The
+       continuation observer can schedule its original DAG without a model turn. *)
+    (try on_result_ready record with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Log.Keeper.warn ~keeper_name:record.keeper_name
+         "owned job result observer failed job_id=%s: %s"
+         (Store.Job_id.to_string record.job_id) (Printexc.to_string exn));
+    (* Cleanup or producer ACK failure cannot suppress the committed queue's hint. *)
+    wake_hint record;
+    let* _ = Store.acknowledge_completion record in
+    (* Result delivery ends before cleanup I/O. Retain this discovery marker:
+       a later maintenance fiber settles the same acknowledged terminal owner. *)
+    Ok Delivered
 
 let recover ?presence_round ?held_absent ~on_result_ready ~base_path (marker : Store.pending_delivery) =
   try

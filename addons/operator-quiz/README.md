@@ -21,7 +21,10 @@ reported as unavailable; original questions, answers and request blobs stay inta
 An installation may bind the `scenes` output of an `operator-lesson`
 installation in the same run. The quiz then keeps the pins each lesson output
 cited (`lesson_seen`), and a session opened under that binding asks new
-questions only from records it read that a lesson cited. Design:
+questions only from records it read that a lesson cited. That binding also
+gives `since`, the lesson's own: until a session has asked, a session that
+follows the lesson reads from it (`follows_lesson`), so the records the lesson
+cited are read. Design:
 [RFC](../../docs/rfc/RFC-operator-quiz-follows-lesson.md).
 
 - `quiz_log.py`: the log's events, the session fold, and the body store.

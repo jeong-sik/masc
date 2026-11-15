@@ -1543,8 +1543,17 @@ export interface KeeperConstitutionRejectedLine {
   detail: string
 }
 
+// A constitution ledger line that decoded but was written under a name the
+// keeper roster does not hold (its author, remover or replacer), so the
+// prompt leaves out the article ids it touches (RFC-0504 §2.4).
+export interface KeeperConstitutionIsolatedLine {
+  line: number
+  subject: string
+  article_ids: string[]
+}
+
 export type KeeperConstitutionLedgerPreview =
-  | { state: 'read'; rejected_lines: KeeperConstitutionRejectedLine[] }
+  | { state: 'read'; rejected_lines: KeeperConstitutionRejectedLine[]; isolated_lines: KeeperConstitutionIsolatedLine[] }
   | { state: 'unreadable'; path: string; detail: string }
 
 export type KeeperSystemPromptPreview =

@@ -19,7 +19,7 @@
 ### 1. 이미지 만들기
 
 ```sh
-docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.0 addons
+docker build -f addons/operator-quiz/Dockerfile -t masc-lane-operator-quiz:0.2.1 addons
 ```
 
 설치 조정(reconcile)은 이미지를 만들지 않는다. MASC 가 쓰는 엔진에 먼저 올려 둔다.
@@ -107,8 +107,8 @@ max_output_tokens = 2048
 ## 설치본 갱신과 출제 복구
 
 저장소 소스가 바뀌어도 실행 중인 설치 패키지는 자동으로 바뀌지 않는다. 패키지의
-`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.5.0` 이고,
-이미지 `0.2.0` 은 Python 과 공용 모듈 둘(`protocol.py`, `records.py`)을 담는 실행 환경이다. worker 코드는
+`revision` 과 설치 경로, 실제 worker 원본을 함께 확인한다. 현재 패키지는 `0.6.0` 이고,
+이미지 `0.2.1` 은 Python 과 공용 모듈 둘(`protocol.py`, `records.py`)을 담는 실행 환경이다. worker 코드는
 설치한 패키지 폴더를 `/addon` 에 읽기 전용으로 붙여 실행한다. `0.3.0` 은 관측 row 에
 `quiz/scorecard` 와 `quiz/review` 를 더했을 뿐 `log.jsonl` 의 모양은 그대로라, 아래
 갱신 절차대로 올려도 log 를 옮기지 않는다. `0.3.1` 은 Results 에 보이는 값의 선언만
@@ -123,6 +123,11 @@ max_output_tokens = 2048
 `0.5.0` 은 수업 출력을 묶을 수 있게 했다(「수업 뒤에 묻기」). log 에 새 사건이 생기지만
 `0.4.0` 이 쓴 log 는 그대로 읽힌다. 이미지는 `0.2.0` 그대로다. 수업을 묶은 뒤 `0.4.0` 으로
 되돌리면 새 사건이 든 log 를 읽지 못한다.
+`0.6.0` 은 수업을 묶은 선언에 `since` 를 받는다(「수업 뒤에 묻기」). 수업을 묶은 선언은
+`since` 없이 저장되지 않고, 묶지 않은 선언은 `since` 를 받지 않는다. 바뀐 `records.py` 가
+이미지 `0.2.1` 에 있어서 이미지를 먼저 만든다. 묶지 않은 설치의 log 는 그대로 읽힌다.
+`0.5.0` 이 수업을 묶은 세션에 적은 `follows_lesson` 줄에는 `since` 가 없다. 그 줄이 하나라도
+있으면 log 전체를 읽지 못한다. 그런 log 는 「정답 모양이 바뀐 revision 으로 올릴 때」처럼 옮겨 두고 빈 log 로 시작한다.
 
 1. 원본 로그와 요청 blob, 설치 선언 및 현재 instance/volume 식별자를 보관한다.
 2. 검증한 패키지를 새 불변 경로에 설치한다. 실행 중인 패키지 폴더를 덮어쓰지 않는다.
@@ -146,9 +151,11 @@ max_output_tokens = 2048
 
 [운영자 수업](operator-lesson.md)을 같이 쓰면, 퀴즈가 수업에 나온 기록에서만 새 문항을 내게 할 수 있다. 묶지 않으면 퀴즈는 지금까지처럼 읽은 기록 전체에서 낸다.
 
-퀴즈 설치 선언에 수업 설치의 `scenes` 출력을 더한다.
+퀴즈 설치 선언의 `[binding]` 에서 `sources = []` 를 지우고, 그 자리에 수업 선언의 `since` 와 수업 설치의 `scenes` 출력을 넣는다.
 
 ```toml
+since = 1794441600
+
 [[binding.sources]]
 source_id = "lesson"
 kind = "lane_output"
@@ -157,8 +164,11 @@ output_id = "scenes"
 selection = "latest_completed"
 ```
 
-맞춰야 하는 것이 셋이다.
+`since`, `language`, `timezone` 은 `[[binding.sources]]` 보다 위에 둔다. 아래에 두면 TOML 이 그 줄을 source 항목의 키로 읽어 선언이 저장되지 않는다.
 
+맞춰야 하는 것이 넷이다.
+
+- 퀴즈 선언의 `since` 를 수업 선언과 같게 둔다. 질문을 낸 세션이 아직 없으면 퀴즈는 이 시각부터 읽는다. 수업도 첫 수업을 이 시각부터 읽으므로, 수업이 인용한 기록을 퀴즈도 읽는다. `since` 를 빼면 선언이 저장되지 않는다. 수업을 묶지 않은 선언에 `since` 를 적어도 저장되지 않는다.
 - 두 설치 선언의 `run_id` 가 같아야 한다. 다르면 퀴즈는 수업 출력을 받지 못하고, `quiz/measures` 의 `lesson.source.detail` 에 `upstream installation belongs to another run` 이 나온다. `run_id` 를 바꿔 저장하면 worker 는 다시 뜨지만 volume 과 log 는 그대로다.
 - 두 선언이 같은 기록에 같은 `source_id` 를 써야 한다. 수업이 `board` 라고 부른 기록을 퀴즈가 `notes` 라고 부르면 같은 글이어도 맞지 않는다.
 - 퀴즈 Schedule 을 수업 Schedule 바로 뒤에 둔다. 이유는 아래 표에 있다.
@@ -289,11 +299,11 @@ Results 에 일곱 lane 이 나온다.
 
    ```sh
    docker inspect <container_id> --format '{{range .Mounts}}{{.Name}} {{end}}'
-   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.2.0 /state/operator-quiz /state/operator-quiz-<날짜>
+   docker run --rm -v <volume>:/state --entrypoint mv masc-lane-operator-quiz:0.2.1 /state/operator-quiz /state/operator-quiz-<날짜>
    ```
 
 4. `manifest_path` 를 새 package 로 바꾸고 `enabled = false` 를 지운다.
-5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다.
+5. 바로 `compose` 를 한 번 보낸다. 아직 문제를 낸 세션이 없으면 첫 세션이 열린 시각부터 기록을 읽는다. 그래서 이 세션은 `no_material` 로 끝나기 쉽지만, 다음 세션은 이 시각부터 쌓인 기록을 읽는다. 보내지 않으면 다음 정기 `compose` 가 첫 세션이 되어, 그 시각 전의 기록은 읽지 않는다. 수업을 묶은 설치는 첫 세션을 연 시각이 아니라 binding 의 `since` 부터 읽는다. 질문을 낸 세션이 생길 때까지 세션마다 그 시각부터 읽으므로, `since` 가 오래될수록 한 번에 읽는 기록이 많다.
 
 - 옮긴 log 는 volume 안에 그대로 남는다. 새 package 는 그 파일을 읽지 않는다.
 - 옮기기 전에 답한 문제의 풀이와 판정은 옮긴 log 에만 있다. 새 package 의 R, G, P 는 빈 log 에서 다시 센다.

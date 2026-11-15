@@ -254,6 +254,40 @@ let test_gate_approval_id_is_the_identity () =
     (Authority.authority_changed ~presented:(Some (gate "appr-a"))
        ~candidate:(Some (operator "appr-a")))
 
+let test_retry_reaches_only_a_listed_gate_row () =
+  (* R on a row the list still holds, but which Auto Judge never ruled on, is
+     a different refusal from R on a row that has left the list. *)
+  let listed = [ operator "token-a"; keeper "keeper-a" "call-a"; gate "appr-a" ] in
+  List.iter
+    (fun shown ->
+      match Authority.retry_target ~presented:(Some shown) ~current:listed with
+      | Authority.Not_retryable -> ()
+      | Authority.Row_gone -> fail "a row still listed was reported as gone"
+      | Authority.Retry_gate _ -> fail "a non-Gate row reached the Auto Judge retry")
+    [ operator "token-a"; keeper "keeper-a" "call-a" ];
+  List.iter
+    (fun shown ->
+      match Authority.retry_target ~presented:(Some shown) ~current:[ gate "appr-b" ] with
+      | Authority.Row_gone -> ()
+      | Authority.Not_retryable -> fail "a row that left the list was reported as listed"
+      | Authority.Retry_gate _ -> fail "a row that left the list reached the Auto Judge retry")
+    [ operator "token-a"; keeper "keeper-a" "call-a"; gate "appr-a" ];
+  let replayable =
+    match gate "appr-a" with
+    | Approvals.Gate_row pending ->
+      { pending with Tui_decode.gp_phase = Tui_decode.Gate_blocked;
+                     gp_retry_request = Some (`Assoc []) }
+    | Approvals.Keeper_tool_row _ | Approvals.Operator_row _ -> fail "expected Gate row" in
+  match
+    Authority.retry_target ~presented:(Some (gate "appr-a"))
+      ~current:[ operator "token-a"; Approvals.Gate_row replayable ]
+  with
+  | Authority.Retry_gate pending ->
+    check string "approval" "appr-a" pending.Tui_decode.gp_id;
+    check bool "the retry reads the row as the current list holds it" true
+      (Option.is_some pending.Tui_decode.gp_retry_request)
+  | Authority.Row_gone | Authority.Not_retryable -> fail "the listed Gate row was not retried"
+
 let test_authority_change_is_typed () =
   let operator_a = operator "token-a" in
   check bool "same operator token" false
@@ -454,6 +488,8 @@ let () =
             test_gate_detail_page_keeps_selection;
           test_case "Gate detail waits for presented mode" `Quick
             test_gate_detail_waits_for_presented_mode;
+          test_case "retry reaches only a listed Gate row" `Quick
+            test_retry_reaches_only_a_listed_gate_row;
           test_case "authority change is typed" `Quick
             test_authority_change_is_typed;
         ] );

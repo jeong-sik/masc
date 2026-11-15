@@ -22,7 +22,8 @@ type refusal =
   | Account_server_on_another_port of { pid : int; port : int }
   | Account_server_without_answer of { pid : int }
   | Owner_unverifiable of string
-  | Stop_refused of Upgrade.error
+  | Stop_refused of { pid : int; error : Upgrade.error }
+      (* [pid] is the process the stop was for, as the kernel names it. *)
   | Log_unopenable of { path : string; reason : string }
   | Spawn_failed of string
 
@@ -92,8 +93,13 @@ let json_field name body =
   | exception Yojson.Json_error _ -> None
 
 let stop_error_message = function
-  | Upgrade.Admin_required ->
-    "the running server refused local operator access; sign in and run restart again"
+  | Upgrade.Sign_in_failed ->
+    "this MASC got no local operator credential to send: signing in to the workspace failed \
+     (its reason is printed above), or the credential it wrote could not be read back"
+  | Admin_required ->
+    "the running server refused (401 or 403) the operator credential that this MASC had just \
+     checked or written for the workspace; this MASC accepts that credential and the server \
+     does not, and signing in again only writes another one this MASC accepts"
   | Server_starting ->
     "the running server is still starting; run restart again once it is ready"
   | Admin_check_unanswered ->
@@ -195,14 +201,20 @@ let refusal_message ~run_dir ~base_path ~port = function
   | Owner_unverifiable reason ->
     Printf.sprintf "The owner of %s could not be checked (%s). Nothing was stopped or started."
       base_path reason
-  | Stop_refused (Upgrade.Not_confirmed { listener; departure }) ->
+  | Stop_refused { pid = (_ : int); error = Upgrade.Not_confirmed { listener; departure } } ->
     (* The server restart had checked left before the stop request: its pid
        and what the kernel names now are said, not only that it changed. *)
     Upgrade.departure_sentence listener departure ^ " Nothing was stopped or started."
+  | Stop_refused { pid; error = Upgrade.Admin_required } ->
+    Printf.sprintf "The stop request was not sent: %s. Stop pid %d yourself (send it SIGTERM \
+                    and wait for it to exit), then run `masc start`."
+      (stop_error_message Upgrade.Admin_required) pid
   | Stop_refused
-      (( Upgrade.Admin_required | Upgrade.Server_starting | Upgrade.Admin_check_unanswered
-       | Upgrade.Incumbent_changed | Upgrade.Owner_unavailable | Upgrade.Invalid_health
-       | Upgrade.Already_requested | Upgrade.Closed | Upgrade.Port_unavailable ) as error) ->
+      { pid = (_ : int);
+        error =
+          ( Upgrade.Sign_in_failed | Upgrade.Server_starting | Upgrade.Admin_check_unanswered
+          | Upgrade.Incumbent_changed | Upgrade.Owner_unavailable | Upgrade.Invalid_health
+          | Upgrade.Already_requested | Upgrade.Closed | Upgrade.Port_unavailable ) as error } ->
     Printf.sprintf "The stop request was not sent: %s." (stop_error_message error)
   | Log_unopenable { path; reason } ->
     Printf.sprintf "The log file %s could not be opened (%s). A server named above as asked \
@@ -364,7 +376,8 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
       let* () =
         Masc_cli_owner_upgrade.with_selected_owner ~sw ~clock ~listener ~agent
           ~expected_version:version ~login Upgrade.request_termination
-        |> Result.map_error (fun error -> Stop_refused error)
+        |> Result.map_error (fun error ->
+          Stop_refused { pid = Upgrade.listener_pid listener; error })
       in
       Printf.printf "Asked masc %s (pid %d) on port %d to stop.\n%!" version
         (Upgrade.listener_pid listener) port;
@@ -372,7 +385,7 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
     | This_account_server { version; pid } ->
       let* () =
         Upgrade.stop_account_server ~run_dir ~base_path ~port
-        |> Result.map_error (fun error -> Stop_refused error)
+        |> Result.map_error (fun error -> Stop_refused { pid; error })
       in
       let named = match version with Some version -> " masc " ^ version | None -> "" in
       Printf.printf "Asked the account server%s (pid %d) on port %d to stop.\n%!" named pid port;

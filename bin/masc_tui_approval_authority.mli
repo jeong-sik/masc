@@ -12,6 +12,23 @@ val resolve :
     mutable cursor's current index. A presented identity absent from [current]
     produces no effect. *)
 
+type retry_target =
+  | Retry_gate of Masc_tui_types.Tui_decode.gate_pending
+      (** The presented Gate row, as the current list now holds it. *)
+  | Row_gone
+      (** The current list holds no row the last frame presented: that frame
+          showed none, or the one it showed has left the list. *)
+  | Not_retryable
+      (** The presented row is still listed, but it is an operator
+          confirmation or a held Keeper tool call: Auto Judge never ruled on
+          it, so there is nothing to retry. *)
+
+val retry_target :
+  presented:Masc_tui_approvals_model.approval_row option ->
+  current:Masc_tui_approvals_model.approval_row list ->
+  retry_target
+(** What [R] acts on, found by the identity last presented like {!resolve}. *)
+
 val authority_changed :
   presented:Masc_tui_approvals_model.approval_row option ->
   candidate:Masc_tui_approvals_model.approval_row option ->

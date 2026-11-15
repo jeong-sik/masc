@@ -1,9 +1,9 @@
 id = "operator-quiz"
-revision = "0.5.0"
+revision = "0.6.0"
 title = "Operator quiz"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
-image = "masc-lane-operator-quiz:0.2.0"
+image = "masc-lane-operator-quiz:0.2.1"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.actions]
@@ -34,48 +34,96 @@ max_reply_bytes = 4194304
 [interface]
 binding_schema = '''{
   "type": "object",
-  "properties": {
-    "sources": {"type": "array", "maxItems": 1,
-      "items": {"type": "object",
-        "properties": {
-          "source_id": {"type": "string", "minLength": 1},
-          "kind": {"type": "string", "const": "lane_output"},
-          "installation_id": {"type": "string", "minLength": 1,
-            "description": "The operator-lesson installation, in the same run as this one"},
-          "output_id": {"type": "string", "const": "scenes"},
-          "selection": {"type": "string", "const": "latest_completed"}},
-        "required": ["source_id", "kind", "installation_id", "output_id", "selection"],
-        "additionalProperties": false},
-      "description": "Empty, or the scenes output of one operator-lesson installation. With it, new questions come only from records the quiz read that a lesson cited; both declarations must give those records the same source_id. Records are read through binding.records either way."},
-    "language": {"type": "string", "minLength": 1,
-      "description": "The language every question is written in, such as ko"},
-    "timezone": {"type": "string", "minLength": 1,
-      "description": "The operator's IANA time zone, such as Asia/Seoul. A later local day in it is what makes a re-ask count for R."},
-    "records": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "properties": {
-          "source_id": {"type": "string", "minLength": 1},
-          "kind": {"type": "string", "enum": ["board", "repository", "wiki", "github_pulls"]},
-          "visibilities": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"type": "string", "enum": ["public", "unlisted", "internal", "direct"]},
-            "description": "Board only. Every post in these visibilities can reach the provider of each slot bound to this installation's author output in runtime.toml. Before adding internal, or naming direct, confirm that each of those providers may receive such posts."
+  "oneOf": [
+   {"type": "object", "title": "Quiz on its own",
+    "properties": {
+      "sources": {"type": "array", "maxItems": 0,
+        "items": {"type": "object",
+          "properties": {
+            "source_id": {"type": "string", "minLength": 1},
+            "kind": {"type": "string", "const": "lane_output"},
+            "installation_id": {"type": "string", "minLength": 1,
+              "description": "The operator-lesson installation, in the same run as this one"},
+            "output_id": {"type": "string", "const": "scenes"},
+            "selection": {"type": "string", "const": "latest_completed"}},
+          "required": ["source_id", "kind", "installation_id", "output_id", "selection"],
+          "additionalProperties": false},
+        "description": "Empty: new questions come from any record the quiz reads through binding.records."},
+      "language": {"type": "string", "minLength": 1,
+        "description": "The language every question is written in, such as ko"},
+      "timezone": {"type": "string", "minLength": 1,
+        "description": "The operator's IANA time zone, such as Asia/Seoul. A later local day in it is what makes a re-ask count for R."},
+      "records": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "source_id": {"type": "string", "minLength": 1},
+            "kind": {"type": "string", "enum": ["board", "repository", "wiki", "github_pulls"]},
+            "visibilities": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "enum": ["public", "unlisted", "internal", "direct"]},
+              "description": "Board only. Every post in these visibilities can reach the provider of each slot bound to this installation's author output in runtime.toml. Before adding internal, or naming direct, confirm that each of those providers may receive such posts."
+            },
+            "repository_id": {"type": "string", "minLength": 1, "description": "Repository and github_pulls only: a registered repository"},
+            "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
+              "description": "Repository only: files, or folders ending in /, such as changelog.d/"}
           },
-          "repository_id": {"type": "string", "minLength": 1, "description": "Repository and github_pulls only: a registered repository"},
-          "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
-            "description": "Repository only: files, or folders ending in /, such as changelog.d/"}
-        },
-        "required": ["source_id", "kind"],
-        "additionalProperties": false
+          "required": ["source_id", "kind"],
+          "additionalProperties": false
+        }
       }
-    }
-  },
-  "required": ["sources", "language", "timezone", "records"],
-  "additionalProperties": false
+    },
+    "required": ["sources", "language", "timezone", "records"],
+    "additionalProperties": false},
+   {"type": "object", "title": "Quiz after a lesson",
+    "properties": {
+      "sources": {"type": "array", "minItems": 1, "maxItems": 1,
+        "items": {"type": "object",
+          "properties": {
+            "source_id": {"type": "string", "minLength": 1},
+            "kind": {"type": "string", "const": "lane_output"},
+            "installation_id": {"type": "string", "minLength": 1,
+              "description": "The operator-lesson installation, in the same run as this one"},
+            "output_id": {"type": "string", "const": "scenes"},
+            "selection": {"type": "string", "const": "latest_completed"}},
+          "required": ["source_id", "kind", "installation_id", "output_id", "selection"],
+          "additionalProperties": false},
+        "description": "The scenes output of one operator-lesson installation. New questions come only from records the quiz read that the lesson cited; both declarations must give those records the same source_id. Records are read through binding.records either way."},
+      "since": {"type": "number", "minimum": 0,
+        "description": "Unix time in seconds. Until a session has asked, a session reads records made from then on. Give the lesson declaration's since, so the records the lesson cites are read."},
+      "language": {"type": "string", "minLength": 1,
+        "description": "The language every question is written in, such as ko"},
+      "timezone": {"type": "string", "minLength": 1,
+        "description": "The operator's IANA time zone, such as Asia/Seoul. A later local day in it is what makes a re-ask count for R."},
+      "records": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "properties": {
+            "source_id": {"type": "string", "minLength": 1},
+            "kind": {"type": "string", "enum": ["board", "repository", "wiki", "github_pulls"]},
+            "visibilities": {
+              "type": "array",
+              "minItems": 1,
+              "items": {"type": "string", "enum": ["public", "unlisted", "internal", "direct"]},
+              "description": "Board only. Every post in these visibilities can reach the provider of each slot bound to this installation's author output in runtime.toml. Before adding internal, or naming direct, confirm that each of those providers may receive such posts."
+            },
+            "repository_id": {"type": "string", "minLength": 1, "description": "Repository and github_pulls only: a registered repository"},
+            "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1},
+              "description": "Repository only: files, or folders ending in /, such as changelog.d/"}
+          },
+          "required": ["source_id", "kind"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": ["sources", "since", "language", "timezone", "records"],
+    "additionalProperties": false}
+  ]
 }'''
 presentation = '''{
   "description": "Questions from the workspace's own records, answered in Approvals",

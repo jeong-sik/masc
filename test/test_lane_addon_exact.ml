@@ -488,7 +488,7 @@ let test_original_consumer_recovers_proof_without_worker_rpc () =
     require (Store.save_exact_request store ~declaration_id
       ~request_id:original.request_id unpublished);
     let calls=ref 0 in
-    let result=Submit.resume ~store ~label:"Proven original" ~original:retained
+    let result=Submit.resume_retained ~store ~label:"Proven original" ~original:retained
       ~request:original ~schema ~decode_final:(Exact.final_of_json ~schema)
       ~prepare:(fun () -> fail "recovery requested fresh admission")
       ~call:(fun ~arguments:_ -> incr calls; fail "recovery contacted the worker")
@@ -539,6 +539,66 @@ let proof_address original =
   let tuple values=Yojson.Safe.to_string (`List values) in
   tuple [`String "exact-original-execution";`String declaration_id],
   tuple [`String "original-request";`String original.Exact.request_id;`String (Exact.digest original)]
+
+(* A waiting owner reads the host record by the request's ID and digest. *)
+let test_an_open_record_is_observed_by_identity () =
+  with_root (fun root ->
+    let store = Store.create ~root in
+    let observe_open identity = Eio_unix.run_in_systhread (fun () ->
+      Exact.observe_open ~store ~declaration_id identity) in
+    let is expected identity = match observe_open identity with
+      | Ok actual -> actual = expected
+      | Error _ -> false in
+    let invalid identity = match observe_open identity with
+      | Error (Exact.Recovery_invalid _) -> true
+      | Error (Exact.Recovery_unavailable _) | Ok _ -> false in
+    let record ?(digest_of) (stored : Exact.request) = `Assoc
+      [ "declaration_id", `String declaration_id; "request_id", `String stored.request_id
+      ; "digest", `String (Exact.digest (Option.value digest_of ~default:stored))
+      ; "request", Exact.request_to_json stored
+      ; "attempts", `List [other_process_marker]; "final", `Null ] in
+    let original = request "o1" in
+    check bool "no record and no link is No_record" true (is Exact.No_record (Exact.identity original));
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o1" (record original));
+    check bool "a self-consistent open record of the same digest is Open" true
+      (is Exact.Open (Exact.identity original));
+    check bool "the digest an owner kept names the same record" true
+      (is Exact.Open (Exact.identity_of_digest ~request_id:"o1" ~digest:(Exact.digest original)));
+    check bool "another caller digest is invalid" true
+      (invalid (Exact.identity (request ~message:"Another input." "o1")));
+    let instance_id, link_id = proof_address original in
+    require (Store.save_host_result store ~instance_id ~request_id:link_id (`Assoc ["executions", `List []]));
+    check bool "an execution link needs the whole request, whatever it holds" true
+      (is Exact.Needs_request (Exact.identity original));
+    let forged = request ~message:"Another input." "o2" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o2"
+      (record ~digest_of:(request "o2") forged));
+    check bool "a stored request that is not the one its digest names is invalid" true
+      (invalid (Exact.identity (request "o2")));
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o5" (match record (request "o6") with
+      | `Assoc fields -> `Assoc (("request_id", `String "o5") :: List.remove_assoc "request_id" fields)));
+    check bool "a stored request of another ID is invalid" true
+      (invalid (Exact.identity_of_digest ~request_id:"o5" ~digest:(Exact.digest (request "o6"))));
+    let disordered = request "o7" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o7" (match record disordered with
+      | `Assoc fields -> `Assoc (("attempts", `List [other_process_marker; other_process_marker])
+          :: List.remove_assoc "attempts" fields)));
+    check bool "an open record with two started attempts is invalid" true
+      (invalid (Exact.identity disordered));
+    let linked = request "o3" in
+    let instance_id, link_id = proof_address linked in
+    require (Store.save_host_result store ~instance_id ~request_id:link_id (`Assoc ["executions", `List []]));
+    check bool "a link without a record needs the whole request" true
+      (is Exact.Needs_request (Exact.identity linked));
+    check bool "and that read refuses it as it does now" true
+      (match Eio.Cancel.protect (fun () -> Eio_unix.run_in_systhread (fun () ->
+         Exact.recover_retained ~store ~declaration_id ~schema linked)) with
+       | Error (Exact.Recovery_invalid _) -> true
+       | Error (Exact.Recovery_unavailable _) | Ok _ -> false);
+    let runner, _, _ = counting_runner store (ref [Answer question]) in
+    check bool "a request is answered" true (answered_with question (run_request store runner (request "o4")));
+    check bool "a record with a final needs the whole request" true
+      (is Exact.Needs_request (Exact.identity (request "o4"))))
 
 (* A proof names its request by request_id and digest and holds no request
    body (RFC exact-request-skips-a-slot-that-refused-its-input, section 3.3).
@@ -1801,6 +1861,8 @@ let () =
             test_a_retained_answer_is_checked_against_the_schema_declared_now
         ; test_case "confirmed proof recovers lost outcome publication" `Quick
             test_confirmed_proof_recovers_lost_outcome_publication
+        ; test_case "an open record is observed by ID and digest" `Quick
+            test_an_open_record_is_observed_by_identity
         ; test_case "v2 proof recovers lost outcome publication" `Quick
             test_v2_proof_recovers_lost_outcome_publication
         ; test_case "original consumer recovers proof without worker RPC" `Quick

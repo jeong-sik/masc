@@ -32,6 +32,12 @@ let command_ok = function
 
 let keeper_name = "wait-resume-keeper"
 
+let notify (config : Workspace.config) =
+  get
+    (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name
+     |> Result.map_error Keeper_client_tool_outbox_wake.notify_error_to_string)
+;;
+
 let with_workspace f =
   let base_path = Filename.temp_file "masc_receipt_wait_resume_" "" in
   Unix.unlink base_path;
@@ -219,14 +225,14 @@ let test_notify_resumes_the_waiting_task () =
   with_workspace (fun ~sw ~clock config ->
     let request_id = "kmsg-arrived" in
     let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
-    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    notify config;
     check int "no receipt yet: nothing resumed" 1 !(task.attempts);
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
     check bool "the owner's run reads it" true
       (outbox_has config ~viewer:(Outbox.Owner_and_unowned task.scope) request_id);
     check bool "another run does not" false
       (outbox_has config ~viewer:Outbox.Unowned_only request_id);
-    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    notify config;
     await ~clock task.finished;
     check int "the task was claimed again after its receipt arrived" 2 !(task.attempts);
     check int "the owned receipt got no stimulus" 0 (List.length (queued_receipt_hints config)))
@@ -263,7 +269,7 @@ let test_a_task_waits_for_every_request () =
     check (list string) "both requests are owned and pending" [ first; second ]
       (pending_requests config);
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id:first));
-    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    notify config;
     check int "one receipt is not enough" 1 !(task.attempts);
     check (list string) "the other request is still pending" [ second ]
       (pending_requests config);
@@ -272,7 +278,7 @@ let test_a_task_waits_for_every_request () =
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id:second));
     check bool "the second receipt is hidden from other runs" false
       (outbox_has config ~viewer:Outbox.Unowned_only second);
-    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    notify config;
     await ~clock task.finished;
     check int "the last receipt resumed the task" 2 !(task.attempts);
     check bool "the resumed run reads the first receipt" true
@@ -426,7 +432,7 @@ let test_a_late_sweep_after_the_receipt_was_consumed_writes_nothing () =
     let request_id = "kmsg-consumed" in
     let task = start_waiting_task ~sw ~clock config ~request_ids:[ request_id ] in
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
-    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    notify config;
     await ~clock task.finished;
     get
       (Outbox.acknowledge
@@ -456,7 +462,7 @@ let test_a_late_sweep_while_the_resumed_run_works_writes_nothing () =
       start_waiting_task ~hold_resume:release ~sw ~clock config ~request_ids:[ request_id ]
     in
     get (Outbox.retain ~base_path:config.base_path ~keeper_name (receipt_for ~request_id));
-    get (Keeper_client_tool_outbox_wake.notify ~base_path:config.base_path ~keeper_name);
+    notify config;
     await ~clock task.resumed;
     get
       (Outbox.acknowledge

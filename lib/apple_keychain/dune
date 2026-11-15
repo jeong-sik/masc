@@ -2,6 +2,7 @@
 (library
  (name apple_keychain)
  (public_name masc.apple_keychain)
+ (libraries unix)
  (foreign_stubs (language c) (names apple_keychain_stubs))
  (c_library_flags (:include framework_flags.sexp)))
 (rule

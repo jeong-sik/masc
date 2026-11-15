@@ -104,8 +104,10 @@ val prepare
     naming another principal refuses the same way, since keyring-first CLI reads
     would resume that account, and so does a readable item that does not
     decode to a known login. A missing or unreadable item leaves the file
-    authoritative; an item the CLI wrote is unreadable here, because its ACL
-    admits only /usr/bin/security. The principal is the login's email, so a
+    authoritative. The CLI writes the item through /usr/bin/security and
+    {!Apple_keychain.read} reads it through the same tool, so an unreadable
+    item is a locked keychain or one security(1) could read only through a
+    dialog. The principal is the login's email, so a
     source login for an address Google gave to another account selects the
     previous holder's generation, and its managed credential stays in use.
     A missing pointer is first-time setup

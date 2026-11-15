@@ -8,9 +8,9 @@
 #include <Security/Security.h>
 #include <string.h>
 
-/* The creating executable gets its own trusted ACL/partition. The denied
- * fixture is created by security(1) instead, so it has a different owner. */
-CAMLprim value masc_test_keychain_add_allowed(value path) {
+/* The creating executable gets its own trusted ACL/partition, so only this
+ * test executable may decrypt the item: security(1) would need a dialog. */
+CAMLprim value masc_test_keychain_add_trusting_this_executable(value path) {
   SecKeychainRef keychain = NULL;
   const char *credential = "dummy-antigravity-credential";
   OSStatus status = SecKeychainOpen(String_val(path), &keychain);
@@ -18,7 +18,7 @@ CAMLprim value masc_test_keychain_add_allowed(value path) {
     status = SecKeychainAddGenericPassword(keychain, 6, "gemini", 11, "antigravity",
                                          (UInt32)strlen(credential), credential, NULL);
   if (keychain) CFRelease(keychain);
-  if (status != errSecSuccess) caml_failwith("cannot add allowed fixture item");
+  if (status != errSecSuccess) caml_failwith("cannot add fixture item trusting this executable");
   return Val_unit;
 }
 
@@ -40,7 +40,7 @@ CAMLprim value masc_test_keychain_set_interaction(value allowed) {
 #include <caml/mlvalues.h>
 #include <caml/fail.h>
 
-CAMLprim value masc_test_keychain_add_allowed(value path) {
+CAMLprim value masc_test_keychain_add_trusting_this_executable(value path) {
   (void)path;
   caml_failwith("macOS Keychain test fixtures require macOS");
 }

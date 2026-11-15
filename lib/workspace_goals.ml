@@ -1009,13 +1009,22 @@ let answer_verifying_repeat ?evidence_refs ?expected_verification ~tool_name ~st
         | Goal_phase.Verifying, Some {Goal_verification.completion=Proof_pending {request_id; _}; _} ->
           let store = Lane_addon_store.of_config ctx.config in
           Goal_verifier_worker.request_retry ~store
+            ~authority:(fun () -> Verification_authority_tools.create_goal_review ~config:ctx.config ~goal_id)
             ~installation_id:Goal_verifier_worker.host_installation_id
             ~package_id:Goal_verifier_worker.host_package_id ~goal_id ~request_id
             ~requested_by:ctx.agent_name ~new_run:(fun () ->
               {Goal_verifier_worker.run_id=Random_id.uuid_v7 (); started_at=Time_compat.now ()})
           |> Result.map_error (function
             | Goal_verifier_worker.Execution_pending detail -> Refused (refuse Conflict detail)
-            | (Goal_verifier_worker.Store_unavailable _ | Original_invalid _ | Authority_changed _) as error ->
+            (* Both are found before this request stages a next attempt, so
+               the refusal is definite. *)
+            | Goal_verifier_worker.Question_changed as error ->
+              Refused (refuse Conflict (Goal_verifier_worker.error_to_string error))
+            | Goal_verifier_worker.Authority_unavailable _ as error ->
+              Refused (refuse Internal_error
+                ("Goal retry not staged: " ^ Goal_verifier_worker.error_to_string error))
+            | (Goal_verifier_worker.Store_unavailable _ | Original_invalid _ | Destination_mismatch _
+              | Authority_changed _) as error ->
               Refused (refuse Internal_error
                 ("Goal retry publication unconfirmed: " ^ Goal_verifier_worker.error_to_string error)))
         | (Goal_phase.Executing | Awaiting_confirmation | Completed | Dropped | Paused _ | Blocked _), _

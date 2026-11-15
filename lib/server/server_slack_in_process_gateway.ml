@@ -526,34 +526,55 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
     None
 
 (* Inbound identity rendering (issue #28376): resolve the author's display
-   label and rewrite [<@U…>] mention escapes before the event reaches the
-   triggered/ambient lanes, so keeper prompts and durable transcripts carry
-   names instead of raw ids. Rendering only — [user_id] stays the identity
-   key everywhere (dedup, speaker_id, continuation channels). Runs after
-   [decode_event], so [mentions_bot] was already detected on the raw wire
-   text. Without a directory (no bot token) events pass through unchanged. *)
+   label before the event reaches the triggered/ambient lanes, so keeper
+   prompts and durable transcripts carry a name instead of a raw id.
+   Rendering only — [user_id] stays the identity key everywhere (dedup,
+   speaker_id, continuation channels). Mentions in the text are rendered
+   later, by [rewrite_mentions], once the channel's Keeper is known. Without
+   a directory (no bot token) events pass through unchanged. *)
 let resolve_event_identity ?user_directory (ev : Gw.slack_event) =
   match user_directory with
   | None -> ev
   | Some directory ->
     (match ev with
-     | Gw.Message_create ({ user_id; user_name; text; _ } as message) ->
+     | Gw.Message_create ({ user_id; user_name; _ } as message) ->
        let user_name =
          match user_name with
          | Some _ as supplied -> supplied
          | None -> Slack_user_directory.display_label directory ~user_id
        in
-       Gw.Message_create
-         { message with
-           user_name
-         ; text = Slack_user_directory.rewrite_mentions directory text
-         }
-     | Gw.App_mention ({ text; _ } as mention) ->
-       Gw.App_mention
-         { mention with
-           text = Slack_user_directory.rewrite_mentions directory text
-         }
-     | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev)
+       Gw.Message_create { message with user_name }
+     | Gw.App_mention _ | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev)
+
+(* Mention rendering (issues #28376, #28401): [<@U…>] escapes become [@label]
+   before the text reaches keeper prompts and durable transcripts. It waits
+   for the channel binding because one mention cannot be named without it:
+   the bot's own. One Slack app serves every bound channel, so the bot's
+   mention means the Keeper this channel is bound to and is written as that
+   Keeper's name. Runs after [decode_event], so [mentions_bot] was already
+   detected on the raw wire text. Without a directory (no bot token) the wire
+   text passes through. *)
+let rewrite_mentions ?user_directory ?bot_user_id ~keeper_name text =
+  match user_directory with
+  | None -> text
+  | Some directory ->
+    let self : Slack_user_directory.self =
+      match bot_user_id with
+      | None -> Slack_user_directory.Bot_user_id_unknown
+      | Some bot_user_id ->
+        Slack_user_directory.Bound_keeper { bot_user_id; keeper_name }
+    in
+    Slack_user_directory.rewrite_mentions directory ~self text
+
+let rewrite_event_mentions ?user_directory ?bot_user_id ~keeper_name
+    (ev : Gw.slack_event) =
+  let rewrite = rewrite_mentions ?user_directory ?bot_user_id ~keeper_name in
+  match ev with
+  | Gw.Message_create ({ text; _ } as message) ->
+    Gw.Message_create { message with text = rewrite text }
+  | Gw.App_mention ({ text; _ } as mention) ->
+    Gw.App_mention { mention with text = rewrite text }
+  | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev
 
 (* What the directory found, written down, and what it did not find, read back.
 
@@ -611,8 +632,8 @@ let accepted_receipt (accepted : accepted_inbound) =
       | Gate_protocol.Acceptance_uncertain | Gate_protocol.Lost ->
         ingress_refusal "connector operation acceptance is unconfirmed"
 
-let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_delivery
-    ~clock ~base_dir (ev : Gw.slack_event) =
+let submit_event ?deliver ?team_id ?user_directory ?bot_user_id ingress
+    ~dispatch_for_delivery ~clock ~base_dir (ev : Gw.slack_event) =
   let ev = resolve_event_identity ?user_directory ev in
   let ev = remember_resolved_names ~base_dir ev in
   let submit ~channel_id ~event_id =
@@ -623,6 +644,13 @@ let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_deliver
       Log.Server.error "Slack ingress binding unavailable channel=%s event=%s: %s" channel_id event_id detail;
       ingress_refusal detail
     | Ok resolved_binding ->
+      let ev =
+        match resolved_binding with
+        | None -> ev (* unbound: [accept_inbound] drops it unread *)
+        | Some resolution ->
+          rewrite_event_mentions ?user_directory ?bot_user_id
+            ~keeper_name:resolution.State.keeper_name ev
+      in
       match accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ev with
       | None -> Ok (Gw.Intentionally_ignored Gw.Unbound_channel)
       | Some accepted ->
@@ -677,8 +705,9 @@ let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_deliver
    plus a single user line, commit the exact event as a durable
    [Connector_attention] stimulus, then offer a best-effort wake hint — no
    dispatch, no turn. Unbound channels drop, as on the dispatch path. *)
-let handle_ambient ~recover_triggered ~base_dir ~team_id ~channel_id
-    ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot () =
+let handle_ambient ~recover_triggered ?user_directory ?bot_user_id ~base_dir
+    ~team_id ~channel_id ~thread_ts ~user_id ~user_name ~text ~files ~ts
+    ~mentions_bot () =
   match State.resolve_keeper_for_channel_result ~channel_id with
   | Error reason ->
     Slack_observability.record_ambient Slack_observability.Ambient_binding_store_error;
@@ -688,6 +717,11 @@ let handle_ambient ~recover_triggered ~base_dir ~team_id ~channel_id
     Ok (Gw.Intentionally_ignored Gw.Unbound_channel)
   | Ok (Some resolution) ->
     let keeper_name = resolution.State.keeper_name in
+    let text =
+      Gw.text_with_files
+        ~text:(rewrite_mentions ?user_directory ?bot_user_id ~keeper_name text)
+        ~files
+    in
     if String.equal (String.trim text) "" then begin
       Slack_observability.record_ambient Slack_observability.Ambient_dropped_empty;
       Ok (Gw.Intentionally_ignored Gw.Empty_message)
@@ -707,13 +741,14 @@ let handle_ambient ~recover_triggered ~base_dir ~team_id ~channel_id
       | Ambient_route -> finish_ambient_original ~base_dir ~keeper_name ~team_id ~channel_id ~thread_ts ~ts ~user_id original
       | Triggered_route -> recover_triggered original
 
-let on_ambient ~recover_triggered ?team_id ~base_dir (ev : Gw.slack_event) =
+let on_ambient ~recover_triggered ?team_id ?user_directory ?bot_user_id ~base_dir
+    (ev : Gw.slack_event) =
   Option.iter State.record_workspace_id team_id;
   match ev with
   | Gw.Message_create {channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot;
       bot_id=None; files} ->
-    handle_ambient ~recover_triggered ~base_dir ~team_id ~channel_id ~thread_ts ~user_id ~user_name
-      ~text:(Gw.text_with_files ~text ~files) ~ts ~mentions_bot ()
+    handle_ambient ~recover_triggered ?user_directory ?bot_user_id ~base_dir ~team_id
+      ~channel_id ~thread_ts ~user_id ~user_name ~text ~files ~ts ~mentions_bot ()
   | Gw.Message_create {bot_id=Some _;_} | Gw.App_mention _ ->
     Ok (Gw.Intentionally_ignored Gw.Bot_echo)
   | Gw.Reaction_added _ ->
@@ -722,7 +757,8 @@ let on_ambient ~recover_triggered ?team_id ~base_dir (ev : Gw.slack_event) =
     Ok (Gw.Intentionally_ignored Gw.Observational_event)
   | Gw.Ignored_event _ -> Ok (Gw.Intentionally_ignored Gw.Observational_event)
 
-let submit_ambient_event ?team_id ?user_directory ingress ~dispatch_for_delivery ~clock ~base_dir ev =
+let submit_ambient_event ?team_id ?user_directory ?bot_user_id ingress
+    ~dispatch_for_delivery ~clock ~base_dir ev =
   let ev = resolve_event_identity ?user_directory ev in
   let ev = remember_resolved_names ~base_dir ev in
   let recover_triggered (original : Keeper_external_attention.item) =
@@ -739,7 +775,7 @@ let submit_ambient_event ?team_id ?user_directory ingress ~dispatch_for_delivery
       | Surface_ref.Agent | Surface_ref.Broadcast | Surface_ref.Gate _), (Some _ | None), (Some _ | None) ->
       ingress_refusal "original triggered source has no complete Slack route"
   in
-  on_ambient ~recover_triggered ?team_id ~base_dir ev
+  on_ambient ~recover_triggered ?team_id ?user_directory ?bot_user_id ~base_dir ev
 ;;
 
 module For_testing = struct
@@ -786,10 +822,11 @@ let start ~sw ~env ~state =
        (* One clock for the whole gateway: bounds [auth.test], durable accept,
           and outbound ACK sends. *)
        let clock = Eio.Stdenv.clock env in
-       (* Resolve the bot's own identity for mention detection. Non-fatal:
+       (* Resolve the bot's own identity for mention detection and for
+          writing the bot's own mention as the bound Keeper's name. Non-fatal:
           without it, [app_mention] events still trigger (a mention by
-          construction); only plain-message mention detection on the [message]
-          event degrades. *)
+          construction); plain-message mention detection on the [message]
+          event degrades, and the bot's mention keeps its Slack name. *)
        State.clear_workspace_id ();
        let bot_user_id, team_id, user_directory =
          match Env_config_slack.bot_token_opt () with
@@ -860,6 +897,7 @@ let start ~sw ~env ~state =
                  ~dispatch_for_delivery:(dispatch_for_config config)
                  ?team_id
                  ?user_directory
+                 ?bot_user_id
                  ~clock
                  ~base_dir:config.base_path
                  ev)
@@ -867,7 +905,7 @@ let start ~sw ~env ~state =
                let config = Mcp_server.workspace_config state in
                if not (String.equal config.Workspace.base_path gateway_base_path) then
                  ingress_refusal "Slack gateway workspace changed; reconnect its owner before accepting events"
-               else submit_ambient_event ?team_id ?user_directory ingress
+               else submit_ambient_event ?team_id ?user_directory ?bot_user_id ingress
                  ~dispatch_for_delivery:(dispatch_for_config config) ~clock
                  ~base_dir:config.base_path ev)
              ()

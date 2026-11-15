@@ -34,23 +34,30 @@ import quiz_projection as p  # noqa: E402
 TEXT = {"type": "string", "minLength": 1}
 CONTEXT_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["instance_id", "incarnation"],
                   "properties": {"instance_id": TEXT, "incarnation": TEXT}}
+
+
+def action_kind(title: str, kind: str, description: str, members: dict, required: list[str]) -> dict:
+    """One alternative of the action: a closed object whose kind is fixed, so
+    the host refuses a member another kind uses before the worker sees it."""
+    return {"type": "object", "title": title, "description": description, "additionalProperties": False,
+            "required": ["kind", *required], "properties": {"kind": {"type": "string", "const": kind}, **members}}
+
+
+# The object node carries nothing but its alternatives: the host checker
+# refuses required or additionalProperties on an object without properties.
+ACTION = {"type": "object", "oneOf": [
+    action_kind("Compose", "compose", "Start a quiz session",
+                {"questions": {"type": "integer", "minimum": 1, "description": "How many questions to write"}},
+                ["questions"]),
+    action_kind("Dispute", "dispute", "Ask for one answered question to be graded again",
+                {"ask_id": {**TEXT, "description": "The answered question's ask"},
+                 "question_id": {**TEXT, "description": "The question within that ask"},
+                 "note": {**TEXT, "description": "What is wrong with the grade"}},
+                ["ask_id", "question_id", "note"]),
+    action_kind("Export", "export", "Return the whole log", {}, [])]}
 ACTION_SCHEMA = {
     "type": "object", "additionalProperties": False, "required": ["context", "request_id", "action"],
-    "properties": {
-        "context": CONTEXT_SCHEMA, "request_id": TEXT,
-        "action": {"type": "object", "additionalProperties": False, "required": ["kind"],
-                   "properties": {
-                       "kind": {"type": "string", "enum": ["compose", "dispute", "export"],
-                                "description": "compose starts a session; dispute asks for one answered "
-                                               "question to be graded again; export returns the whole log"},
-                       "questions": {"type": "integer", "minimum": 1,
-                                     "description": "compose only: how many questions to write"},
-                       "ask_id": {"type": "string", "minLength": 1,
-                                  "description": "dispute only: the answered question's ask"},
-                       "question_id": {"type": "string", "minLength": 1,
-                                       "description": "dispute only: the question within that ask"},
-                       "note": {"type": "string", "minLength": 1,
-                                "description": "dispute only: what is wrong with the grade"}}}}}
+    "properties": {"context": CONTEXT_SCHEMA, "request_id": TEXT, "action": ACTION}}
 OBSERVE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["context", "binding", "sources"],
                   "properties": {"context": CONTEXT_SCHEMA, "binding": {"type": "object"},
                                  "sources": {"type": "array", "items": {"type": "object"}}}}

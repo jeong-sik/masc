@@ -456,7 +456,12 @@ module Rest = struct
          reader at https (#50025). *)
       let advertised = Masc_network_defaults.normalize_advertised_host host in
       if advertised = "" || port <= 0 then "/"
-      else Printf.sprintf "%s://%s:%d" scheme advertised port
+      else
+        Printf.sprintf
+          "%s://%s:%d"
+          scheme
+          Masc_network_defaults.(url_host_to_string (url_host_of_string advertised))
+          port
     in
     `Assoc
       [

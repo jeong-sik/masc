@@ -50,6 +50,10 @@ val flush_interval_sec : float
     prepare the root before construction, then explicitly load sources. *)
 val create_store : base_path:string -> unit -> store
 
+val create_store_bound : Board_workspace_binding.t -> store
+(** Same store on a BasePath the caller already captured. The store keeps that
+    capture as its binding and resolves no path of its own. *)
+
 val create_store_with_source_io_for_testing :
   base_path:string -> io:posts_source_io -> unit -> store
 (** Same production store with an immutable posts transaction IO seam.

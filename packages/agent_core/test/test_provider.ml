@@ -51,7 +51,7 @@ let test_file_object_decode () =
 ;;
 
 let test_pricing_sonnet () =
-  let p = declared_pricing "claude-sonnet-5-20260101" in
+  let p = declared_pricing "claude-sonnet-5" in
   Alcotest.(check (float 0.001)) "input/M" 2.0 p.input_per_million;
   Alcotest.(check (float 0.001)) "output/M" 10.0 p.output_per_million;
   Alcotest.(check (option (float 0.001)))

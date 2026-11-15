@@ -42,12 +42,12 @@ let with_prompts f =
 
 let test_original_preparation () = with_prompts (fun () ->
   let original=input () in
-  let prepared=R.prepare_durable ~now:123. original |> get in
+  let prepared=R.prepare_durable ~source_lines:[] ~now:123. original |> get in
   check bool "the complete original input, including nested tool JSON, is retained" true
     (prepared.source_input=original);
   check bool "the ordinary synchronous Memory substitutions are shared" true
-    (prepared.variables=(R.librarian_prompt_variables original |> get));
-  let sent=R.messages_for_librarian original |> get in
+    (prepared.variables=(R.librarian_prompt_variables ~source_lines:[] original |> get));
+  let sent=R.messages_for_librarian ~source_lines:[] original |> get in
   check bool "the ordinary public Memory message uses these exact rendered bytes" true
     (sent=[Llm_provider.Types.user_msg prepared.rendered_prompt]);
   let saved=prepared.rendered_prompt in
@@ -59,7 +59,7 @@ let test_original_preparation () = with_prompts (fun () ->
     R.validate_durable_preparation prepared |> get;
     check string "restoration never re-renders with current prompt or policy" saved prepared.rendered_prompt;
     check bool "fresh work really observes the changed configuration" true
-      ((R.prepare_durable ~now:124. original |> get).rendered_prompt<>saved)))))
+      ((R.prepare_durable ~source_lines:[] ~now:124. original |> get).rendered_prompt<>saved)))))
 
 let answer = `Assoc [
   "new_claims",`List [`Assoc ["claim",`String "Original source plus completed observation";
@@ -70,7 +70,7 @@ let answer = `Assoc [
   "dropped",`List [];"working_state",`Null;"working_contexts",`List []]
 
 let test_original_validation_and_absorption () = with_prompts (fun () ->
-  let prepared=R.prepare_durable ~now:123. (input ()) |> get in
+  let prepared=R.prepare_durable ~source_lines:[] ~now:123. (input ()) |> get in
   let judged=R.validate_durable_proposal prepared answer |> proposal in
   let expected=L.selection_of_json_result ~now:123. prepared.source_input answer
     |> Result.map_error L.parse_error_to_string |> get in
@@ -110,7 +110,7 @@ let test_original_validation_and_absorption () = with_prompts (fun () ->
    | Ok _ -> fail "unexpected raw proposal field was accepted"))
 
 let test_restore_refuses_tampering () = with_prompts (fun () ->
-  let original=R.prepare_durable ~now:123. (input ()) |> get in
+  let original=R.prepare_durable ~source_lines:[] ~now:123. (input ()) |> get in
   let mutations : R.durable_preparation list = [
     {original with source_input={original.source_input with keeper_instructions="Different source"}};
     {original with parsing_now=Float.nan};
@@ -128,7 +128,7 @@ let test_restore_refuses_tampering () = with_prompts (fun () ->
      | Error (R.Proposal_invalid error) -> fail (L.parse_error_to_string error)
      | Ok _ -> fail "invalid restored preparation reached proposal parsing")) mutations;
   check bool "invalid caller time refuses before durable dispatch" true
-    (Result.is_error (R.prepare_durable ~now:(-1.) (input ()))))
+    (Result.is_error (R.prepare_durable ~source_lines:[] ~now:(-1.) (input ()))))
 
 let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fun () ->
   let counterpart : Keeper_counterpart_observation.t =
@@ -138,7 +138,7 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
   let with_counterpart={original with counterpart_observations=[counterpart]} in
   (* This formerly valid capture is reconstructed under the old prompt, without
      asking the fresh admission path to make a new incomplete original. *)
-  let old=R.prepare_durable ~now:123. original |> get in
+  let old=R.prepare_durable ~source_lines:[] ~now:123. original |> get in
   let legacy=R.restore_durable_preparation ~source_input:with_counterpart ~parsing_now:old.parsing_now
     ~policy:old.policy ~rule_prompt:old.rule_prompt ~prompt:old.prompt ~output_schema:old.output_schema |> get in
   R.validate_durable_preparation legacy |> get;
@@ -147,9 +147,9 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
     (Result.is_error (R.require_counterpart_template legacy));
   R.require_counterpart_template old |> get;
   check bool "fresh counterpart original refuses a prompt without the variable" true
-    (Result.is_error (R.prepare_durable ~now:123. with_counterpart));
+    (Result.is_error (R.prepare_durable ~source_lines:[] ~now:123. with_counterpart));
   let context : R.durable_step_context = {previous_state=None;unread_messages=[]} in
-  let old_step=R.prepare_durable_step ~now:123. ~context original |> get in
+  let old_step=R.prepare_durable_step ~source_lines:[] ~now:123. ~context original |> get in
   let p=old_step.preparation in
   let restored_step=R.restore_durable_step_preparation ~context
     ~source_input:(R.durable_step_source_input with_counterpart) ~parsing_now:p.parsing_now
@@ -158,7 +158,7 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
   check bool "a restored floor question must still pass the live input policy" true
     (Result.is_error (R.require_counterpart_template restored_step.preparation));
   check bool "fresh counterpart floor step also refuses the missing variable" true
-    (Result.is_error (R.prepare_durable_step ~now:123. ~context with_counterpart));
+    (Result.is_error (R.prepare_durable_step ~source_lines:[] ~now:123. ~context with_counterpart));
   let refs value variable = Prompt_registry.resolution_references_variable
     {old.prompt with effective=value} ~variable in
   check bool "plain text is not a substitution" false (refs "counterpart_observations" "counterpart_observations");
@@ -169,17 +169,56 @@ let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fu
   Prompt_registry.set_override Prompt_names.librarian
     "Input: {{ counterpart_observations }}\nAgain: {{counterpart_observations}}" |> get;
   let expected=Keeper_counterpart_observation.render_for_prompt [counterpart] in
-  let fresh=R.prepare_durable ~now:124. with_counterpart |> get in
+  let fresh=R.prepare_durable ~source_lines:[] ~now:124. with_counterpart |> get in
   R.require_counterpart_template fresh |> get;
   check bool "repairing today's override does not rewrite the old frozen question" true
     (Result.is_error (R.require_counterpart_template legacy));
   check string "both actual substitutions contain the original serialized counterpart"
     ("Input: " ^ expected ^ "\nAgain: " ^ expected) fresh.rendered_prompt;
-  let fresh_step=R.prepare_durable_step ~now:124. ~context with_counterpart |> get in
+  let fresh_step=R.prepare_durable_step ~source_lines:[] ~now:124. ~context with_counterpart |> get in
   check string "floor question uses the same captured counterpart substitution"
     fresh.rendered_prompt fresh_step.preparation.rendered_prompt)
 
+(* A Keeper whose earlier [source_path] write left one file-source fact. *)
+let source_lines =
+  Keeper_memory_source_current.budget_lines (Some
+    {Keeper_memory_source_current.revision=1;updated_at=10.;trace_id="durable-preparation";
+     facts=[{claim="The deployment notes name the release owner";first_seen=10.;
+       source={path="notes.txt";sha256="sha256:" ^ String.make 64 'a'}}];
+     invalidations=[]})
+
+let test_restored_budget_counts_source_memory () = with_prompts (fun () ->
+  let original=input () in
+  let prepared,ordinary_variables=Masc_test_deps.with_process_env
+    Env_config.KeeperMemoryOs.facts_max_bytes_env_key (Some "100") (fun () ->
+      R.prepare_durable ~source_lines ~now:123. original |> get,
+      R.librarian_prompt_variables ~source_lines original |> get) in
+  let bytes ~ordinary_facts ~source_lines =
+    Keeper_memory_os_render.facts_payload_bytes ~ordinary_facts ~source_lines in
+  let ordinary_facts=match original.current with Some current -> current.facts | None -> [] in
+  let shown=Printf.sprintf "max=100 bytes; current=%d bytes (ordinary=%d bytes, source=%d bytes)"
+    (bytes ~ordinary_facts ~source_lines) (bytes ~ordinary_facts ~source_lines:[])
+    (bytes ~ordinary_facts:[] ~source_lines) in
+  check (option string) "the prompt shows the total the commit measures" (Some shown)
+    (List.assoc_opt "facts_budget" prepared.variables);
+  check bool "the ordinary substitutions share the captured source lines" true
+    (prepared.variables=ordinary_variables);
+  let frozen=Keeper_librarian_durable_question.(of_json (to_json prepared)) |> get in
+  let restored=Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.facts_max_bytes_env_key
+    (Some "1") (fun () ->
+      R.restore_durable_preparation ~source_input:original ~parsing_now:frozen.parsing_now
+        ~policy:frozen.policy ~rule_prompt:frozen.rule_prompt ~prompt:frozen.prompt
+        ~output_schema:frozen.output_schema |> get) in
+  Keeper_librarian_durable_question.rendered_matches frozen restored |> get;
+  check string "a restored question renders the budget it was sent" prepared.rendered_prompt
+    restored.rendered_prompt;
+  check bool "a capture whose source lines were dropped does not restore" true
+    (Result.is_error (R.validate_durable_preparation
+      {prepared with policy={prepared.policy with facts_source_lines=[]}})))
+
 let () = run "Original history Memory preparation" ["preparation",[
+  test_case "a restored question's facts budget counts source memory" `Quick
+    test_restored_budget_counts_source_memory;
   test_case "original capture survives current prompt and policy changes" `Quick test_original_preparation;
   test_case "normal raw parser and absorption inputs remain original" `Quick test_original_validation_and_absorption;
   test_case "restore inconsistency never reaches domain parsing" `Quick test_restore_refuses_tampering;

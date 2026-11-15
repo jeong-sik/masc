@@ -3298,6 +3298,12 @@ let test_successor_recall_program_canonical_reload () =
   check bool "recall does not rewrite the durable program result" true
     (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" |> require_ok=Some committed.snapshot)
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_successor_recall_program_pending_journal_recovers () =
   with_temp_keepers @@ fun keepers_dir ->
   let a=fact ~claim:"pending program original" () and b=fact ~claim:"pending program middle" ()
@@ -3330,7 +3336,7 @@ let test_successor_recall_program_pending_journal_recovers () =
     (Sys.file_exists (Current.publication_receipt_path ~keepers_dir ~keeper_id:"keeper"));
   check bool "recovery keeps the committed target bytes and revision" true (recalled.snapshot=Some committed.snapshot);
   check int "recall recovery never repeats a producer callback" 1 !callbacks;
-  let program_rows=Current.read_journal_tail ~keepers_dir ~keeper_id:"keeper" ~limit:10
+  let program_rows=readable_journal_tail ~keepers_dir ~keeper_id:"keeper" ~limit:10
     |> List.map require_ok |> List.filter_map (function
       | Current.Journal_committed {program=Some proof;_} -> Some proof
       | Current.Journal_committed {program=None;_} | Current.Journal_failed _ | Current.Journal_quarantined _ -> None) in
@@ -4020,7 +4026,7 @@ let break_change_contract ~keepers_dir =
 (* An inline record cannot leave its constructor, so the two fields under test
    are projected here rather than returned whole. *)
 let quarantined_lines ~keepers_dir =
-  Current.read_journal_tail ~keepers_dir ~keeper_id:"keeper" ~limit:100
+  readable_journal_tail ~keepers_dir ~keeper_id:"keeper" ~limit:100
   |> List.filter_map (function
     | Ok (Current.Journal_quarantined { recorded_at = _; rejection; rejected_path }) ->
       Some (rejection, rejected_path)

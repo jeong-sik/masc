@@ -1645,27 +1645,98 @@ let test_board_curation_submit_roundtrips_to_read () =
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
-(* The MCP path names a new post by the id in the result's typed data. It used
-   to parse the id back out of the message text, so a message that merely
-   contained a JSON object with an "id" also counted. *)
-let test_created_post_id_reads_typed_data () =
+(* A fake terminal-notifier, the only program on PATH for the length of [f]:
+   it appends each argument it was started with to [argv_file], one per line. *)
+let with_recording_notifier f =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-board-notifier-%d" (Unix.getpid ()))
+  in
+  remove_path dir;
+  Unix.mkdir dir 0o700;
+  let argv_file = Filename.concat dir "argv" in
+  let notifier = Filename.concat dir "terminal-notifier" in
+  Out_channel.with_open_bin notifier (fun channel ->
+    Printf.fprintf channel
+      "#!/bin/sh\nfor a in \"$@\"; do printf '%%s\\n' \"$a\"; done >> '%s'\nexit 0\n"
+      argv_file);
+  Unix.chmod notifier 0o700;
+  let previous = Sys.getenv "PATH" in
+  Unix.putenv "PATH" dir;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" previous; remove_path dir)
+    (fun () ->
+      f (fun () ->
+        if Sys.file_exists argv_file
+        then In_channel.with_open_bin argv_file In_channel.input_all
+             |> String.split_on_char '\n'
+        else []))
+
+(* A post or comment sent in [body] is stored, and the SSE notification, the
+   activity record and the mention that follow the write carry the stored
+   text. They used to read the request's [content] by themselves, so a [body]
+   write was announced with an empty text and its mention reached nobody. *)
+let test_body_text_reaches_notification_activity_and_mention () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let created =
-    dispatch_result "masc_board_post"
-      (make_args [ ("author", `String "poster"); ("content", `String "typed id") ])
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing @@ fun () ->
+  with_recording_notifier @@ fun notified_argv ->
+  let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
+  let config = Mcp_server.workspace_config state in
+  let agent_name = "body-writer" in
+  let broadcasts = ref [] in
+  Mcp_server.set_sse_callback state (fun json -> broadcasts := json :: !broadcasts);
+  let runtime name arguments =
+    match Mcp_tool_runtime_board.dispatch
+        ~reader:Masc_board_handlers.Board_access.Operator ~config ~agent_name
+        ~arguments ~state ~name with
+    | Some result ->
+      Alcotest.(check bool) name true (Tool_result.is_success result);
+      result
+    | None -> Alcotest.failf "%s was not routed" name
   in
-  Alcotest.(check bool) "post created" true (Tool_result.is_success created);
-  let expected = Yojson.Safe.Util.(Tool_result.data created |> member "id" |> to_string) in
-  Alcotest.(check (option string)) "id comes from the created post" (Some expected)
-    (Mcp_tool_runtime_board.For_testing.created_post_id created);
-  let text_only =
-    Tool_result.make_ok ~tool_name:"masc_board_post" ~start_time:(Tool_timing.start ())
-      ~data:(`String {|posted {"id":"p-from-text"}|}) ()
+  let open Yojson.Safe.Util in
+  let broadcast_content ~type_ =
+    match List.filter (fun json -> String.equal (json |> member "type" |> to_string) type_)
+            !broadcasts with
+    | [ json ] -> json |> member "content" |> to_string
+    | found -> Alcotest.failf "%d %s notifications" (List.length found) type_
   in
-  Alcotest.(check (option string)) "an id in text is not a post" None
-    (Mcp_tool_runtime_board.For_testing.created_post_id text_only)
+  let activity_content operation =
+    let kind = Event_kind.Board.to_string operation in
+    match Activity_graph.list_events config ~after_seq:0 ~limit:10 ~kinds:[ kind ]
+            ~keep:(fun (event : Activity_graph.event) ->
+              event.actor = Some (Server_utils.board_actor_entity agent_name)) () with
+    | [ event ] -> event.payload |> member "content" |> to_string
+    | found -> Alcotest.failf "%d %s activity records" (List.length found) kind
+  in
+  let post_text = "@body-reader the post text travels in body" in
+  let posted = runtime "masc_board_post"
+    (make_args [ "body", `String post_text; "visibility", `String "public" ]) in
+  let post_id = Tool_result.data posted |> member "id" |> to_string in
+  Alcotest.(check string) "the board stores the body" post_text
+    (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id
+     |> Result.get_ok).body;
+  Alcotest.(check string) "the post notification carries the stored text" post_text
+    (broadcast_content ~type_:"masc/board_post");
+  Alcotest.(check string) "the post activity record carries the stored text" post_text
+    (activity_content Event_kind.Board.Posted);
+  Alcotest.(check bool) "the post's mention is notified with the stored text" true
+    (List.mem post_text (notified_argv ()));
+  let comment_text = "@body-reader the comment text travels in body" in
+  ignore (runtime "masc_board_comment"
+    (make_args [ "post_id", `String post_id; "body", `String comment_text ]));
+  Alcotest.(check string) "the comment notification carries the stored text" comment_text
+    (broadcast_content ~type_:"board_comment");
+  Alcotest.(check string) "the comment activity record carries the stored text" comment_text
+    (activity_content Event_kind.Board.Commented);
+  Alcotest.(check bool) "the comment's mention is notified with the stored text" true
+    (List.mem comment_text (notified_argv ()))
 
 let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
@@ -4177,8 +4248,10 @@ let () =
             "model-visible Board maintenance dispatches in process"
             `Quick
             test_model_visible_board_maintenance_dispatches_in_process;
-          Alcotest.test_case "created post id reads typed data" `Quick
-            test_created_post_id_reads_typed_data;
+          Alcotest.test_case
+            "a body write's notification, activity record and mention carry its text"
+            `Quick
+            test_body_text_reaches_notification_activity_and_mention;
           Alcotest.test_case "masc_board_close checks author permission" `Quick
             test_masc_board_close_requires_the_post_author;
           Alcotest.test_case "configured moderator can close and reopen" `Quick

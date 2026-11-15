@@ -414,6 +414,75 @@ let test_listener_closes_a_connection_that_does_not_start listener ~opening () =
       | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ())
 ;;
 
+(* The whole of what a client reads until the listener ends the connection. *)
+let read_to_end client =
+  match Eio.Buf_read.(parse_exn take_all) client ~max_size:(64 * kib) with
+  | answer -> answer
+  | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ""
+;;
+
+let get target =
+  Printf.sprintf "GET %s HTTP/1.1\r\nHost: test\r\nConnection: close\r\n\r\n" target
+;;
+
+(* A request to [/fail] makes a fiber of its connection's switch raise
+   [failure]: not the fiber that serves the connection, one beside it, as a
+   stream's fiber or a watching daemon is. The listener's switch is the
+   server's lifetime, so the next connection is still accepted and answered
+   (#51173). *)
+let test_listener_outlives_a_failed_connection_fiber failure () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) patience_s @@ fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio_mock.Clock.make () in
+  let net = Eio.Stdenv.net env in
+  let socket =
+    Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:8 (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+  in
+  let port =
+    match Eio.Net.listening_addr socket with
+    | `Tcp (_, port) -> port
+    | `Unix _ -> fail "a TCP socket has a port"
+  in
+  let request_handler _addr (reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+    match (Httpun.Reqd.request reqd.reqd).target with
+    | "/fail" ->
+      (match Masc.Http_reqd.relay_scope (Masc.Http_reqd.of_gluten reqd) with
+       | None -> fail "an HTTP/1.1 request has its connection's switch"
+       | Some connection_sw -> Eio.Fiber.fork ~sw:connection_sw (fun () -> raise failure))
+    | _ ->
+      Httpun.Reqd.respond_with_string
+        reqd.reqd
+        (Httpun.Response.create
+           ~headers:(Httpun.Headers.of_list [ "content-length", "2"; "connection", "close" ])
+           `OK)
+        "ok"
+  in
+  let request target =
+    Eio.Switch.run (fun client_sw ->
+      let client = Eio.Net.connect ~sw:client_sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
+      Eio.Flow.copy_string (get target) client;
+      read_to_end client)
+  in
+  Eio.Fiber.first
+    (fun () ->
+      Eio.Switch.run (fun server_sw ->
+        Server_bootstrap_http.serve
+          ~sw:server_sw
+          ~clock
+          ~socket
+          ~addr_label:(Printf.sprintf "127.0.0.1:%d" port)
+          ~request_handler;
+        fail "the accept loop returned"))
+    (fun () ->
+      check string "the failed connection is not answered" "" (request "/fail");
+      let answer = request "/next" in
+      check bool
+        (Printf.sprintf "the next connection is answered: %S" answer)
+        true
+        (String.starts_with ~prefix:"HTTP/1.1 200" answer))
+;;
+
 let () =
   run
     "connection socket"
@@ -450,6 +519,11 @@ let () =
             (test_listener_closes_a_connection_that_does_not_start Auto ~opening:"")
         ; test_case "auto: a connection that stops inside the HTTP/2 preface" `Quick
             (test_listener_closes_a_connection_that_does_not_start Auto ~opening:"PRI * HT")
+        ; test_case "a connection fiber that raises does not end the listener" `Quick
+            (test_listener_outlives_a_failed_connection_fiber (Failure "a connection fiber"))
+        ; test_case "a connection fiber's Cancelled does not end the listener" `Quick
+            (test_listener_outlives_a_failed_connection_fiber
+               (Eio.Cancel.Cancelled (Failure "another scope")))
         ] )
     ]
 ;;

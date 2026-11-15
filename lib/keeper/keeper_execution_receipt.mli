@@ -226,6 +226,9 @@ type operator_disposition_reason =
       [Reason_tool_correction_lost]; only the label differs. *)
   | Reason_unmapped_runtime_state
 
+val all_of_operator_disposition_reason : operator_disposition_reason list
+(** Every reason, in declaration order. *)
+
 val operator_disposition_reason_to_string : operator_disposition_reason -> string
 
 val operator_disposition_reason_of_string : string -> operator_disposition_reason option

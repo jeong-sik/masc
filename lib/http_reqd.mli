@@ -10,7 +10,14 @@
     builds one [Httpun.Response.t] and the handle translates it where the
     wire format differs. On HTTP/2 the handle lowercases header names, drops
     the connection-specific fields of RFC 9113 §8.2.2 and converts the status
-    code. *)
+    code.
+
+    Whether a response carries content is decided here, for every function
+    that answers (RFC 9110 §6.4.1). A response to a HEAD request and a 304
+    go out with the fields the handler gave and without the body. A 1xx and
+    a 204 go out without the body and without [content-length] (§8.6). For
+    those, {!respond_with_streaming} sends the head and returns a writer
+    that is already closed. *)
 
 type t
 
@@ -261,8 +268,9 @@ val report_exn : t -> exn -> unit
     closes the connection after it: a chunked body then lacks its last
     chunk, but a body that ends with the connection (no length, no chunks,
     as masc's HTTP/1.1 SSE) looks to the client like one that finished.
-    [exn] is logged once at error: on HTTP/2 the error handler logs the ones
-    it answers ({!Http_h2_stream.report_failure}).
+    [exn] is logged once at error: the connection's error handler logs the
+    ones it answers (on HTTP/2, {!Http_h2_stream.report_failure}), and the
+    body of that answer is a fixed sentence ({!Http_error_body}).
 
     On HTTP/1.1 httpun also ends the request body, and a {!read_body} still
     waiting for it delivers nothing. *)

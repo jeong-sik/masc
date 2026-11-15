@@ -72,22 +72,22 @@ let test_mention_rewrite () =
   in
   check string "resolved mention becomes a name"
     "@KinoBot 뭔데"
-    (D.rewrite_mentions t "<@U060QL6SV1V> 뭔데");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U060QL6SV1V> 뭔데");
   check string "multiple mentions in one message"
     "@Vincent님, @KinoBot 확인 부탁"
-    (D.rewrite_mentions t "<@U09L0RHPW7P>님, <@U060QL6SV1V> 확인 부탁");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U09L0RHPW7P>님, <@U060QL6SV1V> 확인 부탁");
   check string "labelled escape uses the supplied label without a fetch"
     "@alice 안녕"
-    (D.rewrite_mentions t "<@U000UNKNOWN0|alice> 안녕");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U000UNKNOWN0|alice> 안녕");
   check string "unresolvable mention keeps its exact wire form"
     "<@U000UNKNOWN0> ping"
-    (D.rewrite_mentions t "<@U000UNKNOWN0> ping");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U000UNKNOWN0> ping");
   check string "channel, special and link escapes pass through"
     "<#C123|general> <!here> <https://example.com|link>"
-    (D.rewrite_mentions t "<#C123|general> <!here> <https://example.com|link>");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<#C123|general> <!here> <https://example.com|link>");
   check string "text without mentions is unchanged"
     "plain @text < unrelated >"
-    (D.rewrite_mentions t "plain @text < unrelated >")
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "plain @text < unrelated >")
 
 let test_empty_user_id_never_fetches () =
   let now_ref = ref 0.0 in
@@ -104,11 +104,11 @@ let test_mention_rewrite_malformed_tokens_pass_through () =
   let now_ref = ref 0.0 in
   let t, calls = directory ~now_ref [] in
   check string "unterminated mention stays verbatim" "<@U123"
-    (D.rewrite_mentions t "<@U123");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U123");
   check string "empty label keeps the wire form" "<@U000UNKNOWN0|> hi"
-    (D.rewrite_mentions t "<@U000UNKNOWN0|> hi");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U000UNKNOWN0|> hi");
   check string "short id stays verbatim" "<@U> hi"
-    (D.rewrite_mentions t "<@U> hi");
+    (D.rewrite_mentions t ~self:D.Bot_user_id_unknown "<@U> hi");
   check int "malformed tokens never fetch" 0 !calls
 
 let () =

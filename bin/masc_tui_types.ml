@@ -3000,6 +3000,52 @@ let schedule_counts_line counts =
       Printf.sprintf "%s \xc2\xb7 %s closed (%s)" live_text
         (string_of_int closed_total) (String.concat ", " parts)
 
+(* Why the modify editor does not open on a row: the store refuses rows in
+   that status (as last read), or this build cannot read the recurrence or the
+   delivery the form would carry back, so saving would put a default over it. *)
+type schedule_modify_refusal =
+  | Schedule_status_not_modifiable of string
+  | Schedule_recurrence_unreadable of string
+  | Schedule_delivery_unreadable of { delivery : string; detail : string }
+  | Schedule_delivery_not_a_string
+
+let schedule_modify_refusal_text ~ko = function
+  | Schedule_status_not_modifiable status ->
+      if ko then
+        Printf.sprintf
+          "%s 상태 일정은 편집할 수 없음 \xc2\xb7 마지막으로 읽은 값 \xc2\xb7 바뀌었으면 새로고침"
+          status
+      else
+        Printf.sprintf
+          "the store refuses to modify a %s schedule (status as last \
+           read; refresh if it has changed)"
+          status
+  | Schedule_recurrence_unreadable detail ->
+      if ko then
+        Printf.sprintf
+          "이 빌드가 반복 규칙을 읽지 못함(%s) \xc2\xb7 저장하면 기본값으로 덮어씀"
+          detail
+      else
+        Printf.sprintf
+          "this build cannot read the schedule's recurrence (%s); the form \
+           would save a default over it"
+          detail
+  | Schedule_delivery_unreadable { delivery; detail } ->
+      if ko then
+        Printf.sprintf
+          "이 빌드가 전달 방식을 읽지 못함(%S, %s) \xc2\xb7 저장하면 기본값으로 덮어씀"
+          delivery detail
+      else
+        Printf.sprintf
+          "this build cannot read the schedule's delivery %S (%s); the form \
+           would save a default over it"
+          delivery detail
+  | Schedule_delivery_not_a_string ->
+      if ko then "전달 방식이 문자열이 아님 \xc2\xb7 저장하면 기본값으로 덮어씀"
+      else
+        "the schedule's delivery is not a string; the form would save a \
+         default over it"
+
 (** Why the store would refuse a modify, read before the editor opens.
 
     The rule is [Schedule_domain.modify_allowed], the same function
@@ -3012,17 +3058,12 @@ let schedule_counts_line counts =
     renders as itself, and it is the server's call, not ours, whether it can
     be modified. Refusing on a word we cannot read would turn forward
     compatibility into a locked row. *)
-let schedule_modify_refusal (row : schedule_row) : string option =
+let schedule_modify_refusal (row : schedule_row) : schedule_modify_refusal option =
   match Schedule_domain.schedule_status_of_string row.sch_status with
   | Error _ -> None
   | Ok status ->
       if Schedule_domain.modify_allowed status then None
-      else
-        Some
-          (Printf.sprintf
-             "the store refuses to modify a %s schedule (status as last \
-              read; refresh if it has changed)"
-             row.sch_status)
+      else Some (Schedule_status_not_modifiable row.sch_status)
 
 (* The recurrence fields of both schedule forms. The defaults are what a new
    schedule starts with; the modify form passes only the fields of the row's
@@ -3058,16 +3099,9 @@ let schedule_form_delivery (row : schedule_row) =
        | None -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
        | Some (`String raw) ->
            Result.map_error
-             (fun detail ->
-                Printf.sprintf
-                  "this build cannot read the schedule's delivery %S (%s); the form \
-                   would save a default over it"
-                  raw detail)
+             (fun detail -> Schedule_delivery_unreadable { delivery = raw; detail })
              (Schedule_supported_kinds.keeper_wake_delivery_of_string raw)
-       | Some _ ->
-           Error
-             "the schedule's delivery is not a string; the form would save a \
-              default over it")
+       | Some _ -> Error Schedule_delivery_not_a_string)
   | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
 
 let schedule_modify_form (row : schedule_row) recurrence ~delivery =
@@ -3134,15 +3168,11 @@ let schedule_modify_form (row : schedule_row) recurrence ~delivery =
     this build cannot read is refused too: the update replaces the whole
     definition, so a form built without that recurrence would save a default
     over it. *)
-let schedule_update_form_json (row : schedule_row) : (string, string) result =
+let schedule_update_form_json (row : schedule_row)
+    : (string, schedule_modify_refusal) result =
   match schedule_modify_refusal row, row.sch_recurrence with
   | Some reason, (Ok _ | Error _) -> Error reason
-  | None, Error detail ->
-      Error
-        (Printf.sprintf
-           "this build cannot read the schedule's recurrence (%s); the form \
-            would save a default over it"
-           detail)
+  | None, Error detail -> Error (Schedule_recurrence_unreadable detail)
   | None, Ok recurrence ->
       Result.map
         (fun delivery -> schedule_modify_form row recurrence ~delivery)
@@ -3469,23 +3499,115 @@ type runtime_lane_write =
          list launched after it reads current execution state; the receipt
          independently says whether the saved configuration was applied. *)
 
+(* Why a pick cannot land on its target. A client with no output-schema
+   channel fits no exact lane: every exact-output call hands its client a JSON
+   Schema to answer to, and the runtime writer refuses it. The picker draws
+   such a candidate below every one that can land, with the reason at the
+   front of its row, and Enter on it sends nothing. *)
+type runtime_pick_refusal =
+  | No_output_schema_channel
+  | No_exact_body_deadline
+  | Wrong_candidate_group
+
+(* The sentence Enter on a refused row draws. *)
+let runtime_pick_refusal_text ~ko refusal (runtime : Tui_decode.runtime_option) =
+  match refusal with
+  | No_output_schema_channel ->
+    if ko then runtime.Tui_decode.ro_id ^ ": 출력 스키마 채널이 없습니다"
+    else runtime.Tui_decode.ro_id ^ " has no output-schema channel"
+  | No_exact_body_deadline ->
+    (* One notice row: the table to fix and the key come first and, with the
+       notice prefix and a typical provider id, fit in about 85 columns. *)
+    Printf.sprintf
+      (if ko then "[providers.%s] 에 exact-body-timeout-s 가 필요합니다"
+       else "[providers.%s] needs exact-body-timeout-s for exact lanes")
+      runtime.Tui_decode.ro_provider_id
+  | Wrong_candidate_group ->
+    if ko then "같은 HTTP 또는 CLI 그룹의 모델을 고르세요. 그룹을 바꾸려면 후보를 추가하세요"
+    else "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
+
+(* Why the lane editor refused a key or a write. The notice keeps the reason
+   and [runtime_lane_notice_text] picks the words when it draws it, so the
+   sentence follows the screen language, also for a notice already on screen
+   when the language changes. *)
+type runtime_lane_refusal =
+  | Lane_list_may_be_stale
+  | No_lane_row_under_cursor
+  | Slot_editor_not_open
+  | No_slot_under_cursor
+  | Already_at_edge of { item : string; move : runtime_lane_move; place : string }
+  | Runtime_is_not_a_declared_lane of string
+  | Last_exact_slot of { slot : string; lane : string }
+  | Reorder_across_slot_groups
+  | Already_a_candidate of { runtime_id : string; lane : string }
+  | Runtime_pick_refused of runtime_pick_refusal * Tui_decode.runtime_option
+  | Refused_by_server of string
+      (* The server's own sentence, drawn as it came. *)
+
 (* What the lane editor says about its last key or write. Both the Runtime
    and the Lanes view draw it, and a new view, a moved cursor or a newly
    opened field ends it. *)
 type runtime_lane_notice =
-  | Lane_write_refused of string
+  | Lane_write_refused of runtime_lane_refusal
       (* The server's sentence, or the editor's own for a key it did not
          send. *)
   | Lane_write_pending
   | Lane_write_committed of Masc_tui_runtime_config_receipt.t
       (* File commit and application facts, not inferred from a list GET. *)
 
-let runtime_lane_notice_text = function
-  | Lane_write_refused detail -> "lane write refused: " ^ detail
+let runtime_lane_refusal_text ~ko = function
+  | Lane_list_may_be_stale ->
+    if ko then "레인 목록이 오래됐을 수 있습니다. 후보를 바꾸기 전에 목록을 다시 읽으세요"
+    else "the lane list may be stale; reload it before changing candidates"
+  | No_lane_row_under_cursor ->
+    if ko then "커서 위치에 레인 행이 없습니다" else "no lane row is under the cursor"
+  | Slot_editor_not_open ->
+    if ko then "슬롯 편집기가 열려 있지 않습니다" else "the slot editor is not open"
+  | No_slot_under_cursor ->
+    if ko then "커서 위치에 슬롯이 없습니다" else "no slot is under the cursor"
+  | Already_at_edge { item; move; place } ->
+    if ko then
+      Printf.sprintf "%s: %s 안에서 이미 %s입니다" item place
+        (match move with Move_down -> "맨 끝" | Move_up -> "맨 앞")
+    else
+      Printf.sprintf "%s is already %s in %s" item
+        (match move with Move_down -> "last" | Move_up -> "first") place
+  | Runtime_is_not_a_declared_lane lane ->
+    if ko then
+      Printf.sprintf "%s: 선언된 레인이 아니라 런타임입니다. 제거할 테이블이 없습니다" lane
+    else
+      Printf.sprintf
+        "%s is a runtime, not a declared lane; there is no table to remove" lane
+  | Last_exact_slot { slot; lane } ->
+    if ko then
+      Printf.sprintf
+        "%s: %s 의 마지막 슬롯입니다. exact 출력 레인에는 슬롯이 하나 이상 있어야 합니다"
+        slot lane
+    else
+      Printf.sprintf
+        "%s is the last slot of %s; an exact-output lane needs at least one" slot lane
+  | Reorder_across_slot_groups ->
+    if ko then
+      "HTTP 슬롯을 먼저 시도하고 CLI 슬롯은 HTTP 슬롯을 모두 시도한 뒤에 씁니다. 같은 그룹 안에서만 순서를 바꾸세요"
+    else
+      "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group"
+  | Already_a_candidate { runtime_id; lane } ->
+    if ko then Printf.sprintf "%s: 이미 %s 의 후보입니다" runtime_id lane
+    else Printf.sprintf "%s is already a candidate on %s" runtime_id lane
+  | Runtime_pick_refused (refusal, runtime) -> runtime_pick_refusal_text ~ko refusal runtime
+  | Refused_by_server detail -> detail
+
+let runtime_lane_notice_text ~ko = function
+  | Lane_write_refused refusal ->
+    (if ko then "레인 쓰기 거부: " else "lane write refused: ")
+    ^ runtime_lane_refusal_text ~ko refusal
   | Lane_write_committed receipt -> Masc_tui_runtime_config_receipt.lane_summary receipt
   | Lane_write_pending ->
-    "lane write refused: the previous lane change is still being written; \
-     press again once the list reloads"
+    if ko then
+      "레인 쓰기 거부: 이전 레인 변경을 아직 쓰는 중입니다. 목록을 다시 읽은 뒤 다시 누르세요"
+    else
+      "lane write refused: the previous lane change is still being written; \
+       press again once the list reloads"
 
 (* The refusal detail is the server's own message and can carry its line
    breaks (the exact-lane save refusal names the [providers.<id>] table and the
@@ -3508,15 +3630,15 @@ let lanes_action_error_row_count ~cols = function
 (* The lane notice's own rows, without the divider the runtime listing adds.
    The lanes overview and the exact picker draw the notice with
    [box_lines_styled] and no divider, so they count these. *)
-let runtime_lane_notice_lines ~cols = function
+let runtime_lane_notice_lines ~ko ~cols = function
   | None -> 0
-  | Some notice -> boxed_row_count ~cols (runtime_lane_notice_text notice)
+  | Some notice -> boxed_row_count ~cols (runtime_lane_notice_text ~ko notice)
 
 (* The runtime listing draws the notice's lines plus a divider, so it counts
    one more row than [runtime_lane_notice_lines]. *)
-let runtime_lane_notice_row_count ~cols = function
+let runtime_lane_notice_row_count ~ko ~cols = function
   | None -> 0
-  | Some notice -> 1 + runtime_lane_notice_lines ~cols (Some notice)
+  | Some notice -> 1 + runtime_lane_notice_lines ~ko ~cols (Some notice)
 
 (* Whether a list on screen carries the last lane write. It is not about a
    key, so it is kept apart from the notice: only a load of that list sets it.
@@ -4502,6 +4624,11 @@ let keeper_detail_tabs =
   [ Detail_info; Detail_items; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity; Detail_channels; Detail_automation; Detail_runs; Detail_terminal ]
 
+(* [Detail_identity] is RFC-0392's keeper identity: the work services a
+   Keeper logs into. Each is a remote MCP server declared under
+   [config/identity/], and its tools are handed to the Keeper's turns. The
+   tab is named for those services, as the dashboard and the manual name
+   them. *)
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
   | Detail_items -> "Items"
@@ -4509,7 +4636,7 @@ let keeper_detail_tab_label = function
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
-  | Detail_identity -> "Identity"
+  | Detail_identity -> "Services"
   | Detail_channels -> "Channels"
   | Detail_automation -> "Automation"
   | Detail_runs -> "Runs"
@@ -4527,7 +4654,7 @@ let keeper_detail_tab_title ~ko tab =
     | Detail_instructions -> "설정"
     | Detail_secrets -> "시크릿"
     | Detail_github -> "GitHub"
-    | Detail_identity -> "정체성"
+    | Detail_identity -> "서비스"
     | Detail_channels -> "채널"
     | Detail_automation -> "자동화"
     | Detail_runs -> "실행"
@@ -5557,6 +5684,7 @@ let runtime_listing_chrome
       ?(stale_rows = 0)
       ?(route_rows = 0)
       ?(editor_rows = None)
+      ~ko
       ~cols
       ~authority_rows
       ~error
@@ -5566,7 +5694,7 @@ let runtime_listing_chrome
       ()
   =
   listing_chrome ~error + 1 + max 1 authority_rows
-  + runtime_lane_notice_row_count ~cols action_error
+  + runtime_lane_notice_row_count ~ko ~cols action_error
   + (if stale_rows > 0 then stale_rows + 1 else 0)
   + (if prompt then 2 else 0)
   + route_rows
@@ -6575,10 +6703,14 @@ type metrics_section =
   | Section_resources
   | Section_tools
 
-let metrics_section_label = function
-  | Section_fleet -> "Engine & Scheduler"
-  | Section_resources -> "Work & Outcomes"
-  | Section_tools -> "Memory & Gate Safety"
+let metrics_section_label ~ko = function
+  | Section_fleet -> if ko then "엔진·스케줄러" else "Engine & Scheduler"
+  | Section_resources -> if ko then "작업·결과" else "Work & Outcomes"
+  | Section_tools -> if ko then "기억·Gate 안전" else "Memory & Gate Safety"
+
+(* The row above a Metrics body that ends in the connection rows, which the
+   End key reaches. Usage and Telemetry both draw it. *)
+let metrics_status_at_end ~ko = if ko then "End: 연결 상태" else "End: status"
 
 (* What the [:] palette is for right now. A jump lists every destination
    the strip and roster offer; a choice lists the names on the Code
@@ -9099,13 +9231,42 @@ type preset_save_receipt =
   ; psr_visible : bool
   }
 
+(* The two Schedules forms an $EDITOR round trip fills. *)
+type schedule_change = Schedule_create | Schedule_modify
+
+let schedule_change_name ~ko = function
+  | Schedule_create -> if ko then "일정 만들기" else "create"
+  | Schedule_modify -> if ko then "일정 편집" else "modify"
+
+(* Why the workspace guard withdrew a request before it left: the workspace
+   moved since the request captured its authority, the server identity is not
+   confirmed, or the server, asked again just before sending, named another
+   workspace or none. *)
+type workspace_refusal =
+  | Workspace_authority_withdrawn
+  | Workspace_identity_not_confirmed
+  | Workspace_identity_changed
+
+(* A request the workspace guard withdrew, or one the transport or the server
+   answered with a failure, which is said in its own words. *)
+type request_failure =
+  | Request_withdrawn of workspace_refusal
+  | Request_failed of string
+
+(* Why a Schedules form did not reach the server, or the server's refusal. *)
+type schedule_form_refusal_reason =
+  | Schedule_form_editor of Masc_tui_editor.abort
+  | Schedule_form_not_json of string
+  | Schedule_form_not_an_object
+  | Schedule_form_request of request_failure
+
 (* A refused schedule create or modify form, kept on the Schedules surface for
    the last-action window. [sfr_workspace] is the workspace the form was sent
    to: a reading that only loses the identity, or reads that workspace again,
    keeps the refusal; a reading of another workspace retires it. *)
 type schedule_form_refusal =
-  { sfr_action : string
-  ; sfr_detail : string
+  { sfr_change : schedule_change
+  ; sfr_reason : schedule_form_refusal_reason
   ; sfr_at : float
   ; sfr_workspace : workspace_input_identity option
   }
@@ -9663,8 +9824,12 @@ type state = {
   mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
      a different process on the same endpoint replaces this projection, while
-     a failed probe returns the display to unread rather than showing stale. *)
+     a failed probe clears it rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
+  (* The loader's sentence for the probe that cleared [server_identity], so a
+     surface with nothing to draw tells a failed read from one not made yet.
+     [store_server_identity_reading] writes the two together. *)
+  mutable server_identity_error: string option;
   local_base_path: string;
   (* [local_base_path] and its MASC root, resolved when this state is made;
      [None] when no base path is set. Workspace checks compare these with
@@ -10672,7 +10837,7 @@ type state = {
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
   mutable schedule_cancel_armed: string option;
-  mutable schedule_cancel_error: (string * string) option;
+  mutable schedule_cancel_error: (string * request_failure) option;
   (* The latest refused create/modify form, kept on the Schedules surface for
      the last-action window. *)
   mutable schedule_form_refusal: schedule_form_refusal option;
@@ -11556,6 +11721,13 @@ let workspace_preset_save_pending (state : state) =
 let preset_save_is_pending (state : state) name =
   List.exists (fun pending -> same_preset_save_name pending.psp_name name)
     (workspace_preset_save_pending state)
+
+(* A preset save waits until the server confirms the workspace it lands in.
+   Nothing is sent, and the chat line or the name entry stays as typed. *)
+let preset_save_needs_workspace_text ~ko =
+  let workspace = Masc_tui_words.workspace_name ~ko in
+  if ko then workspace ^ " 확인 후 저장하세요 · 입력은 유지됩니다"
+  else "Confirm the " ^ workspace ^ " before saving · input retained"
 
 let reveal_unconfirmed_preset_save (state : state) name =
   let workspace = workspace_input_identity_of_server state.server_identity in
@@ -14075,8 +14247,8 @@ let connectors_read_notice state =
   | Waiting_after_write ->
       Some (if server_authority_ready state
         then (if ko then "연결 재확인 대기 · r:재시도" else "Binding recheck pending · r:retry")
-        else (if ko then "연결 재확인 대기 · 작업 공간 확인을 기다리는 중"
-              else "Binding recheck pending · waiting for workspace confirmation"))
+        else (if ko then "연결 재확인 대기 · " else "Binding recheck pending · ")
+             ^ Masc_tui_words.workspace_identity_unconfirmed ~ko)
   | Failed_to_start ->
       Some (if ko then "커넥터 읽기를 시작하지 못했습니다" else "Connector read could not start")
 
@@ -15467,6 +15639,15 @@ let remember_identity_login_expectation (state : state) expectation =
       state.identity_login_expectations;
   state.identity_login_expectations <-
     expectation :: state.identity_login_expectations
+
+(* A confirmed probe replaces the identity and the reason it is missing
+   together, so a failed read is not left drawn as one not made yet. *)
+let store_server_identity_reading (state : state) reading =
+  state.server_identity <- server_identity_of_refresh reading;
+  state.server_identity_error <-
+    (match reading with
+     | Ok _ -> None
+     | Error detail -> Some detail)
 
 let reconcile_detail_intent_origins (state : state) reading =
   match reading with
@@ -18681,7 +18862,7 @@ let wait_for_created_keeper_metadata (state : state) keeper_name =
     requires the shared workspace for attachments and spilled paste files. *)
 type keeper_message_unavailable =
   | Keeper_missing | Remote_keeper_observation
-  | Message_workspace_unobserved | Message_workspace_unconfirmed | Message_workspace_differs
+  | Message_workspace_unobserved | Message_workspace_differs
   | Keeper_metadata_unobserved | Keeper_metadata_unavailable of string
   | Created_keeper_metadata_pending
 
@@ -20372,6 +20553,7 @@ let create_state
   keeper_detail_focus = Right_pane;
   keeper_message_focus = Right_pane;
   server_identity = None;
+  server_identity_error = None;
   local_base_path;
   local_workspace_paths = local_workspace_paths_of_base_path local_base_path;
   workspace_authority = Workspace_authority 0;
@@ -21381,29 +21563,50 @@ let browser_lane_picker_empty_line ~ko (view : Browser_lane_view.t) =
   | None, Failed _ -> Some (page_failed_note ~ko)
   | None, (Idle | No_browser) -> Some (page_unread_note ~ko)
 
-(* What a title says where its counts would go. A read nobody has asked for and a
-   read that failed both leave the snapshot empty, and the title is the row on
-   top, so it is the answer that gets read: "not loaded" after a failure sends
-   the operator to [r] while the server's reason sits in red two rows below.
+(* The words more than one screen says live in one table below every
+   renderer, so a module that cannot see this one says them too. Included
+   here so the callers of this module name them as before. *)
+include Masc_tui_words
 
-   The same distinction the body makes with {!page_unread_note} and
-   {!page_failed_note}, in the words a title has room for. The Memory header was
-   taught it in #35457; every other surface still said "not loaded" for both. *)
-(* A title has no label to hang the words on, so it brackets them: the
-   parentheses are what says "this is the state of the reading, not a count".
-   A labelled field already says that with its label, and the brackets inside
-   one cost two cells on the keeper chat header -- the narrowest row the TUI
-   draws, which at 120 columns beside the roster has none to spare. Both
-   spellings come from here so the words stay one. *)
-let field_unread ~ko = if ko then "미조회" else "not loaded"
-let title_unread ~ko = "(" ^ field_unread ~ko ^ ")"
-(* The same pair one layer down. A title brackets its words because it has no
-   label to hang them on; a labelled field does not, and said so already for
-   the unread half. The failed half had no name here, so the Memory header
-   spelled the title's words itself, minus the brackets -- the one place in
-   the TUI that decided what a field says after a failed read. *)
-let field_failed ~ko = if ko then "조회 실패" else "load failed"
-let title_failed ~ko = "(" ^ field_failed ~ko ^ ")"
+(* What the workspace guard says when it withdraws a request, in the shape of
+   every request kept back. The English sentences are the ones the surfaces
+   still in English have always drawn. *)
+let workspace_refusal_text ~ko refusal =
+  if ko then
+    kept_back ~ko
+      (match refusal with
+       | Workspace_authority_withdrawn -> "워크스페이스가 바뀜"
+       | Workspace_identity_not_confirmed -> workspace_identity_unconfirmed ~ko
+       | Workspace_identity_changed -> "워크스페이스 식별이 바뀌었거나 읽히지 않음")
+      Nothing_kept
+  else
+    match refusal with
+    | Workspace_authority_withdrawn -> "Workspace authority withdrawn"
+    | Workspace_identity_not_confirmed -> "Workspace identity is unconfirmed"
+    | Workspace_identity_changed ->
+        "Workspace identity changed or is unavailable; request withdrawn"
+
+let request_failure_text ~ko = function
+  | Request_withdrawn refusal -> workspace_refusal_text ~ko refusal
+  | Request_failed detail -> detail
+
+let schedule_form_refusal_text ~ko { sfr_change; sfr_reason; _ } =
+  let reason =
+    match sfr_reason with
+    | Schedule_form_editor abort -> Masc_tui_editor.abort_detail ~ko abort
+    | Schedule_form_not_json message ->
+        (if ko then "JSON 이 아님: " else "body is not JSON: ") ^ message
+    | Schedule_form_not_an_object ->
+        if ko then "양식이 JSON 객체가 아님" else "the editor form must be a JSON object"
+    | Schedule_form_request failure -> request_failure_text ~ko failure
+  in
+  schedule_change_name ~ko sfr_change ^ ": " ^ reason
+
+(* The cancel key's first press, said on the action line, under the list and
+   in the detail. *)
+let schedule_cancel_armed_text ~ko schedule_id =
+  if ko then "취소 준비됨: " ^ schedule_id ^ " \xc2\xb7 x 를 한 번 더 누르면 보냄"
+  else "Armed: cancel " ^ schedule_id ^ " \xc2\xb7 press x again to send"
 
 let title_missing_reading ~ko ~error =
   if Option.is_some error then title_failed ~ko else title_unread ~ko
@@ -24230,16 +24433,6 @@ let lane_picker_existing_slots (state : state) = function
        the one thing the reader wants to know before replacing it. *)
     Option.to_list state.runtime_catalog_default_route
 
-(* Why a pick cannot land on its target. A client with no output-schema
-   channel fits no exact lane: every exact-output call hands its client a JSON
-   Schema to answer to, and the runtime writer refuses it. The picker draws
-   such a candidate below every one that can land, with the reason at the
-   front of its row, and Enter on it sends nothing. *)
-type runtime_pick_refusal =
-  | No_output_schema_channel
-  | No_exact_body_deadline
-  | Wrong_candidate_group
-
 type runtime_pick_availability =
   | Pick_available
   | Pick_refused of runtime_pick_refusal
@@ -24273,19 +24466,6 @@ let runtime_pick_refusal_tag ~ko refusal =
   | No_exact_body_deadline, true -> "exact-body-timeout-s 없음"
   | Wrong_candidate_group, false -> "different candidate group"
   | Wrong_candidate_group, true -> "다른 후보 그룹"
-
-(* The sentence Enter on a refused row draws. *)
-let runtime_pick_refusal_text refusal (runtime : Tui_decode.runtime_option) =
-  match refusal with
-  | No_output_schema_channel ->
-    runtime.Tui_decode.ro_id ^ " has no output-schema channel"
-  | No_exact_body_deadline ->
-    (* One notice row: the table to fix and the key come first and, with the
-       notice prefix and a typical provider id, fit in about 85 columns. *)
-    Printf.sprintf "[providers.%s] needs exact-body-timeout-s for exact lanes"
-      runtime.Tui_decode.ro_provider_id
-  | Wrong_candidate_group ->
-    "Choose a model in the same HTTP or CLI group; add a candidate to change groups"
 
 (* The picker's whole list, ordered so the candidate a lane actually needs is
    at the top, with the ids it already holds. Computed in both the key handler
@@ -24435,7 +24615,9 @@ let runtime_picker_catalogue_notices (state : state) =
    the following refusal or read error disappear from the title's count. *)
 let runtime_picker_notices (state : state) =
   runtime_picker_catalogue_notices state
-  @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+  @ Option.to_list
+      (Option.map (runtime_lane_notice_text ~ko:(state.ui_language = Lang_ko))
+         state.runtime_lane_notice)
   @ runtime_lane_stale_lines state
   @ Option.to_list state.runtime_surface_error
 
@@ -24466,7 +24648,8 @@ let runtime_exact_picker_page (state : state) ~terminal_rows ~cols =
   | Lanes, Some { se_target = Exact_lane_slots _; _ } ->
     let extra =
       lanes_action_error_row_count ~cols state.lanes_action_error
-      + runtime_lane_notice_lines ~cols state.runtime_lane_notice
+      + runtime_lane_notice_lines ~ko:(state.ui_language = Lang_ko) ~cols
+          state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + (match state.runtime_lane_write with
         | Lane_write_idle -> 0
@@ -24594,7 +24777,9 @@ let lanes_overview_projection (state : state) ~rows ~cols =
     |> boxed_row_count ~cols in
   let full_tail_rows = Option.fold ~none:0 ~some:safe_boxed_rows state.lanes_action_error
       + Option.fold ~none:0 ~some:(fun notice ->
-          safe_boxed_rows (runtime_lane_notice_text notice)) state.runtime_lane_notice
+          safe_boxed_rows
+            (runtime_lane_notice_text ~ko:(state.ui_language = Lang_ko) notice))
+        state.runtime_lane_notice
       + List.length (runtime_lane_stale_lines state)
       + lanes_overview_picker_rows state in
   let panel_edges = 2 in
@@ -24620,7 +24805,9 @@ let lanes_overview_projection (state : state) ~rows ~cols =
            ^ runtime_catalog_reading_suffix ~ko:(state.ui_language = Lang_ko)
                picker.rlp_catalog_reading] in
     let failures = Option.to_list state.lanes_action_error
-      @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+      @ Option.to_list
+          (Option.map (runtime_lane_notice_text ~ko:(state.ui_language = Lang_ko))
+             state.runtime_lane_notice)
       @ runtime_lane_stale_lines state in
     (* The picker owns Enter while open. Its selected action target survives
        even when only one body row fits; with another row the feature list
@@ -24750,9 +24937,7 @@ let runtime_lane_candidate_write_refusal (state : state) =
     match state.runtime_surface_lane_freshness with
     | Lane_list_read -> None
     | Lane_list_unread _ ->
-      Some
-        (Lane_write_refused
-           "the lane list may be stale; reload it before changing candidates")
+      Some (Lane_write_refused Lane_list_may_be_stale)
 
 let runtime_lane_list_generation (state : state) = function
   | Runtime_surface_list -> state.runtime_surface_generation
@@ -24774,7 +24959,7 @@ let settle_runtime_lane_write (state : state) ~written = function
     state.runtime_lane_write <-
       Lane_write_rereading (written, runtime_lane_list_generation state written, receipt)
   | Error detail ->
-    state.runtime_lane_notice <- Some (Lane_write_refused detail);
+    state.runtime_lane_notice <- Some (Lane_write_refused (Refused_by_server detail));
     state.runtime_lane_write <- Lane_write_idle
 
 (* A load of [list] with [generation] landed. Any load of it that comes back
@@ -24828,7 +25013,7 @@ let plan_runtime_lane_edit (state : state) = function
         List.nth_opt snapshot.Tui_decode.rss_candidates state.runtime_cursor)
     in
     (match row with
-     | None -> Refuse_lane_edit (Lane_write_refused "no lane row is under the cursor")
+     | None -> Refuse_lane_edit (Lane_write_refused No_lane_row_under_cursor)
      | Some row ->
        let lane = row.Tui_decode.rcr_lane_id in
        let position = row.Tui_decode.rcr_position in
@@ -24855,24 +25040,17 @@ let plan_runtime_lane_edit (state : state) = function
                (List.filter (fun id -> not (String.equal id runtime_id)) order))
             ~cursor_after
         | Move_candidate move, None ->
-          let by, edge =
-            match move with
-            | Move_down -> 1, "last"
-            | Move_up -> -1, "first"
-          in
+          let by = match move with Move_down -> 1 | Move_up -> -1 in
           (match swap_candidates order (position - 1) (position - 1 + by) with
            | None ->
              Refuse_lane_edit
                (Lane_write_refused
-                  (Printf.sprintf "%s is already %s in %s" runtime_id edge lane))
+                  (Already_at_edge { item = runtime_id; move; place = lane }))
            | Some moved ->
              write (Write_lane_order moved) ~cursor_after:(Some (state.runtime_cursor + by)))
         | Remove_lane, _ when not row.Tui_decode.rcr_lane_declared ->
           Refuse_lane_edit
-            (Lane_write_refused
-               (Printf.sprintf
-                  "%s is a runtime, not a declared lane; there is no table to remove"
-                  lane))
+            (Lane_write_refused (Runtime_is_not_a_declared_lane lane))
         | Rename_lane, _ ->
           if runtime_lane_write_busy state then
             Refuse_lane_edit Lane_write_pending
@@ -25029,7 +25207,7 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
     let clean = Masc.Tui_terminal_text.sanitize_terminal_text in
     let notices =
       Option.to_list (Option.map
-        (fun notice -> Some notice, runtime_lane_notice_text notice) state.runtime_lane_notice)
+        (fun notice -> Some notice, runtime_lane_notice_text ~ko notice) state.runtime_lane_notice)
       @ List.map (fun line -> None, line) (runtime_lane_stale_lines state)
       @ List.map (fun line -> None, line) (Option.to_list state.runtime_surface_error)
       @ List.map (fun line -> None, line) (runtime_picker_catalogue_notices state)
@@ -25141,13 +25319,13 @@ type slot_edit_plan =
 
 let plan_slot_edit (state : state) edit =
   match state.slot_editor with
-  | None -> Refuse_slot_edit (Lane_write_refused "the slot editor is not open")
+  | None -> Refuse_slot_edit (Lane_write_refused Slot_editor_not_open)
   | Some editor ->
     let rows = slot_editor_rows state in
     let count = List.length rows in
     let order = List.map (fun row -> row.sr_slot) rows in
     (match slot_editor_selection state with
-     | None -> Refuse_slot_edit (Lane_write_refused "no slot is under the cursor")
+     | None -> Refuse_slot_edit (Lane_write_refused No_slot_under_cursor)
      | Some (cursor, row) ->
        let target = editor.se_target in
        let name = slot_editor_target_name target in
@@ -25176,11 +25354,7 @@ let plan_slot_edit (state : state) edit =
            (* The writer refuses it too. Saying so here keeps the round trip
               for edits that can land. *)
            Refuse_slot_edit
-             (Lane_write_refused
-                (Printf.sprintf
-                   "%s is the last slot of %s; an exact-output lane needs at least one"
-                   slot
-                   name))
+             (Lane_write_refused (Last_exact_slot { slot; lane = name }))
          | Exact_lane_slots _, Drop_slot ->
            Send_slot_write
              { target; slot; request = Drop_declared_slot }
@@ -25195,18 +25369,17 @@ let plan_slot_edit (state : state) edit =
                    (List.filteri (fun index _ -> index <> cursor) order)
              }
          | _, Move_slot move ->
-           let by, edge = match move with Move_down -> 1, "last" | Move_up -> -1, "first" in
+           let by = match move with Move_down -> 1 | Move_up -> -1 in
            let moved_to = cursor + by in
            if moved_to < 0 || moved_to >= count
            then
              Refuse_slot_edit
-               (Lane_write_refused (Printf.sprintf "%s is already %s in %s" slot edge name))
+               (Lane_write_refused
+                  (Already_at_edge { item = slot; move; place = name }))
            else if target <> Media_failover_slots
                    && row.sr_kind <> (List.nth rows moved_to).sr_kind
            then
-             Refuse_slot_edit
-               (Lane_write_refused
-                  "HTTP slots run first; CLI slots are the fallback after HTTP exhaustion. Reorder within a group")
+             Refuse_slot_edit (Lane_write_refused Reorder_across_slot_groups)
            else (
              let request =
                match target with
@@ -25355,7 +25528,7 @@ let runtime_spent_usage (resolved : Tui_decode.runtime_resolved_snapshot)
               | Utilization_usd { limit = None; _ } -> false) (first :: rest))
 
 let runtime_option_refusing (option : Tui_decode.runtime_option) =
-  option.Tui_decode.ro_quota_exhausted || option.Tui_decode.ro_rate_limited
+  Option.is_some option.Tui_decode.ro_quota_rest || option.Tui_decode.ro_rate_limited
   || Option.is_some option.Tui_decode.ro_credential_refused_at
 
 let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
@@ -25371,13 +25544,40 @@ let runtime_row_deemphasized state (option : Tui_decode.runtime_option) =
 let toggle_runtime_dim_refusals state =
   state.runtime_dim_refusals <- not state.runtime_dim_refusals
 
+(* What refused, as the quota window recorded it. A payment refusal is the
+   account's balance; the other two are a spent usage window, told apart by
+   whether a refused call or a usage read found it. *)
+let runtime_quota_cause_label ?(ko = false) = function
+  | Runtime_quota_window.Refused Runtime_quota_window.Payment_refused ->
+      if ko then "결제 거절" else "payment refused"
+  | Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused ->
+      if ko then "한도 소진" else "quota exhausted"
+  | Runtime_quota_window.Usage_read ->
+      if ko then "한도 소진 (사용량 조회)" else "quota spent (usage read)"
+
+(* A reset can be days ahead, so the day is part of the time. *)
+let runtime_quota_time at =
+  let tm = Unix.localtime at in
+  Printf.sprintf "%02d-%02d %02d:%02d" (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
+    tm.Unix.tm_min
+
+(* When the rest ends. A stated reset is the provider's; without one the
+   time is when this server calls the scope again. *)
+let runtime_quota_end_label ?(ko = false) = function
+  | Runtime_quota_window.Reset_stated at ->
+      Printf.sprintf (if ko then "%s 초기화" else "resets %s") (runtime_quota_time at)
+  | Runtime_quota_window.Observed_until at ->
+      Printf.sprintf
+        (if ko then "초기화 시각 없음, %s 다시 호출" else "no reset stated, called again %s")
+        (runtime_quota_time at)
+
 let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
-  if not runtime.ro_quota_exhausted then None
-  else Some (match runtime.ro_quota_resets_at with
-    | Some at -> let tm = Unix.localtime at in
-        Printf.sprintf (if ko then "쿼터 소진 (%02d:%02d 초기화)" else "quota exhausted (resets %02d:%02d)")
-          tm.Unix.tm_hour tm.Unix.tm_min
-    | None -> if ko then "쿼터 소진 (초기화 시각 없음)" else "quota exhausted (no reset stated)")
+  Option.map
+    (fun (spent : Runtime_quota_window.spent) ->
+      Printf.sprintf "%s (%s)"
+        (runtime_quota_cause_label ~ko spent.cause)
+        (runtime_quota_end_label ~ko spent.rest))
+    runtime.ro_quota_rest
 
 (* The provider refused the credential itself. No wait ends it, so the label
    carries when it was seen instead of when it resets. *)
@@ -25481,11 +25681,14 @@ let runtime_pick_facts = function
     in
     let default = if option.Tui_decode.ro_is_default then [ fact "[default]" ] else [] in
     let refusal =
-      match option.Tui_decode.ro_quota_exhausted, option.Tui_decode.ro_rate_limited with
-      | false, false -> []
-      | true, false -> [ { rpf_text = "[quota exhausted]"; rpf_warn = true } ]
-      | false, true -> [ { rpf_text = "[rate limited]"; rpf_warn = true } ]
-      | true, true -> [ { rpf_text = "[quota + rate]"; rpf_warn = true } ]
+      let warn text = { rpf_text = Printf.sprintf "[%s]" text; rpf_warn = true } in
+      List.filter_map Fun.id
+        [ Option.map
+            (fun (spent : Runtime_quota_window.spent) ->
+              warn (runtime_quota_cause_label spent.cause))
+            option.Tui_decode.ro_quota_rest
+        ; (if option.Tui_decode.ro_rate_limited then Some (warn "rate limited") else None)
+        ]
     in
     (context :: effort) @ default @ refusal
 
@@ -25924,6 +26127,7 @@ let runtime_selection_summary_lines ~cols state =
 
 let runtime_surface_base_chrome_with ~cols state ~route_rows =
   runtime_listing_chrome
+    ~ko:(state.ui_language = Lang_ko)
     ~cols
     ~authority_rows:(List.length (runtime_authority_rows ~cols state))
     ~error:state.runtime_surface_error

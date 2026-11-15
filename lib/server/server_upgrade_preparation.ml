@@ -1,9 +1,11 @@
-type error = Invalid_health | Different_workspace | Admin_required | Owner_unavailable
+type error = Invalid_health | Different_workspace | Admin_required | Server_starting
+  | Admin_check_unanswered | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
+type http_answer = (int * string, string) result
 type incumbent = {base_path:string; version:string}
 type phase = Prepared | Requested | Released
 type t = {incumbent:incumbent; observe:unit -> (string,error) result;
-  authorize:unit -> bool; signal:unit -> (unit,error) result; release:unit -> unit;
+  authorize:unit -> (unit,error) result; signal:unit -> (unit,error) result; release:unit -> unit;
   lock:Eio.Mutex.t; mutable phase:phase}
 open Result.Syntax
 let decode_health body =
@@ -31,11 +33,33 @@ let authorize_initial ~base_path ~expected_version ~body ~login =
   let* incumbent = decode ~base_path body in
   if incumbent.version <> expected_version then Error Incumbent_changed
   else if login () then Ok () else Error Admin_required
-let prepare_with ~sw ~base_path ~observe ~authorize ~capture =
+(* Whether the answer of [/health/ready] says the server has not finished
+   starting: the [ready] field the server writes as [false] until its state is
+   published. An answer that cannot be read says nothing either way. *)
+let says_starting : http_answer -> bool = function
+  | Error (_ : string) -> false
+  | Ok ((_ : int), body) ->
+    (match Yojson.Safe.from_string body with
+     | `Assoc fields -> List.assoc_opt "ready" fields = Some (`Bool false)
+     | _ -> false
+     | exception Yojson.Json_error _ -> false)
+(* A server that is still starting answers every route behind a credential
+   with a 503 before it reads the credential, so it is asked for readiness
+   first and the bearer is not sent to it. Of the answers to the bearer, 401
+   and 403 are the server refusing the credential it read; any other status,
+   and no answer, is not a verdict on the credential. *)
+let admin_admission ~readiness ~access =
+  if says_starting (readiness ()) then Error Server_starting else
+  match access () with
+  | Ok (200, (_ : string)) -> Ok ()
+  | Ok ((401 | 403), (_ : string)) -> Error Admin_required
+  | Ok ((_ : int), (_ : string)) | Error (_ : string) -> Error Admin_check_unanswered
+let prepare_with ~sw ~base_path ~observe ~readiness ~access ~capture =
+  let authorize () = admin_admission ~readiness ~access in
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
   let* body = observe () in
   let* incumbent = decode ~base_path body in
-  if not (authorize ()) then Error Admin_required else
+  let* () = authorize () in
   let* signal, raw_release = capture () in
   let released = Atomic.make false in
   let release () = if not (Atomic.exchange released true) then raw_release () in
@@ -58,24 +82,24 @@ let request_termination owner =
       let* body = owner.observe () in
       let* current = decode ~base_path:owner.incumbent.base_path body in
       if current <> owner.incumbent then Error Incumbent_changed
-      else if not (owner.authorize ()) then Error Admin_required
-      else let* () = owner.signal () in owner.phase <- Requested; Ok ())
+      else let* () = owner.authorize () in
+        let* () = owner.signal () in owner.phase <- Requested; Ok ())
 let close owner = Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
   if owner.phase <> Released then (owner.release (); owner.phase <- Released))
-let prepare ~sw ~clock ~headers ~run_dir ~base_path ~port =
+let prepare_at ~sw ~clock ~headers ~run_dir ~base_path ~port =
   if port < 1 || port > 65535 then Error Invalid_health else
   let* base_path = try Ok (Unix.realpath base_path) with Unix.Unix_error _ -> Error Different_workspace in
   let url path = Masc_network_defaults.masc_http_loopback_origin ~port ^ path in
   let observe () = match Masc_http_client.get_sync ~clock ~url:(url Server_health_paths.full) ~headers:[] () with
     | Ok (200, body) -> Ok body | Ok _ | Error _ -> Error Invalid_health in
-  let authorize () = match Masc_http_client.get_sync ~clock ~url:(url "/api/v1/runtime/config/raw") ~headers () with
-    | Ok (200, _) -> true | Ok _ | Error _ -> false in
+  let readiness () = Masc_http_client.get_sync ~clock ~url:(url Server_health_paths.readiness) ~headers:[] () in
+  let access () = Masc_http_client.get_sync ~clock ~url:(url "/api/v1/runtime/config/raw") ~headers () in
   let capture () = match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
     | Error _ -> Error Owner_unavailable
     | Ok handle -> Ok ((fun () -> Owner_process_identity.request_termination handle
           |> Result.map_error (fun _ -> Owner_unavailable)),
         (fun () -> Owner_process_identity.close handle)) in
-  prepare_with ~sw ~base_path ~observe ~authorize ~capture
+  prepare_with ~sw ~base_path ~observe ~readiness ~access ~capture
 let suggest_loopback_port () =
   try
     let socket = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
@@ -171,6 +195,63 @@ let holder (root : Host_config.base_path_lease_root) ~base_path ~port =
          | Account_server_on_port { pid = (_ : int) } -> Held_by_account_server { port }
          | Account_server_on_another_port { pid = (_ : int); port = announced } ->
            Held_by_account_server { port = announced }))
+type single_user_listener = { run_dir : string; base_path : string; port : int; pid : int }
+type listener_refusal =
+  | No_lease_owner
+  | Owner_announces_no_port of { pid : int }
+  | Owner_listens_on_another_port of { pid : int; port : int }
+  | Listener_unread of Server_startup_takeover.owner_capture_error
+(* HIGH-RISK-UNREVIEWED: this read decides which port gets the bearer of the
+   operator (#51321). A [single_user_listener] is made here and nowhere else,
+   and only when the kernel owner of the lease is the process that holds the
+   single-user announcement lock of the very byte of [port]. What the port
+   answers over HTTP is not read. *)
+let single_user_listener ~run_dir ~base_path ~port =
+  let unread rejection = Listener_unread (Server_startup_takeover.Owner_lease_rejected rejection) in
+  match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
+  | Error (Owner_identity_unavailable No_owner) -> Error No_lease_owner
+  | Error
+      ( Server_startup_takeover.Owner_lease_rejected _
+      | Server_startup_takeover.Owner_identity_unavailable
+          (Owner_changed | Unsupported | Unavailable | Closed)
+      | Server_startup_takeover.Current_process_owner as error ) -> Error (Listener_unread error)
+  | Ok owner ->
+    (* The owner stays captured over the reads, so the pid the locks are
+       compared with is the one of the process that holds the lease. *)
+    Fun.protect ~finally:(fun () -> Owner_process_identity.close owner) (fun () ->
+      let pid = Owner_process_identity.pid owner in
+      match Server_startup_takeover.single_user_server_port_holder ~run_dir ~base_path ~port with
+      | Error rejection -> Error (unread rejection)
+      | Ok (Some holder) when holder = pid -> Ok { run_dir; base_path; port; pid }
+      | Ok (Some (_ : int)) | Ok None ->
+        (* The owner does not hold the byte of this port. The whole-file read
+           only names the port for the refusal, as in [account_server]. *)
+        (match Server_startup_takeover.single_user_server_announcement ~run_dir ~base_path with
+         | Error rejection -> Error (unread rejection)
+         | Ok (Some { Server_startup_takeover.pid = announcer; port = announced })
+           when announcer = pid && announced <> port ->
+           Error (Owner_listens_on_another_port { pid; port = announced })
+         | Ok (Some (_ : Server_startup_takeover.single_user_server_announcement)) | Ok None ->
+           Error (Owner_announces_no_port { pid })))
+let listener_port (listener : single_user_listener) = listener.port
+let listener_base_path (listener : single_user_listener) = listener.base_path
+(* HIGH-RISK-UNREVIEWED: the only place that puts the bearer of the operator
+   in a request (#51321). The port is the one inside [listener], so no port
+   that the kernel did not confirm can be named here. The confirmation is
+   read again right before each request that carries the bearer: once here,
+   and before every later [observe], which [request_termination] runs just
+   before it authorizes. An owner that left, or a port that changed hands,
+   ends in [Incumbent_changed] with nothing sent. *)
+let prepare ~sw ~clock ~listener ~token ~agent =
+  let { run_dir; base_path; port; pid } = listener in
+  let still_listens () =
+    match single_user_listener ~run_dir ~base_path ~port with
+    | Ok (again : single_user_listener) when again.pid = pid -> Ok ()
+    | Ok (_ : single_user_listener) | Error (_ : listener_refusal) -> Error Incumbent_changed in
+  let* () = still_listens () in
+  let headers = ["authorization", "Bearer " ^ token; "x-masc-agent", agent] in
+  let* owner = prepare_at ~sw ~clock ~headers ~run_dir ~base_path ~port in
+  Ok { owner with observe = (fun () -> let* () = still_listens () in owner.observe ()) }
 let stop_account_server ~run_dir ~base_path ~port =
   match Server_startup_takeover.capture_existing_owner ~run_dir ~base_path with
   | Error (_ : Server_startup_takeover.owner_capture_error) -> Error Owner_unavailable

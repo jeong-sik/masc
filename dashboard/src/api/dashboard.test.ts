@@ -5222,7 +5222,6 @@ describe('fetchRuntimeProviders', () => {
               enable_thinking: true,
               preserve_thinking: null,
               resolved_reasoning_effort: 'high',
-              glm_replay_reasoning: true,
               tool_stream: true,
               tool_choice: {
                 kind: 'required',

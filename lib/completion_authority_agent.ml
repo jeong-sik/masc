@@ -917,6 +917,8 @@ let commit_verdict_with_effects ~observe_original ~apply_original
     | Error (W.Worker_error error) ->
       Error (match error with
         | W.Original_not_found -> "original absent"
+        | W.Question_changed -> "the submitted question changed"
+        | W.Authority_changed change -> Verifier_review_authority_change.to_string change
         | Authority_unavailable detail | Original_corrupt detail | Grants_mismatch detail | Execution_pending detail | Execution_repair_required detail
         | Persistence_unavailable detail -> detail)
     | Error (W.Apply_failed (Invalid_commit_intent detail)) -> Error detail
@@ -1155,14 +1157,20 @@ let process_task_once ?(registry=Verification_run_registry.global ())
             in
             let installation_id = host_installation_id in
             let package_id = host_package_id in
-            let prepared_original : (int * Verifier_review_original.t, Verifier_review_worker.error) result =
+            let prepare_attempt () : (int * Verifier_review_original.t, Verifier_review_worker.error) result =
               let* attempt =
                 Verifier_review_owner.next_attempt ~store:owner_store ~verification_id
                   ~installation_id ~package_id
+                  ~lookup:(fun () -> Result.map Verifier_review_original.lookup_of_authority
+                    (prepare_authority ()))
                 |> Result.map_error (function
-                  | Verifier_review_owner.Not_found -> Verifier_review_worker.Original_not_found
-                  | Verifier_review_owner.Load_store_unavailable d -> Verifier_review_worker.Persistence_unavailable d
-                  | Verifier_review_owner.Corrupt_original d -> Verifier_review_worker.Original_corrupt d) in
+                  | Verifier_review_owner.Load Verifier_review_owner.Not_found -> Verifier_review_worker.Original_not_found
+                  | Verifier_review_owner.Load (Verifier_review_owner.Load_store_unavailable d) ->
+                    Verifier_review_worker.Persistence_unavailable d
+                  | Verifier_review_owner.Load (Verifier_review_owner.Corrupt_original d) ->
+                    Verifier_review_worker.Original_corrupt d
+                  | Verifier_review_owner.Lookup_unavailable d -> Verifier_review_worker.Authority_unavailable d
+                  | Verifier_review_owner.Question_changed -> Verifier_review_worker.Question_changed) in
               let* () = match Verifier_review_owner.load_for_destination ~store:owner_store
                 ~verification_id ~attempt ~installation_id ~package_id with
               | Ok _ -> Ok ()
@@ -1171,8 +1179,6 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               | Error Verifier_review_owner.Not_found ->
               let* lookup_authority = prepare_authority ()
                 |> Result.map_error (fun detail -> Verifier_review_worker.Authority_unavailable detail) in
-              let lookup_tools = Verification_authority_tools.task_review_tools lookup_authority in
-              let lookup_root = Verification_authority_tools.task_review_root lookup_authority in
               let* original =
                 Verifier_review_original.prepare
                   ~generator_runtime:(Option.map
@@ -1180,10 +1186,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                   ~verification_id
                   ~attempt
                   ~question
-                  ~lookup_root
-                  ~lookup_binding:(Verification_authority_tools.task_review_binding lookup_authority)
-                  ~lookup_schemas:(List.map (fun (s : Types_core.tool_schema) -> s.name)
-                                     (Verification_authority_tools.schemas lookup_tools))
+                  ~lookup:(Verifier_review_original.lookup_of_authority lookup_authority)
                   prepared.review_request
                 |> Result.map_error (fun reason -> Verifier_review_worker.Original_corrupt reason)
               in
@@ -1207,8 +1210,8 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                   | Corrupt_original detail -> Verifier_review_worker.Original_corrupt detail) in
               Ok (attempt,original)
             in
-            let run_result =
-              let* attempt,original = prepared_original in
+            let run_once () =
+              let* attempt,original = prepare_attempt () in
               let* reviewed_original,result =
               with_original_publication_guard ~store:owner_store ~verification_id ~attempt
                 ~installation_id ~package_id (fun () -> Verifier_review_worker.run_attempt
@@ -1239,6 +1242,20 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                 ())
               in Ok (attempt,reviewed_original,result)
             in
+            (* HIGH-RISK-UNREVIEWED: an attempt refused before dispatch because
+               its lookup authority or answer format moved is asked again once
+               in this same processing. The walk opens the next attempt with the
+               authority this processing prepared, and the worker checks it
+               against that same value. A second refusal keeps only its own
+               record and waits for the next processing, as an unavailable
+               lookup authority does. *)
+            let run_result = match run_once () with
+              | Error (Verifier_review_worker.Authority_changed _) -> run_once ()
+              | (Ok _ | Error (Verifier_review_worker.Original_not_found | Original_corrupt _
+                  | Authority_unavailable _ | Grants_mismatch _ | Question_changed
+                  | Execution_pending _ | Execution_repair_required _ | Persistence_unavailable _)) as result ->
+                result
+            in
             match run_result with
             | Error (Verifier_review_worker.Execution_pending detail) -> stop (Execution_pending {detail})
             | Error (Verifier_review_worker.Execution_repair_required detail) -> stop (Execution_repair_required {detail})
@@ -1248,15 +1265,21 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               defer_unavailable ~stage:Verification_run_registry.Review_preparation ~detail
             | Error Verifier_review_worker.Original_not_found -> stop (Raised {detail="verifier original not found"})
             | Error (Verifier_review_worker.Original_corrupt detail | Grants_mismatch detail) -> stop (Raised {detail})
+            | Error Verifier_review_worker.Question_changed ->
+              stop (Raised {detail="the submitted subject or evidence changed after the review original was prepared"})
+            | Error (Verifier_review_worker.Authority_changed change) ->
+              defer_unavailable ~stage:Verification_run_registry.Lookup_surface
+                ~detail:(Verifier_review_authority_change.to_string change)
             | Ok (attempt,original,result) ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback
                answered for the intended one. A non-verdict is a no-op
                inside. *)
             let reviewed_request = Verifier_review_original.review_request original in
-            (* The v3 original freezes the generator runtime, not the submitting
-               response identity. The current wake cannot bind that identity to
-               this original, even when both name the same runtime. *)
+            (* The retained original freezes the generator runtime, not the
+               submitting response identity. The current wake cannot bind that
+               identity to this original, even when both name the same
+               runtime. *)
             Eval_calibration.record_verdict
               ~base_path:runtime.config.base_path
               ~task_id:reviewed_request.task_id

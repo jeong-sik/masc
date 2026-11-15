@@ -580,6 +580,12 @@ let test_write_comes_back_through_recall () =
    | Ok None -> () | _ -> Alcotest.fail "committed admission was not acknowledged")
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 let test_retract_cascades_through_public_tool_and_journals_reason () =
   with_temp_dir
   @@ fun base_path ->
@@ -662,7 +668,7 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
     (current_facts ~keepers_dir ~keeper_id:meta.name
      |> List.map Masc.Keeper_memory_os_types.memory_id);
   let journal =
-    Current.read_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10
+    readable_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10
   in
   Alcotest.(check int) "four writes and one retract are journaled" 5 (List.length journal);
   (match List.rev journal |> List.hd with
@@ -717,7 +723,7 @@ let test_retract_cascades_through_public_tool_and_journals_reason () =
   Alcotest.(check int)
     "missing target does not append journal"
     5
-    (List.length (Current.read_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10))
+    (List.length (readable_journal_tail ~keepers_dir ~keeper_id:meta.name ~limit:10))
 ;;
 
 let test_derived_write_uses_exact_premise_receipt () =
@@ -2343,7 +2349,16 @@ let test_tools_isolate_workspace_base_path_from_ambient_decoy () =
     Alcotest.(check int)
       "context status counts only target facts"
       1
-      (int_field "memory_facts_total" status))
+      (int_field "memory_facts_total" status);
+    Alcotest.(check string)
+      "context status leaves repository checkouts uninspected"
+      "not_inspected"
+      Yojson.Safe.Util.(
+        status
+        |> member "sandbox_live"
+        |> member "repository_checkouts"
+        |> member "state"
+        |> to_string))
 ;;
 
 (* The source parser sits behind Safe_ops.json_string, which returns its

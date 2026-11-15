@@ -51,6 +51,9 @@ type t
 val empty : t
 val find : t -> Authz_types.Invite_id.t -> invitation option
 
+(** Every invitation with its id, in the order of the ids. *)
+val bindings : t -> (Authz_types.Invite_id.t * invitation) list
+
 (** The invitation whose token has this digest, open or not. *)
 val find_by_token_digest
   :  t

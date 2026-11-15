@@ -1,8 +1,13 @@
+type unreachable =
+  | Workspace_unread
+  | Workspace_differs
+  | Keeper_unavailable of string
+
 type target =
   | No_target
   | Unreachable of {
       keeper : string;
-      reason : string;
+      reason : unreachable;
     }
   | Ready of string
 
@@ -51,10 +56,21 @@ let listen_key = "\025"
    compose owns text input. *)
 let continuous_key = "\001"
 
+(* The workspace gate is said in the words the top row and the footer use. A
+   mismatch adds why chat needs the matching workspace at all. *)
+let unreachable_text ~ko = function
+  | Workspace_unread -> Masc_tui_words.workspace_identity_unread ~ko
+  | Workspace_differs ->
+      Masc_tui_words.workspace_mismatch ~ko ^ " · "
+      ^ if ko then "첨부와 붙여 넣은 파일 때문에 채팅은 같은 워크스페이스가 필요함"
+        else "chat needs a matching workspace for attachments and pasted files"
+  | Keeper_unavailable reason -> reason
+
 let prompt ~ko composer =
   match composer.target with
   | No_target -> if ko then "고른 키퍼 없음" else "no keeper selected"
-  | Unreachable { keeper; reason } -> Printf.sprintf "%s — %s" keeper reason
+  | Unreachable { keeper; reason } ->
+      Printf.sprintf "%s — %s" keeper (unreachable_text ~ko reason)
   | Ready keeper ->
     let recipient = if ko then keeper ^ " 에게" else "to " ^ keeper in
     if composer.staged_images = 0
@@ -80,12 +96,11 @@ let metadata_step ~ko phase =
 
 let reading_note ~ko reading =
   let say korean english = if ko then korean else english in
+  let sentence word = String.capitalize_ascii (word ~ko) in
   match reading with
-  | Workspace_not_observed -> Some (say "서버 작업 공간 미조회" "Server workspace not observed")
-  | Workspace_unconfirmed ->
-      Some (say "서버 작업 공간 확인 대기" "Server workspace awaiting confirmation")
-  | Different_workspace ->
-      Some (say "채팅하려면 서버 작업 공간이 필요함" "Chat needs the server workspace")
+  | Workspace_not_observed -> Some (sentence Masc_tui_words.workspace_identity_unread)
+  | Workspace_unconfirmed -> Some (sentence Masc_tui_words.workspace_identity_unconfirmed)
+  | Different_workspace -> Some (sentence Masc_tui_words.workspace_mismatch)
   | Metadata {status=Observed;pending=None} -> None
   | Metadata {status=Not_observed;pending=None} ->
       Some (say "키퍼 목록 미조회" "Keeper list not observed")
@@ -99,6 +114,14 @@ let reading_note ~ko reading =
       Some
         (say "키퍼 목록: " "Keeper list: " ^ metadata_step ~ko phase
          ^ say " · 지난 조회 실패: " " · last read failed: " ^ detail)
+
+(* The prompt of a target the workspace gate withheld already names the
+   workspace state, which is the reading too: both come from one identity. *)
+let row_note ~ko composer =
+  match composer.target with
+  | Unreachable { reason = Workspace_unread | Workspace_differs; _ } -> None
+  | No_target | Ready _ | Unreachable { reason = Keeper_unavailable _; _ } ->
+      reading_note ~ko composer.reading
 
 let accepts_input composer =
   match (composer.focus, composer.target) with

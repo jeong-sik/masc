@@ -2,7 +2,7 @@
 """Invented rows, runs, counts and pinned lines for the tests of the prompt comparison
 (`prompt_counts.py`, `prompt_lines.py`, `prompt_compare.py`).
 
-`prompt_counts` imports `eval_admission`, which imports the Tinker caller, which imports openai, so
+`prompt_lines` imports `eval_admission`, which imports the Tinker caller, which imports openai, so
 a test that uses this file runs with `uv run`.
 """
 

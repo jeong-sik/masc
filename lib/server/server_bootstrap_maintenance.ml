@@ -285,6 +285,57 @@ let run_periodic_task_gc config ~days =
   | exn ->
     Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn)
 
+(* HIGH-RISK-UNREVIEWED: the server deletes auth credentials here (#45358).
+   Expiry is the credential's own [expires_at], judged by the server on every
+   request, so a credential past it already authenticates nothing; retiring it
+   is the same garbage collection `masc token prune` does, through the same
+   [Auth_token_prune.run] transaction. Nothing but that CLI called it, while
+   every Claude Code session mints a credential that outlives its use, so the
+   store only grew. Live, undecodable and mismatched credentials are left as
+   they are; a store the transaction cannot read retires nothing and is
+   reported, to be read again at the next daily pass. *)
+let run_periodic_credential_prune (config : Workspace.config) ~now =
+  try
+    match
+      Auth_token_prune.run ~base_path:config.base_path ~now
+        ~mode:Auth_token_prune.Retire
+    with
+    | Error error ->
+      Log.Server.error "periodic credential prune retired nothing: %s"
+        (Masc_domain.masc_error_to_string error)
+    | Ok entries ->
+      List.iter
+        (fun { Auth_token_prune.agent_name; reason; outcome } ->
+          let why =
+            match reason with
+            | Auth_token_prune.Expired -> "expired"
+            | Auth_token_prune.Orphaned_redirect -> "orphaned redirect"
+          in
+          match outcome with
+          | Auth_token_prune.Retired ->
+            Log.Server.info "periodic credential prune: retired %s (%s)"
+              agent_name why
+          | Auth_token_prune.Failed error ->
+            Log.Server.error
+              "periodic credential prune: %s (%s) was not retired and may be \
+               partly removed: %s"
+              agent_name why (Masc_domain.masc_error_to_string error)
+          | Auth_token_prune.Would_retire ->
+            Log.Server.error
+              "periodic credential prune: %s (%s) was only previewed" agent_name
+              why)
+        entries
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Server.error "periodic credential prune failed: %s" (Printexc.to_string exn)
+
+(* What the 24h maintenance block runs. Each pass catches its own failure, so
+   one cannot starve the other for another 24h. *)
+let run_daily_retention config ~task_archive_retention_days ~now =
+  run_periodic_task_gc config ~days:task_archive_retention_days;
+  run_periodic_credential_prune config ~now
+
 
 let latest_keeper_msg_recovery_observation () =
   Atomic.get latest_keeper_msg_recovery
@@ -741,10 +792,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
-    (* Task GC starts due: the first maintenance pass runs it, then every 24h
-       of uptime. Servers that restart more often than daily would otherwise
-       never archive, since the pass is gated on uninterrupted uptime. *)
-    let last_task_gc = ref 0.0 in
+    (* Task GC and the credential prune start due: the first maintenance pass
+       runs them, then every 24h of uptime. Servers that restart more often
+       than daily would otherwise never run either, since the pass is gated on
+       uninterrupted uptime. *)
+    let last_daily_retention = ref 0.0 in
     let last_chat_journal_audit = ref (Unix.gettimeofday ()) in
     (* Operations the audit has reported: each settled operation is audited
        once per process life. *)
@@ -931,18 +983,21 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             (#40427/#40571), so automating it is safe; the retention window
             is a runtime setting, not a wall-clock kill. Its own block, not
             the JSONL-prune try above: a prune failure must not starve task
-            archival for another 24h. *)
-         if now -. !last_task_gc >= Masc_time_constants.day
+            archival for another 24h. Expired credentials are retired in the
+            same block (#45358). *)
+         if now -. !last_daily_retention >= Masc_time_constants.day
          then begin
-           last_task_gc := now;
+           last_daily_retention := now;
            (try
-              run_periodic_task_gc
+              run_daily_retention
                 (Mcp_server.workspace_config state)
-                ~days:(Runtime_params.get Runtime_settings.task_archive_retention_days)
+                ~task_archive_retention_days:
+                  (Runtime_params.get Runtime_settings.task_archive_retention_days)
+                ~now
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-              Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn))
+              Log.Server.error "daily retention failed: %s" (Printexc.to_string exn))
          end;
          (* RFC-0412 stage 2: dual-write consistency audit of the chat event
             journal against keeper_chat_store. Runs hourly — far more often

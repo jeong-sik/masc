@@ -27,6 +27,12 @@ val make_http_config :
     is [address] written out by {!Ipaddr.to_string}. Other config fields
     default via {!Http_server_eio.default_config}. *)
 
+val advertised_base_url : address:Ipaddr.t -> port:int -> string
+(** The base URL {!make_http_config} writes for a listener bound to
+    [address] when none is configured: [http://127.0.0.1:P] for a wildcard,
+    [http://[::1]:P] for [::1]. {!Server_request_authority.make_trust_policy}
+    reads it back as the explicit base URL. *)
+
 val listen_tcp_result :
   sw:Eio.Switch.t ->
   net:[> `Network | `Platform of [> `Generic ] as 'a ] Eio.Resource.t ->
@@ -124,7 +130,12 @@ val with_cleanups_on_release :
     within {!Server_connection_socket.preparation_bound_s}: the first bytes
     on the HTTP/1.1 and h2c loops, the protocol choice on the auto loop, the
     TLS handshake on the TLS loop. A connection that was not ready is logged
-    at debug. *)
+    at debug.
+
+    Each connection runs under a switch of its own. When any fiber or daemon
+    of that switch raises, the connection ends, the exception is logged at
+    error, and the loop accepts the next connection. Cancelling the
+    listener's switch ends the loop and its connections. *)
 
 val serve :
   sw:Eio.Switch.t ->
@@ -140,6 +151,18 @@ val serve :
     every error log line as [[h1 <addr_label>]] so operators can
     identify which listener emitted the line when a process runs
     multiple HTTP servers. *)
+
+val h1_error_handler :
+  Eio.Net.Sockaddr.stream ->
+  ?request:Httpun.Request.t ->
+  Httpun.Server_connection.error ->
+  (Httpun.Headers.t -> Httpun.Body.Writer.t) ->
+  unit
+(** The error handler of every HTTP/1.1 connection: httpun calls it for a
+    request it could not parse and for a request that failed before its
+    response. The body is one of the fixed sentences of {!Http_error_body}.
+    A server failure is logged at error with the exception's text, which
+    reaches the log only. *)
 
 val h2_config : unit -> H2.Config.t
 (** The settings every H2 connection is created with, cleartext or TLS:

@@ -4,7 +4,7 @@
 
 type admitted_http_body =
   { serialized_request : Complete_common.serialized_http_request
-  ; evidence : Request_wire_observer.observation
+  ; stream : bool
   ; config : Provider_config.t
   ; messages : Types.message list
   ; tools : Yojson.Safe.t list
@@ -72,8 +72,8 @@ type t =
       -> stream_result Completion_outcome.t
   }
 
-let admit_http_body ~serialized_request ~evidence ~config ~messages ~tools =
-  { serialized_request; evidence; config; messages; tools }
+let admit_http_body ~serialized_request ~stream ~config ~messages ~tools =
+  { serialized_request; stream; config; messages; tools }
 ;;
 
 (* The body was built from three immutable values. A request that still holds

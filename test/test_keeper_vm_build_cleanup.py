@@ -220,6 +220,21 @@ class LiveProcesses(unittest.TestCase):
         self.process(self.OWN_PID, cwd=self.repo)
         self.assertEqual(cleaner.process_paths(self.proc), [])
 
+    def test_process_reaped_while_its_stat_is_read_is_passed_over(self) -> None:
+        process = self.process(4242, cwd=self.repo)
+        (self.process(4243, cwd=self.root) / "fd" / "3").symlink_to(self.build / "artifact")
+        read_text = Path.read_text
+
+        def reaped(path, *args, **kwargs):
+            if path == process / "stat":
+                raise ProcessLookupError(3, "No such process", str(path))
+            return read_text(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", reaped):
+            paths = cleaner.process_paths(self.proc)
+        self.assertNotIn(self.repo, paths)
+        self.assertIn(self.build / "artifact", paths)
+
     def test_vanished_descriptor_keeps_later_descriptors(self) -> None:
         process = self.process(4242, cwd=self.root)
         vanished = process / "fd" / "0"

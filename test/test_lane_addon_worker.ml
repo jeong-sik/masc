@@ -279,7 +279,7 @@ elif argv[:2] == ['system', 'status']:
     assert argv == ['system', 'status', '--format', 'json'], argv
     if (root / 'info-unavailable').exists(): raise SystemExit(7)
     identity = root / 'engine-id'
-    emit({'status': 'running', 'appRoot': identity.read_text().strip() if identity.exists() else '/fixture/app-root-a'})
+    emit({'status': 'running', 'paths': {'appRoot': identity.read_text().strip() if identity.exists() else '/fixture/app-root-a'}})
 elif argv[:1] == ['volume']:
     action = argv[1]
     if action == 'list':
@@ -837,12 +837,19 @@ let test_engine_identity_parsing_has_no_default () =
   check bool "Apple status without a root is unreadable" true
     (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running"}|}));
   check bool "Apple relative root is unreadable" true
-    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"relative"}|}));
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","paths":{"appRoot":"relative"}}|}));
+  check bool "Apple root printed at the top level by a CLI before 1.4.1 is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}));
   check bool "Apple stopped service is unreachable" true
-    (unreachable (Engine.engine_of_info Types.Apple_container {|{"status":"stopped","appRoot":"/root"}|}));
+    (unreachable (Engine.engine_of_info Types.Apple_container {|{"status":"stopped","paths":{"appRoot":"/root"}}|}));
   check bool "Apple running service is its root" true
-    (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}
-     = Ok (Lifecycle.Apple_app_root "/root"))
+    (Engine.engine_of_info Types.Apple_container {|{"status":"running","paths":{"appRoot":"/root"}}|}
+     = Ok (Lifecycle.Apple_app_root "/root"));
+  (* The output of container 1.6.1, with the other fields kept and values shortened. *)
+  check bool "Apple 1.6.1 status is its root" true
+    (Engine.engine_of_info Types.Apple_container
+       {|{"client":{"appName":"container","version":"1.6.1"},"host":{"architecture":"arm64","cpus":16},"paths":{"appRoot":"/Users/u/Library/Application Support/com.apple.container/","installRoot":"/opt/homebrew/Cellar/container/1.6.1/"},"resources":{"containersRunning":0,"images":1},"server":{"appName":"container-apiserver","version":"1.6.1"},"status":"running"}|}
+     = Ok (Lifecycle.Apple_app_root "/Users/u/Library/Application Support/com.apple.container/"))
 
 (* A container with a blank label would otherwise reach the Slot_foreign record
    as [Some ""], which the record's own decoder refuses: the failure could be

@@ -87,7 +87,7 @@ import {
 } from './keeper-state'
 import {
   abortKeeperThreadMessage,
-  applyKeeperStreamEvent,
+  applyKeeperLiveSendEvent,
   failKeeperStreamOperation,
   flushPendingKeeperStreamDeltas,
 } from './keeper-stream'
@@ -1487,11 +1487,10 @@ export async function sendKeeperThreadMessage(
             })
           }
         }
-        const error = applyKeeperStreamEvent(
+        const error = applyKeeperLiveSendEvent(
           keeperName,
           assistantId,
-          event,
-          { kind: 'operation', operationId, sequence },
+          { operationId, sequence, event },
         )
         if (event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR') {
           // The direct reader cancels itself on the terminal event, while

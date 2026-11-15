@@ -4,8 +4,10 @@ description = """
 Read what you asked one of your Keepers and what it answered. The answer \
 is JSON: keeper_id, current_conversation_id, conversations (each with \
 conversation_id, provider_account_id and started_at_ms, in the order \
-they were started), \
-conversation_id and turns. Each turn has message, asked_at_ms and \
+they were started, and deletion "failed" on one whose deletion did not \
+finish), \
+conversation_id and turns. A conversation you deleted is neither listed \
+nor read. One whose deletion did not finish is listed and not read. Each turn has message, asked_at_ms and \
 outcome: "answered" with text, model and answered_at_ms; "failed" with \
 failure, failed_at_ms and model_may_have_read; or "unrecorded" with \
 model_may_have_read, for a turn the server has no end of. Without \

@@ -813,6 +813,89 @@ let test_late_verdict_respects_actual_terminal_authority () =
           | Ok None | Error _ -> fail "authoritative final Task state is unavailable")) in
   List.iter exercise [`Done; `Cancelled; `Rejected]
 
+module V = Masc.Verifier_review_original
+module O = Masc.Verifier_review_owner
+module P = Masc.Lane_addon_request_progress
+module Change = Masc.Verifier_review_authority_change
+
+(* An attempt retained for the same question before a lookup tool description
+   changed. One processing refuses it before dispatch and asks the question
+   again with the authority it prepared. *)
+let test_moved_authority_is_asked_again_in_the_same_processing () =
+  with_ws "completion_moved_authority"
+    (fun ~sw:_ ~net:_ ~clock:_ ~config ~meta ~publication_recovery ~ctx_work ->
+      reviewer_response := Reviewer_verdict (AR.Approve "asked again with the current authority");
+      ignore (Workspace.add_task config ~title:"moved lookup authority" ~priority:1
+        ~description:"A lookup tool description changed after the first attempt was retained.");
+      ignore (claim_via_dispatch ~config ~meta ~publication_recovery ~ctx_work ~task_id:"task-001");
+      let old_hook = Atomic.get Workspace_hooks.verification_submitted_fn in
+      Fun.protect ~finally:(fun () -> Atomic.set Workspace_hooks.verification_submitted_fn old_hook)
+        (fun () ->
+          (* The stale attempt must be retained before any review of this
+             submission starts, so the submit wake is suppressed. *)
+          Atomic.set Workspace_hooks.verification_submitted_fn (fun _ ~task:_ ~assignee:_ ~verification_id:_ -> ());
+          let submitted = attempt_done ~config ~meta ~publication_recovery ~ctx_work
+            ~task_id:"task-001" ~result:"ready for review under a moved authority" () in
+          check string "submission is accepted" "success" (outcome_label submitted.KTE.disposition);
+          let task, verification_id = match find_task config "task-001" with
+            | Some ({task_status=Masc_domain.AwaitingVerification {verification_id;_}; _} as task) -> task,verification_id
+            | Some _ | None -> fail "fixture never reached AwaitingVerification" in
+          (* The host's own preparation path, so the question digest is the one
+             the processing computes. *)
+          let current =
+            let evidence_access = Workspace_verification_store.inspect_submitted_evidence_for_authority
+              ~base_path:config.Workspace.base_path ~request_id:verification_id ~task_id:task.id
+              ~task_worker:meta.name ~authority:Masc.Verifier_review_publication.authority in
+            match Masc.Verification_authority_tools.create_task_review ~config ~verification_id
+              ~task_id:task.id ~producer:meta.name ~evidence_access with
+            | Ok authority -> V.lookup_of_authority authority
+            | Error detail -> fail ("current authority fixture failed: " ^ detail) in
+          let stale_digest = String.make 64 'b' in
+          let stale = match V.prepare ~generator_runtime:None ~verification_id ~attempt:0
+              ~question:{AR.completion_contract=None;required_evidence=[];evidence_posture=AR.Note_only;few_shot_block=""}
+              ~lookup:{current with V.authority_digest=stale_digest}
+              {AR.task_title=task.title;task_description=task.description;
+               completion_notes="retained before the tool description changed";
+               agent_name=meta.name;task_id=task.id;evidence_refs=[];evidence_images=[]} with
+            | Ok original -> original
+            | Error detail -> fail ("stale original fixture failed: " ^ detail) in
+          let store = Masc.Lane_addon_store.create
+            ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+          let installation_id = "masc.completion-authority"
+          and package_id = "masc.completion-authority.review" in
+          (match O.retain ~store ~verification_id ~attempt:0 ~installation_id ~package_id stale with
+           | Ok () -> ()
+           | Error _ -> fail "stale original fixture was not retained");
+          check bool "actual review and outcome consumer returned" true
+            (Masc.Completion_authority_agent.For_testing.process_active_task
+              ~task ~assignee:meta.name ~verification_id);
+          check int "only the next attempt reaches a reviewer" 1 (List.length !reviewer_calls);
+          let load attempt = match O.load_retained ~store ~verification_id ~attempt ~installation_id ~package_id with
+            | Ok retained -> retained
+            | Error _ -> fail "retained attempt is unreadable" in
+          (match P.phase (O.progress (load 0)) with
+           | Subdivided ({stage=P.Before_dispatch;evidence},_) ->
+             let format = V.output_contract stale in
+             check bool "the refusal names the moved authority" true
+               (Result.map Option.some (Change.of_json evidence)
+                = Change.between ~retained_authority:stale_digest
+                    ~current_authority:current.V.authority_digest
+                    ~retained_format:format ~current_format:format)
+           | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+           | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _
+           | Subdivided ({stage=P.Execution;_},_) ->
+             fail "the stale attempt was not refused before dispatch and linked");
+          let next = O.original (load 1) in
+          check bool "the next attempt asks the retained question" true (V.is_successor_of ~parent:stale next);
+          check string "the next attempt holds the current authority"
+            current.V.authority_digest (V.authority_binding next);
+          match find_task config "task-001" with
+          | Some {task_status=Masc_domain.Done _; _} -> ()
+          | Some task ->
+            fail ("expected Done after the next attempt, got "
+                  ^ Masc_domain.task_status_to_string task.task_status)
+          | None -> fail "task-001 missing after review"))
+
 let () =
   let prompt_dir = Masc_test_deps.source_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompt_dir;
@@ -846,5 +929,7 @@ let () =
             test_legitimate_claim_succeeds
         ; test_case "late verdict respects the actual terminal authority" `Quick
             test_late_verdict_respects_actual_terminal_authority
+        ; test_case "a moved authority is asked again in the same processing" `Quick
+            test_moved_authority_is_asked_again_in_the_same_processing
         ] )
     ]

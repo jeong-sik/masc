@@ -302,6 +302,12 @@ let test_connectors_json_uses_one_typed_observation () =
     (* The inherited connector_json closes over A's identity and snapshot.
        The registry must render this module's constants and typed observation. *)
   end in
+  (* The aggregate also renders the built-in Discord connector, which reads its
+     binding store. The store is placed in a temp directory as in the cases
+     above; without it the read resolves against a workspace this test has not
+     chosen. *)
+  with_temp_dir @@ fun dir ->
+  with_discord_paths dir @@ fun () ->
   Fun.protect
     ~finally:(fun () ->
       Channel_gate_connector.register (module Registry_test_connector_b))

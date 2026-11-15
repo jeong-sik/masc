@@ -1,7 +1,20 @@
 (** Explicit upgrade preparation for an existing owner, including older servers
     without the model-setup resume endpoint. No process starts or forced kills. *)
 type t
-type error = Invalid_health | Different_workspace | Admin_required | Owner_unavailable
+type error =
+  | Invalid_health
+  | Different_workspace
+  | Admin_required
+      (** The local sign-in failed or left no credential, or the running
+          server read the credential and refused it (401 or 403). *)
+  | Server_starting
+      (** [/health/ready] of the running server says it is not ready yet. It
+          was not asked about the credential. Signing in does not change
+          this; the server becoming ready does. *)
+  | Admin_check_unanswered
+      (** The running server gave no verdict on the credential: another
+          status than 200, 401 or 403, or no answer. *)
+  | Owner_unavailable
   | Incumbent_changed | Already_requested | Closed | Port_unavailable
 type incumbent = { base_path : string; version : string }
 val decode_health : string -> (incumbent, error) result
@@ -11,13 +24,10 @@ val authorize_initial : base_path:string -> expected_version:string -> body:stri
   login:(unit -> bool) -> (unit, error) result
 (** Validates workspace and selected version before invoking the login callback. *)
 
-val prepare :
-  sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t -> headers:(string * string) list ->
-  run_dir:string -> base_path:string -> port:int -> (t, error) result
 val incumbent : t -> incumbent
 val request_termination : t -> (unit, error) result
-(** Call only after the user selects replacement. Rechecks workspace/version and
-    admin authentication immediately before identity-bound SIGTERM. Success is
+(** Call only after the user selects replacement. Rechecks workspace/version,
+    readiness and admin authentication immediately before identity-bound SIGTERM. Success is
     a request, not proof of drain. Caller waits for lease/port release and starts
     the replacement with the same workspace and existing authentication. *)
 
@@ -25,11 +35,19 @@ val close : t -> unit
 val suggest_loopback_port : unit -> (int, error) result
 (** OS-selected candidate, not a reserved port. Recheck conflicts at startup. *)
 
+type http_answer = (int * string, string) result
+(** One loopback GET as {!Masc_http_client.get_sync} hands it over: the status
+    and the body, or why no answer came. *)
+
 module For_testing : sig
   val prepare : sw:Eio.Switch.t -> base_path:string -> observe:(unit -> (string, error) result) ->
-    authorize:(unit -> bool) ->
+    readiness:(unit -> http_answer) -> access:(unit -> http_answer) ->
     capture:(unit -> (((unit -> (unit, error) result) * (unit -> unit)), error) result) ->
     (t, error) result
+  (** {!prepare} over answers the caller supplies: [readiness] is the answer
+      of [/health/ready], [access] the answer of the admin route to the
+      bearer. [access] is not asked when [readiness] says the server is
+      still starting. *)
 end
 
 type replacement_readiness = Owner_draining | Port_busy | Replacement_can_start
@@ -104,6 +122,50 @@ val holder :
     when the lease root, the lease or the announcement cannot be read; a root
     or a path to the lease file that cannot be read is an
     [Owner_lease_rejected]. *)
+
+type single_user_listener
+(** Proof that the kernel owner of the lease of a BasePath is the process
+    that announces a port as the server of a single user
+    ({!Server_startup_takeover.single_user_server_port_holder}). Only
+    {!single_user_listener} makes one, so a function that takes one cannot
+    be reached with a port that was merely asked about or that merely
+    answered over HTTP. It is what was true at the read: {!prepare} reads
+    again before it sends. *)
+
+type listener_refusal =
+  | No_lease_owner  (** Nothing holds the lease. *)
+  | Owner_announces_no_port of { pid : int }
+      (** The owner [pid] holds no single-user announcement the kernel
+          showed: a server built before the announcement, one bound where
+          the loopback origin does not reach, an account server, or an
+          owner that has not announced yet. Nothing ties it to the port. *)
+  | Owner_listens_on_another_port of { pid : int; port : int }
+      (** The owner announces [port], not the one asked about. *)
+  | Listener_unread of Server_startup_takeover.owner_capture_error
+      (** The lease or the announcement could not be read. *)
+
+val single_user_listener :
+  run_dir:string -> base_path:string -> port:int -> (single_user_listener, listener_refusal) result
+(** Whether the process that holds the lease of [base_path] is the one that
+    listens on [port], asked of the kernel alone: the owner of the lease
+    must hold the single-user announcement lock of the byte of [port]. A
+    lock that another process holds on that byte confirms nothing. It
+    signals nothing and sends nothing. Like {!account_server} it makes the
+    private lease directory and an empty lease file when they are missing;
+    a command that must make nothing asks {!holder} first. *)
+
+val listener_port : single_user_listener -> int
+val listener_base_path : single_user_listener -> string
+
+val prepare :
+  sw:Eio.Switch.t -> clock:[> float Eio.Time.clock_ty] Eio.Resource.t ->
+  listener:single_user_listener -> token:string -> agent:string -> (t, error) result
+(** Prepares the stop of the server of a single user. This is the only
+    function that sends the bearer [token] of the operator, and the only
+    port it can send it to is the one inside [listener]. Before each request
+    that carries the bearer, here and in {!request_termination}, the kernel
+    is asked again whether the same owner still announces the port;
+    otherwise the answer is [Incumbent_changed] and no bearer leaves. *)
 
 val stop_account_server : run_dir:string -> base_path:string -> port:int -> (unit, error) result
 (** Asks the account server of a multi-account installation to stop: the

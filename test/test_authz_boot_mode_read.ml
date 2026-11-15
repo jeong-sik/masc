@@ -207,25 +207,36 @@ let test_config_file () =
 
 (* What a command that holds no lease reads: the request alone, as the boot
    reads it. *)
-let test_asks_for_multi_account () =
+let test_asked_without_the_lease () =
   with_dirs (fun dirs ->
     let check name expected =
-      Alcotest.(check bool) name expected (Read.asks_for_multi_account ~base_path:dirs.base)
+      let shown = function
+        | Ok B.Asks_single_user -> "single user"
+        | Ok B.Asks_multi_account -> "multi account"
+        | Error refusal -> "refused: " ^ B.refusal_to_string refusal
+      in
+      Alcotest.(check string) name (shown expected) (shown (Read.asked ~base_path:dirs.base))
     in
-    check "missing file" false;
+    check "missing file" (Ok B.Asks_single_user);
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
-    check "Multi_account" true;
+    check "Multi_account" (Ok B.Asks_multi_account);
     (* A boot refuses this one, and it is no single user either. *)
     write_config dirs {|{"enabled":false,"require_token":false,"account_mode":"Multi_account"}|};
-    check "Multi_account with auth off" true;
+    check "Multi_account with auth off" (Ok B.Asks_multi_account);
     write_config dirs {|{"account_mode":"Single_user"}|};
-    check "Single_user" false;
+    check "Single_user" (Ok B.Asks_single_user);
+    (* A value the table does not know is no single user: the command stops
+       with the refusal the boot of the same file gives. *)
     write_config dirs {|{"account_mode":"multi_account"}|};
-    check "a value the table does not know" false;
+    check "a value the table does not know" (Error (B.Unknown_account_mode {|"multi_account"|}));
+    check_decision
+      "and the boot refuses it with the same reason"
+      (Read.Stop (Read.Refuse (B.Unknown_account_mode {|"multi_account"|}, [])))
+      dirs;
     write_config dirs {|{"account_mode":"Single_user","account_mode":"Multi_account"}|};
-    check "twice" false;
+    check "twice" (Error (B.Unknown_account_mode {|"Single_user", "Multi_account"|}));
     write_config dirs {|{"enabled":true,"account_m|};
-    check "cut file" false)
+    check "cut file" (Ok B.Asks_single_user))
 ;;
 
 (* ---- the table, on real installations ---- *)
@@ -807,7 +818,7 @@ let () =
     ; ( "config.json"
       , [ Alcotest.test_case "member shapes" `Quick test_member_shapes
         ; Alcotest.test_case "file" `Quick test_config_file
-        ; Alcotest.test_case "request, without the lease" `Quick test_asks_for_multi_account
+        ; Alcotest.test_case "request, without the lease" `Quick test_asked_without_the_lease
         ] )
     ; ( "installations"
       , [ Alcotest.test_case "nothing set up" `Quick test_nothing_set_up

@@ -10,9 +10,8 @@
     keeper_memory_search, keeper_memory_retract, keeper_memory_write,
     keeper_wiki_search,
     keeper_wiki_read, keeper_surface_read and keeper_surface_post carry a
-    keeper_ prefix, so they land in "other". These cases pin that as the
-    current answer rather than leaving it to be rediscovered — changing it
-    moves six tools to a different metric dimension value.
+    keeper_ prefix, so no prefix arm ever matched them. Each one declares
+    whether it reads or writes, and that declaration is its label.
 
     Since #49742 the remaining name chain (read/write/edit/execute prefixes
     and the "grep" literal) is gone too: a label comes from the catalog's
@@ -66,17 +65,18 @@ let test_board_tools_are_not_labelled_mcp () =
   check string "masc_board_list" "board" (T.tool_type_of_name "masc_board_list")
 ;;
 
-(* The six the removed arms were aiming at. This is the mislabelling, pinned. *)
-let test_keeper_prefixed_tools_fall_to_other () =
+(* The tools the removed arms were aiming at. Since #49742 each takes the
+   label its own declaration gives, read or write, not "other". *)
+let test_keeper_prefixed_tools_take_their_declared_label () =
   List.iter
-    (fun name -> check string name "other" (T.tool_type_of_name name))
-    [ "keeper_memory_search"
-    ; "keeper_memory_retract"
-    ; "keeper_memory_write"
-    ; "keeper_wiki_search"
-    ; "keeper_wiki_read"
-    ; "keeper_surface_read"
-    ; "keeper_surface_post"
+    (fun (name, expected) -> check string name expected (T.tool_type_of_name name))
+    [ "keeper_memory_search", "read"
+    ; "keeper_memory_retract", "write"
+    ; "keeper_memory_write", "write"
+    ; "keeper_wiki_search", "read"
+    ; "keeper_wiki_read", "read"
+    ; "keeper_surface_read", "read"
+    ; "keeper_surface_post", "write"
     ]
 ;;
 
@@ -128,8 +128,8 @@ let () =
         ] )
     ; ( "labels"
       , [ test_case "board tools are not mcp" `Quick test_board_tools_are_not_labelled_mcp
-        ; test_case "keeper-prefixed tools fall to other" `Quick
-            test_keeper_prefixed_tools_fall_to_other
+        ; test_case "keeper-prefixed tools take their declared label" `Quick
+            test_keeper_prefixed_tools_take_their_declared_label
         ; test_case "catalog declaration beats the name chain" `Quick
             test_catalog_declaration_beats_the_name_chain
         ; test_case "descriptor declarations label the keeper tools" `Quick

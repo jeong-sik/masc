@@ -75,6 +75,23 @@ module Mark : sig
   (** One display cell. *)
 end
 
+(** A value the screen does not have, drawn where the value goes as one mark
+    that says why (RFC tui-one-screen-grammar, section 6.4). The sentence
+    that says more belongs to the section or to the selected row's detail:
+    [not observed], [미확인] and their like are not drawn where a value goes.
+
+    A value that was read and found to be none is not unknown. It draws the
+    dash the theme draws for an empty field. *)
+module Unknown : sig
+  type t =
+    | Unread  (** being read, or not read yet *)
+    | Read_failed
+    | Unreported  (** read, and the answer did not carry it *)
+
+  val glyph : t -> string
+  (** One display cell: [◌], the {!Mark.Failed} mark [✕], and [?]. *)
+end
+
 (** How many of something. *)
 module Count : sig
   val grouped : int -> string

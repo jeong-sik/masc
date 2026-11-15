@@ -2,7 +2,8 @@
 # dashboard SPA from the current source tree, then bakes a coherent config seed
 # and a keeper-team preset. Unlike the release Dockerfile (which COPYs a
 # prebuilt masc-linux-x64), this needs no external artifact: `docker build` on a
-# fresh clone produces a runnable image. First build is slow (OCaml 5.5 + deps).
+# fresh clone produces a runnable image, once it is told which commit it builds
+# (see the ARG block in stage 1). First build is slow (OCaml 5.5 + deps).
 #
 # The server binary and embedded configuration assets come from the same tree;
 # the capability catalog is embedded by AGENT_CORE. On Apple Silicon this builds
@@ -48,10 +49,35 @@ RUN ok=0; for attempt in 1 2 3; do \
 
 # Now the full source for the actual build.
 COPY --chown=opam:opam . .
+
+# The build context carries no .git (.dockerignore), so the probe in
+# lib/build_commit/ has no checkout to ask. It reads the commit from these two
+# variables instead, the way scripts/build-linux-release.sh hands them to its
+# build container. They are declared after the dependency layers so a new commit
+# does not rebuild those. Pass both from the checkout being built:
+#   docker build -f Dockerfile.oneclick \
+#     --build-arg MASC_BUILD_COMMIT="$(git rev-parse HEAD)" \
+#     --build-arg MASC_BUILD_COMMIT_UNIX_TS="$(git show -s --format=%ct HEAD)" .
+# The build fails without MASC_BUILD_COMMIT, and again when the finished binary
+# does not report it. Neither check can tell whether the tree matches the
+# commit; that stays with whoever passes the value.
+ARG MASC_BUILD_COMMIT
+ARG MASC_BUILD_COMMIT_UNIX_TS
+RUN [ -n "$MASC_BUILD_COMMIT" ] || { \
+      echo 'Dockerfile.oneclick: MASC_BUILD_COMMIT is empty; pass --build-arg MASC_BUILD_COMMIT="$(git rev-parse HEAD)", this build has no .git to read it from' >&2; \
+      exit 1; \
+    }
 RUN opam exec -- dune build --release bin/main_eio.exe \
     && cp _build/default/bin/main_eio.exe /tmp/masc \
     && chmod u+w /tmp/masc \
     && strip /tmp/masc
+RUN embedded="$(/tmp/masc build-commit)" \
+    && [ "$embedded" = "$MASC_BUILD_COMMIT" ] \
+    || { \
+      printf 'Dockerfile.oneclick: binary reports commit %s, expected %s\n' \
+        "${embedded:-<none>}" "$MASC_BUILD_COMMIT" >&2; \
+      exit 1; \
+    }
 
 # ---- Stage 2: dashboard SPA -------------------------------------------------
 FROM node:22-slim AS dashboard-builder

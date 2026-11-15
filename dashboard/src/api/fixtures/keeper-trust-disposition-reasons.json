@@ -1,0 +1,32 @@
+{
+  "disposition_reasons": [
+    "healthy",
+    "approval_queue_unavailable",
+    "pending_operator_decision",
+    "heartbeat_failures",
+    "turn_failures",
+    "runtime_exhausted",
+    "provider_runtime_error",
+    "official_client_recovery_required",
+    "turn_configuration_error",
+    "critical_block",
+    "exception",
+    "operator_interrupt",
+    "keeper_dashboard_worker_exception",
+    "config_invalid",
+    "authorization_refused",
+    "degraded_retry",
+    "runtime_fallback",
+    "transient_runtime_retry",
+    "internal_error",
+    "input_required",
+    "cancelled",
+    "phase_skipped",
+    "transcript_corruption",
+    "provider_attempt_effect_fenced",
+    "tool_correction_lost",
+    "accept_rejected",
+    "terminal_effect_failed",
+    "unmapped_runtime_state"
+  ]
+}

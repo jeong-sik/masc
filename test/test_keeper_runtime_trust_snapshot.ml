@@ -153,10 +153,30 @@ let test_trust_blocker_uses_structured_state () =
   Alcotest.(check string) "an unresolved fiber is a critical block"
     "critical_block" (Core.disposition_reason_to_wire blocked.disposition_reason);
   Alcotest.(check bool) "blocker requires attention" true blocked.needs_attention;
-  let unnamed = decide (Some Masc.Keeper_status_bridge.Blocked_by_turn_failures) in
-  Alcotest.(check string) "a class with no reason of its own still shows as a blocker"
-    "unknown_runtime_blocker" (Core.disposition_reason_to_wire unnamed.disposition_reason);
-  Alcotest.(check bool) "that blocker requires attention" true unnamed.needs_attention;
+  (* Each of these seven shows under the name the bridge gives it, so no two
+     of them read alike (#43018). *)
+  List.iter
+    (fun (blocker_class, name) ->
+       let model = decide (Some blocker_class) in
+       Alcotest.(check string)
+         (name ^ " shows under its own name")
+         name
+         (Core.disposition_reason_to_wire model.disposition_reason);
+       Alcotest.(check bool) (name ^ " requires attention") true model.needs_attention;
+       Alcotest.(check (option string))
+         (name ^ " is the attention reason when the bridge gives none")
+         (Some name)
+         (Option.map Core.attention_reason_to_wire model.attention_reason))
+    Masc.Keeper_status_bridge.
+      [ Blocked_by_heartbeat_failures, "heartbeat_failures"
+      ; Blocked_by_turn_failures, "turn_failures"
+      ; Blocked_by_provider_runtime_error, "provider_runtime_error"
+      ; Blocked_by_official_client_recovery, "official_client_recovery_required"
+      ; Blocked_by_turn_configuration_error, "turn_configuration_error"
+      ; Blocked_by_exception, "exception"
+      ; Blocked_by_operator_interrupt, "operator_interrupt"
+      ];
+  let turn_failures = decide (Some Masc.Keeper_status_bridge.Blocked_by_turn_failures) in
   (* No receipt is shown in any of these, so there is no operator
      disposition to relay. A kind derived from the blocker would be a guess. *)
   List.iter
@@ -168,7 +188,7 @@ let test_trust_blocker_uses_structured_state () =
     [ "no blocker", healthy
     ; "exhausted", exhausted
     ; "named blocker", blocked
-    ; "unnamed blocker", unnamed
+    ; "turn failures", turn_failures
     ]
 ;;
 

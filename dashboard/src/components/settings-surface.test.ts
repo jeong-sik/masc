@@ -299,23 +299,23 @@ function makeRuntimeResolved(
     default_runtime: {
       id: 'rt-a', provider: 'P', model: 'm1',
       effective_max_context: 128000, max_context_source: 'override',
-      max_output_tokens: null, is_local: false, is_default: true,
+      max_output_tokens: null, is_local: false, is_default: true, quota_rest: null,
     },
     runtimes: [
       {
         id: 'rt-a', provider: 'P', model: 'm1',
         effective_max_context: 128000, max_context_source: 'override',
-        max_output_tokens: null, is_local: false, is_default: true,
+        max_output_tokens: null, is_local: false, is_default: true, quota_rest: null,
       },
       {
         id: 'rt-b', provider: 'P', model: 'm2',
         effective_max_context: 128000, max_context_source: 'override',
-        max_output_tokens: null, is_local: false, is_default: false,
+        max_output_tokens: null, is_local: false, is_default: false, quota_rest: null,
       },
       {
         id: 'rt-c', provider: 'P', model: 'm3',
         effective_max_context: 128000, max_context_source: 'override',
-        max_output_tokens: null, is_local: false, is_default: false,
+        max_output_tokens: null, is_local: false, is_default: false, quota_rest: null,
       },
     ],
     lanes: [],
@@ -1649,7 +1649,6 @@ describe('SettingsSurface', () => {
             enable_thinking: true,
             preserve_thinking: true,
             resolved_reasoning_effort: 'high',
-            glm_replay_reasoning: false,
             tool_stream: true,
             tool_choice: { kind: 'required' },
             disable_parallel_tool_use: true,

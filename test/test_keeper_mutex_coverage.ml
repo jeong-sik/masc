@@ -113,6 +113,14 @@ let cancelled_signal () =
 ;;
 
 
+(* #30627: a directory that a [Keeper_msg_async] worker writes to is removed
+   only after the [Eio.Switch.run] hosting that worker has returned, so the
+   switch goes inside [Fun.protect ~finally], never around it. Workers are
+   daemon fibers: when the case body returns, the switch cancels the ones still
+   running and waits for them, and their durable writes run on a systhread that
+   can still be creating files in the directory at that moment. A [~finally]
+   inside the switch let [rm_rf] race those writes, raise ENOTEMPTY, and turn a
+   passing case into [Fun.Finally_raised]. *)
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -434,14 +442,14 @@ let fail_once_on_write_stage expected =
 let test_keeper_msg_async_request_id_collision_uses_reservation_index () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
   let base_path = temp_dir "keeper-msg-reservation-collision-" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
        let generated = Atomic.make 0 in
        let generate_request_id () =
          match Atomic.fetch_and_add generated 1 with
@@ -533,14 +541,14 @@ let fail_once_on_remove_stage expected =
 let test_keeper_msg_async_initial_post_publish_failure_rolls_back () =
   with_eio_env
   @@ fun _env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
   let base_path = temp_dir "keeper-msg-initial-rollback-" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun background_sw ->
        let worker_ran = Atomic.make false in
        let request_ops =
          Keeper_msg_async.For_testing.make_request_ops
@@ -577,14 +585,14 @@ let test_keeper_msg_async_initial_post_publish_failure_rolls_back () =
 let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
   with_eio_env
   @@ fun _env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
   let base_path = temp_dir "keeper-msg-initial-uncertain-" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun background_sw ->
        let worker_ran = Atomic.make false in
        let request_ops =
          Keeper_msg_async.For_testing.make_request_ops
@@ -651,14 +659,14 @@ let test_keeper_msg_async_initial_rollback_failure_preserves_request_id () =
 let test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
   let base_path = temp_dir "keeper-msg-running-double-write-failure-" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun background_sw ->
        let payload_writes = Atomic.make 0 in
        let worker_ran = Atomic.make false in
        let settlements = ref [] in
@@ -705,14 +713,14 @@ let test_keeper_msg_async_running_double_write_failure_is_terminal_in_memory () 
 let test_keeper_msg_async_running_write_failure_projects_durable_marker_once () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun background_sw ->
   let base_path = temp_dir "keeper-msg-running-write-failure-" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun background_sw ->
        let payload_writes = Atomic.make 0 in
        let worker_ran = Atomic.make false in
        let aborts = ref [] in
@@ -1022,8 +1030,6 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
 let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let cancelled_settlement, observe_cancelled = cancelled_signal () in
   let entered_worker, notify_entered_worker = Eio.Promise.create () in
@@ -1034,6 +1040,8 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
        let fail_cancel_persistence = Atomic.make false in
        let failed = Atomic.make false in
        let request_ops =
@@ -1084,8 +1092,6 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
 let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let cancelled_settlement, observe_cancelled = cancelled_signal () in
   let entered_worker, notify_entered_worker = Eio.Promise.create () in
@@ -1096,6 +1102,8 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
        let settlements = ref [] in
        let aborts = ref [] in
        let signal_attempts = Atomic.make 0 in
@@ -1529,8 +1537,6 @@ let test_keeper_msg_async_preserves_conflicting_terminal_source () =
 let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-canonical-integrity-settlement-" in
@@ -1540,6 +1546,8 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
        let settlements = ref [] in
        let injection : (Keeper_msg_async.entry * string) option Atomic.t =
          Atomic.make None
@@ -1641,8 +1649,6 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
 let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
   with_eio_env
   @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-integrity-projection-error-" in
@@ -1652,6 +1658,8 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
       Keeper_msg_async.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
+       Eio.Switch.run
+       @@ fun sw ->
        let settlements = ref [] in
        let request_id =
          Keeper_msg_async.submit

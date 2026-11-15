@@ -733,7 +733,10 @@ let test_binding_hook_cannot_reenable_incompatible_replay () = with_net (fun net
 ;;
 
 (* A failover must retain canonical provenance and settled tool effects while
-   both dispatch modes admit only the target-compatible wire reasoning. *)
+   both dispatch modes admit only the target-compatible wire reasoning. Each
+   boundary that admits the change records which message it excluded, why and
+   for which target; the record is compared with the typed admission, and it
+   never carries the reasoning itself. *)
 let test_binding_explicit_source_change () = with_net (fun net ->
   Eio.Switch.run (fun sw ->
     List.iter (fun stream ->
@@ -754,8 +757,17 @@ let test_binding_explicit_source_change () = with_net (fun net ->
       let config = { (Types.default_config ~model:target.model_id) with max_tokens=Some 64 } in
       let plan = Agent_checkpoint.build_resume ~checkpoint:cp ~config ~provider_config:target
           ~source_change_policy:Binding_projection.Exclude_unselected () |> binding_resume_ok in
-      (match plan.binding_disposition with
-       | Agent_checkpoint.Rebound_pending_dispatch drops ->
+      let pending = match plan.binding_disposition with
+        | Agent_checkpoint.Rebound_pending_dispatch exclusion -> exclusion
+        | Unconfigured_target | Unrecorded_producer | Identical_source
+        | Declared_endpoint_rotation | Rebound_without_replay_loss | Replay_disabled_by_caller ->
+          Alcotest.fail "missing source-change exclusion evidence" in
+      (match pending with
+       | {boundary=Provider_dispatch _;_} ->
+         Alcotest.fail "restore must name its own boundary"
+       | {boundary=Checkpoint_restore;target=pending_target;drops} ->
+         Alcotest.(check bool) "the pending exclusion names the target" true
+           (Binding_source.equal pending_target (binding_source target));
          Alcotest.(check (list int)) "exact excluded message indices" [1]
            (List.map (fun (drop : Binding_projection.reasoning_replay_drop) -> drop.message_index) drops);
          List.iter (fun (drop : Binding_projection.reasoning_replay_drop) -> match drop.reason with
@@ -763,10 +775,9 @@ let test_binding_explicit_source_change () = with_net (fun net ->
              Alcotest.(check bool) "exact foreign producer is reported" true
                (Binding_source.equal source (binding_source original))
            | Replay_policy_excluded _ | Missing_reasoning_source | Reasoning_on_non_assistant ->
-             Alcotest.fail "wrong exclusion reason") drops
-       | Unconfigured_target | Unrecorded_producer | Identical_source
-       | Declared_endpoint_rotation | Rebound_without_replay_loss | Replay_disabled_by_caller ->
-         Alcotest.fail "missing source-change exclusion evidence");
+             Alcotest.fail "wrong exclusion reason") drops);
+      let sink, records = Log.collector_sink () in
+      Log.add_sink sink;
       let calls = ref 0 in
       let check_request (request : Llm_provider.Llm_transport.completion_request) =
         incr calls;
@@ -812,7 +823,31 @@ let test_binding_explicit_source_change () = with_net (fun net ->
         Alcotest.(check bool) "canonical source history remains" true
           (List.for_all2 (=) cp.messages
              (List.take (List.length cp.messages) (Agent.state agent).messages));
-        Alcotest.(check bool) "checkpoint remains unchanged" true (before=Checkpoint.to_json cp))
+        Alcotest.(check bool) "checkpoint remains unchanged" true (before=Checkpoint.to_json cp));
+      Log.clear_sinks ();
+      let recorded = List.filter_map (fun (record : Log.record) ->
+        List.find_map (function
+          | Log.J ("reasoning_replay_exclusion", json) -> Some json
+          | Log.J _ | Log.S _ | Log.I _ | Log.F _ | Log.B _ | Log.Secret _ -> None) record.fields)
+        (records ()) in
+      let count expected = List.length (List.filter (Yojson.Safe.equal expected) recorded) in
+      let at_restore = Binding_projection.replay_exclusion_to_json pending in
+      let at_dispatch = Binding_projection.replay_exclusion_to_json
+          { pending with boundary=Provider_dispatch {tools_present=
+              Llm_provider.Complete_common.request_tools_present ~config:target ~tools:[]} } in
+      (* Two resumes restored the checkpoint. The refused continuation never
+         admitted a dispatch; the completed run admitted exactly one. *)
+      Alcotest.(check int) "each restore records its pending exclusion" 2 (count at_restore);
+      Alcotest.(check int) "the admitted dispatch records its exclusion" 1 (count at_dispatch);
+      Alcotest.(check int) "no other exclusion is recorded" 3 (List.length recorded);
+      List.iter (fun json ->
+        let text = Yojson.Safe.to_string json in
+        let private_bytes = "foreign-reasoning" in
+        let length = String.length private_bytes in
+        let rec from index =
+          index + length <= String.length text
+          && (String.equal (String.sub text index length) private_bytes || from (index + 1)) in
+        Alcotest.(check bool) "the record carries no reasoning content" false (from 0)) recorded
     ) [false;true]))
 ;;
 

@@ -441,13 +441,39 @@ let a_browser_signs_in_acts_and_signs_out () =
     Alcotest.(check string) "the length is the body's" (string_of_int (String.length back.body)) (one "content-length" back);
     let csrf = csrf_of t admin in
     let (_ : string) = registration_of (register t admin ~csrf {|{"provider":"github","user_id":7}|}) in
-    Alcotest.(check int) "the registered identity joins" 200 (sign_in t (fresh_browser ()) ~user_id:7).status;
+    let a_member = fresh_browser () in
+    Alcotest.(check int) "the registered identity joins" 200 (sign_in t a_member ~user_id:7).status;
     let other = registration_of (register t admin ~csrf {|{"provider":"github","user_id":8}|}) in
     let removed =
       send admin t.router ~meth:"DELETE" ~path:("/api/v1/auth/allowlist/" ^ other) ~headers:(changing ~csrf ())
     in
     Alcotest.(check int) ("removed: " ^ removed.body) 204 removed.status;
     Alcotest.(check int) "the removed identity does not join" 403 (sign_in t (fresh_browser ()) ~user_id:8).status;
+    (* A list is a read as a browser sends one from this origin: no Origin
+       header and no CSRF token. *)
+    let listed path name =
+      let reply = send admin t.router ~meth:"GET" ~path in
+      Alcotest.(check int) (path ^ ": " ^ reply.body) 200 reply.status;
+      match member name reply with
+      | Some (`List items) -> List.length items
+      | _ -> Alcotest.failf "%s: no %s in %S" path name reply.body
+    in
+    Alcotest.(check int) "the spent and the removed entry" 2 (listed "/api/v1/auth/allowlist" "registrations");
+    Alcotest.(check int) "the first Admin's invitation" 1 (listed "/api/v1/auth/invites" "invites");
+    Alcotest.(check int) "the Admin and the Member" 2 (listed "/api/v1/auth/members" "members");
+    List.iter
+      (fun path ->
+        Alcotest.(check int) (path ^ " for a Member") 403 (send a_member t.router ~meth:"GET" ~path).status;
+        Alcotest.(check int) (path ^ " with no session") 401 (send (fresh_browser ()) t.router ~meth:"GET" ~path).status;
+        Alcotest.(check int)
+          (path ^ " from another origin")
+          403
+          (send admin t.router ~meth:"GET" ~path ~headers:(changing ~origin:(Some "https://elsewhere.example") ())).status)
+      [ "/api/v1/auth/allowlist"; "/api/v1/auth/invites"; "/api/v1/auth/members" ];
+    Alcotest.(check int)
+      "a path that only starts like a list"
+      404
+      (send admin t.router ~meth:"GET" ~path:"/api/v1/auth/membersX").status;
     let old = { cookies = admin.cookies } in
     let out = send admin t.router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
     Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
@@ -1047,6 +1073,7 @@ let a_person_calls_mcp () =
       ; "masc_my_keeper_turn"
       ; "masc_my_keeper_conversation_new"
       ; "masc_my_keeper_conversation"
+      ; "masc_my_keeper_conversation_delete"
       ]
       (match at [ "result"; "tools" ] listed with
        | `List tools ->
@@ -1406,6 +1433,42 @@ let a_person_keeps_keepers_over_mcp () =
       "the PAT with both reads it on the route"
       200
       (by_route owner (Masc.Auth_preview_keeper.conversation_path ^ "?keeper_id=keeper-1"));
+    (* A deletion is judged as a turn is: a token that reads state alone
+       deletes nothing, and one that manages Keepers is told when no
+       conversation of the person has the id. *)
+    let delete_by_route token id =
+      let reply =
+        send
+          (fresh_browser ())
+          router
+          ~meth:"DELETE"
+          ~path:(Masc.Auth_preview_keeper.conversation_entry_prefix ^ id)
+          ~headers:[ "Authorization", "Bearer " ^ token ]
+      in
+      reply.status, reply.body
+    in
+    Alcotest.(check int)
+      "a PAT that reads state deletes no conversation"
+      403
+      (fst (delete_by_route reader "conversation-1"));
+    Alcotest.(check (pair int string))
+      "a PAT that manages Keepers is told no conversation of the person has the id"
+      (404, route_error ~code:"unknown_conversation" "No conversation of yours has this id.")
+      (delete_by_route owner "conversation-1");
+    (* The tool of a deletion stops where the route stops. *)
+    let conversation id = `Assoc [ "conversation_id", `String id ] in
+    check
+      "a PAT without the Keeper effect deletes no conversation by the tool"
+      ("true", error_json (Masc.Auth_gate.reason_to_string Masc.Auth_gate.Pat_scope_lacks_own_keeper))
+      (result reader "masc_my_keeper_conversation_delete" ~arguments:(conversation "conversation-1"));
+    check
+      "the tool is told no conversation of the person has the id"
+      ("true", route_error ~code:"unknown_conversation" "No conversation of yours has this id.")
+      (result owner "masc_my_keeper_conversation_delete" ~arguments:(conversation "conversation-1"));
+    Alcotest.(check string)
+      "a deletion without a conversation is refused by the definition of the tool"
+      "true"
+      (fst (result owner "masc_my_keeper_conversation_delete"));
     check
       "a Keeper with no turn yet has no conversation"
       ( "false"
@@ -1499,7 +1562,7 @@ let a_stopped_zone_answers_no_person () =
          ~meth:"POST"
          ~path:Masc.Auth_preview_keeper.keepers_path
          ~headers:(changing ~csrf () @ [ "Content-Type", "application/json" ])
-         ~body:{|{"keeper_id":"sangsu"}|});
+         ~body:{|{"keeper_id":"keeper-1"}|});
     unavailable
       "the sign-out"
       (send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()));
@@ -1634,9 +1697,12 @@ let the_route_table () =
     Alcotest.(check (list string))
       "the paths"
       [ "/api/v1/auth/allowlist"
+      ; "/api/v1/auth/allowlist"
       ; "/api/v1/auth/allowlist/"
       ; "/api/v1/auth/invites"
+      ; "/api/v1/auth/invites"
       ; "/api/v1/auth/invites/"
+      ; "/api/v1/auth/members"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats"
       ; "/api/v1/auth/pats/"

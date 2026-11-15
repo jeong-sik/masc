@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import posixpath
+import re
 import shutil
 import subprocess
 import sys
@@ -83,12 +85,30 @@ class Sources(unittest.TestCase):
             "lib/gen/table.inc",
             "dune",
             "dune-project",
+            "dune-workspace",
             "test/dune",
             "masc.opam",
             ".github/actions/pin-ocaml-deps/action.yml",
             ".github/workflows/pr-type-check.yml",
             "scripts/ci/pr_source_changes.py",
             "scripts/ci/test_pr_source_changes.py",
+            # Inputs of build rules that are not OCaml (#51595).
+            "lib/auth/account_page.css",
+            "lib/exec/parser/bash_subset.mly",
+            "lib/exec/parser/bash_lexer.mll",
+            "lib/sse_event/sse_event.atd",
+            "lib/apple_keychain/apple_keychain_stubs.c",
+            "lib/build_commit/probe-commit.sh",
+            "config/tools/masc_board_post.toml",
+            "skills/root-cause-first/SKILL.md",
+            "addons/browser/ego/lane.toml",
+            "scripts/embed-setup.py",
+            "masc.opam.locked",
+            "sandbox-images/base/Dockerfile",
+            "packages/agent_core/models.toml",
+            # A directory nobody listed is a source until it is shown not to be.
+            "vendor/dune-project",
+            "new-directory/input.txt",
         ):
             self.assertTrue(changes.is_source(path), path)
 
@@ -98,13 +118,144 @@ class Sources(unittest.TestCase):
             "docs/dune",
             "dashboard/src/a.ts",
             "changelog.d/1.md",
-            "scripts/ci/apt-refresh.sh",
-            ".github/workflows/test.yml",
-            "vendor/dune-project",
-            "lib/a.ml.orig",
-            "lib/dune.inc.txt",
         ):
             self.assertFalse(changes.is_source(path), path)
+
+    def test_a_directory_is_skipped_by_its_whole_name(self):
+        for path in ("docs-site/index.md", "dashboard.toml", "changelog.d.md"):
+            self.assertTrue(changes.is_source(path), path)
+
+
+ROOT = HERE.parents[1]
+DUNE_FILES = frozenset({"dune", "dune-project", "dune-workspace"})
+# What a tracked dune file reads from NOT_BUILD_INPUTS today: (dune file, path
+# from the repository root). Each is the `deps` of a `test` stanza or of a
+# rule that has an alias and no target. Those are read when the test runs;
+# `dune build @check` runs no test, so a change to one needs no type-check.
+# A read by a rule that has a target does not belong here: take its directory
+# out of NOT_BUILD_INPUTS instead.
+READ_ONLY_BY_TEST_RUNS = frozenset({
+    ("test/dune", "dashboard/src/api/fixtures/scheduled-automation-lookup-found.json"),
+    ("test/dune", "docs/examples/lane-addons/dos-value-difference.toml"),
+    ("test/dune", "docs/examples/lane-addons/dos-value-statistics.toml"),
+    ("test/dune", "docs/examples/lane-addons/dos-statistics.toml"),
+    ("test/dune", "docs/examples/lane-addons/output-statistics.toml"),
+    ("test/dune", "docs/examples/lane-addons/fusion-compute/*.toml"),
+    ("test/dune", "docs/examples/lane-addons/operator-quiz.toml"),
+    ("test/dune", "docs/evidence/2026-09-30-candle-grade-explicit-outcome"),
+    ("test/dune", "docs/evidence/2026-09-30-candle-grade-scope-survey"),
+})
+ROOT_VARIABLES = ("%{workspace_root}/", "%{project_root}/")
+PATH_IN_VARIABLE = re.compile(r"%\{[^}:]+:([^}]+)\}")
+
+
+def dune_words(text: str) -> tuple[str, ...]:
+    """The words of a dune file: atoms, and the words inside each string (an
+    action's shell command names files too). Comments are left out."""
+    words: list[str] = []
+    word = ""
+    at = 0
+    in_string = False
+    while at < len(text):
+        char = text[at]
+        if in_string and char == "\\":
+            word += text[at + 1 : at + 2]
+            at += 2
+            continue
+        if not in_string and char == ";":
+            end = text.find("\n", at)
+            at = len(text) if end < 0 else end
+            continue
+        if char == '"':
+            in_string = not in_string
+        if char.isspace() or char in '()"':
+            if word:
+                words.append(word)
+            word = ""
+        else:
+            word += char
+        at += 1
+    if word:
+        words.append(word)
+    return tuple(words)
+
+
+def dune_reads(dune_file: str, text: str) -> frozenset[str]:
+    """Every path the words of a dune file can name, from the repository
+    root. A word that is not a path gives a path nothing tracked has."""
+    here = posixpath.dirname(dune_file)
+    reads: set[str] = set()
+    for word in dune_words(text):
+        if word.startswith(ROOT_VARIABLES):
+            named = [(".", word.split("/", 1)[1])]
+        else:
+            named = [(here, path) for path in PATH_IN_VARIABLE.findall(word)] or [(here, word)]
+        for start, path in named:
+            reads.add(posixpath.normpath(posixpath.join(start, path)))
+    return frozenset(reads)
+
+
+def inside(path: str, directories: tuple[str, ...]) -> bool:
+    return f"{path}/".startswith(directories)
+
+
+class DuneReads(unittest.TestCase):
+    def test_paths_are_resolved_from_the_dune_file(self):
+        text = (
+            "(rule (targets a.ml)\n"
+            " ; (deps ../../docs/commented-out.txt)\n"
+            " (deps ../../config/a.toml (glob_files ../../skills/*.md)\n"
+            "  %{workspace_root}/benchmarks/data.json (source_tree ../../docs))\n"
+            ' (action (system "python3 %{dep:../../scripts/gen.py} ; cat ../../dashboard/x.css")))\n'
+        )
+        reads = dune_reads("lib/x/dune", text)
+        for path in (
+            "config/a.toml",
+            "skills/*.md",
+            "benchmarks/data.json",
+            "docs",
+            "scripts/gen.py",
+            "dashboard/x.css",
+            "lib/x/a.ml",
+        ):
+            self.assertIn(path, reads)
+        self.assertNotIn("docs/commented-out.txt", reads)
+        self.assertTrue(inside("docs", ("docs/",)))
+        self.assertTrue(inside("dashboard/x.css", ("dashboard/",)))
+        self.assertFalse(inside("docs-site/a.md", ("docs/",)))
+
+
+class NotBuildInputs(unittest.TestCase):
+    """NOT_BUILD_INPUTS against the dune files this checkout tracks."""
+
+    tracked: tuple[str, ...] = ()
+
+    @classmethod
+    def setUpClass(cls):
+        listed = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-z"],
+            check=True, stdout=subprocess.PIPE, text=True,
+        ).stdout
+        cls.tracked = tuple(path for path in listed.split("\0") if path)
+
+    def dune_files(self) -> tuple[str, ...]:
+        found = tuple(p for p in self.tracked if posixpath.basename(p) in DUNE_FILES)
+        self.assertIn("dune", found)
+        self.assertIn("lib/exec/parser/dune", found)
+        return found
+
+    def test_no_dune_file_sits_in_them(self):
+        for path in self.dune_files():
+            self.assertFalse(inside(path, changes.NOT_BUILD_INPUTS), path)
+
+    def test_dune_files_read_them_only_to_run_tests(self):
+        read = {
+            (dune_file, path)
+            for dune_file in self.dune_files()
+            for path in dune_reads(dune_file, (ROOT / dune_file).read_text(encoding="utf-8"))
+            if inside(path, changes.NOT_BUILD_INPUTS)
+        }
+        self.assertEqual(read, READ_ONLY_BY_TEST_RUNS)
 
 
 class Stack(unittest.TestCase):

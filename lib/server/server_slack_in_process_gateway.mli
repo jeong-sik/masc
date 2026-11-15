@@ -65,6 +65,7 @@ module For_testing : sig
     ?deliver:(unit -> unit) ->
     ?team_id:string ->
     ?user_directory:Slack_user_directory.t ->
+    ?bot_user_id:string ->
     Connector_ingress_lane.t ->
     dispatch_for_delivery:
       (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
@@ -75,6 +76,7 @@ module For_testing : sig
 
   val submit_ambient_event :
     ?team_id:string -> ?user_directory:Slack_user_directory.t ->
+    ?bot_user_id:string ->
     Connector_ingress_lane.t ->
     dispatch_for_delivery:(Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
     clock:_ Eio.Time.clock -> base_dir:string -> Slack_gateway_state.slack_event ->
@@ -85,8 +87,10 @@ module For_testing : sig
     ?user_directory:Slack_user_directory.t ->
     Slack_socket_client.slack_event ->
     Slack_socket_client.slack_event
-  (** Inbound identity rendering (issue #28376): author display label plus
-      [<@U…>] mention rewriting, applied by both submit lanes. Exposed so
+  (** Inbound identity rendering (issue #28376): the author display label,
+      applied by both submit lanes before the channel binding is read.
+      [<@U…>] mentions are rendered after the binding, where the bot's own
+      mention can be named as the bound Keeper (issue #28401). Exposed so
       tests can pin the mapping without a live socket. *)
 
   val record_external_attention :

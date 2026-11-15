@@ -24,7 +24,7 @@ execution and visual evidence remain required for that combined behavior.
 | Automatic Gate work is distinct from human decisions | `approval_item_needs_person`; mixed Gate scenario | Current-head PTY pass and Home/strip comparison |
 | Keeper zero preserves existing Goal confirmations | `empty_roster_preserves_confirmation` | Current-head PTY pass |
 | Empty workspace leads to creation | `Home_create_keeper` dispatch | Creation success/failure journey with inputs preserved |
-| Enter opens requests without deciding them | `requests_are_navigation`, `assert_no_decision_posts` | Current-head pass; individual request identity and duplicate cases |
+| Enter opens requests without deciding them | `open_approvals` (`bin/masc_tui_home.mli`) | Current-head pass; individual request identity and duplicate cases |
 | A newly inserted destination does not steal selection | `refresh_preserves_destination` | Current-head PTY pass |
 | Removed selection requires reselection | `home_selected_action`; refresh scenario | Current-head pass; deleted Keeper resume case |
 | Fixed startup Keeper is not a last-chat receipt | `remember_home_chat`; `opening_boot_frames` | Current-head Overview PTY pass |

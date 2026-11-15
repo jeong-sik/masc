@@ -164,6 +164,10 @@ let test_chat_file_observation_retains_its_read_epoch () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"chat-files" ~local_base_path:"/workspace/a"
       ~port:8935 () in
+  (* The rows below are found by their English labels, so the screen language
+     is English; the default is Korean, where the diff's back hint is
+     "Esc:파일 목록". What a short screen keeps does not depend on the language. *)
+  state.ui_language <- Lang_en;
   state.server_identity <- Some (identity "/workspace/a");
   state.workspace_identity <- Workspace_identity_match;
   state.msg_target_keeper_name <- Some "alpha";

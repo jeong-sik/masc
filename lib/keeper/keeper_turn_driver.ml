@@ -629,7 +629,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   match route, deferred with
   | ( ( Route.Retry_after_observed
           { retry_class =
-              ( Route.Rate_limited | Route.Hard_quota | Route.Provider_capacity
+              ( Route.Rate_limited | Route.Hard_quota _ | Route.Provider_capacity
               | Route.Server_error | Route.Empty_completion _
               | Route.Network_transient | Route.Provider_timeout
               | Route.Local_admission_timeout )
@@ -643,7 +643,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
        | Walk_waits_until { release_at; release_basis = _; resting_runtime_id } ->
          Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
   | ( Route.Retry_after_observed
-        { retry_class = (Route.Rate_limited | Route.Hard_quota) as retry_class; retry_after }
+        { retry_class = (Route.Rate_limited | Route.Hard_quota _) as retry_class; retry_after }
     , None ) ->
     (match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
      | Ok { order = _ :: _ :: _; _ } ->
@@ -700,7 +700,7 @@ let provider_rest_of_failure ~now ~route ~assignment_id deferred =
     | Some (Dispatch_now _) | None -> None
   in
   match route with
-  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota _; retry_after } ->
     (match Route.usable_retry_after retry_after with
      | Some _ -> rest_of_wait ()
      | None -> None)
@@ -990,7 +990,7 @@ let attempt_runtime_candidates
           provider hint as candidate-only ordering evidence. A shared
           credential quota rests on the distinct HardQuota/402 contract, or
           on the provider's usage read after a 429 that states no wait. *)
-       let note_quota retry_after =
+       let note_quota source retry_after =
          (* A hint the provider did not really state -- zero, negative, NaN --
             named no reset. Planting it as a window would date the quota to a
             moment already past, and that window replaces an observation the
@@ -1000,7 +1000,7 @@ let attempt_runtime_candidates
          let resets_at = Option.map
            (fun retry_after_s -> Unix.gettimeofday () +. retry_after_s)
            (Keeper_runtime_failure_route.usable_retry_after retry_after) in
-         observe_standing (Runtime_candidate_standing.Hard_quota {resets_at})
+         observe_standing (Runtime_candidate_standing.Hard_quota {source; resets_at})
        in
        let note_rate_limit retry_after =
          observe_standing (Runtime_candidate_standing.Rate_limited {retry_after})
@@ -1043,7 +1043,7 @@ let attempt_runtime_candidates
            | Some _ -> ()
            | None -> read_usage_after_account_refusal candidate)
         | Keeper_runtime_failure_route.Retry_after_observed
-            { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
+            { retry_class = Keeper_runtime_failure_route.Hard_quota source; retry_after } ->
           (* A spent quota that states no reset rests the scope only to the
              fallback cap, a time MASC set: the path comes back then and is
              refused again while the window stays spent. GLM's 1308 states
@@ -1055,19 +1055,14 @@ let attempt_runtime_candidates
              failed read leaves the observation, and the next refusal reads
              again. A payment refusal (402) names no usage window and is not
              read. *)
-          note_quota retry_after;
-          (match
-             ( Keeper_runtime_failure_route.usable_retry_after retry_after
-             , Keeper_runtime_failure_route.hard_quota_source error )
-           with
-           | None, Some Keeper_runtime_failure_route.Provider_quota_refused ->
+          note_quota source retry_after;
+          (match Keeper_runtime_failure_route.usable_retry_after retry_after, source with
+           | None, Keeper_runtime_failure_route.Provider_quota_refused ->
              read_usage_after_account_refusal candidate
            | ( Some _
-             , ( Some
-                   ( Keeper_runtime_failure_route.Payment_refused
-                   | Keeper_runtime_failure_route.Provider_quota_refused )
-               | None ) )
-           | None, (Some Keeper_runtime_failure_route.Payment_refused | None) -> ())
+             , ( Keeper_runtime_failure_route.Payment_refused
+               | Keeper_runtime_failure_route.Provider_quota_refused ) )
+           | None, Keeper_runtime_failure_route.Payment_refused -> ())
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Server_error
@@ -1827,7 +1822,21 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
     let* root = Runtime_muse_home.prepare_native_workspace
         ~runtime_root:(Common.masc_dir_from_base_path ~base_path) ~keeper_name ~account_home
       |> Result.map_error (fun error -> config_error (Runtime_muse_home.error_to_string error)) in
-    Ok (root,
+    (* The Keeper's session claim admits one turn at a time, so no other
+       session of this Keeper writes the directory between this read and the
+       host's start. *)
+    let* origin =
+      Eio_guard.run_in_systhread ~label:"muse-native-workspace-read" (fun () ->
+        Runtime_muse_serve.origin_of_masc_directory root)
+      |> Result.map_error config_error in
+    (match origin with
+     | Runtime_muse_serve.Masc_private -> ()
+     | Runtime_muse_serve.Other_tree ->
+       Log.Keeper.warn ~keeper_name
+         "Muse private workspace %s holds files, so the host starts without \
+          workspace trust and does not connect the MASC tools"
+         root);
+    Ok (root, origin,
       "Muse native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned tree. Use MASC tools for that tree; native commands run in the official client's host sandbox.") in
   let shared_workspace profile =
     try
@@ -1841,7 +1850,7 @@ let muse_native_workspace ~base_path ~keeper_name ~required_native_posture ~acco
       let canonical = Unix.realpath selected in
       if not (String.equal selected canonical)
       then Error (config_error "native workspace must not traverse symbolic links")
-      else Ok (canonical, Printf.sprintf
+      else Ok (canonical, Runtime_muse_serve.other_tree, Printf.sprintf
         "Muse native tools use host workspace %s, sharing files with MASC tools at %s. Native commands run in the official client's host sandbox, not the Keeper container."
         canonical (Keeper_sandbox.container_root keeper_name))
     with
@@ -3342,7 +3351,7 @@ let run_named
             ; pending_result_receipts = None
             ; settled_session = None
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
-          | Ok (workspace_root, native_context) ->
+          | Ok (workspace_root, workspace_origin, native_context) ->
           Keeper_muse_runtime.run ~on_guidance_prepared ~input_source ~media_store
             ~on_model_input_refused:record_refused_model_input
             ?on_native_tool_completion
@@ -3353,6 +3362,7 @@ let run_named
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ~quota_scope:runtime.quota_scope
             ~workspace_root
+            ~workspace_origin
             ~accepts_image_input
             ?required_native_posture
             ~runtime_id:attempt_runtime_id

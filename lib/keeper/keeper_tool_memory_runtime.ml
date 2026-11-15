@@ -1386,9 +1386,17 @@ let keeper_context_status_json
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
+  (* The tool description promises sandbox health and paths, not checkout
+     identity. Inspecting checkouts runs git inside the guest, and a microvm
+     guest that does not answer holds every call for the full 5s remote
+     timeout before the status comes back as [filesystem_unavailable]: 3,111 of
+     3,113 calls in the 2026-11-10..13 ledger, 2,544 of them 4s or longer.
+     [masc_keeper_status] leaves the inspection off by default and takes it as
+     an opt-in. *)
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:true
+      ~include_repository_checkouts:false
       ~config
       ~meta
       ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())

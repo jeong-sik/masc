@@ -192,10 +192,11 @@ val init_jsonl :
     A read can start the backend before this runs.  That backend has no lookup
     and its writes refuse every address; this call then installs [recipient_lookup]
     into it. A backend that already has a lookup keeps it. The requested root
-    is captured as an explicit BasePath (empty input raises [Invalid_argument]) and must
-    match the startup-bound store before this call
-    installs a lookup or starts a flusher; a mismatch returns [Error] without
-    switching the retained backend. *)
+    is captured as an explicit BasePath (empty input raises [Invalid_argument]).
+    When no store is claimed yet, the store opens on that BasePath, not on the
+    process environment's. A store claimed earlier for another root is refused
+    with [Workspace_mismatch] before any of its files are locked or read, and
+    the retained backend is not switched. *)
 
 val reset_for_test : unit -> unit
 (** Drop the in-memory backend. Test-only. *)

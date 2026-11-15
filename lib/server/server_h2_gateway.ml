@@ -1,12 +1,15 @@
 let make_error_handler () =
   let h2_error_handler _client_addr ?request:_ error respond =
-    let message =
+    (* The log line has what failed. The body is a fixed sentence: an
+       exception's text can name a file of the server. *)
+    let logged, message =
       match error with
-      | `Exn exn -> Printexc.to_string exn
-      | `Bad_request -> "Bad request"
-      | `Internal_server_error -> "Internal server error"
+      | `Exn exn -> Printexc.to_string exn, Http_error_body.internal_server_error
+      | `Bad_request -> Http_error_body.bad_request, Http_error_body.bad_request
+      | `Internal_server_error ->
+        Http_error_body.internal_server_error, Http_error_body.internal_server_error
     in
-    Log.Http.error "Error: %s" message;
+    Log.Http.error "Error: %s" logged;
     let headers = H2.Headers.of_list [ "content-type", "text/plain" ] in
     let body = respond headers in
     (match Http_h2_response_ledger.current () with
@@ -17,11 +20,7 @@ let make_error_handler () =
      | None ->
        (* Parser failures have no admitted application scope. Their fixed
           diagnostic is bounded separately from application payloads. *)
-       H2.Body.Writer.write_string
-         body
-         (match error with
-          | `Bad_request -> "Bad request"
-          | `Internal_server_error | `Exn _ -> "Internal server error"));
+       H2.Body.Writer.write_string body message);
     Http_h2_stream.close_after_flush body
   in
   h2_error_handler

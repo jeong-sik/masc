@@ -2449,6 +2449,12 @@ let test_the_runtime_does_not_save_a_copy ~fail_reverse () =
     (List.length (Absorbed.read ~keepers_dir ~keeper_id |> require))
 ;;
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Masc.Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 (* A payment failure must leave the same sources and proposed claim pending
    across repeated Librarian turns. The durable failure journal is the
    operator-visible receipt for each refused judgment. *)
@@ -2568,7 +2574,7 @@ let check_failed_absorb_evaluations ~status ~body ~failure_code ~diagnostic () =
       entry.keeper_name = Some keeper_id
       && String_util.contains_substring entry.message "absorb judgment failed") in
   Alcotest.(check int) "one failure warning per pass" 3 (List.length failure_warnings);
-  let failures = Current.read_journal_tail ~keepers_dir ~keeper_id ~limit:10
+  let failures = readable_journal_tail ~keepers_dir ~keeper_id ~limit:10
     |> List.filter_map (function
       | Ok (Current.Journal_failed { detail; _ }) -> Some detail
       | Ok _ | Error _ -> None) in

@@ -34,8 +34,13 @@ type exact_completion_artifact
 
 val supports_completion_request_measurement : Provider_config.t -> bool
 
+(** Freeze the generation body and the count-tokens request derived from it.
+    [auth_headers] and [declared_headers] are the ones the plan freezes into
+    the generation request; the count-tokens request carries the same ones. *)
 val freeze_exact_completion_artifact
   :  anthropic_thinking_control:Capabilities.anthropic_thinking_control option
+  -> auth_headers:(string * string) list
+  -> declared_headers:Exact_output_declared_headers.t
   -> Llm_transport.completion_request
   -> (exact_completion_artifact, completion_request_error) result
 

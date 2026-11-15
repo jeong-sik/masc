@@ -339,6 +339,9 @@ let serve_preview ~base_path ~store ~port github =
           base_url
           base_url
           base_url;
+        (* The deletions of conversations a stopped preview left end beside
+           the routes, as at the start of the account server. *)
+        Eio.Fiber.fork ~sw (fun () -> Server_keeper_conversation_purge.resume ~env ~zone ~base_path);
         Server_bootstrap_http.serve
           ~sw
           ~clock

@@ -290,6 +290,47 @@ describe('FleetRotationSection (fl-rot-*)', () => {
     expect(container.querySelector('.fl-as-tag')?.textContent).toBe('후보 3')
   })
 
+  it('names why a resting candidate rests and leaves the others unmarked', async () => {
+    const candidate = (
+      id: string,
+      quota_rest: RuntimeResolvedResponse['runtimes'][number]['quota_rest'],
+    ): RuntimeResolvedResponse['runtimes'][number] => ({
+      id,
+      provider: 'p',
+      model: 'm',
+      effective_max_context: 1,
+      max_context_source: 'capability',
+      max_output_tokens: null,
+      is_local: false,
+      is_default: false,
+      quota_rest,
+    })
+    resolvedMock.state.value = loaded({
+      ...RESOLVED,
+      runtimes: [
+        candidate('claude/main', { cause: 'provider_quota_refused', reset_stated: true, until: 1_794_500_000 }),
+        candidate('codex/main', { cause: 'payment_refused', reset_stated: false, until: 1_794_500_000 }),
+        candidate('local/gguf', null),
+      ],
+    })
+
+    await act(async () => {
+      render(html`<${FleetRotationSection} keeper=${makeKeeper()} />`, container)
+    })
+    await flushUi()
+
+    const cands = container.querySelectorAll('.fl-rot-cand')
+    expect([...cands].map(cand => cand.classList.contains('rest'))).toEqual([true, true, false])
+    const rests = [...container.querySelectorAll('.fl-rot-rest')].map(row => row.textContent ?? '')
+    expect(rests).toHaveLength(2)
+    expect(rests[0]).toContain('claude/main')
+    expect(rests[0]).toContain('한도 소진')
+    expect(rests[0]).toContain('초기화')
+    expect(rests[1]).toContain('codex/main')
+    expect(rests[1]).toContain('결제 거절')
+    expect(rests[1]).toContain('초기화 시각 없음')
+  })
+
   it('renders the na arm for a single-runtime assignment', async () => {
     resolvedMock.state.value = loaded(RESOLVED)
 

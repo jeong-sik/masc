@@ -1,6 +1,16 @@
+(* The file a lease descriptor is open on, as the kernel names it. POSIX
+   record locks belong to the process and to the file: a path is one of the
+   spellings of a file, and the same file answers to more than one
+   ([base_path_lock_digest_of_stats]). What this process holds is asked by
+   this, never by a path. *)
+type lease_file_identity = Lease_file of int * int (* st_dev, st_ino *)
+
+let lease_file_identity (stat : Unix.stats) = Lease_file (stat.st_dev, stat.st_ino)
+
 type base_path_lease =
   { fd : Unix.file_descr
   ; path : string
+  ; file : lease_file_identity
   }
 
 type base_path_lock_rejection =
@@ -225,7 +235,14 @@ type retained_base_path_fd =
   | Active_lease of base_path_lease
   | Failed_close of base_path_lease * base_path_lock_rejection
 
-let base_path_leases : (string, retained_base_path_fd) Hashtbl.t =
+(* lease file -> the descriptor this process retains on it. Closing any
+   descriptor of a file drops every lock the process holds on that file, so
+   a path is looked up here by the file it names before it is opened
+   ([retained_on]): a file found here is never opened a second time. The
+   identity is read once, from the descriptor while it is known to be open,
+   and kept beside it: a descriptor whose close failed can no longer be
+   asked. *)
+let base_path_leases : (lease_file_identity, retained_base_path_fd) Hashtbl.t =
   Hashtbl.create 2
 ;;
 
@@ -262,10 +279,10 @@ type announcement =
   ; id : int
   }
 
-(* lease path -> the one announcement this process holds for it. A process
+(* lease file -> the one announcement this process holds for it. A process
    serves one kind of server for a lease and announces one port, so the key
    is the lease alone and a second announcement of either kind is refused. *)
-let announcements : (string, announcement) Hashtbl.t = Hashtbl.create 2
+let announcements : (lease_file_identity, announcement) Hashtbl.t = Hashtbl.create 2
 let announcement_ids = Atomic.make 0
 
 (* A close that fails leaves it open whether the descriptor is gone. It is
@@ -282,6 +299,13 @@ let close_announcement_fd ~path fd =
 ;;
 
 let close_acquisition_fd ~operation ~path ~context fd =
+  (* Asked before the close: after a close that failed, the number may name
+     nothing or another file. *)
+  let file =
+    match Unix.fstat fd with
+    | stat -> Some (lease_file_identity stat)
+    | exception Unix.Unix_error _ -> None
+  in
   try
     Unix.close fd;
     Ok ()
@@ -298,13 +322,15 @@ let close_acquisition_fd ~operation ~path ~context fd =
               (Printexc.to_string exn)
         }
     in
-    (* [acquire_base_path_lock_with] holds [base_path_lease_mu]. A failed
-       close leaves descriptor and kernel-lock ownership ambiguous, so retain
-       a process-local fence and return an explicit typed rejection. *)
-    Hashtbl.replace
-      base_path_leases
-      path
-      (Failed_close ({ fd; path }, rejection));
+    (* The caller holds [base_path_lease_mu]. A failed close leaves
+       descriptor and kernel-lock ownership ambiguous, so retain a
+       process-local fence on the file and return an explicit typed
+       rejection. A descriptor that named no file before the close was not
+       open: nothing is ambiguous about it and there is no file to fence. *)
+    (match file with
+     | Some file ->
+       Hashtbl.replace base_path_leases file (Failed_close ({ fd; path; file }, rejection))
+     | None -> ());
     Error rejection
 ;;
 
@@ -412,7 +438,7 @@ let write_all fd content =
 let release_base_path_lease lease =
   Mutex.protect base_path_lease_mu (fun () ->
     let owns_table_entry =
-      match Hashtbl.find_opt base_path_leases lease.path with
+      match Hashtbl.find_opt base_path_leases lease.file with
       | Some (Active_lease current) -> current == lease
       | Some (Failed_close _) -> false
       | None -> false
@@ -428,10 +454,10 @@ let release_base_path_lease lease =
     else (
       (* The announcement goes first: nothing reads a port from a process that
          has given the workspace up. Closing a descriptor drops its lock. *)
-      (match Hashtbl.find_opt announcements lease.path with
+      (match Hashtbl.find_opt announcements lease.file with
        | Some held ->
          close_announcement_fd ~path:(announcement_path held.server lease.path) held.fd;
-         Hashtbl.remove announcements lease.path
+         Hashtbl.remove announcements lease.file
        | None -> ());
       (try
          let (_ : int) = Unix.lseek lease.fd 0 Unix.SEEK_SET in
@@ -461,12 +487,12 @@ let release_base_path_lease lease =
       (* A failed close leaves descriptor ownership ambiguous. Retain the
          process-local fence in that case; admitting an alias after a failed
          release would be worse than an explicit fail-closed leak. *)
-      if closed then Hashtbl.remove base_path_leases lease.path))
+      if closed then Hashtbl.remove base_path_leases lease.file))
 ;;
 
 let prepare_base_path_lease_exec_handoff lease =
   Mutex.protect base_path_lease_mu (fun () ->
-    match Hashtbl.find_opt base_path_leases lease.path with
+    match Hashtbl.find_opt base_path_leases lease.file with
     | Some (Active_lease current) when current == lease ->
       (try
          Unix.clear_close_on_exec lease.fd;
@@ -1027,42 +1053,40 @@ let lock_lease_file ~contention fd =
        lockf_until_granted fd)
 ;;
 
-let acquire_base_path_lock_with
-      ?(before_lease_commit = ignore)
-      ?(contention = Refuse_when_owned)
-      ~before_lease_open
+(* [base_path_lease_mu] is held. What this process retains on the file that
+   the lease path of [prepared] names now. The path is not opened to learn
+   it: [lstat] names the file, and the table is keyed by the file. A path
+   that names no regular file names none this process holds. *)
+let retained_on prepared =
+  match observe_lease_path prepared.path with
+  | Error rejection -> Error rejection
+  | Ok (Lease_path_missing | Lease_path_other (_ : Unix.file_kind)) -> Ok None
+  | Ok (Lease_path_regular seen) ->
+    Ok (Hashtbl.find_opt base_path_leases (lease_file_identity seen))
+;;
+
+(* The answer to an acquisition of a lease file this process already retains.
+   Nothing is opened for it. *)
+let retained_result prepared = function
+  | Active_lease (_ : base_path_lease) ->
+    (* NDT-OK: the OS process id is the observed owner identity. *)
+    Base_path_already_owned
+      { owner = Owner_this_process (Unix.getpid ()); lock_path = prepared.path }
+  | Failed_close ((_ : base_path_lease), rejection) -> Base_path_rejected rejection
+;;
+
+(* [base_path_lease_mu] is held, [fd] is the one descriptor this process has
+   on the lease file of [prepared], and [open_lease_file] or
+   [open_existing_lease_file] verified it. Locks it, establishes [.masc] and
+   commits this process as the owner. Every refusal closes [fd]. *)
+let commit_opened_lease
+      ~before_lease_commit
+      ~contention
       ~before_commit_identity_check
       ~before_runtime_identity_check
-      ~run_dir
-      base_path
+      prepared
+      fd
   =
-  match prepare_base_path_lock ~run_dir base_path with
-  | Error rejection -> Base_path_rejected rejection
-  | Ok prepared ->
-    before_lease_open ();
-    (* [lockf] locks are process-associated on POSIX, so a second descriptor in
-       this process may successfully acquire the same kernel lock. The key is
-       a full SHA-256 projection of the directory's (st_dev, st_ino) identity
-       into the validated, current-UID private lease directory. A digest
-       collision remains fail-closed because both identities contend on the
-       same lease file. *)
-    Mutex.protect base_path_lease_mu (fun () ->
-      match Hashtbl.find_opt base_path_leases prepared.path with
-      | Some (Active_lease _) ->
-        (* NDT-OK: the OS process id is the observed owner identity. *)
-        Base_path_already_owned
-          { owner = Owner_this_process (Unix.getpid ()); lock_path = prepared.path }
-      | Some (Failed_close (_, rejection)) -> Base_path_rejected rejection
-      | None ->
-        (* Cross-version exclusion with a server that predates the (st_dev,
-           st_ino) keying is a documented operator step, not a technical
-           fence: legacy_residue forbids keeping a legacy lease format alive,
-           and a one-directional fence could not keep a v1-only server from
-           starting a second lease for the same directory anyway. Stop the
-           old server before starting this one across an upgrade. *)
-        (match open_lease_file prepared with
-         | Error rejection -> Base_path_rejected rejection
-         | Ok fd ->
               let commit_outcome =
                 try
                   before_lease_commit fd;
@@ -1173,11 +1197,13 @@ let acquire_base_path_lock_with
                              in
                              (match
                                 try
-                                  Ok (commit_pid (Printf.sprintf "%d\n" (Unix.getpid ())))
+                                  commit_pid (Printf.sprintf "%d\n" (Unix.getpid ()));
+                                  Ok (lease_file_identity (Unix.fstat fd))
                                 with
                                 | exn ->
-                                  (* cancel-guard-ok: Unix.ftruncate, Unix.lseek
-                                     and Unix.fsync perform no Eio operation. *)
+                                  (* cancel-guard-ok: Unix.ftruncate, Unix.lseek,
+                                     Unix.fsync and Unix.fstat perform no Eio
+                                     operation. *)
                                   Error (Printexc.to_string exn)
                               with
                               | Error reason ->
@@ -1197,13 +1223,54 @@ let acquire_base_path_lock_with
                                         })
                                  | Error rejection ->
                                    Base_path_rejected rejection)
-                              | Ok () ->
-                                let lease = { fd; path = prepared.path } in
-                                Hashtbl.add
-                                  base_path_leases
-                                  prepared.path
-                                  (Active_lease lease);
-                                Base_path_acquired lease)))))))
+                              | Ok file ->
+                                let lease = { fd; path = prepared.path; file } in
+                                Hashtbl.add base_path_leases file (Active_lease lease);
+                                Base_path_acquired lease)))))
+;;
+
+let acquire_base_path_lock_with
+      ?(before_lease_commit = ignore)
+      ?(contention = Refuse_when_owned)
+      ~before_lease_open
+      ~before_commit_identity_check
+      ~before_runtime_identity_check
+      ~run_dir
+      base_path
+  =
+  match prepare_base_path_lock ~run_dir base_path with
+  | Error rejection -> Base_path_rejected rejection
+  | Ok prepared ->
+    before_lease_open ();
+    (* [lockf] locks are process-associated on POSIX, so a second descriptor in
+       this process may successfully acquire the same kernel lock, and its
+       close would drop the lock of the first. The lease file is named by a
+       full SHA-256 projection of the directory's (st_dev, st_ino) identity
+       into the validated, current-UID private lease directory, and this
+       process finds what it holds by the (st_dev, st_ino) of that file
+       ([retained_on]). A digest collision remains fail-closed because both
+       identities contend on the same lease file. *)
+    Mutex.protect base_path_lease_mu (fun () ->
+      match retained_on prepared with
+      | Error rejection -> Base_path_rejected rejection
+      | Ok (Some retained) -> retained_result prepared retained
+      | Ok None ->
+        (* Cross-version exclusion with a server that predates the (st_dev,
+           st_ino) keying is a documented operator step, not a technical
+           fence: legacy_residue forbids keeping a legacy lease format alive,
+           and a one-directional fence could not keep a v1-only server from
+           starting a second lease for the same directory anyway. Stop the
+           old server before starting this one across an upgrade. *)
+        (match open_lease_file prepared with
+         | Error rejection -> Base_path_rejected rejection
+         | Ok fd ->
+           commit_opened_lease
+             ~before_lease_commit
+             ~contention
+             ~before_commit_identity_check
+             ~before_runtime_identity_check
+             prepared
+             fd))
 ;;
 
 let acquire_base_path_lock ~run_dir base_path =
@@ -1265,45 +1332,67 @@ let open_waiter_file prepared =
    (2026-11-04 live incident). The lease record, not the process image, is
    what this keys on.
 
-   Read-only and side-effect free: it never creates the lease file, never
-   locks, and every unreadable or unparsable outcome falls through to the
-   waiter path below. The bypass only skips the waiter slot (a
-   liveness/queueing mechanism); the kernel lock in the inner acquire
-   remains the real mutex, and that acquire re-validates everything before
-   committing, so a TOCTOU'd read degrades to the pre-fix behavior rather
-   than to a wrong owner. *)
-let lease_file_names_self prepared =
-  match observe_lease_path prepared.path with
-  | Ok (Lease_path_regular _) ->
-    (match
-       try Ok (Unix.openfile prepared.path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0)
-       with Unix.Unix_error _ -> Error ()
-     with
-     | Error () -> false
-     | Ok fd ->
-       Fun.protect
-         ~finally:(fun () ->
-           try Unix.close fd with Unix.Unix_error _ -> ())
-         (fun () ->
-           match parsed_pid_fd fd with
-           | Some pid -> pid = Unix.getpid ()
-           | None -> false))
-  | Ok (Lease_path_missing | Lease_path_other _) | Error _ -> false
+   The lock crossed the exec with the process, and the table of the new
+   image is empty. Closing any descriptor of the lease file would drop that
+   lock and hand the lease to a process that sleeps in [lockf] on it
+   (#51285). So the record is read through the one descriptor this
+   acquisition opens, and a lease that names this process is committed on
+   that same descriptor: nothing is closed on the way to [Base_path_acquired].
+
+   [None] sends the caller to the waiter path, as every unreadable or
+   unparsable outcome does: the lease file is never created here. The
+   descriptor of a lease that names another process, or none, is closed. A
+   process whose lock crossed an exec committed its own PID under that lock
+   before the exec, so a file that does not name this process is one this
+   process holds no lock on, and the close drops nothing. The bypass only
+   skips the waiter slot (a liveness/queueing mechanism); the kernel lock
+   remains the real mutex, and the commit re-validates everything, so a
+   TOCTOU'd read degrades to a refusal rather than to a wrong owner. *)
+let resume_recorded_lease prepared =
+  Mutex.protect base_path_lease_mu (fun () ->
+    match observe_lease_path prepared.path with
+    | Error (_ : base_path_lock_rejection)
+    | Ok (Lease_path_missing | Lease_path_other (_ : Unix.file_kind)) -> None
+    | Ok (Lease_path_regular seen) ->
+      (match Hashtbl.find_opt base_path_leases (lease_file_identity seen) with
+       | Some retained -> Some (retained_result prepared retained)
+       | None ->
+         (match open_existing_lease_file prepared seen with
+          | Error (_ : base_path_lock_rejection) -> None
+          | Ok fd ->
+            (match parsed_pid_fd fd with
+             | Some pid when pid = Unix.getpid () ->
+               Some
+                 (commit_opened_lease
+                    ~before_lease_commit:(fun fd ->
+                      (* [parsed_pid_fd] moved the offset; [lockf] locks from
+                         the offset on, and every holder locks from byte 0. *)
+                      let (_ : int) = Unix.lseek fd 0 Unix.SEEK_SET in
+                      ())
+                    ~contention:Refuse_when_owned
+                    ~before_commit_identity_check:(fun () -> ())
+                    ~before_runtime_identity_check:(fun () -> ())
+                    prepared
+                    fd)
+             | Some (_ : int) | None ->
+               (match
+                  close_acquisition_fd
+                    ~operation:"close_unowned_lease_file"
+                    ~path:prepared.path
+                    ~context:"the lease does not record this process"
+                    fd
+                with
+                | Ok () -> None
+                | Error rejection -> Some (Base_path_rejected rejection))))))
 ;;
 
 let acquire_base_path_lock_after_owner_exits ~run_dir ~on_wait base_path =
   match prepare_base_path_lock ~run_dir base_path with
   | Error rejection -> Ok (Base_path_rejected rejection)
-  | Ok prepared when lease_file_names_self prepared ->
-    Ok
-      (acquire_base_path_lock_with
-         ~contention:Refuse_when_owned
-         ~before_lease_open:(fun () -> ())
-         ~before_commit_identity_check:(fun () -> ())
-         ~before_runtime_identity_check:(fun () -> ())
-         ~run_dir
-         base_path)
   | Ok prepared ->
+    match resume_recorded_lease prepared with
+    | Some result -> Ok result
+    | None ->
     (match open_waiter_file prepared with
      | Error rejection -> Ok (Base_path_rejected rejection)
      | Ok (waiter_path, waiter_fd) ->
@@ -1397,15 +1486,21 @@ let capture_existing_owner ~run_dir ~base_path =
   | Error rejection -> Error (Owner_lease_rejected rejection)
   | Ok prepared ->
     Mutex.protect base_path_lease_mu (fun () ->
-      if Hashtbl.mem base_path_leases prepared.path then Error Current_process_owner
-      else
-        match open_lease_file prepared with
-        | Error rejection -> Error (Owner_lease_rejected rejection)
-        | Ok fd ->
-          Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-            match Owner_process_identity.capture ~lease_fd:fd with
-            | Ok owner -> Ok owner
-            | Error other -> Error (Owner_identity_unavailable other)))
+      (* The descriptor opened here is closed below, and that close would
+         drop a lease of this process on the same file: the file is asked
+         for first, whatever the spelling of its path. *)
+      match retained_on prepared with
+      | Error rejection -> Error (Owner_lease_rejected rejection)
+      | Ok (Some (Active_lease (_ : base_path_lease) | Failed_close _)) ->
+        Error Current_process_owner
+      | Ok None ->
+        (match open_lease_file prepared with
+         | Error rejection -> Error (Owner_lease_rejected rejection)
+         | Ok fd ->
+           Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+             match Owner_process_identity.capture ~lease_fd:fd with
+             | Ok owner -> Ok owner
+             | Error other -> Error (Owner_identity_unavailable other))))
 
 (* HIGH-RISK-UNREVIEWED: a reader takes [false] for "nobody holds this
    BasePath", and reads no owner. The path is the one [lease_run_dir] and
@@ -1564,14 +1659,14 @@ let loopback_unreached_to_string = function
       Masc_network_defaults.masc_http_loopback_peer
 ;;
 
-(* Ends the announcement [id] of the lease at [lease_path] and leaves the
+(* Ends the announcement [id] of [lease] and leaves the
    lease held. Nothing when the lease was released first, which withdrew it. *)
-let withdraw_announcement ~lease_path ~id =
+let withdraw_announcement (lease : base_path_lease) ~id =
   Mutex.protect base_path_lease_mu (fun () ->
-    match Hashtbl.find_opt announcements lease_path with
+    match Hashtbl.find_opt announcements lease.file with
     | Some held when held.id = id ->
-      close_announcement_fd ~path:(announcement_path held.server lease_path) held.fd;
-      Hashtbl.remove announcements lease_path
+      close_announcement_fd ~path:(announcement_path held.server lease.path) held.fd;
+      Hashtbl.remove announcements lease.file
     | Some (_ : announcement) | None -> ())
 ;;
 
@@ -1590,9 +1685,9 @@ let announce server (lease : base_path_lease) ({ port } : loopback_listener) ~wi
   let failed = announcement_failed ~operation:"announce_port" ~path in
   let made =
     Mutex.protect base_path_lease_mu (fun () ->
-      match Hashtbl.find_opt base_path_leases lease.path with
+      match Hashtbl.find_opt base_path_leases lease.file with
       | Some (Active_lease current) when current == lease ->
-        (match Hashtbl.find_opt announcements lease.path with
+        (match Hashtbl.find_opt announcements lease.file with
          | Some held ->
            Error
              (Announcement_already_made
@@ -1616,7 +1711,7 @@ let announce server (lease : base_path_lease) ({ port } : loopback_listener) ~wi
                   with
                   | () ->
                     let id = Atomic.fetch_and_add announcement_ids 1 in
-                    Hashtbl.replace announcements lease.path { server; fd; port; id };
+                    Hashtbl.replace announcements lease.file { server; fd; port; id };
                     Ok id
                   | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) ->
                     (* Another process holds a lock over the byte. This
@@ -1642,7 +1737,7 @@ let announce server (lease : base_path_lease) ({ port } : loopback_listener) ~wi
     (* Outside the lock: [withdraw_with] is the caller's, and the withdrawal
        takes the lock again. A caller that cannot take the withdrawal leaves
        nothing announced behind its exception. *)
-    let withdraw () = withdraw_announcement ~lease_path:lease.path ~id in
+    let withdraw () = withdraw_announcement lease ~id in
     (match withdraw_with withdraw with
      | () -> Ok ()
      | exception exn ->
@@ -1664,15 +1759,14 @@ type announcement_reader =
       was opened for this read and is closed after it. *)
 
 (* The announcement this process holds on the file that [seen] names. The
-   table is keyed by the lease path as this process spelled it, and one
-   directory has more than one spelling ([base_path_lock_digest_of_stats]):
-   the file is compared, not the string, and so is every announcement of
+   table is keyed by the lease file, and [seen] is an announcement file:
+   the file is compared, not a path, and so is every announcement of
    this process, of either kind. A read that found none for a file this
    process locks would open a second descriptor on it, and its close would
    drop the announcement. *)
 let own_announcement_on seen =
   Hashtbl.fold
-    (fun (_ : string) (held : announcement) found ->
+    (fun (_ : lease_file_identity) (held : announcement) found ->
       match found with
       | Some (_ : Unix.file_descr * int) -> found
       | None ->

@@ -93,19 +93,12 @@ let admit_serialized_body ~stream prepared =
       ~messages:request.messages
       ~tools:request.tools
   in
-  let evidence =
-    Complete_common.serialization_observation
-      ~capture_id:request.capture_id
-      ~config
-      ~stream
-      serialized_request
-  in
   Ok
     { prepared
     ; admitted_body =
         Llm_transport.admit_http_body
           ~serialized_request
-          ~evidence
+          ~stream
           ~config
           ~messages:request.messages
           ~tools:request.tools
@@ -416,4 +409,4 @@ let admitted_body admitted = admitted.measured.admitted_body
 let serialized_request (serialized : serialized) = serialized.prepared
 let serialized_admitted_body (serialized : serialized) = serialized.admitted_body
 let admitted_body_request (admitted_body : admitted_body) = admitted_body.serialized_request
-let admitted_body_evidence (admitted_body : admitted_body) = admitted_body.evidence
+let admitted_body_stream (admitted_body : admitted_body) = admitted_body.stream

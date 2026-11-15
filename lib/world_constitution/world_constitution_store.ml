@@ -36,7 +36,7 @@ let append_error_to_string = function
 let append_failure_detail : Fs_compat.private_jsonl_append_error -> string =
   function
   | Fs_compat.Incomplete_jsonl_tail ->
-    "the ledger does not end at a line boundary"
+    "the offset counts an unfinished last line as part of the ledger"
   | Fs_compat.Incomplete_jsonl_tail_truncate_failed _ ->
     "the ledger's unfinished last line could not be cut"
   | Fs_compat.Existing_jsonl_refused _ -> "the existing entry was refused"
@@ -180,8 +180,19 @@ let subjects_of_entry = function
   | World_constitution_types.Replaced { by; article; _ } -> [ by; article.author ]
   | World_constitution_types.Removed { by; _ } -> [ by ]
 
+(* Every append writes its move and the newline in one piece, so the moves
+   end right after the last newline. Bytes after it are an append that stopped
+   part way: not a move, and cut by the next [append_at]. *)
+let complete_lines contents =
+  match String.rindex_opt contents '\n' with
+  | Some newline -> String.sub contents 0 (newline + 1)
+  | None -> ""
+
+let unfinished_line_detail =
+  "the line has no newline, so its append did not finish; the next write cuts it"
+
 let parse_with ~keep_history ~resolve_subject contents =
-  let end_offset = String.length contents in
+  let end_offset = String.length (complete_lines contents) in
   let rec scan line_number held entries rejected isolated = function
     | [] -> { end_offset; articles = held; entries = List.rev entries;
               rejected = List.rev rejected; isolated = List.rev isolated }
@@ -189,34 +200,35 @@ let parse_with ~keep_history ~resolve_subject contents =
       if String.equal (String.trim line) "" then
         scan (line_number + 1) held entries rejected isolated rest
       else (
-        (* [split_on_char] leaves the text after the last newline as the
-           final element, so only that element can be unterminated. *)
-        let line_end =
-          match rest with
-          | [] -> Unterminated_final_line
-          | _ :: _ -> Newline_terminated
-        in
-        let reject detail =
+        let reject line_end detail =
           scan (line_number + 1) held entries
             ({ line_number; line_end; detail } :: rejected) isolated rest
         in
-        match Yojson.Safe.from_string line with
-        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-        | exception exn -> reject (Printexc.to_string exn)
-        | json -> (
-          match World_constitution_wire.entry_of_json json with
-          | Error error ->
-            reject (World_constitution_wire.decode_error_to_string error)
-          | Ok entry ->
-            let entries = if keep_history then entry :: entries else entries in
-            match List.find_opt (fun subject -> not (resolve_subject subject))
-                    (subjects_of_entry entry) with
-            | None ->
-              scan (line_number + 1) (apply held entry) entries rejected isolated rest
-            | Some subject ->
-              let article_ids = article_ids_of_entry entry in
-              scan (line_number + 1) (without_ids held article_ids) entries rejected
-                ({ line_number; subject; article_ids } :: isolated) rest))
+        (* [split_on_char] leaves the text after the last newline as the
+           final element, so only that element can be unterminated. It is
+           reported and never decoded: bytes that happen to read as a whole
+           move would otherwise be held now and gone after the next append. *)
+        match rest with
+        | [] -> reject Unterminated_final_line unfinished_line_detail
+        | _ :: _ -> (
+          match Yojson.Safe.from_string line with
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception exn -> reject Newline_terminated (Printexc.to_string exn)
+          | json -> (
+            match World_constitution_wire.entry_of_json json with
+            | Error error ->
+              reject Newline_terminated
+                (World_constitution_wire.decode_error_to_string error)
+            | Ok entry ->
+              let entries = if keep_history then entry :: entries else entries in
+              match List.find_opt (fun subject -> not (resolve_subject subject))
+                      (subjects_of_entry entry) with
+              | None ->
+                scan (line_number + 1) (apply held entry) entries rejected isolated rest
+              | Some subject ->
+                let article_ids = article_ids_of_entry entry in
+                scan (line_number + 1) (without_ids held article_ids) entries rejected
+                  ({ line_number; subject; article_ids } :: isolated) rest)))
   in
   scan 1 [] [] [] [] (String.split_on_char '\n' contents)
 
@@ -271,12 +283,12 @@ let load_held ~base_path ~resolve_subject =
   | Ok contents ->
     let contents = Option.value contents ~default:"" in
     let ledger = parse_with ~keep_history:false ~resolve_subject contents in
-    Ok { articles = ledger.articles; at = position_of contents;
+    Ok { articles = ledger.articles; at = position_of (complete_lines contents);
          status = projection_status ledger }
 
-(* Appends never rewrite a byte already written, so the first [end_offset]
-   bytes of the ledger now are the ledger [position] read, exactly when they
-   still hash to its digest. *)
+(* Appends never rewrite a complete line already written, and a position ends
+   at one, so the first [end_offset] bytes of the ledger now are the ledger
+   [position] read, exactly when they still hash to its digest. *)
 let load_articles_at ~base_path ~resolve_subject (position : position) =
   match read_contents ~base_path with
   | Error _ as error -> error

@@ -71,12 +71,9 @@ def row_success_verdict(row: dict[str, Any]) -> bool | None:
         return False
     return None
 
+
 DEFAULT_CATALOG = (
-    REPO_ROOT
-    / "scripts"
-    / "fixtures"
-    / "keeper-multi-collaboration"
-    / "missions.json"
+    REPO_ROOT / "scripts" / "fixtures" / "keeper-multi-collaboration" / "missions.json"
 )
 # The composition Skills this campaign measures are the runner's own fixtures,
 # not product builtins and not whatever an operator keeps in a runtime skill
@@ -152,9 +149,29 @@ TOOL_APPROVAL_MODE_UNATTENDED = "yolo"
 # name the surviving missions by these numbers. Listing them avoids a range
 # that would silently demand renumbering every retirement.
 EXPECTED_MISSION_IDS = (
-    "RW01", "RW02", "RW03", "RW04", "RW05", "RW06", "RW07", "RW08",
-    "RW09", "RW10", "RW11", "RW12", "RW13", "RW14", "RW15", "RW16",
-    "RW17", "RW18", "RW20", "RW21", "RW22", "RW23", "RW26",
+    "RW01",
+    "RW02",
+    "RW03",
+    "RW04",
+    "RW05",
+    "RW06",
+    "RW07",
+    "RW08",
+    "RW09",
+    "RW10",
+    "RW11",
+    "RW12",
+    "RW13",
+    "RW14",
+    "RW15",
+    "RW16",
+    "RW17",
+    "RW18",
+    "RW20",
+    "RW21",
+    "RW22",
+    "RW23",
+    "RW26",
 )
 
 EXPECTED_ROLES = {"coordinator", "builder-a", "builder-b", "reviewer", "researcher"}
@@ -253,7 +270,9 @@ def rw26_fibonacci_leading_one_count(n: int) -> int:
 # the digit 1. A drifted implementation fails at import, before any
 # campaign run can quote it as an oracle.
 if rw26_fibonacci_leading_one_count(10) != 3:
-    raise AssertionError("rw26 oracle drifted: F(1..10) must contain 3 leading-1 values")
+    raise AssertionError(
+        "rw26 oracle drifted: F(1..10) must contain 3 leading-1 values"
+    )
 
 
 # An external process sweep on this machine SIGTERMs masc servers every
@@ -319,6 +338,7 @@ def rate_limited_record(
         },
         "body": detail[:500],
     }
+
 
 GOAL_VERIFIER_PHASE_FAILED = "goal_verifier_phase_failed"
 
@@ -736,9 +756,7 @@ class McpClient:
         *,
         allow_tool_error: bool = False,
     ) -> ToolObservation:
-        response = self.request(
-            "tools/call", {"name": name, "arguments": arguments}
-        )
+        response = self.request("tools/call", {"name": name, "arguments": arguments})
         result = response.get("result") or {}
         texts = [
             item.get("text", "")
@@ -758,7 +776,9 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     try:
         catalog = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise AcceptanceError(f"could not read mission catalog {path}: {error}") from error
+        raise AcceptanceError(
+            f"could not read mission catalog {path}: {error}"
+        ) from error
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
@@ -817,17 +837,25 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     for approach in approaches:
         for field in ("name", "method"):
             if not isinstance(approach.get(field), str) or not approach[field].strip():
-                raise AcceptanceError(f"approach {approach.get('id')} is missing {field}")
+                raise AcceptanceError(
+                    f"approach {approach.get('id')} is missing {field}"
+                )
         evidence = approach.get("required_evidence")
-        if not isinstance(evidence, list) or not evidence or not all(
-            isinstance(item, str) and item.strip() for item in evidence
+        if (
+            not isinstance(evidence, list)
+            or not evidence
+            or not all(isinstance(item, str) and item.strip() for item in evidence)
         ):
             raise AcceptanceError(
                 f"approach {approach.get('id')} has invalid required_evidence"
             )
     for mission in missions:
         actors = mission.get("actors")
-        if not isinstance(actors, list) or not actors or not set(actors) <= EXPECTED_ROLES:
+        if (
+            not isinstance(actors, list)
+            or not actors
+            or not set(actors) <= EXPECTED_ROLES
+        ):
             raise AcceptanceError(f"{mission.get('id')} contains invalid actors")
         for field in ("phase", "name", "user_story"):
             if not isinstance(mission.get(field), str) or not mission[field].strip():
@@ -847,7 +875,9 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if missing:
         raise AcceptanceError(f"catalog does not route assertions: {sorted(missing)}")
     if catalog.get("acceptance_authority") != "real_world_product_outcomes":
-        raise AcceptanceError("real-world product outcomes must remain the acceptance authority")
+        raise AcceptanceError(
+            "real-world product outcomes must remain the acceptance authority"
+        )
     return catalog
 
 
@@ -892,9 +922,8 @@ def validate_runtime_strategy(
         )
     if require_heterogeneous:
         distinct = set(runtime_by_role.values())
-        if (
-            len(runtime_by_role) != len(EXPECTED_ROLES)
-            or len(distinct) != len(EXPECTED_ROLES)
+        if len(runtime_by_role) != len(EXPECTED_ROLES) or len(distinct) != len(
+            EXPECTED_ROLES
         ):
             raise AcceptanceError(
                 "--require-heterogeneous-runtimes needs five distinct runtime ids, "
@@ -909,9 +938,7 @@ def runtime_strategy_receipt(
     require_heterogeneous: bool,
     roles: set[str] = EXPECTED_ROLES,
 ) -> dict[str, Any]:
-    resolved = {
-        role: runtime_by_role.get(role, runtime_id) for role in sorted(roles)
-    }
+    resolved = {role: runtime_by_role.get(role, runtime_id) for role in sorted(roles)}
     if any(value is None for value in resolved.values()):
         raise AcceptanceError(
             "an exact runtime selection is required before a mutable run"
@@ -951,9 +978,7 @@ def collect_runtime_serving_evidence(
     for role in sorted(keepers_by_role):
         keeper = keepers_by_role[role]
         expected_runtime = expected_runtime_by_role[role]
-        manifest_root = (
-            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
-        )
+        manifest_root = base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
         exact_receipts: list[dict[str, Any]] = []
         fallback_receipts: list[dict[str, Any]] = []
         current_run_row_count = 0
@@ -980,7 +1005,10 @@ def collect_runtime_serving_evidence(
                             f"{relative_path}:{line_number}:{error.msg}"
                         )
                         continue
-                    if not isinstance(row, dict) or row.get("event") != "receipt_appended":
+                    if (
+                        not isinstance(row, dict)
+                        or row.get("event") != "receipt_appended"
+                    ):
                         continue
                     current_run_row_count += 1
                     decision = row.get("decision")
@@ -1011,8 +1039,7 @@ def collect_runtime_serving_evidence(
                         )
                     if schema_errors:
                         parse_errors.append(
-                            f"{relative_path}:{line_number}:"
-                            + "; ".join(schema_errors)
+                            f"{relative_path}:{line_number}:" + "; ".join(schema_errors)
                         )
                         continue
                     receipt = {
@@ -1064,9 +1091,7 @@ def collect_runtime_serving_evidence(
             "served": bool(exact_receipts),
         }
 
-    all_roles_served = all(
-        evidence["served"] for evidence in role_evidence.values()
-    )
+    all_roles_served = all(evidence["served"] for evidence in role_evidence.values())
     return {
         "schema": "masc.keeper_runtime_serving_evidence.v1",
         "status": "passed" if all_roles_served and not parse_errors else "failed",
@@ -1088,9 +1113,7 @@ def capture_runtime_manifest_line_cursors(
     """Snapshot manifest append positions before the campaign mutates Keepers."""
     cursors: dict[str, dict[str, int]] = {}
     for keeper in sorted(set(keepers_by_role.values())):
-        manifest_root = (
-            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
-        )
+        manifest_root = base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
         keeper_cursors: dict[str, int] = {}
         for manifest_path in sorted(manifest_root.glob("*.jsonl")):
             relative_path = str(manifest_path.relative_to(base_path))
@@ -1262,9 +1285,7 @@ def composition_fixture_path(
     *, catalog_path: pathlib.Path, identity_key: tuple[str, str, str]
 ) -> pathlib.Path:
     _source_id, package_id, _name = identity_key
-    return (
-        catalog_path.parent / COMPOSITION_FIXTURE_DIRNAME / package_id / "SKILL.md"
-    )
+    return catalog_path.parent / COMPOSITION_FIXTURE_DIRNAME / package_id / "SKILL.md"
 
 
 def default_dashboard_route_url(mcp_url: str, route: str) -> str:
@@ -1463,7 +1484,7 @@ def install_composition_fixtures(
                 "identity: "
                 + json.dumps(skill_reference_json(installed_reference), sort_keys=True)
             )
-        flow = profile.get("flow")
+        flow = profile.get("flow") if isinstance(profile, dict) else None
         planned_batches = planned_fixture_batches(
             flow.get("batches") if isinstance(flow, dict) else None
         )
@@ -1799,7 +1820,9 @@ def fresh_sandbox_declaration(
     endpoint: str | None,
 ) -> dict[str, str]:
     if profile not in SANDBOX_PROFILES:
-        raise AcceptanceError("--run requires --sandbox-profile: choose docker, microvm or remote_ssh")
+        raise AcceptanceError(
+            "--run requires --sandbox-profile: choose docker, microvm or remote_ssh"
+        )
     values = {
         "sandbox_image": (image or "").strip(),
         "microvm_backend": (backend or "").strip(),
@@ -1815,9 +1838,17 @@ def fresh_sandbox_declaration(
         if field in required and not value:
             raise AcceptanceError(f"--sandbox-profile {profile} requires {flag}")
         if field not in required and value:
-            raise AcceptanceError(f"{flag} is not applicable to --sandbox-profile {profile}")
-    if values["microvm_backend"] and values["microvm_backend"] not in ("apple_container", "microsandbox", "nerdctl_kata"):
-        raise AcceptanceError("--microvm-backend must be apple_container, microsandbox or nerdctl_kata")
+            raise AcceptanceError(
+                f"{flag} is not applicable to --sandbox-profile {profile}"
+            )
+    if values["microvm_backend"] and values["microvm_backend"] not in (
+        "apple_container",
+        "microsandbox",
+        "nerdctl_kata",
+    ):
+        raise AcceptanceError(
+            "--microvm-backend must be apple_container, microsandbox or nerdctl_kata"
+        )
     return {"sandbox_profile": profile, **{field: values[field] for field in required}}
 
 
@@ -1954,13 +1985,13 @@ class MissionRun:
         # Every 429 the run survived stays visible: the full list under
         # observations/, the count under resources.transport_rate_limited_count.
         self.rate_limited_responses.append(record)
-        self.writer.write_json("observations/transport-429.json", self.rate_limited_responses)
+        self.writer.write_json(
+            "observations/transport-429.json", self.rate_limited_responses
+        )
 
     def dashboard_get(self, path: str) -> dict[str, Any]:
         parsed = urllib.parse.urlparse(self.endpoint)
-        url = urllib.parse.urlunparse(
-            (parsed.scheme, parsed.netloc, path, "", "", "")
-        )
+        url = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
         headers = {"Accept": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -1985,9 +2016,16 @@ class MissionRun:
                     )
                     time.sleep(retry_after_seconds(error))
                     continue
-                raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+                raise AcceptanceError(
+                    f"Dashboard GET {path} failed: {error}"
+                ) from error
             except (urllib.error.URLError, json.JSONDecodeError) as error:
-                raise AcceptanceError(f"Dashboard GET {path} failed: {error}") from error
+                raise AcceptanceError(
+                    f"Dashboard GET {path} failed: {error}"
+                ) from error
+        else:
+            # Every attempt breaks, retries or raises; the last one cannot retry.
+            raise AcceptanceError(f"Dashboard GET {path} failed: no attempt was made")
         if not isinstance(value, dict):
             raise AcceptanceError(f"Dashboard GET {path} returned a non-object payload")
         return value
@@ -2039,14 +2077,11 @@ class MissionRun:
                 if isinstance(verification, dict)
                 else None
             )
-            if (
-                last.get("phase") == phase
-                and (
-                    completion_state is None
-                    or (
-                        isinstance(completion, dict)
-                        and completion.get("state") == completion_state
-                    )
+            if last.get("phase") == phase and (
+                completion_state is None
+                or (
+                    isinstance(completion, dict)
+                    and completion.get("state") == completion_state
                 )
             ):
                 return last
@@ -2327,9 +2362,7 @@ class MissionRun:
         return turn
 
     def run_parallel_wave(self, post_id: str) -> None:
-        composition_instruction = (
-            f"먼저 {INLINE_FIXTURE_TOOL}를 정확히 한 번 호출하고 그 typed 결과를 확인하세요. "
-        )
+        composition_instruction = f"먼저 {INLINE_FIXTURE_TOOL}를 정확히 한 번 호출하고 그 typed 결과를 확인하세요. "
         prompts = {
             "coordinator": (
                 composition_instruction
@@ -2386,7 +2419,9 @@ class MissionRun:
 
     def run_continuity_chain(self, post_id: str) -> None:
         for step in range(1, 10):
-            previous = "COORDINATOR_READY" if step == 1 else f"CONTINUITY_STEP_{step - 1}"
+            previous = (
+                "COORDINATOR_READY" if step == 1 else f"CONTINUITY_STEP_{step - 1}"
+            )
             self.run_turn(
                 "coordinator",
                 f"continuity-{step}",
@@ -2414,9 +2449,7 @@ class MissionRun:
                 # and expands the node whose input came from another node's
                 # output; the fixture shape is this runner's, so it is handed
                 # over rather than restated in the script.
-                "MASC_COMPOSITION_INLINE_NODES": json.dumps(
-                    list(INLINE_FIXTURE_NODES)
-                ),
+                "MASC_COMPOSITION_INLINE_NODES": json.dumps(list(INLINE_FIXTURE_NODES)),
                 "MASC_COMPOSITION_EXPANDED_NODE": INLINE_FIXTURE_DATAFLOW_NODE,
                 "MASC_GOAL_VERIFICATION_GOAL_ID": self.verifier_goal_id,
                 "MASC_GOAL_VERIFICATION_RUN_ID": str(
@@ -2776,9 +2809,7 @@ class MissionRun:
             completion_state="proof_refuted",
         )
         refuted_verdict = (
-            refuted.get("verification", {})
-            .get("completion", {})
-            .get("verdict", {})
+            refuted.get("verification", {}).get("completion", {}).get("verdict", {})
         )
         refuted_run_id = refuted_verdict.get("verification_run_id")
         if not isinstance(refuted_run_id, str) or not refuted_run_id.strip():
@@ -2805,9 +2836,7 @@ class MissionRun:
             completion_state="proof_proven",
         )
         proven_verdict = (
-            proven.get("verification", {})
-            .get("completion", {})
-            .get("verdict", {})
+            proven.get("verification", {}).get("completion", {}).get("verdict", {})
         )
         proven_run_id = proven_verdict.get("verification_run_id")
         if not isinstance(proven_run_id, str) or not proven_run_id.strip():
@@ -2816,9 +2845,7 @@ class MissionRun:
             raise AcceptanceError("refutation and proof reused one verification run ID")
         self.writer.write_json("observations/goal-verifier-proven.json", proven)
 
-        runs_payload = self.dashboard_get(
-            "/api/v1/dashboard/goal-verification-runs"
-        )
+        runs_payload = self.dashboard_get("/api/v1/dashboard/goal-verification-runs")
         runs = runs_payload.get("runs")
         if not isinstance(runs, list):
             raise AcceptanceError("Goal verification runs route has no runs array")
@@ -2900,7 +2927,11 @@ class MissionRun:
         self.call(
             "keeper-down-coordinator",
             "masc_keeper_down",
-            {"name": self.roles["coordinator"], "remove_meta": False, "remove_session": False},
+            {
+                "name": self.roles["coordinator"],
+                "remove_meta": False,
+                "remove_session": False,
+            },
         )
         # keepalive_running answers whether the fiber is up. It does not
         # answer whether the shutdown operation reached a phase that admits a
@@ -3045,9 +3076,7 @@ class MissionRun:
                     f"tool-call inspector returned malformed rows for {role}"
                 )
             self.tool_call_rows[role] = entries
-            self.writer.write_json(
-                f"observations/tool-calls-{role}.json", tool_calls
-            )
+            self.writer.write_json(f"observations/tool-calls-{role}.json", tool_calls)
         runtime_receipt = runtime_strategy_receipt(
             runtime_id=self.runtime_id,
             runtime_by_role=self.runtime_by_role,
@@ -3095,7 +3124,11 @@ class MissionRun:
             self.observations[f"task-history-{key}"] = observation
             self.writer.write_json(
                 f"observations/task-history-{key}.json",
-                {"tool": "masc_task_history", "text": observation.text, "data": observation.data},
+                {
+                    "tool": "masc_task_history",
+                    "text": observation.text,
+                    "data": observation.data,
+                },
             )
 
     def read_board_thread(self, post_id: str) -> ToolObservation:
@@ -3207,8 +3240,7 @@ class MissionRun:
                 "ts": row.get("ts"),
             }
             for row in sorted(rows, key=lambda row: float(row.get("ts") or 0.0))
-            if row.get("tool") in accepted_names
-            and not row.get("composition_tool")
+            if row.get("tool") in accepted_names and not row.get("composition_tool")
         ]
 
     def _successful_tool(self, role: str, tool_name: str) -> bool:
@@ -3243,12 +3275,8 @@ class MissionRun:
         ]
         goal_verifier_refuted = self.goal_verifier_evidence.get("refuted_goal")
         goal_verifier_proven = self.goal_verifier_evidence.get("proven_goal")
-        goal_verifier_refuted_run = self.goal_verifier_evidence.get(
-            "refuted_run_id"
-        )
-        goal_verifier_proven_run = self.goal_verifier_evidence.get(
-            "proven_run_id"
-        )
+        goal_verifier_refuted_run = self.goal_verifier_evidence.get("refuted_run_id")
+        goal_verifier_proven_run = self.goal_verifier_evidence.get("proven_run_id")
         goal_verifier_runs = self.goal_verifier_evidence.get("runs")
         goal_verifier_runs_by_id = {
             run.get("run_id"): run
@@ -3278,7 +3306,8 @@ class MissionRun:
                 row
                 for row in self.tool_call_rows.get(role, [])
                 if isinstance(row.get("ts"), (int, float))
-                and turn.started_epoch_seconds <= float(row["ts"])
+                and turn.started_epoch_seconds
+                <= float(row["ts"])
                 <= turn.finished_epoch_seconds
                 and is_submitted_turn_row(row)
             ]
@@ -3390,7 +3419,11 @@ class MissionRun:
         inline_turn_errors: list[str] = []
         attributed_inline_run_keys: set[tuple[str, str]] = set()
         for label in sorted(required_inline_turn_labels):
-            role = label.removeprefix("parallel-") if label.startswith("parallel-") else "coordinator"
+            role = (
+                label.removeprefix("parallel-")
+                if label.startswith("parallel-")
+                else "coordinator"
+            )
             turn = self.turns.get(label)
             if turn is None:
                 inline_turn_errors.append(f"{label}:missing_turn")
@@ -3401,16 +3434,18 @@ class MissionRun:
                 if row.get("composition_tool") == INLINE_FIXTURE_TOOL
             ]
             run_ids = {
-                row.get("composition_run_id")
+                turn_run_id
                 for row in turn_rows
-                if isinstance(row.get("composition_run_id"), str)
-                and row.get("composition_run_id")
+                if isinstance(turn_run_id := row.get("composition_run_id"), str)
+                and turn_run_id
             }
             if len(run_ids) != 1:
                 inline_turn_errors.append(f"{label}:runs={sorted(run_ids)}")
                 continue
             run_id = next(iter(run_ids))
-            run_rows = [row for row in turn_rows if row.get("composition_run_id") == run_id]
+            run_rows = [
+                row for row in turn_rows if row.get("composition_run_id") == run_id
+            ]
             outer_rows = [
                 row
                 for row in rows_for_turn(role, turn)
@@ -3433,10 +3468,9 @@ class MissionRun:
             inline_turn_runs[label] = (run_id, run_rows)
             attributed_inline_run_keys.add((role, run_id))
         unattributed_inline_runs = set(inline_runs) - attributed_inline_run_keys
-        inline_run_ids_globally_unique = (
-            len({run_id for run_id, _ in inline_turn_runs.values()})
-            == len(required_inline_turn_labels)
-        )
+        inline_run_ids_globally_unique = len(
+            {run_id for run_id, _ in inline_turn_runs.values()}
+        ) == len(required_inline_turn_labels)
         inline_action_rows = [
             row for _, rows in inline_turn_runs.values() for row in rows
         ]
@@ -3452,9 +3486,7 @@ class MissionRun:
             for label, (run_id, rows) in inline_turn_runs.items()
             for row in rows
         }
-        full_inline_action_rows = [
-            row for rows in inline_runs.values() for row in rows
-        ]
+        full_inline_action_rows = [row for rows in inline_runs.values() for row in rows]
         full_inline_row_identities = {
             (role, run_id, row.get("execution_id"), row.get("tool_use_id"))
             for (role, run_id), rows in inline_runs.items()
@@ -3481,12 +3513,12 @@ class MissionRun:
             else []
         )
         async_submit_rows = [
-            row
-            for row in researcher_rows
-            if row.get("tool") == ASYNC_FIXTURE_TOOL
+            row for row in researcher_rows if row.get("tool") == ASYNC_FIXTURE_TOOL
         ]
         async_status_rows = [
-            row for row in researcher_rows if row.get("tool") == "keeper_composition_status"
+            row
+            for row in researcher_rows
+            if row.get("tool") == "keeper_composition_status"
         ]
         async_request_id: str | None = None
         async_outer_terminal = False
@@ -3554,9 +3586,9 @@ class MissionRun:
                 coordinator_turn_evidence_errors.append(f"{label}:missing_turn")
                 continue
             keeper_turn_ids = {
-                row.get("keeper_turn_id")
+                keeper_turn_id
                 for row in rows_for_turn("coordinator", turn)
-                if isinstance(row.get("keeper_turn_id"), int)
+                if isinstance(keeper_turn_id := row.get("keeper_turn_id"), int)
             }
             if len(keeper_turn_ids) != 1:
                 coordinator_turn_evidence_errors.append(
@@ -3586,8 +3618,7 @@ class MissionRun:
             source_outputs = [
                 parse_json_maybe(row.get("output", ""))
                 for row in rows
-                if row.get("composition_node_id")
-                == INLINE_FIXTURE_DATAFLOW_SOURCE_NODE
+                if row.get("composition_node_id") == INLINE_FIXTURE_DATAFLOW_SOURCE_NODE
             ]
             if len(source_outputs) != 1 or not isinstance(source_outputs[0], dict):
                 return False
@@ -3620,14 +3651,8 @@ class MissionRun:
             self.writer.output_dir / "browser" / "keeper-composition-inspector.png"
         )
         parallel_events = sorted(
-            [
-                (turn.started_epoch_seconds, 1)
-                for turn in parallel_turns
-            ]
-            + [
-                (turn.finished_epoch_seconds, -1)
-                for turn in parallel_turns
-            ],
+            [(turn.started_epoch_seconds, 1) for turn in parallel_turns]
+            + [(turn.finished_epoch_seconds, -1) for turn in parallel_turns],
             key=lambda event: (event[0], event[1]),
         )
         concurrent_turns = 0
@@ -3665,8 +3690,7 @@ class MissionRun:
             and self._successful_tool("coordinator", "masc_schedule_get"),
             "Task": text_contains(tasks, self.marker)
             and any(
-                self._successful_tool(role, "keeper_task_claim")
-                for role in self.roles
+                self._successful_tool(role, "keeper_task_claim") for role in self.roles
             ),
             "Board": text_contains(board, self.marker)
             and self._successful_tool("coordinator", "masc_board_post"),
@@ -3727,13 +3751,14 @@ class MissionRun:
         checks: dict[str, tuple[bool, str]] = {
             "all_keepers_live": (
                 len(self.statuses) == len(self.roles)
-                and all(
-                    keeper_is_live(self.statuses.get(role)) for role in self.roles
-                ),
+                and all(keeper_is_live(self.statuses.get(role)) for role in self.roles),
                 f"observed live keepalive status for {len(self.statuses)}/{len(self.roles)} roles",
             ),
             "role_identity_preserved": (
-                all(self.roles[role].lower() in self._status_text(role) for role in self.roles),
+                all(
+                    self.roles[role].lower() in self._status_text(role)
+                    for role in self.roles
+                ),
                 "each final status contains its exact Keeper identity",
             ),
             "runtime_assignment_serving_observed": (
@@ -3758,7 +3783,10 @@ class MissionRun:
                 # searching it for the goal id fails even when linkage is
                 # real (masc#28976). The projection still proves the tasks
                 # are alive on the board at observation time.
-                all(task_id.lower() in task_text.lower() for task_id in self.task_ids.values())
+                all(
+                    task_id.lower() in task_text.lower()
+                    for task_id in self.task_ids.values()
+                )
                 and len(self.task_create_receipts) == len(self.task_ids)
                 and all(
                     isinstance(receipt.data, dict)
@@ -3770,7 +3798,8 @@ class MissionRun:
                 f"{len(self.task_create_receipts)} creation receipts carry goal_id",
             ),
             "parallel_wave_completed": (
-                len(parallel_turns) == 5 and all(turn.status == "passed" for turn in parallel_turns),
+                len(parallel_turns) == 5
+                and all(turn.status == "passed" for turn in parallel_turns),
                 f"{sum(turn.status == 'passed' for turn in parallel_turns)}/5 turn calls settled successfully",
             ),
             "parallel_keeper_overlap_observed": (
@@ -3782,7 +3811,8 @@ class MissionRun:
                 f"task histories contain {sorted(distinct_owner_hits)}",
             ),
             "board_thread_visible": (
-                post_id.lower() in board_text.lower() and self.marker.lower() in board_text.lower(),
+                post_id.lower() in board_text.lower()
+                and self.marker.lower() in board_text.lower(),
                 post_id,
             ),
             "multi_author_comments_visible": (
@@ -3810,17 +3840,23 @@ class MissionRun:
                 "researcher durable tool event",
             ),
             "peer_progress_during_fusion": (
-                text_contains(board, "BUILDER_A_DONE") and text_contains(board, "BUILDER_B_DONE"),
+                text_contains(board, "BUILDER_A_DONE")
+                and text_contains(board, "BUILDER_B_DONE"),
                 "builder completion markers coexist with Fusion registry",
             ),
             "schedule_terminal_visible": (
                 text_contains(schedule, self.schedule_id)
-                and any(text_contains(schedule, state) for state in ("succeeded", "failed", "cancelled", "expired")),
+                and any(
+                    text_contains(schedule, state)
+                    for state in ("succeeded", "failed", "cancelled", "expired")
+                ),
                 "schedule identity plus durable terminal state",
             ),
             "scheduled_wake_progress_visible": (
                 text_contains(board, "SCHEDULE_WAKE_OK")
-                or text_contains(self.statuses["coordinator"], "Scheduled collaboration checkpoint"),
+                or text_contains(
+                    self.statuses["coordinator"], "Scheduled collaboration checkpoint"
+                ),
                 "scheduled wake marker in Board or coordinator history",
             ),
             "invalid_tool_turn_settled": (
@@ -3839,7 +3875,11 @@ class MissionRun:
             "unaffected_peers_progressed": (
                 sum(
                     text_contains(board, marker)
-                    for marker in ("COORDINATOR_READY", "REVIEWER_OBSERVED", "BUILDER_A_DONE")
+                    for marker in (
+                        "COORDINATOR_READY",
+                        "REVIEWER_OBSERVED",
+                        "BUILDER_A_DONE",
+                    )
                 )
                 >= 2,
                 "independent peer markers survived",
@@ -3862,8 +3902,10 @@ class MissionRun:
                     not self._tool_events(role, "masc_task_update")
                     for role in self.roles
                 )
-                and ("submit_for_verification" in history_text.lower()
-                     or "awaiting_verification" in task_text.lower())
+                and (
+                    "submit_for_verification" in history_text.lower()
+                    or "awaiting_verification" in task_text.lower()
+                )
                 and any(word in task_text.lower() for word in task_status_words),
                 "no direct operator task update; evidence entered typed verification flow",
             ),
@@ -3905,7 +3947,10 @@ class MissionRun:
                 and len(set(coordinator_runtime_turn_ids.values())) == 11
                 and len({turn.operation_id for turn in coordinator_turns}) == 11
                 and all(turn.status == "passed" for turn in coordinator_turns)
-                and all(text_contains(board, f"CONTINUITY_STEP_{step}") for step in range(1, 10))
+                and all(
+                    text_contains(board, f"CONTINUITY_STEP_{step}")
+                    for step in range(1, 10)
+                )
                 and text_contains(board, f"MEMORY_RECALLED={self.secret}"),
                 "eleven distinct runtime keeper_turn_id values join the requested operations, "
                 f"errors={coordinator_turn_evidence_errors}",
@@ -3985,7 +4030,9 @@ class MissionRun:
                 "actual dashboard inspector renders one complete typed run with expanded input/output",
             ),
             "poc_execution_proof_observed": (
-                successful_windowed_tool("builder-a", "poc-implement", "tool_write_file")
+                successful_windowed_tool(
+                    "builder-a", "poc-implement", "tool_write_file"
+                )
                 and windowed_execute_output_contains(
                     "builder-a", "poc-implement", self.poc_output_token
                 )
@@ -4010,9 +4057,7 @@ class MissionRun:
                     "claim-measure",
                     f"LEADING_ONE_COUNT={self.claim_expected}",
                 )
-                and text_contains(
-                    board, f"CLAIM_MEASURED={self.claim_expected}"
-                ),
+                and text_contains(board, f"CLAIM_MEASURED={self.claim_expected}"),
                 "builder-a wrote the measurement, a durable Execute row "
                 f"carries LEADING_ONE_COUNT={self.claim_expected} (the "
                 "evaluator's independent Fibonacci/Benford count over "
@@ -4020,9 +4065,7 @@ class MissionRun:
                 "prompt), and the Board claim quotes that execution",
             ),
             "claim_verdict_cites_measurement": (
-                text_contains(
-                    board, f"CLAIM_VERDICT_CITES={self.claim_expected}"
-                )
+                text_contains(board, f"CLAIM_VERDICT_CITES={self.claim_expected}")
                 and successful_windowed_tool(
                     "reviewer", "claim-verdict", "masc_board_comment"
                 ),
@@ -4030,9 +4073,7 @@ class MissionRun:
                 "the Board, matching the evaluator's independent expectation",
             ),
             "debate_restatement_faithful": (
-                text_contains(
-                    board, f"DEBATE_RESTATE={self.debate_claim_token}"
-                )
+                text_contains(board, f"DEBATE_RESTATE={self.debate_claim_token}")
                 and successful_windowed_tool(
                     "builder-b", "debate-rebut", "masc_board_comment"
                 )
@@ -4043,13 +4084,9 @@ class MissionRun:
                 "prompt, readable only on the Board) before rebutting",
             ),
             "qa_coverage_execution_observed": (
-                successful_windowed_tool(
-                    "builder-a", "qa-implement", "tool_write_file"
-                )
+                successful_windowed_tool("builder-a", "qa-implement", "tool_write_file")
                 and all(
-                    windowed_execute_output_contains(
-                        "builder-b", "qa-test", expected
-                    )
+                    windowed_execute_output_contains("builder-b", "qa-test", expected)
                     for _, _, expected in self.qa_cases
                 ),
                 "every declared case produced its transformed result in "
@@ -4083,8 +4120,7 @@ class MissionRun:
             "qa_coverage_review_matches_spec": (
                 text_contains(board, "QA_COVERAGE_VERDICT=COMPLETE:")
                 and all(
-                    text_contains(board, expected)
-                    for _, _, expected in self.qa_cases
+                    text_contains(board, expected) for _, _, expected in self.qa_cases
                 )
                 and successful_windowed_tool(
                     "reviewer", "qa-review", "masc_board_comment"
@@ -4115,7 +4151,8 @@ class MissionRun:
                 f"goal={self.verifier_goal_id} refuted_run={goal_verifier_refuted_run}"
                 + (
                     f" failure={self.goal_verifier_evidence.get('detail')}"
-                    if self.goal_verifier_evidence.get("failure") == GOAL_VERIFIER_PHASE_FAILED
+                    if self.goal_verifier_evidence.get("failure")
+                    == GOAL_VERIFIER_PHASE_FAILED
                     else ""
                 ),
             ),
@@ -4147,8 +4184,7 @@ class MissionRun:
                     self.goal_verifier_browser_proof.get("screenshot_sha256"),
                     str,
                 )
-                and len(self.goal_verifier_browser_proof["screenshot_sha256"])
-                == 64
+                and len(self.goal_verifier_browser_proof["screenshot_sha256"]) == 64
                 and (
                     self.writer.output_dir
                     / "browser"
@@ -4208,11 +4244,7 @@ def bundle_markdown(bundle: dict[str, Any]) -> str:
         f"- Bundle ID: `{bundle['bundle_id']}`",
         "- Approach A: **not executed by this runner** (hermetic CI remains separate)",
         "- Approach B: **"
-        + next(
-            row["status"]
-            for row in bundle["approach_results"]
-            if row["id"] == "B"
-        )
+        + next(row["status"] for row in bundle["approach_results"] if row["id"] == "B")
         + "** (this isolated real-world run)",
         "- Approach C: **not executed by this runner** (duration canary remains separate)",
         "",
@@ -4263,9 +4295,7 @@ def build_bundle(
         }
     missions = []
     for mission in catalog["missions"]:
-        routed = [
-            {"name": name, **assertions[name]} for name in mission["assertions"]
-        ]
+        routed = [{"name": name, **assertions[name]} for name in mission["assertions"]]
         passed = all(row["passed"] for row in routed)
         approach_results = [
             {
@@ -4329,11 +4359,7 @@ def build_bundle(
                 "id": approach["id"],
                 "name": approach["name"],
                 "status": (
-                    (
-                        "passed"
-                        if passed_count == len(missions)
-                        else "failed"
-                    )
+                    ("passed" if passed_count == len(missions) else "failed")
                     if approach["id"] == "B"
                     else "not_executed_by_this_runner"
                 ),
@@ -4429,7 +4455,9 @@ def verify_bundle(
         )
     if expected_source_sha:
         if bundle.get("source_sha") != expected_source_sha:
-            errors.append("bundle runtime binary SHA does not match expected source SHA")
+            errors.append(
+                "bundle runtime binary SHA does not match expected source SHA"
+            )
         if bundle.get("runner_source_sha") != expected_source_sha:
             errors.append("bundle runner SHA does not match expected source SHA")
     if expected_base_path and bundle.get("effective_base_path") != expected_base_path:
@@ -4441,20 +4469,24 @@ def verify_bundle(
     runtime_strategy = (
         resources.get("runtime_strategy") if isinstance(resources, dict) else None
     )
+    runtime_ids = (
+        list(runtime_by_role.values()) if isinstance(runtime_by_role, dict) else []
+    )
     valid_runtime_map = (
         isinstance(runtime_by_role, dict)
         and set(runtime_by_role) == EXPECTED_ROLES
         and all(
             isinstance(runtime_id, str) and bool(runtime_id.strip())
-            for runtime_id in runtime_by_role.values()
+            for runtime_id in runtime_ids
         )
     )
-    distinct_runtime_count = (
-        len(set(runtime_by_role.values())) if valid_runtime_map else 0
-    )
+    distinct_runtime_count = len(set(runtime_ids)) if valid_runtime_map else 0
     if not valid_runtime_map:
         errors.append("bundle runtime map does not name all five roles")
-    if isinstance(resources, dict) and resources.get("distinct_runtime_count") != distinct_runtime_count:
+    if (
+        isinstance(resources, dict)
+        and resources.get("distinct_runtime_count") != distinct_runtime_count
+    ):
         errors.append("bundle distinct runtime count mismatch")
     if runtime_strategy not in {
         "shared_runtime",
@@ -4476,7 +4508,11 @@ def verify_bundle(
     manifest_paths: list[str] = []
     for artifact in artifacts:
         relative = artifact.get("path")
-        if not isinstance(relative, str) or relative.startswith("/") or ".." in pathlib.PurePosixPath(relative).parts:
+        if (
+            not isinstance(relative, str)
+            or relative.startswith("/")
+            or ".." in pathlib.PurePosixPath(relative).parts
+        ):
             errors.append(f"unsafe artifact path: {relative!r}")
             continue
         manifest_paths.append(relative)
@@ -4516,8 +4552,7 @@ def verify_bundle(
         isinstance(keepers, dict)
         and set(keepers) == EXPECTED_ROLES
         and all(
-            isinstance(value, str) and bool(value.strip())
-            for value in keepers.values()
+            isinstance(value, str) and bool(value.strip()) for value in keepers.values()
         )
         and len(set(keepers.values())) == len(EXPECTED_ROLES)
     )
@@ -4539,26 +4574,17 @@ def verify_bundle(
             else None
         )
         verification = (
-            proven_goal.get("verification")
-            if isinstance(proven_goal, dict)
-            else None
+            proven_goal.get("verification") if isinstance(proven_goal, dict) else None
         )
         completion = (
-            verification.get("completion")
-            if isinstance(verification, dict)
-            else None
+            verification.get("completion") if isinstance(verification, dict) else None
         )
-        verdict = (
-            completion.get("verdict") if isinstance(completion, dict) else None
-        )
+        verdict = completion.get("verdict") if isinstance(completion, dict) else None
         expected_run_id = (
-            verdict.get("verification_run_id")
-            if isinstance(verdict, dict)
-            else None
+            verdict.get("verification_run_id") if isinstance(verdict, dict) else None
         )
         if (
-            goal_proof.get("schema")
-            != "masc.goal_verification_browser_evidence.v1"
+            goal_proof.get("schema") != "masc.goal_verification_browser_evidence.v1"
             or not isinstance(expected_goal_id, str)
             or goal_proof.get("goal_id") != expected_goal_id
             or not isinstance(expected_run_id, str)
@@ -4567,10 +4593,11 @@ def verify_bundle(
             or goal_proof.get("review_kind") != "proof"
             or goal_proof.get("artifact_tool_visible") is not True
             or not goal_screenshot_path.is_file()
-            or goal_proof.get("screenshot_sha256")
-            != sha256_file(goal_screenshot_path)
+            or goal_proof.get("screenshot_sha256") != sha256_file(goal_screenshot_path)
         ):
-            errors.append("Goal verifier browser proof does not match ledger run identity")
+            errors.append(
+                "Goal verifier browser proof does not match ledger run identity"
+            )
     seed = {
         "source_sha": bundle.get("source_sha"),
         "runner_source_sha": bundle.get("runner_source_sha"),
@@ -4616,7 +4643,9 @@ def parse_args() -> argparse.Namespace:
     mode.add_argument("--preflight", action="store_true")
     mode.add_argument("--run", action="store_true")
     parser.add_argument("--catalog", default=str(DEFAULT_CATALOG))
-    parser.add_argument("--mcp-url", default=os.environ.get("MCP_URL", "http://127.0.0.1:8935/mcp"))
+    parser.add_argument(
+        "--mcp-url", default=os.environ.get("MCP_URL", "http://127.0.0.1:8935/mcp")
+    )
     parser.add_argument("--health-url")
     parser.add_argument("--token-file")
     parser.add_argument("--browser-proof-script")
@@ -4696,9 +4725,16 @@ def main() -> int:
             return 0
 
         # Fresh declarations must be complete before preflight installs fixtures.
-        sandbox_declaration = fresh_sandbox_declaration(
-            args.sandbox_profile, args.sandbox_image, args.microvm_backend, args.remote_endpoint
-        ) if args.run else {}
+        sandbox_declaration = (
+            fresh_sandbox_declaration(
+                args.sandbox_profile,
+                args.sandbox_image,
+                args.microvm_backend,
+                args.remote_endpoint,
+            )
+            if args.run
+            else {}
+        )
         token = read_token(args)
         health_url = args.health_url or default_health_url(args.mcp_url)
         if args.run and args.turn_settle_budget_sec is None:
@@ -4709,6 +4745,7 @@ def main() -> int:
             )
         # A run installs its composition fixtures inside preflight, so every
         # argument the run needs is settled before that first write.
+        run_setup: tuple[dict[str, Any], pathlib.Path] | None = None
         if args.run:
             if not args.allow_mutation:
                 raise AcceptanceError("--run requires explicit --allow-mutation")
@@ -4734,6 +4771,7 @@ def main() -> int:
             )
             output_dir = pathlib.Path(args.output_dir).resolve()
             prepare_output_dir(output_dir)
+            run_setup = (runtime_receipt, output_dir)
         client, health, preflight_result = preflight(
             catalog=catalog,
             catalog_path=catalog_path,
@@ -4745,9 +4783,12 @@ def main() -> int:
             expected_source_sha=args.expected_source_sha,
             install_fixtures=args.run,
         )
-        if args.preflight:
+        # The mode group is required and exclusive, and --validate-catalog and
+        # --verify returned above: no run setup means --preflight.
+        if run_setup is None:
             print(json.dumps(preflight_result, ensure_ascii=False, indent=2))
             return 0
+        runtime_receipt, output_dir = run_setup
 
         writer = EvidenceWriter(output_dir)
         writer.write_json("health.json", health)
@@ -4814,9 +4855,7 @@ def main() -> int:
             post_id=post_id,
         )
         writer.write_json("bundle.json", bundle)
-        (output_dir / "bundle.md").write_text(
-            bundle_markdown(bundle), encoding="utf-8"
-        )
+        (output_dir / "bundle.md").write_text(bundle_markdown(bundle), encoding="utf-8")
         verify_bundle(
             catalog=catalog,
             output_dir=output_dir,

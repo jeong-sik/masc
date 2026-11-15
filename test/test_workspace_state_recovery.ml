@@ -31,7 +31,20 @@ let state_path base_dir =
 let agent_path config agent_name =
   Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent_name ^ ".json")
 
-let test_read_state_repairs_empty_object () =
+let raw_state_file base_dir =
+  match Safe_ops.read_file_safe (state_path base_dir) with
+  | Error error -> fail error
+  | Ok raw -> raw
+
+let stored_state config base_dir =
+  match
+    Masc_domain.workspace_state_of_yojson
+      (Workspace.read_json config (state_path base_dir))
+  with
+  | Ok state -> state
+  | Error error -> fail ("stored state.json does not decode: " ^ error)
+
+let test_read_state_leaves_undecodable_state_untouched () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -46,12 +59,55 @@ let test_read_state_repairs_empty_object () =
       check string "protocol default" "0.1.0" state.protocol_version;
       check int "message_seq default" 0 state.message_seq;
       check (list string) "active_agents default" [] state.active_agents;
+      (match Workspace.observe_state config with
+       | Workspace.State_recovered { fault = Workspace.State_schema_fault _; _ } -> ()
+       | Workspace.State_recovered { fault = Workspace.State_document_fault _; _ } ->
+         fail "an empty object parses; the fault is its schema"
+       | Workspace.State_absent _ -> fail "state.json is there"
+       | Workspace.State_decoded _ -> fail "an empty object is not a workspace state");
+      check string "the reads wrote nothing" "{}" (raw_state_file base_dir))
 
-      let repaired_json = Workspace.read_json config (state_path base_dir) in
-      check string "repaired protocol" "0.1.0"
-        (Safe_ops.json_string ~default:"" "protocol_version" repaired_json);
-      check int "repaired message_seq" 0
-        (Safe_ops.json_int ~default:(-1) "message_seq" repaired_json))
+(* #51419: the MCP status resources read on a system thread, where the store's
+   write lock cannot be taken. A read that repaired the document there poisoned
+   that lock, and every later write of state.json was lost. *)
+let test_status_resource_read_keeps_state_writable () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let server = Mcp_server_eio.For_testing.create_state ~base_path:base_dir () in
+      let config = Mcp_server.workspace_config server in
+      ignore (Workspace.init config ~agent_name:None);
+      write_text_file (state_path base_dir) "{}";
+      let read_resource uri =
+        let response =
+          Mcp_server_eio_resource.handle_read_resource_eio
+            server
+            (`Int 1)
+            (Some (`Assoc [ "uri", `String uri ]))
+        in
+        let open Yojson.Safe.Util in
+        match response |> member "result" |> member "contents" with
+        | `List [ content ] -> content |> member "text" |> to_string
+        | _ -> fail (uri ^ " returned no content: " ^ Yojson.Safe.to_string response)
+      in
+      let status_json = Yojson.Safe.from_string (read_resource "masc://status.json") in
+      check string "status.json says the state was recovered" "recovered"
+        Yojson.Safe.Util.(
+          status_json |> member "state_read" |> member "outcome" |> to_string);
+      let status_text = read_resource "masc://status" in
+      check bool "status says state.json did not decode" true
+        (Astring.String.is_infix ~affix:"state.json did not decode" status_text);
+      check string "the resource reads wrote nothing" "{}" (raw_state_file base_dir);
+
+      let updated =
+        Workspace.update_state config (fun state ->
+          { state with project = "written-after-the-read" })
+      in
+      check string "the write after the read is stored" updated.project
+        (stored_state config base_dir).project)
 
 (* [is_initialized] reads [state.json], so reading the state of a workspace
    that was never initialized must leave it uninitialized. *)
@@ -103,13 +159,15 @@ let test_read_state_drops_legacy_active_agent_objects () =
         [ "gemini-brave-bear" ]
         state.active_agents;
 
-      let open Yojson.Safe.Util in
-      let repaired_json = Workspace.read_json config (state_path base_dir) in
-      let repaired_agents =
-        repaired_json |> member "active_agents" |> to_list |> List.map to_string
-      in
-      check (list string) "canonical active_agents rewritten" state.active_agents
-        repaired_agents)
+      check string "the read wrote nothing" (Yojson.Safe.to_string legacy_json)
+        (raw_state_file base_dir);
+
+      (* The next state write is what replaces the undecodable document. *)
+      check int "the next message number follows the recovered counter" 8
+        (Workspace.next_seq config);
+      check (list string) "that write stores the canonical active_agents"
+        state.active_agents
+        (stored_state config base_dir).active_agents)
 
 let test_read_state_filters_invalid_active_agent_entries () =
   Eio_main.run @@ fun env ->
@@ -272,11 +330,13 @@ let () =
     [
       ( "workspace_state",
         [
-          test_case "repairs empty object" `Quick
-            test_read_state_repairs_empty_object;
+          test_case "a read leaves an undecodable state.json untouched" `Quick
+            test_read_state_leaves_undecodable_state_untouched;
+          test_case "state.json stays writable after the status resources read it"
+            `Quick test_status_resource_read_keeps_state_writable;
           test_case "reading an uninitialized workspace writes nothing" `Quick
             test_read_state_does_not_create_state_json;
-          test_case "drops legacy active_agents objects" `Quick
+          test_case "the next write replaces legacy active_agents objects" `Quick
             test_read_state_drops_legacy_active_agent_objects;
           test_case "filters invalid active_agents entries" `Quick
             test_read_state_filters_invalid_active_agent_entries;

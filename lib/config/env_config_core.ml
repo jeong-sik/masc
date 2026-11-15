@@ -327,7 +327,11 @@ and masc_http_base_url_result () =
               "MASC_HTTP_BASE_URL is required (or set MASC_HOST with MASC_HTTP_PORT)"
       in
       Result.map
-        (fun host -> Printf.sprintf "http://%s:%s" host (masc_http_port ()))
+        (fun host ->
+           Printf.sprintf
+             "http://%s:%s"
+             Masc_network_defaults.(url_host_to_string (url_host_of_string host))
+             (masc_http_port ()))
         host
 
 and masc_http_base_url_opt () =

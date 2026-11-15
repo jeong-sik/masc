@@ -1,0 +1,224 @@
+{
+ "key": "observability-self-improvement",
+ "findings": [
+  {
+   "id": "observability-self-improvement-01",
+   "claim": "전부 저장하는 기억은 네 에이전트 모두에서 고정 기억보다 낮았다. 사람이 판정해 고른 것만 저장하면 모두 높았다. 자동 평가기 셋으로 고르면 열두 칸 중 여섯이 고정 기억보다 낮았다(Table 1: RegAgent 고정 67.53, 전부 55.48, 사람 선별 70.95, 자동 63.18 ~ 67.35).",
+   "src": "How Memory Management Impacts LLM Agents (Xiong et al., arXiv 2505.16067v2) | https://arxiv.org/abs/2505.16067",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "기억·Skill 을 쓰인 Task 의 Verifier 판정과 짝지어 보여 주는 projection 을 RFC-skill-usage-rollup 에 보탠다. Keeper_skill_activation_ledger 가 이미 Task id 를 가진다. 파생 값으로만 두고 저장·삭제를 걸지 않는다.",
+   "caveat": "과제는 회귀·EHR·운전·보안 분류이고 코딩 에이전트가 아니다. 엄격 선별은 사람 판정이다. MASC Verifier 는 자동 평가기 쪽이라 판정으로 자동 삭제할 근거가 못 된다.",
+   "check": "verified Table 1 값 일치. 고정 기억보다 낮은 자동 칸은 RegAgent 3, AgentDriver 2, CIC-IoT 1 로 6개. 단 '사람' 판정은 정답 비교로 흉내 냈고(§3.1), RegAgent 자동 평가기는 LLM 이 아니라 오차 문턱이다."
+  },
+  {
+   "id": "observability-self-improvement-02",
+   "claim": "정답 표시 없는 온라인 적응에서 Dynamic Cheatsheet 는 평균 65.4 로 기준 69.1 밑이었고, ACE 는 FiNER 에서 67.3 으로 기준 70.7 밑이었다(Table 2). 해로운 반성을 매 단계 넣으면 66.7 이다(Table 17).",
+   "src": "Agentic Context Engineering (ACE, arXiv 2510.04618v3) | https://arxiv.org/abs/2510.04618",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "통계·교훈을 Keeper prompt block 으로 자동 주입하지 않는다. 개선 근거로 쓰는 기록은 Verification 판정이 붙은 Task 의 것으로 한정해 보여 준다.",
+   "caveat": "같은 조건에서 ACE 는 Formula +11.0, 평균 +3.8 이었다. 내려간 것은 FiNER 칸이다. 금융 과제 둘과 DeepSeek-V3.1 한 모델의 값이다. 정답 표시가 있으면 온라인 ACE 는 +7.5 다.",
+   "check": "verified Table 2(65.4 대 69.1, FiNER 67.3 대 70.7)와 Table 17(매 단계 66.7) 일치. 같은 표에서 정답 없는 온라인 ACE 평균은 72.9(+3.8), 5단계마다 주입은 76.1 이라 기준 밑은 매 단계뿐이다."
+  },
+  {
+   "id": "observability-self-improvement-03",
+   "claim": "에이전트가 스스로 쓴 Skill 은 세 하네스 모두에서 Skill 없는 기준선보다 8.1 ~ 11.5pp 낮았다(Table 6). 사람이 고른 Skill 은 18개 설정 평균 +16.6pp 였다. 감사한 12개 궤적 중 10개는 만든 Skill 을 읽지 않았다.",
+   "src": "SkillsBench (arXiv 2602.12670v4) | https://arxiv.org/abs/2602.12670",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "keeper_skill_publish 로 발행된 Skill 마다 활성화 0회와 활성화된 Task 의 판정 분포를 보여 준다. 운영자의 사후 삭제(RFC-keeper-self-authored-skills 결정)가 이 값을 읽는다. 발행 Gate 는 더하지 않는다.",
+   "caveat": "스스로 쓴 조건은 과제를 풀기 전에 쓴다. 저자는 이 조건을 본 집계 밖의 진단으로 두고, 차이에 내용 품질·Skill 발견·creator 와 solver 간섭이 섞였다고 적는다. Claude Code 조건은 effort 도 달랐다.",
+   "check": "overstated Table 6(−8.1/−11.3/−11.5)와 +16.6pp 일치. '12개 중 10개 안 읽음'은 원문에서 pre-baked Codex·Gemini CLI 묶음, 차이 큰 과제만 고른 감사로 한정되고 원인을 native discovery 미노출에 둔다. claim 은 이 한정을 뺐다."
+  },
+  {
+   "id": "observability-self-improvement-04",
+   "claim": "자동 자기개선 방법 셋(Memento, GEPA, ReasoningBank) 모두 음수 칸이 있다. 학습 과제에서 뽑은 Skill 을 정답 능력 표시로 골라 넣은 진단용 기준은 24칸 모두 양수다(Table 3). GEPA 는 6개 설정 중 4개에서 턴 수를 늘렸다(Table 4).",
+   "src": "EvoAgentBench: Benchmarking Agent Self-Evolution via Ability Transfer (arXiv 2607.05202v1) | https://arxiv.org/abs/2607.05202",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "프롬프트·Skill 변경을 평균 하나로 판단하지 않는다. test/coding_eval_report.ml 의 cohort 결과를 같은 case 에서 짝지어 나아진 case 와 나빠진 case 를 센다. 어느 Skill 이 어느 Task 에 켜졌는지도 같이 본다.",
+   "caveat": "진단용 기준은 사람이 쓴 것이 아니고 배포할 수 있는 방법도 아니다. 2026-07 v1 preprint 이고 독립 재현을 찾지 못했다. 모델은 Qwen3.5·Gemma-4 계열이다.",
+   "check": "verified Table 3 설명, §4.2(24칸 모두 양수), §4.4(GEPA 6개 중 4개 설정에서 턴 증가) 일치. '정답 능력 표시'는 시험 답이 아니라 curator 쪽 Ability routing label 이고 Anchor 는 'not a deployable method'다. v1 preprint."
+  },
+  {
+   "id": "observability-self-improvement-05",
+   "claim": "GEPA 는 minibatch 에서 부모를 이긴 후보만 후보 묶음에 넣고, 수정용 자료와 갈라 둔 D_pareto 에서 다시 재서 평균이 가장 높은 것을 돌려준다(§3). 여섯 과제에서 GRPO 보다 평균 6% 높고 rollout 은 최대 35배 적었다(초록).",
+   "src": "GEPA: Reflective Prompt Evolution (arXiv 2507.19457v2) | https://arxiv.org/abs/2507.19457",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Eval_harness 시나리오를 채택용과 보고용으로 가르고 pass^k 를 보탠다(지금은 pass@k 만, lib/eval_harness.ml:247). CI 에 넣지 않고 바꾼 쪽이 돌려 PR 에 붙인다.",
+   "caveat": "과제는 짧은 모듈 프롬프트다. Keeper 지시문처럼 길고 목적이 여럿인 글에서 잰 값은 없다. EvoAgentBench 는 GEPA 의 음수 칸을 보고한다.",
+   "check": "verified Algorithm 1·§3 일치: 부모를 이기면 넣고, D_feedback 과 갈라 둔 D_pareto 에서 평균이 가장 높은 후보를 돌려준다. 초록에 6%·35x 그대로 있다. 6% 는 §1 에서 Qwen3 8B 기준으로 적힌다."
+  },
+  {
+   "id": "observability-self-improvement-06",
+   "claim": "자기 코드를 고치는 에이전트가 환각 탐지가 읽는 token 기록을 지워 만점 2.0 을 받았다. 환각은 그대로였다. 탐지 함수는 숨겨져 있었고 그 token 을 바꾸지 말라는 지시도 있었다(부록 H).",
+   "src": "Darwin Gödel Machine (arXiv 2505.22954v3) | https://arxiv.org/abs/2505.22954",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "평가 묶음, 채점 코드, 채점이 읽는 기록을 평가받는 Keeper 가 쓸 수 없는 자리에 둔다. 채점 기준을 바꾸는 변경과 그 기준으로 채택되는 변경을 한 비교에 섞지 않는다.",
+   "caveat": "부록의 사례 연구 한 번이고 빈도 수치는 없다. 같은 실행의 node 96 은 조작 없이 1.67 을 받았다. 자기 수정은 Claude 3.5 Sonnet (New) 로 돌렸다.",
+   "check": "verified 부록 H 일치: node 114 만점 2.0, special token 기록 삭제, 'despite instructions not to change the special tokens', 탐지 함수 숨김. 사례 하나라 빈도 수치는 없다."
+  },
+  {
+   "id": "observability-self-improvement-07",
+   "claim": "maintainer 병합 판정은 자동 채점보다 평균 24.2pp 낮았다(표준오차 2.7, 사람 PR 통과율 68% 로 정규화). 채점을 통과한 PR 의 절반쯤은 병합되지 않는다. maintainer 4명이 출처를 모른 채 AI PR 296건을 검토했다.",
+   "src": "Many SWE-bench-Passing PRs Would Not Be Merged into Main (METR research note, 2026-03-10) | https://metr.org/notes/2026-03-10-many-swe-bench-passing-prs-would-not-be-merged-into-main/",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "Verification 판정을 양쪽으로 틀리는 계기로 본다. 통과 뒤 재작업과 거절 뒤 같은 내용 통과를 세어 Verifier 자신의 지표로 보여 준다. RFC-0401 의 재판정 36% 실측에 잇는다.",
+   "caveat": "채점을 통과한 patch 만 검토해 거짓 통과 쪽만 쟀다. 에이전트는 한 번만 제출했고 리뷰를 받아 고칠 기회가 없었다. 반대쪽 오류는 OpenAI 감사가 보고한다(138문제 중 59.4% 에 결함).",
+   "check": "verified 24.2pp(SE 2.7), 68% 정규화, maintainer 4명, AI PR 296건, 출처 가림 모두 원문 그대로. '절반쯤'은 정규화 뒤 값이고 대상은 2024 중반~2025 하반기 에이전트의 한 번 제출이다."
+  },
+  {
+   "id": "observability-self-improvement-08",
+   "claim": "새 사용자는 세션의 약 20% 에서 전부 자동 승인을 쓰고 750 세션쯤이면 40% 를 넘는다(Figure 2). 끼어들기는 턴의 5% 에서 약 9% 로 늘었다(Figure 3). 가장 복잡한 과제에서는 스스로 멈춰 묻는 횟수가 사람 끼어들기의 두 배를 넘는다(Figure 4).",
+   "src": "Measuring AI agent autonomy in practice (Anthropic, 2026-02-18) | https://www.anthropic.com/research/measuring-agent-autonomy",
+   "depth": "partial",
+   "kind": "measured",
+   "apply": "사람 개입을 턴당 운영자 끼어들기와 Keeper 의 되묻기로 나눠 projection 으로 센다. Keeper_operator_interrupt type 은 있다. 턴 기록에 세어 남는지는 확인 필요다. 목표값은 두지 않는다.",
+   "caveat": "Claude Code 한 제품의 대화형 세션이고 분류는 Claude 가 했다. 개입이 줄어드는 것이 좋은 신호라는 근거는 아니다.",
+   "check": "verified 20%→40% 초과(750 세션), 5%→약 9%, '두 배 넘음' 모두 원문에 있다. 5%→9% 는 시간 변화가 아니라 가입 기간별 단면이다. 본문 한 문장은 '두 배'를 최소 복잡도 과제 대비로 적어 요약과 다르다."
+  },
+  {
+   "id": "observability-self-improvement-09",
+   "claim": "Anthropic count_tokens 는 무료이고 별도 한도지만 값은 추정이다. Opus 4.7 이후 모델은 새 tokenizer 로 같은 글에 이전 모델보다 약 30% 많은 token 을 센다. 증가는 내용에 따라 다르다.",
+   "src": "Token counting (Claude Platform docs) | https://platform.claude.com/docs/en/build-with-claude/token-counting",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "bin/masc_tui_token_scale.ml:26 의 fallback 3.39 byte/token 은 wire 가 보이는 lane 표본인데 official-client lane 에 쓰인다. provider protocol 별로 다시 재고, 표본 없는 protocol 은 모름으로 둔다.",
+   "caveat": "30% 는 Anthropic 이전 모델 대비다. Claude lane 에서 3.39 가 어긋나는 방향과 크기는 MASC 에서 잰 값이 없다. Count_tokens_sync 는 Anthropic·Kimi 만 지원한다.",
+   "check": "verified 무료, 별도 한도, estimate, 약 30%·내용에 따라 다름 모두 원문에 있다. 원문 대상은 'Claude 4.7 and later models and Mythos Preview'이고, 무료여도 tier 별 분당 요청 한도가 있다."
+  },
+  {
+   "id": "observability-self-improvement-10",
+   "claim": "Claude Code 는 claude_code.token.usage 를 type(input, output, cacheRead, cacheCreation), query_source(main, subagent, auxiliary), skill.name, agent.name, mcp_tool.name 으로 나눠 OTel 로 내보낸다. gen_ai.usage.* 는 쓰지 않는다.",
+   "src": "Claude Code docs: Monitoring usage | https://code.claude.com/docs/en/monitoring-usage",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "MASC 가 wire 를 못 보는 Claude Code lane 의 token 분해를 이 telemetry 로 받을 수 있다. 지금 받는 코드는 없다. Turn_record 의 component 분해와 같은 화면에 놓는다.",
+   "caveat": "구독 lane 에서 켜지는지, 다계정에서 사람별로 갈리는지 확인 필요다. 사용자 정의 Skill·agent 이름은 기본으로 custom 으로 가려진다.",
+   "check": "verified Token counter 절에 type 4종, query_source main/subagent/auxiliary, agent.name·skill.name·mcp_tool.name 이 있고 'doesn't set gen_ai.usage.*' 문장도 있다. 일부 이름은 기본으로 custom·third-party 로 가려진다."
+  },
+  {
+   "id": "observability-self-improvement-11",
+   "claim": "OTel GenAI 규약은 core v1.42.0(2026-06-12)에서 별도 저장소로 옮겨졌고 release 가 없다. main 에는 gen_ai.client.token.usage 삭제(#374), cache_creation → cache_write 개명(#440) 같은 breaking 조각이 쌓여 있다.",
+   "src": "open-telemetry/semantic-conventions-genai (README, RELEASING, changelog.d) and semantic-conventions release notes v1.40 ~ v1.45 | https://github.com/open-telemetry/semantic-conventions-genai",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "lib/otel_genai/otel_genai.ml 의 이름은 지금 바꾸지 않는다. 내는 규약 판을 한 곳에 적고, 새 저장소의 첫 tag 에서 한 번에 바꾼다. 옛·새 이름을 같이 내지 않는다.",
+   "caveat": "release 시점은 모른다. 조각 #536 의 '사용량 없으면 0 기록' 은 MASC 의 '모르는 값은 0 이 아니다' 와 충돌하므로 받지 않는다.",
+   "check": "verified v1.42.0 은 2026-06-12, #3696 문장 있음. 새 저장소 releases·tags 비었고 CHANGELOG Unreleased, Schema URL TODO. #374·#440 조각 문장 일치. #374 는 방향별 histogram 으로 교체이고, 첫 tag 는 -dev prerelease 다."
+  },
+  {
+   "id": "observability-self-improvement-12",
+   "claim": "Anthropic 은 요청에 diagnostics.previous_message_id 를 넣으면 cache_miss_reason 을 닫힌 값 여섯(model_changed, system_changed, tools_changed, messages_changed, previous_message_not_found, unavailable)으로 돌려준다. 가장 앞선 분기점 하나만 알려 준다.",
+   "src": "Cache diagnostics (Claude Platform docs) | https://platform.claude.com/docs/en/build-with-claude/cache-diagnostics",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "Anthropic direct lane 에서 이 값을 닫힌 variant 로 받아 Turn_record 의 block diff 옆에 보여 준다. MASC 가 모르는 접두 변경을 찾는다. 저장 필드가 아니라 관측 값으로 먼저 본다.",
+   "caveat": "Claude API 만 지원한다. Claude Code 구독 lane, GLM, Kimi, Codex 에는 못 쓴다. 예제가 beta 호출이라 헤더가 필요한지 확인 필요다.",
+   "check": "verified 이유 6종 표와 'earliest divergence only' 일치, status stable·Claude API 만. 응답에는 diagnostics null 과 cache_miss_reason null(비교 진행 중) 상태도 있다. cURL 예제는 beta 헤더 없이 보낸다."
+  },
+  {
+   "id": "observability-self-improvement-13",
+   "claim": "OpenAI 는 GPT-5.6 부터 캐시 쓰기에 1.25배(30분), 2.5배(12시간)를 받고 읽기는 0.1배다. 명시적 breakpoint 를 받고 요청당 쓰기는 최대 4개다. 이전 모델은 쓰기 요금이 없고 cached_tokens 를 128 단위로 내린다.",
+   "src": "Prompt caching (OpenAI API docs) | https://developers.openai.com/api/docs/guides/prompt-caching",
+   "depth": "partial",
+   "kind": "documented_behavior",
+   "apply": "packages/agent_core/models.toml 은 모델별 쓰기·읽기 배율을 이미 가진다. 쓰기 배율이 모델당 하나라 TTL 구분이 없다. 긴 TTL 을 켜는 lane 이 생기면 같이 고칠 자리다.",
+   "caveat": "문서에 갱신일이 없다. Codex 구독 lane 의 캐시는 client 가 정하므로 MASC 가 바꿀 수 있는 범위가 좁다. Anthropic·Gemini 규칙은 보고서 표에 있다.",
+   "check": "verified 30분 1.25×, 12시간 2.5×(Responses API 만), 읽기 0.1×(GPT-6.1 Sol·Terra 0.05×), 요청당 쓰기 4개, 이전 모델 쓰기 요금 없음·128 단위 내림 모두 일치. 문서에 갱신일이 없다."
+  },
+  {
+   "id": "observability-self-improvement-14",
+   "claim": "Karpathy 는 자동화가 되는 일을 검증할 수 있는 일로 본다. 환경이 다시 시도할 수 있고, 많이 시도할 수 있고, 시도를 자동으로 채점할 때 최적화가 된다고 적는다.",
+   "src": "Verifiability (Andrej Karpathy, 2025-11-17) | https://karpathy.bearblog.dev/verifiability/",
+   "depth": "full_text",
+   "kind": "opinion",
+   "apply": "스스로 나아지는 고리를 typed 판정이 있는 자리(Verification, Eval_harness 시나리오)부터 닫는다. autoresearch 처럼 평가 파일은 고정하고 고칠 대상을 하나로 좁힌다.",
+   "caveat": "측정이 아니라 설계 원칙이다. autoresearch 의 5분 고정 예산은 평가 실행끼리 비교하려는 조건이다. Keeper 실행 제한으로 옮기면 헌법 budget_gate 에 걸린다.",
+   "check": "verified 전문에 resettable·efficient·rewardable 와 'Software 2.0 easily automates what you can verify'가 있다. 맥락은 신경망 학습과 일자리 영향 예측이라 실행 중 에이전트 고리로 옮긴 것은 조사자 해석이다."
+  }
+ ],
+ "not_applicable": [
+  {
+   "idea": "통계·교훈을 Keeper 프롬프트에 playbook 문장으로 자동 주입(ACE, Dynamic Cheatsheet 방식 그대로)",
+   "why_not": "사용자 결정이 프롬프트 문장·강제 제약을 금한다. 신호 없는 적응은 기준선 밑으로 내려간 칸이 있다(ACE Table 2). LLM 이 만든 지침 파일은 해결률을 못 올리고 비용을 20%·23% 올렸다(arXiv 2602.11988 Table 2)."
+  },
+  {
+   "idea": "token·비용·턴 수 상한이나 예산 Gate. autoresearch 의 5분 고정을 Keeper 실행 제한으로 옮기기",
+   "why_not": "헌법 forbidden#budget_gate 가 누적 수치 Gate 를 금한다. 고정 시간은 평가 실행끼리 비교하려는 조건이다."
+  },
+  {
+   "idea": "스스로 발행한 Skill 에 사전 검증 Gate 나 발행 상한",
+   "why_not": "운영자 결정(2026-09-23)은 사후 삭제가 조정선이다. SkillsBench 의 음수 결과는 풀기 전에 쓴 Skill 조건이라 MASC 와 다르다. 관측 projection 이 먼저다."
+  },
+  {
+   "idea": "판정 통계로 Skill·기억을 자동 삭제·강등(history-based deletion 그대로)",
+   "why_not": "Ledger 는 workflow engine 이 아니고 과거 evidence 를 Gate 로 쓰지 않는다. 삭제 임계값은 재생에서 고른 상수가 된다. 자동 평가기로 고른 기억은 여섯 칸에서 고정 기억보다 낮았다(Xiong Table 1)."
+  },
+  {
+   "idea": "PR 마다 eval 묶음을 CI 에서 돌리기",
+   "why_not": "PR 이 2시간에 100개꼴이고 CI 자원이 한정이다. PR 수에 비례하는 CI 비용과 PR push 자동 CI 를 금한다."
+  },
+  {
+   "idea": "병합 차단 검사를 줄이고 flake 는 재실행으로 넘기기(OpenAI Harness engineering)",
+   "why_not": "한 팀의 경험담이고 저자도 처리량이 낮으면 무책임하다고 적는다. required check 실패는 예외 없이 병합하지 않는다. CI 줄이기는 스택 CI RFC #51521 이 맡고 있다."
+  },
+  {
+   "idea": "upstream main 의 OTel rename 을 지금 따르거나 옛·새 이름을 같이 내기",
+   "why_not": "새 저장소에 release 가 없고 Schema URL 이 TODO 다. 호환용 이중 방출은 hard cut 원칙에 어긋난다."
+  },
+  {
+   "idea": "OTel 조각 #536 처럼 사용량이 없을 때 0 을 기록",
+   "why_not": "MASC 는 모르는 값을 0 으로 눌러 담지 않는다(pricing 의 Incomplete, 비용 보고의 unknown)."
+  },
+  {
+   "idea": "METR 시간 지평이나 SWE-bench 점수를 lane·모델 배정의 숫자 근거로 쓰기",
+   "why_not": "신뢰구간이 넓다(Opus 4.6 50% 지평 5.3 ~ 60.6시간). 16시간 초과는 못 믿는다고 페이지가 적는다. SWE-bench Verified 는 오염됐다. 숫자 하나로 정하면 magic number 다."
+  },
+  {
+   "idea": "개선 고리에 LLM 요약만 넘기기",
+   "why_not": "제안자에게 요약을 주면 중앙값 34.9, 원 실행 기록을 주면 50.0 이었다(Meta-Harness Table 3). 한 과제에서 잰 값이다. 요약은 원 기록을 대신하지 못했다."
+  },
+  {
+   "idea": "같은 Task 안에서 자기 반성 재시도를 쌓는 것을 기본 경로로(Reflexion)",
+   "why_not": "MBPP 에서 80.1 → 77.1 로 내려갔고 스스로 쓴 시험의 거짓 통과율이 0.16 이었다(Reflexion Table 1·2). MASC 에는 독립 Verifier 가 있다. 자기 판정을 신호로 쓰지 않는다."
+  },
+  {
+   "idea": "글자 수 ÷ 4 나 다른 회사 tokenizer 로 component token 계산",
+   "why_not": "OpenAI 문서는 글자 수 추정이 부정확하다고 적고 Anthropic 문서는 모델이 바뀌면 다시 세라고 적는다. MASC 는 환산 근거를 type 으로 가른다."
+  },
+  {
+   "idea": "에이전트가 자기 하네스·채점 코드를 고치는 고리(DGM 방식)",
+   "why_not": "채점이 읽는 기록을 지워 만점을 받은 사례가 있다(DGM 부록 H). 탐지 함수를 숨기고 지시문으로 막았는데도 나왔다. 평가 기준은 에이전트가 못 바꾸는 자리에 둔다."
+  },
+  {
+   "idea": "개입 횟수를 줄이는 것을 목표로 삼기",
+   "why_not": "경험 많은 사용자가 더 자주 끼어들었다(5% → 약 9%). DORA 안내의 첫 함정도 지표를 목표로 삼는 것이다."
+  }
+ ],
+ "unknowns": [
+  "새 OTel GenAI 규약 저장소의 첫 release 시점. 공지를 찾지 못했다.",
+  "구독 lane(Claude Code Max, Codex Pro)에서 count endpoint, cache diagnostics, Claude Code telemetry 를 쓸 수 있는지.",
+  "cache diagnostics 에 beta 헤더가 필요한지. 문서 상태는 stable 인데 예제는 beta 호출이다.",
+  "fleet_bytes_per_token 3.39 가 Claude·Codex lane 에서 어느 쪽으로 얼마나 어긋나는지. MASC 에서 잰 값이 없다.",
+  "MASC 에서 스스로 발행된 Skill 수, 쓰인 횟수, 판정과의 관계. 운영 데이터를 열지 않았다.",
+  "MASC Verifier 의 거짓 통과·거짓 거절 비율. 밖의 수치는 SWE-bench 에 한정되고 METR 은 거짓 통과 쪽만 쟀다.",
+  "운영자 끼어들기와 Keeper 의 되묻기가 턴 기록에 세어 남는지. recall 된 fact id 가 턴마다 남는지.",
+  "EvoAgentBench, SkillOpt, Meta-Harness 의 독립 재현 여부.",
+  "GEPA 류 최적화가 Keeper 지시문처럼 길고 목적이 여럿인 글에서 통하는지.",
+  "검증된 실행 뒤에 뽑아 쓴 Skill 이 코딩 에이전트에서 이득인지. SkillsBench 는 풀기 전에 쓴 조건만 쟀다.",
+  "OpenAI 글 둘은 원 페이지가 403 이라 Wayback 사본으로 읽었다. 사본 뒤 수정 여부는 모른다.",
+  "METR 시간 지평 페이지는 2026-09-08 이후 갱신이 없어 그 뒤 모델의 값이 없다.",
+  "조사 도중 main 이 efe98ca792c2 에서 77f7bec3039f 로 옮겨졌다. 인용 파일은 바뀌지 않았지만 다른 파일의 변화는 보지 않았다.",
+  "Karpathy 의 2025-06 YC 강연 원문은 열지 못해 인용하지 않았다."
+ ],
+ "conflicts_with_brief": [
+  "observability-self-improvement-06: brief §2-1(강제 제약 제안 금지, 남은 강제 장치는 지움)과 헌법 gates default·order 에 구현에 따라 걸린다. 평가 묶음·채점 코드를 Keeper 쓰기 금지 경로나 권한 규칙으로 막으면 새 강제 장치다. Keeper 작업 공간 밖 운영자 자리(artifacts/<topic>/ 등)에 두기만 하면 충돌 없음.",
+  "observability-self-improvement-09: brief §2-3(재생에서 고른 상수 위에 세운 설계 금지)에 구현에 따라 걸린다. protocol 별로 다시 잰 비율을 코드 상수로 박으면 지금의 3.39 같은 재생 상수가 더 생긴다. 실행 중 기록에서 그때 재거나, 표본이 없으면 '모름'으로 두면 충돌 없음.",
+  "observability-self-improvement-14: brief §2-1(Keeper 프롬프트 문장 제안 금지)에 구현에 따라 걸린다. 고칠 대상이 Keeper 지시문이고 Verification 점수로 자동 채택하면 최적화기가 Keeper 프롬프트 문장을 만드는 셈이다. 평가 파일 고정은 06 과 같은 문제다. 대상을 하네스·도구 코드로 좁히고 사람이 채택하면 충돌 없음."
+ ]
+}

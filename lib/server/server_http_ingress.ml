@@ -138,8 +138,15 @@ let log_late_response_failure ~context msg =
   Log.Http.warn "%s: response already unwritable; skipped late response (%s)" context msg
 ;;
 
-let try_internal_error_response reqd msg =
-  try Http.Response.internal_error msg reqd with
+(* The 500 of a handler that raised says nothing of the exception, whose
+   text can name a file of the server; the log has it. *)
+let try_internal_error_response reqd =
+  try
+    Http.Response.text
+      ~status:`Internal_server_error
+      Http_error_body.internal_server_error
+      reqd
+  with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     (match Http_reqd.Late_response.classify_write_failure exn with
@@ -191,9 +198,8 @@ let respond_request_authority_bad_request ~error_code ~message reqd =
     reqd
 ;;
 
-(* Runs the steps of an admitted request and answers what they raise.
-   [internal_error] is the body of the 500 for the exception text [msg]. *)
-let answering_failures reqd ~internal_error steps =
+(* Runs the steps of an admitted request and answers what they raise. *)
+let answering_failures reqd steps =
   try steps () with
   (* Cancellation propagates through the connection switch without
      attempting a response from a cancelled handler. *)
@@ -203,7 +209,7 @@ let answering_failures reqd ~internal_error steps =
   | exn ->
     handler_failed reqd exn ~answer:(fun msg ->
       Log.Http.error "http ingress request handler raised: %s" msg;
-      try_internal_error_response reqd (internal_error msg))
+      try_internal_error_response reqd)
 ;;
 
 (* Authority admission precedes rate limiting, auth, and routing so no
@@ -215,7 +221,7 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
     if try_rate_limit_block ~path ~client_addr ~request reqd
     then ()
     else
-      answering_failures reqd ~internal_error:Fun.id (fun () ->
+      answering_failures reqd (fun () ->
         let session_id_for_version = Transport.get_session_id_any request in
         let protocol_version =
           Transport.get_protocol_version_for_session ?session_id:session_id_for_version request
@@ -228,22 +234,16 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
             dispatch_route ~router:routes ~request ~path reqd)))
 ;;
 
-let table_internal_error = "internal error"
-
 (* The whole surface is the table: no agent bucket, no MCP check, no
-   workspace precondition, and no arm outside the router. The 500 of a handler
-   that raised says nothing of the exception, whose text can name a file of
-   the server; the log has it. *)
+   workspace precondition, and no arm outside the router. *)
 let admitted_to_table ~table ~client_addr ~request_authority request reqd =
   Server_request_authority.with_current request_authority (fun () ->
     let path = Http.Request.path request in
     if try_client_rate_limit_block ~path ~client_addr reqd
     then ()
     else
-      answering_failures
-        reqd
-        ~internal_error:(fun (_ : string) -> table_internal_error)
-        (fun () -> Server_account_table.dispatch table request reqd))
+      answering_failures reqd (fun () ->
+        Server_account_table.dispatch table request reqd))
 ;;
 
 let serve_admitted ~admitted classification reqd =

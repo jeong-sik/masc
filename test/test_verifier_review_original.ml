@@ -30,15 +30,27 @@ let sample_root : AR.lookup_root = AR.Producer_tree [ "repos/masc/lib"; "repos/m
 
 let sample_schemas = [ "lookup_read"; "lookup_list" ]
 
+let sample_lookup : V.lookup =
+  { V.granted_root = sample_root
+  ; granted_tools = sample_schemas
+  ; question_digest = String.make 64 'a'
+  ; authority_digest = String.make 64 'b'
+  }
+
+let successor_or_fail ~lookup parent =
+  match V.successor ~lookup parent with
+  | Ok child -> child
+  | Error V.Question_changed -> failwith "successor refused the same question"
+  | Error (V.Prompt_unavailable detail | V.Successor_unavailable detail) ->
+    failwith ("successor failed: " ^ detail)
+
 let make_original ~verification_id ~attempt =
   match
     V.prepare ~generator_runtime:(Some "captured-producer")
       ~verification_id
       ~attempt
       ~question:sample_question
-      ~lookup_root:sample_root
-      ~lookup_binding:(String.make 64 'a')
-      ~lookup_schemas:sample_schemas
+      ~lookup:sample_lookup
       sample_request
   with
   | Ok original -> original
@@ -51,7 +63,10 @@ let test_round_trip_preserves_lookup_and_image () =
     | Error detail -> failwith ("of_json failed: " ^ detail)
   in
   assert (V.generator_runtime restored = Some "captured-producer");
-  assert (V.generator_runtime (match V.successor restored with Ok v -> v | Error e -> failwith e) = Some "captured-producer");
+  assert (V.generator_runtime (successor_or_fail ~lookup:sample_lookup restored) = Some "captured-producer");
+  (* both digests survive the round trip *)
+  assert (String.equal (V.question_binding restored) sample_lookup.question_digest);
+  assert (String.equal (V.authority_binding restored) sample_lookup.authority_digest);
   (* lookup grants survive the round trip *)
   (match V.lookup_root restored with
    | AR.Producer_tree paths -> assert (paths = [ "repos/masc/lib"; "repos/masc/test" ])
@@ -104,9 +119,7 @@ let test_round_trip_with_blank_notes () =
         ~verification_id:"vrf-blank"
         ~attempt:0
         ~question:sample_question
-        ~lookup_root:sample_root
-        ~lookup_binding:(String.make 64 'a')
-      ~lookup_schemas:sample_schemas
+        ~lookup:sample_lookup
         blank_request
     with
     | Ok original -> original
@@ -143,9 +156,7 @@ let test_empty_lookup_schemas_rejected () =
       ~verification_id:"vrf-eeee"
       ~attempt:0
       ~question:sample_question
-      ~lookup_root:sample_root
-      ~lookup_binding:(String.make 64 'a')
-      ~lookup_schemas:[]
+      ~lookup:{ sample_lookup with V.granted_tools = [] }
       sample_request
   with
   | Ok _ -> failwith "empty lookup_schemas must be rejected"
@@ -154,8 +165,8 @@ let test_empty_lookup_schemas_rejected () =
 let test_namespace_round_trip_and_strict_decode () =
   let original = match V.prepare ~generator_runtime:None
     ~verification_id:"vrf-namespace" ~attempt:0 ~question:sample_question
-    ~lookup_root:(AR.Producer_namespace {root="/owned/root"})
-    ~lookup_binding:(String.make 64 'a') ~lookup_schemas:sample_schemas sample_request with
+    ~lookup:{ sample_lookup with V.granted_root = AR.Producer_namespace {root="/owned/root"} }
+    sample_request with
     | Ok value -> value | Error detail -> failwith detail in
   let json = V.to_json original in
   (match V.of_json json with
@@ -172,7 +183,153 @@ let test_namespace_round_trip_and_strict_decode () =
      `Assoc ["producer_namespace", `String "/owned/root";"producer_tree", `List []];
      `Assoc ["producer_namespace", `String "/owned/root";"producer_namespace", `String "/other"]]
 
+let test_digest_fields_are_strict () =
+  let json = V.to_json (make_original ~verification_id:"vrf-digest" ~attempt:0) in
+  List.iter (fun key ->
+    let bad = match json with
+      | `Assoc fields -> `Assoc (List.map (fun (name, value) ->
+          name, if name = key then `String "not-a-digest" else value) fields)
+      | _ -> failwith "unexpected json" in
+    match V.of_json bad with
+    | Ok _ -> failwith (key ^ " must be a canonical digest")
+    | Error _ -> ())
+    [ "question_binding"; "authority_binding" ];
+  match V.prepare ~generator_runtime:None ~verification_id:"vrf-digest" ~attempt:0
+    ~question:sample_question ~lookup:{ sample_lookup with V.question_digest = "short" }
+    sample_request with
+  | Ok _ -> failwith "a non-canonical question digest must be rejected"
+  | Error _ -> ()
+
+let test_successor_asks_the_parent_question_with_current_lookup () =
+  let parent = make_original ~verification_id:"vrf-next" ~attempt:0 in
+  let current : V.lookup =
+    { V.granted_root = AR.Producer_namespace {root = "/current/root"}
+    ; granted_tools = [ "lookup_read"; "lookup_grep"; "lookup_list" ]
+    ; question_digest = V.question_binding parent
+    ; authority_digest = String.make 64 'c'
+    }
+  in
+  let child = successor_or_fail ~lookup:current parent in
+  assert (V.attempt child = 1);
+  (* the question and the captured producer runtime come from the parent *)
+  assert (String.equal (V.verification_id child) (V.verification_id parent));
+  assert (V.review_request child = V.review_request parent);
+  assert (V.question child = V.question parent);
+  assert (V.generator_runtime child = V.generator_runtime parent);
+  assert (String.equal (V.question_binding child) (V.question_binding parent));
+  (* the lookup grants, prompt and answer format are the current ones *)
+  assert (String.equal (V.authority_binding child) current.authority_digest);
+  assert (V.lookup_root child = current.granted_root);
+  assert (V.lookup_schemas child = current.granted_tools);
+  assert (String.equal (V.output_contract child) (V.canonical_output_contract ()));
+  let expected_prompt =
+    match V.system_prompt ~lookup_schemas:current.granted_tools ~question:(V.question parent)
+      ~lookup_root:current.granted_root (V.review_request parent) with
+    | Ok text -> text
+    | Error detail -> failwith detail
+  in
+  assert (String.equal (V.system_prompt_text child) expected_prompt);
+  assert (not (String.equal (V.system_prompt_text child) (V.system_prompt_text parent)));
+  assert (V.is_successor_of ~parent child)
+
+let test_successor_refuses_a_changed_question () =
+  let parent = make_original ~verification_id:"vrf-moved" ~attempt:0 in
+  match V.successor ~lookup:{ sample_lookup with V.question_digest = String.make 64 'd' } parent with
+  | Error V.Question_changed -> ()
+  | Error (V.Prompt_unavailable detail | V.Successor_unavailable detail) ->
+    failwith ("a changed question must be Question_changed: " ^ detail)
+  | Ok _ -> failwith "a changed question must not open the next attempt"
+
+let test_is_successor_of_compares_only_the_question () =
+  let parent = make_original ~verification_id:"vrf-link" ~attempt:0 in
+  let child ?(question = sample_question) ?(generator_runtime = Some "captured-producer")
+      ?(attempt = 1) lookup =
+    match V.prepare ~generator_runtime ~verification_id:"vrf-link" ~attempt ~question ~lookup
+      sample_request with
+    | Ok value -> value
+    | Error detail -> failwith detail
+  in
+  let regranted =
+    { sample_lookup with V.granted_tools = [ "lookup_read" ]; authority_digest = String.make 64 'e' }
+  in
+  assert (V.is_successor_of ~parent (child regranted));
+  assert (not (V.is_successor_of ~parent (child ~generator_runtime:(Some "another-producer") sample_lookup)));
+  assert (not (V.is_successor_of ~parent (child ~attempt:2 sample_lookup)));
+  assert (not (V.is_successor_of ~parent
+    (child { sample_lookup with V.question_digest = String.make 64 'f' })));
+  assert (not (V.is_successor_of ~parent
+    (child ~question:{ sample_question with AR.required_evidence = [ "another proof" ] } sample_lookup)))
+
+module Change = Masc.Verifier_review_authority_change
+
+let test_authority_change_is_closed_and_strict () =
+  let a = String.make 64 'a' and b = String.make 64 'b' in
+  let retained_format = "earlier answer format" and current_format = "current answer format" in
+  let retained_digest = Change.answer_format_digest retained_format
+  and current_digest = Change.answer_format_digest current_format in
+  let between current_authority current_format =
+    match Change.between ~retained_authority:a ~current_authority ~retained_format ~current_format with
+    | Ok change -> change
+    | Error detail -> failwith ("between refused two digests: " ^ detail) in
+  (* What moved, as (before, after) for the authority and the answer format. *)
+  let values (p : Change.pair) = p.Change.before, p.Change.after in
+  let moved = function
+    | Change.Authority p -> Some (values p), None
+    | Change.Output_contract p -> None, Some (values p)
+    | Change.Both { authority; output_contract } -> Some (values authority), Some (values output_contract) in
+  assert (between a retained_format = None);
+  assert (Option.map moved (between b retained_format) = Some (Some (a, b), None));
+  assert (Option.map moved (between a current_format)
+          = Some (None, Some (retained_digest, current_digest)));
+  assert (Option.map moved (between b current_format)
+          = Some (Some (a, b), Some (retained_digest, current_digest)));
+  (* Only digests name an authority. *)
+  assert (Result.is_error (Change.between ~retained_authority:"not-a-digest" ~current_authority:b
+    ~retained_format ~current_format));
+  (* A change belongs to the original whose authority and answer format it
+     moved away from. *)
+  (match between b current_format with
+   | Some change ->
+     assert (Change.begins_at ~authority:a ~answer_format:retained_format change);
+     assert (not (Change.begins_at ~authority:b ~answer_format:retained_format change));
+     assert (not (Change.begins_at ~authority:a ~answer_format:current_format change))
+   | None -> failwith "the authority and the answer format both moved");
+  (* The round trip passes only because both pairs hold SHA-256 digests: the
+     evidence keeps the digests of the two answer formats, not their text. *)
+  List.iter (fun change -> assert (Change.of_json (Change.to_json change) = Ok change))
+    (List.filter_map Fun.id
+       [ between b retained_format; between a current_format; between b current_format ]);
+  let rejected json = match Change.of_json json with Ok _ -> false | Error _ -> true in
+  let pair before after = `Assoc [ "before", `String before; "after", `String after ] in
+  let moved = pair (String.make 64 'a') (String.make 64 'b') in
+  let fields = [ "schema", `String Change.schema; "authority", moved; "output_contract", `Null ] in
+  assert (not (rejected (`Assoc fields)));
+  (* An unmoved pair is not evidence, and a change must name something. *)
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", pair (String.make 64 'a') (String.make 64 'a'); "output_contract", `Null ]));
+  assert (rejected (`Assoc [ "schema", `String Change.schema; "authority", `Null; "output_contract", `Null ]));
+  (* Both pairs hold digests; answer format text is not evidence. *)
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", pair "not-a-digest" (String.make 64 'b'); "output_contract", `Null ]));
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", `Null; "output_contract", pair retained_format current_format ]));
+  (* The key sets are exact at both levels, and the schema is this one. *)
+  assert (rejected (`Assoc (("evaluator_runtime", `String "rt-a") :: fields)));
+  assert (rejected (`Assoc (List.remove_assoc "output_contract" fields)));
+  assert (rejected (`Assoc (fields @ [ "authority", `Null ])));
+  assert (rejected (`Assoc [ "schema", `String Change.schema
+    ; "authority", `Assoc [ "before", `String (String.make 64 'a'); "after", `String (String.make 64 'b')
+      ; "result", `Null ]
+    ; "output_contract", `Null ]));
+  assert (rejected (`Assoc (("schema", `String "verifier_review_authority_change/v0")
+    :: List.remove_assoc "schema" fields)))
+
 let () =
+  test_authority_change_is_closed_and_strict ();
+  test_digest_fields_are_strict ();
+  test_successor_asks_the_parent_question_with_current_lookup ();
+  test_successor_refuses_a_changed_question ();
+  test_is_successor_of_compares_only_the_question ();
   test_namespace_round_trip_and_strict_decode ();
   test_round_trip_preserves_lookup_and_image ();
   test_round_trip_with_blank_notes ();

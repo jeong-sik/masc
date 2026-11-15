@@ -341,7 +341,7 @@ let test_a_provider_rest_retries_the_review_when_the_rest_ends () =
                   (if reports_attempt then "walk-reported" else "terminal-only")
               in
               let now = Unix.gettimeofday () in
-              Runtime_quota_window.note_exhausted ~scope:(resting_scope ()) ~resets_at:(now +. rest_sec);
+              Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:(resting_scope ()) ~resets_at:(now +. rest_sec);
               let cause = reviewed_stop ~slot:resting_slot ~reports_attempt error in
               (match cause with
                | CA.Not_reviewed { retryable_runtimes; _ } ->
@@ -395,7 +395,7 @@ let test_a_rest_expiring_inside_one_slot_still_retries () =
              ~on_attempt_error:on_runtime_attempt_error
              ~read_usage_after_account_refusal:(fun candidate ->
                if candidate = resting_slot then
-                 Runtime_quota_window.note_exhausted ~scope:(resting_scope ())
+                 Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:(resting_scope ())
                    ~resets_at:(Unix.gettimeofday () +. rest_sec))
              ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
                let error =
@@ -466,7 +466,7 @@ let test_failures_time_does_not_change_still_stop_the_review () =
         , Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig { field = "verification.system"; detail = "missing" }) )
       ; ( "hard quota with no stated reset"
-        , (fun () -> Runtime_quota_window.note_observed_exhausted ~scope:(resting_scope ()))
+        , (fun () -> Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope:(resting_scope ()))
         , claude_code_hard_quota ~retry_after:None )
       ; "403 with no recorded window", ignore, account_refused
       ])

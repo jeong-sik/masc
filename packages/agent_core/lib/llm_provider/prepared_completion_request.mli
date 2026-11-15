@@ -131,4 +131,5 @@ val serialized_request : serialized -> t
 val serialized_admitted_body : serialized -> admitted_body
 (** The exact generation body and its backend-owned output-token decision. *)
 val admitted_body_request : admitted_body -> Complete_common.serialized_http_request
-val admitted_body_evidence : admitted_body -> Request_wire_observer.observation
+(** Whether the admitted bytes carry the streaming fields. *)
+val admitted_body_stream : admitted_body -> bool

@@ -53,10 +53,6 @@ module For_testing : sig
       fails. Its data, artifacts and media are retained, and metadata carries
       the failed projection separately. Failed/deferred primary operations do
       not attempt projection. *)
-
-  val created_post_id : Tool_result.result -> string option
-  (** The id of the post a successful [masc_board_post] result carries in
-      its typed data; [None] when the data is not a post. *)
 end
 
 (** {1 MCP runtime fallback} *)
@@ -75,5 +71,8 @@ val dispatch :
     {!Board_tool.handle_tool}; other names return [None]. Successful post,
     comment, post/comment vote and delete operations also project Board
     activity. Projection failure is reported as observation metadata alongside
-    the completed Board result. Post and comment notify mentions. Board activity does not
-    create Task performance records. *)
+    the completed Board result. Post and comment notify mentions. The SSE
+    notification, the activity record and the mention of a post or comment
+    carry the text of the stored row, whichever of [body] and [content] the
+    request sent it in. Board activity does not create Task performance
+    records. *)

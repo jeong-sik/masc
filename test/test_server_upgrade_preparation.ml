@@ -1,3 +1,13 @@
+(* What a server of a single user answers on the two routes the stop asks:
+   [/health/ready] once its state is published and before, and the admin
+   route to a bearer it accepts, refuses, or cannot look at yet. *)
+let ready_answer () = Ok (200, {|{"ready":true,"phase":"ready","pid":1}|})
+let starting_answer () =
+  Ok (503, {|{"ready":false,"phase":"blocking","elapsed_sec":0.4,"pid":1}|})
+let granted () = Ok (200, "{}")
+let refused () = Ok (401, {|{"error":"unauthorized"}|})
+let not_initialized () = Ok (503, {|{"error":"not initialized"}|})
+let access_of admin () = if !admin then granted () else refused ()
 let test_admin_workspace_and_incarnation () =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
     let base = Unix.realpath (Filename.get_temp_dir_name ()) in
@@ -5,7 +15,7 @@ let test_admin_workspace_and_incarnation () =
     let health () = Ok (Yojson.Safe.to_string (`Assoc ["version",`String !version;
       "paths",`Assoc ["effective_base_path",`String base]])) in
     let prepare () = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-      ~observe:health ~authorize:(fun () -> !admin)
+      ~observe:health ~readiness:ready_answer ~access:(access_of admin)
       ~capture:(fun () -> Ok ((fun () -> incr signals; Ok ()),(fun () -> incr closes))) in
     let owner = match prepare () with Ok owner -> owner | Error _ -> Alcotest.fail "valid owner preparation" in
     Alcotest.check Alcotest.int "preparation never stops server" 0 !signals;
@@ -29,7 +39,8 @@ let test_other_workspace_never_receives_credentials () =
     let result = Server_upgrade_preparation.For_testing.prepare ~sw
       ~base_path:(Filename.get_temp_dir_name ())
       ~observe:(fun () -> Ok {|{"version":"0.35.2","paths":{"effective_base_path":"/"}}|})
-      ~authorize:(fun () -> incr authorizations; true)
+      ~readiness:(fun () -> incr authorizations; ready_answer ())
+      ~access:(fun () -> incr authorizations; granted ())
       ~capture:(fun () -> Alcotest.fail "unrelated workspace captured") in
     (match result with Error Different_workspace -> () | _ -> Alcotest.fail "workspace conflict ignored");
     Alcotest.check Alcotest.int "no credential transmission across workspace conflict" 0 !authorizations))
@@ -62,7 +73,8 @@ let test_duplicate_health_never_authorizes () =
        | Error Invalid_health -> () | _ -> Alcotest.fail "ambiguous pre-login identity accepted");
       match Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
         ~observe:(fun () -> Ok body)
-        ~authorize:(fun () -> Alcotest.fail "ambiguous health transmitted credentials")
+        ~readiness:(fun () -> Alcotest.fail "ambiguous health asked for readiness")
+        ~access:(fun () -> Alcotest.fail "ambiguous health transmitted credentials")
         ~capture:(fun () -> Alcotest.fail "ambiguous health captured owner") with
       | Error Invalid_health -> () | _ -> Alcotest.fail "duplicate identity fields accepted") payloads))
 let test_initial_login_identity () =
@@ -87,7 +99,7 @@ let test_termination_request_survives_observation_failure () =
     List.iter (fun expected ->
       let signals = ref 0 in
       let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-        ~observe:health ~authorize:(fun () -> true)
+        ~observe:health ~readiness:ready_answer ~access:granted
         ~capture:(fun () -> Ok ((fun () -> incr signals; Ok ()),(fun () -> ()))) |> Result.get_ok in
       (match Server_upgrade_preparation.request_termination_and_observe owner ~observe:(fun () -> expected) with
        | Requested observed when observed = expected -> ()
@@ -100,7 +112,7 @@ let test_termination_request_survives_observation_failure () =
       Server_upgrade_preparation.close owner)
       [Error Server_upgrade_preparation.Owner_unavailable; Ok Owner_draining; Ok Port_busy; Ok Replacement_can_start];
     let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
-      ~observe:health ~authorize:(fun () -> true)
+      ~observe:health ~readiness:ready_answer ~access:granted
       ~capture:(fun () -> Ok ((fun () -> Ok ()),(fun () -> ()))) |> Result.get_ok in
     (match Server_upgrade_preparation.request_termination_and_observe owner
       ~observe:(fun () -> raise (Sys_error "lease observation failed")) with
@@ -112,13 +124,60 @@ let test_refused_termination_never_observes () =
     let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base
       ~observe:(fun () -> Ok (Yojson.Safe.to_string (`Assoc ["version",`String "fixture";
         "paths",`Assoc ["effective_base_path",`String base]])))
-      ~authorize:(fun () -> !admin)
+      ~readiness:ready_answer ~access:(access_of admin)
       ~capture:(fun () -> Ok ((fun () -> Alcotest.fail "unauthorized signal"),(fun () -> ()))) |> Result.get_ok in
     admin := false;
     match Server_upgrade_preparation.request_termination_and_observe owner
       ~observe:(fun () -> Alcotest.fail "observation after refused termination") with
     | Not_requested Admin_required -> ()
     | Not_requested _ | Requested _ -> Alcotest.fail "refused request reported as sent"))
+(* The stop of a single-user server tells a server that is still starting
+   from one that refused the credential, and both from one that gave no
+   verdict: the first is waited for, only the second is signed in to. *)
+let test_starting_server_is_not_a_refused_login () =
+  Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
+    let base = Unix.realpath (Filename.get_temp_dir_name ()) in
+    let health () = Ok (Yojson.Safe.to_string (`Assoc ["version",`String "fixture";
+      "paths",`Assoc ["effective_base_path",`String base]])) in
+    let label = function
+      | Ok (_ : Server_upgrade_preparation.t) -> "prepared"
+      | Error Server_upgrade_preparation.Server_starting -> "wait: still starting"
+      | Error Admin_required -> "sign in: credential refused"
+      | Error Admin_check_unanswered -> "no verdict on the credential"
+      | Error (Invalid_health | Different_workspace | Owner_unavailable | Incumbent_changed
+              | Already_requested | Closed | Port_unavailable) -> "another refusal" in
+    let bearers = ref 0 in
+    let prepare ~readiness ~access =
+      Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base ~observe:health
+        ~readiness ~access:(fun () -> incr bearers; access ())
+        ~capture:(fun () -> Ok ((fun () -> Ok ()),(fun () -> ()))) in
+    let judged ~readiness ~access = label (prepare ~readiness ~access) in
+    Alcotest.(check string) "a starting server is waited for" "wait: still starting"
+      (judged ~readiness:starting_answer ~access:not_initialized);
+    Alcotest.(check int) "a starting server is not sent the bearer" 0 !bearers;
+    Alcotest.(check string) "a 401 to the bearer asks for a sign-in" "sign in: credential refused"
+      (judged ~readiness:ready_answer ~access:refused);
+    Alcotest.(check string) "a 403 to the bearer asks for a sign-in" "sign in: credential refused"
+      (judged ~readiness:ready_answer ~access:(fun () -> Ok (403, {|{"error":"forbidden"}|})));
+    Alcotest.(check string) "a 503 to the bearer is no verdict" "no verdict on the credential"
+      (judged ~readiness:ready_answer ~access:not_initialized);
+    Alcotest.(check string) "no answer to the bearer is no verdict" "no verdict on the credential"
+      (judged ~readiness:ready_answer ~access:(fun () -> Error "connection refused"));
+    Alcotest.(check string) "an unread readiness leaves the verdict to the bearer"
+      "sign in: credential refused"
+      (judged ~readiness:(fun () -> Error "connection refused") ~access:refused);
+    (* The same reading holds at the stop itself: a server that began
+       starting again after the preparation is not signalled. *)
+    let starting = ref false and signals = ref 0 in
+    let owner = Server_upgrade_preparation.For_testing.prepare ~sw ~base_path:base ~observe:health
+      ~readiness:(fun () -> if !starting then starting_answer () else ready_answer ())
+      ~access:granted
+      ~capture:(fun () -> Ok ((fun () -> incr signals; Ok ()),(fun () -> ()))) |> Result.get_ok in
+    starting := true;
+    Alcotest.(check string) "a server found starting at the stop is waited for"
+      "wait: still starting"
+      (label (Server_upgrade_preparation.request_termination owner |> Result.map (fun () -> owner)));
+    Alcotest.(check int) "a starting server is not signalled" 0 !signals))
 (* A process that ran an Eio loop keeps the SIGCHLD handler of the posix
    backend, and the end of a child then interrupts the call that waits for it. *)
 let rec retrying f =
@@ -399,6 +458,8 @@ let () = Alcotest.run "upgrade preparation"
     Alcotest.test_case "kernel lease and port drain" `Quick test_drain_requires_lease_and_port_release;
     Alcotest.test_case "request and observation stay distinct" `Quick test_termination_request_survives_observation_failure;
     Alcotest.test_case "refused request never observes" `Quick test_refused_termination_never_observes;
+    Alcotest.test_case "a starting server is told apart from a refused login" `Quick
+      test_starting_server_is_not_a_refused_login;
     Alcotest.test_case "duplicate health identity" `Quick test_duplicate_health_never_authorizes];
    "account server",[Alcotest.test_case "the stop goes to the owner that announces the port" `Quick
      test_account_server_stop_needs_its_announced_port;

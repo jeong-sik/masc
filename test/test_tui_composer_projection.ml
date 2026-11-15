@@ -14,6 +14,10 @@ let keeper : Tui_types.keeper =
 
 let state () =
   let state = Tui_types.create_state ~workspace:"test" ~port:8935 () in
+  (* The expected reasons below are the English sentences, so the screen
+     language is English; the default is Korean. Which keeper the composer
+     names and whether it may send does not depend on the language. *)
+  state.ui_language <- Tui_types.Lang_en;
   state.workspace_identity <- Tui_types.Workspace_identity_match;
   state.local_keepers <- Tui_types.Local_workspace_read;
   state
@@ -25,6 +29,10 @@ let target_testable =
        | Composer.Ready keeper_name ->
            Format.fprintf formatter "ready(%s)" keeper_name
        | Composer.Unreachable { keeper; reason } ->
+           let reason = match reason with
+             | Composer.Workspace_unread -> "workspace unread"
+             | Composer.Workspace_differs -> "workspace differs"
+             | Composer.Keeper_unavailable text -> text in
            Format.fprintf formatter "unreachable(%s, %s)" keeper reason)
     ( = )
 
@@ -53,7 +61,8 @@ let test_unread_roster_keeps_the_selected_name () =
   let composer = Projection.of_state state in
   check target_testable "unread roster"
     (Composer.Unreachable
-       { keeper = "analyst"; reason = "keeper list unread" })
+       { keeper = "analyst";
+         reason = Composer.Keeper_unavailable "keeper list unread" })
     composer.target
 
 let test_focus_and_draft_are_projected_together () =
@@ -80,8 +89,7 @@ let test_workspace_loss_withdraws_queued_message_target () =
     { local_base_path = "/client"; server_base_path = "/server" };
   state.keepers <- [{ keeper with k_origin = Masc.Tui_decode.Remote_keeper; k_activity = None }];
   check target_testable "remote observation does not advertise file access"
-    (Composer.Unreachable { keeper = "analyst";
-      reason = "chat needs the server workspace for attachments and pasted files" })
+    (Composer.Unreachable { keeper = "analyst"; reason = Composer.Workspace_differs })
     (Projection.of_state state).target;
   check bool "unobserved remote usage is not zero" true
     (Option.is_none (Tui_types.aggregate_keeper_stats state.keepers))

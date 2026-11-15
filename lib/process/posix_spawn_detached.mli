@@ -22,7 +22,7 @@ type t = {
 (** [argv]'s first element is the executable's path, used as given: no PATH
     lookup. [output] may be any descriptor, standard ones included. [Error]
     names the call that failed, what it failed on and why: posix_spawn and
-    the executable, or the opening or copying of a descriptor. *)
+    the executable, or openfile and [/dev/null]. *)
 val spawn :
   sw:Eio.Switch.t ->
   argv:string list ->

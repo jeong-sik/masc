@@ -1118,6 +1118,7 @@ export function LogViewer() {
                 getKey=${(entry: LogEntry) => String(entry.seq)}
                 renderItem=${(entry: LogEntry) => renderLogRow(entry)}
                 className="v2-logs-stream lg-stream"
+                scrollBox="self"
               />
             `}
 

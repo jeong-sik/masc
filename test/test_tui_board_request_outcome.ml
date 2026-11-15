@@ -448,7 +448,7 @@ let test_closed_results_settle_board_post_without_hanging_inflight () = with_fix
     check bool "closed results release the board write lock" true
       (state.board_write = Types.Board_idle);
     check (option string) "failed launch leaves a single conservative diagnostic"
-      (Some "Board publication not confirmed; check the Board before retrying")
+      (Some "게시 결과 미확인 · 다시 보내기 전에 게시판을 확인하세요")
       state.board_post_error;
     check (list (pair string string)) "no posting notice is emitted when launch does not start"
       [] !reports;

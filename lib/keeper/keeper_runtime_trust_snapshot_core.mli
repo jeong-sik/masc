@@ -28,13 +28,27 @@ type disposition_reason =
   | Healthy
   | Approval_queue_unreadable
   | Pending_operator_decision
-  | Runtime_exhausted
-  | Critical_block
-  | Unknown_runtime_blocker
+  | Runtime_blocker of Keeper_status_bridge_blocker.runtime_blocker_class
+  (** Shown as the class's own name
+      ({!Keeper_status_bridge_blocker.runtime_blocker_class_to_string}), except
+      an unresolved fiber, which shows as [critical_block]. *)
   | Keeper_dashboard_worker_exception
   | Receipt_reason of Keeper_execution_receipt.operator_disposition_reason
 
+val all_of_disposition_reason : disposition_reason list
+(** Every reason, in declaration order: each blocker class and each receipt
+    reason is its own entry. *)
+
 val disposition_reason_to_wire : disposition_reason -> string
+(** The [disposition_reason] field of the trust JSON, and its
+    [attention_reason] when the status surface gives none. Two reasons can
+    write one string (a blocker class and a receipt reason share
+    [runtime_exhausted]). The dashboard labels these strings with
+    [attentionReasonLabel].
+    [dashboard/src/api/fixtures/keeper-trust-disposition-reasons.json] holds
+    what this function writes; a test here checks it against
+    {!all_of_disposition_reason}, and the dashboard's test checks that every
+    string in it has a label. *)
 
 (** Why the snapshot needs attention: the status surface's reason, the
     disposition's own reason, or the error text of a dashboard row that could

@@ -536,10 +536,7 @@ let complete_http
                 ~messages
                 ~tools
             | Some admitted_body ->
-              let evidence =
-                Prepared_completion_request.admitted_body_evidence admitted_body
-              in
-              if evidence.stream
+              if Prepared_completion_request.admitted_body_stream admitted_body
               then
                 Error
                   (Http_client.AcceptRejected
@@ -649,20 +646,11 @@ let complete_http
         | Error error -> Error error, None
         | Ok request ->
           let provider_label = provider_name in
-          (match admitted_body with
-           | Some admitted_body ->
-             observe_pre_dispatch_serialization
-               ?request_wire_observer
-               (Prepared_completion_request.admitted_body_evidence admitted_body)
-           | None ->
-             observe_request_wire
-               ?request_wire_observer
-               ~capture_id
-               ~config
-               ~http_codec
-               ~stream:false
-               ~body:body_str
-               ());
+          (* An admitted body and a body serialized here are observed the
+             same way: these bytes, under this request's capture_id. *)
+          observe_pre_dispatch_serialization
+            ?request_wire_observer
+            (serialization_observation ~capture_id ~config ~stream:false serialized);
           Diag.debug
             "complete"
             "%s %s → %s (%d bytes)"

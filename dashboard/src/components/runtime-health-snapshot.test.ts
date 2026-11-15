@@ -146,7 +146,6 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
           enable_thinking: true,
           preserve_thinking: true,
           resolved_reasoning_effort: 'medium',
-          glm_replay_reasoning: false,
           tool_stream: true,
           tool_choice: { kind: 'auto' },
           disable_parallel_tool_use: false,

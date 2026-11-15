@@ -34,6 +34,7 @@ import {
   subscribeKeeperWaitingInventory,
 } from '../keeper-waiting-inventory-store'
 import { loadRuntimeResolved, runtimeResolvedState } from '../lib/runtime-resolved-resource'
+import { runtimeQuotaRestLabel } from '../lib/runtime-quota-rest'
 import { getData } from '../lib/async-state'
 import {
   keeperDisplayRuntime,
@@ -196,6 +197,12 @@ export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
 
   const runtime = keeperDisplayRuntime(keeper)
   const { lane, note } = fleetRotationLane(data, keeper)
+  // 쉬는 후보와 그 원인. 한도 표가 가진 사실만 쓴다 — 표에 없는 후보는
+  // 표시하지 않는다.
+  const quotaRests = new Map<string, string>()
+  for (const candidate of data.runtimes) {
+    if (candidate.quota_rest) quotaRests.set(candidate.id, runtimeQuotaRestLabel(candidate.quota_rest))
+  }
 
   return html`
     <div class="fl-as-sec" data-testid="fleet-rotation-section">
@@ -208,10 +215,16 @@ export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
             ${lane.runtime_ids.map((id, index) => html`
               <${Fragment} key=${id}>
                 ${index > 0 ? html`<span class="fl-rot-arr">→</span>` : null}
-                <span class="fl-rot-cand mono ${index === 0 ? 'head' : ''} ${runtime && id === runtime.value ? 'cur' : ''}">${id}</span>
+                <span class="fl-rot-cand mono ${index === 0 ? 'head' : ''} ${runtime && id === runtime.value ? 'cur' : ''} ${quotaRests.has(id) ? 'rest' : ''}">${id}</span>
               <//>
             `)}
           </div>
+          ${lane.runtime_ids.filter(id => quotaRests.has(id)).map(id => html`
+            <div class="fl-rot-rest" key=${id}>
+              <span class="mono">${id}</span>
+              <span class="fl-rot-rest-why">${quotaRests.get(id)}</span>
+            </div>
+          `)}
         </div>
       ` : html`
         <div class="fl-rot-na">${note}</div>

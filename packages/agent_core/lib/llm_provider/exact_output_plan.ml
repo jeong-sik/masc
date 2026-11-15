@@ -443,6 +443,8 @@ let exact_artifact_error (config : Provider_config.t) = function
 
 let freeze_serialization
       ~anthropic_thinking_control
+      ~auth_headers
+      ~declared_headers
       ~(config : Provider_config.t)
       (request : Llm_transport.completion_request)
   =
@@ -451,6 +453,8 @@ let freeze_serialization
     match
       Exact_output_count_tokens.freeze_exact_completion_artifact
         ~anthropic_thinking_control
+        ~auth_headers
+        ~declared_headers
         request
     with
     | Error error -> Error (exact_artifact_error config error)
@@ -536,22 +540,23 @@ let preflight
             with
             | Error error -> Error (Provider_request_rejected error)
             | Ok () ->
-              (match freeze_serialization ~anthropic_thinking_control ~config request with
+              (match
+                 freeze_serialization
+                   ~anthropic_thinking_control
+                   ~auth_headers
+                   ~declared_headers
+                   ~config
+                   request
+               with
                | Error error -> Error error
                | Ok { response_codec; body; exact_completion_artifact } ->
                  let body_sha256 = sha256 body in
                  let headers =
-                   auth_headers
-                   @ Exact_output_declared_headers.to_list declared_headers
-                   @ [ "Content-Type", "application/json"
-                     ; "Content-Length", string_of_int (String.length body)
-                     ]
-                 in
-                 let headers =
-                   match config.kind with
-                   | Provider_config.Anthropic ->
-                     Backend_anthropic.request_headers ~body headers
-                   | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> headers
+                   Exact_output_declared_headers.request_headers
+                     ~kind:config.kind
+                     ~auth_headers
+                     ~body
+                     declared_headers
                  in
                  let url = request_url config in
                  (* The URL and headers are parsed here, once, so a binding

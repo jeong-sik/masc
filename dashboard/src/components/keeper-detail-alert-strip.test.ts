@@ -349,9 +349,9 @@ describe('local claim refusal with earlier success', () => {
       const row = {
         name: 'synthetic-claim', status: 'active', keepalive_running: true,
         runtime_blocker_class: blockerClass, runtime_blocker_summary: summary,
-        trust: {
+        runtime_trust: {
           latest_terminal_reason: { code: 'success', summary: 'earlier successful turn' },
-          execution_summary: { runtime_outcome: 'completed', provider_attempt_count: 1 },
+          execution: { runtime_outcome: 'completed', provider_attempt_count: 1 },
         },
       }
       const failed = normalizeKeepers([row])[0]

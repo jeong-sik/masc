@@ -817,6 +817,38 @@ let test_dynamic_tool_bytes_counts_meta () =
     (Option.fold ~none:0 ~some:(fun m -> String.length (Yojson.Safe.to_string m)) spec_meta)
 ;;
 
+(* The turn log reports the [Upfront] share beside the total, because the total
+   also counts the tools behind Claude Code's tool search. The share is sized
+   by the same function as the total, so the two parts add up to it. *)
+let test_upfront_tools_split_the_surface_bytes () =
+  let tool name loading =
+    { Runtime_claude_code.name
+    ; description = "cde"
+    ; input_schema = `Assoc [ "f", `String "g" ]
+    ; loading
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
+    ; call =
+        (fun ~call_id:_ _ ->
+          { Runtime_claude_code.success = true; content = ""; content_blocks = None; abort_turn = None; on_response_sent = None })
+    }
+  in
+  let first = tool "a" Runtime_official_client_tool.Upfront in
+  let deferred = tool "bb" Runtime_official_client_tool.On_demand in
+  let last = tool "ccc" Runtime_official_client_tool.Upfront in
+  let tools = [ first; deferred; last ] in
+  let upfront = Runtime_official_client_tool.upfront_tools tools in
+  check (list string) "only Upfront tools, in order" [ "a"; "ccc" ]
+    (List.map (fun (t : Runtime_claude_code.dynamic_tool) -> t.name) upfront);
+  check int "upfront and on-demand bytes add up to the total"
+    (Runtime_claude_code.dynamic_tool_bytes tools)
+    (Runtime_claude_code.dynamic_tool_bytes upfront
+     + Runtime_claude_code.dynamic_tool_bytes [ deferred ]);
+  check int "no tools gives no upfront tools" 0
+    (List.length (Runtime_official_client_tool.upfront_tools []))
+;;
+
 (* A result-only aggregate is the turn's spend. No assistant frame reported
    usage, so no request's occupancy is known. *)
 let test_result_usage_is_carried () =
@@ -1141,6 +1173,40 @@ let test_auth_status_reaches_a_regular_file () =
       check string "the whole document was read" "claude.ai"
         (Runtime_claude_code.authentication_to_string subscription.authentication)
     | Error error -> fail (Runtime_claude_code.error_to_string error))
+;;
+
+(* [purge_project] runs [--version] and then [purge]. A stand-in that warns
+   on [--version] and fails [purge] shows whose stderr the failure carries
+   (#51877). *)
+let test_failed_purge_reports_only_purge_stderr () =
+  let path = Filename.temp_file "masc-claude-purge-" ".sh" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    Out_channel.with_open_bin path (fun output ->
+      output_string output "#!/bin/sh\n";
+      output_string output "case \"$*\" in\n";
+      output_string output
+        "  --version) echo '2.1.322 (Claude Code)'; echo version-warning >&2; exit 0 ;;\n";
+      output_string output "  *purge*) echo purge-refused >&2; exit 1 ;;\n";
+      output_string output "esac\n";
+      output_string output "exit 80\n");
+    Unix.chmod path 0o700;
+    let outcome =
+      Eio_main.run (fun env ->
+        Runtime_claude_code.purge_project
+          ~mgr:(Eio.Stdenv.process_mgr env)
+          ~clock:(Eio.Stdenv.clock env)
+          ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~account:(fixture_account ())
+          ~cli_path:path
+          ~timeout_s:10.0
+          ~project:"/tmp/masc-purge-fixture-project")
+    in
+    match outcome with
+    | Runtime_claude_code.Project_purged -> fail "a purge that exited 1 was reported as done"
+    | Runtime_claude_code.Project_not_purged detail ->
+      let has needle = String_util.contains_substring detail needle in
+      check bool ("purge's stderr is in: " ^ detail) true (has "purge-refused");
+      check bool ("--version's stderr is not: " ^ detail) false (has "version-warning"))
 ;;
 
 let rate_limit_rejected =
@@ -4943,6 +5009,10 @@ let () =
             "auth status reaches a regular file"
             `Quick
             test_auth_status_reaches_a_regular_file
+        ; test_case
+            "a failed purge reports only purge's stderr"
+            `Quick
+            test_failed_purge_reports_only_purge_stderr
         ] )
     ; ( "terminal"
       , [ test_case
@@ -5019,6 +5089,10 @@ let () =
             "dynamic tool bytes counts _meta"
             `Quick
             test_dynamic_tool_bytes_counts_meta
+        ; test_case
+            "upfront tools split the surface bytes"
+            `Quick
+            test_upfront_tools_split_the_surface_bytes
         ; test_case
             "partial usage does not fail the turn"
             `Quick

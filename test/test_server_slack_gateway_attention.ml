@@ -114,9 +114,9 @@ let test_duplicate_wire_delivery_keeps_one_pending () =
   check int "one pending" 1 (List.length (pending ~base_path ~keeper_name:"alpha"))
 
 (* Inbound identity rendering (issue #28376): the lane-shared mapping
-   resolves the author label and rewrites mention escapes, and never touches
-   [user_id] or [ts] (identity keys). *)
-let test_resolve_event_identity_maps_names_and_mentions () =
+   resolves the author label and never touches [user_id] or [ts] (identity
+   keys). Mentions are rendered after the channel binding (#28401). *)
+let test_resolve_event_identity_maps_author_names () =
   let directory =
     Slack_user_directory.create
       ~fetch:(fun ~user_id ->
@@ -145,16 +145,14 @@ let test_resolve_event_identity_maps_names_and_mentions () =
       }
   in
   (match G.For_testing.resolve_event_identity ~user_directory:directory event with
-   | Slack_gateway_state.Message_create { user_id; user_name; text; ts; _ } ->
+   | Slack_gateway_state.Message_create { user_id; user_name; ts; _ } ->
      check string "identity key untouched" "U09L0RHPW7P" user_id;
      check string "dedup key untouched" "1786524720.554309" ts;
-     check (option string) "author label resolved" (Some "Vincent") user_name;
-     check string "mention rewritten" "@Vincent 확인" text
+     check (option string) "author label resolved" (Some "Vincent") user_name
    | _ -> fail "message event mapped to another variant");
   match G.For_testing.resolve_event_identity event with
-  | Slack_gateway_state.Message_create { user_name; text; _ } ->
-    check (option string) "no directory keeps the raw absence" None user_name;
-    check string "no directory keeps the wire text" "<@U09L0RHPW7P> 확인" text
+  | Slack_gateway_state.Message_create { user_name; _ } ->
+    check (option string) "no directory keeps the raw absence" None user_name
   | _ -> fail "message event mapped to another variant"
 
 let () =
@@ -169,6 +167,6 @@ let () =
         ; test_case "duplicate wire delivery keeps one pending" `Quick
             test_duplicate_wire_delivery_keeps_one_pending
         ; test_case "inbound identity mapping" `Quick
-            test_resolve_event_identity_maps_names_and_mentions
+            test_resolve_event_identity_maps_author_names
         ]
     ]

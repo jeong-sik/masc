@@ -137,8 +137,28 @@ current review or reconciliation attempt. A recovery wake does not reconstruct
 the original model's start time, elapsed time or complete lookup history; an
 empty tool list on that wake does not assert that the model used no tools.
 
+## 5. The next attempt
+
+The next attempt of a Task or Goal review asks the same question with the
+lookup authority current now. The question (subject, workspace, submitted
+evidence and, for a Goal, the reported measurement it was asked with) comes
+from the parent. Lookup grants, prompt, instructions and answer format are
+built when the attempt is prepared. A changed question opens no next attempt.
+
+A retained attempt whose lookup authority or answer format is not the current
+one is refused before dispatch. The refusal holds only what moved, so it has no
+receipt, verdict or evaluator runtime. The same processing then opens the next
+attempt once; if that one is refused too, the review waits for the next
+processing. A Goal attempt that waited for admission before its refusal no
+longer shows that wait's runtime and tool observations in its run row; its
+progress history still holds the wait.
+
 ## Revision History
 
+- 2026-11-13: the next attempt of a Task or Goal review asks the parent's
+  question with the current lookup authority. An attempt retained under
+  another lookup authority or answer format is refused before dispatch, and
+  the same processing asks its next attempt once.
 - 2026-11-12: a settled verdict call is recovered whatever ended its execution
   afterwards. An attempt whose recorded calls all ended without a settled
   report is a definite refusal, and what its walk left names the successor's

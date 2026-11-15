@@ -2193,7 +2193,7 @@ def workspace_check(binary, base_path):
 # The document decides whether imp's persisted conversation opens directly,
 # and whether the workspace is one the journey prepares at all;
 # the journey never re-derives that from check condition strings.
-ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey', 'account_installation')
+ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey', 'account_installation', 'refused_by_boot')
 
 
 def onboarding_status(binary, base_path=None):
@@ -2301,6 +2301,15 @@ def account_server_line(observed):
             + '). The installed MASC is ' + terminal_text(observed['installed_version']) + '.')
 
 
+# The status of the journey that stopped at a workspace whose config asks for
+# accounts. It prepared nothing there, so it does not end with the 0 of a
+# journey that did: scripts/install.sh reads this status
+# (MASC_SETUP_ACCOUNT_INSTALLATION_EXIT) to say what comes next, never the
+# lines printed before it. The terminal UI and `masc setup --no-tui`, whose
+# statuses the journey passes on, do not exit 3.
+ACCOUNT_INSTALLATION_EXIT = 3
+
+
 def account_installation(binary, state, port):
     """Say what runs in a workspace whose config asks for accounts, and stop.
 
@@ -2317,6 +2326,10 @@ def account_installation(binary, state, port):
         if check['condition'] != 'satisfied':
             print(check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
     port = workspace_port(binary, base, port)
+    # `masc setup-server` waits for an announced account server that does not
+    # answer its health probe (Masc_http_client.default_request_timeout_sec),
+    # so the screen says what it waits on before the read.
+    print('Checking whether an account server runs for this workspace…', file=sys.stderr)
     try:
         observed = setup_server_observation(binary, base, port)
     except ServerUnread as unread:
@@ -2344,19 +2357,44 @@ def account_installation(binary, state, port):
     # The journey ends before its workspace screen, so the way to another
     # workspace is said here.
     print('To set up another workspace: masc setup --base-path DIRECTORY', file=sys.stderr)
-    return 0
+    return ACCOUNT_INSTALLATION_EXIT
+
+
+def refused_by_boot(state):
+    """Say why no boot runs a server in this workspace, and stop.
+
+    The config holds an account mode the boot does not know. Nothing is asked,
+    initialized or started: the doctor's line is the sentence the boot stops
+    with, and it names the file to correct.
+    """
+    base = state.get('base_path')
+    if not isinstance(base, str):
+        raise SetupError('MASC returned an unsupported setup observation; reinstall the complete release.')
+    print('\n' + terminal_text(base), file=sys.stderr)
+    for check in state['checks']:
+        if check['condition'] != 'satisfied':
+            print(check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
+    print('Nothing was initialized or started.\n'
+          'To set up another workspace: masc setup --base-path DIRECTORY', file=sys.stderr)
+    return 1
+
+
+def journey_ends_at(binary, state, port):
+    """The exit of the journey in a workspace it does not prepare, and None otherwise."""
+    if state['opening'] == 'account_installation':
+        return account_installation(binary, state, port)
+    if state['opening'] == 'refused_by_boot':
+        return refused_by_boot(state)
+    return None
 
 
 def account_installation_at(binary, base, port):
-    """The exit of the journey when `base` asks for accounts, and None otherwise.
+    """The exit of the journey when `base` is not one it prepares, and None otherwise.
 
     For a directory that no doctor document read so far described: it is read
     before anything is offered, checked or initialized in it.
     """
-    described = onboarding_status(binary, base)
-    if described['opening'] == 'account_installation':
-        return account_installation(binary, described, port)
-    return None
+    return journey_ends_at(binary, onboarding_status(binary, base), port)
 
 
 def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
@@ -3383,8 +3421,9 @@ def show_imp_tools(binary, base):
 
 def journey(binary, base_path, port, timeout, resume=False):
     state = onboarding_status(binary, base_path)
-    if state['opening'] == 'account_installation':
-        return account_installation(binary, state, port)
+    ended = journey_ends_at(binary, state, port)
+    if ended is not None:
+        return ended
     # `invalid` is not one condition. Saving a selection repairs some of them —
     # configure_locked stages the edit, lets runtime-default-set rewrite it,
     # and publishes that rewrite — while a declaration the parser cannot
@@ -3480,6 +3519,11 @@ def sandbox_step(binary, base, port):
     """The sandbox step of a journey that began in an earlier session."""
     # The workspace may ask for accounts since that session.
     ended = account_installation_at(binary, base, port)
+    if ended == ACCOUNT_INSTALLATION_EXIT:
+        # The group-session handoff that runs this step reads every status
+        # but 0 as a session that has to sign in again. This one has nothing
+        # left to do, and what comes next is already on screen.
+        return 0
     if ended is not None:
         return ended
     return sandbox_journey(binary, base, port, refresh_owner=True)

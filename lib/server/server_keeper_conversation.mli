@@ -19,8 +19,10 @@
     - [<conversation_id>/cwd/] is the directory every turn of the
       conversation starts its client in.
 
-    {b The conversation of a Keeper} is the one its last [started] row names.
-    Nothing else stores it.
+    {b The conversation of a Keeper} is the one its last [started] row names,
+    unless the person began to delete that one (plan S1b-3c): then the Keeper
+    has none until a turn or a new conversation starts one. An earlier
+    conversation does not come back. Nothing else stores it.
 
     {b Reading.} A row that is not one of these, with exactly its fields, is
     not repaired or skipped: the read is refused, and so is the turn. There
@@ -116,21 +118,22 @@ type start_error =
 
 (** Start a conversation of the Keeper on the account. The conversations it
     had stay as they are. [draw] gives the id, and [now_ms] the time of the
-    row.
+    row. [deleted] says whether the person began to delete a conversation.
 
-    The conversation it follows gets no turn after it, so the start is the
-    last writer of its file. Each turn of that conversation runs inside the
-    call of its account, and so does the start. [one_call_of account ~busy f]
-    runs [f] when no other call of [account] runs and gives [busy] otherwise,
-    as {!Server_setup_account_login.one_call_of} does. Inside the call, a row
-    a stopped server left half written in that conversation is cut, as its
-    next turn would have cut it, and the [started] row of the new one is
-    appended. The first conversation of a Keeper follows none and takes no
-    call. *)
+    The conversation it follows, the current one ({!current}), gets no turn
+    after it, so the start is the last writer of its file. Each turn of that
+    conversation runs inside the call of its account, and so does the start.
+    [one_call_of account ~busy f] runs [f] when no other call of [account]
+    runs and gives [busy] otherwise, as
+    {!Server_setup_account_login.one_call_of} does. Inside the call, a row a
+    stopped server left half written in that conversation is cut, as its next
+    turn would have cut it, and the [started] row of the new one is appended.
+    A Keeper with no current conversation follows none and takes no call. *)
 val start
   :  root
   -> Authz_types.Keeper_id.t
   -> Authz_types.Provider_account_id.t
+  -> deleted:(Conversation_id.t -> bool)
   -> draw:(unit -> string)
   -> now_ms:(unit -> int)
   -> one_call_of:
@@ -140,13 +143,15 @@ val start
         -> (conversation, start_error) result)
   -> (conversation, start_error) result
 
-(** The conversation of the Keeper. A Keeper that has none starts one on the
-    account, as {!start} does. The conversation of a Keeper that has one is
-    answered whatever account it began on: the caller compares it. *)
+(** The current conversation of the Keeper ({!current}). A Keeper that has
+    none starts one on the account, as {!start} does. The conversation of a
+    Keeper that has one is answered whatever account it began on: the caller
+    compares it. *)
 val current_or_start
   :  root
   -> Authz_types.Keeper_id.t
   -> Authz_types.Provider_account_id.t
+  -> deleted:(Conversation_id.t -> bool)
   -> draw:(unit -> string)
   -> now_ms:(unit -> int)
   -> (conversation, error) result
@@ -155,6 +160,19 @@ type listed =
   { conversation : conversation
   ; started_at_ms : int
   }
+
+(** The conversation the turns of a Keeper go on in, among its conversations
+    in the order they were started: the last, unless [deleted] says the
+    person began to delete it. Then there is none, and the next turn of the
+    Keeper starts one. *)
+val current : deleted:(Conversation_id.t -> bool) -> listed list -> conversation option
+
+(** The conversation of the person with this id, of whichever Keeper, for its
+    deletion. It reads the index alone, and a person with no record has
+    none. A row a stopped server left half written is cut, as the next
+    writer of the index cuts it, so the row does not keep a deletion
+    pending. *)
+val find : root -> Conversation_id.t -> (conversation option, error) result
 
 (** The conversations of the Keeper, in the order they were started. The last
     is the one its turns go on in. It reads the index alone and writes
@@ -186,10 +204,51 @@ type recorded =
 
 (** The turns of the conversation in order. An [answered] or a [failed] row
     that does not close the turn of the [asked] row before it is a row that
-    is not understood. It writes nothing. A row a stopped server left half
-    written refuses the read ([Row_half_written]) until the next turn of the
-    conversation, or the {!start} of the one after it, cuts the row. *)
+    is not understood. It writes no row, but the lock it takes on the file
+    makes the directory of the conversation when it is not there: a caller
+    that may meet a deletion reads inside {!reading}. A row a stopped server
+    left half written refuses the read ([Row_half_written]) until the next
+    turn of the conversation, or the {!start} of the one after it, cuts the
+    row. *)
 val turns : root -> conversation -> (recorded list, error) result
+
+(** [reading f] runs [f] while no directory of a conversation is removed
+    ({!remove}). A caller that judges whether the deletion of a conversation
+    began and then reads its {!turns} does both in [f], so a removal comes
+    before the judgment or after the read, and a read does not bring back a
+    directory a deletion removed. *)
+val reading : (unit -> 'a) -> 'a
+
+(** Whether a client of the conversation may have been started with a
+    message of it, as its turns file says. *)
+type reach =
+  | Reached
+      (** A turn was answered, failed after its client started
+          ({!reached_client}), or has its [asked] row alone. *)
+  | Not_reached  (** Each turn failed before its client started. *)
+  | No_record
+      (** The conversation has no turns file: it had no turn, or a deletion
+          removed the file. *)
+
+(** It reads the turns file alone and writes nothing. *)
+val client_reach : root -> conversation -> (reach, error) result
+
+(** The real path the turns of the conversation start their client in, as
+    {!cwd} gives it. It is spelled from the real path of [root], so it holds
+    when the directory of the conversation is gone. *)
+val project_path : root -> conversation -> (string, error) result
+
+(** Whether something is in the place of the directory of the conversation
+    of this id: the directory, or a link or a file there. It reads no index.
+    [Error] is the detail of a place that could not be looked at, which can
+    name a path of the server. *)
+val has_directory : root -> Conversation_id.t -> (bool, string) result
+
+(** Remove the directory of the conversation: its turns file and the
+    directory its client started in. A link in it is removed, not followed.
+    It waits for the reads in {!reading}. [Error] is the detail, which can
+    name a path of the server: the directory is still there. *)
+val remove : root -> conversation -> (unit, string) result
 
 (** A conversation opened for one turn. *)
 type turn

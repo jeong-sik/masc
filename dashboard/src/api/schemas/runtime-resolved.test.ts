@@ -13,6 +13,7 @@ const validRuntime = {
   max_output_tokens: null,
   is_local: false,
   is_default: true,
+  quota_rest: null,
 } as const
 
 const validLane = {
@@ -50,6 +51,27 @@ describe('runtime-resolved schema', () => {
     const parsed = parseRuntimeResolvedResponse(responseWith(validRuntime))
     expect(parsed.default_runtime).toMatchObject(validRuntime)
     expect(parsed.default_route).toBe('rt-a')
+  })
+
+  it.each(['payment_refused', 'provider_quota_refused', 'usage_read'])(
+    'accepts quota rest cause %s',
+    (cause) => {
+      const quota_rest = { cause, reset_stated: true, until: 1_794_500_000 }
+      const parsed = parseRuntimeResolvedResponse(responseWith({ ...validRuntime, quota_rest }))
+      expect(parsed.runtimes[0]?.quota_rest).toEqual(quota_rest)
+    },
+  )
+
+  it('rejects a quota rest cause the dashboard does not know', () => {
+    const quota_rest = { cause: 'rate_limited', reset_stated: false, until: 1_794_500_000 }
+    expect(() => parseRuntimeResolvedResponse(responseWith({ ...validRuntime, quota_rest })))
+      .toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('rejects a runtime row without the quota rest field', () => {
+    const { quota_rest: _rest, ...withoutRest } = validRuntime
+    expect(() => parseRuntimeResolvedResponse(responseWith(withoutRest)))
+      .toThrow(RuntimeResolvedSchemaDriftError)
   })
 
   it('requires the configured route separately from the entry runtime', () => {

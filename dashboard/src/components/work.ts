@@ -1726,10 +1726,12 @@ function WorkSurfaceV2() {
                 items=${backlogTasks}
                 estimatedItemHeight=${48}
                 className="wk-backlog-list"
+                scrollBox="self"
                 tabIndex=${0}
                 ariaLabel="클레임 가능 백로그 목록"
                 getKey=${(t: Task & { goalTitle?: string }) => t.id}
-                renderItem=${(t: Task & { goalTitle?: string }) => html`
+                renderItem=${(t: Task & { goalTitle?: string }, index: number) => html`
+                  <div class=${index === 0 ? undefined : 'wk-bl-gap'}>
                   <div key=${t.id} class="wk-bl-row">
                     <span class="wk-task-id mono">${t.id}</span>
                     <span class="wk-bl-title">
@@ -1743,6 +1745,7 @@ function WorkSurfaceV2() {
                           masc_task_set_goal refuses an already-assigned task. */
                       t.goal_id || !assignmentSource ? null : html`<${GoalAssignPicker} taskId=${t.id} source=${assignmentSource} />`}
                     <button type="button" class="wk-task-claim" onClick=${() => claimTask(t.id)}>＋ claim</button>
+                  </div>
                   </div>
                 `}
               />

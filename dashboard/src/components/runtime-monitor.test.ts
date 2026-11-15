@@ -120,7 +120,6 @@ describe('RuntimeMonitor', () => {
             enable_thinking: true,
             preserve_thinking: false,
             resolved_reasoning_effort: 'high',
-            glm_replay_reasoning: true,
             tool_stream: true,
             tool_choice: { kind: 'required' },
             disable_parallel_tool_use: true,
@@ -385,7 +384,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('system-prompt')
     expect(container.textContent).toContain('assistant-prefill off')
     expect(container.textContent).toContain('preserve:off')
-    expect(container.textContent).toContain('glm:replay')
     expect(container.textContent).toContain('tool-stream:on')
     expect(container.textContent).toContain('cap-override')
     expect(container.textContent).toContain('rotation:2')

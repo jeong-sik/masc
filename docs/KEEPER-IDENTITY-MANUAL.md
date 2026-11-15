@@ -152,7 +152,7 @@ Keeper's approval posture alongside attaching it.
 
 ## Detaching a service
 
-Press `D` twice in the Identity tab of the Keeper detail pane. The first
+Press `D` twice in the Services tab of the Keeper detail pane. The first
 press arms the row under the cursor and says so; the second press on that
 same row detaches it. The pane then says what was removed and whether the
 service was asked to revoke what it still holds. The two are different

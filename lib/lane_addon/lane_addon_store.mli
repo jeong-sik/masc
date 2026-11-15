@@ -178,6 +178,9 @@ type history_fence_publication =
   | History_fence_unconfirmed of string
 val load_history_fence : t -> scope:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
+val history_fences_directory : string
+(** The directory below {!root} that holds one directory of fences per
+    original scope, named by the scope's {!digest}. *)
 val history_fence_path : scope:string -> request_id:string -> string
 val publish_history_fence : t -> scope:string -> request_id:string ->
   expected_owner:Yojson.Safe.t -> fence:Yojson.Safe.t ->
@@ -192,6 +195,9 @@ type history_resolution_publication =
   | History_resolution_unconfirmed of string
 val load_history_resolution : t -> scope:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
+val history_resolutions_directory : string
+(** The directory below {!root} that holds one directory of resolutions
+    per original scope, named by the scope's {!digest}. *)
 val history_resolution_path : scope:string -> request_id:string -> string
 val history_resolution_inventory : t -> scope:string ->
   ((string * Yojson.Safe.t) list, string) result

@@ -2748,34 +2748,42 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
             prepared in
           let result = match prepared with
           | Error _ as error -> error
-          | Ok (config, checkpoint, Native.Continue_from_checkpoint) ->
-            (match checkpoint with
-             | None -> Error (Agent_core.Error.Internal "native continuation has no exact checkpoint")
-             | Some checkpoint ->
-              Runtime_agent.continue_from_checkpoint
-                ~sw:attempt_sw
-                ~net:ctx.net
-                ~config
-                ~checkpoint
-                ?on_event:ctx.on_event
-                ~on_yield
-                ~on_resume
-                ~agent_ref:attempt_agent_ref
-                ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ())
-          | Ok (config, checkpoint, Native.New_input { blocks; metadata }) ->
-              Runtime_agent.run_blocks
-                ~sw:attempt_sw
-                ~net:ctx.net
-                ~config
-                ?agent_core_checkpoint:checkpoint
-                ?on_event:ctx.on_event
-                ~on_yield
-                ~on_resume
-                ~agent_ref:attempt_agent_ref
-                ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ~input_metadata:metadata
-                blocks
+          | Ok (config, checkpoint, input) ->
+            (* The one place a Keeper turn hands its request to AGENT_CORE.
+               The operator snapshot's inference_inflight counts the calls
+               inside this callback. *)
+            Inference_inflight_observation.with_observation
+              ~keeper_name:ctx.keeper_name ~runtime_id:ctx.runtime_id
+            @@ fun () ->
+            match input with
+            | Native.Continue_from_checkpoint ->
+              (match checkpoint with
+               | None -> Error (Agent_core.Error.Internal "native continuation has no exact checkpoint")
+               | Some checkpoint ->
+                Runtime_agent.continue_from_checkpoint
+                  ~sw:attempt_sw
+                  ~net:ctx.net
+                  ~config
+                  ~checkpoint
+                  ?on_event:ctx.on_event
+                  ~on_yield
+                  ~on_resume
+                  ~agent_ref:attempt_agent_ref
+                  ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                  ())
+            | Native.New_input { blocks; metadata } ->
+                Runtime_agent.run_blocks
+                  ~sw:attempt_sw
+                  ~net:ctx.net
+                  ~config
+                  ?agent_core_checkpoint:checkpoint
+                  ?on_event:ctx.on_event
+                  ~on_yield
+                  ~on_resume
+                  ~agent_ref:attempt_agent_ref
+                  ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                  ~input_metadata:metadata
+                  blocks
 
           in
           (match ctx.on_request_evidence, ctx.native_binding, request_execution with

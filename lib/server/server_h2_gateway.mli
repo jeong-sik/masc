@@ -10,8 +10,10 @@ val make_error_handler
   -> (H2.Headers.t -> H2.Body.Writer.t)
   -> unit
 (** The connection-level error handler h2 calls for a request it could not
-    parse or a handler it could not run. Its one-line diagnostic is reserved
-    in the request's ledger scope when one is bound. The answer closes once
+    parse or a handler it could not run. Its body is one of the fixed
+    sentences of {!Http_error_body}, reserved in the request's ledger scope
+    when one is bound. What failed is logged at error; an exception's text
+    reaches the log only. The answer closes once
     its bytes drain. h2 opens it inside the call that reports a stream's
     failure, and there the stream's {!Http_h2_stream.Stream_end} is bound, so
     a peer that leaves it undrained past the stall bound gets the stream

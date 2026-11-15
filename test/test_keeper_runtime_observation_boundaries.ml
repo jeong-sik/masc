@@ -440,11 +440,10 @@ let test_generic_invalid_request_is_not_empty_completion () =
 
 (* #31958 regression pin: a transient network failure must advance the crash
    streak. Before RFC turn-failure-visible-stop (#32105) the network class had
-   no budget term, so such failures were exempt: the streak stayed 0 and the
-   heartbeat mapped the zero count to Turn_succeeded — a dead transport
-   retried forever with fleet health ok. Every step here is the production
-   chain: record_failure_observation → registry count → turn_status_event →
-   dispatched phase. *)
+   no budget term, so such failures were exempt: the streak stayed 0 — a dead
+   transport retried forever with fleet health ok. Every step here is the
+   production chain: record_failure_observation → registry count → the failed
+   turn's turn_status_event → dispatched phase. *)
 let test_transient_network_failure_advances_crash_streak () =
   with_temp_dir "network-crash-streak" @@ fun base_path ->
   let config = Workspace.default_config base_path in
@@ -472,7 +471,9 @@ let test_transient_network_failure_advances_crash_streak () =
          ~terminal_error_origin:Keeper_unified_turn_types.Terminal_error_not_from_a_candidate;
        let count = R.get_turn_failures ~base_path meta.name in
        Alcotest.(check int) "second network failure compounds the streak" 2 count;
-       let event = KHL.turn_status_event ~turn_fail_count:count in
+       let event =
+         KHL.turn_status_event ~turn_fail_count:count KHL.Cycle_turn_failed
+       in
        (match event with
         | KSM.Turn_failed { consecutive } ->
           Alcotest.(check int) "Turn_failed carries the streak" 2 consecutive

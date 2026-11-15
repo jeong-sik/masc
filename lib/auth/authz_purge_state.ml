@@ -22,6 +22,7 @@ type t = status Target_map.t
 
 let empty = Target_map.empty
 let find t target = Target_map.find_opt target t
+let to_list t = Target_map.bindings t
 
 type refusal =
   | Not_the_owner of

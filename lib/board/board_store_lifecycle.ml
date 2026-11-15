@@ -53,16 +53,45 @@ let initialize_store store =
     if !failed then Error (Io_error "Board initialization retained unavailable sources.")
     else Ok ()
 
-let new_global_lazy () =
-  Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
-    let store = Board_core.create_store
-      ~base_path:(Board_paths.board_base_path ()) () in
-    (match initialize_store store with
-     | Ok () -> ()
-     | Error error -> Log.BoardLog.error "initialization incomplete: %s" (show_board_error error));
-    store)
+type claim =
+  { binding : Board_workspace_binding.t
+  ; store : store Eio.Lazy.t
+  }
 
-(* The owner has one cell; constructing/resetting it does not resolve a root. *)
-let global_lazy = ref (new_global_lazy ())
-let global () = Eio.Lazy.force !global_lazy
-let reset_global_for_test () = global_lazy := new_global_lazy ()
+let new_claim binding =
+  { binding
+  ; store =
+      Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
+        let store = Board_core.create_store_bound binding in
+        (match initialize_store store with
+         | Ok () -> ()
+         | Error error ->
+           Log.BoardLog.error "initialization incomplete: %s" (show_board_error error));
+        store)
+  }
+
+(* The process has one store. The first caller names its BasePath; every later
+   caller receives that claim and compares roots before opening anything. *)
+let claimed : claim option Atomic.t = Atomic.make None
+
+let rec claim_global binding =
+  match Atomic.get claimed with
+  | Some claim -> claim
+  | None ->
+    let candidate = new_claim binding in
+    if Atomic.compare_and_set claimed None (Some candidate) then candidate
+    else claim_global binding
+
+let claimed_binding claim = claim.binding
+let open_claim claim = Eio.Lazy.force claim.store
+
+let global () =
+  let claim = match Atomic.get claimed with
+    | Some claim -> claim
+    | None ->
+      claim_global
+        (Board_workspace_binding.capture ~base_path:(Board_paths.board_base_path ()))
+  in
+  open_claim claim
+
+let reset_global_for_test () = Atomic.set claimed None

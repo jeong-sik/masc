@@ -69,7 +69,7 @@ let test_a_front_at_this_turns_start_decodes () =
     Inspector.decode_forecast
       (Yojson.Safe.from_string
          (Printf.sprintf
-            {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+            {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
                "walk":{"lane_id":"r","declared":["r"]},
                "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
                  "parts":{"error":"not measured"},"history_atoms":12,

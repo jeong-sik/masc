@@ -447,7 +447,7 @@ Rows are ordered: linked to an in-progress Goal first, then lower `priority` num
 - Unclaimed but not offered to you: {{count}}
 
 ### world.namespace_state.failed (vars: count)
-- Failed tasks: {{count}}
+- Claimed tasks whose holder is not an active member: {{count}} (keeper_tasks_audit lists them)
 
 ### world.namespace_state.running_fibers (vars: count)
 - Running keeper fibers: {{count}}

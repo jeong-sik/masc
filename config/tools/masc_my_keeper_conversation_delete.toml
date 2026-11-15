@@ -1,0 +1,24 @@
+name = "masc_my_keeper_conversation_delete"
+title = "Delete A Conversation With My Keeper"
+description = """
+Delete one of your conversations with your Keepers. The server removes \
+what you asked and what the Keeper answered in it, and asks Claude Code \
+to purge what it keeps of the conversation on the login of your \
+subscription. The answer is JSON: conversation_id and vendor_copy, which \
+is "removed", "none" when no turn of it started Claude Code, or \
+"may_remain" when Claude Code did not purge it. Afterwards no read shows \
+the conversation and no turn goes on in it. When it was the current \
+conversation of a Keeper, the Keeper's next turn starts a new one. A \
+deletion while a turn runs on the subscription the conversation began on \
+is refused. When the server cannot remove all of its files, the deletion \
+is refused, masc_my_keeper_conversation lists it with deletion "failed", \
+and asking again finishes it."""
+additional_properties = false
+
+[[params]]
+name = "conversation_id"
+type = "string"
+required = true
+min_length = 1
+description = """
+The conversation, as masc_my_keeper_conversation lists it."""

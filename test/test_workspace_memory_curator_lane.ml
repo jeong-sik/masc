@@ -471,6 +471,32 @@ let test_new_child_rejects_changed_worker_inputs ()=
     check json "original refusal and capture remain intact" (Progress.to_json parent.progress)
       (Progress.to_json (original_record store capture).progress);
     check int "rejected successor never dispatches HTTP" 0 (F.post_count server))
+(* The shared progress machine lets a before-dispatch refusal keep a successor
+   intent. Curator narrows only an execution refusal, so it neither writes such
+   an intent nor completes one that is already stored. *)
+let test_a_before_dispatch_refusal_never_leads_to_a_curator_successor ()=
+  with_fixture ~start_owner:false ~claims:["Before-dispatch original source a";"Before-dispatch original source b"]
+    (fun ~sw:_ ~clock ~base_path ~config ~store ~source:_ ~declaration:_ ~server ~urls:_ ~mode:_ ~delivery:_ ->
+    await clock (fun () -> (Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports<>[]);
+    let capture=capture_classification config in
+    let parent=advance store (original_record store capture)
+      (Progress.Refused {stage=Progress.Before_dispatch;evidence=`Assoc ["reason",`String "original host refusal"]}) in
+    (match Consumer.narrow ~config ~request_id:parent.request_id with
+     | Error (Consumer.Rejected _) -> ()
+     | Error (Consumer.Unavailable _ | Consumer.Uncertain _) | Ok _ ->
+       fail "a before-dispatch refusal was narrowed");
+    let final=Lane_addon_exact.Call_final (Input_refused Input_capacity) in
+    let child=match Capture.narrow ~request_id:(Capture.Request_id.fresh ()) ~final capture |> get with
+      | Some child -> child | None -> fail "fixture needs a whole-prefix child" in
+    let intent : Progress.successor = {request_id=Capture.Request_id.to_string (Capture.request_id child);
+      request_digest=get (Owner.request_digest (Capture.to_json child))} in
+    ignore (advance store parent (Progress.Successor_intended intent));
+    (match Consumer.For_testing.recover_successor ~store ~base_path ~request_id:parent.request_id with
+     | Error (Consumer.Rejected _) -> ()
+     | Error (Consumer.Unavailable _ | Consumer.Uncertain _) | Ok _ ->
+       fail "a stored intent after a before-dispatch refusal was completed");
+    check int "no child is retained" 1 (List.length (records store));
+    check int "no provider is called" 0 (F.post_count server))
 let test_existing_intent_recovers_locally_off_then_runs_on ()=
   with_fixture ~start_owner:false ~claims:["Interrupted original source a";"Interrupted original source b"]
     (fun ~sw ~clock ~base_path ~config ~store ~source ~declaration ~server ~urls:_ ~mode:_ ~delivery:_ ->
@@ -1262,6 +1288,7 @@ let ()=run "Actual Addon-backed production Curator owner" ["owner",[
   test_case "new child requires fresh Off and semantic configuration authority" `Quick test_new_child_requires_fresh_configured_admission;
   test_case "new child rejects changed canonical worker inputs" `Quick test_new_child_rejects_changed_worker_inputs;
   test_case "existing successor intent recovers locally Off and completes after On" `Quick test_existing_intent_recovers_locally_off_then_runs_on;
+  test_case "a before-dispatch refusal never leads to a Curator successor" `Quick test_a_before_dispatch_refusal_never_leads_to_a_curator_successor;
   test_case "accepted retained host terminal commits Off without another provider" `Quick test_accepted_host_terminal_commits_off_without_worker;
   test_case "the next root takes the size its last answer supports" `Quick
     test_the_next_root_takes_the_size_its_last_answer_supports;

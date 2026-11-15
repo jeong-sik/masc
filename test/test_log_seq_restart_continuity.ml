@@ -65,6 +65,12 @@ let write_restart_shaped_log dir =
 
 let restored_rows = 4
 
+let open_file_sink ?identity_recheck_interval_s dir =
+  match Log.Ring.init_file_sink ?identity_recheck_interval_s dir with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Log.Ring.file_sink_error_to_string error)
+;;
+
 let test_next_sequence_clears_every_sequence_on_disk () =
   let dir =
     Filename.concat
@@ -72,7 +78,7 @@ let test_next_sequence_clears_every_sequence_on_disk () =
       "masc-test-log-seq-restart-continuity"
   in
   let path = write_restart_shaped_log dir in
-  Log.Ring.init_file_sink dir;
+  open_file_sink dir;
   Log.Misc.info "seq-restart-continuity: first emit after restore";
   (match Log.Ring.recent ~limit:1 () with
    | [] -> Alcotest.fail "the emit after restore is not in the ring"

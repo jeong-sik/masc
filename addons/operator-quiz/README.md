@@ -26,6 +26,6 @@ reported as unavailable; original questions, answers and request blobs stay inta
 - `server.py`: the MCP worker; it reads `max_reply_bytes` from `lane.toml`.
 
 The host mounts this directory at `/addon`; the image carries Python and the
-shared `protocol.py` only. Turning it on, binding the `author` slot, setting
+shared `protocol.py` and `records.py` only. Turning it on, binding the `author` slot, setting
 the times and reading the results: [operator quiz guide](../../docs/guides/operator-quiz.md).
 Design: [RFC](../../docs/rfc/RFC-operator-quiz-lane.md).

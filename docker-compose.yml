@@ -54,12 +54,19 @@ services:
   masc-oneclick:
     # One-touch, self-contained: builds the server + dashboard from source and
     # seeds a keeper team on the default flash model. No prebuilt binary needed.
+    # The image has no .git, so the commit its binary reports comes from the two
+    # build args below; the build fails when MASC_BUILD_COMMIT is empty.
+    #   MASC_BUILD_COMMIT="$(git rev-parse HEAD)" \
+    #   MASC_BUILD_COMMIT_UNIX_TS="$(git show -s --format=%ct HEAD)" \
     #   OLLAMA_CLOUD_API_KEY=... docker compose --profile oneclick up --build
     # Then open http://localhost:8935/dashboard
     profiles: ["oneclick"]
     build:
       context: .
       dockerfile: Dockerfile.oneclick
+      args:
+        MASC_BUILD_COMMIT: "${MASC_BUILD_COMMIT:-}"
+        MASC_BUILD_COMMIT_UNIX_TS: "${MASC_BUILD_COMMIT_UNIX_TS:-}"
     image: masc-oneclick:local
     container_name: masc-oneclick
     restart: unless-stopped

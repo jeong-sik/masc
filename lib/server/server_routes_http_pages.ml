@@ -594,6 +594,7 @@ let handle_post_graphql request reqd =
 
 let handle_graphql request reqd =
   match Http.Request.method_ request with
-  | `GET -> handle_get_graphql request reqd
+  | `GET | `HEAD -> handle_get_graphql request reqd
   | `POST -> handle_post_graphql request reqd
-  | _ -> Http.Response.method_not_allowed reqd
+  | `PUT | `DELETE | `CONNECT | `OPTIONS | `TRACE | `Other _ ->
+    Http.Response.method_not_allowed ~allow:[ `GET; `HEAD; `POST ] reqd

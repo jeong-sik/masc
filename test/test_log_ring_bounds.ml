@@ -143,6 +143,62 @@ let test_category_param_reads_a_closed_list () =
   Alcotest.(check bool) "an unknown name is refused" true
     (read "/api/v1/dashboard/logs?category=tool,provider" = Error "provider")
 
+(* #51304: a reader that follows the ring from another domain, the way the
+   log stream does: it takes [bounds], reads the entries between its cursor
+   and [total], and moves the cursor to [total - 1]. Every sequence in that
+   window has to come back once, in order. An entry of another sequence in
+   the window is a row from [capacity] entries ago; a missing sequence is a
+   row the follower never gets, because its cursor has moved past it. *)
+let follow_writer_domains = 2
+let follow_entries_per_writer = 100_000
+
+type follow_break = { after : int; upto : int; got : int list }
+
+let test_follower_on_another_domain_gets_every_sequence_once () =
+  let writing = Atomic.make follow_writer_domains in
+  let writers =
+    List.init follow_writer_domains (fun writer ->
+      Domain.spawn (fun () ->
+        for i = 1 to follow_entries_per_writer do
+          Log.Misc.info "ring-follow %d-%d" writer i
+        done;
+        Atomic.decr writing))
+  in
+  let rounds = ref 0 in
+  let breaks = ref 0 in
+  let first_break = ref None in
+  let rec follow after =
+    let last_round = Atomic.get writing = 0 in
+    let upto = (Log.Ring.bounds ()).total in
+    let got =
+      seqs
+        (Log.Ring.recent ~limit:Log.Ring.capacity ~since_seq:after ~before_seq:upto
+           ~order:`Oldest_first ())
+    in
+    (* A round whose oldest sequence the writers evicted, or were evicting,
+       while it read says nothing: those rows are gone from the ring. *)
+    if after + 1 > (Log.Ring.bounds ()).start_seq then begin
+      incr rounds;
+      let want = List.init (upto - 1 - after) (fun k -> after + 1 + k) in
+      if got <> want then begin
+        incr breaks;
+        match !first_break with
+        | None -> first_break := Some { after; upto; got }
+        | Some _ -> ()
+      end
+    end;
+    if not last_round then follow (upto - 1)
+  in
+  follow ((Log.Ring.bounds ()).total - 1);
+  List.iter Domain.join writers;
+  match !first_break with
+  | None -> ()
+  | Some { after; upto; got } ->
+    Alcotest.failf
+      "%d of %d rounds broke; first: cursor %d, total %d, wanted %d..%d, got [%s]"
+      !breaks !rounds after upto (after + 1) (upto - 1)
+      (String.concat "; " (List.map string_of_int got))
+
 let () =
   Alcotest.run "log_ring_bounds"
     [
@@ -161,5 +217,10 @@ let () =
             test_uncategorized_and_exclusion_selectors;
           Alcotest.test_case "the category param reads a closed list" `Quick
             test_category_param_reads_a_closed_list;
+        ] );
+      ( "domains",
+        [
+          Alcotest.test_case "a follower on another domain gets every sequence once"
+            `Quick test_follower_on_another_domain_gets_every_sequence_once;
         ] );
     ]

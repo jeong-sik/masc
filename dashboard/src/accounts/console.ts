@@ -10,9 +10,13 @@ import { signal, type ReadonlySignal } from '@preact/signals'
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
-import { ProblemNote, Retry, idTail, slowAfterMs } from './notes'
+import { Callout, ProblemNote, Retry, idTail, slowAfterMs } from './notes'
 import type { Failure, Next, Shown } from './notes'
+import { KeepersPanel } from './keeper-rows'
+import type { KeepersModel } from './keepers'
 import { SubscriptionsPanel } from './subscriptions'
+import { TokensPanel } from './token-rows'
+import type { TokensModel } from './tokens'
 import type { SubscriptionsModel } from './subscriptions'
 import { session as readSession, signOut as endSession, who as readWho } from './wire'
 import type { Answer, Problem, Role, Send, Session, Who } from './wire'
@@ -184,9 +188,11 @@ function Account({ who, signOut, onSignOut }: { readonly who: Who; readonly sign
 /** What is under the heading of the page in one state. A note of a failure
     is made anew for each failure (its key is the count), so a screen reader
     says the second one as it said the first. */
-function Body({ view, subscriptions, onRetry }: {
+function Body({ view, subscriptions, keepers, tokens, onRetry }: {
   readonly view: View
   readonly subscriptions: SubscriptionsModel
+  readonly keepers: KeepersModel
+  readonly tokens: TokensModel
   readonly onRetry: () => void
 }): VNode {
   switch (view.kind) {
@@ -201,10 +207,8 @@ function Body({ view, subscriptions, onRetry }: {
       `
     case 'changed':
       return html`
-        <div class="callout" role="alert">
-          <p class="callout-title">다른 탭에서 계정이 바뀌었어요</p>
-          <p>이 브라우저에는 지금 다른 계정이 로그인되어 있어요. 이 화면은 그 계정을 불러오기 전에는 아무것도 보내지 않아요.</p>
-        </div>
+        <${Callout} title="다른 탭에서 계정이 바뀌었어요" reason=${null} attempts=${1}
+          lines=${['이 브라우저에는 지금 다른 계정이 로그인되어 있어요. 이 화면은 그 계정을 불러오기 전에는 아무것도 보내지 않아요.']} />
         <${Retry} label="지금 계정 불러오기" next=${view.next} onRetry=${onRetry} />
       `
     case 'signed_in':
@@ -213,7 +217,8 @@ function Body({ view, subscriptions, onRetry }: {
           ? html`<${ProblemNote} key=${view.signOut.failure.attempts} title="로그아웃하지 못했어요" failure=${view.signOut.failure} />`
           : null}
         <${SubscriptionsPanel} model=${subscriptions} />
-        <p>구독 연결과 모델 확인, Keeper, 토큰은 아직 처음 화면에서 해요.</p>
+        <${KeepersPanel} model=${keepers} subscriptions=${subscriptions} />
+        <${TokensPanel} model=${tokens} />
         <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `
@@ -226,9 +231,11 @@ function Body({ view, subscriptions, onRetry }: {
 const takesThePressedButton = (from: View['kind'], to: View['kind']): boolean =>
   ((from === 'failed' || from === 'changed') && to === 'signed_in') || (from === 'signed_in' && to === 'changed')
 
-export function ConsoleFrame({ model, subscriptions }: {
+export function ConsoleFrame({ model, subscriptions, keepers, tokens }: {
   readonly model: ConsoleModel
   readonly subscriptions: SubscriptionsModel
+  readonly keepers: KeepersModel
+  readonly tokens: TokensModel
 }): VNode {
   const view = model.view.value
   const heading = useRef<HTMLHeadingElement>(null)
@@ -248,7 +255,7 @@ export function ConsoleFrame({ model, subscriptions }: {
     </header>
     <main>
       <h1 ref=${heading} tabindex="-1">내 계정</h1>
-      <${Body} view=${view} subscriptions=${subscriptions} onRetry=${() => { void model.load() }} />
+      <${Body} view=${view} subscriptions=${subscriptions} keepers=${keepers} tokens=${tokens} onRetry=${() => { void model.load() }} />
     </main>
   `
 }

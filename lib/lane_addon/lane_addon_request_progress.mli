@@ -73,9 +73,10 @@ val append : t -> event -> (t, string) result
     immediately after dispatch intent, before any execution observation.
     A late original judgment preserves earlier observations in the history.
     Commit retry requires a fresh exact before-state observation; confirmation
-    requires the exact captured after-state. An execution refusal can retain
-    one immutable successor intent and acknowledge that same child's ID. Its
-    original refusal remains terminal; neither fact permits redispatch or
+    requires the exact captured after-state. An execution or before-dispatch
+    refusal can retain one immutable successor intent and acknowledge that same
+    child's ID; a settled execution refusal cannot. The refusal itself
+    remains terminal; neither fact permits redispatch or
     establishes that this consumer may narrow. The host checks that policy,
     whole-child derivation and durable parent acknowledgement before admission.
     Neither observation performs I/O. *)

@@ -78,10 +78,8 @@ let websocket_upgrade_unavailable_reason () =
 let websocket_upgrade_authorized ~base_path ~request_authority request =
   let ( let* ) = Result.bind in
   let* () = ensure_same_origin_if_browser_request ~request_authority request in
-  let* (_ : _ option) =
-    verify_mcp_auth_for_authority ~base_path ~request_authority request
-  in
-  Ok ()
+  (* HIGH-RISK-UNREVIEWED: the /mcp verdict is the answer of this gate. *)
+  verify_mcp_auth_for_authority ~base_path ~request_authority request
 
 let websocket_handler ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then

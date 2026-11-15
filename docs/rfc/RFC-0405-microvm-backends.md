@@ -62,7 +62,7 @@ keeper TOML 에 한 줄:
 
 ```toml
 sandbox_profile = "microvm"
-microvm_backend = "apple_container"   # | "microsandbox" | "gondolin"
+microvm_backend = "apple_container"   # | "microsandbox" | "nerdctl_kata"
 ```
 
 생략하면 플랫폼 기본값. macOS 는 `apple_container`, 리눅스는 미선언이면

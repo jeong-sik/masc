@@ -1,5 +1,6 @@
 (** Actual listener ownership, bind acknowledgment, cancellation, and h2c handoff.
-    Synchronization uses promises and real sockets; no readiness timers/probes. *)
+    Synchronization uses promises and real sockets; no readiness timers/probes.
+    The connection bounds are counted on a mock clock. *)
 module TM = Masc.Transport_metrics
 module Listener = Server_grpc_listener
 
@@ -200,6 +201,104 @@ let test_malformed_connection_keeps_listener_alive () =
       await_peer_close ())
     ()
 
+let small_buffer_bytes = 16 * 1024
+
+(* A loopback connection to [addr] whose receive buffer is set before it
+   connects. Set later, the size no longer holds the kernel back: macOS went
+   on growing the buffer of a connected socket and took megabytes for a
+   reader that was away. *)
+let connect_with_small_receive_buffer ~sw addr =
+  let fd = Unix.socket ~cloexec:true Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt_int fd Unix.SO_RCVBUF small_buffer_bytes;
+  (match addr with
+   | `Tcp (_, port) -> Unix.connect fd (Unix.ADDR_INET (Unix.inet_addr_loopback, port))
+   | `Unix _ -> Alcotest.fail "expected TCP listener");
+  Eio_unix.Net.import_socket_stream ~sw ~close_unix:true fd
+
+(* The listener on a loopback port, its connection bounds counted on a mock
+   clock (RFC-0518 D4, D6). [run] is the client side.
+
+   Both socket buffers between the server's writer and the client are of a
+   set size, which the kernel does not grow: an accepted socket takes the
+   listening socket's sending buffer. What the server writes to a reader
+   that is away soon waits at the socket and stays there. *)
+let with_bounded_listener run =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 30.0 @@ fun () ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio_mock.Clock.make () in
+  let bound, publish_bound = Eio.Promise.create () in
+  let server = Grpc_eio.Server.create () in
+  Eio.Fiber.first
+    (fun () -> ignore (Listener.with_listener
+      ~listen:(fun ~sw ->
+        let socket = listen net ~sw in
+        Eio_unix.Fd.use_exn "setsockopt" (Eio_unix.Net.fd socket) (fun fd ->
+          Unix.setsockopt_int fd Unix.SO_SNDBUF small_buffer_bytes);
+        socket)
+      ~serve:(fun ~sw socket ->
+        Eio.Promise.resolve publish_bound (Eio.Net.listening_addr socket);
+        Listener.serve_socket ~sw ~clock ~socket server)))
+    (fun () ->
+      Eio.Switch.run @@ fun sw ->
+      run ~clock (connect_with_small_receive_buffer ~sw (Eio.Promise.await bound)))
+
+(* Moves the mock clock to its next sleeper, once there is one. *)
+let rec to_next_timer clock =
+  if not (Eio_mock.Clock.try_advance clock)
+  then (
+    Eio.Fiber.yield ();
+    to_next_timer clock)
+
+(* A client that connects and sends nothing. The first timer the listener
+   starts is the preparation bound; when it runs out the client sees the
+   connection end. *)
+let test_peer_that_sends_nothing_is_given_up () =
+  with_bounded_listener @@ fun ~clock client ->
+  to_next_timer clock;
+  Alcotest.(check (float 0.0)) "the first timer is the preparation bound"
+    Server_connection_socket.preparation_bound_s (Eio.Time.now clock);
+  match Eio.Flow.single_read client (Cstruct.create 16) with
+  | (_ : int) -> Alcotest.fail "the listener answered a client that sent nothing"
+  | exception End_of_file -> ()
+  | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
+
+let h2_client_preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+let h2_frame_header_bytes = 9
+let h2_settings_frame_type = 4
+let h2_empty_settings = "\x00\x00\x00\x04\x00\x00\x00\x00\x00"
+let h2_ping = "\x00\x00\x08\x06\x00\x00\x00\x00\x00masc-png"
+
+(* What the client sends in one turn of the scheduler. *)
+let pings_a_turn = 1024
+
+(* A client that opens an HTTP/2 connection, keeps sending PINGs and reads
+   none of the answers. Once the two small socket buffers are full, the
+   server's writer waits at the socket with a piece in flight. Time
+   passes only on the mock clock, a timer at a time, so the piece is cut
+   because its write bound ran out: the client's next write finds the
+   connection reset. *)
+let test_peer_that_reads_nothing_is_cut () =
+  with_bounded_listener @@ fun ~clock client ->
+  Eio.Flow.copy_string (h2_client_preface ^ h2_empty_settings) client;
+  (* The server's SETTINGS: preparation is over, so its timer is gone. *)
+  let header = Cstruct.create h2_frame_header_bytes in
+  Eio.Flow.read_exact client header;
+  Alcotest.(check int) "the server opened with SETTINGS" h2_settings_frame_type
+    (Cstruct.get_uint8 header 3);
+  let pings = String.concat "" (List.init pings_a_turn (fun _ -> h2_ping)) in
+  let rec ask_until_cut () =
+    let (_ : bool) = Eio_mock.Clock.try_advance clock in
+    match Eio.Flow.copy_string pings client with
+    | () ->
+      Eio.Fiber.yield ();
+      ask_until_cut ()
+    | exception Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _) -> ()
+  in
+  ask_until_cut ();
+  Alcotest.(check bool) "a write bound passed before the cut" true
+    (Eio.Time.now clock >= Server_connection_socket.write_bound_s)
+
 let () =
   Alcotest.run "gRPC listener ownership"
     ["lifecycle", [
@@ -212,4 +311,10 @@ let () =
       Alcotest.test_case "actual h2 gRPC health handoff" `Quick test_h2_health_handoff;
       Alcotest.test_case "malformed connection then same-listener health" `Quick
         test_malformed_connection_keeps_listener_alive;
+    ];
+     "connection bounds", [
+      Alcotest.test_case "a peer that sends nothing is given up" `Quick
+        test_peer_that_sends_nothing_is_given_up;
+      Alcotest.test_case "a peer that reads nothing is cut at the write bound" `Quick
+        test_peer_that_reads_nothing_is_cut;
     ]]

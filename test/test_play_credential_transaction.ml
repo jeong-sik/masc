@@ -828,10 +828,52 @@ let test_disconnect_refuses_a_following_load_or_restore () =
     [ "masc_dos_load", `Assoc ["program", `String "spin.com"]
     ; "masc_dos_restore", `Assoc ["slot", `String "autosave"] ]
 
+(* Issue #46540: an auth config that cannot be read says neither "seats are
+   enforced" nor "names are self-declared". A seat that left must not move or
+   hand on the machine through that gap; the refusal is the host's
+   unavailability, not a client mistake. *)
+let unreadable_auth_configs =
+  [ "malformed JSON", "{ not json"
+  ; "unknown field", {|{"enabled":true,"require_token":false,"surprise":1}|} ]
+
+let test_unreadable_auth_config_refuses_input_and_handoff () =
+  List.iter (fun (label, content) ->
+    with_machine @@ fun config _ _ ->
+    let token, _ = renew config in
+    ignore (auth_ok (Auth.create_token config.base_path ~agent_name:"operator" ~role:Masc_domain.Admin));
+    participation_ok (participate config token Play_participation.Departed);
+    check (option string) (label ^ ": the departure freed the controller") None (controller ());
+    Out_channel.with_open_bin (Auth.auth_config_file config.base_path)
+      (fun channel -> output_string channel content);
+    let unavailable action = function
+      | Error (Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Unavailable _)) -> ()
+      | Error error -> fail (label ^ ": " ^ action ^ " was refused as something else: " ^ call_failure error)
+      | Ok result -> fail (label ^ ": " ^ action ^ " passed the unreadable auth config: "
+          ^ Agent_core.Mcp.text_of_tool_result result) in
+    unavailable "input" (step_as config "player");
+    unavailable "handoff" (Machine_addon_host.call_shared ~config
+      ~principal:(Lane_addon_call_context.Host_actor "player") ~name:"masc_dos_pass"
+      ~arguments:(`Assoc ["to", `String "operator"]));
+    check (option string) (label ^ ": nobody took the controller") None (controller ()))
+    unreadable_auth_configs
+
+let test_self_declared_input_is_admitted_without_a_seat_check () =
+  with_machine @@ fun config _ _ ->
+  let token, _ = renew config in
+  participation_ok (participate config token Play_participation.Departed);
+  Auth.save_auth_config config.base_path {Masc_domain.default_auth_config with enabled=false};
+  (match step_as config "player" with
+   | Ok result when result.S.is_error <> Some true -> ()
+   | Ok result -> fail ("self-declared input was refused: " ^ Agent_core.Mcp.text_of_tool_result result)
+   | Error error -> fail ("self-declared input was refused: " ^ call_failure error));
+  check (option string) "a self-declared name takes the free controller" (Some "player") (controller ())
+
 let () =
   run "play_credential_transaction"
     [ "controller recovery",
       [ test_case "disconnect refuses a following load or restore" `Quick test_disconnect_refuses_a_following_load_or_restore
+      ; test_case "an unreadable auth config refuses input and handoff" `Quick test_unreadable_auth_config_refuses_input_and_handoff
+      ; test_case "self-declared input needs no seat check" `Quick test_self_declared_input_is_admitted_without_a_seat_check
       ; test_case "current discovery follows regular symlinks" `Quick test_current_listing_follows_regular_symlink
       ; test_case "Worker Keepers have no play session" `Quick test_worker_keeper_has_no_play_session
       ; test_case "departed callers cannot pass a free controller" `Quick test_departed_caller_cannot_pass_a_free_controller

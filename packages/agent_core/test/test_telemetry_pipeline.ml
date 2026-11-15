@@ -15,6 +15,13 @@ let local_provider_config ~base_url ~model_id =
     ~api_key:""
     ~headers:[ "Content-Type", "application/json" ]
     ~request_path:"/v1/chat/completions"
+    (* The scripted transport answers a streaming turn through
+       [complete_stream]. Without this declaration [Pipeline] sends the turn
+       through [complete_sync] and no streaming telemetry is emitted. *)
+    ~model_capabilities_override:
+      { Llm_provider.Capabilities.default_capabilities with
+        supports_native_streaming = true
+      }
     ()
 ;;
 

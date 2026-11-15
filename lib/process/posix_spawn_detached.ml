@@ -40,30 +40,15 @@ let rec reaped pid =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> reaped pid
   | exception Unix.Unix_error (Unix.ECHILD, _, _) -> Some None
 
-let standard fd = fd = Unix.stdin || fd = Unix.stdout || fd = Unix.stderr
-
-(* posix_spawn applies the descriptor actions in order, so a source that is
-   itself 0, 1 or 2 would be overwritten by an earlier action before it is
-   copied. A process whose standard descriptors are closed gets one of those
-   numbers for the next file it opens. Every descriptor this opens or copies
-   goes into [opened], which the caller closes once. *)
-let above_standard ~opened fd =
-  let rec lift fd =
-    if standard fd then begin
-      let copy = Unix.dup ~cloexec:true fd in
-      opened := copy :: !opened;
-      lift copy
-    end
-    else fd
-  in
-  lift fd
-
-let spawn_with ~opened ~executable ~argv ~env ~output =
+(* [output] may be numbered 0, 1 or 2 -- a process whose standard descriptors
+   are closed gets one of those for the next file it opens. The spawn stub
+   reads every source before it writes a target, so it is passed as it is. *)
+let spawn_with ~executable ~argv ~env ~output =
   let devnull = Unix.openfile "/dev/null" [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-  opened := devnull :: !opened;
-  let devnull = above_standard ~opened devnull in
-  let output = above_standard ~opened output in
-  posix_spawn executable (Array.of_list argv) env (None, true) [ 0, devnull; 1, output; 2, output ]
+  Fun.protect
+    ~finally:(fun () -> try Unix.close devnull with Unix.Unix_error _ -> ())
+    (fun () ->
+      posix_spawn executable (Array.of_list argv) env (None, true) [ 0, devnull; 1, output; 2, output ])
 
 let spawn ~sw ~argv ~env ~output =
   match argv with
@@ -72,19 +57,13 @@ let spawn ~sw ~argv ~env ~output =
     (* Only a backend that installs a SIGCHLD handler broadcasts the
        condition [reaped] waits on (see Posix_spawn_process_mgr). *)
     Eio_unix.Process.install_sigchld_handler ();
-    let opened = ref [] in
     let started =
-      Fun.protect
-        ~finally:(fun () ->
-          List.iter (fun fd -> try Unix.close fd with Unix.Unix_error _ -> ()) !opened)
-        (fun () ->
-          match spawn_with ~opened ~executable ~argv ~env ~output with
-          | pid -> Ok pid
-          | exception Unix.Unix_error (code, call, target) ->
-            (* [target] is what [call] failed on: "/dev/null" for openfile,
-               the executable for posix_spawn, nothing for dup. *)
-            let call = if String.equal target "" then call else Printf.sprintf "%s %s" call target in
-            Error (Printf.sprintf "%s: %s" call (Unix.error_message code)))
+      match spawn_with ~executable ~argv ~env ~output with
+      | pid -> Ok pid
+      | exception Unix.Unix_error (code, call, target) ->
+        (* [target] is what [call] failed on: "/dev/null" for openfile, the
+           executable for posix_spawn. *)
+        Error (Printf.sprintf "%s %s: %s" call target (Unix.error_message code))
     in
     Result.map
       (fun pid ->

@@ -88,6 +88,30 @@ val is_unspecified_host : string -> bool
 (** [true] for the wildcard bind addresses 0.0.0.0 and ::. A wildcard means
     "every interface", so it is not a peer any caller can reach back on. *)
 
+type url_host =
+  | Ip_address of Ipaddr.t
+  | Host_name of string
+(** The host of a URL: an IP address, or a name. *)
+
+val url_host_of_string : string -> url_host
+(** Read a host written without brackets, as a bind setting or [Uri.host]
+    gives it. Text that {!Ipaddr.of_string} reads is an address; every other
+    text is a name, kept as written. *)
+
+val url_host_to_string : url_host -> string
+(** The host as a URL spells it. An IPv6 address is put in square brackets
+    (RFC 3986 section 3.2.2), so [::1] is ["[::1]"] and a port can follow it.
+    An IPv4 address and a name are written as they are. *)
+
+val http_origin : address:Ipaddr.t -> port:int -> string
+(** ["http://<host>:<port>"] for a listener address, with the host spelled by
+    {!url_host_to_string}: [http://127.0.0.1:8935], [http://[::1]:8935]. *)
+
+val advertised_bind_address : Ipaddr.t -> Ipaddr.t
+(** The address a client on this machine dials for a listener bound to the
+    given address. The wildcards 0.0.0.0 and :: become 127.0.0.1; every other
+    address is returned as it is, [::1] included. *)
+
 val normalize_advertised_host : string -> string
 (** Turn a host that may have been written as a bind setting into one a
     client can dial.

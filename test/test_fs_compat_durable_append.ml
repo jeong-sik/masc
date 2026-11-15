@@ -740,8 +740,65 @@ let test_private_jsonl_stable_append_cuts_incomplete_tail () =
   cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
 ;;
 
-(* An offset-checked caller conditioned its write on the length it saw,
-   fragment included, so the fragment is refused and left in place. *)
+(* A caller whose offset is where the complete rows end read every row there
+   is. The torn row after that offset was never one, so the append cuts it
+   and writes from the offset instead of refusing until a person repairs the
+   file. *)
+let test_private_jsonl_append_at_rows_end_cuts_incomplete_tail () =
+  let cut_then_append ~complete ~fragment =
+    with_temp_jsonl (complete ^ fragment) @@ fun path ->
+    let suffix = "{\"row\":\"next\"}\n" in
+    (match
+       Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+         path
+         ~expected_end_offset:(String.length complete)
+         suffix
+     with
+     | Fs_compat.Private_file_succeeded end_offset ->
+       check int "end offset is where the kept rows and the new row end"
+         (String.length complete + String.length suffix) end_offset
+     | Fs_compat.Private_file_failed error ->
+       fail (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+     | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+       fail "unexpected cleanup failure");
+    check string
+      (Printf.sprintf "%S is cut and the complete rows kept" fragment)
+      (complete ^ suffix)
+      (Fs_compat.load_file path)
+  in
+  cut_then_append ~complete:"{\"row\":1}\n" ~fragment:"{\"row\":2";
+  cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
+;;
+
+(* An offset that is neither the end of the complete rows nor the full length
+   belongs to an older read. It is a mismatch, and the torn row stays. *)
+let test_private_jsonl_append_at_stale_offset_keeps_incomplete_tail () =
+  let original = "{\"row\":1}\n{\"row\":2}\n{\"row\":3" in
+  with_temp_jsonl original @@ fun path ->
+  let stale = String.length "{\"row\":1}\n" in
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:stale
+       "{\"row\":4}\n"
+   with
+   | Fs_compat.Private_file_failed
+       (Fs_compat.End_offset_mismatch { expected; actual }) ->
+     check int "names the stale offset" stale expected;
+     check int "names the observed length" (String.length original) actual
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded _
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "a stale offset wrote after an incomplete row");
+  check string "every byte unchanged" original (Fs_compat.load_file path)
+;;
+
+(* An offset-checked caller that counted the fragment in the length it saw
+   read something that is not a row, so it is refused and the fragment is
+   left in place. *)
 let test_private_jsonl_append_at_end_offset_refuses_incomplete_tail () =
   let original = "{\"row\":1}\n{\"row\":2" in
   with_temp_jsonl original @@ fun path ->
@@ -2017,6 +2074,14 @@ let () =
             "private JSONL append cuts incomplete tail"
             `Quick
             test_private_jsonl_append_cuts_incomplete_tail
+        ; test_case
+            "private JSONL offset append at the rows end cuts incomplete tail"
+            `Quick
+            test_private_jsonl_append_at_rows_end_cuts_incomplete_tail
+        ; test_case
+            "private JSONL offset append at a stale offset keeps incomplete tail"
+            `Quick
+            test_private_jsonl_append_at_stale_offset_keeps_incomplete_tail
         ; test_case
             "private JSONL offset append refuses incomplete tail"
             `Quick

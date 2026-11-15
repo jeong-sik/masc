@@ -485,7 +485,17 @@ type raw_sync_response =
     [timeout_s] is explicitly supplied. Enforcing that deadline also requires
     [clock]; supplying [timeout_s] without [clock] returns [AcceptRejected]. A
     timeout owned by this wrapper surfaces as
-    [TimeoutError { phase = Http_operation; _ }]. *)
+    [TimeoutError { phase = Http_operation; _ }].
+
+    The response returned is the final one: interim 1xx responses before it
+    are read past (RFC 9110 §15.2). A body the peer's close ends before its
+    [Content-Length] or before the chunked coding's last chunk is incomplete
+    (RFC 9112 §8) and is returned as [NetworkError { kind = End_of_file; _ }],
+    not as a response. A response that declares neither ends where the
+    server closes the connection (RFC 9112 §6.3). The peer's close before any
+    response is the same [NetworkError], with or without [cache].
+    {!delete_sync}, {!post_sync} and {!post_sync_once} read a response the
+    same way. *)
 val get_sync
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock

@@ -662,44 +662,34 @@ let test_masc_dashboard_schema () =
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
-(* The enum the model reads is declared in the tool TOML; the vocabulary
-   Dashboard accepts is declared in OCaml (#27069). A scope in one and not the
-   other either hides it from the model or advertises one the runtime
-   refuses. *)
-let test_masc_dashboard_scope_enum_matches_the_runtime () =
+(* The model reads the parameter list in the tool TOML; the handler reads
+   [Dashboard.compact_argument] and falls back to [Dashboard.default_view]
+   (#51211). A parameter in one and not the other is either advertised and then
+   refused, or accepted and never offered; a default that differs tells the
+   model it gets one view by leaving the key out while the handler gives the
+   other. *)
+let test_masc_dashboard_schema_is_what_the_handler_takes () =
   match find_registered_tool "masc_dashboard" with
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some schema ->
-    let enum =
+    let properties =
       match get_json_assoc "properties" schema.input_schema with
+      | Some properties -> properties
       | None -> Alcotest.fail "masc_dashboard missing properties"
-      | Some props ->
-        (match List.assoc_opt "scope" props with
-         | None -> Alcotest.fail "masc_dashboard has no scope parameter"
-         | Some scope_schema ->
-           (match Yojson.Safe.Util.member "enum" scope_schema with
-            | `List values ->
-              List.map
-                (function
-                  | `String value -> value
-                  | other ->
-                    Alcotest.failf
-                      "scope enum holds a non-string: %s"
-                      (Yojson.Safe.to_string other))
-                values
-            | _ -> Alcotest.fail "masc_dashboard scope has no enum"))
     in
     Alcotest.(check (list string))
-      "the schema enum is what Dashboard accepts"
-      Dashboard.valid_scope_strings
-      enum;
-    List.iter
-      (fun value ->
-        Alcotest.(check bool)
-          (Printf.sprintf "the runtime parses the advertised scope %S" value)
-          true
-          (Option.is_some (Dashboard.scope_of_string_opt value)))
-      enum
+      "the declared parameters are the ones the handler takes"
+      [ Dashboard.compact_argument ]
+      (List.map fst properties);
+    let compact = List.assoc Dashboard.compact_argument properties in
+    Alcotest.(check (option string))
+      "the parameter is declared a boolean"
+      (Some "boolean")
+      (get_json_string "type" compact);
+    Alcotest.(check (option bool))
+      "the declared default is the view the handler falls back to"
+      (Some (Dashboard.compact_of_view Dashboard.default_view))
+      (get_json_bool "default" compact)
 
 let test_masc_keeper_waiting_inventory_schema () =
   match find_registered_tool "masc_keeper_waiting_inventory" with
@@ -833,8 +823,8 @@ let () =
     ];
     "dashboard_tools", [
       Alcotest.test_case "dashboard" `Quick test_masc_dashboard_schema;
-      Alcotest.test_case "dashboard scope enum matches the runtime" `Quick
-        test_masc_dashboard_scope_enum_matches_the_runtime;
+      Alcotest.test_case "dashboard schema is what the handler takes" `Quick
+        test_masc_dashboard_schema_is_what_the_handler_takes;
       Alcotest.test_case "keeper_waiting_inventory" `Quick
         test_masc_keeper_waiting_inventory_schema;
       Alcotest.test_case "agent_fitness" `Quick test_masc_agent_fitness_schema;

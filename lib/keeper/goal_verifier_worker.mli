@@ -22,7 +22,19 @@ val goal_admission_result :
 type error =
   | Store_unavailable of string
   | Original_invalid of string
-  | Authority_changed of string
+  | Destination_mismatch of string
+      (** The record belongs to another installation or package. *)
+  | Authority_unavailable of string
+      (** The current lookup authority could not be prepared, or the next
+          attempt's prompt could not be rendered with it. *)
+  | Question_changed
+      (** The current authority asks another question: Goal, request,
+          criterion, workspace or submitted evidence moved. No next attempt
+          may ask it. *)
+  | Authority_changed of Verifier_review_authority_change.t
+      (** The same question meets another lookup authority or answer format.
+          The attempt is refused before dispatch; its next attempt asks with
+          the current authority. *)
   | Execution_pending of string
 val error_to_string : error -> string
 
@@ -125,15 +137,22 @@ val inventory_by_goal :
     no dispatch or cross-Goal authority. *)
 
 val frontier :
+  authority:(unit -> (Verification_authority_tools.goal_review, string) result) ->
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> request_id:string -> new_run:(unit -> run_identity) ->
   (retained option, error) result
 (** Restore the exact linked original before preparing a new input. A definite
     terminal refusal with typed retryable runtimes may retain one successor;
-    its complete input and fixed run are staged before the parent intent.
-    Restart restores that staged child without calling [new_run] or rendering
-    prompts. Once the parent has observed a successor, its actual retained
-    record and progress are required; a missing or different child is an error,
+    its complete input and fixed run are staged before the parent intent. The
+    successor asks the parent's question with the lookup authority [authority]
+    prepares; [authority] is forced only to allocate it, and a changed
+    question allocates nothing.
+    A before-dispatch refusal whose evidence starts at this original's
+    authority and answer format allocates its next attempt the same way, on a
+    wake or an explicit request alike.
+    Restart restores that staged child without calling [new_run], [authority]
+    or rendering prompts. Once the parent has observed a successor, its actual
+    retained record and progress are required; a missing or different child is an error,
     never a fresh [Captured] replacement or another unknown dispatch.
     A noncanonical key for this exact Goal/request refuses selection even when
     a canonical original exists; another Goal or request's noncanonical key
@@ -144,6 +163,7 @@ val frontier :
     retention and run. *)
 
 val request_retry :
+  authority:(unit -> (Verification_authority_tools.goal_review, string) result) ->
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> request_id:string -> requested_by:string ->
   new_run:(unit -> run_identity) -> (unit, error) result
@@ -153,7 +173,11 @@ val request_retry :
     its required stated reason. The exact reviewer result stays in its receipt;
     the Goal admission projection grants no judgment or automatic retry.
     Store the actor/parent
-    authorization in the complete staged child before acknowledging it.
+    authorization in the complete staged child before acknowledging it. The
+    child asks the parent's question with the lookup authority [authority]
+    prepares now. A before-dispatch refusal needs no authorization: its next
+    attempt is staged as a wake stages it, and the request acknowledges that
+    child.
     An ordinary wake or judgment grants no retry. An active or unknown dispatch
     returns [Execution_pending], so the caller cannot report a new retry as
     accepted while its original result is unresolved. *)
@@ -165,7 +189,8 @@ val destination : retained -> string * string
 val progress : retained -> Lane_addon_request_progress.t
 val restored_receipt : retained -> (receipt option, error) result
 (** A retained judgment/terminal refusal and all actual tool observations, independent
-    of today's lookup availability. Captured/admission/pending returns None. *)
+    of today's lookup availability. Captured/admission/pending returns None,
+    and so does a before-dispatch refusal: it reached no reviewer. *)
 
 val retained_judgment : retained -> (Yojson.Safe.t, error) result
 (** Complete validated stored judgment for the host's commit payload. Returns
@@ -179,7 +204,9 @@ val tool_observations : retained ->
 val observed_receipt : retained -> (receipt option, error) result
 (** Passive receipt restoration including admission and unknown outcomes.
     Unlike [restored_receipt], a returned value need not be a settled review;
-    the caller must use progress for dispatch/commit authority. *)
+    the caller must use progress for dispatch/commit authority. A
+    before-dispatch refusal returns [None], also after an admission wait; that
+    wait stays in the progress events. *)
 
 val record_observer :
   store:Lane_addon_store.t -> retained:retained ->
@@ -195,8 +222,12 @@ val run :
   authority:Verification_authority_tools.goal_review ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) ->
   unit -> (receipt, error) result
-(** Restore exact prior judgments first. Otherwise confirm original authority
-    and persist dispatch intent before using the actual retained reviewer.
+(** Restore exact prior judgments first. Otherwise check the question first:
+    another one is [Question_changed]. A moved lookup authority or answer
+    format records a before-dispatch refusal holding only what moved and
+    returns [Authority_changed]; called again on that refusal it returns the
+    same. Otherwise persist dispatch intent before using the actual retained
+    reviewer.
     Unknown dispatch/cancellation/exception never redispatches; a proven pre-admission
     refusal may reuse the same original. Persist the structured reply and full
     tool observations atomically before returning control to the Goal host.

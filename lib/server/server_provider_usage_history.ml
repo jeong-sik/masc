@@ -60,15 +60,11 @@ let consume projection = function
         detail;
       Projection.note_unreadable projection
   | Dated_jsonl.Parsed (`List items) ->
-      List.fold_left
-        (fun projection item ->
-          match Projection.consume_item projection item with
-          | Ok next -> next
-          | Error detail ->
-              Log.Server.warn "provider usage history unreadable report: stored report: %s"
-                detail;
-              Projection.note_unreadable projection)
-        projection items
+      let projection, unread = Projection.consume_report projection items in
+      List.iter
+        (Log.Server.warn "provider usage history unreadable report: stored report: %s")
+        unread;
+      projection
   | Dated_jsonl.Parsed _ ->
       Log.Server.warn "provider usage history unreadable report: stored line: %s"
         "expected a report list";
@@ -125,6 +121,18 @@ let restore config ~now ~scopes =
     Log.Server.warn
       "provider usage history: %d stored readings name a source or kind this build does not write and were not put back"
       stored.Projection.unrestorable;
+  let reports =
+    List.filter_map
+      (fun (scope_id, stored) ->
+        match stored with
+        | Projection.Report { observed_at; report } -> Some (scope_id, observed_at, report)
+        | Projection.Unreadable_complete_report { source; observed_at } ->
+            Log.Server.warn
+              "provider usage history: the complete %s report of scope %s observed at %.3f was not read whole; nothing of that source was put back"
+              (Usage.source_to_string source) scope_id observed_at;
+            None)
+      stored.Projection.reports
+  in
   List.iter
     (fun scope ->
       let id = scope_id scope in
@@ -132,6 +140,6 @@ let restore config ~now ~scopes =
         (List.filter_map
            (fun (scope_id, observed_at, report) ->
              if String.equal scope_id id then Some (observed_at, report) else None)
-           stored.Projection.reports))
+           reports))
     scopes;
   Ok ()

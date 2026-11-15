@@ -1,6 +1,7 @@
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseSSEMessage } from './schemas/sse'
+import type * as NamespaceTruthSignals from './namespace-truth-signals'
 import type { BoardPost, BoardSortMode, RouteState } from './types'
 
 void vi
@@ -91,7 +92,7 @@ async function loadSseStore() {
     normalizeNamespaceTruth: vi.fn((value: unknown) => value),
   }))
   vi.doMock('./namespace-truth-signals', async original => ({
-    ...(await original<typeof import('./namespace-truth-signals')>()),
+    ...(await original<typeof NamespaceTruthSignals>()),
     namespaceTruth,
     namespaceTruthError,
   }))

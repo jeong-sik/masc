@@ -211,7 +211,7 @@ val read_after_account_refusal :
     refreshable credential is not refreshed: the read fails instead), record
     the windows as {!read_scopes} does, and rest the scope on
     {!Runtime_quota_window} when a gating window is spent: [Spent_until t]
-    is {!Runtime_quota_window.note_exhausted} until [t],
+    is {!Runtime_quota_window.note_read_spent_until} until [t],
     [Spent_without_reset] is {!Runtime_quota_window.note_read_without_reset}.
     A [t] not after the answer's arrival names no rest and is returned and
     recorded as [Spent_without_reset].

@@ -138,6 +138,16 @@ let test_rest_generate_openapi_document_keeps_the_https_scheme () =
   check string "the servers url is dialled over https" "https://127.0.0.1:443"
     (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
+(* An IPv6 host keeps its brackets in the servers url: without them the port
+   reads as one more group of the address (#50058). *)
+let test_rest_generate_openapi_document_brackets_an_ipv6_host () =
+  let open Yojson.Safe.Util in
+  let doc =
+    Transport.Rest.generate_openapi_document ~scheme:"https" ~host:"fd00::1" ~port:8443 ()
+  in
+  check string "the servers url of an IPv6 host" "https://[fd00::1]:8443"
+    (doc |> member "servers" |> index 0 |> member "url" |> to_string)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -163,5 +173,7 @@ let () =
         test_rest_generate_openapi_document_folds_a_wildcard_host;
       test_case "openapi document keeps the https scheme" `Quick
         test_rest_generate_openapi_document_keeps_the_https_scheme;
+      test_case "openapi document brackets an IPv6 host" `Quick
+        test_rest_generate_openapi_document_brackets_an_ipv6_host;
     ];
   ]

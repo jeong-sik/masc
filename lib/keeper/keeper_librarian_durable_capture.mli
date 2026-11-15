@@ -115,6 +115,11 @@ val confirm_sources : boundaries:boundary_lines -> messages:Agent_core.Types.mes
     names. Atom messages are compared in their checkpoint encoding. Reads
     nothing itself. *)
 val to_json : t -> Yojson.Safe.t
+val basis_json : t -> Yojson.Safe.t
+(** {!to_json} of the source with the two fields {!with_current} sets, the
+    expected Memory revision and the input's current Memory, emptied. Two
+    sources have equal basis exactly when one is the other with another
+    current Memory. The value is compared, never decoded. *)
 val of_json : Yojson.Safe.t -> (t, error) result
 (** Field-exact envelope and typed structured children. Original payload JSON and
     ordered message metadata use the complete Librarian input codec. Source

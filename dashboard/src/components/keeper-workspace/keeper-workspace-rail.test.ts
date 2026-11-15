@@ -326,7 +326,6 @@ describe('KeeperWorkspaceRail', () => {
             enable_thinking: true,
             preserve_thinking: false,
             resolved_reasoning_effort: 'high',
-            glm_replay_reasoning: false,
             tool_stream: true,
             tool_choice: { kind: 'required' },
             disable_parallel_tool_use: true,

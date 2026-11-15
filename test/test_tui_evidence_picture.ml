@@ -70,12 +70,12 @@ let sha256 = String.init 64 (fun i -> "0123456789abcdef".[i mod 16])
 
 let test_a_control_sequence_in_the_reference_never_reaches_the_line () =
   let line =
-    Picture.caption_of_preview ~reference:"artifact:a\x1b[2Jb.png" ~bytes:1 ~sha256 ~format:"png"
+    Picture.caption_of_preview ~ko:false ~reference:"artifact:a\x1b[2Jb.png" ~bytes:1 ~sha256 ~format:"png"
       (Decode.Preview_withheld Decode.Withheld_not_image_format)
   in
   Alcotest.(check bool) "no escape byte" false (String.contains line '\x1b');
   let line =
-    Picture.caption ~reference:"artifact:a\x1b[2Jb.png" ~bytes:1 ~sha256 ~format:"p\x1bng"
+    Picture.caption ~ko:false ~reference:"artifact:a\x1b[2Jb.png" ~bytes:1 ~sha256 ~format:"p\x1bng"
       (Picture.Unshown (Picture.Conversion_failed "sips: \x1b[31mfailed"))
   in
   Alcotest.(check bool) "nor in a prepared one, or a converter's report" false

@@ -573,6 +573,7 @@ type posts_source_failure =
   | Posts_transaction_failed of Fs_compat.private_jsonl_transaction_error
   | Posts_missing
   | Posts_source_binding_mismatch
+  | Posts_policy_source_is_posts_source
   | Posts_snapshot_stale
   | Posts_workspace_binding_refused of Board_workspace_binding.rejection
   | Posts_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }

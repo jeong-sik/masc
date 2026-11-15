@@ -24,6 +24,11 @@ val apply_publication :
     when a later step failed. Unknown outcomes retain the draft and files.
     Draft protection compares submitted bytes; it does not track revisions. *)
 
+val comment_outcome_unknown : ko:bool -> string
+(** A comment that may or may not have landed: its dispatch did not run, or
+    was interrupted after the request could have reached the server. The
+    operator looks at the thread before sending it again. *)
+
 val comment_launch_failed :
   Masc_tui_types.state -> request_id:Masc_tui_types.board_comment_request_id -> unit
 (** Release only the matching request after launch failure. Dispatch failure

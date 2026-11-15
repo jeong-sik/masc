@@ -45,7 +45,59 @@ const scenarios = {
   // whoami names another person than the session, as when another tab signs
   // in between the two requests.
   account_changed: { session: { status: 200 }, role: "worker", logout: 204, whoamiUser: "usr_01JCMOTHER0000" },
+  // The subscriptions panel (L3d) in each case: nothing connected, accounts
+  // of each kind, and a reading the server refuses.
+  member_panel_none: { session: { status: 200 }, role: "worker", logout: 204, panel: "none" },
+  member_panel_each: { session: { status: 200 }, role: "worker", logout: 204, panel: "each" },
+  member_panel_unread: { session: { status: 200 }, role: "worker", logout: 204, panel: "unread" },
+  admin_panel_each: { session: { status: 200 }, role: "admin", logout: 204, panel: "each" },
 };
+
+// What the two routes of the panel answer, in the shapes of
+// lib/server/server_person_integrations.ml and lib/auth_preview.ml
+// (provider_accounts). One model id is one long word, to see that a narrow
+// window breaks it rather than scrolls.
+const longModel = "claude-code-sonnet-thinking-high-effort-with-a-long-identifier-2026";
+const offered = {
+  integrations: [
+    { integration_id: "claude_code", display_name: "Claude Code", models: ["claude-sonnet-5", longModel], calls: "allowed" },
+    { integration_id: "codex", display_name: "Codex", models: ["gpt-5.5"], calls: "refused", refusal: "native_tools_reach_other_homes" },
+  ],
+};
+const id = (c) => c.repeat(64);
+const runtime = (account, model, fact) => ({ runtime_id: `${id(account)}.${model}`, provider_account_id: id(account), ...fact });
+const owned = {
+  none: { provider_accounts: [], runtimes: [] },
+  each: {
+    provider_accounts: [
+      { provider_account_id: id("a"), integration_id: "claude_code" },
+      { provider_account_id: id("b"), integration_id: "codex" },
+      { provider_account_id: id("c"), integration_id: "muse" },
+      { provider_account_id: id("d"), integration_id: null, unread: "login_receipt_missing" },
+      { provider_account_id: id("e"), integration_id: "claude_code" },
+    ],
+    runtimes: [
+      runtime("a", "claude-sonnet-5", { model: "claude-sonnet-5" }),
+      runtime("a", longModel, { model: longModel }),
+      runtime("a", "claude-opus-9", { model: null, unread: "runtime_not_bound" }),
+      runtime("b", "gpt-5.5", { model: "gpt-5.5" }),
+      runtime("c", "muse-1", { model: null, unread: "template_not_declared" }),
+      runtime("d", "claude-sonnet-5", { model: null, unread: "account_integration_unread" }),
+    ],
+  },
+};
+
+async function panelRoutes(req, res, path) {
+  if (held !== null) await new Promise((release) => held.push(release));
+  if (req.method !== "GET") return json(res, 405, { error: "method not allowed" });
+  if (scenario.session.status === 401) return json(res, 401, { error: "the route needs a credential" });
+  const panel = scenario.panel ?? "none";
+  if (path === "/api/v1/auth/integrations") {
+    if (panel === "unread") return json(res, 503, { error: "The workspace configuration could not be read." });
+    return json(res, 200, offered);
+  }
+  return json(res, 200, owned[panel === "each" ? "each" : "none"]);
+}
 const firstSession = { user: "usr_01JCM8P0Y4A7M2", token: "mock-csrf-token" };
 let scenario = scenarios.signed_out;
 let session = firstSession;
@@ -123,6 +175,10 @@ http
         answer.headers["content-security-policy"] = answer.headers["content-security-policy"].replace("style-src 'self'; ", "");
       res.writeHead(200, answer.headers);
       return res.end(answer.body);
+    }
+    if (path === "/api/v1/auth/integrations" || path === "/api/v1/auth/provider-accounts") {
+      seen.push({ method: req.method, path, csrf: req.headers["x-masc-csrf-token"] ?? null, authorization: "authorization" in req.headers });
+      return void panelRoutes(req, res, path);
     }
     if (path === "/auth/session" || path === "/api/v1/auth/whoami" || path === "/auth/logout") {
       seen.push({ method: req.method, path, csrf: req.headers["x-masc-csrf-token"] ?? null, authorization: "authorization" in req.headers });

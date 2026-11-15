@@ -47,6 +47,7 @@ type tool =
   | Keeper_turn
   | Keeper_conversation_new
   | Keeper_conversation
+  | Keeper_conversation_delete
 
 let tools =
   [ Whoami
@@ -57,6 +58,7 @@ let tools =
   ; Keeper_turn
   ; Keeper_conversation_new
   ; Keeper_conversation
+  ; Keeper_conversation_delete
   ]
 ;;
 
@@ -69,6 +71,7 @@ let name_of = function
   | Keeper_turn -> "masc_my_keeper_turn"
   | Keeper_conversation_new -> "masc_my_keeper_conversation_new"
   | Keeper_conversation -> "masc_my_keeper_conversation"
+  | Keeper_conversation_delete -> "masc_my_keeper_conversation_delete"
 ;;
 
 (* Decoded when the module starts, as every tool definition the binary
@@ -83,6 +86,7 @@ let definition_of =
   let keeper_turn = load Keeper_turn in
   let keeper_conversation_new = load Keeper_conversation_new in
   let keeper_conversation = load Keeper_conversation in
+  let keeper_conversation_delete = load Keeper_conversation_delete in
   function
   | Whoami -> whoami
   | Runtimes -> runtimes
@@ -92,6 +96,7 @@ let definition_of =
   | Keeper_turn -> keeper_turn
   | Keeper_conversation_new -> keeper_conversation_new
   | Keeper_conversation -> keeper_conversation
+  | Keeper_conversation_delete -> keeper_conversation_delete
 ;;
 
 let definitions = List.map (fun tool -> tool, definition_of tool) tools
@@ -121,16 +126,24 @@ let judged gate { trusted; now_ms; gate = request } f =
   | Ok who -> f who
 ;;
 
+(* The members of the arguments. A value that is not an object has none. *)
+let fields_of = function
+  | `Assoc fields -> fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
+;;
+
+(* The 400 of an argument that the definition of the tool requires as a
+   string, as a route answers for a body it cannot read. *)
+let not_a_string name =
+  R.json R.Bad_request_400 [ "error", `String (Printf.sprintf "The argument %s must be a string." name) ]
+;;
+
 (* The body that the route function of a tool reads: the arguments [names],
    in the order the function takes them. The definition of the tool requires
    each as a string, so one that is missing here answers a 400 as a route
    does for a body it cannot read. *)
 let with_body names arguments f =
-  let fields =
-    match arguments with
-    | `Assoc fields -> fields
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
-  in
+  let fields = fields_of arguments in
   let members =
     List.fold_right
       (fun name members ->
@@ -143,19 +156,22 @@ let with_body names arguments f =
   in
   match members with
   | Ok members -> f ~body:(Yojson.Safe.to_string (`Assoc members))
-  | Error name ->
-    R.json R.Bad_request_400 [ "error", `String (Printf.sprintf "The argument %s must be a string." name) ]
+  | Error name -> not_a_string name
+;;
+
+(* The argument [name] that a route function takes on its own, as a deletion
+   takes the id at the end of its path. *)
+let with_string name arguments f =
+  match List.assoc_opt name (fields_of arguments) with
+  | Some (`String value) -> f value
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None -> not_a_string name
 ;;
 
 (* The query that the read of a conversation takes: the Keeper, and the
    conversation when the arguments name one. The definition of the tool
    allows no other argument. *)
 let conversation_query arguments =
-  let fields =
-    match arguments with
-    | `Assoc fields -> fields
-    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
-  in
+  let fields = fields_of arguments in
   let text name =
     match List.assoc_opt name fields with
     | Some (`String value) -> Ok (Some value)
@@ -233,10 +249,24 @@ let run installation caller tool ~arguments =
              ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
              ~base_path:installation.base_path
              ~query
-         | Error name ->
-           R.json
-             R.Bad_request_400
-             [ "error", `String (Printf.sprintf "The argument %s must be a string." name) ])
+         | Error name -> not_a_string name)
+  | Keeper_conversation_delete ->
+    (* The deletion removes a record under the namespace of the person, which
+       this judgment gives. It calls no model, so the token is not read. *)
+    judged
+      Auth_preview.keeper_turn_caller
+      caller
+      (fun
+          { Auth_preview.person = { Auth_preview.user_id; namespace }
+          ; pat = (_ : Authz_types.Pat_binding.t)
+          }
+        ->
+         with_string "conversation_id" arguments (fun conversation_id ->
+           Server_preview_keeper_conversation.delete
+             ~env:installation.env
+             ~person:{ Server_setup_account_login.zone = installation.zone; user_id; namespace }
+             ~base_path:installation.base_path
+             ~conversation_id))
 ;;
 
 let succeeded = function

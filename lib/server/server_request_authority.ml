@@ -186,9 +186,7 @@ let parse_h2 raw =
 ;;
 
 let rendered_host host =
-  match Ipaddr.V6.of_string host with
-  | Ok _ -> "[" ^ host ^ "]"
-  | Error _ -> host
+  Masc_network_defaults.(url_host_to_string (url_host_of_string host))
 ;;
 
 let host_port_of_parts ~host ~port =

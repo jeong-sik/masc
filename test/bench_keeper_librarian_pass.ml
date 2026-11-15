@@ -68,6 +68,8 @@ let claims keepers_dir=match current keepers_dir with None -> [] | Some snapshot
 let originals_for ~keeper_name base_path keepers_dir store =
   Durable_owner.discover ~store ~base_path ~keepers_dir ~keeper_id:keeper_name
   |> Result.map_error Durable_owner.error_to_string |> get
+  |> List.map (fun listed -> Durable_owner.load ~store listed
+    |> Result.map_error Durable_owner.error_to_string |> get)
 let originals=originals_for ~keeper_name
 let new_claim claim=`Assoc ["claim",`String claim;"category",`String "fact";
   "board_post_id",`Null;"board_comment_id",`Null;"supersedes",`Null;"absorbs",`List []; "evidence", `Assoc ["conversation",`List [];"tools",`List [];"counterpart",`Bool false;"task_contexts",`Bool false]]

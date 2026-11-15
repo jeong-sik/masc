@@ -139,6 +139,16 @@ val load : base_path:string -> keeper_name:string -> viewer:viewer -> (snapshot,
     chat operation journal when the outbox holds a receipt and [viewer] is not
     [Every_receipt]; a journal that cannot be read is an [Error], not an empty
     owner set. *)
+val inspect_committed :
+  base_path:string -> keeper_name:string ->
+  ((string * (unit, string) result) list, string) result
+(** Each committed receipt file of the Keeper's outbox, in the order {!load}
+    reads them, with what the read and validation {!load} applies to that file
+    say of it. {!load} stops at the first [Error]; this reads every file, so a
+    check before a start can count them. It takes no producer lease, reads no
+    receipt owner, and creates, writes and removes nothing. The outer [Error]
+    is an outbox that cannot be listed; a missing outbox is [Ok []]. *)
+
 val receipt_ids : snapshot -> string list
 (** Exact SHA256 identities of the validated committed receipts. Staging files
     and provider execution cell numbers are not receipt identities. *)

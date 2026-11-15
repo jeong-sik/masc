@@ -647,6 +647,32 @@ let test_refusal_settlement_is_one_orthogonal_fact_on_an_execution_refusal () =
     [[];dispatch;dispatch@[Progress.Judgment_retained judgment];
      [Progress.Refused {stage=Progress.Before_dispatch;evidence=evidence "before dispatch"}]]
 
+(* A refusal at either stage may keep one successor intent; which refusals
+   actually lead to one is each consumer's own decision. *)
+let test_successor_intent_follows_either_refusal_stage () =
+  let fold events=get (List.fold_left (fun state event ->
+    Result.bind state (fun state -> Progress.append state event)) (Ok Progress.captured) events) in
+  let child:Progress.successor={request_id="next-attempt";request_digest=String.make 64 'a'} in
+  let before_dispatch=[Progress.Refused {stage=Progress.Before_dispatch;evidence=evidence "authority moved"}] in
+  let execution=[Progress.Dispatch_intended;
+    Progress.Refused {stage=Progress.Execution;evidence=evidence "transient refusal"}] in
+  List.iter (fun history ->
+    let linked=get (Progress.append (fold history) (Progress.Successor_intended child)) in
+    (match Progress.phase linked with
+     | Progress.Subdividing (_,intent) -> Alcotest.(check bool) "the intent is kept" true (intent=child)
+     | _ -> Alcotest.fail "a refusal did not keep its successor intent");
+    let observed=get (Progress.append linked (Progress.Successor_observed child.request_id)) in
+    (match Progress.phase observed with
+     | Progress.Subdivided _ -> ()
+     | _ -> Alcotest.fail "the successor acknowledgement was lost");
+    Alcotest.(check bool) "the linked refusal survives the strict codec" true
+      (Progress.phase (get (Progress.of_json (Progress.to_json observed)))=Progress.phase observed))
+    [before_dispatch;execution];
+  List.iter (fun history ->
+    match Progress.append (fold history) (Progress.Successor_intended child) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "an original without a refusal acquired a successor")
+    [[];[Progress.Dispatch_intended];[Progress.Dispatch_intended;Progress.Judgment_retained judgment]]
+
 let test_staged_successor_input_survives_publication_cuts () = with_store (fun root store ->
   let child_id="one-retry-child" in
   let child_request=`Assoc ["parent",request;"authority",`String "original replay"] in
@@ -692,6 +718,8 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
     test_replacement_cannot_infer_away_unknown_or_other_phases;
   Alcotest.test_case "refusal settlement is one orthogonal fact on an execution refusal" `Quick
     test_refusal_settlement_is_one_orthogonal_fact_on_an_execution_refusal;
+  Alcotest.test_case "a successor intent follows either refusal stage" `Quick
+    test_successor_intent_follows_either_refusal_stage;
   Alcotest.test_case "replacement strict codec refuses malformed changed or duplicate intents" `Quick
     test_replacement_strict_codec_rejects_malformed_and_changed_intents;
   Alcotest.test_case "opaque receipt reuse and strict replay" `Quick

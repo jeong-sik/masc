@@ -1349,11 +1349,17 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        the whole history into the new thread, so "fresh" does not mean "empty
        context" — the mode is recorded because the injection only happens on
        that branch. Sizes are the bytes this process holds, not provider
-       tokens; they bound the request, they do not price it. *)
+       tokens; they bound the request, they do not price it.
+
+       [tool_surface_bytes] counts every declared tool, including those the
+       spec marks [deferLoading]. [upfront_*] is the share declared [Upfront],
+       which the model has in context from the start. *)
+    let upfront_tools = Runtime_official_client_tool.upfront_tools dynamic_tools in
     Log.Keeper.info
       ~keeper_name
       "%s turn composition: mode=%s prompt_bytes=%d developer_instructions_bytes=%d developer_context_bytes=%d \
-       history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d"
+       history_messages=%d history_bytes=%d tools=%d tool_surface_bytes=%d \
+       upfront_tools=%d upfront_bytes=%d"
       runtime_label
       (match thread_mode with
        | Runtime_codex_app_server.Start -> "start"
@@ -1364,7 +1370,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
       (List.length history)
       (Runtime_codex_app_server.history_bytes history)
       (List.length dynamic_tools)
-      (Runtime_codex_app_server.dynamic_tool_bytes dynamic_tools);
+      (Runtime_codex_app_server.dynamic_tool_bytes dynamic_tools)
+      (List.length upfront_tools)
+      (Runtime_codex_app_server.dynamic_tool_bytes upfront_tools);
     let* () =
       match
         Runtime_codex_app_server.validate_turn

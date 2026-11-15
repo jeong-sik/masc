@@ -35,10 +35,6 @@ let write_meta config trace_id =
   | Error detail -> failf "write metadata: %s" detail
 ;;
 
-let restart config trace_id =
-  Turn.record_history_restart ~config ~keeper_name ~trace_id Turn.At_turn_start
-;;
-
 let store_boundary config trace_id =
   match Boundaries.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
     ~keeper_id:keeper_name

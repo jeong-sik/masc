@@ -19,8 +19,6 @@ let message role content =
   Agent_core.Types.{ origin = Llm_provider.Types.Conversation;  role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-let text_of_message = Agent_core.Types.text_of_message
-
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_core.Checkpoint.
     { provider_binding = None; version = checkpoint_version

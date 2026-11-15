@@ -248,34 +248,37 @@ type turn_input_prompts = {
   turn_inputs : Prompt_registry.prompt_resolution;
 }
 
-let resolve_turn_input_prompt key =
-  let resolution = Prompt_registry.resolve_prompt key in
-  if String.trim resolution.effective = "" then Error (Printf.sprintf "%s is missing or blank" key)
-  else Ok resolution
-
-let resolve_turn_input_prompts () =
-  let open Result.Syntax in
-  let* working_context_input =
-    resolve_turn_input_prompt Prompt_names.librarian_working_context_input in
-  let+ turn_inputs = resolve_turn_input_prompt Prompt_names.librarian_turn_inputs in
-  { working_context_input; turn_inputs }
-
 (* A slot's text is trimmed when the file is read, so the blank lines that set
    the material apart are added here. The body places [working_context_input]
    right before the Goal heading and [turn_inputs] right after the Goal
    paragraph; with both empty the body reads as if the material were never
    there. *)
+let turn_input_variables ~context ~turn variables =
+  (working_context_input_variable, context ^ "\n\n") :: (turn_inputs_variable, "\n\n" ^ turn)
+  :: variables
+
+(* The slots a question was frozen with: a restored question renders the slot
+   text it was sent. *)
 let with_turn_input_prompts (prompts : turn_input_prompts) variables =
   let open Result.Syntax in
   let* context = Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_working_context_input prompts.working_context_input variables in
   let+ turn = Prompt_registry.render_resolved_prompt_template
     Prompt_names.librarian_turn_inputs prompts.turn_inputs variables in
-  (working_context_input_variable, context ^ "\n\n") :: (turn_inputs_variable, "\n\n" ^ turn)
-  :: variables
+  turn_input_variables ~context ~turn variables
 
-let with_turn_inputs variables =
-  Result.bind (resolve_turn_input_prompts ()) (fun prompts -> with_turn_input_prompts prompts variables)
+(* Today's slots, resolved and rendered in one registry call each, so a slot
+   that is missing or whose file cannot be read is an [Error] like the body's
+   and the rule's. *)
+let resolve_turn_inputs variables =
+  let open Result.Syntax in
+  let* working_context_input, context = Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian_working_context_input variables in
+  let+ turn_inputs, turn = Prompt_registry.resolve_and_render_prompt_template
+    Prompt_names.librarian_turn_inputs variables in
+  { working_context_input; turn_inputs }, turn_input_variables ~context ~turn variables
+
+let with_turn_inputs variables = Result.map snd (resolve_turn_inputs variables)
 
 let without_turn_inputs variables =
   (working_context_input_variable, "") :: (turn_inputs_variable, "") :: variables
@@ -434,9 +437,9 @@ let resolve_librarian_prompt ~source_lines pass input =
     match pass with
     | Memory_pass _ | Volatile_memory_pass _ ->
       Result.bind (with_working_contexts_rule variables) (fun variables ->
-        Result.bind (resolve_turn_input_prompts ()) (fun prompts ->
-          Result.map (fun variables -> variables, Some prompts.turn_inputs)
-            (with_turn_input_prompts prompts variables)))
+        Result.map (fun ((prompts : turn_input_prompts), variables) ->
+            variables, Some prompts.turn_inputs)
+          (resolve_turn_inputs variables))
     | Working_context_pass ->
       Result.map (fun variables -> variables, None) (with_working_contexts_rule variables)
     | Continuity_state_pass _ | Volatile_state_pass _ -> Ok (variables, None)
@@ -592,8 +595,7 @@ let prepare_durable_with ?continuity ~output_schema ~now ~source_lines source_in
     | None -> base
     | Some continuity ->
       ("continuity",Yojson.Safe.to_string continuity)::List.remove_assoc "continuity" base in
-  let* turn_prompts=resolve_turn_input_prompts () in
-  let* variables=with_turn_input_prompts turn_prompts ((working_contexts_rule_variable,String.trim rule)::base) in
+  let* turn_prompts,variables=resolve_turn_inputs ((working_contexts_rule_variable,String.trim rule)::base) in
   let* prompt,rendered_prompt=Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables in
   let preparation : durable_preparation = {source_input;parsing_now=now;policy;rule_prompt;turn_prompts;prompt;
     variables;rendered_prompt;output_schema} in

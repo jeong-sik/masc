@@ -57,6 +57,7 @@ const PHASE_DOT_COLOR: Record<FleetTone, string> = {
   idle: 'var(--text-dim)',
 }
 import { MISSING_DATA_DASH } from '../lib/format-string'
+import { attentionReasonLabel } from '../lib/keeper-attention-labels'
 import { relativeTime } from '../lib/format-time'
 import type { AsyncState } from '../lib/async-state'
 import { showToast } from './common/toast'
@@ -1786,7 +1787,9 @@ function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean
   const execution = recordValue(trust.execution)
   const latestReceipt = recordValue(trustRecord?.latest_receipt)
   const disposition = trust.disposition ?? MISSING_DATA_DASH
-  const reason = trust.attention_reason ?? trust.disposition_reason ?? MISSING_DATA_DASH
+  const reason =
+    attentionReasonLabel(trust.attention_reason ?? trust.disposition_reason ?? null, false)
+    ?? MISSING_DATA_DASH
   const completionContract =
     stringField(execution, 'completion_contract_result')
     ?? stringField(latestReceipt, 'completion_contract_result')

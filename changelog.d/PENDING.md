@@ -1,0 +1,9 @@
+### Fixed
+
+- The goal Keeper card, the Keeper config panel's 실행 주의 row and the
+  fleet table's row hint name a Keeper's trust reason by its label instead
+  of the raw `attention_reason` or `disposition_reason` value, so
+  `pending_operator_decision` reads as its Korean label there too. The
+  fleet row hint also labels `operator_disposition_reason`. The goal card
+  still hides the operator cause when it carries the same value as the
+  summary (#43117, #PENDING).

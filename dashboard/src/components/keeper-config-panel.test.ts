@@ -1,4 +1,5 @@
 import { readKeeperCostCoverage } from '../lib/keeper-cost-coverage'
+import { attentionReasonLabel } from '../lib/keeper-attention-labels'
 import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { html } from 'htm/preact'
 import { render } from 'preact'
@@ -1532,6 +1533,27 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     expect(container.textContent).not.toContain('이 Keeper 는 네트워크가 없습니다')
+  })
+
+  // The trust snapshot names why a Keeper needs attention as a wire token in
+  // disposition_reason when the status bridge gives no attention_reason.
+  it('names the runtime trust reason by its label, not the wire token', async () => {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        runtime_trust: { needs_attention: true, disposition_reason: 'pending_operator_decision' },
+      }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '상태·진단')
+    await flush()
+
+    expect(container.textContent).toContain(
+      `ON · ${attentionReasonLabel('pending_operator_decision', false)}`,
+    )
+    expect(container.textContent).not.toContain('pending_operator_decision')
   })
 
   it('allows runtime config assignment writes when Keeper name is valid without a manifest path', async () => {

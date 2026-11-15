@@ -73,13 +73,17 @@ describe('reading the answers about invitations', () => {
         inviteJson('inv_3', { status: 'revocation_pending' }),
         inviteJson('inv_4', { status: 'paused' }),
         inviteJson('inv_5', { status: 'paused', user_id: 'usr_8' }),
+        inviteJson('inv_6', { status: 'expired', expires_at_ms: 8_640_000_000_000_000 }),
+        inviteJson('inv_7', { status: 'revoked' }),
       ],
     })).toEqual([
-      { id: 'inv_1', role: 'admin', issuer: { kind: 'local_operator' }, expiresAtMs: expiresAt, status: 'open', joined: null },
-      { id: 'inv_2', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: 'consumed', joined: 'usr_7' },
-      { id: 'inv_3', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: 'revocation_pending', joined: null },
-      { id: 'inv_4', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: 'unrecognised', joined: null },
-      { id: 'inv_5', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: 'unrecognised', joined: 'usr_8' },
+      { id: 'inv_1', role: 'admin', issuer: { kind: 'local_operator' }, expiresAtMs: expiresAt, status: { kind: 'open' } },
+      { id: 'inv_2', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: { kind: 'consumed', joined: 'usr_7' } },
+      { id: 'inv_3', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: { kind: 'revocation_pending' } },
+      { id: 'inv_4', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: { kind: 'unrecognised' } },
+      { id: 'inv_5', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: { kind: 'unrecognised' } },
+      { id: 'inv_6', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: 8_640_000_000_000_000, status: { kind: 'expired' } },
+      { id: 'inv_7', role: 'member', issuer: { kind: 'admin', userId: 'usr_first' }, expiresAtMs: expiresAt, status: { kind: 'revoked' } },
     ])
   })
 
@@ -97,10 +101,15 @@ describe('reading the answers about invitations', () => {
       one({ status: 'consumed' }),
       one({ status: 'open', user_id: 'usr_7' }),
       one({ status: 'consumed', user_id: '' }),
+      one({ status: 'consumed', user_id: null }),
+      one({ issuer: null }),
+      one({ issuer: 'local_operator' }),
+      one({ expires_at_ms: 8_640_000_000_000_001 }),
       readInvites({ invites: [inviteJson('inv_1'), inviteJson('inv_1')] }),
+      readInvites({ invites: ['inv_1'] }),
       readInvites({ invites: {} }),
       readInvites([]),
-    ]).toEqual(Array.from({ length: 14 }, () => null))
+    ]).toEqual(Array.from({ length: 19 }, () => null))
   })
 
   it('reads an invitation made only with a link to the invitation page that carries a token', () => {
@@ -113,10 +122,11 @@ describe('reading the answers about invitations', () => {
       readIssued({ ...issuedJson('inv_9'), link: '/accounts/console#token' }),
       readIssued({ ...issuedJson('inv_9'), role: 'owner' }),
       readIssued({ ...issuedJson('inv_9'), invite_id: undefined }),
+      readIssued({ ...issuedJson('inv_9'), expires_at_ms: '1763086400000' }),
     ]).toEqual([
       { id: 'inv_9', role: 'admin', expiresAtMs: expiresAt, link: '/accounts/invite#secret-of-inv_9' },
       'https://masc.example/accounts/invite#secret-of-inv_9',
-      null, null, null, null, null,
+      null, null, null, null, null, null,
     ])
   })
 })
@@ -223,14 +233,15 @@ describe('the invitations an Admin sees', () => {
     expect([methods(sent).filter((one) => one.startsWith('POST')).length, reading.making.value, methods(unread.sent)]).toEqual([1, { kind: 'idle' }, [`GET ${invitesPath}`]])
   })
 
-  it('drops a make that answers after another person is shown', async () => {
+  it('drops a make that answers after another Admin is shown, and reads their list again, which holds it', async () => {
     const wait = later()
-    const { model, sent } = await loaded([wait.answer, listed()])
+    const { model, sent } = await loaded([wait.answer, listed(), listed(inviteJson('inv_2'))])
     const making = model.make('member')
     await model.load(second)
     wait.give(issuedAnswer('inv_2'))
     await making
-    expect([model.making.value, methods(sent).filter((one) => one.startsWith('GET')).length]).toEqual([{ kind: 'idle' }, 2])
+    await vi.waitFor(() => { expect(invitesOf(model)?.map((one) => one.id)).toEqual(['inv_2']) })
+    expect([model.making.value, methods(sent).filter((one) => one.startsWith('GET')).length]).toEqual([{ kind: 'idle' }, 3])
   })
 
   it('keeps the newest session of the person shown, and does not read the list again for it', async () => {
@@ -251,7 +262,7 @@ describe('the invitations an Admin sees', () => {
     await vi.waitFor(() => { expect(invitesOf(model)?.length).toBe(2) })
     wait.give(listed(inviteJson('inv_1')))
     await new Promise((resolve) => { setTimeout(resolve, 20) })
-    expect(invitesOf(model)?.map((one) => one.status)).toEqual(['revoked', 'open'])
+    expect(invitesOf(model)?.map((one) => one.status.kind)).toEqual(['revoked', 'open'])
   })
 
   it('reads the list again when a revoke answers while the list is read', async () => {
@@ -266,7 +277,7 @@ describe('the invitations an Admin sees', () => {
     await revoking
     slowRead.give(listed(inviteJson('inv_1')))
     await retried
-    expect([invitesOf(model)?.map((one) => one.status), sent.filter((one) => one.init.method === 'GET').length]).toEqual([['revoked'], 4])
+    expect([invitesOf(model)?.map((one) => one.status.kind), sent.filter((one) => one.init.method === 'GET').length]).toEqual([['revoked'], 4])
   })
 
   it('revokes an invitation and reads the list again, and takes one the server closed before as done', async () => {
@@ -322,15 +333,47 @@ describe('the invitations an Admin sees', () => {
 
   it('forgets the link made and drops a late answer when another person is shown', async () => {
     const wait = later()
-    const { model, sent } = await loaded([issuedAnswer('inv_2'), listed(), wait.answer, listed()])
+    const { model, sent } = await loaded([issuedAnswer('inv_2'), listed(), wait.answer, listed(), listed()])
     await model.make('member')
     await settled(sent, 2)
     const revoking = model.revoke('inv_1')
     await model.load(second)
     wait.give(revoked())
     await revoking
+    await settled(sent, 4)
     expect([model.making.value, model.revoking.value.size, model.view.value.kind === 'read' ? model.view.value.forUser : null]).toEqual([{ kind: 'idle' }, 0, 'usr_second'])
     expect(new Headers(sent[3]?.init.headers).get(csrfHeader)).toBe('token-1')
+  })
+
+  it('leaves once when a reading and a write both find that the session ended', async () => {
+    const slowRead = later()
+    const { model, leave } = await loaded([issuedAnswer('inv_2'), slowRead.answer, noSession()])
+    await model.make('member')
+    await model.revoke('inv_1')
+    slowRead.give(noSession())
+    await new Promise((resolve) => { setTimeout(resolve, 20) })
+    expect([leave.mock.calls.length, model.view.value.kind]).toEqual([1, 'read'])
+  })
+
+  it('reads once for two retries at once', async () => {
+    const wait = later()
+    const { send, sent } = answering([json(503, { error: 'not now' }), wait.answer])
+    const model = createInvites({ send, leave: vi.fn() })
+    await model.load(first)
+    const retries = [model.retry(), model.retry()]
+    wait.give(listed())
+    await Promise.all(retries)
+    expect([sent.length, model.view.value.kind]).toEqual([2, 'read'])
+  })
+
+  it('keeps what came of the requests before when the browser leaves', async () => {
+    const { model, sent, leave } = await loaded([json(404, { error: 'no invitation' }), listed(), noSession()])
+    await model.revoke('inv_9')
+    await settled(sent, 2)
+    await model.revoke('inv_1')
+    expect([model.revoking.value.get('inv_9'), model.revoking.value.get('inv_1'), leave.mock.calls.length]).toEqual([
+      { kind: 'refused', problem: { kind: 'refused', status: 404, reason: 'no invitation' }, attempts: 1 }, { kind: 'leaving' }, 1,
+    ])
   })
 })
 
@@ -339,17 +382,37 @@ describe('following the console', () => {
     kind: 'signed_in', session, who: { id: session.userId, role }, signOut: { kind: 'idle' },
   })
 
-  it('reads the invitations for an Admin and sends nothing for a Member', async () => {
+  it('reads the invitations for an Admin and sends nothing for anyone else', async () => {
     const { send, sent } = answering([listed(), listed()])
     const model = createInvites({ send, leave: vi.fn() })
     const frame = signal<View>({ kind: 'reading', slow: false })
     const stop = followInvites(frame, model)
     frame.value = signedIn('member')
+    frame.value = { kind: 'signed_in', session: first, who: { id: first.userId, role: 'unrecognised' }, signOut: { kind: 'idle' } }
     const asMember = methods(sent)
     frame.value = signedIn('admin', second)
     await vi.waitFor(() => { expect(model.view.value.kind).toBe('read') })
     stop()
     frame.value = signedIn('admin')
     expect([asMember, methods(sent), model.view.value.kind === 'read' ? model.view.value.forUser : null]).toEqual([[], [`GET ${invitesPath}`], 'usr_second'])
+  })
+
+  it('forgets the list and the link once the console shows no Admin, reads nothing for an answer that comes after, and reads afresh for the Admin again', async () => {
+    const wait = later()
+    const { send, sent } = answering([listed(inviteJson('inv_1')), wait.answer, listed(inviteJson('inv_1'), inviteJson('inv_2'))])
+    const model = createInvites({ send, leave: vi.fn() })
+    const frame = signal<View>(signedIn('admin'))
+    const stop = followInvites(frame, model)
+    await vi.waitFor(() => { expect(model.view.value.kind).toBe('read') })
+    const making = model.make('admin')
+    frame.value = { kind: 'changed', next: 'idle' }
+    const stopped = [model.view.value, model.making.value]
+    wait.give(issuedAnswer('inv_2', 'admin'))
+    await making
+    const late = [model.making.value, methods(sent).filter((one) => one.startsWith('GET')).length]
+    frame.value = signedIn('admin')
+    await vi.waitFor(() => { expect(model.view.value.kind === 'read' ? model.view.value.invites.length : null).toBe(2) })
+    stop()
+    expect([stopped, late]).toEqual([[{ kind: 'waiting' }, { kind: 'idle' }], [{ kind: 'idle' }, 1]])
   })
 })

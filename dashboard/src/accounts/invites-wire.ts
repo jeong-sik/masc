@@ -22,11 +22,16 @@ export type Issuer = { readonly kind: 'local_operator' } | { readonly kind: 'adm
 
 /** What the server says of an invitation now. `revocation_pending` is a
     revocation the log did not record: no one joins through the invitation,
-    and revoking it again closes it. `unrecognised` is a word this console
-    does not know. */
-export type InviteStatus = 'open' | 'expired' | 'revocation_pending' | 'revoked' | 'consumed' | 'unrecognised'
-
-const statuses = ['open', 'expired', 'revocation_pending', 'revoked', 'consumed'] as const
+    and revoking it again closes it. A consumed invitation names the person
+    who joined through it, and no other does. `unrecognised` is a word this
+    console does not know. */
+export type InviteStatus =
+  | { readonly kind: 'open' }
+  | { readonly kind: 'expired' }
+  | { readonly kind: 'revocation_pending' }
+  | { readonly kind: 'revoked' }
+  | { readonly kind: 'consumed'; readonly joined: string }
+  | { readonly kind: 'unrecognised' }
 
 export interface Invite {
   readonly id: string
@@ -34,8 +39,6 @@ export interface Invite {
   readonly issuer: Issuer
   readonly expiresAtMs: number
   readonly status: InviteStatus
-  /** The person who joined through it. Only a consumed invitation has one. */
-  readonly joined: string | null
 }
 
 /** An invitation just made. `link` is a path on the account server, and the
@@ -63,20 +66,34 @@ function readIssuer(json: unknown): Issuer | null {
   return json.kind === 'admin' && members === 'kind,user_id' && userId !== null ? { kind: 'admin', userId } : null
 }
 
+/** The status of an item, with the person who joined: the server names one
+    for a consumed invitation, and for no other. A word this console does
+    not know may come with one or not. */
+function readStatus(json: Readonly<Record<string, unknown>>): InviteStatus | null {
+  const joined = 'user_id' in json ? text(json.user_id) : null
+  if ('user_id' in json && joined === null) return null
+  const status = json.status
+  switch (status) {
+    case 'consumed':
+      return joined === null ? null : { kind: 'consumed', joined }
+    case 'open':
+    case 'expired':
+    case 'revocation_pending':
+    case 'revoked':
+      return joined === null ? { kind: status } : null
+    default:
+      return typeof status === 'string' ? { kind: 'unrecognised' } : null
+  }
+}
+
 function readInvite(json: unknown): Invite | null {
   if (!isRecord(json)) return null
   const id = text(json.invite_id)
   const role = readRole(json.role)
   const issuer = readIssuer(json.issuer)
   const expiresAtMs = time(json.expires_at_ms)
-  if (id === null || role === null || issuer === null || expiresAtMs === null || typeof json.status !== 'string') return null
-  const status = statuses.find((known) => known === json.status) ?? 'unrecognised'
-  const joined = 'user_id' in json ? text(json.user_id) : null
-  // The server names the person who joined for a consumed invitation, and
-  // only for one. A word this console does not know may come with one or not.
-  if ('user_id' in json && joined === null) return null
-  if (status !== 'unrecognised' && (status === 'consumed') !== (joined !== null)) return null
-  return { id, role, issuer, expiresAtMs, status, joined }
+  const status = readStatus(json)
+  return id === null || role === null || issuer === null || expiresAtMs === null || status === null ? null : { id, role, issuer, expiresAtMs, status }
 }
 
 /** Every invitation, or null when any is not what the route promises. */

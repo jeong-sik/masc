@@ -81,6 +81,10 @@ export interface InvitesModel {
   readonly forget: () => void
   /** Revokes the invitation `id`. One whose revoke runs is left as it is. */
   readonly revoke: (id: string) => Promise<void>
+  /** Forgets the list and the link made once the console shows no Admin:
+      another person, or no one. An answer still under way then changes
+      nothing on the page and reads nothing. */
+  readonly stop: () => void
 }
 
 /** How many tries came to nothing in a row before this one. */
@@ -187,7 +191,13 @@ export function createInvites({ send, leave }: InvitesDeps): InvitesModel {
     const attempts = failedBefore(before) + 1
     making.value = { kind: 'sending', role }
     const answer = await issue(send, csrfToken, role)
-    if (mine !== round || left) return
+    if (left) return
+    // The invitations are those of the server, not of the person: another
+    // Admin shown since then reads a list that may lack this one.
+    if (mine !== round) {
+      refresh()
+      return
+    }
     if (!answer.ok) {
       failed(
         answer.problem,
@@ -218,7 +228,11 @@ export function createInvites({ send, leave }: InvitesDeps): InvitesModel {
     const attempts = failedBefore(before) + 1
     setRevoke(id, { kind: 'sending' })
     const answer = await revoke(send, csrfToken, id)
-    if (mine !== round || left) return
+    if (left) return
+    if (mine !== round) {
+      refresh()
+      return
+    }
     if (answer.ok) {
       setRevoke(id, { kind: 'done', before: false })
       refresh()
@@ -256,15 +270,26 @@ export function createInvites({ send, leave }: InvitesDeps): InvitesModel {
     return read(shown.forUser, shown.failure.attempts)
   }
 
-  return { view, making, revoking, load, retry, make: makeInvite, forget, revoke: revokeInvite }
+  const stop = (): void => {
+    if (view.peek().kind === 'waiting') return
+    round += 1
+    latest += 1
+    session = null
+    making.value = { kind: 'idle' }
+    revoking.value = new Map()
+    view.value = { kind: 'waiting' }
+  }
+
+  return { view, making, revoking, load, retry, make: makeInvite, forget, revoke: revokeInvite, stop }
 }
 
-/** Reads the invitations for each Admin the console comes to show signed in.
-    A Member's session is never sent to the route. The returned function
-    stops following. */
+/** Reads the invitations for each Admin the console comes to show signed in,
+    and stops whenever it shows anything else, so a Member's session is not
+    sent to the route. The returned function stops following. */
 export function followInvites(frame: ReadonlySignal<View>, invites: InvitesModel): () => void {
   return effect(() => {
     const shown = frame.value
     if (shown.kind === 'signed_in' && shown.who.role === 'admin') void invites.load(shown.session)
+    else invites.stop()
   })
 }

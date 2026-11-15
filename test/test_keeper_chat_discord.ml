@@ -5,8 +5,8 @@ module D = Masc.Keeper_chat_discord.For_testing
 let contains haystack needle =
   String_util.contains_substring haystack needle
 
-let run_adapter ?show_activity ?now events ~post_message ~edit_message
-    ~send_message =
+let run_adapter ?show_activity ?now ?fresh_nonce events ~post_message
+    ~edit_message ~send_message =
   Eio_main.run
   @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
@@ -16,7 +16,7 @@ let run_adapter ?show_activity ?now events ~post_message ~edit_message
   let outcomes = ref [] in
   D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
     ~events:stream ~post_message ~edit_message ~send_message
-    ?show_activity ?now
+    ?show_activity ?now ?fresh_nonce
     ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
   List.rev !outcomes
 
@@ -207,7 +207,7 @@ let test_terminal_callback_once_for_fallback_post () =
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-fallback" }
       ]
-      ~post_message:(fun ~content:_ -> fail "stable prefix should not POST")
+      ~post_message:(fun ~nonce:_ ~content:_ -> fail "stable prefix should not POST")
       ~edit_message:(fun ~message_id:_ ~content:_ ->
         fail "fallback delivery should not PATCH")
       ~send_message:(fun ~content ->
@@ -235,7 +235,7 @@ let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
       ; Masc.Keeper_chat_events.Text_delta {text="fresh"; response=Unobserved_scope (None)}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-retry" }
       ]
-      ~post_message:(fun ~content:_ -> fail "single words stay buffered")
+      ~post_message:(fun ~nonce:_ ~content:_ -> fail "single words stay buffered")
       ~edit_message:(fun ~message_id:_ ~content:_ ->
         fail "retry fixture never opens a streaming message")
       ~send_message:(fun ~content ->
@@ -266,7 +266,7 @@ let test_streamed_response_owner_survives_retry () =
       ; Masc.Keeper_chat_events.Text_delta {text="fresh";response=response 2 0}
       ; Masc.Keeper_chat_events.Run_finished {run_id="run-owner"}
       ]
-      ~post_message:(fun ~content:_ -> Ok "stream-message")
+      ~post_message:(fun ~nonce:_ ~content:_ -> Ok "stream-message")
       ~edit_message:(fun ~message_id:_ ~content -> edits := content :: !edits; Ok ())
       ~send_message:(fun ~content:_ -> fail "the streamed message must be edited") in
   check_single_ok "response ownership terminal result" outcomes;
@@ -286,7 +286,7 @@ let test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it () =
       ; Masc.Keeper_chat_events.Event_error
           { message = "published after the terminal" }
       ]
-      ~post_message:(fun ~content:_ -> Ok "stream-message")
+      ~post_message:(fun ~nonce:_ ~content:_ -> Ok "stream-message")
       ~edit_message:(fun ~message_id:_ ~content ->
         sends := content :: !sends;
         Ok ())
@@ -328,7 +328,7 @@ let test_publisher_is_not_wedged_behind_the_settled_adapter () =
   let outcomes = ref [] in
   D.adapter_loop ~token:"test-token" ~channel_id:"test-channel"
     ~events:stream
-    ~post_message:(fun ~content:_ -> Ok "stream-message")
+    ~post_message:(fun ~nonce:_ ~content:_ -> Ok "stream-message")
     ~edit_message:(fun ~message_id:_ ~content:_ -> Ok ())
     ~send_message:(fun ~content:_ -> Ok ())
     ~on_send_result:(fun result -> outcomes := result :: !outcomes) ();
@@ -349,7 +349,7 @@ let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
           { run_id = "run-cut"; thread_id = "thread-cut" }
       ; Masc.Keeper_chat_events.Text_delta {text="half an "; response=Unobserved_scope (None)}
       ]
-      ~post_message:(fun ~content:_ -> Ok "stream-message")
+      ~post_message:(fun ~nonce:_ ~content:_ -> Ok "stream-message")
       ~edit_message:(fun ~message_id:_ ~content:_ -> Ok ())
       ~send_message:(fun ~content:_ -> fail "no terminal event, no final send")
   in
@@ -366,7 +366,7 @@ let test_adapter_empty_terminal_is_local_error () =
   let outcomes =
     run_adapter
       [ Masc.Keeper_chat_events.Run_finished { run_id = "run-empty" } ]
-      ~post_message:(fun ~content:_ ->
+      ~post_message:(fun ~nonce:_ ~content:_ ->
         incr sends;
         Ok "unexpected-stream-message")
       ~edit_message:(fun ~message_id:_ ~content:_ ->
@@ -394,7 +394,7 @@ let test_completed_external_effect_settles_without_duplicate_send () =
           }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-effect" }
       ]
-      ~post_message:(fun ~content:_ ->
+      ~post_message:(fun ~nonce:_ ~content:_ ->
         incr sends;
         Ok "unexpected-stream-message")
       ~edit_message:(fun ~message_id:_ ~content:_ ->
@@ -417,7 +417,7 @@ let test_terminal_callback_reports_final_patch_failure () =
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-patch" }
       ]
-      ~post_message:(fun ~content ->
+      ~post_message:(fun ~nonce:_ ~content ->
         check string "streaming POST content" "hello " content;
         Ok "discord-message-1")
       ~edit_message:(fun ~message_id ~content ->
@@ -441,7 +441,7 @@ let test_terminal_callback_reports_overflow_failure () =
       ; Masc.Keeper_chat_events.Text_message_end
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-overflow" }
       ]
-      ~post_message:(fun ~content ->
+      ~post_message:(fun ~nonce:_ ~content ->
         check int "streaming head length" 2000 (String.length content);
         Ok "discord-message-2")
       ~edit_message:(fun ~message_id:_ ~content ->
@@ -463,7 +463,7 @@ let test_error_reply_callback_once () =
           { run_id = "run-error"; thread_id = "thread-error" }
       ; Masc.Keeper_chat_events.Event_error { message = "provider failed" }
       ]
-      ~post_message:(fun ~content:_ -> fail "error reply should use final sender")
+      ~post_message:(fun ~nonce:_ ~content:_ -> fail "error reply should use final sender")
       ~edit_message:(fun ~message_id:_ ~content:_ ->
         fail "error reply should not PATCH")
       ~send_message:(fun ~content ->
@@ -494,7 +494,7 @@ let test_private_errors_never_reach_channel () =
       [ Masc.Keeper_chat_events.Agent_core_stream_protocol_error protocol_error
       ; Masc.Keeper_chat_events.Event_error { message = diagnostic }
       ]
-      ~post_message:(fun ~content:_ -> fail "diagnostics must use final sender")
+      ~post_message:(fun ~nonce:_ ~content:_ -> fail "diagnostics must use final sender")
       ~edit_message:(fun ~message_id:_ ~content:_ -> fail "no message to edit")
       ~send_message:(fun ~content -> sends := content :: !sends; Ok ())
   in
@@ -522,7 +522,7 @@ let test_external_effect_status_replaces_assistant_preface () =
           { kind = Masc.Keeper_chat_blocks.Awaiting_gate_approval }
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-status" }
       ]
-      ~post_message:(fun ~content ->
+      ~post_message:(fun ~nonce:_ ~content ->
         posts := content :: !posts;
         Ok "status-message")
       ~edit_message:(fun ~message_id ~content ->
@@ -569,7 +569,7 @@ let test_tool_activity_uses_native_surface_without_messages () =
       ; Masc.Keeper_chat_events.Text_delta {text="done"; response=Unobserved_scope (None)}
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-tool" }
       ]
-      ~post_message:(fun ~content:_ ->
+      ~post_message:(fun ~nonce:_ ~content:_ ->
         fail "tool activity and one-word final reply must not stream POST")
       ~edit_message:(fun ~message_id:_ ~content:_ ->
         fail "tool activity must not create a message to edit")
@@ -605,7 +605,7 @@ let test_failed_stream_edit_rearms_the_throttle () =
   let edits = ref [] in
   let outcomes =
     run_adapter ~now
-      ~post_message:(fun ~content:_ -> Ok "discord-message-1")
+      ~post_message:(fun ~nonce:_ ~content:_ -> Ok "discord-message-1")
       ~edit_message:(fun ~message_id:_ ~content ->
         edits := content :: !edits;
         Error (Discord_rest_client.Network "rate limited"))
@@ -634,7 +634,7 @@ let test_checkpoint_status_keeps_the_accumulated_stream_text () =
   let edits = ref [] in
   let outcomes =
     run_adapter
-      ~post_message:(fun ~content:_ -> Ok "discord-message-ckpt")
+      ~post_message:(fun ~nonce:_ ~content:_ -> Ok "discord-message-ckpt")
       ~edit_message:(fun ~message_id:_ ~content ->
         edits := content :: !edits;
         Ok ())
@@ -657,35 +657,116 @@ let test_checkpoint_status_keeps_the_accumulated_stream_text () =
         (contains content "world")
   | _ -> fail "a checkpointed reply must receive one terminal edit"
 
-(* A failed placeholder POST may still have landed server-side; Discord has no
-   idempotency key for message creation. One bounded retry, then the turn
-   degrades to a single final message instead of risking a duplicate. *)
-let test_unknown_outcome_post_retries_once_then_degrades () =
-  let posts = ref [] in
-  let finals = ref [] in
-  let outcomes =
-    run_adapter
-      ~post_message:(fun ~content ->
-        posts := content :: !posts;
-        Error (Discord_rest_client.Network "connection reset after send"))
-      ~edit_message:(fun ~message_id:_ ~content:_ ->
-        fail "without a message id there is nothing to edit")
-      ~send_message:(fun ~content ->
-        finals := content :: !finals;
-        Ok ())
-      [ Masc.Keeper_chat_events.Run_started
-          { run_id = "run-post"; thread_id = "thread-post" }
-      ; Masc.Keeper_chat_events.Text_delta {text="a "; response=Unobserved_scope (None)}
-      ; Masc.Keeper_chat_events.Text_delta {text="b "; response=Unobserved_scope (None)}
-      ; Masc.Keeper_chat_events.Text_delta {text="c "; response=Unobserved_scope (None)}
-      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-post" }
-      ]
+(* A failed streaming POST may still have landed server-side. The final
+   delivery used to post the reply as a new message, so a landed POST showed
+   the reply twice. The streaming POST, its retry and the final POST now carry
+   the reply's nonce, so the later two ask Discord for the message an earlier
+   attempt created, and a PATCH writes the intended text over the partial text
+   that message may hold. The fixture answers the create-message requests
+   with [post_results] in order and fails a reply posted as a fresh message. *)
+let run_reply_with_unanswered_posts ~post_results events =
+  let nonces_made = ref 0 in
+  let fresh_nonce () =
+    incr nonces_made;
+    match
+      Discord_rest_client.nonce_of_string (Printf.sprintf "reply-%d" !nonces_made)
+    with
+    | Ok nonce -> nonce
+    | Error message -> failf "invalid test nonce: %s" message
   in
-  check_single_ok "the degraded turn still settles" outcomes;
-  check (list string) "the placeholder POST is retried at most once"
-    [ "a "; "a b " ] (List.rev !posts);
-  check (list string) "the reply still arrives as one final message"
-    [ "a b c " ] (List.rev !finals)
+  let post_results = ref post_results in
+  let posts = ref [] in
+  let edits = ref [] in
+  let outcomes =
+    run_adapter ~fresh_nonce
+      ~post_message:(fun ~nonce ~content ->
+        posts := (Discord_rest_client.nonce_to_string nonce, content) :: !posts;
+        match !post_results with
+        | result :: rest ->
+            post_results := rest;
+            result
+        | [] -> fail "more create-message requests than one reply needs")
+      ~edit_message:(fun ~message_id ~content ->
+        edits := (message_id, content) :: !edits;
+        Ok ())
+      ~send_message:(fun ~content:_ ->
+        fail "a reply whose POST went unanswered must not be posted anew")
+      events
+  in
+  (outcomes, List.rev !posts, List.rev !edits)
+
+let lost_post = Error (Discord_rest_client.Network "connection reset after send")
+
+let reply_text text =
+  Masc.Keeper_chat_events.Text_delta { text; response = Unobserved_scope None }
+
+let reply_started =
+  Masc.Keeper_chat_events.Run_started
+    { run_id = "run-post"; thread_id = "thread-post" }
+
+let reply_finished = Masc.Keeper_chat_events.Run_finished { run_id = "run-post" }
+
+(* Every create-message request of the reply carries the first one's nonce,
+   in the order sent. *)
+let check_one_reply_nonce label expected_contents posts =
+  match posts with
+  | [] -> fail "the reply never asked Discord to create its message"
+  | (reply_nonce, _) :: _ ->
+      check (list (pair string string)) label
+        (List.map (fun content -> (reply_nonce, content)) expected_contents)
+        posts
+
+(* The last delta "c" leaves the stable prefix at "a b ", so a third streaming
+   POST would send "a b " and only the final POST sends "a b c". *)
+let test_unanswered_post_is_asked_again_with_the_reply_nonce () =
+  let outcomes, posts, edits =
+    run_reply_with_unanswered_posts
+      ~post_results:[ lost_post; lost_post; Ok "discord-landed" ]
+      [ reply_started; reply_text "a "; reply_text "b "; reply_text "c"
+      ; reply_finished ]
+  in
+  check_single_ok "the reply settles" outcomes;
+  check_one_reply_nonce
+    "streaming POST, its one retry and the final POST share one nonce"
+    [ "a "; "a b "; "a b c" ] posts;
+  check (list (pair string string))
+    "the complete reply is written over the returned message"
+    [ ("discord-landed", "a b c") ] edits
+
+let test_unanswered_posts_that_all_fail_settle_the_final_error () =
+  let outcomes, posts, edits =
+    run_reply_with_unanswered_posts
+      ~post_results:
+        [ lost_post; lost_post
+        ; Error (Discord_rest_client.Network "final post failed") ]
+      [ reply_started; reply_text "a "; reply_text "b "; reply_text "c"
+      ; reply_finished ]
+  in
+  check_single_network_error "the final POST failure settles the reply"
+    "final post failed" outcomes;
+  check_one_reply_nonce
+    "one streaming retry, then only the final POST" [ "a "; "a b "; "a b c" ]
+    posts;
+  check (list (pair string string)) "no message id, nothing edited" [] edits
+
+(* Discord may answer the retry with the message the first attempt created,
+   holding "a ". The retry's text is written over it at once, so a turn that
+   ends without a terminal event does not leave the shorter text behind. *)
+let test_answered_retry_writes_its_text_over_the_returned_message () =
+  let outcomes, posts, edits =
+    run_reply_with_unanswered_posts
+      ~post_results:[ lost_post; Ok "discord-landed" ]
+      [ reply_started; reply_text "a "; reply_text "b " ]
+  in
+  check_one_reply_nonce "the retry carries the reply's nonce" [ "a "; "a b " ]
+    posts;
+  check (list (pair string string)) "the retry's text is on the message"
+    [ ("discord-landed", "a b ") ] edits;
+  match outcomes with
+  | [ Error (Discord_rest_client.Other _) ] -> ()
+  | outcomes ->
+      failf "a bus closed without a terminal settles once with an error, got %d"
+        (List.length outcomes)
 
 let () =
   run "keeper_chat_discord"
@@ -728,8 +809,12 @@ let () =
             test_failed_stream_edit_rearms_the_throttle
         ; test_case "checkpoint status keeps accumulated text" `Quick
             test_checkpoint_status_keeps_the_accumulated_stream_text
-        ; test_case "unknown-outcome POST retries once then degrades" `Quick
-            test_unknown_outcome_post_retries_once_then_degrades
+        ; test_case "unanswered POST is asked again with the reply nonce" `Quick
+            test_unanswered_post_is_asked_again_with_the_reply_nonce
+        ; test_case "unanswered POSTs that all fail settle the final error"
+            `Quick test_unanswered_posts_that_all_fail_settle_the_final_error
+        ; test_case "answered retry writes its text over the returned message"
+            `Quick test_answered_retry_writes_its_text_over_the_returned_message
         ; test_case "a settled adapter delivers nothing published after it" `Quick
             test_a_settled_adapter_delivers_nothing_the_turn_publishes_after_it
         ; test_case "a publisher is not wedged behind the settled adapter" `Quick

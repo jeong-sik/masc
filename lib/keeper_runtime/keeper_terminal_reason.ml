@@ -14,7 +14,8 @@
    [api_error_*] / [Provider_runtime_failure] family. These are the wire
    forms of exactly the [Agent_core.Error] variants that
    [Keeper_error_classify.is_transient_network_error] reports as transient:
-   a plain (non-structural) [Api.Timeout] and an [Api.NetworkError]. The
+   a plain (non-structural) [Api.Timeout], an [Api.NetworkError] and an
+   [Api.Connect_failed] (its own code, not folded into the network one). The
    producer [Keeper_agent_error.api_error_terminal_reason_code] builds the
    same strings; it references these constants so encoder and the
    consumer-side classifier cannot drift.
@@ -22,6 +23,7 @@
    Agent execution observations never enter this API-error wire family. *)
 let wire_api_error_timeout = "api_error_timeout"
 let wire_api_error_network = "api_error_network"
+let wire_api_error_connect_failed = "api_error_connect_failed"
 
 (* The [provider_error_*] family. Producer and classifier used to spell these
    at fifteen call sites across three modules with nothing tying them
@@ -41,6 +43,13 @@ let wire_provider_error_timeout = "provider_error_timeout"
 let wire_provider_error_timeout_prefix = "provider_error_timeout:"
 let wire_provider_error_network_timeout = "provider_error_network:timeout"
 let wire_provider_error_network_timeout_prefix = "provider_error_network:timeout:"
+let wire_provider_error_connect_failed_prefix = "provider_error_connect_failed:"
+
+(* A provider connect failure carries no deadline phase, so its timeout code is
+   one exact string: the prefix and the kind's own label. *)
+let wire_provider_error_connect_failed_timeout =
+  wire_provider_error_connect_failed_prefix
+  ^ Llm_provider.Http_client.network_error_kind_to_string Llm_provider.Http_client.Timeout
 
 type t =
   | Runtime_exhausted of string
@@ -183,10 +192,12 @@ let is_transient_provider_runtime_failure = function
   | Provider_runtime_failure wire ->
     String.equal wire wire_api_error_timeout
     || String.equal wire wire_api_error_network
+    || String.equal wire wire_api_error_connect_failed
     || String.equal wire wire_provider_error_timeout
     || String.starts_with ~prefix:wire_provider_error_timeout_prefix wire
     || String.equal wire wire_provider_error_network_timeout
     || String.starts_with ~prefix:wire_provider_error_network_timeout_prefix wire
+    || String.equal wire wire_provider_error_connect_failed_timeout
   | Runtime_exhausted _
   | Config_invalid _
   | Authorization_refused _

@@ -44,6 +44,7 @@ let core_termination_semantics err =
       | Llm_provider.Error.AuthorizationError _
       | Llm_provider.Error.ServerError _
       | Llm_provider.Error.NetworkError _
+      | Llm_provider.Error.Connect_failed _
       | Llm_provider.Error.InvalidRequest _
       | Llm_provider.Error.NotFound _
       | Llm_provider.Error.ProviderTerminal _ ) -> Core_error_failure
@@ -57,7 +58,8 @@ let core_termination_semantics err =
   | Agent_core.Error.Api (Agent_core.Retry.NotFound _)
   | Agent_core.Error.Api (Agent_core.Retry.ContextOverflow _)
   | Agent_core.Error.Api (Agent_core.Retry.InputCapacity _)
-  | Agent_core.Error.Api (Agent_core.Retry.NetworkError _) -> Core_error_failure
+  | Agent_core.Error.Api (Agent_core.Retry.NetworkError _)
+  | Agent_core.Error.Api (Agent_core.Retry.Connect_failed _) -> Core_error_failure
   | Agent_core.Error.Mcp _ -> Core_error_failure
   | Agent_core.Error.Config _ -> Core_error_failure
   | Agent_core.Error.Serialization _ -> Core_error_failure
@@ -102,6 +104,7 @@ let api_error_terminal_reason_code (err : Agent_core.Error.api_error) : string =
      encoder cannot drift. Agent execution observations are represented by the
      typed Agent error constructors above this API layer. *)
   | Agent_core.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
+  | Agent_core.Retry.Connect_failed _ -> Keeper_terminal_reason.wire_api_error_connect_failed
   | Agent_core.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
@@ -186,6 +189,9 @@ let provider_error_terminal_reason_code = function
       "provider_error_network:%s%s"
       (Llm_provider.Http_client.network_error_kind_to_string kind)
       (provider_timeout_suffix timeout_phase)
+  | Llm_provider.Error.Connect_failed { kind; _ } ->
+    Keeper_terminal_reason.wire_provider_error_connect_failed_prefix
+    ^ Llm_provider.Http_client.network_error_kind_to_string kind
   | Llm_provider.Error.Timeout { timeout_phase; _ } ->
     Keeper_terminal_reason.wire_provider_error_timeout
     ^ provider_timeout_suffix timeout_phase
@@ -244,7 +250,9 @@ let agent_core_timeout_observation :
     Some { Keeper_turn_terminal_code.source = Agent_core_provider; phase = Some phase }
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError
-         { kind = Llm_provider.Http_client.Timeout; timeout_phase = None; _ }) ->
+         { kind = Llm_provider.Http_client.Timeout; timeout_phase = None; _ })
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.Connect_failed { kind = Llm_provider.Http_client.Timeout; _ }) ->
     Some { Keeper_turn_terminal_code.source = Agent_core_provider; phase = None }
   | Agent_core.Error.Provider
       (Llm_provider.Error.NetworkError
@@ -258,6 +266,19 @@ let agent_core_timeout_observation :
              | Llm_provider.Http_client.End_of_file
              | Llm_provider.Http_client.Unknown )
          ; timeout_phase = None
+         ; _
+         })
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.Connect_failed
+         { kind =
+             ( Llm_provider.Http_client.Connection_refused
+             | Llm_provider.Http_client.Dns_failure
+             | Llm_provider.Http_client.Unreachable
+             | Llm_provider.Http_client.Tls_error
+             | Llm_provider.Http_client.Local_resource_exhaustion
+             | Llm_provider.Http_client.Connection_reset
+             | Llm_provider.Http_client.End_of_file
+             | Llm_provider.Http_client.Unknown )
          ; _
          })
   | Agent_core.Error.Provider
@@ -289,7 +310,8 @@ let agent_core_timeout_observation :
       | Llm_provider.Retry.NotFound _
       | Llm_provider.Retry.ContextOverflow _
       | Llm_provider.Retry.InputCapacity _
-      | Llm_provider.Retry.NetworkError _ )
+      | Llm_provider.Retry.NetworkError _
+      | Llm_provider.Retry.Connect_failed _ )
   | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
   | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ -> None

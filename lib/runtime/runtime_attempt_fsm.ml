@@ -11,6 +11,9 @@ let should_try_next = function
     code = 408 || code = 409 || code = 429
     || Option.is_some (Llm_provider.Retry.server_status_class_of_code code)
   | Llm_provider.Http_client.NetworkError _
+  (* The connection did not open: the next candidate may open its own (RFC
+     #52028 §2.3). The walk moves on exactly as for a network failure. *)
+  | Llm_provider.Http_client.Connect_failed _
   | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.ProviderFailure _ ->
     true

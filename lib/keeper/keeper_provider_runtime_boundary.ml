@@ -187,6 +187,7 @@ let provider_runtime_error_looks_like_timeout ~code =
   || String.starts_with
        ~prefix:Keeper_terminal_reason.wire_provider_error_network_timeout_prefix
        code
+  || String.equal code Keeper_terminal_reason.wire_provider_error_connect_failed_timeout
 ;;
 
 let classify_provider_runtime_error_record ?agent_core_timeout ~code () =
@@ -264,6 +265,7 @@ let classify_provider_error = function
   | Llm_provider.Error.AuthorizationError _
   | Llm_provider.Error.ServerError _
   | Llm_provider.Error.NetworkError _
+  | Llm_provider.Error.Connect_failed _
   | Llm_provider.Error.InvalidRequest _
   | Llm_provider.Error.NotFound _
   | Llm_provider.Error.ProviderTerminal _ ->
@@ -280,7 +282,7 @@ let classify_core_error (err : Agent_core.Error.t) : t =
          ~phase:(Option.map timeout_phase_of_agent_core_phase phase)
      | Agent_core.Error.Provider provider_error ->
        classify_provider_error provider_error
-     | Agent_core.Error.Api (NetworkError _ | Overloaded _ | ServerError _
+     | Agent_core.Error.Api (NetworkError _ | Connect_failed _ | Overloaded _ | ServerError _
        | RateLimited _ | AuthError _ | AuthorizationError _ | PaymentRequired _
        | InvalidRequest _ | NotFound _ | ContextOverflow _ | InputCapacity _)
      | Agent_core.Error.Agent _

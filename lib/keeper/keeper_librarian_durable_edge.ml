@@ -46,7 +46,8 @@ let call ~config ~reserved ~(expected : Request.destination) ~(original : Retain
     Runtime.call_captured_tool_request ~config ~reserved ~export
       ~access:Lane_addon_sources.Operator_configuration
       ~installation_id:expected.installation_id ~package_id:expected.package_id
-      ~tool:expected.tool ~configuration_revision:expected.configuration_revision ~original ~arguments
+      ~tool:expected.tool ~configuration_revision:expected.configuration_revision
+      ~original:(Retained.listed original) ~arguments
     |> Result.map_error Submit.call_error_of_runtime
 let confirm_destination ~config ~reserved (destination:Request.destination) =
   let snapshot=Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved in

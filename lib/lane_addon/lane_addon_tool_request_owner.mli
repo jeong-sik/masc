@@ -186,6 +186,27 @@ val advance_events : store:Lane_addon_store.t -> expected:retained ->
 val advance : store:Lane_addon_store.t -> expected:retained ->
   event:Lane_addon_request_progress.event -> (publication, update_error) result
 (** {!advance_events} for one event, with the same publication contract. *)
+type record_publication = Record_stored of Record.t | Record_already_stored of Record.t
+  | Record_unconfirmed of string
+val advance_record_events : store:Lane_addon_store.t -> expected:Record.t ->
+  events:Lane_addon_request_progress.event list -> (record_publication, update_error) result
+(** {!advance_events} for a caller that holds the record and not the body.
+    The transition, the expected-record check and the publication contract are
+    the same; {!advance_events} is this function with the caller's request
+    put back beside the record it returns. *)
+val advance_record : store:Lane_addon_store.t -> expected:Record.t ->
+  event:Lane_addon_request_progress.event -> (record_publication, update_error) result
+(** {!advance_record_events} for one event. *)
+val rebind : retained -> Record.t -> retained option
+(** The record beside the request the caller already read and checked, when
+    the record names that request: same scope, ID, installation, package,
+    tool, digest and summary. Progress may differ. [None] for any other
+    record. No store is read. *)
+val confirm_listed : store:Lane_addon_store.t -> Record.t -> (unit, error) result
+(** Read the record of this ID again and check that it still names the same
+    installation, package, tool, digest and summary. Progress may differ. A
+    record naming anything else is [Binding_conflict]; an absent record is
+    [Store_unavailable]. The body is not read and nothing is written. *)
 module For_testing : sig
   val fold_all : store:Lane_addon_store.t -> after_inventory:(unit -> unit) ->
     init:'a -> f:('a -> retained -> 'a) -> ('a, error) result

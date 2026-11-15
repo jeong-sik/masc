@@ -200,12 +200,15 @@ val call_exported_tool_with_authority :
 val call_captured_tool_request : config:Workspace.config ->
   access:Lane_addon_sources.access -> reserved:string list -> export:tool_export ->
   installation_id:string -> package_id:string -> tool:string ->
-  configuration_revision:string -> original:Lane_addon_tool_request_owner.retained ->
+  configuration_revision:string -> original:Lane_addon_tool_request_owner.Record.t ->
   arguments:Yojson.Safe.t -> (Mcp_protocol.Mcp_types.tool_result, tool_call_error) result
 (** Call the original configured tool while holding the existing configuration
     and action serializers from fresh complete declaration verification through
     the worker RPC. Validate the immutable logical destination and semantic
-    configuration revision, plus the original retained owner, before the call.
+    configuration revision, plus the original owner record, before the call.
+    The record of that ID is read again and must name the same installation,
+    package, tool, digest and summary; an absent record or one naming anything
+    else is [Unavailable]. The request body is neither read nor written here.
     Raw source revision stays original provenance; formatting does not transfer
     an original request. The host caller still restores physical input authority
     and publishes its dispatch intent first. No model is called by this port;

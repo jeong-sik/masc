@@ -9,15 +9,21 @@
     The index is rebuilt from the first row when the file at the path is not
     the file that was read (another device or inode), is shorter than what was
     read, or has no row starting at the place the reading ended. It is not
-    kept at all by an update that met a row it could not read, or a last row
-    without its newline: while a transcript has either, each update reads the
-    whole file, and so does the first update after its repair.
+    kept at all by an update that met a row it could not read: while a
+    transcript has one, each update reads the whole file, and so does the
+    first update after its repair.
+
+    A row is a line that ends with its newline. Bytes after the last newline
+    are an append that stopped part way, whether or not they read as a row:
+    the sender of that append got no answer, so its delivery is not in the
+    index, and the update that appends a row cuts those bytes first, as a
+    plain append does.
 
     It is not rebuilt when bytes before that place change while the device,
     the inode, at least the length and a row start at that place all stay. The
     writers of the chat store never make such a change: they append, take back
-    an append that failed, and cut an incomplete last row before a plain
-    append, all after that place. A transcript whose rows can all be read is
+    an append that failed, and cut an incomplete last row before an append,
+    all after that place. A transcript whose rows can all be read is
     therefore edited by hand only with the server stopped. That includes one
     that refuses a delivery key for rows that can be read (two rows of one
     provenance): the refusal stays with the kept index until the index is

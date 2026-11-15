@@ -131,6 +131,8 @@ type subject =
   | Registry_root
   | Recovery_root
   | Lanes_root
+  | Staging_root
+  | Staged_lane of owner
   | Lane_root of owner
   | Lane_entry of owner * string
   | Area of area * owner
@@ -143,6 +145,8 @@ type operation =
   | Close_directory
   | Sync_directory
   | Read_directory
+  | Rename_directory
+  | Remove_directory
   | Inspect_record
   | Open_record
   | Read_record
@@ -291,8 +295,9 @@ val forensic_operation_id : forensic -> operation_id
     components are fchmodded after umask filtering. Every call repeats both
     directory and parent durability barriers. Retain the returned registry for
     the process lifetime rather than reopening it on the publication hot path.
-    Only the final [lanes] capability is retained on [sw]; the intermediate
-    recovery-directory capability is short-scoped. *)
+    The recovery-directory and [lanes] capabilities are retained on [sw]; a
+    lane that is created later is staged below the former and published below
+    the latter. *)
 val open_registry
   :  sw:Eio.Switch.t
   -> registry_root:Eio.Fs.dir_ty Eio.Path.t
@@ -352,8 +357,12 @@ type 'a store_scope_outcome =
       ; release_failure : resource_release_failure
       }
 
-(** Idempotently complete and pin one owner's fixed three-store layout inside
-    a module-owned switch, then call [f]. The intermediate lane capability is
+(** Pin one owner's fixed three-store layout inside a module-owned switch,
+    then call [f]. A missing lane is built under the registry's [staging]
+    directory and published under [lanes] in one rename, so a lane is never
+    visible without its three areas. An existing lane is pinned as found; an
+    area missing from it is a layout failure and is not created. The
+    intermediate lane capability is
     short-scoped; the active, owned, and forensic capabilities remain pinned
     for exactly the callback lifetime. Normal return, exceptions,
     cancellation, and partial layout failure all close every capability owned

@@ -23,6 +23,9 @@ let post_id = function
   | Vote_post post_id -> post_id
   | Vote_comment { post_id; _ } -> post_id
 
-let describe = function
+let describe ~ko = function
   | Vote_post post_id -> post_id
-  | Vote_comment { comment_id; _ } -> "comment " ^ comment_id
+  | Vote_comment { comment_id; _ } -> (if ko then "댓글 " else "comment ") ^ comment_id
+
+let direction ~ko ~up =
+  if ko then (if up then "추천" else "비추천") else if up then "up" else "down"

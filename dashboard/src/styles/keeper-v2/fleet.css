@@ -340,7 +340,10 @@
 .fl-rot-cand { font-size: var(--fs-10); padding: 3px 7px; border: 1px solid var(--border-main); border-radius: var(--radius-sm); color: var(--text-dim); background: var(--bg-card); }
 .fl-rot-cand.head { border-color: var(--volt-dim); color: var(--text-mid); }
 .fl-rot-cand.cur { color: var(--volt); border-color: var(--volt-dim); box-shadow: inset 0 0 0 1px var(--volt-dim); }
+.fl-rot-cand.rest { border-style: dashed; border-color: var(--status-warn); }
 .fl-rot-arr { color: var(--text-dim); font-size: var(--fs-10); }
+.fl-rot-rest { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: var(--fs-10); color: var(--text-mid); }
+.fl-rot-rest-why { color: var(--status-warn); }
 .fl-rot-na { font-size: var(--fs-11); color: var(--text-dim); }
 .fl-rot-ev { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 10.5px; color: var(--text-mid); }
 .fl-rot-ev-out { flex: none; }

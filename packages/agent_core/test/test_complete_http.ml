@@ -4824,6 +4824,70 @@ let test_native_completion_outcome ?(public = false) ~via_transport () =
   with Exit -> ()
 ;;
 
+(* The request body is hashed once, when its serialization is sealed. The
+   pre-dispatch observation and the outcome provenance both report that one
+   digest: the same string, not two equal ones computed from the body twice
+   (#51560). *)
+let test_request_digest_is_computed_once_for_observation_and_provenance () =
+  Eio_main.run @@ fun env ->
+  try Eio.Switch.run @@ fun sw ->
+    List.iter (fun stream ->
+      List.iter (fun admitted ->
+        let captured = ref None in
+        let url =
+          if stream then
+            start_sse_server ~sw ~net:env#net ~capture_body:captured
+              (anthropic_sse_response "ok")
+          else start_mock_server ~sw ~net:env#net ~capture_body:captured
+              (anthropic_response "ok") in
+        let config = make_config url in
+        let observed = ref None in
+        let request_wire_observer observation = observed := Some observation; Ok () in
+        let provenance =
+          if admitted then
+            let serialized =
+              match Complete.admit_request_body ~stream
+                      (Complete.prepare_request ~config ~messages ()) with
+              | Ok serialized -> serialized
+              | Error _ -> fail "fixture serialization failed" in
+            if stream then
+              (Complete.complete_stream_serialized ~sw ~net:env#net
+                 ~request_wire_observer serialized ~on_event:(fun _ -> ()) ())
+                .request_provenance
+            else
+              (Complete.complete_serialized ~sw ~net:env#net
+                 ~request_wire_observer serialized ()).request_provenance
+          else if stream then
+            (Complete_stream.complete_stream_http ~sw ~net:env#net
+               ~request_wire_observer ~config ~messages ~tools:[]
+               ~on_event:(fun _ -> ()) ()).request_provenance
+          else
+            (Complete_sync.complete_http ~sw ~net:env#net
+               ~request_wire_observer ~config ~messages ~tools:[] ()).request_provenance
+        in
+        let sent = match !captured with Some body -> body
+          | None -> fail "peer did not receive the generation body" in
+        let observed = match !observed with Some observation -> observation
+          | None -> fail "the serialization was not observed" in
+        match provenance with
+        | Completion_outcome.Cache_reused _
+        | Completion_outcome.Not_serialized
+        | Completion_outcome.External_unobserved
+        | Completion_outcome.Interrupted_unobserved -> fail "serialized evidence was lost"
+        | Completion_outcome.Serialized sealed ->
+          let label = Printf.sprintf "stream=%b admitted=%b" stream admitted in
+          check string (label ^ ": the digest is of the bytes the peer received")
+            Agent_core_sha256.(digest_string sent |> to_hex) sealed.body_sha256;
+          check int (label ^ ": the observation counts the bytes the peer received")
+            (String.length sent) observed.body_bytes;
+          check bool (label ^ ": observation and provenance hold one digest value") true
+            (observed.body_sha256 == sealed.body_sha256))
+        [false; true])
+      [false; true];
+    Eio.Switch.fail sw Exit
+  with Exit -> ()
+;;
+
 let test_custom_transport_outcome () =
   let response = Ok (mock_transport_response "custom") in
   let transport = make_transport response in
@@ -5155,6 +5219,8 @@ let () =
             `Quick (test_native_completion_outcome ~via_transport:false)
         ; test_case "native transport factory preserves the received wire evidence"
             `Quick (test_native_completion_outcome ~via_transport:true)
+        ; test_case "observation and provenance share the one digest of the sent body"
+            `Quick test_request_digest_is_computed_once_for_observation_and_provenance
         ; test_case "public sync/stream outcomes preserve native success/error evidence"
             `Quick (test_native_completion_outcome ~public:true ~via_transport:false)
         ; test_case "public outcomes preserve factory success/error evidence"

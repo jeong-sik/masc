@@ -563,7 +563,7 @@ let failure_of_agent_core_error error =
   match Route.route_of_error ~boundary:Route.Agent_core_execution error with
   | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after } ->
     Rate_limited (with_retry_after retry_after detail)
-  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota (Route.Payment_refused | Route.Provider_quota_refused); retry_after } ->
     Quota_exhausted (with_retry_after retry_after detail)
   | Route.Retry_after_observed
       { retry_class = Route.Provider_capacity | Route.Server_error; retry_after } ->

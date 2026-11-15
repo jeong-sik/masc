@@ -104,41 +104,30 @@ let render_content_status fields =
   in
   Printf.sprintf "Content status: %s%s%s" status detail_text error_text
 
-let render_hit_content_text hit =
-  match hit with
-  | `Assoc fields ->
-      let title =
-        match assoc_field_string "title" fields with
-        | Some value -> value
-        | None -> "Untitled result"
-      in
-      let heading =
-        match assoc_field_int "rank" fields with
-        | Some rank -> Printf.sprintf "%d. %s" rank title
-        | None -> title
-      in
-      let content =
-        match assoc_field_string "page_content" fields with
-        | Some value -> value
-        | None -> "(no page content available)"
-      in
-      let metadata =
-        []
-        |> add_optional_line "URL" (assoc_field_string "url" fields)
-        |> add_optional_line "Snippet" (assoc_field_string "snippet" fields)
-        |> add_optional_line "Provider" (assoc_field_string "source" fields)
-        |> add_optional_line "Fetched URL" (assoc_field_string "page_content_final_url" fields)
-        |> add_optional_line "Fetched title" (assoc_field_string "page_content_title" fields)
-        |> List.rev
-      in
-      let lines =
-        heading :: (metadata @ [ render_content_status fields; "Content:"; content ])
-      in
-      String.concat "\n" lines
-  | _ -> "Unreadable search result payload."
+let render_hit_content_text ((hit : Tool_misc_web_search.normalized_hit), fields) =
+  let heading = Printf.sprintf "%d. %s" hit.rank hit.title in
+  let content =
+    match assoc_field_string "page_content" fields with
+    | Some value -> value
+    | None -> "(no page content available)"
+  in
+  let metadata =
+    []
+    |> add_optional_line "URL" (Some hit.url)
+    |> add_optional_line "Snippet" (String_util.trim_nonempty hit.snippet)
+    |> add_optional_line "Provider" (Some hit.source)
+    |> add_optional_line "Content source" (assoc_field_string "page_content_source" fields)
+    |> add_optional_line "Fetched URL" (assoc_field_string "page_content_final_url" fields)
+    |> add_optional_line "Fetched title" (assoc_field_string "page_content_title" fields)
+    |> List.rev
+  in
+  let lines =
+    heading :: (metadata @ [ render_content_status fields; "Content:"; content ])
+  in
+  String.concat "\n" lines
 
 let render_content_text ~content_max_chars ~content_timeout ~content_ok_count
-  ~content_error_count result_fields hits =
+  ~content_engine_text_count ~content_error_count result_fields hits =
   let metadata =
     []
     |> add_optional_line "Query" (assoc_field_string "query" result_fields)
@@ -150,8 +139,10 @@ let render_content_text ~content_max_chars ~content_timeout ~content_ok_count
   let header =
     ("WebSearch readable results" :: metadata)
     @ [ Printf.sprintf
-          "Content fetch: best_effort, ok=%d, unavailable=%d, max_chars=%d, timeout=%ds"
+          "Content fetch: best_effort, ok=%d, engine_text=%d, unavailable=%d, \
+           max_chars=%d, timeout=%ds"
           content_ok_count
+          content_engine_text_count
           content_error_count
           content_max_chars
           content_timeout
@@ -168,6 +159,15 @@ let failed_page_content_note ~url message =
   let message = String.trim message in
   let message = if String.equal message "" then "unknown error" else message in
   Printf.sprintf "_Failed to retrieve page content: %s_\n\nSource: %s\n" message url
+
+(* What a result's [content_text] entry holds. The kinds are counted apart,
+   so a reader never takes the engine's text for the fetched page. *)
+type hit_content =
+  | Page_fetched      (* the result's page, fetched with WebFetch *)
+  | Engine_text_kept  (* the page fetch failed; the engine's text stands in *)
+  | Unavailable       (* the page fetch failed and the engine gave no text *)
+
+let fetched_page_source = "fetched page"
 
 let fetch_page_content_for_search_hit ~content_max_chars ~content_timeout url =
   let fetch_args =
@@ -188,16 +188,11 @@ let fetch_page_content_for_search_hit ~content_max_chars ~content_timeout url =
   if Tool_result.is_success fetch_result then (
     let data = Tool_result.data fetch_result in
     match json_field_string "text" data with
-    | None ->
-        let message = "WebFetch success payload missing text field" in
-        ( [ "page_content_status", `String "error"
-          ; "page_content", `String (failed_page_content_note ~url message)
-          ; "page_content_error", `String message
-          ]
-        , false )
+    | None -> Error "WebFetch success payload missing text field"
     | Some text ->
         let fields =
           [ "page_content_status", `String "ok"
+          ; "page_content_source", `String fetched_page_source
           ; "page_content", `String text
           ]
         in
@@ -226,100 +221,104 @@ let fetch_page_content_for_search_hit ~content_max_chars ~content_timeout url =
           | Some value -> ("page_content_title", `String value) :: fields
           | None -> fields
         in
-        List.rev fields, true)
-  else
-    ( [ "page_content_status", `String "error"
-      ; "page_content", `String (failed_page_content_note ~url (Tool_result.message fetch_result))
-      ; "page_content_error", `String (Tool_result.message fetch_result)
-      ]
-    , false )
+        Ok (List.rev fields))
+  else Error (Tool_result.message fetch_result)
 
-let enrich_web_search_hit ~content_max_chars ~content_timeout hit =
-  match hit with
-  | `Assoc fields ->
-      (match List.assoc_opt "url" fields with
-       | Some (`String url) when not (String.equal (String.trim url) "") ->
-           let additions, ok =
-             fetch_page_content_for_search_hit
-               ~content_max_chars
-               ~content_timeout
-               url
-           in
-           `Assoc (append_assoc_fields fields additions), ok
-       | _ ->
-           ( `Assoc
-               (append_assoc_fields fields
-                  [ "page_content_status", `String "skipped"
-                  ; "page_content",
-                    `String "_Skipped page content fetch: result has no URL._\n"
-                  ])
-           , false ))
-  | other -> other, false
+let failed_page_content_fields ~url message =
+  [ "page_content_status", `String "error"
+  ; "page_content", `String (failed_page_content_note ~url message)
+  ; "page_content_error", `String message
+  ]
 
-let enrich_web_search_results ~content_max_chars ~content_timeout hits =
-  let ok_count = ref 0 in
-  let enriched =
-    List.map
-      (fun hit ->
-         let hit, ok =
-           enrich_web_search_hit ~content_max_chars ~content_timeout hit
-         in
-         if ok then incr ok_count;
-         hit)
-      hits
-  in
-  let result_count = List.length hits in
-  enriched, !ok_count, result_count - !ok_count
+(* The engine's text for a page that could not be fetched, cut to the same
+   [contentMaxChars] a fetched page gets. Its source line names the engine,
+   and the status keeps the fetch failure. *)
+let engine_text_fields ~content_max_chars ~source ~fetch_error text =
+  let kept = String_util.utf8_safe ~max_bytes:content_max_chars ~suffix:"…" text in
+  let content = String_util.to_string kept in
+  [ "page_content_status", `String "engine_text"
+  ; ( "page_content_source"
+    , `String
+        (Printf.sprintf "text the %s search engine returned with this result, \
+                         not the fetched page" source) )
+  ; "page_content", `String content
+  ; "page_content_chars", `Int (String.length content)
+  ; "page_content_truncated", `Bool (String_util.was_truncated kept)
+  ; "page_content_error", `String ("page fetch failed: " ^ fetch_error)
+  ]
 
-let enrich_web_search_payload ~tool_name ~start_time ~content_max_chars
-  ~content_timeout data =
+let enrich_web_search_hit ~content_max_chars ~content_timeout
+    (hit : Tool_misc_web_search.normalized_hit) =
+  match
+    fetch_page_content_for_search_hit ~content_max_chars ~content_timeout hit.url
+  with
+  | Ok fields -> fields, Page_fetched
+  | Error message ->
+      (match hit.engine_text with
+       | Some text ->
+           ( engine_text_fields ~content_max_chars ~source:hit.source
+               ~fetch_error:message text
+           , Engine_text_kept )
+       | None -> failed_page_content_fields ~url:hit.url message, Unavailable)
+
+let content_counts contents =
+  List.fold_left
+    (fun (fetched, engine_text, unavailable) (_, _, content) ->
+       match content with
+       | Page_fetched -> (fetched + 1, engine_text, unavailable)
+       | Engine_text_kept -> (fetched, engine_text + 1, unavailable)
+       | Unavailable -> (fetched, engine_text, unavailable + 1))
+    (0, 0, 0) contents
+
+let enrich_web_search_payload ~content_max_chars ~content_timeout hits data =
   match data with
   | `Assoc fields ->
       (match List.assoc_opt "result" fields with
        | Some (`Assoc result_fields) ->
-           (match List.assoc_opt "results" result_fields with
-            | Some (`List hits) ->
-                let enriched_hits, content_ok_count, content_error_count =
-                  enrich_web_search_results
-                    ~content_max_chars
-                    ~content_timeout
-                    hits
-                in
-                (* Fetched bodies ride only in [content_text]. Mirroring
-                   them into [results.[].page_content] doubled every byte
-                   through [Tool_result.message]'s whole-payload
-                   serialization with no reader on the structured copy. *)
-                let result_fields =
-                  append_assoc_fields result_fields
-                    [ "content_enriched", `Bool true
-                    ; "content_fetch_mode", `String "best_effort"
-                    ; "content_max_chars", `Int content_max_chars
-                    ; "content_timeout", `Int content_timeout
-                    ; "content_result_count", `Int content_ok_count
-                    ; "content_error_count", `Int content_error_count
-                    ; ( "content_text",
-                        `String
-                          (render_content_text
-                             ~content_max_chars
-                             ~content_timeout
-                             ~content_ok_count
-                             ~content_error_count
-                             result_fields
-                             enriched_hits) )
-                    ]
-                in
-                Tool_result.make_ok
-                  ~tool_name
-                  ~start_time
-                  ~data:(`Assoc (assoc_replace "result" (`Assoc result_fields) fields))
-                  ()
-            | _ -> Tool_result.make_ok ~tool_name ~start_time ~data ())
-       | _ -> Tool_result.make_ok ~tool_name ~start_time ~data ())
-  | _ -> Tool_result.make_ok ~tool_name ~start_time ~data ()
+           let contents =
+             List.map
+               (fun hit ->
+                  let content_fields, content =
+                    enrich_web_search_hit ~content_max_chars ~content_timeout hit
+                  in
+                  hit, content_fields, content)
+               hits
+           in
+           let content_ok_count, content_engine_text_count, content_error_count =
+             content_counts contents
+           in
+           (* Fetched bodies ride only in [content_text]. Mirroring
+              them into [results.[].page_content] doubled every byte
+              through [Tool_result.message]'s whole-payload
+              serialization with no reader on the structured copy. *)
+           let result_fields =
+             append_assoc_fields result_fields
+               [ "content_enriched", `Bool true
+               ; "content_fetch_mode", `String "best_effort"
+               ; "content_max_chars", `Int content_max_chars
+               ; "content_timeout", `Int content_timeout
+               ; "content_result_count", `Int content_ok_count
+               ; "content_engine_text_count", `Int content_engine_text_count
+               ; "content_error_count", `Int content_error_count
+               ; ( "content_text",
+                   `String
+                     (render_content_text
+                        ~content_max_chars
+                        ~content_timeout
+                        ~content_ok_count
+                        ~content_engine_text_count
+                        ~content_error_count
+                        result_fields
+                        (List.map (fun (hit, fields, _) -> (hit, fields)) contents)) )
+               ]
+           in
+           `Assoc (assoc_replace "result" (`Assoc result_fields) fields)
+       | _ -> data)
+  | _ -> data
 
-let enrich_result_if_requested ~tool_name ~start_time args result =
-  if not (Tool_result.is_success result) then result
-  else if not (get_bool args "includeContent" false) then result
+let handle ~tool_name ~start_time args =
+  if not (get_bool args "includeContent" false) then
+    Tool_misc_web_search.handle ~tool_name ~start_time args
   else
     let content_max_chars =
       get_int args "contentMaxChars" web_search_content_default_max_chars
@@ -329,9 +328,5 @@ let enrich_result_if_requested ~tool_name ~start_time args result =
       get_int args "contentTimeout" Tool_misc_web_fetch.default_timeout_sec
       |> clamp_int ~min:1 ~max:60
     in
-    enrich_web_search_payload
-      ~tool_name
-      ~start_time
-      ~content_max_chars
-      ~content_timeout
-      (Tool_result.data result)
+    Tool_misc_web_search.handle_with_rows ~tool_name ~start_time args
+      ~on_rows:(enrich_web_search_payload ~content_max_chars ~content_timeout)

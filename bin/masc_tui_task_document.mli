@@ -1,6 +1,9 @@
 (** Complete immutable Task documents. Preparation is presentation only. *)
 val status_label : ko:bool -> Masc_domain.task_status -> string
 (** Shared localized label for the list, preview and current Task document. *)
+val status_tag_label : ko:bool -> Masc_domain.Task_status_tag.t -> string
+(** The same label for a status without its payload, for a count of the
+    tasks in that status (the Metrics task rows). *)
 type goals = Unread | Unavailable of string | Membership of string list | Canonical of string option
 type part = Body | History
 type input

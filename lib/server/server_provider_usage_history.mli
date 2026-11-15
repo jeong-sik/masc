@@ -21,7 +21,10 @@ val restore :
     in-memory usage table for [scopes], as {!Runtime_provider_usage_window.restore}
     describes, choosing them as
     {!Server_provider_usage_history_projection.stored_reports} does. Stored
-    reports of a scope not in [scopes] stay on disk only. Nothing is written
+    reports of a scope not in [scopes] stay on disk only. A source whose
+    latest complete report was not read whole is logged and nothing of it is
+    put back, so its scope starts as one that has not reported that source.
+    Nothing is written
     to the store. [Error] when the store cannot be read; the table is then
     left as it was. Called once at start, before runtimes report. *)
 

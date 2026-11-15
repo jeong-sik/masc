@@ -170,11 +170,19 @@ val wire_dropped_fields : string list
 
 val goal_context_to_json : goal_context -> Yojson.Safe.t
 
-val prompt_variables_with_policy : facts_max_bytes:int -> category_cap:int ->
-  facts_per_category_cap:int -> input -> (string * string) list
-(** Pure substitution from the original host-captured advisory limits and
-    complete typed input. No current environment or prompt lookup. *)
-val prompt_variables : input -> (string * string) list
+val facts_budget :
+  facts_max_bytes:int -> source_lines:string list -> input -> Keeper_memory_os_render.facts_budget
+(** The commit's measurement ({!Keeper_memory_os_render.measure_facts_budget})
+    of the input's current facts with [source_lines], the file-source store's
+    {!Keeper_memory_source_current.budget_lines}. The [facts_budget] prompt
+    variable renders exactly this value. *)
+
+val prompt_variables_with_policy : facts_max_bytes:int -> source_lines:string list ->
+  category_cap:int -> facts_per_category_cap:int -> input -> (string * string) list
+(** Pure substitution from the original host-captured advisory limits, the
+    source lines captured with them and complete typed input. No current
+    environment, store or prompt lookup. *)
+val prompt_variables : source_lines:string list -> input -> (string * string) list
 (** Capture the current environment's advisory limits, then use the same pure
     substitution. Resumed original work uses [prompt_variables_with_policy]. *)
 

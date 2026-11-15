@@ -50,8 +50,27 @@ type divergence = {
   notes_hash : string;
   evaluator_verdict : Task.Anti_rationalization.verdict;
   human_verdict : label_verdict;
-  gate : string;
+  gate : Task.Anti_rationalization.gate;
   task_title : string;
+}
+
+(** One row of the store, as one of its two writers wrote it. *)
+type stored_record =
+  | Verdict of verdict_record
+  | Label of label_record
+
+(** The newest rows of the store, oldest first. [unreadable_rows] counts the
+    rows of the window {!stored_record_of_json} refused; they are in neither
+    list. *)
+type window = {
+  verdicts : verdict_record list;
+  labels : label_record list;
+  unreadable_rows : int;
+}
+
+type divergence_scan = {
+  divergences : divergence list;
+  unreadable_rows : int;  (** As in {!window}. *)
 }
 
 type calibration_example = {
@@ -102,10 +121,26 @@ val record_human_label :
   unit
 (** Append a human label for ground-truth tracking. *)
 
+(** {1 Reading} *)
+
+val stored_record_of_json : Yojson.Safe.t -> (stored_record, string) result
+(** The inverse of the two writers above, and the only decoder of a stored
+    row. Every key is read the way its writer writes it: a key the writer
+    always writes is required, [fallback_reason] is absent for [None], and
+    [generator_runtime], [producer_execution] and [evaluator_execution] are
+    [null] for [None]. A row neither writer produces -- a missing or repeated
+    key, a value of another JSON type, a verdict, gate, label or record type
+    outside the current vocabulary -- is an [Error] naming the key. *)
+
+val read_window :
+  ?since:string -> ?until:string -> base_path:string -> max_rows:int -> unit -> window
+(** Decode at most the newest [max_rows] rows, within the ["YYYY-MM-DD"] date
+    filters when given. Every reader of the store goes through this. *)
+
 (** {1 Analysis} *)
 
 val find_divergences :
-  ?since:string -> ?until:string -> base_path:string -> unit -> divergence list
+  ?since:string -> ?until:string -> base_path:string -> unit -> divergence_scan
 (** Find cases where evaluator and human verdicts disagree.
     Date filters use ["YYYY-MM-DD"] format. *)
 
@@ -130,4 +165,6 @@ val calibration_stats :
     and unobserved coverage and causes. Its rate is [null] without a complete
     pair. Submission identity does not identify every model or collaborator
     that authored an artifact; identity diversity does not establish weight
-    differences or statistical independence. *)
+    differences or statistical independence. [unreadable_record_count] is the
+    number of rows in the window that {!stored_record_of_json} refused; no
+    other count includes them. *)

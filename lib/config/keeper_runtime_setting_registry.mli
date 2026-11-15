@@ -67,6 +67,11 @@ type setting =
   ; effective : effective
   ; value_kind : value_kind
   ; value_range : value_range
+  ; value_meaning : (string -> (unit, string) result) option
+        (** What the value has to mean past its type and range: a pure check
+            of the text the boot load stores for the key, with the reason it
+            refuses. The row's reader decides by the same function, so
+            validating the file's text and reading the value agree. *)
   ; default_display : string
   ; reload_class : reload_class
   ; consumers : string list

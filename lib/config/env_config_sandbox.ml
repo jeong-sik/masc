@@ -162,21 +162,21 @@ module Runtime = struct
   let microvm_dns_toml_key = "sandbox.microvm_dns"
 
   (* What the workspace named, apart from anything the host supplies. Blank is
-     unset. A value that is set and is not a usable address is refused, and
-     the refusal names the setting. *)
-  let configured_nameserver raw =
+     unset. A value that is set and is not a usable address is refused. *)
+  let microvm_dns_configured raw =
     match String.trim raw with
     | "" -> Ok None
     | value ->
       (match nameserver_of_string value with
        | Ok address -> Ok (Some address)
        | Error refusal ->
-         Error
-           (Printf.sprintf
-              "%s=%S %s"
-              microvm_dns_toml_key
-              value
-              (nameserver_refusal_to_string refusal)))
+         Error (Printf.sprintf "%S %s" value (nameserver_refusal_to_string refusal)))
+  ;;
+
+  (* The same rule for a reader, whose refusal names the setting. *)
+  let configured_nameserver raw =
+    microvm_dns_configured raw
+    |> Result.map_error (fun detail -> microvm_dns_toml_key ^ "=" ^ detail)
   ;;
 
   let host_nameserver_for_guest = function
@@ -244,15 +244,29 @@ module Runtime = struct
 
      Blank is unset, as it is for [get_int]. A value that is set and does not
      parse is refused rather than read as the default: the operator asked for
-     a size, and booting on another one would say nothing. The refusal names
-     the runtime.toml key. *)
+     a size, and booting on another one would say nothing. *)
+  let guest_dimension_configured parse raw =
+    if String.equal (String.trim raw) ""
+    then Ok None
+    else Result.map Option.some (parse raw)
+  ;;
+
+  let microvm_memory_configured =
+    guest_dimension_configured Keeper_microvm_guest_size.memory_of_string
+  ;;
+
+  (* A reader's refusal names the runtime.toml key. *)
   let configured_guest_dimension ~key ~toml_key ~default parse =
-    let raw =
+    let configured =
       match Config_boot_overrides.get_opt key with
-      | Some value when String.trim value <> "" -> value
-      | Some _ | None -> default
+      | Some raw -> guest_dimension_configured parse raw
+      | None -> Ok None
     in
-    parse raw |> Result.map_error (fun detail -> toml_key ^ ": " ^ detail)
+    (match configured with
+     | Ok (Some dimension) -> Ok dimension
+     | Ok None -> parse default
+     | Error _ as refused -> refused)
+    |> Result.map_error (fun detail -> toml_key ^ ": " ^ detail)
   ;;
 
   let microvm_memory () =

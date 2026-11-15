@@ -524,7 +524,8 @@ let label_of_event ~ko (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage -> say "제공자 사용량" "provider usage"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing -> say "제공자 상태" "provider standing"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs -> say "Keeper 비용" "keeper costs"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health -> say "작업 공간 상태" "workspace health"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
+      Masc_tui_words.workspace_name ~ko ^ say " 상태" " health"
   | Observer.Dataset_changed
       (Masc.Workspace_dataset_event.Keeper_oauth_attempts _) -> say "로그인" "login"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics _) -> say "지표" "metrics"
@@ -561,6 +562,7 @@ let label_of_event ~ko (event : Observer.event) =
 let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   let label = label_of_event ~ko event in
   let say korean english = if ko then korean else english in
+  let workspace = Masc_tui_words.workspace_name ~ko in
   match event with
   | Observer.Agent_core e -> agent_core_row ~ko ~at ~duration_ms e
   | Observer.Keeper_heartbeat h ->
@@ -718,7 +720,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
       { at; keeper; glyph = Quiet; label; detail = say "OAuth 로그인 시도가 바뀜" "an OAuth login attempt changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "작업 공간 클라이언트 항목이 바뀜" "a workspace client row changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say (workspace ^ " 클라이언트 항목이 바뀜") ("a " ^ workspace ^ " client row changed") }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Account_emails ->
       { at; keeper = "server"; glyph = Quiet; label; detail = say "로그인이 계정 자격 증명을 다시 씀" "a login rewrote the account credentials" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage ->
@@ -757,7 +759,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = say "웹 대시보드 관측이 바뀜" "a web dashboard observation changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "작업 공간 메모리 목록이 바뀜" "the workspace memory inventory changed" }
+      { at; keeper = "server"; glyph = Quiet; label; detail = say (workspace ^ " 메모리 목록이 바뀜") ("the " ^ workspace ^ " memory inventory changed") }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room { machine }) ->
       { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->

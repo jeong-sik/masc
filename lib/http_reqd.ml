@@ -214,6 +214,51 @@ let h2_response_of (response : Httpun.Response.t) =
     (H2.Status.of_code (Httpun.Status.to_code response.status))
 ;;
 
+(* RFC 9110 §6.4.1: whether a response carries content is decided by the
+   request method and the status, not by the handler. Every response leaves
+   through the functions below, so the rule is applied here once and a route
+   answers a HEAD as it answers a GET.
+
+   - A response to HEAD has no content (§9.3.2). Its fields stay: they are
+     the ones the GET gets, [content-length] included (§8.6).
+   - 304 has no content and its fields stay too (§15.4.5).
+   - 1xx and 204 have no content and no [content-length] (§8.6, §15.3.5). *)
+type content =
+  | Content
+  | No_content
+
+let status_forbids_content_length status =
+  Httpun.Status.is_informational status
+  || Int.equal (Httpun.Status.to_code status) (Httpun.Status.to_code `No_content)
+;;
+
+let status_has_no_content status =
+  status_forbids_content_length status
+  || Int.equal (Httpun.Status.to_code status) (Httpun.Status.to_code `Not_modified)
+;;
+
+let outgoing (request : Httpun.Request.t) (response : Httpun.Response.t) =
+  let response =
+    if status_forbids_content_length response.status
+    then
+      { response with headers = Httpun.Headers.remove response.headers "content-length" }
+    else response
+  in
+  let content =
+    match request.meth with
+    | `HEAD -> No_content
+    | `GET | `POST | `PUT | `DELETE | `CONNECT | `OPTIONS | `TRACE | `Other _ ->
+      if status_has_no_content response.status then No_content else Content
+  in
+  response, content
+;;
+
+let outgoing_string request response body =
+  match outgoing request response with
+  | response, Content -> response, body
+  | response, No_content -> response, ""
+;;
+
 (* The fields that described the refused payload go; the rest (CORS, vary,
    rate-limit fields) still describe this answer. *)
 let payload_description_fields =
@@ -315,14 +360,17 @@ let try_respond_with_string t response body =
     (fun () ->
        match t with
        | Http1 { reqd; _ } ->
+         let response, body = outgoing_string (Httpun.Reqd.request reqd) response body in
          Httpun.Reqd.respond_with_string reqd response body;
          Accepted_by_writer
-       | Http2 { reqd; ledger; stream_end; _ } ->
+       | Http2 { reqd; request; ledger; stream_end; _ } ->
          if h2_stream_over ~stream_end reqd
          then (
            Log.Http.debug "[http] response skipped, the HTTP/2 stream is already over";
            Rejected_by_writer)
-         else h2_respond_with_string ~stream_end reqd ledger response body
+         else (
+           let response, body = outgoing_string request response body in
+           h2_respond_with_string ~stream_end reqd ledger response body)
        | Relayed relay ->
          let answer, resolver = Eio.Promise.create () in
          if Domain_mailbox.send relay.mailbox (Relay_respond (response, body, resolver))
@@ -343,14 +391,21 @@ let try_respond_with_shared t response body =
     (fun () ->
        match t with
        | Http1 { reqd; _ } ->
-         Httpun.Reqd.respond_with_string reqd response (Shared_body.to_string body);
+         let response, body =
+           outgoing_string (Httpun.Reqd.request reqd) response (Shared_body.to_string body)
+         in
+         Httpun.Reqd.respond_with_string reqd response body;
          Accepted_by_writer
-       | Http2 { reqd; stream_end; _ } ->
+       | Http2 { reqd; request; ledger; stream_end; _ } ->
          if h2_stream_over ~stream_end reqd
          then (
            Log.Http.debug "[http] response skipped, the HTTP/2 stream is already over";
            Rejected_by_writer)
-         else h2_respond_with_shared ~stream_end reqd response body
+         else (
+           match outgoing request response with
+           | response, Content -> h2_respond_with_shared ~stream_end reqd response body
+           | response, No_content ->
+             h2_respond_with_string ~stream_end reqd ledger response "")
        | Relayed relay ->
          let answer, resolver = Eio.Promise.create () in
          if Domain_mailbox.send relay.mailbox (Relay_respond_shared (response, body, resolver))
@@ -372,8 +427,8 @@ module Body_writer = struct
         ; ledger : Http_h2_response_ledger.request
         ; stream_end : Stream_end.t
         }
-    (* An HTTP/2 stream that was over before the response opened, or a
-       relayed request that was. *)
+    (* An HTTP/2 stream that was over before the response opened, a
+       relayed request that was, or a response that has no content. *)
     | Ended
     | Relayed of
         { relay : relay
@@ -471,17 +526,23 @@ end
 let respond_with_streaming ?flush_headers_immediately t response =
   match t with
   | Http1 http1 ->
-    let writer =
-      Httpun.Reqd.respond_with_streaming ?flush_headers_immediately http1.reqd response
-    in
-    http1.streaming <- Some writer;
-    Body_writer.H1 writer
+    (match outgoing (Httpun.Reqd.request http1.reqd) response with
+     | response, Content ->
+       let writer =
+         Httpun.Reqd.respond_with_streaming ?flush_headers_immediately http1.reqd response
+       in
+       http1.streaming <- Some writer;
+       Body_writer.H1 writer
+     | response, No_content ->
+       Httpun.Reqd.respond_with_string http1.reqd response "";
+       Body_writer.Ended)
   | Http2 http2 ->
     let reqd = http2.reqd
     and stream_end = http2.stream_end in
     if h2_stream_over ~stream_end reqd
     then Body_writer.Ended
     else (
+      let response, content = outgoing http2.request response in
       (* The HEADERS frame goes out at once, whatever the caller asked.
          Told to wait for the first flush, h2 makes the connection writer
          pass its next turn (h2 reqd.ml [send_streaming_response]), and the
@@ -499,8 +560,13 @@ let respond_with_streaming ?flush_headers_immediately t response =
           (h2_response_of response)
       in
       let body = Response_body.create stream_end writer in
-      http2.streaming <- Some body;
-      Body_writer.H2 { reqd; body; ledger = http2.ledger; stream_end })
+      match content with
+      | Content ->
+        http2.streaming <- Some body;
+        Body_writer.H2 { reqd; body; ledger = http2.ledger; stream_end }
+      | No_content ->
+        Response_body.close body;
+        Body_writer.Ended)
   | Relayed relay ->
     let started, resolver = Eio.Promise.create () in
     if not

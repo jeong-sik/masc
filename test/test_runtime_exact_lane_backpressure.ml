@@ -192,13 +192,13 @@ let test_stated_account_reset_holds_every_slot_on_it () =
   check bool "the declared slots share one account" true
     (Runtime_quota_window.scope_equal scope (runtime_scope secondary));
   let now = Unix.gettimeofday () in
-  Runtime_quota_window.note_observed_exhausted ~scope;
+  Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
   let observed = Lane.order_at ~now resolved in
   check (list string) "an observation without a reset walks every slot" declared
     (walked observed);
   check (list string) "and holds none" [] (held_ids observed);
   let resets_at = now +. 3600.0 in
-  Runtime_quota_window.note_exhausted ~scope ~resets_at;
+  Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope ~resets_at;
   let noted_at = note_rate_limit primary ~retry_after:(Some 7200.0) in
   let stated = Lane.order_at ~now resolved in
   check (list string) "a stated reset walks no slot on that account" [] (walked stated);
@@ -362,8 +362,8 @@ let test_http_answer_clears_undated_account_before_semantic_validation env () =
       (fun ~server resolved ->
         let scope = runtime_scope primary in
         let reset = Unix.gettimeofday () +. 3600.0 in
-        if stated_reset then Runtime_quota_window.note_exhausted ~scope ~resets_at:reset
-        else Runtime_quota_window.note_observed_exhausted ~scope;
+        if stated_reset then Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope ~resets_at:reset
+        else Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
         Backpressure.note_rate_limit ~candidate:(candidate primary) ~retry_after:(Some 180.0);
         Backpressure.note_failed_attempt ~candidate:(candidate primary) ~failure:Server_error
           ~recorded_by:(Backpressure.keeper_recorder ~keeper_name:"exact-answer-fixture");

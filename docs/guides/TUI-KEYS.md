@@ -370,7 +370,7 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | Keys | What it does |
 |---|---|
 | `h/l` | move between roster and detail |
-| `[ / ]` | detail tabs: Info / Items / Sandbox / Settings / Secrets / GitHub / Identity / Channels / Automation / Runs / Terminal |
+| `[ / ]` | detail tabs: Info / Items / Sandbox / Settings / Secrets / GitHub / Services / Channels / Automation / Runs / Terminal |
 | `o` | open container logs in Sandbox; Keeper activity elsewhere |
 | `U` | pick a runtime candidate order (on the Channels tab U is unbind all) |
 | `Left / Esc` | back |
@@ -406,15 +406,15 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `3` | on the GitHub tab: tick or untick this scope for the next L login |
 | `4` | on the GitHub tab: tick or untick this scope for the next L login |
 | `5` | on the GitHub tab: tick or untick this scope for the next L login |
-| `arrows+enter` | on the Identity tab: connect |
-| `PgUp/PgDn` | on the Identity tab: move the cursor a page; Home/End go to the first and last service |
-| `v` | on the Identity tab: cycle all / attached only / not attached only |
-| `o` | on the Identity tab: cycle attached first / declared order |
-| `T` | on the Identity tab: turn the provider under the cursor on or off |
-| `A` | on the Identity tab: open the app-registration form for it -- it asks for a Client ID |
-| `D D` | on the Identity tab: twice: forget the stored token, drop the tools it attached, and ask the provider to revoke what it still holds |
-| `/` | on the Identity tab: filter |
-| `R` | on the Identity tab: refresh |
+| `arrows+enter` | on the Services tab: connect |
+| `PgUp/PgDn` | on the Services tab: move the cursor a page; Home/End go to the first and last service |
+| `v` | on the Services tab: cycle all / attached only / not attached only |
+| `o` | on the Services tab: cycle attached first / declared order |
+| `T` | on the Services tab: turn the provider under the cursor on or off |
+| `A` | on the Services tab: open the app-registration form for it -- it asks for a Client ID |
+| `D D` | on the Services tab: twice: forget the stored token, drop the tools it attached, and ask the provider to revoke what it still holds |
+| `/` | on the Services tab: filter |
+| `R` | on the Services tab: refresh |
 | `j/k` | on the Channels tab: transport |
 | `J/K` | on the Channels tab: binding |
 | `PgUp/PgDn` | on the Channels tab: detail page |

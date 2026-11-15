@@ -51,10 +51,10 @@ let test_the_seven_writers_report_a_record () =
       ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha");
     Runtime_candidate_backpressure.note_candidate_success ~candidate;
     let scope = Runtime_quota_window.scope_of_muse_home "provider-rest-announce" in
-    Runtime_quota_window.note_observed_exhausted ~scope;
+    Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
     Runtime_quota_window.note_read_without_reset ~scope;
     Runtime_quota_window.note_succeeded ~scope;
-    Runtime_quota_window.note_exhausted ~scope ~resets_at:(Unix.gettimeofday () +. rest_retry_after_s);
+    Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope ~resets_at:(Unix.gettimeofday () +. rest_retry_after_s);
     check int "each write reports once" 7 !calls)
 ;;
 
@@ -181,7 +181,7 @@ let test_an_observation_without_a_reset_names_its_end_as_the_next_change () =
       Runtime_candidate_backpressure.note_candidate_success
         ~candidate:runtime.candidate_backpressure;
       let scope = Runtime_instance.quota_scope_of_runtime runtime in
-      Runtime_quota_window.note_observed_exhausted ~scope;
+      Runtime_quota_window.note_observed_exhausted ~source:Runtime_quota_window.Provider_quota_refused ~scope;
       let now = Unix.gettimeofday () in
       match Runtime_quota_window.rest ~scope ~now with
       | Some (Runtime_quota_window.Observed_until ends_at) ->

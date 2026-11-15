@@ -615,7 +615,10 @@ let prepare_antigravity_panel_home ~host ~runtime_root ~oauth_source =
 let claude_quota_standing : Runtime_claude_code.quota_block -> Runtime_candidate_standing.observation
   = function
   | Runtime_claude_code.Quota_spent { resets_at; windows = _ } ->
-    Runtime_candidate_standing.Hard_quota { resets_at = Option.map float_of_int resets_at }
+    Runtime_candidate_standing.Hard_quota
+      { source = Runtime_quota_window.Provider_quota_refused
+      ; resets_at = Option.map float_of_int resets_at
+      }
   | Runtime_claude_code.Rate_throttled ->
     Runtime_candidate_standing.Rate_limited { retry_after = None }
 ;;
@@ -662,7 +665,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      create or replace a Fleet-owned failed-attempt observation. *)
   let codex_failed error =
     if Runtime_codex_app_server.refused_for_spent_usage error
-    then observe (Runtime_candidate_standing.Hard_quota {resets_at=None})
+    then observe (Runtime_candidate_standing.Hard_quota
+      {source=Runtime_quota_window.Provider_quota_refused; resets_at=None})
     else (
       match error with
       | Runtime_codex_app_server.Turn_failed

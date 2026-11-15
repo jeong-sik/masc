@@ -70,11 +70,10 @@ val load_and_apply : base_path:string -> (int, load_failure) result
     with no TOML file. Strict malformed environment input is a [Validate]
     failure at startup rather than a later Keeper-cycle exception.
 
-    Validates them again once the file's values are applied, because a reader
-    checks what a value means and the type and range check of each key does
-    not: a blank [autonomous.wake_prompt] is a [Validate] failure that names
-    the key, not an exception on every autonomous turn. A load that fails this
-    way restores the boot override store to what it held before the load. *)
+    The file is judged by {!validate_doc} before any of its values is stored,
+    so a file that fails leaves the boot override store as it was: a blank
+    [autonomous.wake_prompt] is a [Validate] failure that names the key, not
+    an exception on every autonomous turn. *)
 
 (** Read the raw TOML value for [env_name] from the shadow registry.
     Returns [None] when the key was absent from [runtime.toml]
@@ -122,6 +121,12 @@ type validation_report =
   }
 
 val validate_doc : Keeper_toml_loader.toml_doc -> validation_report
+(** Every owned key against its registry row: the type, the range, and what
+    the row says the value has to mean
+    ({!Keeper_runtime_setting_registry.setting.value_meaning}). Saving,
+    previewing, the deployment check and the boot load all decide by this
+    report. *)
+
 val validate_source_text : string -> (validation_report, string) result
 
 val owned_namespaces : string list

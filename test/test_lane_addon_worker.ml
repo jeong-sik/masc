@@ -265,7 +265,7 @@ let write path value =
     (fun () -> output_string channel value)
 
 let apple_fixture = {|#!/usr/bin/env python3
-import hashlib, json, os, pathlib, signal, sys
+import hashlib, json, os, pathlib, re, signal, sys
 root = pathlib.Path(__file__).parent
 argv = sys.argv[1:]
 digest = 'sha256:' + 'a' * 64
@@ -279,7 +279,7 @@ elif argv[:2] == ['system', 'status']:
     assert argv == ['system', 'status', '--format', 'json'], argv
     if (root / 'info-unavailable').exists(): raise SystemExit(7)
     identity = root / 'engine-id'
-    emit({'status': 'running', 'appRoot': identity.read_text().strip() if identity.exists() else '/fixture/app-root-a'})
+    emit({'status': 'running', 'paths': {'appRoot': identity.read_text().strip() if identity.exists() else '/fixture/app-root-a'}})
 elif argv[:1] == ['volume']:
     action = argv[1]
     if action == 'list':
@@ -299,7 +299,10 @@ elif argv[:1] == ['create']:
     assert value('--cap-drop') == 'ALL' and '--read-only' in argv, argv
     assert argv[argv.index('--') + 1] == 'fixture/image', argv
     cid = value('--name')
-    assert len(cid) == 64, cid
+    # Apple container refuses a name longer than a DNS label (ManagedContainer.nameValid).
+    if len(cid) > 63 or not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.-]+', cid):
+        print(f'Error: container ID {cid} is not a valid container ID', file=sys.stderr)
+        raise SystemExit(1)
     mode = argv[-1]
     config = {'id': cid, 'Id': cid, 'mode': mode, 'argv': argv, 'status': 'running',
         'configuration': {'id': cid, 'labels': dict(item.split('=', 1) for flag, item in zip(argv, argv[1:]) if flag == '--label'),
@@ -403,7 +406,7 @@ let test_apple_state_has_one_writer_and_survives_detach () =
     let runtime = Types.Apple_container in
     let owner = match State.create_owner ~workspace_root:dir ~installation_id:"apple-state"
         ~package_id:"worker-test" with Ok value -> value | Error message -> fail message in
-    check int "Apple writer ID fits the engine name contract" 64
+    check int "Apple writer ID fits the engine name contract" 63
       (String.length (State.container_name ~runtime owner));
     let first = unwrap (start_apple ~state_owner:owner ~instance_id:"first" env sw dir command "good") in
     let volume = Filename.concat dir (State.volume_name ~runtime owner ^ ".volume") in
@@ -820,6 +823,30 @@ let test_apple_engine_identity_is_the_service_app_root () = with_apple_fixture (
    | Error (Worker.Engine_fault {runtime = Types.Apple_container; fault = Masc.Lane_addon_lifecycle.Unreachable _}) -> ()
    | Ok _ | Error _ -> fail "an Apple service that exits non-zero must be Unreachable"))
 
+(* Apple container takes the name the host gives as the container ID and
+   refuses one longer than 63 characters; Docker prints a 64-digit ID. *)
+let test_apple_container_names_fit_the_engine () =
+  let module Engine = Masc.Lane_addon_engine in
+  let module Worker_state = Masc.Lane_addon_worker_state in
+  let apple = Engine.owned_name Types.Apple_container "instance-a" in
+  check int "Apple instance name fits a DNS label" 63 (String.length apple);
+  check bool "Apple instance name is an Apple container ID" true (Engine.valid_id Types.Apple_container apple);
+  check bool "Apple instance name is not a Docker container ID" false (Engine.valid_id Types.Docker apple);
+  check bool "two instances get two Apple names" false
+    (String.equal apple (Engine.owned_name Types.Apple_container "instance-b"));
+  (match Worker_state.container_name_of_identity ~runtime:Types.Apple_container
+           {|["/workspace","installation","package"]|} with
+   | Ok writer ->
+       check int "Apple writer name fits a DNS label" 63 (String.length writer);
+       check bool "Apple writer name is an Apple container ID" true (Engine.valid_id Types.Apple_container writer)
+   | Error detail -> fail detail);
+  let docker = Engine.owned_name Types.Docker "instance-a" in
+  check bool "Docker instance name keeps its prefix and full digest" true
+    (String.starts_with ~prefix:"masc-lane-" docker && String.length docker = 74);
+  let docker_id = String.make 64 'a' in
+  check bool "a 64-digit ID is a Docker container ID" true (Engine.valid_id Types.Docker docker_id);
+  check bool "a 64-digit name is not an Apple container ID" false (Engine.valid_id Types.Apple_container docker_id)
+
 let test_engine_identity_parsing_has_no_default () =
   let module Engine = Masc.Lane_addon_engine in
   let module Lifecycle = Masc.Lane_addon_lifecycle in
@@ -837,12 +864,19 @@ let test_engine_identity_parsing_has_no_default () =
   check bool "Apple status without a root is unreadable" true
     (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running"}|}));
   check bool "Apple relative root is unreadable" true
-    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"relative"}|}));
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","paths":{"appRoot":"relative"}}|}));
+  check bool "Apple root printed at the top level by a CLI before 1.4.1 is unreadable" true
+    (unreadable (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}));
   check bool "Apple stopped service is unreachable" true
-    (unreachable (Engine.engine_of_info Types.Apple_container {|{"status":"stopped","appRoot":"/root"}|}));
+    (unreachable (Engine.engine_of_info Types.Apple_container {|{"status":"stopped","paths":{"appRoot":"/root"}}|}));
   check bool "Apple running service is its root" true
-    (Engine.engine_of_info Types.Apple_container {|{"status":"running","appRoot":"/root"}|}
-     = Ok (Lifecycle.Apple_app_root "/root"))
+    (Engine.engine_of_info Types.Apple_container {|{"status":"running","paths":{"appRoot":"/root"}}|}
+     = Ok (Lifecycle.Apple_app_root "/root"));
+  (* The output of container 1.6.1, with the other fields kept and values shortened. *)
+  check bool "Apple 1.6.1 status is its root" true
+    (Engine.engine_of_info Types.Apple_container
+       {|{"client":{"appName":"container","version":"1.6.1"},"host":{"architecture":"arm64","cpus":16},"paths":{"appRoot":"/Users/u/Library/Application Support/com.apple.container/","installRoot":"/opt/homebrew/Cellar/container/1.6.1/"},"resources":{"containersRunning":0,"images":1},"server":{"appName":"container-apiserver","version":"1.6.1"},"status":"running"}|}
+     = Ok (Lifecycle.Apple_app_root "/Users/u/Library/Application Support/com.apple.container/"))
 
 (* A container with a blank label would otherwise reach the Slot_foreign record
    as [Some ""], which the record's own decoder refuses: the failure could be
@@ -2697,6 +2731,7 @@ let () = run "Lane Add-on worker" [ "lifecycle", [
   test_case "engine identity comes from the info command" `Quick test_engine_identity_comes_from_the_info_command;
   test_case "Apple engine identity is the service root" `Quick test_apple_engine_identity_is_the_service_app_root;
   test_case "engine identity parsing has no default" `Quick test_engine_identity_parsing_has_no_default;
+  test_case "Apple container names fit the engine" `Quick test_apple_container_names_fit_the_engine;
   test_case "a blank label reads as no label" `Quick test_a_blank_label_reads_as_no_label;
   test_case "start is refused before create when the engine is unreachable" `Quick
     test_start_is_refused_before_create_when_the_engine_is_unreachable;

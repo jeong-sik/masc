@@ -249,6 +249,17 @@ let range_matches range value =
      | None -> false)
 ;;
 
+(* What the row's own check says of the text the boot load would store for
+   [value]. A value with no such text has already failed the type check. *)
+let meaning_refusal (row : Keeper_runtime_setting_registry.setting) value =
+  match row.value_meaning, value_to_string value with
+  | None, (Some _ | None) | Some _, None -> None
+  | Some check, Some text ->
+    (match check text with
+     | Ok () -> None
+     | Result.Error detail -> Some detail)
+;;
+
 let validate_setting_value key row value =
   if not (type_matches row.Keeper_runtime_setting_registry.value_kind value)
   then
@@ -263,7 +274,10 @@ let validate_setting_value key row value =
               "expected a %s TOML value"
               (Keeper_runtime_setting_registry.value_kind_label kind)))
   else if range_matches row.value_range value
-  then None
+  then
+    Option.map
+      (validation_issue ~key ~kind:Out_of_range ~severity:Error)
+      (meaning_refusal row value)
   else
     Some
       (validation_issue
@@ -597,35 +611,20 @@ let load_failure_to_string { kind; message } =
   Printf.sprintf "%s %s" verb message
 ;;
 
-(* The first registry row whose reader rejects what the store and the process
-   environment hold now, as [(toml key, reader message)]. [validate_doc] checks
-   the type and range of each key; a reader also checks what the value means (a
-   blank wake prompt, a prompt over its byte bound), which would otherwise raise
-   on the first turn that reads it. *)
+(* The first registry reader that rejects what the process environment and the
+   defaults hold, with its message. The file's own values are not this check's
+   to judge: [validate_doc] refuses them before any is stored. *)
 let first_rejecting_reader () =
   List.find_map
     (fun (row : Keeper_runtime_setting_registry.setting) ->
        match Keeper_runtime_setting_registry.effective_value row with
        | (_ : string) -> None
-       | exception Env_config_core.Config_error message ->
-         let toml_key =
-           match Keeper_runtime_setting_registry.toml_key_opt row with
-           | Some key -> key
-           | None ->
-             invalid_arg
-               (Printf.sprintf
-                  "toml_settings row %s has no TOML key"
-                  row.env_name)
-         in
-         Some (toml_key, message))
+       | exception Env_config_core.Config_error message -> Some message)
     Keeper_runtime_setting_registry.toml_settings
 
-(* Serializes [load_and_apply_document]'s snapshot→apply→validate→rollback
-   section: two concurrent reloads would otherwise interleave their applies
-   and a snapshot-based rollback could clobber the other's writes.  The
-   sequence has no suspension points, so cross-domain readers can observe
-   applied-but-rolled-back values only in the tiny preemptive window; one
-   reload at a time closes the writer-vs-writer race completely. *)
+(* One load at a time stores the file's values and records them in the shadow
+   registry, so two loads cannot leave the store holding one file's values and
+   the shadow registry the other's. *)
 let apply_sequence_mutex = Eio.Mutex.create ()
 
 let load_and_apply_document ~base_path =
@@ -650,48 +649,26 @@ let load_and_apply_document ~base_path =
              }
          | None ->
            Eio_guard.with_mutex apply_sequence_mutex (fun () ->
-             let stored_before =
-               List.map
-                 (fun (_, env_name) -> env_name, Config_boot_overrides.get_opt env_name)
-                 key_to_env
-             in
              let count =
                List.fold_left
                  (fun acc pair -> if apply_one doc pair then acc + 1 else acc)
                  0
                  key_to_env
              in
-             (* The readers see the file's values only once the store holds them. *)
-             (match first_rejecting_reader () with
-              | Some (toml_key, message) ->
-                (* A file that did not load fed nothing: the store, the shadow
-                   registry and the applied time stay as the other failures
-                   above leave them. *)
-                List.iter
-                  (fun (env_name, stored) ->
-                     match stored with
-                     | Some value -> Config_boot_overrides.set env_name value
-                     | None -> Config_boot_overrides.clear env_name)
-                  stored_before;
-                Result.Error
-                  { kind = Validate
-                  ; message = Printf.sprintf "%s: %s: %s" path toml_key message
-                  }
-              | None ->
-                Hashtbl.clear toml_shadow;
-                List.iter
-                  (fun (toml_key, env_name) ->
-                     (* Populate shadow registry for every known key that has a
-                        TOML value, regardless of whether env preempts it. *)
-                     match List.assoc_opt toml_key doc with
+             Hashtbl.clear toml_shadow;
+             List.iter
+               (fun (toml_key, env_name) ->
+                  (* Populate shadow registry for every known key that has a
+                     TOML value, regardless of whether env preempts it. *)
+                  match List.assoc_opt toml_key doc with
+                  | None -> ()
+                  | Some v ->
+                    (match value_to_string v with
                      | None -> ()
-                     | Some v ->
-                       (match value_to_string v with
-                        | None -> ()
-                        | Some _ -> Hashtbl.replace toml_shadow env_name v))
-                  key_to_env;
-                Atomic.set last_applied_at (Some (Time_compat.now ()));
-                Ok count)))
+                     | Some _ -> Hashtbl.replace toml_shadow env_name v))
+               key_to_env;
+             Atomic.set last_applied_at (Some (Time_compat.now ()));
+             Ok count))
 
 let load_and_apply ~base_path : (int, load_failure) result =
   (* First, so the validation below and every later read of these names leave
@@ -702,7 +679,7 @@ let load_and_apply ~base_path : (int, load_failure) result =
      malformed variable is reported as one, not blamed on the file. *)
   let validation =
     match first_rejecting_reader () with
-    | Some (_, message) -> Result.Error { kind = Validate; message }
+    | Some message -> Result.Error { kind = Validate; message }
     | None -> Ok ()
   in
   let result =

@@ -30,6 +30,9 @@ module Task : sig
     | Approved
     | Rejected
     | Linked
+    | Restored_from_archive
+        (** GC moved a non-terminal task found only in the archive back
+            into the backlog. *)
 
   val to_string : t -> string
   (** Canonical dotted-form wire name ([task.claimed] etc.). *)

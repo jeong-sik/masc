@@ -134,3 +134,59 @@ let revoke (t : R.t) request ~invite_id =
         | Error error -> failed error
         | Ok () -> { R.status = R.No_content_204; headers = [ "cache-control", "no-store" ]; body = "" }))
 ;;
+
+(* A held revocation comes first: the invitation lets no one join whatever
+   the clock says, and a revoke made again closes it (design 8.3). Expiry is
+   the comparison {!Authz_invite_state.consume} makes, at [joins_at_ms]. A
+   revocation is refused before its intent for an invitation that is not
+   open, so only an open one is held. *)
+let status_name state ~joins_at_ms invite_id (invitation : Authz_invite_state.invitation) =
+  match invitation.status, S.revocation state (Authz_records.Subject.Invite invite_id) with
+  | Authz_invite_state.Open, Authz_records.Revocation_state.Pending -> "revocation_pending"
+  | Authz_invite_state.Open, Authz_records.Revocation_state.Not_pending ->
+    if joins_at_ms >= invitation.expires_at_ms then "expired" else "open"
+  | ( Authz_invite_state.Revoked
+    , (Authz_records.Revocation_state.Not_pending | Authz_records.Revocation_state.Pending) ) -> "revoked"
+  | ( Authz_invite_state.Consumed (_ : Authz_types.User_id.t)
+    , (Authz_records.Revocation_state.Not_pending | Authz_records.Revocation_state.Pending) ) -> "consumed"
+;;
+
+let issuer_json = function
+  | Authz_invite_state.Local_operator_issued -> `Assoc [ "kind", `String "local_operator" ]
+  | Authz_invite_state.Admin_issued user_id ->
+    `Assoc [ "kind", `String "admin"; "user_id", `String (Authz_types.User_id.to_string user_id) ]
+;;
+
+let invitation_json state ~joins_at_ms (invite_id, (invitation : Authz_invite_state.invitation)) =
+  let spent =
+    match invitation.status with
+    | Authz_invite_state.Consumed user_id -> [ "user_id", `String (Authz_types.User_id.to_string user_id) ]
+    | Authz_invite_state.Open | Authz_invite_state.Revoked -> []
+  in
+  `Assoc
+    ([ "invite_id", `String (Authz_types.Invite_id.to_string invite_id)
+     ; "role", `String (E.role_label invitation.role)
+     ; "issuer", issuer_json invitation.issuer
+     ; "expires_at_ms", `Int invitation.expires_at_ms
+     ; "status", `String (status_name state ~joins_at_ms invite_id invitation)
+     ]
+     @ spent)
+;;
+
+let list (t : R.t) request =
+  match R.admin_reading t request with
+  | Error answer -> answer
+  | Ok state ->
+    (* The earliest time an admission can be judged at: {!Authz_state} refuses
+       one whose time is before the latest record it read, so a clock set back
+       joins no one until it passes that time. *)
+    let joins_at_ms =
+      let now_ms = R.ms_of (t.R.now ()) in
+      match state.S.latest_at_ms with
+      | Some latest_at_ms -> max now_ms latest_at_ms
+      | None -> now_ms
+    in
+    R.json
+      R.Ok_200
+      [ "invites", `List (List.map (invitation_json state ~joins_at_ms) (Authz_invite_state.bindings state.S.invites)) ]
+;;

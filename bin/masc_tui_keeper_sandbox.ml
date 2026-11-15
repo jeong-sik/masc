@@ -853,7 +853,8 @@ let path_lines ~ko ~width = function
   | None -> []
   | Some paths ->
     [ ""; " " ^ styled Masc_tui_theme.Sgr.bold (text ~ko "4. 파일시스템 마운트" "4. Filesystem mounts") ]
-    @ wrapped_rows ~width ~label:(text ~ko "작업공간" "Workspace") ~tone:`Info
+    @ wrapped_rows ~width
+        ~label:(String.capitalize_ascii (Masc_tui_words.workspace_name ~ko)) ~tone:`Info
         (value ~ko paths.guest_workspace)
     @ wrapped_rows ~width ~label:"HOME" ~tone:`Muted
         (Option.value paths.guest_home ~default:(text ~ko "확인 불가" "unavailable"))

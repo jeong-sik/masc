@@ -115,10 +115,10 @@ let test_a_refusal_without_a_suffix_waits_for_the_failed_path () =
     (decide (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None }));
   check_decision "a stated reset beyond the fallback cap"
     (wait ~after:4470.0)
-    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 4470.0 }));
+    (decide (KFR.Retry_after_observed { retry_class = (KFR.Hard_quota KFR.Provider_quota_refused); retry_after = Some 4470.0 }));
   check_decision "a hard quota stating nothing"
     (wait ~after:cap_sec)
-    (decide (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None }))
+    (decide (KFR.Retry_after_observed { retry_class = (KFR.Hard_quota KFR.Provider_quota_refused); retry_after = None }))
 ;;
 
 (* #36583: the driver deferred the input to a path that is not resting, so the
@@ -132,7 +132,7 @@ let test_a_suffix_on_a_serving_path_continues_without_waiting () =
     [ ( "rate limit"
       , KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None } )
     ; ( "hard quota"
-      , KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 600.0 } )
+      , KFR.Retry_after_observed { retry_class = (KFR.Hard_quota KFR.Provider_quota_refused); retry_after = Some 600.0 } )
     ; ( "provider capacity (#38061)"
       , KFR.Retry_after_observed { retry_class = KFR.Provider_capacity; retry_after = Some 5.0 } )
     ]

@@ -146,14 +146,11 @@ let test_pointer_decision () =
   let both = { (create ()) with clients = Some [ego; bidi] } in
   let alone = { (create ()) with clients = Some [ego] } in
   let on_ego = shot ego.client_id and on_bidi = shot bidi.client_id in
-  let unserved serving_listed =
-    {asked = Browser_lane.Ego_task_space; capability = Browser_lane.Touch_input; serving_listed} in
-  expect "a tap on ego is not sent, and no listed connection serves it"
-    (pointer_decision both on_ego (tap on_ego) = Pointer_unserved (unserved false)
-     && pointer_decision alone on_ego (tap on_ego) = Pointer_unserved (unserved false));
-  expect "a point click and a wheel notch are sent on each connection"
+  expect "a tap on ego is sent, whether or not another connection is listed"
+    (sends both on_ego (tap on_ego) && sends alone on_ego (tap on_ego));
+  expect "a point click, a wheel notch and a tap are sent on each connection"
     (List.for_all (fun (shot : screenshot) ->
-       sends both shot (click shot) && sends both shot (wheel shot))
+       sends both shot (click shot) && sends both shot (wheel shot) && sends both shot (tap shot))
        [on_ego; on_bidi]);
   expect "a connection the view no longer holds is left to the server"
     (sends (create ()) on_ego (tap on_ego));
@@ -1023,8 +1020,14 @@ let test_inventory_summary_contract () =
      | Inventory_report_unreadable _ -> true
      | Inventory_not_reported|Inventory_reported _ -> false)
 
+(* Every case runs. One that raises is reported and the rest still run, so a
+   single broken expectation does not hide the cases listed after it. *)
 let () =
-  List.iter (fun (name, test) -> test (); Printf.printf "PASS %s\n%!" name)
+  let failed = List.filter_map (fun (name, test) ->
+    match test () with
+    | () -> Printf.printf "PASS %s\n%!" name; None
+    | exception exn ->
+        Printf.printf "FAIL %s: %s\n%!" name (Printexc.to_string exn); Some name)
     ["activity refresh preserves pending read", test_activity_refresh_preserves_pending_read;
      "client activity keeps connection", test_client_activity_preserves_connection;
      "automatic browser binding", test_automatic_browser_binding;
@@ -1059,4 +1062,9 @@ let () =
      "source switch", test_source_switch;
      "malformed response", test_malformed_response;
      "empty tabs", test_empty_tabs;
-     "which operations are refreshes", test_operation_is_refresh]
+     "which operations are refreshes", test_operation_is_refresh] in
+  match failed with
+  | [] -> ()
+  | _ :: _ ->
+      Printf.eprintf "%d failed: %s\n%!" (List.length failed) (String.concat "; " failed);
+      exit 1

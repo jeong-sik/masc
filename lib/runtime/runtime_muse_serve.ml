@@ -126,6 +126,21 @@ type mcp_server =
   ; tool_names : string list
   }
 
+type workspace_origin =
+  | Masc_private
+  | Other_tree
+
+let other_tree = Other_tree
+
+(* Blocking; callers run it off the Eio scheduler. [Sys.readdir] leaves out
+   "." and "..". *)
+let origin_of_masc_directory path =
+  match Sys.readdir path with
+  | [||] -> Ok Masc_private
+  | _ -> Ok Other_tree
+  | exception Sys_error detail -> Error detail
+;;
+
 type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
@@ -642,12 +657,32 @@ let login_environment ~account_home =
 
 let login_argv ~cli_path = [ cli_path; "login" ]
 
-let client_argv config =
+(* HIGH-RISK-UNREVIEWED: [--trust-workspace] makes the host load the skills and
+   rules it finds in the session workspace, and Muse Code connects a session's
+   MCP servers only on a host started with it (observed on 1.4.18: without the
+   flag a [required] server gets no request and the turn still runs). The flag
+   is given only when all three hold: the session has MCP servers to connect,
+   the directory MASC made held no entry when the turn read it
+   ([origin_of_masc_directory]), and the posture disables native writes and
+   shell, so this session cannot put a skill or a rule there either. An
+   earlier session with native writes may have used the same directory; what
+   it left makes the directory [Other_tree]. *)
+let trusts_workspace config ~workspace_origin ~mcp_servers =
+  match workspace_origin, config.native, mcp_servers with
+  | Masc_private, (Runtime_native_tools.Native_read | Runtime_native_tools.Native_none), _ :: _
+    -> true
+  | Masc_private, (Runtime_native_tools.Native_read | Runtime_native_tools.Native_none), []
+  | Masc_private, Runtime_native_tools.Native_full, _
+  | Other_tree, _, _ -> false
+;;
+
+let client_argv config ~trust_workspace =
   [ config.cli_path; "serve" ]
   @ (match config.native with
      | Runtime_native_tools.Native_read | Runtime_native_tools.Native_none ->
        [ "--disable-write"; "--disable-shell" ]
      | Runtime_native_tools.Native_full -> [])
+  @ (if trust_workspace then [ "--trust-workspace" ] else [])
 ;;
 
 let drain_stderr flow tail =
@@ -752,8 +787,8 @@ let turn_start_selection =
   Runtime_official_client_write.(Fields [ "params", Fields [ "input", turn_input ] ])
 ;;
 
-let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mgr ~clock ~cwd
-      ~account_home config run =
+let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ())
+      ?(trust_workspace = false) ~mgr ~clock ~cwd ~account_home config run =
   Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -767,7 +802,7 @@ let with_spawned_client ?storage_root ?(on_subscription_usage = fun _ -> ()) ~mg
         ~stdin:stdin_r
         ~stdout:stdout_w
         ~stderr:stderr_w
-        (client_argv config)
+        (client_argv config ~trust_workspace)
     with
     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception exn -> Error (Spawn_failed (Printexc.to_string exn))
@@ -1903,6 +1938,7 @@ let run_turn
       ~storage
       ?(session_mode = Start)
       ?(mcp_servers = [])
+      ?(workspace_origin = other_tree)
       ?reasoning_effort
       ?(on_session_ready = fun ~session_id:_ ~last_turn:_ -> Ok ())
       ?(on_prompt_sent = fun () -> ())
@@ -1943,6 +1979,7 @@ let run_turn
       ~storage_root:(storage_root storage)
       ~on_subscription_usage:(fun usage ->
         emit_stream_event on_stream_event (Subscription_usage_observed usage))
+      ~trust_workspace:(trusts_workspace config ~workspace_origin ~mcp_servers)
       ~mgr ~clock ~cwd ~account_home config (fun io ->
       run_protocol
         io

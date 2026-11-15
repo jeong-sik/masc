@@ -17,11 +17,16 @@ afterEach(() => {
 })
 
 function snapshot(count: number, tool: string | null = null) {
-  const stat = { call_count: count, failure_count: 0, deferred_count: 0, total_ms: count,
+  const stat = { call_count: count, failure_count: 0,
+    failure_classes: { dependency_unavailable: 0, policy_rejection: 0, runtime_failure: 0,
+      workflow_rejection: 0, operator_cancelled: 0 },
+    failure_unclassified_count: 0, deferred_count: 0, total_ms: count,
     p50_ms: count ? 1 : null, p95_ms: count ? 1 : null, max_ms: count ? 1 : null,
-    long_count: 0, long_total_ms: 0 }
+    long_count: 0, long_total_ms: 0,
+    result_observed_count: 0, result_bytes_total: 0, result_bytes_max: null }
   return { generated_at: 3600, window: { since: 0, until: 3600, bucket: 'hour', bucket_seconds: 3600,
-    utc_offset_min: 0 }, tool, long_call_ms: 60_000, total: stat, buckets: [{ start: 0, ...stat }], top_by_time: [] }
+    utc_offset_min: 0 }, tool, long_call_ms: 60_000, total: stat, buckets: [{ start: 0, ...stat }], top_by_time: [],
+    by_caller: [], caller_unobserved_count: 0 }
 }
 
 describe('native series query', () => {

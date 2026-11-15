@@ -303,26 +303,17 @@ let record_publication_journal ~keepers_dir ~keeper_id receipt =
   let+ () = write_publication ~keepers_dir ~keeper_id pending in
   pending
 
+(* The publication's own line is its exact canonical entry. *)
 let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
-  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let* recovered = Fs_compat.recover_private_jsonl_durable_locked_result path
-    |> Result.map_error Fs_compat.private_jsonl_transaction_error_to_string in
-  let rec scan found = function
-    | [] -> Ok found
-    | "" :: rest -> scan found rest
-    | line :: rest ->
-      (match Yojson.Safe.from_string line with
-       | json ->
-         let* entry = Journal_codec.journal_entry_of_json json in
-         (* Revisions restart after a quarantine, so a pre-quarantine entry
-            cannot finalize a publication from the current generation. *)
-         (match entry with
-          | Journal_quarantined _ -> scan false rest
-          | Journal_committed _ when Yojson.Safe.sort json = Yojson.Safe.sort receipt.journal ->
-            scan true rest
-          | Journal_committed _ | Journal_failed _ -> scan found rest)
-       | exception Yojson.Json_error detail -> Error ("publication journal: " ^ detail)) in
-  let* present = scan false (String.split_on_char '\n' recovered.Fs_compat.bytes) in
+  let canonical = Yojson.Safe.sort receipt.journal in
+  let* present =
+    journal_holds_receipt_target ~keepers_dir ~keeper_id
+      ~target_revision:receipt.target_revision
+      ~is_target:(fun json entry ->
+        match entry with
+        | Journal_committed _ -> Yojson.Safe.sort json = canonical
+        | Journal_failed _ | Journal_quarantined _ -> false)
+    |> Result.map_error (fun detail -> "publication journal: " ^ detail) in
   let* () = if present then Ok () else append_journal_line_strict ~keepers_dir ~keeper_id receipt.journal in
   let pending = {receipt with phase=Notification_pending} in
   let+ () = write_publication ~keepers_dir ~keeper_id pending in

@@ -268,21 +268,20 @@ let verify_discovered ?expected_slots ?expected_ctx ?expected_model endpoints =
                   (Local_runtime_pool.runtime_id_of_base_url endpoint.url) );
               ("base_url", `String endpoint.url);
               ("provider_reachable", `Bool provider_ok_row);
-              ( "provider_status_code",
-                Json_util.int_opt_to_json
-                  (if provider_ok_row then Some 200 else None) );
               ( "provider_error",
                 Json_util.string_opt_to_json
                   (if provider_ok_row then None
                    else Some "agent_core discovery marked endpoint unhealthy") );
               ("slot_reachable", `Bool slot_ok_row);
-              ("slot_status_code", Json_util.int_opt_to_json (if slot_ok_row then Some 200 else None));
-              ( "props_status_code",
-                Json_util.int_opt_to_json
-                  (if Option.is_some endpoint.props then Some 200 else None) );
-              ( "models_status_code",
-                Json_util.int_opt_to_json
-                  (if Stdlib.List.length endpoint.models > 0 then Some 200 else None) );
+              (* The discovery snapshot keeps what each request yielded, not
+                 its HTTP status, so the row says only whether a value is
+                 there. *)
+              ("props_observed", `Bool (Option.is_some endpoint.props));
+              ( "models_observed",
+                `Bool
+                  (match endpoint.models with
+                   | [] -> false
+                   | _ :: _ -> true) );
               ("expected_model", Json_util.string_opt_to_json expected_model);
               ("actual_model_id", Json_util.string_opt_to_json actual_model);
               ("expected_slots", Json_util.int_opt_to_json expected_slots);

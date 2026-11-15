@@ -1,284 +1,25 @@
 """The operator quiz's own record (RFC operator-quiz §4.9 Log, Sessions).
 
 One append-only JSON line per event at ``<state>/operator-quiz/log.jsonl``.
-Events and their fields are closed sets: an unknown event or field is an
-error naming the line, and a log that cannot be read refuses every write.
-
-A write always ends with a newline, so a last segment without one is a write
-the process did not finish. Reading skips it and the next append cuts it off
-first; every complete line before it must decode.
+Events and their fields are closed sets. The file, the pins and the grants are
+the shared ones of records.py; the events, sessions and their fold are here.
 
 A session's state is a fold of the log. Nothing else is stored about it.
 """
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Union
 
-
-class LogError(Exception):
-    """The log cannot be read as this package's history."""
-
-
-def _exact(value: Any, keys: set[str], label: str) -> dict:
-    if not isinstance(value, dict):
-        raise LogError(f"{label} must be an object")
-    extra = set(value) - keys
-    missing = keys - set(value)
-    if extra:
-        raise LogError(f"{label} has unknown field {sorted(extra)[0]}")
-    if missing:
-        raise LogError(f"{label} is missing {sorted(missing)[0]}")
-    return value
-
-
-def _text(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise LogError(f"{label} must be a non-blank string")
-    return value
-
-
-def _count(value: Any, label: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise LogError(f"{label} must be a positive integer")
-    return value
-
-
-def _index(value: Any, label: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise LogError(f"{label} must be a non-negative integer")
-    return value
-
-
-def _time(value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
-        raise LogError(f"{label} must be a number")
-    return float(value)
-
-
-def _texts(value: Any, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise LogError(f"{label} must be an array")
-    return tuple(_text(item, label) for item in value)
-
-
-# -- Pins: where a cited record lives, one shape per source kind (RFC §5).
-#    The material writes each pin with pin_text and the log reads it back with
-#    parse_pin, so a pin has one spelling.
-
-_HEX = frozenset("0123456789abcdef")
-
-
-def _hex_id(text: str, prefix: str) -> bool:
-    """A Board id: the prefix, then lowercase hex."""
-    return text.startswith(prefix) and len(text) > len(prefix) and set(text[len(prefix):]) <= _HEX
-
-
-def _object_id(text: str) -> bool:
-    """A full commit id, SHA-1 or SHA-256, as the host accepts it."""
-    return len(text) in (40, 64) and set(text) <= _HEX
-
-
-def _positive(text: str) -> int | None:
-    return int(text) if text.isdigit() and text[0] != "0" else None
-
-
-def _page_name(text: str) -> bool:
-    """A wiki page name as the wiki writes it: lowercase a-z, digits and -,
-    with no - at either end."""
-    return (bool(text) and set(text) <= frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
-            and text[0] != "-" and text[-1] != "-")
-
-
-@dataclass(frozen=True, slots=True)
-class BoardPostPin:
-    post_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class BoardCommentPin:
-    post_id: str
-    comment_id: str
-
-
-@dataclass(frozen=True, slots=True)
-class RepoFilePin:
-    commit: str
-    path: str
-
-
-@dataclass(frozen=True, slots=True)
-class CommitPin:
-    commit: str
-
-
-@dataclass(frozen=True, slots=True)
-class WikiPagePin:
-    name: str
-    revision: int
-
-
-@dataclass(frozen=True, slots=True)
-class PrPin:
-    number: int
-    merge_commit: str
-
-
-@dataclass(frozen=True, slots=True)
-class PrReviewPin:
-    number: int
-    review_id: int
-
-
-@dataclass(frozen=True, slots=True)
-class PrCommentPin:
-    number: int
-    comment_id: int
-
-
-Pin = Union[BoardPostPin, BoardCommentPin, RepoFilePin, CommitPin, WikiPagePin, PrPin, PrReviewPin, PrCommentPin]
-
-
-def pin_kind(pin: Pin) -> str:
-    match pin:
-        case BoardPostPin():
-            return "board_post"
-        case BoardCommentPin():
-            return "board_comment"
-        case RepoFilePin():
-            return "repo_file"
-        case CommitPin():
-            return "commit"
-        case WikiPagePin():
-            return "wiki_page"
-        case PrPin():
-            return "pr"
-        case PrReviewPin() | PrCommentPin():
-            return "pr_comment"
-
-
-def pin_text(pin: Pin) -> str:
-    match pin:
-        case BoardPostPin(post_id):
-            return post_id
-        case BoardCommentPin(post_id, comment_id):
-            return f"{post_id}/{comment_id}"
-        case RepoFilePin(commit, path):
-            return f"{commit}:{path}"
-        case CommitPin(commit):
-            return commit
-        case WikiPagePin(name, revision):
-            return f"{name}@{revision}"
-        case PrPin(number, merge_commit):
-            return f"{number}@{merge_commit}"
-        case PrReviewPin(number, review_id):
-            return f"{number}/r{review_id}"
-        case PrCommentPin(number, comment_id):
-            return f"{number}/c{comment_id}"
-
-
-def _parse_pin(kind: str, text: str) -> Pin | None:
-    match kind:
-        case "board_post" if _hex_id(text, "p-"):
-            return BoardPostPin(text)
-        case "board_comment":
-            post_id, _, comment_id = text.partition("/")
-            if _hex_id(post_id, "p-") and _hex_id(comment_id, "c-"):
-                return BoardCommentPin(post_id, comment_id)
-        case "repo_file":
-            commit, _, path = text.partition(":")
-            if _object_id(commit) and path and not path.startswith("/") and ".." not in path.split("/"):
-                return RepoFilePin(commit, path)
-        case "commit" if _object_id(text):
-            return CommitPin(text)
-        case "wiki_page":
-            name, _, revision = text.rpartition("@")
-            number = _positive(revision)
-            if _page_name(name) and number is not None:
-                return WikiPagePin(name, number)
-        case "pr":
-            number_text, _, merge_commit = text.partition("@")
-            number = _positive(number_text)
-            if number is not None and _object_id(merge_commit):
-                return PrPin(number, merge_commit)
-        case "pr_comment":
-            number_text, _, rest = text.partition("/")
-            number = _positive(number_text)
-            index = _positive(rest[1:]) if rest[:1] in ("r", "c") else None
-            if number is not None and index is not None:
-                return PrReviewPin(number, index) if rest[0] == "r" else PrCommentPin(number, index)
-    return None
-
-
-def parse_pin(kind: str, text: str) -> Pin:
-    """The pin [text] names for a source of [kind], read strictly: a text of
-    another shape is not a pin."""
-    if kind not in SOURCE_KINDS:
-        raise LogError(f"source.kind {kind} is not a kind this package cites")
-    pin = _parse_pin(kind, text)
-    if pin is None:
-        raise LogError(f"{text!r} is not a {kind} pin")
-    return pin
-
-
-# -- Sources a question cites (RFC §5). ------------------------------------
-
-SOURCE_KINDS = {"board_post", "board_comment", "repo_file", "commit", "wiki_page", "pr", "pr_comment"}
-
-
-@dataclass(frozen=True, slots=True)
-class Source:
-    kind: str
-    source_id: str  # the grant
-    pin: str  # the pin_text of the record's pin; parse_pin reads it
-    quote: str
-    sha256: str  # the retained bytes the quote was checked against
-
-    def to_json(self) -> dict:
-        return {"kind": self.kind, "source_id": self.source_id, "pin": self.pin,
-                "quote": self.quote, "sha256": self.sha256}
-
-    @staticmethod
-    def of_json(value: Any) -> "Source":
-        fields = _exact(value, {"kind", "source_id", "pin", "quote", "sha256"}, "source")
-        kind = _text(fields["kind"], "source.kind")
-        pin = _text(fields["pin"], "source.pin")
-        parse_pin(kind, pin)
-        # Kept byte for byte, spacing included, but whitespace alone cites nothing.
-        if not isinstance(fields["quote"], str) or not fields["quote"].strip():
-            raise LogError("source.quote must hold more than whitespace")
-        return Source(kind, _text(fields["source_id"], "source.source_id"), pin, fields["quote"],
-                      _text(fields["sha256"], "source.sha256"))
-
-
-# -- The grants a session reads, fixed when it opens. The listing is then a
-#    function of the log alone, even before this worker's first observation.
-
-GRANT_KINDS = {"board", "repository", "wiki", "github_pulls"}
-
-
-@dataclass(frozen=True, slots=True)
-class Grant:
-    source_id: str
-    kind: str
-    paths: tuple[str, ...]  # repository grants only: the files read for each new commit
-
-    def to_json(self) -> dict:
-        return {"source_id": self.source_id, "kind": self.kind, "paths": list(self.paths)}
-
-    @staticmethod
-    def of_json(value: Any) -> "Grant":
-        fields = _exact(value, {"source_id", "kind", "paths"}, "grant")
-        kind = _text(fields["kind"], "grant.kind")
-        if kind not in GRANT_KINDS:
-            raise LogError(f"grant.kind {kind} is not a kind this package reads")
-        paths = _texts(fields["paths"], "grant.paths")
-        if (kind == "repository") != bool(paths):
-            raise LogError("grant.paths is required for a repository grant and only for one")
-        return Grant(_text(fields["source_id"], "grant.source_id"), kind, paths)
+import records
+from records import (  # noqa: F401  -- the names this package's modules and tests read from here
+    BoardCommentPin, BoardPostPin, CommitPin, GRANT_KINDS, Grant, LogError, Pin, PrCommentPin, PrPin, PrReviewPin,
+    RepoFilePin, SOURCE_KINDS, Source, WikiPagePin, parse_pin, pin_kind, pin_text)
+from records import count as _count, exact as _exact, index as _index, number as _time, text as _text
+from records import texts as _texts
+
+FOLDER = "operator-quiz"  # under the persistent volume
 
 
 # -- Answers, in the Keeper ask wire form the host delivers. ---------------
@@ -660,8 +401,91 @@ class Disputed:
 
 Grading = Union[GradeRequested, Judged, GradeFailed, Disputed]
 
+
+# -- What a bound lesson taught (RFC operator-quiz-follows-lesson §3). -------
+
+@dataclass(frozen=True, slots=True)
+class Cite:
+    """A record a lesson scene quoted. Two cites name the same record only
+    when all three are equal: a repository pin does not say which repository."""
+    kind: str
+    source_id: str
+    pin: str
+
+    def to_json(self) -> dict:
+        return {"kind": self.kind, "source_id": self.source_id, "pin": self.pin}
+
+    @staticmethod
+    def of_json(value: Any) -> "Cite":
+        fields = _exact(value, {"kind", "source_id", "pin"}, "cite")
+        kind, pin = _text(fields["kind"], "cite.kind"), _text(fields["pin"], "cite.pin")
+        parse_pin(kind, pin)
+        return Cite(kind, _text(fields["source_id"], "cite.source_id"), pin)
+
+
+@dataclass(frozen=True, slots=True)
+class Scene:
+    session_id: str  # the lesson's session, not one of this log's
+    entry_id: str
+    cites: tuple[Cite, ...]
+
+    def to_json(self) -> dict:
+        return {"session_id": self.session_id, "entry_id": self.entry_id,
+                "cites": [cite.to_json() for cite in self.cites]}
+
+    @staticmethod
+    def of_json(value: Any) -> "Scene":
+        fields = _exact(value, {"session_id", "entry_id", "cites"}, "scene")
+        if not isinstance(fields["cites"], list) or not fields["cites"]:
+            raise LogError("a scene cites at least one record")
+        return Scene(_text(fields["session_id"], "scene.session_id"), _text(fields["entry_id"], "scene.entry_id"),
+                     tuple(Cite.of_json(cite) for cite in fields["cites"]))
+
+
+@dataclass(frozen=True, slots=True)
+class LessonSeen:
+    """One completed output of the bound lesson, read whole at an
+    observation. [sha256] is the evidence the host retained for it and
+    [rows] the digest of each row's lane and fields: the lesson is observed
+    far more often than it writes, so an output whose rows were already
+    recorded is not recorded again."""
+    instance_id: str
+    observation_seq: int
+    sha256: str
+    rows: str
+    scenes: tuple[Scene, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LessonUnreadable:
+    """One completed output of the bound lesson with a row this package does
+    not read as a scene. None of its rows count."""
+    instance_id: str
+    observation_seq: int
+    sha256: str
+    rows: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class FollowsLesson:
+    """Written with session_opened when the binding names a lesson source:
+    the session's new questions come only from records a lesson cited."""
+    session_id: str
+    source_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class LessonScopeApplied:
+    """Written with an author request of a session that follows a lesson:
+    the records its material holds, which are the cited ones among those read."""
+    session_id: str
+    request_id: str
+    kept: tuple[Cite, ...]
+
 Event = Union[SessionOpened, MaterialRead, ExactRequested, AuthorContextRecorded, Posed, DraftRejected, SessionFailed, AnswerReceived,
-              GradeRequested, Judged, GradeFailed, Disputed]
+              GradeRequested, Judged, GradeFailed, Disputed, LessonSeen, LessonUnreadable, FollowsLesson,
+              LessonScopeApplied]
 
 
 def event_to_json(event: Event) -> dict:
@@ -704,6 +528,17 @@ def event_to_json(event: Event) -> dict:
         case Disputed(ask_id, question_id, note, action_request_id):
             return {"event": "disputed", "ask_id": ask_id, "question_id": question_id, "note": note,
                     "action_request_id": action_request_id}
+        case LessonSeen(instance_id, observation_seq, sha256, rows, scenes):
+            return {"event": "lesson_seen", "instance_id": instance_id, "observation_seq": observation_seq,
+                    "sha256": sha256, "rows": rows, "scenes": [scene.to_json() for scene in scenes]}
+        case LessonUnreadable(instance_id, observation_seq, sha256, rows, reason):
+            return {"event": "lesson_unreadable", "instance_id": instance_id, "observation_seq": observation_seq,
+                    "sha256": sha256, "rows": rows, "reason": reason}
+        case FollowsLesson(session_id, source_id):
+            return {"event": "follows_lesson", "session_id": session_id, "source_id": source_id}
+        case LessonScopeApplied(session_id, request_id, kept):
+            return {"event": "lesson_scope_applied", "session_id": session_id, "request_id": request_id,
+                    "kept": [cite.to_json() for cite in kept]}
 
 
 def event_of_json(value: Any) -> Event:
@@ -783,161 +618,74 @@ def event_of_json(value: Any) -> Event:
             f = _exact(value, {"event", "ask_id", "question_id", "note", "action_request_id"}, "disputed")
             return Disputed(_text(f["ask_id"], "ask_id"), _text(f["question_id"], "question_id"),
                             _text(f["note"], "note"), _text(f["action_request_id"], "action_request_id"))
+        case "lesson_seen":
+            f = _exact(value, {"event", "instance_id", "observation_seq", "sha256", "rows", "scenes"}, "lesson_seen")
+            if not isinstance(f["scenes"], list):
+                raise LogError("lesson_seen.scenes must be an array")
+            return LessonSeen(_text(f["instance_id"], "instance_id"), _count(f["observation_seq"], "observation_seq"),
+                              _text(f["sha256"], "sha256"), _text(f["rows"], "rows"),
+                              tuple(Scene.of_json(scene) for scene in f["scenes"]))
+        case "lesson_unreadable":
+            f = _exact(value, {"event", "instance_id", "observation_seq", "sha256", "rows", "reason"},
+                       "lesson_unreadable")
+            return LessonUnreadable(_text(f["instance_id"], "instance_id"),
+                                    _count(f["observation_seq"], "observation_seq"),
+                                    _text(f["sha256"], "sha256"), _text(f["rows"], "rows"),
+                                    _text(f["reason"], "reason"))
+        case "follows_lesson":
+            f = _exact(value, {"event", "session_id", "source_id"}, "follows_lesson")
+            return FollowsLesson(_text(f["session_id"], "session_id"), _text(f["source_id"], "source_id"))
+        case "lesson_scope_applied":
+            f = _exact(value, {"event", "session_id", "request_id", "kept"}, "lesson_scope_applied")
+            if not isinstance(f["kept"], list):
+                raise LogError("lesson_scope_applied.kept must be an array")
+            return LessonScopeApplied(_text(f["session_id"], "session_id"), _text(f["request_id"], "request_id"),
+                                      tuple(Cite.of_json(cite) for cite in f["kept"]))
         case other:
             raise LogError(f"event {other!r} is not an event of this package")
 
 
-# -- The file. --------------------------------------------------------------
-
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _make_directory(path: Path) -> None:
-    """Creates the folder and any missing parents, syncing each parent that
-    gained an entry, so a new folder survives a crash with its contents."""
-    if path.is_dir():
-        return
-    _make_directory(path.parent)
-    path.mkdir()
-    _fsync_directory(path.parent)
-
-
-def _line(event: Event) -> bytes:
-    """The bytes one event is written as."""
-    return (json.dumps(event_to_json(event), ensure_ascii=False, allow_nan=False, separators=(",", ":"))
-            + "\n").encode("utf-8")
-
+# -- The files. --------------------------------------------------------------
 
 def unreadable(event: Event) -> str | None:
-    """Why this event would not read back as written, or None. It is checked
-    through the bytes it would be written as: text UTF-8 cannot hold, such as
-    a lone surrogate, never reaches the file."""
-    try:
-        if event_of_json(json.loads(_line(event).decode("utf-8"))) == event:
-            return None
-        return f"{type(event).__name__} reads back differently"
-    except UnicodeEncodeError:
-        return f"{type(event).__name__} holds text UTF-8 cannot encode"
-    except (LogError, ValueError, TypeError) as error:
-        return str(error)
+    """Why this event would not read back as written, or None."""
+    return records.unreadable(event, event_to_json, event_of_json)
 
 
-class Log:
+class Log(records.Log[Event]):
     def __init__(self, state: Path):
-        self.directory = state / "operator-quiz"
-        self.path = self.directory / "log.jsonl"
-        # Lines already decoded, their byte length and the last of them.
-        self._events: list[Event] = []
-        self._complete = 0
-        self._last_line = b""
-
-    def _read(self) -> tuple[list[Event], int]:
-        """Events and the byte length of the complete lines.
-
-        Lines decoded before are kept and only the bytes after them are read:
-        the worker is the log's only writer, so those bytes do not change. A
-        shorter file, or a last line that is no longer where it was, means
-        they did, and the whole file is decoded again."""
-        try:
-            with open(self.path, "rb") as handle:
-                start = self._complete
-                if start:
-                    size = os.fstat(handle.fileno()).st_size
-                    handle.seek(start - len(self._last_line) - 1)
-                    if size < start or handle.read(len(self._last_line) + 1) != self._last_line + b"\n":
-                        self._events, self._complete, self._last_line, start = [], 0, b"", 0
-                handle.seek(start)
-                data = handle.read()
-        except FileNotFoundError:
-            self._events, self._complete, self._last_line = [], 0, b""
-            return [], 0
-        complete = data.rfind(b"\n") + 1
-        lines = data[:complete].split(b"\n")[:-1]
-        events: list[Event] = []
-        for number, line in enumerate(lines, start=len(self._events) + 1):
-            try:
-                events.append(event_of_json(json.loads(line.decode("utf-8"))))
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise LogError(f"line {number} of {self.path} is not JSON: {error}") from error
-            except LogError as error:
-                raise LogError(f"line {number} of {self.path}: {error}") from error
-        if lines:
-            self._events = self._events + events
-            self._complete = start + complete
-            self._last_line = lines[-1]
-        return list(self._events), self._complete
-
-    def read(self) -> list[Event]:
-        return self._read()[0]
-
-    def append(self, events: list[Event]) -> None:
-        """Appends after the history decodes; the lines are synced before return."""
-        if not events:
-            return
-        # A line that would not read back would make the whole log unreadable.
-        for event in events:
-            problem = unreadable(event)
-            if problem is not None:
-                raise LogError(problem)
-        _, complete = self._read()
-        payload = b"".join(_line(event) for event in events)
-        created = not self.path.exists()
-        _make_directory(self.directory)
-        descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT, 0o600)
-        try:
-            os.ftruncate(descriptor, complete)  # cut off an unfinished write
-            os.lseek(descriptor, complete, os.SEEK_SET)
-            written = 0
-            while written < len(payload):
-                written += os.write(descriptor, payload[written:])
-            os.fsync(descriptor)
-        finally:
-            os.close(descriptor)
-        if created:
-            _fsync_directory(self.directory)
+        super().__init__(state / FOLDER, event_to_json, event_of_json)
 
 
-class Blobs:
-    """Bodies the log names by digest: the package's exact requests and the
-    pages it read. Written whole before the event that names them."""
-
+class Blobs(records.Blobs):
     def __init__(self, state: Path, kind: str):
-        self.directory = state / "operator-quiz" / kind
+        super().__init__(state / FOLDER / kind)
 
-    def path(self, digest: str) -> Path:
-        if not digest or any(c not in "0123456789abcdef" for c in digest):
-            raise LogError(f"{digest!r} is not a digest")
-        return self.directory / f"{digest}.json"
-
-    def write(self, digest: str, value: Any) -> None:
-        target = self.path(digest)
-        if target.exists():
-            return
-        _make_directory(self.directory)
-        temporary = target.with_suffix(".tmp")
-        with open(temporary, "wb") as handle:
-            handle.write(json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True).encode("utf-8"))
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
-        _fsync_directory(self.directory)
-
-    def read(self, digest: str) -> Any:
-        try:
-            return json.loads(self.path(digest).read_bytes().decode("utf-8"))
-        except FileNotFoundError as error:
-            raise LogError(f"the log names {digest} and it is not kept") from error
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise LogError(f"{digest} is not JSON: {error}") from error
 
 
 # -- Sessions (RFC §4.9 Sessions). "graded" is derived by grading, from an
 #    answered session's verdicts. -------------------------------------------
+
+@dataclass(frozen=True, slots=True)
+class Disputable:
+    """A question the operator may dispute now, with what a grade request reads."""
+    posed: Posed
+    answer: AnswerReceived
+
+
+@dataclass(frozen=True, slots=True)
+class NotAnswered:
+    """The session has no answer, or did not pose the question."""
+
+
+@dataclass(frozen=True, slots=True)
+class GradeWaiting:
+    """A grade request for the question has no result yet."""
+    request_id: str
+
+
+DisputeStanding = Union[Disputable, NotAnswered, GradeWaiting]
+
 
 @dataclass(frozen=True, slots=True)
 class Session:
@@ -957,6 +705,9 @@ class Session:
     answer: AnswerReceived | None
     grading: tuple[Grading, ...]  # in log order
     history_scope: str | None  # None means no domain context was recorded; never infer it from request wire.
+    follows: str | None  # the lesson source this session follows, from follows_lesson
+    scopes: tuple[LessonScopeApplied, ...]  # one per author request of a session that follows a lesson
+    taught: frozenset[str]  # question ids whose source a lesson seen before the question had cited
 
     @property
     def ask_id(self) -> str | None:
@@ -976,6 +727,18 @@ class Session:
         events = self.grading_of(question_id)
         return events[-1] if events and isinstance(events[-1], GradeRequested) else None
 
+    def dispute_standing(self, question_id: str) -> DisputeStanding:
+        """Whether the operator may dispute this question's grade (RFC §6.4).
+        The flow takes a dispute and the projection offers one by this rule
+        alone, so a row never offers a dispute the flow refuses."""
+        posed = next((p for p in self.posed if p.question_id == question_id), None)
+        if self.state != "answered" or self.answer is None or posed is None:
+            return NotAnswered()
+        waiting = self.outstanding_grade(question_id)
+        if waiting is not None:
+            return GradeWaiting(waiting.request_id)
+        return Disputable(posed, self.answer)
+
 
 def fold(events: list[Event]) -> list[Session]:
     """Sessions in the order they were opened. History that contradicts
@@ -984,6 +747,8 @@ def fold(events: list[Event]) -> list[Session]:
     sessions: dict[str, dict] = {}
     order: list[str] = []
     by_ask: dict[str, str] = {}
+    outputs: set[tuple[type, str]] = set()
+    cited: set[tuple[str, str, str]] = set()
     grade_requests: set[str] = set()
     disputes: set[str] = set()
 
@@ -1012,8 +777,31 @@ def fold(events: list[Event]) -> list[Session]:
                                         "questions": questions, "grants": grants, "language": language,
                                         "opened_at": opened_at, "state": "writing", "failure": None,
                                         "superseded_by": None, "material": [], "requests": [], "rejected": [],
-                                        "posed": [], "answer": None, "grading": [], "history_scope": None}
+                                        "posed": [], "answer": None, "grading": [], "history_scope": None,
+                                        "follows": None, "scopes": [], "taught": set()}
                 order.append(session_id)
+            case LessonSeen(rows=rows) | LessonUnreadable(rows=rows):
+                # Rows recorded as unreadable may be recorded as seen later,
+                # by a revision that reads them; neither is recorded twice.
+                if (type(event), rows) in outputs or (LessonSeen, rows) in outputs:
+                    raise LogError(f"the lesson output with rows {rows} was recorded twice")
+                outputs.add((type(event), rows))
+                if isinstance(event, LessonSeen):
+                    cited.update((cite.kind, cite.source_id, cite.pin) for scene in event.scenes for cite in scene.cites)
+            case FollowsLesson(session_id=session_id, source_id=source_id):
+                current = writing(session_id, "follows_lesson")
+                if current["follows"] is not None or current["material"] or current["requests"]:
+                    raise LogError(f"follows_lesson for session {session_id} does not come with its opening")
+                current["follows"] = source_id
+            case LessonScopeApplied(session_id=session_id, request_id=request_id):
+                current = writing(session_id, "lesson_scope_applied")
+                latest = current["requests"][-1] if current["requests"] else None
+                if current["follows"] is None or latest is None or latest.request_id != request_id \
+                        or latest.output != "author":
+                    raise LogError("lesson scope does not name the latest author request of a session that follows")
+                if any(scope.request_id == request_id for scope in current["scopes"]):
+                    raise LogError(f"lesson scope of {request_id} was recorded twice")
+                current["scopes"].append(event)
             case MaterialRead(session_id=session_id):
                 writing(session_id, "material_read")["material"].append(event)
             case ExactRequested(session_id=session_id):
@@ -1043,6 +831,8 @@ def fold(events: list[Event]) -> list[Session]:
                 if any(p.question_id == question_id for p in current["posed"]):
                     raise LogError(f"question {question_id} was posed twice in session {session_id}")
                 current["posed"].append(event)
+                if any((source.kind, source.source_id, source.pin) in cited for source in event.sources):
+                    current["taught"].add(question_id)
             case SessionFailed(session_id=session_id, reason=reason):
                 # An asked session fails when the host refuses its ask by rule.
                 current = session(session_id, "session_failed")
@@ -1098,5 +888,12 @@ def fold(events: list[Event]) -> list[Session]:
     return [Session(s["session_id"], s["action_request_id"], s["questions"], s["grants"], s["language"],
                     s["opened_at"], s["state"], s["failure"],
                     s["superseded_by"], tuple(s["material"]), tuple(s["requests"]), tuple(s["rejected"]),
-                    tuple(s["posed"]), s["answer"], tuple(s["grading"]), s["history_scope"])
+                    tuple(s["posed"]), s["answer"], tuple(s["grading"]), s["history_scope"], s["follows"],
+                    tuple(s["scopes"]), frozenset(s["taught"]))
             for s in (sessions[session_id] for session_id in order)]
+
+
+def cited(events: list[Event]) -> frozenset[Cite]:
+    """Every record a lesson output read so far cited."""
+    return frozenset(cite for event in events if isinstance(event, LessonSeen)
+                     for scene in event.scenes for cite in scene.cites)

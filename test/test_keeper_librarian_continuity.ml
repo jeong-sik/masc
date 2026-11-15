@@ -556,7 +556,7 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
      working_context=Masc.Keeper_librarian_context.empty;
      messages=P.messages half; tool_observations=[];counterpart_observations=[]} in
   let variables =
-    Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
+    Masc.Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] ~continuity:half input |> get in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template
     Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
@@ -1638,6 +1638,12 @@ type memory_floor_case =
   | Rewritten_memory_source
   | Appended_memory_suffix
 
+let readable_journal_tail ~keepers_dir ~keeper_id ~limit =
+  match Masc.Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id ~limit with
+  | Ok rows -> rows
+  | Error detail -> failwith ("memory journal unreadable: " ^ detail)
+;;
+
 (* Drive the production Queue -> Runtime CLI lane -> parsed/gated Memory
    inference path. One assistant/tool exchange is one indivisible atom,
    so a whole-request refusal must stage each exact message before publishing. *)
@@ -1815,7 +1821,7 @@ let test_uncommitted_memory_message_floor ?native case () =
     check bool "neither tool argument nor raw tool-result payload is rendered" false
       (contains ~sub:tool_argument_marker prompt || contains ~sub:tool_result_marker prompt))
     [first_prompt;second_prompt];
-  let publications = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:(List.length !requests+1)
+  let publications = readable_journal_tail ~keepers_dir ~keeper_id:keeper_name ~limit:(List.length !requests+1)
     |> List.map get |> List.filter_map (function
       | Current.Journal_committed {program=Some proof;_} -> Some proof
       | Current.Journal_committed {program=None;_} | Current.Journal_failed _
@@ -1923,7 +1929,7 @@ let test_queue_memory_floor_retains_proven_api_holes ~all_refused () =
   let snapshot = P.read ~config ~keeper_name |> get |> some in
   check bool "the working-state snapshot cannot erase the skipped source" true
     (snapshot.unread_messages=holes);
-  let publications = Current.read_journal_tail ~keepers_dir ~keeper_id:keeper_name
+  let publications = readable_journal_tail ~keepers_dir ~keeper_id:keeper_name
       ~limit:(List.length !requests+1)
     |> List.map get |> List.filter_map (function
       | Current.Journal_committed {program=Some proof;_} -> Some proof
@@ -2167,7 +2173,7 @@ let test_cached_fit_refusal_reaches_its_original_message_floor () =
      current=Option.map (fun (memory : Masc.Keeper_memory_os_current.t) -> {K.facts=memory.facts}) current;
      working_context=Masc.Keeper_librarian_context.empty;messages=P.messages half;
      tool_observations=[];counterpart_observations=[]} in
-  let variables = Masc.Keeper_librarian_runtime.librarian_prompt_variables ~continuity:half input |> get in
+  let variables = Masc.Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] ~continuity:half input |> get in
   let _, prompt = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian variables |> get in
   let requirement = Agent_core.Exact_output.make_output_requirement
     ~schema:Masc.Keeper_structured_output_schema.librarian_continuity_output_schema

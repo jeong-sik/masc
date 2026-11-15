@@ -43,7 +43,9 @@ type load_error =
   | Load_store_unavailable of string
   | Not_found
   | Corrupt_original of string
-      (** The stored bytes exist but do not decode to a review original. *)
+      (** The stored bytes exist but do not decode to a review original, or
+          the key names an attempt no original can have (a negative attempt).
+          Reading again changes neither. *)
 
 type verification_scope = All_verifications | Verification of string
 (** [Verification id] isolates only records whose summary, body identity,

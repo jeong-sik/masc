@@ -66,15 +66,33 @@ let data_url_base64 url =
     else None
 ;;
 
+type codex_item =
+  | Input_text of string
+  | Data_url_image of
+      { media_type : string
+      ; payload : string
+      }
+  | Other_item
+
 let codex_item = function
-  | `Assoc fields as item ->
-    (match List.assoc_opt "type" fields, List.assoc_opt "imageUrl" fields with
-     | Some (`String "inputImage"), Some (`String url) ->
-       (match data_url_base64 url with
-        | Some (media_type, encoded) -> omitted ~kind:Image ~media_type encoded
-        | None -> item)
-     | (Some _ | None), (Some _ | None) -> item)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as item -> item
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "inputText") ->
+       (match List.assoc_opt "text" fields with
+        | Some (`String text) -> Input_text text
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None ->
+          Other_item)
+     | Some (`String "inputImage") ->
+       (match List.assoc_opt "imageUrl" fields with
+        | Some (`String url) ->
+          (match data_url_base64 url with
+           | Some (media_type, payload) -> Data_url_image { media_type; payload }
+           | None -> Other_item)
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) | None ->
+          Other_item)
+     | Some (`String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _)
+     | None -> Other_item)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> Other_item
 ;;
 
 let map_list f = function
@@ -88,10 +106,37 @@ let map_field name f = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as value -> value
 ;;
 
+let codex_items = function
+  | `Assoc fields ->
+    (match List.assoc_opt "result" fields with
+     | Some (`Assoc result) ->
+       (match List.assoc_opt "contentItems" result with
+        | Some (`List items) -> Some (List.map (fun item -> item, codex_item item) items)
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None ->
+          None)
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+let with_codex_items items response =
+  map_field "result" (map_field "contentItems" (fun _ -> `List items)) response
+;;
+
+let with_input_text text item = map_field "text" (fun _ -> `String text) item
+
 let response json =
-  json
-  |> map_field "content_blocks" (map_list host_block)
-  |> map_field "result" (map_field "contentItems" (map_list codex_item))
+  let json = map_field "content_blocks" (map_list host_block) json in
+  match codex_items json with
+  | None -> json
+  | Some items ->
+    with_codex_items
+      (List.map
+         (fun (item, held) ->
+            match held with
+            | Data_url_image { media_type; payload } -> omitted ~kind:Image ~media_type payload
+            | Input_text _ | Other_item -> item)
+         items)
+      json
 ;;
 
 let carrier_row receipt = map_field "response" response receipt

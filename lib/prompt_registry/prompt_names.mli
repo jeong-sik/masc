@@ -67,6 +67,8 @@ val keeper_skills_unavailable_diagnostic : string
 (** The diagnostic on an [unavailable] Skill catalog row. One sentence, two
     render sites (current task and other held tasks). *)
 val keeper_observation_rejected_digest_heading : string
+val keeper_observation_rejected_digest_artifact_reference_row : string
+val keeper_observation_rejected_digest_unstated_input_row : string
 val keeper_observation_rejected_digest_row : string
 (** The instruction attached to the skills named by the current task. *)
 
@@ -339,6 +341,8 @@ val keeper_world_own_recent_actions_intro : string
 val keeper_world_own_recent_actions_turn_ok_row : string
 val keeper_world_own_recent_actions_turn_rejected_row : string
 val keeper_world_own_recent_actions_turn_rejected_detail_row : string
+val keeper_world_own_recent_actions_turn_rejected_artifact_reference_row : string
+val keeper_world_own_recent_actions_turn_rejected_unstated_input_row : string
 val keeper_world_own_recent_actions_turn_deferred_row : string
 val keeper_world_own_recent_actions_turn_unrecorded_row : string
 val keeper_world_own_recent_actions_unavailable : string

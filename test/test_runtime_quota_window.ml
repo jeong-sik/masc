@@ -22,7 +22,7 @@ let test_window_lifecycle () =
     "no window recorded"
     None
     (Q.active_until ~scope ~now:100.0);
-  Q.note_exhausted ~scope ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:500.0;
   Alcotest.(check (option (float 0.0)))
     "active before reset"
     (Some 500.0)
@@ -39,13 +39,13 @@ let test_window_lifecycle () =
 let test_later_reset_extends_earlier_is_ignored () =
   reset ();
   let scope = provider_scope "codex_subscription" in
-  Q.note_exhausted ~scope ~resets_at:500.0;
-  Q.note_exhausted ~scope ~resets_at:900.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:900.0;
   Alcotest.(check (option (float 0.0)))
     "later reset extends"
     (Some 900.0)
     (Q.active_until ~scope ~now:100.0);
-  Q.note_exhausted ~scope ~resets_at:600.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:600.0;
   Alcotest.(check (option (float 0.0)))
     "earlier reset cannot shorten"
     (Some 900.0)
@@ -64,7 +64,7 @@ let test_an_observation_demotes_and_a_success_clears_it () =
   let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   Alcotest.(check bool) "nothing recorded" false (Q.is_exhausted ~scope ~now:100.0);
   let before_the_note = Unix.gettimeofday () in
-  Q.note_observed_exhausted ~scope;
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
   let after_the_note = Unix.gettimeofday () in
   Alcotest.(check bool) "an observation holds it back" true
     (Q.is_exhausted ~scope ~now:100.0);
@@ -83,7 +83,7 @@ let test_an_observation_demotes_and_a_success_clears_it () =
      | Some (Q.Reset_stated _) | None -> false);
   Alcotest.(check bool) "after the cap it holds nothing back" false
     (Q.is_exhausted ~scope ~now:(after_the_note +. cap));
-  Q.note_observed_exhausted ~scope;
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
   Q.note_succeeded ~scope;
   Alcotest.(check bool) "a call getting through clears it sooner" false
     (Q.is_exhausted ~scope ~now:100.0)
@@ -98,8 +98,8 @@ let test_an_injected_moment_dates_the_observation () =
   let scope = provider_scope "api_z_ai" in
   let observed_at = 1_000_000.0 in
   let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
-  Q.note_exhausted ~scope ~resets_at:(observed_at -. 10.0);
-  Q.note_observed_exhausted_at ~now:observed_at ~scope;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:(observed_at -. 10.0);
+  Q.note_observed_exhausted_at ~source:Q.Provider_quota_refused ~now:observed_at ~scope;
   Alcotest.(check bool) "the observation rests the scope at the given moment" true
     (Q.is_exhausted ~scope ~now:observed_at);
   Alcotest.(check (option (float 0.0))) "and names no reset" None
@@ -108,8 +108,8 @@ let test_an_injected_moment_dates_the_observation () =
     (Q.is_exhausted ~scope ~now:(observed_at +. cap +. 1.0));
   (* A stated window still ahead of the given moment is not weakened. *)
   let ahead = observed_at +. 60.0 in
-  Q.note_exhausted ~scope ~resets_at:ahead;
-  Q.note_observed_exhausted_at ~now:observed_at ~scope;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:ahead;
+  Q.note_observed_exhausted_at ~source:Q.Provider_quota_refused ~now:observed_at ~scope;
   Alcotest.(check (option (float 0.0))) "a stated reset ahead of it still wins"
     (Some ahead)
     (Q.active_until ~scope ~now:observed_at)
@@ -125,13 +125,13 @@ let test_a_stated_window_outranks_an_observation () =
   reset ();
   let scope = provider_scope "api_z_ai" in
   let resets_at = reset_after_the_wall_clock in
-  Q.note_observed_exhausted ~scope;
-  Q.note_exhausted ~scope ~resets_at;
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at;
   Alcotest.(check (option (float 0.0)))
     "a stated reset replaces an observation"
     (Some resets_at)
     (Q.active_until ~scope ~now:100.0);
-  Q.note_observed_exhausted ~scope;
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
   Alcotest.(check (option (float 0.0)))
     "an observation does not weaken a stated window"
     (Some resets_at)
@@ -153,8 +153,8 @@ let test_a_passed_window_gives_way_to_a_later_observation () =
   reset ();
   let scope = provider_scope "api_z_ai" in
   let now = Unix.gettimeofday () in
-  Q.note_exhausted ~scope ~resets_at:(now -. 10.0);
-  Q.note_observed_exhausted ~scope;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:(now -. 10.0);
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
   Alcotest.(check bool) "the refusal rests the scope" true (Q.is_exhausted ~scope ~now);
   Alcotest.(check (option (float 0.0))) "and names no reset" None
     (Q.active_until ~scope ~now)
@@ -172,18 +172,18 @@ let test_a_read_without_reset_answers_what_a_refusal_asks () =
     | Some Q.Stated_reset_ahead -> "stated reset ahead"
     | Some Q.Read_found_no_reset -> "read found no reset"
   in
-  Q.note_observed_exhausted ~scope;
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
   Alcotest.(check string) "a refusal leaves the question open" "open" (answered ());
   Q.note_read_without_reset ~scope;
   Alcotest.(check string) "a read that found no reset answers it" "read found no reset"
     (answered ());
-  Q.note_observed_exhausted ~scope;
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope;
   Alcotest.(check string) "a later refusal does not reopen it" "read found no reset"
     (answered ());
   Alcotest.(check bool) "the scope rests either way" true (Q.is_exhausted ~scope ~now:100.0);
   Q.note_succeeded ~scope;
   Alcotest.(check string) "a success clears the answer" "open" (answered ());
-  Q.note_exhausted ~scope ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope ~resets_at:500.0;
   Alcotest.(check string) "a stated reset still ahead is an answer" "stated reset ahead"
     (answered ());
   let read_scope = provider_scope "api_z_ai_read" in
@@ -202,7 +202,7 @@ let test_a_read_without_reset_answers_what_a_refusal_asks () =
    take a lane out. *)
 let test_an_observed_scope_is_demoted_not_excluded () =
   reset ();
-  Q.note_observed_exhausted ~scope:(provider_scope "ollama_cloud");
+  Q.note_observed_exhausted ~source:Q.Provider_quota_refused ~scope:(provider_scope "ollama_cloud");
   let candidates = [ "ollama_cloud.glm-5-3"; "deepseek.v4-flash" ] in
   Alcotest.(check (list string))
     "an observed candidate goes to the tail"
@@ -216,7 +216,7 @@ let test_an_observed_scope_is_demoted_not_excluded () =
 
 let test_demote_moves_exhausted_provider_to_tail () =
   reset ();
-  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "exhausted provider's candidates keep order at the tail"
     [ "ollama.qwen"; "codex.spark"; "claude_code.sonnet"; "claude_code.opus" ]
@@ -228,12 +228,12 @@ let test_demote_noop_paths () =
     "no windows: unchanged"
     candidates
     (Q.demote_order ~now:100.0 ~quota_scope_of candidates);
-  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "window passed: unchanged"
     candidates
     (Q.demote_order ~now:501.0 ~quota_scope_of candidates);
-  Q.note_exhausted ~scope:(provider_scope "unrelated_provider") ~resets_at:900.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:(provider_scope "unrelated_provider") ~resets_at:900.0;
   Alcotest.(check (list string))
     "window on a provider with no candidate: unchanged"
     candidates
@@ -241,7 +241,7 @@ let test_demote_noop_paths () =
 
 let test_unknown_provider_stays_in_place () =
   reset ();
-  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "unresolvable id is not demoted"
     [ "no-dot-id"; "ollama.qwen"; "claude_code.sonnet" ]
@@ -256,7 +256,7 @@ let test_unknown_provider_stays_in_place () =
 
 let test_all_demoted_keeps_declared_order () =
   reset ();
-  Q.note_exhausted ~scope:(provider_scope "claude_code") ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:(provider_scope "claude_code") ~resets_at:500.0;
   Alcotest.(check (list string))
     "every candidate demoted: declared order preserved, still attemptable"
     [ "claude_code.sonnet"; "claude_code.opus" ]
@@ -284,7 +284,7 @@ let test_shared_credential_scope_demotes_siblings () =
            (Some (Runtime_schema.Env "ANTHROPIC_KEY")))
     | _ -> None
   in
-  Q.note_exhausted
+  Q.note_exhausted ~source:Q.Provider_quota_refused
     ~scope:
       (Q.scope_of_credential
          ~provider_id:"ollama_cloud"
@@ -306,7 +306,7 @@ let test_scope_kinds_do_not_collide () =
       (Some (Runtime_schema.Env "TOKEN"))
   in
   let provider_row_scope = provider_scope "env:TOKEN" in
-  Q.note_exhausted ~scope:env_scope ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:env_scope ~resets_at:500.0;
   Alcotest.(check (option (float 0.0)))
     "an env reference cannot collide with a provider row that resembles it"
     None
@@ -324,7 +324,7 @@ let test_declared_credential_is_shared_scope () =
   let glm_scope = selected_scope "glm" in
   let image_scope = selected_scope "zai-image" in
   reset ();
-  Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:glm_scope ~resets_at:500.0;
   Alcotest.(check bool)
     "rows declaring the same credential env share a quota window"
     true
@@ -340,7 +340,7 @@ let test_undeclared_rows_have_separate_scopes () =
   Alcotest.(check bool) "undeclared rows do not share a scope" false
     (Q.scope_equal glm_scope image_scope);
   reset ();
-  Q.note_exhausted ~scope:glm_scope ~resets_at:500.0;
+  Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:glm_scope ~resets_at:500.0;
   Alcotest.(check bool) "exhausting glm does not demote zai-image" false
     (Q.is_exhausted ~scope:image_scope ~now:100.0);
   Alcotest.(check bool) "and glm's own window holds" true
@@ -377,7 +377,7 @@ let test_selected_environment_alias_owns_scope () =
            (Some (Runtime_schema.Env "OLLAMA_API_KEY"))
        in
        reset ();
-       Q.note_exhausted ~scope:selected_scope ~resets_at:500.0;
+       Q.note_exhausted ~source:Q.Provider_quota_refused ~scope:selected_scope ~resets_at:500.0;
        Alcotest.(check bool)
          "the environment alias that supplied the key shares the window"
          true

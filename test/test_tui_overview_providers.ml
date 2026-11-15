@@ -59,8 +59,18 @@ let runtime ?resets ~scope ~exhausted id : Tui_decode.runtime_option =
   ; ro_declared_reasoning_effort = None
   ; ro_is_local = false
   ; ro_is_default = false
-  ; ro_quota_exhausted = exhausted
-  ; ro_quota_resets_at = resets
+  ; ro_quota_rest =
+      (if exhausted
+       then
+         Some
+           { Runtime_quota_window.cause =
+               Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused
+           ; rest =
+               (match resets with
+                | Some at -> Runtime_quota_window.Reset_stated at
+                | None -> Runtime_quota_window.Observed_until infinity)
+           }
+       else None)
   ; ro_quota_scope_id = None
   ; ro_quota_scope = Some scope
   ; ro_credential_refused_at = None

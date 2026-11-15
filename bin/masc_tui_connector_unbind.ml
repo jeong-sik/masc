@@ -17,16 +17,21 @@ type outcome =
   | Not_found of string
   | Failed of string
 
-let channel_label ~channel_id ~channel_name =
+let channel_label ~ko ~channel_id ~channel_name =
   match channel_name with
   | Some name ->
       Printf.sprintf "%s (%s)"
         (Terminal_text.single_line name)
         (Terminal_text.single_line channel_id)
-  | None -> Terminal_text.single_line channel_id ^ " (name unknown)"
+  | None ->
+      Terminal_text.single_line channel_id
+      ^ if ko then " (이름 모름)" else " (name unknown)"
 
+(* Every sentence that names a target below is English, so the label inside
+   it is English too. *)
 let target_label target =
-  channel_label ~channel_id:target.channel_id ~channel_name:target.channel_name
+  channel_label ~ko:false ~channel_id:target.channel_id
+    ~channel_name:target.channel_name
 
 let targets ~keeper_name (connectors : Masc.Tui_decode_connectors.connector list) =
   List.concat_map

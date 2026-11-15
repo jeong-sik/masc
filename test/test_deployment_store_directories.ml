@@ -70,6 +70,48 @@ let test_real_store_refusals exe () = with_workspace (fun root keepers traces ->
   check string "refused boundary preserved" "{invalid boundary}\n" (read boundary);
   check string "refused fragment preserved" "{invalid fragment}\n" (read fragment))
 
+(* #51587: #51429 moved a receipt's [arguments] to [{"known": _}] or
+   [{"unknown": true}] and the deploy check did not read the outbox, so an
+   install passed with receipts whose [arguments] is the bare call arguments,
+   and every request of their Keepers failed after the start. *)
+let test_tool_outbox_receipts exe () = with_workspace (fun root _keepers _traces ->
+  let module Codec = Keeper_client_tool_outbox_codec in
+  let directory =
+    match Keeper_official_client_paths.outbox_dir ~base_path:root ~keeper_name:"keeper" with
+    | Ok directory -> directory
+    | Error detail -> fail detail in
+  Fs_compat.mkdir_p directory;
+  let call_arguments = `Assoc ["command", `String "ls"] in
+  let put json =
+    let path = Filename.concat directory (Codec.filename json) in
+    write path (Yojson.Safe.to_string json);
+    path in
+  let readable = put (Codec.to_json
+    { Codec.thread_id = "thread"; turn_id = "turn"; call_id = "call-current"
+    ; tool_name = "Execute"; arguments = Codec.Known call_arguments
+    ; response = `Assoc ["outcome", `String "completed"] }) in
+  let status, output = invoke exe root in
+  check bool ("receipts this build reads do not stop deployment: " ^ output) true
+    (status = Unix.WEXITED 0);
+  check bool ("the outbox is counted: " ^ output) true
+    (String_util.contains_substring output "keeper tool outbox receipts rows=1 refused=0");
+  let earlier = `Assoc
+    [ "thread_id", `String "thread"; "turn_id", `String "turn"
+    ; "call_id", `String "call-earlier"; "tool_name", `String "Execute"
+    ; "arguments", call_arguments
+    ; "response", `Assoc ["outcome", `String "completed"] ] in
+  let refused = put earlier in
+  let status, output = invoke exe root in
+  check bool ("a receipt this build cannot read stops deployment: " ^ output) true
+    (status <> Unix.WEXITED 0);
+  check bool ("both receipts are counted and one is refused: " ^ output) true
+    (String_util.contains_substring output "keeper tool outbox receipts rows=2 refused=1");
+  check bool ("the refusal names the file and the cause: " ^ output) true
+    (String_util.contains_substring output (refused ^ ": invalid tool outbox arguments"));
+  check string "the refused receipt is left as it was" (Yojson.Safe.to_string earlier)
+    (read refused);
+  check bool "the readable receipt is still there" true (Sys.file_exists readable))
+
 (* The logger stamps a line with the second it was written, and a second run
    starts a second later. *)
 let without_log_stamp line =
@@ -430,6 +472,39 @@ let test_lane_addon_exact_requests () = with_lane_store (fun base root ->
     expect_refusals P.Store.Exact_requests ~base_path:base ~rows:2
       [path "string-messages", P.Exact_record])))
 
+(* validate-stores resolves --base-path as the server resolves its workspace,
+   so the workspace's .masc directory, a ./ suffix and a symlink to the
+   workspace all read the store the server serves. The proof file names the
+   root the server writes under, through symlinks: a check that read the store
+   under another root would stop on it before it refuses the record. *)
+let test_base_path_forms_read_the_served_store exe () = with_lane_store (fun base root ->
+  let record = exact_record ~declaration_id:"quiz" ~request_id:"served"
+      ~messages:[`Assoc ["role", `String "user"; "text", `String "hello"]] in
+  let path = grouped root Lane_addon_store.exact_requests_directory ~group:"quiz" ~id:"served" in
+  put path record;
+  let link = match Lane_addon_exact.Retained_key.of_record record with
+    | Ok key -> Filename.concat root (Lane_addon_exact.Retained_key.proof_path key)
+    | Error detail -> failf "the record names no proof file: %s" detail in
+  let served = Lane_addon_store.directory
+      ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base)) in
+  (* The link holds nothing but its root. Once the root matches, the link
+     does not decode, and the check refuses the record with it. *)
+  put link (`Assoc ["executions", `List [`Assoc ["store_root", `String served]]]);
+  let alias = Filename.temp_file "preflight-lane-addons-alias-" "" in
+  Sys.remove alias;
+  Unix.symlink base alias;
+  Fun.protect ~finally:(fun () -> Sys.remove alias) (fun () ->
+    List.iter (fun base_path ->
+      let status, output = invoke_with_args exe base ["validate-stores"; "--base-path"; base_path] in
+      let words = diagnostic_words output in
+      check bool ("--base-path " ^ base_path ^ " refuses the record: " ^ output) true
+        (status <> Unix.WEXITED 0);
+      check bool ("--base-path " ^ base_path ^ " reads the served store: " ^ output) true
+        (String_util.contains_substring words "lane-addon exact requests rows=1 refused=1"
+         && String_util.contains_substring words (Filename.basename path)
+         && String_util.contains_substring words (Filename.basename link)))
+      [Filename.concat base ".masc/"; Filename.concat base "./"; alias]))
+
 let owner_request = `Assoc ["query", `String "rows"]
 let owner_request_bytes = Yojson.Safe.to_string owner_request
 
@@ -762,6 +837,44 @@ type librarian_payload_fixture = {
   base:string; root:string; store:Lane_addon_store.t; owner:Admission.owner;
   capture:Admission.t; parent:Original.retained; gate_id:string; gate_request:Yojson.Safe.t;
 }
+(* The host retains an original's Exact record and proof when it answers.
+   The deploy check reads them as the original's consumer does (RFC
+   exact-request-skips-a-slot-that-refused-its-input, section 3.3), so the
+   fixture's judgment is the final [run] retains. The store is the one the
+   server serves, so the proof names the root the check reads. *)
+let host_answer ~base ~(declared:Lane_addon_types.exact_output) request answer =
+  let module Exact=Lane_addon_exact in
+  let module Receipt=Keeper_exact_walk_receipt in
+  let store=Lane_addon_store.create ~root:(Lane_addon_store.directory
+    ~masc_dir:(Common.masc_dir_from_base_path ~base_path:(Unix.realpath base))) in
+  let package:Lane_addon_types.package =
+    { id = Keeper_librarian_admission_capture.package_id; revision = "1"; title = "Librarian fixture"
+    ; ui_category = None; contributions = [ Lane_addon_types.Observe ]; command = [ "unused" ]
+    ; directory = "/nonexistent"; skills_directory = None; action_tool = None
+    ; state_storage = Lane_addon_types.Ephemeral; tool_invocation = Lane_addon_types.Direct; tool_hooks = []
+    ; worker_service = Lane_addon_types.Mcp_tools; exported_tools = []; outputs = []
+    ; refresh_policy = Lane_addon_types.Every_hint; model_access = Lane_addon_types.Model_disabled
+    ; exact_outputs = [ declared ]; operator_asks = false; web_search = false
+    ; binding_schema = None; presentation = Lane_addon_presentation.empty
+    ; execution = Lane_addon_types.Container { runtime = Lane_addon_types.Docker; image = "unused"
+        ; resources = { cpus = 0.5; memory_bytes = 134217728L; pids = Some 16; max_reply_bytes = 65536 } } } in
+  let authorize_request ~store:_ ~declaration_id:_ ~package:_ _ =
+    Ok {Exact.admission_class=Agent_core.Llm_provider.Admission_class.Standard;
+        before_dispatch=(fun () -> Ok ()); with_execution=(fun run -> run ()); validate_output=(fun _ -> Ok ())} in
+  let slot="fixture" in
+  let runner ~before_dispatch ~admission_class:_ ~lane_key:_ ~schema:_ ~size_refused:_ _ =
+    Ok (fun ~validate ->
+      require (before_dispatch Exact.Generation);
+      let receipt=Receipt.make_v2 ~declared_http:[] ~excluded_http:[] ~declared_cli:[slot]
+        ~http:(Receipt.http_not_started ~detail:"synthetic host publication fixture")
+        ~cli:(Receipt.cli ~visited:[slot] ~dispatched:[slot] ~failures:[] ~result:(Receipt.Answered slot))
+        |> require in
+      {Exact.outcome=Exact.Call_ended (Exact.Answered {output=require (validate answer);slot;usage=None});receipt}) in
+  match Eio_main.run (fun _ ->
+      Exact.run ~store ~declaration_id:"librarian" ~package ~runner ~authorize_request request) with
+  | Ok (Exact.Final final) -> final
+  | Ok (Exact.Not_final _) -> fail "the host must end the fixture original"
+  | Error detail -> fail detail
 let with_librarian_payload f = with_lane_store (fun base root ->
   let module Queue=Keeper_memory_admission_queue in
   let module L=Keeper_librarian in
@@ -788,7 +901,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
     working_context=Keeper_librarian_context.empty;messages=[];tool_observations=[];counterpart_observations=[]} in
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   let retirement=Keeper_memory_admission_judgment.Available [] in
-  let preparation=Keeper_librarian_runtime.prepare_admission ~batch ~retirement input |> require in
+  let preparation=Keeper_librarian_runtime.prepare_admission ~source_lines:[] ~batch ~retirement input |> require in
   let destination:Admission.destination={installation_id=Original.installation_id (Original.Configuration "librarian");
     package_id=Admission.package_id;tool=Admission.tool;source_revision="source";configuration_revision="configuration"} in
   let capture=Admission.create ~request_id:(Admission.fresh_request_id owner) ~parent_part_id:"part"
@@ -816,9 +929,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
   let exact=Admission.request capture |> require in
   let output:Lane_addon_types.exact_output={name=exact.output;schema=Option.get exact.schema;
     request_schema=Lane_addon_types.Consumer_request_schema} in
-  let checked=Lane_addon_exact.validate_answer ~output exact proposal |> require in
-  let judgment=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final
-    (Lane_addon_exact.Answered {output=checked;slot="fixture";usage=None})) in
+  let judgment=Lane_addon_exact.final_to_json (host_answer ~base ~declared:output exact proposal) in
   let parent=advance_original store parent [Progress.Dispatch_intended;Progress.Judgment_retained judgment] in
   let gate_id="captured-gate" in
   let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-admission-gate";
@@ -1029,6 +1140,8 @@ let () =
       test_case "the number of scan jobs does not change the report" `Quick
         (test_scan_jobs_do_not_change_the_report exe);
       test_case "zero scan jobs are refused" `Quick (test_zero_scan_jobs_are_refused exe);
+      test_case "tool outbox receipts are read before rollout" `Quick
+        (test_tool_outbox_receipts exe);
       test_case "transcript inventory failure stops deployment" `Quick
         (test_transcript_inventory_failure_stops_preflight exe);
       test_case "symlink remains a refusal" `Quick (test_symlink_refusal exe);
@@ -1049,7 +1162,9 @@ let () =
       test_case "a record settled while it is checked is absent" `Quick
         test_a_record_settled_while_it_is_checked_is_absent;
       test_case "a refused record stops validate-stores" `Quick
-        (test_lane_addon_record_refuses_deploy exe)];
+        (test_lane_addon_record_refuses_deploy exe);
+      test_case "--base-path forms read the store the server serves" `Quick
+        (test_base_path_forms_read_the_served_store exe)];
      "Memory publication preflight",
      [test_case "preserves each interrupted publication for its owner" `Quick
         (test_memory_publication_preflight exe);

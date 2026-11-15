@@ -135,6 +135,14 @@ let test_loader_keeps_only_current_rows () =
     | Error error ->
       Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
   in
+  (* The comment is written while [source_store]'s cursor still matches the
+     posts file. The rows appended and the truncation below change that file
+     behind the store, after which its next write is refused. *)
+  let comment = match Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared
+      ~post_id:(Board.Post_id.to_string post.id) ~author:"fixture-author"
+      ~content:"retained partial comment" ~ttl_hours:0 () with
+    | Ok comment -> Board_core.comment_to_yojson comment
+    | Error error -> Alcotest.failf "create_comment failed: %s" (Board.show_board_error error) in
   let canonical = Board_core.post_to_yojson post in
   let path = Board.persist_path source_store in
   let append json =
@@ -162,11 +170,6 @@ let test_loader_keeps_only_current_rows () =
     (Masc_board_handlers.Board_votes_json.load_persisted_posts loaded_store = Ok 0);
   Alcotest.(check int) "old post is not trusted after empty reload" 0 (Hashtbl.length loaded_store.posts);
   Alcotest.(check int) "old post count is cleared" 0 !(loaded_store.post_count);
-  let comment = match Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared
-      ~post_id:(Board.Post_id.to_string post.id) ~author:"fixture-author"
-      ~content:"retained partial comment" ~ttl_hours:0 () with
-    | Ok comment -> Board_core.comment_to_yojson comment
-    | Error error -> Alcotest.failf "create_comment failed: %s" (Board.show_board_error error) in
   let comments_path = Board.comments_path source_store in
   Out_channel.with_open_bin comments_path (fun out ->
     output_string out (Yojson.Safe.to_string comment ^ "\n{bad-json\n"));
@@ -553,8 +556,10 @@ let test_all_persistence_stays_in_captured_workspace () =
       let deleted = restart_a () in
       Alcotest.(check bool) "deleted post cannot resurrect" true
         (Result.is_error (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid));
-      Alcotest.(check int) "cascaded comment cannot resurrect" 0
-        (List.length (board_ok (Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid)));
+      Alcotest.(check bool) "comments of the deleted post are refused with the post" true
+        (Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id:pid
+         = Error (Board.Post_not_found pid));
+      Alcotest.(check int) "cascaded comment cannot resurrect" 0 (Hashtbl.length deleted.comments);
       Alcotest.(check bool) "deleted policy cannot resurrect" true
         (Result.is_error (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:room_id));
       Alcotest.(check int) "deleted votes cannot resurrect" 0 (Hashtbl.length deleted.vote_log);

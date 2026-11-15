@@ -311,37 +311,51 @@ module Tools = struct
     in
     if v < 0.0 then 0.0 else v
 
-  (* Unset or blank is the local default instance; anything else must be an
-     http(s) URL. *)
+  let searxng_url_env = "MASC_SEARXNG_URL"
+  let searxng_url_toml_key = "web_search.searxng_url"
+
+  (* Blank is unset; anything else must be an http(s) URL with a host and no
+     userinfo. *)
+  let searxng_url_configured raw =
+    let url = raw |> String.trim |> strip_trailing_slashes in
+    if String.equal url ""
+    then Ok None
+    else (
+      let uri = Uri.of_string url in
+      let redacted = Url_userinfo.redact url in
+      let has_userinfo =
+        Option.is_some (Uri.userinfo uri) || not (String.equal url redacted)
+      in
+      match
+        ( Uri.scheme uri |> Option.map String.lowercase_ascii
+        , Uri.host uri
+        , has_userinfo )
+      with
+      | Some ("http" | "https"), Some host, false when not (String.equal host "") ->
+        Ok (Some url)
+      | Some ("http" | "https"), Some host, true when not (String.equal host "") ->
+        Error (Printf.sprintf "must not contain userinfo credentials (got: %s)" redacted)
+      | (Some _ | None), _, _ ->
+        Error (Printf.sprintf "must use http or https scheme (got: %s)" redacted))
+  ;;
+
+  (* Unset or blank is the local default instance. The value comes from
+     runtime.toml or, when the variable is set, from the environment; a refusal
+     names both. *)
   let searxng_base_url () =
-    let url =
-      match raw_value_opt "MASC_SEARXNG_URL" with
-      | Some raw ->
-        let normalized = raw |> String.trim |> strip_trailing_slashes in
-        if String.equal normalized ""
-        then Masc_network_defaults.searxng_default_url
-        else normalized
-      | None -> Masc_network_defaults.searxng_default_url
-    in
-    let uri = Uri.of_string url in
-    let redacted = Url_userinfo.redact url in
-    let has_userinfo =
-      Option.is_some (Uri.userinfo uri) || not (String.equal url redacted)
-    in
-    match
-      ( Uri.scheme uri |> Option.map String.lowercase_ascii
-      , Uri.host uri
-      , has_userinfo )
-    with
-    | Some ("http" | "https"), Some host, false when not (String.equal host "") ->
-      Ok url
-    | Some ("http" | "https"), Some host, true when not (String.equal host "") ->
-      Error "MASC_SEARXNG_URL must not contain userinfo credentials"
-    | (Some _ | None), _, _ ->
-      Error
-        (Printf.sprintf
-           "MASC_SEARXNG_URL must use http or https scheme (got: %s)"
-           redacted)
+    match raw_value_opt searxng_url_env with
+    | None -> Ok Masc_network_defaults.searxng_default_url
+    | Some raw ->
+      (match searxng_url_configured raw with
+       | Ok (Some url) -> Ok url
+       | Ok None -> Ok Masc_network_defaults.searxng_default_url
+       | Error detail ->
+         Error
+           (Printf.sprintf
+              "%s (%s in the environment) %s"
+              searxng_url_toml_key
+              searxng_url_env
+              detail))
   end
 
 (** {1 OpenTelemetry Configuration} *)

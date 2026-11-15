@@ -477,7 +477,7 @@ let approval_walk =
     ~help:"while browsing or answering a question, move to the previous or next ask; \
            with an approval detail open, move to the previous or next approval"
 let approval_workspace =
-  b ~ko:"작업 공간 모드" Act "w" "Workspace mode"
+  b ~ko:"워크스페이스 모드" Act "w" "Workspace mode"
     ~help:"choose manual, Auto Judge or allow-all; Enter applies, Esc cancels"
 let approval_outside =
   b ~ko:"외부 모드" Act "e" "Outside mode"
@@ -3297,7 +3297,7 @@ let footer_hints_browser_observations ~lang =
     ; scroll_binding
     ; b ~ko:"기록 복사" Act "y" "copy record"
     ; b ~ko:"목록 다시 읽기" Act "r" "reload list"
-    ; b ~ko:"작업 공간 다시 확인" Act "R" "recheck workspace"
+    ; b ~ko:"워크스페이스 다시 확인" Act "R" "recheck workspace"
     ; b ~ko:"브라우저로" Navigate "h/Esc" "back to browser"
     ]
 

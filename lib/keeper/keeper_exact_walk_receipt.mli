@@ -56,8 +56,9 @@ val make_v2 : declared_http:string list -> excluded_http:string list ->
 
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, string) result
-(** Strict version 1 and version 2 receipt formats. Version 1 retains its
-    canonical encoding and meaning. Closed normalized causes are classified again;
+(** Strict version 2 receipt format, the one {!make_v2} gives. A version 1
+    receipt, which {!make} gives for use in memory, is refused: no proof
+    holds one. Closed normalized causes are classified again;
     unknown/missing/extra or internally inconsistent evidence refuses. Physical
     host receipt authority and original request binding belong to the caller. *)
 

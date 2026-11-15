@@ -114,6 +114,14 @@ let exact_outputs ~directory world =
   | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
   | Some (Otoml.TomlLocalDateTime _) | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _)
   | Some (Otoml.TomlArray _) | Some (Otoml.TomlTableArray _) -> Error "world.exact_outputs must be a table"
+(* A row action fills a lane action, so the package must expose an action
+   tool. Its lane is matched against rows like a reading's lane: ports
+   publish lanes to other installations, and a package also emits lanes no
+   port names. *)
+let check_row_actions ~action_tool (presentation : Lane_addon_presentation.t) =
+  match presentation.Lane_addon_presentation.actions, action_tool with
+  | [], (Some _ | None) | _ :: _, Some _ -> Ok ()
+  | _ :: _, None -> Error "presentation actions require a world.actions.tool"
 let load ~path =
   let parse () =
     let path = Unix.realpath path in
@@ -315,6 +323,7 @@ let load ~path =
     let* presentation = json "presentation" in
     let* presentation = match presentation with None -> Ok Lane_addon_presentation.empty
       | Some value -> Lane_addon_presentation.of_json value in
+    let* () = check_row_actions ~action_tool presentation in
     let* id = text ["id"] in
     let* revision = text ["revision"] in
     let* title = text ["title"] in

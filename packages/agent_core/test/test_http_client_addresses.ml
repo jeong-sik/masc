@@ -110,7 +110,7 @@ let test_failed_attempts_do_not_accumulate = with_runtime (fun env sw ->
             Eio.Promise.resolve fail_last ();
             raise (Unix.Unix_error (Unix.ENETUNREACH, "connect", "last")))) in
     (match post ~cache net with
-     | Error (Http_client.Before_dispatch_error (Http_client.NetworkError {kind = Dns_failure; _})) -> ()
+     | Error (Http_client.Before_dispatch_error (Http_client.NetworkError {kind = Unreachable; _})) -> ()
      | _ -> Alcotest.fail "expected last DNS-order error even when it fails first");
     Alcotest.(check bool) "all real attempt descriptors closed before next request" true (all_closed fds)
   done;

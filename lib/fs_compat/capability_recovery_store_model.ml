@@ -19,6 +19,8 @@ type subject =
   | Registry_root
   | Recovery_root
   | Lanes_root
+  | Staging_root
+  | Staged_lane of owner
   | Lane_root of owner
   | Lane_entry of owner * string
   | Area of area * owner
@@ -31,6 +33,8 @@ type operation =
   | Close_directory
   | Sync_directory
   | Read_directory
+  | Rename_directory
+  | Remove_directory
   | Inspect_record
   | Open_record
   | Read_record
@@ -100,7 +104,9 @@ type transition_error =
   }
 
 type registry =
-  { lanes : Eio.Fs.dir_ty Eio.Path.t }
+  { recovery : Eio.Fs.dir_ty Eio.Path.t
+  ; lanes : Eio.Fs.dir_ty Eio.Path.t
+  }
 
 type area_capability =
   | Area_available of Eio.Fs.dir_ty Eio.Path.t
@@ -166,6 +172,7 @@ exception Transition_failed of transition_error
 
 let recovery_directory_leaf = "fs-publication-recovery"
 let lanes_directory_leaf = "lanes"
+let staging_directory_leaf = "staging"
 let active_directory_leaf = "active"
 let owned_directory_leaf = "owned"
 let forensic_directory_leaf = "forensic"
@@ -216,10 +223,19 @@ let area_to_string = function
   | Forensic -> "forensic"
 ;;
 
+let area_directory_leaf = function
+  | Active -> active_directory_leaf
+  | Owned -> owned_directory_leaf
+  | Forensic -> forensic_directory_leaf
+;;
+
 let subject_to_string = function
   | Registry_root -> "registry_root"
   | Recovery_root -> "recovery_root"
   | Lanes_root -> "lanes_root"
+  | Staging_root -> "staging_root"
+  | Staged_lane owner ->
+    Printf.sprintf "staged_lane(%S)" (owner_to_string owner)
   | Lane_root owner -> Printf.sprintf "lane(%S)" (owner_to_string owner)
   | Lane_entry (owner, name) ->
     Printf.sprintf "lane(%S)/%S" (owner_to_string owner) name
@@ -240,6 +256,8 @@ let operation_to_string = function
   | Close_directory -> "close_directory"
   | Sync_directory -> "sync_directory"
   | Read_directory -> "read_directory"
+  | Rename_directory -> "rename_directory"
+  | Remove_directory -> "remove_directory"
   | Inspect_record -> "inspect_record"
   | Open_record -> "open_record"
   | Read_record -> "read_record"

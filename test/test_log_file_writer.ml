@@ -74,10 +74,16 @@ let test_unconfigured_sink_stays_disabled () =
      |> List.map (fun (entry : Log.Ring.entry) -> entry.message))
 ;;
 
+let open_file_sink ?identity_recheck_interval_s dir =
+  match Log.Ring.init_file_sink ?identity_recheck_interval_s dir with
+  | Ok () -> ()
+  | Error error -> Alcotest.fail (Log.Ring.file_sink_error_to_string error)
+;;
+
 let test_synchronous_before_start () =
   silence_console ();
   let dir = Filename.temp_dir "masc-log-writer-" "" in
-  Log.Ring.init_file_sink dir;
+  open_file_sink dir;
   emit "before-start";
   check (list string) "the record is in the file when emit returns" [ "before-start" ] (file_messages dir)
 ;;
@@ -85,7 +91,7 @@ let test_synchronous_before_start () =
 let test_queued_records_are_complete_and_ordered () =
   silence_console ();
   let dir = Filename.temp_dir "masc-log-writer-" "" in
-  Log.Ring.init_file_sink dir;
+  open_file_sink dir;
   Log.Ring.start_writer ();
   let per_producer = 2000
   and producers = 4 in
@@ -139,7 +145,7 @@ let test_a_stalled_file_makes_producers_wait_and_drops_nothing () =
   let dir = Filename.temp_dir "masc-log-writer-" "" in
   (* Rechecking the sink's identity on every write moves it onto the FIFO
      that replaces the file. *)
-  Log.Ring.init_file_sink ~identity_recheck_interval_s:0.0 dir;
+  open_file_sink ~identity_recheck_interval_s:0.0 dir;
   let path = sink_file dir in
   (* Renamed, not unlinked: the file keeps its inode, so the FIFO gets
      another one and the identity check sees a different file. An unlinked
@@ -168,7 +174,7 @@ let test_a_stalled_file_makes_producers_wait_and_drops_nothing () =
     in
     Option.iter Thread.join !producer;
     Log.Ring.stop_writer ();
-    Log.Ring.init_file_sink (Filename.temp_dir "masc-log-writer-" "");
+    open_file_sink (Filename.temp_dir "masc-log-writer-" "");
     Thread.join drain;
     Unix.close reader
   in
@@ -217,7 +223,7 @@ let test_a_stalled_file_makes_producers_wait_and_drops_nothing () =
 let test_synchronous_after_stop () =
   silence_console ();
   let dir = Filename.temp_dir "masc-log-writer-" "" in
-  Log.Ring.init_file_sink dir;
+  open_file_sink dir;
   Log.Ring.start_writer ();
   Log.Ring.stop_writer ();
   emit "after-stop";
@@ -235,7 +241,7 @@ let test_later_emit_reopens_after_write_failure ~queued ~large_message ~partial_
       Sys.set_signal Sys.sigpipe previous_sigpipe)
     (fun () ->
       let dir = Filename.temp_dir "masc-log-reopen-" "" in
-      Log.Ring.init_file_sink ~identity_recheck_interval_s:0.0 dir;
+      open_file_sink ~identity_recheck_interval_s:0.0 dir;
       let path = sink_file dir in
       if partial_tail then emit "retained-before-failure";
       let retained = In_channel.with_open_bin path In_channel.input_all in
@@ -282,7 +288,7 @@ let test_later_emit_reopens_after_write_failure ~queued ~large_message ~partial_
          | rows -> failf "expected two complete rows and one incomplete row, found %d" (List.length rows));
         (* Exercise the production JSONL restore path: only the malformed
            row is skipped, and the healthy later record survives a restart. *)
-        Log.Ring.init_file_sink dir;
+        open_file_sink dir;
         check (list string) "restore keeps the complete records"
           ["after-write-failure"; "retained-before-failure"]
           (Log.Ring.recent ~limit:10 ~module_filter:module_name ()
@@ -303,7 +309,7 @@ let test_readerless_fifo_does_not_block_the_next_open ~queued () =
       Sys.set_signal Sys.sigpipe previous_sigpipe)
     (fun () ->
       let dir = Filename.temp_dir "masc-log-readerless-" "" in
-      Log.Ring.init_file_sink ~identity_recheck_interval_s:0.0 dir;
+      open_file_sink ~identity_recheck_interval_s:0.0 dir;
       let path = sink_file dir in
       Unix.rename path (Filename.concat dir "previous-sink");
       Unix.mkfifo path 0o600;
@@ -350,7 +356,7 @@ let test_readerless_fifo_does_not_block_the_next_open ~queued () =
 let test_failed_reconfiguration_retries_intended_directory ~queued () =
   silence_console ();
   let previous = Filename.temp_dir "masc-log-previous-" "" in
-  Log.Ring.init_file_sink previous;
+  open_file_sink previous;
   emit "previous-directory";
   let previous_path = sink_file previous in
   let previous_bytes = In_channel.with_open_bin previous_path In_channel.input_all in
@@ -358,10 +364,16 @@ let test_failed_reconfiguration_retries_intended_directory ~queued () =
   (* A regular file in place of the directory is root-portably ENOTDIR.
      Neither dated file exists, so loading succeeds but opening fails. *)
   let failed =
-    try Log.Ring.init_file_sink intended; false with
-    | Sys_error _ | Unix.Unix_error _ -> true
+    match Log.Ring.init_file_sink intended with
+    | Error (Log.Ring.Open_io { dir; failure = Log.Ring.Unix_failure { error; _ } }) ->
+      String.equal dir intended && error = Unix.ENOTDIR
+    | Error
+        (Log.Ring.Open_io
+           { failure = Log.Ring.Sys_failure _ | Log.Ring.Eio_failure _; _ })
+    | Error (Log.Ring.Restore_io _ | Log.Ring.Restore_undecodable _)
+    | Ok () -> false
   in
-  check bool "opening the new directory failed" true failed;
+  check bool "opening the new directory is returned as ENOTDIR on that directory" true failed;
   Sys.remove intended;
   Unix.mkdir intended 0o700;
   if queued then Log.Ring.start_writer ();
@@ -375,7 +387,7 @@ let test_failed_reconfiguration_retries_intended_directory ~queued () =
 let test_failed_restore_disables_previous_directory () =
   silence_console ();
   let previous = Filename.temp_dir "masc-log-previous-" "" in
-  Log.Ring.init_file_sink previous;
+  open_file_sink previous;
   emit "previous-directory";
   let previous_path = sink_file previous in
   let previous_bytes = In_channel.with_open_bin previous_path In_channel.input_all in
@@ -383,10 +395,11 @@ let test_failed_restore_disables_previous_directory () =
   let rejected_path = Filename.concat rejected (Filename.basename previous_path) in
   Out_channel.with_open_bin rejected_path (fun oc -> output_string oc "{}\n");
   let failed =
-    try Log.Ring.init_file_sink rejected; false with
-    | Log.Ring.Entry_decode_error _ -> true
+    match Log.Ring.init_file_sink rejected with
+    | Error (Log.Ring.Restore_undecodable { dir; _ }) -> String.equal dir rejected
+    | Error (Log.Ring.Restore_io _ | Log.Ring.Open_io _) | Ok () -> false
   in
-  check bool "a complete but invalid entry still fails strict decoding" true failed;
+  check bool "a complete but invalid entry is returned as an undecodable restore" true failed;
   emit "after-rejected-restore";
   check string "a rejected restore does not resume the previous sink" previous_bytes
     (In_channel.with_open_bin previous_path In_channel.input_all);

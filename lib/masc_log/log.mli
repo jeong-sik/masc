@@ -210,7 +210,26 @@ module Ring : sig
       latest metadata, and file-sink state without raw log message text or
       [details] payloads. *)
 
-  val init_file_sink : ?identity_recheck_interval_s:float -> string -> unit
+  type sink_io_failure =
+    | Unix_failure of { error : Unix.error; call : string; path : string }
+    | Sys_failure of string
+    | Eio_failure of string
+  (** What a file operation of the sink raised: a [Unix] call, a [Stdlib]
+      channel, or [Eio.Path] when the restore runs inside an Eio loop. *)
+
+  type file_sink_error =
+    | Restore_undecodable of { dir : string; reason : string }
+        (** A row of a dated file in [dir] is JSON but not a log entry. *)
+    | Restore_io of { dir : string; failure : sink_io_failure }
+        (** A dated file in [dir] could not be read. *)
+    | Open_io of { dir : string; failure : sink_io_failure }
+        (** The entries were restored; today's file could not be opened. *)
+
+  val file_sink_error_to_string : file_sink_error -> string
+  (** One sentence naming the directory and the cause, for an operator. *)
+
+  val init_file_sink :
+    ?identity_recheck_interval_s:float -> string -> (unit, file_sink_error) result
   (** Initialize file-based log persistence. Loads previous entries from disk
       into the ring buffer, then opens the file for appending new entries.
       [dir] is the directory for dated JSONL log files.
@@ -219,6 +238,7 @@ module Ring : sig
       If loading [dir] fails, the previous sink stays disabled. After loading
       succeeds, [dir] remains the intended sink even if opening it fails;
       later entries retry that directory rather than the previous one.
+      Both failures are returned as [Error]; neither is raised.
 
       A failed append or flush closes the channel; later entries still
       attempt to reopen this configured sink. The failed batch is not

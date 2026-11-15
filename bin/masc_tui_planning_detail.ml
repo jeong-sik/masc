@@ -423,9 +423,15 @@ let receipt_authority_current ~credential_current ~current_instance ~current_con
 
 let receipt_outcome_text ~ko ~current result =
   let text korean english = if ko then korean else english in
+  (* The receipt is bound to a server instance, a workspace and an operator
+     ([receipt_authority_current]); any of the three may have moved. *)
+  let reinspect =
+    let workspace = Masc_tui_words.workspace_name ~ko in
+    text ("원래 서버, " ^ workspace ^ ", 운영자를 다시 확인")
+      ("reinspect the original server, " ^ workspace ^ " and operator") in
   match current, result with
-  | false, Error _ -> text "결과 미확인 · 원래 서버와 작업 공간의 운영자를 다시 확인" "Outcome unconfirmed; reinspect the original server, workspace and operator"
-  | false, Ok _ -> text "응답 보존됨 · 원래 서버와 작업 공간의 운영자를 다시 확인" "Response retained; reinspect the original server, workspace and operator"
+  | false, Error _ -> text "결과 미확인" "Outcome unconfirmed" ^ " · " ^ reinspect
+  | false, Ok _ -> text "응답 보존됨" "Response retained" ^ " · " ^ reinspect
   | true, Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
   | true, Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error
 

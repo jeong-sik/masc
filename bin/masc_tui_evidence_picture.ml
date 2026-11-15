@@ -36,31 +36,46 @@ let reading = function
       Unreadable (Withheld withheld)
   | Decode.Preview_defective defect -> Unreadable (Defective defect)
 
-let cause_text = function
-  | Withheld Decode.Withheld_not_image_format -> "not an image"
-  | Withheld Decode.Withheld_body_not_filed -> "the server holds no copy of the bytes"
-  | Withheld Decode.Withheld_body_unreadable -> "the server could not read its copy of the bytes"
+let cause_text ~ko cause =
+  let text korean english = if ko then korean else english in
+  match cause with
+  | Withheld Decode.Withheld_not_image_format -> text "이미지가 아님" "not an image"
+  | Withheld Decode.Withheld_body_not_filed ->
+      text "서버에 바이트 사본이 없음" "the server holds no copy of the bytes"
+  | Withheld Decode.Withheld_body_unreadable ->
+      text "서버가 바이트 사본을 읽지 못함" "the server could not read its copy of the bytes"
   | Withheld (Decode.Withheld_body_identity_mismatch _) ->
-      "the server's copy does not match the submitted size or sha256"
+      text "서버 사본이 제출한 크기나 sha256과 다름"
+        "the server's copy does not match the submitted size or sha256"
   | Withheld (Decode.Withheld_over_delivery_ceiling { bytes; ceiling }) ->
-      Printf.sprintf "%dB is over the %dB the server sends" bytes ceiling
+      if ko then Printf.sprintf "%dB가 서버가 보내는 %dB를 넘음" bytes ceiling
+      else Printf.sprintf "%dB is over the %dB the server sends" bytes ceiling
   | Withheld Decode.Withheld_over_response_budget ->
-      "earlier images already used this response's image budget"
-  | Defective Decode.Defect_bad_base64 -> "the bytes did not decode"
+      text "앞 이미지가 이 응답의 이미지 한도를 이미 다 씀"
+        "earlier images already used this response's image budget"
+  | Defective Decode.Defect_bad_base64 -> text "바이트를 디코딩하지 못함" "the bytes did not decode"
   | Defective (Decode.Defect_length_mismatch { declared; actual }) ->
-      Printf.sprintf "received %dB but the item records %dB" actual declared
-  | Defective Decode.Defect_digest_mismatch -> "the bytes do not match the recorded sha256"
-  | Defective Decode.Defect_not_an_image -> "the bytes are not a PNG, JPEG, GIF or WebP image"
-  | Conversion_failed detail -> "could not convert it to PNG: " ^ single_line detail
-  | Not_png_after_conversion -> "the converter's output is not a PNG"
+      if ko then Printf.sprintf "%dB를 받았지만 항목에는 %dB로 적혀 있음" actual declared
+      else Printf.sprintf "received %dB but the item records %dB" actual declared
+  | Defective Decode.Defect_digest_mismatch ->
+      text "바이트가 기록된 sha256과 다름" "the bytes do not match the recorded sha256"
+  | Defective Decode.Defect_not_an_image ->
+      text "바이트가 PNG, JPEG, GIF, WebP 이미지가 아님"
+        "the bytes are not a PNG, JPEG, GIF or WebP image"
+  | Conversion_failed detail ->
+      text "PNG로 바꾸지 못함: " "could not convert it to PNG: " ^ single_line detail
+  | Not_png_after_conversion -> text "변환 결과가 PNG가 아님" "the converter's output is not a PNG"
   | Too_many_pixels { width; height } ->
-      Printf.sprintf "%dx%d pixels is over the %d pixels shown" width height max_picture_pixels
-  | Empty_dimensions -> "the picture has no width or no height"
-  | Png_incomplete -> "the PNG ends before its last chunk"
-  | Unknown_size -> "the PNG header has no readable size"
+      if ko then
+        Printf.sprintf "%dx%d 픽셀이 보여 주는 한도 %d 픽셀을 넘음" width height max_picture_pixels
+      else Printf.sprintf "%dx%d pixels is over the %d pixels shown" width height max_picture_pixels
+  | Empty_dimensions -> text "그림의 너비나 높이가 없음" "the picture has no width or no height"
+  | Png_incomplete -> text "PNG가 마지막 청크 전에 끝남" "the PNG ends before its last chunk"
+  | Unknown_size -> text "PNG 헤더에서 크기를 읽을 수 없음" "the PNG header has no readable size"
   | No_free_slot ->
-      Printf.sprintf "only the first %d pictures of a task are drawn"
-        (List.length Masc_tui_graphics.evidence_images)
+      let drawn = List.length Masc_tui_graphics.evidence_images in
+      if ko then Printf.sprintf "Task 하나에서 처음 %d장만 그림" drawn
+      else Printf.sprintf "only the first %d pictures of a task are drawn" drawn
 
 let short_sha_length = 12
 
@@ -237,29 +252,28 @@ let prepare ~layout ~display ~convert = function
       in
       Items (List.rev rev)
 
-let caption_line ~reference ~bytes ~sha256 ~format = function
-  | `Image media ->
-      let identity detail =
-        Printf.sprintf "%s (%s, %dB, sha256 %s)" (single_line reference) detail bytes
-          (short_sha sha256)
-      in
-      "image " ^ identity (Media.media_type_to_string media)
-  | `Binary ->
-      Printf.sprintf "binary artifact %s (%s, %dB, sha256 %s)" (single_line reference)
-        (single_line format) bytes (short_sha sha256)
+let caption_line ~ko ~reference ~bytes ~sha256 ~format kind =
+  let identity detail =
+    Printf.sprintf "%s (%s, %dB, sha256 %s)" (single_line reference) detail bytes
+      (short_sha sha256)
+  in
+  let text korean english = if ko then korean else english in
+  match kind with
+  | `Image media -> text "이미지 " "image " ^ identity (Media.media_type_to_string media)
+  | `Binary -> text "바이너리 파일 " "binary artifact " ^ identity (single_line format)
   | `Unshown cause ->
-      Printf.sprintf "image not shown: %s (%s, %dB, sha256 %s): %s" (single_line reference)
-        (single_line format) bytes (short_sha sha256) (cause_text cause)
+      text "표시하지 않은 이미지: " "image not shown: " ^ identity (single_line format) ^ ": "
+      ^ cause_text ~ko cause
 
-let caption ~reference ~bytes ~sha256 ~format picture =
-  caption_line ~reference ~bytes ~sha256 ~format
+let caption ~ko ~reference ~bytes ~sha256 ~format picture =
+  caption_line ~ko ~reference ~bytes ~sha256 ~format
     (match picture with
      | Drawable { media; _ } | Undrawn_image media -> `Image media
      | Binary_only -> `Binary
      | Unshown cause -> `Unshown cause)
 
-let caption_of_preview ~reference ~bytes ~sha256 ~format preview =
-  caption_line ~reference ~bytes ~sha256 ~format
+let caption_of_preview ~ko ~reference ~bytes ~sha256 ~format preview =
+  caption_line ~ko ~reference ~bytes ~sha256 ~format
     (match reading preview with
      | Image media -> `Image media
      | Not_an_image -> `Binary

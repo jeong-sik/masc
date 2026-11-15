@@ -52,7 +52,7 @@ MSX 예제는 incarnation을 고정하지 않으므로 기존 머신의 load/res
 
 ## 실행기 선택
 
-패키지 `lane.toml`에 `runtime = "apple_container"`를 선언하면 Apple `container`의 전용 microVM에서 실행한다. 생략하면 기존 Docker 실행을 유지한다. 이미지도 선택한 실행기의 저장소에 준비해야 한다. Docker에만 있는 이미지는 Apple 실행기가 읽을 수 없다.
+패키지 `lane.toml`에 `runtime = "apple_container"`를 선언하면 Apple `container`의 전용 microVM에서 실행한다. 생략하면 기존 Docker 실행을 유지한다. 이미지도 선택한 실행기의 저장소에 준비해야 한다. Docker에만 있는 이미지는 Apple 실행기가 읽을 수 없다. Apple `container`는 1.4.1 이상이어야 한다. 그 전 버전은 `container system status`에서 실행 위치를 다른 자리에 출력한다. 그러면 호스트가 엔진을 알아보지 못해 설치를 시작하지 않는다.
 
 ```toml
 runtime = "apple_container"

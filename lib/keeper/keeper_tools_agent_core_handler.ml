@@ -244,6 +244,9 @@ let make_keeper_tool_handler_with_authority
          but do not poison the request-scoped terminal-effect state. *)
       validation_result |> record_result ~input
     in
+    (* The observers that record this call read the Keeper from here. *)
+    Dispatch_caller.with_keeper meta.name
+    @@ fun () ->
     match prepare_input raw_input with
     | Error validation_result ->
       handle_validation_error ~input:raw_input validation_result

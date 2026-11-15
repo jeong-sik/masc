@@ -1,7 +1,10 @@
 ; Parsing what an endpoint answers when asked which voices it has, and which
 ; endpoints there is anything to ask. Voice_bridge belongs to the masc library.
+; Reading an endpoint key asks for the host's account access, so the executable
+; links the access a test process publishes when it starts.
 
 (test
  (name test_voice_catalog)
  (libraries alcotest yojson masc masc.server masc.config masc.voice_config
-  masc.voice_runtime_overlay masc.voice_bridge_core eio_main unix uri))
+  masc.voice_runtime_overlay masc.voice_bridge_core masc_test_host_access
+  eio_main unix uri))

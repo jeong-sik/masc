@@ -253,8 +253,7 @@ let test_opaque_bearer_and_name_roundtrip () = with_workspace @@ fun base_path -
     | Ok authority -> authority
     | Error `Malformed -> fail "fixture loopback request authority is malformed" in
   (match Server_auth.verify_mcp_auth_for_authority ~base_path ~request_authority request with
-   | Ok None -> () (* Authorization succeeded; identity was checked above. *)
-   | Ok (Some _) -> fail "unexpected MCP authorization result"
+   | Ok () -> () (* Authorization succeeded; identity was checked above. *)
    | Error error -> fail (D.masc_error_to_string error));
   let report = auth_ok (Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935 ~agent_name ~role:D.Worker
       ~token_env_var:"FILE_BACKED_FIXTURE_TOKEN" ~token_lifetime:Auth_login.Long_lived ()) in
@@ -473,8 +472,7 @@ let test_formatted_admin_reaches_http_without_rotation () =
     let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
       | Ok authority -> authority | Error `Malformed -> fail "fixture authority invalid" in
     (match Server_auth.verify_mcp_auth_for_authority ~base_path ~request_authority:authority request with
-     | Ok None -> ()
-     | Ok (Some _) -> fail "unexpected MCP authorization result"
+     | Ok () -> ()
      | Error error -> fail (D.masc_error_to_string error));
     check bool "HTTP authentication keeps persisted auth bytes unchanged" true (snapshot paths = before);
     check bool "same bearer still verifies as Admin" true

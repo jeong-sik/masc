@@ -21,39 +21,62 @@ type scope =
    the operator's declared cap) from the moment it was noted, and the next
    success on the scope clears it sooner (RFC-provider-path-rest §3.3).
    Coarse 429 evidence does not establish this credential ownership and uses
-   candidate backpressure. Who stated no reset is kept apart: a refusal leaves
-   a question a usage read may still answer with a date, and a read that found
-   no reset has answered it. *)
-type observation =
-  | Refusal_named_no_reset
-  | Read_named_no_reset
+   candidate backpressure. Who set the entry is kept with it: a refusal
+   without a reset leaves a question a usage read may still answer with a
+   date, and a read that found no reset has answered it. The refusal keeps
+   the typed constructor that refused, so a 402 and a spent usage window stay
+   two facts for whoever shows the scope. *)
+type refusal = Keeper_runtime_failure_route.hard_quota_source =
+  | Payment_refused
+  | Provider_quota_refused
+
+type cause =
+  | Refused of refusal
+  | Usage_read
 
 type window =
-  | Until of float
+  | Until of
+      { resets_at : float
+      ; cause : cause
+      }
   | Observed of
-      { observation : observation
+      { cause : cause
       ; rests_until : float
       }
 
-let observed_rest_sec () =
+(* A usage read reports the provider's own quota window, so its rest is the
+   one a quota refusal without a reset takes. *)
+let observed_rest_sec cause =
+  let source =
+    match cause with
+    | Refused source -> source
+    | Usage_read -> Provider_quota_refused
+  in
   Keeper_runtime_failure_route.path_rest_sec
     ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
-    ~retry_class:Keeper_runtime_failure_route.Hard_quota
+    ~retry_class:(Keeper_runtime_failure_route.Hard_quota source)
     ~retry_after_hint:None
 
 let windows : (scope, window) Hashtbl.t = Hashtbl.create 4
 let mu = Stdlib.Mutex.create ()
 
-let note_exhausted ~scope ~resets_at =
+let note_until ~scope ~cause ~resets_at =
   Stdlib.Mutex.protect mu (fun () ->
     match Hashtbl.find_opt windows scope with
-    | Some (Until existing) when Float.compare existing resets_at >= 0 -> ()
+    | Some (Until { resets_at = existing; cause = _ })
+      when Float.compare existing resets_at >= 0 -> ()
     (* A stated reset is more than an observation, so it replaces one. *)
     | Some (Until _) | Some (Observed _) | None ->
-      Hashtbl.replace windows scope (Until resets_at));
+      Hashtbl.replace windows scope (Until { resets_at; cause }));
   Runtime_path_rest_signal.recorded ()
 
-let note_observed_at ~now ~scope observation =
+let note_exhausted ~scope ~source ~resets_at =
+  note_until ~scope ~cause:(Refused source) ~resets_at
+
+let note_read_spent_until ~scope ~resets_at =
+  note_until ~scope ~cause:Usage_read ~resets_at
+
+let note_observed_at ~now ~scope cause =
   (* NDT-OK: the wall clock is the default moment an observation is noted,
      not the only admissible one. It dates the rest, and tells whether a
      held entry has passed. A caller that already holds the moment passes it
@@ -61,34 +84,33 @@ let note_observed_at ~now ~scope observation =
      instant the test happens to run. A passed entry that no read has pruned
      yet names no rest, and keeping it over this observation would leave the
      scope looking available. *)
-  let observed = Observed { observation; rests_until = now +. observed_rest_sec () } in
+  let observed = Observed { cause; rests_until = now +. observed_rest_sec cause } in
   Stdlib.Mutex.protect mu (fun () ->
-    match Hashtbl.find_opt windows scope, observation with
+    match Hashtbl.find_opt windows scope, cause with
     (* A stated window still ahead says more; do not weaken it. *)
-    | Some (Until resets_at), (Refusal_named_no_reset | Read_named_no_reset)
+    | Some (Until { resets_at; cause = _ }), (Refused _ | Usage_read)
       when Float.compare now resets_at < 0 -> ()
     (* A read already answered the question a refusal asks, until its rest
        ends. *)
-    | Some (Observed { observation = Read_named_no_reset; rests_until }), Refusal_named_no_reset
+    | Some (Observed { cause = Usage_read; rests_until }), Refused _
       when Float.compare now rests_until < 0 -> ()
-    | ( (Some (Until _) | Some (Observed _) | None)
-      , (Refusal_named_no_reset | Read_named_no_reset) ) ->
+    | (Some (Until _) | Some (Observed _) | None), (Refused _ | Usage_read) ->
       Hashtbl.replace windows scope observed);
   Runtime_path_rest_signal.recorded ()
 
 (* Real provider paths keep the wall clock; a caller that already holds the
    moment (a fixture, a replay) passes it in through the [_at] entry points. *)
-let note_observed ~scope observation =
-  note_observed_at ~now:(Unix.gettimeofday ()) ~scope observation
+let note_observed ~scope cause =
+  note_observed_at ~now:(Unix.gettimeofday ()) ~scope cause
 
-let note_observed_exhausted ~scope = note_observed ~scope Refusal_named_no_reset
-let note_read_without_reset ~scope = note_observed ~scope Read_named_no_reset
+let note_observed_exhausted ~scope ~source = note_observed ~scope (Refused source)
+let note_read_without_reset ~scope = note_observed ~scope Usage_read
 
-let note_observed_exhausted_at ~now ~scope =
-  note_observed_at ~now ~scope Refusal_named_no_reset
+let note_observed_exhausted_at ~now ~scope ~source =
+  note_observed_at ~now ~scope (Refused source)
 
 let note_read_without_reset_at ~now ~scope =
-  note_observed_at ~now ~scope Read_named_no_reset
+  note_observed_at ~now ~scope Usage_read
 
 let note_succeeded ~scope =
   Stdlib.Mutex.protect mu (fun () ->
@@ -105,8 +127,8 @@ let note_succeeded ~scope =
 let live_entry ~scope ~now =
   match Hashtbl.find_opt windows scope with
   | None -> None
-  | Some (Until resets_at as window)
-  | Some (Observed { rests_until = resets_at; observation = _ } as window) ->
+  | Some (Until { resets_at; cause = _ } as window)
+  | Some (Observed { rests_until = resets_at; cause = _ } as window) ->
     if Float.compare now resets_at < 0
     then Some window
     else begin
@@ -118,7 +140,7 @@ let active_until ~scope ~now =
   Stdlib.Mutex.protect mu (fun () ->
     match live_entry ~scope ~now with
     | None | Some (Observed _) -> None
-    | Some (Until resets_at) -> Some resets_at)
+    | Some (Until { resets_at; cause = _ }) -> Some resets_at)
 
 type rest =
   | Reset_stated of float
@@ -128,14 +150,36 @@ let rest ~scope ~now =
   Stdlib.Mutex.protect mu (fun () ->
     match live_entry ~scope ~now with
     | None -> None
-    | Some (Until resets_at) -> Some (Reset_stated resets_at)
-    | Some (Observed { rests_until; observation = _ }) -> Some (Observed_until rests_until))
+    | Some (Until { resets_at; cause = _ }) -> Some (Reset_stated resets_at)
+    | Some (Observed { rests_until; cause = _ }) -> Some (Observed_until rests_until))
+
+type spent =
+  { cause : cause
+  ; rest : rest
+  }
+
+let spent ~scope ~now =
+  Stdlib.Mutex.protect mu (fun () ->
+    match live_entry ~scope ~now with
+    | None -> None
+    | Some (Until { resets_at; cause }) -> Some { cause; rest = Reset_stated resets_at }
+    | Some (Observed { rests_until; cause }) -> Some { cause; rest = Observed_until rests_until })
 
 (* Whether ordering should hold this scope back at [now]: a stated window or
    an observation whose rest has not passed. Prunes a passed entry the way
    [active_until] does. *)
 let is_exhausted ~scope ~now =
   Stdlib.Mutex.protect mu (fun () -> Option.is_some (live_entry ~scope ~now))
+
+let cause_to_wire_name = function
+  | Refused Payment_refused -> "payment_refused"
+  | Refused Provider_quota_refused -> "provider_quota_refused"
+  | Usage_read -> "usage_read"
+
+let cause_of_wire_name name =
+  List.find_map
+    (fun cause -> if String.equal (cause_to_wire_name cause) name then Some cause else None)
+    [ Refused Payment_refused; Refused Provider_quota_refused; Usage_read ]
 
 type answered_rest =
   | Stated_reset_ahead
@@ -148,9 +192,8 @@ type answered_rest =
 let answered_rest ~scope ~now =
   Stdlib.Mutex.protect mu (fun () ->
     match live_entry ~scope ~now with
-    | None | Some (Observed { observation = Refusal_named_no_reset; rests_until = _ }) -> None
-    | Some (Observed { observation = Read_named_no_reset; rests_until = _ }) ->
-      Some Read_found_no_reset
+    | None | Some (Observed { cause = Refused _; rests_until = _ }) -> None
+    | Some (Observed { cause = Usage_read; rests_until = _ }) -> Some Read_found_no_reset
     | Some (Until _) -> Some Stated_reset_ahead)
 
 let demote_order ~now ~quota_scope_of candidates =

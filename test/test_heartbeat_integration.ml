@@ -811,8 +811,8 @@ let test_turn_failure_streak_unknown_schema_fails_closed () =
     turn failure. [record_crashed_cycle_failure] (called by the
     [run_keepalive_unified_turn] catch-all) increments the same
     registry counter the unified-turn failure path uses, and the
-    caller's post-turn event mapping ([turn_status_event]) then yields
-    [Turn_failed] — not [Turn_succeeded] — moving the state machine to
+    crashed cycle's own status ([Turn_cycle_crashed]) makes the caller
+    dispatch [Turn_failed] carrying that count, moving the state machine to
     failing. *)
 let test_crashed_cycle_records_turn_failure () =
   Eio_main.run @@ fun env ->
@@ -836,9 +836,17 @@ let test_crashed_cycle_records_turn_failure () =
         (Failure "boom");
       let count = R.get_turn_failures ~base_path:config.base_path meta.name in
       check int "crash recorded as turn failure" 1 count;
-      (* Same registry read + event mapping the caller loop performs
-         after [run_keepalive_unified_turn] returns. *)
-      let event = KHL.turn_status_event ~turn_fail_count:count in
+      (* Same decision, registry read and event mapping the caller loop
+         performs after [run_keepalive_unified_turn] returns. *)
+      let event =
+        match KHL.decide_keepalive_cycle_action KHL.Turn_cycle_crashed with
+        | KHL.Record_turn_status (turn_result, KHL.Preserve_work_heartbeat) ->
+          KHL.turn_status_event ~turn_fail_count:count turn_result
+        | KHL.Record_turn_status (_, KHL.Refresh_work_heartbeat)
+        | KHL.Defer_autonomous_work _ | KHL.Skip_interrupted_turn
+        | KHL.Skip_unadmitted_cycle | KHL.Refresh_without_turn_status ->
+          fail "a crashed cycle must record a turn status and keep the lease"
+      in
       (match event with
        | KSM.Turn_failed { consecutive } ->
          check int "consecutive" 1 consecutive
@@ -849,10 +857,11 @@ let test_crashed_cycle_records_turn_failure () =
          check string "crashed cycle moves state machine to failing" "failing"
            (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
-      (* Clean cycle (count = 0) still maps to Turn_succeeded. *)
-      (match KHL.turn_status_event ~turn_fail_count:0 with
+      (* The turn's own result chooses the event: a succeeded turn maps to
+         Turn_succeeded whatever the stored streak says. *)
+      (match KHL.turn_status_event ~turn_fail_count:count KHL.Cycle_turn_succeeded with
       | KSM.Turn_succeeded -> ()
-      | _ -> fail "expected Turn_succeeded when no failures recorded");
+      | _ -> fail "expected Turn_succeeded for a turn that succeeded");
       let stale_meta = make_meta "stale-crashed-cycle" in
       let stale_entry =
         R.For_testing.register ~base_path:config.base_path stale_meta.name stale_meta
@@ -927,7 +936,11 @@ let test_operator_interrupt_skips_turn_accounting () =
       check bool "selected stimuli stay pending" false outcome.stimuli_acked;
       (match outcome.cycle_status with
        | KHL.Turn_cycle_interrupted -> ()
-       | KHL.Turn_cycle_completed
+       | KHL.Turn_cycle_turn_succeeded
+       | KHL.Turn_cycle_turn_failed
+       | KHL.Turn_cycle_without_turn
+       | KHL.Turn_cycle_lifecycle_blocked
+       | KHL.Turn_cycle_owner_rejected
        | KHL.Turn_cycle_crashed
        | KHL.Turn_cycle_busy _
        | KHL.Turn_cycle_rested ->
@@ -935,7 +948,7 @@ let test_operator_interrupt_skips_turn_accounting () =
       match KHL.decide_keepalive_cycle_action outcome.cycle_status with
       | KHL.Skip_interrupted_turn -> ()
       | KHL.Defer_autonomous_work _ | KHL.Record_turn_status _
-      | KHL.Rest_without_turn_status ->
+      | KHL.Skip_unadmitted_cycle | KHL.Refresh_without_turn_status ->
         fail "operator interrupt must not emit turn success or failure")
 
 (* ══════════════════════════════════════════════════════════
@@ -1502,6 +1515,122 @@ let test_fresh_lane_serves_queued_schedule_wake_after_warmup () =
       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
         fail ("fresh lane crashed instead of stopping: " ^ reason))
+
+(* #34673: a fiber that starts with a failure streak left by earlier turns must
+   not report a failed turn before it has run one. After a server restart the
+   streak store still holds the count, the registration restores it, and
+   [Fiber_started] starts the lane as running. The first keepalive cycle runs
+   inside the warmup and runs no turn. Before the fix that cycle read the
+   restored count and dispatched [Turn_failed], so the Keeper went to failing
+   within a second of launch and the roster showed it offline while it worked.
+
+   Property: when the lane has finished its first cycle and entered the
+   cadence sleep ([cadence_sleeping], true only inside that sleep), and the
+   warmup has not elapsed, the Keeper is still running with a healthy turn
+   condition and the restored streak is unchanged. The warmup is far longer
+   than the wait, so no turn can have run. *)
+let inherited_streak_warmup_sec = 120
+let inherited_streak = 8
+
+let test_inherited_failure_streak_does_not_fail_the_first_cycle () =
+  Eio_main.run @@ fun env ->
+  install_test_env env;
+  R.For_testing.clear ();
+  let base_dir = temp_dir "inherited-failure-streak" in
+  let keeper_name = "inherited-failure-streak" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      Eio.Switch.run @@ fun keeper_sw ->
+      Masc_test_deps.with_server_root_switch ~sw:keeper_sw @@ fun () ->
+      Masc.Keeper_process_switch.set keeper_sw;
+      install_owner_inventory_exn ~sw:keeper_sw config;
+      ensure_owner_meta_exn config meta;
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = keeper_sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env keeper_sw config)
+        }
+      in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      (* What an earlier process left behind: the durable streak, written
+         through the store the failure path uses. *)
+      (match
+         Masc.Keeper_turn_failure_streak_store.save
+           ~base_path:config.base_path
+           ~keeper_name
+           inherited_streak
+       with
+       | Ok () -> ()
+       | Error error ->
+         fail
+           ("the inherited streak could not be stored: "
+            ^ Masc.Keeper_turn_failure_streak_store.error_to_string error));
+      let launched_at = Eio.Time.now ctx.clock in
+      (match
+         Masc.Keeper_keepalive.start_keepalive
+           ~proactive_warmup_sec:inherited_streak_warmup_sec
+           ctx
+           meta
+       with
+       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         failf
+           "lane with an inherited streak failed to start: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      let entry () =
+        match R.get ~base_path:config.base_path keeper_name with
+        | Some entry -> entry
+        | None -> fail "the launched Keeper is not registered"
+      in
+      check int "the registration restored the inherited streak" inherited_streak
+        (R.get_turn_failures ~base_path:config.base_path keeper_name);
+      let rec await_first_cycle_end () =
+        if Atomic.get (entry ()).R.cadence_sleeping
+        then ()
+        else if Eio.Time.now ctx.clock -. launched_at >= first_cycle_deadline_sec
+        then
+          failf
+            "the lane did not finish its first cycle within %.0fs of launch"
+            first_cycle_deadline_sec
+        else (
+          Eio.Time.sleep ctx.clock first_cycle_poll_interval_sec;
+          await_first_cycle_end ())
+      in
+      await_first_cycle_end ();
+      let observed = entry () in
+      let observed_at = Eio.Time.now ctx.clock in
+      check bool "the observation is inside the warmup, so no turn has run" true
+        (observed_at -. launched_at < Float.of_int inherited_streak_warmup_sec);
+      check string "a cycle that ran no turn leaves the Keeper running" "running"
+        (KSM.phase_to_string observed.R.phase);
+      check bool "no turn failed in this fiber's life" true
+        observed.R.conditions.KSM.turn_healthy;
+      check int "the streak is still the inherited observation" inherited_streak
+        (R.get_turn_failures ~base_path:config.base_path keeper_name);
+      match
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          keeper_name
+      with
+      | Masc.Keeper_keepalive.Keeper_not_registered ->
+        fail "the lane disappeared before joined stop"
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Stopped; _ } -> ()
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+        fail ("the lane crashed instead of stopping: " ^ reason))
 
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->
@@ -5992,6 +6121,8 @@ let () =
         test_direct_stop_ignores_a_dead_librarian_executor;
       test_case "fresh lane serves a queued schedule wake right after warmup" `Quick
         test_fresh_lane_serves_queued_schedule_wake_after_warmup;
+      test_case "inherited failure streak does not fail the first cycle" `Quick
+        test_inherited_failure_streak_does_not_fail_the_first_cycle;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick

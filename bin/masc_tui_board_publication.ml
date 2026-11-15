@@ -223,10 +223,7 @@ let decode_response ~status_code ~body =
   match decoded with
   | Ok acknowledgement -> Answered acknowledgement
   | Error detail ->
-    Unanswered
-      { detail = Printf.sprintf "Board publication response could not be read (HTTP %d): %s"
-          status_code detail;
-        raw_response = Some (status_code, body) }
+    Unanswered { detail; raw_response = Some (status_code, body) }
 
 let unanswered detail = Unanswered { detail; raw_response = None }
 
@@ -235,11 +232,19 @@ let committed_post_id = function
   | Answered (Tool_result.Failed failure) -> failure.committed_post_id
   | Answered (Tool_result.Deferred _) | Unanswered _ -> None
 
-let response_diagnostic = function
+let response_diagnostic ~ko = function
   | Answered (Tool_result.Completed _) -> None
   | Answered (Tool_result.Failed failure) -> Some failure.message
-  | Answered (Tool_result.Deferred _) -> Some "Board publication was deferred"
-  | Unanswered { detail; _ } -> Some detail
+  | Answered (Tool_result.Deferred _) -> Some (if ko then "미뤄짐" else "deferred")
+  | Unanswered { detail; raw_response = Some (status, _) } ->
+    (* An answer came back and could not be read; [detail] says why. *)
+    Some
+      (Printf.sprintf
+         (if ko then "응답을 읽지 못함 (HTTP %d): %s" else "response could not be read (HTTP %d): %s")
+         status detail)
+  | Unanswered { detail; raw_response = None } -> Some detail
+
+let outcome_unknown ~ko = if ko then "게시 결과 미확인" else "Board post outcome unknown"
 
 let response_effect = function
   | Answered (Tool_result.Completed _) -> Failure_effect.Proven_post_effect

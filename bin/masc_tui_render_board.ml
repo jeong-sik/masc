@@ -154,13 +154,13 @@ let render_board_compose (state : state) =
     match state.board_compose_reply_to, state.board_compose_attachments with
     | None, _ :: _ ->
         Some
-          (Printf.sprintf "attachments: %s"
-             (String.concat " \xc2\xb7 "
-                (List.map
-                   (fun (staged : board_staged_attachment) ->
-                      board_upload_kind_to_wire staged.sa_kind
-                      ^ " " ^ Terminal_text.single_line staged.sa_name)
-                   state.board_compose_attachments)))
+          (words state "첨부: " "attachments: "
+           ^ String.concat " \xc2\xb7 "
+               (List.map
+                  (fun (staged : board_staged_attachment) ->
+                     board_upload_kind_to_wire staged.sa_kind
+                     ^ " " ^ Terminal_text.single_line staged.sa_name)
+                  state.board_compose_attachments))
     | None, [] | Some _, _ -> None
   in
   (* The path being typed after Ctrl-A, on a row of its own. The footer drops
@@ -171,7 +171,7 @@ let render_board_compose (state : state) =
   let attach_input_line =
     match state.board_compose_attach_input with
     | Some input ->
-        let label = "attach file: " in
+        let label = words state "첨부할 파일: " "attach file: " in
         let room =
           max 1
             (Board_composer.draft_cells ~cols - Message_layout.display_width label)

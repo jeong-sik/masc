@@ -112,10 +112,10 @@ let test_a_tagged_line_that_cannot_be_named_is_refused () =
   append_raw session Fragments.Internal
     (String.concat "\n"
        [ {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"tool_observation","tool_name":"t","outcome":"maybe"}|}
-       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"user","content_blocks":[],"extra":1}|}
-       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"user"}|}
+       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"user","origin":"conversation","content_blocks":[],"extra":1}|}
+       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"user","origin":"conversation"}|}
        ; {|{"ts_unix":1.0,"turn_ref":"not a ref","kind":"message"}|}
-       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"oracle","content_blocks":[]}|}
+       ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"message","role":"oracle","origin":"conversation","content_blocks":[]}|}
        ; {|{"ts_unix":1.0,"turn_ref":"trace#1","kind":"tool_observation","tool_name":"t","outcome":"ok"}|}
        ]
      ^ "\n");

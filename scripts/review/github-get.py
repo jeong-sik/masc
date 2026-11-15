@@ -30,6 +30,10 @@ TRANSIENT_RETRIES = 3
 # pause longer than this is no blip: it is not waited out and fails red
 # instead of sleeping without a bound or leaving earlier reads looking fresh.
 TRANSIENT_MAX_PAUSE_SECONDS = 30
+# One GET that gh does not finish in this long is a failed read. Without the
+# limit a stalled connection held the caller, and what it had planned to undo
+# after its reads, until the job itself was cancelled.
+GET_TIMEOUT_SECONDS = 120
 
 
 class ApiFailure(ValueError):
@@ -154,8 +158,13 @@ class Client:
         self.deadline = None
 
     def once(self, path):
-        result = self.run(['gh', 'api', '--method', 'GET', '--include', '--', path],
-                          capture_output=True, text=True, check=False)
+        try:
+            result = self.run(['gh', 'api', '--method', 'GET', '--include', '--', path],
+                              capture_output=True, text=True, check=False,
+                              timeout=GET_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as error:
+            raise ApiFailure(path, None, {},
+                             f'gh api did not answer in {GET_TIMEOUT_SECONDS} seconds') from error
         try:
             status, headers, body = response_parts(result.stdout)
         except ValueError as error:

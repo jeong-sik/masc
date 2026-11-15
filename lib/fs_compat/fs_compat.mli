@@ -459,6 +459,23 @@ module Optional_read_for_testing : sig
       must not perform Eio effects. *)
 end
 
+type regular_file_read_error =
+  | Not_a_regular_file of Unix.file_kind
+      (** The opened entry is a directory, a device, a FIFO or a socket. *)
+  | Regular_file_unreadable of string
+
+val regular_file_read_error_to_string : regular_file_read_error -> string
+
+(** Load an entire regular file, or [Ok None] when the path is absent at
+    open. The open does not wait: a FIFO without a writer is
+    [Error (Not_a_regular_file S_FIFO)], not a blocked caller. The kind is
+    read from the opened descriptor, so the entry cannot change between the
+    check and the read. A link to a regular file is followed; a dangling link
+    is [Ok None], like any path that does not resolve. Open, read and close
+    form one blocking job, as in {!load_file_opt}. *)
+val load_regular_file_opt :
+  string -> (string option, regular_file_read_error) result
+
 (** Save string to file (overwrite). A write, flush or close error is raised
     as [Sys_error], on the Eio branch and the inline branch alike: both run
     one writer. *)
@@ -1664,6 +1681,15 @@ type 'a private_jsonl_guard_result =
       cleanup_failures : private_jsonl_guard_failure list;
     }
 
+type 'a private_jsonl_dependency_guard_result =
+  | Dependency_is_target of {
+      target_path : string;
+      dependency_path : string;
+    }
+  | Dependency_guarded of 'a private_jsonl_guard_result
+(** [Dependency_is_target]: the dependency names the file whose stable lock the
+    target guard already holds, judged by that lock file's device and inode.
+    The dependency guard never started and nothing was appended. *)
 
 val private_jsonl_transaction_error_to_string :
   private_jsonl_transaction_error -> string
@@ -1766,9 +1792,11 @@ val append_private_jsonl_durable_locked_at_snapshot_with_dependency_result :
   string -> expected:private_jsonl_snapshot ->
   dependency_path:string -> dependency:private_jsonl_snapshot -> string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
-    private_jsonl_guard_result private_jsonl_guard_result
+    private_jsonl_dependency_guard_result private_jsonl_guard_result
 (** Target stable lock, then a distinct read-dependency lock, retained through
-    the existing exact-snapshot append. Never re-enters the target. Outer/inner
+    the existing exact-snapshot append. Never re-enters the target: a dependency
+    that is the target file under any spelling is [Dependency_is_target], and a
+    dependency lock entry that cannot be inspected is an inner refusal. Outer/inner
     refusal means no append; nested executed values preserve the append result
     and both guard cleanup lists. Filesystem worker only, with no model effects.
     This does not make arbitrary multi-file writes atomic. *)
@@ -1779,7 +1807,7 @@ val append_private_jsonl_durable_locked_at_snapshot_with_dependency_with_io_for_
   string -> expected:private_jsonl_snapshot ->
   dependency_path:string -> dependency:private_jsonl_snapshot -> string ->
   (Private_jsonl_cursor.t, private_jsonl_transaction_error) result
-    private_jsonl_guard_result private_jsonl_guard_result
+    private_jsonl_dependency_guard_result private_jsonl_guard_result
 
 
 val fold_private_jsonl_unique_regular_locked_with_io_for_testing :
@@ -1980,9 +2008,9 @@ type 'kept private_jsonl_rows_read =
 type 'kept private_jsonl_rows_from_cursor =
   { read : 'kept private_jsonl_rows_read
   ; rows : string
-    (** The bytes read, up to and including their last newline. *)
-  ; incomplete_tail : string
-    (** The bytes after that newline; [""] when the file ends with a row. *)
+    (** The bytes read, up to and including their last newline. Bytes after
+        it are an append that stopped part way and not a row: [decide] does
+        not receive them. *)
   ; rows_end : Private_jsonl_cursor.t
     (** This file at the end of [rows]. *)
   }
@@ -2000,6 +2028,11 @@ type 'kept private_jsonl_rows_from_cursor =
     replaced, shortened or rewritten across that offset does not describe this
     one. When the caller has taken [rows] into what it keeps, it passes
     [rows_end] with that as [after] next time.
+
+    A suffix [decide] returns is written after the last row. Bytes after the
+    file's last newline are cut and the cut fsynced before the suffix goes in,
+    as {!append_private_jsonl_durable_locked_result} cuts them; an update
+    whose [decide] returns no suffix leaves them where they are.
 
     Of the bytes before the cursor, only the last is read. A change below it
     that keeps the device, the inode, at least the length and a row start at

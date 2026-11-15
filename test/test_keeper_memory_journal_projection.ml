@@ -49,9 +49,13 @@ let append_raw ~keepers_dir line =
   close_out out
 ;;
 
-let read_json ~keepers_dir =
-  Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper ~limit:50
+let projection ~keepers_dir ~limit =
+  match Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper ~limit with
+  | Ok rows -> rows
+  | Error detail -> Alcotest.failf "memory journal unreadable: %s" detail
 ;;
+
+let read_json ~keepers_dir = projection ~keepers_dir ~limit:50
 
 let field json name = U.member name json
 
@@ -148,8 +152,7 @@ let test_undecodable_line_keeps_its_position_and_reason () =
         (String.length (U.to_string (field torn "error")) > 0);
       let torn_identity = U.to_string (field torn "structural_id") in
       (match
-         Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper
-           ~limit:2
+         projection ~keepers_dir ~limit:2
        with
        | [ torn_again; _ ] ->
          Alcotest.(check string) "tail window keeps absolute line identity"
@@ -190,7 +193,7 @@ let test_a_long_journal_names_each_tail_row_by_its_offset () =
       collect 0 [ 0 ]
     in
     let window limit =
-      Current.read_journal_tail_projection ~keepers_dir ~keeper_id:keeper ~limit
+      projection ~keepers_dir ~limit
     in
     let identities rows = List.map (fun row -> U.to_string (field row "structural_id")) rows in
     let narrow = window 3 in

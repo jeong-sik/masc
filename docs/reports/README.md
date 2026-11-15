@@ -4,6 +4,7 @@ Retained reports explain findings and link to supporting verification records.
 Generate new reports under `artifacts/`; retain selected reports here. See the
 [storage guide](../guides/WORKSPACE-STORAGE.md).
 
+- [에이전트 Farm 계획: 요구 25개, 감사 빈틈 199건, N0~N+7 단계 · 2026-11-12](2026-11-12-agent-farm-plan.md)
 - [열린 이슈 1,094개 지도와 개선 계획 · 2026-11-11](2026-11-11-open-issue-map-and-plan.md)
 - [기능 경로 추가 점검 · 2026-11-09](2026-11-09-feature-miss-audit.md)
 - [최근 7일 코드 점검과 OCaml 5.5.2 적용 · 2026-11-09](2026-11-09-weekly-code-audit.md)

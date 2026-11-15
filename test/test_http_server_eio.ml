@@ -582,39 +582,6 @@ let request_tests =
   ]
 ;;
 
-(* RFC 7230 §3.3.2: a 204 response with no payload should still carry
-   an explicit [Content-Length: 0] so keep-alive clients and proxies
-   know the body is empty. *)
-;;
-
-let test_response_empty_includes_content_length_zero () =
-  let reqd_ref = ref None in
-  let conn =
-    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some (Masc.Http_reqd.of_httpun reqd))
-  in
-  let request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n" in
-  let len = String.length request in
-  let bs = Bigstringaf.of_string request ~off:0 ~len in
-  ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
-  let reqd = Option.get !reqd_ref in
-  Response.empty reqd;
-  let response =
-    match Httpun.Server_connection.next_write_operation conn with
-    | `Write iovecs ->
-      String.concat
-        ""
-        (List.map
-           (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
-             Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len)
-           iovecs)
-    | `Yield | `Close _ -> ""
-  in
-  Alcotest.(check bool)
-    "204 Response.empty includes Content-Length: 0"
-    true
-    (String_util.contains_substring response "content-length: 0")
-;;
-
 (* ===== JSON conditional-request rule ===== *)
 
 (* [Response.json] offers a validator so a polling client can be told "still
@@ -1304,9 +1271,6 @@ let response_tests =
   ; ( "content_headers preserve all header segments"
     , `Quick
     , test_response_content_headers_preserve_all_segments )
-  ; ( "empty response includes Content-Length: 0"
-    , `Quick
-    , test_response_empty_includes_content_length_zero )
   ; ( "matching If-None-Match is 304"
     , `Quick
     , test_json_conditional_matching_tag_is_not_modified )

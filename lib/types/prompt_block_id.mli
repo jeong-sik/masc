@@ -109,6 +109,10 @@ val cache_rank : t -> int
     changes when a Goal is asked to complete or its proof is refuted, a few
     times an hour, while a Task decision is new on the turn it lands.
 
+    [direct_input_source] sits just behind [active_goals], the order the two
+    are issued in. Its bytes change when another operation is admitted; how
+    often that is has not been measured.
+
     [recalled_memory] and [recalled_memory_status] have not been measured yet:
     the body is placed in front of [dynamic_context] because it changes only
     when the carried set does, and the status line behind it because it names

@@ -19,7 +19,6 @@ let agent_name agent = (Agent.state agent).config.name
 let run_agent_result ~sw ?clock agent prompt =
   try Agent.run ~sw ?clock agent prompt with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | Raw_trace.Trace_error e -> Error e
   | Out_of_memory -> raise Out_of_memory
   | Stack_overflow -> raise Stack_overflow
   | Stdlib.Sys.Break -> raise Stdlib.Sys.Break

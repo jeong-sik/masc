@@ -21,6 +21,8 @@ type step =
   | Idle_until_killed
   | Sleep of float  (** Read nothing for this long. *)
   | Expect_launch of { home : string; native_read : bool }
+  | Expect_arguments of string list
+      (** Exit 95 unless the arguments after [serve] are exactly these. *)
 
 let init_frame ~granted =
   Printf.sprintf
@@ -176,7 +178,10 @@ let script_text ~capture ~storage steps =
           line "[ \"$#\" = 2 ] || exit 95";
           line "[ \"$1\" = --disable-write ] || exit 95";
           line "[ \"$2\" = --disable-shell ] || exit 95")
-        else line "[ \"$#\" = 0 ] || exit 95")
+        else line "[ \"$#\" = 0 ] || exit 95"
+      | Expect_arguments arguments ->
+        line (Printf.sprintf "[ \"$*\" = %s ] || exit 95"
+          (shell_quote (String.concat " " arguments))))
     steps;
   let page_host = {|import json, sys
 events = json.loads(sys.argv[1])
@@ -239,7 +244,7 @@ let environment_account () =
   Masc_test_deps.authorized_muse Runtime_account_access.Process_environment
 ;;
 
-let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account_home ?prepared_home ?mcp_servers ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
+let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account_home ?prepared_home ?mcp_servers ?workspace_origin ?on_session_ready ?on_prompt_sent ?on_stream_event ?native steps check_result =
   with_script steps (fun ~dir ~requests ->
     Eio_main.run (fun env ->
       let run (type where) (account : where Runtime_account_access.muse_authorized) =
@@ -247,6 +252,7 @@ let run_scripted ?model ?(workspace_root = "/w") ?storage ?session_mode ?account
           ~storage:(Option.value storage ~default:(native_storage dir))
           ?session_mode
           ?mcp_servers
+          ?workspace_origin
           ?on_session_ready
           ?on_prompt_sent
           ?on_stream_event
@@ -528,6 +534,91 @@ let test_bridge_needs_session_mcp () =
             |> member "capabilities"
             |> member "requestedCapabilities")
           = `List [ `String "sessionMcp" ]))
+;;
+
+let probe_mcp_server =
+  { Serve.name = "masc_keeper"
+  ; server = Msp.Streamable_http
+      { url = "http://127.0.0.1:1/mcp"; headers = []; required = true }
+  ; tool_names = []
+  }
+;;
+
+(* A directory MASC made, read as [Serve.origin_of_masc_directory] reads it.
+   [left] names the files an earlier session left there. *)
+let with_masc_directory ?(left = []) f =
+  let dir = Filename.temp_dir "masc-muse-workspace-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
+    List.iter
+      (fun name ->
+         Out_channel.with_open_bin (Filename.concat dir name) (fun output ->
+           output_string output "left by an earlier session"))
+      left;
+    match Serve.origin_of_masc_directory dir with
+    | Ok origin -> f origin
+    | Error detail -> fail detail)
+;;
+
+(* [Serve.workspace_origin] is private: a test reads it, never builds it. *)
+let is_masc_private = function
+  | Serve.Masc_private -> true
+  | Serve.Other_tree -> false
+;;
+
+let test_only_an_empty_masc_directory_is_masc_private () =
+  with_masc_directory (fun origin ->
+    check bool "empty" true (is_masc_private origin));
+  (* A session with native writes may have left a skill or a rule. *)
+  with_masc_directory ~left:[ "SKILL.md" ] (fun origin ->
+    check bool "holds a file" false (is_masc_private origin));
+  with_masc_directory ~left:[ ".muse" ] (fun origin ->
+    check bool "holds a dot file" false (is_masc_private origin));
+  match Serve.origin_of_masc_directory "/nonexistent/masc-muse-workspace" with
+  | Error _ -> ()
+  | Ok _ -> fail "an unreadable directory has no origin"
+;;
+
+(* Muse Code connects a session's MCP servers only on a host started with
+   [--trust-workspace], which also makes it load the workspace's skills and
+   rules. Only an empty directory MASC made, used by a session that cannot
+   write it, is trusted. *)
+let test_trust_needs_a_masc_workspace_no_session_can_write () =
+  with_masc_directory (fun masc_private ->
+    List.iter
+      (fun (workspace_origin, native, mcp_servers, expected) ->
+         check bool "workspace trust" expected
+           (Serve.trusts_workspace (config ~native ()) ~workspace_origin ~mcp_servers))
+      [ masc_private, Runtime_native_tools.Native_read, [ probe_mcp_server ], true
+      ; masc_private, Runtime_native_tools.Native_none, [ probe_mcp_server ], true
+      ; masc_private, Runtime_native_tools.Native_read, [], false
+      ; masc_private, Runtime_native_tools.Native_full, [ probe_mcp_server ], false
+      ; Serve.other_tree, Runtime_native_tools.Native_read, [ probe_mcp_server ], false
+      ; Serve.other_tree, Runtime_native_tools.Native_none, [ probe_mcp_server ], false
+      ; Serve.other_tree, Runtime_native_tools.Native_full, [ probe_mcp_server ], false
+      ])
+;;
+
+(* The host that withholds sessionMcp ends the turn after the launch check,
+   so a wrong argument list shows as an exited process instead. *)
+let launch_arguments_are workspace_origin arguments =
+  run_scripted ~workspace_origin ~mcp_servers:[ probe_mcp_server ]
+    [ Expect_arguments arguments; Read; Write (init_frame ~granted:[]) ]
+    (fun result _ ->
+       match result with
+       | Error (Serve.Capability_not_granted Msp.Session_mcp) -> ()
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "a host that withholds sessionMcp must fail the turn")
+;;
+
+let test_launch_arguments_follow_workspace_trust () =
+  let read_only = [ "--disable-write"; "--disable-shell" ] in
+  with_masc_directory (fun origin ->
+    launch_arguments_are origin (read_only @ [ "--trust-workspace" ]));
+  launch_arguments_are Serve.other_tree read_only;
+  (* A native-full session wrote here; the read-only turn after it is not
+     trusted with what it left. *)
+  with_masc_directory ~left:[ "SKILL.md" ] (fun origin ->
+    launch_arguments_are origin read_only)
 ;;
 
 let test_native_none_is_config_error () =
@@ -1905,6 +1996,12 @@ let () =
         ; test_case "exit code is typed" `Quick test_exit_code_is_typed
         ; test_case "bridge needs sessionMcp" `Quick test_bridge_needs_session_mcp
         ; test_case "native none is config error" `Quick test_native_none_is_config_error
+        ; test_case "only an empty MASC directory is masc private" `Quick
+            test_only_an_empty_masc_directory_is_masc_private
+        ; test_case "trust needs a MASC workspace no session can write" `Quick
+            test_trust_needs_a_masc_workspace_no_session_can_write
+        ; test_case "launch arguments follow workspace trust" `Quick
+            test_launch_arguments_follow_workspace_trust
         ; test_case "selected account home isolates child roots and posture" `Quick
             test_selected_homes_do_not_inherit_other_account_roots
         ; test_case "valid images use shared official media contract" `Quick test_valid_image_inputs_use_shared_official_media_contract

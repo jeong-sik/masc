@@ -10,6 +10,7 @@ type origin =
 let observe_terminal ~scope = function
   | Runtime_muse_msp.Terminal_failed { quota = Some quota; _ } ->
     Runtime_quota_window.note_exhausted ~scope
+      ~source:Runtime_quota_window.Provider_quota_refused
       ~resets_at:(float_of_int quota.resets_at_ms /. 1000.)
   | Runtime_muse_msp.Terminal_failed { quota = None; _ }
   | Runtime_muse_msp.Terminal_completed
@@ -66,7 +67,8 @@ let report origin (usage : Runtime_muse_msp.subscription_usage) =
 let observe ~scope origin usage =
   Option.iter
     (fun reset_ms ->
-       Runtime_quota_window.note_exhausted ~scope ~resets_at:(float_of_int reset_ms /. 1000.))
+       Runtime_quota_window.note_read_spent_until ~scope
+         ~resets_at:(float_of_int reset_ms /. 1000.))
     (Runtime_muse_msp.exhausted_subscription_reset_ms usage);
   match report origin usage with
   | Ok report ->

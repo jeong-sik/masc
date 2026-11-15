@@ -58,13 +58,20 @@ val turn_frontier_ordinal : turn_frontier -> int
     A private fiber-local execution scope, when bound by [Agent], owns the turn
     and exact selected provider attempt before provider I/O. The caller owns
     root settlement; this function closes its successful turn descendants,
-    while an error leaves them open for the caller's atomic abort. *)
+    while an error leaves them open for the caller's atomic abort.
+
+    [on_reasoning_replay_exclusion] receives the dispatch boundary's admitted
+    source change, once, before the provider attempt is admitted: the target
+    and each excluded message's index and reason. It is not called when the
+    history keeps its reasoning or the caller disabled replay. *)
 val run_turn
   :  sw:Eio.Switch.t
   -> ?clock:_ Eio.Time.clock
   -> api_strategy:api_strategy
   -> ?raw_trace_run:Raw_trace.active_run
   -> ?on_provider_failure:(Provider_failure_attribution.t option -> unit)
+  -> on_reasoning_replay_exclusion:
+       (Llm_provider.Reasoning_history_projection.replay_exclusion -> unit)
   -> ?before_tool_execution:(unit -> unit)
   -> frontier:turn_frontier
   -> Agent_types.t

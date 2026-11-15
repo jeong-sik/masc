@@ -131,10 +131,17 @@ module Tools : sig
   val web_search_timeout_sec : unit -> int
   val web_search_cache_ttl_sec : unit -> float
 
+  val searxng_url_configured : string -> (string option, string) result
+  (** What a [web_search.searxng_url] value names, without trailing slashes.
+      Blank is unset, [Ok None]. A value that is not an http or https URL with
+      a host, or that carries userinfo, is [Error], saying why without naming
+      the setting. runtime.toml validation and {!searxng_base_url} both decide
+      by this. *)
+
   val searxng_base_url : unit -> (string, string) result
-  (** [MASC_SEARXNG_URL] without trailing slashes, or
-      {!Masc_network_defaults.searxng_default_url} when unset or blank.
-      [Error] names a URL whose scheme is not http or https. *)
+  (** runtime.toml [web_search.searxng_url] or [MASC_SEARXNG_URL] without
+      trailing slashes, or {!Masc_network_defaults.searxng_default_url} when
+      unset or blank. [Error] names the setting and why its URL is refused. *)
 end
 
 (** {1 OpenTelemetry} *)

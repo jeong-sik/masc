@@ -1,7 +1,4 @@
-(* The Overview Tasks section. The 2026-09-23 capture listed the oldest todo
-   tasks while the in-progress and awaiting ones, the work actually moving,
-   were not on screen. The fixture mixes the two so the order is what is
-   read: held work first, the backlog as one line. *)
+(* The Overview Tasks section. *)
 
 open Alcotest
 module Tasks = Masc_tui_overview_tasks

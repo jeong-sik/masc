@@ -141,8 +141,6 @@ let queue_length ~base_path ~keeper_name =
   | Error message -> fail message
 ;;
 
-(* --- pure post-tool boundary decision --------------------------------- *)
-
 let test_peek_projects_ready_resolution_without_consuming () =
   with_workspace
   @@ fun config ->

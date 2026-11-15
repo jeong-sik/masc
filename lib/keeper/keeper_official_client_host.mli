@@ -242,7 +242,15 @@ val encode_history_message : Agent_core.Types.message -> string
 (** Preserve one canonical message on a text-only official-client wire. Every
     role uses the same versioned envelope, so raw user bytes cannot spoof the
     framing layer and typed block payloads, tool identities, structured result
-    content, failure provenance, and message metadata remain visible. *)
+    content, failure provenance, and message metadata remain visible. This is
+    the [Canonical_source] text: digests, held-context hashes, resumes and
+    byte measures use it, and it holds no tool result's age. *)
+
+val encode_start_message : started_at:float -> Agent_core.Types.message -> string
+(** The same message as a new vendor session receives it when seeded at
+    [started_at] (Unix seconds): {!encode_history_message} plus the age of a
+    recorded tool result at that moment
+    ({!Keeper_official_client_context_codec.Session_start}). *)
 
 val invoke_turn_completion_hooks :
   runtime_label:string ->
@@ -721,16 +729,22 @@ val carried_history_projection :
     final projection succeeds, and retain durable-history coordinates: an
     appended Gate replay reference cannot become a checkpoint front. *)
 
+type framed_delivery =
+  | Framed_start of { started_at : float }
+      (** A new vendor session, seeded at [started_at] (Unix seconds). *)
+  | Framed_resume
+
 val framed_prompt_for_turn :
   ?composed_context:composed_context ->
   held:Keeper_official_client_session_store.held_context list ->
-  is_resume:bool ->
+  delivery:framed_delivery ->
   goal:string ->
   prepared_turn ->
   (string, Agent_core.Error.t) result
 (** Input for clients whose Start has no separate System channel. A Start
-    carries the shared Antigravity frame's System label, encoded history and
-    current Goal in order, prefixed once by {!start_prompt}. A Resume uses
+    carries the shared Antigravity frame's System label, history encoded with
+    {!encode_start_message} and current Goal in order, prefixed once by
+    {!start_prompt}. A Resume uses
     {!resume_prompt} with the exact held/composed context supplied by its lane.
     Protocol/session handling and any historical-task input stay with the lane.
     @raise Invalid_argument when a required frame-label asset is missing. *)

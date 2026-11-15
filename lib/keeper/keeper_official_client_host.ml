@@ -1099,31 +1099,29 @@ let carried_history_projection ~input_source
   Ok sent
 ;;
 
-let render_message (message : Agent_core.Types.message) =
-  Ok (history_role_label message.role ^ encode_history_message message)
+let render_start_messages ~started_at messages =
+  messages
+  |> List.map (fun (message : Agent_core.Types.message) ->
+    history_role_label message.role ^ encode_start_message ~started_at message)
+  |> String.concat "\n\n"
 ;;
 
-let render_messages messages =
-  let rec loop rendered = function
-    | [] -> Ok (String.concat "\n\n" (List.rev rendered))
-    | message :: rest ->
-      let* rendered_message = render_message message in
-      loop (rendered_message :: rendered) rest
-  in
-  loop [] messages
-;;
+type framed_delivery =
+  | Framed_start of { started_at : float }
+  | Framed_resume
 
 let required_frame_label = function
   | Ok label -> label
   | Error message -> invalid_arg message
 ;;
 
-let framed_prompt_for_turn ?composed_context ~held ~is_resume ~goal (prepared : prepared_turn) =
-  if is_resume
-  then Ok (resume_prompt ~goal ~held ~turn_observation:prepared.turn_observation
+let framed_prompt_for_turn ?composed_context ~held ~delivery ~goal (prepared : prepared_turn) =
+  match delivery with
+  | Framed_resume ->
+    Ok (resume_prompt ~goal ~held ~turn_observation:prepared.turn_observation
              ?composed_context prepared.messages).prompt
-  else
-    let* history = render_messages prepared.messages in
+  | Framed_start { started_at } ->
+    let history = render_start_messages ~started_at prepared.messages in
     Ok (start_prompt prepared
       ([ String_util.trim_nonempty prepared.system_prompt
          |> Option.map (fun value ->

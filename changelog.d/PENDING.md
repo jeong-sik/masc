@@ -1,0 +1,11 @@
+### Fixed
+
+- A Claude Code client that writes a failed `result` frame before it answers
+  `initialize`, for example when it cannot reach the API or is not signed in,
+  now fails the turn with that frame's status and sentence, read the way a
+  turn's result frame is. Before, the frame was dropped and the turn ended as
+  `initialize: unexpected message type "result" before control response`, a
+  parse error that also stopped the lane walk. The failure now reports no tool
+  effect and no response, so the lane moves on to its next candidate when it
+  has one. A result that reports success before the control response, or one
+  of another session, is still a protocol error (#51901, #PENDING).

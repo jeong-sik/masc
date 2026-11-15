@@ -590,6 +590,11 @@
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main))
 
 (test
+ (name test_tool_results_appended_at)
+ (modules test_tool_results_appended_at)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main eio.mock))
+
+(test
  (name test_api)
  (modules test_api)
  (libraries agent_core_test_deps agent_core alcotest))

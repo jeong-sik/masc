@@ -407,6 +407,37 @@ module Conversation_metadata = struct
   ;;
 end
 
+(* The time a Tool message's results entered the conversation. Only the live
+   turn knows it; the journal replay leaves the key out rather than stamp the
+   replay time (RFC replayed-tool-results-carry-their-time, D1). *)
+module Tool_results_appended_at = struct
+  type classification =
+    | Absent
+    | Present of float
+    | Invalid
+    | Duplicate
+
+  let key = "agent_core.tool_results_appended_at.v1"
+  let entry ~appended_at = key, `Float appended_at
+
+  let classify metadata =
+    match
+      List.filter_map
+        (fun (field_key, value) ->
+           if String.equal field_key key then Some value else None)
+        metadata
+    with
+    | [] -> Absent
+    | [ `Float appended_at ] when Float.is_finite appended_at -> Present appended_at
+    | [ _ ] -> Invalid
+    | _ :: _ :: _ -> Duplicate
+  ;;
+
+  let without metadata =
+    List.filter (fun (field_key, _) -> not (String.equal field_key key)) metadata
+  ;;
+end
+
 (** Exact producer binding for stored reasoning artifacts. *)
 module Reasoning_source = struct
   type provider_instance = Provider_instance_id of string [@@deriving show]

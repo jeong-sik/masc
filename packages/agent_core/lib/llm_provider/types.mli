@@ -455,6 +455,27 @@ module Conversation_metadata : sig
   val is_mergeable_followup : metadata -> bool
 end
 
+(** When AGENT_CORE appended a Tool message's results to the conversation, in
+    Unix seconds. A live turn stamps it once, after every call of the batch has
+    finished. A Tool message rebuilt from the execution journal stays
+    [Absent]: the journal does not keep when each result settled, and the
+    replay time would make old results look new. AGENT_CORE stores and
+    checkpoints the value and never sends it to a provider. *)
+module Tool_results_appended_at : sig
+  type classification =
+    | Absent
+    | Present of float
+    | Invalid (** One entry whose value is not a finite JSON float. *)
+    | Duplicate
+
+  val key : string
+  val entry : appended_at:float -> string * Yojson.Safe.t
+  val classify : metadata -> classification
+
+  (** [metadata] with every appended-at entry removed. *)
+  val without : metadata -> metadata
+end
+
 (** Producer binding stamped on stored reasoning artifacts: provider kind,
     concrete endpoint instance, canonical request model, and typed replay
     contract. Whether a difference in any of those dimensions still admits

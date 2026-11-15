@@ -45,9 +45,9 @@ after `scripts/install-local-build.sh`:
    that process as a `Server_upgrade_preparation.single_user_listener`, which
    only `Server_upgrade_preparation.owner` makes. Nothing is forced down.
    When the kernel no longer names that server at one of these checks,
-   restart and `masc setup-stop-previous-owner` say what it names now: the
-   pid that withdrew its announcement, as a server does when it shuts down,
-   or the owner that took its place.
+   restart and every command named below that sends the credential say what
+   it names now: the pid that withdrew its announcement, as a server does
+   when it shuts down, or the owner that took its place.
 3. It starts `masc start --wait-for-previous-owner` in its own process group
    with its output appended to `<base>/.masc/logs/masc-start-<UTC time>.log`
    (`--log` chooses another file). That process sleeps on the lease until
@@ -60,14 +60,19 @@ after `scripts/install-local-build.sh`:
    Nothing in the answer is read. Ctrl-C stops the waiting, not the new
    server.
 
-`masc setup`, `masc runtime-resume` and the commands that save runtime.toml
-through the running server (`masc config set` and the setup commands) find
-the server the same way and refuse the same owners. The sentence for each
-owner is `Server_upgrade_preparation.owner_sentence`, followed by what the
-command did not do; restart words the account server itself, because it is
-the command that replaces one. These reads compare pids and take no handle
-on the lease owner, so a Linux host without `pidfd_open` still runs them.
-Only the stop takes a handle, to send its SIGTERM.
+`masc setup-server` and `masc setup-stop-previous-owner`, the read and the
+stop the setup journey runs, find the server the same way and refuse the
+same owners. So do `masc setup`, `masc runtime-resume` and the commands
+that save runtime.toml through the running server (`masc config set` and
+the setup commands). All of these but `masc setup-server` send the
+credential. The sentence for each owner is
+`Server_upgrade_preparation.owner_sentence`, followed by what the command
+did not do; restart words the account server itself, because it is the
+command that replaces one. These reads compare pids and take no handle on
+the lease owner, so a Linux host without `pidfd_open` still runs `masc
+setup-server`, `masc setup`, `masc runtime-resume` and the runtime.toml
+commands. Only the stop of `masc setup-stop-previous-owner` takes a handle,
+to send its SIGTERM.
 
 All of this reads the lease under one lease root: `<base>/.masc-owner`, or
 the directory `MASC_BASE_PATH_LEASE_DIR` names. A command sees the server

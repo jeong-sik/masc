@@ -82,7 +82,7 @@ let page (_ : Httpun.Request.t) reqd =
       ~headers:[ no_store; referrer_policy; "content-security-policy", policy ]
       body
       reqd
-  | Error (_ : Web_dashboard.asset_load_error) -> unavailable ~nonce:(Account_page.Nonce.draw ()) reqd
+  | Error (_ : Web_dashboard.asset_load_error) -> unavailable ~nonce:(Csp_nonce.draw ()) reqd
 ;;
 
 (* A file the bundle cannot give now. The answer of the operator dashboard

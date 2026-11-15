@@ -77,7 +77,7 @@ let test_labels_name_the_channel_or_say_the_name_is_unknown () =
     labels;
   check bool "a line break in a name does not reach the terminal" false
     (String.contains
-       (Unbind.channel_label ~channel_id:"1" ~channel_name:(Some "a\nb"))
+       (Unbind.channel_label ~ko:false ~channel_id:"1" ~channel_name:(Some "a\nb"))
        '\n')
 
 let test_statuses_split_rebound_and_gone_from_failure () =

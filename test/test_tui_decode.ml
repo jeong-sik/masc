@@ -11408,8 +11408,8 @@ let test_decode_secret_projection_reads_names_not_values () =
   | Error err -> Alcotest.fail err
   | Ok (_, Some p) ->
       Alcotest.(check string) "keeper" "marlow" p.Tui_decode.ksp_keeper;
-      Alcotest.(check string) "status" "ready"
-        (Tui_decode.keeper_secret_status_to_string p.Tui_decode.ksp_status);
+      Alcotest.(check bool) "status" true
+        (p.Tui_decode.ksp_status = Tui_decode.Secret_ready);
       Alcotest.(check (list string)) "env names"
         [ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
         p.Tui_decode.ksp_env_names;
@@ -11476,6 +11476,36 @@ let test_decode_secret_projection_keeps_an_unknown_status () =
   | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word; _ })
     ->
       Alcotest.(check string) "the producer's word survives" "quarantined" word
+  | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
+  | Error err -> Alcotest.fail err
+
+(* #51610: the Secrets tab draws the status text between its own style codes
+   and hands the row to the frame as it is. An unknown word carrying ESC, a
+   C1 CSI (raw and UTF-8 encoded), BEL, DEL or a line break must arrive as
+   visible text on one row, in either screen language. *)
+let test_secret_status_text_keeps_an_unknown_word_on_one_printable_row () =
+  let hostile = "quar\x1b[2J\x1b]0;owned\x07antined\r\nnext\x9b31m\xc2\x9b0m\x7f" in
+  let json =
+    composite_json "marlow"
+      ~projection:(secret_projection_json ~status:hostile ~env_names:[] ~mounts:[])
+  in
+  match Tui_decode.decode_keeper_composite json with
+  | Ok (_, Some { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word as status; _ })
+    ->
+      Alcotest.(check string) "the decoded value keeps the producer's bytes" hostile word;
+      List.iter
+        (fun ko ->
+          let drawn = Tui_decode.keeper_secret_status_text ~ko status in
+          Alcotest.(check bool)
+            (Printf.sprintf "ko=%b: every byte is printable ASCII" ko)
+            true
+            (String.for_all (fun c -> c >= ' ' && c <= '~') drawn);
+          Alcotest.(check bool)
+            (Printf.sprintf "ko=%b: the producer's word is still readable" ko)
+            true
+            (Astring.String.is_infix ~affix:"quar" drawn
+             && Astring.String.is_infix ~affix:"antined" drawn))
+        [ true; false ]
   | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
   | Error err -> Alcotest.fail err
 
@@ -14597,6 +14627,8 @@ let () =
           test_decode_keeper_composite_reads_an_offline_keeper;
         Alcotest.test_case "keeps an unknown status" `Quick
           test_decode_secret_projection_keeps_an_unknown_status;
+        Alcotest.test_case "draws an unknown status on one printable row" `Quick
+          test_secret_status_text_keeps_an_unknown_word_on_one_printable_row;
         Alcotest.test_case "rejects a wrong env name type" `Quick
           test_decode_secret_projection_rejects_a_wrong_env_name_type;
       ] );

@@ -3969,12 +3969,17 @@ let keeper_secret_status_of_string = function
   | "error" -> Secret_error
   | other -> Secret_status_unknown other
 
-let keeper_secret_status_to_string = function
-  | Secret_ready -> "ready"
-  | Secret_empty -> "empty"
-  | Secret_absent -> "absent"
-  | Secret_error -> "error"
-  | Secret_status_unknown other -> other
+(* HIGH-RISK-UNREVIEWED: terminal output boundary. The unknown word is the
+   producer's bytes; the Secrets tab draws this result between style codes
+   without another pass. *)
+let keeper_secret_status_text ~ko status =
+  let say korean english = if ko then korean else english in
+  match status with
+  | Secret_ready -> say "준비됨" "ready"
+  | Secret_empty -> say "비어 있음" "empty"
+  | Secret_absent -> say "미설정" "absent"
+  | Secret_error -> say "읽지 못함" "error"
+  | Secret_status_unknown other -> Tui_terminal_text.sanitize_terminal_text other
 
 let decode_string_list label items =
   decode_list label

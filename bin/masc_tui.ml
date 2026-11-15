@@ -31304,8 +31304,9 @@ let main
                   let exact =
                     selected.cn_id, binding.cb_channel_id, binding.cb_keeper_name
                   in
+                  (* The footer sentences this label goes into are English. *)
                   let label =
-                    Masc_tui_connector_unbind.channel_label
+                    Masc_tui_connector_unbind.channel_label ~ko:false
                       ~channel_id:binding.cb_channel_id
                       ~channel_name:binding.cb_channel_name
                   in

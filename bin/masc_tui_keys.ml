@@ -574,6 +574,17 @@ let memory_browser_pages =
   [ b ~ko:"최근 / 조회 / 변화 / 저장" Act "1 / 2 / 3 / 4" "recent / retrievals / changes / storage"
       ~help:"one Memory browser; changes require an individual Keeper, while storage opens the fleet health view" ]
 
+(* The Lanes list and one exact-output Lane's inventory detail open the same
+   editor with the same key, so both footers read this one binding. *)
+let exact_models_binding =
+  b ~ko:"exact 모델" Act "s" "exact: models"
+    ~help:"edit the model order of the selected exact-output lane, from the \
+           list or from its reading (d): r replaces the selected model/effort, \
+           a adds a fallback, 1 makes it first within its HTTP/CLI group, \
+           x removes, J/K reorders, Enter/d opens the selected \
+           slot's config table, e opens the lane table, Esc closes back to \
+           the screen it opened from; HTTP runs before CLI"
+
 let for_surface = function
   | Overview ->
       [ b ~ko:"조치 원인" Navigate "v" "action reasons"
@@ -815,12 +826,7 @@ let for_surface = function
           ~help:"add a candidate to the selected exact-output lane's walk order"
       ; b ~ko:"켜고 끄기" Act "Space" "activity"
           ~help:"open Exact or machine activity settings; Space changes the draft, s saves explicitly; Required Exact lanes cannot be off"
-      ; b ~ko:"exact 모델" Act "s" "exact: models"
-          ~help:"edit the model order: r replaces the selected model/effort, \
-                 a adds a fallback, 1 makes it first within its HTTP/CLI group, \
-                 x removes, J/K reorders, Enter/d opens the selected \
-                 slot's config table, e opens the lane table, Esc closes; \
-                 HTTP runs before CLI"
+      ; exact_models_binding
         (* The lane detail spent four rows on the file's shape and on this
            key, the same two sentences under every lane. They are here, where
            the key is. *)
@@ -3340,14 +3346,17 @@ let footer_hints_exact_model_order ~lang =
     ; b ~ko:"뒤로" Navigate "Esc" "back"
     ]
 
-let footer_hints_lane_inventory_detail ~lang =
+(* [exact_models] is whether the reading names an exact-output lane, the only
+   kind whose model order [s] edits. *)
+let footer_hints_lane_inventory_detail ~lang ~exact_models =
   hints_in_order ~lang
-    [ scroll_binding
-    ; page_binding
-    ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
-    ; b ~ko:"새로 조회" Meta "r" "refresh"
-    ; b ~ko:"목록" Navigate "Esc/Left" "inventory"
-    ]
+    ([ scroll_binding
+     ; page_binding
+     ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
+     ; b ~ko:"새로 조회" Meta "r" "refresh"
+     ]
+     @ (if exact_models then [ exact_models_binding ] else [])
+     @ [ b ~ko:"목록" Navigate "Esc/Left" "inventory" ])
 
 let footer_hints_link_preview_empty ~lang = hints_in_order ~lang [ close_binding ]
 

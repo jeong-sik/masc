@@ -409,6 +409,7 @@ let is_retryable = function
       { kind =
           ( Http_client.Connection_refused
           | Http_client.Dns_failure
+          | Http_client.Unreachable
           | Http_client.Timeout
           | Http_client.Connection_reset
           | Http_client.End_of_file

@@ -242,6 +242,8 @@ let every_cause =
       }
   ; Krf.Provider_network
       { provider = None; kind = Llm_provider.Http_client.Unknown; detail = "" }
+  ; Krf.Provider_network
+      { provider = Some "glm"; kind = Llm_provider.Http_client.Unreachable; detail = "" }
   ; Krf.Provider_rate_limited
       { provider = Some "ollama_cloud"; retry_after = Some 12.5; detail = "concurrent requests" }
   ; Krf.Provider_rate_limited

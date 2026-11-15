@@ -31,7 +31,8 @@ let test_progress_fences_reconnect () =
 
 let test_non_connection_failures_remain () =
   let errors = List.map network
-    [Http.Connection_refused; Dns_failure; Tls_error; Timeout; Local_resource_exhaustion; Unknown]
+    [Http.Connection_refused; Dns_failure; Unreachable; Tls_error; Timeout; Local_resource_exhaustion;
+     Unknown]
     @ [Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="fixture"; detail="fixture"})] in
   List.iter (fun error ->
     let failed = Error error, None, () in

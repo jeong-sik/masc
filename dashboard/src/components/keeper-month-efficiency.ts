@@ -142,12 +142,12 @@ function fleetNote(text: string) {
 function Share({ share, fleet }: { share: KeeperMonthEfficiencyShare; fleet: KeeperEfficiencyFleet }) {
   switch (share.kind) {
     case 'absent':
-      return html`<p class="m-0 text-xs text-[var(--color-fg-muted)]">이 달에 이 Keeper 의 턴 없음</p>`
+      return html`<div class="text-xs text-[var(--color-fg-secondary)]">이 달에 이 Keeper 의 턴 없음</div>`
     case 'no_turn_counted':
       return html`
-        <p class="m-0 text-xs text-[var(--color-fg-muted)]">
+        <div class="text-xs text-[var(--color-fg-secondary)]">
           센 턴 없음 · 도구 호출 ${formatNumber(share.calls)}회, 실패 ${formatNumber(share.failed)}회
-        </p>
+        </div>
       `
     case 'measured':
       return html`
@@ -177,6 +177,72 @@ function Share({ share, fleet }: { share: KeeperMonthEfficiencyShare; fleet: Kee
   }
 }
 
+/** A view that draws the month or what became of its read. */
+type DrawnView = Exclude<KeeperMonthEfficiencyView, { kind: 'not_asked' | 'no_workspace' }>
+
+function readRuns(view: DrawnView): boolean {
+  switch (view.kind) {
+    case 'reading':
+      return true
+    case 'unread':
+      return false
+    case 'read':
+      return view.refresh.kind === 'refreshing'
+  }
+}
+
+/** The line beside the button. Each state has an element of its own, so an
+ *  alert is a new element when it appears. The lines are not paragraphs: the
+ *  page's rule for `p` sets a colour over the colour classes. */
+function Headline({ view }: { view: DrawnView }) {
+  switch (view.kind) {
+    case 'reading':
+      return html`
+        <div key="reading" class="text-xs text-[var(--color-fg-secondary)]" role="status">
+          읽는 중 · 그 달의 첫 읽기는 1분쯤 걸릴 수 있음
+        </div>
+      `
+    case 'unread':
+      return html`<div key="unread" class="text-xs text-[var(--color-status-err)]" role="alert">읽지 못함: ${view.reason}</div>`
+    case 'read':
+      return html`
+        <div key="read" class="text-xs text-[var(--color-fg-secondary)]">
+          ${view.month} · ${formatNumber(view.daysCovered)}일 · 전체 ${formatNumber(view.fleet.turns_total)}턴 · 집계 <${TimeAgo} timestamp=${isoOfUnixSeconds(view.generatedAt)} />
+        </div>
+      `
+  }
+}
+
+function readButtonText(view: DrawnView): string {
+  if (readRuns(view)) return '읽는 중…'
+  return view.kind === 'unread' ? '다시 읽기' : '새로고침'
+}
+
+/** The month, or what became of its read, with the button that reads again.
+ *  The three states share one tree, so the button is one element through
+ *  all of them. */
+function Drawn({ view, onRead }: { view: DrawnView; onRead: () => void }) {
+  return html`
+    <${KpiSection} title=${PANEL_TITLE}>
+      <div
+        class="flex flex-col gap-2"
+        data-efficiency-state=${view.kind}
+        data-efficiency-share=${view.kind === 'read' ? view.share.kind : undefined}
+        data-efficiency-refresh=${view.kind === 'read' ? view.refresh.kind : undefined}
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <${Headline} view=${view} />
+          <${Btn} size="xs" variant="ghost" onClick=${onRead} testId="keeper-month-efficiency-read">${readButtonText(view)}<//>
+        </div>
+        ${view.kind === 'read' ? html`<${Share} share=${view.share} fleet=${view.fleet} />` : null}
+        ${view.kind === 'read' && view.refresh.kind === 'failed'
+          ? html`<div class="text-xs text-[var(--color-status-warn)]" role="alert">마지막 새로고침 실패: ${view.refresh.reason}</div>`
+          : null}
+      </div>
+    <//>
+  `
+}
+
 interface KeeperMonthEfficiencyProps {
   keeperName: string
 }
@@ -190,6 +256,14 @@ export function KeeperMonthEfficiency({ keeperName }: KeeperMonthEfficiencyProps
   // the credential it was read under changes (a new resource). The resource
   // withdraws its request when the panel goes away.
   useEffect(() => { read() }, [read])
+  // The button is never disabled and never leaves the page while the month
+  // or its read is drawn: a disabled button drops keyboard focus, and so does
+  // one that is removed when it is pressed. A press while a read runs sends
+  // nothing; the button says a read runs.
+  const readAgain = useCallback(() => {
+    if (resource.state.peek().loading) return
+    read()
+  }, [resource, read])
 
   const workspaceConfirmed = dashboardObservationOwnerHasWorkspace(readDashboardObservationOwner())
   const view = keeperMonthEfficiencyView(resource.state.value, keeperName, workspaceConfirmed)
@@ -199,50 +273,14 @@ export function KeeperMonthEfficiency({ keeperName }: KeeperMonthEfficiencyProps
     case 'no_workspace':
       return html`
         <${KpiSection} title=${PANEL_TITLE}>
-          <p class="m-0 text-xs text-[var(--color-fg-muted)]" role="status" data-efficiency-state="no_workspace">
+          <div class="text-xs text-[var(--color-fg-secondary)]" role="status" data-efficiency-state="no_workspace">
             현재 작업 공간을 확인하는 중…
-          </p>
+          </div>
         <//>
       `
     case 'reading':
-      return html`
-        <${KpiSection} title=${PANEL_TITLE}>
-          <p class="m-0 text-xs text-[var(--color-fg-muted)]" role="status" data-efficiency-state="reading">
-            읽는 중 · 그 달의 첫 읽기는 1분쯤 걸릴 수 있음
-          </p>
-        <//>
-      `
     case 'unread':
-      return html`
-        <${KpiSection} title=${PANEL_TITLE}>
-          <div class="flex flex-wrap items-center gap-2" data-efficiency-state="unread">
-            <p class="m-0 text-xs text-[var(--color-status-err)]" role="alert">읽지 못함: ${view.reason}</p>
-            <${Btn} size="xs" onClick=${read} testId="keeper-month-efficiency-read-again">다시 읽기<//>
-          </div>
-        <//>
-      `
     case 'read':
-      return html`
-        <${KpiSection} title=${PANEL_TITLE}>
-          <div class="flex flex-col gap-2" data-efficiency-state="read" data-efficiency-share=${view.share.kind} data-efficiency-refresh=${view.refresh.kind}>
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <p class="m-0 text-2xs text-[var(--color-fg-muted)]">
-                ${view.month} · ${formatNumber(view.daysCovered)}일 · 전체 ${formatNumber(view.fleet.turns_total)}턴 · 집계 <${TimeAgo} timestamp=${isoOfUnixSeconds(view.generatedAt)} />
-              </p>
-              <${Btn}
-                size="xs"
-                variant="ghost"
-                disabled=${view.refresh.kind === 'refreshing'}
-                onClick=${read}
-                testId="keeper-month-efficiency-refresh"
-              >새로고침<//>
-            </div>
-            <${Share} share=${view.share} fleet=${view.fleet} />
-            ${view.refresh.kind === 'failed'
-              ? html`<p class="m-0 text-2xs text-[var(--color-status-warn)]" role="alert">마지막 새로고침 실패: ${view.refresh.reason}</p>`
-              : null}
-          </div>
-        <//>
-      `
+      return html`<${Drawn} view=${view} onRead=${readAgain} />`
   }
 }

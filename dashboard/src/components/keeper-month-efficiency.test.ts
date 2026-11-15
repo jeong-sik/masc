@@ -174,9 +174,13 @@ describe('KeeperMonthEfficiency', () => {
   const drawn = (name: string) =>
     container.querySelector('[data-efficiency-state]')?.getAttribute(name) ?? null
   const state = () => drawn('data-efficiency-state')
-  const press = async (testId: string) => {
+  const buttonOf = (testId: string): HTMLButtonElement => {
     const button = container.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)
     if (button === null) throw new Error(`no button ${testId} is drawn`)
+    return button
+  }
+  const press = async (testId: string) => {
+    const button = buttonOf(testId)
     await act(async () => { button.click() })
     await flushUi()
   }
@@ -245,7 +249,7 @@ describe('KeeperMonthEfficiency', () => {
     expect(state()).toBe('unread')
     expect(container.querySelector('[role="alert"]')).not.toBeNull()
 
-    await press('keeper-month-efficiency-read-again')
+    await press('keeper-month-efficiency-read')
     expect(fetchMonth).toHaveBeenCalledTimes(2)
     expect(state()).toBe('read')
     expect(drawn('data-efficiency-share')).toBe('measured')
@@ -258,7 +262,7 @@ describe('KeeperMonthEfficiency', () => {
     await draw(fetchMonth, 'alpha')
     expect(drawn('data-efficiency-refresh')).toBe('settled')
 
-    await press('keeper-month-efficiency-refresh')
+    await press('keeper-month-efficiency-read')
     expect(fetchMonth).toHaveBeenCalledTimes(2)
     expect(state()).toBe('read')
     expect(drawn('data-efficiency-share')).toBe('measured')
@@ -266,25 +270,61 @@ describe('KeeperMonthEfficiency', () => {
     expect(container.querySelector('[role="alert"]')).not.toBeNull()
   })
 
-  it('cannot start a second refresh while one runs', async () => {
+  it('sends nothing for a press while a read runs', async () => {
     const second = pending<KeeperEfficiencyMonth>()
     const fetchMonth = vi.fn<FetchMonth>()
       .mockResolvedValueOnce(month)
       .mockReturnValueOnce(second.promise)
     await draw(fetchMonth, 'alpha')
 
-    await press('keeper-month-efficiency-refresh')
+    await press('keeper-month-efficiency-read')
     expect(drawn('data-efficiency-refresh')).toBe('refreshing')
-    const refresh = container.querySelector<HTMLButtonElement>('[data-testid="keeper-month-efficiency-refresh"]')
-    expect(refresh?.disabled).toBe(true)
-    // A second press while the first read runs sends nothing.
-    await press('keeper-month-efficiency-refresh')
     expect(fetchMonth).toHaveBeenCalledTimes(2)
+    await press('keeper-month-efficiency-read')
+    expect(fetchMonth).toHaveBeenCalledTimes(2)
+    expect(drawn('data-efficiency-refresh')).toBe('refreshing')
 
     second.resolve(month)
     await flushUi()
     expect(drawn('data-efficiency-refresh')).toBe('settled')
     expect(fetchMonth).toHaveBeenCalledTimes(2)
+  })
+
+  // A disabled button drops keyboard focus, and so does a button that leaves
+  // the page when it is pressed. The pressed button stays the same enabled
+  // element from a failed read through the read again and a refresh.
+  it('keeps the pressed button on the page, enabled, through every read', async () => {
+    const again = pending<KeeperEfficiencyMonth>()
+    const refresh = pending<KeeperEfficiencyMonth>()
+    const fetchMonth = vi.fn<FetchMonth>()
+      .mockRejectedValueOnce(new Error('refused (503)'))
+      .mockReturnValueOnce(again.promise)
+      .mockReturnValueOnce(refresh.promise)
+    await draw(fetchMonth, 'alpha')
+    expect(state()).toBe('unread')
+    const pressed = buttonOf('keeper-month-efficiency-read')
+    const held = () => {
+      expect(buttonOf('keeper-month-efficiency-read')).toBe(pressed)
+      expect(pressed.isConnected).toBe(true)
+      expect(pressed.disabled).toBe(false)
+    }
+
+    await press('keeper-month-efficiency-read')
+    expect(state()).toBe('reading')
+    held()
+    again.resolve(month)
+    await flushUi()
+    expect(state()).toBe('read')
+    held()
+
+    await press('keeper-month-efficiency-read')
+    expect(drawn('data-efficiency-refresh')).toBe('refreshing')
+    held()
+    refresh.resolve(month)
+    await flushUi()
+    expect(drawn('data-efficiency-refresh')).toBe('settled')
+    held()
+    expect(fetchMonth).toHaveBeenCalledTimes(3)
   })
 
   it('draws the answer of a refresh in place of the one before', async () => {
@@ -298,7 +338,7 @@ describe('KeeperMonthEfficiency', () => {
     await draw(fetchMonth, 'tools-only')
     expect(drawn('data-efficiency-share')).toBe('no_turn_counted')
 
-    await press('keeper-month-efficiency-refresh')
+    await press('keeper-month-efficiency-read')
     expect(drawn('data-efficiency-share')).toBe('measured')
     expect(drawn('data-efficiency-refresh')).toBe('settled')
   })

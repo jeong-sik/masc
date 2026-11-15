@@ -88,7 +88,8 @@ vi.mock('./keeper-detail-kpi', () => ({
 }))
 
 vi.mock('./keeper-month-efficiency', () => ({
-  KeeperMonthEfficiency: () => null,
+  KeeperMonthEfficiency: ({ keeperName }: { keeperName: string }) =>
+    html`<div data-testid="keeper-month-efficiency" data-keeper=${keeperName}></div>`,
 }))
 
 vi.mock('./keeper-detail-lists', () => ({
@@ -363,6 +364,9 @@ describe('KeeperDetailPage', () => {
     expect(screen.getByText('direct chat analyst')).toBeTruthy()
     // FSM Hub is detail-only, not in the default conversation view.
     expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
+    // The month efficiency reads when it is drawn, so the conversation view
+    // does not draw it.
+    expect(screen.queryByTestId('keeper-month-efficiency')).toBeNull()
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
     // Chat entry does not request prompt/world/repository previews.
     // The mounted config and runtime editors own that demand.
@@ -381,6 +385,8 @@ describe('KeeperDetailPage', () => {
       expect(screen.getByRole('tab', { name: '상태' }).getAttribute('aria-selected')).toBe('true')
       expect(screen.getByText('운영 상태 개요')).toBeTruthy()
     })
+    // The Status tab draws the month efficiency of the Keeper on the page.
+    expect(screen.getByTestId('keeper-month-efficiency').getAttribute('data-keeper')).toBe('analyst')
   })
 
   it('opens target keeper config as an overlay from the roster row menu after a keeper route change', async () => {

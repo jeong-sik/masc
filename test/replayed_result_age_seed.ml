@@ -2,9 +2,12 @@
    replayed-result-age eval (RFC replayed-tool-results-carry-their-time §6.1).
 
    The input is a fixture whose times are already absolute
-   (scripts/eval-replayed-result-age.py resolves them). The history goes
-   through the runtime's own Start projection and envelope, so a change to
-   the codec or the envelope reaches the eval without touching this file.
+   (scripts/eval-replayed-result-age.py resolves them). A tool entry's
+   [appended_at] is stamped on its message the way Agent Core stamps a live
+   turn's results, and the history goes through the runtime's own Start
+   projection and envelope for a session started at the fixture's
+   [started_at]. A change to the codec or the envelope reaches the eval
+   without touching this file.
 
    The first prompt the runtime sends is the composed start context followed
    by the envelope, separated by a blank line (Keeper_official_client_host
@@ -34,6 +37,11 @@ let string_of name json =
   match member name json with
   | `String value -> value
   | _ -> fail "fixture: %s must be a string" name
+
+let float_of name json =
+  match member name json with
+  | `Float value -> value
+  | _ -> fail "fixture: %s must be a float" name
 
 let bool_of name json =
   match member name json with
@@ -74,7 +82,12 @@ let message_of entry =
   match string_of "role" entry with
   | "preamble" -> Runtime_model_input_tail_window.preamble_message
   | "assistant" -> Agent_core.Types.make_message ~role:Assistant (assistant_blocks entry)
-  | "tool" -> Agent_core.Types.make_message ~role:Tool [ tool_result entry ]
+  | "tool" ->
+    Agent_core.Types.make_message
+      ~metadata:
+        [ Agent_core.Types.Tool_results_appended_at.entry
+            ~appended_at:(float_of "appended_at" entry) ]
+      ~role:Tool [ tool_result entry ]
   | other -> fail "fixture: role %s is not one the eval uses" other
 
 let () =
@@ -86,17 +99,18 @@ let () =
   let history = match member "history" json with
     | `List entries -> List.map message_of entries
     | _ -> fail "fixture: history must be a list" in
+  let started_at = float_of "started_at" json in
   let context =
     Agent_core.Types.make_message ~role:System ~origin:System_context
       [ Agent_core.Types.Text (string_of "system_context" json) ] in
-  match Keeper_claude_code_runtime.project_messages history with
+  match Keeper_claude_code_runtime.project_messages ~started_at history with
   | Error _ -> fail "the Start projection refused the fixture history"
   | Ok (_ :: _, _) -> fail "fixture history must not hold System messages"
   | Ok ([], projected) ->
     let envelope =
-      Keeper_claude_code_runtime.initial_turn_prompt ~history:projected
-        ~goal:(string_of "goal" json) in
+      Keeper_claude_code_runtime.initial_turn_prompt ~session_started_at:started_at
+        ~history:projected ~goal:(string_of "goal" json) in
     print_string
       (Keeper_official_client_host.history_role_label Agent_core.Types.System
-       ^ Keeper_official_client_host.encode_history_message context
+       ^ Keeper_official_client_host.encode_start_message ~started_at context
        ^ "\n\n" ^ envelope)

@@ -317,12 +317,19 @@ type http_error =
     caller cancellation and reserved exceptions must still propagate. *)
 val classify_network_exn : exn -> http_error option
 
-(** [connect_failed_of_exn exn] is the {!Connect_failed} a connection
-    function returns for [exn]: an exception that {!classify_network_exn}
-    reads as a {!NetworkError} becomes a [Connect_failed] of the same [kind].
-    [None] for every other exception (a deadline, a reserved exception, an
-    unclassified one), which the connection function raises again. *)
-val connect_failed_of_exn : exn -> http_error option
+(** [connection_failure exn bt] is what a connection function returns for
+    [exn], raised while it was opening a connection (RFC #52028 §2.3). An
+    exception that {!classify_network_exn} reads as a {!NetworkError} becomes
+    a {!Connect_failed} of the same [kind]; a [Failure] becomes a
+    [Connect_failed] of kind [Unknown]. A reserved exception, a deadline and
+    an unclassified exception are raised again with [bt]. Every connection
+    function calls this one, so the provider transport and the exact-output
+    measurement transport read the same exception the same way. *)
+val connection_failure : exn -> Printexc.raw_backtrace -> ('a, http_error) result
+
+(** [true] for {!Connect_failed}. A receipt that carries it after dispatch
+    began cannot happen: only a connection function builds it. *)
+val is_connect_failed : http_error -> bool
 
 (** [true] only when the transport itself named the peer's close: an
     [ECONNRESET] or [EPIPE] raised directly or carried by

@@ -487,9 +487,10 @@ let known_network_error_kind = function
     | End_of_file ) as kind -> Some kind
 ;;
 
-(* For composite errors, prefer kinds that should not be retried (local
-   resource exhaustion and TLS errors) over transient network failures.
-   This mirrors the severity ordering rather than the retry policy itself. *)
+(* The kind rule of the retry policy for a network or connect failure
+   ([Retry.is_retryable], [Error.is_retryable], [Error_domain.is_retryable]):
+   a TLS error or a local resource shortage meets the same certificate,
+   configuration or shortage on the next try. *)
 let network_error_kind_is_non_retryable = function
   | Local_resource_exhaustion | Tls_error -> true
   | Connection_refused | Dns_failure | Unreachable | Timeout | Connection_reset | End_of_file
@@ -583,6 +584,29 @@ let connect_failed_of_exn exn =
       | ProviderTerminal _
       | ProviderFailure _ )
   | None -> None
+;;
+
+(* What a connection function returns for an exception raised while it was
+   opening the connection. A [Failure] there names no transport fact, but the
+   connection still did not open, so it is a [Connect_failed] of kind
+   [Unknown]. A reserved exception, a deadline and an exception nothing
+   classifies are raised again with [bt]. *)
+let connection_failure exn bt =
+  Reserved_exn.reraise_if_reserved exn;
+  match connect_failed_of_exn exn, exn with
+  | Some error, _ -> Error error
+  | None, Failure msg -> Error (Connect_failed { message = msg; kind = Unknown })
+  | None, _ -> Printexc.raise_with_backtrace exn bt
+;;
+
+let is_connect_failed = function
+  | Connect_failed _ -> true
+  | HttpError _
+  | NetworkError _
+  | TimeoutError _
+  | AcceptRejected _
+  | ProviderTerminal _
+  | ProviderFailure _ -> false
 ;;
 
 (* ── classify_network_exn / phase-mapping invariants ─────────── *)
@@ -916,13 +940,7 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
              ; kind = Dns_failure
              })
     with
-    | Eio.Io (err, _) as exn ->
-      Error (Connect_failed { message = Printexc.to_string exn; kind = classify_eio_error err })
-    | Unix.Unix_error (code, _, _) as exn ->
-      Error
-        (Connect_failed
-           { message = Printexc.to_string exn; kind = classify_unix_error code })
-    | Failure msg -> Error (Connect_failed { message = msg; kind = Unknown })
+    | exn -> connection_failure exn (Printexc.get_raw_backtrace ())
   and* tls_wrap =
     match origin.scheme with
     | Https ->
@@ -984,13 +1002,7 @@ let make_connection ?tls_config ~sw ~net ~origin () : (connection, http_error) r
     Diag.debug "http_client" "make_connection: new connection for %s" origin.url;
     Ok conn
   with
-  | exn ->
-    let bt = Printexc.get_raw_backtrace () in
-    Reserved_exn.reraise_if_reserved exn;
-    (match connect_failed_of_exn exn, exn with
-     | Some error, _ -> Error error
-     | None, Failure msg -> Error (Connect_failed { message = msg; kind = Unknown })
-     | None, _ -> Printexc.raise_with_backtrace exn bt)
+  | exn -> connection_failure exn (Printexc.get_raw_backtrace ())
 ;;
 
 (* True when the transport itself named the peer's close: an errno that
@@ -1655,27 +1667,16 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
           , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
 
-(* [Connect_failed] comes only from a connection function, which ends before
-   the request is dispatched. One carried after dispatch began is a receipt
-   that cannot happen, refused like an inconsistent phase (RFC #52028 §2.3). *)
-let connect_failed_after_dispatch = function
-  | Connect_failed _ -> true
-  | HttpError _
-  | NetworkError _
-  | TimeoutError _
-  | AcceptRejected _
-  | ProviderTerminal _
-  | ProviderFailure _ -> false
-;;
-
 (* The receipt [post_sync_once] returns for [error], read from how far the
    request got. A phase and status that cannot go together raise
-   [Invalid_argument], and so does a connect failure after dispatch began. *)
+   [Invalid_argument]. So does a [Connect_failed] after dispatch began: it
+   comes only from a connection function, which ends before the request is
+   dispatched (RFC #52028 §2.3). *)
 let post_sync_once_receipt ~phase ~status error =
   match phase, status with
   | Before_dispatch, None -> Error (Before_dispatch_error error)
   | (Dispatch_started, None | Response_received, Some _)
-    when connect_failed_after_dispatch error ->
+    when is_connect_failed error ->
     invalid_arg "Http_client.post_sync_once: a connect failure after dispatch started"
   | Dispatch_started, None -> Error (Dispatch_started_error error)
   | Response_received, Some status -> Error (Response_received_error { status; error })

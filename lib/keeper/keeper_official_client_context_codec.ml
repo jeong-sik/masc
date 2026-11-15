@@ -75,11 +75,17 @@ let message_to_json (message : Agent_core.Types.message) =
       , Option.fold ~none:`Null ~some:(fun value -> `String value) message.name )
     ; ( "tool_call_id"
       , Option.fold ~none:`Null ~some:(fun value -> `String value) message.tool_call_id )
-    ; (* The input speaker is host attribution for the Librarian (RFC-0468
-         §3.2). The official client reads this framing as prompt text and
-         its snapshot hashes cover it, so the speaker stays out: the model
-         never sees it and the hashes do not move with it. *)
-      "metadata", `Assoc (Agent_core.Types.Input_speaker.without message.metadata)
+    ; (* Two Agent Core keys stay out. The input speaker is host attribution
+         for the Librarian (RFC-0468 §3.2). The tool-results appended-at stamp
+         is a bare Unix float the model has no "now" to read against. The
+         official client reads this framing as prompt text and its snapshot
+         hashes cover it, so the model never sees either key and the hashes
+         do not move with them. *)
+      ( "metadata"
+      , `Assoc
+          (message.metadata
+           |> Agent_core.Types.Input_speaker.without
+           |> Agent_core.Types.Tool_results_appended_at.without) )
     ]
 ;;
 

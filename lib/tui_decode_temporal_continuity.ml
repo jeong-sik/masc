@@ -146,8 +146,11 @@ let step json =
        "restart_observed", Restart_observed; "summary_ready_observed", Summary_ready_observed] in
   let* operation_state = required_nullable_string_field json "operation_state" in
   let* () = match operation_state with
-    | None | Some ("Queued" | "Running" | "Succeeded" | "Failed" | "Cancelled") -> Ok ()
-    | Some value -> Error ("unsupported operation state " ^ value) in
+    | None -> Ok ()
+    | Some value ->
+      (match Keeper_chat_operation.State_name.of_wire value with
+       | Ok (_ : Keeper_chat_operation.State_name.t) -> Ok ()
+       | Error _ -> Error ("unsupported operation state " ^ value)) in
   let* turn_ref = required_nullable_string_field json "turn_ref" in
   let* working_state_messages = nullable_natural json "working_state_messages" in
   let* raw_state = required_member json "working_state" in

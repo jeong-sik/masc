@@ -1,5 +1,5 @@
 # pyright: basic
-"""Label-only screening table for the pass-time research runs (exp-time/PLAN.md). Numbers only.
+"""Label-only screening table for the pass-time research runs. Numbers only.
 
     python3 time_screen.py --runs screen-runs.json [--root <runs folder>] [--out screen.json]
 
@@ -14,8 +14,10 @@ rate, the formula of prompt_compare.py.
 
 `big3` counts absorbs made by a claim that absorbs three or more memories. It reads the blind
 merge judges' folder for the claim each absorb belongs to (cases.jsonl with key.jsonl) and never
-their decisions. `answers>=10` counts the valid answers that absorb ten memories or more, and the
-absorbs they hold. The last table line counts invalid answers by the problem kind their row names.
+their decisions. An absorbed planted stale fact has no case there, so `big3` leaves it out;
+`no_case` counts those absorbs. `answers>=10` counts the valid answers that absorb ten memories or
+more, and the absorbs they hold. The lines after the table count invalid answers by the problem kind their row
+names: once for the runs of the groups a contrast names, and once for each other group.
 """
 
 from __future__ import annotations
@@ -67,7 +69,8 @@ def invalid_kinds(run: Path) -> dict[str, int]:
 
 
 def claim_sizes(merges: Path | None) -> dict[str, int] | None:
-    """Absorbs by how many memories their claim absorbs: {"1": n, "2": n, "3+": n, "claims3+": n}."""
+    """Absorbs that have a case, by how many memories their claim absorbs:
+    {"1": n, "2": n, "3+": n, "claims3+": n, "cased": n}."""
     if merges is None or not (merges / "key.jsonl").exists():
         return None
     cases = {}
@@ -79,7 +82,7 @@ def claim_sizes(merges: Path | None) -> dict[str, int] | None:
         key = json.loads(line)
         for absorb in key["absorbs"]:
             groups[(absorb[0], cases[key["case"]]["proposed_memory"])] += 1
-    out = {"1": 0, "2": 0, "3+": 0, "claims3+": 0}
+    out = {"1": 0, "2": 0, "3+": 0, "claims3+": 0, "cased": sum(groups.values())}
     for size in groups.values():
         out["1" if size == 1 else "2" if size == 2 else "3+"] += size
         out["claims3+"] += size >= 3
@@ -129,7 +132,7 @@ def main() -> int:
             before = held.get(name, (0, 0))
             held[name] = (before[0] + pair[0], before[1] + pair[1])
     head = ["run", "valid", "ahead_keep", "past_drop", "stale_drop", "merge", "state", "drop_prec", "absorbed",
-            "big3", f"answers>={BIG_ANSWER}", "off_label", "net/item", "spent"]
+            "big3", "no_case", f"answers>={BIG_ANSWER}", "off_label", "net/item", "spent"]
     print(" | ".join(head))
     for row in table:
         c = row["counts"]
@@ -139,12 +142,18 @@ def main() -> int:
             pair = c[name]
             cells.append(f"{pair[0]}/{pair[1]}" + (f" {pair[0] / pair[1]:.2f}" if pair[1] else ""))
         cells += [str(c["absorbed"][0]), "-" if sizes is None else f"{sizes['3+']} ({sizes['claims3+']} claims)",
-                  f"{c['big_answers'][0]} ({c['big_answer_absorbs'][0]} absorbs)", str(c["off_label_drops"][0]), f"{c['net'][0] / c['net'][1]:+.2f}", str(row["spent_usd"])]
+                  "-" if sizes is None else str(c["absorbed"][0] - sizes["cased"]),
+                  f"{c['big_answers'][0]} ({c['big_answer_absorbs'][0]} absorbs)", str(c["off_label_drops"][0]),
+                  f"{c['net'][0] / c['net'][1]:+.2f}", str(row["spent_usd"])]
         print(" | ".join(cells))
-    kinds: collections.Counter[str] = collections.Counter()
-    for row in table:
-        kinds.update(row["invalid_kinds"])
-    print("invalid answers by problem kind, all runs: " + ", ".join(f"{k} {n}" for k, n in sorted(kinds.items())))
+    compared = {group for pair in config.get("contrasts", []) for group in pair}
+    for name, held in (("the compared runs", lambda group: group in compared),
+                       *((group, lambda g, group=group: g == group) for group in sorted(set(groups) - compared))):
+        kinds: collections.Counter[str] = collections.Counter()
+        for row in table:
+            if held(row["group"]):
+                kinds.update(row["invalid_kinds"])
+        print(f"invalid answers by problem kind, {name}: " + ", ".join(f"{k} {n}" for k, n in sorted(kinds.items())))
     contrasts: list[dict[str, object]] = []
     for group, against in config.get("contrasts", []):
         if group not in groups or against not in groups:
@@ -161,8 +170,8 @@ def main() -> int:
         contrasts.append(line)
         print(f"{group} vs {against}: " + ", ".join(parts))
     if args.out is not None:
-        Path(args.out).write_text(json.dumps({"runs": table, "contrasts": contrasts}, ensure_ascii=False, indent=1)
-                                  + "\n", encoding="utf-8")
+        Path(args.out).write_text(json.dumps({"runs": table, "groups": groups, "contrasts": contrasts},
+                                             ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return 0
 
 

@@ -4,13 +4,19 @@
    "label": "base-1",
    "group": "base",
    "synth": "rescore-a1/base-inkling-synth-1",
-   "merges": "rescore-a1/base-inkling-1-merges"
+   "merges": "rescore-a1/opus/base-inkling-1-merges"
   },
   {
    "label": "base-2",
    "group": "base",
    "synth": "rescore-a1/base-inkling-synth-2",
-   "merges": "rescore-a1/base-inkling-2-merges"
+   "merges": "rescore-a1/opus/base-inkling-2-merges"
+  },
+  {
+   "label": "glm-base-1",
+   "group": "glm-base",
+   "synth": "rescore-a1/base-glm-synth-1",
+   "merges": "rescore-a1/opus/base-glm-1-merges"
   },
   {
    "label": "P-1",

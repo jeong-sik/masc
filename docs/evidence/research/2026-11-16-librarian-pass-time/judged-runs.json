@@ -39,6 +39,38 @@
     "drops": "xtF-inkling-drops-2",
     "merges": "xtF-inkling-merges-2"
    }
+  ],
+  "P": [
+   {
+    "synth": "a1p-inkling-synth-1",
+    "drops": "a1p-inkling-drops-1",
+    "merges": "a1p-inkling-merges-1"
+   },
+   {
+    "synth": "a1p-inkling-synth-2",
+    "drops": "a1p-inkling-drops-2",
+    "merges": "a1p-inkling-merges-2"
+   }
+  ]
+ },
+ "label_only": {
+  "A": [
+   {
+    "synth": "xtA-inkling-synth-1"
+   }
+  ],
+  "B": [
+   {
+    "synth": "xtB-inkling-synth-1"
+   }
+  ],
+  "E": [
+   {
+    "synth": "xtE-inkling-synth-1"
+   },
+   {
+    "synth": "xtE-inkling-synth-2"
+   }
   ]
  },
  "expect": {
@@ -55,6 +87,10 @@
   ],
   [
    "F-2",
+   "base"
+  ],
+  [
+   "P",
    "base"
   ]
  ]

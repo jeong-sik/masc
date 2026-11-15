@@ -14,7 +14,9 @@ sha256, and a draft here has no finished E-real run for each E-synth run. This s
 E-synth half of `prompt_counts.measure` with the same functions (`audit_decisions`, `merge_decisions`,
 `synth_counts`) and leaves `real_valid_rate` out. Run on the baseline's own run folders it must print
 the counts prompt_lines.json pins for them; `--expect <prompt_lines.json>` checks that and stops
-when a count differs.
+when a count differs. Under each side it prints, per run, how many drops the label did not ask for
+(`dropped_off_label`), the class the blind drop judge gave each, how many memories the answer dropped
+that the label asks to merge, and how many memories the judge's classes leave out of scoring.
 
 A contrast prints d and d/σ with σ = sqrt(p(1-p)(1/n1 + 1/n2)), p the pooled rate, the formula of
 prompt_compare.py.
@@ -40,8 +42,10 @@ def load(scripts: str):
     return D, MD, C, synth_render
 
 
-def synth_half(mods, synth: Path, drops: Path | None, merges: Path | None) -> dict[str, tuple[int, int]]:
-    """The E-synth counts of one run, as `prompt_counts.measure` counts them before its E-real half."""
+def synth_half(mods, synth: Path, drops: Path | None, merges: Path | None) -> tuple[dict[str, tuple[int, int]],
+                                                                                    dict[str, Any]]:
+    """The E-synth counts of one run, as `prompt_counts.measure` counts them before its E-real half,
+    and what the drop judge said of the run's off-label drops."""
     D, MD, C, synth_render = mods
     summary = C.summary_of(synth)
     names = list(summary.targets)
@@ -62,7 +66,13 @@ def synth_half(mods, synth: Path, drops: Path | None, merges: Path | None) -> di
     numbers = MD.for_run(rows, merges, synth_render.TEMPLATE, synth).numbers(
         rows, [as_json for _, as_json in scored], target)
     counts = C.synth_counts(mine, judged.wrong_outside(rows).get(target, 0), numbers)
-    return {str(metric): (count.hits, count.chances) for metric, count in counts.items()}
+    verbs: dict[str, int] = {}
+    for drop in judged.drops:
+        verbs[drop.judged.verb] = verbs.get(drop.judged.verb, 0) + 1
+    said = {"off_label_drops": len(judged.drops), "judged": dict(sorted(verbs.items())),
+            "dropped_unmerged": sum(len(row["dropped_unmerged"]) for row in rows),
+            "memories_left_out": len(judged.excluded)}
+    return {str(metric): (count.hits, count.chances) for metric, count in counts.items()}, said
 
 
 def sigma(a: tuple[int, int], b: tuple[int, int]) -> tuple[float, float] | None:
@@ -99,17 +109,23 @@ def main() -> int:
             for run in runs:
                 synth = at(run["synth"])
                 assert synth is not None
-                counts = synth_half(mods, synth, at(run.get("drops")), at(run.get("merges")))
-                listed.append({"synth": run["synth"], "counts": counts})
+                counts, said = synth_half(mods, synth, at(run.get("drops")), at(run.get("merges")))
+                listed.append({"synth": run["synth"], "counts": counts, "drops": said})
                 for name, pair in counts.items():
                     before = total.get(name, (0, 0))
                     total[name] = (before[0] + pair[0], before[1] + pair[1])
             sides[label] = total
             per_run[label] = listed
             print(label, " ".join(f"{name} {pair[0]}/{pair[1]}" for name, pair in total.items()))
+            for run in listed:
+                said = run["drops"]
+                print(f"  {run['synth']}: off-label drops {said['off_label_drops']} judged {said['judged']}, "
+                      f"dropped instead of merged {said['dropped_unmerged']}, memories left out of scoring {said['memories_left_out']}")
     if args.expect is not None:
         pinned = json.loads(Path(args.expect).read_text(encoding="utf-8"))["models"]
         for label, model in config.get("expect", {}).items():
+            if pinned[model]["baseline"] is None:
+                raise SystemExit(f"{args.expect} pins no baseline for {model}")
             want = pinned[model]["baseline"]["counts"]
             for name, pair in sides[label].items():
                 held = want[name]

@@ -233,22 +233,23 @@ let test_recent_view_reads_like_filter_map_recent () =
   check (list int) "newest three parsed rows across months" [ 2; 3; 4 ]
     (Dated_jsonl.read_recent_view (view_of_i 3) store)
 
-let test_recent_view_keeps_the_answer_while_sizes_hold () =
-  (* Day files only grow. Rewriting rows to the same length breaks that rule
-     on purpose: the store's rows change, the view still answers from its
-     kept read, and that is how a test sees an unchanged store go unread. *)
+let test_recent_view_keeps_the_answer_while_files_hold () =
+  (* The projection runs once for every row read, so a kept answer shows as a
+     second call that projects nothing. *)
   let location = temp_store "dated_jsonl_view_kept" in
   let dir = Dated_jsonl.Store.dir location in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|} ];
   let store = Dated_jsonl.open_store location in
-  let view = view_of_i 2 in
+  let projected = ref 0 in
+  let view =
+    Dated_jsonl.recent_view 2 ~f:(fun j ->
+      incr projected;
+      Some (json_i j))
+  in
   check (list int) "first read" [ 1; 2 ] (Dated_jsonl.read_recent_view view store);
-  Out_channel.with_open_bin (day_path dir "2026-01" "01") (fun oc ->
-    output_string oc "{\"i\":7}\n{\"i\":8}\n");
-  check (list int) "the rows changed" [ 7; 8 ]
-    (Dated_jsonl.filter_map_recent store 2 ~f:(fun j -> Some (json_i j)));
-  check (list int) "same sizes, kept answer" [ 1; 2 ]
-    (Dated_jsonl.read_recent_view view store)
+  let after_first_read = !projected in
+  check (list int) "kept answer" [ 1; 2 ] (Dated_jsonl.read_recent_view view store);
+  check int "no row read again" after_first_read !projected
 
 let test_recent_view_reads_an_appended_row () =
   let location = temp_store "dated_jsonl_view_append" in
@@ -292,6 +293,64 @@ let test_recent_view_reads_the_first_file_of_an_empty_store () =
   check (list int) "empty store" [] (Dated_jsonl.read_recent_view view store);
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
   check (list int) "first file" [ 1 ] (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_keeps_nothing_when_a_listed_month_is_gone_by_its_read () =
+  (* The older month leaves after the newest row is read and comes back after
+     the call, the way a month that a failed listing reads as empty would.
+     The projection moves it, once, to put the change at that moment. That
+     call's answer must not be kept, so the next call reads both months. *)
+  let location = temp_store "dated_jsonl_view_month_gone" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":2}|} ];
+  let store = Dated_jsonl.open_store location in
+  let older = Filename.concat dir "2026-01" in
+  let aside = Filename.concat dir ".older-month-aside" in
+  let moved = ref false in
+  let view =
+    Dated_jsonl.recent_view 2 ~f:(fun j ->
+      if not !moved then begin
+        moved := true;
+        Sys.rename older aside
+      end;
+      Some (json_i j))
+  in
+  check (list int) "the older month was gone by its read" [ 2 ]
+    (Dated_jsonl.read_recent_view view store);
+  Sys.rename aside older;
+  check (list int) "the next read sees both months" [ 1; 2 ]
+    (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_reads_a_file_replaced_with_the_same_size () =
+  (* A day file replaced whole by a rename is another file at the same size;
+     the size alone would keep the old answer. *)
+  let location = temp_store "dated_jsonl_view_replaced" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 1 in
+  check (list int) "first read" [ 1 ] (Dated_jsonl.read_recent_view view store);
+  let path = day_path dir "2026-01" "01" in
+  let replacement = Filename.concat dir ".replacement" in
+  Out_channel.with_open_bin replacement (fun oc -> output_string oc "{\"i\":7}\n");
+  check int "same size" (Unix.stat path).Unix.st_size (Unix.stat replacement).Unix.st_size;
+  Sys.rename replacement path;
+  check (list int) "the replacement's row" [ 7 ] (Dated_jsonl.read_recent_view view store)
+
+let test_recent_view_keeps_one_answer_per_store () =
+  let location_a = temp_store "dated_jsonl_view_store_a" in
+  let location_b = temp_store "dated_jsonl_view_store_b" in
+  let dir_a = Dated_jsonl.Store.dir location_a in
+  write_dated_file dir_a "2026-01" "01" [ {|{"i":1}|} ];
+  write_dated_file (Dated_jsonl.Store.dir location_b) "2026-01" "01" [ {|{"i":2}|} ];
+  let store_a = Dated_jsonl.open_store location_a in
+  let store_b = Dated_jsonl.open_store location_b in
+  let view = view_of_i 1 in
+  check (list int) "store a" [ 1 ] (Dated_jsonl.read_recent_view view store_a);
+  check (list int) "store b" [ 2 ] (Dated_jsonl.read_recent_view view store_b);
+  write_dated_file dir_a "2026-01" "01" [ {|{"i":3}|} ];
+  check (list int) "store a after its append" [ 3 ] (Dated_jsonl.read_recent_view view store_a);
+  check (list int) "store b as it was" [ 2 ] (Dated_jsonl.read_recent_view view store_b)
 
 let test_collect_matching_counts_selected_rows () =
   let location = temp_store "dated_jsonl_collect_matching" in
@@ -1852,8 +1911,8 @@ let () =
         [
           test_case "reads like filter_map_recent" `Quick
             test_recent_view_reads_like_filter_map_recent;
-          test_case "keeps the answer while sizes hold" `Quick
-            test_recent_view_keeps_the_answer_while_sizes_hold;
+          test_case "keeps the answer while files hold" `Quick
+            test_recent_view_keeps_the_answer_while_files_hold;
           test_case "reads an appended row" `Quick
             test_recent_view_reads_an_appended_row;
           test_case "reads a new day file" `Quick
@@ -1862,6 +1921,12 @@ let () =
             test_recent_view_drops_a_removed_day_file;
           test_case "reads the first file of an empty store" `Quick
             test_recent_view_reads_the_first_file_of_an_empty_store;
+          test_case "keeps nothing when a listed month is gone by its read" `Quick
+            test_recent_view_keeps_nothing_when_a_listed_month_is_gone_by_its_read;
+          test_case "reads a file replaced with the same size" `Quick
+            test_recent_view_reads_a_file_replaced_with_the_same_size;
+          test_case "keeps one answer per store" `Quick
+            test_recent_view_keeps_one_answer_per_store;
         ] );
       ( "collect_matching",
         [ test_case "n counts selected rows" `Quick

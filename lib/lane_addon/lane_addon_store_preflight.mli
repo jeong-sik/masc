@@ -44,6 +44,11 @@ type decoder =
           the proof link. *)
   | Exact_slot_observation
       (** {!Lane_addon_exact_observation.request_id}, the startup sweep's read. *)
+  | Exact_directory_entry
+      (** {!Lane_addon_store.exact_directory_entry} or
+          {!Lane_addon_store.exact_directory}: the startup sweep stops at this
+          entry of an Exact record, proof link or slot observation directory,
+          or at this path that should be such a directory. *)
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.Published_reader.read} *)
   | Tool_request_payload (** The consumer's current pure payload decoder. *)
@@ -77,7 +82,8 @@ type exact_files =
   ; deleted : deleted_record option  (** The record the Exact scan deletes there. *)
   ; proof : exact_proof
         (** The proof link the original's request names, unless the Exact scan
-            deletes it with that record. A link no kept record names is read
+            deletes it with that record. A link the startup sweep stops at is
+            not opened and is [Unreadable_proof]. A link no kept record names is read
             here: whether the Exact scan finds it depends on the other records
             of its declaration. *)
   ; store : Lane_addon_store.t
@@ -87,8 +93,11 @@ type exact_files =
 
 type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_files, string) result
 (** Reads by path, as the Exact scan does, and judges the record with the Exact
-    scan's own judgment. [Error] names two store roots: a proof link names
-    another root than this scan reads. *)
+    scan's own judgment. A record the startup sweep stops at
+    ({!Lane_addon_store.exact_directory_entry}) is deleted unread: it is
+    absent, and the deleted record shows [Deleted_unknown]. [Error] names two
+    store roots, a proof link that names another root than this scan reads,
+    or a path [lstat] could not read. *)
 
 type payload_verdict =
   | Payload_valid
@@ -136,14 +145,16 @@ type refusal =
             originals included, and the paths the consumer check names. For an
             Exact record stored under its own key it is that file, its proof
             link and the slot observation files of its request, those that
-            exist. *)
+            exist; that holds too when its proof link is an entry the startup
+            sweep stops at. For any other Exact directory, or entry of one, the
+            startup sweep stops at it is that path. *)
   }
 
 type report =
   { rows : int
         (** Files (installation slots, for native claims) read. The Exact scan
-            also counts the slot observation files it reads and the proof
-            links it refuses. *)
+            also counts the slot observation files it reads, the proof links
+            it refuses and the directory entries it refuses. *)
   ; refusals : refusal list  (** In path order. *)
   }
 

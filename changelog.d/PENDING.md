@@ -1,0 +1,12 @@
+### Fixed
+
+- `validate-stores` reads the Exact request store, and the entries of the Exact
+  record, proof link and slot observation directories, with the startup sweep's
+  own judgment. It skipped a name that was not `<name>.json`, a declaration
+  path that was not a directory, and read a symbolic link through, so a store
+  holding `notes.txt` or a symbolic link passed the check and then stopped the
+  startup sweep, which deleted nothing. Such an entry is now refused, and its
+  `fresh state` line deletes that entry alone; a symbolic link at a record's
+  proof link path deletes the record, the link and the record's slot
+  observations. The sweep's refusal now names the entry below the store root
+  (#51820, #PENDING).

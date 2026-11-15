@@ -2034,6 +2034,24 @@ let test_preflight_refuses_a_body_refusal_whose_size_evidence_goes ()=
     let record_path,proof_path=exact_files fixture capture in
     check int "the refusal passes while its record and proof are kept" 0
       (List.length (closure_preflight fixture).refusals);
+    (* The startup sweep stops at a record or proof link that is a symbolic
+       link, so the Exact check deletes it unread, the record with such a link
+       (#51820). [run] would read both through the link, so the owner check
+       reads them as fresh state leaves them: no record, no size evidence. *)
+    List.iter (fun (label,path) ->
+      let moved=Filename.concat fixture.base_path (Filename.basename path) in
+      io (fun () -> Sys.rename path moved;Unix.symlink moved path);
+      let exact=io (fun () -> Lane_addon_store_preflight.scan
+        Lane_addon_store_preflight.Store.Exact_requests ~base_path:fixture.base_path) |> get in
+      check bool (label ^ ": the Exact check deletes the record") true
+        (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+           List.mem record_path refusal.delete) exact.refusals);
+      check bool (label ^ ": the size evidence goes with the record, so the owner is refused") true
+        (refuses_owner fixture owner (closure_preflight fixture));
+      io (fun () -> Sys.remove path;Sys.rename moved path))
+      ["a record that is a symbolic link",record_path;"a proof link that is a symbolic link",proof_path];
+    check int "the refusal passes again once both are regular files" 0
+      (List.length (closure_preflight fixture).refusals);
     (* A proof link that is not JSON: the Exact check deletes the record with it. *)
     io (fun () -> write proof_path "{");
     check bool "the size evidence goes with the deleted record, so the owner is refused" true

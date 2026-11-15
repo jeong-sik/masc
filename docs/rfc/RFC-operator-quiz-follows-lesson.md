@@ -3,7 +3,7 @@ rfc: "operator-quiz-follows-lesson"
 title: "수업 뒤 퀴즈: 퀴즈가 수업이 인용한 기록에서만 새 문항을 낸다"
 status: Draft
 created: 2026-11-14
-updated: 2026-11-14
+updated: 2026-11-15
 author: claude
 related: ["operator-lesson-lane", "operator-quiz-lane"]
 ---
@@ -14,6 +14,7 @@ related: ["operator-lesson-lane", "operator-quiz-lane"]
 - 앞 RFC: [operator-lesson-lane](RFC-operator-lesson-lane.md) §10 의 첫 항목이다.
 - 좌표는 `파일:줄` 이다. `lib/` 와 `docs/` 는 main `3760a3a2a900`, `addons/` 는 아직 병합되지 않은 수업 스택(#51895, #51896, #51897, #51987)의 #51897 head `485c31fd9556` 기준이다. §9 에 읽은 범위를 적었다.
 - 수업 스택이 병합된 뒤에 구현한다. 리뷰에서 수업의 행 모양이 바뀌면 §3.1 을 다시 쓴다.
+- 2026-11-15 개정: 시험 설치에서 첫 퀴즈 세션이 수업의 인용 기록을 하나도 읽지 못했다(#52289). §3.8 에 첫 읽기 시작점을 더하고 결정 D5 를 더했다. 개정의 좌표는 main `36c2f465c9b2` 기준이다.
 
 ## 0. 요약
 
@@ -139,6 +140,8 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 
 퀴즈를 수업 바로 뒤에 두면 빠지는 구간이 그 사이 시간으로 줄어든다. 가이드에 그렇게 적는다. 한 번도 자료에 실리지 않은 cite 의 수를 `quiz/measures` 에 보여 준다. 구간을 없애는 방법 둘은 §8 D2 에 적었다.
 
+이 표는 퀴즈가 질문을 낸 세션이 이미 있어 cursor 가 움직인 뒤만 다룬다. 질문을 낸 세션이 아직 없을 때는 §3.8 이다.
+
 ### 3.7 행과 재는 값
 
 - 수업을 묶은 설치는 `quiz/questions` 와 `quiz/review` 의 문항 행에 `taught` 를 더한다. 그 문항을 낼 때까지 적힌 `LessonSeen` 의 cite 가운데 문항의 출처와 같은 것이 하나라도 있으면 참이다. log 에서 계산하고 따로 저장하지 않는다.
@@ -151,6 +154,33 @@ cursor 는 지금처럼 문항을 낸 세션만 옮긴다(`quiz_flow.py:191-200`
 - `lesson` 은 수업을 묶은 설치의 행에만 있다.
 
 `first_attempt` 는 보고하는 값이다. 어떤 상태도 그 값을 읽지 않는다. 무작위 배정이 아니다. 묶은 뒤에는 새 문항이 모두 `taught` 이므로, 나머지 쪽은 묶기 전 문항과 다시 묻는 문항이다. 주제의 난이도와 시기 차이가 섞인다.
+
+### 3.8 첫 읽기 시작점
+
+질문을 낸 세션이 아직 없으면 퀴즈는 첫 세션을 연 시각부터 읽는다(`addons/operator-quiz/quiz_flow.py:338-349`). history 전체를 읽다 worker 가 메모리 부족으로 죽은 #44537 뒤에 정한 규칙이다. cursor 는 질문을 낸 세션만 옮긴다(§3.5). 그래서 질문을 낸 세션이 생길 때까지 모든 세션이 같은 시각부터 읽는다.
+
+수업은 binding 의 `since` 부터 읽는다. 그 뒤로는 outline 까지 간 지난 세션의 cursor 부터 읽는다(`addons/operator-lesson/lesson_flow.py:53-64, 136-147`). 둘을 맞대면 이렇게 된다.
+
+- 수업을 묶어 새로 설치한 퀴즈는 첫 퀴즈 세션보다 먼저 만들어진 기록을 읽지 못한다.
+- 수업이 그 기록을 인용해도 §3.5 의 거르기에서 모두 빠진다. 다시 물을 문항도 없으면 세션은 `no_material` 로 끝난다.
+- 2026-11-15 시험 설치에서 그대로 일어났다(§7, #52289).
+
+고친다.
+
+- 수업을 묶은 퀴즈의 binding 은 `since` 를 받는다. 뜻은 수업의 `since` 와 같다: 첫 세션이 읽기 시작하는 Unix 시각(초)이다. 가이드는 수업 선언과 같은 값을 적으라고 쓴다.
+- 수업 source 가 있으면 `since` 가 꼭 있어야 하고, 없으면 `since` 를 받지 않는다. binding 스키마를 object 의 `oneOf` 두 갈래로 쓴다: `sources` 가 빈 배열이고 `since` 가 없는 갈래, `sources` 가 하나이고 `since` 가 있는 갈래. host 의 검사기는 object 단위 `oneOf` 를 받고, 값이 갈래 하나에만 맞아야 통과시킨다(`lib/lane_addon/lane_addon_action.ml:82-85, 137-143`). 그래서 틀린 선언은 저장할 때 거절된다.
+- 값 검사는 수업과 같다. 정수나 실수이고, 유한하고, 0 이상이다. 수업의 `since_of_binding` 을 `addons/records.py` 로 옮겨 두 패키지가 같이 쓴다.
+- `FollowsLesson` 에 `since` 를 더한다(`addons/operator-quiz/quiz_log.py:471-476`). 세션을 열 때 binding 에서 읽어 적고, 그 뒤에는 log 만 읽는다(§3.4).
+- 첫 읽기는 이렇게 고른다.
+  1. 앞서 질문을 낸 세션의 cursor 가 있으면 지금처럼 거기서부터 읽는다.
+  2. 없고 이 세션이 수업을 따르면 자기 `FollowsLesson.since` 부터 읽는다.
+  3. 둘 다 아니면 지금처럼 첫 세션을 연 시각부터 읽는다. 묶지 않은 퀴즈는 바뀌지 않는다.
+
+읽는 양은 운영자가 정한 `since` 로 묶인다. 수업을 묶은 퀴즈의 첫 세션은 수업의 첫 세션과 같은 범위를 읽는다. history 전체를 읽던 #44537 의 경로로 돌아가지 않는다. 시험에서 수업은 11-13 부터 이틀 남짓의 기록을 256 MiB 안에서 읽었다. 같은 범위를 퀴즈가 읽어도 되는지는 구현 뒤 시험 설치로 확인한다.
+
+`FollowsLesson` 의 모양이 바뀐다. 이 사건이 적힌 log 는 #52003 병합(2026-11-15) 뒤의 시험 설치 하나뿐이다. `since` 가 없는 `FollowsLesson` 은 읽지 않는다(hard cut). 시험 설치의 퀴즈 volume 은 지우고 다시 만든다. 옛 모양을 읽는 코드나 변환 코드는 만들지 않는다.
+
+질문을 낸 세션이 생긴 뒤에는 `since` 를 다시 쓰지 않는다. 그때부터 빠지는 기록은 §3.6 이다.
 
 ## 4. 수업 출력의 크기가 먼저다
 
@@ -194,12 +224,38 @@ L2 의 Python 시험(`addons/tests/`):
 
 운영자가 하는 일: 두 선언의 `run_id` 를 맞추고 퀴즈 선언에 source 를 더해 저장한다. 퀴즈 worker 는 새 instance 로 다시 뜨고 `/state` 는 그대로다(§2). 퀴즈 Schedule 을 수업 바로 뒤로 옮긴다.
 
+### 6.1 첫 읽기 시작점(§3.8, 2026-11-15)
+
+위 층은 모두 병합됐다. §3.8 은 새 native stack 으로 올린다.
+
+| 층 | 내용 | 확인 |
+| --- | --- | --- |
+| L0 | 이 개정 | |
+| L1 | `since_of_binding` 을 `addons/records.py` 로 옮김, 퀴즈 binding 스키마의 `oneOf`, `FollowsLesson.since`, 첫 읽기 규칙, revision 올림 | 아래 시험 |
+| L2 | 가이드와 예제 선언에 `since`, `addons/README.md` | 예제 선언이 `test_lane_addon_config` 에서 읽힌다 |
+
+L1 의 시험:
+
+1. 수업을 묶고 질문을 낸 세션이 없으면 첫 읽기는 `FollowsLesson.since` 부터다.
+2. 질문을 낸 세션이 있으면 `since` 와 상관없이 그 cursor 부터 읽는다.
+3. 묶지 않은 퀴즈는 지금처럼 첫 세션을 연 시각부터 읽는다. 지금 있는 시험을 본문 수정 없이 통과한다.
+4. 수업을 묶었는데 `since` 가 없거나, 묶지 않았는데 `since` 가 있으면 binding 스키마가 거절한다. 같은 경우를 OCaml 선언 시험(`test_lane_addon_config`)에도 둔다.
+5. `since` 가 없는 `FollowsLesson` 줄은 log 오류로 읽지 않는다.
+6. #52289 재현: 수업이 인용한 기록이 첫 퀴즈 세션보다 오래돼도, `since` 가 그보다 앞이면 그 기록이 자료에 남는다.
+7. 수업의 `since` 시험은 함수를 옮긴 뒤에도 본문 수정 없이 통과한다.
+
+운영자가 하는 일: 수업을 묶은 퀴즈 선언에 수업과 같은 `since` 를 적어 저장한다. 지금 수업을 묶은 설치는 시험 설치 하나뿐이다.
+
 ## 7. 확인하지 못한 것
 
 - 관측 중에 log 에 쓰는 것을 막는 규칙은 host 코드와 가이드에서 찾지 못했다. 다만 host 가 관측 응답을 거절해도(예: 크기 초과) 퀴즈의 쓰기는 남는다. `LessonSeen` 은 받은 사실만 적으므로 다시 불려도 같은 값이고, 한 번만 적힌다. L2 에서 실제 host 로 확인한다.
 - 퀴즈의 관측 응답 `coverage` 가 묶인 source 를 언급해야 하는지 읽지 않았다. 지금 퀴즈는 빈 배열을 준다.
 - `run_id` 를 바꾸면 Dashboard 묶음과 Goal binding 에 어떤 일이 생기는지 읽지 않았다. `/state` 가 유지된다는 것만 확인했다. worker 를 지울 때 named volume 이 남는다는 것은 Docker 의 동작에 기댄 추정이다(`docs/guides/machine-addon-state.md:32-38` 은 같은 말을 한다).
-- 실제 설치로 돌려 본 것은 없다.
+- 2026-11-15 시험 설치(Apple container, 모델 `glm-coding.glm-5.3-flash`, run_id `operator-study-trial`)에서 돌려 본 것:
+  - 19:12 수업 compose(장면 2). outline 은 약 5분 40초 뒤 응답했다. 장면 하나는 서버 재시작으로 끊겨 `outcome_unknown`, 하나는 쓰였다. 쓰인 장면은 pin 14개를 인용했다.
+  - 퀴즈의 관측은 그 장면을 받았다: `lesson.scenes_seen 1`, `cites_seen 14`.
+  - 19:43 퀴즈 compose(문항 1)는 이 설치의 첫 세션이었고 `no_material` 로 끝났다(`cites_unmatched 14`). §3.8 의 경우다.
+  - 그래서 출제 요청, Approvals 의 ask, 채점, `taught` 는 실제 설치로 확인하지 못했다.
 
 ## 8. 운영자 결정
 
@@ -209,6 +265,7 @@ L2 의 Python 시험(`addons/tests/`):
 | D2 | 빠지는 구간(§3.6)을 어떻게 하나 | v1 은 그대로 두고 수를 보여 준다 | 대안 셋. (다) 수업 장면을 자료로 쓴다(§5): 구간이 없어지지만 문항의 근거가 조각이 된다. (가) 퀴즈가 지난 세션의 보존된 page 에서도 찾는다: core 는 그대로지만 compose 마다 지난 page 를 모두 훑는다. (나) host 에 pin 으로 기록 하나를 읽는 요청을 더한다: 구간이 없어지지만 core 를 고치고 별도 RFC 가 필요하다 |
 | D3 | #51941(수업 출력 크기)을 이 스택 앞에 고치나 | 고친다(§4). #51987 로 올렸다 | 지난 수업의 장면이 Results 에서 사라진다. 안 고치면 장면이 쌓인 뒤 퀴즈가 새 문항을 못 낸다 |
 | D4 | 두 설치가 같이 쓸 `run_id` | 예제 둘을 `operator-study` 로 맞춘다 | 이미 설치한 퀴즈의 선언을 고쳐 저장해야 한다 |
+| D5 | 질문을 낸 세션이 없는 묶은 퀴즈의 첫 읽기 시작점(§3.8) | 퀴즈 binding 에 수업과 같은 뜻의 `since` 를 두고, 묶으면 꼭 적게 한다 | 운영자가 두 선언의 `since` 를 맞춰야 한다. 어긋나도 퀴즈는 알 수 없고 `cites_unmatched` 로만 보인다. 대안 둘. (라) 수업의 `scenes` 행이 읽은 범위의 시작 시각을 싣고 퀴즈가 그 값부터 읽는다: 맞출 값이 없어지지만 다른 설치가 낸 값이 읽는 양을 정하므로 상한을 따로 정해야 하고, 수업의 행 모양이 바뀐다. (나) host 에 pin 으로 기록 하나를 읽는 요청을 더한다(D2 와 같다): 첫 읽기와 §3.6 의 구간이 함께 없어지지만 core 를 고치고 별도 RFC 가 필요하다 |
 
 ## 9. 읽은 범위와 확신
 
@@ -218,6 +275,12 @@ L2 의 Python 시험(`addons/tests/`):
 - `addons/operator-lesson/lane.toml`, `lesson_projection.py:40-100`, `lesson_log.py:33-46, 77-90`. `addons/records.py:166-260, 372-552`.
 - `addons/output-statistics/lane.toml`, `server.py:60-115`.
 
+**2026-11-15 개정 때 직접 읽음(main `36c2f465c9b2`):**
+- `addons/operator-quiz/quiz_flow.py:186-221, 327-349`, `quiz_log.py:466-480`, `lane.toml:35-78`.
+- `addons/operator-lesson/lesson_flow.py:53-64, 118-147`.
+- `lib/lane_addon/lane_addon_action.ml:62-160`, `lane_addon_config.ml:175-181`.
+- #44537 본문. 시험 설치의 Lane 행과 exact 요청 기록.
+
 **조사 보고에 기댐(읽기 전용 에이전트 한 번, 2026-11-14):**
 - §2 표의 `lib/lane_addon/` 좌표 전부와 `test/test_lane_addon_composition.ml`. 직접 다시 읽지 않았다.
 
@@ -226,3 +289,5 @@ L2 의 Python 시험(`addons/tests/`):
 - 묶지 않은 퀴즈가 그대로 돈다: 높다. 새 사건은 source 가 있을 때만 적힌다.
 - 빠지는 구간이 실제로 얼마나 큰가: 모른다. 수업이 무엇을 인용하는지에 달렸다. `cites_unmatched` 로 본다.
 - 수업을 읽으면 정답이 늘어나는가: 모른다. §3.7 의 값은 비교군이 고르지 않다.
+- §3.8 이 시험의 `no_material` 을 없애는가: 높다. 원인이 첫 읽기 시작점 하나이고, 수업이 인용한 기록은 모두 수업의 `since` 뒤에 있다.
+- 묶은 퀴즈의 첫 세션이 `since` 부터 읽어도 메모리 안에 드는가: 모른다. 수업은 같은 범위를 256 MiB 안에서 읽었지만, 퀴즈의 읽기는 따로 재지 않았다.

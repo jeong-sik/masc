@@ -501,10 +501,6 @@ let observed ~at session =
       ; to_at = at
       } )
 
-let opens = "\xe2\x94\x8c"
-let inside = "\xe2\x94\x82"
-let closes = "\xe2\x94\x94"
-
 let test_a_call_row_names_the_call_a_press_opens () =
   let view = Pane.lines ~rows ~cols ~scroll:0 (runner_input ()) in
   check bool "by the provider's call id" true

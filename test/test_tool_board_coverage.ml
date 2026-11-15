@@ -73,8 +73,6 @@ let parse_create_response_json body =
     | None ->
         Alcotest.failf "expected JSON payload in create response: %s" body
 
-let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
-
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture

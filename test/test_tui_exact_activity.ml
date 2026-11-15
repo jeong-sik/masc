@@ -1,6 +1,5 @@
 module A = Masc_tui_exact_activity
 module R = Masc_tui_runtime_config_receipt
-let ok = function Ok value -> value | Error detail -> Alcotest.fail detail
 let admitted = function
   | Ok value -> value
   | Error notice -> Alcotest.fail (Masc_tui_activity_notice.text ~ko:false notice)

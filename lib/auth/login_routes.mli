@@ -62,7 +62,8 @@ type t =
   ; now : unit -> Ptime.t  (** The wall clock. *)
   ; draw : unit -> string
         (** 32 random bytes as lowercase hex ({!Random_id.hex} in the server):
-            user ids, namespaces, session ids, and the nonce of a page. *)
+            user ids, namespaces and session ids. A page draws its nonce with
+            {!Account_page.Nonce.draw}. *)
   }
 
 (** [POST /auth/oidc/start] and [POST /auth/github/start].

@@ -171,8 +171,8 @@ let completion_page ~nonce ~return_to ~cookie =
       ; no_referrer
       ; ( "content-security-policy"
         , Printf.sprintf
-            "default-src 'none'; script-src 'nonce-%s'; %s; %s"
-            nonce
+            "default-src 'none'; script-src %s; %s; %s"
+            (Account_page.Nonce.source nonce)
             (Account_page.style_source ~nonce)
             Account_page.formless_limits )
       ; set_cookie (Q.set_session_cookie cookie)
@@ -189,8 +189,8 @@ let completion_page ~nonce ~return_to ~cookie =
                (escape (T.Local_path.to_string return_to))
            ]
          ^ Printf.sprintf
-             "\n<script nonce=\"%s\">location.replace(document.getElementById(\"next\").getAttribute(\"href\"));</script>"
-             nonce)
+             "\n<script %s>location.replace(document.getElementById(\"next\").getAttribute(\"href\"));</script>"
+             (Account_page.Nonce.attribute nonce))
   }
 ;;
 
@@ -309,7 +309,7 @@ let start t provider ~origin ~session_cookie ~fields =
     begin_login t login ~invite ~return_to ~replaces
   in
   match started with
-  | Error failure -> refused_page ~nonce:(t.draw ()) failure
+  | Error failure -> refused_page ~nonce:(Account_page.Nonce.draw ()) failure
   | Ok (sealed, authorization_url) ->
     { status = See_other_303
     ; headers =
@@ -469,8 +469,8 @@ let callback t provider ~transaction_cookie ~query =
   in
   let answer =
     match completed with
-    | Error failure -> refused_page ~nonce:(t.draw ()) failure
-    | Ok (return_to, cookie) -> completion_page ~nonce:(t.draw ()) ~return_to ~cookie
+    | Error failure -> refused_page ~nonce:(Account_page.Nonce.draw ()) failure
+    | Ok (return_to, cookie) -> completion_page ~nonce:(Account_page.Nonce.draw ()) ~return_to ~cookie
   in
   { answer with headers = answer.headers @ [ set_cookie Q.clear_transaction_cookie ] }
 ;;

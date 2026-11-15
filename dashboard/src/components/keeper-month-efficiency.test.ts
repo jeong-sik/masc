@@ -46,23 +46,29 @@ const month: KeeperEfficiencyMonth = {
 const nothing: KeeperMonthEfficiencyRead = { data: null, loading: false, error: null }
 
 describe('keeperMonthEfficiencyView', () => {
-  it('says nothing before a read was asked', () => {
-    expect(keeperMonthEfficiencyView(nothing, 'alpha')).toEqual({ kind: 'not_asked' })
+  it('says nothing in the frame before the read was asked', () => {
+    expect(keeperMonthEfficiencyView(nothing, 'alpha', true)).toEqual({ kind: 'not_asked' })
+  })
+
+  // Without a confirmed workspace the resource asks nothing. That is neither
+  // a month without the Keeper nor a panel with nothing to say.
+  it('says it has no workspace when none is confirmed', () => {
+    expect(keeperMonthEfficiencyView(nothing, 'alpha', false)).toEqual({ kind: 'no_workspace' })
   })
 
   it('is reading while the first read is in flight', () => {
-    expect(keeperMonthEfficiencyView({ ...nothing, loading: true }, 'alpha')).toEqual({ kind: 'reading' })
+    expect(keeperMonthEfficiencyView({ ...nothing, loading: true }, 'alpha', true)).toEqual({ kind: 'reading' })
   })
 
   // A read that failed has no month to show. Drawing it as a month without
   // this Keeper would say the Keeper did nothing.
   it('keeps a failed first read apart from a month without the Keeper', () => {
-    expect(keeperMonthEfficiencyView({ ...nothing, error: 'the read timed out' }, 'alpha'))
+    expect(keeperMonthEfficiencyView({ ...nothing, error: 'the read timed out' }, 'alpha', true))
       .toEqual({ kind: 'unread', reason: 'the read timed out' })
   })
 
   it('divides the totals of the Keeper by its turns', () => {
-    const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'alpha')
+    const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'alpha', true)
     expect(view).toEqual({
       kind: 'read',
       month: '2026-11',
@@ -83,20 +89,20 @@ describe('keeperMonthEfficiencyView', () => {
   })
 
   it('does not divide for a row with no counted turn', () => {
-    const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'tools-only')
+    const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'tools-only', true)
     expect(view.kind === 'read' && view.share).toEqual({ kind: 'no_turn_counted', calls: 4, failed: 1 })
   })
 
   it('tells a Keeper with no row from a Keeper with a row', () => {
-    const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'beta')
+    const view = keeperMonthEfficiencyView({ ...nothing, data: month }, 'beta', true)
     expect(view.kind === 'read' && view.share).toEqual({ kind: 'absent' })
   })
 
   it('keeps the last numbers while a refresh runs and after it fails', () => {
-    const refreshing = keeperMonthEfficiencyView({ data: month, loading: true, error: null }, 'alpha')
+    const refreshing = keeperMonthEfficiencyView({ data: month, loading: true, error: null }, 'alpha', true)
     expect(refreshing.kind === 'read' && refreshing.refresh).toEqual({ kind: 'refreshing' })
     expect(refreshing.kind === 'read' && refreshing.share.kind).toBe('measured')
-    const failed = keeperMonthEfficiencyView({ data: month, loading: false, error: 'refused (503)' }, 'alpha')
+    const failed = keeperMonthEfficiencyView({ data: month, loading: false, error: 'refused (503)' }, 'alpha', true)
     expect(failed.kind === 'read' && failed.refresh).toEqual({ kind: 'failed', reason: 'refused (503)' })
     expect(failed.kind === 'read' && failed.share.kind).toBe('measured')
   })
@@ -113,17 +119,28 @@ async function flushUi(): Promise<void> {
   })
 }
 
+// The panel reads only for a confirmed workspace. Both steps act on the
+// module graph this test imports the panel from.
 async function loadPanel(fetchMonth: FetchMonth) {
   vi.resetModules()
   vi.doMock('../api/dashboard-keeper-efficiency', async () => ({
     ...(await vi.importActual<typeof import('../api/dashboard-keeper-efficiency')>('../api/dashboard-keeper-efficiency')),
     fetchKeeperEfficiencyCurrentMonth: fetchMonth,
   }))
-  // The panel reads only for a confirmed workspace; confirm it in the module
-  // graph this test is about to import.
   const { confirmRuntimeTestWorkspace } = await import('../lib/runtime-workspace.test-fixture')
-  confirmRuntimeTestWorkspace()
-  return import('./keeper-month-efficiency')
+  const { invalidateExecutionSnapshotGeneration } = await import('../store')
+  let withdrawals = 0
+  return {
+    panel: await import('./keeper-month-efficiency'),
+    /** Confirms a workspace; called again, it confirms another one. */
+    confirmWorkspace: confirmRuntimeTestWorkspace,
+    /** A publication epoch the page has no snapshot of yet withdraws the
+     *  accepted workspace (store.ts). */
+    withdrawWorkspace: () => {
+      withdrawals += 1
+      invalidateExecutionSnapshotGeneration(`efficiency-panel-withdrawal-${withdrawals}`, 0)
+    },
+  }
 }
 
 function pending<T>() {
@@ -164,8 +181,14 @@ describe('KeeperMonthEfficiency', () => {
     await flushUi()
   }
 
-  async function draw(fetchMonth: FetchMonth, keeperName: string) {
-    const { KeeperMonthEfficiency } = await loadPanel(fetchMonth)
+  async function draw(
+    fetchMonth: FetchMonth,
+    keeperName: string,
+    workspace: 'confirmed' | 'unconfirmed' = 'confirmed',
+  ) {
+    const loaded = await loadPanel(fetchMonth)
+    if (workspace === 'confirmed') loaded.confirmWorkspace()
+    const { KeeperMonthEfficiency } = loaded.panel
     const show = async (name: string) => {
       await act(async () => {
         render(html`<${KeeperMonthEfficiency} keeperName=${name} />`, container)
@@ -173,8 +196,16 @@ describe('KeeperMonthEfficiency', () => {
       })
       await flushUi()
     }
+    const change = async (step: () => void) => {
+      await act(async () => { step() })
+      await flushUi()
+    }
     await show(keeperName)
-    return show
+    return {
+      show,
+      confirmWorkspace: () => change(loaded.confirmWorkspace),
+      withdrawWorkspace: () => change(loaded.withdrawWorkspace),
+    }
   }
 
   it('reads once when drawn and shows the Keeper after the answer', async () => {
@@ -191,9 +222,12 @@ describe('KeeperMonthEfficiency', () => {
     expect(drawn('data-efficiency-refresh')).toBe('settled')
   })
 
-  it('asks nothing more when the page moves to another Keeper', async () => {
+  // The Keeper page closes its detail when the Keeper changes, but the render
+  // that carries the new name still draws this panel once. That render must
+  // show the new Keeper's row and send no request the unmount would withdraw.
+  it('picks the row of a new Keeper out of the answer it holds, without another request', async () => {
     const fetchMonth = vi.fn<FetchMonth>(async () => month)
-    const show = await draw(fetchMonth, 'alpha')
+    const { show } = await draw(fetchMonth, 'alpha')
     expect(drawn('data-efficiency-share')).toBe('measured')
 
     await show('beta')
@@ -243,11 +277,70 @@ describe('KeeperMonthEfficiency', () => {
     expect(drawn('data-efficiency-refresh')).toBe('refreshing')
     const refresh = container.querySelector<HTMLButtonElement>('[data-testid="keeper-month-efficiency-refresh"]')
     expect(refresh?.disabled).toBe(true)
+    // A second press while the first read runs sends nothing.
+    await press('keeper-month-efficiency-refresh')
+    expect(fetchMonth).toHaveBeenCalledTimes(2)
 
     second.resolve(month)
     await flushUi()
     expect(drawn('data-efficiency-refresh')).toBe('settled')
     expect(fetchMonth).toHaveBeenCalledTimes(2)
+  })
+
+  it('draws the answer of a refresh in place of the one before', async () => {
+    const later: KeeperEfficiencyMonth = {
+      ...month,
+      keepers: month.keepers.map(row => (row.keeper === 'tools-only' ? { ...row, turns: 2 } : row)),
+    }
+    const fetchMonth = vi.fn<FetchMonth>()
+      .mockResolvedValueOnce(month)
+      .mockResolvedValueOnce(later)
+    await draw(fetchMonth, 'tools-only')
+    expect(drawn('data-efficiency-share')).toBe('no_turn_counted')
+
+    await press('keeper-month-efficiency-refresh')
+    expect(drawn('data-efficiency-share')).toBe('measured')
+    expect(drawn('data-efficiency-refresh')).toBe('settled')
+  })
+
+  it('waits for a workspace without asking, and reads once one is confirmed', async () => {
+    const fetchMonth = vi.fn<FetchMonth>(async () => month)
+    const page = await draw(fetchMonth, 'alpha', 'unconfirmed')
+    expect(state()).toBe('no_workspace')
+    expect(fetchMonth).not.toHaveBeenCalled()
+
+    await page.confirmWorkspace()
+    expect(fetchMonth).toHaveBeenCalledTimes(1)
+    expect(state()).toBe('read')
+    expect(drawn('data-efficiency-share')).toBe('measured')
+  })
+
+  // The numbers were read under the workspace that was withdrawn. They are
+  // not the numbers of whatever workspace is confirmed next.
+  it('drops the numbers of a withdrawn workspace and reads again under the next one', async () => {
+    const fetchMonth = vi.fn<FetchMonth>(async () => month)
+    const page = await draw(fetchMonth, 'alpha')
+    expect(state()).toBe('read')
+
+    await page.withdrawWorkspace()
+    expect(state()).toBe('no_workspace')
+    expect(fetchMonth).toHaveBeenCalledTimes(1)
+
+    await page.confirmWorkspace()
+    expect(fetchMonth).toHaveBeenCalledTimes(2)
+    expect(state()).toBe('read')
+  })
+
+  it('withdraws its request when the workspace is withdrawn', async () => {
+    const answer = pending<KeeperEfficiencyMonth>()
+    const fetchMonth = vi.fn<FetchMonth>(() => answer.promise)
+    const page = await draw(fetchMonth, 'alpha')
+    const signal = fetchMonth.mock.calls[0]?.[0]?.signal
+    expect(signal?.aborted).toBe(false)
+
+    await page.withdrawWorkspace()
+    expect(signal?.aborted).toBe(true)
+    expect(state()).toBe('no_workspace')
   })
 
   it('withdraws its request when the panel goes away', async () => {

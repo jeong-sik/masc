@@ -3,8 +3,9 @@
 //
 // The TUI draws these numbers in the Info tab of its Keepers view
 // (bin/masc_tui_keeper_efficiency.ml). One read holds every Keeper of the
-// month, so the panel reads when it is first drawn and picks the row of the
-// Keeper on the page; moving to another Keeper asks nothing.
+// month. The panel reads once each time it is drawn and picks the row of its
+// Keeper by name. The Keeper page closes its detail when the Keeper changes
+// (keeper-detail-page.ts), so each opening of the tab is one read.
 //
 // A failed read is not an empty month. The panel says the read failed and
 // offers it again; a refresh that fails after a good read keeps the last
@@ -21,6 +22,10 @@ import {
   type KeeperEfficiencyMonth,
 } from '../api/dashboard-keeper-efficiency'
 import { formatNumber } from '../lib/format-number'
+import {
+  dashboardObservationOwnerHasWorkspace,
+  readDashboardObservationOwner,
+} from '../lib/observation-read-owner'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { Btn } from './btn'
 import { StatTile } from './common/stat-tile'
@@ -59,8 +64,11 @@ export type KeeperMonthEfficiencyRefresh =
   | { readonly kind: 'failed'; readonly reason: string }
 
 export type KeeperMonthEfficiencyView =
-  /** Nothing was asked yet, or the read was withdrawn: nothing to say. */
+  /** The panel was drawn and has not asked yet: one frame, nothing to say. */
   | { readonly kind: 'not_asked' }
+  /** No workspace is confirmed, so the resource asks nothing
+   *  (use-managed-async-resource.ts). It is not a month without numbers. */
+  | { readonly kind: 'no_workspace' }
   | { readonly kind: 'reading' }
   | { readonly kind: 'unread'; readonly reason: string }
   | {
@@ -94,15 +102,17 @@ function refreshOf(read: KeeperMonthEfficiencyRead): KeeperMonthEfficiencyRefres
   return { kind: 'settled' }
 }
 
-/** What the panel draws for one Keeper from what the read has come to. */
+/** What the panel draws for one Keeper from what the read has come to.
+ *  `workspaceConfirmed` says whether the resource can ask at all. */
 export function keeperMonthEfficiencyView(
   read: KeeperMonthEfficiencyRead,
   keeperName: string,
+  workspaceConfirmed: boolean,
 ): KeeperMonthEfficiencyView {
   if (read.data === null) {
     if (read.loading) return { kind: 'reading' }
     if (read.error !== null) return { kind: 'unread', reason: read.error }
-    return { kind: 'not_asked' }
+    return workspaceConfirmed ? { kind: 'not_asked' } : { kind: 'no_workspace' }
   }
   return {
     kind: 'read',
@@ -117,6 +127,13 @@ export function keeperMonthEfficiencyView(
 
 const PANEL_TITLE = '이번 달 효율'
 const PER_TURN_DIGITS = 1
+
+/** The decoder holds `generated_at` within what a Date holds, so this does
+ *  not throw. TimeAgo reads a bare number by its size, as seconds or as
+ *  milliseconds; a string says which instant is meant. */
+function isoOfUnixSeconds(seconds: number): string {
+  return new Date(seconds * MS_PER_SECOND).toISOString()
+}
 
 function fleetNote(text: string) {
   return { direction: 'flat' as const, text: `전체 ${text}` }
@@ -174,10 +191,19 @@ export function KeeperMonthEfficiency({ keeperName }: KeeperMonthEfficiencyProps
   // withdraws its request when the panel goes away.
   useEffect(() => { read() }, [read])
 
-  const view = keeperMonthEfficiencyView(resource.state.value, keeperName)
+  const workspaceConfirmed = dashboardObservationOwnerHasWorkspace(readDashboardObservationOwner())
+  const view = keeperMonthEfficiencyView(resource.state.value, keeperName, workspaceConfirmed)
   switch (view.kind) {
     case 'not_asked':
       return null
+    case 'no_workspace':
+      return html`
+        <${KpiSection} title=${PANEL_TITLE}>
+          <p class="m-0 text-xs text-[var(--color-fg-muted)]" role="status" data-efficiency-state="no_workspace">
+            현재 작업 공간을 확인하는 중…
+          </p>
+        <//>
+      `
     case 'reading':
       return html`
         <${KpiSection} title=${PANEL_TITLE}>
@@ -201,7 +227,7 @@ export function KeeperMonthEfficiency({ keeperName }: KeeperMonthEfficiencyProps
           <div class="flex flex-col gap-2" data-efficiency-state="read" data-efficiency-share=${view.share.kind} data-efficiency-refresh=${view.refresh.kind}>
             <div class="flex flex-wrap items-center justify-between gap-2">
               <p class="m-0 text-2xs text-[var(--color-fg-muted)]">
-                ${view.month} · ${formatNumber(view.daysCovered)}일 · 전체 ${formatNumber(view.fleet.turns_total)}턴 · 집계 <${TimeAgo} timestamp=${view.generatedAt} />
+                ${view.month} · ${formatNumber(view.daysCovered)}일 · 전체 ${formatNumber(view.fleet.turns_total)}턴 · 집계 <${TimeAgo} timestamp=${isoOfUnixSeconds(view.generatedAt)} />
               </p>
               <${Btn}
                 size="xs"

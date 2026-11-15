@@ -99,11 +99,8 @@ let run () =
     let+ cases = parse_dataset ~fact_observed_at (Yojson.Safe.from_string bytes) in bytes, cases
     with Sys_error detail | Yojson.Json_error detail -> Error detail in
   let* config_observation =
-    try
-      let (_ : string option) = Server_runtime_bootstrap.configure_agent_core_model_catalog_env () in
-      Runtime.load_config_observation
-        ~runtime_config_path:(Config_dir_resolver.absolute_path !config) ()
-    with Env_config_core.Config_error detail -> Error detail in
+    Runtime_model_catalog_boot.load_standalone_config_observation
+      ~runtime_config_path:(Config_dir_resolver.absolute_path !config) in
   let* _ = Runtime.init_default_degraded_observation config_observation
     |> Result.map_error Runtime.strict_init_error_to_string in
   Prompt_registry.set_markdown_dir (Config_dir_resolver.absolute_path !prompts);
@@ -121,7 +118,8 @@ let run () =
            ~role:Agent_core.Types.User [Agent_core.Types.Text text]) case.messages;
          historical_task_contexts=[]; goal_context=Keeper_librarian.No_task;
          tool_observations=[]; counterpart_observations=[]} in
-      let* variables = Keeper_librarian_runtime.librarian_prompt_variables inp in
+      (* A case holds ordinary facts only; it has no file-source memory. *)
+      let* variables = Keeper_librarian_runtime.librarian_prompt_variables ~source_lines:[] inp in
       let* _, prompt = Prompt_registry.resolve_and_render_prompt_template "librarian" variables in
       let+ rest = prepare rest in (case, prompt) :: rest in
   let* requests = prepare cases in

@@ -381,13 +381,16 @@
 
 .wk-backlog-list {
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   max-block-size: min(24dvh, 14rem);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+/* The list measures the element around a row, so the room between two rows is
+   that element's padding. */
+.wk-bl-gap {
+  padding-top: 4px;
 }
 
 .wk-bl-row {

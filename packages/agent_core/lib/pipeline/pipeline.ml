@@ -65,6 +65,7 @@ let stage_route
       ~api_strategy
       ?raw_trace_run
       ?on_provider_failure
+      ~on_reasoning_replay_exclusion
       ?before_provider_attempt
       ~turn_config
       agent
@@ -96,6 +97,7 @@ let stage_route
              ?clock
              ~trace_context
              ?on_provider_failure
+             ~on_reasoning_replay_exclusion
              ?before_provider_attempt
              ~provider_config
              agent
@@ -121,7 +123,7 @@ let stage_route
                 indices and pre-admission inventory own Keeper's occurrences. *)
              dispatch_sync
                ~sw ?clock ~trace_context ?on_provider_failure
-               ?before_provider_attempt ~provider_config agent prep
+               ~on_reasoning_replay_exclusion ?before_provider_attempt ~provider_config agent prep
              |> Llm_provider.Completion_outcome.map_result (Result.map (fun response ->
                   Llm_provider.Streaming.emit_synthetic_events response
                     (Llm_provider.Complete_stream.emit_stream_event on_event);
@@ -138,6 +140,7 @@ let stage_route
                ?capture_id
                ?on_telemetry
                ?on_provider_failure
+               ~on_reasoning_replay_exclusion
                ?before_provider_attempt
                ())
   in
@@ -772,6 +775,7 @@ let run_new_turn
       ~api_strategy
       ?raw_trace_run
       ?on_provider_failure
+      ~on_reasoning_replay_exclusion
       ?before_tool_execution
       ~turn
       agent
@@ -821,6 +825,7 @@ let run_new_turn
       ~api_strategy
       ?raw_trace_run
       ?on_provider_failure
+      ~on_reasoning_replay_exclusion
       ~before_provider_attempt:
         (Pipeline_execution_scope.before_provider_attempt execution)
       ~turn_config
@@ -883,6 +888,7 @@ let run_turn
       ~api_strategy
       ?raw_trace_run
       ?on_provider_failure
+      ~on_reasoning_replay_exclusion
       ?before_tool_execution
       ~frontier
       agent
@@ -923,6 +929,7 @@ let run_turn
         ~api_strategy
         ?raw_trace_run
         ?on_provider_failure
+        ~on_reasoning_replay_exclusion
         ?before_tool_execution
         ~turn
         agent)

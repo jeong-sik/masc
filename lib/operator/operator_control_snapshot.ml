@@ -323,28 +323,10 @@ let keepers_json
                     in
                     let diagnostic = diagnostic_observation.json in
                     let t_audit = Time_compat.now () in
-                    let audit_json =
-                      Operator_control_snapshot_tool_audit.tool_audit_json ~read_policy
+                    let tool_audit =
+                      Operator_control_snapshot_tool_audit.read ~read_policy
                         config
                         meta
-                    in
-                    let recent_tool_names =
-                      Json_util.get_string_list audit_json "recent_tool_names"
-                    in
-                    let latest_tool_names =
-                      Json_util.get_string_list audit_json "latest_tool_names"
-                    in
-                    let latest_tool_call_count =
-                      Json_util.get_int audit_json "latest_tool_call_count"
-                    in
-                    let latest_action_source =
-                      Json_util.get_string audit_json "latest_action_source"
-                    in
-                    let tool_audit_source =
-                      Json_util.get_string audit_json "tool_audit_source"
-                    in
-                    let tool_audit_at =
-                      Json_util.get_string audit_json "tool_audit_at"
                     in
                     dt_audit := Time_compat.now () -. t_audit;
                     let status =
@@ -426,23 +408,9 @@ let keepers_json
                          @ [ keeper_current_task_field meta ]
                          @ [ "keepalive_running", `Bool keepalive_running
                            ; "next_model_hint", `Null
-                           ; ( "latest_tool_names"
-                             , `List
-                                 (List.map (fun value -> `String value) latest_tool_names)
-                             )
-                           ; ( "recent_tool_names"
-                             , `List
-                                 (List.map (fun value -> `String value) recent_tool_names)
-                             )
-                           ; ( "latest_tool_call_count"
-                             , Json_util.option_to_yojson
-                                 (fun value -> `Int value)
-                                 latest_tool_call_count )
-                           ; ( "latest_action_source"
-                             , Json_util.string_opt_to_json latest_action_source )
-                           ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
-                           ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
-                           ; "activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode
+                           ]
+                         @ Operator_control_snapshot_tool_audit.row_fields tool_audit
+                         @ [ "activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode
                            ; ( "last_proactive_reason"
                              , Json_util.string_opt_to_json
                                  (let value =
@@ -501,7 +469,10 @@ let keepers_json
                       completeness = Dashboard_projection_read.combine_completeness
                         context_snapshot.completeness
                         (Dashboard_projection_read.combine_completeness
-                          runtime_trust_observation.completeness attention_completeness)})
+                          (Operator_control_snapshot_tool_audit.completeness
+                            ~keeper_name:meta.name tool_audit)
+                          (Dashboard_projection_read.combine_completeness
+                            runtime_trust_observation.completeness attention_completeness))})
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

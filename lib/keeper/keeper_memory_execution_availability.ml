@@ -5,8 +5,11 @@ module Registry = Runtime_exact_output_registry
 
 type mode = Preflight | Live of Runtime.tool_execution_snapshot
 
+type unreadable_source = Lane_directory | Declaration_file of string
+type unreadable = { source : unreadable_source; issue : Lane_addon_config.issue }
+
 type problem =
-  | Configuration_unreadable of Lane_addon_config.issue list
+  | Configuration_unreadable of unreadable list
   | Addon_unattached
   | Addon_off of string list
   | Multiple_installations of string list
@@ -26,6 +29,12 @@ type state =
 
 type t = (Contract.operation * state) list
 
+(* [paths] holds every declaration file the directory listing found, parsed or
+   not. An issue about anything else is about the directory. *)
+let unreadable ~(declarations : Lane_addon_config.snapshot) (issue : Lane_addon_config.issue) =
+  { issue; source = if List.mem issue.source_path declarations.paths
+      then Declaration_file (Filename.basename issue.source_path) else Lane_directory }
+
 let observe ~setting ~(declarations : Lane_addon_config.snapshot) ~route ~mode =
   let inspect operation =
     match setting with
@@ -33,7 +42,7 @@ let observe ~setting ~(declarations : Lane_addon_config.snapshot) ~route ~mode =
     | Invalid -> Invalid_setting
     | Enabled ->
       if not declarations.complete || declarations.issues <> [] then
-        Unavailable (None, Configuration_unreadable declarations.issues)
+        Unavailable (None, Configuration_unreadable (List.map (unreadable ~declarations) declarations.issues))
       else
         let candidates = List.filter (fun (d : Lane_addon_config.declaration) ->
           String.equal d.package.id Contract.package_id) declarations.declarations in
@@ -48,7 +57,8 @@ let observe ~setting ~(declarations : Lane_addon_config.snapshot) ~route ~mode =
           let output = Contract.output operation in
           match Runtime_schema.addon_lane ~declaration_id:d.id ~output with
           | Error _ -> Unavailable (None, Configuration_unreadable
-              [{source_path=d.source_path;id=Some d.id;message="Invalid Librarian exact-output identity"}])
+              [unreadable ~declarations
+                 {source_path=d.source_path;id=Some d.id;message="Invalid Librarian exact-output identity"}])
           | Ok lane ->
             let binding = {installation_id=d.id;output;
               route_table=Runtime_schema.exact_lane_table_name (Runtime_schema.Addon lane)} in
@@ -114,8 +124,12 @@ let host_issue_json issue =
   `Assoc ["kind",`String code;"request_id",Option.fold ~none:`Null ~some:(fun id -> `String id) request]
 let problem_json = function
   | Configuration_unreadable issues -> "configuration_unreadable",true,
-    `List (List.map (fun (issue : Lane_addon_config.issue) ->
+    `List (List.map (fun {source;issue} ->
+      let source,file = match source with
+        | Lane_directory -> "lane_directory",`Null
+        | Declaration_file name -> "declaration_file",`String name in
       `Assoc ["installation_id",Option.fold ~none:`Null ~some:(fun id -> `String id) issue.id;
+        "source",`String source;"declaration_file",file;
         "reason",`String "declaration_unavailable"]) issues)
   | Addon_unattached -> "addon_unattached",true,`Null
   | Addon_off ids -> "addon_off",false,string_list ids

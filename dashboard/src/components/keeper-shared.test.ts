@@ -703,7 +703,9 @@ describe('KeeperConversationPanel', () => {
       const step = container.querySelector(
         '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-live-hydration"]',
       ) as HTMLElement
-      expect(step.getAttribute('data-chat-trace-output-state')).toBe('hydration-failed')
+      // The exact lookup has not answered, so the step status stays pending;
+      // the failed bulk refresh shows on the coverage attribute and the count.
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('pending')
       expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
       expect(container.textContent).toContain('출력 hydration 실패 1')
     })

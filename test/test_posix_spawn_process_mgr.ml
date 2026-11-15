@@ -207,6 +207,54 @@ let test_await_without_the_backends_sigchld_handler () =
     fail "await never returned: the manager waited on a handler nothing installed"
 ;;
 
+(* A spawn installs a SIGCHLD handler only when the process has none. With one
+   in place it writes nothing: each write to the runtime's handler table is
+   one another domain reads while it polls for signals, which ThreadSanitizer
+   reported for every spawn (#51395). The handler set here is this case's
+   own, so finding it again after the spawn says the spawn left the table
+   alone. *)
+let spawn_keeps_the_installed_sigchld_handler ~spawn_and_wait () =
+  Eio_main.run
+  @@ fun _env ->
+  let handler (_ : int) = Eio.Condition.broadcast Eio_unix.Process.sigchld in
+  Sys.set_signal Sys.sigchld (Sys.Signal_handle handler);
+  let found =
+    Fun.protect
+      ~finally:(fun () -> Sys.set_signal Sys.sigchld (Sys.Signal_handle handler))
+      (fun () ->
+         Eio.Switch.run spawn_and_wait;
+         Sys.signal Sys.sigchld Sys.Signal_default)
+  in
+  match found with
+  | Sys.Signal_handle after -> check bool "the handler set before the spawn" true (after == handler)
+  | Sys.Signal_default -> fail "the spawn left no handler"
+  | Sys.Signal_ignore -> fail "the spawn left SIGCHLD ignored"
+;;
+
+let manager_child_runs_to_its_end sw =
+  match Eio.Process.await (Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr [ "/bin/echo"; "hi" ]) with
+  | `Exited code -> check int "exit code" 0 code
+  | `Signaled signal -> failf "signaled %d" signal
+;;
+
+let detached_child_runs_to_its_end sw =
+  let output = Unix.openfile "/dev/null" [ Unix.O_WRONLY; Unix.O_CLOEXEC ] 0 in
+  let child =
+    Fun.protect
+      ~finally:(fun () -> Unix.close output)
+      (fun () ->
+         Posix_spawn_detached.spawn ~sw ~argv:[ "/bin/echo"; "hi" ] ~env:[||] ~output)
+  in
+  match child with
+  | Error reason -> fail reason
+  | Ok child ->
+    (match Eio.Promise.await child.exited with
+     | Some (Unix.WEXITED code) -> check int "exit code" 0 code
+     | Some (Unix.WSIGNALED signal) -> failf "signaled %d" signal
+     | Some (Unix.WSTOPPED signal) -> failf "stopped %d" signal
+     | None -> fail "another waiter reaped the child")
+;;
+
 (* This spawn closes a descriptor it was not given. eio_posix does not, and
    that difference is deliberate.
 
@@ -759,6 +807,12 @@ let () =
     ; ( "own dependencies"
       , [ test_case "awaits without the backend's SIGCHLD handler" `Quick
             test_await_without_the_backends_sigchld_handler
+        ; test_case "a spawn keeps the SIGCHLD handler it finds" `Quick
+            (spawn_keeps_the_installed_sigchld_handler
+               ~spawn_and_wait:manager_child_runs_to_its_end)
+        ; test_case "a detached spawn keeps the SIGCHLD handler it finds" `Quick
+            (spawn_keeps_the_installed_sigchld_handler
+               ~spawn_and_wait:detached_child_runs_to_its_end)
         ] )
     ; ( "stricter than eio_posix"
       , [ test_case "closes a descriptor it was not given" `Quick

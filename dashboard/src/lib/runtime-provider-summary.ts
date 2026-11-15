@@ -82,7 +82,6 @@ export function runtimeCatalogParameterPolicy(item: DashboardRuntimeProviderSnap
   const parts = nonEmptyParts([
     policy.reasoning_toggle_wire ? `wire:${policy.reasoning_toggle_wire}` : null,
     policy.reasoning_replay_policy ? `replay:${policy.reasoning_replay_policy}` : null,
-    policy.requires_reasoning_replay_on_tool_call ? 'tool-call-replay:required' : null,
     ignored ? `ignore:${ignored}` : null,
     alwaysIgnored ? `always:${alwaysIgnored}` : null,
   ])

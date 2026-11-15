@@ -183,7 +183,7 @@ status: reference
     `home_action` 7개(`Home_approvals`·`Home_request`·`Home_agenda`·`Home_resume`·`Home_read_last`·
     `Home_choose_keeper`·`Home_create_keeper`)를 `j`/`k` 또는 방향키로 선택하고 `Enter`로
     원천 화면(Approvals·Agenda·Chat)을 열며, `Enter` 진입은 순수 탐색일 뿐 의사결정(승인/거절)을
-    제출하지 않는다(`requests_are_navigation`·`assert_no_decision_posts`).
+    제출하지 않는다(`open_approvals`, `bin/masc_tui_home.mli`).
   - 복귀와 선택 보존: 열람 화면에서 `Esc`를 누르면 Home으로 복귀하며, 직전 선택 항목(`home_selected`)과
     스크롤 윈도우(`home_decision_scroll`)를 그대로 유지한다. 새로운 최상단 탐색이 발생하면 직전 복귀
     컨텍스트는 정리된다.
@@ -4496,19 +4496,28 @@ status: reference
   → [server_dashboard_http_keeper_memory_health](../../lib/server/server_dashboard_http_keeper_memory_health.ml)
 
 **Continuity Width (연속성 pass 의 폭)**
-: 연속성 pass 가 한 번에 읽을 수 있는 atom 수의 상한. 크기 때문에 거절당한 pass 가 좁힌
-  값을 다음 pass 가 이어받는다. (keepers dir, keeper)별로 그 값을 잰 trace와 함께 루프
-  메모리에 둔다(`keeper_librarian_queue_refresh.ml`의 `limited_widths`). trace가 바뀌면
-  atom 번호가 다시 매겨지므로 비교하지 않고 새 값으로 바꾸고, 같은 trace 안에서는 더
-  좁은 값만 남는다. 끝 atom이 아니라 폭을 남기므로 커밋한 pass 다음에는 같은 자리가
-  아니라 그다음 자리를 읽는다. 좁히는 것은 작은 요청이 같은 벽을 피할 수 있는 실패뿐이고,
-  그 판정은 `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 들고, 원인별 판정
-  규칙은 RFC-librarian-lifecycle §4.3이 정한다. 마지막 후보 하나가 아니라 후보를 차례로
-  시도한 전체 결과로 판정한다. 폭은 backlog 를 끝까지 읽었을 때(`Drained`)만 푼다. 좁힌 커밋 한 번은
-  거절했던 범위가 이제 들어간다는 증거가 아니다. 루프
-  메모리에만 있으므로 서버가 재시작하면 폭은 사라지고 다시 전부 읽기부터 시작한다(RFC
-  librarian-lifecycle §4.3).
-  → [keeper_librarian_queue_refresh](../../lib/keeper/keeper_librarian_queue_refresh.ml)
+: 연속성 pass 가 한 번에 읽는 범위의 크기. 크기 조정은 두 경로다. 한도를 아는 fitting 은
+  oversized 배치를 가장 오래된 완료 턴으로 고르고 그 턴 안의 원자 중간점에서 접으며 다시
+  키우지 않는다(`keeper_librarian_continuity.mli`의 `fit`; 판정은 실제 렌더링 글자 수가 CLI 가
+  서버로 알려 준 max_chars 이하인지, `keeper_librarian_runtime.ml`의 `fit_continuity`). 타입화된
+  용량 거절 뒤에만 부르는 `narrow`도 같은 순서로 접고, 더 나눌 수 없는 원자 하나가 남았거나
+  정확한 범위에 Memory 영수증이 이미 붙었으면 `None`이다. 거절 원인 판정은
+  `walk_shows_size`(`keeper_librarian_runtime.mli`의 `not_committed` 필드)가 역사적 범위 조정
+  힌트로 들고, 확인된 입력 크기 거절(`input_capacity_evidence`)과 무효 출력·미정찰 native 효과
+  거부(`message_descent`)를 따로 기록하며, 마지막 후보 하나가 아니라 후보를 차례로 시도한
+  전체 결과를 누적해 판정한다(`keeper_librarian_queue_refresh.ml`의 `merge_not_committed`).
+  (2026-10-30 개정, RFC-librarian-lifecycle §4.12) 거절당한 폭을 다음 pass 가 이어받는 루프
+  기억은 철거됐다 — 이전 턴의 atom 개수를 다음 턴의 폭으로 재사용하지 않고, 확인된 입력
+  크기 거절과 walk 전체의 `may_descend_messages` 허가 뒤에만 가장 오래된 실제 완료 턴으로
+  내려가며, 원본 범위가 커밋되면 메시지 모드를 풀고 다음 턴은 통째로 시도한다. 루프 메모리가
+  기억하는 것은 CLI 가 알려 준 실제 입력 한도다(`keeper_librarian_queue_refresh.ml`의
+  `input_capacities`; 커밋이 Api slot 으로 서브되면 잊고 다시 잰다). 좁힌 pass 는 backlog 를
+  끝까지 읽었을 때(`Drained`)만 한도를 풀고, 좁힌 커밋 한 번은 거절했던 범위가 이제 들어간다는
+  증거가 아니다. 이 기억도 프로세스 메모리라 서버가 재시작하면 사라진다. 원인별 판정 규칙은
+  RFC-librarian-lifecycle §4.3 표와 §4.12가 정한다.
+  → [keeper_librarian_continuity](../../lib/keeper/keeper_librarian_continuity.mli) ·
+  [keeper_librarian_runtime](../../lib/keeper/keeper_librarian_runtime.mli) ·
+  [keeper_librarian_queue_refresh](../../lib/keeper/keeper_librarian_queue_refresh.ml)
 
 **Fact**
 : Memory OS의 기억 하나. 문장 필드(`claim` — 이 문서에서 Fact의 문장을 가리킬 때만
@@ -4518,7 +4527,7 @@ status: reference
   (`first_seen`, `last_seen`)은 둘 다 Fact가 기록된 시각(write time)이며, 상태가
   지속된 시각이나 신뢰도·강도(strength) 신호가 아니다. 같은 내용(동일 바이트)으로
   다시 쓰인 Fact는 최초의 `first_seen`을 보존하고 `last_seen`만 전진한다(#38056).
-  → [Keeper_memory_os_current.insert_or_reobserve](../../lib/keeper/keeper_memory_os_current.ml)
+  → [Keeper_memory_os_support_core.insert_or_reobserve](../../lib/keeper/keeper_memory_os_support_core.mli)
 
 **Memory Category (기억 분류)**
 : Memory Fact의 내용을 찾고 묶는 데 쓰는 이름(`category`). 기본 이름은 흔한 주제의

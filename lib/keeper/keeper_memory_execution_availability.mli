@@ -3,8 +3,16 @@
     No result here admits or stops a Keeper turn. *)
 type mode = Preflight | Live of Lane_addon_runtime.tool_execution_snapshot
 
+type unreadable_source =
+  | Lane_directory  (** The Lane directory itself could not be read. *)
+  | Declaration_file of string
+      (** The file's name inside the Lane directory, without the directory. *)
+type unreadable = { source : unreadable_source; issue : Lane_addon_config.issue }
+
 type problem =
-  | Configuration_unreadable of Lane_addon_config.issue list
+  | Configuration_unreadable of unreadable list
+      (** Every issue of the reading, each with the file it is about. One
+          unreadable declaration is enough: it may be the Librarian's. *)
   | Addon_unattached
   | Addon_off of string list
   | Multiple_installations of string list
@@ -36,6 +44,7 @@ val snapshot : config:Workspace.config -> mode:[ `Preflight | `Live ] -> t
     published route registry plus existing live worker cells. No full retained
     Add-on inventory or per-Keeper store traversal. *)
 val to_json : t -> Yojson.Safe.t
-(** Public diagnostic: configuration failures expose only categories and
-    declaration identities. Raw parser messages and source paths remain in
-    authenticated Lane configuration diagnostics. *)
+(** Public diagnostic: configuration failures expose only categories,
+    declaration identities and each unreadable declaration's file name inside
+    the Lane directory. Raw parser messages and the directory's own path remain
+    in authenticated Lane configuration diagnostics. *)

@@ -280,7 +280,9 @@ def main():
             assert server.poll() is None, 'server exited'
             try:
                 health = http('/health?full=1')
-                if health['startup']['state_ready']:
+                # Until the server has published its workspace, /health answers
+                # everyone the public probe, which has no `startup` section: not ready yet.
+                if health.get('startup', {}).get('state_ready'):
                     break
             except (URLError, ConnectionError) as error:
                 safe_save(out / f'readiness-observation-error-{counter:03}.json',

@@ -948,12 +948,17 @@ let rejection_result (rejection : rejection) =
     }
 ;;
 
-type argument_contract = Host_tool | External_export
+type argument_contract = Host_tool | Declared_schema | External_export
+
+let refuses_fieldless_arguments = function
+  | Host_tool | Declared_schema -> true
+  | External_export -> false
+;;
 
 let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
   let prepared_args = match contract with
     | Host_tool -> strip_internal_marker_args args
-    | External_export -> args
+    | Declared_schema | External_export -> args
   in
   let reject ~schema violation message =
     Error { tool_name = name; schema; violation; message }
@@ -966,7 +971,7 @@ let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
       (Printf.sprintf
          "Tool '%s' has no registered input schema; refusing schema-less dispatch"
          name)
-  | Some schema when contract = Host_tool && not (schema_has_properties schema) ->
+  | Some schema when refuses_fieldless_arguments contract && not (schema_has_properties schema) ->
     if required_names schema <> []
     then
       reject
@@ -986,7 +991,7 @@ let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
     let reject = reject ~schema:(Some schema) in
     let retired_aliases = match contract with
       | Host_tool -> retired_transition_alias_names ~name prepared_args
-      | External_export -> []
+      | Declared_schema | External_export -> []
     in
     (match retired_aliases with
      | alias :: aliases ->
@@ -1003,7 +1008,7 @@ let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
           reject Arguments_did_not_arrive (Printf.sprintf "Tool '%s' %s" name message)
         | None ->
           (match (match contract with
-                  | Host_tool -> schema_shape_error schema prepared_args
+                  | Host_tool | Declared_schema -> schema_shape_error schema prepared_args
                   | External_export ->
                       (* The oneOf presence checker above models host-generated
                          exact forms, not arbitrary external alternatives. Only
@@ -1068,6 +1073,7 @@ let check_arguments ~contract ~(schema : Yojson.Safe.t option) ~name ~args =
                     | None ->
                       match contract with
                       | External_export -> Ok (prepared_args, Accepted_external_subset)
+                      | Declared_schema -> Ok (prepared_args, Accepted_valid)
                       | Host_tool ->
                           if Yojson.Safe.equal prepared_args args
                           then Ok (prepared_args, Accepted_valid)

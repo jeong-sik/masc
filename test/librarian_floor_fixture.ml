@@ -254,7 +254,7 @@ let range_link owner : Step.link =
 
 let new_step fixture ~owner ~range ~previous (question : Machine.question) =
   let step =
-    Memory_runtime.prepare_durable_step ~now:(Time_compat.now ())
+    Memory_runtime.prepare_durable_step ~source_lines:[] ~now:(Time_compat.now ())
       ~context:{ Memory_runtime.previous_state = question.previous_state; unread_messages = question.unread_messages }
       question.input |> get in
   let destination =

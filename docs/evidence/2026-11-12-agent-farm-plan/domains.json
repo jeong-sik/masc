@@ -1,0 +1,104 @@
+[
+ {
+  "domain": "agent-dev-process-docs",
+  "head": "62cd3a898b3f",
+  "state": "PR 은 모든 push 에서 도는 `changes` job 과 스택 꼭대기 `type-check` 를 거친다. 리뷰 이벤트가 깨운 worker 가 층마다 현재 head 의 서로 다른 계정 승인 2개를 확인한 뒤 스택을 통째로 병합한다. 병합할 때마다 main build 가 dispatch 된다. 헌법 build_and_ci 와 문서 네 곳은 PR 자동 CI 가 없다고 적는다. 필수 검사를 적은 에이전트 문서는 없다. 문서 최신성 경로는 산문 규칙 하나뿐이고, 틀린 문장을 24곳 찾았다. 용어집은 447KB, 정의 306개이고 충돌을 설명만 한다. RFC 493개 중 Draft 가 351개이고 31개는 정의 밖 상태 값이다. restack 할 때마다 승인이 층 수×2 만큼 사라져 리뷰가 CI 보다 먼저 막힌다.",
+  "scale": "가장 먼저 깨지는 것은 Actions 토큰의 REST 한도다. worker 호출 수는 실행 수×층 수(약 5L+5)에 비례한다. 2026-11-11 에는 한 시간에 588번 돌았다. 11-12 07:33~07:44Z 에는 약 70번 만에 한도를 다 썼다(#51600 이 다룬다). 그다음은 현재-head 승인이다. restack 할 때마다 승인 2·D개가 지워진다. A > 2·D·r 을 지키지 못하면 깊은 스택은 병합에 닿지 않는다. 공유 생성 파일(TUI-KEYS, 7일 57커밋)이 충돌을 만들어 r 을 키운다. PR runner 는 06Z 한 시간에 165번 돌았고 성공 p90 은 47.3분이었다. main build 는 24.5시간에 300번 돌았다. 마지막 병목은 운영자 한 명이 정하는 이슈 유입이다(main 에 닿은 PR 100개당 33개)."
+ },
+ {
+  "domain": "basepath-portability",
+  "head": "42f135cc7e0209f35751b2b9e104f80f5904e191",
+  "state": "workspace 를 내보내고 들이는 CLI·HTTP·MCP 경로가 없다. 있는 것은 store 하나를 바꾸기 전에 뜨는 사본뿐이다. `.masc` 직속 항목 153개를 답하는 닫힌 목록이 없고 부분 목록 다섯이 서로 다른 질문에 답한다. 원본·파생·비밀·기기 묶임을 가르는 타입이 없어 백업 단위가 217.2 GiB, 파일 365만 개 전체다(2026-11-12 측정). 저장 기록 다섯 종류가 BasePath 절대 경로나 inode 를 담고 읽을 때 일치를 요구해, 옮기면 Keeper 등록 거절과 Curator 정지가 난다. API 키·볼륨·keychain 은 BasePath 밖에 있다. 도는 서버에서 한 시점 사본을 뜰 방법이 없다. P0 없음, P1 여덟, P2 넷. 감사 중 checkout 이 efe98ca792c2 에서 42f135cc7e02 로 움직였고 인용한 파일은 그대로다.",
+  "scale": "먼저 깨지는 순서다. (1) 도는 중에 뜬 사본: Keeper 마다 event queue snapshot·WAL 쌍과 SQLite 가 있어 K 개 쌍이 서로 다른 시점이 된다. Q·P 가 늘면 복사 시점에 WAL 이 남은 Keeper 가 늘고 그 사본은 Refuse_boot 다. (2) 옮긴 뒤 WAL 의 base_path 불일치도 같은 조건에서 는다. (3) tool_blobs 284만 파일은 tool 호출 수 K×(Q+P) 에 비례해 늘고 정리는 세기만 한다. (4) official-clients 홈은 (Keeper, 계정) 쌍마다 생긴다(TOML 29개에 92.5 GiB). (5) validate-stores 는 Keeper 24개에서 60초였다(2026-09-26 측정, 지금 값은 재지 않음). 두 기기 동시 실행과 Curator 정지는 K 와 무관하게 난다."
+ },
+ {
+  "domain": "candle-economy",
+  "head": "42f135cc7e02",
+  "state": "Candle 은 원장 파일 하나에 사실을 덧붙이고 잔액을 읽을 때마다 처음부터 재생한다. 자산은 하나, 계정은 Keeper 이름 문자열 하나이고 거래·주문·가격 사건은 없다. 소비처는 Keeper 당 한 번만 사는 초상화 장신구 18개이고, Keeper 도구와 읽기 전용 화면이 있다. 헌법이 Candle 로 초상화 장신구만 사게 하므로 Stock 은 헌법 개정이 먼저다. Keeper 는 지급 규칙을 모른다(운영자 결정 10). 그래서 지급 세부는 싣지 않는다.",
+  "scale": "먼저 깨지는 것은 원장 읽기다. 읽기 한 번이 파일 전체 파싱·검증·잔액 재생이다. 대시보드 응답, 초상화 GET(화면의 Keeper 수만큼), Keeper 도구가 모두 그 경로다. 다음은 쓰기다. 모든 쓰기가 파일 하나의 잠금과 한도 없는 CAS 재시도를 지나고, 쓰기마다 전체를 다시 읽는다. 원장이 아직 작아 드러나지 않았고 측정값은 없다."
+ },
+ {
+  "domain": "collab-knowledge-graph",
+  "head": "efe98ca792c2",
+  "state": "Keeper 끼리 닿는 길 다섯(Board, 멘션 broadcast, fleet broadcast, delegate, Task claim)은 producer 부터 턴까지 코드로 이어진다. 지식은 쌓이지만 고친 것이 다시 읽히는 고리는 닫혀 있지 않다. 공유 기억 본문은 Keeper 가 도구를 불러야 나오고(문서 측정 0.01%), 충돌은 원장에만 남고, wiki lint 는 부를 때만 돌고, skill 은 만들기만 된다. Activity_graph 는 이벤트 log 이고 관계를 묻는 API 가 없다. P0 없음, P1 넷, P2 여덟. Keeper 가 늘면 Task backlog 잠금이 먼저 막힌다.",
+  "scale": "먼저 깨지는 순서. 1) Task backlog 잠금: 변경마다 전체 encode 와 쓰기 두 벌, 잠금 안에서 broadcast·activity 까지 한다. lease 가 끝나면 commit 이 거절된다(workspace_task_claim.ml:107,252-300; workspace_backlog.ml:381-480). 2) Board attention fanout: 글마다 Keeper 전원의 candidate 쓰기와 바깥 판정 호출, P 가 글을 만들면 K×P(keeper_board_attention_fanout.ml:160-309). 3) fleet broadcast: 1건이 transcript transaction K개, K명이 말하면 K 제곱(server_bootstrap_loops.ml:426-511). 4) activity emit 잠금 하나(activity_graph.ml:904-948). 5) Curator 는 owner 하나가 차례로 돌고 capture 마다 원장 한 벌이 남는다. 6) 턴마다 wiki 목차와 fleet 10줄이 관련 없이 실린다."
+ },
+ {
+  "domain": "dashboard-authz",
+  "head": "77f7bec3039fa0106463d5dc90e582d92fbc8f29",
+  "state": "서버는 두 종류이고 한 설치에서 하나만 뜬다. 단일 사용자 서버(route 약 390개)는 등록할 때 권한 종류를 타입으로 적는다. 역할은 Admin·Worker·Player 셋이고, reader 로 내용을 거르는 곳은 Board 하나다. 계정 서버(route 29개)는 로그인·세션 쿠키·CSRF·PAT 와 자기 Keeper 한 턴까지 하고 Dashboard·Keeper 실행·Board 가 없다. 요구 6(권한별 노출)을 채우는 경로는 지금 없다. 보안 세부는 수리가 main 에 들어간 뒤 싣는다.",
+  "scale": "코드 구조에서 읽었고 실측은 없다. 요청 한도가 클라이언트별로 갈리지 않아, Keeper 호출이 늘면 운영자 화면과 CLI 도 같이 한도에 걸린다. 화면이 reader 로 거르지 않아 Keeper K 개의 행이 모두 한 사람에게 간다."
+ },
+ {
+  "domain": "external-tools-multimodal",
+  "head": "77f7bec3039fa0106463d5dc90e582d92fbc8f29",
+  "state": "dashboard·API 로 넣은 이미지·음성·PDF 는 타입 있는 block 으로 Keeper 턴에 닿고, 모델이 못 읽으면 LLM vision·STT·Poppler 가 text 로 바꾼다. OAuth 로 붙인 원격 MCP 도구(선언 89개)는 승인 Gate 뒤에서 돈다. connector 넷, web search·fetch, wiki, text artifact, browser lane, voice 가 각각 돈다. 닫히지 않은 것: 자격 증명 projection 에 소비자 구분이 없다, connector 는 양방향 text 뿐, MCP 결과의 non-text block 과 video·PDF 밖 문서는 못 읽는다, MCP 확장은 빌드 시점 선언에 묶였다, 다계정에서는 외부 도구가 전부 닫혔다. 감사 중 HEAD 가 efe98ca792c2 에서 77f7bec3039f 로 움직였고 인용 파일 103개는 바뀌지 않았다.",
+  "scale": "P 가 늘면 connector 첨부가 조용히 사라진다(text 한 줄 또는 버림). K 가 늘면 browser lane 이 먼저 줄 선다: client 하나의 명령 stream 과 운영자 로그인 하나를 모두 같이 쓴다. 다음은 원격 MCP 서버다: identity 호출 하나가 connect·tools/list·tools/call 을 보내 서버 요청 한도에 닿는다. voice 는 재생 중 전역 mutex 를 잡고, vision 은 턴당 한 장만 미리 읽으며 후보 runtime 의 quota 를 같이 쓴다. Q 는 이 영역에서 동시성을 더하지 않는다: Keeper 당 턴 하나(lib/keeper/keeper_owner.mli:114-117), identity 도구는 한 턴 안에서 차례로 돈다. OAuth 갱신 경합은 두 서버 process 가 같은 base path 를 쓸 때만 생긴다. 다계정은 K 와 무관하게 전부 닫혀 있다. 시간은 재지 않았다."
+ },
+ {
+  "domain": "keeper-continuity-time",
+  "head": "62cd3a898b3f",
+  "state": "Agent Core lane 은 턴마다 canonical checkpoint 와 경계 줄을 쓰고, 다음 턴·공식 클라이언트 씨앗·Librarian 작업 상태가 그것을 읽는다. 공식 클라이언트 lane(Claude Code, Codex, Muse, Antigravity)은 checkpoint 를 쓰지 않고 best-effort 조각과 vendor 세션으로만 이어진다. lane 을 오가면 이력이 갈린다. 지금 시각은 턴의 첫 요청에만 가고, 저장소가 든 시각은 대기·fleet·direct·Board·영수증·작업 상태 행에서 버려진다. 시각 표기 넷, 간격 표기 셋이다. 연속성을 판정하는 측정이 없다. #51636 의 사람의 Keeper 는 넷째 저장소와 vendor 세션으로 이어지고, Codex Runtime 이면 이어지지 않는다. P0 없음, P1 셋, P2 여덟, P3 하나.",
+  "scale": "가장 먼저 연속성이 깨진다. K 가 계정 pool 을 나누면 한도 거절과 계정 교체마다 새 세션이 열리고, 그때마다 gap 01 의 손실이 난다(2026-09-15 측정: 새 세션 115개 중 48개가 거절 뒤 30초 안, 오래된 수치). 압축도 K×턴 길이로 는다(#48214). 둘째, 프로세스가 같이 쓰는 도구 호출 장부 큐(4,096줄, flush 0.5초, mutex 하나)가 밀리면 줄을 버린다. 실제로 버렸는지는 확인 필요다. 셋째, recall 판정과 Librarian 두 회차의 비용이 K×(Q+P)로 는다. 넷째, 경계 로그(중앙값 1.0 MB)와 transcript(1.8 MB)를 통째로 읽는 I/O 가 K 에 비례한다. 다섯째, Q×P 에서는 due 일정이 대화 작업 뒤로 밀린다(#46120). 행에 도착 시각이 없어 Keeper 는 순서만 안다."
+ },
+ {
+  "domain": "lane-addon-hooks-judgement",
+  "head": "efe98ca792c2",
+  "state": "저장소 밖 패키지는 운영자 선언 TOML 의 manifest_path 로 꽂힌다. 관측·파생·행동·tool export·패키지 자신의 exact output 은 돈다. 판정 확장은 좁다. Hook 은 schema 검사 두 값뿐이고 턴 hook 9단계는 OCaml 에서만 조립한다. host 가 패키지 판정을 받아 쓰는 자리는 손으로 쓴 몇 곳뿐이고 권한은 패키지 id 문자열로 정한다. 판정 계약은 Fusion, verifier, exact output 셋으로 갈라져 있다. System One 은 클라이언트가 둘이고, 느린 판정으로 넘기는 규칙은 Board attention 의 숫자 문턱 하나다. Keeper 가 늘면 Add-on manager 전체 잠금 둘이 먼저 막힌다. 로컬 빌드·시험·서버 실행 없이 코드와 문서만 읽었다.",
+  "scale": "먼저 깨지는 순서다. 1) 잠금: Add-on manager 의 configuration_mutex 와 action_mutex 가 workspace 에 하나씩이고, captured request 가 그 안에서 선언 폴더를 다시 읽고 worker 와 왕복한다. 2) 순서: 한 설치의 exact 요청은 기본 1개씩이라 Librarian 패키지 하나가 Keeper K명을 한 줄로 받는다. 3) 파일 I/O: exact_worker.py 는 단일 스레드이고 쓰기마다 fsync, 목록마다 pending 전체를 다시 읽는다. 4) 목록 한 장: pending 이 max_reply_bytes 를 넘으면 capacity_wait 다. 5) 주의: 문턱 아래 System One 답이 Keeper 마다 느린 lane 으로 가 K×P 로 는다. 6) 허가: 패키지 판정은 Standard 라 Keeper 턴 뒤로 밀린다. 운영 Add-on store 는 18 GB 다. 이번에 재지 않았고 코드 구조와 RFC 의 사고 기록에서 끌어냈다."
+ },
+ {
+  "domain": "ocaml-architecture",
+  "head": "77f7bec3039fa0106463d5dc90e582d92fbc8f29",
+  "state": "production .ml 1,184,292줄 중 448,995줄(모듈 1,415개)이 wrapped library masc 하나에 있다. 하위 library 200개의 경계, 닫힌 variant 위 catch-all 금지(warning 4 에러), Obj.magic 0건, GADT actor 명령, TLA 결속은 실제로 돈다. Keeper 분리(RFC-0215)는 Draft 로 멈췄고 그 사이 lib/keeper 는 436개에서 969개 모듈이 됐다. blocking 호출, domain 소속, 식별자, 실패, 경로, JSON 계약은 타입이 아니라 관례로 지킨다. 구조 검사 도구는 부르는 곳이 없는데 문서는 CI 가 돈다고 적는다. release 의 -O3 는 flambda 없는 switch 라 효과가 없다. 수치는 efe98ca792c2 에서 쟀고 좌표는 77f7bec3039f 에서 다시 읽었다.",
+  "scale": "먼저 깨지는 순서다. ① main domain 정지: Keeper loop 가 HTTP 와 같은 domain 에서 돌고 직접 blocking 호출이 1,611곳이다. ② minor GC 정지: 할당이 K 에 비례하고 minor GC 한 번이 모든 domain 을 세운다. ③ thread 수: systhread host 는 domain 하나에 대기열 상한이 없다. ④ 공유 칸: 최상위 table 133개와 잠금 211개를 모든 Keeper 가 쓰고, 이름만 키인 table 은 사람별 이름에서 섞인다. ⑤ 만드는 쪽 처리량: 모듈 집합이 7일에 239번 바뀌고 그때마다 library 전체가 재컴파일 대상이다. lib/dune, bin/dune, masc_tui.ml 이 충돌 지점이다. ⑥ 읽는 쪽: 모듈 1,415개가 한 이름 공간에 있다. queue·proactive source 가 전부 main domain fiber 인지는 확인 필요다."
+ },
+ {
+  "domain": "provider-protocol",
+  "head": "77f7bec3039fa0106463d5dc90e582d92fbc8f29",
+  "state": "API lane 은 codec 여섯이 닫힌 타입(sse_event, stop_reason, api_usage, Candidate_fault)으로 정규화하고, OpenAI 호환 provider 는 TOML 두 파일로 들어온다. 공식 클라이언트 lane 다섯은 스트림·결과·effect 관측 타입만 공유한다. 오류 사상, effect 관측 코드, 동시 실행, stop reason 은 lane 마다 따로 짰다. failover 는 효과가 없던 실패에서만 같은 턴에 넘어간다. 한도 쉼은 거절을 직접 받은 Keeper 만 지킨다. P0 없음, P1 셋, P2 여섯, P3 셋. 감사는 efe98ca792c2 에서 시작했고 checkout 이 세 커밋 움직였지만 인용한 파일은 그대로다(git diff 로 확인).",
+  "scale": "먼저 깨지는 순서다. (1) 쉬는 계정 재호출: 거절을 직접 받은 Keeper 만 쉬어 계정당 K 번, 재시작·설정 변경마다 다시 든다(한도 거절 턴 7.25일 2,113번, 원인별 미분리). (2) 공식 클라이언트 프로세스: Claude Code·Codex·Muse 는 상한이 없고 Antigravity 는 서버 전체 8턴, 120초 대기 뒤 가짜 실패 증거를 남긴다. (3) 접수 뒤 실패하는 공식 head: 기록한 Keeper 또는 lane 전체가 사이클마다 턴을 잃는다. (4) standing 은 프로세스 메모리다(진행 중 #51466). (5) 공식 계정에는 사람·판정·proactive 턴 사이 순서가 없다. (6) 휴식 broadcast 가 증거 기록마다 전 Keeper 를 다시 계산한다(비용 미측정). Q 와 P 는 턴 수를 늘려 (1)~(3)을 앞당긴다."
+ },
+ {
+  "domain": "queue-proactive-attention",
+  "head": "efe98ca792c2",
+  "state": "Keeper 마다 큐가 둘(SQLite 채팅 작업 큐, durable event queue)이고 턴 슬롯은 하나다. 자율 줄은 한 바퀴에 준비된 행을 urgency 순으로 최대 32개, scope 하나만 받는다. 완료는 받은 행 전부를, 체크포인트는 Board 행과 승인만 지우고, 실패는 아무것도 지우지 않는다. 채팅 줄은 맨 앞 작업이나 같은 출처의 연속 묶음을 받는다. 풀린 슬롯은 채팅이 먼저 받는다. 주기 tick(300초)은 조건 없이 턴을 연다. 일정은 앞 occurrence 를 취소하고 한 행만 둔다. 도는 중 도착한 행은 미리보기로 보인다. P0 는 없고 P1 둘, P2 여섯, P3 하나다.",
+  "scale": "먼저 깨지는 것은 슬롯 순서다(K): Keeper 사이 메시지가 보낸 Keeper 마다 대상의 턴 하나를 쓰고 자율 줄은 채팅이 빌 때까지 기다린다. 다음은 주의다(Q): 32 를 넘은 행은 보이지 않고 받은 행은 첫 요청에만 있다. 그다음은 중복이다(K×P): Keeper 마다 300초 tick, 열린 Board 글 하나에 K 번 판정. 파일 I/O 는 그 뒤다: 큐 전이마다 전체 상태 쓰기와 fsync, Broadcast 는 K 번. 지금 snapshot 29개는 중앙값 2.8 KB 로 작다. 잠금은 먼저 깨지지 않는다: 큐 잠금과 Owner 가 Keeper 별이다."
+ },
+ {
+  "domain": "sandbox-remote",
+  "head": "77f7bec3039fa0106463d5dc90e582d92fbc8f29",
+  "state": "Keeper 실행 자리는 Docker, Apple container, nerdctl+Kata, microsandbox(부팅 거절), OpenSSH 끝점 다섯이다. OpenSSH 경로는 bootstrap, shim, 프레임 프로토콜, 원격 파일 읽기·쓰기까지 돌고 운영 기록이 있다. 다만 한 운영자·한 신뢰 범위를 전제로 한다. 사람이 만든 Keeper 는 도구 없이 돌고, 샌드박스를 사람별로 가르는 장치는 아직 없다. Apple container 는 Keeper 마다 VM 이지만 게스트 메모리 합을 막는 코드가 없다. 네 경계(파일·망·자격·프로세스)를 backend 마다 같은 타입으로 적은 곳은 없다. 보안 세부는 수리가 main 에 들어간 뒤 싣는다.",
+  "scale": "SSH 끝점에서 먼저 깨지는 순서: 끝점 세마포어 8(Keeper 전체 공유, 대기 상한·기록 없음), 쉬었다 깰 때마다 도는 점검(연결 8개), 연결·서버 재시작에 죽는 긴 명령. microVM 은 호스트 메모리가 먼저다(23개에서 swap 96~97%, 문서 측정). 사람이 둘이면 K 와 무관하게 경계가 먼저 깨진다."
+ },
+ {
+  "domain": "storage-locking-io",
+  "head": "efe98ca792c2",
+  "state": "쓰기 진입점은 Fs_compat 안 일곱 등급과 밖의 손 rename 27곳이고, store 별 fsync·잠금 규칙을 선언한 표는 없다(부팅 정책표 23개만 있다). 잠금은 Stdlib.Mutex 276곳, Eio.Mutex 98곳, Cross_context_mutex 33곳에 프로세스 잠금 구현 열둘이 섞여 있고 기다림 정책이 여섯 가지다. Tasks(5.2 MB)·Schedule(12.3 MB)은 변경마다 문서를 두 번 통째로 쓰고 50회 폴링 lease 를 쓴다. Board 는 comment 한 건마다 원장 94.6 MB 를 다시 읽어 비교한다. main 도메인의 blocking 호출은 Systhread_host 도메인 하나로 간다. 읽기 실패를 빈 값으로 바꾸거나 쓰기 실패를 삼키는 helper 가 14곳에서 불린다. 감사 중 checkout 이 77f7bec3039f 로 옮겨졌고 인용한 파일은 그대로다.",
+  "scale": "먼저 깨지는 순서. ① backlog·schedules lease 포기: 전이 수는 K×Q, schedule 변경은 P 에 비례하고 한 건이 5~12 MB 를 두 번 쓰는 동안 lease 를 쥔다. 17 actor 에서 포기 기록이 있다. ② Board 쓰기: 한 건이 원장 94.6 MB 를 읽고 mutex 하나에 서며 원장은 영구라 계속 커진다. ③ Systhread_host 한 도메인: 기록상 초당 약 240 job 이 락 하나를 나눈다. ④ tool call 마다 telemetry store 전체 stat 과 SQLite insert. ⑤ 턴마다 turn-boundaries 전체 읽기(5.6 MB). ⑥ crash 뒤 lease TTL 2분. ⑦ fd 캐시 32칸. event queue 는 지금 작다(snapshot 29개 183.3 KB). 시간은 재지 않았다."
+ },
+ {
+  "domain": "tools-paradigm",
+  "head": "e031f7ff990a",
+  "state": "도구 선언은 config/tools TOML 226개를 부팅 때 fail-closed 로 읽는 한 곳이다. 표면은 바깥 MCP(profile 넷), 사람용 MCP(닫힌 variant 7개), Keeper(Agent Core·공식 클라이언트·loopback), 셸 `masc <path>`(읽기 도구 3개)로 갈린다. Keeper 호출은 얼린 표면 admission, Ask|Run Gate, runtime_handler match 순서로 돈다. 위임은 성공과 턴 안 실패까지 닫혀 있지만 스트림 닫힘·재시작 때 묻은 Keeper 에게 끝 사실이 가지 않는다. 결과를 기다리는 길은 넷이고 완료 기록 id 가 producer 마다 다르다. batch 는 descriptor execution 하나를 모든 Keeper lane 이 지킨다. memory 도구는 같은 표면에 있고 자동 recall 이 따로 돈다. Keeper 에게는 System Two(Fusion)만 보인다. Keeper lane 권한은 가시성 투영이다.",
+  "scale": "먼저 깨지는 것은 정확성이다. 재시작·스트림 닫힘마다 진행 중 위임의 끝 사실이 묻은 Keeper 에게 가지 않는다(K × 진행 중 위임 × 배포 재시작). 다음은 비용이다. receipt 로 못 기다리는 일은 Keeper 마다 폴링 왕복이고, 72시간 sleep+gh 535건·36.6시간 중 두 Keeper 가 72% 다(#51606). 미룬 schema 는 처음 쓸 때 왕복 하나가 더 든다. P 가 늘면 일정 receipt 파일 I/O 가 K × P 로 는다. 성능 후보(호출마다 capability search FTS5 색인, all_descriptors 이어 붙이기와 선형 탐색, owner registry Eio.Mutex)는 측정이 없어 확인 필요다. 서버 정지 구간 #51655 와 겹치는지도 확인 필요다."
+ },
+ {
+  "domain": "tui-core-music",
+  "head": "efe98ca792c279c91505ca910c149f123226a069",
+  "state": "TUI 는 실행 파일 하나(masc-tui), run_loop 하나(약 11,000줄), mutable 1,011칸 상태 레코드 하나다. 키는 문자열로 읽혀 순서 있는 match 316갈래를 지나고, 키 표는 키 줄·도움말용이다. 화면 문법 RFC 의 키 variant·동작 창은 HEAD 에 코드가 없다. 음악은 TUI 안의 작은 조각 넷(ASCII tab, MIDI 요약, 띄우고 잊는 재생, 터미널 넘기기)과 따로 까는 Node 도구 masc-alphatex 로 갈린다. 도구는 서버와 안 이어지고 키 체계가 다르며 한글 입력을 못 읽는다. 음악 도구를 켜면 TUI main domain 이 waitpid 에서 멈춘다. P0 는 없고 P1 셋, P2 여덟, P3 하나다.",
+  "scale": "먼저 끊기는 것은 운영자의 주의다. Keeper 가 늘면 승인·질문이 늘지만 음악 도구·MSX 화면·$EDITOR 에 있는 동안 표시가 없다. Keeper 의 큐(K)와 일정(J)을 여는 키는 대문자뿐이라 한글 상태에서 커서만 움직인다. 승인은 줄마다 y 한 번이고 신원으로 묶여 있어 느려지지만 틀리지는 않는다. mailbox 는 32칸에 4 ms 씩 적용하고 가득 차면 넣는 쪽이 기다려, 화면이 늦어지되 답을 잃지는 않는다. 동기 길 하나(Board 첨부 32 MiB, 일정 양식)가 loop 전체를 세운다. 큐는 Keeper 하나씩만 본다(Ctrl-T). frame 을 만드는 시간은 2026-09-03 뒤 값이 없어 확인 필요다."
+ },
+ {
+  "domain": "usage-observability-feedback",
+  "head": "77f7bec3039f",
+  "state": "턴 사용량은 성공·실패 모두 resolved 행으로 남고, 못 받은 값과 0 을 구분한다. 턴의 마지막 요청은 구성 요소별 byte 로 기록돼 TUI·dashboard 에서 보인다. 집계는 모델별(증분 읽기)과 Keeper 월별 둘뿐이고 도구 시계열에는 Keeper 차원이 없다. 계측 emit 540곳 가운데 프로세스 안에서 읽히는 것은 일부이고 OTel 은 기본으로 꺼져 있다. 통계가 Keeper 맥락으로 돌아가는 경로는 켠 설정이 0개인 opt-in 주입 하나뿐이다. 운영자 설정으로 돌아가는 고리는 사람이 돌리는 Python 스크립트다. 좌표는 efe98ca792c2 에서 읽었고 77f7bec3039f 까지 인용 파일은 바뀌지 않았다.",
+  "scale": "먼저 깨지는 순서. (1) 주의: 되먹임이 0이라 낭비가 Keeper 수만큼 복제되고 사람이 며칠 뒤 스크립트로 찾는다. (2) 집계 차원: 모델별·월별뿐이라 K 가 늘수록 누가·어느 큐·어느 proactive source 인지 가릴 수 없다. (3) 쓰기: tool-call 원장은 프로세스 전체가 큐 하나(4096칸, 0.5초 flush)이고 차면 행을 버린다. cost 원장은 store 잠금 하나에 턴 fiber 동기 쓰기다. (4) 읽기: 통째 읽기가 K × 날짜 수로 늘고, decision 로그 32개 중 22개가 이미 10MB 에서 회전했다. (5) metric 표: 전역 mutex 하나, series 는 지워지지 않고 keeper × tool 로 는다."
+ },
+ {
+  "domain": "world-config-text",
+  "head": "79c51d7c6725",
+  "state": "세계를 한 묶음으로 꺼내고 들이는 경로가 없다. preset 형식이 둘이다(저장소 team preset 은 shell cp, runtime prompt preset 은 HTTP·TUI·dashboard). prompt preset 은 override·instructions·배정·lane 네 면만 싣는다. Keeper 선언 나머지, 헌법 조항, wake prompt, Candle 정책, skill 선택은 빠지고 기억은 Keeper 이름을 따라 남는다. restore 는 runtime.toml 을 lock 밖에서 읽고 조건 없이 덮는다. system prompt 와 도구 스키마는 registry·TOML 로 나갔다. 도구 결과·기억 안내·브라우저 기능 설명은 OCaml 에 남았고 오늘도 늘었다(#51673, #51636). 60자 이상 literal 은 8,711개 1,071,465자다(log·exception·doc 제외 6,804개). 최상위 table 오타와 agent_core_env 는 조용히 반영되지 않는다.",
+  "scale": "K 가 늘면 세계 교체가 먼저 깨진다. override 는 바로, instructions 는 다음 sweep, runtime 배정은 commit 뒤, fleet 설정은 재시작 뒤(registry 67줄 중 64줄)에 적용된다. 그래서 turn 마다 세계 조합이 다르고 turn 기록에는 System SHA-256 만 남는다. worldview·keeper.md 를 바꾸면 K 개 Keeper 가 history cache 를 한꺼번에 잃는다(keeper_turn_system.mli:4-7). restore 는 Keeper 마다 manifest·runtime lock 을 차례로 잡아 다른 runtime.toml 쓰기와 다투고, 잃는 쓰기가 생긴다(gap 03). config/keepers 는 TOML 29개에 항목 819개라 scan 의 readdir 이 K×약 28 로 는다. P 원천은 fleet wake 글 하나를 나눠 쓴다. 슬롯 해석마다 드는 stat·mutex 비용은 아직 재지 않았다. preset 쓰기 권한이 사람 단위로 갈리지 않아, 다계정에서는 한 사람의 교체가 전원에게 간다."
+ }
+]

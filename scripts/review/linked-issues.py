@@ -6,10 +6,14 @@ token: of 19 open issues linked from pull requests the merge worker landed on
 main, none closed within a minute of the merge (#51498). The worker therefore
 closes them itself.
 
-A merge closes its issues once. The worker meets the same merged pull request
-again: on a recheck, after a run that died before this step, and in a stack
-whose lower layers landed earlier. An issue that was reopened after the merge
-stays open, whoever reopened it.
+One run of the worker closes each linked issue once. The run meets the same
+merged pull request again: on a recheck, after a run that died before this
+step, and in a stack whose lower layers landed earlier, and the close is
+reused. An issue stays open when this run's check saw it reopened at or after
+the merge. Runs are not serialized with each other: one that checked before
+the reopening still closes the issue (#51614), and a later merge of another
+pull request that links the issue closes it again, as GitHub's own keyword
+does.
 
 The decisions live here and the one I/O path comes in as an argument:
 `graphql(document, **variables)` returns the response's `data` and raises
@@ -135,7 +139,9 @@ def check(owner, name, default, merged, graphql):
 
     Returns the layers whose merge commit is on the default branch, and for
     each issue its state now with the time it was last reopened, or None when
-    it never was.
+    it never was. A reopening history that is not a list is an answer this
+    code cannot read rather than a history of none; it raises here, before
+    anything is sent.
     """
     layers = {pull.number: pull.commit for pull in merged if pull.commit is not None}
     ids = list(dict.fromkeys(issue.id for pull in merged for issue in pull.issues))
@@ -151,6 +157,12 @@ def check(owner, name, default, merged, graphql):
     for index, issue_id in enumerate(ids):
         node = checked[f'i{index:d}']
         reopened = node['timelineItems']['nodes']
+        # GitHub's null here is an answer this code cannot read, not a history
+        # of no reopening: raising refuses every issue of the call instead of
+        # closing it as never reopened.
+        if not isinstance(reopened, list):
+            raise TypeError(f'timelineItems of {issue_id} answered '
+                            f'{type(reopened).__name__}, not a list')
         now[issue_id] = (node['state'], instant(reopened[0]['createdAt']) if reopened else None)
     return landed, now
 
@@ -174,9 +186,11 @@ def close_linked_issues(repo, numbers, graphql):
     keeps its parent branch as base after the stack lands on main, so the
     base alone would leave the issues of every such layer open.
 
-    An issue is left open when it was reopened at or after the merge. GitHub
-    keeps times to the second, and the same second counts as after: closing
-    an issue someone reopened costs more than leaving one open.
+    An issue is left open when the check saw it reopened at or after the
+    merge. GitHub keeps times to the second, and the same second counts as
+    after: closing an issue someone reopened costs more than leaving one
+    open. A run that checked before the reopening still closes the issue;
+    runs are not serialized with each other (#51614).
 
     Only the read can raise, and it raises before anything is sent. After it
     every pull request and issue gets its own record. A check that fails

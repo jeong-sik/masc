@@ -48,6 +48,7 @@ let empty =
 ;;
 
 let find t user_id = User_map.find_opt user_id t.by_id
+let bindings t = User_map.bindings t.by_id
 let find_identity t identity = Identity.Map.find_opt identity t.by_identity
 let find_membership t user_id = User_map.find_opt user_id t.memberships
 let find_namespace t namespace = Namespace_map.find_opt namespace t.by_namespace
@@ -60,7 +61,8 @@ let is_active t user_id =
   | Some { status = Disabled; identity = _ } | None -> false
 ;;
 
-let is_admin t user_id = User_id.Set.mem user_id t.admins && is_active t user_id
+let has_admin_assignment t user_id = User_id.Set.mem user_id t.admins
+let is_admin t user_id = has_admin_assignment t user_id && is_active t user_id
 
 (* Design 5.1-5: an installation with Admins keeps one that acts. An Admin that
    is held writes nothing (design 8.3), so it does not act. *)

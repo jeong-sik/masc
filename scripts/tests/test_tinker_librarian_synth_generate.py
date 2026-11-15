@@ -9,7 +9,9 @@ and candidates, with a fake model in place of the Tinker caller.
 A plan must not show its label: no category holds more facts than the cap, and
 the size of a candidate's category does not depend on its kind. The generator
 keeps only what it asked for: a duplicate restates a durable fact of its
-category, and a copy, a mark or a length nobody asked for is not kept.
+category, a copy, a mark or a length nobody asked for is not kept, and a facts
+answer that is not one text claim per slot is asked again. Each refusal is
+recorded.
 `synth_generate` imports the Tinker caller, which imports openai, so this file
 runs with `uv run`.
 """
@@ -51,7 +53,8 @@ def text(n: int) -> str:
 
 
 type Reply = Callable[["FakeModel"], str]
-type FactsReply = Callable[["FakeModel", int], list[str]]
+# A float claim is written as a bare JSON number, NaN included.
+type FactsReply = Callable[["FakeModel", int], Sequence[str | float]]
 
 
 class FakeModel:
@@ -146,6 +149,22 @@ def stale_copies_first(model: FakeModel, n: int) -> list[str]:
     return claims
 
 
+def second_blank(model: FakeModel, n: int) -> list[str]:
+    claims = fresh_facts(model, n)
+    claims[1] = " \t\n"
+    return claims
+
+
+def second_skipped(model: FakeModel, n: int) -> list[str]:
+    claims = fresh_facts(model, n)
+    del claims[1]
+    return claims
+
+
+def second_bare_nan(model: FakeModel, n: int) -> list[str | float]:
+    return [float("nan") if i == 1 else claim for i, claim in enumerate(fresh_facts(model, n))]
+
+
 def memory_plan(seed: int) -> G.MemoryPlan:
     """One category of three durable and three stale facts, and a duplicate planted there."""
     slots = tuple(G.FactSlot("topic_0", LENGTH, i >= 3, SEEN + dt.timedelta(hours=i), BLANK, None)
@@ -158,6 +177,12 @@ def fact(index: int, *, category: str = "topic_0", stale: bool = False, duplicat
          use_at: str | None = None) -> S.MemoryFact:
     seen = (SEEN + dt.timedelta(hours=index)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return S.MemoryFact(f"m{index}", text(index), category, None, seen, stale, duplicate_of, use_at)
+
+
+def durable_plan(n: int) -> G.MemoryPlan:
+    """n durable facts in topic_0 and no duplicate; DURABLE_KEEP_SHARE keeps an attempt short of one of three."""
+    slots = tuple(G.FactSlot("topic_0", LENGTH, False, SEEN + dt.timedelta(hours=i), BLANK, None) for i in range(n))
+    return G.MemoryPlan("docs-gardener-00", KEEPER, slots, None, 0)
 
 
 def record_plan() -> G.MemoryPlan:
@@ -262,7 +287,7 @@ class MemoryTest(unittest.TestCase):
 
     def test_a_duplicate_restates_a_durable_fact_of_its_category(self) -> None:
         for seed in range(30):
-            facts = G.build_memory(FakeModel(), memory_plan(seed))
+            facts = G.build_memory(FakeModel(), memory_plan(seed)).value
             assert facts is not None
             by_id = {f.memory_id: f for f in facts}
             (duplicate,) = [f for f in facts if f.duplicate_of is not None]
@@ -275,7 +300,7 @@ class MemoryTest(unittest.TestCase):
         for seed in range(30):
             plan = dataclasses.replace(record_plan(), duplicate=G.DuplicateSlot("topic_0", SEEN + dt.timedelta(days=2),
                                                                                 BLANK), seed=seed)
-            facts = G.build_memory(FakeModel(), plan)
+            facts = G.build_memory(FakeModel(), plan).value
             assert facts is not None
             by_id = {f.memory_id: f for f in facts}
             (duplicate,) = [f for f in facts if f.duplicate_of is not None]
@@ -283,33 +308,45 @@ class MemoryTest(unittest.TestCase):
 
     def test_a_duplicate_that_copies_or_misses_its_marks_or_length_is_not_kept(self) -> None:
         model = FakeModel((copied, dated, too_long, fresh))
-        facts = G.build_memory(model, memory_plan(0))
+        facts = G.build_memory(model, memory_plan(0)).value
         assert facts is not None
         (duplicate,) = [f for f in facts if f.duplicate_of is not None]
         self.assertEqual(duplicate.claim, model.written[-1])
         refused = FakeModel((copied, dated, too_long) * 2)
         self.assertGreater(len(refused.duplicate), G.CANDIDATE_ATTEMPTS - 1)
-        self.assertIsNone(G.build_memory(refused, memory_plan(0)))
+        self.assertIsNone(G.build_memory(refused, memory_plan(0)).value)
 
     def test_a_fact_that_copies_another_or_misses_its_marks_is_not_kept(self) -> None:
         # Three durable slots, then three stale ones; DURABLE_KEEP_SHARE keeps an attempt with two
         # durable facts of three, and only one with every stale fact.
         plan = memory_plan(0)
-        for reply in (second_copies_first, second_dated):
-            kept = G.claims_for(FakeModel(facts=(reply,)), plan, "topic_0", plan.slots, [], [])
-            assert kept is not None
-            self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [0, 2, 3, 4, 5], reply.__name__)
+        for reply, miss in ((second_copies_first, G.ClaimMiss.COPY), (second_dated, G.ClaimMiss.MARKS)):
+            got = G.claims_for(FakeModel(facts=(reply,)), plan, "topic_0", plan.slots, [], [])
+            assert got.value is not None
+            self.assertEqual([plan.slots.index(slot) for slot, _ in got.value], [0, 2, 3, 4, 5], reply.__name__)
+            self.assertEqual(got.refused, (miss,))
         existing = text(999)
         for same, others in (([existing], []), ([], [existing])):
-            kept = G.claims_for(FakeModel(facts=(lambda m, n: [existing, *fresh_facts(m, n - 1)],)), plan,
-                                "topic_0", plan.slots, same, others)
-            assert kept is not None
-            self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [1, 2, 3, 4, 5])
+            got = G.claims_for(FakeModel(facts=(lambda m, n: [existing, *fresh_facts(m, n - 1)],)), plan,
+                               "topic_0", plan.slots, same, others)
+            assert got.value is not None
+            self.assertEqual([plan.slots.index(slot) for slot, _ in got.value], [1, 2, 3, 4, 5])
+
+    def test_an_answer_that_is_not_one_text_claim_per_slot_is_asked_again(self) -> None:
+        # Matched by position, each answer would put its third claim on the second slot, and two
+        # durable facts of three would keep the attempt.
+        for reply, fault in ((second_skipped, G.AnswerFault.COUNT), (second_bare_nan, G.AnswerFault.CLAIM_NOT_TEXT),
+                             (second_blank, G.AnswerFault.CLAIM_NOT_TEXT)):
+            model = FakeModel(facts=(reply, fresh_facts))
+            got = G.claims_for(model, durable_plan(3), "topic_0", durable_plan(3).slots, [], [])
+            assert got.value is not None
+            self.assertEqual([claim for _, claim in got.value], model.written[-3:], reply.__name__)
+            self.assertEqual(got.refused, (fault,))
 
     def test_an_attempt_that_keeps_too_few_facts_is_asked_again(self) -> None:
         for lost in (two_copy_first, stale_copies_first):
             model = FakeModel(facts=(lost, fresh_facts))
-            kept = G.claims_for(model, memory_plan(0), "topic_0", memory_plan(0).slots, [], [])
+            kept = G.claims_for(model, memory_plan(0), "topic_0", memory_plan(0).slots, [], []).value
             assert kept is not None
             self.assertEqual([claim for _, claim in kept], model.written[-6:], lost.__name__)
 
@@ -317,7 +354,7 @@ class MemoryTest(unittest.TestCase):
         # Slot 3 is the record ahead. Counted as a durable fact, losing it would leave enough.
         plan = record_plan()
         model = FakeModel(facts=(stale_copies_first, fresh_facts))
-        kept = G.claims_for(model, plan, "topic_0", plan.slots, [], [])
+        kept = G.claims_for(model, plan, "topic_0", plan.slots, [], []).value
         assert kept is not None
         self.assertEqual([claim for _, claim in kept], model.written[-5:])
 
@@ -326,13 +363,13 @@ class MemoryTest(unittest.TestCase):
         prompts: list[str] = []
         for slot in plan.slots[3:]:
             model = FakeModel()
-            self.assertIsNotNone(G.claims_for(model, plan, "topic_0", (slot,), [], []))
+            self.assertIsNotNone(G.claims_for(model, plan, "topic_0", (slot,), [], []).value)
             prompts.append(model.prompts[-1][1])
         self.assertEqual(prompts[0], prompts[1])
         self.assertIn(P.fact_kind_word("scheduled"), prompts[0])
 
     def test_a_record_keeps_its_use_time_and_side(self) -> None:
-        facts = G.build_memory(FakeModel(), record_plan())
+        facts = G.build_memory(FakeModel(), record_plan()).value
         assert facts is not None
         self.assertEqual([(f.planted_stale, f.use_at) for f in facts if f.use_at is not None],
                          [(False, "2026-11-09T00:00:00Z"), (True, "2026-10-02T00:00:00Z")])
@@ -342,7 +379,7 @@ class MemoryTest(unittest.TestCase):
         slots = tuple(G.FactSlot(category, LENGTH, False, SEEN + dt.timedelta(hours=i), BLANK, None)
                       for i, category in enumerate(["topic_1"] + ["topic_0"] * 8))
         model = FakeModel()
-        facts = G.build_memory(model, G.MemoryPlan("docs-gardener-00", KEEPER, slots, None, 0))
+        facts = G.build_memory(model, G.MemoryPlan("docs-gardener-00", KEEPER, slots, None, 0)).value
         assert facts is not None
         prompts = [prompt for label, prompt in model.prompts if label == "facts"]
         self.assertEqual(len(prompts), 3)

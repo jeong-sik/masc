@@ -144,20 +144,39 @@ if [ "${#aliases[@]}" -gt 0 ]; then
     # preparation existed. Say so instead of falling back silently -- a run
     # that quietly lost the preparation looks exactly like the 601s TIMEOUT it
     # was meant to prevent, and nobody re-reads a log that never complained.
-    if ! alias_dep_lines=$(python3 "${stanza_env_reader}" --dir test --alias-deps "${alias_name}" 2>&1); then
-      log "[targeted] ${alias_name}: could not read the rule's deps; building the alias under its own budget instead: ${alias_dep_lines}"
+    # Only the reader's stdout names build targets. What it writes to stderr
+    # is kept apart and logged, so a warning from a reader that exits 0 is not
+    # handed to dune as a target.
+    alias_dep_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-targeted-alias-deps.XXXXXX")
+    if alias_dep_lines=$(python3 "${stanza_env_reader}" --dir test --alias-deps "${alias_name}" 2>"${alias_dep_stderr}"); then
+      if [ -s "${alias_dep_stderr}" ]; then
+        log "[targeted] ${alias_name}: the deps reader wrote to stderr: $(cat "${alias_dep_stderr}")"
+      fi
+    else
+      log "[targeted] ${alias_name}: could not read the rule's deps; building the alias under its own budget instead: $(cat "${alias_dep_stderr}")"
       alias_dep_lines=""
     fi
+    rm -f "${alias_dep_stderr}"
     while IFS= read -r alias_dep; do
       [ -n "${alias_dep}" ] || continue
       alias_deps+=("${alias_dep}")
     done <<< "${alias_dep_lines}"
   done
 fi
+# This build has no timeout of its own: it is the compile the suite budget
+# must not pay for, and the job's own limit bounds it. When it fails, the run
+# is marked failed and every alias still runs under its budget, where dune
+# builds whatever is missing. Stopping here, as `set -e` would, left the other
+# suites of the dispatch without a verdict.
 if [ "${#alias_deps[@]}" -gt 0 ]; then
   log "[targeted] dune build ${alias_deps[*]} (prepare alias dependencies)"
+  prepare_rc=0
   opam exec -- dune build --root . -j "${DUNE_JOBS:-2}" "${alias_deps[@]}" \
-    2>&1 | tee -a "${CI_TEST_LOG_FILE}"
+    2>&1 | tee -a "${CI_TEST_LOG_FILE}" || prepare_rc=$?
+  if [ "${prepare_rc}" -ne 0 ]; then
+    log "[targeted] FAIL - prepare alias dependencies: exit ${prepare_rc}; each alias still runs under its own budget"
+    status=1
+  fi
 fi
 # Stream fixture records directly to tee: buffered Dune output can
 # truncate a successful suite mid-JSON. Keep actions serial so their

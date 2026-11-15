@@ -46,7 +46,7 @@ if mode == 'exit-before-result':
     sys.exit(3)
 assert sys.argv[sys.argv.index('--tools')+1] == 'ToolSearch'
 assert '--setting-sources=' in sys.argv
-session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id='))
+session = next(x.split('=',1)[1] for x in sys.argv if x.startswith('--session-id=') or x.startswith('--resume='))
 request = receive()
 emit({'type':'control_response','response':{'subtype':'success','request_id':request['request_id'],'response':{}}})
 receive()
@@ -169,13 +169,22 @@ candidates = ["forbidden.verifier", "official.verifier"]
     Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn previous_slots);
   let calls = ref [] in
   let owner_confirmed=ref false in
+  (* The capture keeps every launch of the case, so a review compares the
+     launches it finds when its owner is confirmed with the launches made
+     before it began. *)
+  let client_launches () =
+    if Sys.file_exists capture
+    then records capture |> List.filter (fun row -> member "argv" row <> `Null) |> List.length
+    else 0 in
   let review () = if owned then (
+    let launches_before_review = client_launches () in
     let system_prompt=Prompt_registry.render_prompt_template Prompt_names.verification_system [] |> Result.get_ok in
     let execution_owner : AR.execution_owner = {keeper_name="owned-official-review";
       session_root=Filename.concat root "original-review-session";
       on_execution_ready=(fun ~runtime_id ~execution ->
         check string "exact admitted CLI runtime owns its session" "official.verifier" runtime_id;
-        check bool "owner is confirmed before the client starts" false (Sys.file_exists capture);
+        check int "owner is confirmed before the client starts" launches_before_review
+          (client_launches ());
         (match execution with Types_core.Official_session -> ()
          | Native_execution _ -> fail "official client was assigned a native locator");
         owner_confirmed:=true;Ok ())} in
@@ -279,9 +288,12 @@ candidates = ["forbidden.verifier", "official.verifier"]
       (second.verdict = Some (AR.Approve "read-only fixture receipt"));
     let invocations = records capture |> List.filter (fun row -> member "argv" row <> `Null) in
     check int "two fresh client launches" 2 (List.length invocations);
-    List.iter (fun row ->
-      check bool "every client directory reclaimed" false
-        (Sys.file_exists (member "cwd" row |> Yojson.Safe.Util.to_string))) invocations)
+    (* An owner keeps its session root, so its second review resumes the
+       session of the first and neither directory is reclaimed. *)
+    if not owned then
+      List.iter (fun row ->
+        check bool "every client directory reclaimed" false
+          (Sys.file_exists (member "cwd" row |> Yojson.Safe.Util.to_string))) invocations)
 
 let test_unsafe_slots_refused_before_spawn () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->

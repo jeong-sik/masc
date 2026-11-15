@@ -31,6 +31,7 @@
 # Usage:
 #   scripts/build-linux-release.sh [--out DIR] [--floor 2.35] [--image IMG]
 #                                  [--jobs N] [--keep] [--print-binaries]
+#                                  [--test-helper-out DIR]
 #
 #   --out DIR          where to place the built binaries
 #                      (default: <repo>/artifacts/linux-<arch>)
@@ -42,6 +43,10 @@
 #                      container (release.yml asks for this on one arch)
 #   --lifecycle-out DIR run the full lifecycle matrix in the builder and export
 #                      its source-bound bundle and logs for host verification
+#   --test-helper-out DIR  also build the test helpers release.yml runs on
+#                      the host next to the binaries, and export them to DIR.
+#                      No asset ships them, so the floor and SQLite checks
+#                      below do not read them
 #   --print-binaries   list the binaries this script produces, then exit
 #   --print-floor      print the glibc floor this script builds at, then exit
 #                      (release.yml re-checks the packaged assets at it, so the
@@ -70,6 +75,13 @@ release_binaries=(
   bin/masc_antigravity_path_hook.exe
 )
 
+# Test executables release.yml runs on the host next to the release binaries:
+# test/test_setup_cli.py takes this one as --announcer. Built and exported
+# only with --test-helper-out.
+test_helpers=(
+  test/hold_workspace_announcement.exe
+)
+
 # Run inside the container with --run-contract-test, not exported and run on
 # the host. The test resolves its workspace through the environment dune sets
 # up for `dune exec`, so the bare executable run from a checkout answers
@@ -90,11 +102,13 @@ jobs=""
 keep=0
 run_contract_test=0
 lifecycle_out=""
+test_helper_out=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --lifecycle-out) lifecycle_out="${2:?--lifecycle-out needs a directory}"; shift 2 ;;
     --out) out_dir="${2:?--out needs a directory}"; shift 2 ;;
+    --test-helper-out) test_helper_out="${2:?--test-helper-out needs a directory}"; shift 2 ;;
     --floor) floor="${2:?--floor needs a version}"; shift 2 ;;
     --image) image="${2:?--image needs an image}"; shift 2 ;;
     --jobs) jobs="${2:?--jobs needs a number}"; shift 2 ;;
@@ -107,7 +121,7 @@ while [ "$#" -gt 0 ]; do
       exit 0
       ;;
     --print-floor) printf '%s\n' "$floor"; exit 0 ;;
-    -h|--help) sed -n '2,55p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,60p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "build-linux-release: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -262,6 +276,11 @@ if [ -n "$jobs" ]; then
   jobs_flag="-j $jobs"
 fi
 
+build_targets=("${release_binaries[@]}")
+if [ -n "$test_helper_out" ]; then
+  build_targets+=("${test_helpers[@]}")
+fi
+
 echo "== build"
 docker exec \
   -e MASC_BUILD_COMMIT="$build_commit" \
@@ -270,7 +289,7 @@ docker exec \
   set -e
   cd /src
   eval "$(opam env --switch=masc)"
-  dune build --release '"${release_binaries[*]} $jobs_flag"'
+  dune build --release '"${build_targets[*]} $jobs_flag"'
 '
 
 # The injection above is only as good as what came out. A binary that cannot
@@ -332,6 +351,16 @@ for binary in "${release_binaries[@]}"; do
   chmod +x "$out_dir/$name"
   echo "== exported $name ($(wc -c < "$out_dir/$name" | tr -d ' ') bytes)"
 done
+
+if [ -n "$test_helper_out" ]; then
+  mkdir -p "$test_helper_out"
+  for helper in "${test_helpers[@]}"; do
+    name="$(basename "$helper")"
+    echo "== export $helper -> $test_helper_out/$name"
+    docker cp "$container:/src/_build/default/$helper" "$test_helper_out/$name"
+    chmod +x "$test_helper_out/$name"
+  done
+fi
 
 # The checked release binaries have already been exported. Dune lifecycle
 # aliases may rebuild their dependencies in the dev profile; those bytes must

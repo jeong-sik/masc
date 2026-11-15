@@ -201,6 +201,7 @@ let prompt_of_json json =
   Result.map_error (fun detail -> "Original Librarian capture: " ^ detail) (Prompt_registry.prompt_resolution_of_yojson json)
 let preparation_json (prepared:Runtime.admission_preparation) = `Assoc [
   "policy",`Assoc ["facts_max_bytes",`Int prepared.policy.facts_max_bytes;
+    "facts_source_lines",`List (List.map (fun line -> `String line) prepared.policy.facts_source_lines);
     "category_cap",`Int prepared.policy.category_cap;"facts_per_category_cap",`Int prepared.policy.facts_per_category_cap];
   "rule_prompt",prompt_json prepared.rule_prompt;"prompt",prompt_json prepared.prompt;
   "admission_prompt",prompt_json prepared.admission_prompt;
@@ -209,11 +210,13 @@ let preparation_json (prepared:Runtime.admission_preparation) = `Assoc [
   "rendered_prompt",`String prepared.rendered_prompt;"output_schema",prepared.output_schema]
 let preparation_of_json json =
   let* fields=object_fields ["policy";"rule_prompt";"prompt";"admission_prompt";"retirement_prompt";"variables";"rendered_prompt";"output_schema"] json in
-  let* policy_fields=object_fields ["facts_max_bytes";"category_cap";"facts_per_category_cap"] (value "policy" fields) in
+  let* policy_fields=object_fields ["facts_max_bytes";"facts_source_lines";"category_cap";"facts_per_category_cap"]
+    (value "policy" fields) in
   let* facts_max_bytes=integer (value "facts_max_bytes" policy_fields) in
+  let* facts_source_lines=list text (value "facts_source_lines" policy_fields) in
   let* category_cap=integer (value "category_cap" policy_fields) in
   let* facts_per_category_cap=integer (value "facts_per_category_cap" policy_fields) in
-  let policy={Runtime.facts_max_bytes;category_cap;facts_per_category_cap} in
+  let policy={Runtime.facts_max_bytes;facts_source_lines;category_cap;facts_per_category_cap} in
   let* rule_prompt=prompt_of_json (value "rule_prompt" fields) in
   let* prompt=prompt_of_json (value "prompt" fields) in
   let* admission_prompt=prompt_of_json (value "admission_prompt" fields) in

@@ -166,9 +166,8 @@ type provider_rest =
     model, permanent for the unchanged request. [Producer_must_act]: nothing
     that time alone changes. The walk reads this when the failure is
     reported. A result without a verdict names the [Reviews_again] candidates
-    in [retryable_runtimes]; a retained walk ({!review_rendered},
-    {!run_retained}) empties that list once one candidate's outcome is
-    unknown. *)
+    in [retryable_runtimes]; a retained walk ({!review_rendered}) empties
+    that list once one candidate's outcome is unknown. *)
 type candidate_failure =
   | Reviews_again
   | Model_absent
@@ -331,10 +330,13 @@ val run_retained :
   base_path:string -> unit -> review_result
 (** Subject-independent retained execution for the Goal caller. Both messages
     are already captured. Use the existing candidate/slot dispatch policy and
-    structured verdict protocol, with the retained-original unknown-outcome
-    fence and the same read-result projection as Task review. No synthetic
-    Task request, producer, second runner or prompt-registry read is needed.
-    The caller owns retention, actual read authority and domain commitment. *)
+    structured verdict protocol, with the same read-result projection as Task
+    review. Provider failures no longer fence the walk: they fail over to the
+    next slot, the existing candidate-failure classification decides
+    retryability, and every failure observation stays in the evidence
+    (RFC-0489 §2.1). No synthetic Task request, producer, second runner or
+    prompt-registry read is needed. The caller owns retention, actual read
+    authority and domain commitment. *)
 
 val report_tool_name : string
 (** The name of the tool a reviewer calls to report its verdict. *)

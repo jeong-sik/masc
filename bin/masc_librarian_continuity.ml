@@ -88,12 +88,8 @@ let publish_access options =
 
 let prepare_runtime ?(prepare_exact_lane = false) options =
   let* observation =
-    try
-      let (_ : string option) =
-        Server_runtime_bootstrap.configure_agent_core_model_catalog_env ()
-      in
-      Runtime.load_config_observation ~runtime_config_path:options.config_path ()
-    with Env_config_core.Config_error detail -> Error detail
+    Runtime_model_catalog_boot.load_standalone_config_observation
+      ~runtime_config_path:options.config_path
   in
   let* outcome =
     Runtime.init_default_degraded_observation observation

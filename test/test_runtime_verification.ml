@@ -1449,7 +1449,7 @@ import urllib.request
 
 mode = Path(sys.argv[0]).name
 Path(sys.argv[0]).with_suffix(".launched").touch()
-assert sys.argv[1:] == ["serve", "--disable-write", "--disable-shell"]
+assert sys.argv[1:] == ["serve", "--disable-write", "--disable-shell", "--trust-workspace"]
 account_dir = Path(os.environ["HOME"])
 config_dir = Path(os.environ["XDG_CONFIG_HOME"])
 assert config_dir.is_relative_to(account_dir / ".local/state/masc/muse-config")

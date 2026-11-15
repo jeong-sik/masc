@@ -21,7 +21,13 @@ let run_pipeline_turn ~sw ~api_strategy ?raw_trace_run agent =
   match Internal_pipeline.resolve_turn_frontier agent with
   | Error error -> Error error
   | Ok frontier ->
-    Internal_pipeline.run_turn ~sw ~api_strategy ?raw_trace_run ~frontier agent
+    Internal_pipeline.run_turn
+      ~sw
+      ~api_strategy
+      ?raw_trace_run
+      ~on_reasoning_replay_exclusion:ignore
+      ~frontier
+      agent
 ;;
 
 let invocation tool_use_id =

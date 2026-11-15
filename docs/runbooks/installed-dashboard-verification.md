@@ -16,6 +16,12 @@ commit, binary hash, selected installed-release root, receipt hash, served
 dashboard index and referenced packaged assets. It prints a JSON receipt
 only after all checks pass. Save that output with the release evidence.
 
+The verifier sends no credential and reads fields of `/health` that a server
+gives only to a requester that may read its state. Run it against an install
+that listens on loopback without strict auth. A server that requires a token
+answers it with the public probe, which has none of those fields, and the
+check fails.
+
 This verifies the installed binary and dashboard binding. Verify the runtime
 workspace separately through `/health?full=1`, and observe Item balances,
 ownership, equipment and portrait behavior in the TUI and browser. A matching

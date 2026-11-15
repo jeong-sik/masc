@@ -8,6 +8,7 @@
  (libraries
   fs_compat
   masc.config
+  masc.tool_types
   masc_core
   sqlite3
   threads

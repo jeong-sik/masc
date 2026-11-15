@@ -3,7 +3,7 @@
     After responsibility split (Epic #7261 Step 5), this module retains:
     - State read/write/update with file locking
     - Sequence counter (next_seq)
-    - State recovery (recover_workspace_state)
+    - State observation and recovery (observe_state, update_state)
     - Shared string utilities (String_util.option_trim, normalized_string_list)
 
     Extracted owner modules:
@@ -44,8 +44,7 @@ let recover_active_agent_name = function
   | `String name -> String_util.trim_nonempty name
   | _ -> None
 
-let recover_workspace_state config json =
-  let defaults = Workspace_bootstrap.default_workspace_state config in
+let recover_workspace_state ~defaults json =
   let active_agents =
     match Safe_ops.json_list_opt "active_agents" json with
     | Some agents -> List.filter_map recover_active_agent_name agents
@@ -66,7 +65,79 @@ let recover_workspace_state config json =
   }
 
 (* ============================================ *)
-(* State Read / Write / Update                  *)
+(* State Observation (read only)                *)
+(* ============================================ *)
+
+type state_read_fault =
+  | State_document_fault of json_doc_error
+  | State_schema_fault of
+      { reason : string
+      ; document : Yojson.Safe.t
+      }
+
+type state_observation =
+  | State_absent of workspace_state
+  | State_decoded of workspace_state
+  | State_recovered of
+      { state : workspace_state
+      ; fault : state_read_fault
+      }
+
+let state_read_fault_to_string = function
+  | State_document_fault error -> json_doc_error_to_string error
+  | State_schema_fault { reason; document = _ } -> "schema mismatch: " ^ reason
+
+let state_of_observation = function
+  | State_absent state | State_decoded state | State_recovered { state; fault = _ } ->
+    state
+
+let state_observation_to_yojson = function
+  | State_absent _ -> `Assoc [ "outcome", `String "absent" ]
+  | State_decoded _ -> `Assoc [ "outcome", `String "decoded" ]
+  | State_recovered { state = _; fault } ->
+    `Assoc
+      [ "outcome", `String "recovered"
+      ; "fault", `String (state_read_fault_to_string fault)
+      ]
+
+(* Deciding what an undecodable document means takes the document and the
+   declared defaults, and nothing that can write: the store is not an
+   argument, so this step cannot put a repaired value back (#51419).
+   [defaults] is a thunk because computing it lists the message store, which
+   a document that decodes never needs. *)
+let observe_state_doc ~defaults = function
+  | Ok None -> State_absent (defaults ())
+  | Ok (Some document) ->
+    (match workspace_state_of_yojson document with
+     | Ok state -> State_decoded state
+     | Error reason ->
+       State_recovered
+         { state = recover_workspace_state ~defaults:(defaults ()) document
+         ; fault = State_schema_fault { reason; document }
+         })
+  | Error error ->
+    State_recovered { state = defaults (); fault = State_document_fault error }
+
+(* [state.json] is what [is_initialized] reads, so a read never creates it:
+   a workspace without one gets the declared default, unwritten. A document
+   that is there but does not decode is not rewritten either: the caller gets
+   the recovered value together with the fault. *)
+let observe_state config =
+  observe_state_doc
+    ~defaults:(fun () -> Workspace_bootstrap.default_workspace_state config)
+    (read_json_doc config (state_path config))
+
+let read_state config =
+  match observe_state config with
+  | State_absent state | State_decoded state -> state
+  | State_recovered { state; fault } ->
+    Log.Misc.warn
+      "read_state: state.json did not decode (%s); answering with recovered values"
+      (state_read_fault_to_string fault);
+    state
+
+(* ============================================ *)
+(* State Write / Update                         *)
 (* ============================================ *)
 
 let write_state config state =
@@ -75,41 +146,31 @@ let write_state config state =
 
 let raw_snippet_max_bytes = 500
 
-let read_present_state config json =
-  match workspace_state_of_yojson json with
-  | Ok state -> state
-  | Error msg ->
-      let repaired = recover_workspace_state config json in
-      let raw_snippet =
-        let s = Yojson.Safe.to_string json in
-        if String.length s <= raw_snippet_max_bytes then s
-        else String_util.utf8_prefix ~max_bytes:raw_snippet_max_bytes s ^ "...(truncated)"
-      in
-      Log.Misc.warn
-        "read_state: deserialization failed (%s), raw=%s — repairing and rewriting"
-        msg raw_snippet;
-      (try write_state config repaired
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Misc.warn "read_state: failed to persist repaired state: %s"
-             (Printexc.to_string exn));
-      repaired
-
-(* [state.json] is what [is_initialized] reads, so a read never creates it:
-   a workspace without one gets the declared default, unwritten. A document
-   that is there but does not decode is repaired and written back. *)
-let read_state config =
-  match read_json_doc config (state_path config) with
-  | Ok None -> Workspace_bootstrap.default_workspace_state config
-  | Ok (Some json) -> read_present_state config json
-  | Error error ->
-      Log.Misc.warn "read_state: %s" (json_doc_error_to_string error);
-      read_present_state config (`Assoc [])
+(* The one place an undecodable document is about to be replaced, so the one
+   place its bytes are worth logging. *)
+let state_to_overwrite = function
+  | State_absent state | State_decoded state -> state
+  | State_recovered { state; fault } ->
+    let raw_snippet =
+      match fault with
+      | State_document_fault _ -> ""
+      | State_schema_fault { reason = _; document } ->
+        let s = Yojson.Safe.to_string document in
+        if String.length s <= raw_snippet_max_bytes
+        then s
+        else
+          String_util.utf8_prefix ~max_bytes:raw_snippet_max_bytes s ^ "...(truncated)"
+    in
+    Log.Misc.warn
+      "workspace state: state.json did not decode (%s), raw=%s — replacing it with \
+       recovered values"
+      (state_read_fault_to_string fault)
+      raw_snippet;
+    state
 
 let update_state config f =
   with_file_lock config (state_path config) (fun () ->
-    let state = read_state config in
+    let state = state_to_overwrite (observe_state config) in
     let new_state = f state in
     write_state config new_state;
     new_state

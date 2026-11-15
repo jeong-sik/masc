@@ -13,6 +13,7 @@ See the [storage guide](../guides/WORKSPACE-STORAGE.md) for output locations.
 | — | [TUI frame cost and terminal output: prior art and what applies to masc](tui-frame-cost-and-terminal-output-prior-art-20261104.md) |
 | — | [Extreme TUI/server performance: measured baseline and next decisions](extreme-performance-20261030.md) |
 | 2026-11-13 | [OpenMAIC 메커니즘 조사와 Lane Add-on 으로 가져올 것](2026-11-13-openmaic-mechanisms-and-lane-addon-absorption.md) |
+| 2026-11-12 | [에이전트 의사결정 farm 의 바깥 근거 168개 재확인](2026-11-12-agent-farm-prior-art.md) |
 | 2026-11-11 | [TUI 화면 문법 감사](2026-11-11-tui-screen-grammar-audit.md) |
 | 2026-11-10 | [다계정 로그인 구현 적대적 검토와 에이전트 플랫폼 조사](2026-11-10-multi-account-review-and-agent-platform-landscape.md) |
 | 2026-11-09 | [Librarian 이 한 번 받은 지시를 상시 제약으로 굳힐 때: 사례, 글 4편·논문 19편 대조, 선택지 (r1)](2026-11-09-librarian-scoped-instruction-stale-constraint-r1.md) |

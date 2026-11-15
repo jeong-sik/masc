@@ -126,3 +126,51 @@ let remove (t : R.t) request ~registration_id =
         | Error error -> failed error
         | Ok () -> { R.status = R.No_content_204; headers = [ "cache-control", "no-store" ]; body = "" }))
 ;;
+
+(* An open entry whose removal the external store gave up lets no one join
+   (design 8.3), so it is not listed as open. A removal is refused before its
+   intent for an entry that is not open, so only an open entry is held. *)
+let status_name state registration_id (registration : Authz_registration_state.registration) =
+  match registration.status, S.revocation state (Authz_records.Subject.Registration registration_id) with
+  | Authz_registration_state.Open, Authz_records.Revocation_state.Not_pending -> "open"
+  | Authz_registration_state.Open, Authz_records.Revocation_state.Pending -> "removal_pending"
+  | ( Authz_registration_state.Removed
+    , (Authz_records.Revocation_state.Not_pending | Authz_records.Revocation_state.Pending) ) -> "removed"
+  | ( Authz_registration_state.Consumed (_ : Authz_types.User_id.t)
+    , (Authz_records.Revocation_state.Not_pending | Authz_records.Revocation_state.Pending) ) -> "consumed"
+;;
+
+let entry state (registration_id, (registration : Authz_registration_state.registration)) =
+  match Authz_external_identity.to_body registration.identity with
+  | Error error -> Error error
+  | Ok identity ->
+    let spent =
+      match registration.status with
+      | Authz_registration_state.Consumed user_id -> [ "user_id", `String (Authz_types.User_id.to_string user_id) ]
+      | Authz_registration_state.Open | Authz_registration_state.Removed -> []
+    in
+    Ok
+      (`Assoc
+          ([ "registration_id", `String (Authz_types.Registration_id.to_string registration_id)
+           ; "identity", Authz_body.to_yojson identity
+           ; "registrar", `String (Authz_types.User_id.to_string registration.registrar)
+           ; "status", `String (status_name state registration_id registration)
+           ]
+           @ spent))
+;;
+
+let list (t : R.t) request =
+  match R.admin_reading t request with
+  | Error answer -> answer
+  | Ok state ->
+    let rec entries acc = function
+      | [] -> Ok (List.rev acc)
+      | one :: rest ->
+        (match entry state one with
+         | Error error -> Error error
+         | Ok json -> entries (json :: acc) rest)
+    in
+    (match entries [] (Authz_registration_state.bindings state.S.registrations) with
+     | Error error -> refused R.Internal_error_500 ("an identity is not shown: " ^ Authz_body.error_to_string error)
+     | Ok entries -> R.json R.Ok_200 [ "registrations", `List entries ])
+;;

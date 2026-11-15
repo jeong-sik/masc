@@ -322,15 +322,45 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT' if is_alias else 'FAKE_BUILD_EX
         self.assertEqual(result.stdout.splitlines(),
                          ["packages/agent_core/bench/bench.exe"])
 
-    def test_alias_deps_of_a_missing_alias_is_empty_not_the_whole_file(self):
-        # A sibling rule must not donate its deps to a name it does not carry.
+    def test_alias_deps_of_a_missing_alias_is_refused_not_answered_as_no_deps(self):
+        # "No rule carries this alias" is not "the rule needs nothing built":
+        # answering both with an empty list and exit 0 let the runner skip the
+        # preparation for a misread name without a word. A sibling rule must
+        # not donate its deps to a name it does not carry either.
         result = self.alias_deps("test_absent_alias")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("runtest-test_absent_alias", result.stderr)
+
+    def test_alias_deps_of_a_rule_without_deps_is_empty_and_succeeds(self):
+        self.inc.write_text("""
+(rule
+ (alias runtest-test_browser_activity)
+ (action (run python3 -c pass)))
+""")
+        result = self.alias_deps("test_browser_activity")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_alias_deps_includes_the_files_an_action_names_as_dep(self):
+        # The spelling most Python rules use for the binary they drive. A rule
+        # that names it only there, with no (deps ...), compiled it inside the
+        # suite budget.
+        self.inc.write_text("""
+(rule
+ (alias runtest-test_browser_activity)
+ (action (run python3 %{dep:activity.py} --binary %{dep:../bin/masc_tui.exe})))
+""")
+        result = self.alias_deps("test_browser_activity")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(),
+                         ["test/activity.py", "bin/masc_tui.exe"])
+
     def run_python_alias_runner(self, alias_name="test_stdio_browser_activity",
-                               with_deps=True):
-        suite_path = f"test/{alias_name}.py"
+                               with_deps=True, prepare_exit_code=0, reader=None):
+        """Run the real runner over one Python alias. Each fake `opam` call is
+        recorded with whether it ran under the fake `timeout`, and that
+        `timeout` records the budget arguments it was given."""
         deps_field = f"(deps {alias_name}.py ../bin/main_stdio_eio.exe)" if with_deps else ""
         self.inc.write_text(f"""
 (rule
@@ -341,83 +371,136 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT' if is_alias else 'FAKE_BUILD_EX
         (self.root / f"test/{alias_name}.py").write_text("print('body')\n")
         runner = self.root / "scripts/ci-run-targeted-tests.sh"
         shutil.copyfile(SCRIPTS / runner.name, runner)
+        if reader is not None:
+            self.reader.write_text(reader)
         commands = self.root / "commands"
         commands.mkdir()
-        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
+        self.executable(commands / "timeout", """
+import json,os,sys
+from pathlib import Path
+with Path('timeout-calls.jsonl').open('a') as handle:
+    handle.write(json.dumps(sys.argv[1:6]) + "\\n")
+env = dict(os.environ, TARGETED_FIXTURE_TIMED="1")
+os.execvpe(sys.argv[6], sys.argv[6:], env)
+""")
         self.executable(commands / "opam", """
 import json,os,sys
 from pathlib import Path
+invocation = {'argv':sys.argv[1:],
+              'timed':os.environ.get('TARGETED_FIXTURE_TIMED') == '1'}
 with Path('opam-calls.jsonl').open('a') as handle:
-    handle.write(json.dumps(sys.argv[1:]) + "\\n")
-raise SystemExit(0)
+    handle.write(json.dumps(invocation) + "\\n")
+is_alias = '--force' in sys.argv[1:]
+raise SystemExit(0 if is_alias else int(os.environ['FAKE_PREPARE_EXIT']))
 """)
         env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                    TARGET_SUITES=alias_name, DUNE_JOBS="2",
+                   TARGET_SUITE_TIMEOUT_SEC="600", TARGET_SUITE_KILL_GRACE_SEC="30",
+                   FAKE_PREPARE_EXIT=str(prepare_exit_code),
                    CI_TEST_LOG_FILE=str(self.root / "runner.log"))
+        env.pop("TARGETED_FIXTURE_TIMED", None)
         result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
                                 text=True, capture_output=True, timeout=15)
         calls = [json.loads(line) for line in
                  (self.root / "opam-calls.jsonl").read_text().splitlines()]
-        return suite_path, result, calls
+        budgets = [json.loads(line) for line in
+                   (self.root / "timeout-calls.jsonl").read_text().splitlines()]
+        return result, calls, budgets
+
+    def assert_only_the_alias_is_timed(self, alias_name, alias_call, budgets):
+        self.assertIn("--force", alias_call["argv"])
+        self.assertEqual(alias_call["argv"][-1], f"@runtest-{alias_name}")
+        self.assertTrue(alias_call["timed"], alias_call)
+        self.assertEqual(budgets, [["-s", "TERM", "-k", "30", "600"]])
 
     def test_python_alias_runner_prepares_deps_before_the_timed_alias(self):
-        suite_path, result, calls = self.run_python_alias_runner()
+        result, calls, budgets = self.run_python_alias_runner()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(calls), 2, calls)
-        # Dependencies first, outside any timeout wrapper.
-        self.assertEqual(calls[0][-2:], ["test/test_stdio_browser_activity.py",
-                                         "bin/main_stdio_eio.exe"])
-        # Then the alias itself, still under the suite budget.
-        self.assertIn("--force", calls[1])
-        self.assertEqual(calls[1][-1], f"@runtest-test_stdio_browser_activity")
+        # Dependencies first, outside the suite budget: a compile that ran
+        # under it is what spent 601s of 600s.
+        self.assertEqual(calls[0]["argv"][-2:], ["test/test_stdio_browser_activity.py",
+                                                 "bin/main_stdio_eio.exe"])
+        self.assertFalse(calls[0]["timed"], calls[0])
+        # Then the alias itself, the only call under the suite budget.
+        self.assert_only_the_alias_is_timed("test_stdio_browser_activity", calls[1], budgets)
         self.assertIn("(prepare alias dependencies)", result.stdout)
 
     def test_python_alias_whose_rule_declares_no_deps_still_runs(self):
         # No (deps ...) and no %{exe:...}: the preparation step must add no
         # build call at all rather than one with an empty target.
-        _, result, calls = self.run_python_alias_runner("test_bare_alias", with_deps=False)
+        result, calls, budgets = self.run_python_alias_runner("test_bare_alias", with_deps=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(len(calls), 1, calls)
-        self.assertIn("--force", calls[0])
+        self.assert_only_the_alias_is_timed("test_bare_alias", calls[0], budgets)
 
+    def test_python_alias_failed_preparation_fails_the_run_and_the_alias_still_runs(self):
+        # The preparation build used to stop the whole dispatch under set -e,
+        # so no suite after it got a verdict. Swallowing its exit is the other
+        # way to be wrong: the run would read as green over a failed build.
+        result, calls, budgets = self.run_python_alias_runner(prepare_exit_code=23)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAIL - prepare alias dependencies: exit 23", result.stdout)
+        self.assertEqual(len(calls), 2, calls)
+        self.assertFalse(calls[0]["timed"], calls[0])
+        self.assert_only_the_alias_is_timed("test_stdio_browser_activity", calls[1], budgets)
+        self.assertIn("@runtest-test_stdio_browser_activity: OK", result.stdout)
+
+    def test_python_alias_reader_stderr_is_logged_and_is_not_a_build_target(self):
+        # A reader that exits 0 and also writes to stderr: only its stdout
+        # names targets. With 2>&1 the warning line reached `dune build`.
+        result, calls, _ = self.run_python_alias_runner(reader=(
+            "import sys\n"
+            "print('a warning, not a target', file=sys.stderr)\n"
+            "print('test/x.py')\n"
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls[0]["argv"],
+                         ["exec", "--", "dune", "build", "--root", ".", "-j", "2", "test/x.py"])
+        self.assertIn("the deps reader wrote to stderr: a warning, not a target", result.stdout)
 
     def test_python_alias_reader_failure_is_reported_and_the_alias_still_runs(self):
         # A silent fallback to "no deps" is indistinguishable in the log from
         # the 601s in-budget TIMEOUT this preparation exists to prevent, so the
         # run says it fell back. The alias is still built, under its budget.
+        # A reader that refuses this query: the alias-deps path exits non-zero.
         alias_name = "test_reader_failure"
-        self.inc.write_text(f"""
-(rule
- (alias runtest-{alias_name})
- (deps {alias_name}.py)
- (action (run python3 {alias_name}.py)))
-""")
+        result, calls, budgets = self.run_python_alias_runner(alias_name, reader=(
+            "import sys\n"
+            "if '--alias-deps' in sys.argv:\n"
+            "    print('simulated reader refusal', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+            "print('test/x.py')\n"
+        ))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("could not read the rule's deps", result.stdout)
+        self.assertIn("simulated reader refusal", result.stdout)
+        self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
+        self.assertNotIn("(prepare alias dependencies)", result.stdout)
+        self.assertEqual(len(calls), 1, calls)
+        self.assert_only_the_alias_is_timed(alias_name, calls[0], budgets)
+
+    def test_python_alias_without_a_rule_is_reported_by_the_real_reader(self):
+        # test/NAME.py exists, so the runner takes it for an alias suite, but
+        # no rule carries runtest-NAME. The real reader refuses; the runner
+        # says so and leaves the verdict to the alias build.
+        alias_name = "test_orphan_script"
         (self.root / f"test/{alias_name}.py").write_text("print('body')\n")
         runner = self.root / "scripts/ci-run-targeted-tests.sh"
         shutil.copyfile(SCRIPTS / runner.name, runner)
         commands = self.root / "commands"
         commands.mkdir()
         self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
-        self.executable(commands / "opam", "import sys\nraise SystemExit(0)\n")
-        # A reader that refuses this query: the alias-deps path exits non-zero.
-        reader = self.root / "scripts/ci/stanza_env.py"
-        reader.write_text(
-            "import sys\n"
-            "if '--alias-deps' in sys.argv:\n"
-            "    print('simulated reader refusal', file=sys.stderr)\n"
-            "    raise SystemExit(1)\n"
-            "print('test/x.py')\n"
-        )
+        self.executable(commands / "opam", "raise SystemExit(0)\n")
         env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                    TARGET_SUITES=alias_name, DUNE_JOBS="2",
                    CI_TEST_LOG_FILE=str(self.root / "runner.log"))
         result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
                                 text=True, capture_output=True, timeout=15)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("could not read the rule's deps", result.stdout)
-        self.assertIn("simulated reader refusal", result.stdout)
-        self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
+        self.assertIn(f"no (rule (alias runtest-{alias_name})", result.stdout)
         self.assertNotIn("(prepare alias dependencies)", result.stdout)
+        self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
 
 
 if __name__ == "__main__":

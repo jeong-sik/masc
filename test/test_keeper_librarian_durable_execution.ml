@@ -547,7 +547,7 @@ let test_retained_source_root_alias () = with_fixture ~history_kind:Official (fu
       Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
     check bool "the physical owner uses another spelling of the same root" false
       (Source.runtime_keepers_dir source=Capture.runtime_keepers_dir owner);
-    let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> get in
+    let preparation=Keeper_librarian_runtime.prepare_durable ~source_lines:[] ~now:(Time_compat.now ()) (Source.input source) |> get in
     let destination=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
       ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination -> Ok destination) |> get in
     let capture=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
@@ -2077,7 +2077,7 @@ let retain_absent_history_original fixture =
   let owner = io (fun () ->
     ignore (Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
     Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
-  let preparation = Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> get in
+  let preparation = Keeper_librarian_runtime.prepare_durable ~source_lines:[] ~now:(Time_compat.now ()) (Source.input source) |> get in
   let destination = Keeper_librarian_durable_edge.with_destination ~config:fixture.config
     ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination -> Ok destination) |> get in
   let request = io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
@@ -2637,7 +2637,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       let rebased=Source.with_current ~expected_revision:(Some written.revision)
         ~current:(Some {Keeper_librarian.facts=written.facts}) source
         |> Result.map_error Source.error_to_string |> get in
-      let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input rebased) |> get in
+      let preparation=Keeper_librarian_runtime.prepare_durable ~source_lines:[] ~now:(Time_compat.now ()) (Source.input rebased) |> get in
       let owner=Capture.physical_owner original in
       let request_id=minted_a_day_before (Capture.fresh_request_id owner) in
       let child=io (fun () -> Capture.create
@@ -3280,7 +3280,7 @@ let test_published_floor_with_omitted_observations_keeps_pending_ack () =
       | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
       | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
       Prompt_registry.set_override Prompt_names.librarian "Old floor question without counterpart substitution" |> get;
-      let seed = R.prepare_durable_step ~now:(Time_compat.now ()) ~context:valid.context
+      let seed = R.prepare_durable_step ~source_lines:[] ~now:(Time_compat.now ()) ~context:valid.context
         {input with counterpart_observations=[]} |> get in
       let preparation = seed.preparation in
       let omitted = R.restore_durable_step_preparation ~context:valid.context ~source_input:input
@@ -3858,7 +3858,7 @@ let with_legacy_omitted_original fixture f =
       (input.counterpart_observations<>[]);
     Prompt_registry.set_override Prompt_names.librarian "Legacy history question without observation substitution" |> get;
     let module R=Keeper_librarian_runtime in
-    let seed=R.prepare_durable ~now:(Time_compat.now ()) {input with counterpart_observations=[]} |> get in
+    let seed=R.prepare_durable ~source_lines:[] ~now:(Time_compat.now ()) {input with counterpart_observations=[]} |> get in
     let preparation=R.restore_durable_preparation ~source_input:input ~parsing_now:seed.parsing_now
       ~policy:seed.policy ~rule_prompt:seed.rule_prompt ~prompt:seed.prompt ~output_schema:seed.output_schema |> get in
     R.validate_durable_preparation preparation |> get;

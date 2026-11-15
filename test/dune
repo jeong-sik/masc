@@ -7511,3 +7511,5 @@
 (include stanzas/test_server_dashboard_keeper_decisions_current.inc)
 
 (include stanzas/test_http_response_content.inc)
+
+(include stanzas/test_tui_termios_reclaim.inc)

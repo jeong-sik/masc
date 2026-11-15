@@ -64,9 +64,6 @@ let contains_check result =
   has_legacy_result_prefix "\xE2\x9C\x85" result
   || (String.trim result <> "" && not (contains_problem_result result))
 
-let contains_warning result =
-  has_legacy_result_prefix "\xE2\x9A\xA0" result || contains_problem_result result
-
 let contains_error = contains_problem_result
 
 let verification_id_for_task config task_id =

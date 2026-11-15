@@ -1250,6 +1250,94 @@ let test_waiter_timeout_returns_error_not_cached ~clock () =
   in
   check_json "owner result survives waiter timeout" (`String "owner_done") final
 
+(* -- 14. A seed does not outlive the compute it was waiting for ------------- *)
+
+(* #29980. A seed says the key is warming, which is true only until a compute
+   ends. The Tools page seeds its key on every read, so a seed that comes back
+   after a failed compute answers "warming, no tools" for as long as every
+   compute keeps failing. These reads go through the payload API because the
+   origin is what the Tools page turns into pending, ready or error. *)
+
+let await_no_computing_slot ~clock =
+  Eio.Time.with_timeout_exn clock 2. (fun () ->
+    let rec loop () =
+      if Yojson.Safe.Util.(Dashboard_cache.stats () |> member "computing" |> to_int) > 0
+      then (Eio.Time.sleep clock 0.01; loop ())
+    in
+    loop ())
+
+let check_origin msg expected (payload : Dashboard_cache.cached_payload) =
+  let name = function
+    | Dashboard_cache.Seeded -> "seeded"
+    | Computed -> "computed"
+    | Timeout -> "timeout"
+  in
+  Alcotest.(check string) msg (name expected) (name payload.origin)
+
+let test_seed_gives_way_to_a_background_timeout ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let key = "seed-background-timeout" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  let read () =
+    Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60. ~clock
+      ~timeout_sec:0.05 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+        Eio.Time.sleep clock 1.0;
+        `String "never_reached"))
+  in
+  check_origin "the first read answers with the seed" Dashboard_cache.Seeded (read ());
+  await_no_computing_slot ~clock;
+  let after = read () in
+  check_origin "the read after the timed-out refresh reports the timeout"
+    Dashboard_cache.Timeout after;
+  Alcotest.(check string) "with the refresh's own timeout" "owner" (timeout_kind after.json);
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  check_origin "a seed planted after the timeout does not replace it"
+    Dashboard_cache.Timeout (read ())
+
+let test_expired_seed_reports_an_inline_timeout ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let key = "seed-inline-timeout" in
+  (* Past its grace at once, so the read computes inline with the seed as the
+     slot's only fallback. *)
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:0. (`String "warming");
+  let answer =
+    Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60. ~clock
+      ~timeout_sec:0.05 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+        Eio.Time.sleep clock 1.0;
+        `String "never_reached"))
+  in
+  check_origin "the read whose compute timed out reports the timeout"
+    Dashboard_cache.Timeout answer;
+  check_json "and the slot keeps the timeout, not the seed"
+    answer.json (Option.get (Dashboard_cache.peek key))
+
+let test_seed_gives_way_to_a_background_failure ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let key = "seed-background-failure" in
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  let read work =
+    Dashboard_cache.get_or_compute_payload_with_timeout key ~ttl:60. ~clock
+      ~timeout_sec:2. (Pool_work.cpu ~name:__FUNCTION__ work)
+  in
+  let unreadable () = failwith "tools unreadable" in
+  check_origin "the first read answers with the seed" Dashboard_cache.Seeded
+    (read unreadable);
+  await_no_computing_slot ~clock;
+  (match read unreadable with
+   | payload ->
+     Alcotest.failf "the failed refresh was answered as %s" payload.raw_json
+   | exception Failure message ->
+     Alcotest.(check string) "the next reader gets the failure" "tools unreadable" message);
+  Dashboard_cache.seed_stale_if_missing key ~stale_for:60. (`String "warming");
+  (match read unreadable with
+   | payload ->
+     Alcotest.failf "a seed planted after the failure answered as %s" payload.raw_json
+   | exception Failure _ -> ());
+  let recovered = read (fun () -> `String "tools") in
+  check_origin "a compute that succeeds answers with its value"
+    Dashboard_cache.Computed recovered;
+  check_json "the computed tools" (`String "tools") recovered.json
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -2229,6 +2317,12 @@ let () =
             (test_repeated_no_stale_timeout_opens_circuit ~clock);
           test_case "waiter timeout returns error, not cached" `Quick
             (test_waiter_timeout_returns_error_not_cached ~clock);
+          test_case "a seed gives way to a background timeout" `Quick
+            (test_seed_gives_way_to_a_background_timeout ~clock);
+          test_case "an expired seed reports an inline timeout" `Quick
+            (test_expired_seed_reports_an_inline_timeout ~clock);
+          test_case "a seed gives way to a background failure" `Quick
+            (test_seed_gives_way_to_a_background_failure ~clock);
           test_case "timeout envelope producer and recognizer agree" `Quick
             (test_timeout_envelope_recognizer ~clock);
         ] );

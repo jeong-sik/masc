@@ -40,6 +40,27 @@ type state =
       }
   | Cancelled of { completed_at : float }
 
+(** The state's name without its facts: the word the operation API writes in
+    [state]. The operation object, the queued operation list and the stream's
+    [KEEPER_CHAT_OPERATION_ACCEPTED] event spell it with {!to_wire}, and
+    {!of_wire} reads it back. *)
+module State_name : sig
+  type t =
+    | Queued
+    | Running
+    | Succeeded
+    | Failed
+    | Cancelled
+
+  val to_wire : t -> string
+
+  val of_wire : string -> (t, string) result
+  (** Inverse of {!to_wire}. Any other text, including another case of the
+      same word, is an [Error] that names it. *)
+end
+
+val state_name : state -> State_name.t
+
 type batch_membership = { execution_id : Operation_id.t; input_digest : string }
 
 type t =
@@ -55,6 +76,11 @@ type t =
   }
 
 val state_to_string : state -> string
+(** Lowercase label for logs and for the replies that only acknowledge a
+    submission: the board context inference response, the Keeper message tool
+    result and the channel gate's reply text. The operation API spells the
+    state with {!State_name.to_wire}. *)
+
 val is_terminal : state -> bool
 val to_json : t -> Yojson.Safe.t
 (** Internal operation facts, including the original diagnostic. *)

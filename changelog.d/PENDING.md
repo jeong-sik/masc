@@ -1,3 +1,0 @@
-### Added
-
-- The TUI Activity list answers `/` under the Actions and Everything filters: a query lands the cursor on the newest row whose event, tool or keeper matches, `n` / `N` step to the next and previous match, and the footer counts the matches. The rows searched are the ones the filter keeps, in the order they are drawn. Turns has no cursor and an open event's evidence has no list, so `/` stays closed there. See [Activity keys](docs/guides/TUI-KEYS.md#activity) (#35306, #PENDING).

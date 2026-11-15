@@ -42,7 +42,7 @@ let test_confirmed_success () = with_cache (fun cache_dir ->
     graph_req := Some (Yojson.Safe.from_file input);
     write output "masc-pele-protocol:1\npng";
     write errors "";
-    Unix.WEXITED 0 in
+    Cache.Exited (Unix.WEXITED 0) in
   let graph_res = Pele.render ~cache_dir ~runner:graph_runner graph_scene in
   check (result string string) "confirmed graph image" (Ok "png") graph_res;
   check string "requested graph format" "graph" (Option.get !graph_req |> member "format" |> to_string))

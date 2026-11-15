@@ -1,7 +1,7 @@
 # keeper-librarian 프롬프트 비교의 기준선, A1 계약으로 다시 셈 (2026-11-15)
 
 `scripts/tinker/librarian/prompt_lines.json` 에 두 모델의 기준선을 다시 고정했다.
-스택 #51826 이 RFC-0517 §7.1 의 A1 계약을 들이면서 [#51780](../2026-11-13-librarian-pinned-baseline/README.md) 의 기준선이 비었다.
+#51823 이 RFC-0517 §7.1 의 A1 계약(#51814)을 들이면서 [#51780](../2026-11-13-librarian-pinned-baseline/README.md) 의 기준선이 비었다.
 A1 계약에서는 지우기와, 기존 기억을 흡수만 하는 새 claim 에 지지 후보가 없어도 된다.
 
 - #51780 이 고정한 실행 셋(Inkling 2 Small 기본 모델 두 번, GLM `glm-5.3-flash` 한 번)을 다시 채점했다. 모델은 다시 부르지 않았다(`eval_admission.py rescore`).

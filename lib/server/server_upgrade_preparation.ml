@@ -106,7 +106,7 @@ type departure =
   | Announcement_withdrawn of { pid : int }
   | Owner_now of owner
   | Owner_unreadable of Server_startup_takeover.owner_capture_error
-type error = Invalid_health | Admin_required | Server_starting
+type error = Invalid_health | Sign_in_failed | Admin_required | Server_starting
   | Admin_check_unanswered | Owner_unavailable
   | Incumbent_changed
   | Not_confirmed of { listener : single_user_listener; departure : departure }
@@ -189,12 +189,14 @@ let compact_health_version body =
    operator is told when a stop is given up. *)
 let confirmed listener () =
   Result.map_error (fun departure -> Not_confirmed { listener; departure }) (confirm listener)
+(* A failed login is this command's own: the running server has not seen a
+   credential yet, so it has refused none (#36877). *)
 let authorize_initial_with ~confirm ~version ~expected_version ~login =
   let* () = confirm () in
   match version () with
   | None -> Error Invalid_health
   | Some version when version <> expected_version -> Error Incumbent_changed
-  | Some (_ : string) -> if login () then Ok () else Error Admin_required
+  | Some (_ : string) -> if login () then Ok () else Error Sign_in_failed
 let loopback_url listener path = Masc_network_defaults.masc_http_loopback_origin ~port:listener.port ^ path
 let get ~clock ~headers url =
   Masc_http_client.get_sync ~clock ~timeout_sec:Masc_http_client.default_request_timeout_sec

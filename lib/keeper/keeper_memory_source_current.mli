@@ -183,4 +183,9 @@ val budget_lines : t option -> string list
     budget measures: every fact reserved as unverified, then every pending
     invalidation. *)
 
+val read_budget_lines :
+  keepers_dir:string -> keeper_id:string -> (string list, string) result
+(** {!budget_lines} of the stored snapshot. The Memory commit and every
+    Librarian Memory prompt read the source part of the facts budget here. *)
+
 val to_json : t -> Yojson.Safe.t

@@ -92,7 +92,7 @@ let capture ?replacement_parent ?(before_retain=fun _ -> Ok ())
     ~store ~config ~reserved ~keeper_name source =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let* owner=io (fun () ->
+  let* owner,source_lines=io (fun () ->
     let* anchor=Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name in
     let snapshot=Current.program_anchor_snapshot anchor in
     let revision=Option.map (fun (snapshot : Current.t) -> snapshot.revision) snapshot in
@@ -100,8 +100,11 @@ let capture ?replacement_parent ?(before_retain=fun _ -> Ok ())
       ({Keeper_librarian.facts=snapshot.facts} : Keeper_librarian.current_selection)) snapshot in
     let* ()=require (revision=Source.expected_revision source && current=(Source.input source).current)
       "Memory changed before the original completed-history capture" in
-    Request.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name) in
-  let* preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) in
+    let* source_lines=Keeper_memory_source_current.read_budget_lines ~keepers_dir ~keeper_id:keeper_name in
+    let+ owner=Request.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name in
+    owner,source_lines) in
+  let* preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) ~source_lines
+    (Source.input source) in
   let request_id=Request.fresh_request_id owner in
   (* Factory/retention performs local I/O under the actual configuration/action
      serializers. capture_tool_request_owner's factory is pure, so use the

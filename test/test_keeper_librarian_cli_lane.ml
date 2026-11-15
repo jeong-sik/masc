@@ -92,7 +92,7 @@ let publish_unreachable_lane ?(cli_only = false) ?(projection_refused = false)
 
 let execute ~net ~clock ~base_path ~runner =
   let selected_input = input () in
-  match Runtime.messages_for_librarian selected_input with
+  match Runtime.messages_for_librarian ~source_lines:[] selected_input with
   | Error detail -> failf "librarian render failed: %s" detail
   | Ok messages ->
     Runtime.For_testing.execute_exact_output_classified ~continuity:None

@@ -70,7 +70,12 @@ let prepare_child ~config ~keeper_name ~store intent =
   | Unreplayable detail ->
     io (fun () -> Intent.refuse ~store ~expected:intent (Intent.No_longer_eligible detail))
   | Replayable source ->
-  let* preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> unavailable in
+  let* source_lines=io (fun () ->
+    Keeper_memory_source_current.read_budget_lines
+      ~keepers_dir:(Request.keepers_dir (Request.physical_owner request)) ~keeper_id:keeper_name)
+    |> unavailable in
+  let* preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) ~source_lines
+    (Source.input source) |> unavailable in
   Edge.with_destination ~config ~reserved:(Edge.reserved ()) (fun destination ->
     let* child=io (fun () -> Request.create ~request_id:(Request.fresh_request_id (Request.physical_owner request))
       ~predecessor:{Request.request_id=parent.request_id;request_digest=parent.request_digest}

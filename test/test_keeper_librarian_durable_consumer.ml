@@ -314,7 +314,7 @@ let test_historical_contexts_in_one_batch ~missing_boundary () =
         | Historical.Unattributed -> fail "known T3 admission lost")
      | _ -> fail "expected two distinct source contexts");
     check bool "current Goal context stays separate" true (input.goal_context = Masc.Keeper_librarian.No_task);
-    let variables = Masc.Keeper_librarian.prompt_variables input in
+    let variables = Masc.Keeper_librarian.prompt_variables ~source_lines:[] input in
     check string "prompt carries exact context association"
       (Yojson.Safe.to_string (Historical.to_json input.historical_task_contexts))
       (List.assoc "historical_task_contexts" variables);

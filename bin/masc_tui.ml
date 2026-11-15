@@ -912,10 +912,16 @@ let clear_keeper_history_projection state =
    drained, below. *)
 let store_preference state change =
   note_session_pick state change;
-  ignore
-    (Masc_tui_preference_writer.submit state.preference_writer
-       ~sw:(Eio_context.get_switch_opt ()) change
-     : Masc_tui_preference_writer.request)
+  match state.connection_status with
+  (* The account server of a multi-account installation keeps no [tui]
+     table: the pick stays with this session, and nothing is sent to it. *)
+  | Masc_tui_types.Account_server _ -> ()
+  | Masc_tui_types.Disconnected | Masc_tui_types.Connecting | Masc_tui_types.Booting
+  | Masc_tui_types.Degraded | Masc_tui_types.Connected ->
+    ignore
+      (Masc_tui_preference_writer.submit state.preference_writer
+         ~sw:(Eio_context.get_switch_opt ()) change
+       : Masc_tui_preference_writer.request)
 
 let preference_name state = function
   | Masc.Tui_preference.Theme_chosen _ -> ui_text state ~ko:"테마" ~en:"Theme"
@@ -17642,9 +17648,14 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
      on every refresh rather than inferred from connection failure. It goes
      first: a server still booting behind an open port says so here, and every
      surface asked of it would only wait out its timeout. *)
-  let http_server_identity = observe_http_reader ~on_progress
+  match Masc_tui_loader.server_probe (observe_http_reader ~on_progress
     Http_refresh_progress.Identity_before ~outcome:Http_refresh_progress.of_result
-    (fun () -> load_server_identity ~host ~port) in
+    (fun () -> Masc_tui_loader.load_server_reading ~host ~port)) with
+  (* An account server serves none of the surfaces below: each would answer
+     404. *)
+  | Masc_tui_loader.Probe_account_server { version } ->
+    Refresh_account_server { refresh_ticket; version; approval_ticket }
+  | Masc_tui_loader.Probe_identity http_server_identity ->
   if Masc_tui_types.server_is_booting http_server_identity
   then Refresh_server_booting { refresh_ticket; identity = http_server_identity; approval_ticket }
   else begin
@@ -17698,9 +17709,14 @@ let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_da
                   ~board_query ~provider_history_days ~tool_series_days
                   ~needs:{ needs with needs_asks = false; needs_keeper_roster = false }))
     in
-    let identity_after = observe_http_reader ~on_progress
+    match Masc_tui_loader.server_probe (observe_http_reader ~on_progress
       Http_refresh_progress.Identity_after ~outcome:Http_refresh_progress.of_result
-      (fun () -> load_server_identity ~host ~port) in
+      (fun () -> Masc_tui_loader.load_server_reading ~host ~port)) with
+    (* Another process took the address during the pass: what was read is
+       not this server's. *)
+    | Masc_tui_loader.Probe_account_server { version } ->
+      Refresh_account_server { refresh_ticket; version; approval_ticket }
+    | Masc_tui_loader.Probe_identity identity_after ->
     if Masc_tui_types.server_is_booting identity_after then
       Refresh_server_booting { refresh_ticket; identity = identity_after; approval_ticket }
     else if Masc_tui_types.server_workspace_matches
@@ -18976,6 +18992,26 @@ let apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_tick
   state.connection_status <- Masc_tui_types.Booting
   end
 
+(* The account server of a multi-account installation serves no workspace, so
+   the workspace readings are withdrawn as after a failed probe, and nothing
+   but the probe was asked. The approvals panel and the roster are told why,
+   as for a booting server. *)
+let account_server_reason =
+  "the address answers as the account server of a multi-account installation, which serves no workspace"
+
+let apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket =
+  if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then begin
+  apply_server_identity_reading ~withdraw_on_error:true state ~mailbox (Error account_server_reason);
+  apply_keeper_roster_load state
+    (Error (Keeper_control.Roster_unreachable account_server_reason));
+  Option.iter
+    (fun ao_ticket ->
+       apply_approval_observation state
+         { ao_ticket; ao_result = Error account_server_reason })
+    approval_ticket;
+  state.connection_status <- Masc_tui_types.Account_server { version }
+  end
+
 let apply_workspace_unconfirmed state ~mailbox ~detail ~unreachable ~approval_ticket ~latest_identity =
   apply_refused_workspace_identity state ~mailbox ~detail (Some latest_identity);
   (* The Candle surface says why it has no reading rather than looking
@@ -18995,6 +19031,8 @@ let apply_http_refresh_outcome state ~mailbox = function
   | Refresh_surfaces results -> apply_http_surfaces state ~mailbox results
   | Refresh_server_booting { refresh_ticket; identity; approval_ticket } ->
     apply_server_booting state ~mailbox ~refresh_ticket ~identity ~approval_ticket
+  | Refresh_account_server { refresh_ticket; version; approval_ticket } ->
+    apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket
 
 (* Preserve the existing physical metrics window, shared by every entry path. *)
 let keeper_log_window = 200
@@ -20036,7 +20074,7 @@ let open_observer_if_due state ~retry_closed ~host ~port ~mailbox =
   | (Connected | Degraded),
     ( Observer_closed_before_answer _ | Observer_closed_after_live _
     | Observer_opening | Observer_live _ )
-  | (Disconnected | Connecting | Booting), _ ->
+  | (Disconnected | Connecting | Booting | Account_server _), _ ->
       ())
   | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
     | Workspace_identity_match | Workspace_identity_mismatch _), _ -> ()
@@ -20179,7 +20217,7 @@ let open_fleet_stream_if_due state ~host ~port ~mailbox =
        | (Connected | Degraded), Fleet_stream_idle ->
            launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox
        | (Connected | Degraded), Fleet_stream_following _
-       | (Disconnected | Connecting | Booting), _ ->
+       | (Disconnected | Connecting | Booting | Account_server _), _ ->
            ())
   | ( Workspace_identity_unread
     | Workspace_identity_match
@@ -20381,10 +20419,11 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     (* Read before the label below moves. While the last probe said the
        server is booting, only the probe goes out this tick: the side loads
        below would each wait out a timeout against a process that has not
-       finished replaying its stores. *)
-    let was_booting =
+       finished replaying its stores. An account server serves none of them:
+       each would answer 404. *)
+    let probe_only =
       match state.connection_status with
-      | Booting -> true
+      | Booting | Account_server _ -> true
       | Disconnected | Connecting | Degraded | Connected -> false
     in
     state.connection_status <-
@@ -20392,6 +20431,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        | Connected -> Masc_tui_types.Connected
        | Degraded -> Masc_tui_types.Degraded
        | Booting -> Masc_tui_types.Booting
+       | Account_server _ as account_server -> account_server
        | Disconnected | Connecting -> Masc_tui_types.Connecting);
     let needs = current_surface_needs state in
     let roster_request = if needs.needs_keeper_roster
@@ -20412,7 +20452,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        initial-probe acknowledgement or the terminal refresh. The open
        questions the agenda strip counts read on their own announcement
        ([launch_owed_asks]). *)
-    if not was_booting then launch_tick_side_reads state ~mailbox ~needs;
+    if not probe_only then launch_tick_side_reads state ~mailbox ~needs;
 
     (* This worker owns the binding. The UI's initial-probe acknowledgement is
        the only replacement, before parallel collection starts. Callbacks never
@@ -23458,7 +23498,7 @@ let contact_of_connection_status :
     Masc_tui_types.connection_status -> Masc_tui_server_lifecycle.contact =
   function
   | Masc_tui_types.Disconnected -> Masc_tui_server_lifecycle.Nothing_answered
-  | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
+  | Masc_tui_types.Connected | Masc_tui_types.Degraded | Masc_tui_types.Account_server _ ->
       Masc_tui_server_lifecycle.Server_reached
   | Masc_tui_types.Connecting | Masc_tui_types.Booting ->
       Masc_tui_server_lifecycle.Undecided
@@ -24502,6 +24542,18 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         ~port:state.port ~refresh_inflight:http_refresh_inflight
         ~scoped_refresh_inflight:http_scoped_refresh_inflight
         ~scoped_refresh_followup ~mailbox
+  | Http_msg (Http_refresh_done (Refresh_account_server { refresh_ticket; version; approval_ticket })) ->
+      http_refresh_inflight := false;
+      finish_observed_http_refresh state ~ticket:refresh_ticket;
+      (* As for a booting server: nothing else was asked, nothing else
+         follows, and the scoped follow-up stays queued until a masc server
+         answers the address. *)
+      if Http_refresh_order.is_current state.http_refresh_order refresh_ticket then
+        apply_account_server state ~mailbox ~refresh_ticket ~version ~approval_ticket
+      else start_scoped_refresh_followup state ~host:server_peer_host
+        ~port:state.port ~refresh_inflight:http_refresh_inflight
+        ~scoped_refresh_inflight:http_scoped_refresh_inflight
+        ~scoped_refresh_followup ~mailbox
   | Http_msg (Http_refresh_done (Refresh_surfaces results)) ->
       http_refresh_inflight := false;
       finish_observed_http_refresh state ~ticket:results.http_scoped.http_refresh_ticket;
@@ -25289,7 +25341,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               (Disconnected | Connecting | Booting)
             | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _),
               (Connected | Degraded) ->
-                schedule_observer_retry state ~mailbox expected)
+                schedule_observer_retry state ~mailbox expected
+            (* An account server has no observer to reopen. *)
+            | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+              | Workspace_identity_match | Workspace_identity_mismatch _),
+              Account_server _ -> ())
   | Observer_msg (Observer_recovery_ready (authority, owner, session_id)) ->
       if Masc_tui_async_protocol.observer_recovery_owned state ~authority owner then begin
         Option.iter (fun session_id -> state.mcp_session <- Some session_id) session_id;
@@ -35090,7 +35146,7 @@ Use relative paths for resources already held in the package. -->
            after the revalidation owes them a read, so each answers that
            debt instead of being overtaken by it. *)
         (match state.connection_status with
-         | Booting -> ()
+         | Booting | Account_server _ -> ()
          | Disconnected | Connecting | Degraded | Connected ->
            launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh
              state ~mailbox:async_messages;
@@ -43128,7 +43184,7 @@ Use relative paths for resources already held in the package. -->
                            ~refresh_inflight:http_refresh_inflight
                            ~scoped_refresh_inflight:http_scoped_refresh_inflight
                            ~scoped_refresh_followup ~mailbox:async_messages)
-                 | Connecting | Booting | Degraded | Connected ->
+                 | Connecting | Booting | Account_server _ | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
             | Board ->

@@ -1535,7 +1535,8 @@ let render_metrics (state : state) =
             else compact_connection_badge state ~width
         | Compact_workspace_mismatch | Compact_workspace_unconfirmed | Compact_workspace_unread | Compact_read_failed
         | Compact_read_partial | Compact_read_interrupted | Compact_read_unfinished
-        | Compact_reading | Compact_http (Degraded | Connecting | Booting | Disconnected) ->
+        | Compact_reading
+        | Compact_http (Degraded | Connecting | Booting | Account_server _ | Disconnected) ->
             compact_connection_badge state ~width in
       let rows = Option.fold ~none:[] ~some:(fun details ->
         let wrap = Message_layout.split_styled_cells ~max_cells:(max 1 width) in

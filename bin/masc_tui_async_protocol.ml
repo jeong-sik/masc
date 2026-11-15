@@ -165,8 +165,9 @@ type http_surface_results = {
   http_server_identity: (Masc.Tui_decode.server_identity, string) result;
 }
 
-(* What one full refresh came back with. A booting server answers the probe
-   and nothing else, so there are no surfaces to carry. *)
+(* What one full refresh came back with. A booting server and an account
+   server answer the probe and nothing else, so there are no surfaces to
+   carry. *)
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_workspace_unconfirmed of
@@ -174,6 +175,14 @@ type http_refresh_outcome =
         approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option;
         latest_identity : (Masc.Tui_decode.server_identity, string) result
         (* The identity read after the surfaces; it may name a workspace. *) }
+  | Refresh_account_server of
+      { refresh_ticket : Http_refresh_order.ticket
+      ; version : string
+        (* The version the account server names in its [/health]. *)
+      ; approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option
+        (* As for [Refresh_server_booting]: the approvals panel learns why its
+           rows are stale. *)
+      }
   | Refresh_server_booting of
       { refresh_ticket : Http_refresh_order.ticket
       ; identity : (Masc.Tui_decode.server_identity, string) result

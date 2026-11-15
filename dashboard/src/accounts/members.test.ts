@@ -138,10 +138,29 @@ describe('the people an Admin sees', () => {
     await model.retry()
     const failed = model.view.value
     await model.retry()
-    expect([slow, failed.kind === 'failed' ? failed.failure.attempts : null, peopleOf(model)]).toEqual([{ kind: 'reading', forUser: 'usr_first', slow: true }, 2, ['usr_first']])
+    expect([slow, failed.kind === 'failed' ? failed.failure.attempts : null, peopleOf(model), vi.getTimerCount()]).toEqual([{ kind: 'reading', forUser: 'usr_first', slow: true }, 2, ['usr_first'], 0])
     expect(sent.map(({ path, init }) => [path, init.method, init.credentials, new Headers(init.headers).has('authorization')])).toEqual(
       Array.from({ length: 3 }, () => [membersPath, 'GET', 'same-origin', false]),
     )
+  })
+
+  it('says the reading of the latest person is slow on its own clock, not on that of one before', async () => {
+    vi.useFakeTimers()
+    const before = later()
+    const now = later()
+    const { send } = answering([before.answer, now.answer])
+    const model = createMembers({ send, leave: vi.fn() })
+    const firstRun = model.load(first)
+    await vi.advanceTimersByTimeAsync(200)
+    const run = model.load(second)
+    await vi.advanceTimersByTimeAsync(150)
+    const early = model.view.value
+    await vi.advanceTimersByTimeAsync(200)
+    const late = model.view.value
+    now.give(listed(memberJson('usr_second', { role: 'admin' })))
+    before.give(listed(memberJson('usr_first', { role: 'admin' })))
+    await Promise.all([run, firstRun])
+    expect([early, late]).toEqual([{ kind: 'reading', forUser: 'usr_second', slow: false }, { kind: 'reading', forUser: 'usr_second', slow: true }])
   })
 
   it('leaves when the session ended, and reads nothing again for the person shown', async () => {

@@ -1,10 +1,11 @@
-type error = Invalid_request | Configuration_unavailable | Network_unavailable | Unsupported_connection | Disabled_connection
+type config_unread = Unreadable of string | Unparsable of Runtime_toml.parse_error list
+type error = Invalid_request | Configuration_unavailable of config_unread | Network_unavailable | Unsupported_connection | Disabled_connection
   | Credential_unavailable | Discovery_failed of Runtime_model_discovery.error
   | Save_failed of Runtime_setup_batch.error
   | Account_refused of Runtime_account_access.refusal
 let error_message = function
   | Invalid_request -> "Choose a connection and models with reported context metadata."
-  | Configuration_unavailable -> "The workspace configuration could not be read."
+  | Configuration_unavailable (Unreadable _ | Unparsable _) -> "The workspace configuration could not be read."
   | Network_unavailable -> "The server has no network capability for discovery."
   | Disabled_connection -> "This provider is disabled. Enable it in runtime.toml before adding models."
   | Unsupported_connection -> "This connection needs its native account setup before web discovery."
@@ -19,7 +20,7 @@ let error_message = function
 let status_of_error : error -> Httpun.Status.t = function
   | Account_refused _ -> `Forbidden
   | Invalid_request | Unsupported_connection | Disabled_connection | Credential_unavailable -> `Bad_request
-  | Configuration_unavailable | Network_unavailable -> `Service_unavailable
+  | Configuration_unavailable (Unreadable _ | Unparsable _) | Network_unavailable -> `Service_unavailable
   | Discovery_failed (Runtime_model_discovery.Invalid_connection
       | Runtime_model_discovery.Credential_unavailable) -> `Bad_request
   | Discovery_failed (Runtime_model_discovery.Request_failed | Runtime_model_discovery.Http_error _
@@ -42,12 +43,22 @@ let text = function
   | _ -> Error Invalid_request
 let list = function `List values -> Ok values | _ -> Error Invalid_request
 let value key fields = match List.assoc_opt key fields with Some v -> v | None -> `Null
+(* The person routes answer only error_message, and two callers keep only
+   Ok, so the operator log written here is the one place the reason shows. *)
 let config ~base_path =
   let path = Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "config") Config_dir_resolver.runtime_toml_filename in
+  let unread reason =
+    let kind, diagnostic = match reason with
+      | Unreadable detail -> "unreadable", detail
+      | Unparsable errors -> "unparsable",
+        Runtime_config_error.to_diagnostic_text ~config_path:path (Runtime_config_error.Toml_unparsable errors) in
+    Log.Server.emit Log.Warn ~details:(`Assoc ["path",`String path; "reason",`String kind])
+      ("The workspace configuration could not be read: " ^ diagnostic);
+    Error (Configuration_unavailable reason) in
   match Runtime.load_config_observation ~runtime_config_path:path () with
-  | Error _ -> Error Configuration_unavailable
+  | Error detail -> unread (Unreadable detail)
   | Ok observation -> (match Runtime_toml.parse_string observation.source_text with
-    | Ok parsed -> Ok parsed | Error _ -> Error Configuration_unavailable)
+    | Ok parsed -> Ok parsed | Error errors -> unread (Unparsable errors))
 let declared_provider (config:Runtime_schema.config) id =
   List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers
 (* Web setup drives the connection kinds Runtime_setup_spec renders; Gemini

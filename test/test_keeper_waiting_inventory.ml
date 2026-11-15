@@ -1,6 +1,5 @@
 open Alcotest
 module U = Yojson.Safe.Util
-module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_external_attention = Masc.Keeper_external_attention
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_owner_registry = Masc.Keeper_owner_registry

@@ -11,7 +11,6 @@ module Invocation = Masc.Keeper_invocation_contract
 module Turn = Masc.Keeper_turn
 module KHS = Masc.Keeper_keepalive_signal
 module KST = Keeper_state_machine
-module KFS = Masc.Keeper_fs
 module P = Masc.Otel_metric_store
 module Publication_scope = Masc.Keeper_publication_recovery_scope
 module Publication_availability =

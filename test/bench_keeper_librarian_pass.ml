@@ -19,11 +19,8 @@ module Refresh = Keeper_librarian_queue_refresh
 module Source = Keeper_librarian_durable_capture
 module Durable_owner = Keeper_librarian_durable_owner
 module Boundary = Keeper_turn_boundaries
-module Position = Keeper_librarian_progress
 module Checkpoint = Keeper_checkpoint_store
 module Memory_lane = Keeper_memory_lane
-module Current = Keeper_memory_os_current
-module Types = Keeper_memory_os_types
 module Capture = Keeper_librarian_durable_request
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
@@ -76,7 +73,7 @@ let publish_routes base_path urls =
   ignore (F.publish_registry ~lane_id:"librarian/durable" ~slot_ids:(List.map (fun (s:F.target_fixture) -> s.id) slots)
     (F.resolver_snapshot ~source:base_path slots) : Runtime_exact_output_registry.t)
 
-let backend env base_path delivery delivery_observed : Runtime.For_testing.backend = {
+let backend env base_path delivery_observed : Runtime.For_testing.backend = {
   start=(fun ~sw ~state_owner ~instance_id ~installation_id:_ ~package ~binding:_ ~on_authority ~is_live_instance:_ ~on_created ->
     let state_owner=match state_owner with Some owner -> owner | None -> fail "persistent worker has no state owner" in
     let state=Filename.concat base_path ("worker-state-" ^ Store.digest (Lane_addon_worker_state.identity state_owner)) in
@@ -108,8 +105,7 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
       host=Some {list_requests=(fun () ->
           Protocol.host_requests protocol |> Result.map_error protocol_error);
         deliver=(fun ~arguments ->
-          let result=if !delivery then Error "controlled reply loss before worker delivery"
-            else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
+          let result=Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in
           delivery_observed ();result)}} in
     on_created connection;Ok connection);
   package_ready=(fun ~package:_ -> Ok ());
@@ -125,11 +121,10 @@ let backend env base_path delivery delivery_observed : Runtime.For_testing.backe
   condition_met=(fun ~runtime:_ _ -> true);sweep=(fun ~runtime:_ ~is_live_instance:_ -> Ok []) }
 
 type fixture = {
-  base_path:string; config:Workspace.config; keepers_dir:string; store:Store.t;
+  base_path:string; config:Workspace.config;
   source:string; declaration:bool -> string; server:F.test_server;
-  set_response:(Capture.t -> Cohttp.Code.status_code * string) -> unit;
   set_step_response:(string -> Cohttp.Code.status_code * string) -> unit;
-  delivery_loss:bool ref; deliveries:int ref; delivery_changed:Eio.Condition.t;
+  deliveries:int ref; delivery_changed:Eio.Condition.t;
   clock:float Eio.Time.clock_ty Eio.Resource.t;
 }
 let start_memory_action ?(keeper_name=keeper_name) fixture action =
@@ -314,7 +309,7 @@ let with_fixture ?(history_kind=Atoms) f =
       let declaration enabled=Printf.sprintf "id=\"librarian\"\nenabled=%b\nrun_id=\"librarian-original-owner\"\nmanifest_path=%s\n[binding]\nsources=[]\n"
         enabled (Yojson.Safe.to_string (`String (Filename.concat package.directory "lane.toml"))) in
       io (fun () -> write source (declaration true));
-      let response=ref (fun capture -> `OK,F.openai_response (answer capture)) in
+      let response capture=`OK,F.openai_response (answer capture) in
       (* A request that is no history original is a floor step. *)
       let step_response=ref (fun _ -> fail "a floor step has no answer in this run") in
       let original_for body=
@@ -355,18 +350,17 @@ let with_fixture ?(history_kind=Atoms) f =
         (F.Reply_with (fun _ body -> match original_for body with
           | Some capture -> respond capture
           | None -> !step_response body)) in
-      let server=start_server (fun capture -> !response capture) in
+      let server=start_server response in
       publish_routes base_path [server.base_url];
       Runtime.register_exact_runner ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path)
         (Server_lane_addon_exact.runner ~base_path);
-      let deliveries=ref 0 and delivery_changed=Eio.Condition.create () and delivery_loss=ref false in
+      let deliveries=ref 0 and delivery_changed=Eio.Condition.create () in
       let delivery_observed ()=incr deliveries;Eio.Condition.broadcast delivery_changed in
-      let fixture={base_path;config;keepers_dir;store;source;declaration;server;
-        set_response=(fun callback -> response:=callback);
-        set_step_response=(fun callback -> step_response:=callback);delivery_loss;deliveries;delivery_changed;
+      let fixture={base_path;config;source;declaration;server;
+        set_step_response=(fun callback -> step_response:=callback);deliveries;delivery_changed;
         clock=Eio.Stdenv.clock env} in
       Runtime.For_testing.with_backend
-        (backend env base_path delivery_loss delivery_observed) (fun () ->
+        (backend env base_path delivery_observed) (fun () ->
         let exported,ready=Eio.Promise.create () in
         let stop=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id (function
           | Runtime.Export_inventory_changed -> ignore (Eio.Promise.try_resolve ready ())
@@ -387,7 +381,6 @@ let with_fixture ?(history_kind=Atoms) f =
         set_enabled fixture false;
         Memory_lane.For_testing.reset ())))))))))))
 
-module Gate = Keeper_librarian_durable_gate
 
 let mib = 1024 * 1024
 let turn_bytes = 16 * 1024

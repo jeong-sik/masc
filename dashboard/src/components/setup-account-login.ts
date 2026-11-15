@@ -6,7 +6,9 @@ import { streamSetupLogin, sendLoginInput, cancelSetupLogin, fetchLoginReceipt, 
 // Only the currently visible terminal tail is retained. No output or code is persisted.
 const visibleTerminalCharacters = 65536
 function terminalText(value: string): string {
-  return value.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+  // An OSC ends at BEL or at ST (ESC \); an ESC inside one ends it, so a match
+  // never runs on into the text after it to a later ST.
+  return value.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 }
 function recoveryStorage(key: string, action: 'read' | 'write' | 'remove', value?: string): string | null {
@@ -33,7 +35,9 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
   const [running, setRunning] = useState(false)
   const [pending, setPending] = useState(false)
   const [code, setCode] = useState('')
-  const [output, setOutput] = useState('')
+  // A screen replaces the one before and holds at most one terminal's rows;
+  // printed text is the tail of what the client wrote so far.
+  const [output, setOutput] = useState<{ readonly text: string; readonly screen: boolean }>({ text: '', screen: false })
   const [notice, setNotice] = useState('')
   const storageKey = `masc.setup.login.${integrationId}`
   useEffect(() => {
@@ -80,7 +84,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
   async function login(existing: Source | null) {
     const operation = begin()
     if (!operation) return
-    setOutput(''); setCode(''); setNotice('공식 클라이언트의 로그인 안내를 기다리고 있습니다.')
+    setOutput({ text: '', screen: false }); setCode(''); setNotice('공식 클라이언트의 로그인 안내를 기다리고 있습니다.')
     setLoginId(null); setRunning(true); setPending(false)
     let startedId: string | null = null
     let completed: Source | null = null
@@ -92,7 +96,8 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
           session.current = event.login_id; setLoginId(event.login_id)
           recoveryStorage(storageKey, 'write', event.login_id)
           setRecovered(event.account_ref ? { integration_id: integrationId, account_ref: event.account_ref } : null)
-        } else if (event.event === 'output') setOutput(value => (value + event.text).slice(-visibleTerminalCharacters))
+        } else if (event.event === 'output') setOutput(value => ({ text: (value.text + event.text).slice(-visibleTerminalCharacters), screen: false }))
+        else if (event.event === 'screen') setOutput({ text: event.text, screen: true })
         else if (event.event === 'input_ready') { inputPending.current = false; setPending(false) }
         else if (event.event === 'complete') {
           completed = event.source; onReplaceAccount(); retain(event.source); setRunning(false)
@@ -149,7 +154,7 @@ export function SetupAccountLogin({ integrationId, selected, busy = false, onRep
       ${existing?.account_ref ? html`<button type="button" class="btn" disabled=${disabled} onClick=${() => login(existing)}>선택한 계정 다시 로그인</button>` : null}
       ${selected?.account_ref && recovered?.account_ref && selected.account_ref !== recovered.account_ref ? html`<button type="button" class="btn" disabled=${disabled} onClick=${() => login(recovered)}>중단된 계정 다시 로그인</button>` : null}
       ${loginId && !running ? html`<button type="button" class="btn" disabled=${disabled} onClick=${recover}>로그인 상태 다시 확인</button>` : null}</div>
-    ${output ? html`<pre class="setup-login-output" aria-label="로그인 안내">${terminalText(output)}</pre>` : null}
+    ${output.text ? html`<pre class=${output.screen ? 'setup-login-output setup-login-screen' : 'setup-login-output'} aria-label="로그인 안내">${terminalText(output.text)}</pre>` : null}
     ${running ? html`<p>안내된 주소에서 로그인하세요. 브라우저가 코드를 돌려주면 아래에 붙여 넣으세요.</p>
       <form onSubmit=${(event: Event) => { event.preventDefault(); void input({ kind: 'text', text: code }) }}>
         <label>로그인 코드 <input type="password" autoComplete="off" value=${code} disabled=${pending || !loginId}

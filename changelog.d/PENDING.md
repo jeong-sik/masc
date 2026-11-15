@@ -1,0 +1,10 @@
+### Fixed
+
+- An official-client (Codex, Claude Code) Gate resume of a request that
+  arrived as structured blocks sends the original input once. The blocks
+  already carry it, and the resume now appends only the Gate resolution
+  fragments: the replay evidence reference, or the approval or denial
+  instruction. Before, it appended the whole prepared text, so the model read
+  the original input twice. The block appended for replay evidence is the one
+  the Agent Core path appends. A request that arrived as a plain message sends
+  the same text as before (#35828, #PENDING).

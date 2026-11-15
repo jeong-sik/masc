@@ -10461,8 +10461,26 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
                  |> require "untransmitted wake reconciliation")
                 = Masc.Keeper_heartbeat_stimulus_intake.Selection_actionable)
            | _ -> ()) waiting;
-         let goal_blocks = if native_blocks then Some [Agent_core.Types.Text "Additional structured user instruction";
-           Agent_core.Types.Text model.text] else None in
+         (* A request without [message] holds its original only in User_text
+            blocks; the resumed adapter receives those blocks and the prepared
+            resolution blocks, the same arguments Keeper_agent_run passes. *)
+         let original_blocks = [Agent_core.Types.Text "Finish the original research"] in
+         check string "string input is the original followed by the same resolution fragments"
+           (String.concat "\n\n" (prepared_prompt
+              :: List.map (fun block -> Agent_core.Types.text_of_content [block]) model.resolution_blocks))
+           model.text;
+         (match model.replay_evidence with
+          | [ evidence ] ->
+            check bool "structured resume appends the block the Agent Core path appends" true
+              (model.resolution_blocks = Masc.Keeper_gate_replay.append_model_evidence_block evidence [])
+          | [] | _ :: _ :: _ -> ());
+         if native_blocks then (
+           match Gate.observe_native_input ~blocks:(original_blocks @ [Agent_core.Types.Text model.text])
+                   ~prepared:model ~config ~user_message:"Finish the original research" admission
+                   ~transmitted:model.text with
+           | Error _ -> ()
+           | Ok () -> fail "structured input repeating the original was admitted");
+         let goal_blocks = if native_blocks then Some (original_blocks @ model.resolution_blocks) else None in
          let resumed = run ~continuation ~goal_blocks ~goal:model.text ~on_transmitted:(fun _ ->
            Gate.observe_native_input ?blocks:goal_blocks ~prepared:model ~config ~user_message:"Finish the original research" admission ~transmitted:model.text
              |> require "actual native input transmission") () in
@@ -10485,9 +10503,19 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          check string "original native thread resumed" continuation.session_id Yojson.Safe.Util.(resume |> member "params" |> member "threadId" |> to_string);
          let turn = List.hd (List.rev (request "turn/start")) in
          let inputs = Yojson.Safe.Util.(turn |> member "params" |> member "input" |> to_list) in
-         let expected_input_text = if native_blocks then "Additional structured user instruction\n" ^ model.text else model.text in
+         let expected_input_text = match goal_blocks with
+           | Some blocks -> String.concat "\n" (List.map (fun block -> Agent_core.Types.text_of_content [block]) blocks)
+           | None -> model.text in
          check bool "decoded native request contains the complete prepared replay input" true
-           (List.exists (fun row -> Yojson.Safe.Util.member "text" row = `String expected_input_text) inputs)
+           (List.exists (fun row -> Yojson.Safe.Util.member "text" row = `String expected_input_text) inputs);
+         let wire_text = List.filter_map (fun row -> Yojson.Safe.Util.(member "text" row |> to_string_option)) inputs
+           |> String.concat "\n" in
+         let rec occurrences ?(pos=0) needle = match String_util.find_substring ~pos wire_text needle with
+           | None -> 0 | Some at -> 1 + occurrences ~pos:(at + String.length needle) needle in
+         check int "native model receives the original input once" 1 (occurrences "Finish the original research");
+         check bool "native model receives each resolution fragment once" true
+           (model.resolution_blocks <> [] && List.for_all (fun block ->
+              occurrences (Agent_core.Types.text_of_content [block]) = 1) model.resolution_blocks)
        | None ->
       Gate.discharge ~config ~keeper_name ~operation_id ~user_message:"Finish the original research"
         ~checkpoint admission |> require "discharge only admitted evidence";
@@ -10881,7 +10909,7 @@ let () =
         (test_direct_gate_current_history_resume ~native:true ~one_shot:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "native Gate input settles despite rejected output" `Quick
         (test_direct_gate_current_history_resume ~native:true ~native_output_rejected:true Keeper_approval_queue_rules_types.Decision.Approve);
-      test_case "official-client structured Gate input retains the complete prepared message" `Quick
+      test_case "official-client structured Gate input sends the original once with its resolution" `Quick
         (test_direct_gate_current_history_resume ~native:true ~native_blocks:true Keeper_approval_queue_rules_types.Decision.Approve);
       test_case "official-client Gate resumes original native session and exact replay" `Quick
         (test_direct_gate_current_history_resume ~native:true Keeper_approval_queue_rules_types.Decision.Approve);

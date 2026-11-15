@@ -32,10 +32,15 @@ export type Provider = Registrable['provider']
 
 export const providers: readonly Provider[] = ['github', 'google']
 
-/** What the Admin typed, read as an account, or why it is not one. */
+/** What the Admin typed, read as an account, or why it is not one:
+    `not_a_number` holds more than digits, `out_of_range` is digits outside
+    the user ids GitHub gives. */
 export type Typed =
   | { readonly ok: true; readonly identity: Registrable }
-  | { readonly ok: false; readonly why: 'empty' | 'not_a_number' | 'not_a_sub' }
+  | { readonly ok: false; readonly why: 'empty' | 'not_a_number' | 'out_of_range' | 'not_a_sub' }
+
+/** The largest GitHub user id the server takes. */
+export const maxGithubUserId = Number.MAX_SAFE_INTEGER
 
 /** Reads what the Admin typed for `provider` as the server takes it
     (lib/auth/authz_external_identity.ml): a GitHub account is its user id,
@@ -47,8 +52,9 @@ export function readTyped(provider: Provider, typed: string): Typed {
   if (value === '') return { ok: false, why: 'empty' }
   switch (provider) {
     case 'github': {
-      const userId = /^[0-9]+$/.test(value) ? Number(value) : Number.NaN
-      return Number.isSafeInteger(userId) && userId > 0 ? { ok: true, identity: { provider, userId } } : { ok: false, why: 'not_a_number' }
+      if (!/^[0-9]+$/.test(value)) return { ok: false, why: 'not_a_number' }
+      const userId = Number(value)
+      return Number.isInteger(userId) && userId > 0 && userId <= maxGithubUserId ? { ok: true, identity: { provider, userId } } : { ok: false, why: 'out_of_range' }
     }
     case 'google':
       return googleSub.test(value) ? { ok: true, identity: { provider, sub: value } } : { ok: false, why: 'not_a_sub' }
@@ -114,13 +120,30 @@ export interface AllowlistModel {
   readonly stop: () => void
 }
 
-/** How many tries came to nothing in a row before this one. */
-function failedBefore(before: Add | Remove | undefined): number {
+/** How many removals of an entry came to nothing in a row before this one. */
+function failedBefore(before: Remove | undefined): number {
   if (before === undefined) return 0
   switch (before.kind) {
     case 'refused':
     case 'unknown':
       return before.attempts
+    case 'sending':
+    case 'done':
+    case 'leaving':
+      return 0
+  }
+}
+
+const sameAccount = (a: Registrable, b: Registrable): boolean =>
+  a.provider === 'github' ? b.provider === 'github' && a.userId === b.userId : b.provider === 'google' && a.sub === b.sub
+
+/** How many registrations of `identity` came to nothing in a row before
+    this one. The alert names the account, so another account starts again. */
+function addsFailedBefore(before: Add, identity: Registrable): number {
+  switch (before.kind) {
+    case 'refused':
+    case 'unknown':
+      return sameAccount(before.identity, identity) ? before.attempts : 0
     case 'idle':
     case 'sending':
     case 'done':
@@ -211,7 +234,7 @@ export function createAllowlist({ send, leave }: AllowlistDeps): AllowlistModel 
     const csrfToken = session?.csrfToken ?? null
     if (left || before.kind === 'sending' || view.peek().kind !== 'read' || csrfToken === null) return
     const mine = round
-    const attempts = failedBefore(before) + 1
+    const attempts = addsFailedBefore(before, identity) + 1
     adding.value = { kind: 'sending', identity }
     const answer = await register(send, csrfToken, identity)
     if (left) return
@@ -290,7 +313,6 @@ export function createAllowlist({ send, leave }: AllowlistDeps): AllowlistModel 
   }
 
   const stop = (): void => {
-    if (view.peek().kind === 'waiting') return
     round += 1
     latest += 1
     session = null

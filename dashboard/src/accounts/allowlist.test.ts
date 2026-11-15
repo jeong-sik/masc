@@ -99,11 +99,13 @@ describe('reading the answers about the allowlist', () => {
       one({ status: 'removed', user_id: 'usr_7' }),
       one({ status: 'consumed', user_id: '' }),
       one({ status: 'consumed', user_id: null }),
+      one({ status: 'open', user_id: '' }),
+      one({ status: 'paused', user_id: '' }),
       readEntries({ registrations: [entryJson('reg_1'), entryJson('reg_1')] }),
       readEntries({ registrations: ['reg_1'] }),
       readEntries({ registrations: {} }),
       readEntries([]),
-    ]).toEqual(Array.from({ length: 15 }, () => null))
+    ]).toEqual(Array.from({ length: 17 }, () => null))
   })
 
   it('reads a registration with its id and whether a person with the account was deleted before', () => {
@@ -149,7 +151,7 @@ describe('reading an account the Admin typed', () => {
       readTyped('google', '하나'),
     ].map((one) => (one.ok ? 'read' : one.why))).toEqual([
       'empty', 'empty',
-      'not_a_number', 'not_a_number', 'not_a_number', 'not_a_number', 'not_a_number', 'not_a_number',
+      'not_a_number', 'out_of_range', 'not_a_number', 'not_a_number', 'not_a_number', 'out_of_range',
       'not_a_sub', 'not_a_sub', 'not_a_sub',
     ])
   })
@@ -164,12 +166,12 @@ describe('sending about the allowlist', () => {
     await remove(send, 'token-1', 'reg_1/x')
     expect(sent.map(({ path, init }) => {
       const headers = new Headers(init.headers)
-      return [path, init.method, init.credentials, headers.get(csrfHeader), headers.has('authorization'), init.body ?? null]
+      return [path, init.method, init.credentials, headers.get(csrfHeader), headers.has('authorization'), headers.get('content-type'), init.body ?? null]
     })).toEqual([
-      [allowlistPath, 'GET', 'same-origin', null, false, null],
-      [allowlistPath, 'POST', 'same-origin', 'token-1', false, JSON.stringify({ provider: 'github', user_id: 12345 })],
-      [allowlistPath, 'POST', 'same-origin', 'token-1', false, JSON.stringify({ provider: 'google', sub: 'abc' })],
-      [`${allowlistPath}/reg_1%2Fx`, 'DELETE', 'same-origin', 'token-1', false, null],
+      [allowlistPath, 'GET', 'same-origin', null, false, null, null],
+      [allowlistPath, 'POST', 'same-origin', 'token-1', false, 'application/json', JSON.stringify({ provider: 'github', user_id: 12345 })],
+      [allowlistPath, 'POST', 'same-origin', 'token-1', false, 'application/json', JSON.stringify({ provider: 'google', sub: 'abc' })],
+      [`${allowlistPath}/reg_1%2Fx`, 'DELETE', 'same-origin', 'token-1', false, null, null],
     ])
   })
 
@@ -208,7 +210,81 @@ describe('the allowlist an Admin sees', () => {
     await model.retry()
     const failed = model.view.value
     await model.retry()
-    expect([slow, failed.kind === 'failed' ? failed.failure.attempts : null, entriesOf(model)?.length]).toEqual([{ kind: 'reading', forUser: 'usr_first', slow: true }, 2, 1])
+    expect([slow, failed.kind === 'failed' ? failed.failure.attempts : null, entriesOf(model)?.length, vi.getTimerCount()]).toEqual([{ kind: 'reading', forUser: 'usr_first', slow: true }, 2, 1, 0])
+  })
+
+  it('says the reading of the latest person is slow on its own clock, not on that of one before', async () => {
+    vi.useFakeTimers()
+    const before = later()
+    const now = later()
+    const { send } = answering([before.answer, now.answer])
+    const model = createAllowlist({ send, leave: vi.fn() })
+    const firstRun = model.load(first)
+    await vi.advanceTimersByTimeAsync(200)
+    const run = model.load(second)
+    await vi.advanceTimersByTimeAsync(150)
+    const early = model.view.value
+    await vi.advanceTimersByTimeAsync(200)
+    const late = model.view.value
+    now.give(listed())
+    before.give(listed())
+    await Promise.all([run, firstRun])
+    expect([early, late]).toEqual([{ kind: 'reading', forUser: 'usr_second', slow: false }, { kind: 'reading', forUser: 'usr_second', slow: true }])
+  })
+
+  it('takes no reading that answers after it stopped, and sends nothing with the session it showed', async () => {
+    const wait = later()
+    const { send, sent } = answering([wait.answer])
+    const model = createAllowlist({ send, leave: vi.fn() })
+    const run = model.load(first)
+    model.stop()
+    await model.remove('reg_1')
+    await model.add(someone)
+    wait.give(listed(entryJson('reg_1')))
+    await run
+    expect([model.view.value, methods(sent)]).toEqual([{ kind: 'waiting' }, [`GET ${allowlistPath}`]])
+  })
+
+  it('forgets what came of the requests of an Admin once it stopped', async () => {
+    const { model, sent } = await loaded([json(404, { error: 'no entry' }), listed()])
+    await model.remove('reg_1')
+    await settled(sent, 2)
+    const kept = model.removing.value.size
+    model.stop()
+    expect([kept, model.removing.value.size, model.adding.value]).toEqual([1, 0, { kind: 'idle' }])
+  })
+
+  it('drops a removal that answers after another Admin is shown, and reads their list again, which lacks it', async () => {
+    const wait = later()
+    const { model, sent } = await loaded([wait.answer, listed(entryJson('reg_1')), listed(entryJson('reg_1', { status: 'removed' }))])
+    const removing = model.remove('reg_1')
+    await model.load(second)
+    const shown = model.removing.value.size
+    wait.give(removed())
+    await removing
+    await vi.waitFor(() => { expect(entriesOf(model)?.map((one) => one.status.kind)).toEqual(['removed']) })
+    expect([shown, model.removing.value.size, methods(sent).filter((one) => one.startsWith('GET')).length]).toEqual([0, 0, 3])
+  })
+
+  it('stays leaving when a registration answers after a removal found that the session ended, and reads nothing more', async () => {
+    const wait = later()
+    const { model, sent, leave } = await loaded([wait.answer, noSession()])
+    const adding = model.add(someone)
+    await model.remove('reg_1')
+    wait.give(registered('reg_2'))
+    await adding
+    expect([model.adding.value, methods(sent).filter((one) => one.startsWith('GET')).length, leave.mock.calls.length]).toEqual([{ kind: 'leaving' }, 1, 1])
+  })
+
+  it('reads and writes again for an Admin shown after the browser had to leave', async () => {
+    const { send, sent } = answering([listed(entryJson('reg_1')), noSession(), listed(), registered('reg_2'), listed(entryJson('reg_2'))])
+    const model = createAllowlist({ send, leave: vi.fn() })
+    await model.load(first)
+    await model.remove('reg_1')
+    await model.load(second)
+    await model.add(someone)
+    await settled(sent, 3)
+    expect([model.view.value.kind, model.adding.value.kind]).toEqual(['read', 'done'])
   })
 
   it('registers the account asked for, says whether a person with it was deleted before, and reads the list again', async () => {
@@ -230,6 +306,21 @@ describe('the allowlist an Admin sees', () => {
       kinds.push(now.kind === 'refused' || now.kind === 'unknown' ? [now.kind, now.identity, now.attempts] : null)
     }
     expect(kinds).toEqual([['refused', someone, 1], ['refused', someone, 2], ['unknown', someone, 3], ['unknown', someone, 4], ['unknown', someone, 5]])
+  })
+
+  it('counts the failures of each account on its own', async () => {
+    const other = { provider: 'github', userId: 888 } as const
+    const sameSub = { provider: 'google', sub: '777' } as const
+    const bound = (): readonly Scripted[] => [json(409, { error: 'bound' }), listed()]
+    const { model, sent } = await loaded([...bound(), ...bound(), ...bound(), ...bound(), ...bound()])
+    const counts = []
+    for (const [n, identity] of [someone, other, { provider: 'github', userId: 888 } as const, sameSub, someone].entries()) {
+      await model.add(identity)
+      await settled(sent, n + 2)
+      const now = model.adding.value
+      counts.push(now.kind === 'refused' ? now.attempts : null)
+    }
+    expect(counts).toEqual([1, 1, 2, 1, 1])
   })
 
   it('registers one account at a time, and none before the list is read', async () => {

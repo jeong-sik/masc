@@ -171,6 +171,64 @@ let memory_os_current_store =
   }
 ;;
 
+(* 2026-09-05 (#32504): #33241 removed [reinforcement] from the fact codec.
+   No snapshot kept the field but 15 of 17 journals did, and the scan above
+   reads only the snapshot. Each journal line is decoded with the decoder
+   every journal reader applies, and a refusal names the physical line. The
+   text after the last newline is an append a crash cut short; the next
+   append truncates it, so it is not a line this build refuses. *)
+let memory_journal_store =
+  { store = "keeper memory journal"
+  ; on_refusal =
+      "the keeper's turns still run, because turn recall reads only the \
+       snapshot; every Librarian Memory program stops, because capturing its \
+       anchor decodes the whole journal; an admission commit that carries \
+       recall bindings refuses, and superseding a removed memory, the archive \
+       and successor recall report the journal unreadable; writes keep \
+       appending and the line stays on disk"
+  ; scan =
+      (fun ~base_path ->
+         let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+         let complete_lines bytes =
+           match List.rev (String.split_on_char '\n' bytes) with
+           | [] -> []
+           | _after_last_newline :: lines -> List.rev lines
+         in
+         let scan_line ~path report line_number line =
+           let refusal detail = Error (Printf.sprintf "%s line %d: %s" path line_number detail) in
+           match Dated_jsonl.entry_of_physical_line ~path line with
+           | None -> report
+           | Some (Dated_jsonl.Malformed_json { detail; _ }) ->
+             count_row report (refusal ("not JSON: " ^ detail))
+           | Some (Dated_jsonl.Parsed json) ->
+             count_row
+               report
+               (match Keeper_memory_os_journal_codec.journal_entry_of_json json with
+                | Ok (_ : Keeper_memory_os_current_types.journal_entry) -> Ok ()
+                | Error detail -> refusal detail)
+         in
+         let* keeper_ids = Keeper_memory_os_current.list_journal_keeper_ids ~keepers_dir in
+         Ok
+           (List.fold_left
+              (fun report keeper_id ->
+                 let path =
+                   Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id
+                 in
+                 match read_optional_regular_file path with
+                 | Error detail -> count_row report (Error detail)
+                 | Ok None -> report
+                 | Ok (Some bytes) ->
+                   List.fold_left
+                     (fun (report, line_number) line ->
+                        scan_line ~path report line_number line, line_number + 1)
+                     (report, 1)
+                     (complete_lines bytes)
+                   |> fst)
+              empty_report
+              keeper_ids))
+  }
+;;
+
 let librarian_range_receipt_store =
   { store = "Librarian range receipt ledger"
   ; on_refusal =
@@ -916,6 +974,7 @@ module Id = struct
     | Gate_pending
     | Official_client_session
     | Memory_current
+    | Memory_journal
     | Goal_store
     | Librarian_range_receipts
     | Memory_admission_queue
@@ -963,6 +1022,7 @@ type reader =
 let reader : Id.t -> reader = function
   | Id.Keeper_meta -> Refuse_boot (Refusing.Keeper_meta, keeper_meta_store)
   | Id.Memory_current -> Refuse_boot (Refusing.Memory_current, memory_os_current_store)
+  | Id.Memory_journal -> Preflight_only memory_journal_store
   | Id.Goal_store -> Degrade_typed Reported.Goal_store
   | Id.Gate_pending -> Preflight_only gate_pending_store
   | Id.Official_client_session ->

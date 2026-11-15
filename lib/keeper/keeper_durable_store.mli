@@ -41,6 +41,7 @@ module Id : sig
     | Gate_pending
     | Official_client_session
     | Memory_current
+    | Memory_journal
     | Goal_store
     | Librarian_range_receipts
     | Memory_admission_queue

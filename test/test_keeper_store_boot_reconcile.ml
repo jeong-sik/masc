@@ -1017,6 +1017,118 @@ let test_preflight_refuses_an_older_chat_operation_journal () =
   | Error detail -> failf "scan failed: %s" detail
 ;;
 
+let replace_member key value = function
+  | `Assoc fields ->
+    `Assoc (List.map (fun (name, held) -> name, if String.equal name key then value else held) fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    fail "journal fixture line is not an object"
+;;
+
+(* The committed line with a field the fact codec no longer has, as the
+   journals #33241 left behind. *)
+let with_reinforced_fact line =
+  let module U = Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string line in
+  let change = U.member "change" json in
+  let added =
+    match U.to_list (U.member "added" change) with
+    | `Assoc fact :: rest -> `Assoc (("reinforcement", `Int 1) :: fact) :: rest
+    | [] | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) :: _ ->
+      fail "the first commit line holds no added fact"
+  in
+  Yojson.Safe.to_string (replace_member "change" (replace_member "added" (`List added) change) json)
+;;
+
+(* 2026-09-05 (#32504): #33241 removed [reinforcement] from the fact codec.
+   No snapshot kept the field but 15 of 17 journals did, and the deploy
+   preflight read only the snapshot, so it would have passed while every
+   reader that decodes the journal refused those lines. Of all the stores
+   the preflight reads, the journal's own scan is the one that refuses such
+   a line, and it names the file and the line. *)
+let test_preflight_names_the_journal_line_readers_refuse () =
+  with_workspace
+  @@ fun config ->
+  let module Current = Keeper_memory_os_current in
+  let module Types = Keeper_memory_os_types in
+  let base_path = config.Workspace.base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let journal keeper_id = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
+  let scan =
+    match D.reader D.Id.Memory_journal with
+    | D.Preflight_only scan -> scan
+    | D.Refuse_boot _ | D.Degrade_typed _ -> fail "the journal is read by the preflight only"
+  in
+  Fs_compat.mkdir_p keepers_dir;
+  (match D.run scan ~base_path with
+   | Ok { D.rows = 0; refused = 0; first_refusal = None; pending_recovery = [] } -> ()
+   | Ok report -> failf "no journal, yet rows %d refused %d" report.D.rows report.D.refused
+   | Error detail -> failf "no journal, yet the scan failed: %s" detail);
+  let source = { Current.kind = Current.Explicit_write; trace_id = "journal-preflight" } in
+  let commit ~expected_revision claim =
+    let fact =
+      Types.observed ~claim ~category:Types.Fact ~now:10.
+        ~origin:{ kind = Types.Authored; trace_id = "journal-preflight" }
+    in
+    match
+      Current.replace ~keepers_dir ~keeper_id:"readable" ~expected_revision ~now:20. ~source
+        ~facts:[ fact ] ()
+    with
+    | Ok _ -> ()
+    | Error detail -> fail detail
+  in
+  commit ~expected_revision:None "first memory";
+  commit ~expected_revision:(Some 1) "second memory";
+  (match D.run scan ~base_path with
+   | Ok { D.rows = 2; refused = 0; _ } -> ()
+   | Ok report -> failf "a written journal read rows %d refused %d" report.D.rows report.D.refused
+   | Error detail -> failf "a written journal failed the scan: %s" detail);
+  let committed =
+    String.split_on_char '\n' (Fs_compat.load_file (journal "readable"))
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  let first, second =
+    match committed with
+    | [ first; second ] -> first, second
+    | lines -> failf "the two commits wrote %d journal lines" (List.length lines)
+  in
+  (* A blank line is not a row, and the cut-short append at the end is the
+     one the next append truncates: neither is refused, and the blank line
+     still counts toward the line the refusal names. *)
+  let unreadable =
+    String.concat "\n" [ first; ""; with_reinforced_fact first; second ]
+    ^ "\n{\"outcome\":\"comm"
+  in
+  write_bytes (journal "unreadable") unreadable;
+  let refusals =
+    List.filter_map
+      (fun id ->
+         match D.preflight_scan id with
+         | None -> None
+         | Some scan ->
+           (match D.run scan ~base_path with
+            | Ok { D.refused = 0; _ } -> None
+            | Ok report -> Some (D.name id, report)
+            | Error detail -> failf "%s: scan failed: %s" (D.name id) detail))
+      D.Id.all
+  in
+  (match refusals with
+   | [ (name, { D.rows = 5; refused = 1; first_refusal = Some detail; _ }) ] ->
+     check string "the journal store refuses it" (D.name D.Id.Memory_journal) name;
+     check bool ("the refusal names the file and line 3: " ^ detail) true
+       (String.starts_with ~prefix:(journal "unreadable" ^ " line 3: ") detail);
+     check bool "and the field the decoder refuses" true
+       (String_util.contains_substring detail "reinforcement")
+   | refusals ->
+     failf "expected one store to refuse one of five journal rows, got [%s]"
+       (String.concat "; "
+          (List.map
+             (fun (name, report) ->
+                Printf.sprintf "%s rows=%d refused=%d" name report.D.rows report.D.refused)
+             refusals)));
+  check string "the preflight leaves the refused journal as it was" unreadable
+    (Fs_compat.load_file (journal "unreadable"))
+;;
+
 (* [Id.all] is derived. Each store boot refuses on or reports must be
    reached from exactly one id, or boot would read it twice or never. *)
 let test_every_boot_store_has_exactly_one_id () =
@@ -2256,6 +2368,8 @@ let () =
             test_transcript_inventory_failure_is_not_empty
         ; test_case "the preflight refuses an older chat operation journal" `Quick
             test_preflight_refuses_an_older_chat_operation_journal
+        ; test_case "the preflight names the journal line Memory readers refuse" `Quick
+            test_preflight_names_the_journal_line_readers_refuse
         ; test_case "every boot store has exactly one id" `Quick
             test_every_boot_store_has_exactly_one_id
         ] )

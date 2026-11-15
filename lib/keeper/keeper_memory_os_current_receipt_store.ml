@@ -366,7 +366,7 @@ let rec missing_directory_or_broken_ancestor path =
        Error (path ^ ": " ^ Printexc.to_string exn))
 ;;
 
-let list_preflight_keeper_ids ~keepers_dir =
+let list_keeper_ids_with_suffixes ~keepers_dir suffixes =
   try
     let stat = Unix.stat keepers_dir in
     if stat.Unix.st_kind <> Unix.S_DIR then
@@ -375,13 +375,7 @@ let list_preflight_keeper_ids ~keepers_dir =
       Sys.readdir keepers_dir
       |> Array.to_list
       |> List.filter_map (fun filename ->
-           match Filename.chop_suffix_opt ~suffix filename with
-           | Some _ as id -> id
-           | None ->
-             (match Filename.chop_suffix_opt ~suffix:publication_receipt_suffix filename with
-              | Some _ as id -> id
-              | None ->
-                Filename.chop_suffix_opt ~suffix:retraction_plan_receipt_suffix filename))
+           List.find_map (fun suffix -> Filename.chop_suffix_opt ~suffix filename) suffixes)
       |> List.sort_uniq String.compare
       |> fun ids -> Ok ids
   with
@@ -396,6 +390,15 @@ let list_preflight_keeper_ids ~keepers_dir =
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | (Unix.Unix_error _ | Sys_error _) as exn ->
     Error (keepers_dir ^ ": " ^ Printexc.to_string exn)
+;;
+
+let list_preflight_keeper_ids ~keepers_dir =
+  list_keeper_ids_with_suffixes ~keepers_dir
+    [ suffix; publication_receipt_suffix; retraction_plan_receipt_suffix ]
+;;
+
+let list_journal_keeper_ids ~keepers_dir =
+  list_keeper_ids_with_suffixes ~keepers_dir [ journal_suffix ]
 ;;
 
 let list_durable_range_receipt_keeper_ids ~keepers_dir =

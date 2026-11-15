@@ -76,4 +76,6 @@ val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val list_preflight_keeper_ids : keepers_dir:string -> (string list, string) result
 
+val list_journal_keeper_ids : keepers_dir:string -> (string list, string) result
+
 val list_durable_range_receipt_keeper_ids : keepers_dir:string -> string list

@@ -11,6 +11,7 @@ const turnSchema = Schema.Struct({
 const faultSchema = Schema.Union(
   Schema.Struct({ kind: Schema.Literal('unattributed') }),
   Schema.Struct({ kind: Schema.Literal('unknown_after_dispatch') }),
+  Schema.Struct({ kind: Schema.Literal('not_sent') }),
   Schema.Struct({
     kind: Schema.Literal('binding'),
     fact: Schema.Literal(
@@ -81,6 +82,7 @@ export function runtimeCandidateFaultLabel(fault: RuntimeCandidateFault | null):
   switch (fault.kind) {
     case 'unattributed': return 'API 오류 · 귀속 미분류'
     case 'unknown_after_dispatch': return '결과 불확실'
+    case 'not_sent': return '연결 못 함 · 보내지 않음'
     case 'binding': return `API 오류 · ${bindingLabels[fault.fact]}`
   }
 }

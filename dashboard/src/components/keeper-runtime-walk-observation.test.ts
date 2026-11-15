@@ -2,7 +2,7 @@ import { h } from 'preact'
 import { cleanup, fireEvent, render } from '@testing-library/preact'
 import { afterEach, describe, expect, it } from 'vitest'
 import '@testing-library/jest-dom'
-import { readRuntimeLaneObservation } from '../lib/keeper-runtime-walk'
+import { readRuntimeLaneObservation, runtimeCandidateFaultLabel } from '../lib/keeper-runtime-walk'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 
@@ -36,6 +36,17 @@ describe('historical runtime candidate evidence', () => {
   it('retains order, repeated identities, dispatch, opaque source failures and exact terminal origin', () => {
     const wire = observed()
     expect(readRuntimeLaneObservation(wire)).toEqual(wire)
+  })
+
+  it('reads a candidate whose connection did not open as not sent', () => {
+    const wire = observed()
+    const first = wire.evidence.failures[1]!
+    const notSent = { ...wire, evidence: { ...wire.evidence, failures: [
+      { ...first, summary: 'connect failed', api_candidate_fault: { kind: 'not_sent' } },
+    ] } }
+    const parsed = readRuntimeLaneObservation(notSent)
+    expect(parsed).toEqual(notSent)
+    expect(runtimeCandidateFaultLabel({ kind: 'not_sent' })).toBe('연결 못 함 · 보내지 않음')
   })
 
   it('distinguishes no receipt, no capture and an observed walk without failures', () => {

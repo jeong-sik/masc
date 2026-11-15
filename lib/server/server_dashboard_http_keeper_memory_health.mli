@@ -18,9 +18,22 @@ val keeper_memory_health_row_http_json : base_path:string -> keeper:string -> Yo
     [keeper] (it left, or never had one). The name is matched against the
     Keepers that answer lists, so it never names a file on its own. *)
 
+val invalidate_after_write : keepers_dir:string -> keeper_id:string -> unit
+(** Empty [keeper_id]'s cached row when [keepers_dir] is a root a read of
+    that row registered: the config root the row is cached under, or the
+    runtime root next to it. The next read recomputes that Keeper alone, not
+    the fleet. [keepers_dir] is resolved through symlinks, as
+    {!Keeper_memory_health_input} and {!Keeper_memory_commit_notifications}
+    name it; this looks nothing up on the filesystem, so it can run inside
+    either signal's callback. A root no read registered, or a Keeper with no
+    cached row, is left alone. *)
+
 val install : unit -> unit
 (** Invalidate only the changed Keeper after a durable journal commit. The next
-    visible read recomputes that Keeper outside the store locks, not the fleet. *)
+    visible read recomputes that Keeper outside the store locks, not the fleet.
+    These store hooks run beside {!Server_memory_health_broadcast}, which
+    empties the row for every write signal; a write both reach empties it
+    twice, which is the same as once. *)
 
 module For_testing : sig
   val keeper_health : config:Workspace.config -> keepers_dir:string -> string -> keeper_health

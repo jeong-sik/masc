@@ -3,13 +3,25 @@
 # ([runtime.addon_exact_lanes.operator-quiz.author]), and the grade output
 # ([runtime.addon_exact_lanes.operator-quiz.grade]) so written answers are graded.
 id = "operator-quiz"
-run_id = "operator-quiz"
+run_id = "operator-study"
 manifest_path = "../../../addons/operator-quiz/lane.toml"
 
 [binding]
-sources = []
 language = "ko"
 timezone = "Asia/Seoul"
+# To ask only about records a lesson cited, remove this line and uncomment
+# since and the source below. The operator-lesson installation must be in the
+# same run, both declarations must give the same records the same source_id,
+# and since is the lesson declaration's since.
+sources = []
+# since = 1794441600
+#
+# [[binding.sources]]
+# source_id = "lesson"
+# kind = "lane_output"
+# installation_id = "operator-lesson"
+# output_id = "scenes"
+# selection = "latest_completed"
 
 [[binding.records]]
 source_id = "board"

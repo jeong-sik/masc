@@ -6260,6 +6260,50 @@ let test_completion_cancelled_round_preserves_original_result () =
   check string "cleanup and later recovery preserve the single original notification"
     selected.source.post_id repeated.source.post_id
 
+(* A shutdown that holds the Keeper's intake refuses the completion notice.
+   That is a wait, not a store failure: each pass counts the job as waiting
+   and keeps its delivery marker, and the first pass after the shutdown
+   releases the intake delivers the notice once. *)
+let test_completion_shutdown_hold_waits_then_delivers () =
+  let module Fence = Masc.Keeper_shutdown_intake_fence in
+  with_fixture @@ fun _env _initialize fixture ->
+  set_source fixture ~task_id:"task-A" ~turn:41;
+  let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in
+  control_job fixture id (`Assoc ["state", `String "exited"; "exit_code", `Int 0]);
+  ignore (with_bundle fixture (fun bundle ->
+    invoke fixture bundle ~tool_use_id:"collect-before-shutdown-hold" ~turn:42
+      "keeper_job_status" (argument id)));
+  check bool "complete result is durable before the hold" true (Store.result_ready (load fixture id));
+  let operation_id = Masc.Keeper_shutdown_types.Operation_id.generate () in
+  (match Fence.begin_shutdown ~base_path:fixture.base_path ~keeper_name:keeper ~operation_id with
+   | Fence.Reserved _ -> ()
+   | Fence.Already_reserved _ -> fail "the fixture Keeper already held a shutdown");
+  let assert_held pass =
+    let report = recover_completions fixture in
+    (match report.failures with
+     | [] -> ()
+     | _ :: _ -> fail (pass ^ ": a shutdown hold was reported as a store failure"));
+    check int (pass ^ ": the held completion waits") 1 report.waiting;
+    check int (pass ^ ": the held completion is not delivered") 0 report.delivered;
+    check_no_completion fixture;
+    let held = load fixture id in
+    check bool (pass ^ ": the held owner is not acknowledged") false held.completion_delivered in
+  assert_held "first pass";
+  assert_held "second pass";
+  (match Fence.rollback_shutdown ~base_path:fixture.base_path ~keeper_name:keeper ~operation_id with
+   | Fence.Rolled_back -> ()
+   | Fence.Not_reserved | Fence.Reserved_by_other _ ->
+     fail "the test's own shutdown did not roll back");
+  let released = recover_completions fixture in
+  (match released.failures with
+   | [] -> ()
+   | _ :: _ -> fail "the released completion failed to deliver");
+  check int "the first pass after the release delivers" 1 released.delivered;
+  let completion = completion_payload (only_selection fixture) in
+  check string "the original job is delivered" id (Store.Job_id.to_string completion.oj_job_id);
+  let delivered = load fixture id in
+  check bool "delivery acknowledges the original owner" true delivered.completion_delivered
+
 let test_completion_pulse_does_not_join_blocked_backend () = with_fixture @@ fun env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let running = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) in
@@ -6966,6 +7010,8 @@ let () = match Array.to_list Sys.argv with
           (test_prepared_result_scope_preserves_original_resources ~scenario:Observer_scope_cancelled)
       ; test_case "cancelled recovery retains original output and a fresh scope delivers once and cleans" `Quick
           test_completion_cancelled_round_preserves_original_result
+      ; test_case "a shutdown hold waits and the first pass after its release delivers" `Quick
+          test_completion_shutdown_hold_waits_then_delivers
       ; test_case "held absence uses a presence hint and reactivates only original authority" `Quick
           test_held_absent_presence_reactivates_only_original_authority
       ; test_case "changed cancellation bypasses process-local held absence" `Quick

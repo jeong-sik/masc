@@ -970,13 +970,15 @@ let event_queue_delivery_seen_for_source_result =
   event_queue_reaction_seen_for_source_result ~reaction_matches:delivery_reaction_matches
 ;;
 
+type incomplete_delivery_evidence =
+  { malformed_row_count : int
+  ; semantic_invalid_row_count : int
+  ; first_reason : row_quarantine_reason
+  }
+
 type strict_delivery_evidence_error =
   | Delivery_evidence_unavailable of event_queue_reaction_evidence_error
-  | Evidence_incomplete of
-      { malformed_row_count : int
-      ; semantic_invalid_row_count : int
-      ; first_reason : row_quarantine_reason
-      }
+  | Evidence_incomplete of incomplete_delivery_evidence
 
 let strict_delivery_evidence_error_to_string = function
   | Delivery_evidence_unavailable error -> event_queue_reaction_evidence_error_to_string error
@@ -987,11 +989,11 @@ let strict_delivery_evidence_error_to_string = function
 ;;
 
 (* What the rows of some day files say about delivery. [proven] holds the
-   [(post_id, stimulus_kind)] of every row that proves a delivery; the other
-   fields count the rows that could not be read as evidence, with the reason
-   of the first one. The value is a pure function of the rows and
-   [keeper_name], which lets a day file's part be kept while the file only
-   grows. *)
+   [(post_id, stimulus_kind)] of every row that proves a delivery; [rows]
+   counts every row read; the other fields count the rows that could not be
+   read as evidence, with the reason of the first one. The value is a pure
+   function of the rows and [keeper_name], which lets a day file's part be
+   kept while the file only grows. *)
 module Delivery_source_set = Set.Make (struct
   type t = string * stimulus_kind
 
@@ -1000,6 +1002,7 @@ end)
 
 type delivery_evidence =
   { proven : Delivery_source_set.t
+  ; rows : int
   ; malformed_rows : int
   ; semantic_invalid_rows : int
   ; first_invalid : row_quarantine_reason option
@@ -1007,6 +1010,7 @@ type delivery_evidence =
 
 let no_delivery_evidence =
   { proven = Delivery_source_set.empty
+  ; rows = 0
   ; malformed_rows = 0
   ; semantic_invalid_rows = 0
   ; first_invalid = None
@@ -1019,7 +1023,9 @@ let note_first_invalid evidence reason =
   | Some _ as first -> first
 ;;
 
-let add_delivery_evidence ~keeper_name evidence = function
+let add_delivery_evidence ~keeper_name evidence entry =
+  let evidence = { evidence with rows = evidence.rows + 1 } in
+  match entry with
   | Dated_jsonl.Malformed_json _ ->
     { evidence with
       malformed_rows = evidence.malformed_rows + 1
@@ -1052,6 +1058,7 @@ let add_delivery_evidence ~keeper_name evidence = function
    first invalid row of the pair is the earlier one's when it has any. *)
 let append_delivery_evidence earlier later =
   { proven = Delivery_source_set.union earlier.proven later.proven
+  ; rows = earlier.rows + later.rows
   ; malformed_rows = earlier.malformed_rows + later.malformed_rows
   ; semantic_invalid_rows = earlier.semantic_invalid_rows + later.semantic_invalid_rows
   ; first_invalid =
@@ -1185,17 +1192,26 @@ let strict_source_delivery_snapshot_result ~base_path ~keeper_name ~since =
   |> Result.map_error (fun error -> Delivery_evidence_unavailable (Evidence_read_error error))
 ;;
 
+let strict_source_delivery_snapshot_rows snapshot = snapshot.rows
+
+let strict_source_delivery_snapshot_incomplete snapshot =
+  match snapshot.first_invalid with
+  | None -> None
+  | Some first_reason ->
+    Some
+      { malformed_row_count = snapshot.malformed_rows
+      ; semantic_invalid_row_count = snapshot.semantic_invalid_rows
+      ; first_reason
+      }
+;;
+
 let source_delivery_seen_in_snapshot snapshot ~post_id ~stimulus_kind =
   if String.equal post_id "" then
     Error (Delivery_evidence_unavailable Evidence_invalid_stimulus_id)
   else if Delivery_source_set.mem (post_id, stimulus_kind) snapshot.proven then Ok true
-  else match snapshot.first_invalid with
+  else match strict_source_delivery_snapshot_incomplete snapshot with
     | None -> Ok false
-    | Some first_reason ->
-        Error (Evidence_incomplete
-          { malformed_row_count = snapshot.malformed_rows
-          ; semantic_invalid_row_count = snapshot.semantic_invalid_rows
-          ; first_reason })
+    | Some incomplete -> Error (Evidence_incomplete incomplete)
 ;;
 
 let event_queue_delivery_seen_for_source_strict_result

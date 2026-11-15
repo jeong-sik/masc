@@ -361,9 +361,14 @@ let observe_native_input ?blocks ~(prepared : Keeper_gate_replay.model_message) 
         else Error "native Gate input does not identify the admitted resolution instruction"
       | (Semantic.Gate_approved | Semantic.Gate_denied _), _, _ ->
         Error "native Gate input has no matching durable resolution evidence" in
+    (* Structured input already holds the original, so it must end with
+       exactly the prepared resolution blocks rather than the whole text. *)
     let evidence_present = match blocks with
       | None -> transmitted = prepared.text
-      | Some blocks -> List.mem (Agent_core.Types.Text prepared.text) blocks in
+      | Some blocks ->
+        let extra = List.length blocks - List.length prepared.resolution_blocks in
+        extra >= 0
+        && List.filteri (fun index _ -> index >= extra) blocks = prepared.resolution_blocks in
     if not evidence_present then Error "native Gate transmitted input differs from its replay evidence"
     else (admission.transmitted_input <- Some transmitted; Ok ())
 

@@ -38,6 +38,9 @@ readiness = json.loads(get("/health/ready"))
 if not isinstance(readiness, dict) or readiness.get("ready") is not True:
     raise SystemExit("installed server is not ready for dashboard verification")
 health = json.loads(get("/health?full=1"))
+if not isinstance(health, dict) or "build" not in health:
+    raise SystemExit("server answered the public health probe, which names no build; "
+                     "run this check against a loopback install without strict auth")
 if health["build"]["binary_commit"] != receipt["source_commit"]:
     raise SystemExit("running binary commit differs from installed receipt")
 if Path(health["build"]["executable_path"]).resolve() != binary:

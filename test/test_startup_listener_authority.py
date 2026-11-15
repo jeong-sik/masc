@@ -143,6 +143,42 @@ class StartupListenerAuthority(unittest.TestCase):
     def test_start_ignores_hardlink_pid_observation(self):
         self.leftover_observation('hardlink')
 
+    def get(self, port, path, headers=None):
+        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        try:
+            connection.request('GET', path, headers=headers or {})
+            response = connection.getresponse()
+            return response.status, response.read()
+        finally:
+            connection.close()
+
+    def test_a_strict_server_says_only_the_public_probe_without_a_credential(self):
+        # A booted server under strict auth: a requester without a credential
+        # learns the public probe and nothing of the workspace, a verified
+        # reader gets the workspace, and a credential the server cannot accept
+        # is refused instead of being treated as none.
+        with self.workspace() as (base, run, env, token):
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0))
+                port = probe.getsockname()[1]
+            sentinel = base / 'outside-observation'
+            sentinel.write_text('outside fixture remains intact\n')
+            with self.server(base, env, port) as (process, log):
+                self.wait_ready(process, log, port, token, sentinel)
+                public = ['live', 'phase', 'ready', 'server', 'version']
+                for path, keys in (('/health', public), ('/health?full=1', public),
+                                   ('/health/live', ['live']), ('/health/ready', ['phase', 'ready'])):
+                    status, body = self.get(port, path)
+                    self.assertEqual(status, 200, path)
+                    self.assertEqual(sorted(json.loads(body)), keys, path)
+                    self.assertNotIn(str(base).encode(), body, path)
+                status, body = self.get(port, '/health', {'Authorization': 'Bearer ' + token})
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body)['paths']['effective_base_path'], str(base.resolve()))
+                status, body = self.get(port, '/health', {'Authorization': 'Bearer ' + secrets.token_hex(32)})
+                self.assertEqual(status, 401)
+                self.assertNotIn(str(base).encode(), body)
+
     def occupied_port(self, recorded):
         with self.workspace() as (base, run, env, _token), self.unrelated_listener() as (owner, port):
             observation = run / f'masc-{port}.pid'

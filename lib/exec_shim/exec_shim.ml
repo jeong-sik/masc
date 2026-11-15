@@ -1334,6 +1334,37 @@ let probe () =
     ; boot_id = kernel_boot_id ()
     }
 
+(* [run] reads its request from fd 0 and writes payload output and the
+   trailer to fds 1 and 2; [spawn] wires the payload with one dup2 per
+   standard descriptor and then closes its pipe ends. Both take those numbers
+   to be this process's own streams. A process whose standard descriptor is
+   closed gets that number for its next pipe: the closes after the dup2s
+   would then close one of the payload's streams, and the shim would lose the
+   number it writes to (#52033). While all three are open, no pipe or file
+   the shim opens can take one of their numbers. *)
+type standard_descriptor =
+  | Standard_input
+  | Standard_output
+  | Standard_error
+
+let file_descr_of_standard = function
+  | Standard_input -> Unix.stdin
+  | Standard_output -> Unix.stdout
+  | Standard_error -> Unix.stderr
+
+(* fstat answers EBADF exactly when the number names no open file. Any other
+   error is not an answer about the descriptor and propagates. *)
+let standard_descriptor_closed descriptor =
+  match Unix.fstat (file_descr_of_standard descriptor) with
+  | _ -> false
+  | exception Unix.Unix_error (Unix.EBADF, _, _) -> true
+
+let closed_standard_descriptors () =
+  List.filter standard_descriptor_closed [ Standard_input; Standard_output; Standard_error ]
+
+(* No message goes with it: stderr may be the descriptor that is closed. *)
+let closed_standard_descriptor_exit_code = 3
+
 let main () =
   (* OCaml does NOT ignore SIGPIPE by default; an undelivered SIGPIPE would
      kill the shim outright (signal 13) where the code expects EPIPE
@@ -1345,7 +1376,10 @@ let main () =
   | [ _; "--probe" ] -> print_endline (Exec_ssh_protocol.render_probe (probe ()))
   | [ argv0; flag; socket; owner ] when String.equal flag Exec_ssh_protocol.Relay.serve_flag ->
     Shim_agent.main ~host_signal_number ~argv0 ~socket ~owner
-  | [ _ ] -> run ()
+  | [ _ ] ->
+    (match closed_standard_descriptors () with
+     | [] -> run ()
+     | _ :: _ -> exit closed_standard_descriptor_exit_code)
   | _ ->
     prerr_endline "usage: masc-exec-shim [--probe | --serve SOCKET UID:GID]";
     exit 2

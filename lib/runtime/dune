@@ -14,6 +14,8 @@
   ptime
   yojson
   cstruct
+  matrix.grid
+  matrix.vte
   otoml
   masc.toml_line_editor
   masc.fusion_core

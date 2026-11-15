@@ -160,7 +160,6 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
     parameter_policy: {
       reasoning_toggle_wire: 'responses.reasoning',
       reasoning_replay_policy: 'preserve',
-      requires_reasoning_replay_on_tool_call: true,
       ignored_sampling_params: ['top_k'],
       always_ignored_sampling_params: ['min_p'],
     },

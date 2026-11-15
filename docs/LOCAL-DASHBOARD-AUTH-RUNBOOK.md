@@ -31,6 +31,13 @@ Truth fields:
 - `strict_mode_requested`
 - `startup_rejected`
 
+This works as written on a loopback server without strict auth. A server that
+requires a token (`MASC_HTTP_AUTH_STRICT`, or a bind host or base URL that is
+not loopback) answers a request without a credential with a public probe that
+has no `paths`; add `-H "Authorization: Bearer <raw-token>"` there. A
+credential the server cannot accept is answered 401, 403 or 503, not the
+public probe.
+
 If `effective_base_path` is not the base path you expected, fix that first. In shared workspace setups, the live auth store is `<base-path>/.masc/auth` even when the server process is running from a sub-repo worktree.
 
 ## 2. Understand the Gate
@@ -292,7 +299,7 @@ MASC_BASE_PATH="$BASE_PATH" \
   --base-path "$BASE_PATH"
 ```
 
-Then rerun the login JSON and `/health` checks with `MASC_BASE_PATH="$BASE_PATH"` to confirm the effective base path is the path you intended.
+Then rerun the login JSON and `/health` checks with `MASC_BASE_PATH="$BASE_PATH"` to confirm the effective base path is the path you intended. On a server that requires a token, send the bearer on the `/health` check (section 1).
 
 ## 7. Bootstrap an Admin Bearer
 

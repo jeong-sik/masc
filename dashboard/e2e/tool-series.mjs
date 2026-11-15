@@ -1,11 +1,18 @@
 // Draws the Tools page series panel (`#/lab/tools`) in a real browser against a stubbed server.
 //
-// The server answers `GET /api/v1/tool-metrics/series` from a fixed clock, so a screenshot and the
-// numbers on it do not move between runs. `TOOL_SERIES_RECORDED_JSON` replaces the answer for the
-// 24-hour window of every tool with a recorded response of the live endpoint; the checks that
-// depend on the synthetic numbers are skipped for it.
+// The panel reads its series from the event stream `GET /api/v1/tool-metrics/series/stream`. The page
+// opens it only for an admitted observer: the observer connection (`/mcp?sse_kind=observer`) admits
+// the page, and the execution snapshot names that observer instance. The page sends the instance
+// with each stream request and the stream answers with it. The stub answers all three. Both event
+// streams stay open, as the server keeps them: the page takes a stream that ends for a failure.
+//
+// The stub answers each series request from a fixed clock, so a screenshot and the numbers on it do
+// not move between runs. `TOOL_SERIES_RECORDED_JSON` replaces the answer for the 24-hour window of
+// every tool with a recorded response of the live endpoint; the checks that depend on the synthetic
+// numbers are skipped for it.
 import { chromium } from 'playwright'
 import { readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 
 const appUrl = process.env.TOOL_SERIES_APP_URL
 if (!appUrl) throw new Error('TOOL_SERIES_APP_URL is required')
@@ -20,15 +27,30 @@ const SEOUL_OFFSET_MIN = 540
 const NOW = 1_793_971_800
 
 // `longShare` of a tool's calls ran at least LONG_CALL_MS, and such a call took about `longMs`. Only Execute
-// waits on a command that long, so the other tools never have a long call.
+// waits on a command that long, so the other tools never have a long call. Every call has a stored
+// result size of about `resultBytes`.
 const LONG_CALL_MS = 60_000
 const TOOLS = [
-  { name: 'tool_execute', publicNames: ['Execute'], perHour: 140, failShare: 0.04, p50: 380, p95: 5200, maxMs: 41_000, longShare: 0.015, longMs: 140_000 },
-  { name: 'keeper_broadcast', publicNames: ['keeper_broadcast'], perHour: 36, failShare: 0.01, p50: 40, p95: 190, maxMs: 900, longShare: 0, longMs: 0 },
-  { name: 'keeper_artifact_read', publicNames: ['keeper_artifact_read'], perHour: 9, failShare: 0.07, p50: 14, p95: 55, maxMs: 210, longShare: 0, longMs: 0 },
-  { name: 'masc_board_list', publicNames: ['masc_board_list'], perHour: 22, failShare: 0, p50: 85, p95: 410, maxMs: 1_300, longShare: 0, longMs: 0 },
+  { name: 'tool_execute', publicNames: ['Execute'], perHour: 140, failShare: 0.04, p50: 380, p95: 5200, maxMs: 41_000, longShare: 0.015, longMs: 140_000, resultBytes: 2_400 },
+  { name: 'keeper_broadcast', publicNames: ['keeper_broadcast'], perHour: 36, failShare: 0.01, p50: 40, p95: 190, maxMs: 900, longShare: 0, longMs: 0, resultBytes: 180 },
+  { name: 'keeper_artifact_read', publicNames: ['keeper_artifact_read'], perHour: 9, failShare: 0.07, p50: 14, p95: 55, maxMs: 210, longShare: 0, longMs: 0, resultBytes: 5_200 },
+  { name: 'masc_board_list', publicNames: ['masc_board_list'], perHour: 22, failShare: 0, p50: 85, p95: 410, maxMs: 1_300, longShare: 0, longMs: 0, resultBytes: 3_100 },
 ]
 const QUIET_BUCKET_FROM_END = 7
+
+// The observer instance the stub admits. The keepalive interval and the idle deadline are the
+// server's own (lib/server/server_mcp_transport_http_headers.ml: `sse_ping_interval_s`,
+// `observer_idle_timeout_ms`).
+const OBSERVER_INSTANCE = 'tool-series-e2e'
+const SSE_PING_INTERVAL_MS = 30_000
+const OBSERVER_IDLE_TIMEOUT_MS = 3 * SSE_PING_INTERVAL_MS
+const EXECUTION_SNAPSHOT = {
+  execution_publication_epoch: 'tool-series-e2e',
+  execution_publication_generation: 1,
+  status: { workspace_root: '/fixture/tool-series', project: 'tool-series-e2e' },
+  observer_instance_id: OBSERVER_INSTANCE,
+  projection_diagnostics: { read_completeness: 'complete', read_error: null },
+}
 
 const json = (route, body, status = 200) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
@@ -53,7 +75,7 @@ function statOf(tool, index, factor, quiet) {
   if (quiet) {
     return {
       call_count: 0, failure_count: 0, deferred_count: 0, total_ms: 0, p50_ms: null, p95_ms: null, max_ms: null,
-      long_count: 0, long_total_ms: 0,
+      long_count: 0, long_total_ms: 0, result_observed_count: 0, result_bytes_total: 0, result_bytes_max: null,
     }
   }
   const calls = Math.round(tool.perHour * factor * (0.45 + 1.1 * wobble(index, tool.perHour)))
@@ -74,12 +96,16 @@ function statOf(tool, index, factor, quiet) {
       : Math.round(tool.maxMs * (0.5 + wobble(index, 9))),
     long_count: longCalls,
     long_total_ms: longTime,
+    result_observed_count: calls,
+    result_bytes_total: Math.round(calls * tool.resultBytes * (0.6 + 0.8 * wobble(index, 13))),
+    result_bytes_max: Math.round(tool.resultBytes * (2 + wobble(index, 17))),
   }
 }
 
 function sumStats(rows) {
   const calls = rows.reduce((sum, row) => sum + row.call_count, 0)
   const observed = rows.filter(row => row.call_count > 0)
+  const sized = rows.filter(row => row.result_bytes_max !== null)
   const mean = key => (observed.length === 0 ? null : Math.round(observed.reduce((sum, row) => sum + row[key], 0) / observed.length))
   return {
     call_count: calls,
@@ -91,6 +117,9 @@ function sumStats(rows) {
     max_ms: observed.length === 0 ? null : Math.max(...observed.map(row => row.max_ms)),
     long_count: rows.reduce((sum, row) => sum + row.long_count, 0),
     long_total_ms: rows.reduce((sum, row) => sum + row.long_total_ms, 0),
+    result_observed_count: rows.reduce((sum, row) => sum + row.result_observed_count, 0),
+    result_bytes_total: rows.reduce((sum, row) => sum + row.result_bytes_total, 0),
+    result_bytes_max: sized.length === 0 ? null : Math.max(...sized.map(row => row.result_bytes_max)),
   }
 }
 
@@ -122,11 +151,43 @@ function synthesize(query) {
 }
 
 const requests = []
-function answer(url) {
-  const query = new URL(url).searchParams
+function answer(query) {
   requests.push(Object.fromEntries(query))
   if (recorded !== null && query.get('tool') === null && query.get('since_hours') === '24') return recorded
   return synthesize(query)
+}
+
+// The two event streams. Route handlers cannot keep a response open, so the page's requests for
+// them are passed on to this loopback server, which writes each frame and holds the stream until
+// the page closes it.
+function openEventStream(response, headers) {
+  response.writeHead(200, {
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache',
+    'x-masc-sse-instance-id': OBSERVER_INSTANCE,
+    'x-masc-sse-idle-timeout-ms': String(OBSERVER_IDLE_TIMEOUT_MS),
+    ...headers,
+  })
+  response.flushHeaders()
+  const keepalive = setInterval(() => response.write(': keepalive\n\n'), SSE_PING_INTERVAL_MS)
+  response.on('close', () => clearInterval(keepalive))
+}
+const streamServer = createServer((request, response) => {
+  const url = new URL(request.url, 'http://stream-server')
+  if (url.pathname === '/mcp' && url.searchParams.get('sse_kind') === 'observer') {
+    openEventStream(response, { 'x-masc-sse-replay': 'fresh' })
+  } else if (url.pathname === '/api/v1/tool-metrics/series/stream') {
+    openEventStream(response, {})
+    response.write(`data: ${JSON.stringify(answer(url.searchParams))}\n\n`)
+  } else {
+    response.writeHead(404).end()
+  }
+})
+await new Promise(resolve => streamServer.listen(0, '127.0.0.1', resolve))
+const streamOrigin = `http://127.0.0.1:${streamServer.address().port}`
+const toStreamServer = route => {
+  const url = new URL(route.request().url())
+  return route.continue({ url: `${streamOrigin}${url.pathname}${url.search}` })
 }
 
 const failures = []
@@ -144,7 +205,9 @@ try {
   await page.route('**/api/v1/dashboard/dev-token', route => json(route, {
     token: 'fixture-worker-token', actor: 'dashboard', role: 'worker',
   }))
-  await page.route('**/api/v1/tool-metrics/series?**', route => json(route, answer(route.request().url())))
+  await page.route(url => url.pathname === '/mcp' && url.searchParams.get('sse_kind') === 'observer', toStreamServer)
+  await page.route(url => url.pathname === '/api/v1/dashboard/execution', route => json(route, EXECUTION_SNAPSHOT))
+  await page.route(url => url.pathname === '/api/v1/tool-metrics/series/stream', toStreamServer)
 
   await page.goto(`${appUrl}#/lab/tools`)
   const callChart = page.getByLabel('구간별 호출 수', { exact: true }).first()
@@ -210,7 +273,7 @@ try {
   async function pickWindow(name, sinceHours, bucket) {
     const answered = page.waitForResponse(response => {
       const url = response.url()
-      return url.includes('/api/v1/tool-metrics/series') && url.includes(`since_hours=${sinceHours}`) && url.includes(`bucket=${bucket}`)
+      return url.includes('/api/v1/tool-metrics/series/stream?') && url.includes(`since_hours=${sinceHours}`) && url.includes(`bucket=${bucket}`)
     })
     await page.getByRole('tab', { name }).click()
     await answered
@@ -269,6 +332,8 @@ try {
   failures.push('the run stopped before the last check')
 } finally {
   await browser.close()
+  streamServer.closeAllConnections()
+  await new Promise(resolve => streamServer.close(resolve))
 }
 
 if (failures.length > 0) {

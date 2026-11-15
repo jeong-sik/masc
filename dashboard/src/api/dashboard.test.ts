@@ -3834,7 +3834,7 @@ describe('fetchKeeperConfig', () => {
           world: { key: 'keeper.world', source: 'override', text: 'world text' },
           capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
         },
-        system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [] } },
+        system_prompt: { state: 'available', effective: 'full prompt', assembled: 'assembled prompt', constitution_ledger: { state: 'read', rejected_lines: [], isolated_lines: [] } },
         unified_user_message_preview: 'world state',
       },
       execution: {
@@ -3844,6 +3844,7 @@ describe('fetchKeeperConfig', () => {
         selected_runtime_id: 'keeper_unified',
         selected_runtime_canonical: 'keeper_unified',
         runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
+        lane_options: ['resilient'],
       },
       skills: {
         names: ['ocaml-coding', 'proof-harness'],
@@ -3922,6 +3923,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
+    expect(result.execution.lane_options).toEqual(['resilient'])
     expect(result.workspace.board_interests).toEqual([])
     expect(result.skills.names).toEqual(['ocaml-coding', 'proof-harness'])
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')
@@ -4010,6 +4012,9 @@ describe('fetchKeeperConfig', () => {
         { line: 2, line_end: 'newline_terminated', detail: 'Yojson error' },
         { line: 4, line_end: 'unterminated_final_line', detail: 'Unexpected end of input' },
       ],
+      isolated_lines: [
+        { line: 3, subject: 'departed-keeper', article_ids: ['a-0123456789abcdef0123456789abcdef'] },
+      ],
     }
 
     fetchWith({ ...available, constitution_ledger: ledger })
@@ -4026,10 +4031,32 @@ describe('fetchKeeperConfig', () => {
     })
 
     const torn = { line: 4, line_end: 'cut', detail: 'Unexpected end of input' }
-    fetchWith({ ...available, constitution_ledger: { state: 'read', rejected_lines: [torn] } })
+    fetchWith({ ...available, constitution_ledger: { state: 'read', rejected_lines: [torn], isolated_lines: [] } })
     expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
       state: 'decode_failed',
       detail: `constitution_ledger has an unreadable row ${JSON.stringify(torn)}`,
+    })
+  })
+
+  it('never reads an absent isolated_lines answer as no lines left out by the roster (#52169)', async () => {
+    const body = (value: unknown) =>
+      `{"name":"keeper-sangsu","config_revision":{"manifest":{"state":"missing"},"runtime_assignment":{"state":"runtime_config_missing"}},"max_context_override":null,"activation_mode":"manual","skills":{"names":null},"prompt":{"instructions":"be exact","system_prompt":${JSON.stringify(value)}}}`
+    const fetchWith = (value: unknown) => vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(body(value), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    const available = { state: 'available', effective: 'full prompt', assembled: 'assembled prompt' }
+
+    fetchWith({ ...available, constitution_ledger: { state: 'read', rejected_lines: [] } })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: 'constitution_ledger has no isolated_lines array',
+    })
+
+    const untyped = { line: 3, subject: 'departed-keeper', article_ids: [7] }
+    fetchWith({ ...available, constitution_ledger: { state: 'read', rejected_lines: [], isolated_lines: [untyped] } })
+    expect((await fetchKeeperConfig('keeper-sangsu')).prompt.system_prompt).toEqual({
+      state: 'decode_failed',
+      detail: `constitution_ledger has an unreadable isolated row ${JSON.stringify(untyped)}`,
     })
   })
 
@@ -5203,7 +5230,6 @@ describe('fetchRuntimeProviders', () => {
             parameter_policy: {
               reasoning_toggle_wire: 'chat_template_kwargs',
               reasoning_replay_policy: 'preserve_always',
-              requires_reasoning_replay_on_tool_call: false,
               ignored_sampling_params: ['temperature', 'top_p'],
               always_ignored_sampling_params: ['temperature'],
             },

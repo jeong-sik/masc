@@ -261,7 +261,7 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 
 - 옛 모양 receipt의 그림 base64와 Codex receipt의 data URL은 #49665가 이미 묶음 글에서 뺀다. 이 RFC가 할 일은 아니다.
 - 옛 모양 receipt의 긴 글 본문은 `Inline`에 그대로 실린다. 넘쳐서 꼴이 바뀌면 `Inline` 글이 통째로 blob으로 가니, 변환 없이 주소로 간다.
-- 들어갈 때는 지금처럼 `Inline`으로 간다. #49697(Codex receipt 파일이 data URL을 담는 것)은 파일 크기 문제로 그대로 남는다.
+- 들어갈 때는 지금처럼 `Inline`으로 간다. #49697(Codex receipt 파일이 data URL을 담는 것)은 receipt를 쓸 때 따로 고쳤다. Codex receipt도 host receipt와 같은 규칙으로 그림과 긴 글을 blob 주소로 남긴다(`Keeper_client_tool_outbox.codex_response`).
 - `By_address` 글은 도구 종류 수, 개수 자릿수, reader 여부로만 길이가 달라진다. receipt 개수로는 Codex 문자열 상한에 닿지 않는다. `Inline`이 그 상한을 넘을 때의 거절은 typed가 아니다(§7).
 
 ## 9. 남는 대가

@@ -303,30 +303,31 @@ let record_publication_journal ~keepers_dir ~keeper_id receipt =
   let+ () = write_publication ~keepers_dir ~keeper_id pending in
   pending
 
+(* The publication's own line is its exact canonical entry. *)
 let finalize_publication_journal ~keepers_dir ~keeper_id receipt =
-  let path = journal_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  let* recovered = Fs_compat.recover_private_jsonl_durable_locked_result path
-    |> Result.map_error Fs_compat.private_jsonl_transaction_error_to_string in
-  let rec scan found = function
-    | [] -> Ok found
-    | "" :: rest -> scan found rest
-    | line :: rest ->
-      (match Yojson.Safe.from_string line with
-       | json ->
-         let* entry = Journal_codec.journal_entry_of_json json in
-         (* Revisions restart after a quarantine, so a pre-quarantine entry
-            cannot finalize a publication from the current generation. *)
-         (match entry with
-          | Journal_quarantined _ -> scan false rest
-          | Journal_committed _ when Yojson.Safe.sort json = Yojson.Safe.sort receipt.journal ->
-            scan true rest
-          | Journal_committed _ | Journal_failed _ -> scan found rest)
-       | exception Yojson.Json_error detail -> Error ("publication journal: " ^ detail)) in
-  let* present = scan false (String.split_on_char '\n' recovered.Fs_compat.bytes) in
+  let canonical = Yojson.Safe.sort receipt.journal in
+  let* present =
+    journal_holds_receipt_target ~keepers_dir ~keeper_id
+      ~target_revision:receipt.target_revision
+      ~is_target:(fun json entry ->
+        match entry with
+        | Journal_committed _ -> Yojson.Safe.sort json = canonical
+        | Journal_failed _ | Journal_quarantined _ -> false)
+    |> Result.map_error (fun detail -> "publication journal: " ^ detail) in
   let* () = if present then Ok () else append_journal_line_strict ~keepers_dir ~keeper_id receipt.journal in
   let pending = {receipt with phase=Notification_pending} in
   let+ () = write_publication ~keepers_dir ~keeper_id pending in
   pending
+
+(* What a recovery found once it held the locks. Its only caller saw a
+   receipt before taking them, and the receipt can be gone by then: the
+   dispatch that finished it or a purge of the Keeper's memory removed it,
+   and each announces its own write. This recovery changed nothing then,
+   unlike a target that was never published, whose removal only it reports. *)
+type locked_recovery =
+  | Removed_before_locks
+  | Never_published
+  | Notification_owed of publication_receipt
 
 (* Caller owns aggregate and snapshot locks. Inspect the receipt before parsing
    or quarantining a snapshot: an unmatched publication must preserve all bytes. *)
@@ -334,7 +335,7 @@ let recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id =
   let* _ = Keeper_librarian_unread_ledger.read ~keepers_dir ~keeper_id in
   let* receipt = read_publication ~keepers_dir ~keeper_id in
   match receipt with
-  | None -> Ok None
+  | None -> Ok Removed_before_locks
   | Some receipt ->
     let* () = check_publication_companions ~keepers_dir ~keeper_id receipt in
     let* expected = Journal_codec.journal_entry_of_json receipt.journal in
@@ -362,7 +363,7 @@ let recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id =
          consumed nothing; the reconcile still moves them aside as it does
          every receipt it drops. *)
       let* _ = reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot in
-      let+ () = remove_publication ~sync_parent ~keepers_dir ~keeper_id in None
+      let+ () = remove_publication ~sync_parent ~keepers_dir ~keeper_id in Never_published
     else match content with
       | Some text when String.equal receipt.target_sha256 (sha256 text) ->
         let* current = parse path text in
@@ -379,7 +380,7 @@ let recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id =
         let snapshot = Some (current, text) in
         let* () = reconcile_retraction_plan_receipt ~keepers_dir ~keeper_id ~snapshot in
         let+ _ = reconcile_durable_range_receipts ~keepers_dir ~keeper_id ~snapshot in
-        Some pending
+        Notification_owed pending
       | None | Some _ -> Error "publication target is absent or conflicting; stores preserved"
 
 let dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt =
@@ -402,13 +403,14 @@ let recover_publication_with_sync ~sync_parent ~keepers_dir ~keeper_id =
     File_lock_eio.with_lock (path_for_keepers_dir ~keepers_dir ~keeper_id) (fun () ->
       recover_publication_locked ~sync_parent ~keepers_dir ~keeper_id)) in
   match pending with
-  | None ->
+  | Removed_before_locks -> Ok ()
+  | Never_published ->
     (* The target was never published: the receipt is gone and the
        retraction plan is reconciled, perhaps with a removal line. No commit
        notification follows, so the row's readers are told here (RFC-0487). *)
     Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
     Ok ()
-  | Some receipt -> dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt
+  | Notification_owed receipt -> dispatch_publication ~sync_parent ~keepers_dir ~keeper_id receipt
 
 let recover_publication ~keepers_dir ~keeper_id =
   recover_publication_with_sync ~sync_parent:Unix.fsync ~keepers_dir ~keeper_id

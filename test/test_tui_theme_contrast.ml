@@ -263,13 +263,14 @@ let palette_of scheme =
                Some (ansi scheme index)))
 ;;
 
-let readable scheme colour =
+let truecolor = Palette.For_testing.best_color_for_level ~level:Palette.True_color
+
+let readable_on ~surface scheme colour =
   Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
-    ~project:
-      (Palette.For_testing.best_color_for_level
-         ~level:Palette.True_color)
-    (palette_of scheme) colour
+    ~project:truecolor ~surface (palette_of scheme) colour
 ;;
+
+let readable = readable_on ~surface:Masc_tui_theme.Page
 
 let truecolor_prefix = "\027[38;2;"
 
@@ -538,7 +539,8 @@ let test_status_text_uses_foreground_when_colour_is_unverified () =
   let project level = Palette.For_testing.best_color_for_level ~level in
   let text ~colors_enabled ~level palette =
     Masc_tui_theme.For_testing.status_text_readable ~colors_enabled
-      ~project:(project level) palette Masc_tui_theme.Info in
+      ~project:(project level) ~surface:Masc_tui_theme.Page palette
+      Masc_tui_theme.Info in
   let default_foreground = "\027[39m" in
   let cyan = Masc_tui_theme.Bright_cyan in
   let ansi = Masc_tui_theme.For_testing.ansi_color_code cyan in
@@ -551,7 +553,8 @@ let test_status_text_uses_foreground_when_colour_is_unverified () =
         (text ~colors_enabled:false ~level:Palette.True_color None);
       check string "colour-only tokens keep their existing fallback" ansi
         (Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
-           ~project:(project Palette.True_color) None cyan);
+           ~project:(project Palette.True_color) ~surface:Masc_tui_theme.Page
+           None cyan);
       slots.(Masc_tui_theme.For_testing.ansi_color_index cyan) <- Some (rgb 52 226 226);
       let measured = palette () in
       let lifted = text ~colors_enabled:true ~level:Palette.True_color measured in
@@ -599,7 +602,194 @@ let test_status_text_does_not_verify_an_unreported_index () =
         "\027[39m"
         (Masc_tui_theme.For_testing.status_text_readable ~colors_enabled:true
            ~project:(Palette.For_testing.best_color_for_level ~level:Palette.Ansi256)
-           palette Masc_tui_theme.Info))
+           ~surface:Masc_tui_theme.Page palette Masc_tui_theme.Info))
+;;
+
+(* #47503. The Keeper roster, a list index beside a detail and the Activity
+   pane all draw on [side_pane_background], one step off the page. A colour
+   lifted to clear the page by a hair is under the floor on that ground, so a
+   side-pane colour is measured against the ground bytes the pane draws. *)
+let side_pane = Masc_tui_theme.Side_pane
+
+let truecolor_rgb ~prefix drawn =
+  let lead = String.length prefix in
+  if String.starts_with ~prefix drawn && String.ends_with ~suffix:"m" drawn then
+    match
+      String.split_on_char ';'
+        (String.sub drawn lead (String.length drawn - lead - 1))
+    with
+    | [ red; green; blue ] ->
+      Some
+        (Palette.make_rgb ~red:(int_of_string red) ~green:(int_of_string green)
+           ~blue:(int_of_string blue))
+    | _ -> None
+  else None
+;;
+
+let side_pane_ground palette =
+  match
+    truecolor_rgb ~prefix:"\027[48;2;"
+      (Masc_tui_theme.For_testing.side_pane_background ~colors_enabled:true
+         ~project:truecolor (Some palette))
+  with
+  | Some ground -> ground
+  | None -> Alcotest.fail "a truecolour side pane draws an RGB ground"
+;;
+
+(* What a reader sees for a drawn colour: the theme's own slot when the plain
+   code goes out, the RGB when a lifted one does. *)
+let drawn_rgb ~entry ~code drawn =
+  if String.equal drawn code then Some entry
+  else truecolor_rgb ~prefix:truecolor_prefix drawn
+;;
+
+let issue_47503_palette () =
+  let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+  let slots = Array.make Palette.ansi_slot_count None in
+  slots.(Masc_tui_theme.For_testing.ansi_color_index Masc_tui_theme.Bright_cyan) <-
+    Some (rgb 0 70 70);
+  match
+    Palette.of_responses ~foreground:(Some (rgb 255 255 255))
+      ~background:(Some (rgb 0 0 0)) ~ansi:slots
+  with
+  | Some palette -> palette
+  | None -> Alcotest.fail "both defaults were given"
+;;
+
+let test_side_pane_colour_reads_against_the_side_pane_ground () =
+  let palette = issue_47503_palette () in
+  let page = Palette.background palette in
+  let ground = side_pane_ground palette in
+  let cyan = Masc_tui_theme.Bright_cyan in
+  let measured surface =
+    match
+      truecolor_rgb ~prefix:truecolor_prefix
+        (Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
+           ~project:truecolor ~surface (Some palette) cyan)
+    with
+    | Some color -> color
+    | None -> Alcotest.fail "cyan (0,70,70) is lifted on a truecolour terminal"
+  in
+  with_lift true (fun () ->
+      check bool "the side pane is one step off the black page" true
+        (ground <> page);
+      let on_page = measured Masc_tui_theme.Page in
+      check bool
+        (Printf.sprintf "the page's lift reads at %.3f on the page"
+           (Color.contrast_ratio on_page page))
+        true
+        (Color.contrast_ratio on_page page >= text_floor);
+      (* Why the ground has to be named: this is the issue's counterexample. *)
+      check bool
+        (Printf.sprintf "the page's lift is under the floor on the side pane: %.3f"
+           (Color.contrast_ratio on_page ground))
+        true
+        (Color.contrast_ratio on_page ground < text_floor);
+      let on_side = measured side_pane in
+      check bool
+        (Printf.sprintf "the side pane's lift reads at %.3f on its ground"
+           (Color.contrast_ratio on_side ground))
+        true
+        (Color.contrast_ratio on_side ground >= text_floor))
+;;
+
+let test_every_side_pane_token_reads_on_every_scheme () =
+  with_lift true (fun () ->
+      List.iter
+        (fun scheme ->
+          let ground = side_pane_ground scheme.palette in
+          List.iter
+            (fun (label, colour) ->
+              let entry =
+                ansi scheme (Masc_tui_theme.For_testing.ansi_color_index colour)
+              in
+              let drawn = readable_on ~surface:side_pane scheme colour in
+              match
+                drawn_rgb ~entry
+                  ~code:(Masc_tui_theme.For_testing.ansi_color_code colour)
+                  drawn
+              with
+              | None ->
+                Alcotest.failf "%s: %s drew neither its code nor an RGB"
+                  scheme.name label
+              | Some color ->
+                let ratio = Color.contrast_ratio color ground in
+                check bool
+                  (Printf.sprintf "%s: %s reads at %.2f on the side pane"
+                     scheme.name label ratio)
+                  true
+                  (ratio >= text_floor -. 0.01))
+            named_colours)
+        schemes);
+  (* Both directions of the step: a dark page lightens, a light one darkens. *)
+  let light = List.map (fun scheme -> Color.is_light (background scheme)) schemes in
+  check bool "a light scheme is measured" true (List.mem true light);
+  check bool "a dark scheme is measured" true (List.mem false light)
+;;
+
+let test_side_pane_recede_reads_on_every_scheme () =
+  let receded =
+    List.filter_map
+      (fun scheme ->
+        let ground = side_pane_ground scheme.palette in
+        let drawn =
+          Masc_tui_theme.For_testing.recede ~colors_enabled:true
+            ~default_foreground:Masc_tui_theme.Sgr.default_fg ~project:truecolor
+            ~surface:side_pane (Some scheme.palette)
+        in
+        if String.equal drawn Masc_tui_theme.Sgr.default_fg then None
+        else
+          match truecolor_rgb ~prefix:truecolor_prefix drawn with
+          | None ->
+            Alcotest.failf "%s: recede drew neither the foreground nor an RGB"
+              scheme.name
+          | Some color ->
+            let ratio = Color.contrast_ratio color ground in
+            check bool
+              (Printf.sprintf "%s: receded text reads at %.2f on the side pane"
+                 scheme.name ratio)
+              true
+              (ratio >= recede_floor);
+            Some scheme.name)
+      schemes
+  in
+  check bool "some scheme recedes on the side pane" true (receded <> [])
+;;
+
+(* The fallbacks on the side pane are the page's, decided per ground. *)
+let test_side_pane_limited_capability_paths () =
+  let palette = issue_47503_palette () in
+  let ground = side_pane_ground palette in
+  let cyan = Masc_tui_theme.Bright_cyan in
+  let code = Masc_tui_theme.For_testing.ansi_color_code cyan in
+  let project level = Palette.For_testing.best_color_for_level ~level in
+  let colour ~colors_enabled level =
+    Masc_tui_theme.For_testing.ansi_readable ~colors_enabled
+      ~project:(project level) ~surface:side_pane (Some palette) cyan
+  in
+  let text level =
+    Masc_tui_theme.For_testing.status_text_readable ~colors_enabled:true
+      ~project:(project level) ~surface:side_pane (Some palette)
+      Masc_tui_theme.Info
+  in
+  with_lift true (fun () ->
+      check string "NO_COLOR draws no colour" ""
+        (colour ~colors_enabled:false Palette.True_color);
+      check bool "256 colours still project the side pane's lift" true
+        (String.starts_with ~prefix:"\027[38;5;"
+           (colour ~colors_enabled:true Palette.Ansi256));
+      check string "16 colours keep the requested code" code
+        (colour ~colors_enabled:true Palette.Ansi16);
+      check string "an unverified 256-colour status label uses the foreground"
+        Masc_tui_theme.Sgr.default_fg (text Palette.Ansi256);
+      match truecolor_rgb ~prefix:truecolor_prefix (text Palette.True_color) with
+      | None -> fail "a verified truecolour status label keeps its colour"
+      | Some color ->
+        check bool "the status label is verified against the side pane" true
+          (Color.contrast_ratio color ground >= text_floor));
+  with_lift false (fun () ->
+      check string "lift off keeps the requested code on the side pane" code
+        (colour ~colors_enabled:true Palette.True_color))
 ;;
 
 let test_picker_orders_native_first_then_by_cost_and_name () =
@@ -801,6 +991,8 @@ let () =
             test_status_text_cache_follows_lift_setting
         ; Alcotest.test_case "indexed status text uses the terminal foreground"
             `Quick test_status_text_does_not_verify_an_unreported_index
+        ; Alcotest.test_case "side pane fallbacks follow the capability" `Quick
+            test_side_pane_limited_capability_paths
         ; Alcotest.test_case "picker orders native first, then cost and name"
             `Quick test_picker_orders_native_first_then_by_cost_and_name
         ] )
@@ -821,6 +1013,13 @@ let () =
             test_keeper_action_colours_stay_apart_under_red_green_deficiency
         ; Alcotest.test_case "categorical slots hold their measured floor"
             `Quick test_categorical_slots_hold_their_measured_floor
+        ; Alcotest.test_case
+            "a side pane colour reads against the side pane ground" `Quick
+            test_side_pane_colour_reads_against_the_side_pane_ground
+        ; Alcotest.test_case "every side pane token reads on every scheme"
+            `Quick test_every_side_pane_token_reads_on_every_scheme
+        ; Alcotest.test_case "side pane recede reads on every scheme" `Quick
+            test_side_pane_recede_reads_on_every_scheme
 
         ] )
     ; ( "toml theme loading"

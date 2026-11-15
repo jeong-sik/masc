@@ -2,7 +2,7 @@
 title: "모든 영속 store 가 부팅 정책을 한 목록에서 받는다"
 status: Draft
 created: 2026-09-24
-updated: 2026-09-26
+updated: 2026-11-15
 author: claude-main
 ---
 
@@ -63,6 +63,7 @@ store 마다 세 가지를 묻는다.
 | turn boundaries | 아니오 | 예 (append) | 돈다 (맥락이 줄어듦) | Preflight_only | `keeper_checkpoint_purge.ml:269-274` |
 | Librarian progress | 아니오 | 예 | 돈다 (Librarian 멈춤) | Preflight_only | `keeper_librarian_continuity.ml:99-104`, `server_dashboard_http_keeper_memory_health.ml:201`, `keeper_turn_driver_try_provider.ml:268-276` |
 | turn fragments | 아니오 | 예 (append) | 돈다 (Librarian 멈춤) | Preflight_only | `keeper_status_detail.ml:522`, `dashboard_http_keeper_metrics.ml:112` |
+| memory-journal | 아니오 | 예 (append) | 돈다 (Librarian 멈춤) | Preflight_only | `keeper_memory_journal_outcome.ml:67-79` (Memory health 행이 못 푼 줄을 건너뜀) |
 | Librarian range receipts | 예 | 예 | 돈다 (Memory 쓰기 도구 실패) | Preflight_only | — |
 | disposition receipts | 예 | 예 | 돈다 (턴 경로에 없음) | Preflight_only | — |
 | provider-input | 거의 | 예 (append) | 돈다 | Preflight_only | — |
@@ -72,7 +73,7 @@ store 마다 세 가지를 묻는다.
 | gate pending | 예 | 예 | 돈다 (Gate 가 필요한 도구만 실패) | Preflight_only | — |
 
 - "—" 는 조사하지 않았다는 뜻이다. (c) 가 아니오면 정책이 이미 정해져서 (a)(b) 를 보지 않았다.
-- (a) 칸의 file:line 은 09-24 조사 커밋 `eba5fb56ad` 기준이다. 지금은 줄이 옮겨진 곳이 있다. 소비자를 고치는 PR 이 그때의 위치를 다시 찾는다.
+- (a) 칸의 file:line 은 09-24 조사 커밋 `eba5fb56ad` 기준이다. 지금은 줄이 옮겨진 곳이 있다. 소비자를 고치는 PR 이 그때의 위치를 다시 찾는다. memory-journal 행은 2026-11-15 `807a5e46ab` 기준이다.
 - (b) 아니오의 근거
   - keeper meta: 부팅이 스키마가 안 맞는 meta 를 없는 것으로 보고 선언에서 Keeper 를 다시 만든다 (`keeper_owner_registry.ml:96-101`).
   - memory current: Memory 쓰기가 못 읽는 스냅숏을 옆으로 옮기고 빈 상태에서 새로 쓴다 (`keeper_memory_os_current.ml:1895-1945`).
@@ -84,6 +85,10 @@ store 마다 세 가지를 묻는다.
 - Keeper event queue: `keeper_event_queue_persistence.ml:349-377` 이 못 읽는 스냅숏을 그대로 두고 오류를 돌려준다. `keeper_heartbeat_stimulus_intake.ml:1060-1069` 가 `Pending_selection_failed` 로 바꾸고, `keeper_heartbeat_loop.ml:80-88` 이 매 cycle 턴을 돌리지 않는다. 2026-09-22 event-queue v18→v19 사고가 이것이다 (#37900). 파일 이름(`event-queue-v19.json`)은 두고 payload 표식만 올리면 이 상태가 된다 (`keeper_event_queue_schema.ml`).
 - Keeper checkpoint: `keeper_run_context.ml:100-106` 이 `Superseded_version` 말고는 모든 읽기 실패를 `Checkpoint_unread` 로 올리고, `keeper_agent_run.ml:952-973` 이 그걸 `not_dispatched` 로 끝낸다. 다만 `checkpoint_version` 을 올린 hard cut 은 `Superseded_version` 이 되어 새 맥락으로 돈다. 턴이 멈추는 건 버전을 올리지 않은 codec 변경(`Parse_error`), 더 새 버전(`Newer_version`), 읽기 실패다.
 - World constitution: 턴을 막는 건 파일 자체를 읽지 못할 때(`Unreadable`, I/O 오류)뿐이다 (`keeper_unified_prompt.ml:1359-1366`). 스키마가 바뀌어 못 푸는 줄은 `ledger.rejected` 로 빠지고, 턴은 그 조항 없이 돈다 (`world_constitution_store.ml:125-141`). 그래서 hard cut 으로 턴이 멈추는 store 가 아니다. 파일을 읽지 못하는 경우는 #39230 과 같은 부류다.
+- memory-journal (2026-11-15 `807a5e46ab` 조사): 턴의 recall 은 snapshot 만 읽고, 못 읽으면 "unavailable" 문구를 넣고 돈다 (`keeper_memory_os_recall.ml:23-31`). 턴 드라이버가 읽는 Librarian 상태는 continuity·turn boundary·progress·unread ledger 다 (`keeper_turn_driver_try_provider.ml:379-386`). journal 을 줄마다 푸는 곳은 턴 밖에 있다.
+  - Librarian 프로그램: 앵커를 잡을 때 journal 전체를 풀어서 못 푼 줄 하나에 멈춘다 (`keeper_memory_os_current_read_anchor.ml:108-142`, `keeper_librarian_message_floor.ml:187`).
+  - Memory 도구: recall binding 을 가진 admission commit 은 거절된다 (`keeper_memory_os_current_update.ml:312-316`). 지운 memory 의 supersede 는 `Supersede_journal_unreadable` 로 실패한다 (`keeper_memory_os_current_fact_ops.ml:220`). archive 와 successor recall 은 오류로 답한다 (`keeper_memory_os_current_read_anchor.ml:299-357`, `keeper_memory_os_current_revision_evidence.ml:200-220`·`272-287`).
+  - snapshot 읽기는 publication receipt 가 남아 있을 때만 journal 을 먼저 마무리한다 (`keeper_memory_os_current_publication.ml:306-331`·`396-399`). 이때 journal 에 못 푼 줄이 있으면 snapshot 읽기가 실패해 recall 이 빠지고, 턴은 돈다.
 
 아직 목록에 없는 store 는 4장 PR-3 에서 다룬다.
 
@@ -93,7 +98,8 @@ store 마다 세 가지를 묻는다.
   - codec 을 바꿀 때 버전을 올리도록 강제하면(#38680 제안): 새 코드가 옛 파일을 읽을 수 있는 변경에도 모든 Keeper 가 `Superseded_version` 으로 새 맥락에서 시작한다(`keeper_context_core.ml:153-164`). 옛 버전을 읽는 코드는 두지 않으니 history 에 남은 옛 바이트도 쓸 수 없다. 맥락을 가장 많이 잃는다.
   - 지금대로면: 못 읽는 동안 턴이 멈추고 정본은 남는다. build 를 되돌리면 맥락이 이어진다. `masc_keeper_clear` 가 못 읽는 정본을 지워도 저장 때마다 hardlink 한 history(기본 3개, `keeper.checkpoint_history_retained`)에 바이트가 남아서, 새 저장이 밀어내기 전까지는 손으로 되살릴 수 있다. 롤백 뒤 clear 의 남은 위험은 #38680 에 적었다.
 - World constitution: hard cut 으로 턴이 멈추지 않아서 이 RFC 의 부팅 정책 대상이 아니다. 프롬프트가 `rejected` 줄을 보여 주지 않는 것은 (a) 결함이다.
-- board comments, memory-journal: preflight 도 읽지 않는다. 읽는 함수부터 만들어야 한다 (#38595, #38596). (c) 는 조사하지 않았다.
+- board comments: preflight 도 읽지 않는다. base_path 로 부를 점검 함수부터 만들어야 한다 (#38595). (c) 는 조사하지 않았다.
+- memory-journal: snapshot 과 따로 append 하는 파일이다 (`<keeper>.memory-journal.jsonl`). 위 표대로 `Preflight_only` 로 넣는다 (PR-4). 2026-09-05 #33241 뒤에 지운 필드가 남은 파일은 snapshot 10개 중 0개, journal 17개 중 15개였다. snapshot 만 읽는 scan 은 journal 을 보지 않았다 (#32504 댓글).
 
 ## 2. 설계
 
@@ -165,6 +171,7 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 4. PR-2: v1 `session.json` 을 둔 base path 로 `Keeper_store_boot_reconcile.examine`·`admit` 을 돌리면 플래그 없이는 거절하고, 거절 문구에 Keeper 와 경로가 있다. 파일 digest 는 그대로다. `quarantine` 뒤에는 파일이 없고, 옮긴 사본이 같은 바이트를 가지며, `load` 는 `None` 이다.
 5. PR-3: event queue 를 못 읽는 fixture 로 부팅이 거절하고, 격리하면 스냅숏과 WAL 이 함께 옮겨진다. preflight 의 `validate-current-queue`·`validate-current-wal` 과 셸 반복문이 사라진다.
 6. 소비자 수정 PR 은 1장 마지막 열의 해당 소비자를 고치고, 읽기 실패가 typed 로 보이는 것을 테스트로 보인다.
+7. PR-4 memory-journal: 못 푸는 줄 하나가 든 journal 을 두면 preflight 가 읽는 store 가운데 journal scan 만 그 한 줄을 거절하고, 거절 문구에 파일과 물리 줄 번호가 있다. 정상 journal 은 거절 0건이고, journal 이 없으면 빈 보고다. 끝의 줄바꿈 없는 조각은 다음 append 가 잘라 내므로 거절하지 않는다. 파일 바이트는 그대로다.
 
 ## 4. 단계
 
@@ -172,7 +179,7 @@ preflight 의 `scan` 과 `on_refusal` 문구는 `Keeper_durable_store` 로 옮�
 - **PR-2 세션**: official-client session 을 `Refuse_boot` 로 올리고, 잠금을 잡고 옮기는 방법을 더한다. 판정 4.
 - **PR-3 event queue**: 목록에 넣고 `Refuse_boot` 로 둔다. 격리는 queue 소유자 잠금 아래에서 스냅숏과 WAL 을 함께 옮기고, WAL 을 먼저 옮긴다. WAL 은 혼자서도 첫 줄의 이전 상태부터 다시 읽히기 때문에, 중간에 멈췄을 때 스냅숏만 남게 하려는 순서다. 판정 5.
 - **체크포인트**: 목록 밖 (1장 아래 설명).
-- **PR-4 읽는 함수가 없는 store**: board comments, memory-journal(#38596). (c) 부터 조사한다.
+- **PR-4 읽는 함수가 없는 store**: memory-journal 은 `Preflight_only` 로 넣는다(1장 표, 판정 7). board comments 는 (c) 부터 조사한다.
 - **PR-5~ 소비자**: 1장 마지막 열의 소비자를 store 별로 고친다. 판정 6.
 - 별도 결함: #38597(memory events), #38598(preflight 문구), #39224(설치된 preflight helper 가 서버보다 오래됨).
 

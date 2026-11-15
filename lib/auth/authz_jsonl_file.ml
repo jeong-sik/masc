@@ -132,7 +132,14 @@ module Make (F : Line_format) = struct
     ; zone : Eio.Mutex.t
     ; mutable head : F.state
     ; mutable cursor : Fs_compat.Private_jsonl_cursor.t
-    ; mutable stopped : string option
+    ; stopped : string option Atomic.t
+          (* HIGH-RISK-UNREVIEWED: set only inside the zone. [stopped] reads it
+             outside, for [Authz_zone.read], which reads it beside the [current]
+             and [probe] of the zone. Those two are [Atomic.t] because the gate
+             reads them outside the zone, and this is too, so a read on any
+             domain gets a whole value and does not race with the set. A check
+             that leads to a write ([append], [confirm_end], [with_writer]) runs
+             inside the zone, whose mutex orders it against every set. *)
     }
 
   type writer =
@@ -177,7 +184,7 @@ module Make (F : Line_format) = struct
         }
 
   let stopped (log : t) =
-    Option.map (fun reason -> { path = log.path; reason }) log.stopped
+    Option.map (fun reason -> { path = log.path; reason }) (Atomic.get log.stopped)
   ;;
 
   let open_error_to_string reason_to_string = function
@@ -280,7 +287,10 @@ module Make (F : Line_format) = struct
            discarded_bytes
            kept_bytes
            (F.describe_state head));
-      Ok ({ path; zone = Eio.Mutex.create (); head; cursor; stopped = None }, state, recovered)
+      Ok
+        ( { path; zone = Eio.Mutex.create (); head; cursor; stopped = Atomic.make None }
+        , state
+        , recovered )
   ;;
 
   let append_error_to_string = function
@@ -339,11 +349,12 @@ module Make (F : Line_format) = struct
          stay where they were. The file stops, so that no caller reads the state
          as if it were current. The exception goes on to the caller. *)
       let backtrace = Printexc.get_raw_backtrace () in
-      log.stopped
-      <- Some
+      Atomic.set
+        log.stopped
+        (Some
            (Printf.sprintf
               "a write raised %s, so the end of the file is not known"
-              (Printexc.to_string exn));
+              (Printexc.to_string exn)));
       Printexc.raise_with_backtrace exn backtrace
     | Ok { Fs_compat.value = cursor; settlement_error } ->
       Option.iter (observe_settlement ~description:F.description ~path:log.path) settlement_error;
@@ -354,11 +365,11 @@ module Make (F : Line_format) = struct
       (match failure_kind error with
        | Lock_held_by_another_process -> Error (Write_locked { path = log.path })
        | End_moved ->
-         log.stopped <- Some end_moved;
+         Atomic.set log.stopped (Some end_moved);
          Error (Diverged { path = log.path })
        | Outcome_unknown ->
          let detail = store_error error in
-         log.stopped <- Some detail;
+         Atomic.set log.stopped (Some detail);
          Error (Write_failed { path = log.path; detail }))
   ;;
 
@@ -367,7 +378,7 @@ module Make (F : Line_format) = struct
     if not writer.live
     then Error Writer_expired
     else (
-      match log.stopped with
+      match Atomic.get log.stopped with
       | Some reason -> Error (Stopped { path = log.path; reason })
       | None ->
         Result.bind (encode ~head:log.head records) (fun (lines, head) ->
@@ -456,13 +467,13 @@ module Make (F : Line_format) = struct
   let confirm_end writer =
     let log = writer.log in
     let moved () =
-      log.stopped <- Some end_moved;
+      Atomic.set log.stopped (Some end_moved);
       Error (End_moved { path = log.path })
     in
     if not writer.live
     then Error End_writer_expired
     else (
-      match log.stopped with
+      match Atomic.get log.stopped with
       | Some reason -> Error (End_stopped { path = log.path; reason })
       | None ->
         (match Fs_compat.private_jsonl_snapshot_success_receipt (read_after_end log) with
@@ -477,7 +488,7 @@ module Make (F : Line_format) = struct
             | Read_moved -> moved ()
             | Read_not_one_file ->
               let detail = store_error error in
-              log.stopped <- Some detail;
+              Atomic.set log.stopped (Some detail);
               Error (End_not_one_file { path = log.path; detail })
             | Read_not_done -> Error (End_unread { path = log.path; detail = store_error error }))))
   ;;
@@ -492,7 +503,7 @@ module Make (F : Line_format) = struct
   let with_writer (log : t) f =
     let outcome =
       Eio.Mutex.use_rw ~protect:true log.zone (fun () ->
-        match log.stopped with
+        match Atomic.get log.stopped with
         | Some reason -> Refused { path = log.path; reason }
         | None ->
           let writer = { log; live = true } in

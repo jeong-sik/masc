@@ -511,7 +511,11 @@ type cached_keeper_health = {
 
 let health_cache : (string * string, cached_keeper_health) Hashtbl.t = Hashtbl.create 16
 let health_cache_mutex = Mutex.create ()
-let health_base_paths : (string, string) Hashtbl.t = Hashtbl.create 4
+
+(* Every root a writer may name, resolved, to the root the row is cached
+   under. Both are resolved when a read registers them, so emptying a row
+   from a write signal needs no filesystem lookup. *)
+let row_roots : (string, string) Hashtbl.t = Hashtbl.create 4
 let health_reader = ref keeper_health
 
 let health_directory_identity path =
@@ -519,8 +523,8 @@ let health_directory_identity path =
   | Unix.Unix_error (Unix.ENOENT, _, _) -> path
 
 let cache_entry ~keepers_dir keeper_id =
+  let key = health_directory_identity keepers_dir, keeper_id in
   Stdlib.Mutex.protect health_cache_mutex (fun () ->
-    let key = health_directory_identity keepers_dir, keeper_id in
     match Hashtbl.find_opt health_cache key with
     | Some entry -> entry
     | None ->
@@ -549,46 +553,43 @@ let cached_keeper_health ~config ~keepers_dir keeper_id =
   in
   read ()
 
+(* A writer reports the root it wrote under. The Librarian keeps its progress
+   and turn records under the runtime root while the row is cached under the
+   config root, so the reported root is mapped to the row's own root before
+   the row is emptied, or a write under the runtime root leaves the row
+   answering what it had. *)
 let invalidate_after_write ~keepers_dir ~keeper_id =
-  let keepers_dir = health_directory_identity keepers_dir in
-  let base_path = Stdlib.Mutex.protect health_cache_mutex (fun () ->
-    Hashtbl.find_opt health_base_paths keepers_dir) in
-  match base_path with
+  (* An invalidation is a report about a row some read put there. Creating
+     the row here instead would leave an entry nobody has read, kept alive
+     only by its own invalidation. *)
+  let entry =
+    Stdlib.Mutex.protect health_cache_mutex (fun () ->
+      Option.bind (Hashtbl.find_opt row_roots keepers_dir) (fun row_root ->
+        Hashtbl.find_opt health_cache (row_root, keeper_id)))
+  in
+  match entry with
   | None -> ()
-  | Some base_path ->
-      (* A writer reports the root it wrote under. The Librarian keeps its
-         progress under the runtime root while the fleet row is cached under
-         the config root, so the reported root can name the same base path
-         without being the key the row is cached under. Resolve to the row's
-         own root before emptying it, or a position write leaves the row
-         answering the position it had. *)
-      let cached_dir =
-        health_directory_identity
-          (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
-      in
-      (* An invalidation is a report about a row some read put there. Creating
-         the row here instead would leave an entry nobody has read, kept alive
-         only by its own invalidation. *)
-      let entry =
-        Stdlib.Mutex.protect health_cache_mutex (fun () ->
-          Hashtbl.find_opt health_cache
-            (health_directory_identity cached_dir, keeper_id))
-      in
-      (match entry with
-       | None -> ()
-       | Some entry ->
-           Stdlib.Mutex.protect entry.mutex (fun () ->
-             entry.generation <- entry.generation + 1;
-             entry.value <- None))
+  | Some entry ->
+    Stdlib.Mutex.protect entry.mutex (fun () ->
+      entry.generation <- entry.generation + 1;
+      entry.value <- None)
+;;
+
+(* A store hook names the directory as its writer spelled it, so the hook
+   resolves it before the lookup. The write signals name it resolved already
+   and reach [invalidate_after_write] directly. *)
+let invalidate_after_store_write ~keepers_dir ~keeper_id =
+  invalidate_after_write ~keepers_dir:(health_directory_identity keepers_dir) ~keeper_id
+;;
 
 let install () =
   let retained = ref [] in
   let register restore = retained := restore :: !retained in
-  register (Keeper_memory_os_current.install_commit_observer invalidate_after_write);
-  register (Keeper_memory_source_current.install_commit_observer invalidate_after_write);
-  register (Keeper_librarian_progress.install_commit_observer invalidate_after_write);
+  register (Keeper_memory_os_current.install_commit_observer invalidate_after_store_write);
+  register (Keeper_memory_source_current.install_commit_observer invalidate_after_store_write);
+  register (Keeper_librarian_progress.install_commit_observer invalidate_after_store_write);
   let refresh ~config ~keeper_name =
-    invalidate_after_write
+    invalidate_after_store_write
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path
         ~base_path:config.Workspace.base_path)
       ~keeper_id:keeper_name
@@ -884,12 +885,12 @@ let totals_row (h : keeper_health) : Keeper_memory_health_totals.Row.t =
    path, or a write under one root finds no entry under the other and the row
    keeps answering the state it had. Kept in one place so the fleet answer and
    the single-row answer cannot drift apart. *)
-let register_health_base_paths ~config ~keepers_dir ~base_path =
+let register_row_roots ~config ~keepers_dir =
+  let row_root = health_directory_identity keepers_dir in
+  let runtime_root = health_directory_identity (Workspace.keepers_runtime_dir config) in
   Stdlib.Mutex.protect health_cache_mutex (fun () ->
-    Hashtbl.replace health_base_paths (health_directory_identity keepers_dir) base_path;
-    Hashtbl.replace health_base_paths
-      (health_directory_identity (Workspace.keepers_runtime_dir config))
-      base_path)
+    Hashtbl.replace row_roots row_root row_root;
+    Hashtbl.replace row_roots runtime_root row_root)
 ;;
 
 let keeper_memory_health_http_json ~base_path =
@@ -898,7 +899,7 @@ let keeper_memory_health_http_json ~base_path =
   let keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path
   in
-  register_health_base_paths ~config ~keepers_dir ~base_path;
+  register_row_roots ~config ~keepers_dir;
   let entries =
     health_keeper_ids ~keepers_dir
     |> List.map (cached_keeper_health ~config ~keepers_dir)
@@ -928,7 +929,7 @@ let keeper_memory_health_row_http_json ~base_path ~keeper =
   let config = Workspace.default_config base_path in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let generated_at = Time_compat.now () in
-  register_health_base_paths ~config ~keepers_dir ~base_path;
+  register_row_roots ~config ~keepers_dir;
   let row =
     if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
     then keeper_health_entry_to_json ~now:generated_at (cached_keeper_health ~config ~keepers_dir keeper)
@@ -945,7 +946,7 @@ module For_testing = struct
   let keeper_health = keeper_health
 
   let invalidate ~base_path ~keeper =
-    invalidate_after_write
+    invalidate_after_store_write
       ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
       ~keeper_id:keeper
   ;;
@@ -954,9 +955,11 @@ module For_testing = struct
     let previous_reader = !health_reader in
     Stdlib.Mutex.protect health_cache_mutex (fun () ->
       Hashtbl.reset health_cache;
-      Hashtbl.reset health_base_paths);
+      Hashtbl.reset row_roots);
     health_reader := reader;
-    let restore = Keeper_memory_os_current.install_commit_observer invalidate_after_write in
+    let restore =
+      Keeper_memory_os_current.install_commit_observer invalidate_after_store_write
+    in
     Fun.protect
       ~finally:(fun () ->
         restore ();

@@ -13,34 +13,37 @@ let compare_comments_oldest_first (a : comment) (b : comment) =
   | order -> order
 ;;
 
+(* The per-post comment list with expired rows excluded — the same visibility
+   the sweeper enforces. Runs under the store lock; does not mutate
+   anything. *)
+let live_comments_unlocked store pid =
+  let now = Time_compat.now () in
+  let comment_keys =
+    match Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid) with
+    | None -> []
+    | Some keys -> keys
+  in
+  List.filter_map
+    (fun key ->
+       match Hashtbl.find_opt store.comments key with
+       | Some { expires_at; _ } when
+           Stdlib.Float.compare expires_at 0.0 > 0
+           && Stdlib.Float.compare expires_at now < 0 -> None
+       | found -> found)
+    comment_keys
+;;
+
 (* task-1758/#39356 scope extension: a post holding Limits.comment_count_cap
    live comments refuses the next one, with the same "open a successor post"
    guidance a closed thread gives. The count is the live per-post comment
-   list with expired rows excluded — the same visibility the sweeper
-   enforces — so threads whose timed comments have aged out keep accepting
-   new ones. Runs under the store lock (the staging/commit write boundary
-   holds it); does not mutate anything. *)
+   list, so threads whose timed comments have aged out keep accepting new
+   ones. Runs under the store lock (the staging/commit write boundary holds
+   it); does not mutate anything. *)
 let comment_count_cap_error_unlocked store pid =
   let cap = Limits.comment_count_cap in
   if cap <= 0 then None
   else
-    let now = Time_compat.now () in
-    let comment_keys =
-      match Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid) with
-      | None -> []
-      | Some keys -> keys
-    in
-    let live =
-      List.fold_left
-        (fun n key ->
-           match Hashtbl.find_opt store.comments key with
-           | Some { expires_at; _ } when
-               Stdlib.Float.compare expires_at 0.0 > 0
-               && Stdlib.Float.compare expires_at now < 0 -> n
-           | Some _ -> n + 1
-           | None -> n)
-        0 comment_keys
-    in
+    let live = List.length (live_comments_unlocked store pid) in
     if live >= cap
     then
       Some
@@ -48,6 +51,35 @@ let comment_count_cap_error_unlocked store pid =
            "Post %s has reached the comment cap of %d; open a successor post"
            (Post_id.to_string pid) cap)
     else None
+;;
+
+(* A live comment on the post from the same author, under the same parent,
+   with byte-identical text already says what the new one would say. A Keeper
+   turn that kept re-posting one body wrote 390 comments of 39 distinct bodies
+   on 5 posts (turn 5517, 2026-11-14). The refusal names the existing comment
+   so the writer sees why nothing was posted; a different body, parent or
+   author is not a repeat. Runs under the store lock before the durable
+   append; does not mutate anything. *)
+let duplicate_comment_error_unlocked store pid ~author_id ~parent_cid ~content =
+  let author = Agent_id.to_string author_id in
+  let same_parent existing =
+    match existing, parent_cid with
+    | None, None -> true
+    | Some a, Some b -> String.equal (Comment_id.to_string a) (Comment_id.to_string b)
+    | None, Some _ | Some _, None -> false
+  in
+  let repeats (existing : comment) =
+    String.equal (Agent_id.to_string existing.author) author
+    && same_parent existing.parent_id
+    && String.equal existing.content content
+  in
+  Option.map
+    (fun (existing : comment) ->
+       Printf.sprintf
+         "Post %s already has this exact comment from %s as %s; it was not \
+          posted again. Change the text or reply under a different comment"
+         (Post_id.to_string pid) author (Comment_id.to_string existing.id))
+    (List.find_opt repeats (live_comments_unlocked store pid))
 ;;
 
 let add_comment_with_audience
@@ -98,6 +130,11 @@ let add_comment_with_audience
            | Some msg -> Error (Validation_error msg)
            | None ->
           (match
+             duplicate_comment_error_unlocked store pid ~author_id ~parent_cid ~content
+           with
+           | Some msg -> Error (Validation_error msg)
+           | None ->
+          (match
              validate_sub_board_post_policy_unlocked
                store
                ~author_id
@@ -123,7 +160,7 @@ let add_comment_with_audience
                           *. Masc_time_constants.hour))
                ; votes_up = 0
                ; votes_down = 0
-               })))
+               }))))
     in
     (match staged with
      | Error _ as e -> e

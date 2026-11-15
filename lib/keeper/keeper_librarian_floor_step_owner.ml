@@ -10,7 +10,7 @@ type error = Submit.error = Unavailable of string | Rejected of string | Uncerta
 let error_to_string = Submit.error_to_string
 type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
-type call = expected:Durable.destination -> original:Owner.retained -> arguments:Yojson.Safe.t ->
+type call = expected:Durable.destination -> original:Owner.Record.t -> arguments:Yojson.Safe.t ->
   (Mcp_protocol.Mcp_types.tool_result,Submit.call_error) result
 type answer = {raw:Yojson.Safe.t;proposal:Memory_runtime.durable_step_proposal}
 type outcome = Pending of wait * Owner.retained
@@ -71,7 +71,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
   let call ~arguments =
     match prepare () with
     | Error error -> Error (Submit.Not_sent error)
-    | Ok () -> call ~expected:destination ~original ~arguments in
+    | Ok () -> call ~expected:destination ~original:(Owner.listed original) ~arguments in
   let terminal record final =
     let* ()=confirm_live_owner () in
     let* ()=io (fun () -> Step.confirm_final ~store step final) |> rejected in
@@ -83,7 +83,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
   let decode_final json=io (fun () -> Step.decode_final ~store step json) in
-  let* result=Submit.resume ~store ~label:"Floor step" ~original ~request:exact ~schema ~decode_final ~prepare:admit ~call ~terminal in
+  let* result=Submit.resume_retained ~store ~label:"Floor step" ~original ~request:exact ~schema ~decode_final ~prepare:admit ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (answer,record)) -> Ok (Answered (answer,record))

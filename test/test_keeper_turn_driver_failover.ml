@@ -4235,6 +4235,16 @@ let test_only_the_candidates_own_failures_are_evidence () =
         (Some Runtime_candidate_backpressure.Network_transient)
         (one "shared_b.test_model" (retryable_network_error "connection refused"));
       reset_quota_lane_rests ();
+      (* RFC #52028 §2.3: how slot standing reads a connection that did not
+         open is #38403's decision; until then the slot notes it as a network
+         failure, as it did before the route class existed. *)
+      Alcotest.check attempt_failure "a connection that did not open"
+        (Some Runtime_candidate_backpressure.Network_transient)
+        (one "shared_b.test_model"
+           (Agent_core.Error.Api
+              (Agent_core.Retry.Connect_failed
+                 { message = "connection refused"; kind = Llm_provider.Http_client.Connection_refused })));
+      reset_quota_lane_rests ();
       Alcotest.check attempt_failure "a provider overload (HTTP 529)"
         (Some Runtime_candidate_backpressure.Provider_capacity)
         (one "shared_a.test_model"

@@ -914,23 +914,10 @@ let store_preference state change =
   note_session_pick state change;
   match state.connection_status with
   (* The account server of a multi-account installation keeps no [tui]
-     table: the pick stays with this session, and nothing is sent to it. A
-     pick the person made is said once, as a credential that may not write
-     is. The first key retires the help hint and a chat records its visit on
-     its own; said after [r], that notice would answer a key it has nothing
-     to do with. *)
-  | Masc_tui_types.Account_server _ ->
-    (match change with
-     | Masc.Tui_preference.Help_hint_retired | Masc.Tui_preference.Chat_visited _ -> ()
-     | Masc.Tui_preference.Theme_chosen _ | Masc.Tui_preference.Language_chosen _
-     | Masc.Tui_preference.Board_sort_chosen _ | Masc.Tui_preference.Candle_chosen _ ->
-       if not state.preference_refusal_said then begin
-         state.preference_refusal_said <- true;
-         report_action state "error"
-           (ui_text state
-              ~ko:"계정 서버는 화면 설정을 저장하지 않아요. 이번 세션에만 적용돼요."
-              ~en:"The account server keeps no screen settings. They last this session only.")
-       end)
+     table, and nothing is sent to it. No pick a person makes reaches here:
+     its screen takes every key. What does is the first key retiring the help
+     hint, which is not a choice to report. *)
+  | Masc_tui_types.Account_server _ -> ()
   | Masc_tui_types.Disconnected | Masc_tui_types.Connecting | Masc_tui_types.Booting
   | Masc_tui_types.Degraded | Masc_tui_types.Connected ->
     ignore
@@ -34986,6 +34973,12 @@ Use relative paths for resources already held in the package. -->
       let quit_input_key = if help_owns_input then None else key in
       let quit_key =
         match quit_input_key with
+        (* The account server screen's own rule, not the covered surface's:
+           a chat underneath would read q as text, and an About, collab or
+           queue panel left in state would withhold it. The arm below and the
+           withdrawal of an armed quit read this same answer. *)
+        | Some k when panel_owns_input && current_panel = Some Presented.Account_server ->
+            Render_schedule.Input_shortcut.is_quit ~message_mode:false k
         | Some k ->
             (* On a viewport too small to draw them, no field is taking keys:
                the compact fallback further down owns every remaining one, so

@@ -1561,7 +1561,8 @@ let render_account_server state ~version =
   in
   let rows =
     [ say "주소" "Address", address
-    ; say "버전" "Version", version
+    (* The server's own string: one printable row, whatever it carries. *)
+    ; say "버전" "Version", Masc.Tui_terminal_text.sanitize_terminal_text version
     ; say "사람" "People",
       say "브라우저로 주소를 열고 로그인해 자기 구독과 키퍼를 써요."
         "Open the address in a browser, sign in, and use your own subscriptions and Keepers."

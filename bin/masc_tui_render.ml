@@ -79,7 +79,13 @@ let base_acting_pane_suppressed (state : state) =
     || Masc_tui_types.modal_owns_keys state
     || state.answering_open || state.memory_fact_detail_open
   in
-  modal
+  (* The account server's screen covers every surface, and the pane would
+     show what the previous server said. *)
+  let account_server = match state.connection_status with
+    | Account_server _ -> true
+    | Disconnected | Connecting | Booting | Degraded | Connected -> false
+  in
+  modal || account_server
   || Masc_tui_types.on_activity_screen state.view
   || Option.is_some (browser_lane_on_screen state)
 

@@ -3425,6 +3425,7 @@
   masc_tui_machine_live
   masc_tui_interactive
   masc_tui_ansi
+  masc_tui_message_layout
   masc_tui_graphics
   masc_tui_image_mosaic
   masc_tui_frame_timing

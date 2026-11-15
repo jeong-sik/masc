@@ -11,6 +11,17 @@ let document_rows ~width text =
   |> List.concat_map (fun line ->
       Masc_tui_message_layout.split_cells ~max_cells:(max 1 width)
         (Masc.Tui_terminal_text.sanitize_terminal_text line))
+
+(* Keys as screen rows. Whole items are joined by
+   [Masc_tui_message_layout.clause_separator], so a row ends where a key ends
+   and [n:new] never becomes [n:n] and [ew]; an item wider than a row on its
+   own, such as a sentence that leads the keys, wraps at spaces. Every row
+   opens with [indent] spaces. The items are this screen's own words, not
+   received text, so they are not sanitized here. *)
+let key_rows ?(indent = 0) ~width keys =
+  let margin = String.make indent ' ' in
+  Masc_tui_message_layout.pack_clauses ~max_cells:(max 1 (width - indent)) keys
+  |> List.map (fun row -> margin ^ row)
 type runtime_presence = Live_entry | Retained_binding | Presence_unknown
 type host_wait =
   | Host_wait_exact of Masc.Lane_addon_exact.not_final
@@ -761,16 +772,17 @@ let acknowledge_broadcast view receipt =
       {view with pending_broadcasts=List.filter
         (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
   | (Ok _ | Error _), (Ok _ | Error _) -> view
-let evidence_lines prompt =
+let evidence_rows ~width prompt =
   let choice index label = (if prompt.choice=index then "> " else "  ") ^ label in
-  [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
-     (if prompt.row_count=1 then "" else "s") prompt.owner_title;
-   "Evidence stays preserved; sharing sends its reference. Reads and actions are separate.";
-   "An unanswered Broadcast retries the original saved send, including after restart.";
-   "j/k:choose  Enter:preserve  Esc:back"]
-  @ [choice 0 "Preserve only"]
-  @ List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers
-  @ [choice (List.length prompt.keepers+1) "Preserve and share the reference via Broadcast"]
+  let wrap = List.concat_map (document_rows ~width) in
+  wrap [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
+          (if prompt.row_count=1 then "" else "s") prompt.owner_title;
+        "Evidence stays preserved; sharing sends its reference. Reads and actions are separate.";
+        "An unanswered Broadcast retries the original saved send, including after restart."]
+  @ key_rows ~width ["j/k:choose"; "Enter:preserve"; "Esc:back"]
+  @ wrap ([choice 0 "Preserve only"]
+          @ List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers
+          @ [choice (List.length prompt.keepers+1) "Preserve and share the reference via Broadcast"])
 (* The receipt names what was frozen and, separately, whether the optional
    message reached its Keeper. A failed delivery leaves the bundle preserved. *)
 let evidence_receipt_lines json =
@@ -1207,26 +1219,28 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
     | Some text -> [(if view.naming then "New TOML filename: " else "Plugin command: ") ^ text] in
   let document = match selected_document view with
     | None -> [] | Some session -> document_application_lines view session @ Document.summary session in
-  List.concat_map (technical_rows ~width)
-    (technical_text (["?:help  Esc:back  J/K:scroll"] @ diagnostic_lines view)
+  key_rows ~width ["?:help"; "Esc:back"; "J/K:scroll"]
+  @ List.concat_map (technical_rows ~width)
+    (technical_text (diagnostic_lines view)
      @ content @ technical_text (draft @ document) @ action_parts view @ receipt)
 
 let installation_detail_lines ~width view =
   let wrap = document_rows ~width in
-  let edit_hint = if Option.is_some (selected_source_path view) then "  E:edit TOML" else "" in
-  let refresh_hint = if view.loading then "  Reading …" else "  r:refresh" in
+  let edit = if Option.is_some (selected_source_path view) then ["E:edit TOML"] else [] in
+  let refresh = if view.loading then "Reading …" else "r:refresh" in
   let body = match view.snapshot with
     | Some ({configuration=Some configuration;_} as snapshot) ->
         (match selected_declaration view with
          | Some declaration ->
-             ["Installation details · " ^
-                Option.value ~default:(Filename.basename declaration.source_path) declaration.installation_id;
-              "Esc:back" ^ edit_hint ^ refresh_hint; ""]
-             @ configuration_lines {view with configuration_cursor=0}
-                 {snapshot with configuration=Some {configuration with declarations=[declaration]}}
-         | None -> ["Installation selection changed · Esc:back" ^ refresh_hint])
-    | _ -> ["Installation inventory unread · Esc:back" ^ refresh_hint] in
-  List.concat_map wrap (diagnostic_lines view @ body)
+             wrap ("Installation details · " ^
+                Option.value ~default:(Filename.basename declaration.source_path) declaration.installation_id)
+             @ key_rows ~width (("Esc:back" :: edit) @ [refresh])
+             @ wrap ""
+             @ List.concat_map wrap (configuration_lines {view with configuration_cursor=0}
+                 {snapshot with configuration=Some {configuration with declarations=[declaration]}})
+         | None -> key_rows ~width ["Installation selection changed"; "Esc:back"; refresh])
+    | _ -> key_rows ~width ["Installation inventory unread"; "Esc:back"; refresh] in
+  List.concat_map wrap (diagnostic_lines view) @ body
 
 let pending_action view =
   match view.last_action, view.action_receipt with
@@ -1267,45 +1281,46 @@ let removal_block_reason view (instance : instance) =
        | _ -> refusal "Lane configuration inventory is incomplete")
   | _ -> refusal "Lane configuration owner is incomplete"
 
+(* One item per key or notice, the way [overview_hints] lists them. *)
 let instance_controls view (instance : instance) =
   let removal = match removal_block_reason view instance with
-    | Some reason -> "  " ^ reason
+    | Some reason -> reason
     | None -> match instance.source_path with
-    | Some _ -> "  d:remove TOML + worker"
-    | None -> "  d:remove worker" in
+    | Some _ -> "d:remove TOML + worker"
+    | None -> "d:remove worker" in
   match instance.phase with
   | Row.Attached | Row.Observing ->
       (if can_observe instance then
-         "o:observe" ^ (if Option.is_some instance.action_schema then "  a:actions" else "")
-       else "worker execution unavailable") ^ removal
-  | Row.Detaching -> "worker cleanup pending"
-  | Row.Detached -> "retained history · D:details"
+         "o:observe" :: (if Option.is_some instance.action_schema then ["a:actions"] else [])
+       else ["worker execution unavailable"]) @ [removal]
+  | Row.Detaching -> ["worker cleanup pending"]
+  | Row.Detached -> ["retained history · D:details"]
   | Row.Failed _ ->
       (if can_observe instance then
-         "o:retry observation" ^ (if Option.is_some instance.action_schema then "  a:actions" else "")
-       else "worker execution unavailable") ^ removal
+         "o:retry observation" :: (if Option.is_some instance.action_schema then ["a:actions"] else [])
+       else ["worker execution unavailable"]) @ [removal]
 
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
-  if view.help_open then "Esc:close help"
+  let refresh = if view.loading then "Reading …" else "r:refresh" in
+  if view.help_open then ["Esc:close help"]
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  Space:on/off draft  E:edit  R:records  s:save  l:reload  u/U:revision  Colon:palette  A:command"
+    ["?:help"; "Esc:back"; "Space:on/off draft"; "E:edit"; "R:records"; "s:save"; "l:reload";
+     "u/U:revision"; "Colon:palette"; "A:command"]
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
-      "?:help  Esc:back"
-      ^ (if Option.is_some (selected_source_path view) then "  E:edit TOML" else "")
-      ^ "  Colon:palette  A:command"
-      ^ (if view.loading then "  Reading …" else "  r:refresh")
+      ["?:help"; "Esc:back"]
+      @ (if Option.is_some (selected_source_path view) then ["E:edit TOML"] else [])
+      @ ["Colon:palette"; "A:command"; refresh]
   | Overview ->
-      "?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command"
-      ^ (if view.loading then "  Reading …" else "  r:refresh")
+      ["?:help"; "Colon:palette"; "Esc:back"; "Enter:open"; "h:history/current"; "i:install";
+       "n:new"; "S:subs"; "A:command"; refresh]
   | Detail _ ->
-      "?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  " ^
-      (match selected_instance view with None -> "" | Some instance -> instance_controls view instance ^ "  ") ^
-      "D:raw  J/K:scroll"
-      ^ (if view.loading then "  Reading …" else "  r:refresh")
+      ["?:help"; "Colon:palette"; "Esc:back"; "A:command"; "1-4:section"; "Tab:next section"; "j/k:move"]
+      @ (match selected_instance view with None -> [] | Some instance -> instance_controls view instance)
+      @ ["D:raw"; "J/K:scroll"; refresh]
 
 (* The advertised lane action tool, its name and its [action] property, the
    part the operator fills. The host checks a send under the package's tool
@@ -1648,28 +1663,30 @@ let led_rows ?(split = fun ~width text -> document_rows ~width text) ?(indent = 
    weight. Fields are label and value pairs: the fields of one indent share a
    label column across the page, so their values start under each other, and
    a long value hangs under itself. Text is a sentence and keeps its own
-   indent. A label column wider than half the width leaves the values a
-   sliver, so every label then takes its own row and its value hangs two
-   cells under it, fewer where a two-cell character would not fit beside the
-   hang. *)
+   indent. Keys are drawn by [key_rows]. A label column wider than half the
+   width leaves the values a sliver, so every label then takes its own row
+   and its value hangs two cells under it, fewer where a two-cell character
+   would not fit beside the hang. *)
 type fact_row =
   | Fact_heading of string
   | Fact_fields of { indent : int; fields : (string * string) list }
   | Fact_text of string
+  | Fact_keys of string list
 
 let fact_spans ~width rows =
   let label_cells indent = 1 + List.fold_left (fun widest -> function
     | Fact_fields { indent = at; fields } when at = indent ->
         List.fold_left (fun widest (label, _) ->
           max widest (Masc_tui_message_layout.display_width label)) widest fields
-    | Fact_fields _ | Fact_heading _ | Fact_text _ -> widest) 0 rows in
+    | Fact_fields _ | Fact_heading _ | Fact_text _ | Fact_keys _ -> widest) 0 rows in
   let beside = List.for_all (function
     | Fact_fields { indent; _ } -> 2 * (indent + label_cells indent) <= width
-    | Fact_heading _ | Fact_text _ -> true) rows in
+    | Fact_heading _ | Fact_text _ | Fact_keys _ -> true) rows in
   let spaces cells = Span.text Span.plain (String.make (max 0 (min cells (width - 2))) ' ') in
   let spans = function
     | Fact_heading text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
     | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Fact_keys keys -> List.map (Span.text Span.plain) (key_rows ~width keys)
     | Fact_fields { indent; fields } when beside ->
         List.concat_map (fun (label, value) ->
           let lead = Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) in
@@ -1783,15 +1800,20 @@ let instance_heading _snapshot (item : instance) =
   | None -> item.title
   | Some name -> name ^ " · " ^ item.title
 
-let empty_result_lines view (item : instance) =
+(* Laid out rows. The failure is wrapped at spaces and the controls are
+   packed from whole items, so neither is cut in the middle of a word. *)
+let empty_result_rows ~width view (item : instance) =
   match item.phase with
-  | Row.Failed detail -> ["Plugin failed: " ^ detail; instance_controls view item]
+  | Row.Failed detail ->
+      Masc_tui_text_block.rows ~max_cells:width ("Plugin failed: " ^ detail)
+      @ key_rows ~width (instance_controls view item)
   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
-      if item.observation_seq=0 then ["No completed observation received yet."]
+      let wrap = List.concat_map (document_rows ~width) in
+      if item.observation_seq=0 then wrap ["No completed observation received yet."]
       else if item.rows_count=0 then
-        ["Last completed observation contains no result rows.";
-         "Check input coverage and 2 Links for declared inputs."]
-      else ["No result rows in this received view."; "r:refresh · D:raw details"]
+        wrap ["Last completed observation contains no result rows.";
+              "Check input coverage and 2 Links for declared inputs."]
+      else wrap ["No result rows in this received view."] @ key_rows ~width ["r:refresh"; "D:raw details"]
 
 let snapshot_coverage_lines coverage =
   if coverage=[] then [] else
@@ -1836,18 +1858,22 @@ let overview_lines ~width view =
         let items = List.mapi (fun index item -> index,item) entries
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
         let empty = match view.overview_mode, snapshot.configuration with
-          | Retained_runs, _ when entries=[] -> ["No retained runs in this snapshot. h:current installations"]
+          | Retained_runs, _ when entries=[] ->
+              key_rows ~width ["No retained runs in this snapshot"; "h:current installations"]
           | Retained_runs, _ -> []
           | Current_installations, Some {complete=true;declarations=[];_} when count=0 ->
-              ["No Plugins installed. i:install a package  n:new TOML"]
-          | Current_installations, Some {complete=false;_} when entries=[] -> ["Installation inventory incomplete · r:refresh"]
-          | Current_installations, None when entries=[] -> ["TOML installation status unknown · r:refresh"]
+              key_rows ~width ["No Plugins installed"; "i:install a package"; "n:new TOML"]
+          | Current_installations, Some {complete=false;_} when entries=[] ->
+              key_rows ~width ["Installation inventory incomplete"; "r:refresh"]
+          | Current_installations, None when entries=[] ->
+              key_rows ~width ["TOML installation status unknown"; "r:refresh"]
           | Current_installations, (Some _ | None) -> [] in
-        texts ([heading;
-         (match view.overview_mode with
-          | Current_installations -> Printf.sprintf "Retained history · %d instances · h:open" retained_count
-          | Retained_runs -> Printf.sprintf "Retained history · %d instances · h:current installations" retained_count);
-         ""] @ empty)
+        let history = Printf.sprintf "Retained history · %d instances" retained_count in
+        texts [heading]
+        @ [Overview_drawn (key_rows ~width (match view.overview_mode with
+             | Current_installations -> [history; "h:open"]
+             | Retained_runs -> [history; "h:current installations"]))]
+        @ texts [""] @ [Overview_drawn empty]
         @ List.concat_map (fun (index,item) ->
             let marker = if index=view.instance_cursor then "> " else "  " in
             let role_header = match view.overview_mode with
@@ -1864,11 +1890,11 @@ let overview_lines ~width view =
                 let reading = declaration_reading declaration in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
-                  then Some "  E:edit" else None) |> Option.value ~default:"" in
+                  then Some "E:edit" else None) |> Option.to_list in
                 entry_lead ~width ~marker (declaration_entry_standing view declaration)
                   (name ^ " · " ^ declaration_reading_word reading ^ " · " ^ Filename.basename declaration.source_path)
-                :: texts ["    " ^ declaration_application view declaration;
-                          "    Enter:installation" ^ edit]
+                :: texts ["    " ^ declaration_application view declaration]
+                @ [Overview_drawn (key_rows ~indent:4 ~width ("Enter:installation" :: edit))]
             | `Instance item ->
                 let group_header = match view.overview_mode with
                   | Current_installations -> []
@@ -1892,7 +1918,7 @@ let overview_lines ~width view =
                      | Row.Failed _ -> "failed"
                      | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
                    " · " ^ count_text) in
-                let controls = "    Enter:open  " ^ instance_controls view item in
+                let controls = key_rows ~indent:4 ~width ("Enter:open" :: instance_controls view item) in
                 let detail = match item.phase with
                   | Row.Failed detail ->
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
@@ -1918,12 +1944,13 @@ let overview_lines ~width view =
                           (match now with Classified c -> category_label c | Unclassified | Unverified -> "unclassified")])
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
-                   else [])
-                @ [controls] @ detail)) items
+                   else []))
+                @ [Overview_drawn controls] @ texts detail) items
   in
   List.concat_map (function Overview_text line -> wrap line | Overview_drawn rows -> rows)
-    (texts (diagnostic_lines view) @ content
-     @ texts ([""; overview_hints view] @ action_lines view))
+    (texts (diagnostic_lines view) @ content @ texts [""]
+     @ [Overview_drawn (key_rows ~width (overview_hints view))]
+     @ texts (action_lines view))
 
 (* One line of the Plugins help. [Help_keys] names the keys of a screen or a
    task under a label, and [Help_note] explains the line above it. *)
@@ -2298,8 +2325,9 @@ let detail_lines ~height ~width view =
       (* The footer drops its last items first, and the worker controls sit
          there, so [a] is named here too whenever it opens this worker's form. *)
       let actions =
-        if can_observe item && Option.is_some item.action_schema then "  a:actions" else "" in
-      let head = List.concat_map wrap ["?:help  Esc:back  Tab:section  j/k:move" ^ actions ^ "  D:raw"; header]
+        if can_observe item && Option.is_some item.action_schema then ["a:actions"] else [] in
+      let head = key_rows ~width (["?:help"; "Esc:back"; "Tab:section"; "j/k:move"] @ actions @ ["D:raw"])
+        @ wrap header
         @ [tab_strip ~width view; ""]
         @ List.concat_map wrap (diagnostic_lines view) in
       let record_rows = List.map snd (ordered_rows view snapshot) in
@@ -2309,11 +2337,11 @@ let detail_lines ~height ~width view =
       | Timeline | Instances ->
           let selected = Option.bind selected (fun selected ->
             List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
-          if rows=[] then List.concat_map wrap (Option.to_list item.display.description
-            @ (if record_rows=[] then empty_result_lines view item
-               else ["No declared result rows in this received view.";
-                     "Supporting records remain available in 4 Records."])
-            @ snapshot_coverage_lines snapshot.output.coverage)
+          if rows=[] then List.concat_map wrap (Option.to_list item.display.description)
+            @ (if record_rows=[] then empty_result_rows ~width view item
+               else List.concat_map wrap ["No declared result rows in this received view.";
+                                          "Supporting records remain available in 4 Records."])
+            @ List.concat_map wrap (snapshot_coverage_lines snapshot.output.coverage)
           else
             let intro = List.concat_map wrap (Option.to_list item.display.description) in
             let height = max 1 (height - List.length head - List.length intro) in
@@ -2347,7 +2375,7 @@ let detail_lines ~height ~width view =
           @ host_request_lines item
           @ connection_worker_lines snapshot item)
       | Rows ->
-          if record_rows=[] then List.concat_map wrap (empty_result_lines view item)
+          if record_rows=[] then empty_result_rows ~width view item
           else List.concat_map (fun (row : Row.row) ->
             technical_text [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")
@@ -2531,9 +2559,9 @@ let flow_rows ?(embedded=false) view =
   @ (match Option.map evidence_receipt_lines view.receipt with
      | Some (_ :: _ as receipt) -> Fact_heading "Last evidence sharing receipt · this session" :: List.map text receipt
      | Some [] | None -> [Fact_text "No evidence sharing receipt in this session."])
-  @ [Fact_text
-     (if embedded then "f:open full flow  D:technical details  J/K:scroll"
-      else "f:back to observations  D:technical details  J/K:scroll")]
+  @ [Fact_keys
+     ((if embedded then "f:open full flow" else "f:back to observations")
+      :: ["D:technical details"; "J/K:scroll"])]
 
 (* The Links tab: the selected Plugin's bound inputs and outputs, then its
    flow. Inputs and outputs are fields, so they share a label column with the
@@ -2564,47 +2592,47 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       diagnostics @ Masc_tui_lane_installer.lines ~height:(max 1 (height - List.length diagnostics)) ~render installer
   | None -> match view.evidence_prompt with
   | Some prompt ->
-      (diagnostic_lines view @ evidence_lines prompt)
-      |> List.concat_map (document_rows ~width)
+      List.concat_map (document_rows ~width) (diagnostic_lines view)
+      @ evidence_rows ~width prompt
   | None -> match view.subscription_panel,view.action_menu,view.records with
   | Some panel,_,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
   | None,Some menu,_ ->
+      let wrap = List.concat_map (document_rows ~width) in
       (match menu.row with
        | Some (Row_list {row_title;entries;_}) ->
            (* The title names the chosen row and the instance that produced
               it; an action the row cannot fill stays listed with why. *)
-           [Printf.sprintf "Actions for %s · %s" row_title menu.target_title]
-           @ diagnostic_lines view
-           @ ["Up/Down:choose · Enter:open · Esc:cancel"]
-           @ List.mapi (fun position (entry : row_entry) ->
+           wrap ([Printf.sprintf "Actions for %s · %s" row_title menu.target_title]
+                 @ diagnostic_lines view)
+           @ key_rows ~width ["Up/Down:choose"; "Enter:open"; "Esc:cancel"]
+           @ wrap (List.mapi (fun position (entry : row_entry) ->
                (if position=menu.cursor then "> " else "  ") ^ entry.label
                ^ (match entry.filled with
                   | Ok _ -> ""
                   | Error unfilled ->
                       " · unavailable: " ^ String.concat "; " (List.map unfilled_text unfilled))) entries
-           @ [(if menu.cursor=List.length entries then "> " else "  ") ^ "Other action"]
+             @ [(if menu.cursor=List.length entries then "> " else "  ") ^ "Other action"])
        | Some (Row_form {label;_}) ->
            (* One sentence for what sending does: which instance receives
               which action. *)
-           [Printf.sprintf "Sends \"%s\" to %s" label menu.target_title]
-           @ diagnostic_lines view
-           @ Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines ~show_description:true) menu.form
+           wrap ([Printf.sprintf "Sends \"%s\" to %s" label menu.target_title]
+                 @ diagnostic_lines view
+                 @ Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines ~show_description:true) menu.form)
        | None ->
-           ["Run action on " ^ menu.target_title]
-           @ diagnostic_lines view
+           wrap (["Run action on " ^ menu.target_title] @ diagnostic_lines view)
            @ (match menu.form with
-           | Some form -> Masc_tui_schema_form.lines ~show_description:true form
-           | None -> [
-            Printf.sprintf "Action %d/%d · Up/Down:choose · Enter:run once · Esc:cancel"
-              (menu.cursor+1) (List.length menu.choices);
-            "J/K:scroll action details"]
-           @ (match List.nth_opt menu.choices menu.cursor with
-              | Some action -> action_fields "" action
-              | None -> ["No selected action"])))
-      |> List.concat_map (document_rows ~width)
+           | Some form -> wrap (Masc_tui_schema_form.lines ~show_description:true form)
+           | None ->
+               key_rows ~width
+                 [Printf.sprintf "Action %d/%d" (menu.cursor+1) (List.length menu.choices);
+                  "Up/Down:choose"; "Enter:run once"; "Esc:cancel"]
+               @ key_rows ~width ["J/K:scroll action details"]
+               @ wrap (match List.nth_opt menu.choices menu.cursor with
+                  | Some action -> action_fields "" action
+                  | None -> ["No selected action"])))
   | _,_,Some overlay ->
       (diagnostic_lines view @ Masc_tui_lane_records.lines overlay)
       |> List.concat_map (document_rows ~width)

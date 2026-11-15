@@ -17,23 +17,30 @@ let object_schema ?title properties =
    therefore spread into one root per alternative, named after it. The spread
    root accepts the same values: the other two members are the same in every
    root, so a value fits exactly one root when its binding fits exactly one
-   alternative. The spread drops the node that held the alternatives, so that
-   node may say nothing but its type, its alternatives and its annotations,
-   and every alternative has to be an object as the node is. Any other
-   binding schema stays a plain member. The spread schema stays in the form;
-   the host checks the saved binding against the package's own schema. *)
+   alternative. Three conditions keep that true and the choice readable.
+   The spread drops the node that held the alternatives, so that node may say
+   nothing but its type, its alternatives and its annotations. Every
+   alternative has to be an object, as the node is. And every alternative's
+   own schema has to name it: the form shows a member's name but not its
+   type, so alternatives known only by position cannot be told apart when
+   their members are named alike. Any other binding schema stays a plain
+   member. The spread schema stays in the form; the host checks the saved
+   binding against the package's own schema. *)
 let install_schema binding_schema =
   let root ?title binding =
     object_schema ?title ["installation_id",string_schema;"run_id",string_schema;"binding",binding] in
-  let only_holds_alternatives = match binding_schema with
-    | `Assoc members -> List.for_all (fun (key,_) -> List.mem key ["type";"oneOf";"title";"description"]) members
-    | _ -> false in
-  let is_object (_,alternative) = field "type" alternative=Ok (`String "object") in
-  match Form.named_alternatives binding_schema with
-  | Some alternatives when only_holds_alternatives && List.for_all is_object alternatives ->
-      `Assoc ["type",`String "object";
-        "oneOf",`List (List.map (fun (title,alternative) -> root ~title alternative) alternatives)]
-  | Some _ | None -> root binding_schema
+  let holds_alternatives_only members =
+    List.for_all (fun (key,_) -> List.mem key ["type";"oneOf";"title";"description"]) members in
+  let is_object alternative = field "type" alternative=Ok (`String "object") in
+  let spread = match binding_schema,Form.named_alternatives binding_schema with
+    | `Assoc members,Some alternatives when holds_alternatives_only members ->
+        List.fold_right (fun (name,alternative) roots -> match name,roots with
+          | Some title,Some roots when is_object alternative -> Some (root ~title alternative :: roots)
+          | (Some _ | None),(Some _ | None) -> None) alternatives (Some [])
+    | _,(Some _ | None) -> None in
+  match spread with
+  | Some roots -> `Assoc ["type",`String "object";"oneOf",`List roots]
+  | None -> root binding_schema
 type inspection = Available of string | Unverified of string
 type execution = Host_process | Container of {runtime:Masc.Lane_addon_types.runtime;image_name:string;inspection:inspection}
 type service = Mcp_tools | Browser_service

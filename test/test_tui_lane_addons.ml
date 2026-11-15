@@ -794,8 +794,9 @@ let installation_chooses_a_binding_alternative () =
   let module Install = Masc_tui_lane_installer in
   let edit key state = match Install.handle ~key state |> ok with
     | Install.Updated next -> next | _ -> fail "editing must not invoke a request" in
-  let closed members = Printf.sprintf
-    {|{"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|}
+  (* [naming] is a title or a description member, with its trailing comma. *)
+  let closed ?(naming="") members = Printf.sprintf
+    {|{%s"type":"object","additionalProperties":false,"required":[%s],"properties":{%s}}|} naming
     (String.concat "," (List.map (fun (name,_) -> Printf.sprintf {|"%s"|} name) members))
     (String.concat "," (List.map (fun (name,schema) -> Printf.sprintf {|"%s":%s|} name schema) members)) in
   let text = {|{"type":"string","minLength":1}|} in
@@ -823,7 +824,10 @@ let installation_chooses_a_binding_alternative () =
   let typed values state = List.fold_left (fun state value ->
       (match value with Some text -> Install.paste ~text state | None -> state) |> edit "tab") state values in
   let form = opened (union [file;port]) in
-  check bool "nothing is drafted before an alternative is chosen" true (refused form);
+  (* With no alternative chosen the form has no slot to type into. A form that
+     opened on the first alternative would take these four values. *)
+  check bool "what is typed before an alternative is chosen fills nothing" true
+    (refused (form |> edit "tab" |> typed [Some "consumer";Some "shared-run";None;Some "/data/in.txt"]));
   let as_port = form |> edit "right" |> edit "right" |> edit "tab"
     |> typed [Some "consumer";Some "shared-run";None;Some "producer"] in
   let document = draft as_port in
@@ -847,18 +851,50 @@ let installation_chooses_a_binding_alternative () =
   let document = draft (opened with_members |> typed [Some "flat";Some "shared-run";Some "notes"]) in
   check (list (option string)) "a binding with members beside oneOf is filled member by member"
     [Some "flat";Some "notes"] (List.map (at document) [["id"];["binding";"topic"]]);
-  (* The spread would drop the node that holds the alternatives. A node that
-     says more than its alternatives, or an alternative that is not an object,
-     keeps the binding one JSON field. *)
+  (* A title and a description on the node that holds the alternatives say
+     nothing about a value, so that node is spread like a bare one. *)
+  let annotated = Printf.sprintf
+    {|{"type":"object","title":"Where it reads","description":"A file or a port.","oneOf":[%s,%s]}|} file port in
+  let document = draft (opened annotated |> edit "right" |> edit "tab"
+    |> typed [Some "annotated";Some "shared-run";None;Some "/data/in.txt"]) in
+  check (list (option string)) "a node with a title and a description is still chosen by alternative"
+    [Some "annotated";Some "file";Some "/data/in.txt"]
+    (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]);
+  (* A title or a description names an alternative as its constants do. *)
+  let whole = {|{"type":"integer"}|} in
+  let by_title = closed ~naming:{|"title":"Read a file",|} ["path",text] in
+  let by_description = closed ~naming:{|"description":"Listen on a port.",|} ["port",whole] in
+  let document = draft (opened (union [by_title;by_description]) |> edit "right" |> edit "tab"
+    |> typed [Some "titled";Some "shared-run";Some "/data/in.txt"]) in
+  check (list (option string)) "alternatives named by a title and by a description are chosen"
+    [Some "titled";Some "/data/in.txt"] (List.map (at document) [["id"];["binding";"path"]]);
+  (* The spread would drop the node that holds the alternatives, so a node
+     that says more than its alternatives keeps the binding one member: one
+     JSON field, or one pick where the node lists its values. So does an
+     alternative that is not an object, and so does an alternative its schema
+     does not name: the two unnamed ones below take the same members and
+     differ only in a type, which the form does not show. *)
   let as_json = {|{"kind":"file","path":"/data/in.txt"}|} in
-  List.iter (fun (label,binding_schema) ->
-    let document = draft (opened binding_schema |> typed [Some "whole";Some "shared-run";Some as_json]) in
+  let typed_as_json state = typed [Some as_json] state in
+  let picked state = edit "right" state in
+  let unnamed = closed ["kind",text;"path",text] in
+  let unnamed_number = closed ["kind",text;"path",whole] in
+  List.iter (fun (label,binding_schema,fill) ->
+    let document = draft (opened binding_schema |> typed [Some "whole";Some "shared-run"] |> fill) in
     check (list (option string)) label [Some "whole";Some "file";Some "/data/in.txt"]
       (List.map (at document) [["id"];["binding";"kind"];["binding";"path"]]))
     ["a node with another keyword is typed as JSON",
-       Printf.sprintf {|{"type":"object","minLength":1,"oneOf":[%s,%s]}|} file port;
+       Printf.sprintf {|{"type":"object","minLength":1,"oneOf":[%s,%s]}|} file port,typed_as_json;
+     "a node with a constant is picked as one member",
+       Printf.sprintf {|{"type":"object","const":%s,"oneOf":[%s,%s]}|} as_json file port,picked;
+     "a node with an enumeration is picked as one member",
+       Printf.sprintf {|{"type":"object","enum":[%s],"oneOf":[%s,%s]}|} as_json file port,picked;
      "an alternative that is not an object is typed as JSON",
-       Printf.sprintf {|{"type":"object","oneOf":[{"type":"string"},%s]}|} file]
+       union [file;{|{"title":"A path alone","type":"string"}|}],typed_as_json;
+     "alternatives their schemas do not name are typed as JSON",
+       union [unnamed;unnamed_number],typed_as_json;
+     "one alternative its schema does not name keeps the binding JSON",
+       union [file;unnamed_number],typed_as_json]
 
 let object_array_fields () =
   let module Form = Masc_tui_schema_form in

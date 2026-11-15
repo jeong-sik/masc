@@ -27,12 +27,13 @@ val create_for_row :
     [branch] is negative or past the last alternative, or when a locked
     member is named twice, is not a member of the alternative or fails its
     schema. *)
-val named_alternatives : Yojson.Safe.t -> (string * Yojson.Safe.t) list option
-(** The alternatives [create] edits one at a time, each with the name the form
-    shows for it: [title], else [description], else its constant members, else
-    its position. [None] unless the schema is an object with [oneOf] and no
-    [properties]. A caller that holds such a schema as a member of its own
-    root spreads that root over these, because only a root is edited by
+val named_alternatives : Yojson.Safe.t -> (string option * Yojson.Safe.t) list option
+(** The alternatives [create] edits one at a time, each with the name its own
+    schema gives it: [title], else [description], else its constant members.
+    An alternative that says none of them is [None]; the form shows it by its
+    position. The list is [None] unless the schema is an object with [oneOf]
+    and no [properties]. A caller that holds such a schema as a member of its
+    own root spreads that root over these, because only a root is edited by
     alternative. *)
 val insert_text : text:string -> t -> t
 val handle : key:string -> t -> (event, string) result

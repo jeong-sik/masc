@@ -1008,7 +1008,7 @@ let render_acting (state : state) =
   let table_columns =
     let measured =
       match chunked with
-      | Some rows -> List.map Acting.measured_of_row rows
+      | Some rows -> List.map (Acting.measured_of_row ~ko:(state.ui_language = Lang_ko)) rows
       | None ->
           List.map
             (fun (entry, _older) ->
@@ -1102,7 +1102,11 @@ let render_acting (state : state) =
           in
           let line =
             column_line ~glyph:(Acting.glyph_text row.Acting.glyph)
-              ~content ~actor:(Terminal_text.single_line row.Acting.keeper) ~clock
+              ~content
+              ~actor:
+                (Terminal_text.single_line
+                   (Acting.actor_text ~ko:(state.ui_language = Lang_ko) row.Acting.actor))
+              ~clock
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           let line = if selected then "> " ^ String.sub line 2 (String.length line - 2) else line in

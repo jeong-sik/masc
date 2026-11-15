@@ -152,9 +152,26 @@ let glyph_text = function
      names the row. *)
   | Quiet -> " "
 
+(* Who a row is about. The server is its own case, not a name: a Keeper may
+   be named [server], and the screen spells the server in its own language
+   (#51699). *)
+type actor =
+  | Actor_named of string
+  | Actor_unnamed
+  | Actor_server
+
+let actor_text ~ko = function
+  | Actor_named name -> name
+  | Actor_unnamed -> Masc_tui_theme.Glyph.no_value
+  | Actor_server -> if ko then "서버" else "server"
+
+let named = function
+  | Some name -> Actor_named name
+  | None -> Actor_unnamed
+
 type row = {
   at : float;
-  keeper : string;
+  actor : actor;
   glyph : glyph;
   label : string;
   detail : string;
@@ -389,42 +406,45 @@ let agent_core_row ~ko ~at ~duration_ms (e : Observer.agent_core) =
         detail
   in
   { at
-  ; keeper = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.agent
+  ; actor = named e.Observer.agent
   ; glyph
   ; label
   ; detail
   }
 
-(* The Keeper a change names, or ["server"] for a change of the whole queue,
+(* The Keeper a change names, or the server for a change of the whole queue,
    the rules, a Gate mode or an installation's questions. *)
-let approval_change_keeper = function
+let approval_change_actor = function
   | Observer.Gate_keeper_settings_changed { keeper }
   | Observer.Tool_approval_waits_changed { keeper }
   | Observer.Tool_approval_mode_changed { keeper }
   | Observer.Keeper_asks_changed { keeper } ->
-      keeper
+      Actor_named keeper
   | Observer.Approval_queue_changed | Observer.Approval_rules_changed | Observer.Gate_mode_changed
   | Observer.Installation_asks_changed _ ->
-      "server"
+      Actor_server
 
-let keeper_of_event ~traces (event : Observer.event) =
+(* The keeper whose trace an agent_core event's correlation carries, else the
+   agent name the feed gave; [None] when the feed named neither. *)
+let agent_core_owner ~traces (e : Observer.agent_core) =
+  match e.Observer.correlation with
+  | None -> e.Observer.agent
+  | Some correlation -> (
+      match
+        List.find_opt
+          (fun (_, trace) -> String.equal trace correlation)
+          traces
+      with
+      | Some (keeper, _) -> Some keeper
+      | None -> e.Observer.agent)
+
+let actor_of_event ~traces (event : Observer.event) =
   match event with
-  | Observer.Agent_core e -> (
-      let by_agent = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.agent in
-      match e.Observer.correlation with
-      | None -> by_agent
-      | Some correlation -> (
-          match
-            List.find_opt
-              (fun (_, trace) -> String.equal trace correlation)
-              traces
-          with
-          | Some (keeper, _) -> keeper
-          | None -> by_agent))
-  | Observer.Keeper_heartbeat h -> h.Observer.hb_keeper
-  | Observer.Keeper_tool_call c -> c.Observer.kt_keeper
-  | Observer.Keeper_turn_complete t -> t.Observer.tc_keeper
-  | Observer.Keeper_turn_observation o -> o.Observer.to_keeper
+  | Observer.Agent_core e -> named (agent_core_owner ~traces e)
+  | Observer.Keeper_heartbeat h -> Actor_named h.Observer.hb_keeper
+  | Observer.Keeper_tool_call c -> Actor_named c.Observer.kt_keeper
+  | Observer.Keeper_turn_complete t -> Actor_named t.Observer.tc_keeper
+  | Observer.Keeper_turn_observation o -> Actor_named o.Observer.to_keeper
   | Observer.Keeper_composite_changed { keeper; _ }
   | Observer.Keeper_metrics_appended { keeper; _ }
   | Observer.Keeper_chat_appended { keeper; _ }
@@ -443,8 +463,8 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper })
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper })
   | Observer.Fusion_run_status { keeper; _ } ->
-      keeper
-  | Observer.Approval_change change -> approval_change_keeper change
+      Actor_named keeper
+  | Observer.Approval_change change -> approval_change_actor change
   | Observer.Keeper_roster_change Observer.Every_row_changed
   | Observer.Internal_agent_runs_changed _ | Observer.Workspace_store_changed _
   | Observer.Dataset_changed
@@ -463,9 +483,9 @@ let keeper_of_event ~traces (event : Observer.event) =
       | Masc.Workspace_dataset_event.Lane_addons _ )
   | Observer.Gate_connector_changed _ | Observer.Board_changed _ | Observer.Lane_resource _
   | Observer.Snapshot _ | Observer.Execution_snapshot | Observer.Other _ ->
-      "server"
+      Actor_server
 
-(* The EVENT column's word for any event, the sibling of {!keeper_of_event}
+(* The EVENT column's word for any event, the sibling of {!actor_of_event}
    for the other measured column. [row_of_event] reads its label here, so the
    word has one owner and a measurement can ask for it without building the
    detail sentence that sits beside it. *)
@@ -567,7 +587,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   | Observer.Agent_core e -> agent_core_row ~ko ~at ~duration_ms e
   | Observer.Keeper_heartbeat h ->
       { at
-      ; keeper = h.Observer.hb_keeper
+      ; actor = Actor_named h.Observer.hb_keeper
       ; glyph = Quiet
       ; label
       ; detail =
@@ -584,7 +604,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
       }
   | Observer.Keeper_tool_call c ->
       { at
-      ; keeper = c.Observer.kt_keeper
+      ; actor = Actor_named c.Observer.kt_keeper
       ; glyph = Call_returned
       ; label
       ; detail =
@@ -611,7 +631,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
         | None -> ""
       in
       { at
-      ; keeper = t.Observer.tc_keeper
+      ; actor = Actor_named t.Observer.tc_keeper
       ; glyph = Turn_done
       ; label
       ; detail =
@@ -621,24 +641,24 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
       }
   | Observer.Keeper_composite_changed { keeper; _ }
   | Observer.Keeper_metrics_appended { keeper; _ } ->
-      { at; keeper; glyph = Quiet; label; detail = "" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_turn_observation o ->
       { at
-      ; keeper = o.Observer.to_keeper
+      ; actor = Actor_named o.Observer.to_keeper
       ; glyph = Quiet
       ; label
       ; detail = turn_detail ~ko (keeper_turn_of_observation o)
       }
   | Observer.Keeper_chat_appended { keeper; connector; _ } ->
       { at
-      ; keeper
+      ; actor = Actor_named keeper
       ; glyph = Turn_boundary
       ; label
       ; detail = Option.value ~default:"" connector
       }
   | Observer.Keeper_chat_stream_frame { keeper; frame; _ } ->
       { at
-      ; keeper
+      ; actor = Actor_named keeper
       ; glyph = Quiet
       ; label
       ; detail = Option.value ~default:"" frame
@@ -650,12 +670,12 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
   | Observer.Keeper_skill_activations_changed { keeper }
   | Observer.Keeper_roster_change (Observer.Keeper_row_changed { keeper })
   | Observer.Keeper_turn_changed { keeper; _ } ->
-      { at; keeper; glyph = Quiet; label; detail = "" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_roster_change Observer.Every_row_changed ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = "" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = "" }
   | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; _ } ->
       { at
-      ; keeper
+      ; actor = Actor_named keeper
       ; glyph = Quiet
       ; label
       ; detail = Option.value ~default:"" queue_kind
@@ -666,7 +686,7 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
          that a deliberation moved. The run id keeps its kmsg- prefix --
          it is what Ctrl-] would jump on. *)
       { at
-      ; keeper
+      ; actor = Actor_named keeper
       ; glyph = Quiet
       ; label
       ; detail = status ^ " \xc2\xb7 " ^ run_id
@@ -686,10 +706,10 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
         | Some reason -> resource.Observer.lr_package ^ " \xc2\xb7 " ^ reason
         | None -> resource.Observer.lr_package
       in
-      { at; keeper = "server"; glyph; label; detail }
+      { at; actor = Actor_server; glyph; label; detail }
   | Observer.Internal_agent_runs_changed registry ->
       { at
-      ; keeper = "server"
+      ; actor = Actor_server
       ; glyph = Quiet
       ; label
       ; detail =
@@ -698,79 +718,79 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
            else "the " ^ name ^ " run registry changed")
       }
   | Observer.Workspace_store_changed Observer.Schedule_store ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "일정 상태가 바뀌었을 수 있음" "schedule status may have changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "일정 상태가 바뀌었을 수 있음" "schedule status may have changed" }
   | Observer.Workspace_store_changed Observer.Pending_confirms ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "확인 대기 상태가 바뀌었을 수 있음" "pending confirmation status may have changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "확인 대기 상태가 바뀌었을 수 있음" "pending confirmation status may have changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Verification_requests ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "검증 요청이 바뀜" "a verification request changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "검증 요청이 바뀜" "a verification request changed" }
   | Observer.Workspace_store_changed Observer.Goal_projection ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "목표가 바뀜" "a Goal changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "목표가 바뀜" "a Goal changed" }
   | Observer.Workspace_store_changed Observer.Runtime_config ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "runtime.toml 이 바뀜" "runtime.toml changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "runtime.toml 이 바뀜" "runtime.toml changed" }
   | Observer.Workspace_store_changed Observer.Skill_catalog ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "스킬 카탈로그가 게시됨" "the skill catalog was published" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "스킬 카탈로그가 게시됨" "the skill catalog was published" }
   | Observer.Workspace_store_changed Observer.Lane_addon_exports ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "Lane Add-on 이 내보내는 도구가 바뀜" "a Lane Add-on's exported tools changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "Lane Add-on 이 내보내는 도구가 바뀜" "a Lane Add-on's exported tools changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Repositories ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "저장소 목록이 바뀜" "the repository catalog changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "저장소 목록이 바뀜" "the repository catalog changed" }
   | Observer.Gate_connector_changed { connector } ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "커넥터 " "connector " ^ connector ^ say " 바뀜" " changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "커넥터 " "connector " ^ connector ^ say " 바뀜" " changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Harness_verdicts ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "판정이나 라벨이 기록됨" "a judge verdict or label was recorded" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "판정이나 라벨이 기록됨" "a judge verdict or label was recorded" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_oauth_attempts { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = say "OAuth 로그인 시도가 바뀜" "an OAuth login attempt changed" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = say "OAuth 로그인 시도가 바뀜" "an OAuth login attempt changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Clients ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say (workspace ^ " 클라이언트 항목이 바뀜") ("a " ^ workspace ^ " client row changed") }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say (workspace ^ " 클라이언트 항목이 바뀜") ("a " ^ workspace ^ " client row changed") }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Account_emails ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "로그인이 계정 자격 증명을 다시 씀" "a login rewrote the account credentials" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "로그인이 계정 자격 증명을 다시 씀" "a login rewrote the account credentials" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_usage ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "제공자 사용량 보고가 기록됨" "a provider usage report was recorded" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "제공자 사용량 보고가 기록됨" "a provider usage report was recorded" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Provider_standing ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "런타임의 한도나 속도 제한 상태가 바뀜" "a runtime's quota or rate-limit standing changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "런타임의 한도나 속도 제한 상태가 바뀜" "a runtime's quota or rate-limit standing changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Keeper_costs ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "Keeper 비용 구간에 줄이 들어오거나 빠짐" "the Keeper cost window took or dropped a row" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "Keeper 비용 구간에 줄이 들어오거나 빠짐" "the Keeper cost window took or dropped a row" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Keeper_metrics { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = say "지표 기록에 줄이 들어옴" "the metrics ledger took a row" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = say "지표 기록에 줄이 들어옴" "the metrics ledger took a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Goals ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "목표 목록이 바뀜" "the Goal projection changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "목표 목록이 바뀜" "the Goal projection changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_config ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "runtime.toml 저장을 시도함" "a runtime.toml commit was attempted" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "runtime.toml 저장을 시도함" "a runtime.toml commit was attempted" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Connectors ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "커넥터 상태가 바뀜" "a connector's status changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "커넥터 상태가 바뀜" "a connector's status changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Skill_activations { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = say "스킬 활성화 기록에 줄이 들어옴" "the Skill activation ledger took a row" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = say "스킬 활성화 기록에 줄이 들어옴" "the Skill activation ledger took a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "스킬 카탈로그 스냅샷이 게시됨" "a Skill catalog snapshot was published" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "스킬 카탈로그 스냅샷이 게시됨" "a Skill catalog snapshot was published" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Workspace_health ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "Home Health 줄이 바뀜" "the Home Health line moved" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "Home Health 줄이 바뀜" "the Home Health line moved" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "런타임 점검 결과가 들어옴" "a runtime probe landed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "런타임 점검 결과가 들어옴" "a runtime probe landed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "런타임 기록에 줄이 들어오거나 빠짐" "the runtime history took or dropped a row" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "런타임 기록에 줄이 들어오거나 빠짐" "the runtime history took or dropped a row" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "Lane 목록이 바뀜" "the Lane inventory changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "Lane 목록이 바뀜" "the Lane inventory changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live { machine }) ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation { scope; _ }) ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
+      { at; actor = Actor_server; glyph = Quiet; label; detail = Printf.sprintf "%s/%d"
           (Browser_lane.Lane_name.to_wire scope.source) scope.tab_id }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "Play seat 권한이 바뀜" "Play seat authority changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "Play seat 권한이 바뀜" "Play seat authority changed" }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say "웹 대시보드 관측이 바뀜" "a web dashboard observation changed" }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say "웹 대시보드 관측이 바뀜" "a web dashboard observation changed" }
   | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = say (workspace ^ " 메모리 목록이 바뀜") ("the " ^ workspace ^ " memory inventory changed") }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = say (workspace ^ " 메모리 목록이 바뀜") ("the " ^ workspace ^ " memory inventory changed") }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room { machine }) ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = Masc.Machine_lane.to_wire machine }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons { instance_id }) ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = instance_id }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = instance_id }
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health { keeper }) ->
-      { at; keeper; glyph = Quiet; label; detail = say "메모리 상태 입력이 기록됨" "a memory health input was written" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = say "메모리 상태 입력이 기록됨" "a memory health input was written" }
   | Observer.Keeper_event_queue_changed { keeper } ->
-      { at; keeper; glyph = Quiet; label; detail = say "이벤트 큐가 바뀜" "the event queue changed" }
+      { at; actor = Actor_named keeper; glyph = Quiet; label; detail = say "이벤트 큐가 바뀜" "the event queue changed" }
   | Observer.Board_changed { post_id } ->
       { at
-      ; keeper = "server"
+      ; actor = Actor_server
       ; glyph = Quiet
       ; label
       ; detail = Option.value post_id ~default:(say "댓글이나 반응이 바뀜" "a comment or a reaction changed")
@@ -789,14 +809,14 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
             if ko then declaration_id ^ " 의 질문이 바뀜"
             else "the questions of " ^ declaration_id ^ " changed"
       in
-      { at; keeper = approval_change_keeper change; glyph = Quiet; label; detail }
+      { at; actor = approval_change_actor change; glyph = Quiet; label; detail }
   | Observer.Snapshot projection ->
-      { at; keeper = "server"; glyph = Quiet; label; detail = Observer.projection_name projection }
+      { at; actor = Actor_server; glyph = Quiet; label; detail = Observer.projection_name projection }
   | Observer.Execution_snapshot ->
-      { at; keeper = "server"; glyph = Quiet; label
+      { at; actor = Actor_server; glyph = Quiet; label
       ; detail = Masc.Dashboard_event_slices.execution_snapshot_type }
   | Observer.Other _ ->
-      { at; keeper = "server"; glyph = Attention; label; detail = "" }
+      { at; actor = Actor_server; glyph = Attention; label; detail = "" }
 
 (* The screen draws entries, not bare events. Taking the entry means there is
    no clock argument at the call site to hand in the wrong value. *)
@@ -809,7 +829,7 @@ let row_of_entry ~ko ~duration_ms entry =
    of in the renderer. *)
 let keeper_row_of_entry ~ko ~traces ~duration_ms entry =
   { (row_of_entry ~ko ~duration_ms entry) with
-    keeper = keeper_of_event ~traces entry.ae_event
+    actor = actor_of_event ~traces entry.ae_event
   }
 
 (* What "/" finds a flat row by: its EVENT cell as the table spells it, then
@@ -930,54 +950,63 @@ type chunk_member =
   | Member_settle of Observer.keeper_turn_complete
   | Member_quiet
 
-(* Which events fold into a chunk. Internal agent runs (Agent_started and
-   friends) and approvals stay standalone: they are not keeper-turn
-   lifecycle, and a reader scanning for them should not find them buried
-   inside a turn row. *)
-let member_of_event (event : Observer.event) =
+(* Which events fold into a chunk, and whose turn each one is. Internal agent
+   runs (Agent_started and friends) and approvals stay standalone: they are
+   not keeper-turn lifecycle, and a reader scanning for them should not find
+   them buried inside a turn row. An agent_core frame that names no trace and
+   no agent is no one's turn either: it draws as its own row. Filed under a
+   mark, the nameless frames of every runtime would fold into one turn, and
+   the mark would stand as a keeper in the Activity pane. *)
+let member_of_event ~traces (event : Observer.event) =
   match event with
   | Observer.Agent_core e -> (
-      match e.Observer.kind with
-      | Observer.Turn_ready ->
-          Some (Member_turn_marker { marker = Marker_ready; turn = e.Observer.turn })
-      | Observer.Turn_started ->
-          Some (Member_turn_marker { marker = Marker_started; turn = e.Observer.turn })
-      | Observer.Turn_completed ->
-          Some (Member_turn_marker { marker = Marker_completed; turn = e.Observer.turn })
-      | Observer.Tool_called ->
-          Some
-            (Member_wire_call
-               { tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool
-               ; tool_use_id = e.Observer.tool_use_id
-               ; turn = e.Observer.turn
-               })
-      | Observer.Tool_completed ->
-          Some
-            (Member_wire_return
-               { tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool
-               ; tool_use_id = e.Observer.tool_use_id
-               ; turn = e.Observer.turn
-               })
-      | Observer.Telemetry -> Some Member_quiet
-      | Observer.Agent_started | Observer.Agent_completed _
-      | Observer.Agent_failed _ | Observer.Agent_yielded _
-      | Observer.Agent_input_required _
-      | Observer.Tool_approval_completed | Observer.Relay_subscription_loss _
-      | Observer.Agent_core_other _ ->
-          None)
+      match agent_core_owner ~traces e with
+      | None -> None
+      | Some keeper ->
+          Option.map
+            (fun member -> (keeper, member))
+            (match e.Observer.kind with
+             | Observer.Turn_ready ->
+                 Some (Member_turn_marker { marker = Marker_ready; turn = e.Observer.turn })
+             | Observer.Turn_started ->
+                 Some (Member_turn_marker { marker = Marker_started; turn = e.Observer.turn })
+             | Observer.Turn_completed ->
+                 Some (Member_turn_marker { marker = Marker_completed; turn = e.Observer.turn })
+             | Observer.Tool_called ->
+                 Some
+                   (Member_wire_call
+                      { tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool
+                      ; tool_use_id = e.Observer.tool_use_id
+                      ; turn = e.Observer.turn
+                      })
+             | Observer.Tool_completed ->
+                 Some
+                   (Member_wire_return
+                      { tool = Option.value ~default:Masc_tui_theme.Glyph.no_value e.Observer.tool
+                      ; tool_use_id = e.Observer.tool_use_id
+                      ; turn = e.Observer.turn
+                      })
+             | Observer.Telemetry -> Some Member_quiet
+             | Observer.Agent_started | Observer.Agent_completed _
+             | Observer.Agent_failed _ | Observer.Agent_yielded _
+             | Observer.Agent_input_required _
+             | Observer.Tool_approval_completed | Observer.Relay_subscription_loss _
+             | Observer.Agent_core_other _ ->
+                 None))
   | Observer.Keeper_tool_call c ->
       Some
-        (Member_ledger_tool
-           { tool = c.Observer.kt_tool
-           ; duration_ms = c.Observer.kt_duration_ms
-           ; turn = c.Observer.kt_turn
-           ; tool_use_id = c.Observer.kt_tool_use_id
-           ; disposition = c.Observer.kt_disposition
-           ; schedule = c.Observer.kt_schedule
-           ; input = c.Observer.kt_tool_args_preview
-           ; output = c.Observer.kt_tool_output_preview
-           })
-  | Observer.Keeper_turn_complete t -> Some (Member_settle t)
+        ( c.Observer.kt_keeper
+        , Member_ledger_tool
+            { tool = c.Observer.kt_tool
+            ; duration_ms = c.Observer.kt_duration_ms
+            ; turn = c.Observer.kt_turn
+            ; tool_use_id = c.Observer.kt_tool_use_id
+            ; disposition = c.Observer.kt_disposition
+            ; schedule = c.Observer.kt_schedule
+            ; input = c.Observer.kt_tool_args_preview
+            ; output = c.Observer.kt_tool_output_preview
+            } )
+  | Observer.Keeper_turn_complete t -> Some (t.Observer.tc_keeper, Member_settle t)
   (* Identity for the fold's session table, read before members are filed
      ([fold_chunks]); not a member itself. *)
   | Observer.Keeper_turn_observation _
@@ -1141,7 +1170,7 @@ let row_of_chunk ~ko chunk =
     else tools_text
   in
   { at = chunk.ck_at
-  ; keeper = chunk.ck_keeper
+  ; actor = Actor_named chunk.ck_keeper
   ; glyph = (if chunk.ck_settled then Turn_done else Call_started)
   ; label = turn_label ~ko chunk.ck_turn
   ; detail
@@ -1363,7 +1392,7 @@ let fold_chunks ~traces entries =
     (fun position entry ->
       let event = entry.ae_event in
       let at = entry.ae_at in
-      match member_of_event event with
+      match member_of_event ~traces event with
       | None -> (
           (* A non-member passes through as its own row only if the Turns
              scope shows it at all. Without this test the fold readmitted
@@ -1383,8 +1412,7 @@ let fold_chunks ~traces entries =
           | true, None ->
               plains :=
                 (entry.ae_at, Plain_entry entry) :: !plains)
-      | Some member ->
-          let keeper = keeper_of_event ~traces event in
+      | Some (keeper, member) ->
           let session = session_of_member member in
           let keeper_turn =
             match member with
@@ -1590,11 +1618,11 @@ type columns = { keeper_cells : int; content_cells : int; show_clock : bool }
    of every retained off-screen event. *)
 type measured = { measured_keeper : string; measured_label : string }
 
-let measured_of_row row =
-  { measured_keeper = row.keeper; measured_label = row.label }
+let measured_of_row ~ko row =
+  { measured_keeper = actor_text ~ko row.actor; measured_label = row.label }
 
 let measured_of_event ~ko ~traces event =
-  { measured_keeper = keeper_of_event ~traces event
+  { measured_keeper = actor_text ~ko (actor_of_event ~traces event)
   ; measured_label = label_of_event ~ko event
   }
 

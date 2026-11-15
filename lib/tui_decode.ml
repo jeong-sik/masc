@@ -4411,18 +4411,23 @@ let gate_input_preview ~operation ~server_preview envelope =
 (* The queue row is durable after Auto Judge stops. Calling every such row
    "waiting" made a completed [require_human] judgment look like a worker that
    had been computing for hours, and hid quarantined/failed attempts behind
-   the same word. Project only the closed backend states already carried by
-   the row; absent legacy fields remain queued rather than gaining invented
-   success. *)
+   the same word. The server projects the phase and owns its words
+   ([Keeper_approval_queue_rules_types]), so the row is read with the server's
+   decoder; a row without a phase or with a word the server never emits is a
+   wire error. The panes match on the TUI constructors, and naming every
+   server phase here makes a new one a compile error instead of a rejected
+   row. *)
+let gate_pending_phase_of_approval_queue_phase = function
+  | Keeper_approval_queue_rules_types.Phase_queued -> Gate_queued
+  | Keeper_approval_queue_rules_types.Phase_judging -> Gate_judging
+  | Keeper_approval_queue_rules_types.Phase_human_required -> Gate_human_required
+  | Keeper_approval_queue_rules_types.Phase_blocked -> Gate_blocked
+
 let gate_pending_phase_of_json json =
   let* raw = required_string_field json "phase" in
-  match raw with
-  | "queued" -> Ok Gate_queued
-  | "judging" -> Ok Gate_judging
-  | "human_required" -> Ok Gate_human_required
-  | "blocked" -> Ok Gate_blocked
-  | other ->
-    Error (Printf.sprintf "unknown gate pending phase: %S" other)
+  match Keeper_approval_queue_rules_types.approval_queue_phase_of_string raw with
+  | Some phase -> Ok (gate_pending_phase_of_approval_queue_phase phase)
+  | None -> Error (Printf.sprintf "unknown gate pending phase: %S" raw)
 
 let gate_auto_judge_detail_of_json json =
   let summary = member "summary_status" json in

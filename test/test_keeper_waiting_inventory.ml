@@ -144,30 +144,6 @@ let schedule_payload =
     ]
 ;;
 
-let external_attention_item ~keeper_name index : Keeper_external_attention.item =
-  let dedupe_key = Printf.sprintf "waiting-inventory-external:%s:%d" keeper_name index in
-  { event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key
-  ; dedupe_key
-  ; keeper_name
-  ; conversation =
-      { conversation_id = Printf.sprintf "conversation-%d" index
-      ; surface = Keeper_external_attention.Agent
-      }
-  ; external_message = None
-  ; source_label = "agent"
-  ; actor =
-      { actor_id = Some (Printf.sprintf "actor-%d" index)
-      ; display_name = None
-      ; authority = Keeper_chat_store.External
-      }
-  ; urgency = Keeper_external_attention.Ambient
-  ; content_preview = Printf.sprintf "attention %d" index
-  ; content_ref = None
-  ; received_at = 100.0 +. Float.of_int index
-  ; metadata = []
-  }
-;;
-
 let create_schedule_exn ?(payload = schedule_payload) config ~schedule_id ~scheduled_by =
   match
     Schedule_service.create

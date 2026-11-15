@@ -44,6 +44,8 @@ ADMISSION_CONSTANTS: tuple[tuple[str, str], ...] = (
     ("conversation_history", "[no messages]"),
     ("turn_tool_observations", "[]"),
     ("counterpart_observations", "[]"),
+    ("working_context_input", ""),
+    ("turn_inputs", ""),
 )
 
 

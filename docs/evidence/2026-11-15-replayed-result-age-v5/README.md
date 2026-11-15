@@ -61,8 +61,8 @@ Each run renders its own seed from its own start time, so the run seeds are
 | Item | Value |
 | --- | --- |
 | Window | 2026-11-15T09:02:43Z to 09:07:38Z (UTC) |
-| Harness | `scripts/eval-replayed-result-age.py` at `e7285ac8fb99` (sha256 `d83326fe…c73f`), unchanged since the baseline |
-| Seed renderer | `test/replayed_result_age_seed.exe` (sha256 `512759dc…99dc`). The binary used was built from the working copy committed as `fc1cfba2b6cf`. Rebuilding from this branch gives the same hash |
+| Harness | `scripts/eval-replayed-result-age.py` (sha256 `d83326fe…c73f`), unchanged since the baseline |
+| Seed renderer | `test/replayed_result_age_seed.exe` (sha256 `512759dc…99dc`), built from the working copy committed as 「test(eval): render the replayed-result-age seed as a v5 session start」 on the stack's first base. Rebuilt there, it hashed the same. After the stack moved onto a newer `main`, the binary hashes differently and still renders `seed-v5.txt` byte for byte |
 | Fixture | `scripts/fixtures/replayed-result-age/fixture.json` (sha256 `d241ebe9…5230`), unchanged |
 | Client | Claude Code 2.1.325 with the baseline's flags |
 | Model | `claude-sonnet-5-5`, no `--effort` |

@@ -605,7 +605,7 @@ let handle_get state request reqd = function
             reqd
             (`Assoc
                [ "schema", `String "masc.keeper_chat_operations.list.v1"
-               ; "state", `String "Queued"
+               ; "state", `String Operation.State_name.(to_wire Queued)
                ; "operations", `List (List.map
                    (public_operation_json ~redaction:(Keeper_secret_redaction.snapshot
                      ~base_path:(base_path state) ~keeper_name)) operations)

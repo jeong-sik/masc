@@ -115,13 +115,41 @@ let test_status_projection_keeps_state_and_drops_the_request () =
     [ None; Some batch ]
 ;;
 
+(* Every object that reports an operation names its state with one word, and
+   [State_name.of_wire] reads that word back as the same state. Another case of
+   the word, or a word the server never writes, is refused. *)
+let test_state_word_reads_back () =
+  List.iter (fun state ->
+    let original = operation state in
+    let expected = Operation.state_name state in
+    List.iter (fun (surface, json) ->
+      let word = Yojson.Safe.Util.(json |> member "state" |> to_string) in
+      check bool (surface ^ " state " ^ word ^ " reads back") true
+        (Operation.State_name.of_wire word = Ok expected))
+      [ "public", Operation.to_public_json original
+      ; "internal", Operation.to_json original
+      ; "status", Operation.to_status_json original ])
+    [ Operation.Queued; Running { started_at = 100.5 }
+    ; Succeeded { completed_at = 101.; outcome_ref = "trace-1" }
+    ; Failed
+        { completed_at = 101.
+        ; failure = { kind = Operation.Turn_cancelled; detail = diagnostic; outcome_ref = None } }
+    ; Cancelled { completed_at = 101. } ];
+  List.iter (fun word ->
+    check bool (word ^ " is not a state word") true
+      (Result.is_error (Operation.State_name.of_wire word)))
+    [ "queued"; "Paused" ]
+;;
+
 let () =
   run "Keeper public operation failures"
     [ "public boundary",
       [ test_case "secret and path stay internal; incident survives" `Quick
           test_failed_operation_public_boundary
       ; test_case "nonfailure state is unchanged" `Quick
-          test_nonfailure_operation_projection_is_unchanged ]
+          test_nonfailure_operation_projection_is_unchanged
+      ; test_case "the state word reads back as its state" `Quick
+          test_state_word_reads_back ]
     ; "status projection",
       [ test_case "state survives and the request is not repeated" `Quick
           test_status_projection_keeps_state_and_drops_the_request ] ]

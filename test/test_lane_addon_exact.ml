@@ -488,7 +488,7 @@ let test_original_consumer_recovers_proof_without_worker_rpc () =
     require (Store.save_exact_request store ~declaration_id
       ~request_id:original.request_id unpublished);
     let calls=ref 0 in
-    let result=Submit.resume ~store ~label:"Proven original" ~original:retained
+    let result=Submit.resume_retained ~store ~label:"Proven original" ~original:retained
       ~request:original ~schema ~decode_final:(Exact.final_of_json ~schema)
       ~prepare:(fun () -> fail "recovery requested fresh admission")
       ~call:(fun ~arguments:_ -> incr calls; fail "recovery contacted the worker")

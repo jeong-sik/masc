@@ -203,7 +203,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
        | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> wake ());
       Ok (Basis_superseded completed) in
   let decode_final json=io (fun () -> Request.decode_final ~store request json) in
-  let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~decode_final ~prepare:admit ~call ~terminal in
+  let* result=Submit.resume_retained ~store ~label:"History Memory" ~original ~request:exact ~schema ~decode_final ~prepare:admit ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (proposal,record)) -> publish_answer record proposal

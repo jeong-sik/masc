@@ -40,7 +40,7 @@ let reply state = Ok { (Mcp_protocol.Mcp_types.tool_result_of_text "fixture work
   structured_content = Some (`Assoc ["request_id",`String request_id;"state",`String state]) }
 let kind arguments = Yojson.Safe.Util.(member "kind" arguments |> to_string)
 let resume ?(prepare = fun () -> Ok ()) store call =
-  Submit.resume ~store ~label:"Fixture" ~original:(load store) ~request ~schema
+  Submit.resume_retained ~store ~label:"Fixture" ~original:(load store) ~request ~schema
     ~decode_final:(Exact.final_of_json ~schema) ~prepare ~call
     ~terminal:(fun _ final -> Ok final)
 let names = Alcotest.(list string)
@@ -293,6 +293,80 @@ let test_unknown_refusal_without_a_host_cause_is_not_replayed () = with_store (f
   | Error (Submit.Rejected _) -> ()
   | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ -> Alcotest.fail "cause-free old refusal was accepted")
 
+(* The machine on the record: which branches read the body. *)
+let resume_record ?unreadable store call =
+  let loads = ref 0 in
+  let source = {Submit.identity = Exact.identity request;
+    load = (fun () -> incr loads; match unreadable with
+      | Some detail -> Error (Submit.Unavailable detail)
+      | None -> Ok ());
+    request = (fun () -> request); schema = (fun () -> schema)} in
+  let result = Submit.resume ~store ~label:"Fixture" ~original:(Owner.listed (load store)) ~source
+    ~decode_final:(fun () -> Exact.final_of_json ~schema) ~prepare:(fun () -> Ok ()) ~call
+    ~terminal:(fun () _ final -> Ok final) in
+  result, !loads
+let admitting ~arguments = match kind arguments with
+  | "read" -> reply "absent"
+  | "submit" -> reply "pending"
+  | other -> Alcotest.fail ("unexpected worker command " ^ other)
+let answering state ~arguments = match kind arguments with
+  | "read" -> state ()
+  | other -> Alcotest.fail ("a dispatched original reached " ^ other)
+let waits reason = function
+  | Ok (Submit.Awaiting (Submit.Worker_pending, _)), loads -> Alcotest.(check int) reason 0 loads
+  | (Ok (Submit.Awaiting _ | Submit.Final _ | Submit.Commit_pending _ | Submit.Settled _) | Error _), _ ->
+    Alcotest.fail ("the original must wait on its worker: " ^ reason)
+let unreadable_leaves reason store before = function
+  | Error (Submit.Unavailable "fixture body is unreadable"), loads ->
+    Alcotest.(check int) (reason ^ ": the body was asked for once") 1 loads;
+    Alcotest.check json (reason ^ ": nothing was written") before (events store)
+  | (Error _ | Ok _), _ -> Alcotest.fail (reason ^ ": an unreadable body must be this pass's error")
+let denied = Exact.Not_allowed {reason = "original host refusal"}
+let refused_once reason = function
+  | Ok (Submit.Final (Exact.Not_allowed _)), loads -> Alcotest.(check int) reason 1 loads
+  | (Ok _ | Error _), _ -> Alcotest.fail ("the refusal must be delivered: " ^ reason)
+let test_a_waiting_original_reads_no_body () = with_store (fun store ->
+  (match resume_record store admitting with
+   | Ok (Submit.Awaiting (Submit.Worker_pending, _)), loads ->
+     Alcotest.(check int) "admission reads the body once" 1 loads
+   | (Ok _ | Error _), _ -> Alcotest.fail "the original must be admitted");
+  let pending = answering (fun () -> reply "pending") in
+  waits "no host record and a pending worker" (resume_record store pending);
+  host_record store ~attempt:(`Assoc ["started",`String (String.make 32 '0')]) ~final:`Null;
+  waits "an open host record and a pending worker" (resume_record store pending);
+  waits "and an unreadable body changes nothing there"
+    (resume_record ~unreadable:"fixture body is unreadable" store pending);
+  match resume_record store (answering (fun () ->
+      Error (Submit.Not_sent (Submit.Unavailable "Add-on tool connection is unavailable")))) with
+  | Ok (Submit.Awaiting (Submit.Worker_unreachable, _)), loads ->
+    Alcotest.(check int) "an unreachable worker reads no body" 0 loads
+  | (Ok _ | Error _), _ -> Alcotest.fail "an unreachable worker leaves the original waiting")
+let test_admission_stores_no_intent_for_an_unreadable_body () = with_store (fun store ->
+  let absent ~arguments = match kind arguments with
+    | "read" -> reply "absent"
+    | other -> Alcotest.fail ("an unreadable original reached " ^ other) in
+  unreadable_leaves "admission" store (events store)
+    (resume_record ~unreadable:"fixture body is unreadable" store absent);
+  Alcotest.check names "no intent was stored" [] (event_names store))
+let test_a_finished_reply_is_read_after_the_body () = with_store (fun store ->
+  ignore (resume_record store admitting);
+  let finished = answering (fun () -> worker_finished denied) in
+  unreadable_leaves "finished reply" store (events store)
+    (resume_record ~unreadable:"fixture body is unreadable" store finished);
+  refused_once "a finished reply reads the body once" (resume_record store finished);
+  let never ~arguments:_ = Alcotest.fail "a retained refusal called its worker" in
+  unreadable_leaves "retained refusal" store (events store)
+    (resume_record ~unreadable:"fixture body is unreadable" store never);
+  refused_once "a retained execution refusal reads the body once" (resume_record store never))
+let test_a_host_terminal_is_read_with_the_body () = with_store (fun store ->
+  ignore (resume_record store admitting);
+  let final = Exact.final_to_json denied in
+  host_record store ~attempt:final ~final;
+  let never ~arguments:_ = Alcotest.fail "a host terminal called its worker" in
+  unreadable_leaves "host terminal" store (events store)
+    (resume_record ~unreadable:"fixture body is unreadable" store never);
+  refused_once "a host terminal reads the body once" (resume_record store never))
+
 (* The journal a waiting pass keeps is written from the record alone. *)
 let update value = get (Result.map_error Owner.update_error_to_string value)
 let body_path store =
@@ -360,6 +434,13 @@ let test_a_worker_call_confirms_the_record_it_carries () = with_store (fun store
 let () =
   Alcotest.run "Lane_addon_submit_once" [
     "record", [
+      Alcotest.test_case "a waiting original reads no body" `Quick test_a_waiting_original_reads_no_body;
+      Alcotest.test_case "admission stores no intent for an unreadable body" `Quick
+        test_admission_stores_no_intent_for_an_unreadable_body;
+      Alcotest.test_case "a finished reply is read after the body" `Quick
+        test_a_finished_reply_is_read_after_the_body;
+      Alcotest.test_case "a host terminal is read with the body" `Quick
+        test_a_host_terminal_is_read_with_the_body;
       Alcotest.test_case "a record advances and rebinds without its body" `Quick
         test_a_record_advances_without_its_body;
       Alcotest.test_case "a worker call confirms the record it carries without retaining" `Quick

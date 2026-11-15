@@ -7287,7 +7287,7 @@
 (test
  (name test_tui_pele_protocol)
  (modules test_tui_pele_protocol)
- (libraries alcotest masc_tui_pele unix yojson))
+ (libraries alcotest masc_tui_image_cache masc_tui_pele unix yojson))
 
 (test
  (name test_tui_resource_image_admission)

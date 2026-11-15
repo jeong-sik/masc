@@ -1013,7 +1013,7 @@
  (name masc_tui_pele)
  (wrapped false)
  (modules masc_tui_pele)
- (libraries unix yojson))
+ (libraries masc_tui_image_cache unix yojson))
 
 (library
  (name masc_tui_graphics)

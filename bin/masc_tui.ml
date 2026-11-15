@@ -14248,7 +14248,7 @@ let launch_image_opener ?after ~url ~allow_start ~on_result () =
                Ok opener)
 
 let download_remote_image ?(force_fetch = false) url =
-  Masc_tui_image_cache.download ~force_fetch ~run:Unix.system
+  Masc_tui_image_cache.download ~force_fetch ~run:Masc_tui_image_cache.run_unbounded
     ~cache_dir:(ensure_img_cache_dir ()) url
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
@@ -14297,7 +14297,7 @@ let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview
       (* The raw frame is read once, right after the decode, and nothing reuses
          its file. Each decode writes a file of its own, so another TUI
          decoding the same URL and width cannot remove it. *)
-      Masc_tui_image_cache.with_decoder_output ~run:Unix.system ~cache_dir
+      Masc_tui_image_cache.with_decoder_output ~run:Masc_tui_image_cache.run_unbounded ~cache_dir
         ~prefix:"mosaic_" ~suffix:".raw" cmd (function
         | Error failure -> refuse failure
         | Ok data -> (
@@ -14807,7 +14807,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
     let run = match board_worker with
       | Some _ -> (fun command -> Masc_tui_image_cache.run_bounded
           ~deadline_seconds:image_process_deadline_seconds command)
-      | None -> Unix.system in
+      | None -> Masc_tui_image_cache.run_unbounded in
     let load () =
       Masc_tui_image_requests.load ~host:server_peer_host ~port
         ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
@@ -14898,7 +14898,7 @@ let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
                    Error "image has an invalid or truncated PNG structure"
                | Board_image_read _ | Local_file_image_read _ | Remote_url_image_read _
                | Draft_image_read _ | Peer_image_read _ -> Ok () in
-             let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
+             let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Masc_tui_image_cache.run_unbounded
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
            let result = if not current then None else match pending.sir_owner with
@@ -26048,10 +26048,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                             (match Eio.Fiber.fork_daemon ~sw (fun () ->
                                let status=Eio.Promise.await completed in
                                let outcome=match status with
-                                 | Ok (Unix.WEXITED 0) -> Board_image_open_finished (attempt,"opened " ^ name)
-                                 | Ok (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | Error _ ->
-                                     Board_image_open_retry {attempt;prepared;opener} in
-                               deliver mailbox (Board_msg (Board_attachment_saved (request,Ok outcome)));
+                                 | Ok (Masc_tui_image_cache.Exited (Unix.WEXITED 0)) ->
+                                     Some (Board_image_open_finished (attempt,"opened " ^ name))
+                                 | Ok (Exited (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _)
+                                       | Killed_at_deadline) | Error _ ->
+                                     Some (Board_image_open_retry {attempt;prepared;opener})
+                                 (* Only the exit hook cancels an opener. The
+                                    process is ending, so no next opener starts. *)
+                                 | Ok Cancelled -> None in
+                               Option.iter (fun outcome ->
+                                 deliver mailbox (Board_msg (Board_attachment_saved (request,Ok outcome))))
+                                 outcome;
                                `Stop_daemon) with
                              | () -> ()
                              | exception Eio.Cancel.Cancelled _ -> finish ()

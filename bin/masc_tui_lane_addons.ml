@@ -1762,15 +1762,20 @@ let instance_heading _snapshot (item : instance) =
   | None -> item.title
   | Some name -> name ^ " · " ^ item.title
 
-let empty_result_lines view (item : instance) =
+(* Laid out rows. The failure is wrapped at spaces and the controls are
+   packed from whole items, so neither is cut in the middle of a word. *)
+let empty_result_rows ~width view (item : instance) =
   match item.phase with
-  | Row.Failed detail -> ["Plugin failed: " ^ detail; String.concat "  " (instance_controls view item)]
+  | Row.Failed detail ->
+      Masc_tui_text_block.rows ~max_cells:width ("Plugin failed: " ^ detail)
+      @ Masc_tui_message_layout.pack_clauses ~max_cells:width (instance_controls view item)
   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached ->
-      if item.observation_seq=0 then ["No completed observation received yet."]
-      else if item.rows_count=0 then
-        ["Last completed observation contains no result rows.";
-         "Check input coverage and 2 Links for declared inputs."]
-      else ["No result rows in this received view."; "r:refresh · D:raw details"]
+      List.concat_map (document_rows ~width)
+        (if item.observation_seq=0 then ["No completed observation received yet."]
+         else if item.rows_count=0 then
+           ["Last completed observation contains no result rows.";
+            "Check input coverage and 2 Links for declared inputs."]
+         else ["No result rows in this received view."; "r:refresh · D:raw details"])
 
 let snapshot_coverage_lines coverage =
   if coverage=[] then [] else
@@ -1871,7 +1876,10 @@ let overview_lines ~width view =
                      | Row.Failed _ -> "failed"
                      | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
                    " · " ^ count_text) in
-                let controls = "    " ^ String.concat "  " ("Enter:open" :: instance_controls view item) in
+                let controls =
+                  Masc_tui_message_layout.pack_clauses ~max_cells:(width - 4)
+                    ("Enter:open" :: instance_controls view item)
+                  |> List.map (fun line -> "    " ^ line) in
                 let detail = match item.phase with
                   | Row.Failed detail ->
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
@@ -1898,7 +1906,7 @@ let overview_lines ~width view =
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else [])
-                @ [controls] @ detail)) items
+                @ controls @ detail)) items
   in
   (* The keys are packed from whole items, so a row ends where a key ends. A
      cut at the width would leave [n:n] on one row and [ew] on the next. *)
@@ -2291,11 +2299,11 @@ let detail_lines ~height ~width view =
       | Timeline | Instances ->
           let selected = Option.bind selected (fun selected ->
             List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
-          if rows=[] then List.concat_map wrap (Option.to_list item.display.description
-            @ (if record_rows=[] then empty_result_lines view item
-               else ["No declared result rows in this received view.";
-                     "Supporting records remain available in 4 Records."])
-            @ snapshot_coverage_lines snapshot.output.coverage)
+          if rows=[] then List.concat_map wrap (Option.to_list item.display.description)
+            @ (if record_rows=[] then empty_result_rows ~width view item
+               else List.concat_map wrap ["No declared result rows in this received view.";
+                                          "Supporting records remain available in 4 Records."])
+            @ List.concat_map wrap (snapshot_coverage_lines snapshot.output.coverage)
           else
             let intro = List.concat_map wrap (Option.to_list item.display.description) in
             let height = max 1 (height - List.length head - List.length intro) in
@@ -2329,7 +2337,7 @@ let detail_lines ~height ~width view =
           @ host_request_lines item
           @ connection_worker_lines snapshot item)
       | Rows ->
-          if record_rows=[] then List.concat_map wrap (empty_result_lines view item)
+          if record_rows=[] then empty_result_rows ~width view item
           else List.concat_map (fun (row : Row.row) ->
             technical_text [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
                  selected then "> " else "  ")

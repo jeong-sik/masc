@@ -113,6 +113,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       selected_runtime_id: 'tier-group.keeper_unified',
       selected_runtime_canonical: 'tier-group.keeper_unified',
       runtime_options: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
+      lane_options: [],
     },
     hooks: {
       scope: 'keeper_runtime_composite',
@@ -1690,6 +1691,60 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.updateKeeperRuntime).not.toHaveBeenCalled()
   })
 
+  // #38866: an assignment may name a declared lane (RFC-0457), but the select
+  // offered runtime ids only, so a lane could not be picked from the panel.
+  it('offers declared lanes apart from runtimes and patches the picked lane as runtime_id', async () => {
+    const execution = {
+      ...makeKeeperConfig().execution,
+      // [runtime.lanes.resilient] plus a lane that shares a runtime's id: the
+      // server resolves that id to the lane, so it is offered once, as a lane.
+      lane_options: ['resilient', 'tier.resilient_breaker'],
+    }
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({ execution }))
+    mocks.patchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        execution: {
+          ...execution,
+          selected_runtime_id: 'resilient',
+          selected_runtime_canonical: 'resilient',
+        },
+      }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+
+    const runtimeSelect = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement
+    const groupOptions = (label: string) =>
+      [...runtimeSelect.querySelectorAll(`optgroup[label="${label}"] option`)].map(
+        option => (option as HTMLOptionElement).value,
+      )
+    expect(groupOptions('레인')).toEqual(['resilient', 'tier.resilient_breaker'])
+    expect(groupOptions('런타임')).toEqual(['tier-group.keeper_unified'])
+    expect(runtimeSelect.value).toBe('tier-group.keeper_unified')
+
+    runtimeSelect.value = 'resilient'
+    runtimeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'),
+    )
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      expect.objectContaining({ runtime_id: 'resilient' }),
+      makeKeeperConfig().config_revision,
+    )
+  })
+
   it('patches sandbox runtime controls from the dashboard panel', async () => {
     mocks.fetchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({ sandbox_profile: 'microvm', network_mode: 'inherit' }),
@@ -2056,6 +2111,7 @@ describe('KeeperConfigPanel', () => {
       execution: {
         selected_runtime_id: 'ollama_cloud.deepseek-v4-flash',
         runtime_options: ['ollama_cloud.deepseek-v4-flash', 'ollama_cloud.qwen-2.5-coder'],
+        lane_options: [],
         selected_runtime_canonical: 'ollama_cloud.deepseek-v4-flash',
         models: ['ollama_cloud.deepseek-v4-flash'],
       } as any,
@@ -2065,6 +2121,7 @@ describe('KeeperConfigPanel', () => {
       execution: {
         selected_runtime_id: 'ollama_cloud.qwen-2.5-coder',
         runtime_options: ['ollama_cloud.deepseek-v4-flash', 'ollama_cloud.qwen-2.5-coder'],
+        lane_options: [],
         selected_runtime_canonical: 'ollama_cloud.qwen-2.5-coder',
         models: ['ollama_cloud.qwen-2.5-coder'],
       } as any,

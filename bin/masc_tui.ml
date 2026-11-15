@@ -34620,7 +34620,9 @@ Use relative paths for resources already held in the package. -->
               editor, so text and dropped images cannot change the draft
               behind it. *)
            ()
-       | Some (Pasted _) when Option.is_some state.queue_panel ->
+       (* The queue panel, Git Changes, a client detail and every other
+          overlay that holds the keys: the draft under it takes no paste. *)
+       | Some (Pasted _) when unclaimed_paste state = Paste_held_by_overlay ->
            if recovered_paste then reject_recovered_paste ()
            else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
        | Some (Pasted _)

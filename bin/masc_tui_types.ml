@@ -20076,6 +20076,18 @@ let modal_owns_keys (state : state) =
   || Option.is_some state.collab
   || Option.is_some (play_card_shown state)
 
+(* Where a paste goes once no field has claimed it. A key reaches the chat
+   draft only while no overlay holds the keys ([composer_claimed] asks
+   [modal_owns_keys]), and a paste asks the same question: behind Git
+   Changes or a client detail the draft is not on screen, and text put there
+   unseen is what a voice send would deliver. The overlays with a field of
+   their own -- a reader's search, the Collab form, the skill source filter
+   -- take their paste before this is asked. *)
+type unclaimed_paste = Paste_into_draft | Paste_held_by_overlay
+
+let unclaimed_paste (state : state) =
+  if modal_owns_keys state then Paste_held_by_overlay else Paste_into_draft
+
 (* Whether [?] opens the help sheet on the frame being drawn. A text field
    holding printable keys takes [?] as a character, a modal owns its own
    row, and the chat composer owns its footer -- its rows carry the door

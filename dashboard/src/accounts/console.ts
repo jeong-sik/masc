@@ -213,7 +213,7 @@ function Body({ view, subscriptions, onRetry }: {
           ? html`<${ProblemNote} key=${view.signOut.failure.attempts} title="로그아웃하지 못했어요" failure=${view.signOut.failure} />`
           : null}
         <${SubscriptionsPanel} model=${subscriptions} />
-        <p>구독 연결과 모델 확인, Keeper, 토큰은 아직 처음 화면에서 해요.</p>
+        <p>모델 확인, Keeper, 토큰은 아직 처음 화면에서 해요.</p>
         <p><a class="button" href="/">처음 화면으로</a></p>
         <p class="hint" role="status">${view.signOut.kind === 'out' ? '로그아웃했어요. 로그인 화면으로 이동해요…' : ''}</p>
       `

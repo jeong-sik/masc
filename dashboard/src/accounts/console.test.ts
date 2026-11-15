@@ -8,6 +8,7 @@ import { signal } from '@preact/signals'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
+import { createConnect } from './connect'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
@@ -73,6 +74,7 @@ const waitingPanel = (): SubscriptionsModel => ({
   view: signal<PanelView>({ kind: 'waiting' }),
   load: vi.fn(() => Promise.resolve()),
   retry: vi.fn(() => Promise.resolve()),
+  connecting: createConnect({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
 })
 
 /** Longer than any wait the console announces or times. */

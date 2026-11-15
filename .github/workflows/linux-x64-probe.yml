@@ -373,7 +373,8 @@ jobs:
           cp _build/default/bin/masc_antigravity_path_hook.exe "$PROBE_OUT/masc-antigravity-path-hook-macos-arm64"
           cp scripts/check-runtime-deployment-preflight.sh "$PROBE_OUT/masc-check-runtime-deployment-preflight-macos-arm64"
           python3 scripts/package-macos-runtime.py --dist "$PROBE_OUT" \
-            --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$SOURCE_SHA"
+            --stage "$PROBE_STAGE" --platform macos-arm64 --source-commit "$SOURCE_SHA" \
+            --without-ocaml-notices
       - name: Validate packaged identity and record dependencies
         run: |
           set -euo pipefail

@@ -39,7 +39,8 @@ jobs:
                   path.write_text('#!/bin/sh\nprintf "%s\\n" '+commit+'\n')
                   path.chmod(0o755)
               subprocess.run(['python3','scripts/package-linux-runtime.py','--dist',str(dist),'--stage',str(stage),
-                              '--platform',platform,'--source-commit',commit],check=True)
+                              '--platform',platform,'--source-commit',commit,
+                              '--without-ocaml-notices'],check=True)
               def snapshot():
                   return {str(p.relative_to(stage)):hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in stage.rglob('*') if p.is_file()}

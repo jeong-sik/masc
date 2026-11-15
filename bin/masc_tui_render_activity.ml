@@ -527,10 +527,18 @@ let render_keeper_calls (state : state) =
   let inner_cells = max 1 (framed_inner_width cols) in
   let labeled_rows ~call_index ~style ~label value =
     let prefix = Printf.sprintf "  #%d %s " (call_index + 1) label in
-    let value = Terminal_text.single_line value in
     let value =
       if String.equal value "" then ui_text state ~ko:"(빈 값)" ~en:"(empty)"
       else value
+    in
+    (* A field is a block, not a line. [single_line] escapes every control
+       byte, and a newline is one: run over a tool's output whole it printed
+       "\x0A" at each break, and the run was then cut at the width in the
+       middle of a word. Each stored line is escaped on its own and wrapped at
+       spaces, keeping its indentation, so an ESC is still drawn as text. *)
+    let value_lines ~max_cells =
+      Message_layout.wrap_indented_body ~max_cells
+        ~sanitize:Terminal_text.single_line value
     in
     let narrow_rows () =
       (* Drop decorative indentation before wrapping the exact header. The
@@ -544,7 +552,7 @@ let render_keeper_calls (state : state) =
         |> List.map (fun part -> call_index, style, part)
       in
       let value_rows =
-        Message_layout.split_cells ~max_cells:inner_cells value
+        value_lines ~max_cells:inner_cells
         |> List.map (fun part -> call_index, style, part)
       in
       List.concat_map
@@ -553,7 +561,7 @@ let render_keeper_calls (state : state) =
     in
     if Message_layout.display_width prefix < inner_cells then
       let body_cells = inner_cells - Message_layout.display_width prefix in
-      let parts = Message_layout.split_cells ~max_cells:body_cells value in
+      let parts = value_lines ~max_cells:body_cells in
       if
         List.for_all
           (fun part -> Message_layout.display_width part <= body_cells)

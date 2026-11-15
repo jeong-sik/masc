@@ -66,6 +66,15 @@ let keeper_observation_rejected_digest_heading =
 ;;
 
 let keeper_observation_rejected_digest_row = "keeper.observation.rejected_digest_row"
+
+let keeper_observation_rejected_digest_artifact_reference_row =
+  "keeper.observation.rejected_digest_artifact_reference_row"
+;;
+
+let keeper_observation_rejected_digest_unstated_input_row =
+  "keeper.observation.rejected_digest_unstated_input_row"
+;;
+
 let keeper_current_task_skills = "keeper.current_task.skills"
 let keeper_held_task_skills = "keeper.held_task.skills"
 let keeper_held_task_skills_heading = "keeper.held_task.skills_heading"
@@ -428,6 +437,14 @@ let keeper_world_own_recent_actions_turn_rejected_row =
 
 let keeper_world_own_recent_actions_turn_rejected_detail_row =
   "keeper.world.own_recent_actions.turn_rejected_detail_row"
+;;
+
+let keeper_world_own_recent_actions_turn_rejected_artifact_reference_row =
+  "keeper.world.own_recent_actions.turn_rejected_artifact_reference_row"
+;;
+
+let keeper_world_own_recent_actions_turn_rejected_unstated_input_row =
+  "keeper.world.own_recent_actions.turn_rejected_unstated_input_row"
 ;;
 
 let keeper_world_own_recent_actions_turn_deferred_row =

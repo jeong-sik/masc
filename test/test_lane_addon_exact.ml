@@ -575,6 +575,16 @@ let test_an_open_record_is_observed_by_identity () =
       (record ~digest_of:(request "o2") forged));
     check bool "a stored request that is not the one its digest names is invalid" true
       (invalid (Exact.identity (request "o2")));
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o5" (match record (request "o6") with
+      | `Assoc fields -> `Assoc (("request_id", `String "o5") :: List.remove_assoc "request_id" fields)));
+    check bool "a stored request of another ID is invalid" true
+      (invalid (Exact.identity_of_digest ~request_id:"o5" ~digest:(Exact.digest (request "o6"))));
+    let disordered = request "o7" in
+    require (Store.save_exact_request store ~declaration_id ~request_id:"o7" (match record disordered with
+      | `Assoc fields -> `Assoc (("attempts", `List [other_process_marker; other_process_marker])
+          :: List.remove_assoc "attempts" fields)));
+    check bool "an open record with two started attempts is invalid" true
+      (invalid (Exact.identity disordered));
     let linked = request "o3" in
     let instance_id, link_id = proof_address linked in
     require (Store.save_host_result store ~instance_id ~request_id:link_id (`Assoc ["executions", `List []]));

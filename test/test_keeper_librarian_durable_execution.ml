@@ -1526,6 +1526,29 @@ let resume_with_settlement_fault fixture before_settlement = memory_action fixtu
       Keeper_librarian_durable_commit.For_testing.publish ~before_settlement ~store:fixture.store
         ~config:fixture.config ~original ~request ~proposal ~fresh_authority
       |> Result.map_error (fun detail -> Durable_owner.Rejected detail)))
+let test_a_worker_call_reads_the_record_and_writes_nothing () = with_fixture (fun ~sw:_ fixture ->
+  drive_advanced fixture;
+  let original,capture=only_original fixture in
+  let destination=Capture.destination capture in
+  let root=Store.root fixture.store in
+  let body=Filename.concat root
+    (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+  let record=Filename.concat root (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest original.scope) (Store.digest original.request_id ^ ".json"))) in
+  let call ()=Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
+    ~access:Lane_addon_sources.Operator_configuration ~installation_id:destination.installation_id
+    ~package_id:destination.package_id ~tool:destination.tool
+    ~configuration_revision:destination.configuration_revision ~original:(Owner.listed original)
+    ~arguments:(`Assoc ["kind",`String "read";"request_id",`String original.request_id]) in
+  check bool "the fixture's original has a body and a record" true (Sys.file_exists body && Sys.file_exists record);
+  Sys.remove body;
+  check bool "the call reaches the worker without the body" true (Result.is_ok (call ()));
+  check bool "and writes no body" false (Sys.file_exists body);
+  Sys.remove record;
+  check bool "an absent record is unavailable before the worker" true (match call () with
+    | Error (Runtime.Unavailable _) -> true
+    | Error (Runtime.Outcome_unknown _ | Runtime.Host_refusal _) | Ok _ -> false);
+  check bool "and no record is written" false (Sys.file_exists record))
 let test_real_memory_receipt_then_failed_ack_recovers_while_off () = with_fixture (fun ~sw:_ fixture ->
   fixture.delivery_loss:=true;
   let before_delivery= !(fixture.deliveries) in
@@ -4032,6 +4055,7 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "actual host result bridge resumes production queue" `Quick test_actual_result_bridge_uses_production_queue;
   test_case "host answer without original gate waits while Off" `Quick test_host_answer_without_gate_waits_while_off;
   test_case "actual Memory receipt with failed ACK settles while Off" `Quick test_real_memory_receipt_then_failed_ack_recovers_while_off;
+  test_case "a worker call reads the record and writes nothing" `Quick test_a_worker_call_reads_the_record_and_writes_nothing;
   test_case "changed checkpoint source cannot publish retained original answer" `Quick
     (test_source_replacement_cannot_publish_retained_answer Replaced_checkpoint);
   test_case "same-trace restart cannot publish old retained checkpoint answer" `Quick

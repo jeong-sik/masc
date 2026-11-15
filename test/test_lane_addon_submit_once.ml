@@ -358,6 +358,40 @@ let test_a_finished_reply_is_read_after_the_body () = with_store (fun store ->
   unreadable_leaves "retained refusal" store (events store)
     (resume_record ~unreadable:"fixture body is unreadable" store never);
   refused_once "a retained execution refusal reads the body once" (resume_record store never))
+let test_an_undecodable_finished_result_keeps_its_words () = with_store (fun store ->
+  ignore (resume_record store admitting);
+  let garbled = answering (fun () -> Ok {
+    (Mcp_protocol.Mcp_types.tool_result_of_text "fixture worker state") with
+    structured_content = Some (`Assoc ["request_id",`String request_id;
+      "state",`String "finished";"result",`String "not a final"]) }) in
+  let expected = match Exact.final_of_json ~schema (`String "not a final") with
+    | Error detail -> "Fixture Add-on reply.result: " ^ detail
+    | Ok _ -> Alcotest.fail "the fixture result must not decode" in
+  (match resume_record store garbled with
+   | Ok (Submit.Awaiting (Submit.Worker_unknown, _)), loads ->
+     Alcotest.(check int) "the body is read before the result" 1 loads
+   | (Ok _ | Error _), _ -> Alcotest.fail "an undecodable result is an unknown outcome");
+  match Progress.phase (load store).progress with
+  | Progress.Dispatch_pending (Some (Progress.Outcome_unknown evidence)) ->
+    Alcotest.check json "the observation holds the words the single-step read wrote"
+      (`Assoc ["detail", `String expected]) evidence
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
+    Alcotest.fail "the unknown outcome was not observed")
+let test_a_dispatched_schema_mismatch_is_refused_before_publication () = with_store (fun store ->
+  ignore (resume_record store admitting);
+  let before = events store in
+  let loads = ref 0 in
+  let source = {Submit.identity = Exact.identity request; load = (fun () -> incr loads; Ok ());
+    request = (fun () -> request);
+    schema = (fun () -> `Assoc ["type",`String "object";"title",`String "another schema"])} in
+  (match Submit.resume ~store ~label:"Fixture" ~original:(Owner.listed (load store)) ~source
+      ~decode_final:(fun () -> Exact.final_of_json ~schema) ~prepare:(fun () -> Ok ())
+      ~call:(answering (fun () -> worker_finished denied)) ~terminal:(fun () _ final -> Ok final) with
+   | Error (Submit.Rejected _) -> ()
+   | Error (Submit.Unavailable _ | Submit.Uncertain _) | Ok _ ->
+     Alcotest.fail "a schema that differs from the request's grant must be refused");
+  Alcotest.check json "and nothing was published" before (events store))
 let test_a_host_terminal_is_read_with_the_body () = with_store (fun store ->
   ignore (resume_record store admitting);
   let final = Exact.final_to_json denied in
@@ -425,6 +459,17 @@ let test_a_worker_call_confirms_the_record_it_carries () = with_store (fun store
    | Error Owner.Binding_conflict -> ()
    | Error (Owner.Store_unavailable _ | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
      Alcotest.fail "a record naming another digest must be a binding conflict");
+  List.iter (fun (reason, package_id, tool, summary) ->
+    let root = Filename.concat (Store.root store) reason in
+    let changed = Store.create ~root in
+    owned (Owner.retain ~store:changed ~scope ~request_id ~installation_id ~package_id ~tool ~summary
+      ~request:(Exact.request_to_json request));
+    match Owner.confirm_listed ~store:changed record with
+    | Error Owner.Binding_conflict -> ()
+    | Error (Owner.Store_unavailable _ | Owner.Invalid_identity _ | Owner.Invalid_request _) | Ok () ->
+      Alcotest.fail ("a record of the same digest naming " ^ reason ^ " must be a binding conflict"))
+    ["another-package", "other", "admit", `Null; "another-tool", "fixture", "other", `Null;
+     "another-summary", "fixture", "admit", `Assoc ["fixture", `String "summary"]];
   let empty = Store.create ~root:(Filename.concat (Store.root store) "empty") in
   match Owner.confirm_listed ~store:empty record with
   | Error (Owner.Store_unavailable _) -> ()
@@ -439,6 +484,10 @@ let () =
         test_admission_stores_no_intent_for_an_unreadable_body;
       Alcotest.test_case "a finished reply is read after the body" `Quick
         test_a_finished_reply_is_read_after_the_body;
+      Alcotest.test_case "an undecodable finished result keeps its words" `Quick
+        test_an_undecodable_finished_result_keeps_its_words;
+      Alcotest.test_case "a dispatched schema mismatch is refused before publication" `Quick
+        test_a_dispatched_schema_mismatch_is_refused_before_publication;
       Alcotest.test_case "a host terminal is read with the body" `Quick
         test_a_host_terminal_is_read_with_the_body;
       Alcotest.test_case "a record advances and rebinds without its body" `Quick

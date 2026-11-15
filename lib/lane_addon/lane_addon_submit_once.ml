@@ -186,9 +186,20 @@ let resume ~store ~label ~(original : Owner.Record.t) ~(source : _ source) ~deco
          ends the pass with nothing written; a result that cannot be read is
          a reply of unknown meaning, as it was when one step read both. *)
       let* body = body () in
+      (* A dispatched original used to have its schema checked against its
+         request before every worker read. That check now runs here, where
+         the body is first read for it; a mismatch can never be cured by
+         waiting and is refused before anything is published. *)
+      let* () = if submission then Ok () else
+        let* declaration_id = declaration_id () in
+        rejected (Exact.confirm_original_schema ~declaration_id ~schema:(source.schema body)
+          (source.request body)) in
       (match decode_final body result with
        | Ok result -> finish_worker body original result
-       | Error detail -> unknown original (Rejected detail)) in
+       | Error detail ->
+         (* The words one step wrote when it read state and result together,
+            so an observation stored before this split still compares equal. *)
+         unknown original (Rejected (Printf.sprintf "%s Add-on reply.result: %s" label detail))) in
   let invoke arguments =
     match call ~arguments with
     | Error (Not_sent error) -> Error (Unsent error)

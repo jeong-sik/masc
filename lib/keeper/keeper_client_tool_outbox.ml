@@ -1,7 +1,12 @@
 open Result.Syntax
 
 type entry = { path : string; json : Yojson.Safe.t }
-type snapshot = { directory : string; entries : entry list }
+type snapshot =
+  { directory : string
+  ; consumed_directory : string
+  ; ownership_root : string
+  ; entries : entry list
+  }
 module Producer_map = Map.Make(String)
 
 type arguments = Keeper_client_tool_outbox_codec.arguments =
@@ -35,7 +40,8 @@ type delivery_frontier = Open of entry Producer_map.t | Closed of entry Producer
 type host_producer =
   { producer_id : string; runtime_label : string; turn_count : int
   ; base_path : string; keeper_name : string; lease_path : string
-  ; outbox_directory : string; delivery : delivery_frontier Atomic.t }
+  ; outbox_directory : string; consumed_directory : string
+  ; delivery : delivery_frontier Atomic.t }
 type host_delivery = { producer : host_producer; entry : entry }
 
 let directory = Keeper_official_client_paths.outbox_dir
@@ -56,6 +62,8 @@ let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
   else if turn_count < 0 then Error "tool result producer turn count is negative"
   else
     let* outbox_directory = directory ~base_path ~keeper_name in
+    let* consumed_directory =
+      Keeper_official_client_paths.consumed_results_dir ~base_path ~keeper_name in
     let producer_id = Random_id.uuid_v7 () in
     let* leases = lease_directory ~base_path ~keeper_name in
     let* () = Keeper_fs.save_bytes_durable_atomic ~ownership_root:base_path
@@ -64,7 +72,7 @@ let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
       |> Result.map_error Keeper_fs.durable_write_error_to_string in
     let* lease_path = canonical_lease_path ~base_path ~keeper_name producer_id in
     Ok {producer_id;runtime_label;turn_count;base_path;keeper_name;lease_path;
-        outbox_directory;delivery=Atomic.make (Open Producer_map.empty)}
+        outbox_directory;consumed_directory;delivery=Atomic.make (Open Producer_map.empty)}
 
 let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
   Eio.Switch.check sw;
@@ -302,6 +310,8 @@ let rec mark_response_sent delivery =
 let rec close_delivery_frontier producer =
   let snapshot entries =
     {directory=producer.outbox_directory;
+     consumed_directory=producer.consumed_directory;
+     ownership_root=producer.base_path;
      entries=Producer_map.bindings entries |> List.map snd} in
   let current = Atomic.get producer.delivery in
   match current with
@@ -353,6 +363,8 @@ let inspect_committed ~base_path ~keeper_name =
 
 let load_committed ~base_path ~keeper_name =
   let* directory, paths = committed_paths ~base_path ~keeper_name in
+  let* consumed_directory =
+    Keeper_official_client_paths.consumed_results_dir ~base_path ~keeper_name in
   let inactive_producers = ref Producer_map.empty in
   let producer_inactive json =
     match json with
@@ -381,7 +393,7 @@ let load_committed ~base_path ~keeper_name =
     let* json = read_committed path in
     let* inactive = producer_inactive json in
     if inactive then Ok ({path; json} :: acc) else Ok acc) (Ok []) paths in
-  Ok {directory; entries = List.rev entries}
+  Ok {directory; consumed_directory; ownership_root=base_path; entries = List.rev entries}
 
 (* A receipt with no [call_id] names no request, so no execution owns it. *)
 let call_id_of_entry entry =
@@ -710,16 +722,53 @@ let place_carrier carrier messages =
   in
   split [] (List.rev (List.filter (fun message -> not (is_carrier message)) messages))
 
+let pending_matches entry =
+  let* current = read entry.path in
+  match current with
+  | None -> Ok ()
+  | Some json when json = entry.json -> Ok ()
+  | Some _ -> Error "tool outbox receipt changed before acknowledgement"
+
+let publish_consumed (snapshot : snapshot) entry =
+  let path = Filename.concat snapshot.consumed_directory (Filename.basename entry.path) in
+  let* () = validate path entry.json in
+  let* existing = read path in
+  let* () = match existing with
+    | None -> Ok ()
+    | Some json when json = entry.json -> validate path json
+    | Some _ -> Error "consumed tool outbox receipt differs from the acknowledged original" in
+  (* A visible equal file may be left by a failed post-rename fsync. Publish
+     the same immutable JSON through the strict writer on every retry before
+     retiring pending delivery. Concurrent ACKs write the same digest-bound
+     bytes; a pre-existing conflicting file is never replaced. *)
+  let temp_dir =
+    Filename.concat (Filename.dirname snapshot.consumed_directory)
+      ".consumed-tool-results-staging" in
+  let* () = Keeper_fs.save_json_durable_atomic
+      ~ownership_root:snapshot.ownership_root ~temp_dir ~pretty:false path entry.json
+    |> Result.map_error (fun error ->
+      "consumed tool outbox receipt publication failed: "
+      ^ Keeper_fs.durable_write_error_to_string error) in
+  let* persisted = read path in
+  match persisted with
+  | Some json when json = entry.json -> validate path json
+  | None | Some _ -> Error "consumed tool outbox receipt readback differs from the original"
+
 let acknowledge snapshot =
   List.fold_left (fun acc entry ->
     let* () = acc in
-    let* current = read entry.path in
-    match current with
-    | None -> Ok ()
-    | Some json when json = entry.json ->
-      Keeper_fs.remove_file_durable ~ownership_root:snapshot.directory entry.path
-      |> Result.map_error Keeper_fs.durable_remove_error_to_string
-    | Some _ -> Error "tool outbox receipt changed before acknowledgement") (Ok ()) snapshot.entries
+    let* () = pending_matches entry in
+    let* () = publish_consumed snapshot entry in
+    (* Publication yields. Re-read the pending identity before unlinking it.
+       A concurrent ACK may already have removed it; the strict writer above
+       still confirmed its original owner, and the idempotent unlink fsyncs
+       the pending directory even after a prior removal failed its fsync. *)
+    let* () = pending_matches entry in
+    Keeper_fs.remove_file_durable ~ownership_root:snapshot.directory entry.path
+    |> Result.map_error (fun (error : Keeper_fs.durable_remove_error) ->
+      Printf.sprintf "tool outbox pending retirement failed: removed=%b %s"
+        error.removed (Keeper_fs.durable_remove_error_to_string error)))
+    (Ok ()) snapshot.entries
 
 let settle_after_turn snapshot ~(stop_reason : Runtime_agent_context.stop_reason) =
   match stop_reason with

@@ -1,5 +1,6 @@
 let state_dirname = "official-client-runtime"
 let outbox_dirname = "undelivered-tools"
+let consumed_results_dirname = "consumed-tool-results"
 let muse_storage_dirname = "muse-storage"
 
 let state_dir ~base_path ~keeper_name =
@@ -17,19 +18,25 @@ let outbox_dir ~base_path ~keeper_name =
   Result.map (fun directory -> Filename.concat directory outbox_dirname)
     (state_dir ~base_path ~keeper_name)
 
+let consumed_results_dir ~base_path ~keeper_name =
+  Result.map (fun directory -> Filename.concat directory consumed_results_dirname)
+    (state_dir ~base_path ~keeper_name)
+
 let muse_storage_dir ~base_path ~keeper_name =
   Result.map (fun directory -> Filename.concat directory muse_storage_dirname)
     (state_dir ~base_path ~keeper_name)
 
-type outbox_source = Outbox_source of string
+type tool_result_source = Tool_result_source of string
 
-let outbox_source ~base_path ~path =
+let tool_result_source ~base_path ~path =
   let directory = Filename.dirname path in
   let keeper_name = Filename.basename (Filename.dirname (Filename.dirname directory)) in
-  match outbox_dir ~base_path ~keeper_name with
-  | Ok expected when String.equal directory expected
-      && String.equal path (Filename.concat expected (Filename.basename path)) ->
-      Some (Outbox_source path)
+  match state_dir ~base_path ~keeper_name with
+  | Ok state when
+      (String.equal directory (Filename.concat state outbox_dirname)
+       || String.equal directory (Filename.concat state consumed_results_dirname))
+      && String.equal path (Filename.concat directory (Filename.basename path)) ->
+      Some (Tool_result_source path)
   | Ok _ | Error _ -> None
 
-let outbox_source_path (Outbox_source path) = path
+let tool_result_source_path (Tool_result_source path) = path

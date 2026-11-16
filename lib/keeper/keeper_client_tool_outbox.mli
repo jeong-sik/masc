@@ -149,7 +149,8 @@ val codex_response :
     failed blob write returns [Error], and the caller writes no receipt. *)
 
 val load : base_path:string -> keeper_name:string -> viewer:viewer -> (snapshot, string) result
-(** Read exact committed results, excluding host producers whose kernel lease
+(** Read exact committed pending results only; consumed originals are never
+    delivered by this loader. Exclude host producers whose kernel lease
     is still held. Vendor receipts remain independent. An unavailable/missing
     host lease is a failure, never an inactive owner or permission to ACK.
     Loading is independent of the active producer's frozen delivery frontier.
@@ -320,9 +321,27 @@ val run_carrier_reprojection :
     alone. *)
 
 val acknowledge : snapshot -> (unit, string) result
-(** Remove only the exact loaded receipts after the consumer completes.
-    Newer receipts remain pending. Runtime callers use [settle_after_turn] so
-    a successful checkpoint cannot acknowledge unfinished consumption. *)
+(** Retire only the exact loaded receipts from pending delivery after the
+    consumer completes. Before deleting each pending file, publish its exact
+    validated JSON durably under the Keeper's [consumed-tool-results] directory.
+    That original receipt remains a durable owner of its artifact references;
+    pending loaders never deliver it again from the consumed directory.
+
+    An existing identical consumed receipt is durably rewritten, not accepted
+    merely because it is visible. A conflicting or unreadable consumed file,
+    a failed publication, or changed pending content returns [Error] without
+    deleting that pending file. Publication errors retain their write stage
+    and whether the rename happened. Delete failures retain whether unlink
+    happened, so callers do not infer that the pending file is still present.
+
+    A retry whose pending file is already absent may publish the original held
+    by this validated snapshot and then durably confirm the idempotent unlink.
+    Concurrent acknowledgements converge on the same content-addressed JSON;
+    the caller keeps the receipt namespace process-owned, as for retention.
+    Cancellation propagates; an archive committed before cancellation is kept.
+    This operation executes no tool and makes no replay decision. Newer
+    receipts remain pending. Runtime callers use [settle_after_turn] so a
+    successful checkpoint cannot acknowledge unfinished consumption. *)
 
 val settle_after_turn :
   snapshot -> stop_reason:Runtime_agent_context.stop_reason -> (unit, string) result

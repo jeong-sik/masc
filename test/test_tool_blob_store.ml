@@ -1309,7 +1309,7 @@ let outbox_vendor_receipt arguments response : Masc.Keeper_client_tool_outbox.re
 ;;
 
 let test_maintenance_outbox_payloads_are_tool_data () =
-  with_temp_dir (fun base_path ->
+  List.iter (fun consumed -> with_temp_dir (fun base_path ->
     let module Outbox = Masc.Keeper_client_tool_outbox in
     let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
     let store = B.create ~base_path in
@@ -1338,6 +1338,10 @@ let test_maintenance_outbox_payloads_are_tool_data () =
         ~runtime_label:"host fixture" ~turn_count:1) in
     require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
       ~tool_name:"fixture" ~arguments:(Outbox.Known payload) ~response:payload);
+    if consumed then
+      List.iter (fun keeper_name ->
+        let snapshot = require (Outbox.load ~base_path ~keeper_name ~viewer:Outbox.Unowned_only) in
+        require (Outbox.acknowledge snapshot)) ["reviewer"; "another-keeper"];
     ignore (save_maintenance_source base_path "messages/outbox-media-owner.json"
       (Agent_core.History.content_block_to_json
         (Agent_core.Types.Image {media_type="image/png";source=Agent_core.Types.Stored media})));
@@ -1352,7 +1356,7 @@ let test_maintenance_outbox_payloads_are_tool_data () =
     List.iter (fun (sha256,bytes) ->
       Alcotest.(check (option string)) "actual owned bytes survive" (Some bytes) (fetch_ok store ~sha256))
       [media.sha256,"sole sibling media";artifact.sha256,"outbox structured artifact";
-       marker.sha256,"outbox reserved marker"])
+       marker.sha256,"outbox reserved marker"])) [false; true]
 ;;
 
 (* A host receipt names its media and its large text by blob address
@@ -1538,6 +1542,7 @@ let test_maintenance_receipt_shaped_messages_keep_history_ownership () =
 
 let test_maintenance_outbox_source_authority_is_exact_and_top_level () =
   let module Codec = Keeper_client_tool_outbox_codec in
+  List.iter (fun result_directory ->
   List.iter (fun shape -> with_temp_dir (fun base_path ->
     let store = B.create ~base_path in
     let raw = "generic ownership survives a false outbox source" in
@@ -1547,14 +1552,14 @@ let test_maintenance_outbox_source_authority_is_exact_and_top_level () =
       tool_name="fixture";arguments=Codec.Known payload;response=`Null} in
     let filename = Codec.filename json in
     let directory = match shape with
-      | `Wrong_root -> "messages/reviewer/official-client-runtime/undelivered-tools/"
-      | `Invalid_keeper -> "keepers/not portable/official-client-runtime/undelivered-tools/"
-      | `Nested_keeper -> "keepers/outer/reviewer/official-client-runtime/undelivered-tools/"
-      | `Wrong_runtime -> "keepers/reviewer/official-client-runtime-copy/undelivered-tools/"
+      | `Wrong_root -> "messages/reviewer/official-client-runtime/" ^ result_directory ^ "/"
+      | `Invalid_keeper -> "keepers/not portable/official-client-runtime/" ^ result_directory ^ "/"
+      | `Nested_keeper -> "keepers/outer/reviewer/official-client-runtime/" ^ result_directory ^ "/"
+      | `Wrong_runtime -> "keepers/reviewer/official-client-runtime-copy/" ^ result_directory ^ "/"
       | `Wrong_outbox -> "keepers/reviewer/official-client-runtime/other/"
-      | `Nested_outbox -> "keepers/reviewer/official-client-runtime/undelivered-tools/nested/"
+      | `Nested_outbox -> "keepers/reviewer/official-client-runtime/" ^ result_directory ^ "/nested/"
       | `Wrong_filename | `Nested_json | `Jsonl ->
-          "keepers/reviewer/official-client-runtime/undelivered-tools/" in
+          "keepers/reviewer/official-client-runtime/" ^ result_directory ^ "/" in
     let filename = match shape with `Wrong_filename -> "unbound.json" | _ -> filename in
     let value = match shape with `Nested_json -> `List [json] | _ -> json in
     let path = save_maintenance_source base_path (directory ^ filename) value in
@@ -1568,7 +1573,8 @@ let test_maintenance_outbox_source_authority_is_exact_and_top_level () =
     Alcotest.(check (option string)) "generic reference remains live after two scans"
       (Some raw) (fetch_ok store ~sha256:media.sha256)))
     [`Wrong_root;`Invalid_keeper;`Nested_keeper;`Wrong_runtime;`Wrong_outbox;
-     `Nested_outbox;`Wrong_filename;`Nested_json;`Jsonl]
+     `Nested_outbox;`Wrong_filename;`Nested_json;`Jsonl])
+    ["undelivered-tools"; "consumed-tool-results"]
 ;;
 
 let media_error =

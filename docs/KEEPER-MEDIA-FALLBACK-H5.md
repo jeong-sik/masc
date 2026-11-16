@@ -142,6 +142,14 @@ It does not turn MCP audio or documents into native tool-result media for every
 provider. Large text uses the lane's existing externalization threshold;
 attached tools no longer declare that text threshold as a bound on native media.
 
+Retained official-client results now keep their original receipt and artifact
+references after acknowledgement, under `consumed-tool-results`. Only the pending
+directory is delivered to later requests. Publication must be durable before
+pending removal. This preserves the original result's blobs, not the transient
+`By_address` carrier blob or the separate H5 reading cache. See
+[retained result ownership](design/retained-result-ownership.md) for the ordering,
+storage cost and remaining reading integration.
+
 ## Verification and remaining work
 
 The focused behavior fixtures are in `test_keeper_turn_driver_failover`,

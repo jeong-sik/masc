@@ -3,7 +3,7 @@ rfc: "retained-results-carrier-shrinks-to-an-address"
 title: "남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-17
 author: claude
 supersedes: []
 superseded_by: null
@@ -13,6 +13,10 @@ related: ["claude-code-context-overflow-bounded-restart", "official-client-conve
 # RFC: 남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다
 
 줄 번호는 `6581d43773c` 기준이다.
+
+후속 [원본 보관 계약](../design/retained-result-ownership.md)은 ACK 뒤의 원본 receipt와
+개별 artifact 보관을 추가한다. 여기서 receipt를 지운다는 말은 pending 전달 목록에서
+제거한다는 뜻이다. `By_address` 묶음 blob 자체의 보관은 그 후속 변경에도 포함되지 않는다.
 
 ## 1. 결정
 
@@ -285,7 +289,9 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - blob 저장소가 고장 나면 큰 도구 결과와 그림 저장도 같이 실패한다. 그래서 묶음만 따로 살리는 길은 두지 않는다.
 - Gate continuation이 묶음 때문에 넘치면 `Vendor_session_full`로 잘못 기록된다(§5.4).
 - Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 그래도 묶음 때문에 넘치지는 않는다. review는 Keeper가 아닌 임시 base path에서 돌아서(`lib/workspace_metric_hooks.ml:369-394`) 그 Keeper의 receipt를 싣지 않는다.
-- ACK된 뒤의 blob은 배포 때 오프라인 검사 두 번이 지나면 지워질 수 있다. 그 뒤에 vendor 대화에 남은 주소로 읽으면 실패한다.
+- ACK된 뒤에도 원본 receipt와 개별 artifact는 후속 원본 보관 계약으로 유지한다.
+  `By_address` 묶음의 임시 blob은 그 원본이 가리키지 않으므로 오프라인 검사 뒤 지워질 수
+  있다. 그 묶음 주소가 vendor 대화에 남아 있어도 읽기에 실패할 수 있다.
 - reader가 없는 요청은 호출 수와 도구별 개수만 본다. 어느 호출이 실패했는지 모르니, 다시 부르기 전에 지금 상태를 보라는 안내만 받는다.
 - hook이 꼴을 바꿀 때 blob 하나를 쓰고 파일과 부모 폴더를 fsync한다. 크기는 `Inline` 글과 같다. 11-07 첫 번째 사고라면 약 12 MB다. 비용은 재지 않았다.
 - 호출 하나를 찾으려면 blob을 앞에서부터 나눠 읽어야 한다. receipt마다 따로 읽는 꼴은 버렸다(§11의 9).

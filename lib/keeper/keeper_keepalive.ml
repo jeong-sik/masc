@@ -561,9 +561,13 @@ let fork_egress_proxy
                 so a stale one sends the next guest to a port nothing is
                 listening on -- no refusal, no event, a keeper that looks
                 idle rather than cut off. *)
+             let proxy_auth = Keeper_egress_lane.generate_proxy_auth () in
+             Atomic.set reg.egress_proxy_auth (Some proxy_auth);
              Atomic.set reg.egress_proxy_port (Some port);
              Fun.protect
-               ~finally:(fun () -> Atomic.set reg.egress_proxy_port None)
+               ~finally:(fun () ->
+                 Atomic.set reg.egress_proxy_port None;
+                 Atomic.set reg.egress_proxy_auth None)
                (fun () ->
                   Log.Keeper.info
                     "egress proxy listening keeper=%s port=%d rules=%d"
@@ -582,6 +586,7 @@ let fork_egress_proxy
                           cancels the handlers with it. *)
                        Eio.Switch.run (fun serve_sw ->
                        Egress_proxy_net.serve
+                         ~proxy_auth:(Some proxy_auth)
                          ~sw:serve_sw
                          ~net
                          ~clock:ctx.clock

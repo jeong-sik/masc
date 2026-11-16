@@ -220,7 +220,12 @@ let start_process_bound_microvm_container ?timeout_sec (t : t) =
               and a guest boots per turn, so the two ends have different
               lifetimes and the entry is what both can see. *)
            match policy_gateway, bound_egress_proxy_port t with
-           | Some gateway, Some port -> Some { Keeper_sandbox_microvm.gateway; port }
+           | Some gateway, Some port ->
+             Some
+               { Keeper_sandbox_microvm.gateway
+               ; port
+               ; proxy_auth = bound_egress_proxy_auth t
+               }
            (* Either half missing means the guest cannot be told its one
               route. [network_args_for] refuses on [None] rather than booting
               a guest that reaches nothing silently. *)

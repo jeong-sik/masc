@@ -13,6 +13,9 @@ type refusal =
       (** The authority is not a host this proxy will resolve. A destination
           a resolver could read differently than the matcher does is refused
           here rather than admitted and resolved later. *)
+  | Proxy_auth_required
+      (** The listener requires a per-lane [Proxy-Authorization: Basic]
+          credential and the request did not present a matching one. *)
   | Port_not_allowed of
       { host : string
       ; port : int
@@ -23,6 +26,13 @@ type refusal =
           because this refusal is an operator's rule missing a port and
           reporting it as an unlisted host sends them looking for the wrong
           mistake. *)
+  | Forbidden_address of
+      { host : string
+      ; detail : string
+      }
+      (** An allowlisted name or literal resolved to a loopback, private,
+          link-local, CGNAT, multicast, or reserved address that a keeper
+          proxy must never dial on the host network. *)
   | Upstream_unreachable of
       { host : string
       ; port : int
@@ -58,6 +68,17 @@ val client_env : proxy_url:string -> (string * string) list
     This is convenience, not enforcement. On the policy lane a client that
     ignores these finds no route rather than a way around, because the
     enforcement point is the guest's network and not this list. *)
+
+val proxy_url : proxy_auth:string option -> host:string -> port:int -> string
+(** Format [http://<host>:<port>] when [proxy_auth] is [None], or
+    [http://masc:<token>@<host>:<port>] when [proxy_auth] is [Some token]. *)
+
+val expected_proxy_authorization : token:string -> string
+(** The [Basic <base64>] value expected in [Proxy-Authorization] for [token]. *)
+
+val verify_proxy_authorization : expected_token:string -> headers:string list -> bool
+(** Whether [headers] carries a [Proxy-Authorization: Basic ...] header whose
+    credential matches [masc:<expected_token>] in constant time. *)
 
 type decision =
   | Admitted of

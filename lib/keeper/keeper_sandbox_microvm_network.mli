@@ -19,6 +19,7 @@ val boot_plan_network :
 type policy_proxy =
   { gateway : string
   ; port : int
+  ; proxy_auth : string option
   }
 
 val apple_policy_environment : policy_proxy -> (string * string) list

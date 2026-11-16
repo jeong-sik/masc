@@ -35,9 +35,14 @@ let port_of socket =
 (* One request against a proxy serving [allow], and the events it produced.
    The switch is released as soon as the answer is read, which is what stops
    the accept loop. *)
-let one_request ~allow ~line =
+let one_request ?(proxy_auth = None) ?(headers = []) ~allow ~line () =
   let collected = ref [] in
   let status = ref "" in
+  let header_block =
+    match headers with
+    | [] -> ""
+    | hs -> String.concat "\r\n" hs ^ "\r\n"
+  in
   (try
      Eio_main.run (fun env ->
        Eio.Switch.run (fun sw ->
@@ -51,6 +56,7 @@ let one_request ~allow ~line =
          Eio.Fiber.fork ~sw (fun () ->
            try
              Egress_proxy_net.serve
+               ~proxy_auth
                ~sw
                ~net
                ~clock
@@ -61,7 +67,7 @@ let one_request ~allow ~line =
                ~read_timeout_s:5.0
            with _ -> ());
          let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
-         Eio.Flow.copy_string (line ^ "\r\n\r\n") flow;
+         Eio.Flow.copy_string (line ^ "\r\n" ^ header_block ^ "\r\n") flow;
          let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
          (status := try Eio.Buf_read.line reader with End_of_file -> "");
          raise Exit))
@@ -78,10 +84,15 @@ let one_request ~allow ~line =
 
    The stub greets, then echoes one line, so a one-way copy is
    distinguishable from a real splice. *)
-let admitted_tunnel_exchange ~request =
+let admitted_tunnel_exchange ?(proxy_auth = None) ?(headers = []) ~request () =
   let events = ref [] in
   let greeting = "UPSTREAM-HELLO" in
   let transcript = ref [] in
+  let header_block =
+    match headers with
+    | [] -> ""
+    | hs -> String.concat "\r\n" hs ^ "\r\n"
+  in
   (try
      Eio_main.run (fun env ->
        Eio.Switch.run (fun sw ->
@@ -108,7 +119,8 @@ let admitted_tunnel_exchange ~request =
          let proxy_port = port_of proxy in
          Eio.Fiber.fork ~sw (fun () ->
            try
-             Egress_proxy_net.serve
+             Egress_proxy_net.For_testing.serve_allowing_private_ips
+               ~proxy_auth
                ~sw
                ~net
                ~clock
@@ -120,7 +132,10 @@ let admitted_tunnel_exchange ~request =
            with _ -> ());
          let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, proxy_port)) in
          Eio.Flow.copy_string
-           (Printf.sprintf "CONNECT 127.0.0.1:%d HTTP/1.1\r\n\r\n" upstream_port)
+           (Printf.sprintf
+              "CONNECT 127.0.0.1:%d HTTP/1.1\r\n%s\r\n"
+              upstream_port
+              header_block)
            flow;
          let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
          let read_line () = try Some (Eio.Buf_read.line reader) with End_of_file -> None in
@@ -138,7 +153,7 @@ let admitted_tunnel_exchange ~request =
 ;;
 
 let test_an_admitted_request_tunnels_both_ways () =
-  let transcript, events = admitted_tunnel_exchange ~request:"PING" in
+  let transcript, events = admitted_tunnel_exchange ~request:"PING" () in
   check bool "the tunnel is opened with a 200" true
     (match transcript with
      | status :: _ -> String_util.contains_substring status "200"
@@ -172,6 +187,7 @@ let test_a_changed_allowlist_applies_to_the_next_request () =
          Eio.Fiber.fork ~sw (fun () ->
            try
              Egress_proxy_net.serve
+               ~proxy_auth:None
                ~sw
                ~net
                ~clock
@@ -221,7 +237,9 @@ let single_refusal = function
 ;;
 
 let test_a_refused_request_gets_403_and_no_tunnel () =
-  let status, events = one_request ~allow:[ "example.com" ] ~line:"CONNECT evil.com:443 HTTP/1.1" in
+  let status, events =
+    one_request ~allow:[ "example.com" ] ~line:"CONNECT evil.com:443 HTTP/1.1" ()
+  in
   check bool "the status is 403" true (is_403 status);
   check int "exactly one event" 1 (List.length events);
   check bool "and it is a refusal" true (single_refusal events)
@@ -229,7 +247,7 @@ let test_a_refused_request_gets_403_and_no_tunnel () =
 
 let test_a_malformed_line_is_refused_without_a_tunnel () =
   let status, events =
-    one_request ~allow:[ "example.com" ] ~line:"GET http://example.com/ HTTP/1.1"
+    one_request ~allow:[ "example.com" ] ~line:"GET http://example.com/ HTTP/1.1" ()
   in
   check bool "the status is 403" true (is_403 status);
   check bool "one refusal event" true (single_refusal events)
@@ -243,6 +261,7 @@ let test_a_nul_authority_never_opens_a_tunnel () =
     one_request
       ~allow:[ "*.google.com" ]
       ~line:"CONNECT attacker.com\x00.google.com:443 HTTP/1.1"
+      ()
   in
   check bool "the status is 403" true (is_403 status);
   check bool "recorded as a refusal, not an upstream failure" true (single_refusal events)
@@ -250,7 +269,7 @@ let test_a_nul_authority_never_opens_a_tunnel () =
 
 let test_a_port_outside_the_lane_is_refused () =
   let status, events =
-    one_request ~allow:[ "example.com" ] ~line:"CONNECT example.com:22 HTTP/1.1"
+    one_request ~allow:[ "example.com" ] ~line:"CONNECT example.com:22 HTTP/1.1" ()
   in
   check bool "the status is 403" true (is_403 status);
   check bool "one refusal event" true (single_refusal events)
@@ -258,7 +277,7 @@ let test_a_port_outside_the_lane_is_refused () =
 
 let test_every_request_produces_one_event_naming_its_keeper () =
   let _status, events =
-    one_request ~allow:[] ~line:"CONNECT anything.example:443 HTTP/1.1"
+    one_request ~allow:[] ~line:"CONNECT anything.example:443 HTTP/1.1" ()
   in
   check int "one event for one request" 1 (List.length events);
   check string "and it names the keeper" "probe"
@@ -272,7 +291,7 @@ let test_every_request_produces_one_event_naming_its_keeper () =
    two connections is otherwise invisible in the log. *)
 let test_an_event_names_the_rules_that_judged_it () =
   let allow = [ "github.com" ] in
-  let _, events = one_request ~allow ~line:"CONNECT github.com:443 HTTP/1.1" in
+  let _, events = one_request ~allow ~line:"CONNECT github.com:443 HTTP/1.1" () in
   match events with
   | [ event ] ->
     check
@@ -283,7 +302,7 @@ let test_an_event_names_the_rules_that_judged_it () =
     (* A refusal is a decision too, and tracing one back to its rules is how
        an operator tells "I never allowed that" from "I allowed it and then
        stopped". *)
-    let _, refused = one_request ~allow ~line:"CONNECT evil.com:443 HTTP/1.1" in
+    let _, refused = one_request ~allow ~line:"CONNECT evil.com:443 HTTP/1.1" () in
     (match refused with
      | [ refusal ] ->
        check
@@ -297,7 +316,7 @@ let test_an_event_names_the_rules_that_judged_it () =
 
 let test_an_edited_allowlist_shows_as_a_new_generation () =
   let before =
-    match snd (one_request ~allow:[ "github.com" ] ~line:"CONNECT github.com:443 HTTP/1.1") with
+    match snd (one_request ~allow:[ "github.com" ] ~line:"CONNECT github.com:443 HTTP/1.1" ()) with
     | [ event ] -> generation_of event
     | other -> failf "expected one event, got %d" (List.length other)
   in
@@ -306,7 +325,8 @@ let test_an_edited_allowlist_shows_as_a_new_generation () =
       snd
         (one_request
            ~allow:[ "github.com"; "pypi.org" ]
-           ~line:"CONNECT github.com:443 HTTP/1.1")
+           ~line:"CONNECT github.com:443 HTTP/1.1"
+           ())
     with
     | [ event ] -> generation_of event
     | other -> failf "expected one event, got %d" (List.length other)
@@ -372,7 +392,8 @@ let stop_latency_with_a_tunnel_open ~give_serve_its_own_switch =
                   Eio.Fiber.first
                     (fun () ->
                        let run_serve serve_sw =
-                         Egress_proxy_net.serve
+                         Egress_proxy_net.For_testing.serve_allowing_private_ips
+                           ~proxy_auth:None
                            ~sw:serve_sw
                            ~net
                            ~clock
@@ -520,6 +541,146 @@ let test_a_stale_ruleset_says_so_in_the_record () =
   ignore stale
 ;;
 
+let test_production_serve_refuses_loopback_upstream () =
+  let upstream_accepted = ref false in
+  let events = ref [] in
+  let status = ref "" in
+  (try
+     Eio_main.run (fun env ->
+       Eio.Switch.run (fun sw ->
+         let net = Eio.Stdenv.net env in
+         let clock = Eio.Stdenv.clock env in
+         let upstream =
+           Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:4
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let upstream_port = port_of upstream in
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Eio.Net.accept_fork ~sw upstream ~on_error:(fun _ -> ()) (fun _ _ ->
+               upstream_accepted := true)
+           with _ -> ());
+         let proxy =
+           Eio.Net.listen net ~sw ~reuse_addr:true ~backlog:4
+             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+         in
+         let proxy_port = port_of proxy in
+         Eio.Fiber.fork ~sw (fun () ->
+           try
+             Egress_proxy_net.serve
+               ~proxy_auth:None
+               ~sw
+               ~net
+               ~clock
+               ~keeper_name:"ssrf-guard"
+               ~rules:(fun () ->
+                 fresh (rules [ Printf.sprintf "127.0.0.1:%d" upstream_port ]))
+               ~on_event:(fun event -> events := event :: !events)
+               ~socket:proxy
+               ~read_timeout_s:5.0
+           with _ -> ());
+         let flow = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, proxy_port)) in
+         Eio.Flow.copy_string
+           (Printf.sprintf "CONNECT 127.0.0.1:%d HTTP/1.1\r\n\r\n" upstream_port)
+           flow;
+         let reader = Eio.Buf_read.of_flow flow ~max_size:65536 in
+         (status := try Eio.Buf_read.line reader with End_of_file -> "");
+         raise Exit))
+   with
+   | Exit -> ());
+  check bool "production serve refuses loopback with 403" true (is_403 !status);
+  check bool "loopback upstream never receives a connection" false !upstream_accepted;
+  check bool "recorded as a refusal" true (single_refusal (List.rev !events))
+;;
+
+let test_special_purpose_addresses_refused_and_public_admitted () =
+  let check_refused ip =
+    check bool (ip ^ " is refused") true
+      (Option.is_some (Egress_proxy_net.For_testing.ip_refusal_of_string ip))
+  in
+  let check_admitted ip =
+    check (option string) (ip ^ " is admitted") None
+      (Egress_proxy_net.For_testing.ip_refusal_of_string ip)
+  in
+  List.iter
+    check_refused
+    [ "127.0.0.1"
+    ; "127.255.255.254"
+    ; "0.0.0.0"
+    ; "169.254.169.254"
+    ; "10.0.0.1"
+    ; "172.16.0.1"
+    ; "172.31.255.254"
+    ; "192.168.1.1"
+    ; "100.64.0.1"
+    ; "100.127.255.254"
+    ; "224.0.0.1"
+    ; "255.255.255.255"
+    ; "::1"
+    ; "::"
+    ; "fe80::1"
+    ; "fc00::1"
+    ; "fd12:3456:789a::1"
+    ; "ff02::1"
+    ; "::ffff:127.0.0.1"
+    ; "::ffff:169.254.169.254"
+    ; "::ffff:10.0.0.1"
+    ; "64:ff9b::7f00:1"
+    ];
+  List.iter
+    check_admitted
+    [ "140.82.121.6"
+    ; "1.1.1.1"
+    ; "2606:4700:4700::1111"
+    ; "64:ff9b::8c52:7906"
+    ]
+;;
+
+let test_proxy_auth_blocks_unauthenticated_and_admits_matching_token () =
+  let is_407 status =
+    String.length status >= 12 && String.equal (String.sub status 0 12) "HTTP/1.1 407"
+  in
+  let missing_status, missing_events =
+    one_request
+      ~proxy_auth:(Some "secret-token")
+      ~allow:[ "example.com" ]
+      ~line:"CONNECT example.com:443 HTTP/1.1"
+      ()
+  in
+  check bool "missing Proxy-Authorization gets 407" true (is_407 missing_status);
+  check bool "missing Proxy-Authorization records refusal" true
+    (single_refusal missing_events);
+  let wrong_status, wrong_events =
+    one_request
+      ~proxy_auth:(Some "secret-token")
+      ~headers:[ "Proxy-Authorization: Basic bWFzYzp3cm9uZw==" ]
+      ~allow:[ "example.com" ]
+      ~line:"CONNECT example.com:443 HTTP/1.1"
+      ()
+  in
+  check bool "wrong Proxy-Authorization gets 407" true (is_407 wrong_status);
+  check bool "wrong Proxy-Authorization records refusal" true
+    (single_refusal wrong_events);
+  (* "masc:secret-token" -> "bWFzYzpzZWNyZXQtdG9rZW4=" *)
+  let transcript, admitted_events =
+    admitted_tunnel_exchange
+      ~proxy_auth:(Some "secret-token")
+      ~headers:[ "Proxy-Authorization: Basic bWFzYzpzZWNyZXQtdG9rZW4=" ]
+      ~request:"AUTH-PING"
+      ()
+  in
+  check bool "matching Proxy-Authorization opens tunnel with 200" true
+    (match transcript with
+     | status :: _ -> String_util.contains_substring status "200"
+     | [] -> false);
+  check bool "authenticated tunnel carries bytes both ways" true
+    (List.exists (fun line -> String_util.contains_substring line "echo:AUTH-PING") transcript);
+  check bool "authenticated tunnel records Admitted" true
+    (match admitted_events with
+     | [ { Egress_proxy_net.outcome = Egress_proxy_net.Admitted _; _ } ] -> true
+     | _ -> false)
+;;
+
 let () =
   run "egress_proxy_net"
     [ ( "refusals"
@@ -531,6 +692,12 @@ let () =
             test_a_nul_authority_never_opens_a_tunnel
         ; test_case "a port outside the lane is refused" `Quick
             test_a_port_outside_the_lane_is_refused
+        ; test_case "production serve refuses loopback upstream" `Quick
+            test_production_serve_refuses_loopback_upstream
+        ; test_case "special-purpose addresses refused and public admitted" `Quick
+            test_special_purpose_addresses_refused_and_public_admitted
+        ; test_case "proxy auth blocks unauthenticated and admits matching token" `Quick
+            test_proxy_auth_blocks_unauthenticated_and_admits_matching_token
         ] )
     ; ( "reload"
       , [ test_case "a changed allowlist applies to the next request" `Quick

@@ -1,10 +1,15 @@
 type refusal =
   | Malformed_request of string
   | Unparsable_host of Egress_host.parse_error
+  | Proxy_auth_required
   | Port_not_allowed of
       { host : string
       ; port : int
       ; allowed : int list
+      }
+  | Forbidden_address of
+      { host : string
+      ; detail : string
       }
   | Upstream_unreachable of
       { host : string
@@ -18,12 +23,15 @@ let refusal_to_string = function
   | Unparsable_host error ->
     "destination is not a host this lane will resolve: "
     ^ Egress_host.parse_error_to_string error
+  | Proxy_auth_required -> "proxy authentication required"
   | Port_not_allowed { host; port; allowed } ->
     Printf.sprintf
       "%s is allowed on %s, not on port %d"
       host
       (String.concat ", " (List.map string_of_int allowed))
       port
+  | Forbidden_address { host; detail } ->
+    Printf.sprintf "%s resolved to a non-public address: %s" host detail
   | Upstream_unreachable { host; port; detail } ->
     Printf.sprintf "%s:%d is allowed and did not answer: %s" host port detail
   | Not_in_allowlist { host } -> Printf.sprintf "%s is not in this keeper's allowlist" host
@@ -35,6 +43,61 @@ let client_env ~proxy_url =
   ; "HTTP_PROXY", proxy_url
   ; "HTTPS_PROXY", proxy_url
   ]
+;;
+
+let proxy_url ~proxy_auth ~host ~port =
+  match proxy_auth with
+  | None -> Printf.sprintf "http://%s:%d" host port
+  | Some token -> Printf.sprintf "http://masc:%s@%s:%d" token host port
+;;
+
+let strip_trailing_cr line =
+  let length = String.length line in
+  if length > 0 && line.[length - 1] = '\r'
+  then String.sub line 0 (length - 1)
+  else line
+;;
+
+let constant_time_equal ~expected candidate =
+  let exp_len = String.length expected in
+  let cand_len = String.length candidate in
+  let diff = ref (exp_len lxor cand_len) in
+  for i = 0 to exp_len - 1 do
+    let c = if i < cand_len then Char.code candidate.[i] else 0 in
+    diff := !diff lor (Char.code expected.[i] lxor c)
+  done;
+  !diff = 0
+;;
+
+let expected_proxy_authorization ~token =
+  "Basic " ^ Base64.encode_string ("masc:" ^ token)
+;;
+
+let verify_proxy_authorization ~expected_token ~headers =
+  let expected_b64 = Base64.encode_string ("masc:" ^ expected_token) in
+  let matches_header raw_line =
+    let line = strip_trailing_cr raw_line in
+    match String.index_opt line ':' with
+    | None -> false
+    | Some colon ->
+      let name = String.lowercase_ascii (String.trim (String.sub line 0 colon)) in
+      if not (String.equal name "proxy-authorization")
+      then false
+      else (
+        let rest =
+          String.trim (String.sub line (colon + 1) (String.length line - colon - 1))
+        in
+        match String.index_opt rest ' ' with
+        | None -> false
+        | Some space ->
+          let scheme = String.lowercase_ascii (String.sub rest 0 space) in
+          let credential =
+            String.trim (String.sub rest (space + 1) (String.length rest - space - 1))
+          in
+          String.equal scheme "basic"
+          && constant_time_equal ~expected:expected_b64 credential)
+  in
+  List.exists matches_header headers
 ;;
 
 type decision =
@@ -115,9 +178,23 @@ let decide ~rules ~request_line =
    first sends an operator to the allowlist for a problem that is not
    there. *)
 let status_line_of_refusal = function
+  | Proxy_auth_required -> "HTTP/1.1 407 Proxy Authentication Required"
   | Upstream_unreachable _ -> "HTTP/1.1 502 Bad Gateway"
-  | Malformed_request _ | Unparsable_host _ | Port_not_allowed _ | Not_in_allowlist _ ->
-    "HTTP/1.1 403 Forbidden"
+  | Malformed_request _
+  | Unparsable_host _
+  | Port_not_allowed _
+  | Forbidden_address _
+  | Not_in_allowlist _ -> "HTTP/1.1 403 Forbidden"
+;;
+
+let extra_headers_of_refusal = function
+  | Proxy_auth_required -> "Proxy-Authenticate: Basic realm=\"masc-egress\"\r\n"
+  | Malformed_request _
+  | Unparsable_host _
+  | Port_not_allowed _
+  | Forbidden_address _
+  | Upstream_unreachable _
+  | Not_in_allowlist _ -> ""
 ;;
 
 let response_of_decision = function
@@ -126,12 +203,14 @@ let response_of_decision = function
     let body = refusal_to_string refusal ^ "\n" in
     Printf.sprintf
       "%s\r\n\
+       %s\
        Content-Type: text/plain; charset=utf-8\r\n\
        Content-Length: %d\r\n\
        Connection: close\r\n\
        \r\n\
        %s"
       (status_line_of_refusal refusal)
+      (extra_headers_of_refusal refusal)
       (String.length body)
       body
 ;;

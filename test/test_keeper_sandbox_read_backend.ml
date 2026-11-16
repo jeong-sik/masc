@@ -2175,7 +2175,12 @@ let test_a_policy_boot_points_the_guest_at_its_proxy () =
       Masc.Keeper_microvm_backend.Apple_container
       ~dns:None
       ~keeper_name:"probe"
-      ~policy_proxy:(Some { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"; port = 51234 })
+      ~policy_proxy:
+        (Some
+           { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"
+           ; port = 51234
+           ; proxy_auth = None
+           })
       Keeper_types_profile_sandbox.Network_policy
   with
   | Error detail -> Alcotest.failf "expected a policy boot, got %s" detail
@@ -2196,7 +2201,29 @@ let test_a_policy_boot_points_the_guest_at_its_proxy () =
     (* An exception list here would be a second allowlist the proxy never
        sees and cannot record. *)
     Alcotest.(check bool) "and no NO_PROXY exception list" false
-      (String_util.contains_substring joined "NO_PROXY")
+      (String_util.contains_substring joined "NO_PROXY");
+    (match
+       Masc.Keeper_sandbox_microvm.network_args_for
+         Masc.Keeper_microvm_backend.Apple_container
+         ~dns:None
+         ~keeper_name:"probe"
+         ~policy_proxy:
+           (Some
+              { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"
+              ; port = 51234
+              ; proxy_auth = Some "deadbeef0123"
+              })
+         Keeper_types_profile_sandbox.Network_policy
+     with
+     | Error detail -> Alcotest.failf "expected a credentialed policy boot, got %s" detail
+     | Ok authed_args ->
+       let authed_joined = String.concat " " authed_args in
+       List.iter
+         (fun name ->
+           Alcotest.(check bool) (name ^ " carries the per-listener credential") true
+             (String_util.contains_substring authed_joined
+                (name ^ "=http://masc:deadbeef0123@192.168.128.1:51234")))
+         [ "http_proxy"; "https_proxy"; "HTTP_PROXY"; "HTTPS_PROXY" ])
 
 (* Two keepers, two networks. A shared network plus a listener on every
    interface let a guest reach a neighbour's proxy port through the common
@@ -2217,7 +2244,11 @@ let test_each_keeper_gets_its_own_policy_network () =
         ~dns:None
         ~keeper_name:keeper
         ~policy_proxy:
-          (Some { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"; port = 51234 })
+          (Some
+             { Masc.Keeper_sandbox_microvm.gateway = "192.168.128.1"
+             ; port = 51234
+             ; proxy_auth = None
+             })
         Keeper_types_profile_sandbox.Network_policy
     with
     | Ok args -> String.concat " " args

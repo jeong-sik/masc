@@ -133,10 +133,12 @@ let boot_plan_network ~keeper_name (mode : Keeper_types_profile_sandbox.network_
 type policy_proxy =
   { gateway : string
   ; port : int
+  ; proxy_auth : string option
   }
 
-let apple_policy_environment {gateway; port} =
-  Egress_proxy_decision.client_env ~proxy_url:(Printf.sprintf "http://%s:%d" gateway port)
+let apple_policy_environment { gateway; port; proxy_auth } =
+  Egress_proxy_decision.client_env
+    ~proxy_url:(Egress_proxy_decision.proxy_url ~proxy_auth ~host:gateway ~port)
 ;;
 
 let apple_network_args ~dns ~(policy_proxy : policy_proxy option)
@@ -160,7 +162,7 @@ let apple_network_args ~dns ~(policy_proxy : policy_proxy option)
              reported one. The proxy is forked with the keeper lane; a guest \
              booting before it binds is refused rather than started with no \
              route."
-        | Some { gateway; port } ->
+        | Some proxy ->
           (* Three things, and all three are the policy rather than a default.
 
              The host-only network is the enforcement point. Measured
@@ -187,7 +189,7 @@ let apple_network_args ~dns ~(policy_proxy : policy_proxy option)
             ([ "--network"; name; "--no-dns" ]
              @ List.concat_map
                  (fun (name, value) -> [ "-e"; name ^ "=" ^ value ])
-                 (apple_policy_environment {gateway; port}))))
+                 (apple_policy_environment proxy))))
 ;;
 
 let network_args_for

@@ -173,6 +173,53 @@ let test_an_unreachable_upstream_is_502_not_403 () =
      String.length policy >= 12 && String.equal (String.sub policy 0 12) "HTTP/1.1 403")
 ;;
 
+let test_proxy_auth_and_forbidden_address_responses () =
+  check string "unauthenticated proxy URL omits userinfo"
+    "http://192.0.2.1:3128"
+    (D.proxy_url ~proxy_auth:None ~host:"192.0.2.1" ~port:3128);
+  check string "credentialed proxy URL embeds masc:<token>"
+    "http://masc:deadbeef@192.0.2.1:3128"
+    (D.proxy_url ~proxy_auth:(Some "deadbeef") ~host:"192.0.2.1" ~port:3128);
+  let header_val = D.expected_proxy_authorization ~token:"secret-token" in
+  check bool "matching Proxy-Authorization passes" true
+    (D.verify_proxy_authorization
+       ~expected_token:"secret-token"
+       ~headers:[ "Host: api.github.com:443"; "Proxy-Authorization: " ^ header_val ]);
+  check bool "case-insensitive header name and scheme pass" true
+    (D.verify_proxy_authorization
+       ~expected_token:"secret-token"
+       ~headers:[ "proxy-authorization: basic bWFzYzpzZWNyZXQtdG9rZW4=\r" ]);
+  check bool "missing header is rejected" false
+    (D.verify_proxy_authorization
+       ~expected_token:"secret-token"
+       ~headers:[ "Host: api.github.com:443" ]);
+  check bool "wrong token is rejected" false
+    (D.verify_proxy_authorization
+       ~expected_token:"secret-token"
+       ~headers:[ "Proxy-Authorization: " ^ D.expected_proxy_authorization ~token:"other" ]);
+  check bool "non-Basic scheme is rejected" false
+    (D.verify_proxy_authorization
+       ~expected_token:"secret-token"
+       ~headers:[ "Proxy-Authorization: Bearer secret-token" ]);
+  let auth_resp = D.response_of_decision (D.Refused D.Proxy_auth_required) in
+  check bool "missing auth responds 407" true
+    (String.length auth_resp >= 12
+     && String.equal (String.sub auth_resp 0 12) "HTTP/1.1 407");
+  check bool "407 carries Proxy-Authenticate challenge" true
+    (String_util.contains_substring auth_resp "Proxy-Authenticate: Basic");
+  let forbidden_resp =
+    D.response_of_decision
+      (D.Refused
+         (D.Forbidden_address { host = "rebind.example"; detail = "loopback address" }))
+  in
+  check bool "forbidden resolved address responds 403" true
+    (String.length forbidden_resp >= 12
+     && String.equal (String.sub forbidden_resp 0 12) "HTTP/1.1 403");
+  check bool "forbidden address names host and class" true
+    (String_util.contains_substring forbidden_resp "rebind.example"
+     && String_util.contains_substring forbidden_resp "loopback address")
+;;
+
 let () =
   run "egress_proxy_decision"
     [ ( "allowlist"
@@ -190,6 +237,8 @@ let () =
             test_a_nul_in_the_authority_is_refused
         ; test_case "a refusal never echoes the offending byte raw" `Quick
             test_a_refusal_never_echoes_the_offending_byte_raw
+        ; test_case "proxy auth and forbidden address responses" `Quick
+            test_proxy_auth_and_forbidden_address_responses
         ] )
     ; ( "protocol"
       , [ test_case "an unreachable upstream is 502 not 403" `Quick

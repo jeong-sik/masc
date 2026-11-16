@@ -1,0 +1,15 @@
+; Os_mutex — the one way masc takes an OS mutex (RFC
+; a-fiber-that-suspends-while-holding-an-os-mutex-fails-at-unlock, D1).
+;
+; A section entered from an Eio fiber runs under an effect handler, and a
+; section whose fiber switched while it held the mutex fails when it ends.
+; The library sits below every agent_core and masc library, so both can take
+; their locks through it, and depends on eio and eio.unix alone: the effects
+; it names are declared there.
+
+(include_subdirs no)
+
+(library
+ (name os_mutex)
+ (public_name masc.agent_core.os_mutex)
+ (libraries eio eio.unix))

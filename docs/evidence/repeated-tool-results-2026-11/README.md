@@ -187,6 +187,30 @@ python3 -I -m unittest discover -s docs/evidence/repeated-tool-results-2026-11
 다른 구간은 `--since`와 `--until`만 바꿔요. `--exclude-keeper`로 Keeper를 빼고, `--match answer`로 장부의 답 지문이 같은 결과까지 세고, `--view ledger`로 장부만 읽어요.
 `--from-date`는 읽을 파일의 첫 날이에요. `--since`보다 며칠 앞으로 두어야 요청이 싣고 있는 옛 턴의 호출이 장부와 이어져요.
 
+## 11-14 09:17Z ~ 11-15 13:35Z 구간 (11-16 에 덧붙임)
+
+11-14 09:17Z(18:17 KST)는 서버가 다시 시작한 때예요. 그때부터 28시간 18분을 `--min-bytes 2048`로 셌어요. 읽은 때는 2026-11-15T15:1xZ예요.
+
+| 보는 곳 | 수 | MB | 같은 턴 반복 | 반복 MB | 몫 | 스텁으로 줄 몫 |
+|---|---:|---:|---:|---:|---:|---:|
+| 저장된 요청 | 1,626 | 3,459.1 | 17,814칸 | 106.57 | 3.08% | 2.90% |
+| 장부 | 19,901 | 52.0 | 916번 | 6.08 | 11.68% | 11.07% |
+
+- 저장된 요청의 몫이 11-06 ~ 11-07 구간(1.19%)의 2.6배예요. 반복이 든 요청은 1,626개 중 465개예요. 요청 하나가 줄 수 있는 몫은 p50 0, p90 6.25%, p99 6.25%, 최대 41.3%예요.
+- 이번에도 Keeper 하나에 몰려요. `wkbl-web-leader`가 반복 바이트의 97.3%(103.70 MB / 106.57 MB)이고, 그 Keeper 의 프롬프트 1,562.2 MB 중 6.64%예요. 다음은 `sangsu` 1.93 MB(6.46%), `music-sensei` 0.71 MB(2.88%)예요. 11-06 구간의 Keeper(`kidsnote-incoming-dd-manager`)와 다른 Keeper 예요.
+- 앞서는 도구도 바뀌었어요. 장부에서 2 KB 이상 같은 턴 반복은 `masc_keeper_delegate_status_many` 481번 1.93 MB(그 도구 결과 바이트의 84.2%), `keeper_artifact_read` 133번 1.93 MB(35.6%), `masc_board_post_get` 237번 1.78 MB(23.3%), `keeper_tasks_list` 48번 0.25 MB(41.2%)예요. 11-06 구간에서 앞섰던 `BrowserRead`는 이 표에 없어요.
+- 거리는 더 멀어요. 같은 호출을 한 번씩 센 반복 942개가 첫 결과까지 중앙값 206 메시지(p90 1,178, 최대 1,554), 사이 프롬프트 중앙값 628 KB(p90 1.76 MB)예요. 바로 앞의 같은 결과까지는 중앙값 4 메시지(p90 8)예요. 같은 글자가 한 턴에 나타난 차례는 중앙값 36, 최대 382예요.
+- 건너뛴 것: 구간 밖 977행, 호출 번호 없는 호출 85개, 다른 종류의 기록 13개. 없는 blob, 읽지 못한 blob, 깨진 줄은 0이에요.
+
+```bash
+python3 -I docs/evidence/repeated-tool-results-2026-11/measure_repeated_results.py \
+    --base-path ~/me --from-date 2026-11-14 --to-date 2026-11-15 \
+    --since 2026-11-14T09:17:00Z --until 2026-11-15T13:35:00Z --view both --min-bytes 2048 \
+    --json-out docs/evidence/repeated-tool-results-2026-11/result-2026-11-14T09_17_to_11-15T13_35.json
+```
+
+두 구간에서 Keeper 와 도구가 모두 달라요. 켤 도구를 고정된 이름 둘로 두면 다음 구간의 반복을 놓쳐요.
+
 ## 파일
 
 | 파일 | 내용 |
@@ -205,3 +229,4 @@ python3 -I -m unittest discover -s docs/evidence/repeated-tool-results-2026-11
 | `result-without-dd-manager-and-leader-2026-11-06T09_52_to_11-07T09_52.json` | 24시간에서 Keeper 둘을 뺀 값 |
 | `result-match-answer-2026-11-06T09_52_to_11-07T09_52.json` | 24시간, 장부의 답 지문이 같은 결과까지 센 값 |
 | `result-ledger-2026-11-06T09_52_to_11-07T09_52.json` | 24시간, 장부만(`--top 15`) |
+| `result-2026-11-14T09_17_to_11-15T13_35.json` | 11-14 서버 재시작 뒤 28시간, 2 KB 이상 |

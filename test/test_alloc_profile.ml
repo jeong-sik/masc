@@ -214,6 +214,111 @@ let test_wire_shape () =
   | _ -> fail "object"
 ;;
 
+let test_complete_counters_keep_unranked_sites_and_ids () =
+  with_clean @@ fun () ->
+  T.set_sampling_rate 0.1;
+  let first = T.observe_alloc ~key:"first" ~n_samples:1 in
+  for index=2 to 40 do
+    ignore (T.observe_alloc ~key:(string_of_int index) ~n_samples:index)
+  done;
+  let before = P.counter_snapshot () in
+  check int "every site, beyond the old top30" 40 (List.length before.counters);
+  let ids = List.map (fun (row:P.site_counters) -> row.id) before.counters in
+  let stacks = match P.callstacks ~expected:before.identity ids with
+    | Ok stacks -> stacks
+    | Error _ -> fail "lookup of captured IDs failed" in
+  let first_id = fst (List.find (fun (_,key) -> String.equal key "first") stacks) in
+  ignore (T.observe_alloc_on_starting_domain ~key:"first" ~n_samples:1000);
+  T.observe_promote first;
+  T.observe_dealloc first;
+  let after = P.counter_snapshot () in
+  check bool "same profile identity" true (before.identity=after.identity);
+  check int "complete delta includes an initially low-ranked site" 1000
+    (after.totals.allocated_samples-before.totals.allocated_samples);
+  let row = List.find (fun (row:P.site_counters) -> row.id=first_id) after.counters in
+  check int "same key keeps its ID" 1001 row.counts.allocated_samples;
+  check int "main-domain allocation" 1000 row.counts.starting_domain_samples;
+  check int "promotion" 1 row.counts.major_samples;
+  check int "deallocation" 1000 row.counts.live_samples;
+  check bool "duplicate lookup IDs collapse" true
+    (P.callstacks ~expected:after.identity [first_id;first_id] = Ok [first_id,"first"]);
+  let report = P.report ~top:1 in
+  check int "counter total equals existing report total" report.allocated_samples after.totals.allocated_samples;
+  check int "top still cuts only its own table" 1 (List.length report.allocated)
+;;
+
+let test_counter_lookup_rejects_stale_identity_and_unknown_ids () =
+  with_clean @@ fun () ->
+  T.set_sampling_rate 0.1;
+  ignore (T.observe_alloc ~key:"old" ~n_samples:1);
+  let before=P.counter_snapshot () in
+  let old_id=(List.hd before.counters).id in
+  let unknown=Option.get (P.site_id_of_int 2) in
+  check bool "unknown ID is explicit" true
+    (P.callstacks ~expected:before.identity [unknown] = Error (P.Unknown_site unknown));
+  T.set_sampling_rate 0.2;
+  check bool "rate transition rejects old identity" true
+    (P.callstacks ~expected:before.identity [old_id] = Error P.Profile_changed);
+  T.reset ();
+  T.set_sampling_rate 0.1;
+  ignore (T.observe_alloc ~key:"new" ~n_samples:1);
+  let after=P.counter_snapshot () in
+  check bool "reset does not alias an old identity" true (before.identity<>after.identity);
+  check bool "old ID cannot resolve to a new stack" true
+    (P.callstacks ~expected:before.identity [old_id] = Error P.Profile_changed);
+  check bool "invalid numeric IDs cannot be constructed" true
+    (P.site_id_of_int 0=None && P.site_id_of_int (-1)=None && P.site_id_of_int (P.max_sites+2)=None)
+;;
+
+let test_counter_snapshot_preserves_overflow_and_zero_live_rows () =
+  with_clean @@ fun () ->
+  T.set_sampling_rate 0.1;
+  let freed=T.observe_alloc_in_major ~key:"freed" ~n_samples:3 in
+  T.observe_dealloc freed;
+  for index=1 to P.max_sites+4 do
+    ignore (T.observe_alloc ~key:(string_of_int index) ~n_samples:1)
+  done;
+  let snapshot=P.counter_snapshot () in
+  check int "bounded complete table" (P.max_sites+1) (List.length snapshot.counters);
+  check int "overflow retains all samples" (P.max_sites+7) snapshot.totals.allocated_samples;
+  check int "direct major is available per-site and in totals" 3 snapshot.totals.direct_major_samples;
+  let overflow=Option.get snapshot.overflow_id in
+  check bool "overflow ID resolves to its existing marker" true
+    (P.callstacks ~expected:snapshot.identity [overflow]=Ok [overflow,P.overflow_site_key]);
+  check bool "zero-live rows remain in complete counters" true
+    (List.exists (fun (row:P.site_counters) -> row.counts.live_samples=0 && row.counts.allocated_samples=3)
+      snapshot.counters)
+;;
+
+let test_counter_reads_serialize_with_real_profile_transitions () =
+  with_clean @@ fun () ->
+  let running=Atomic.make true and failure=Atomic.make None in
+  let reader=Thread.create (fun () ->
+    try while Atomic.get running do
+      let snapshot=P.counter_snapshot () in
+      let sum=List.fold_left (fun n (row:P.site_counters) -> n+row.counts.allocated_samples) 0 snapshot.counters in
+      if sum<>snapshot.totals.allocated_samples then failwith "partial counter copy";
+      ignore (P.callstacks ~expected:snapshot.identity (List.map (fun (row:P.site_counters)->row.id) snapshot.counters));
+      Thread.yield ()
+    done with exn -> Atomic.set failure (Some exn)) () in
+  Fun.protect ~finally:(fun () -> P.stop (); Atomic.set running false; Thread.join reader) (fun () ->
+    for _=1 to 3 do
+      P.start ~sampling_rate:0.01;
+      allocate_on_the_starting_domain 5000;
+      let snapshot=P.counter_snapshot () in
+      check bool "real allocations are captured" true (snapshot.totals.allocated_samples>0);
+      let invalid_rejected = try P.start ~sampling_rate:2.0; false with Invalid_argument _ -> true in
+      check bool "runtime rejects an invalid rate" true invalid_rejected;
+      check bool "failed start preserves valid profile identity" true
+        (snapshot.identity=(P.counter_snapshot ()).identity);
+      check bool "failed start leaves the valid sampler running" true (P.counter_snapshot ()).sampling;
+      P.stop ();
+      check bool "stop invalidates captured identity" true
+        (P.callstacks ~expected:snapshot.identity []=Error P.Profile_changed)
+    done);
+  check bool "concurrent lifecycle reader did not raise" true (Atomic.get failure=None)
+;;
+
 let () =
   run
     "alloc_profile"
@@ -228,11 +333,16 @@ let () =
         ; test_case "starting domain table" `Quick
             test_the_starting_domain_table_counts_only_its_own_allocations
         ; test_case "wire" `Quick test_wire_shape
+        ; test_case "complete numeric counters and stable IDs" `Quick test_complete_counters_keep_unranked_sites_and_ids
+        ; test_case "counter identity guards" `Quick test_counter_lookup_rejects_stale_identity_and_unknown_ids
+        ; test_case "complete overflow and zero-live rows" `Quick test_counter_snapshot_preserves_overflow_and_zero_live_rows
         ] )
     ; ( "profile"
       , [ test_case "report under sampling" `Quick test_report_under_a_live_profile_does_not_raise
         ; test_case "starting domain under sampling" `Quick
             test_a_live_profile_tells_the_starting_domain_apart
+        ; test_case "counter readers during real profile transitions" `Quick
+            test_counter_reads_serialize_with_real_profile_transitions
         ] )
     ]
 ;;

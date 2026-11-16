@@ -49,6 +49,11 @@ let profile : Gc.Memprof.t option Atomic.t = Atomic.make None
 let no_domain = -1
 let starting_domain = Atomic.make no_domain
 
+(* Readers take this before [sites_mutex]; callbacks take neither. Memprof
+   lifecycle operations never run while the site registry is locked. *)
+let lifecycle_mutex = Stdlib.Mutex.create ()
+let profile_epoch = ref 0
+
 let push event =
   let rec attempt () =
     let current = Atomic.get pending in
@@ -159,27 +164,37 @@ let tracker : (block, block) Gc.Memprof.tracker =
 ;;
 
 let start ~sampling_rate =
-  Atomic.set rate sampling_rate;
-  Atomic.set starting_domain (Domain.self () :> int);
-  Atomic.set
-    profile
-    (Some (Gc.Memprof.start ~sampling_rate ~callstack_size:callstack_frames tracker))
+  Stdlib.Mutex.protect lifecycle_mutex (fun () ->
+    let previous_domain = Atomic.get starting_domain in
+    Atomic.set starting_domain (Domain.self () :> int);
+    match Gc.Memprof.start ~sampling_rate ~callstack_size:callstack_frames tracker with
+    | started ->
+      Atomic.set rate sampling_rate;
+      Atomic.set profile (Some started);
+      incr profile_epoch
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      Atomic.set starting_domain previous_domain;
+      Printexc.raise_with_backtrace exn bt)
 ;;
 
 let is_sampling () = Gc.Memprof.is_sampling ()
 
 let stop () =
-  match Atomic.exchange profile None with
-  | None -> ()
-  | Some started ->
-    if is_sampling () then Gc.Memprof.stop ();
-    Gc.Memprof.discard started
+  Stdlib.Mutex.protect lifecycle_mutex (fun () ->
+    match Atomic.exchange profile None with
+    | None -> ()
+    | Some started ->
+      incr profile_epoch;
+      if is_sampling () then Gc.Memprof.stop ();
+      Gc.Memprof.discard started)
 ;;
 
 (* The site table. Only the reader touches it, under [sites_mutex], which no
    callback ever takes. *)
 type site =
-  { site_key : string
+  { site_id : int
+  ; site_key : string
   ; mutable allocated_samples : int
   ; mutable starting_domain_samples : int
   ; mutable major_samples : int
@@ -189,9 +204,12 @@ type site =
 
 let sites : (string, site) Hashtbl.t = Hashtbl.create 1024
 let sites_mutex = Stdlib.Mutex.create ()
+let next_site_id = ref 0
 
 let new_site site_key =
-  { site_key
+  incr next_site_id;
+  { site_id = !next_site_id
+  ; site_key
   ; allocated_samples = 0
   ; starting_domain_samples = 0
   ; major_samples = 0
@@ -297,7 +315,8 @@ let report ~top =
       drain ();
       ( Hashtbl.fold
           (fun _ site acc ->
-             { site_key = site.site_key
+             { site_id = site.site_id
+             ; site_key = site.site_key
              ; allocated_samples = site.allocated_samples
              ; starting_domain_samples = site.starting_domain_samples
              ; major_samples = site.major_samples
@@ -373,6 +392,74 @@ let report_to_yojson report : Yojson.Safe.t =
     ]
 ;;
 
+type site_id = int
+let site_id_of_int id = if id > 0 && id <= max_sites + 1 then Some id else None
+
+type counter_identity = { epoch : int; sampling_rate : float }
+type sample_counters =
+  { allocated_samples : int
+  ; starting_domain_samples : int
+  ; major_samples : int
+  ; direct_major_samples : int
+  ; live_samples : int
+  }
+type site_counters = { id : site_id; counts : sample_counters }
+type counter_snapshot =
+  { identity : counter_identity
+  ; sampling : bool
+  ; counters : site_counters list
+  ; totals : sample_counters
+  ; dropped_samples : int
+  ; pending_events : int
+  ; overflow_id : site_id option
+  }
+
+let counter_snapshot () =
+  Stdlib.Mutex.protect lifecycle_mutex (fun () ->
+    Stdlib.Mutex.protect sites_mutex (fun () ->
+      drain ();
+      let counters = Hashtbl.fold (fun _ (site : site) rows ->
+        {id=site.site_id; counts=
+          { allocated_samples=site.allocated_samples
+          ; starting_domain_samples=site.starting_domain_samples
+          ; major_samples=site.major_samples
+          ; direct_major_samples=site.direct_major_samples
+          ; live_samples=site.live_samples }} :: rows) sites [] in
+      let zero = {allocated_samples=0; starting_domain_samples=0; major_samples=0;
+                  direct_major_samples=0; live_samples=0} in
+      let totals = List.fold_left (fun total {counts; id=_} ->
+        { allocated_samples=total.allocated_samples + counts.allocated_samples
+        ; starting_domain_samples=total.starting_domain_samples + counts.starting_domain_samples
+        ; major_samples=total.major_samples + counts.major_samples
+        ; direct_major_samples=total.direct_major_samples + counts.direct_major_samples
+        ; live_samples=total.live_samples + counts.live_samples }) zero counters in
+      { identity={epoch= !profile_epoch; sampling_rate=Atomic.get rate}
+      ; sampling=is_sampling ()
+      ; counters; totals
+      ; dropped_samples=Atomic.get dropped_samples
+      ; pending_events=Atomic.get pending_count
+      ; overflow_id=Option.map (fun site -> site.site_id) (Hashtbl.find_opt sites overflow_site_key)
+      }))
+;;
+
+type stack_lookup_error = Profile_changed | Unknown_site of site_id
+module Site_ids = Set.Make (Int)
+
+let callstacks ~(expected : counter_identity) ids =
+  Stdlib.Mutex.protect lifecycle_mutex (fun () ->
+    if expected.epoch <> !profile_epoch || not (Float.equal expected.sampling_rate (Atomic.get rate))
+    then Error Profile_changed
+    else Stdlib.Mutex.protect sites_mutex (fun () ->
+      let requested = Site_ids.of_list ids in
+      let found, missing = Hashtbl.fold (fun _ site ((found, missing) as state) ->
+        if Site_ids.mem site.site_id missing then
+          ((site.site_id,site.site_key)::found, Site_ids.remove site.site_id missing)
+        else state) sites ([],requested) in
+      match Site_ids.min_elt_opt missing with
+      | Some id -> Error (Unknown_site id)
+      | None -> Ok found))
+;;
+
 module For_testing = struct
   type nonrec block = block
 
@@ -396,16 +483,22 @@ module For_testing = struct
 
   let observe_promote block = push (Promoted block)
   let observe_dealloc block = push (Freed block)
-  let set_sampling_rate sampling_rate = Atomic.set rate sampling_rate
+  let set_sampling_rate sampling_rate =
+    Stdlib.Mutex.protect lifecycle_mutex (fun () ->
+      incr profile_epoch;
+      Atomic.set rate sampling_rate)
 
   let reset () =
+    Stdlib.Mutex.protect lifecycle_mutex (fun () ->
     Stdlib.Mutex.protect sites_mutex (fun () ->
       (* See mli: tests discard undrained events on purpose. *)
       ignore (Atomic.exchange pending [] : event list);
       Atomic.set pending_count 0;
       Atomic.set dropped_samples 0;
-      Hashtbl.reset sites);
+      Hashtbl.reset sites;
+      next_site_id := 0);
+    incr profile_epoch;
     Atomic.set starting_domain no_domain;
-    Atomic.set rate 0.0
+    Atomic.set rate 0.0)
   ;;
 end

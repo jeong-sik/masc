@@ -93,6 +93,49 @@ val report : top:int -> report
 
 val report_to_yojson : report -> Yojson.Safe.t
 
+type site_id = private int
+val site_id_of_int : int -> site_id option
+(** IDs are positive and at most [max_sites + 1]. They identify one registered
+    stack only within the process and profile epoch of a counter snapshot. *)
+
+type counter_identity = { epoch : int; sampling_rate : float }
+
+type sample_counters =
+  { allocated_samples : int
+  ; starting_domain_samples : int
+  ; major_samples : int
+  ; direct_major_samples : int
+  ; live_samples : int
+  }
+
+type site_counters = { id : site_id; counts : sample_counters }
+
+type counter_snapshot =
+  { identity : counter_identity
+  ; sampling : bool
+  ; counters : site_counters list
+  ; totals : sample_counters
+  ; dropped_samples : int
+  ; pending_events : int
+  ; overflow_id : site_id option
+  }
+
+val counter_snapshot : unit -> counter_snapshot
+(** Drain once and copy every registered site's raw sample counters under the
+    reader mutex. No ranking or stack text is included. Callbacks never lock.
+    The epoch changes on profile lifecycle transitions and test resets; these
+    transitions serialize with this copy, without holding the sites mutex while
+    starting or stopping Memprof. Pending/dropped events are concurrent queue
+    observations, not a promise that the process was quiescent. *)
+
+type stack_lookup_error = Profile_changed | Unknown_site of site_id
+val callstacks :
+  expected:counter_identity -> site_id list ->
+  ((site_id * string) list, stack_lookup_error) result
+(** Check epoch/rate, then look up only the requested IDs in the existing bounded
+    registry. Does not drain, resample, sort or retain another registry. Duplicate
+    IDs are returned once; an unknown ID refuses the whole lookup. *)
+
 val key_of_callstack : Printexc.raw_backtrace -> string
 (** The site key for a call stack: of the top [callstack_frames] frames,
     the first {!frames_per_key} that are not Stdlib or Yojson frames, each

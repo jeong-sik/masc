@@ -16,7 +16,10 @@ val purpose : string -> purpose option
     A validator belongs to one scan. It keeps the Librarian forests it has
     already read and passed, so the records of one owner share a single read of
     that owner's scopes. A forest that failed is read again by the next record
-    that names it. *)
+    that names it. While the scan stays in one scope, it also keeps the capture
+    of each execution the scope's gate records name, and the retry chains it
+    proved under that capture, as long as the reader returns the same
+    execution record. A capture that failed is restored again. *)
 val validator : unit ->
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   read_scope:(scope:string -> (Lane_addon_tool_request_owner.retained list, string) result) ->
@@ -49,4 +52,6 @@ val preflight : unit -> Lane_addon_store_preflight.payload_validator
 
     A check belongs to one scan, like {!validator}. It keeps each owner's
     forest of parts and partitions for the scan, and reads it again before it
-    refuses a record. *)
+    refuses a record. While the scan stays in one scope, a gate's parent
+    execution that passed is not judged again for the next gate record that
+    names it, as long as the reader returns the same execution record. *)

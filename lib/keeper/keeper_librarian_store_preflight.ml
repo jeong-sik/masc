@@ -26,9 +26,21 @@ let owner_json (record:Owner.retained) = match record.request with
   | _ -> Error "Original Librarian payload is not an object"
 let admission_owner record = let* json=owner_json record in Admission.owner_of_json json
 let history_owner record = let* json=owner_json record in History.owner_of_json json
+let admission_key owner = Yojson.Safe.to_string (Admission.owner_to_json owner)
+let history_key owner = Yojson.Safe.to_string (History.owner_to_json owner)
 let parent ~read ~scope ~request_id =
   let* record=read ~scope ~request_id in
   Option.to_result ~none:("Original Librarian source parent is absent: " ^ request_id) record
+(* Values derived from what one scope of the scan reads. The scan meets a
+   scope's records together, and its reader gives back the record it read
+   before for bytes that did not change, so a value derived from that record
+   holds while the scan stays in the scope. Moving to another scope drops
+   them: the next scope's reader reads every record anew. *)
+let per_scope fresh =
+  let current=ref None in
+  fun scope -> match !current with
+    | Some (seen,values) when String.equal seen scope -> values
+    | Some _ | None -> let values=fresh () in current:=Some (scope,values); values
 (* The forest is every part and partition one owner has, read from that
    owner's two whole scopes, and it is the same for each record that names the
    owner. An owner has dozens of such records, so proving it again for each one
@@ -38,7 +50,7 @@ let parent ~read ~scope ~request_id =
 let forest_proof () =
   let proved=Hashtbl.create 16 in
   fun ~read_scope ~owner ->
-    let key=Yojson.Safe.to_string (Admission.owner_to_json owner) in
+    let key=admission_key owner in
     if Hashtbl.mem proved key then Ok ()
     else
       let+ ()=Parts.validate_payload_forest ~read_scope ~owner in
@@ -51,24 +63,49 @@ let floor_capture ~read ~owner record =
   let* capture=Floor.restore ~owner record in
   let+ ()=Floor.validate_ancestry_payload ~read capture in capture
 
+(* What one scope's gate records proved about the executions they name. A
+   journal's records all name one execution, and restoring its capture and
+   proving its ancestry for each record did that dozens of times. A passed
+   capture is kept while the execution reads the same, and the chains proved
+   under it with it. A failed one is not: each record that names the
+   execution restores it again and is refused as before. *)
+type ('capture,'proofs) gate_parents =
+  {captures:(string, string * Owner.retained * 'capture) Hashtbl.t; proofs:'proofs}
+let gate_parents proofs = {captures=Hashtbl.create 8; proofs=proofs ()}
+let parent_capture gates ~owner_key ~(parent:Owner.retained) restore =
+  match Hashtbl.find_opt gates.captures parent.request_id with
+  | Some (key,read,capture) when String.equal key owner_key && read == parent -> Ok capture
+  | Some _ | None ->
+    let+ capture=restore () in
+    Hashtbl.replace gates.captures parent.request_id (owner_key,parent,capture);
+    capture
+type scope_gates = {
+  admission_gates:(Admission.t, Keeper_librarian_admission_gate.proofs) gate_parents;
+  history_gates:(History.t, Keeper_librarian_durable_gate.proofs) gate_parents;
+  floor_gates:(Floor.t, Keeper_librarian_floor_step_gate.proofs) gate_parents}
+let fresh_gates () =
+  {admission_gates=gate_parents Keeper_librarian_admission_gate.proofs;
+   history_gates=gate_parents Keeper_librarian_durable_gate.proofs;
+   floor_gates=gate_parents Keeper_librarian_floor_step_gate.proofs}
+
 let validator () =
   let forest=forest_proof () in
   (* Each gate record's check follows its retry links back to the journal's
-     root. Chains proved earlier in this scan are not proved again. *)
-  let admission_proofs=Keeper_librarian_admission_gate.proofs ()
-  and history_proofs=Keeper_librarian_durable_gate.proofs ()
-  and floor_proofs=Keeper_librarian_floor_step_gate.proofs () in
+     root. Chains proved earlier in the scope are not proved again. An
+     execution's own record proves only its journal's first attempt, with
+     proofs of its own. *)
+  let scope_gates=per_scope fresh_gates in
   let admission_capture ~read ~read_scope ~owner record =
     let* ()=forest ~read_scope ~owner in
     Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
-  let validate ~read ~read_scope ~read_body ~read_fence ~read_resolution (record:Owner.retained) =
+  let validate ~gates ~read ~read_scope ~read_body ~read_fence ~read_resolution (record:Owner.retained) =
   match purpose record.scope with
   | None -> Ok ()
   | Some Admission_execution ->
     let* owner=admission_owner record in
     let* capture=admission_capture ~read ~read_scope ~owner record in
-    Keeper_librarian_admission_gate.validate_preparation_payload ~proofs:admission_proofs ~read ~read_body ~owner ~capture
-      ~parent:record
+    Keeper_librarian_admission_gate.validate_preparation_payload ~proofs:(Keeper_librarian_admission_gate.proofs ())
+      ~read ~read_body ~owner ~capture ~parent:record
   | Some Admission_part ->
     let* owner=admission_owner record in
     let* ()=Parts.validate_part_payload ~owner record in
@@ -83,47 +120,51 @@ let validator () =
   | Some History_execution ->
     let* owner=history_owner record in
     let* capture=history_capture ~read ~read_fence ~read_resolution ~owner record in
-    Keeper_librarian_durable_gate.validate_preparation_payload ~proofs:history_proofs ~read ~read_body ~owner ~capture
-      ~parent:record
+    Keeper_librarian_durable_gate.validate_preparation_payload ~proofs:(Keeper_librarian_durable_gate.proofs ())
+      ~read ~read_body ~owner ~capture ~parent:record
   | Some Floor_execution ->
     let* owner=history_owner record in
     let* capture=floor_capture ~read ~owner record in
-    Keeper_librarian_floor_step_gate.validate_preparation_payload ~proofs:floor_proofs ~read ~read_body ~owner ~capture
-      ~parent:record
+    Keeper_librarian_floor_step_gate.validate_preparation_payload ~proofs:(Keeper_librarian_floor_step_gate.proofs ())
+      ~read ~read_body ~owner ~capture ~parent:record
   | Some Admission_gate ->
     let module Gate=Keeper_librarian_admission_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=admission_owner record in
     let* parent=parent ~read ~scope:(Admission.scope owner) ~request_id in
-    let* capture=admission_capture ~read ~read_scope ~owner parent in
-    Gate.validate_payload ~proofs:admission_proofs ~read ~read_body ~owner ~capture ~parent ~record
+    let* capture=parent_capture gates.admission_gates ~owner_key:(admission_key owner) ~parent
+        (fun () -> admission_capture ~read ~read_scope ~owner parent) in
+    Gate.validate_payload ~proofs:gates.admission_gates.proofs ~read ~read_body ~owner ~capture ~parent ~record
   | Some History_gate ->
     let module Gate=Keeper_librarian_durable_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(History.scope owner) ~request_id in
-    let* capture=history_capture ~read ~read_fence ~read_resolution ~owner parent in
-    Gate.validate_payload ~proofs:history_proofs ~read ~read_body ~owner ~capture ~parent ~record
+    let* capture=parent_capture gates.history_gates ~owner_key:(history_key owner) ~parent
+        (fun () -> history_capture ~read ~read_fence ~read_resolution ~owner parent) in
+    Gate.validate_payload ~proofs:gates.history_gates.proofs ~read ~read_body ~owner ~capture ~parent ~record
   | Some Floor_gate ->
     let module Gate=Keeper_librarian_floor_step_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(Floor.scope owner) ~request_id in
-    let* capture=floor_capture ~read ~owner parent in
-    Gate.validate_payload ~proofs:floor_proofs ~read ~read_body ~owner ~capture ~parent ~record
+    let* capture=parent_capture gates.floor_gates ~owner_key:(history_key owner) ~parent
+        (fun () -> floor_capture ~read ~owner parent) in
+    Gate.validate_payload ~proofs:gates.floor_gates.proofs ~read ~read_body ~owner ~capture ~parent ~record
   in
   (* Unlike the immutable forest payload, absence is not stable: a running
      owner can publish its closing journal before the next scanned record. *)
   fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution (record:Owner.retained) ->
+  let gates=scope_gates record.scope in
   match purpose record.scope with
   | None | Some (History_execution | Floor_execution | History_gate | Floor_gate) ->
-    validate ~read ~read_scope ~read_body ~read_fence ~read_resolution record
+    validate ~gates ~read ~read_scope ~read_body ~read_fence ~read_resolution record
   | Some (Admission_execution | Admission_part | Admission_partition | Admission_gate | Admission_closure) ->
     let* owner=admission_owner record in
     let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
     match view.closure with
     | None ->
-      validate ~read ~read_scope ~read_body ~read_fence ~read_resolution record
+      validate ~gates ~read ~read_scope ~read_body ~read_fence ~read_resolution record
     | Some closure ->
       let* ()=if Closure.is_scope record.scope then
         let current=Closure.record closure in
@@ -136,7 +177,10 @@ let validator () =
           | Some current when Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))
               (Owner.record_to_json (Owner.listed record)) -> Ok ()
           | None | Some _ -> Error "Admission closure member changed during preflight" in
-      let check=validate ~read:view.read ~read_scope:view.read_scope ~read_body:view.read_body ~read_fence ~read_resolution in
+      (* The closure's reads answer what the live reads may not, so what they
+         prove is not kept for the live ones. *)
+      let check=validate ~gates:(fresh_gates ()) ~read:view.read ~read_scope:view.read_scope ~read_body:view.read_body
+          ~read_fence ~read_resolution in
       let* ()=check record in
       if Closure.is_scope record.scope then
         List.fold_left (fun result original -> let* ()=result in check original)
@@ -333,7 +377,7 @@ let floor_original ~owner record =
 let forest_reads () =
   let read=Hashtbl.create 16 in
   fun ~again ~read_scope ~owner ->
-    let key=Yojson.Safe.to_string (Admission.owner_to_json owner) in
+    let key=admission_key owner in
     match Hashtbl.find_opt read key with
     | Some inventory when not again -> Ok inventory
     | Some _ | None ->
@@ -384,9 +428,26 @@ let admission_verdict ~read ~read_scope ~read_body ~read_archive (record:Owner.r
         | Some (Closure.Closing | Closure.Closed) -> Preflight.Payload_valid
         | None | Some Closure.Captured -> refused
 
+(* A gate record's consumer reads the Exact files of the execution the record
+   names, so a journal's records all read one execution's files. A passed
+   verdict is kept while the scan stays in the scope and the execution reads
+   the same. A refused one is not: each record that names the execution is
+   judged again and refused as before. *)
+let gate_verdict passed ~owner_key ~(parent:Owner.retained) judge =
+  match Hashtbl.find_opt passed parent.request_id with
+  | Some (key,read) when String.equal key owner_key && read == parent -> Preflight.Payload_valid
+  | Some _ | None ->
+    match judge () with
+    | Preflight.Payload_valid ->
+      Hashtbl.replace passed parent.request_id (owner_key,parent);
+      Preflight.Payload_valid
+    | (Payload_invalid _ | Consumer_stops_on_exact _ | Exact_root_differs _) as refused -> refused
+
 let exact_check () =
   let forest=forest_reads () in
+  let scope_passed=per_scope (fun () -> Hashtbl.create 8) in
   fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_exact (record:Owner.retained) ->
+  let passed=scope_passed record.scope in
   let admission=admission_verdict ~read ~read_scope ~read_body ~read_archive record in
   let forest_check check ~owner ~scopes =
     forest_verdict ~forest ~read ~read_scope ~read_exact ~owner ~scopes check record in
@@ -398,10 +459,15 @@ let exact_check () =
         (let+ original=admission_original ~read ~owner record in scopes,original))
   | Some Admission_gate ->
     admission (fun ~owner ~scopes ->
-      original_verdict ~read_exact
-        (let* request_id=Keeper_librarian_admission_gate.parent_execution_id record in
-         let* parent=parent ~read ~scope:(Admission.scope owner) ~request_id in
-         let+ original=admission_original ~read ~owner parent in scopes,original))
+      match
+        let* request_id=Keeper_librarian_admission_gate.parent_execution_id record in
+        parent ~read ~scope:(Admission.scope owner) ~request_id
+      with
+      | Error detail -> Preflight.Payload_invalid detail
+      | Ok parent ->
+        gate_verdict passed ~owner_key:(admission_key owner) ~parent (fun () ->
+          original_verdict ~read_exact
+            (let+ original=admission_original ~read ~owner parent in scopes,original)))
   | Some Admission_part -> admission (forest_check Parts.check_frontier_evidence)
   | Some Admission_partition -> admission (forest_check Parts.check_partition_proof)
   | Some History_execution ->
@@ -409,21 +475,31 @@ let exact_check () =
       (let* owner=history_owner record in
        let+ original=history_original ~read_fence ~owner record in history_scopes owner,original)
   | Some History_gate ->
-    original_verdict ~read_exact
-      (let* request_id=Keeper_librarian_durable_gate.parent_execution_id record in
+    (match
+       let* request_id=Keeper_librarian_durable_gate.parent_execution_id record in
        let* owner=history_owner record in
-       let* parent=parent ~read ~scope:(History.scope owner) ~request_id in
-       let+ original=history_original ~read_fence ~owner parent in history_scopes owner,original)
+       let+ parent=parent ~read ~scope:(History.scope owner) ~request_id in owner,parent
+     with
+     | Error detail -> Preflight.Payload_invalid detail
+     | Ok (owner,parent) ->
+       gate_verdict passed ~owner_key:(history_key owner) ~parent (fun () ->
+         original_verdict ~read_exact
+           (let+ original=history_original ~read_fence ~owner parent in history_scopes owner,original)))
   | Some Floor_execution ->
     original_verdict ~read_exact
       (let* owner=history_owner record in
        let+ original=floor_original ~owner record in floor_scopes owner,original)
   | Some Floor_gate ->
-    original_verdict ~read_exact
-      (let* request_id=Keeper_librarian_floor_step_gate.parent_execution_id record in
+    (match
+       let* request_id=Keeper_librarian_floor_step_gate.parent_execution_id record in
        let* owner=history_owner record in
-       let* parent=parent ~read ~scope:(Floor.scope owner) ~request_id in
-       let+ original=floor_original ~owner parent in floor_scopes owner,original)
+       let+ parent=parent ~read ~scope:(Floor.scope owner) ~request_id in owner,parent
+     with
+     | Error detail -> Preflight.Payload_invalid detail
+     | Ok (owner,parent) ->
+       gate_verdict passed ~owner_key:(history_key owner) ~parent (fun () ->
+         original_verdict ~read_exact
+           (let+ original=floor_original ~owner parent in floor_scopes owner,original)))
 
 let preflight () =
   let validate=validator () and exact=exact_check () in

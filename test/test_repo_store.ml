@@ -598,7 +598,7 @@ let test_discover_skips_missing_origin_without_failing_request () =
       let without_origin = Filename.concat base_path "without-origin" in
       Unix.mkdir without_origin 0o755;
       init_git_repo without_origin "https://github.com/test/temporary";
-      (match Repo_git.run_git ~cwd:without_origin [ "remote"; "remove"; "origin" ] with
+      (match Repo_git.run_git ~cwd:without_origin Repo_git.Reports_on_stdout [ "remote"; "remove"; "origin" ] with
        | Ok _ -> ()
        | Error detail -> Alcotest.fail detail);
       let with_origin = Filename.concat base_path "with-origin" in

@@ -258,7 +258,7 @@ let test_fetch () =
                 (List.mem "origin/main" remotes);
               let common_dir = Filename.concat dest ".git" in
               let oid =
-                match Repo_git.run_git ~cwd:dest [ "rev-parse"; "origin/main" ] with
+                match Repo_git.run_git ~cwd:dest Repo_git.Reads_data [ "rev-parse"; "origin/main" ] with
                 | Ok [ oid ] -> oid
                 | _ -> Alcotest.fail "origin/main OID unavailable"
               in
@@ -857,6 +857,55 @@ let test_file_paths_report_git_failure () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "a nonrepository must not become an empty catalog")
 
+(* What the fake git prints on standard output before it stops. *)
+let fake_git_stdout = "FAKE-GIT-STDOUT-52175"
+
+(* A git that prints [fake_git_stdout] and exits 124, the status Process_eio
+   gives a run it timed out, with nothing on standard error: a read cut off
+   part-way. *)
+let with_git_that_stops_after_printing f =
+  with_temp_dir (fun tmp ->
+      let fake_bin = Filename.concat tmp "bin" in
+      Unix.mkdir fake_bin 0o755;
+      let fake_git = Filename.concat fake_bin "git" in
+      write_file fake_git ("#!/bin/sh\necho " ^ fake_git_stdout ^ "\nexit 124\n");
+      Unix.chmod fake_git 0o755;
+      let old_path = Sys.getenv "PATH" in
+      Fun.protect
+        ~finally:(fun () -> Unix.putenv "PATH" old_path)
+        (fun () ->
+          Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+          f tmp))
+
+let test_stopped_read_does_not_quote_what_it_read () =
+  with_git_that_stops_after_printing (fun local_path ->
+      let check_failure what = function
+        | Stdlib.Ok _ -> Alcotest.failf "%s: a stopped git must fail" what
+        | Stdlib.Error detail ->
+            Alcotest.(check bool) (what ^ " keeps the exit status") true
+              (String_util.contains_substring detail "exit 124");
+            Alcotest.(check bool) (what ^ " does not quote standard output") false
+              (String_util.contains_substring detail fake_git_stdout)
+      in
+      check_failure "ls-files" (Repo_git.file_paths_at ~local_path ());
+      check_failure "cat-file"
+        (Repo_git.run_git_read_only_raw ~cwd:local_path [ "cat-file"; "blob"; "HEAD:.env" ]);
+      check_failure "grep"
+        (Repo_git.grep_at ~local_path ~pathspec:"" ~pattern:"API_KEY" ~ignore_case:false
+           ~max_matches:10 ()))
+
+let test_stopped_merge_quotes_its_report () =
+  with_git_that_stops_after_printing (fun local_path ->
+      match
+        Repo_git.fast_forward
+          ~repository:(sample_repo ~url:"unused" local_path)
+          ~target_ref:"origin/main"
+      with
+      | Stdlib.Ok () -> Alcotest.fail "a stopped merge must fail"
+      | Stdlib.Error detail ->
+          Alcotest.(check bool) "merge's own standard output is its reason" true
+            (String_util.contains_substring detail fake_git_stdout))
+
 let () =
   Alcotest.run "Repo_git"
     [
@@ -888,6 +937,12 @@ let () =
             test_file_paths_preserve_exact_names_and_ignore_policy
         ; Alcotest.test_case "reports Git failure" `Quick
             test_file_paths_report_git_failure
+        ] );
+      ( "stopped git",
+        [ Alcotest.test_case "a read does not quote what it read" `Quick
+            test_stopped_read_does_not_quote_what_it_read
+        ; Alcotest.test_case "a merge quotes its own report" `Quick
+            test_stopped_merge_quotes_its_report
         ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );

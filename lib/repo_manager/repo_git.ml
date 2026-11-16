@@ -92,13 +92,27 @@ let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
 
-(* [reason] is the output of the run that says why it failed. *)
-let git_failure_with_reason args status reason =
+type stdout_role =
+  | Reads_data
+  | Reports_on_stdout
+
+(* HIGH-RISK-UNREVIEWED: the failure detail reaches HTTP responses, the server
+   log and Keeper tool results. A data command stopped part-way, a timeout
+   included, leaves standard error empty and what it read so far on standard
+   output: file lines, paths, a remote URL that may carry a credential. Only a
+   command whose standard output is its own report may be quoted (#48500,
+   #52175). *)
+let git_failure_detail role args status ~stdout ~stderr =
   let status_text =
     match status with
     | Unix.WEXITED code -> Printf.sprintf "exit %d" code
     | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
     | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+  in
+  let reason =
+    match role with
+    | Reads_data -> stderr
+    | Reports_on_stdout -> if String.trim stderr <> "" then stderr else stdout
   in
   let detail =
     match String.trim reason with
@@ -106,13 +120,6 @@ let git_failure_with_reason args status reason =
     | reason -> status_text ^ ": " ^ reason
   in
   Printf.sprintf "git %s failed: %s" (String.concat " " args) detail
-;;
-
-(* A run that printed nothing on standard error may have said why on standard
-   output. *)
-let git_failure_detail args status stdout stderr =
-  git_failure_with_reason args status
-    (if String.trim stderr <> "" then stderr else stdout)
 ;;
 
 type status_summary = {
@@ -205,7 +212,7 @@ let status_summary_of_porcelain_lines lines =
     lines
 ;;
 
-let run_git_raw ~cwd ?(env = []) ?timeout_sec args : (string, string) result =
+let run_git_raw ~cwd ?(env = []) ?timeout_sec role args : (string, string) result =
   let argv = "git" :: "-C" :: cwd :: args in
   let envp = merge_env env in
   let status, stdout, stderr =
@@ -215,19 +222,20 @@ let run_git_raw ~cwd ?(env = []) ?timeout_sec args : (string, string) result =
   match status with
   | Unix.WEXITED 0 -> Ok stdout
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-    Error (git_failure_detail args status stdout stderr)
+    Error (git_failure_detail role args status ~stdout ~stderr)
 
-let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
-  Result.map split_lines (run_git_raw ~cwd ~env ?timeout_sec args)
+let run_git ~cwd ?(env = []) ?timeout_sec role args : (string list, string) result =
+  Result.map split_lines (run_git_raw ~cwd ~env ?timeout_sec role args)
 
-let run_git_read_only_raw ~cwd args = run_git_raw ~cwd ~env:read_only_git_env args
+let run_git_read_only_raw ~cwd args =
+  run_git_raw ~cwd ~env:read_only_git_env Reads_data args
 
 let clone ~repository =
   let env = network_git_env in
   let parent_dir = Filename.dirname repository.local_path in
   Fs_compat.mkdir_p parent_dir;
   match
-    run_git ~cwd:parent_dir ~env
+    run_git ~cwd:parent_dir ~env Reports_on_stdout
       ["clone"; repository.url; repository.local_path]
   with
   | Ok _ -> Ok ()
@@ -240,7 +248,7 @@ let record_target_fetch ~repository =
   let open Result.Syntax in
   let cwd = repository.local_path in
   let first args =
-    match run_git ~cwd args with
+    match run_git ~cwd Reads_data args with
     | Ok (line :: _) -> Ok line
     | Ok [] -> Error ("git " ^ String.concat " " args ^ " returned no output")
     | Error _ as error -> error
@@ -281,7 +289,7 @@ let record_target_fetch ~repository =
 
 let fetch ~repository : (string list, string) result =
   let env = network_git_env in
-  match run_git ~env ~cwd:repository.local_path
+  match run_git ~env ~cwd:repository.local_path Reports_on_stdout
           [ "-c"; "fetch.append=false"; "fetch"; "--all" ] with
   | Error msg -> Error msg
   | Ok _ -> (
@@ -289,7 +297,7 @@ let fetch ~repository : (string list, string) result =
        | Ok () -> ()
        | Error message -> Log.Misc.warn "repo target fetch receipt: %s" message);
       match
-        run_git ~cwd:repository.local_path
+        run_git ~cwd:repository.local_path Reads_data
           ["branch"; "-r"; "--format=%(refname:short)"]
       with
       | Ok lines -> Ok lines
@@ -304,7 +312,7 @@ let fetch ~repository : (string list, string) result =
    merge is local; the ref must already be fetched). *)
 let fast_forward ~repository ~target_ref : (unit, string) result =
   match
-    run_git ~cwd:repository.local_path
+    run_git ~cwd:repository.local_path Reports_on_stdout
       [ "-c"; "core.hooksPath=/dev/null"; "merge"; "--ff-only"; target_ref ]
   with
   | Ok _ -> Ok ()
@@ -312,7 +320,7 @@ let fast_forward ~repository ~target_ref : (unit, string) result =
 
 let get_branches ~repository =
   match
-    run_git ~cwd:repository.local_path
+    run_git ~cwd:repository.local_path Reads_data
       ["branch"; "-a"; "--format=%(refname:short)"]
   with
   | Ok lines -> Ok lines
@@ -346,9 +354,9 @@ let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   (* Process_eio owns what a timeout looks like; reading its number here made
      the two modules agree by coincidence (#28651). *)
   | status', _ when Process_eio.exit_reason_of_status status' = Process_eio.Timed_out ->
-    Error (Origin_lookup_timed_out (git_failure_detail args status stdout stderr))
+    Error (Origin_lookup_timed_out (git_failure_detail Reads_data args status ~stdout ~stderr))
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
-    Error (Origin_lookup_failed (git_failure_detail args status stdout stderr))
+    Error (Origin_lookup_failed (git_failure_detail Reads_data args status ~stdout ~stderr))
 
 type checkout_identity = {
   toplevel : string;
@@ -364,6 +372,7 @@ let checkout_identity ?(timeout_sec = inspection_timeout_sec) ~local_path () =
       ~cwd:local_path
       ~env:read_only_git_env
       ~timeout_sec
+      Reads_data
       [ "rev-parse"
       ; "--path-format=absolute"
       ; "--show-toplevel"
@@ -381,7 +390,7 @@ let checkout_identity ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   | Error msg -> Stdlib.Error msg
 
 let common_dir ?(timeout_sec = inspection_timeout_sec) ~local_path () =
-  match run_git ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+  match run_git ~cwd:local_path ~env:read_only_git_env ~timeout_sec Reads_data
           [ "rev-parse"; "--path-format=absolute"; "--git-common-dir" ] with
   | Ok [ path ] when not (String.equal path "") -> Stdlib.Ok path
   | Ok _ -> Stdlib.Error "git rev-parse common directory returned unexpected output"
@@ -391,7 +400,7 @@ let common_dir ?(timeout_sec = inspection_timeout_sec) ~local_path () =
 let current_branch ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec
+      ~timeout_sec Reads_data
       [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
   with
   | Ok (name :: _) -> Ok name
@@ -407,7 +416,7 @@ let ahead_behind
   =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec
+      ~timeout_sec Reads_data
       [ "rev-list"; "--left-right"; "--count"; target_ref ^ "...HEAD" ]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
@@ -433,7 +442,7 @@ let ahead_behind
 
 let get_recent_commits ~repository ~branch ~limit =
   match
-    run_git ~cwd:repository.local_path
+    run_git ~cwd:repository.local_path Reads_data
       ["log"; branch; "-n"; string_of_int limit; "--oneline"]
   with
   | Ok lines -> Ok lines
@@ -442,7 +451,7 @@ let get_recent_commits ~repository ~branch ~limit =
 let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec
+      ~timeout_sec Reads_data
       ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
@@ -506,7 +515,7 @@ let status_files_of_porcelain_z output =
 
 let status_files_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
-    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec Reads_data
       [ "--no-optional-locks"; "status"; "--porcelain=v1"; "-z"
       ; "--no-renames"; "--untracked-files=normal"
       ]
@@ -582,7 +591,7 @@ let branch_status_of_porcelain_v2_z output =
 
 let branch_status_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
-    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec Reads_data
       [ "--no-optional-locks"; "status"; "--porcelain=v2"; "--branch"; "-z"
       ; "--untracked-files=no"
       ]
@@ -712,7 +721,7 @@ let branch_list_of_for_each_ref ~max_entries output =
 
 let branches_at ?(timeout_sec = inspection_timeout_sec) ~local_path ~max_entries () =
   match
-    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec Reads_data
       [ "--no-optional-locks"; "for-each-ref"; "--sort=-committerdate"
       ; "--format=%(HEAD)%00%(refname:lstrip=2)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(contents:subject)"
       ; "refs/heads/"
@@ -877,7 +886,7 @@ let worktree_list_of_porcelain ~max_entries output =
 
 let worktrees_at ?(timeout_sec = inspection_timeout_sec) ~local_path ~max_entries () =
   match
-    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec Reads_data
       [ "--no-optional-locks"; "worktree"; "list"; "--porcelain"; "-z" ]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
@@ -885,7 +894,7 @@ let worktrees_at ?(timeout_sec = inspection_timeout_sec) ~local_path ~max_entrie
 
 let file_paths_at ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
-    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec
+    run_git_raw ~cwd:local_path ~env:read_only_git_env ~timeout_sec Reads_data
       [ "--no-optional-locks"; "ls-files"; "--cached"; "--others"
       ; "--exclude-standard"; "--full-name"; "-z"; "--"
       ]
@@ -1014,11 +1023,9 @@ let grep_in_scope ~timeout_sec ~local_path ~pathspec ~pattern ~ignore_case ~max_
       (* git grep exits 1 when nothing matched; that is an answer. *)
       Stdlib.Ok { gr_matches = []; gr_truncated = false }
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      (* HIGH-RISK-UNREVIEWED: standard output holds the rows git found before
-         it stopped, a timeout included: lines of files the workspace file
-         reader refuses to serve. The failure detail reaches the server log, so
-         standard error alone says why (#48500). *)
-      Stdlib.Error (git_failure_with_reason args status stderr)
+      (* Standard output holds the rows git found before it stopped: lines of
+         files the workspace file reader refuses to serve. *)
+      Stdlib.Error (git_failure_detail Reads_data args status ~stdout ~stderr)
 
 (* A tracked, non-ignored file is in both runs with the same rows; one copy of
    each path and line is kept. *)

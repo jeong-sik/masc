@@ -782,7 +782,7 @@ let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
 (* --- Git helpers --- *)
 
 let git_run_lines ~cwd args =
-  match Repo_git.run_git ~cwd ("--no-optional-locks" :: args) with
+  match Repo_git.run_git ~cwd Repo_git.Reads_data ("--no-optional-locks" :: args) with
   | Ok lines -> lines
   | Error msg ->
       observe_workspace_route_failure
@@ -828,7 +828,7 @@ let git_diff_badges ~base =
    route handlers distinguish "command errored / invalid ref" from
    "command succeeded with no output". *)
 let git_run_lines_or_error ~cwd args =
-  Repo_git.run_git ~cwd ("--no-optional-locks" :: args)
+  Repo_git.run_git ~cwd Repo_git.Reads_data ("--no-optional-locks" :: args)
 
 (* The repository that owns [path], searched upward from the file and stopped
    at [base].

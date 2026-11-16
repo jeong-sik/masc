@@ -304,7 +304,7 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
          | Some timestamp -> check bool "reflog timestamp read" true (timestamp > 0)
          | None -> fail "target ref timestamp missing");
         let oid =
-          match Repo_git.run_git ~cwd:with_origin [ "rev-parse"; "HEAD" ] with
+          match Repo_git.run_git ~cwd:with_origin Repo_git.Reads_data [ "rev-parse"; "HEAD" ] with
           | Ok [ oid ] -> oid
           | _ -> fail "guest fixture HEAD unavailable"
         in

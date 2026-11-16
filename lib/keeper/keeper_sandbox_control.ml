@@ -395,7 +395,7 @@ let with_inspection_budget budget inspect =
 let first_git_line ~budget ~cwd args =
   match
     with_inspection_budget budget (fun timeout_sec ->
-      Repo_git.run_git ~cwd ~timeout_sec args)
+      Repo_git.run_git ~cwd ~timeout_sec Repo_git.Reads_data args)
   with
   | Ok (line :: _) -> Ok line
   | Ok [] -> Error (Printf.sprintf "git %s returned no output" (String.concat " " args))

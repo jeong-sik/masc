@@ -268,7 +268,7 @@ let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
 ;;
 
 let run_git_or_fail ~cwd args =
-  match Repo_git.run_git ~cwd args with
+  match Repo_git.run_git ~cwd Repo_git.Reports_on_stdout args with
   | Ok lines -> lines
   | Error error ->
     Alcotest.failf "git %s failed: %s" (String.concat " " args) error

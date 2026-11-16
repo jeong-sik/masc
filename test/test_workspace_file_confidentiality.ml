@@ -360,7 +360,7 @@ let test_noise_dirs_not_confidential () =
 ;;
 
 let catalog_git ~cwd args =
-  match Repo_git.run_git ~cwd args with
+  match Repo_git.run_git ~cwd Repo_git.Reports_on_stdout args with
   | Ok _ -> ()
   | Error detail -> Alcotest.fail detail
 

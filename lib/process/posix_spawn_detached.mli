@@ -60,9 +60,11 @@ type parent =
       (** The pid its exit status goes to. A process whose parent ended has
           been adopted and names the adopter. *)
   | No_process
-      (** No process holds the number: never started, or already reaped. A
-          number that is no pid -- 0 or less, or past the platform's pid
-          range -- reads this too. *)
+      (** No process this can see holds the number: never started, already
+          reaped, or hidden from this process -- Linux's /proc mounted with
+          [hidepid=invisible] hides other users' processes, and /proc of
+          another pid namespace numbers them apart. A number that is no pid
+          -- 0 or less, or past pid_t -- reads this on every platform. *)
   | Unreadable
       (** The platform gives no process table this reads -- neither Darwin
           nor Linux with /proc -- or the table refused. *)

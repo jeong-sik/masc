@@ -3156,6 +3156,25 @@ status: reference
   갱신되어 저장된다(#43361). 도구 승인의 `Auto`와 Gate의 `Auto_judge`도 다른 값이다.
   → [Keeper_tool_approval_mode](../../lib/keeper/keeper_tool_approval_mode.mli)
 
+**Message Request Status (메시지 요청 상태)**
+: Gate 메시지 요청 하나가 제출부터 종결까지 지나는 상태를 이름 붙인 닫힌 여덟 값
+  (`Gate_protocol.message_request_status`): 접수(`Accepted`), 접수 불확실(`Acceptance_uncertain`),
+  대기(`Queued`), 실행(`Running`)은 아직 끝나지 않은 상태이고, 종결 네 값(`Done` · `Failed` ·
+  `Lost` · `Cancelled`)은 끝난 상태다. dashboard chat·Connector·미래 MASC↔MASC peer 가 함께 쓰는
+  durable 메시지 요청 봉투(envelope)의 상태 필드다. 생산자는 요청을 제출해 `request_id`를 받고,
+  그 id 로 살아 있는 투영을 관측해 종결 상태를 맞춘다. wire 라벨은
+  `message_request_status_to_string` 한 곳이 정한다. 여덟 값 중 `Failed`만 라벨이 `"error"`이고
+  나머지 일곱은 이름의 소문자다. `POST /api/v1/gate/message`는
+  진행 중 세 상태(`Accepted`·`Queued`·`Running`)에 `202 Accepted`로 답하고, 동기 응답과
+  `Acceptance_uncertain`·종결 네 값에는 `200 OK`로 답한다(#52529). `Acceptance_uncertain`은
+  접수 확인이 오지 않은 상태로, 전송 계층은 이 값과 `Lost`를 접수 미확인으로 함께 다루고
+  (예: Telegram 폴링 계좌) 관측자는 id 로 다시 맞춘다. 검증 실패는 400, Keeper 쪽 오류는
+  `502 Bad Gateway`, dispatch 부재는 503, 내부 오류는 500으로 나간다.
+  **다른 것**: 이 `Queued`는 러너 슬롯 대기도 `Keeper_queued`(메시지 전달)도 아닌 Gate 메시지
+  요청의 대기 상태다.
+  → [Gate_protocol](../../lib/gate/gate_protocol.mli),
+  [server_routes_http_routes_channel_gate](../../lib/server/server_routes_http_routes_channel_gate.ml)
+
 **Prompt Block (프롬프트 블록)**
 : 한 Keeper turn의 맥락 조립(per-turn context assembly)에서 생성자 하나가
   주입 자리(injection site) 하나를 이름하는 닫힌 슬롯(`Prompt_block_id.t`, 목록은 `all_known` 이 정한다). 예:

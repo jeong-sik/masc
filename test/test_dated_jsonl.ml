@@ -224,6 +224,58 @@ let view_of_i n = Dated_jsonl.recent_view n ~f:(fun j -> Some (json_i j))
 
 let day_path dir month day = Filename.concat (Filename.concat dir month) (day ^ ".jsonl")
 
+let test_count_and_recent_view_follow_external_changes () =
+  let location = temp_store "dated_jsonl_joint_summary" in
+  let dir = Dated_jsonl.Store.dir location in
+  let store = Dated_jsonl.open_store location in
+  let projected = ref 0 in
+  let view = Dated_jsonl.recent_view 2 ~f:(fun j -> incr projected; Some (json_i j)) in
+  let check_read label expected_count expected_values =
+    let count, values = Dated_jsonl.count_and_read_recent_view view store in
+    check int (label ^ " count") expected_count count;
+    check (list int) (label ^ " recent") expected_values values
+  in
+  check_read "empty" 0 [];
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":3}|} ];
+  check_read "all history counted, recent window bounded" 3 [ 2; 3 ];
+  let already_projected = !projected in
+  check_read "warm view" 3 [ 2; 3 ];
+  check int "warm count preserves cached recent projection" already_projected !projected;
+  (* An external writer may still append to an old day; no directory-mtime
+     or current-day-only shortcut may hide that change. *)
+  write_dated_file dir "2026-01" "31" [ {|{"i":4}|} ];
+  check_read "append to older file" 4 [ 4; 3 ];
+  Sys.remove (day_path dir "2026-01" "31");
+  check_read "retention removes old rows" 1 [ 3 ];
+  write_dated_file dir "2026-03" "01" [ {|{"i":5}|} ];
+  check_read "new month" 2 [ 3; 5 ];
+  let newest = day_path dir "2026-03" "01" in
+  Fs_compat.save_file (newest ^ ".replacement") "{\"i\":6}\n";
+  Unix.rename (newest ^ ".replacement") newest;
+  check_read "same-size replacement refreshes recent values" 2 [ 3; 6 ]
+;;
+
+let test_count_and_recent_view_preserve_listing_failure_fallback () =
+  let location = temp_store "dated_jsonl_joint_listing_failure" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json"; {|{"i":2}|} ];
+  (* This is an invalid layout name for the strict shared listing. The
+     existing permissive readers still define the fallback result. *)
+  Fs_compat.mkdir_p (Filename.concat dir "2026-99");
+  let store = Dated_jsonl.open_store location in
+  let expected_count = Dated_jsonl.count_entries store in
+  let expected_values = Dated_jsonl.filter_map_recent store 2 ~f:(fun j -> Some (json_i j)) in
+  let projected = ref 0 in
+  let view = Dated_jsonl.recent_view 2 ~f:(fun j -> incr projected; Some (json_i j)) in
+  let read () = Dated_jsonl.count_and_read_recent_view view store in
+  check (pair int (list int)) "fallback matches both existing readers"
+    (expected_count, expected_values) (read ());
+  let first_projection = !projected in
+  ignore (read ());
+  check bool "a failed listing keeps no recent answer" true (!projected > first_projection)
+;;
+
 let test_recent_view_reads_like_filter_map_recent () =
   let location = temp_store "dated_jsonl_view_reads" in
   let dir = Dated_jsonl.Store.dir location in
@@ -1909,6 +1961,10 @@ let () =
         ] );
       ( "recent_view",
         [
+          test_case "joint count and recent view follow external changes" `Quick
+            test_count_and_recent_view_follow_external_changes;
+          test_case "joint count and recent preserve listing failure fallback" `Quick
+            test_count_and_recent_view_preserve_listing_failure_fallback;
           test_case "reads like filter_map_recent" `Quick
             test_recent_view_reads_like_filter_map_recent;
           test_case "keeps the answer while files hold" `Quick

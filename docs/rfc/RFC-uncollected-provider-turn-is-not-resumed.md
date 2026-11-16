@@ -5,12 +5,13 @@ status: Draft
 created: 2026-11-16
 updated: 2026-11-16
 author: claude-main
-related: []
+related: ["restart-resumes-running-chat-operations"]
 ---
 
 # RFC: 응답을 모으기 전에 끊긴 턴은 재시작 정리에서 닫는다
 
 - 관련: #52341, #42073, #47059
+- 결정(운영자, 2026-11-16): 끊긴 메시지는 이어 한다. 닫은 뒤 호출 전 체크포인트에서 새 호출로 잇는다. 두 재시작 경로를 함께 바꾸는 일은 `restart-resumes-running-chat-operations` 가 다룬다.
 - 범위:
   - agent_core: 실행 기록(journal)을 읽고, 모으기 전에 끊긴 턴이면 닫는 함수 하나.
   - masc: 기동 때 채팅 작업을 정리하는 자리(`Keeper_direct_native_continuation.journal_terminal`, `Keeper_chat_operation_store.settle_running_without_executor_with_journal_terminal`).
@@ -138,7 +139,7 @@ val retire_uncollected_turn :
 
 `Pipeline_execution_resume.resolve` 는 바꾸지 않는다. 기동 정리가 이 모양을 먼저 닫으므로, `Agent.run` 에서 같은 모양을 만나면 기동 정리가 돌지 않은 것이다. `Error.Internal` 이 그대로 맞다.
 
-### 4.2 masc: 기동 정리에서 닫고 같은 종류로 끝낸다
+### 4.2 masc: 기동 정리에서 닫는다
 
 `journal_terminal` 이 terminal 을 못 찾았을 때 한 단계를 더한다.
 
@@ -146,7 +147,7 @@ val retire_uncollected_turn :
    - Owner 는 체크포인트를 쓸 때마다 이 참조를 옮긴다. 순서는 내용 보관 → Owner store commit → agent_core 진행이다(`keeper_direct_native_continuation.ml:365-376`, 460-464). store 는 `synchronous=EXTRA` 다(`keeper_chat_operation_store.ml:802-806`).
    - 그래서 턴 k 의 provider 시도가 열렸으면, 참조는 턴 k-1 의 마지막 체크포인트(`turn_count = k`)이거나 그 뒤의 것이다.
 2. `retire_uncollected_turn` 을 부른다. 지금 `journal_terminal` 이 projection 을 여는 것과 같은 runtime·디렉터리·locator 와 seed 체크포인트의 Agent 이름을 넘긴다.
-3. `Retired` 면 그 disposition 을 돌려준다. 이후는 3.4 의 「terminal 이 있으면」 경로 그대로다. 작업은 `Interrupted_by_restart` 로 닫힌다.
+3. `Retired` 면 그 disposition 을 돌려준다. 그 뒤는 `restart-resumes-running-chat-operations` §4.4 를 따른다. 호출을 내리고, `call.checkpoint` 를 continuation 으로 남겨 다시 큐에 넣는다. 다음 claim 이 그 체크포인트에서 새 native 호출을 연다.
 4. `Not_uncollected` 면 지금처럼 `None` 을 돌려주고, 작업은 다시 큐에 들어간다.
 5. 오류면 `read_execution_terminal` 로 기록을 한 번 더 읽는다.
    - 닫기는 commit 됐는데 writer 닫기가 실패했을 수 있다(`execution_lane_writer.ml:887-893`). 그때 다시 큐에 넣으면 다음 `load` 가 terminal 을 보고 `Terminal_pending` → `Turn_exception` 으로 끝난다(`keeper_turn.ml:478-479`).
@@ -170,9 +171,7 @@ val retire_uncollected_turn :
 - 열린 provider 시도가 있으면 기록은 「요청이 나갔을 수 있다」고 말한다. 턴마다 시도는 하나라서, 같은 턴에서 다시 부를 수 없다.
 - 열리기 전이면 기록에 나간 요청이 없다. 그 턴을 처음부터 하는 것이 기록과 맞다.
 
-이웃 구간처럼 이어 할지, 종료 절차처럼 끝낼지는 10 절에서 정한다. 이 RFC 는 끝내는 쪽을 고른다. 종료 절차와 결과가 같고, 같은 턴에서 provider 를 다시 부르지 않기 때문이다.
-
-메시지는 여전히 실패로 끝난다. 끊긴 메시지를 이어 할지는 두 재시작 경로를 함께 바꾸는 별도 결정이다(7 절).
+운영자는 이어 하기로 정했다(2026-11-16, 머리말의 결정). 같은 턴에서 provider 를 다시 부르지 않는 규칙은 그대로다. 닫힌 실행과 새 호출이 따로 있다. 두 재시작 경로를 함께 바꾸는 일은 `restart-resumes-running-chat-operations` 가 다룬다.
 
 ## 5. 순서와 상태
 
@@ -181,15 +180,14 @@ Keeper 하나가 채팅 작업 하나를 돌리는 동안의 틱이다.
 | 틱 | 일 | 지금 | 제안 |
 |---|---|---|---|
 | N | 턴 k 의 provider 호출 중 프로세스가 죽는다 | 작업 `running`, 턴 k·provider 시도 열림, 체크포인트 `turn_count = k` | 같음 |
-| N+1 | 기동 정리 | terminal 없음 → 다시 큐에 넣는다 | 기록을 `Cancelled`·`Retire` 로 닫고 `failed / Interrupted_by_restart` |
-| N+2 | Owner 가 작업을 집는다 | 입력을 조립하고 `Agent.run` 에서 `Error.Internal` | 집을 작업이 없다 |
-| N+3 | 작업이 끝난다 | `failed / Turn_exception` | (N+1 에서 끝남) |
-| N+4 | 다음 작업이 슬롯을 받는다 | 같음 | N+2 에 받는다 |
+| N+1 | 기동 정리 | terminal 없음 → 다시 큐에 넣는다 | 기록을 `Cancelled`·`Retire` 로 닫고, 호출 전 체크포인트를 continuation 으로 다시 큐에 넣는다 |
+| N+2 | Owner 가 작업을 집는다 | 입력을 조립하고 `Agent.run` 에서 `Error.Internal` | 체크포인트에서 새 native 호출을 연다 |
+| N+3 | 작업이 끝난다 | `failed / Turn_exception` | 새 호출의 결과로 끝난다 |
 
-- 다른 Keeper 가 그 메시지를 보냈다면 실패를 받는 시점이 당겨지고, 실패 종류가 바뀐다.
+- 다른 Keeper 가 그 메시지를 보냈다면 실패 대신 답을 받는다.
 - 기록을 닫은 뒤 행을 정리하기 전에 다시 죽으면, 다음 기동은 terminal 을 읽고 3.4 의 기존 경로로 `Interrupted_by_restart` 를 남긴다. terminal 을 먼저 읽으므로 retire 는 부르지 않는다.
-- 재시도 횟수나 시간 한도가 없다. 아무것도 다시 부르지 않기 때문이다.
-- 종료 절차를 거친 재시작은 지금과 같다.
+- 재시도 횟수나 시간 한도가 없다. 재기동 한 번에 새 호출 하나다. 연속 재기동은 `restart-resumes-running-chat-operations` §5.3 이 다룬다.
+- 종료 절차를 거친 재시작이 같은 기록을 남기게 하는 일도 `restart-resumes-running-chat-operations` 가 다룬다.
 
 ## 6. runtime 바꿈·문맥 창·계정·위임
 
@@ -209,7 +207,6 @@ Keeper 하나가 채팅 작업 하나를 돌리는 동안의 틱이다.
 - `validate_collected_counter` 를 지우지 않는다. 어긋난 기록은 그대로 막는다.
 - 오류 문구로 상태를 가르지 않는다.
 - 모은 체크포인트가 있는 `Active` 호출의 다시 잇기는 바꾸지 않는다. 그 호출이 `Agent.run` 전에 거절되는 경우(저장된 runtime·model 이 바뀜, 체크포인트 복원 실패 등)도 이 RFC 에 넣지 않는다.
-- 끊긴 메시지를 호출 전 체크포인트에서 새 native 호출로 이어 하지 않는다. 이어 하려면 종료 절차를 거친 재시작도 함께 바꿔야 같은 사건이 같은 결과가 된다.
 
 ## 8. 시험
 
@@ -225,7 +222,7 @@ agent_core(`retire_uncollected_turn`):
 - 조건 넷 중 하나를 빼면 위 시험 가운데 하나가 실패한다.
 
 masc(기동 정리):
-- `Active` 호출 + 모으기 전 기록 → 작업 `failed / Interrupted_by_restart`, 다시 큐에 들어가지 않는다.
+- `Active` 호출 + 모으기 전 기록 → 기록이 닫히고, 작업은 호출 전 체크포인트 continuation 으로 다시 큐에 들어간다. 다음 claim 이 새 native 호출을 연다.
 - `Active` 호출 + 모은 체크포인트 → 지금처럼 다시 큐에 들어간다.
 - 기록은 닫혔고 행은 `running` 인 상태로 기동 → `Interrupted_by_restart`.
 - 닫기는 commit 됐는데 retire 가 오류 → 다시 읽은 terminal 로 `Interrupted_by_restart`.
@@ -237,17 +234,13 @@ masc(기동 정리):
 |---|---|
 | L0 | 이 RFC |
 | L1 | agent_core: `retire_uncollected_turn`, 시험 |
-| L2 | masc: 기동 정리에서 부르기, 함수 이름·주석, 시험 |
+| L2 | masc: 기동 정리에서 부르기, 함수 이름·주석, 시험. 닫은 뒤의 continuation 은 `restart-resumes-running-chat-operations` L4 가 함께 한다 |
 
 ## 10. 정할 것
 
 - 닫힌 기록에 「재시작 정리에서 모으기 전이라 닫음」이라는 원인을 남길지.
   - 기록은 이미 `Event.Cancelled {reason; data}` 로 원인을 담을 수 있다(`execution_agent_scope.ml:65-70`).
   - 공개 terminal 증거는 outcome 과 recovery 만 내보내서, 종료 절차의 멈춤·운영자 중단과 같은 모양이다. 남기려면 공개 증거 타입에 필드가 하나 생긴다.
-- 끊긴 메시지를 이어 할지(4.3, 7 절).
-  - 이어 하면 이웃 구간(provider 시도 전, Tool 실행 중)과 같아진다. 종료 절차도 같이 바꿔야 같은 사건이 같은 결과가 된다.
-  - 끝내면 종료 절차와 같아진다. 이웃 구간과는 1ms 차이로 결과가 갈린다.
-  - 이어 하기로 정하면 두 재시작 경로를 함께 바꾸는 RFC 를 따로 쓴다.
 - 모은 체크포인트가 있는데 `Agent.run` 전에 거절되는 `Active` 호출(7 절)을 어떻게 끝낼지.
   - `Turn_exception` 이면 Owner 는 호출을 열어 둔다(`active_native_call_policy`, `keeper_owner.ml:957-976`). 기록이 닫히지 않았으면 다음 기동이 다시 큐에 넣는다.
   - 코드를 읽고 본 흐름이고 재현하지 않았다. 따로 재현한 뒤 정한다.

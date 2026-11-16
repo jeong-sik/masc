@@ -821,12 +821,14 @@ let test_reuse_timeout_is_not_an_empty_tool_audit () =
       Keeper_types_support.append_keeper_metrics config meta.name
         (Yojson.Safe.from_string (turn_row ["recorded-tool"]));
       Dashboard_cache.invalidate key;
-      (* Three owner timeouts with no stale value open the key's circuit. *)
+      (* Three owner timeouts with no stale value open the key's circuit. Each
+         compute outlasts its window. *)
       for _attempt = 1 to 3 do
         let timeout = Dashboard_cache.get_or_compute_with_timeout key
             ~ttl:10.0 ~clock ~timeout_sec:0.01
             (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-              raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner }))) in
+              Eio.Time.sleep clock 1.0;
+              `Null)) in
         Alcotest.(check bool) "the cache answers with its timeout envelope" true
           (Dashboard_cache.is_timeout_envelope timeout)
       done;

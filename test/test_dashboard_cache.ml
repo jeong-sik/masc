@@ -1091,7 +1091,7 @@ let test_invalidate_all_wakes_waiters () =
 (** When [get_or_compute_with_timeout] is called for a stale (but within grace)
     entry and the recomputation times out, the stale value must be preserved in
     the cache.  The caller receives the stale value immediately, and the
-    background fiber's Compute_timeout exception triggers the restore path.
+    background compute's closed window triggers the restore path.
     A subsequent cache lookup must return the stale value, not timeout-error
     JSON.  (Regression test for review P2 on PR #1314.) *)
 let test_stale_preserved_on_timeout ~clock ~sw () =
@@ -1337,6 +1337,36 @@ let test_seed_gives_way_to_a_background_failure ~clock () =
   check_origin "a compute that succeeds answers with its value"
     Dashboard_cache.Computed recovered;
   check_json "the computed tools" (`String "tools") recovered.json
+
+(* -- 15. A compute's own failure is not its window closing ----------------- *)
+
+(* #52277. A closed window used to be an exception that a compute could raise
+   too. A claimed compute that raised it at once was read as its runner giving
+   up: the claim was released, the owner looked the key up again and computed
+   again, and the first read never returned. The window now answers with a
+   value, so whatever a compute raises is its failure: the read ends with it,
+   and a failure is no timeout, so it does not open the key's circuit. *)
+let test_a_compute_that_raises_at_once_fails_the_read ~clock () =
+  Dashboard_cache.invalidate_all ();
+  let computes = Atomic.make 0 in
+  let read () =
+    Dashboard_cache.get_or_compute_with_timeout "raises-at-once" ~ttl:1.0 ~clock
+      ~timeout_sec:0.05 (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+        Atomic.incr computes;
+        failwith "the compute's own failure"))
+  in
+  (* One read past the three timeouts that open a key's circuit. *)
+  for attempt = 1 to 4 do
+    (match read () with
+     | json ->
+       Alcotest.failf "a compute that raised was answered as %s"
+         (Yojson.Safe.to_string json)
+     | exception Failure message ->
+       Alcotest.(check string) "the read ends with the compute's failure"
+         "the compute's own failure" message);
+    Alcotest.(check int) "each read runs its compute once" attempt
+      (Atomic.get computes)
+  done
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -2323,6 +2353,8 @@ let () =
             (test_expired_seed_reports_an_inline_timeout ~clock);
           test_case "a seed gives way to a background failure" `Quick
             (test_seed_gives_way_to_a_background_failure ~clock);
+          test_case "a compute that raises at once fails the read" `Quick
+            (test_a_compute_that_raises_at_once_fails_the_read ~clock);
           test_case "timeout envelope producer and recognizer agree" `Quick
             (test_timeout_envelope_recognizer ~clock);
         ] );

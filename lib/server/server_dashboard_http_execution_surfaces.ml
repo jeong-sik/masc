@@ -1871,10 +1871,10 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
   | None, None, false when requested_fixture = None && force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
     let attempt = ref None in
-    let publish_failure exn =
+    let publish_failure message =
       Option.iter
         (fun attempt ->
-          let (_ : bool) = publish_execution_attempt_failure attempt exn in
+          let (_ : bool) = publish_execution_attempt_failure_message attempt message in
           ())
         !attempt
     in
@@ -1893,7 +1893,7 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        publish_failure exn;
+        publish_failure (Printexc.to_string exn);
         raise exn
     in
     (* A refresh that finished, and published, as its window closed is the
@@ -1907,16 +1907,16 @@ let cached_dashboard_execution_http_response ~sw ~clock context =
      with
      | Ok json -> json
      | Error `Timeout ->
-       let role = Dashboard_cache.Compute_owner in
+       let kind = Dashboard_cache.Timeout_owner in
        publish_failure
-         (Dashboard_cache.Compute_timeout
-            { key = execution_default_light_cache_key; role });
+         (Dashboard_cache.timeout_envelope_message
+            ~kind ~key:execution_default_light_cache_key ~timeout_sec);
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key
          timeout_sec;
        Dashboard_cache.timeout_envelope_json
-         ~kind:(Dashboard_cache.timeout_kind_of_role role)
+         ~kind
          ~key:execution_default_light_cache_key
          ~timeout_sec)
     |> with_execution_metadata

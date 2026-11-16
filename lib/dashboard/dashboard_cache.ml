@@ -191,17 +191,43 @@ type slot =
       claim : claim option;
     }
 
+(* Whose window closed: the fiber computing the value, or one waiting on it.
+   The envelope's kind is read from this, so it is never inferred later. *)
+type compute_timeout_role =
+  | Compute_owner
+  | Compute_waiter
+
+(* How a compute ran under a window. The window answers with a value, not an
+   exception: a compute could raise any exception itself, and one that raised
+   the window's own exception was read as its runner giving up (#52277). *)
+type 'a windowed =
+  | Finished of 'a
+  | Window_closed
+
+(* What a lookup with no window ends with in place of a closed window: nothing. *)
+type no_window = |
+
 (* The caller's compute window, applied to whoever runs the compute. A bounded
    window also bounds a waiter's wait, and its length is the one a timeout
-   envelope reports. *)
-type compute_window =
-  | Unbounded
-  | Bounded of { timeout_sec : float; within : 'a. (unit -> 'a) -> 'a }
+   envelope reports. The index is what a lookup ends with when its window
+   closes: a bounded window says whose window it was, and an unbounded one
+   never closes. *)
+type _ compute_window =
+  | Unbounded : no_window compute_window
+  | Bounded : {
+      timeout_sec : float;
+      within : 'a. (unit -> 'a) -> 'a windowed;
+    } -> compute_timeout_role compute_window
 
-let within_window window f =
+let within_window : type closed a.
+    closed compute_window -> (unit -> a) -> (a, closed) result =
+  fun window f ->
   match window with
-  | Unbounded -> f ()
-  | Bounded { within; _ } -> within f
+  | Unbounded -> Ok (f ())
+  | Bounded { within; _ } ->
+    (match within f with
+     | Finished value -> Ok value
+     | Window_closed -> Error Compute_owner)
 
 let payload_of_entry entry = entry.payload
 
@@ -337,19 +363,6 @@ let stale_factor = 3.0
     normal stale_grace before retrying.  #5402 *)
 let bg_revalidate_backoff_factor = 2.0
 
-(* Whose window closed: the fiber computing the value, or one waiting on it.
-   The envelope's kind is read from this, so it is never inferred later. *)
-type compute_timeout_role =
-  | Compute_owner
-  | Compute_waiter
-
-exception Compute_timeout of { key : string; role : compute_timeout_role }
-
-let is_compute_timeout exn =
-  match exn with
-  | Compute_timeout _ -> true
-  | _ -> false
-
 (* The one shape a timed-out compute takes on the wire.
 
    Every timeout path, in this module and outside it, goes through
@@ -429,14 +442,19 @@ type unfinished_compute =
       (* the caller's window closed first *)
   | Raised  (* the compute itself failed *)
 
-let unfinished_of_exn window exn =
-  match exn, window with
-  | Compute_timeout { role; _ }, Bounded { timeout_sec; _ } ->
-    Timed_out { role; timeout_sec }
-  (* No window of this cache closed: the compute raised the timeout itself. *)
-  | Compute_timeout _, Unbounded -> Raised
-  | Eio.Cancel.Cancelled _, (Bounded _ | Unbounded) -> Gave_up
-  | _, (Bounded _ | Unbounded) -> Raised
+(* A compute whose window closed first. *)
+let unfinished_of_closed : type closed.
+    closed compute_window -> closed -> unfinished_compute =
+  fun window closed ->
+  match window, closed with
+  | Bounded { timeout_sec; _ }, role -> Timed_out { role; timeout_sec }
+  | Unbounded, _ -> .
+
+(* A compute that raised. Its window, if it closed, said so with a value, so
+   nothing raised here is a closed window. *)
+let unfinished_of_exn = function
+  | Eio.Cancel.Cancelled _ -> Gave_up
+  | _ -> Raised
 
 let origin_of_cached_value = function
   | Prepared payload -> payload.origin
@@ -569,13 +587,17 @@ let inc_cache_miss () =
     A pool job that would wait on a compute whose owner's job has not started
     claims that compute and runs its own instead of holding its worker idle;
     the owner's job then returns without computing (RFC-0204 3.4 L4b). *)
-let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
+let get_or_compute_eio : type closed.
+    window:closed compute_window -> string -> ttl:float -> cached_value Pool_work.t ->
+    (entry, closed) result =
+  fun ~window key ~ttl produce ->
   let stale_grace = ttl *. stale_factor in
   let started = now () in
-  (* A runner that was cancelled or whose window closed gave up on the
-     compute; the compute itself did not fail. *)
+  (* A runner that was cancelled gave up on the compute; the compute itself
+     did not fail. A runner whose window closed says so with [Error], not an
+     exception, so nothing else a compute raises is read as giving up. *)
   let rec gave_up = function
-    | Eio.Cancel.Cancelled _ | Compute_timeout _ -> true
+    | Eio.Cancel.Cancelled _ -> true
     | Eio.Exn.Multiple exns -> List.exists (fun (exn, _) -> gave_up exn) exns
     | _ -> false
   in
@@ -594,7 +616,7 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
      later lookups recompute, as after any owner's failure. *)
   let run_claimed ~token claim run =
     match run () with
-    | payload ->
+    | Ok payload ->
       let ts = now () in
       let entry = {
         payload;
@@ -607,7 +629,11 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
           ((), SMap.add key (Ready entry) map)
         | Some (Ready _) | None | Some (Computing _) -> ((), map));
       Eio.Promise.resolve claim.settle (Published entry);
-      entry
+      Ok entry
+    | Error closed ->
+      clear_claimed ~token;
+      Eio.Promise.resolve claim.settle Released;
+      Error closed
     | exception exn ->
       let backtrace = Printexc.get_raw_backtrace () in
       clear_claimed ~token;
@@ -621,13 +647,21 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
      claimed gave up and cleared the slot, so the owner looks the key up
      again instead of failing for another request's cancellation. *)
   let own_claimed ~token claim =
+    (* The job has no window of its own: the owner's window bounds the wait. *)
     let job =
       Pool_work.wrap produce (fun body ->
         if Atomic.compare_and_set claim.holder Unclaimed Owner_job then
-          match run_claimed ~token claim body with
-          | _entry -> ()
+          match run_claimed ~token claim (fun () -> (Ok (body ()) : (cached_value, no_window) result)) with
+          | Ok _entry -> ()
           | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
           | exception _ -> ()  (* settled as [Failed]; the owner raises it below *))
+    in
+    (* An unclaimed compute is abandoned and its slot cleared. A claimed one
+       is left to whoever runs it, which publishes or clears; the owner's own
+       job is cancelled with the owner and clears as it exits. *)
+    let abandon () =
+      if Atomic.compare_and_set claim.holder Unclaimed Abandoned then
+        clear_claimed ~token
     in
     match
       within_window window (fun () ->
@@ -637,27 +671,26 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
             Eio.Promise.await claim.outcome)
           (fun () -> Eio.Promise.await claim.outcome))
     with
-    | Published entry -> `Entry entry
-    | Failed (exn, backtrace) ->
+    | Ok (Published entry) -> `Entry entry
+    | Ok (Failed (exn, backtrace)) ->
       if not (Cancel_safe.is_internal_race_cancel exn) then
         Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
       Printexc.raise_with_backtrace exn backtrace
-    | Released -> `Retry
-    | exception exn ->
-      (* The owner gave up: cancelled, or its window closed. An unclaimed
-         compute is abandoned and its slot cleared. A claimed one is left to
-         whoever runs it, which publishes or clears; the owner's own job is
-         cancelled with the owner and clears as it exits. *)
-      let backtrace = Printexc.get_raw_backtrace () in
-      (match exn, Eio.Promise.peek claim.outcome with
-       | Compute_timeout _, Some (Published entry) ->
+    | Ok Released -> `Retry
+    | Error closed ->
+      (match Eio.Promise.peek claim.outcome with
+       | Some (Published entry) ->
          (* The window closed in the round the claim was published: the
             value is ready, so it is the answer, not a timeout. *)
          `Entry entry
-       | _, (None | Some (Published _ | Failed _ | Released)) ->
-         if Atomic.compare_and_set claim.holder Unclaimed Abandoned then
-           clear_claimed ~token;
-         Printexc.raise_with_backtrace exn backtrace)
+       | None | Some (Failed _ | Released) ->
+         abandon ();
+         `Closed closed)
+    | exception exn ->
+      (* The owner was cancelled. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      abandon ();
+      Printexc.raise_with_backtrace exn backtrace
   in
   let rec try_get ~waited ~watching_token =
     let action = atomic_update table (fun map ->
@@ -677,19 +710,18 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
           | _ -> waited
         in
         let elapsed = now () -. started_at in
-        let timed_out_waiter =
+        let waiter_closed : closed option =
           match window with
-          | Bounded { timeout_sec; _ } -> waited >= timeout_sec
-          | Unbounded -> false
+          | Bounded { timeout_sec; _ } when waited >= timeout_sec -> Some Compute_waiter
+          | Bounded _ | Unbounded -> None
         in
         let watchdog_ceiling = max_wait_sec () in
-        if timed_out_waiter then
-          (`Timed_out, map)
-        else if elapsed > watchdog_ceiling || waited > watchdog_ceiling then begin
-          Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
-          (`Retry_stuck (elapsed, watchdog_ceiling), SMap.remove key map)
-        end else
-          (`Wait (token, claim), map)
+        (match waiter_closed with
+         | Some closed -> (`Timed_out closed, map)
+         | None when elapsed > watchdog_ceiling || waited > watchdog_ceiling ->
+           Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
+           (`Retry_stuck (elapsed, watchdog_ceiling), SMap.remove key map)
+         | None -> (`Wait (token, claim), map))
       | Some (Ready entry) ->
         let token = next_token () in
         (`Compute (token, None), SMap.add key (Computing { token; started_at = now (); stale = Some entry; claim = None }) map)
@@ -706,8 +738,8 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
     | `Hit entry ->
       (* PR-0.2.A: cache hit observation (no logic change). *)
       inc_cache_hit ();
-      entry
-    | `Timed_out -> raise (Compute_timeout { key; role = Compute_waiter })
+      Ok entry
+    | `Timed_out closed -> Error closed
     (* The guard claims: only the job whose CAS succeeds computes. *)
     | `Wait (token, Some claim)
       when Executor_pool_ref.in_worker_context ()
@@ -733,8 +765,25 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
          data without blocking on compute; bg recompute is incidental). *)
       inc_cache_hit ();
       let do_bg_compute () =
+        (* A refresh that published nothing puts the stale entry back, as
+           [entry_after_unfinished] says for how it ended. [retry_now]: the
+           next lookup recomputes at once instead of serving it. *)
+        let settle_unfinished ~retry_now unfinished =
+          atomic_update table (fun map ->
+            match SMap.find_opt key map with
+            | Some (Computing { token = c; _ }) when c = token ->
+              let ts = now () in
+              let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+              let expires_at = if retry_now then ts else ts +. backoff_grace in
+              let refreshed =
+                entry_after_unfinished ~key ~ts ~expires_at
+                  ~stale_until:(ts +. backoff_grace) unfinished stale_entry
+              in
+              ((), SMap.add key (Ready refreshed) map)
+            | Some (Ready _) | None | Some (Computing _) -> ((), map))
+        in
         match compute () with
-        | payload ->
+        | Ok payload ->
           let ts = now () in
           let new_entry = {
             payload;
@@ -748,6 +797,9 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
             | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
           )
+        | Error closed ->
+          (* The window logged its own closing. *)
+          settle_unfinished ~retry_now:false (unfinished_of_closed window closed)
         (* [do_bg_compute] runs inside [Eio.Fiber.fork ~sw] on the process
            root switch. Eio's [fork] hands anything escaping the body to
            [Switch.fail sw], which cancels that switch, so propagating a
@@ -759,29 +811,14 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
            runs after it, so absorbing the cancellation ends the fiber
            rather than letting it work on past its own cancellation. *)
         | exception exn -> (* cancel-guard-ok: fork body on the root switch; the handler is the fiber's last act and raising here fails that switch *)
-          (match exn with
-           | Compute_timeout _ -> ()
-           | _ when Cancel_safe.is_internal_race_cancel exn ->
-               Log.Dashboard.debug "cache bg-revalidate race-cancel for %s, scheduling early retry" key
-           | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
-          atomic_update table (fun map ->
-            match SMap.find_opt key map with
-            | Some (Computing { token = c; _ }) when c = token ->
-              let ts = now () in
-              let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              (* After race-cancel, set expires_at = ts so the next lookup
-                 immediately triggers recompute instead of returning stale. *)
-              let expires_at =
-                if Cancel_safe.is_internal_race_cancel exn then ts else ts +. backoff_grace
-              in
-              let refreshed =
-                entry_after_unfinished ~key ~ts ~expires_at
-                  ~stale_until:(ts +. backoff_grace)
-                  (unfinished_of_exn window exn) stale_entry
-              in
-              ((), SMap.add key (Ready refreshed) map)
-            | Some (Ready _) | None | Some (Computing _) -> ((), map)
-          )
+          let race_cancel = Cancel_safe.is_internal_race_cancel exn in
+          if race_cancel then
+            Log.Dashboard.debug "cache bg-revalidate race-cancel for %s, scheduling early retry" key
+          else
+            Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn);
+          (* After race-cancel, the next lookup recomputes at once instead of
+             returning stale. *)
+          settle_unfinished ~retry_now:race_cancel (unfinished_of_exn exn)
       and restore_stale_ready () =
         atomic_update table (fun map ->
           match SMap.find_opt key map with
@@ -846,18 +883,21 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
        | Eio.Cancel.Cancelled _ as e ->
          abandon_registration ();
          raise e);
-      stale_entry
+      Ok stale_entry
     | `Compute (token, Some claim) ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
       (match own_claimed ~token claim with
-       | `Entry entry -> entry
+       | `Entry entry -> Ok entry
+       | `Closed closed -> Error closed
        | `Retry ->
          (* The window is the caller's; the wait budget keeps counting too. *)
          try_get ~waited:(now () -. started) ~watching_token:None)
     | `Compute (token, None) ->
       (* PR-0.2.A: cache miss observation (this fiber must compute). *)
       inc_cache_miss ();
+      (* [Some (Ok answer)]: the compute returned, with its value or with its
+         window closed. [Some (Error exn)]: it raised. *)
       let result_ref = ref None in
       (* release_on_cancel: when the caller's switch is cancelled (HTTP
          client disconnect, [Eio.Time.with_timeout] tripping the caller
@@ -904,8 +944,31 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
          catches that regression. *)
       run_compute ();
       let ts = now () in
+      (* A compute that published nothing puts the slot's stale value back, as
+         [entry_after_unfinished] says for how it ended. A timeout or a
+         cancellation answers with that value; [otherwise] answers when there
+         is none, or when the compute raised. *)
+      let settle_unfinished unfinished ~otherwise =
+        let fallback =
+          atomic_update table (fun map ->
+            match SMap.find_opt key map with
+            | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
+                let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+                let refreshed =
+                  entry_after_unfinished ~key ~ts ~expires_at:ts
+                    ~stale_until:(ts +. backoff_grace) unfinished stale_value
+                in
+                (Some refreshed, SMap.add key (Ready refreshed) map)
+            | Some (Computing { token = c; stale = None; _ }) when c = token ->
+                (None, SMap.remove key map)
+            | Some (Ready _) | None | Some (Computing _) -> (None, map))
+        in
+        match fallback, unfinished with
+        | Some entry, (Timed_out _ | Gave_up) -> Ok entry
+        | Some _, Raised | None, (Timed_out _ | Gave_up | Raised) -> otherwise ()
+      in
       (match !result_ref with
-       | Some (Ok payload) ->
+       | Some (Ok (Ok payload)) ->
            let new_entry = {
              payload;
              expires_at = ts +. jittered_ttl ~key ttl;
@@ -918,30 +981,14 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
              | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
                ((), map)
            );
-           new_entry
+           Ok new_entry
+       | Some (Ok (Error closed)) ->
+           settle_unfinished (unfinished_of_closed window closed)
+             ~otherwise:(fun () -> Error closed)
        | Some (Error exn) ->
-           let unfinished = unfinished_of_exn window exn in
-           if not (Cancel_safe.is_internal_race_cancel exn || is_compute_timeout exn) then
+           if not (Cancel_safe.is_internal_race_cancel exn) then
              Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
-           let fallback =
-             atomic_update table (fun map ->
-               match SMap.find_opt key map with
-               | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
-                   let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                   let refreshed =
-                     entry_after_unfinished ~key ~ts ~expires_at:ts
-                       ~stale_until:(ts +. backoff_grace) unfinished stale_value
-                   in
-                   (Some refreshed, SMap.add key (Ready refreshed) map)
-               | Some (Computing { token = c; stale = None; _ }) when c = token ->
-                   (None, SMap.remove key map)
-               | Some (Ready _) | None | Some (Computing _) -> (None, map))
-           in
-           (* A timeout or a cancellation answers with the fallback; a compute
-              that raised reaches its caller. *)
-           (match fallback, unfinished with
-            | Some entry, (Timed_out _ | Gave_up) -> entry
-            | Some _, Raised | None, (Timed_out _ | Gave_up | Raised) -> raise exn)
+           settle_unfinished (unfinished_of_exn exn) ~otherwise:(fun () -> raise exn)
        | None ->
            let fallback_val = ref None in
            let fallback_payload = Prepared (payload_of_json ~origin:Timeout
@@ -962,9 +1009,9 @@ let get_or_compute_eio ?(window = Unbounded) key ~ttl produce =
              | Some (Ready _) | None | Some (Computing _) -> ((), map)
            );
            (match !fallback_val with
-            | Some entry -> entry
+            | Some entry -> Ok entry
             | None ->
-                { payload = fallback_payload; expires_at = ts +. 5.0; stale_until = ts +. 5.0 }))
+                Ok { payload = fallback_payload; expires_at = ts +. 5.0; stale_until = ts +. 5.0 }))
     | `Retry_stuck (elapsed, _ceiling) ->
       (* Pair the watchdog with an SLO-actionable signal: if this counter
          climbs sustainedly, [release_on_cancel] is not firing and the
@@ -992,12 +1039,19 @@ let get_or_compute_simple key ~ttl compute =
   | `Hit entry ->
     (* PR-0.2.A: cache hit observation. *)
     inc_cache_hit ();
-    entry
+    Ok entry
   | `Compute token ->
     (* PR-0.2.A: cache miss observation. *)
     inc_cache_miss ();
+    let release () =
+      atomic_update table (fun map ->
+        match SMap.find_opt key map with
+        | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
+        | Some (Ready _) | None | Some (Computing _) -> ((), map)
+      )
+    in
     (match compute () with
-     | payload ->
+     | Ok payload ->
        let ts_after = now () in
        let entry = {
          payload;
@@ -1010,23 +1064,25 @@ let get_or_compute_simple key ~ttl compute =
            ((), SMap.add key (Ready entry) map)
          | Some (Ready _) | None | Some (Computing _) -> ((), map)
        );
-       entry
+       Ok entry
+     | Error closed ->
+       release ();
+       Error closed
      | exception exn ->
-       atomic_update table (fun map ->
-         match SMap.find_opt key map with
-         | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
-         | Some (Ready _) | None | Some (Computing _) -> ((), map)
-       );
+       release ();
        raise exn)
 
 let get_or_compute_entry key ~ttl produce =
-  let entry =
-    if Eio_guard.is_ready () then get_or_compute_eio key ~ttl produce
+  let looked_up =
+    if Eio_guard.is_ready () then get_or_compute_eio ~window:Unbounded key ~ttl produce
     else
-      get_or_compute_simple key ~ttl (fun () -> Pool_work.submit produce)
+      get_or_compute_simple key ~ttl (fun () ->
+        (Ok (Pool_work.submit produce) : (cached_value, no_window) result))
   in
-  clear_timeout_circuit key;
-  entry
+  match looked_up with
+  | Ok entry ->
+    clear_timeout_circuit key;
+    entry
 
 let peek_entry key =
   let ts = now () in
@@ -1084,19 +1140,21 @@ let offloaded_value produce () = Pool_work.submit produce
    window closed is the answer: [Eio.Time.with_timeout] kept whichever arm
    finished first and would report a payload it already had as a timeout --
    and this timeout is not a one-off, it opens the key's circuit, so the
-   next reads answer "circuit_open" without computing at all. *)
+   next reads answer "circuit_open" without computing at all. The window
+   closing is [Window_closed], a value: whatever the compute raises
+   propagates as its own failure. *)
 let compute_under_timeout ~clock ~timeout_sec ~key f =
   match
     Watched_work.run
       ~watcher:(fun () ->
         Eio.Time.sleep clock timeout_sec;
-        Error `Timeout)
-      (fun () -> Ok (f ()))
+        Window_closed)
+      (fun () -> Finished (f ()))
   with
-  | Ok value -> value
-  | Error `Timeout ->
+  | Finished _ as finished -> finished
+  | Window_closed ->
     Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
-    raise (Compute_timeout { key; role = Compute_owner })
+    Window_closed
 ;;
 
 let get_or_compute_value_with_timeout ~preparation
@@ -1107,7 +1165,11 @@ let get_or_compute_value_with_timeout ~preparation
   else
     let produce = prepared_work ~preparation work in
     let compute = offloaded_value produce in
-    let with_timeout f = compute_under_timeout ~clock ~timeout_sec ~key f in
+    let with_timeout f =
+      match compute_under_timeout ~clock ~timeout_sec ~key f with
+      | Finished value -> Ok value
+      | Window_closed -> Error Compute_owner
+    in
     (* One window for every attempt of this lookup: a retry after a released
        claim (RFC-0204 3.4 L4b) gets what is left of it, not a fresh one. *)
     let deadline = Eio.Time.now clock +. timeout_sec in
@@ -1115,21 +1177,21 @@ let get_or_compute_value_with_timeout ~preparation
       compute_under_timeout ~clock ~key
         ~timeout_sec:(Float.max 0. (deadline -. Eio.Time.now clock)) f
     in
-    try
-      let entry =
-        if Eio_guard.is_ready () then
-          get_or_compute_eio ~window:(Bounded { timeout_sec; within }) key ~ttl produce
-        else
-          get_or_compute_simple key ~ttl (fun () -> with_timeout compute)
-      in
+    let looked_up =
+      if Eio_guard.is_ready () then
+        get_or_compute_eio ~window:(Bounded { timeout_sec; within }) key ~ttl produce
+      else
+        get_or_compute_simple key ~ttl (fun () -> with_timeout compute)
+    in
+    match looked_up with
+    | Ok entry ->
       clear_timeout_circuit key;
       payload_of_entry entry
-    with
-    | Compute_timeout { key; role } ->
-        record_timeout_circuit key;
-        Prepared (payload_of_json ~origin:Timeout
-          (timeout_envelope_json
-             ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
+    | Error role ->
+      record_timeout_circuit key;
+      Prepared (payload_of_json ~origin:Timeout
+        (timeout_envelope_json
+           ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
 
 let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
     key ~ttl ~clock ~timeout_sec work =
@@ -1141,13 +1203,15 @@ let get_or_compute_payload_with_timeout ?(preparation = Identity_only)
       (match Eio_guard.execution_context () with
        | Eio_guard.Non_eio -> force_cached_payload value
        | Eio_guard.Eio_fiber ->
-           try compute_under_timeout ~clock ~timeout_sec ~key
-             (fun () -> force_cached_payload value)
-           with Compute_timeout { key; role } ->
-             record_timeout_circuit key;
-             payload_of_json ~origin:Timeout
-               (timeout_envelope_json
-                  ~kind:(timeout_kind_of_role role) ~key ~timeout_sec))
+           (match
+              compute_under_timeout ~clock ~timeout_sec ~key
+                (fun () -> force_cached_payload value)
+            with
+            | Finished payload -> payload
+            | Window_closed ->
+              record_timeout_circuit key;
+              payload_of_json ~origin:Timeout
+                (timeout_envelope_json ~kind:Timeout_owner ~key ~timeout_sec)))
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec work =
   get_or_compute_value_with_timeout ~preparation:Cache_json
@@ -1189,9 +1253,10 @@ let within_default_compute_window ~key work =
   match Atomic.get default_clock with
   | None -> Ok (work ())
   | Some clock ->
-    (try Ok (compute_under_timeout ~clock ~timeout_sec:default_compute_timeout_sec ~key work) with
-     | Compute_timeout { key = timed_key; role } when String.equal timed_key key ->
-       Error (timeout_envelope_json ~kind:(timeout_kind_of_role role)
+    (match compute_under_timeout ~clock ~timeout_sec:default_compute_timeout_sec ~key work with
+     | Finished value -> Ok value
+     | Window_closed ->
+       Error (timeout_envelope_json ~kind:Timeout_owner
          ~key ~timeout_sec:default_compute_timeout_sec))
 
 let get_or_compute_unbounded_value ~preparation key ~ttl work =

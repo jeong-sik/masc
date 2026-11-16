@@ -15,8 +15,8 @@ let default_json ~state ~scope ~owner ~sw ~clock =
   | None ->
       let key = "operator_digest:default:" ^ Owner.cache_identity owner in
       let attempted = ref None in
-      let fail exn = Option.iter (fun attempt ->
-        ignore (Owner.publish_failure_message attempt (Printexc.to_string exn))) !attempted in
+      let fail message = Option.iter (fun attempt ->
+        ignore (Owner.publish_failure_message attempt message)) !attempted in
       let work = Pool_work.cpu ~name:__FUNCTION__ (fun () ->
         let attempt = Owner.begin_attempt owner ~origin:Default_request in
         attempted := Some attempt;
@@ -30,12 +30,13 @@ let default_json ~state ~scope ~owner ~sw ~clock =
           Dashboard_projection_read.json_with_read_diagnostics observation
         with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> fail exn; raise exn) in
+        | exn -> fail (Printexc.to_string exn); raise exn) in
       let json = Dashboard_cache.get_or_compute_with_timeout key
           ~ttl:Core_cache.standard_cache_ttl_s ~clock
           ~timeout_sec:Core_cache.dashboard_request_timeout_s work in
       if Dashboard_cache.is_timeout_envelope json then (
-        fail (Dashboard_cache.Compute_timeout {key; role = Dashboard_cache.Compute_owner});
+        fail (Dashboard_cache.timeout_envelope_message ~kind:Dashboard_cache.Timeout_owner
+          ~key ~timeout_sec:Core_cache.dashboard_request_timeout_s);
         attest_instance scope json)
       else match cached () with Some current -> current | None -> attest_instance scope json
 

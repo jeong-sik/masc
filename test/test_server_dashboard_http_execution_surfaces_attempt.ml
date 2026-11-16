@@ -27,11 +27,8 @@ let with_execution_surface f =
   Fun.protect ~finally:invalidate f
 ;;
 
-(* A failure of the kind that ends an attempt. Only its string form reaches
-   the surface, so the key inside it is not the production key under test. *)
-let a_failure_that_ends_an_attempt () =
-  Dashboard_cache.Compute_timeout
-    { key = "the attempt's key"; role = Dashboard_cache.Compute_owner }
+(* A failure that ends an attempt. Only its string form reaches the surface. *)
+let a_failure_that_ends_an_attempt () = Failure "the attempt's compute failed"
 ;;
 
 let surface () = Server_dashboard_http_cache.snapshot (Server_dashboard_http_execution_surfaces.For_testing.cache execution_test_owner)

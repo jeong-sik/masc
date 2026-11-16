@@ -84,15 +84,12 @@ val peek_payload : string -> cached_payload option
     entry. JSON-only entries return [None] until a payload reader prepares them.
     This never serializes, waits for preparation, or submits executor work. *)
 
-(** Whose window closed when a compute timed out. *)
-type compute_timeout_role =
-  | Compute_owner (** the caller's own compute exceeded its window *)
-  | Compute_waiter (** the caller was waiting on another fiber's compute *)
-
-exception Compute_timeout of { key : string; role : compute_timeout_role }
-(** Raised internally when the compute function exceeds [timeout_sec].
-    Callers of [get_or_compute_with_timeout] do not need to handle this —
-    it is caught and converted to a timeout-error JSON response. *)
+(** How a compute ran under a window: it finished, or the window closed before
+    it did. A closed window is this value, never an exception, so nothing a
+    compute raises is read as its window closing. *)
+type 'a windowed =
+  | Finished of 'a
+  | Window_closed
 
 val timeout_error_code : string
 (** The [error] value carried by every timeout envelope this module emits. *)
@@ -104,8 +101,12 @@ type timeout_kind =
   | Timeout_compute (** a computing slot yielded no result in time *)
   | Timeout_circuit_open (** repeated timeouts for the key: failing fast *)
 
-val timeout_kind_of_role : compute_timeout_role -> timeout_kind
-(** The kind an envelope reports for a {!Compute_timeout} with this role. *)
+val timeout_envelope_message
+  :  kind:timeout_kind
+  -> key:string
+  -> timeout_sec:float
+  -> string
+(** The [message] of {!timeout_envelope_json} for the same arguments. *)
 
 val timeout_envelope_json
   :  kind:timeout_kind
@@ -134,7 +135,9 @@ val get_or_compute_with_timeout :
     ({!seed_stale_if_missing}).  On timeout with no stale
     data, returns a timeout-error JSON without caching it.  Repeated no-stale
     timeouts for the same key open a short fail-fast circuit; fresh or stale
-    cache entries are still served normally. *)
+    cache entries are still served normally.  A compute that raises is no
+    timeout: its exception reaches the caller and does not count toward the
+    circuit. *)
 
 val get_or_compute_payload_with_timeout :
   ?preparation:payload_preparation ->
@@ -226,8 +229,8 @@ module For_testing : sig
     timeout_sec:float ->
     key:string ->
     (unit -> 'a) ->
-    'a
+    'a windowed
   (** The window one cache compute runs under: a compute that finished as the
-      window closed is the answer; the window raises [Compute_timeout] only
-      when the compute has not finished. *)
+      window closed is the answer; the window answers [Window_closed] only
+      when the compute has not finished. What the compute raises propagates. *)
 end

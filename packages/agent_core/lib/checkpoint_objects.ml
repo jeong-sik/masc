@@ -1,4 +1,5 @@
 let ( let* ) = Result.bind
+let ( let+ ) result f = Result.map f result
 
 (* ── Digests and the hash chain ─────────────────────────── *)
 
@@ -984,7 +985,7 @@ let bundle_header_entry = function
 
 (* The bundle's messages as entries, every slice checked against the header,
    each message decoded from its own bytes. *)
-let bundle_entries ~bundle bytes =
+let bundle_entries_with ~decode_slice ~bundle bytes =
   let invalid detail = Bundle_invalid { bundle; detail } in
   match String.index_opt bytes '\n' with
   | None -> Error (invalid "no header line")
@@ -1017,11 +1018,26 @@ let bundle_entries ~bundle bytes =
           if not (String.equal actual digest)
           then Error (invalid (Printf.sprintf "message at byte %d has digest %s, header names %s" offset actual digest))
           else (
-            let message_bytes = String.sub bytes offset length in
-            let* decoded = decode_message ~digest message_bytes in
-            slices (offset + length + 1) ({ bytes = message_bytes; digest; decoded } :: rev) rest))
+            let* entry = decode_slice ~digest bytes ~off:offset ~len:length in
+            slices (offset + length + 1) (entry :: rev) rest))
     in
     slices (newline + 1) [] header
+;;
+
+let bundle_entries ~bundle bytes =
+  bundle_entries_with ~bundle bytes ~decode_slice:(fun ~digest bytes ~off ~len ->
+    let bytes = String.sub bytes off len in
+    let+ decoded = decode_message ~digest bytes in
+    { bytes; digest; decoded })
+;;
+
+let bundle_messages ~bundle bytes =
+  bundle_entries_with ~bundle bytes ~decode_slice:(fun ~digest bytes ~off ~len ->
+    let+ decoded =
+      Checkpoint_codec.decode_written_slice ~decode:Checkpoint_codec.message_of_json bytes ~off ~len
+      |> Result.map_error (fun error -> Message_invalid { digest; detail = Error.to_string error })
+    in
+    digest, decoded)
 ;;
 
 let header_object ~read_object digest =
@@ -1087,7 +1103,7 @@ let find_last ~read_object head find =
       in_segments (Option.map (fun (segment : segment_ref) -> segment.segment) head.history.segment)))
 ;;
 
-let load memo ~read_object head =
+let load_with ~decode_open ~decode_bundle ~entry_digest ~finish_loaded ~read_object head =
   let* system_prompt = header_object ~read_object head.header_objects.system_prompt in
   let* tools = header_object ~read_object head.header_objects.tools in
   (* The segments' turns, oldest first, read from the last segment back. *)
@@ -1108,7 +1124,7 @@ let load memo ~read_object head =
     | [] -> Ok (chain, count, rev_loaded)
     | (turn : turn) :: turns ->
       let* bytes = read_checked ~read_object turn.bundle in
-      let* entries = bundle_entries ~bundle:turn.bundle bytes in
+      let* entries = decode_bundle ~bundle:turn.bundle bytes in
       let held = List.length entries in
       if held <> turn.messages
       then
@@ -1121,7 +1137,7 @@ let load memo ~read_object head =
         let chain, rev_loaded =
           List.fold_left
             (fun (chain, rev_loaded) entry ->
-               let chain = chain_step chain entry.digest in
+               let chain = chain_step chain (entry_digest entry) in
                chain, (entry, chain) :: rev_loaded)
             (chain, rev_loaded) entries
         in
@@ -1149,9 +1165,9 @@ let load memo ~read_object head =
       (fun acc digest ->
          let* chain, rev_loaded = acc in
          let* bytes = read_checked ~read_object digest in
-         let* decoded = decode_message ~digest bytes in
+         let* entry = decode_open ~digest bytes in
          let chain = chain_step chain digest in
-         Ok (chain, ({ bytes; digest; decoded }, chain) :: rev_loaded))
+         Ok (chain, (entry, chain) :: rev_loaded))
       (Ok (chain, rev_loaded))
       head.history.open_messages
   in
@@ -1163,11 +1179,27 @@ let load memo ~read_object head =
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error (Head_invalid "head.checkpoint must be an object")
   in
-  let loaded = Array.of_list (List.rev rev_loaded) in
-  let entries = Array.map fst loaded in
-  let chains = Array.make (Array.length loaded + 1) chain_start in
-  Array.iteri (fun index ((_ : entry), chain) -> chains.(index + 1) <- chain) loaded;
-  let messages = Array.map (fun (entry : entry) -> entry.decoded) entries in
-  memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains };
-  Ok { header with messages = Array.to_list messages }
+  let messages = finish_loaded rev_loaded in
+  Ok { header with messages }
+;;
+
+let load memo ~read_object head =
+  load_with ~read_object head ~decode_bundle:bundle_entries
+    ~decode_open:(fun ~digest bytes ->
+      let+ decoded = decode_message ~digest bytes in { bytes; digest; decoded })
+    ~entry_digest:(fun (entry : entry) -> entry.digest)
+    ~finish_loaded:(fun rev_loaded ->
+      let loaded = Array.of_list (List.rev rev_loaded) in
+      let entries = Array.map fst loaded in
+      let chains = Array.make (Array.length loaded + 1) chain_start in
+      Array.iteri (fun index (_, chain) -> chains.(index + 1) <- chain) loaded;
+      let messages = Array.map (fun (entry : entry) -> entry.decoded) entries in
+      memo.last <- Some { last_messages = messages; last_entries = entries; last_chains = chains };
+      Array.to_list messages)
+;;
+
+let load_read_only ~read_object head =
+  load_with ~read_object head ~decode_bundle:bundle_messages
+    ~decode_open:(fun ~digest bytes -> let+ message = decode_message ~digest bytes in digest, message)
+    ~entry_digest:fst ~finish_loaded:(List.rev_map (fun ((_, message), _) -> message))
 ;;

@@ -791,6 +791,29 @@ let decode_written_bytes ~decode bytes =
          (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
 ;;
 
+(* Match [Lexing.from_string] over one slice without first copying the
+   slice to a string. The empty lexer already has its final-input state;
+   install only this slice's owned buffer and its length. No bundle is
+   borrowed, and error offsets are relative to the message as before. *)
+let decode_written_slice ~decode bytes ~off ~len =
+  let lexbuf = Lexing.from_string "" in
+  let buffer = Bytes.create len in
+  String.blit bytes off buffer 0 len;
+  lexbuf.lex_buffer <- buffer;
+  lexbuf.lex_buffer_len <- len;
+  try
+    let json =
+      try Yojson.Safe.from_lexbuf (Yojson.init_lexer ()) ~stream:false lexbuf with
+      | Yojson.End_of_input -> raise (Yojson.Json_error "Blank input data")
+    in
+    decode json
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) | Yojson.Json_error msg | Failure msg ->
+    Error
+      (Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json: %s" msg }))
+;;
+
 (* The passes [checkpoint_json_result] runs over the whole checkpoint,
    restricted to one message: encode, [Execution_json.validate] and a decode.
    Neither reads past the message's own subtree ([Execution_json.validate]

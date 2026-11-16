@@ -1126,6 +1126,7 @@ let completion_wake_fields (operation : Keeper_owner.Chat_operation.t) =
      | Keeper_continuation_channel.Slack _
      | Keeper_continuation_channel.Telegram _
      | Keeper_continuation_channel.Imessage _
+     | Keeper_continuation_channel.Gate _
      | Keeper_continuation_channel.Unrouted _ -> [])
 ;;
 

@@ -590,7 +590,7 @@ let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
       (contains message "without a terminal event")
   | _ -> fail "a closed bus must settle exactly once with an error"
 
-let test_adapter_empty_terminal_is_error () =
+let test_adapter_empty_terminal_settles_ok () =
   let sends = ref 0 in
   let outcomes =
     run_adapter
@@ -603,11 +603,59 @@ let test_adapter_empty_terminal_is_error () =
         Ok ())
   in
   check int "empty terminal makes no Slack call" 0 !sends;
-  match outcomes with
-  | [ Error (Masc.Keeper_chat_slack.Other message) ] ->
-    check bool "empty terminal failure is explicit" true
-      (contains message "no text or blocks")
-  | _ -> fail "empty terminal must settle exactly once with an error"
+  check bool "empty terminal settles Ok ()" true (outcomes = [ Ok () ])
+
+let test_runtime_attempt_discards_failed_attempt_blocks_and_run_started_cleans_stream () =
+  let deleted = ref [] in
+  let sent_blocks = ref [] in
+  let outcomes =
+    run_adapter
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "slack-stale-draft")
+        ; edit_stream = (fun ~message_id:_ ~content:_ -> Ok ())
+        ; edit_blocks =
+            (fun ~message_id:_ ~content ~blocks ->
+              sent_blocks := (content, blocks) :: !sent_blocks;
+              Ok ())
+        ; delete_stream =
+            (fun ~message_id ->
+              deleted := message_id :: !deleted;
+              Ok ())
+        }
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-prior"; thread_id = "thread-prior" }
+      ; Masc.Keeper_chat_events.Text_delta
+          { text = "abandoned "; response = Unobserved_scope None }
+      ; Masc.Keeper_chat_events.Run_started
+          { run_id = "run-current"; thread_id = "thread-current" }
+      ; Masc.Keeper_chat_events.Link_block
+          { url = "https://stale.example.com"
+          ; title = "stale-link"
+          ; description = None
+          ; image = None
+          }
+      ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+          { runtime_id = Some "failover-runtime"; attempt_index = Some 1 }
+      ; Masc.Keeper_chat_events.Text_delta
+          { text = "clean failover"; response = Unobserved_scope None }
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-current" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "final reply uses block delivery")
+      ~send_blocks:(fun ~content ~blocks ->
+        sent_blocks := (content, blocks) :: !sent_blocks;
+        Ok ())
+  in
+  check bool "failover run settles Ok ()" true (outcomes = [ Ok () ]);
+  check (list string) "Run_started deletes prior live stream draft"
+    [ "slack-stale-draft" ] (List.rev !deleted);
+  match List.rev !sent_blocks with
+  | [ (content, blocks) ] ->
+    check string "failover text delivered" "clean failover" content;
+    check bool "failed attempt blocks do not leak into failover message" false
+      (List.exists
+         (fun block -> contains (json_string block) "stale.example.com")
+         blocks)
+  | _ -> fail "expected exactly one final block delivery"
 
 let test_completed_external_effect_settles_without_duplicate_send () =
   let sends = ref 0 in
@@ -1047,8 +1095,10 @@ let () =
             test_protocol_diagnostic_cannot_mask_final_failure
         ; test_case "private errors never reach channel" `Quick
             test_private_errors_never_reach_channel
-        ; test_case "empty terminal is explicit failure" `Quick
-            test_adapter_empty_terminal_is_error
+        ; test_case "empty terminal settles Ok ()" `Quick
+            test_adapter_empty_terminal_settles_ok
+        ; test_case "runtime retry drops failed blocks and Run_started cleans live draft" `Quick
+            test_runtime_attempt_discards_failed_attempt_blocks_and_run_started_cleans_stream
         ; test_case "completed effect sends no duplicate reply" `Quick
             test_completed_external_effect_settles_without_duplicate_send
         ; test_case "completed effect deletes streamed draft" `Quick

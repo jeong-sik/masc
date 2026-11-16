@@ -1103,11 +1103,63 @@ let test_sandbox_reads_share_a_single_worker_without_waiting_for_each_other () =
           check string "slow read still settles" "slow"
             (Eio.Time.with_timeout_exn clock 5. (fun () -> Eio.Promise.await slow))))))
 
+let test_gate_message_http_status_codes () =
+  let make_outbound status_opt : Channel_gate.outbound_message =
+    { keeper_name = "luna"
+    ; content = "accepted"
+    ; structured = None
+    ; turn_stats = None
+    ; message_request =
+        Option.map
+          (fun status ->
+             { Gate_protocol.request_id = "op-1"
+             ; destination_type = "keeper"
+             ; destination_id = "luna"
+             ; channel = "discord"
+             ; actor_id = Some "user-1"
+             ; status
+             ; modalities = [ "text" ]
+             ; transport = Some "discord"
+             ; metadata = []
+             })
+          status_opt
+    }
+  in
+  check int "queued inbound turn answers 202 Accepted" 202
+    (Routes.Sandbox_read_for_testing.http_status_code_of_outbound
+       (make_outbound (Some Gate_protocol.Queued)));
+  check int "running inbound turn answers 202 Accepted" 202
+    (Routes.Sandbox_read_for_testing.http_status_code_of_outbound
+       (make_outbound (Some Gate_protocol.Running)));
+  check int "accepted inbound turn answers 202 Accepted" 202
+    (Routes.Sandbox_read_for_testing.http_status_code_of_outbound
+       (make_outbound (Some Gate_protocol.Accepted)));
+  check int "completed turn answers 200 OK" 200
+    (Routes.Sandbox_read_for_testing.http_status_code_of_outbound
+       (make_outbound (Some Gate_protocol.Done)));
+  check int "synchronous reply without message_request answers 200 OK" 200
+    (Routes.Sandbox_read_for_testing.http_status_code_of_outbound
+       (make_outbound None));
+  check int "validation error answers 400 Bad Request" 400
+    (Routes.Sandbox_read_for_testing.http_status_code_of_gate_error
+       (Channel_gate.Validation Channel_gate.Empty_channel_user_id));
+  check int "enqueue/keeper error answers 502 Bad Gateway" 502
+    (Routes.Sandbox_read_for_testing.http_status_code_of_gate_error
+       (Channel_gate.Keeper_error "store rejected"));
+  check int "unavailable owner answers 503 Service Unavailable" 503
+    (Routes.Sandbox_read_for_testing.http_status_code_of_gate_error
+       Channel_gate.Dispatch_unavailable);
+  check int "internal error answers 500 Internal Server Error" 500
+    (Routes.Sandbox_read_for_testing.http_status_code_of_gate_error
+       (Channel_gate.Internal "boom"))
+
 let () =
   run "channel_gate_connector_routes"
     [
       ( "keeper_status_route_http_contract",
         [
+          test_case "gate/message HTTP status mapping (202 vs 4xx/5xx)" `Quick
+            test_gate_message_http_status_codes;
           test_case "error_json wire shape" `Quick
             test_error_json_wire_shape;
           test_case "unknown keeper error includes name" `Quick

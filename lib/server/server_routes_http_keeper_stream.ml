@@ -216,7 +216,7 @@ let has_connector_context (payload : keeper_chat_stream_request) =
   payload.channel <> "" && payload.channel_workspace_id <> ""
 
 let has_external_speaker (payload : keeper_chat_stream_request) =
-  has_connector_context payload && payload.channel_user_id <> ""
+  String.trim payload.channel_user_id <> ""
 
 let gate_address_of_request payload =
   let field key value =
@@ -275,7 +275,9 @@ let input_speaker_of_request payload =
     if has_external_speaker payload then
       Keeper_input_speaker.Person
         (Keeper_input_speaker.External
-           { Keeper_input_speaker.channel = payload.channel
+           { Keeper_input_speaker.channel =
+               (let ch = String.trim payload.channel in
+                if ch = "" then "gate" else ch)
            ; user_id = Some payload.channel_user_id
            ; user_name =
                (let name = String.trim payload.channel_user_name in
@@ -2666,7 +2668,8 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                        settle_delivery (Error (Printexc.to_string exn))))
             in
             (match operation_payload.source.continuation_channel with
-             | Keeper_continuation_channel.Dashboard _ ->
+             | Keeper_continuation_channel.Dashboard _
+             | Keeper_continuation_channel.Gate _ ->
                fork_adapter (fun () ->
                  let redaction =
                    Keeper_secret_redaction.snapshot

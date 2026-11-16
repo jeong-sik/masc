@@ -75,6 +75,28 @@ let http_status_of_gate_error : Channel_gate.gate_error -> Httpun.Status.t = fun
   | Dispatch_unavailable -> `Service_unavailable
   | Internal _ -> `Internal_server_error
 
+let http_status_of_outbound (out : Channel_gate.outbound_message) : Httpun.Status.t =
+  match out.message_request with
+  | Some
+      { status =
+          ( Gate_protocol.Accepted
+          | Gate_protocol.Queued
+          | Gate_protocol.Running )
+      ; _
+      } ->
+      `Accepted
+  | None
+  | Some
+      { status =
+          ( Gate_protocol.Acceptance_uncertain
+          | Gate_protocol.Done
+          | Gate_protocol.Failed
+          | Gate_protocol.Lost
+          | Gate_protocol.Cancelled )
+      ; _
+      } ->
+      `OK
+
 let metric_context_of_json json =
   let field key =
     Json_util.get_string json key
@@ -171,7 +193,8 @@ let handle_gate_message ~clock state request reqd =
     in
     match result with
     | Ok out ->
-        respond_json_value_with_cors ~status:`OK request reqd
+        let status = http_status_of_outbound out in
+        respond_json_value_with_cors ~status request reqd
           (Channel_gate.outbound_to_json out)
     | Error (gate_err, client_msg) ->
         let status = http_status_of_gate_error gate_err in
@@ -626,6 +649,10 @@ let capture_required_workspace state request =
 module Sandbox_read_for_testing = struct
   let work_kind = sandbox_read_work_kind
   let capture_workspace = capture_required_workspace
+  let http_status_code_of_outbound out =
+    Httpun.Status.to_code (http_status_of_outbound out)
+  let http_status_code_of_gate_error err =
+    Httpun.Status.to_code (http_status_of_gate_error err)
 end
 
 let with_required_workspace_read state handler request reqd =

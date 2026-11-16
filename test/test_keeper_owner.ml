@@ -5937,6 +5937,97 @@ let test_connector_submit_uses_owner_operation_idempotency () =
        | Error error -> fail (Owner_registry.command_error_to_string error))
 ;;
 
+let test_gate_dispatch_accepts_external_speaker_as_durable_operation () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       let clock = Eio.Stdenv.clock env in
+       let config = Workspace.default_config base_path in
+       ignore (Workspace.init config ~agent_name:(Some "gate-dispatch-test"));
+       let meta = make_meta "gate-dispatch-owner" in
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       (match
+          Owner_registry.install_from_store
+            ~sw
+            ~operation_runner:None
+            ~on_turn_slot_released:None
+            config
+        with
+        | Ok 1 -> ()
+        | Ok count -> failf "unexpected owner count %d" count
+        | Error error -> fail (Owner_registry.install_error_to_string error));
+       let dispatch = Gate_keeper_backend.dispatch ~clock ~config in
+       let msg : Channel_gate.inbound_message =
+         { channel = "discord"
+         ; channel_user_id = "123456789"
+         ; channel_user_name = "user#1234"
+         ; channel_workspace_id = "987654321"
+         ; keeper_name = meta.name
+         ; content = "What is the project status?"
+         ; idempotency_key = "gate-msg-1"
+         ; metadata = []
+         }
+       in
+       (match Channel_gate.handle_inbound ~dispatch msg with
+        | Error gate_err -> fail (Channel_gate.gate_error_to_string gate_err)
+        | Ok out ->
+          (match out.message_request with
+           | Some request ->
+             check string "request_id is operation id" "gate-msg-1" request.request_id;
+             check string "status is queued" "queued"
+               (Gate_protocol.message_request_status_to_string request.status)
+           | None -> fail "expected message_request on gate acceptance"));
+       let op_id = operation_id "gate-msg-1" in
+       (match Owner_registry.exact_operation ~base_path ~keeper_name:meta.name op_id with
+        | Ok (Some operation) ->
+          (match Keeper_chat_operation_payload.source_of_json operation.source with
+           | Error detail -> fail ("persisted gate source failed decode: " ^ detail)
+           | Ok source ->
+             check string "external speaker retained" "123456789" source.channel_user_id;
+             (match source.continuation_channel with
+              | Keeper_continuation_channel.Gate
+                  { channel = "discord"
+                  ; workspace_id = Some "987654321"
+                  ; conversation_id = Some "gate:discord:workspace:987654321"
+                  ; user_id = "123456789"
+                  } -> ()
+              | _ -> fail "expected Gate continuation channel"))
+        | Ok None -> fail "accepted gate operation missing from owner store"
+        | Error error -> fail (Owner_registry.command_error_to_string error));
+       let dm_msg =
+         { msg with
+           channel = ""
+         ; channel_workspace_id = ""
+         ; idempotency_key = "gate-msg-dm-1"
+         }
+       in
+       (match Channel_gate.handle_inbound ~dispatch dm_msg with
+        | Error gate_err -> fail (Channel_gate.gate_error_to_string gate_err)
+        | Ok _ -> ());
+       (match
+          Channel_gate.handle_inbound
+            ~dispatch
+            { msg with keeper_name = "missing-keeper"; idempotency_key = "gate-msg-missing" }
+        with
+        | Error Channel_gate.Dispatch_unavailable -> ()
+        | Error other -> fail ("expected Dispatch_unavailable, got " ^ Channel_gate.gate_error_to_string other)
+        | Ok _ -> fail "missing keeper must not succeed");
+       match
+         Channel_gate.handle_inbound
+           ~dispatch
+           { msg with content = "different content" }
+       with
+       | Error (Channel_gate.Keeper_error _) -> ()
+       | Error other -> fail ("expected Keeper_error, got " ^ Channel_gate.gate_error_to_string other)
+       | Ok _ -> fail "idempotency conflict must not return Reply")
+;;
+
 let test_telegram_poll_receipt_is_persisted_owner_operation () =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -7358,6 +7449,10 @@ let () =
             "connector submit is owner-idempotent"
             `Quick
             test_connector_submit_uses_owner_operation_idempotency
+        ; test_case
+            "HTTP Gate dispatch accepts external speaker"
+            `Quick
+            test_gate_dispatch_accepts_external_speaker_as_durable_operation
         ; test_case "Telegram poll receipt is a durable owner operation" `Quick test_telegram_poll_receipt_is_persisted_owner_operation
         ; test_case "Telegram claim pins Owner across cursor failure" `Quick test_telegram_claim_pins_owner_across_cursor_failure
         ; test_case

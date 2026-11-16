@@ -38,4 +38,6 @@ module Sandbox_read_for_testing : sig
   val capture_workspace :
     Mcp_server.server_state -> Httpun.Request.t ->
     (Workspace.config, Workspace.expected_workspace_error) result
+  val http_status_code_of_outbound : Channel_gate.outbound_message -> int
+  val http_status_code_of_gate_error : Channel_gate.gate_error -> int
 end

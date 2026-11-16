@@ -359,6 +359,141 @@ let test_assistant_message_persists_with_typed_surface () =
         (Option.map Masc.Surface_ref.lane_label m.Store.surface);
       check bool "no speaker on keeper output" true (m.Store.speaker = None))
 
+let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
+  let base_path = Filename.temp_dir "surface-post-replay-coords-" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Channel_gate_discord_state.unregister_thread ~thread_id:"discord-thread-9";
+      Channel_gate_slack_state.clear_workspace_id ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+       Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+       @@ fun () ->
+       Eio_main.run @@ fun env ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "replay-coords-test"));
+       let meta =
+         match
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc
+                [ "name", `String "replay-keeper"
+                ; "always_allow", `Bool true
+                ])
+         with
+         | Ok meta -> meta
+         | Error detail -> fail detail
+       in
+       let discord_cont =
+         Keeper_continuation_channel.discord
+           ~guild_id:(Some "guild-42")
+           ~channel_id:"discord-thread-9"
+           ~parent_channel_id:(Some "discord-parent-3")
+           ~thread_id:(Some "discord-thread-9")
+           ~user_id:"100001"
+           ()
+         |> Result.get_ok
+       in
+       let discord_replay =
+         Masc.Keeper_tool_in_process_runtime.Replay_discord_post
+           { input =
+               `Assoc
+                 [ "connector", `String "discord"
+                 ; "channel_id", `String "discord-thread-9"
+                 ; "content", `String "reply in discord thread"
+                 ; "mention_user_ids", `List []
+                 ]
+           ; channel_id = "discord-thread-9"
+           ; content = "reply in discord thread"
+           ; mention_user_ids = []
+           }
+       in
+       let discord_result =
+         Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
+           ~config
+           ~meta
+           ~continuation_channel:discord_cont
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ->
+             Ok "discord-msg-1")
+           discord_replay
+       in
+       check bool "Discord replay completed" true
+         (discord_result.disposition = Tool_result.Completed ());
+       Channel_gate_slack_state.record_workspace_id "T-SLACK-99";
+       let slack_cont =
+         Keeper_continuation_channel.slack
+           ~team_id:(Some "T-SLACK-77")
+           ~channel_id:"C-SLACK-1"
+           ~thread_ts:(Some "1700000000.000100")
+           ~user_id:"U123ABC"
+         |> Result.get_ok
+       in
+       let slack_replay =
+         Masc.Keeper_tool_in_process_runtime.Replay_slack_post
+           { input =
+               `Assoc
+                 [ "connector", `String "slack"
+                 ; "channel_id", `String "C-SLACK-1"
+                 ; "thread_ts", `String "1700000000.000100"
+                 ; "content", `String "reply in slack thread"
+                 ; "blocks", `List []
+                 ; "mention_user_ids", `List []
+                 ]
+           ; channel_id = "C-SLACK-1"
+           ; thread_ts = Some "1700000000.000100"
+           ; content = "reply in slack thread"
+           ; blocks = []
+           ; mention_user_ids = []
+           }
+       in
+       let slack_result =
+         Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
+           ~config
+           ~meta
+           ~continuation_channel:slack_cont
+           ~slack_send:
+             (fun ~thread_ts:_ ~channel:_ ~content:_ ~blocks:_ ~mention_user_ids:_ ->
+               Ok ())
+           slack_replay
+       in
+       check bool "Slack replay completed" true
+         (slack_result.disposition = Tool_result.Completed ());
+       match Store.load ~base_dir:base_path ~keeper_name:meta.name with
+       | [ discord_row; slack_row ] ->
+         check (option string) "Discord conversation_id preserved"
+           (Some "discord:guild-42:channel:discord-thread-9")
+           discord_row.conversation_id;
+         (match discord_row.surface with
+          | Some
+              (Masc.Surface_ref.Discord
+                 { guild_id
+                 ; channel_id
+                 ; channel_name = _
+                 ; parent_channel_id
+                 ; thread_id
+                 }) ->
+            check (option string) "Discord guild_id" (Some "guild-42") guild_id;
+            check string "Discord channel_id" "discord-thread-9" channel_id;
+            check (option string) "Discord parent_channel_id"
+              (Some "discord-parent-3") parent_channel_id;
+            check (option string) "Discord thread_id"
+              (Some "discord-thread-9") thread_id
+          | _ -> fail "expected Discord surface on persisted row");
+         check (option string) "Slack conversation_id preserved"
+           (Some "slack:channel:C-SLACK-1")
+           slack_row.conversation_id;
+         (match slack_row.surface with
+          | Some
+              (Masc.Surface_ref.Slack
+                 { team_id; channel_id; channel_name = _; thread_ts }) ->
+            check (option string) "Slack team_id" (Some "T-SLACK-77") team_id;
+            check string "Slack channel_id" "C-SLACK-1" channel_id;
+            check (option string) "Slack thread_ts"
+              (Some "1700000000.000100") thread_ts
+          | _ -> fail "expected Slack surface on persisted row")
+       | rows ->
+         failf "expected 2 persisted assistant rows, got %d" (List.length rows))
+
 let test_slack_mentions_require_stable_ids () =
   let args =
     `Assoc
@@ -713,5 +848,7 @@ let () =
         [
           test_case "persists assistant line with typed surface" `Quick
             test_assistant_message_persists_with_typed_surface;
+          test_case "replay preserves Discord/Slack surface and conversation metadata" `Quick
+            test_replay_connector_post_preserves_discord_and_slack_coordinates;
         ] );
     ]

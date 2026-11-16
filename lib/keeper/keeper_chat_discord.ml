@@ -457,18 +457,10 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
             when !external_effect_completed -> Ok ()
           | (Not_requested | Unanswered (Retry_available | Retry_spent))
             when String.length delivered_text = 0 ->
-              (* Ask whether there is anything to send, which is
-                 [delivered_text] — the accumulated text plus the tool trail.
-                 Checking [acc_text] asked about a different value: a turn that
-                 only called tools has no assistant text but does have a trail,
-                 so it settled Error while the turn layer had already settled
-                 Delivered (#26406). *)
-              Error
-                (Discord_rest_client.Other
-                   { request_id = "keeper_chat_discord.final_reply"
-                   ; reason = "primary final Discord reply contained no text"
-                   ; body_bytes = 0
-                   })
+              (* A turn that finished legitimately with no text or tool trail
+                 has nothing to send; settle Ok () matching iMessage/Slack
+                 instead of marking the operation Delivery_failed. *)
+              Ok ()
           | Not_requested ->
               (* No request of this reply was sent, so Discord holds nothing
                  a nonce could return in place of this message. *)
@@ -505,6 +497,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         on_send_result (send_message ~content:("Keeper error: " ^ message));
         Keeper_chat_events.reader_gone events
     | Run_started { run_id = _; thread_id = _ } ->
+        external_effect_completed := false;
         refresh_activity ();
         (* A new run's work is its own; the previous run's trail was delivered
            with the previous run's reply. *)

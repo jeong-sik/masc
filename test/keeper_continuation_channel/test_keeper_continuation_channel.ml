@@ -31,6 +31,10 @@ let imessage_channel ~chat_identifier ~chat_guid ~user_id =
   imessage ~chat_identifier ~chat_guid ~user_id |> Result.get_ok
 ;;
 
+let gate_channel ~channel ~workspace_id ~conversation_id ~user_id =
+  gate ~channel ~workspace_id ~conversation_id ~user_id |> Result.get_ok
+;;
+
 let roundtrip ch =
   match of_yojson (to_yojson ch) with
   | Ok ch' -> assert (ch' = ch)
@@ -410,7 +414,7 @@ let test_discord_thread_parent_preserves_thread_target () =
     assert (reply_to_message_id = None);
     assert (guild_id = Some "G1");
     assert (user_id = "U1")
-  | Dashboard _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _ ->
+  | Dashboard _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _ ->
     failwith "Discord thread parent changed connector kind"
 
 (* iMessage (#24497). Before this constructor existed an iMessage-originated
@@ -456,9 +460,63 @@ let test_imessage_roundtrip_and_contract () =
       (imessage ~chat_identifier:"c" ~chat_guid:(Some " ") ~user_id:"u"))
 ;;
 
+let test_gate_roundtrip_and_contract () =
+  let with_workspace =
+    gate_channel
+      ~channel:"webhook"
+      ~workspace_id:(Some "workspace-1")
+      ~conversation_id:(Some "gate:webhook:workspace:workspace-1")
+      ~user_id:"user-1"
+  in
+  let dm_like =
+    gate_channel
+      ~channel:"cli"
+      ~workspace_id:None
+      ~conversation_id:None
+      ~user_id:"user-1"
+  in
+  let dm_other =
+    gate_channel
+      ~channel:"cli"
+      ~workspace_id:None
+      ~conversation_id:None
+      ~user_id:"user-2"
+  in
+  roundtrip with_workspace;
+  roundtrip dm_like;
+  assert (kind_label with_workspace = "gate");
+  assert (is_routable with_workspace);
+  assert (same_route with_workspace with_workspace);
+  assert (not (same_route dm_like dm_other));
+  assert (same_conversation dm_like dm_like);
+  assert (not (same_conversation dm_like dm_other));
+  let workspace_other_user =
+    gate_channel
+      ~channel:"webhook"
+      ~workspace_id:(Some "workspace-1")
+      ~conversation_id:(Some "gate:webhook:workspace:workspace-1")
+      ~user_id:"user-2"
+  in
+  assert (same_conversation with_workspace workspace_other_user);
+  assert (
+    Result.is_error
+      (gate ~channel:" " ~workspace_id:None ~conversation_id:None ~user_id:"u"));
+  assert (
+    Result.is_error
+      (gate ~channel:"webhook" ~workspace_id:None ~conversation_id:None ~user_id:" "));
+  assert (
+    Result.is_error
+      (gate
+         ~channel:"webhook"
+         ~workspace_id:(Some " ")
+         ~conversation_id:None
+         ~user_id:"u"))
+;;
+
 let () =
   test_codec_roundtrip ();
   test_imessage_roundtrip_and_contract ();
+  test_gate_roundtrip_and_contract ();
   test_unknown_kind_is_error ();
   test_missing_field_is_error ();
   test_smart_constructors_reject_blank_coordinates ();

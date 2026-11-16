@@ -1200,13 +1200,334 @@ let with_connector_post_gate_execution
     continue
 ;;
 
-let replay_connector_post_with_outcome
+let normalize_discord_continuation_channel = function
+  | Keeper_continuation_channel.Discord
+      { channel_id; parent_channel_id = None; thread_id = None; _ } as channel ->
+    (match Channel_gate_discord_state.parent_channel_of_thread ~channel_id with
+     | Some parent_channel_id ->
+       Keeper_continuation_channel.discord_thread_parent
+         channel
+         ~parent_channel_id
+     | None -> channel)
+  | ( Keeper_continuation_channel.Discord _
+    | Keeper_continuation_channel.Dashboard _
+    | Keeper_continuation_channel.Slack _
+    | Keeper_continuation_channel.Telegram _
+    | Keeper_continuation_channel.Imessage _
+    | Keeper_continuation_channel.Gate _
+    | Keeper_continuation_channel.Keeper _
+    | Keeper_continuation_channel.Unrouted _ ) as channel ->
+    channel
+;;
+
+let discord_conversation_id_for ~guild_id ~is_dm ~channel_id =
+  match guild_id with
+  | Some guild_id when String.trim guild_id <> "" ->
+    Some (Printf.sprintf "discord:%s:channel:%s" guild_id channel_id)
+  | Some _ | None ->
+    if is_dm then Some (Printf.sprintf "discord:dm:channel:%s" channel_id) else None
+;;
+
+let discord_post_chat_route
+      ~base_dir
+      ~keeper_name
+      ?continuation_channel
+      ~channel_id
+      ()
+  =
+  let continuation_channel =
+    Option.map normalize_discord_continuation_channel continuation_channel
+  in
+  let registered_parent =
+    Channel_gate_discord_state.parent_channel_of_thread ~channel_id
+  in
+  let history =
+    Keeper_chat_store.load ~base_dir ~keeper_name |> List.rev
+  in
+  let find_discord_row predicate =
+    List.find_map
+      (fun (row : Keeper_chat_store.chat_message) ->
+         match row.surface with
+         | Some
+             (Surface_ref.Discord
+                { guild_id
+                ; channel_id = row_channel_id
+                ; channel_name = _
+                ; parent_channel_id
+                ; thread_id
+                })
+           when predicate ~guild_id ~row_channel_id ~parent_channel_id ~thread_id ->
+           Some (guild_id, parent_channel_id, thread_id, row.conversation_id)
+         | Some
+             ( Surface_ref.Discord _
+             | Surface_ref.Dashboard _
+             | Surface_ref.Slack _
+             | Surface_ref.Webhook _
+             | Surface_ref.Agent
+             | Surface_ref.Broadcast
+             | Surface_ref.Gate _ )
+         | None ->
+           None)
+      history
+  in
+  let exact_row =
+    find_discord_row
+      (fun ~guild_id:_ ~row_channel_id ~parent_channel_id:_ ~thread_id:_ ->
+         String.equal row_channel_id channel_id)
+  in
+  let parent_channel_id =
+    match continuation_channel with
+    | Some
+        (Keeper_continuation_channel.Discord
+           { channel_id = cont_channel_id
+           ; parent_channel_id = Some _ as cont_parent
+           ; _
+           })
+      when String.equal cont_channel_id channel_id ->
+      cont_parent
+    | Some
+        ( Keeper_continuation_channel.Discord _
+        | Keeper_continuation_channel.Dashboard _
+        | Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Telegram _
+        | Keeper_continuation_channel.Imessage _
+        | Keeper_continuation_channel.Gate _
+        | Keeper_continuation_channel.Keeper _
+        | Keeper_continuation_channel.Unrouted _ )
+    | None ->
+      (match registered_parent with
+       | Some _ as parent -> parent
+       | None ->
+         (match exact_row with
+          | Some (_, (Some _ as parent), _, _) -> parent
+          | Some (_, None, _, _) | None -> None))
+  in
+  let thread_id =
+    match continuation_channel with
+    | Some
+        (Keeper_continuation_channel.Discord
+           { channel_id = cont_channel_id; thread_id = Some _ as cont_thread; _ })
+      when String.equal cont_channel_id channel_id ->
+      cont_thread
+    | Some
+        ( Keeper_continuation_channel.Discord _
+        | Keeper_continuation_channel.Dashboard _
+        | Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Telegram _
+        | Keeper_continuation_channel.Imessage _
+        | Keeper_continuation_channel.Gate _
+        | Keeper_continuation_channel.Keeper _
+        | Keeper_continuation_channel.Unrouted _ )
+    | None ->
+      (match exact_row with
+       | Some (_, _, (Some _ as row_thread), _) -> row_thread
+       | Some (_, _, None, _) | None ->
+         Option.map (fun _ -> channel_id) parent_channel_id)
+  in
+  let guild_id, conversation_id =
+    match continuation_channel with
+    | Some
+        (Keeper_continuation_channel.Discord
+           { guild_id = cont_guild; channel_id = cont_channel_id; _ })
+      when String.equal cont_channel_id channel_id ->
+      ( cont_guild
+      , discord_conversation_id_for
+          ~guild_id:cont_guild
+          ~is_dm:(Option.is_none cont_guild)
+          ~channel_id )
+    | Some
+        (Keeper_continuation_channel.Discord
+           { guild_id = Some guild as cont_guild
+           ; channel_id = cont_channel_id
+           ; parent_channel_id = cont_parent
+           ; _
+           })
+      when Option.equal String.equal parent_channel_id (Some cont_channel_id)
+           || Option.equal String.equal cont_parent (Some channel_id)
+           || (Option.is_some parent_channel_id
+               && Option.equal String.equal parent_channel_id cont_parent) ->
+      ( cont_guild
+      , Some (Printf.sprintf "discord:%s:channel:%s" guild channel_id) )
+    | Some
+        ( Keeper_continuation_channel.Discord _
+        | Keeper_continuation_channel.Dashboard _
+        | Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Telegram _
+        | Keeper_continuation_channel.Imessage _
+        | Keeper_continuation_channel.Gate _
+        | Keeper_continuation_channel.Keeper _
+        | Keeper_continuation_channel.Unrouted _ )
+    | None ->
+      (match exact_row with
+       | Some (row_guild, _, _, row_conversation) ->
+         let conversation_id =
+           match row_conversation with
+           | Some _ as cid -> cid
+           | None ->
+             discord_conversation_id_for
+               ~guild_id:row_guild
+               ~is_dm:false
+               ~channel_id
+         in
+         row_guild, conversation_id
+       | None ->
+         let parent_guild =
+           match parent_channel_id with
+           | None -> None
+           | Some parent_id ->
+             (match
+                find_discord_row
+                  (fun ~guild_id ~row_channel_id ~parent_channel_id:row_parent ~thread_id:_ ->
+                     Option.is_some guild_id
+                     && (String.equal row_channel_id parent_id
+                         || Option.equal String.equal row_parent (Some parent_id)))
+              with
+              | Some (Some guild, _, _, _) -> Some guild
+              | Some (None, _, _, _) | None -> None)
+         in
+         let resolved_guild =
+           match parent_guild with
+           | Some _ as guild -> guild
+           | None ->
+             (match Channel_gate_discord_state.current_guild_ids () with
+              | [ single_guild ] ->
+                if String.trim single_guild <> "" then Some single_guild else None
+              | [] | _ :: _ :: _ -> None)
+         in
+         ( resolved_guild
+         , discord_conversation_id_for
+             ~guild_id:resolved_guild
+             ~is_dm:false
+             ~channel_id ))
+  in
+  let surface =
+    Surface_ref.Discord
+      { guild_id
+      ; channel_id
+      (* Recalled, not fetched: the inbound path already asked and wrote the
+         answer down. Without this the pane reads [#일반] on the message that
+         arrived and an id on our own reply to it -- the same room, named
+         twice over. *)
+      ; channel_name =
+          Keeper_connector_names.recall
+            ~base_dir
+            ~connector:Channel_gate_discord_state.channel
+            ~scope:Keeper_connector_names.Channel
+            ~id:channel_id
+      ; parent_channel_id
+      ; thread_id
+      }
+  in
+  surface, conversation_id
+;;
+
+let slack_post_chat_route
+      ~base_dir
+      ~keeper_name
+      ?continuation_channel
+      ~channel_id
+      ~thread_ts
+      ()
+  =
+  let history =
+    Keeper_chat_store.load ~base_dir ~keeper_name |> List.rev
+  in
+  let exact_row =
+    List.find_map
+      (fun (row : Keeper_chat_store.chat_message) ->
+         match row.surface with
+         | Some
+             (Surface_ref.Slack
+                { team_id
+                ; channel_id = row_channel_id
+                ; channel_name = _
+                ; thread_ts = _
+                })
+           when String.equal row_channel_id channel_id ->
+           Some (team_id, row.conversation_id)
+         | Some
+             ( Surface_ref.Slack _
+             | Surface_ref.Dashboard _
+             | Surface_ref.Discord _
+             | Surface_ref.Webhook _
+             | Surface_ref.Agent
+             | Surface_ref.Broadcast
+             | Surface_ref.Gate _ )
+         | None ->
+           None)
+      history
+  in
+  let team_id =
+    match continuation_channel with
+    | Some
+        (Keeper_continuation_channel.Slack
+           { team_id = Some _ as cont_team; channel_id = cont_channel_id; _ })
+      when String.equal cont_channel_id channel_id ->
+      cont_team
+    | Some
+        ( Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Dashboard _
+        | Keeper_continuation_channel.Discord _
+        | Keeper_continuation_channel.Telegram _
+        | Keeper_continuation_channel.Imessage _
+        | Keeper_continuation_channel.Gate _
+        | Keeper_continuation_channel.Keeper _
+        | Keeper_continuation_channel.Unrouted _ )
+    | None ->
+      (match exact_row with
+       | Some ((Some _ as row_team), _) -> row_team
+       | Some (None, _) | None ->
+         (match Channel_gate_slack_state.current_workspace_id () with
+          | Some _ as ws -> ws
+          | None ->
+            (match continuation_channel with
+             | Some (Keeper_continuation_channel.Slack { team_id = Some _ as cont_team; _ }) ->
+               cont_team
+             | Some
+                 ( Keeper_continuation_channel.Slack _
+                 | Keeper_continuation_channel.Dashboard _
+                 | Keeper_continuation_channel.Discord _
+                 | Keeper_continuation_channel.Telegram _
+                 | Keeper_continuation_channel.Imessage _
+                 | Keeper_continuation_channel.Gate _
+                 | Keeper_continuation_channel.Keeper _
+                 | Keeper_continuation_channel.Unrouted _ )
+             | None -> None)))
+  in
+  let conversation_id =
+    match exact_row with
+    | Some (_, (Some _ as row_cid)) -> row_cid
+    | Some (_, None) | None -> Some (Printf.sprintf "slack:channel:%s" channel_id)
+  in
+  let surface =
+    Surface_ref.Slack
+      { team_id
+      ; channel_id
+      ; channel_name =
+          Keeper_connector_names.recall
+            ~base_dir
+            ~connector:Channel_gate_slack_state.channel
+            ~scope:Keeper_connector_names.Channel
+            ~id:channel_id
+      ; thread_ts
+      }
+  in
+  surface, conversation_id
+;;
+
+let replay_connector_post_with_senders
       ~config
       ~(meta : keeper_meta)
+      ?turn_ref
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?discord_send
+      ?slack_send
   =
+  let continuation_channel =
+    Option.map normalize_discord_continuation_channel continuation_channel
+  in
   let succeed connector ?message_id () =
     Keeper_tool_execution.success
       (Keeper_surface_post.ok_json ~surface:connector ?message_id ())
@@ -1251,7 +1572,8 @@ let replay_connector_post_with_outcome
          | Ok () ->
            match Keeper_chat_store.append_assistant_message_result
              ~base_dir:config.Workspace.base_path ~keeper_name:meta.name ~content
-             ~surface:(Keeper_native_origin_reply.surface route) () with
+             ~conversation_id:(Keeper_native_origin_reply.conversation_id route)
+             ~surface:(Keeper_native_origin_reply.surface route) ?turn_ref () with
            | Error detail -> fail_after_effect (Keeper_native_origin_reply.connector route)
                ("message sent, but local chat persistence failed: " ^ detail)
            | Ok () -> succeed (Keeper_native_origin_reply.connector route) ())
@@ -1265,10 +1587,14 @@ let replay_connector_post_with_outcome
       ~input
       ~call_summary:(connector_post_call_summary replay)
     @@ fun () ->
-    (match
-       Channel_gate_discord_state.send_message ~channel_id ~content
-         ~mention_user_ids ()
-     with
+    let send_result =
+      match discord_send with
+      | Some send -> send ~channel_id ~content ~mention_user_ids
+      | None ->
+        Channel_gate_discord_state.send_message ~channel_id ~content
+          ~mention_user_ids ()
+    in
+    (match send_result with
      | Error send_error ->
        (* Discord stays "outcome unknown": its refusals arrive as non-2xx and
           {!Discord_rest_client.Discord_api} carries Discord's own error code
@@ -1283,27 +1609,22 @@ let replay_connector_post_with_outcome
             Channel_gate_discord_state.pp_send_error
             send_error)
      | Ok message_id ->
+       let surface, conversation_id =
+         discord_post_chat_route
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name:meta.name
+           ?continuation_channel
+           ~channel_id
+           ()
+       in
        (match
           Keeper_chat_store.append_assistant_message_result
             ~base_dir:config.Workspace.base_path
             ~keeper_name:meta.name
             ~content
-            ~surface:
-              (Surface_ref.Discord
-                 { guild_id = None
-                 ; channel_id
-                   (* Recalled, not fetched: the inbound path already asked
-                      and wrote the answer down. Without this the pane reads
-                      [#일반] on the message that arrived and an id on our own
-                      reply to it -- the same room, named twice over. *)
-                 ; channel_name =
-                     Keeper_connector_names.recall
-                       ~base_dir:config.Workspace.base_path
-                       ~connector:Channel_gate_discord_state.channel
-                       ~scope:Keeper_connector_names.Channel ~id:channel_id
-                 ; parent_channel_id = None
-                 ; thread_id = None
-                 })
+            ~surface
+            ?conversation_id
+            ?turn_ref
             ()
         with
         | Error detail ->
@@ -1322,52 +1643,78 @@ let replay_connector_post_with_outcome
       ~input
       ~call_summary:(connector_post_call_summary replay)
     @@ fun () ->
-    (match slack_token_opt () with
+    let send_result_opt =
+      match slack_send with
+      | Some send ->
+        Some (send ~thread_ts ~channel:channel_id ~content ~blocks ~mention_user_ids)
+      | None ->
+        Option.map
+          (fun token ->
+             Keeper_chat_slack.send_message_with_blocks
+               ?thread_ts
+               ~token
+               ~channel:channel_id
+               ~content
+               ~blocks
+               ~mention_user_ids
+               ())
+          (slack_token_opt ())
+    in
+    (match send_result_opt with
      | None ->
        Keeper_tool_execution.failure
          ~class_:Tool_result.Runtime_failure
          ~effect_disposition:Tool_result.Proven_pre_effect
          (Keeper_surface_post.error_json "SLACK_BOT_TOKEN is unset or empty")
-     | Some token ->
+     | Some (Error send_error) ->
+       fail
+         Keeper_surface_post.slack_label
+         ~effect_disposition:(Keeper_chat_slack.effect_disposition send_error)
+         (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
+     | Some (Ok ()) ->
+       let surface, conversation_id =
+         slack_post_chat_route
+           ~base_dir:config.Workspace.base_path
+           ~keeper_name:meta.name
+           ?continuation_channel
+           ~channel_id
+           ~thread_ts
+           ()
+       in
        (match
-          Keeper_chat_slack.send_message_with_blocks
-            ?thread_ts
-            ~token
-            ~channel:channel_id
+          Keeper_chat_store.append_assistant_message_result
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
             ~content
-            ~blocks
-            ~mention_user_ids
+            ~surface
+            ?conversation_id
+            ?turn_ref
             ()
         with
-        | Error send_error ->
-          fail
+        | Error detail ->
+          fail_after_effect
             Keeper_surface_post.slack_label
-            ~effect_disposition:(Keeper_chat_slack.effect_disposition send_error)
-            (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
-        | Ok () ->
-          (match
-             Keeper_chat_store.append_assistant_message_result
-               ~base_dir:config.Workspace.base_path
-               ~keeper_name:meta.name
-               ~content
-               ~surface:
-                 (Surface_ref.Slack
-                    { team_id = None
-                    ; channel_id
-                    ; channel_name =
-                        Keeper_connector_names.recall
-                          ~base_dir:config.Workspace.base_path
-                          ~connector:Channel_gate_slack_state.channel
-                          ~scope:Keeper_connector_names.Channel ~id:channel_id
-                    ; thread_ts
-                    })
-               ()
-           with
-           | Error detail ->
-             fail_after_effect
-               Keeper_surface_post.slack_label
-               ("message sent, but local chat persistence failed: " ^ detail)
-           | Ok () -> succeed Keeper_surface_post.slack_label ())))
+            ("message sent, but local chat persistence failed: " ^ detail)
+        | Ok () -> succeed Keeper_surface_post.slack_label ()))
+;;
+
+let replay_connector_post_with_outcome
+      ~config
+      ~(meta : keeper_meta)
+      ?turn_ref
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      replay
+  =
+  replay_connector_post_with_senders
+    ~config
+    ~meta
+    ?turn_ref
+    ?continuation_channel
+    ?gate_context
+    ?gate_grant
+    replay
 ;;
 
 let handle_surface_post_with_outcome
@@ -1390,26 +1737,7 @@ let handle_surface_post_with_outcome
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
   let continuation_channel =
-    Option.map
-      (fun channel ->
-         match channel with
-         | Keeper_continuation_channel.Discord
-             { channel_id; parent_channel_id = None; thread_id = None; _ } ->
-           (match
-              Channel_gate_discord_state.parent_channel_of_thread ~channel_id
-            with
-            | Some parent_channel_id ->
-              Keeper_continuation_channel.discord_thread_parent channel
-                ~parent_channel_id
-            | None -> channel)
-         | Keeper_continuation_channel.Discord _
-         | Keeper_continuation_channel.Dashboard _
-         | Keeper_continuation_channel.Slack _
-         | Keeper_continuation_channel.Telegram _
-      | Keeper_continuation_channel.Imessage _
-         | Keeper_continuation_channel.Keeper _
-         | Keeper_continuation_channel.Unrouted _ -> channel)
-      continuation_channel
+    Option.map normalize_discord_continuation_channel continuation_channel
   in
   let redaction =
     Keeper_secret_redaction.snapshot
@@ -1523,6 +1851,7 @@ let handle_surface_post_with_outcome
          | _, Some (Keeper_continuation_channel.Dashboard _
              | Keeper_continuation_channel.Discord _ | Keeper_continuation_channel.Slack _
              | Keeper_continuation_channel.Telegram _ | Keeper_continuation_channel.Imessage _
+             | Keeper_continuation_channel.Gate _
              | Keeper_continuation_channel.Keeper _ | Keeper_continuation_channel.Unrouted _)
          | _, None -> Ok None in
        match native_reply with
@@ -1574,7 +1903,7 @@ let handle_surface_post_with_outcome
              "channel_id", `String (Keeper_native_origin_reply.channel_id route);
              "content", `String safe_content; "mention_user_ids", `List [];
              "native_route", Keeper_native_origin_reply.to_yojson route] in
-           replay_connector_post_with_outcome ~config ~meta ?continuation_channel
+           replay_connector_post_with_outcome ~config ~meta ?turn_ref ?continuation_channel
              ?gate_context ?gate_grant (Replay_native_post {input;route;content=safe_content})
            |> Keeper_tool_execution.with_surface_post_receipt target
          | Keeper_surface_post.To_dashboard ->
@@ -1608,6 +1937,7 @@ let handle_surface_post_with_outcome
       replay_connector_post_with_outcome
         ~config
         ~meta
+        ?turn_ref
         ?continuation_channel
         ?gate_context
         ?gate_grant
@@ -1634,6 +1964,7 @@ let handle_surface_post_with_outcome
       replay_connector_post_with_outcome
         ~config
         ~meta
+        ?turn_ref
         ?continuation_channel
         ?gate_context
         ?gate_grant
@@ -2276,3 +2607,24 @@ let handle_masc_keeper_with_outcome
       ()
   |> dispatch_option_to_execution ~name
 ;;
+
+module For_testing = struct
+  let replay_connector_post_with_senders
+        ~config
+        ~meta
+        ?turn_ref
+        ?continuation_channel
+        ?discord_send
+        ?slack_send
+        replay
+    =
+    replay_connector_post_with_senders
+      ~config
+      ~meta
+      ?turn_ref
+      ?continuation_channel
+      ?discord_send
+      ?slack_send
+      replay
+  ;;
+end

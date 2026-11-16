@@ -161,7 +161,7 @@ let source_integrity ~redaction ~original ~redacted =
         text_copied ~redaction (Keeper_identity.Keeper_id.to_string sender) in
     let reply_copied = match source.continuation_channel with
       | Keeper_continuation_channel.Keeper { keeper_name } -> text_copied ~redaction keeper_name
-      | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Unrouted _ -> true in
+      | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Gate _ | Unrouted _ -> true in
     if sender_copied && reply_copied && json_copied ~redaction original && original = redacted
     then Source_intact
     else Source_redacted

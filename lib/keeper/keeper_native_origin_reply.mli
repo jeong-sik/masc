@@ -10,6 +10,8 @@ val channel_id : t -> string
 (** Original conversation binding key. *)
 val destination_id : t -> string
 (** Actual send destination; iMessage self-chat may differ from the origin. *)
+val conversation_id : t -> string
+(** Canonical conversation key for persisted chat store rows. *)
 val surface : t -> Surface_ref.t
 val check_binding : keeper_name:string -> t -> (unit, string) result
 (** Fresh authoritative binding read, including on approval replay. *)

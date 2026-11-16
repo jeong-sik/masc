@@ -97,6 +97,7 @@ val connector_post_call_summary : connector_post_replay -> string option
 val replay_connector_post_with_outcome :
   config:Workspace.config ->
   meta:keeper_meta ->
+  ?turn_ref:Ids.Turn_ref.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
@@ -434,3 +435,25 @@ val handle_masc_local_runtime_with_outcome
   -> args:Yojson.Safe.t
   -> unit
   -> Keeper_tool_execution.t
+
+module For_testing : sig
+  val replay_connector_post_with_senders :
+    config:Workspace.config ->
+    meta:keeper_meta ->
+    ?turn_ref:Ids.Turn_ref.t ->
+    ?continuation_channel:Keeper_continuation_channel.t ->
+    ?discord_send:
+      (channel_id:string ->
+       content:string ->
+       mention_user_ids:string list ->
+       (string, Channel_gate_discord_state.send_error) result) ->
+    ?slack_send:
+      (thread_ts:string option ->
+       channel:string ->
+       content:string ->
+       blocks:Yojson.Safe.t list ->
+       mention_user_ids:string list ->
+       (unit, Keeper_chat_slack.error) result) ->
+    connector_post_replay ->
+    Keeper_tool_execution.t
+end

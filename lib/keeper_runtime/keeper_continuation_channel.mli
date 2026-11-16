@@ -43,6 +43,12 @@ type t = private
       chat_guid : string option;
       user_id : string;
     }
+  | Gate of {
+      channel : string;
+      workspace_id : string option;
+      conversation_id : string option;
+      user_id : string;
+    }
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
@@ -95,6 +101,16 @@ val imessage :
   user_id:string ->
   (t, string) result
 
+(** [gate] routes a generic HTTP Channel Gate inbound request ({!Surface_ref.Gate})
+    carrying an external [user_id] without conflating it with the operator's
+    Dashboard screen. *)
+val gate :
+  channel:string ->
+  workspace_id:string option ->
+  conversation_id:string option ->
+  user_id:string ->
+  (t, string) result
+
 (** [unrouted reason] is the fail-closed channel carrying a diagnostic
     [reason] explaining why no connector could be determined. It raises
     [Invalid_argument] for a blank diagnostic. Every constructor therefore
@@ -106,7 +122,7 @@ val unrouted : string -> t
 val is_routable : t -> bool
 
 (** [kind_label t] is a stable lowercase tag for metrics / observability:
-    ["dashboard"] | ["discord"] | ["slack"] | ["telegram"] | ["imessage"] | ["keeper"] | ["unrouted"]. *)
+    ["dashboard"] | ["discord"] | ["slack"] | ["telegram"] | ["imessage"] | ["gate"] | ["keeper"] | ["unrouted"]. *)
 val kind_label : t -> string
 
 (** [describe t] is a human-readable one-line summary for logs. *)

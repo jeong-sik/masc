@@ -16,13 +16,23 @@ let of_continuation ?imessage_destination = function
      | None, Some chat_guid -> Ok (Imessage {chat_identifier;chat_guid;user_id})
      | Some _, _ | None, None -> Error "iMessage continuation has no concrete reply destination")
   | Keeper_continuation_channel.Dashboard _ | Keeper_continuation_channel.Discord _
-  | Keeper_continuation_channel.Slack _ | Keeper_continuation_channel.Keeper _
+  | Keeper_continuation_channel.Slack _ | Keeper_continuation_channel.Gate _
+  | Keeper_continuation_channel.Keeper _
   | Keeper_continuation_channel.Unrouted _ -> Error "native reply requires a Telegram or iMessage continuation"
 
 let connector = function Telegram _ -> "telegram" | Imessage _ -> "imessage"
 let channel_id = function Telegram r -> Int64.to_string r.chat_id | Imessage r -> r.chat_identifier
 
 let destination_id = function Telegram r -> Int64.to_string r.chat_id | Imessage r -> r.chat_guid
+
+let conversation_id = function
+  | Telegram r ->
+    Keeper_telegram_coordinates.conversation_id
+      ~bot_user_id:r.bot_user_id
+      ~chat_id:r.chat_id
+      ~message_thread_id:r.message_thread_id
+      ~direct_messages_topic_id:r.direct_messages_topic_id
+  | Imessage r -> "imessage:chat:" ^ r.chat_identifier
 
 let to_yojson = function
   | Telegram r ->

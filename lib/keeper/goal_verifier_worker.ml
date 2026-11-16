@@ -639,7 +639,9 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
         | (View.Subdividing _ | View.Subdivided _), _ -> Ok ()
         | (View.Captured | View.Admission_wait _ | View.Dispatch_pending _ | View.Judged _
           | View.Committing _ | View.Commit_unknown _ | View.Finished _ | View.Conflicted _
-          | View.Rejected _), _ ->
+          | View.Rejected
+              {stage=_; refusal=(View.Reviewer_refused _ | View.Authority_moved _
+                                 | View.Run_ended _ | View.Owner_exited _)}), _ ->
           invalid "Goal successor parent changed during restoration"
       in
       let* child = restore_child parent successor in
@@ -659,9 +661,12 @@ let select_frontier ~automatic ~authority ~store ~installation_id ~package_id ~g
        the next scan; a raised exception does not, because the same input would
        raise again on every scan, so only an explicit request asks again; an
        original whose owner exited never produced a verdict at all. *)
-    | View.Rejected {stage=View.Execution; refusal=View.Run_ended {cause=View.Raised; _}}, [] ->
-      Ok (Some parent)
-    | View.Rejected {stage=View.Execution; refusal=(View.Run_ended _ | View.Owner_exited _)}, [] ->
+    | View.Rejected {stage=View.Execution; refusal=View.Run_ended {cause; _}}, [] ->
+      (match cause with
+       | View.Raised -> Ok (Some parent)
+       | View.Cancelled | View.Retention_failed ->
+         if not automatic then Ok (Some parent) else allocate parent)
+    | View.Rejected {stage=View.Execution; refusal=View.Owner_exited _}, [] ->
       if not automatic then Ok (Some parent) else allocate parent
     | View.Rejected {stage=View.Execution; refusal=View.Authority_moved _}, [] ->
       invalid "Goal refusal evidence does not match its refusal stage"

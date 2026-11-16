@@ -103,7 +103,7 @@ let ended_run evidence =
   match evidence with
   | `Assoc fields when not (List.mem_assoc "schema" fields) ->
     (match List.assoc_opt "cause" fields, List.assoc_opt "run" fields with
-     | Some (`String label), Some encoded_run ->
+     | Some (`String label), Some (encoded_run : Yojson.Safe.t) ->
        (match run_end_of_label label, run_of_json encoded_run with
         | Ok cause, Ok run ->
           (match List.assoc_opt "tools" fields, List.assoc_opt "observations" fields with

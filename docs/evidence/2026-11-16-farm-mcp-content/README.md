@@ -257,7 +257,7 @@ installation, Linux and full Dune/CI remain unexecuted by this suite.
 The publication handoff preserves its original 53 files for Schedule3 plus
 Document5. The separate main-checkout
 `artifacts/farm-publication-handoff-20261116-update.json` records subsequent
-documentation and owner-layer corrections with the current five refs. The packet
+documentation and owner-layer corrections with the current complete stack refs. The packet
 and update note must be read together. Fresh remote main, exact refs/PRs, semantic duplicates and REST stack
 inspection remain required before publication. The latest outbound handoff's
 transport failed and delivery is unconfirmed; this local evidence does not
@@ -278,5 +278,50 @@ current in-server blob sweep records candidates without deleting them. Neither
 observation proves recovery across a crash between blob publication and durable
 ownership, or the offline maintenance interaction. Local trace:
 `artifacts/farm-mcp-retention-audit-20261116/`. The maintained identity-tools
-40-case consumer suite is being connected to its actual implementations; no
-test result from that work is claimed here.
+40-case continuation stopped at the boundary described below. It has no
+executed test result.
+
+
+## Identity name-owner correction and compiler frontier — 2026-11-16
+
+A sixth native layer follows the original five. Its source candidate before
+this evidence update is `77ef965413357353084b6bd2d0833ddd8e5f41e3`, parent
+`f50713a3bc9c55e7d542a0928ea0c7f20a94cd4a`. Three references in two files now
+use existing defining modules: approval policy reads the validated public
+search schema's name, and GitHub credential entrypoints use the public
+Keeper name validator directly. No API, test fixture, permission rule or
+registration source changed. The full two-file independent source review
+found no additional P0/P1/P2; it does not certify every original stack layer.
+
+The two actual product implementations and the entire original 40-case test
+module compiled at that candidate. Product public CMIs are byte-identical;
+new native imports remove the policy's direct Search implementation edge and
+GitHub identity's direct Keeper_config edge. These are dependency facts, not
+execution coverage or proof that every Runtime/Slack/SSE path is gone.
+
+The first continuation passed the former policy→Search→Agent boundary, then
+stopped because the standalone runner had not generated the real SSE type
+module `Sse_event_t`. Its native graph also reached substantial lifecycle and
+Runtime configuration code. It was not broadened into a full archive or a
+fake implementation. The principal `Keeper_identity_tools.ml` implementation
+has not yet been compiled by this unit. Final test linking remains incomplete:
+**0 of the original 40 cases executed**. No subset was selected to claim a pass.
+
+Inspection also found that earlier test ML compilation overwrote a separately
+generated empty interface, producing an inferred CMI with 81 exports. The
+original complete test was recompiled with normal `-intf-suffix .ml` metadata;
+its CMI now has zero exports and is unchanged by implementation compilation.
+Earlier receipts retain that interface limitation. The final check verifies
+current interface imports and opaque native clients; historical complete
+installed-archive byte identity and final link compatibility are not claimed.
+
+Local receipts are under `artifacts/farm-mcp-identity-consumer-20261116/`:
+`candidate-frontier-1/` retains the stopped broad graph, and
+`owner-import-final-1/` retains the final bounded compile/import check.
+The latter seal is
+`2846a59cecb5c0cfd7bb15359b4bd08db84727a06ef5e48152c7661f6b27d30b`.
+Source review is in
+`artifacts/farm-policy-tool-name-20261116/independent-review-surface-2/`.
+Publication must inspect the complete current six-layer membership, not submit
+only the old five-layer packet. Publication and installed behavior remain
+unconfirmed; the original Farm requirements and scale matrix remain open.

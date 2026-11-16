@@ -161,7 +161,7 @@ and undescribed_kind ~identity_tool_index ?composition_plan_index tool_name =
      || String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
      || String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
      || String.equal tool_name Keeper_tool_composition_catalog.skill_tool_name
-     || String.equal tool_name Keeper_identity_tool_search.tool_name
+     || String.equal tool_name Tool_schemas_identity_tool_search.schema.name
   then Control
   else
     match

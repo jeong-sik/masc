@@ -270,7 +270,7 @@ let validate_existing_config_dir path =
 ;;
 
 let ensure_config_dir ~config ~keeper_name =
-  if not (Keeper_config.validate_name keeper_name)
+  if not (Keeper_config_text.validate_name keeper_name)
   then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
   else begin
     let keepers_root = Workspace.keepers_runtime_dir config in
@@ -522,7 +522,7 @@ let inspect_optional_directory path =
 ;;
 
 let existing_config_dir ~config ~keeper_name =
-  if not (Keeper_config.validate_name keeper_name)
+  if not (Keeper_config_text.validate_name keeper_name)
   then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
   else begin
     let keepers_root = Workspace.keepers_runtime_dir config in

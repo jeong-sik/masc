@@ -5685,7 +5685,7 @@ let keeper_settings_editor_available state =
   && Option.is_none (Masc_tui_types.text_input_target state ~compact_viewport:false)
   && not (state.image_open || state.msx_open || state.palette_open
     || state.answering_open || state.keeper_navigation_open || state.approval_detail_open
-    || state.link_modal_open || state.patch_modal_open || state.composer_focused)
+    || state.link_modal_open || state.composer_focused)
 
 let log_keeper_settings_read ~phase request ~outcome =
   let key = Masc_tui_fetched.request_key request.ksr_request in
@@ -7042,20 +7042,13 @@ let launch_repository_changes_load state ~mailbox ~scope =
           Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
   end
 
-let launch_repository_changes_diff_load state ~mailbox ~reader ~scope ~path =
+let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
-  let generation =
-    match reader with
-    | Repository_diff_reader ->
-        state.repository_changes_diff_generation <- state.repository_changes_diff_generation + 1;
-        state.repository_changes_diff_generation
-    | Patch_diff_reader ->
-        state.patch_modal_generation <- state.patch_modal_generation + 1;
-        state.patch_modal_generation
-  in
+  state.repository_changes_diff_generation <- state.repository_changes_diff_generation + 1;
   let request =
-    { rdr_reader = reader; rdr_scope = scope; rdr_path = path; rdr_generation = generation }
+    { rdr_scope = scope; rdr_path = path
+    ; rdr_generation = state.repository_changes_diff_generation }
   in
   let host = server_peer_host in
   let port = state.port in
@@ -7105,8 +7098,7 @@ let open_repository_change_diff state ~mailbox ~scope
   state.repository_changes_diff_hscroll <- 0;
   state.repository_changes_diff_max_width <- 0;
   state.repository_changes_diff_scroll <- 0;
-  launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
-    ~scope ~path:change.rc_path
+  launch_repository_changes_diff_load state ~mailbox ~scope ~path:change.rc_path
 
 let close_repository_changes_diff state =
   state.repository_changes_diff <- None;
@@ -7137,8 +7129,7 @@ let refresh_repository_changes state ~mailbox =
   | Some scope ->
       (match state.repository_changes_diff_path with
        | Some path ->
-           launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader
-             ~scope ~path
+           launch_repository_changes_diff_load state ~mailbox ~scope ~path
        | None ->
            launch_repository_changes_load state ~mailbox ~scope)
 
@@ -14972,7 +14963,7 @@ let resource_surface_visible state =
     | `Surface -> true
     | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
-    | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ -> false
+    | `Help | `Agenda | `Answering | `Queue _ | `Link | `Client_detail _ -> false
 
 let resource_diagram_frame state ~geometry_stable =
   match state.view, state.resource_focus, server_authority_ready state,
@@ -15660,7 +15651,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Say _ | Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
     | Show_load_errors | About | Lane_addons _ | Play_invites | Play_link _ | Play_invite _
     | Play_revoke _ | Play_invalid _ | Open_metrics | Account_login _ | Open_settings
-    | Open_diff | Open_patch_modal | Open_usage | Open_link_preview _ | Open_links_list
+    | Open_diff | Open_usage | Open_link_preview _ | Open_links_list
     | Copy_latest_reply | Set_embeds _ | Open_changes | Toggle_acting_pane
     | Show_acting_pane_tab _ | Acting_pane_tab_unknown _ | Set_acting_pane_call_order _
     | Acting_pane_call_order_unknown _ | Scroll_acting_pane _ | Acting_pane_scroll_unknown _
@@ -15695,7 +15686,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Masc_tui_command.Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
       | Show_load_errors | About
       | Lane_addons _ | Play_invites | Play_link _ | Play_invite _ | Play_revoke _ | Play_invalid _
-      | Open_metrics | Account_login _ | Open_settings | Open_diff | Open_patch_modal | Open_usage
+      | Open_metrics | Account_login _ | Open_settings | Open_diff | Open_usage
       | Open_link_preview _ | Open_links_list | Copy_latest_reply | Set_embeds _ | Open_changes
       | Toggle_acting_pane | Show_acting_pane_tab _ | Acting_pane_tab_unknown _
       | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
@@ -15833,24 +15824,6 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       state.repository_changes_return_chat <- true;
       open_repository_changes state ~mailbox
         ~scope:Tui_decode.Repository_change_project
-  | Masc_tui_command.Open_patch_modal ->
-      Masc_tui_message_input.clear state.msg_input;
-      state.patch_modal_open <- true;
-      state.patch_modal_scroll <- 0;
-      state.patch_modal_hscroll <- 0;
-      state.patch_modal_diff <- None;
-      state.patch_modal_error <- None;
-      let target_path =
-        (* This command reads the project working tree. A repository-relative
-           path from another scope cannot identify a project file. *)
-        match state.repository_changes_scope, state.repository_changes_diff_path with
-        | Some Tui_decode.Repository_change_project, Some path -> path
-        | Some (Tui_decode.Repository_change_repository _), _ | None, _
-        | Some Tui_decode.Repository_change_project, None -> "."
-      in
-      state.patch_modal_path <- Some target_path;
-      launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
-        ~scope:Tui_decode.Repository_change_project ~path:target_path
   | Masc_tui_command.Open_usage ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Metrics
@@ -19960,7 +19933,7 @@ let press_marked_target state ~mailbox (target : press_target) =
        | `Play_card _ -> Masc_tui_render.queue_below_play state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ())
        | `Surface | `Too_small _ | `Account_login _ | `Account_server _ | `Palette
        | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
-       | `Keeper_deletions | `Help | `Agenda | `Answering | `Patch | `Link
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Link
        | `Client_detail _ -> None in
       (match panel with
        | Some panel ->
@@ -21101,12 +21074,9 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     if state.repository_changes_open then
       (match state.repository_changes_scope, state.repository_changes_diff_path with
        | Some scope, Some path ->
-           launch_repository_changes_diff_load state ~mailbox ~reader:Repository_diff_reader ~scope ~path
+           launch_repository_changes_diff_load state ~mailbox ~scope ~path
        | Some scope, None -> launch_repository_changes_load state ~mailbox ~scope
        | None, _ -> ());
-    if state.patch_modal_open then Option.iter (fun path ->
-      launch_repository_changes_diff_load state ~mailbox ~reader:Patch_diff_reader
-        ~scope:Tui_decode.Repository_change_project ~path) state.patch_modal_path;
     if state.keeper_deletions_open then launch_keeper_deletions state ~mailbox ();
     (match state.browser_history with
      | Some {resume=Some resume; _} -> launch_browser_history state ~mailbox
@@ -23452,7 +23422,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Show_load_errors
        | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Open_artifacts | Masc_tui_command.Open_music | Masc_tui_command.Music_invalid_arguments
-        | Masc_tui_command.Open_diff | Masc_tui_command.Open_patch_modal
+        | Masc_tui_command.Open_diff
         | Masc_tui_command.Open_usage | Masc_tui_command.Open_changes
         | Masc_tui_command.Toggle_acting_pane
          | Masc_tui_command.Show_acting_pane_tab _
@@ -29457,38 +29427,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                Some "Git changes response belongs to a different workspace"
          | Error detail -> state.repository_changes_error <- Some detail)
   | Repository_msg (Repository_changes_diff_loaded (request, result)) ->
-      (* Each response belongs to one reader and one request incarnation, not
-         to every open pane that happens to name the same relative path. *)
-      (match request.rdr_reader with
-       | Repository_diff_reader ->
-           if state.repository_changes_open
-              && request.rdr_generation = state.repository_changes_diff_generation
-              && Option.equal repository_change_scope_equal
-                   state.repository_changes_scope (Some request.rdr_scope)
-              && Option.equal String.equal state.repository_changes_diff_path
-                   (Some request.rdr_path)
-           then
-             (match result with
-              | Ok diff ->
-                  state.repository_changes_diff <- Some (request.rdr_path, diff);
-                  state.repository_changes_diff_max_width <- git_diff_body_max_width diff;
-                  state.repository_changes_diff_hscroll <-
-                    min state.repository_changes_diff_hscroll
-                      (max 0 (state.repository_changes_diff_max_width - 1));
-                  state.repository_changes_diff_error <- None
-              | Error detail -> state.repository_changes_diff_error <- Some detail)
-       | Patch_diff_reader ->
-           if state.patch_modal_open
-              && request.rdr_generation = state.patch_modal_generation
-              && repository_change_scope_equal request.rdr_scope
-                   Tui_decode.Repository_change_project
-              && Option.equal String.equal state.patch_modal_path (Some request.rdr_path)
-           then
-             (match result with
-              | Ok diff ->
-                  state.patch_modal_diff <- Some (request.rdr_path, diff);
-                  state.patch_modal_error <- None
-              | Error detail -> state.patch_modal_error <- Some detail))
+      (* Each response belongs to one request incarnation, not to every open
+         pane that happens to name the same relative path. *)
+      if state.repository_changes_open
+         && request.rdr_generation = state.repository_changes_diff_generation
+         && Option.equal repository_change_scope_equal
+              state.repository_changes_scope (Some request.rdr_scope)
+         && Option.equal String.equal state.repository_changes_diff_path
+              (Some request.rdr_path)
+      then
+        (match result with
+         | Ok diff ->
+             state.repository_changes_diff <- Some (request.rdr_path, diff);
+             state.repository_changes_diff_max_width <- git_diff_body_max_width diff;
+             state.repository_changes_diff_hscroll <-
+               min state.repository_changes_diff_hscroll
+                 (max 0 (state.repository_changes_diff_max_width - 1));
+             state.repository_changes_diff_error <- None
+         | Error detail -> state.repository_changes_diff_error <- Some detail)
   | Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, result)) ->
       let still_current =
         generation = state.msg_file_changes_generation
@@ -30653,7 +30609,7 @@ let main
     | `Surface -> Masc_tui_approvals_model.detail_presentation state
     | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `Detail_reading _ | `Keeper_deletions | `Help | `About
-    | `Context | `Queue _ | `Agenda | `Answering | `Patch | `Link | `Client_detail _ -> None in
+    | `Context | `Queue _ | `Agenda | `Answering | `Link | `Client_detail _ -> None in
   let approval_detail_changed () =
     let shown = presented_approval_detail (!presented).reader in
     let current = current_approval_detail () in
@@ -31020,7 +30976,7 @@ let main
     | `Detail_reading reading -> keeper_peer_frame_owner state reading
     | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
-    | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
+    | `Answering | `Queue _ | `Link | `Client_detail _ | `Surface -> None
   in
   let peer_target_on_screen ~terminal_rows ~terminal_cols =
     (* Target identity uses the physical terminal geometry. The reader uses
@@ -31040,7 +30996,7 @@ let main
              then Some target else None)
     | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
     | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
-    | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
+    | `Answering | `Queue _ | `Link | `Client_detail _ | `Surface -> None
   in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
       ~drawn_detail_reading ~drawn_tools_task ~input_pending ~write ~flush reader =
@@ -31132,7 +31088,7 @@ let main
         | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
         | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
         | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
-        | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+        | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
         | Preset_detail_scroll { confirmation = None; _ } | Keeper_list_scroll _
         | Context_inspector_scroll _
@@ -31242,7 +31198,7 @@ let main
          | Some (Planning_detail_scroll _) | Some (Planning_list_page_rows _) | Some (Lane_run_detail_scroll _)
          | Some (Changes_diff_scroll _) | Some (Repository_changes_diff_scroll _)
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
-         | Some (Patch_modal_scroll (_, _)) | Some (Link_modal_scroll _)
+         | Some (Link_modal_scroll _)
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
          | Some (Keeper_list_scroll _) | Some (Context_inspector_scroll _)
          | Some (Context_inspector_response_scroll _) | Some (Queue_panel_presented _)
@@ -34459,7 +34415,7 @@ Use relative paths for resources already held in the package. -->
           | Fusion_detail_scroll _ | Runtime_detail_scroll _ | Runtime_params_scroll _
           | System_log_detail_scroll _ | Planning_confirmation_scroll _ | Planning_detail_scroll _
           | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
-          | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
+          | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
           | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _
           | Context_inspector_scroll _ | Context_inspector_response_scroll _
           | Queue_panel_presented _ | Help_presented) -> false in
@@ -34566,7 +34522,7 @@ Use relative paths for resources already held in the package. -->
                    | `Agenda | `Answering | `Help -> not command_reading
                    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
                    | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About
-                   | `Context | `Keeper_deletions | `Patch | `Link
+                   | `Context | `Keeper_deletions | `Link
                    | `Client_detail _ | `Surface -> false)
               | Some _ | None -> false)
         in
@@ -36919,7 +36875,7 @@ Use relative paths for resources already held in the package. -->
          when String.equal k toggle_browser_lane_key
               && not state.palette_open && not (modal_owns_keys state)
               && not state.answering_open
-              && not state.patch_modal_open && not state.link_modal_open
+              && not state.link_modal_open
               && Option.is_none state.ask_text_entry
               && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
               && Option.is_none (text_input_target state ~compact_viewport) ->
@@ -37221,7 +37177,7 @@ Use relative paths for resources already held in the package. -->
        | Some "S"
          when state.view=Board && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
-              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && not state.answering_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
               && (match state.board_mode with Board_read _ -> true | Board_list | Board_compose -> false) ->
            (match board_successor state with
@@ -37234,14 +37190,14 @@ Use relative paths for resources already held in the package. -->
               && not (Masc_tui_overview_tasks.is_focused state.task_focus)
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
-              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && not state.answering_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport) ->
            open_detail_reading state
              (Masc_tui_render_work.planning_summary_reading ~cols:terminal_columns state)
        | Some "v"
          when not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
-              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && not state.answering_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport)
               && ((state.view=Overview && not state.keeper_navigation_open)
                   || (state.view=Repositories && Option.is_none state.workspace_activity_repo)
@@ -37299,7 +37255,7 @@ Use relative paths for resources already held in the package. -->
        | Some ("\r" | "\n" | "enter")
          when state.view = Clients && not (modal_owns_keys state)
               && not state.palette_open && not state.answering_open
-              && not state.patch_modal_open && not state.link_modal_open
+              && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport) ->
            (match state.clients_surface with
             | None -> ()
@@ -37391,79 +37347,6 @@ Use relative paths for resources already held in the package. -->
                      launch_image_render state ~mailbox:async_messages ~notice ~title
                        ~caption ~page_url:url img_url
                  | None -> ())
-            | _ -> ())
-       | Some k when state.patch_modal_open ->
-           let close () =
-             state.patch_modal_open <- false;
-             state.patch_modal_scroll <- 0;
-             state.patch_modal_hscroll <- 0;
-             state.patch_modal_path <- None;
-             state.patch_modal_diff <- None;
-             state.patch_modal_error <- None
-           in
-           (match k with
-            | "?" -> state.help_open <- true; state.help_scroll <- 0
-            | "esc" | "q" | "Q" -> close ()
-            | "shift-left" ->
-                let limit = Masc_tui_render.patch_modal_horizontal_limit state in
-                state.patch_modal_hscroll <-
-                  max 0 (min state.patch_modal_hscroll limit - 1)
-            | "shift-right" ->
-                let limit = Masc_tui_render.patch_modal_horizontal_limit state in
-                state.patch_modal_hscroll <-
-                  min limit (max 0 state.patch_modal_hscroll + 1)
-            | "j" | "down" ->
-                state.patch_modal_scroll <- state.patch_modal_scroll + 1
-            | "k" | "up" ->
-                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - 1)
-            | "d" | "pagedown" ->
-                let _, height = Masc_tui_render.patch_modal_viewport state in
-                state.patch_modal_scroll <- state.patch_modal_scroll + height
-            | "u" | "pageup" ->
-                let _, height = Masc_tui_render.patch_modal_viewport state in
-                state.patch_modal_scroll <- max 0 (state.patch_modal_scroll - height)
-            | "g" | "home" ->
-                state.patch_modal_scroll <- 0
-            | "G" | "end" ->
-                let total_rows, height =
-                  Masc_tui_render.patch_modal_viewport state
-                in
-                state.patch_modal_scroll <- max 0 (total_rows - height)
-            | "e" | "E" ->
-                let path_opt =
-                  match state.patch_modal_path with
-                  | Some p -> Some p
-                  | None -> state.repository_changes_diff_path
-                in
-                (match path_opt with
-                 | None ->
-                     report_action state "error" "No file path associated with active patch"
-                 | Some path ->
-                     close ();
-                     match Masc_tui_editor_jump.route () with
-                     | Masc_tui_editor_jump.No_editor ->
-                         report_action state "error"
-                           (editor_jump_unset state)
-                     | Masc_tui_editor_jump.Remote_neovim { server } -> (
-                         let target =
-                           { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line = 1 }
-                         in
-                         match
-                           Masc_tui_editor_jump.send_to_neovim ~server target
-                         with
-                         | Ok () ->
-                             report_action state "system"
-                               (Printf.sprintf "opened %s in Neovim" path)
-                         | Error detail -> report_action state "error" detail)
-                     | Masc_tui_editor_jump.Terminal_handoff { editor } ->
-                         hand_off_terminal ();
-                         let command =
-                           Printf.sprintf "%s %s" editor (Filename.quote path)
-                         in
-                         let _ : Unix.process_status = Unix.system command in
-                         take_back_terminal ();
-                         report_action state "system"
-                           (Printf.sprintf "closed %s" path))
             | _ -> ())
        (* The Git-changes overlay is a modal like the agenda sheet: while
           it is open it owns every key, answering its own and swallowing
@@ -39142,7 +39025,7 @@ Use relative paths for resources already held in the package. -->
               && state.ask_answer_mode = Ask_browsing
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
-              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && not state.answering_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport) ->
            (match Masc_tui_render_approvals.answer_feedback_reading state with
             | Some reading -> open_detail_reading state reading
@@ -39151,7 +39034,7 @@ Use relative paths for resources already held in the package. -->
          when state.view = Approvals && state.approval_detail_open
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
-              && not state.answering_open && not state.patch_modal_open && not state.link_modal_open
+              && not state.answering_open && not state.link_modal_open
               && Option.is_none (text_input_target state ~compact_viewport) ->
            (match Masc_tui_approvals_model.toggle_value_reading state ~presented:(!presented).approval with
             | Masc_tui_approvals_model.Value_reading_opened | Value_reading_closed -> ()
@@ -43933,12 +43816,12 @@ Use relative paths for resources already held in the package. -->
         | `Queue _ | `Play_card _ | `Help -> true
         | `Too_small _ | `Account_login _ | `Account_server _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions
-        | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+        | `Agenda | `Answering | `Link | `Client_detail _ | `Surface -> false in
       let compact_recovery = match frame_choice with
         | `Too_small _ -> not ready_input
         | `Queue _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _ | `Lane_addons _
         | `Detail_reading _ | `About | `Context | `Keeper_deletions | `Help
-        | `Agenda | `Answering | `Patch | `Link | `Client_detail _ | `Surface -> false in
+        | `Agenda | `Answering | `Link | `Client_detail _ | `Surface -> false in
       let panel_changed = Presented.panel_presentation_changed !presented
           ~current_owner:(Masc_tui_render.panel_input_owner state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ())) in
       let defer_owned_frame = transition_input_pending && not compact_recovery
@@ -43987,7 +43870,7 @@ Use relative paths for resources already held in the package. -->
                  | Peer_no_result | Peer_result_applied -> ())
             | (`Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
               | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
-              | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _
+              | `Help | `Agenda | `Answering | `Queue _ | `Link | `Client_detail _
               | `Surface), (Some _ | None) -> ());
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
@@ -44037,7 +43920,7 @@ Use relative paths for resources already held in the package. -->
                       state.home_decision_scroll <- body.hb_first;
                       Masc_tui_frame_timing.finish_stage ~name:"home.selection" selection_started
                   | Overview, `Detail_reading _ -> ()
-                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | `Account_server _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | (`Queue _ | `Patch))))))))))))))))
+                  | (Overview, (`Palette | (`Link | (`Help | (`About | (`Play_card _ | (`Client_detail _ | (`Account_login _ | `Account_server _ | (`Keeper_deletions | (`Agenda | (`Too_small _ | (`Collab _ | (`Context | (`Lane_addons _ | (`Answering | `Queue _)))))))))))))))
                   | ((Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Fusion | (Repositories | (Code | (Changes | (Connectors | (Runtime | (Config | (Resources | (Tools | (System_logs | Keepers _))))))))))))))))))))), _) -> ());
                  let compact_recovery_notice =
                    if input_holds_incomplete_sequence input_reader then
@@ -44050,7 +43933,7 @@ Use relative paths for resources already held in the package. -->
                    | `Detail_reading reading -> Some reading
                    | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette | `Collab _
                    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
-                   | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None);
+                   | `Answering | `Queue _ | `Link | `Client_detail _ | `Surface -> None);
                  render ~home ~compact_recovery_notice state)
            in
            let terminal_rows, cols = get_terminal_size () in

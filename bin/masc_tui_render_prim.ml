@@ -172,7 +172,6 @@ let clamped_scroll_now (state : state) = function
                        card_rows = state.metrics_scroll_card_rows }
   | Approval_detail_scroll (_, viewport) ->
       Approval_detail_scroll (state.approval_detail_scroll, viewport)
-  | Patch_modal_scroll _ -> Patch_modal_scroll (state.patch_modal_scroll, state.patch_modal_hscroll)
   | Link_modal_scroll _ -> Link_modal_scroll state.link_modal_scroll
   | Play_invite_scroll (card, _) -> Play_invite_scroll (card, state.play_invite_scroll)
   | Queue_panel_presented owner -> Queue_panel_presented owner
@@ -253,8 +252,6 @@ let reader_after_wheel (reader : clamped_scroll)
         (move ~count:viewport.adv_count ~height:viewport.adv_height value, Some viewport))
   | Approval_detail_scroll (value, None) ->
       Some (Approval_detail_scroll (step value, None))
-  | Patch_modal_scroll (vertical, horizontal) ->
-      Some (Patch_modal_scroll (step vertical, horizontal))
   | Link_modal_scroll value -> Some (Link_modal_scroll (step value))
   | Play_invite_scroll (card, value) -> Some (Play_invite_scroll (card, step value))
   | Queue_panel_presented _ | Help_presented -> None

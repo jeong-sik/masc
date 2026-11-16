@@ -657,10 +657,6 @@ let context_inspector_detail_viewport =
 let render_context_inspector = Masc_tui_render_overlays.render_context_inspector
 let help_viewport = Masc_tui_render_overlays.help_viewport
 let render_palette = Masc_tui_render_overlays.render_palette
-let patch_modal_horizontal_limit =
-  Masc_tui_render_overlays.patch_modal_horizontal_limit
-let patch_modal_viewport = Masc_tui_render_overlays.patch_modal_viewport
-let render_patch_modal = Masc_tui_render_overlays.render_patch_modal
 let link_modal_viewport = Masc_tui_render_overlays.link_modal_viewport
 let render_link_preview_modal =
   Masc_tui_render_overlays.render_link_preview_modal
@@ -717,7 +713,6 @@ let frame_choice_after_play (state : state) =
       | None ->
         if state.agenda_open then `Agenda
         else if state.answering_open then `Answering
-        else if state.patch_modal_open then `Patch
         else if state.link_modal_open then `Link
         else match state.client_detail with
           | Some client -> `Client_detail client
@@ -749,7 +744,7 @@ let queue_below_play state ~terminal_rows ~terminal_cols ~now =
     | `Queue panel -> Some panel
     | `Account_login _ | `Palette | `Collab _ | `Lane_addons _ | `Detail_reading _
     | `About | `Context | `Keeper_deletions | `Help | `Agenda | `Answering
-    | `Patch | `Link | `Client_detail _ | `Surface -> None
+    | `Link | `Client_detail _ | `Surface -> None
 
 (* Input follows the same top frame as rendering. Only the inspector's visible
    row-search editor accepts text; its covered surface never owns paste. *)
@@ -766,7 +761,7 @@ let panel_input_owner (state : state) ~terminal_rows ~terminal_cols ~now =
   | `Account_server _ -> Some Presented.Account_server
   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
   | `Lane_addons _ | `Detail_reading _ | `Keeper_deletions
-  | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
+  | `Queue _ | `Link | `Client_detail _ | `Surface -> None
 
 let render ~home ~compact_recovery_notice (state : state) =
   let fusion_detail_owned =
@@ -839,8 +834,6 @@ let render ~home ~compact_recovery_notice (state : state) =
   | `Queue panel ->
     let frame, clamped = Masc_tui_render_overlays.render_queue_panel state panel in
     (frame, clamped, None, Overlay_drawn)
-  | `Patch ->
-    let frame, clamped = render_patch_modal state in (frame, clamped, None, Overlay_drawn)
   | `Link ->
     let frame, clamped = render_link_preview_modal state in (frame, clamped, None, Overlay_drawn)
   | `Client_detail client ->

@@ -1048,8 +1048,6 @@ let test_nested_read_owners_retire_without_losing_selection () =
   state.context_inspector_loading <- true;
   state.schedule_detail_id <- Some "schedule-a";
   state.schedule_wake_history_inflight <- Some "schedule-a";
-  state.patch_modal_open <- true;
-  state.patch_modal_path <- Some "lib/example.ml";
   state.resource_pending_key <- Some (Masc_tui_resource_catalog.Mcp_uri "masc://selected/resource");
   state.resource_read_owner <- Some (ref ());
   state.prompts_librarian_input_requested <- Some "librarian-input";
@@ -1067,7 +1065,6 @@ let test_nested_read_owners_retire_without_losing_selection () =
   Alcotest.(check (option string)) "context selection retained" (Some "alpha") state.context_inspector_keeper;
   Alcotest.(check (option string)) "schedule owner released" None state.schedule_wake_history_inflight;
   Alcotest.(check (option string)) "schedule selection retained" (Some "schedule-a") state.schedule_detail_id;
-  Alcotest.(check (option string)) "patch selection retained" (Some "lib/example.ml") state.patch_modal_path;
   (match state.voice_wizard with
    | Some ({vws_save=Wizard.Save_settled; _} as session) ->
        Alcotest.(check bool) "retired probe cannot populate the wizard" true

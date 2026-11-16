@@ -70,8 +70,6 @@ type t =
       (** [/settings] — open the type-aware Runtime parameters pane. *)
   | Open_diff
       (** [/diff] — open Git working-tree changes and diff for the workspace. *)
-  | Open_patch_modal
-      (** [/patch] or [/review] — open the patch review overlay. *)
   | Open_usage
       (** [/cost] — open Usage for provider quotas and Keeper usage. *)
   | Open_link_preview of string option

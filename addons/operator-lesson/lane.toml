@@ -1,9 +1,9 @@
 id = "operator-lesson"
-revision = "0.2.1"
+revision = "0.2.2"
 title = "Operator lesson"
 ui_category = "memory_judgment"
 contributions = ["derive", "act"]
-image = "masc-lane-operator-lesson:0.1.1"
+image = "masc-lane-operator-lesson:0.1.2"
 command = ["python3", "server.py", "--state", "/state"]
 
 [world.actions]

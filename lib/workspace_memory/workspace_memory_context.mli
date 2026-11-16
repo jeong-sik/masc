@@ -17,5 +17,7 @@ val collect : base_path:string -> (t, string) result
 val keepers : t -> keeper list
 (** Every discovered Keeper, in discovery order. *)
 val fingerprint : t -> string
-(** Stable identity of the captured inventory, excluding observation time. *)
+(** Compute the stable identity from the captured inventory, excluding
+    observation time. Uses only its immutable snapshots; does not reread stores.
+    Collection and HTTP observation do not compute this identity. *)
 val http_json : base_path:string -> Yojson.Safe.t

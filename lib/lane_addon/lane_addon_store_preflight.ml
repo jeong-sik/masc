@@ -769,27 +769,27 @@ let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_
              verified from. A check can then tell a parent that reads the same
              by identity, and does not decode it again for each record that
              names it. Both files are still read each time. *)
-          let decoded=Hashtbl.create 16 in
+          let read_before=Hashtbl.create 16 in
           let read_name ~scope ~name =
             let group=Lane_addon_store.digest scope in
             let path=Filename.concat root (Filename.concat Lane_addon_store.tool_request_owners_directory
               (Filename.concat group name)) in
             let* bytes=read_text path in
             match bytes with
-            | None -> Hashtbl.remove decoded path; Ok None
+            | None -> Hashtbl.remove read_before path; Ok None
             | Some bytes ->
               let same_body (record:Lane_addon_tool_request_owner.retained) =
                 match Reader.request reader ~scope:record.scope ~request_digest:record.request_digest with
                 | Ok request -> request == record.request
                 | Error _ -> false in
               let result =
-                let* record=match Hashtbl.find_opt decoded path with
+                let* record=match Hashtbl.find_opt read_before path with
                   | Some (seen,record) when String.equal seen bytes && same_body record -> Ok record
                   | Some _ | None ->
-                    Hashtbl.remove decoded path;
+                    Hashtbl.remove read_before path;
                     let* json=try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error detail -> Error detail in
                     let+ record=Reader.read reader ~directory_name:group ~file_name:name json in
-                    Hashtbl.replace decoded path (bytes,record);
+                    Hashtbl.replace read_before path (bytes,record);
                     record in
                 if record.scope=scope then Ok (Some record)
                 else Error "original parent belongs to another scope" in

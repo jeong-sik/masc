@@ -846,10 +846,10 @@ let apply_original_change ~config ~original ~judgment ~authority change =
       let detail = Masc_domain.masc_error_to_string error in
       (match error with
        | Masc_domain.Task
-           (Masc_domain.Task_error.InvalidState _ | BacklogVersionConflict _) ->
+           (Masc_domain.Task_error.InvalidState _ | BacklogVersionConflict _
+            | VerificationSuperseded _ | TransitionRejected _) ->
          Error (W.Authority_refused {error=failure; detail})
-       | Task (NotFound _ | AlreadyClaimed _ | InvalidId _
-           | TransitionRejected _ | VerificationSuperseded _)
+       | Task (NotFound _ | AlreadyClaimed _ | InvalidId _)
        | Agent _ | Auth _ | System _ ->
          Error (W.Outcome_unknown {error=failure; detail}))
 

@@ -102,11 +102,15 @@ let process ?(sw=None) config ~goal_id =
       let on_tool_result ~input result =
         tools := Verification_run_registry.observe_tool_result ~input
           ~finished_at:(Time_compat.now ()) result :: !tools in
+      let has_reason (r : AR.review_result) =
+        match r.verdict with
+        | Some (AR.Approve reason | AR.Reject reason) -> String.trim reason <> ""
+        | None -> false in
       let on_verdict result =
-        match !unknown with
-        | Some detail -> (match retain_unknown detail with
+        match has_reason result, !unknown with
+        | false, Some detail -> (match retain_unknown detail with
             | Ok () -> () | Error error -> raise (Retention_failed error))
-        | None ->
+        | false, None | true, (None | Some _) ->
           let receipt : R.receipt = {original; result; tools=List.rev !tools} in
           let saved = remember config claimed (Reply receipt) in
           reply_seen := Some saved;
@@ -120,9 +124,9 @@ let process ?(sw=None) config ~goal_id =
            ~log_warn:(fun message -> Log.Misc.warn "[goal-criterion-review] goal_id=%s %s" goal_id message)
            ~lookup ~provider_rest:Verification_retry.provider_rest
            ~base_path:config.Workspace_utils.base_path () in
-         (match !judged, !unknown with
-          | None, None -> on_verdict result
-          | Some _, _ | None, Some _ -> ());
+         (match !judged, has_reason result, !unknown with
+          | None, false, None | None, true, (None | Some _) -> on_verdict result
+          | Some _, _, _ | None, false, Some _ -> ());
          match !judged with
          | Some saved -> R.publish config saved |> Result.map (fun _ -> ())
          | None -> Error (R.Conflict "Criterion reviewer execution is uncertain; original retained")

@@ -161,8 +161,62 @@ let test_unknown_provider_dispatch_fails_over_then_explicit () = with_workspace 
         ["criterion-reviewer", Types_core.Catalog_slot; "criterion-reviewer-2", Types_core.Catalog_slot]);
       ignore (Agent.For_testing.process config ~goal_id);
       get (Agent.For_testing.recover config));
-  Alcotest.(check int) "provider failure fails over to the second slot" 2 !calls;
+    Alcotest.(check int) "provider failure fails over to the second slot" 2 !calls;
   Alcotest.(check string) "unknown is explicit" "execution_unknown" (state config goal_id))
+
+let test_unknown_first_slot_preserves_second_slot_verdict () = with_workspace (fun config _ ->
+  let goal_id = create config in
+  let calls = ref 0 in
+  let approved_reason = "Second slot verified criterion reachability after first slot dropped." in
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+      ~attempt_continuation:_ ~on_runtime_attempt_error () ->
+    incr calls;
+    if !calls = 1 then (
+      let error = Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError
+        {message="first slot dropped stream"; kind=Llm_provider.Http_client.Connection_reset}) in
+      on_runtime_attempt_error ~runtime_id:evaluator_runtime ~attempt:0
+        ~dispatch:Runtime_attempt_dispatch.Dispatched error;
+      Error error)
+    else (
+      let input = `Assoc ["id", `String goal_id] in
+      let tool_res = lookup.AR.dispatch ~name:"masc_goal_list" ~args:input in
+      on_tool_result ~input tool_res;
+      Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution=None;
+          verdict=Some (AR.Approve approved_reason)})) (fun () ->
+      Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn (fun () -> Ok
+        ["criterion-reviewer-1", Types_core.Catalog_slot; "criterion-reviewer-2", Types_core.Catalog_slot]);
+      get (Agent.For_testing.process config ~goal_id));
+  Alcotest.(check int) "failed over from slot 1 to slot 2" 2 !calls;
+  Alcotest.(check string) "slot 2 verdict published as viable instead of execution_unknown"
+    "viable" (state config goal_id))
+
+let test_unknown_first_slot_with_reasonless_second_slot_stays_unknown () = with_workspace (fun config _ ->
+  let goal_id = create config in
+  let calls = ref 0 in
+  with_reviewer (fun ~base_path:_ ?sw:_ ?execution_owner:_ ~evaluator_runtime ~candidate_kind:_ ~prompt:_
+      ?system_prompt:_ ?goal_blocks:_ ~report_tool_schema:_ ~lookup ~on_tool_result
+      ~attempt_continuation:_ ~on_runtime_attempt_error () ->
+    incr calls;
+    if !calls = 1 then (
+      let error = Agent_core.Error.Api (Agent_core.Error.Retry.NetworkError
+        {message="first slot dropped stream"; kind=Llm_provider.Http_client.Connection_reset}) in
+      on_runtime_attempt_error ~runtime_id:evaluator_runtime ~attempt:0
+        ~dispatch:Runtime_attempt_dispatch.Dispatched error;
+      Error error)
+    else (
+      let input = `Assoc ["id", `String goal_id] in
+      let tool_res = lookup.AR.dispatch ~name:"masc_goal_list" ~args:input in
+      on_tool_result ~input tool_res;
+      Ok {AR.selected_runtime_id=evaluator_runtime; evaluator_execution=None;
+          verdict=Some (AR.Approve "   ")})) (fun () ->
+      Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn (fun () -> Ok
+        ["criterion-reviewer-1", Types_core.Catalog_slot; "criterion-reviewer-2", Types_core.Catalog_slot]);
+      match Agent.For_testing.process config ~goal_id with
+      | Error (R.Conflict _) -> ()
+      | Ok () | Error (R.Goal_unavailable _ | R.Store_unavailable _) ->
+        Alcotest.fail "reasonless second slot must not demote uncertain original to deferred");
+  Alcotest.(check string) "remains execution_unknown" "execution_unknown" (state config goal_id))
 
 let test_observed_reply_survives_one_retention_failure () = with_workspace (fun config _ ->
   let goal_id = create config in
@@ -382,6 +436,8 @@ let () = Alcotest.run "Goal criterion review" ["behavior", [
   Alcotest.test_case "criterion revision fences stale model judgment" `Quick test_stale_verdict_cannot_approve_new_criterion;
   Alcotest.test_case "cancelled execution retains its owner and lookup" `Quick test_cancellation_retains_original_and_never_replays;
   Alcotest.test_case "unknown provider effect fails over then ends explicit" `Quick test_unknown_provider_dispatch_fails_over_then_explicit;
+  Alcotest.test_case "unknown first slot preserves second slot structured verdict" `Quick test_unknown_first_slot_preserves_second_slot_verdict;
+  Alcotest.test_case "unknown first slot with reasonless second slot stays execution_unknown" `Quick test_unknown_first_slot_with_reasonless_second_slot_stays_unknown;
   Alcotest.test_case "observed reply survives persistence refusal without replay" `Quick test_observed_reply_survives_one_retention_failure;
   Alcotest.test_case "unreadable ledger remains unavailable" `Quick test_unreadable_ledger_is_not_unchecked;
   Alcotest.test_case "missing primary never resets an uncertain original" `Quick test_missing_primary_cannot_replay_a_dispatched_original;

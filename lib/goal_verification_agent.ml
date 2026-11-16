@@ -846,10 +846,11 @@ let process_goal_work (runtime : runtime) (claim : claim) =
                 claim.work.goal_id
                 (Printexc.to_string exn))
             (fun () ->
-              ignore (process_pending_work
-                ~sw:(Some work_sw)
-                ~schedule_retry:(schedule_retry runtime)
-                runtime.config claim.work))))
+              Completion_authority_agent.with_review_slot (fun () ->
+                ignore (process_pending_work
+                  ~sw:(Some work_sw)
+                  ~schedule_retry:(schedule_retry runtime)
+                  runtime.config claim.work)))))
       (fun () -> Eio.Promise.await claim.abandoned))
 ;;
 

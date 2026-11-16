@@ -30,8 +30,9 @@ let standing_in_backlog (backlog : Masc_domain.backlog)
   | _ :: _ :: _ -> Error "multiple current completion rejection relations"
   | [item] ->
     if not (String.equal item.verification_id verification_id) then Ok Obsolete
+    else if item.authority <> authority then Ok Obsolete
     else if not (String.equal item.producer producer
-                 && String.equal item.reason reason && item.authority = authority)
+                 && String.equal item.reason reason)
     then Error "completion rejection payload conflicts with the current relation"
     else
       match Workspace_backlog.find_task_in_backlog_opt backlog task_id with

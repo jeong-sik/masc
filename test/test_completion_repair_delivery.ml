@@ -773,6 +773,19 @@ let test_delivered_receipt_remains_current_until_resubmit () =
       (List.length (ok (Workspace_backlog.read_backlog_r config)).delivered_completion_rejections);
     check_rejection config ~verification_id:old_id ~authority:system)
 
+let test_competing_authority_rejection_is_obsolete () =
+  with_workspace (fun config ->
+    persist_producer config;
+    let shared_id = "vrf-competing-hitl-and-llm" in
+    prepare_submission config shared_id;
+    commit config ~authority:human ~verification_id:shared_id (D.Verdict_rejected {reason = "human rejected first"});
+    Alcotest.(check bool) "human rejection remains current for human authority" true
+      (Outbox.standing config ~task_id ~verification_id:shared_id ~producer
+         ~reason:"human rejected first" ~authority:human = Ok Outbox.Current);
+    Alcotest.(check bool) "competing system rejection on same verification_id is obsolete, not corrupt" true
+      (Outbox.standing config ~task_id ~verification_id:shared_id ~producer
+         ~reason:"llm rejected second" ~authority:system = Ok Outbox.Obsolete))
+
 let test_old_unroutable_snapshot_cannot_release_new_rejection () =
   with_workspace (fun config ->
     let old_id = "vrf-release-snapshot" in
@@ -994,6 +1007,7 @@ let () =
       ; Alcotest.test_case "resubmission and stale acknowledgement" `Quick test_resubmit_supersedes_and_stale_ack_preserves_new_rejection
       ; Alcotest.test_case "old snapshot cannot enqueue after resubmission" `Quick test_snapshot_before_resubmit_cannot_enqueue
       ; Alcotest.test_case "delivered authority retires only on resubmission" `Quick test_delivered_receipt_remains_current_until_resubmit
+      ; Alcotest.test_case "competing authority rejection on same verification_id is obsolete" `Quick test_competing_authority_rejection_is_obsolete
       ; Alcotest.test_case "old release cannot retire a newer rejection" `Quick test_old_unroutable_snapshot_cannot_release_new_rejection
       ; Alcotest.test_case "corrupt primary preserves queue and pending rejection" `Quick test_corrupt_primary_blocks_wake_without_changing_queue
       ; Alcotest.test_case "absent delivered observations preserve Task list and claim" `Quick test_backlog_without_delivered_observations_lists_and_claims

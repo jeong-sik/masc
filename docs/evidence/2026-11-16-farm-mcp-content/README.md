@@ -170,11 +170,11 @@ The dated old-head evidence above is retained unchanged. No remote push,
 submission, merge or runtime change was performed by this rebase.
 
 
-## Current stack after the Core compile correction — 2026-11-16
+## Stack checkpoint after the Core compile correction — 2026-11-16
 
 The reviewed base is still `e0e819e29968366c1dffb59ad625ba4e17d4ac22`.
-Current Core is `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC is
-`01c94838471b1cbff986e5a78f2c14597a8df564`, and MCP source is
+At that checkpoint Core was `db69904f29c6f4a6166957fbdffa4f7e8e910a7a`, MASC was
+`01c94838471b1cbff986e5a78f2c14597a8df564`, and MCP source was
 `e392aa3a7f8fafdfe18045c92bc0fe1d023e44b5`. The integrated top at that
 checkpoint was `6134e0a42aae676f63143d1473aaeca7fb99053f`.
 
@@ -256,10 +256,27 @@ installation, Linux and full Dune/CI remain unexecuted by this suite.
 
 The publication handoff preserves its original 53 files for Schedule3 plus
 Document5. The separate main-checkout
-`artifacts/farm-publication-handoff-20261116-update.json` records the documentation
-leaf change from `3bdedcea` to `ad6ba29`; this document change requires another
-leaf/evidence update after commit. The packet and update note must be read
-together. Fresh remote main, exact refs/PRs, semantic duplicates and REST stack
+`artifacts/farm-publication-handoff-20261116-update.json` records subsequent
+documentation and owner-layer corrections with the current five refs. The packet
+and update note must be read together. Fresh remote main, exact refs/PRs, semantic duplicates and REST stack
 inspection remain required before publication. The latest outbound handoff's
 transport failed and delivery is unconfirmed; this local evidence does not
 establish a PR, approval, merge or deployment.
+
+The later MASC test correction restacked this unchanged MCP patch to
+`4202159afd7cdbc9259296ceb09f7fa8f6c0d05f`; the resulting leaf before this
+documentation update is `d18a8aa8eeb625087e8862fd4140efc23d658483`.
+The complete tree delta from `d1ede6aa` is one Yojson match arm in the separate
+provider materialization test. All 239 source inputs of the executed projection
+suite still match the new Git head and worktree; this was a source binding check,
+not a rerun. The [document-input record](../2026-11-16-farm-document-input/README.md#masc-test-correction-and-consumer-source-audit--2026-11-16)
+holds that correction's independent review and limits.
+
+A separate fixed-head source trace confirms that normal call roots remain in
+the invocation carrier until the tool log commit callback clears them. The
+current in-server blob sweep records candidates without deleting them. Neither
+observation proves recovery across a crash between blob publication and durable
+ownership, or the offline maintenance interaction. Local trace:
+`artifacts/farm-mcp-retention-audit-20261116/`. The maintained identity-tools
+40-case consumer suite is being connected to its actual implementations; no
+test result from that work is claimed here.

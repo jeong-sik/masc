@@ -189,3 +189,35 @@ The full Farm requirements and scale matrix are unchanged. A fresh `gh api user`
 again exited 1 with an API connection error in the agent command environment;
 that does not establish an invalid user account. Remote publication, GitHub
 review, installed behavior and original-request recovery remain unconfirmed.
+
+## MASC test correction and consumer source audit — 2026-11-16
+
+The subsequent audit found obsolete `Tuple` and `Variant` patterns in the
+declaration-to-wire test's `Yojson.Safe.t` match. The installed public type has
+neither constructor. The owning MASC layer was amended to
+`be648b8e1bfe796c250ddb37fab6c9b00f03ccb6`, removing only those two patterns.
+All assertions remain. The whole five-layer native stack was restacked without
+changing its base; the resulting leaf is `d18a8aa8eeb625087e8862fd4140efc23d658483`.
+MCP's unchanged patch is now `4202159afd7cdbc9259296ceb09f7fa8f6c0d05f`.
+
+Independent review confirmed that this one-line correction is the complete tree
+delta from `d1ede6aa`. The other 16 commits have unchanged patches. Whole-file
+parsing with OCaml 5.5.2 and `git diff --check` passed. This is a source-corrected
+type defect, not a typecheck or execution of the maintained materialization suite.
+The earlier Core118 and MCP239 source inputs still match the new leaf; neither
+suite was rerun for this test-only change.
+
+The fixed-head consumer audit traced actual TOML materialization, candidate H5,
+canonical checkpoint restoration and native continuation. It found no additional
+P0–P2 in that scope. Late/carried and active-tool-round documents remain outside
+initial H5. Actual PDF/STT, provider acceptance and these MASC consumer suites
+remain unexecuted. The complete materialization suite also uses runtime creation,
+resume, dashboard probes and loopback HTTP; the small document test section does
+not make its full implementation dependency graph small.
+
+Local receipts: `artifacts/farm-document-materialization-fix-20261116/restack-1/`
+and `artifacts/farm-document-consumer-audit-20261116/`. The one-line diff SHA-256
+is `9512cb0cc8299ffc052f798716789077c732907cd36ab06188ffd57ef05298f6`;
+independent correction review SHA-256 is
+`767395815fbdbdfc7e3a6e2f604981969760679057a9f06894c51ad5e9af1dfe`.
+No publication, installation or runtime change occurred.

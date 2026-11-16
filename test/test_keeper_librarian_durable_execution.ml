@@ -2485,6 +2485,8 @@ let test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wa
       (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
     io (fun () -> write body "unreadable original body";
       write fixture.source (fixture.declaration false));
+    check bool "an unended original still needs its body at deploy" true
+      (librarian_refusals fixture<>[]);
     let wakes=ref 0 in
     let pass ()=memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
       ~wake:(fun () -> incr wakes)) in
@@ -2511,7 +2513,14 @@ let test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wa
     check json "before-admission replacement advances no external ACK" cursor_before (cursor ());
     check int "the unadmitted original was never dispatched" 0 (F.post_count fixture.server);
     no_memory fixture;
+    let accepts_ending label=check int label 0 (List.length (librarian_refusals fixture)) in
+    accepts_ending "deploy accepts the runtime-recoverable ending with a damaged body";
+    io (fun () -> Sys.remove body);
+    accepts_ending "deploy accepts the same ending with no body";
+    io (fun () -> write fixture.source (fixture.declaration false));
+    accepts_ending "a stored ending does not need a currently enabled declaration";
     replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    accepts_ending "declaration rollback preserves the stored ending at deploy";
     drive_advanced fixture;
     let fresh,capture=only_original fixture in
     check bool "rollback creates a separate original instead of reviving the old one" true
@@ -2565,9 +2574,36 @@ let test_preflight_preserves_before_dispatch_ending_evidence () = with_fixture (
   let ended=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
     ~request_id:original.request_id |> owned |> Option.get) in
   check int "no host record or proof is valid before dispatch" 0 (List.length (librarian_refusals fixture));
+  let body=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:ended.scope ~request_digest:ended.request_digest) in
+  io (fun () -> write body "damaged body after the strict ending");
+  check int "the original body is not needed to validate a stored isolated ending" 0
+    (List.length (librarian_refusals fixture));
+  (* A contradictory retained Gate still refers to the full parent. It must
+     not be hidden by the parent's otherwise valid bodyless ending. *)
+  let gate_scope=Gate.scope (Capture.physical_owner request) in
+  let gate_id="fixture-gate-refers-to-ended-original" in
+  let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-durable-gate";
+    "request_id",`String gate_id;"owner",Capture.owner_to_json (Capture.physical_owner request);
+    "execution_id",`String ended.request_id;"execution_digest",`String ended.request_digest;
+    "proposal",`Null;"authority",`Null;"guidance",`Null;"predecessor",`Null] in
+  io (fun () -> Owner.retain ~store:fixture.store ~scope:gate_scope ~request_id:gate_id
+    ~installation_id:ended.installation_id ~package_id:ended.package_id ~tool:ended.tool
+    ~summary:`Null ~request:gate_request |> owned);
+  let owner_path=Filename.concat (scope_directory fixture ended.scope) (Store.digest ended.request_id ^ ".json") in
+  check bool "a Gate reference keeps the complete parent body required" true
+    (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+       refusal.path=owner_path && refusal.decoder=Lane_addon_store_preflight.Tool_request_owner)
+      (librarian_refusals fixture));
+  let gate_digest=Owner.request_digest gate_request |> get in
+  io (fun () ->
+    Sys.remove (Filename.concat (scope_directory fixture gate_scope) (Store.digest gate_id ^ ".json"));
+    Sys.remove (Filename.concat (Store.root fixture.store)
+      (Store.tool_request_body_path ~scope:gate_scope ~request_digest:gate_digest)));
+  check int "removing the contradictory fixture restores isolated ending inspection" 0
+    (List.length (librarian_refusals fixture));
   let positions=progress fixture and wakes=ref 0 in
   let scope=Capture.scope (Capture.physical_owner request) in
-  let gate_scope=Gate.scope (Capture.physical_owner request) in
   let refuses ()=check bool "preflight preserves the consumer's lack of replacement authority" true
     (refuses_original fixture ~original:ended (scope,gate_scope) (librarian_refusals fixture)) in
   let runtime_refuses ()=
@@ -2601,6 +2637,7 @@ let test_preflight_preserves_before_dispatch_ending_evidence () = with_fixture (
   io (fun () -> Sys.remove proof);
   check int "restoring actual absence also restores the read-only verdict" 0
     (List.length (librarian_refusals fixture));
+  io (fun () -> write body (Yojson.Safe.to_string ended.request));
   replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
   drive_advanced fixture;
   check int "only the new request runs after the evidence is restored" 1 (F.post_count fixture.server))
@@ -3028,6 +3065,15 @@ let test_linked_replacement_preserves_the_resolution_protocol ~cut ~recovery () 
   check bool "a linked original has a host-confirmed declaration ending" true
     (io (fun () -> Keeper_librarian_declaration_replacement.ended ~store:fixture.store
       ~original:(Owner.listed actual) ~exact ~captured:(Capture.destination request) |> get));
+  let body=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:actual.scope ~request_digest:actual.request_digest) in
+  io (fun () -> write body "damaged linked original body");
+  let owner_path=Filename.concat (scope_directory fixture actual.scope) (Store.digest actual.request_id ^ ".json") in
+  check bool "a linked ending still requires its complete body at deploy" true
+    (List.exists (fun (refusal:Lane_addon_store_preflight.refusal) ->
+      refusal.path=owner_path && refusal.decoder=Lane_addon_store_preflight.Tool_request_owner)
+      (librarian_refusals fixture));
+  io (fun () -> write body (Yojson.Safe.to_string actual.request));
   if cut then check bool "Cut keeps its original refusal and separate disposition" true
     (Progress.phase actual.progress=Progress.phase child.progress
       && Option.is_some (Progress.settlement actual.progress));

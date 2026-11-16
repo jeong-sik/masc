@@ -312,15 +312,16 @@ let recover_files ~wording ~body_refusal (target:Final.target) (files:Preflight.
   match observed with
   | Exact.Retained_absent | Retained_open -> Ok ()
   | Retained_terminal retained -> confirm_files ~wording target recovered (Exact.delivered retained)
-let ending_reads (target:Final.target) (files:Preflight.exact_files)
-    : Keeper_librarian_declaration_replacement.ending_reads = {
-  before_dispatch=(fun () ->
-    match files.deleted,files.record,files.proof with
+let confirm_before_dispatch_files (files:Preflight.exact_files) =
+  match files.deleted,files.record,files.proof with
     | None,None,Preflight.No_proof -> Ok ()
     | Some (Deleted_open | Deleted_terminal _ | Deleted_unknown),_,_ ->
       Error "The Exact check removes original host evidence; absence cannot confirm a before-dispatch ending"
     | None,(Some _),_ | None,None,(Proof _ | Unreadable_proof _) ->
-      Error "A before-dispatch declaration ending has original host execution evidence");
+      Error "A before-dispatch declaration ending has original host execution evidence"
+let ending_reads (target:Final.target) (files:Preflight.exact_files)
+    : Keeper_librarian_declaration_replacement.ending_reads = {
+  before_dispatch=(fun () -> confirm_before_dispatch_files files);
   observe=(fun () ->
     let* proof=proof_json files in
     let* record=Exact.recovery_of_files ~store:files.store ~declaration_id:target.declaration_id
@@ -379,7 +380,7 @@ let original_verdict ~(read_exact:Preflight.exact_reader) = function
   | Error detail -> Preflight.Payload_invalid detail
   | Ok (_,None) -> Preflight.Payload_valid
   | Ok (scopes,Some {target;read;wording;body_refusal}) ->
-    (match read_exact ~declaration_id:target.Final.declaration_id target.Final.exact with
+    (match read_exact ~declaration_id:target.Final.declaration_id (Exact.identity target.Final.exact) with
      | Error detail -> Preflight.Exact_root_differs detail
      | Ok files ->
        (match judge_files ~wording ~body_refusal target files read with
@@ -434,7 +435,7 @@ let forest_reads () =
 let forest_verdict ~forest ~read ~read_scope ~(read_exact:Preflight.exact_reader) ~owner ~scopes check record =
   let root=ref None in
   let read_exact ~declaration_id request =
-    let files=read_exact ~declaration_id request in
+    let files=read_exact ~declaration_id (Exact.identity request) in
     Result.iter_error (fun detail -> root:=Some detail) files;
     files in
   let reads={Parts.load=(fun ~request_id -> read ~scope:(Admission.scope owner) ~request_id);
@@ -469,7 +470,7 @@ let admission_verdict ~read ~read_scope ~read_body ~read_archive (record:Owner.r
   | Error detail -> Preflight.Payload_invalid detail
   | Ok owner ->
     match verdict ~owner ~scopes:(admission_scopes owner) with
-    | (Preflight.Payload_valid | Exact_root_differs _) as kept -> kept
+    | (Preflight.Payload_valid | Body_unreadable _ | Exact_root_differs _) as kept -> kept
     | (Payload_invalid _ | Consumer_stops_on_exact _) as refused ->
       match Closure.project ~owner ~read ~read_scope ~read_body ~read_archive with
       | Error detail -> Preflight.Payload_invalid detail
@@ -491,7 +492,7 @@ let gate_verdict passed ~owner_key ~(parent:Owner.retained) judge =
     | Preflight.Payload_valid ->
       Hashtbl.replace passed parent.request_id (owner_key,parent);
       Preflight.Payload_valid
-    | (Payload_invalid _ | Consumer_stops_on_exact _ | Exact_root_differs _) as refused -> refused
+    | (Body_unreadable _ | Payload_invalid _ | Consumer_stops_on_exact _ | Exact_root_differs _) as refused -> refused
 
 let exact_check () =
   let forest=forest_reads () in
@@ -551,10 +552,65 @@ let exact_check () =
          original_verdict ~read_exact
            (let+ original=floor_original ~owner parent in floor_scopes owner,original)))
 
+(* The same isolation boundary as durable execution's record-only ending
+   recovery. A gate or a lineage link still needs the complete request. *)
+let bodyless_history_ending ~read_scope ~read_records ~read_fence record =
+  let module Record=Owner.Record in
+  match purpose (Record.scope record) with
+  | None | Some (Admission_execution | Admission_part | Admission_partition | Admission_closure
+    | Floor_execution | Admission_gate | History_gate | Floor_gate) -> Ok None
+  | Some History_execution ->
+    match Progress.phase (Record.progress record) with
+    | Progress.Rejected {stage=Before_dispatch;_} ->
+      let* index=History.index_of_summary record in
+      let* ended=Keeper_librarian_declaration_replacement.retained ~original:record ~captured:index.destination in
+      if not ended || Option.is_some index.predecessor
+          || Option.is_some (Progress.preparation (Record.progress record))
+          || Option.is_some (Progress.replacement (Record.progress record)) then Ok None else
+      let* fence=read_fence ~scope:(Record.scope record) ~request_id:(Record.request_id record) in
+      if Option.is_some fence then Ok None else
+      let* records=read_records ~scope:(Record.scope record) in
+      let* has_child=List.fold_left (fun result member ->
+        let* found=result in
+        let+ member=History.index_of_summary member in
+        found || Option.fold ~none:false ~some:(fun (parent:History.predecessor) ->
+          parent.request_id=Record.request_id record) member.predecessor) (Ok false) records in
+      if has_child then Ok None else
+      let* gates=read_scope ~scope:(Keeper_librarian_durable_gate.scope index.owner) in
+      let+ has_gate=List.fold_left (fun result gate ->
+        let* found=result in
+        let* execution=Keeper_librarian_durable_gate.parent_execution_id gate in
+        let* owner=owner_json gate in
+        let+ ()=History.owner_matches_json index.owner owner in
+        found || execution=Record.request_id record) (Ok false) gates in
+      if has_gate then None else Some index
+    | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+    | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Execution;_} | Subdividing _ | Subdivided _ -> Ok None
+
 let preflight () =
   let validate=validator () and exact=exact_check () in
-  fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
-    (record:Owner.retained) ->
-  match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
+  fun ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
+    (original:Preflight.original) ->
+  let module Record=Owner.Record in
+  match bodyless_history_ending ~read_scope ~read_records ~read_fence original.record with
   | Error detail -> Preflight.Payload_invalid detail
-  | Ok () -> exact ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_exact record
+  | Ok (Some index) ->
+    (match Owner.installation_of_id index.destination.installation_id with
+     | Error detail -> Preflight.Payload_invalid detail
+     | Ok (Owner.Manual _) -> Preflight.Payload_invalid "Before-dispatch history ending requires a configured original"
+     | Ok (Configuration declaration_id) ->
+       let identity=Exact.identity_of_digest ~request_id:(Record.request_id original.record) ~digest:index.exact_digest in
+       match read_exact ~declaration_id identity with
+       | Error detail -> Preflight.Exact_root_differs detail
+       | Ok files ->
+         match confirm_before_dispatch_files files with
+         | Ok () -> Preflight.Payload_valid
+         | Error detail -> Preflight.Consumer_stops_on_exact {detail;scopes=history_scopes index.owner;
+             paths=[Exact.Retained_key.proof_path (Exact.Retained_key.of_identity ~declaration_id identity)]})
+  | Ok None ->
+    match original.restore () with
+    | Error detail -> Preflight.Body_unreadable detail
+    | Ok record ->
+      match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
+      | Error detail -> Preflight.Payload_invalid detail
+      | Ok () -> exact ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_exact record

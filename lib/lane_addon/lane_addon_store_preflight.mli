@@ -64,6 +64,10 @@ type tool_request_reader = scope:string -> request_id:string ->
 type request_body_reader = scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
 type tool_request_scope_reader = scope:string ->
   (Lane_addon_tool_request_owner.retained list, string) result
+type tool_request_records_reader = scope:string ->
+  (Lane_addon_tool_request_owner.Record.t list, string) result
+(** Strict whole-scope metadata discovery, with the same physical key,
+    canonical summary and progress checks, without reading request bodies. *)
 type tool_request_archive_reader = scope:string -> date:string -> request_id:string ->
   (Lane_addon_tool_request_owner.Record.t option, string) result
 type history_resolution_reader = scope:string -> request_id:string -> (Yojson.Safe.t option, string) result
@@ -91,7 +95,7 @@ type exact_files =
             root each proof names with its root. *)
   }
 
-type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_files, string) result
+type exact_reader = declaration_id:string -> Lane_addon_exact.identity -> (exact_files, string) result
 (** Reads by path, as the Exact scan does, and judges the record with the Exact
     scan's own judgment. A record the startup sweep stops at
     ({!Lane_addon_store.exact_directory_entry}) is deleted unread: it is
@@ -101,6 +105,9 @@ type exact_reader = declaration_id:string -> Lane_addon_exact.request -> (exact_
 
 type payload_verdict =
   | Payload_valid
+  | Body_unreadable of string
+      (** Restoring the original body failed. Classified as
+          [Tool_request_owner], as in the strict original reader. *)
   | Payload_invalid of string
       (** Fresh state deletes the record's scope: its owner records,
           request bodies, history fences and history resolution records. *)
@@ -113,12 +120,25 @@ type payload_verdict =
   | Exact_root_differs of string
       (** The scan stops and prints no fresh-state line. *)
 
-type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
+type original = {
+  record : Lane_addon_tool_request_owner.Record.t;
+  restore : unit -> (Lane_addon_tool_request_owner.retained, string) result;
+}
+(** The strictly decoded published record and restoration of its exact body.
+    The body is read only when the consumer needs it. A consumer that needs
+    the body must propagate restoration failure as [Body_unreadable]; the
+    default validator restores every original. Metadata alone never grants
+    execution, repair, consumption or ACK authority. *)
+
+type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader ->
+  read_records:tool_request_records_reader -> read_body:request_body_reader ->
   read_archive:tool_request_archive_reader ->
   read_fence:history_resolution_reader -> read_resolution:history_resolution_reader ->
-  read_exact:exact_reader -> Lane_addon_tool_request_owner.retained -> payload_verdict
-(** Explicit read-only parent, scope inventory, body and Exact ports. Every returned original passes the
-    same record identity, canonical body and digest checks as the scanned one.
+  read_exact:exact_reader -> original -> payload_verdict
+(** Explicit read-only metadata, parent, scope inventory, body and Exact
+    ports. [read] and [read_scope] return complete originals whose physical
+    record identity, canonical bodies and digests were checked. [read_records]
+    checks only metadata; [original.restore] checks that original's body.
 
     {!scan} asks for a new validator once per scan, never once per record. A
     validator may remember what it proved about an owner while that scan runs,

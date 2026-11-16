@@ -954,15 +954,19 @@ let test_sparse_whole_candidate_partition_reads_fresh_memory ()=
     let forest_reads=ref 0 and closure_reads=ref 0 and validated=ref 0 in
     let counting ()=
       let validate=Keeper_librarian_store_preflight.validator () in
-      fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_ record ->
+      fun ~read ~read_scope ~read_records:_ ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_
+        (original:Lane_addon_store_preflight.original) ->
         incr validated;
-        match validate ~read ~read_body ~read_archive ~read_fence ~read_resolution record
-          ~read_scope:(fun ~scope ->
-            if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
-            else incr forest_reads;
-            read_scope ~scope) with
-        | Ok () -> Lane_addon_store_preflight.Payload_valid
-        | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
+        match original.restore () with
+        | Error detail -> Lane_addon_store_preflight.Body_unreadable detail
+        | Ok record ->
+          match validate ~read ~read_body ~read_archive ~read_fence ~read_resolution record
+            ~read_scope:(fun ~scope ->
+              if Keeper_librarian_admission_closure.is_scope scope then incr closure_reads
+              else incr forest_reads;
+              read_scope ~scope) with
+          | Ok () -> Lane_addon_store_preflight.Payload_valid
+          | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
     let report=io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
       Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
     check int "the preflight refuses none of the owner's real records" 0 (List.length report.refusals);

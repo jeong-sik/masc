@@ -833,28 +833,31 @@ let validate_tool_request () =
     | Ok () -> L.Payload_valid
     | Error detail -> L.Payload_invalid detail
   in
-  fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
-    (record : Masc.Lane_addon_tool_request_owner.retained) ->
-    match Tool_request_consumer.of_scope record.scope with
+  fun ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
+    (original : L.original) ->
+    match Tool_request_consumer.of_scope (Masc.Lane_addon_tool_request_owner.Record.scope original.record) with
     | Some (Tool_request_consumer.Librarian (_ : Masc.Keeper_librarian_store_preflight.purpose)) ->
-      librarian ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
-        record
-    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Workspace_curator) ->
-      decoded (Masc.Workspace_memory_execution_capture.check_retained record)
-    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Completion_review) ->
-      decoded (Masc.Verifier_review_owner.check_retained record)
-    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Goal_proof_review) ->
-      decoded (Masc.Goal_verifier_worker.check_retained record)
-    (* Candle reads its originals back by request ID and decodes nothing of
-       the owner record past what the scan's owner reader already checked. *)
-    | Some (Tool_request_consumer.One_scope Tool_request_consumer.Candle_appraisal) ->
-      L.Payload_valid
+      librarian ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact
+        original
+    | Some (Tool_request_consumer.One_scope consumer) ->
+      (match original.restore () with
+       | Error detail -> L.Body_unreadable detail
+       | Ok record ->
+         match consumer with
+         | Tool_request_consumer.Workspace_curator -> decoded (Masc.Workspace_memory_execution_capture.check_retained record)
+         | Completion_review -> decoded (Masc.Verifier_review_owner.check_retained record)
+         | Goal_proof_review -> decoded (Masc.Goal_verifier_worker.check_retained record)
+         (* Candle reads its originals back by request ID and decodes nothing
+            past the owner and body restoration above. *)
+         | Candle_appraisal -> L.Payload_valid)
     (* No reader of this build reads this scope, so fresh state deletes it.
        The refusal's fresh-state line names the scope's directories; the
        detail does not list them again. *)
     | None ->
-      L.Payload_invalid
-        "no consumer of this build reads tool request originals of this scope"
+      (match original.restore () with
+       | Error detail -> L.Body_unreadable detail
+       | Ok _ -> L.Payload_invalid
+           "no consumer of this build reads tool request originals of this scope")
 ;;
 
 let run_scan ~base_path = function

@@ -648,15 +648,19 @@ let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture 
       let reads = ref 0 in
       let counting () =
         let validate = Keeper_librarian_store_preflight.validator () in
-        fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_ record ->
+        fun ~read ~read_scope ~read_records:_ ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact:_
+          (original:Lane_addon_store_preflight.original) ->
           let read ~scope ~request_id =
             if String.equal scope gate_scope then incr reads;
             if read_anew then
               Owner.load ~store:fixture.store ~scope ~request_id |> Result.map_error Owner.error_to_string
             else read ~scope ~request_id in
-          match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
-          | Ok () -> Lane_addon_store_preflight.Payload_valid
-          | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
+          match original.restore () with
+          | Error detail -> Lane_addon_store_preflight.Body_unreadable detail
+          | Ok record ->
+            match validate ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution record with
+            | Ok () -> Lane_addon_store_preflight.Payload_valid
+            | Error detail -> Lane_addon_store_preflight.Payload_invalid detail in
       let report = io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
         Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
       check (list string) "the deploy check refuses no record" []
@@ -719,11 +723,11 @@ let test_a_deploy_check_judges_a_steps_exact_files_once_for_its_journal () = wit
       let reads = ref 0 in
       let counting () =
         let check = Keeper_librarian_store_preflight.preflight () in
-        fun ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact record ->
-          let read_exact ~declaration_id (request : Exact.request) =
-            if String.equal request.request_id step.request_id then incr reads;
-            read_exact ~declaration_id request in
-          check ~read ~read_scope ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact record in
+        fun ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact original ->
+          let read_exact ~declaration_id (identity : Exact.identity) =
+            if String.equal identity.identity_request_id step.request_id then incr reads;
+            read_exact ~declaration_id identity in
+          check ~read ~read_scope ~read_records ~read_body ~read_archive ~read_fence ~read_resolution ~read_exact original in
       let report = io (fun () -> Lane_addon_store_preflight.scan ~validate_tool_request:counting
         Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
       check (list string) "the deploy check refuses no record" []

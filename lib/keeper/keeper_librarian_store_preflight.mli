@@ -38,7 +38,13 @@ val validator : unit ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 
 val preflight : unit -> Lane_addon_store_preflight.payload_validator
-(** The deploy check of a Librarian original: {!validator}, then the reads its
+(** An isolated, unfenced history original with a strict before-dispatch
+    declaration ending is checked from its record, index and positive absence
+    of both original host record and proof, as runtime recovery checks it.
+    Whole history metadata and strict Gate discovery must show no predecessor,
+    child, Gate reference, preparation or replacement intent. Its body is not
+    needed to check that retained ending. All other originals restore their
+    complete bodies and use {!validator}, then the reads their
     consumer makes of Exact files, on the files the Exact check leaves (RFC
     exact-request-skips-a-slot-that-refused-its-input 3.3, item 5). An
     original whose consumer stops on those files is refused with every scope

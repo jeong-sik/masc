@@ -934,6 +934,9 @@ module Retained_key = struct
   let of_request ~declaration_id (request : request) =
     { declaration_id; request_id = request.request_id; digest = digest request }
 
+  let of_identity ~declaration_id (identity : identity) =
+    { declaration_id; request_id = identity.identity_request_id; digest = identity.identity_digest }
+
   let equal left right =
     String.equal left.declaration_id right.declaration_id
     && String.equal left.request_id right.request_id

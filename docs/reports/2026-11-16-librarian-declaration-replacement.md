@@ -190,6 +190,26 @@ history 두 경우의 Gate에는 흡수 항목이 없고, floor 두 경우는 �
 다른 설치 사례는 전송 0건을 기대한다. 취소 사례는 그 fixture의 취소 원인만 처리한다.
 이 단위의 문법·독립 소스 검토 기록은 `artifacts/farm-librarian-answered-gate-20261116/`에 따로 둔다.
 
+## 아홉 번째 단위: 실행 전 종료와 설치 검사
+
+실행 전 종료가 저장된 뒤 archive 전에 중단하면, 연결과 Gate가 없는 history 원본은
+런타임이 본문 없이 정리할 수 있었다. 설치 검사는 소비자에게 묻기 전에 본문을 읽어
+같은 원본을 거절했다. 이 차이를 단일 소비자 검사 경로에서 맞춘다.
+
+공통 검사는 먼저 엄격한 record metadata를 넘기고 소비자가 필요할 때 원래 본문을 복원한다.
+history의 namespace·index·저장된 선언 교체 증거가 맞고, predecessor·자식 참조·Gate 참조·fence·준비·대체
+intent가 모두 없을 때만 본문 없이 검사한다. Exact identity로 기존 파일 판정 경로를 읽어
+host record와 proof가 실제로 모두 없음을 확인한다. 검사에서 지울 record는 부재 증거가 아니다.
+다른 상태와 namespace, 연결된 원본과 Gate 소비자, Candle과 기본 검사도 본문 검증을 유지한다.
+
+설치 검사는 현재 선언이나 worker를 요구하지 않고 저장된 종료만 판정한다. source·Memory·외부 ACK와
+종료 record를 바꾸지 않는다. 실제 정리의 owner·source-root·fence 재확인과 CAS는 기존 runtime이 맡는다.
+따라서 worker 비활성화나 설정 되돌림으로 종료된 ID가 다시 실행되지 않는다.
+
+기존 Runtime fixture에 Captured·Admission_wait의 손상·누락 본문, 비활성화·설정 되돌림 뒤 설치 검사,
+Gate 참조와 연결된 종료의 본문 요구, 손상 host record와 record 없는 proof의 거절을 추가했다.
+**문법 검사만 실행했으며 이 회귀 시나리오는 미실행이다.**
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
@@ -204,7 +224,7 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 ## 남은 범위
 
 - 연결된 history의 접수 전 상태·Cut 해소는 위 소스 변경과 작성한 회귀의 범위이며, 실제 타입·회귀·운영 검증은 남는다.
-- preflight가 손상된 저장 본문을 만난 기동 경계와 연결된 요청의 본문 손상 복구는 별도 확인이 남는다.
+- isolated history의 실행 전 종료는 아홉 번째 소스 단위에서 설치 검사와 맞췄다. 실제 기동 검증과 연결된 요청의 본문 손상 복구는 남는다.
 - floor 본문 손상 복구는 남는다. 이미 받은 답의 Gate는 여덟 번째 소스 단위로 이으며 실제 반영 검증은 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
 - `raised`·floor Cut·admission Cut는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.

@@ -335,6 +335,15 @@ type execution_authority =
     [Not_allowed {reason=Replaced_declaration}]. Retained terminal
     replay uses only original validation and never invokes this guard. *)
 
+type identity = private { identity_request_id : string; identity_digest : string }
+(** What names one original Exact request without holding it: its ID and
+    {!digest}. *)
+val identity : request -> identity
+val identity_of_digest : request_id:string -> digest:string -> identity
+(** For an owner that kept the digest of a request it validated and retained.
+    Nothing is checked here; {!observe_open} compares the digest with the host
+    record. *)
+
 module Retained_key : sig
   type t = private { declaration_id : string; request_id : string; digest : string }
 
@@ -345,6 +354,10 @@ module Retained_key : sig
   val of_request : declaration_id:string -> request -> t
   (** The key [declaration_id] keeps this request's record and proof link
       under. *)
+
+  val of_identity : declaration_id:string -> identity -> t
+  (** The same paths from an original's retained identity alone. This does
+      not validate that identity or grant execution or recovery authority. *)
 
   val equal : t -> t -> bool
 
@@ -504,15 +517,6 @@ val confirm_original_schema : declaration_id:string -> schema:Yojson.Safe.t -> r
     reads anything: the output names a lane of [declaration_id], [schema] is
     a canonical object, and it equals the grant the request holds, if any.
     Reads nothing. *)
-
-type identity = private { identity_request_id : string; identity_digest : string }
-(** What names one original Exact request without holding it: its ID and
-    {!digest}. *)
-val identity : request -> identity
-val identity_of_digest : request_id:string -> digest:string -> identity
-(** For an owner that kept the digest of a request it validated and retained.
-    Nothing is checked here; {!observe_open} compares the digest with the host
-    record. *)
 
 type open_observation =
   | No_record      (** Neither a host record nor an execution link exists. *)

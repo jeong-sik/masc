@@ -15,6 +15,7 @@ let body_truncation_suffix = "..."
 let to_message (err : Llm_provider.Http_client.http_error) : string =
   match err with
   | Llm_provider.Http_client.NetworkError { message; _ } -> message
+  | Llm_provider.Http_client.Connect_failed { message; _ } -> message
   | Llm_provider.Http_client.TimeoutError { message; phase } ->
       Printf.sprintf "provider timeout: %s: %s"
         (Llm_provider.Http_client.timeout_phase_to_label phase) message

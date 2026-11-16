@@ -72,6 +72,11 @@ type provider_error =
       ; timeout_phase : Http_client.timeout_phase option
       ; detail : string
       }
+  | Connect_failed of
+      { provider : string
+      ; kind : Http_client.network_error_kind
+      ; detail : string
+      }
   | Timeout of
       { provider : string
       ; timeout_phase : Http_client.timeout_phase option
@@ -210,6 +215,12 @@ let to_string = function
       (Http_client.network_error_kind_to_string r.kind)
       (timeout_phase_suffix r.timeout_phase)
       r.detail
+  | Connect_failed r ->
+    Printf.sprintf
+      "Provider '%s' connect failed (%s): %s"
+      r.provider
+      (Http_client.network_error_kind_to_string r.kind)
+      r.detail
   | Timeout r ->
     Printf.sprintf
       "Provider '%s' timeout%s: %s"
@@ -263,6 +274,7 @@ let of_retry_api_error ?provider err =
     InvalidRequest { provider; reason = Retry.error_message (Retry.InputCapacity r) }
   | Retry.NetworkError r ->
     NetworkError { provider; kind = r.kind; timeout_phase = None; detail = r.message }
+  | Retry.Connect_failed r -> Connect_failed { provider; kind = r.kind; detail = r.message }
   (* Preserve the transport phase carried by Retry.Timeout so a retried
      prefill timeout surfaces as [First_token] (not the default [None]
      that would collapse every retry-classified timeout into an
@@ -387,6 +399,8 @@ let of_http_error ?provider = function
   | Http_client.NetworkError { message; kind } ->
     NetworkError
       { provider = provider_name provider; kind; timeout_phase = None; detail = message }
+  | Http_client.Connect_failed { message; kind } ->
+    Connect_failed { provider = provider_name provider; kind; detail = message }
   | Http_client.TimeoutError { message; phase } ->
     Timeout
       { provider = provider_name provider; timeout_phase = Some phase; detail = message }
@@ -403,19 +417,8 @@ let is_retryable = function
   | RateLimit _ -> true
   | CapacityExhausted _ -> true
   | ServerError r -> r.transient
-  | NetworkError { kind = Http_client.Tls_error; _ } -> false
-  | NetworkError { kind = Http_client.Local_resource_exhaustion; _ } -> false
-  | NetworkError
-      { kind =
-          ( Http_client.Connection_refused
-          | Http_client.Dns_failure
-          | Http_client.Unreachable
-          | Http_client.Timeout
-          | Http_client.Connection_reset
-          | Http_client.End_of_file
-          | Http_client.Unknown )
-      ; _
-      } -> true
+  | NetworkError { kind; _ } | Connect_failed { kind; _ } ->
+    not (Http_client.network_error_kind_is_non_retryable kind)
   | Timeout _ -> true
   | MissingApiKey _
   | InvalidConfig _
@@ -470,6 +473,7 @@ let is_local_admission_timeout = function
   | AuthorizationError _
   | ServerError _
   | NetworkError _
+  | Connect_failed _
   | InvalidRequest _
   | NotFound _
   | ProviderTerminal _ -> false
@@ -490,6 +494,7 @@ let is_candidate_access_rejection = function
   | CapacityExhausted _
   | ServerError _
   | NetworkError _
+  | Connect_failed _
   | Timeout _
   | InvalidRequest _
   | ProviderTerminal _ -> false
@@ -524,6 +529,7 @@ let is_end_turn_empty_completion = function
   | AuthorizationError _
   | ServerError _
   | NetworkError _
+  | Connect_failed _
   | Timeout _
   | InvalidRequest _
   | NotFound _

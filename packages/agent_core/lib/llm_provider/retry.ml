@@ -42,6 +42,10 @@ type api_error =
       { message : string
       ; kind : Http_client.network_error_kind
       }
+  | Connect_failed of
+      { message : string
+      ; kind : Http_client.network_error_kind
+      }
   | Timeout of
       { message : string
       ; phase : Http_client.timeout_phase option
@@ -115,6 +119,11 @@ let error_message = function
           | Http_client.End_of_file ) as kind
       } ->
     Printf.sprintf "Network error (%s): %s" (Http_client.network_error_kind_to_string kind) message
+  | Connect_failed { message; kind } ->
+    Printf.sprintf
+      "Connect failed (%s): %s"
+      (Http_client.network_error_kind_to_string kind)
+      message
   | Timeout r ->
     (* The phase is the whole diagnostic value of a timeout -- a stalled stream
        and a refused admission are different failures. It was carried in the
@@ -132,20 +141,8 @@ let error_message = function
 let is_retryable = function
   | RateLimited _ -> true
   | Overloaded _ | ServerError _ | Timeout _ -> true
-  | NetworkError { kind; _ } ->
-    (* TLS errors are permanent (certificate/config issues).
-         Local resource exhaustion means the local machine is the bottleneck,
-         not the remote server — retrying won't help. *)
-    (match kind with
-     | Http_client.Tls_error -> false
-     | Http_client.Local_resource_exhaustion -> false
-     | Http_client.Connection_refused
-     | Http_client.Dns_failure
-     | Http_client.Unreachable
-     | Http_client.Timeout
-     | Http_client.Connection_reset
-     | Http_client.End_of_file
-     | Http_client.Unknown -> true)
+  | NetworkError { kind; _ } | Connect_failed { kind; _ } ->
+    not (Http_client.network_error_kind_is_non_retryable kind)
   | InvalidRequest { reason = Json_parse_error; _ } ->
     (* Malformed JSON from model output is transient — retry may produce valid JSON. *)
     true
@@ -250,7 +247,7 @@ let%test "overflow_of_empty_completion: ContextWindowExceeded yields ContextOver
   | Some (RateLimited _) | None | Some (Overloaded _) | Some (ServerError _) | Some (AuthError _)
   | Some (AuthorizationError _) | Some (PaymentRequired _) | Some (InvalidRequest _)
   | Some (NotFound _) | Some (ContextOverflow _) | Some (InputCapacity _) | Some (NetworkError _)
-  | Some (Timeout _) -> false
+  | Some (Connect_failed _) | Some (Timeout _) -> false
 ;;
 
 let%test "overflow_of_empty_completion: non-overflow stop_reason yields None" =
@@ -276,6 +273,7 @@ let%test "verdict_of_empty_completion: ContextWindowExceeded is Empty_overflow" 
       | NotFound _
       | InputCapacity _
       | NetworkError _
+      | Connect_failed _
       | Timeout _ )
   | Empty_attributed
   | Empty_unattributed _ -> false
@@ -463,6 +461,7 @@ let%test "is_retryable: flat Ollama provider prose is not retryable" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -488,6 +487,7 @@ let%test "HTTP 400 prose does not synthesize ContextOverflow" =
   | PaymentRequired _
   | NotFound _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -513,6 +513,7 @@ let%test "HTTP 400 prompt-too-long report without ref stays Unknown InvalidReque
   | PaymentRequired _
   | NotFound _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -538,6 +539,7 @@ let%test "HTTP 400 prompt-too-long report with UUID ref stays unknown" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -563,6 +565,7 @@ let%test "measured Ollama HTTP 400 prose stays unknown" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -588,6 +591,7 @@ let%test "nested HTTP 400 prompt-too-long prose stays Unknown InvalidRequest" =
   | PaymentRequired _
   | NotFound _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -613,6 +617,7 @@ let%test "HTTP 400 prompt-too-long report requires an ASCII token count" =
   | PaymentRequired _
   | NotFound _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -638,6 +643,7 @@ let%test "HTTP 400 prompt-too-long report rejects unrelated suffixes" =
   | PaymentRequired _
   | NotFound _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -663,6 +669,7 @@ let%test "HTTP 422 prompt-too-long report stays Unknown InvalidRequest" =
   | PaymentRequired _
   | NotFound _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -686,6 +693,7 @@ let%test "classify_error returns Unknown InvalidRequest for non-overflow 400" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -797,6 +805,7 @@ let%test "classify_error 429 preserves structured retry_after regardless of pros
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -817,6 +826,7 @@ let%test "classify_error 429 transient preserves retry_after" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -843,6 +853,7 @@ let%test "classify_error 429: body retry_after wins over header" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -862,6 +873,7 @@ let%test "classify_error 429: header-only (flat provider body) works" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -881,6 +893,7 @@ let%test "classify_error 429: neither body nor header yields None, message prese
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -900,6 +913,7 @@ let%test "classify_error 402 maps to PaymentRequired" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;
 
@@ -919,5 +933,6 @@ let%test "classify_error 402 is not retryable" =
   | ContextOverflow _
   | InputCapacity _
   | NetworkError _
+  | Connect_failed _
   | Timeout _ -> false
 ;;

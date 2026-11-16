@@ -631,8 +631,8 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
           { retry_class =
               ( Route.Rate_limited | Route.Hard_quota _ | Route.Provider_capacity
               | Route.Server_error | Route.Empty_completion _
-              | Route.Network_transient | Route.Provider_timeout
-              | Route.Local_admission_timeout )
+              | Route.Network_transient | Route.Connection_not_opened
+              | Route.Provider_timeout | Route.Local_admission_timeout )
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -669,8 +669,8 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
   | ( ( Route.Retry_after_observed
           { retry_class =
               Route.Provider_capacity | Route.Empty_completion _ | Route.Server_error
-              | Route.Network_transient | Route.Provider_timeout
-              | Route.Local_admission_timeout
+              | Route.Network_transient | Route.Connection_not_opened
+              | Route.Provider_timeout | Route.Local_admission_timeout
           ; _
           }
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
@@ -707,8 +707,8 @@ let provider_rest_of_failure ~now ~route ~assignment_id deferred =
   | Route.Retry_after_observed
       { retry_class =
           ( Route.Rate_limited | Route.Provider_capacity | Route.Empty_completion _
-          | Route.Server_error | Route.Network_transient | Route.Provider_timeout
-          | Route.Local_admission_timeout )
+          | Route.Server_error | Route.Network_transient | Route.Connection_not_opened
+          | Route.Provider_timeout | Route.Local_admission_timeout )
       ; retry_after = _
       }
   | Route.Rotate_now
@@ -1077,6 +1077,14 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Network_transient
+        (* The route keeps "not sent" apart from "sent, then lost", but how slot
+           standing reads a connection that did not open is #38403's decision
+           (RFC #52028 §2.3 step 5). Until then the slot notes it as it did
+           before the class existed. *)
+        | Keeper_runtime_failure_route.Retry_after_observed
+            { retry_class = Keeper_runtime_failure_route.Connection_not_opened
+            ; retry_after = _
+            } -> note_failed_attempt Runtime_candidate_backpressure.Network_transient
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Provider_timeout
@@ -1912,7 +1920,7 @@ let official_client_error_dispatch (error : Agent_core.Error.t) =
       | Llm_provider.Retry.NotFound _
       | Llm_provider.Retry.ContextOverflow _
       | Llm_provider.Retry.InputCapacity _
-      | Llm_provider.Retry.NetworkError _
+      | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _
       | Llm_provider.Retry.Timeout _ )
   | Agent_core.Error.Provider _
   | Agent_core.Error.Agent _
@@ -1974,7 +1982,7 @@ let provider_attempt_dispatch ~request_serialized result =
              | Llm_provider.Retry.AuthorizationError _
              | Llm_provider.Retry.PaymentRequired _
              | Llm_provider.Retry.NotFound _
-             | Llm_provider.Retry.NetworkError _
+             | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _
              | Llm_provider.Retry.Timeout _ )) ) )
   | ( true
     , Error

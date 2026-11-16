@@ -756,6 +756,29 @@ let test_stream_finalization_keeps_empty_completion_evidence () =
   | _ -> Alcotest.fail "expected typed empty-completion evidence"
 ;;
 
+(* RFC #52028 §2.3: a connection that did not open keeps its own name at both
+   boundaries. The core error is the [Retry] family's [Connect_failed], and the
+   evidence JSON says [connect_failed] with the same network kind, so neither
+   reads as a network failure after sending. The ownership is the one the
+   network kind gives. *)
+let test_connect_failed_keeps_its_name () =
+  let binding = identity ~api_key:"credential-a" () in
+  let error = Http.Connect_failed { message = "lookup detail"; kind = Http.Dns_failure } in
+  (match Attribution.core_error_of_http_error ~provider:"fixture" error with
+   | Error.Api (Llm_provider.Retry.Connect_failed { message = "lookup detail"; kind = Http.Dns_failure })
+     -> ()
+   | other ->
+     Alcotest.failf "connect failure became %s" (Error.to_string other));
+  check_ownership "a connection that did not open is endpoint evidence" Attribution.Endpoint
+    binding error;
+  let attribution = Option.get (Attribution.of_http_error ~binding error).provider_failure in
+  let evidence = Yojson.Safe.Util.member "evidence" (Attribution.to_yojson attribution) in
+  check_string "evidence kind" "connect_failed"
+    (Yojson.Safe.Util.member "kind" evidence |> Yojson.Safe.Util.to_string);
+  check_string "evidence network kind" "dns_failure"
+    (Yojson.Safe.Util.member "network_kind" evidence |> Yojson.Safe.Util.to_string)
+;;
+
 let test_attribution_json_omits_diagnostics () =
   let binding = identity ~api_key:"credential-a" () in
   let detailed =
@@ -851,6 +874,10 @@ let () =
             "error boundary retains typed unmodeled stop reason"
             `Quick
             test_error_boundary_unmodeled_stop_reason_stays_typed
+        ; Alcotest.test_case
+            "connect failure keeps its name"
+            `Quick
+            test_connect_failed_keeps_its_name
         ] )
     ; ( "agent detailed API"
       , [ Alcotest.test_case

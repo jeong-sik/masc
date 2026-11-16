@@ -928,7 +928,7 @@ let run_keeper_cycle
                           Keeper_metrics.(to_string Agent_coreTimeoutClassifications)
                           ~labels:[ "classification", "transient_network" ]
                           ()
-                      | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
+                      | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _))))))))))
                       | Agent_core.Error.Provider _ | Agent_core.Error.Agent _
                       | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
                       | Agent_core.Error.Serialization _ | Agent_core.Error.Io _

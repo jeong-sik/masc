@@ -103,6 +103,7 @@ let describe_error (e : Http_client.http_error) =
   | Http_client.HttpError { code; body; _ } ->
     Printf.sprintf "HTTP %d: %s" code (Http_client.refusal_body_text body)
   | Http_client.NetworkError { message; _ } -> "network: " ^ message
+  | Http_client.Connect_failed { message; _ } -> "connect failed: " ^ message
   | Http_client.TimeoutError { message; _ } -> "timeout: " ^ message
   | Http_client.AcceptRejected { reason } -> "refused before dispatch: " ^ reason
   | Http_client.ProviderTerminal { message; _ } -> "provider terminal: " ^ message

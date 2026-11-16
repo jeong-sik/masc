@@ -55,7 +55,8 @@ let%test "ordinary unclassified transport exceptions remain typed" =
     | Typed_transport_error (ProviderFailure { kind = Unknown_provider_failure _; _ }) ->
       true
     | Reserved_transport_exception | Typed_transport_error (HttpError _)
-    | Typed_transport_error (NetworkError _) | Typed_transport_error (TimeoutError _)
+    | Typed_transport_error (NetworkError _) | Typed_transport_error (Connect_failed _)
+    | Typed_transport_error (TimeoutError _)
     | Typed_transport_error (AcceptRejected _) | Typed_transport_error (ProviderTerminal _)
     | Typed_transport_error
         (ProviderFailure
@@ -143,21 +144,18 @@ let resolve_origin net ({ uri; host } : validated_origin) =
       | (_ :: _ as addresses) -> Ok addresses
       | [] ->
         Error
-          (NetworkError
+          (Connect_failed
              { message = Printf.sprintf "failed to resolve hostname: %s" host
              ; kind = Dns_failure
              })
     with
-    | (Eio.Io _ | Unix.Unix_error _) as exn ->
-      (match classify_network_exn exn with
-       | Some error -> Error error
-       | None -> raise exn)
+    | exn -> Http_client.connection_failure exn (Printexc.get_raw_backtrace ())
   in
   let* tls_wrap =
     match Uri.scheme uri with
     | Some "https" ->
       let wrap_error reason =
-        NetworkError
+        Connect_failed
           { message =
               Printf.sprintf
                 "HTTPS requested but TLS not available for %s: %s"
@@ -170,7 +168,7 @@ let resolve_origin net ({ uri; host } : validated_origin) =
       Result.map (fun peer -> Some (wrap peer))
       @@ Result.map_error
            (fun reason ->
-              NetworkError
+              Connect_failed
                 { message =
                     Printf.sprintf
                       "https host %S of %s is neither an address nor a host name; the \
@@ -186,6 +184,10 @@ let resolve_origin net ({ uri; host } : validated_origin) =
   Ok (net, addresses, tls_wrap)
 ;;
 
+(* The TCP connect and the TLS handshake run before [phase := Dispatch_started],
+   so every failure this function returns is [Connect_failed] (RFC #52028 §2.3).
+   A deadline, a reserved exception and an unclassified exception are raised
+   again, as before. *)
 let make_connection ~sw ~net ~origin =
   let* net, addresses, tls_wrap = resolve_origin net origin in
   try
@@ -202,10 +204,7 @@ let make_connection ~sw ~net ~origin =
     in
     Ok connection
   with
-  | (Eio.Io _ | Unix.Unix_error _) as exn ->
-    (match classify_network_exn exn with
-     | Some error -> Error error
-     | None -> raise exn)
+  | exn -> Http_client.connection_failure exn (Printexc.get_raw_backtrace ())
 ;;
 
 let read_response_body response_body =
@@ -275,6 +274,11 @@ let post_sync_once_after_commit
   let staged_error error =
     match !phase, !status with
     | Before_dispatch, None -> Before_dispatch_error error
+    (* Same rule as [Http_client.post_sync_once]: [Connect_failed] comes only
+       from [make_connection], which ends before dispatch. *)
+    | (Dispatch_started, None | Response_received, Some _)
+      when Http_client.is_connect_failed error ->
+      invalid_arg "exact-output measurement transport has a connect failure after dispatch"
     | Dispatch_started, None -> Dispatch_started_error error
     | Response_received, Some status -> Response_received_error { status; error }
     | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->

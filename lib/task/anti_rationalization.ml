@@ -614,7 +614,11 @@ let failure_certainty ~dispatch error =
   | Runtime_attempt_dispatch.Rejected_before_dispatch -> Before_dispatch
   | Runtime_attempt_dispatch.Dispatched ->
     match error with
-    | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Timeout _) -> Outcome_unknown
+    (* Certainty is per attempt, not per request. A [Dispatched] attempt whose
+       last request could not open its connection may have sent an earlier
+       one, so [Connect_failed] stays unknown here (RFC #52028 §2.3 step 4). *)
+    | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Connect_failed _ | Timeout _)
+      -> Outcome_unknown
     | Agent_core.Error.Api (RateLimited _ | Overloaded _ | ServerError _ | AuthError _
         | AuthorizationError _ | PaymentRequired _ | NotFound _ | ContextOverflow _
         | InputCapacity _ | InvalidRequest _) -> Definite_refusal
@@ -622,7 +626,8 @@ let failure_certainty ~dispatch error =
         | CapacityExhausted _ | AuthError _ | AuthorizationError _ | ServerError _
         | NotFound _ | InvalidRequest _ | EmptyCompletion _) -> Definite_refusal
     | Agent_core.Error.Provider (MissingApiKey _ | InvalidConfig _ | ParseError _
-        | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Timeout _
+        | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Connect_failed _
+        | Timeout _
         | ProviderTerminal _ | ProviderReportedError _ | ProviderWireError _)
     | Agent_core.Error.Agent _ | Mcp _ | Config _ | Serialization _ | Io _
     | Orchestration _ | Media _ | Internal _ | Internal_carried _ -> Outcome_unknown

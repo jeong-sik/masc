@@ -54,6 +54,8 @@ let provider_error_to_http_error = function
       }
   | Llm_provider.Error.NetworkError { detail; kind; _ } ->
     Llm_provider.Http_client.NetworkError { message = detail; kind }
+  | Llm_provider.Error.Connect_failed { detail; kind; _ } ->
+    Llm_provider.Http_client.Connect_failed { message = detail; kind }
   | Llm_provider.Error.ProviderWireError { format; kind; detail; _ } ->
     Llm_provider.Http_client.ProviderFailure
       { kind = Llm_provider.Http_client.Provider_wire_error { format; kind }
@@ -166,6 +168,8 @@ let core_error_to_runtime_outcome err =
            http_error ~code:529 ~body:message
          | NetworkError { message; kind } ->
            Llm_provider.Http_client.NetworkError { message; kind }
+         | Connect_failed { message; kind } ->
+           Llm_provider.Http_client.Connect_failed { message; kind }
          | Timeout { message; phase } ->
            (* [Http_client.Timeout] is the ETIMEDOUT transport kind, but
               [Retry.Timeout] also covers Queue, First_token and

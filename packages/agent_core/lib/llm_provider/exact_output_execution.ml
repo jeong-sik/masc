@@ -164,7 +164,7 @@ let execute_once_with_evidence ~net ~clock ?on_phase plan =
             { status = _
             ; error =
                 ( Http_client.HttpError _
-                | Http_client.NetworkError _
+                | Http_client.NetworkError _ | Http_client.Connect_failed _
                 | Http_client.TimeoutError
                     { message = _
                     ; phase =

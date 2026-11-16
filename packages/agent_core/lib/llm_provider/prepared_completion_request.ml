@@ -172,7 +172,7 @@ let measure_prepared ?connection_cache ?clock ?timeout_s ~next_stage ?permit_wai
     Error (Count_tokens_sync.Invalid_completion_request reason)
   | Error
       ( ( Http_client.HttpError _
-        | Http_client.NetworkError _
+        | Http_client.NetworkError _ | Http_client.Connect_failed _
         | Http_client.TimeoutError _
         | Http_client.ProviderTerminal _
         | Http_client.ProviderFailure _ ) as error ) -> transport_failure error

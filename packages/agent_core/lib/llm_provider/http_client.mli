@@ -49,6 +49,12 @@ val network_error_kind_of_string : string -> network_error_kind option
 (** [None] for [Unknown], [Some kind] otherwise. *)
 val known_network_error_kind : network_error_kind -> network_error_kind option
 
+(** [true] for [Tls_error] and [Local_resource_exhaustion]: a retry meets the
+    same certificate or configuration, or the same local shortage. The one kind
+    rule that [Retry.is_retryable], [Error.is_retryable] and
+    [Error_domain.is_retryable] read for a network or connect failure. *)
+val network_error_kind_is_non_retryable : network_error_kind -> bool
+
 (** What a stream was producing when it went idle: the state its last
     named production left it in. Transport-generic: provider parsers
     translate chunks into AGENT_CORE SSE events first, and the evidence
@@ -262,6 +268,19 @@ type http_error =
       { message : string
       ; kind : network_error_kind
       }
+  | Connect_failed of
+      { message : string
+      ; kind : network_error_kind
+      }
+  (** A connection function could not open a connection to the origin: the
+      name lookup, the TLS setup, the TCP connect or the TLS handshake
+      failed. No byte of the request was written. Only the connection
+      functions of this module and of the exact-output measurement transport
+      return it, and only before a request is dispatched: {!post_sync_once}
+      refuses a [Connect_failed] carried in {!Dispatch_started_error} or
+      {!Response_received_error}. Every other failure, including a failure on
+      an open connection, stays {!NetworkError}. [kind] is read the way
+      {!classify_network_exn} reads the same exception. *)
   | TimeoutError of
       { message : string
       ; phase : timeout_phase
@@ -297,6 +316,20 @@ type http_error =
     [None] means the exception is not a known transport failure; in particular
     caller cancellation and reserved exceptions must still propagate. *)
 val classify_network_exn : exn -> http_error option
+
+(** [connection_failure exn bt] is what a connection function returns for
+    [exn], raised while it was opening a connection (RFC #52028 §2.3). An
+    exception that {!classify_network_exn} reads as a {!NetworkError} becomes
+    a {!Connect_failed} of the same [kind]; a [Failure] becomes a
+    [Connect_failed] of kind [Unknown]. A reserved exception, a deadline and
+    an unclassified exception are raised again with [bt]. Every connection
+    function calls this one, so the provider transport and the exact-output
+    measurement transport read the same exception the same way. *)
+val connection_failure : exn -> Printexc.raw_backtrace -> ('a, http_error) result
+
+(** [true] for {!Connect_failed}. A receipt that carries it after dispatch
+    began cannot happen: only a connection function builds it. *)
+val is_connect_failed : http_error -> bool
 
 (** [true] only when the transport itself named the peer's close: an
     [ECONNRESET] or [EPIPE] raised directly or carried by

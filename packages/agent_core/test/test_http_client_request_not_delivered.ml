@@ -104,6 +104,7 @@ let large_body = String.make (16 * 1024 * 1024) 'x'
 let describe_http_error : Http_client.http_error -> string = function
   | HttpError { code; _ } -> Printf.sprintf "HttpError %d" code
   | NetworkError { message; _ } -> "NetworkError: " ^ message
+  | Connect_failed { message; _ } -> "Connect_failed: " ^ message
   | TimeoutError { message; _ } -> "TimeoutError: " ^ message
   | AcceptRejected { reason } -> "AcceptRejected: " ^ reason
   | ProviderTerminal { message; _ } -> "ProviderTerminal: " ^ message
@@ -467,7 +468,7 @@ let test_tls_config_decides_which_certificate_is_trusted () =
     in
     (match post ~cache:(cache_with ()) ~net ~url "{}" with
      | Ok _ -> Alcotest.fail "the system trust store accepted a self-signed certificate"
-     | Error (Http_client.Before_dispatch_error (Http_client.NetworkError _)) -> ()
+     | Error (Http_client.Before_dispatch_error (Http_client.Connect_failed _)) -> ()
      | Error error ->
        Alcotest.failf
          "expected the handshake to fail before dispatch, got %s"
@@ -524,6 +525,156 @@ let test_tls_passes_a_failed_writes_errno_through () =
   | exception exn -> Alcotest.failf "the write failed as %s" (Printexc.to_string exn)
 ;;
 
+(* RFC #52028 §4 step 5. A failure inside a connection function is
+   [Connect_failed] before dispatch: nothing listens, the client refuses the
+   server's certificate during the TLS handshake, or the peer closes during the
+   handshake. A failure after the connection opened stays [NetworkError]. *)
+type server =
+  | Nothing_listening
+  | Tls_with_untrusted_certificate
+  | Closes_during_tls_handshake
+  | Resets_after_reading_the_request
+  | Tls_resets_after_reading_the_request
+
+type connection_stage =
+  | Connect_failed_before_dispatch
+  | Network_error_after_dispatch
+
+type connection_stage_case =
+  { server : server
+  ; trust_test_certificate : bool
+  ; expected : connection_stage
+  ; label : string
+  }
+
+let connection_stage_cases =
+  [ { server = Nothing_listening
+    ; trust_test_certificate = false
+    ; expected = Connect_failed_before_dispatch
+    ; label = "nothing listens on the port"
+    }
+  ; { server = Tls_with_untrusted_certificate
+    ; trust_test_certificate = false
+    ; expected = Connect_failed_before_dispatch
+    ; label = "the client refuses the certificate in the TLS handshake"
+    }
+  ; { server = Closes_during_tls_handshake
+    ; trust_test_certificate = true
+    ; expected = Connect_failed_before_dispatch
+    ; label = "the peer closes during the TLS handshake"
+    }
+  ; { server = Resets_after_reading_the_request
+    ; trust_test_certificate = false
+    ; expected = Network_error_after_dispatch
+    ; label = "the peer resets after reading the request"
+    }
+  ; { server = Tls_resets_after_reading_the_request
+    ; trust_test_certificate = true
+    ; expected = Network_error_after_dispatch
+    ; label = "the peer resets after reading the request over TLS"
+    }
+  ]
+;;
+
+(* Returns the URL of a server that behaves as [server]. A listener opened in
+   a switch that has ended is closed, so its port refuses connections. *)
+let serve ~sw ~net ~server_config = function
+  | Nothing_listening ->
+    let port = Eio.Switch.run (fun listener_sw -> snd (listen_on_a_free_port ~sw:listener_sw ~net)) in
+    Printf.sprintf "http://127.0.0.1:%d/v1" port
+  | Tls_with_untrusted_certificate | Tls_resets_after_reading_the_request ->
+    fst
+      (start_tls_server ~sw ~net ~server_config (fun tls flow ->
+         read_request (Eio.Buf_read.of_flow tls ~max_size:max_int);
+         reset_on_close flow))
+  | Closes_during_tls_handshake ->
+    let socket, port = listen_on_a_free_port ~sw ~net in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      while true do
+        Eio.Net.accept_fork socket ~sw ~on_error:(fun _ -> ()) (fun _flow _addr -> ())
+      done);
+    Printf.sprintf "https://127.0.0.1:%d/v1" port
+  | Resets_after_reading_the_request ->
+    fst
+      (start_server ~sw ~net (fun flow ->
+         read_request (Eio.Buf_read.of_flow ~max_size:max_int flow);
+         reset_on_close flow))
+;;
+
+let stage_of_result = function
+  | Error (Http_client.Before_dispatch_error (Http_client.Connect_failed _)) ->
+    Some Connect_failed_before_dispatch
+  | Error (Http_client.Dispatch_started_error (Http_client.NetworkError _)) ->
+    Some Network_error_after_dispatch
+  | Ok _
+  | Error
+      ( Http_client.Before_dispatch_error _
+      | Http_client.Dispatch_started_error _
+      | Http_client.Response_received_error _ ) -> None
+;;
+
+let test_connection_stage_table () =
+  let server_config = https_server_config () in
+  List.iter
+    (fun { server; trust_test_certificate; expected; label } ->
+       let tls_config = if trust_test_certificate then Some (tls_client_config ()) else None in
+       with_cache ?tls_config
+       @@ fun ~sw ~net ~cache ->
+       let url = serve ~sw ~net ~server_config server in
+       let result = post ~cache ~net ~url "{}" in
+       match stage_of_result result with
+       | Some stage when stage = expected -> ()
+       | Some _ | None ->
+         (match result with
+          | Ok _ -> Alcotest.failf "%s: the request was answered" label
+          | Error error -> Alcotest.failf "%s: got %s" label (describe_post_error error)))
+    connection_stage_cases
+;;
+
+(* The exact-output measurement transport opens its connections with its own
+   pair of connection functions, so the same table runs through it. It trusts
+   only the system's certificates, so the one case that needs the test
+   certificate to open a connection is left out. *)
+let test_measurement_connection_stage_table () =
+  let server_config = https_server_config () in
+  let module Measurement = Exact_output_measurement_transport in
+  List.iter
+    (fun { server; trust_test_certificate = _; expected; label } ->
+       with_cache
+       @@ fun ~sw ~net ~cache:_ ->
+       let url = serve ~sw ~net ~server_config server in
+       let dispatch_intent =
+         Measurement.create_dispatch_intent
+           ~commit_fence:(fun () -> Ok ())
+           ~mark_dispatch_started:(fun () -> ())
+       in
+       let result =
+         Measurement.post_sync_once
+           ~net
+           ~url
+           ~headers:[ "Content-Type", "application/json" ]
+           ~body:"{}"
+           ~dispatch_intent
+           ()
+       in
+       match result with
+       | Error (Measurement.Transport_failed error) ->
+         (match stage_of_result (Error error) with
+          | Some stage when stage = expected -> ()
+          | Some _ | None -> Alcotest.failf "%s: got %s" label (describe_post_error error))
+       | Error (Measurement.Commit_failed ()) -> Alcotest.failf "%s: the commit fence failed" label
+       | Ok _ -> Alcotest.failf "%s: the request was answered" label)
+    (List.filter
+       (fun { server; _ } ->
+          match server with
+          | Tls_resets_after_reading_the_request -> false
+          | Nothing_listening
+          | Tls_with_untrusted_certificate
+          | Closes_during_tls_handshake
+          | Resets_after_reading_the_request -> true)
+       connection_stage_cases)
+;;
+
 let () =
   Alcotest.run
     "HTTP Client request not delivered"
@@ -552,6 +703,16 @@ let () =
             "tls passes a failed write's errno through"
             `Quick
             test_tls_passes_a_failed_writes_errno_through
+        ] )
+    ; ( "connection stage"
+      , [ Alcotest.test_case
+            "connection failures are Connect_failed, later failures NetworkError"
+            `Quick
+            test_connection_stage_table
+        ; Alcotest.test_case
+            "the measurement transport reads the same stages"
+            `Quick
+            test_measurement_connection_stage_table
         ] )
     ; ( "close reason over https"
       , [ Alcotest.test_case

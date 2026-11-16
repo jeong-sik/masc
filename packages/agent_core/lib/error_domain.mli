@@ -27,6 +27,10 @@ type provider_error =
   | `Authorization_error of string
   | `Server_error of int * string (** status, message *)
   | `Network_error of string
+  | `Connect_failed of string option * Llm_provider.Http_client.network_error_kind * string
+    (** The connection did not open, so the request was not sent: provider
+        (when a provider error carried it), kind, detail. Converts back to the
+        [Retry] or provider [Connect_failed] it came from. *)
   | `Empty_completion of string * Llm_provider.Types.stop_reason * string
     (** Provider, typed stop reason and detail; never flattened to a network
         error or invalid request. Same-attempt retry remains refused. *)

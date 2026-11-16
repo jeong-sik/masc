@@ -39,7 +39,8 @@ let test_provider_refusals () =
   List.iter (fun (refusal, expected) ->
       check failure (Exact.provider_refusal_to_string refusal) expected (F.execution (refused refusal)))
     [ Exact.Rate_limited, F.Transient; Exact.Overloaded, F.Transient; Exact.Server_error, F.Transient
-    ; Exact.Network_error, F.Transient; Exact.Timeout, F.Transient; Exact.Refusal_body_not_received, F.Transient
+    ; Exact.Network_error, F.Transient; Exact.Connect_failed, F.Transient
+    ; Exact.Timeout, F.Transient; Exact.Refusal_body_not_received, F.Transient
     ; Exact.Auth_failed, F.Auth_refused; Exact.Authorization_refused, F.Auth_refused
     ; Exact.Payment_required, F.Configuration_refused; Exact.Not_found, F.Configuration_refused
     ; Exact.Request_body_refused, F.Input_refused F.Request_body

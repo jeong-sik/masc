@@ -133,6 +133,8 @@ let roundtrip_corpus =
   ; "api_error_server:502"
   ; "api_error_timeout"
   ; "api_error_network"
+  ; "api_error_connect_failed"
+  ; "provider_error_connect_failed:connection_refused"
   ; "api_error_context_overflow"
   ; "provider_error_parse"
   ; "provider_error_server:500"
@@ -204,9 +206,12 @@ let () =
 (* Independent copy of the intended canonical-wire policy. DO NOT refactor to
    call production helpers — this is the oracle. *)
 
+(* RFC #52028 §2.3 added [api_error_connect_failed]: a connection that did not
+   open waits and is tried again, as a dropped one does. *)
 let frozen_is_transient_provider_runtime_failure terminal_reason =
   String.equal terminal_reason "api_error_timeout"
   || String.equal terminal_reason "api_error_network"
+  || String.equal terminal_reason "api_error_connect_failed"
 ;;
 
 (* Two predicates in the oracle, matching the two production wire sets.
@@ -951,6 +956,40 @@ let () =
   check
     "terminal transient retry-later does not page the operator"
     (not (R.needs_operator_broadcast (fst got)))
+;;
+
+(* RFC #52028 §2.3: a provider [Connect_failed] writes its kind. Only the
+   [timeout] kind is transient, like the network timeout markers; a name lookup
+   that did not open stays a provider runtime failure that is not retried. *)
+let () =
+  let code = "provider_error_connect_failed:timeout" in
+  check
+    "provider connect-failed timeout is transient"
+    (Tr.is_transient_provider_runtime_failure (Tr.of_wire code));
+  check
+    "provider connect-failed timeout is the named wire"
+    (String.equal code Tr.wire_provider_error_connect_failed_timeout);
+  let receipt =
+    { base_receipt with
+      terminal_reason_code = code
+    ; error_kind = Some (R.error_kind_of_string "provider")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_failed
+    }
+  in
+  let got = R.operator_disposition receipt in
+  let want = R.Disp_retry_later, R.Reason_transient_runtime_retry in
+  check
+    (Printf.sprintf
+       "provider connect-failed timeout disposition want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "provider connect-failed dns_failure is not transient"
+    (not
+       (Tr.is_transient_provider_runtime_failure
+          (Tr.of_wire "provider_error_connect_failed:dns_failure")))
 ;;
 
 let () =

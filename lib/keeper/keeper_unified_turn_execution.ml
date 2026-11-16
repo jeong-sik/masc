@@ -51,7 +51,7 @@ let declared_lane_failure_of_error (err : Agent_core.Error.t) =
   | Agent_core.Error.Api (InputCapacity _)
   | Agent_core.Error.Api
       ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
-      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _
+      | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _ | Connect_failed _
       | Timeout _ )
   | Agent_core.Error.Provider _
   | Agent_core.Error.Agent _

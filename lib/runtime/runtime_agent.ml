@@ -18,6 +18,7 @@ let transport_error_kind_of_exception exn =
     Some Llm_provider.Http_client.Timeout
   | Some
       ( Llm_provider.Http_client.HttpError _
+      | Llm_provider.Http_client.Connect_failed _
       | Llm_provider.Http_client.AcceptRejected _
       | Llm_provider.Http_client.ProviderTerminal _
       | Llm_provider.Http_client.ProviderFailure _ )

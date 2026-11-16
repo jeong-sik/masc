@@ -41,6 +41,43 @@ let test_api_network_becomes_provider_network () =
        (network_error Llm_provider.Http_client.Connection_refused "refused")).Krf.cause
 ;;
 
+(* RFC #52028 §2.3: a connection that did not open keeps its own cause, so the
+   stored failure says the request was not sent. *)
+let test_api_connect_failed_becomes_provider_connect_failed () =
+  Alcotest.check
+    cause_testable
+    "an agent-core connect failure names the connection that did not open"
+    (Krf.Provider_connect_failed
+       { provider = None
+       ; kind = Llm_provider.Http_client.Connection_refused
+       ; detail = "refused"
+       })
+    (Krf.of_core_error
+       (Agent_core.Error.Api
+          (Agent_core.Retry.Connect_failed
+             { message = "refused"; kind = Llm_provider.Http_client.Connection_refused })))
+      .Krf.cause
+;;
+
+let test_provider_connect_failed_keeps_its_provider () =
+  Alcotest.check
+    cause_testable
+    "a provider connect failure keeps the provider that failed"
+    (Krf.Provider_connect_failed
+       { provider = Some "glm"
+       ; kind = Llm_provider.Http_client.Dns_failure
+       ; detail = "no such host"
+       })
+    (Krf.of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.Connect_failed
+             { provider = "glm"
+             ; kind = Llm_provider.Http_client.Dns_failure
+             ; detail = "no such host"
+             })))
+      .Krf.cause
+;;
+
 let test_provider_network_keeps_its_provider () =
   Alcotest.check
     cause_testable
@@ -244,6 +281,10 @@ let every_cause =
       { provider = None; kind = Llm_provider.Http_client.Unknown; detail = "" }
   ; Krf.Provider_network
       { provider = Some "glm"; kind = Llm_provider.Http_client.Unreachable; detail = "" }
+  ; Krf.Provider_connect_failed
+      { provider = Some "glm"; kind = Llm_provider.Http_client.Tls_error; detail = "handshake" }
+  ; Krf.Provider_connect_failed
+      { provider = None; kind = Llm_provider.Http_client.Dns_failure; detail = "" }
   ; Krf.Provider_rate_limited
       { provider = Some "ollama_cloud"; retry_after = Some 12.5; detail = "concurrent requests" }
   ; Krf.Provider_rate_limited
@@ -411,6 +452,14 @@ let () =
             "a provider transport failure"
             `Quick
             test_provider_network_keeps_its_provider
+        ; Alcotest.test_case
+            "an agent-core connect failure"
+            `Quick
+            test_api_connect_failed_becomes_provider_connect_failed
+        ; Alcotest.test_case
+            "a provider connect failure"
+            `Quick
+            test_provider_connect_failed_keeps_its_provider
         ; Alcotest.test_case
             "a context overflow"
             `Quick

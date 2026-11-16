@@ -152,7 +152,7 @@ let observe_http_error ~now ~candidate ~quota_scope error =
      | Llm_provider.Retry.AuthError _ | Llm_provider.Retry.AuthorizationError _
      | Llm_provider.Retry.InvalidRequest _ | Llm_provider.Retry.NotFound _
      | Llm_provider.Retry.ContextOverflow _ | Llm_provider.Retry.InputCapacity _
-     | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Timeout _ -> ())
+     | Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _ | Llm_provider.Retry.Timeout _ -> ())
   | Llm_provider.Http_client.ProviderFailure {kind; _} ->
     (match kind with
      | Llm_provider.Http_client.Hard_quota {retry_after} ->
@@ -169,5 +169,5 @@ let observe_http_error ~now ~candidate ~quota_scope error =
      | Llm_provider.Http_client.Empty_completion _
      | Llm_provider.Http_client.Context_overflow _
      | Llm_provider.Http_client.Unknown_provider_failure _ -> ())
-  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.TimeoutError _
+  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _ | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _ -> ()

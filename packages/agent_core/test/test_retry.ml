@@ -219,6 +219,17 @@ let test_is_retryable () =
     "a reset connection is retryable"
     true
     (Retry.is_retryable (Retry.NetworkError { message = ""; kind = Connection_reset }));
+  (* RFC #52028 §2.3: a connection that did not open reads the same kind rule. *)
+  check
+    bool
+    "a refused connection that did not open is retryable"
+    true
+    (Retry.is_retryable (Retry.Connect_failed { message = ""; kind = Connection_refused }));
+  check
+    bool
+    "a TLS handshake that did not open is not retryable"
+    false
+    (Retry.is_retryable (Retry.Connect_failed { message = ""; kind = Tls_error }));
   check
     bool
     "no route to the network or host is retryable"

@@ -84,6 +84,14 @@ type provider_error =
       ; timeout_phase : Http_client.timeout_phase option
       ; detail : string
       }
+  | Connect_failed of
+      { provider : string
+      ; kind : Http_client.network_error_kind
+      ; detail : string
+      }
+  (** The connection to the provider did not open, so the request was not
+      sent ({!Http_client.Connect_failed}, RFC #52028 §2.3). No deadline phase:
+      a deadline stays [Timeout]. *)
   | Timeout of
       { provider : string
       ; timeout_phase : Http_client.timeout_phase option

@@ -656,7 +656,7 @@ let%test "a refusal this stage makes before dispatch is Attempt_rejected" =
            | NotFound _
            | ContextOverflow _
            | InputCapacity _
-           | NetworkError _
+           | NetworkError _ | Connect_failed _
            | Timeout _)
      | Error.Provider _
      | Error.Agent _

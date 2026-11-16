@@ -76,5 +76,10 @@ type t =
           ([Retry.Timeout] in the [Queue] or [Capacity_backpressure] phase).
           Nothing reached this binding, so the failure says nothing about
           it. *)
+  | Not_sent
+      (** The connection to this binding's host did not open
+          ([Retry.Connect_failed]), so this request was not sent. Whose affair
+          it is stays unknown: the host name may be this binding's, or the
+          network may be one every candidate shares. *)
 
 val of_api_error : Retry.api_error -> t

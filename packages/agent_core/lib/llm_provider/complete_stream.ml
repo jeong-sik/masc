@@ -1205,7 +1205,7 @@ let complete_stream_http
           ())
       with
       | Error
-          (( Http_client.HttpError _ | Http_client.NetworkError _
+          (( Http_client.HttpError _ | Http_client.NetworkError _ | Http_client.Connect_failed _
            | Http_client.TimeoutError _ | Http_client.AcceptRejected _
            | Http_client.ProviderTerminal _ | Http_client.ProviderFailure _ ) as err) ->
         (* Agent Core contract: transport-level error before body_logic ran (or

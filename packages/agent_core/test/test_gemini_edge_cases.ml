@@ -320,6 +320,7 @@ let test_error_envelope_classification () =
            check "bodiless 429 is retryable" (Retry.is_retryable refusal)
          | Http_client.HttpError _ -> check "bodiless 429 keeps its status" false
          | Http_client.NetworkError _
+         | Http_client.Connect_failed _
          | Http_client.TimeoutError _
          | Http_client.AcceptRejected _
          | Http_client.ProviderTerminal _

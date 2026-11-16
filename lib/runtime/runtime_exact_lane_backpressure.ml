@@ -75,7 +75,7 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
           | Exact.Server_error | Exact.Auth_failed | Exact.Authorization_refused
           | Exact.Invalid_request | Exact.Not_found
           | Exact.Context_overflow | Exact.Input_capacity | Exact.Network_error
-          | Exact.Timeout )
+          | Exact.Connect_failed | Exact.Timeout )
       ; _
       }
   | Exact.Completion_failed {dispatch=Exact.No_generation_dispatch; _}

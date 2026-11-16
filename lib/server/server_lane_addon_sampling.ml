@@ -20,6 +20,7 @@ let provider_error_detail = function
   | Llm_provider.Http_client.HttpError {code;body;retry_after_header=_} ->
       Printf.sprintf "HTTP %d: %s" code (Llm_provider.Http_client.refusal_body_text body)
   | Llm_provider.Http_client.NetworkError {message;kind=_}
+  | Llm_provider.Http_client.Connect_failed {message;kind=_}
   | Llm_provider.Http_client.TimeoutError {message;phase=_}
   | Llm_provider.Http_client.ProviderTerminal {message;kind=_}
   | Llm_provider.Http_client.ProviderFailure {message;kind=_} -> message
@@ -63,8 +64,9 @@ let note_provider_failure runtime error =
         | Some seconds -> Runtime_quota_window.note_exhausted ~scope ~source ~resets_at:(Time_compat.now () +. seconds)
         | None -> Runtime_quota_window.note_observed_exhausted ~scope ~source) runtime
   | Retry_after_observed {retry_class=Empty_completion _;_} -> note_answered runtime
-  | Retry_after_observed {retry_class=(Server_error | Network_transient | Provider_timeout
-                                       | Local_admission_timeout | Provider_capacity);_}
+  | Retry_after_observed {retry_class=(Server_error | Network_transient | Connection_not_opened
+                                       | Provider_timeout | Local_admission_timeout
+                                       | Provider_capacity);_}
   | Rotate_now _ | Exhausted_visible_alive _ ->
       (* Like the shared one-shot walk, this call has no recurring Keeper
          recorder to retry a failed-attempt mark. Quota and rate-limit evidence
@@ -189,7 +191,7 @@ let invoke ~sw ~net ~store ~route ~request params =
                   ["provider_stop_reason", `String (L.stop_reason_to_string stop_reason)]
               | Runtime_unavailable _ | Unsupported_controls _ | Invalid_request _
               | Invalid_response _ | Provider_error (Llm_provider.Http_client.HttpError _)
-              | Provider_error (Llm_provider.Http_client.NetworkError _)
+              | Provider_error (Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _)
               | Provider_error (Llm_provider.Http_client.TimeoutError _)
               | Provider_error (Llm_provider.Http_client.AcceptRejected _)
               | Provider_error (Llm_provider.Http_client.ProviderTerminal _)

@@ -331,6 +331,28 @@ let test_http_network_error_mapping () =
   | _ -> fail "expected NetworkError"
 ;;
 
+(* A connection function's failure keeps its own constructor through the
+   provider error (RFC #52028 §2.3); it is not folded into NetworkError. *)
+let test_http_connect_failed_mapping () =
+  let err =
+    Error.of_http_error
+      ~provider:"local"
+      (Http_client.Connect_failed
+         { message = "lookup failed"; kind = Http_client.Dns_failure })
+  in
+  match err with
+  | Error.Connect_failed { provider; kind; detail } ->
+    check string "provider" "local" provider;
+    check bool "kind" true (kind = Http_client.Dns_failure);
+    check string "detail" "lookup failed" detail;
+    check
+      string
+      "to_string"
+      "Provider 'local' connect failed (dns_failure): lookup failed"
+      (Error.to_string err)
+  | _ -> fail "expected Connect_failed"
+;;
+
 let test_http_timeout_error_mapping () =
   let err =
     Error.of_http_error
@@ -408,6 +430,10 @@ let test_retry_remaining_variants_mapping () =
       , "network" )
     ; ( Error.of_retry_api_error
           ~provider:"openai"
+          (Retry.Connect_failed { message = "refused"; kind = Http_client.Connection_refused })
+      , "connect_failed" )
+    ; ( Error.of_retry_api_error
+          ~provider:"openai"
           (Retry.Timeout { message = "slow"; phase = None })
       , "timeout" )
     ]
@@ -427,6 +453,8 @@ let test_retry_remaining_variants_mapping () =
          check bool "context reason" true (String.length reason > 0)
        | "network", Error.NetworkError { kind = Http_client.Tls_error; detail; _ } ->
          check string "network detail" "tls" detail
+       | "connect_failed", Error.Connect_failed { kind = Http_client.Connection_refused; detail; _ }
+         -> check string "connect failed detail" "refused" detail
        | "timeout", Error.Timeout { detail; _ } ->
          check string "timeout detail" "slow" detail
        | _ -> fail ("unexpected mapping for " ^ expected))
@@ -634,6 +662,13 @@ let test_is_retryable_matrix () =
        ; timeout_phase = None
        ; detail = "fd"
        });
+  (* A connection that did not open follows the same kind rule as a network
+     error (RFC #52028 §2.3): refused may pass, a TLS failure does not. *)
+  retryable
+    (Error.Connect_failed
+       { provider = "p"; kind = Http_client.Connection_refused; detail = "refused" });
+  not_retryable
+    (Error.Connect_failed { provider = "p"; kind = Http_client.Tls_error; detail = "tls" });
   retryable (Error.Timeout { provider = "p"; timeout_phase = None; detail = "slow" });
   not_retryable
     (Error.HardQuota { provider = "p"; retry_after = None; detail = "billing" });
@@ -674,6 +709,8 @@ let classification_samples : Error.provider_error list =
       ; timeout_phase = Some Http_client.Queue
       ; detail = "d"
       }
+  ; Error.Connect_failed
+      { provider = "p"; kind = Http_client.Connection_refused; detail = "d" }
   ; Error.Timeout { provider = "p"; timeout_phase = None; detail = "d" }
   ; Error.InvalidRequest { provider = "p"; reason = "r" }
   ; Error.NotFound { provider = "p"; detail = "d" }
@@ -701,6 +738,7 @@ let expected_classification : Error.provider_error -> bool * bool * bool = funct
   | Error.CapacityExhausted _
   | Error.ServerError _
   | Error.NetworkError _
+  | Error.Connect_failed _
   | Error.InvalidRequest _
   | Error.ProviderTerminal _ -> false, false, false
 ;;
@@ -868,6 +906,7 @@ let () =
         ; test_case "HTTP server error" `Quick test_http_server_error_mapping
         ; test_case "HTTP terminal" `Quick test_http_terminal_mapping
         ; test_case "HTTP network error" `Quick test_http_network_error_mapping
+        ; test_case "HTTP connect failed" `Quick test_http_connect_failed_mapping
         ; test_case "HTTP timeout error" `Quick test_http_timeout_error_mapping
         ; test_case
             "Retry timeout phase preserved"

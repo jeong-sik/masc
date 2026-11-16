@@ -782,7 +782,14 @@ val connection_recovery_sequence :
 (** A typed peer reset/EOF before checkpoint or effect progress may be answered
     by rebuilding the same HTTP attempt with fresh connections. The reconnect
     result is returned directly, including its checkpoint and failure; it does
-    not enter another reconnect loop. Other failures remain unchanged. *)
+    not enter another reconnect loop. Other failures remain unchanged.
+
+    The reset/EOF must come from a connection that had opened
+    ([Http_client.NetworkError]). A connection that never opened
+    ([Http_client.Connect_failed]) was not a reused one, so fresh connections
+    are not its remedy, whatever its kind: a reset or EOF during the TLS
+    handshake of a new connection is not rebuilt. The walk moves to the next
+    candidate (RFC #52028 §3.5). *)
 
 val run_try_provider_with_truncation_recovery :
   ?on_memory_capacity_refusal:Keeper_memory_delivery_reprojection.t ->

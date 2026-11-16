@@ -14,7 +14,7 @@
 (** GET [url] and decode the body as JSON.  Returns [Error msg] for
     non-2xx responses, transport errors, parser errors, and the
     closed-sum [Http_client.http_error] variants ([AcceptRejected],
-    [NetworkError], [TimeoutError],
+    [NetworkError], [Connect_failed], [TimeoutError],
     [ProviderTerminal], [ProviderFailure]).  [ProviderTerminal] is
     surfaced defensively — discovery hits HTTP endpoints only, so
     CLI-subprocess terminals cannot reach this match. *)

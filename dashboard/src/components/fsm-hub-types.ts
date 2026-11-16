@@ -455,6 +455,7 @@ const TERMINAL_REASON_CODE_LABELS: Record<string, string> = {
   api_error_not_found: 'API 자원 없음',
   api_error_context_overflow: 'API 컨텍스트 초과',
   api_error_network: 'API 네트워크 오류',
+  api_error_connect_failed: 'API 연결 실패',
   api_error_timeout: 'API 타임아웃',
   // keeper_unified_turn.ml:210
   registry_phase_missing: '레지스트리 phase 누락',

@@ -604,6 +604,7 @@ let test_size_verdict_table () =
     ; "overloaded", refused E.Overloaded, false
     ; "server error", refused E.Server_error, false
     ; "network error", refused E.Network_error, false
+    ; "connection not opened", refused E.Connect_failed, false
     ; "authentication failed", refused E.Auth_failed, false
     ; "authorization refused", refused E.Authorization_refused, false
     ; "payment required", refused E.Payment_required, false
@@ -651,6 +652,10 @@ let test_size_verdict_table () =
        that was never sent was judged by no provider. *)
     ; ( "completion failed, connect deadline, not sent"
       , unsent (Http.TimeoutError { message = ""; phase = Http.Http_operation })
+      , false )
+    (* RFC #52028 §2.3: a connection that did not open sent nothing. *)
+    ; ( "completion failed, connection not opened, not sent"
+      , unsent (Http.Connect_failed { message = ""; kind = Http.Connection_refused })
       , false )
     ; ( "completion failed, context overflow, not sent"
       , unsent (Http.ProviderFailure { kind = Http.Context_overflow { limit = None }; message = "" })

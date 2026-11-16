@@ -431,6 +431,7 @@ let test_complete_stream_openai_captures_llama_server_timings () =
             "expected Ok, got %s"
             (match err with
              | Http_client.NetworkError { message; _ }
+             | Http_client.Connect_failed { message; _ }
              | Http_client.TimeoutError { message; _ } -> message
              | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
              | Http_client.AcceptRejected { reason } -> reason
@@ -691,7 +692,8 @@ let refusal_on
            "context overflow"
          | Error (Http_client.HttpError { code; _ }) -> Printf.sprintf "HTTP %d" code
          | Error
-             ( Http_client.NetworkError _ | Http_client.TimeoutError _
+             ( Http_client.NetworkError _ | Http_client.Connect_failed _
+             | Http_client.TimeoutError _
              | Http_client.AcceptRejected _ | Http_client.ProviderTerminal _
              | Http_client.ProviderFailure _ ) -> "another failure"
          | Ok _ -> "an answer");
@@ -1023,6 +1025,7 @@ let test_complete_stream_openai_responses_ok () =
       failf "expected Ok for Responses streaming, got %s"
         (match error with
          | Http_client.NetworkError { message; _ }
+         | Http_client.Connect_failed { message; _ }
          | Http_client.TimeoutError { message; _ }
          | Http_client.ProviderTerminal { message; _ }
          | Http_client.ProviderFailure { message; _ } -> message
@@ -3219,6 +3222,7 @@ let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
            "expected active stream to complete, got %s"
            (match err with
             | Http_client.NetworkError { message; _ }
+            | Http_client.Connect_failed { message; _ }
             | Http_client.TimeoutError { message; _ } -> message
             | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
             | Http_client.AcceptRejected { reason } -> reason
@@ -3533,6 +3537,7 @@ let test_complete_stream_long_thinking_is_not_cut_off () =
            "long thinking must stream to completion, got %s"
            (match err with
             | Http_client.NetworkError { message; _ }
+            | Http_client.Connect_failed { message; _ }
             | Http_client.TimeoutError { message; _ } -> message
             | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
             | Http_client.AcceptRejected { reason } -> reason

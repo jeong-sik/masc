@@ -9,7 +9,8 @@
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /
       AuthError / AuthorizationError / PaymentRequired / InvalidRequest /
-      NotFound / ContextOverflow / InputCapacity / NetworkError / Timeout)
+      NotFound / ContextOverflow / InputCapacity / NetworkError / Connect_failed /
+      Timeout)
     - agent_error variants reached via [CoreError.Agent _] routing
     - all top-level non-Agent / non-Api wrappers (Mcp / Config /
       Serialization / Io / Orchestration / Internal) *)
@@ -123,6 +124,9 @@ let api_cases : (string * CoreError.api_error * string) list =
   ; ( "NetworkError"
     , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_reset }
     , "api_error_network" )
+  ; ( "Connect_failed"
+    , Retry.Connect_failed { message = "ECONNREFUSED"; kind = Http.Connection_refused }
+    , "api_error_connect_failed" )
   ; "Timeout", Retry.Timeout { message = "60s"; phase = None }, "api_error_timeout"
   ; ( "TimeoutWithExecutionBudgetProse"
     , Retry.Timeout
@@ -171,6 +175,11 @@ let core_error_cases : (string * CoreError.t * string) list =
   ; ( "Api/AuthorizationError"
     , CoreError.Api (Retry.AuthorizationError { message = "permission refused" })
     , "api_error_authorization" )
+  ; ( "Provider/Connect_failed"
+    , CoreError.Provider
+        (Llm_provider.Error.Connect_failed
+           { provider = "glm"; kind = Http.Dns_failure; detail = "no such host" })
+    , "provider_error_connect_failed:dns_failure" )
   ; ( "Provider/AuthorizationError"
     , CoreError.Provider
         (Llm_provider.Error.AuthorizationError

@@ -9,6 +9,8 @@ type provider_error =
   | `Authorization_error of string
   | `Server_error of int * string
   | `Network_error of string
+  | `Connect_failed of string option * Http_client.network_error_kind * string
+    (** provider (when a provider error carried it), kind, detail *)
   | `Empty_completion of string * Llm_provider.Types.stop_reason * string
   | `Provider_timeout of Http_client.timeout_phase option * string
   | `Streaming_timeout of Http_client.timeout_phase * string * string option
@@ -95,6 +97,7 @@ let of_api_error (err : Retry.api_error) : provider_error =
   | Retry.AuthorizationError r -> `Authorization_error r.message
   | Retry.ServerError r -> `Server_error (r.status, r.message)
   | Retry.NetworkError r -> `Network_error r.message
+  | Retry.Connect_failed r -> `Connect_failed (None, r.kind, r.message)
   | Retry.Timeout r ->
     (match r.phase with
      | Some phase when is_streaming_timeout_phase phase ->
@@ -116,6 +119,7 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
   | Llm_provider.Error.AuthorizationError r -> `Authorization_error r.detail
   | Llm_provider.Error.ServerError r -> `Server_error (r.code, r.detail)
   | Llm_provider.Error.NetworkError r -> `Network_error r.detail
+  | Llm_provider.Error.Connect_failed r -> `Connect_failed (Some r.provider, r.kind, r.detail)
   | Llm_provider.Error.Timeout r ->
     (match r.timeout_phase with
      | Some phase when is_streaming_timeout_phase phase ->
@@ -193,6 +197,12 @@ let provider_to_error : provider_error -> Error.t = function
   | `Authorization_error msg -> Error.Api (Retry.AuthorizationError { message = msg })
   | `Server_error (status, msg) -> Error.Api (Retry.ServerError { status; message = msg })
   | `Network_error msg -> Error.Api (Retry.NetworkError { message = msg; kind = Unknown })
+  (* Kind and family ride along, so a connect failure comes back as the value it
+     left as (RFC #52028 §2.3); [`Network_error] above loses both. *)
+  | `Connect_failed (Some provider, kind, detail) ->
+    Error.Provider (Llm_provider.Error.Connect_failed { provider; kind; detail })
+  | `Connect_failed (None, kind, message) ->
+    Error.Api (Retry.Connect_failed { message; kind })
   | `Empty_completion (provider, stop_reason, detail) ->
     Error.Provider (Llm_provider.Error.EmptyCompletion { provider; stop_reason; detail })
   | `Provider_timeout (phase, msg) -> Error.Api (Retry.Timeout { message = msg; phase })
@@ -300,6 +310,7 @@ let is_retryable (err : [< core_error_poly ]) : bool =
   | `Provider_timeout _
   | `Streaming_timeout _
   | `Network_error _ -> true
+  | `Connect_failed (_, kind, _) -> not (Http_client.network_error_kind_is_non_retryable kind)
   | `Mcp_init_failed _
   | `Mcp_tool_list_failed _
   | `Mcp_tool_call_failed _

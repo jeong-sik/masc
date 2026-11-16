@@ -4055,8 +4055,9 @@ let test_every_candidate_rate_limited_is_every_binding_resting () =
 ;;
 
 (* A connection to a port nothing listens on is refused before any byte of the
-   request is written. No provider read the input, so the input cannot be the
-   reason, and the lane waits for the network instead of quarantining. Live, a
+   request is written, so it is [Connect_failed] (RFC #52028 §2.3). No provider
+   read the input, so the input cannot be the reason, and the lane waits for
+   the network instead of quarantining. Live, a
    DNS outage quarantined 1,154 Board attention candidates this way. *)
 let test_network_failure_before_dispatch_is_every_binding_resting () =
   let result, posts =
@@ -4081,12 +4082,12 @@ let test_network_failure_before_dispatch_is_every_binding_resting () =
   | Error (EO.Flow_exact_execution_failed failure) ->
     (match failure.cause.cause with
      | EO.Completion_failed
-         { error = Http_client.NetworkError _ | Http_client.TimeoutError _
+         { error = Http_client.Connect_failed _ | Http_client.TimeoutError _
          ; dispatch = EO.No_generation_dispatch
          } -> ()
      | other ->
        failf
-         "a refused connection was not a network failure before dispatch: %s"
+         "a refused connection was not a connect failure before dispatch: %s"
          (EO.execution_error_cause_to_string other));
     let refused_attempt = attempt_for failure.evidence "unreachable-b" in
     check

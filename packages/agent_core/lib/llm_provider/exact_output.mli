@@ -281,6 +281,9 @@ type provider_refusal =
   | Context_overflow
   | Input_capacity
   | Network_error
+  | Connect_failed
+      (** The connection to the binding's host did not open, so the request was
+          not sent. Stored as [connect_failed], apart from [network_error]. *)
   | Timeout
 
 type generation_dispatch_fact =

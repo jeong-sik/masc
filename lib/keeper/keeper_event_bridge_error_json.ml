@@ -184,6 +184,11 @@ let core_api_error_fields = function
     ; "message", `String message
     ; "network_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
     ]
+  | Agent_core.Retry.Connect_failed { message; kind } ->
+    [ "variant", `String "connect_failed"
+    ; "message", `String message
+    ; "network_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
+    ]
   | Agent_core.Retry.Timeout { message; phase } ->
     [ "variant", `String "timeout"
     ; "message", `String message
@@ -456,6 +461,13 @@ let core_provider_error_fields error =
       , match timeout_phase with
         | Some phase -> `String (Llm_provider.Http_client.timeout_phase_to_label phase)
         | None -> `Null )
+    ; "detail", `String detail
+    ]
+  | Llm_provider.Error.Connect_failed { provider; kind; detail } ->
+    [ "variant", `String "connect_failed"
+    ; "message", `String message
+    ; "provider", `String provider
+    ; "network_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
     ; "detail", `String detail
     ]
   | Llm_provider.Error.Timeout { provider; timeout_phase; detail } ->

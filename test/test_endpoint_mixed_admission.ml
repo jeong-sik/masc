@@ -265,7 +265,7 @@ let test_mixed_declared () = with_fixture Declared (fun ~work ~sw ~net ~clock ~a
    | Error error ->
      (match error with
       | LP.Http_client.HttpError {code; _} -> check int "ordinary typed HTTP status" 429 code
-      | NetworkError _ | TimeoutError _ | AcceptRejected _
+      | NetworkError _ | Connect_failed _ | TimeoutError _ | AcceptRejected _
       | ProviderTerminal _ | ProviderFailure _ -> fail "ordinary 429 lost its HTTP status"));
   assert_released config;
   ordinary ~sw ~net config |> get_ok "ordinary succeeds after 429" |> ignore;

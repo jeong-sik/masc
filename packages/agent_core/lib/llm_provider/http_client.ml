@@ -153,6 +153,13 @@ type http_error =
       { message : string
       ; kind : network_error_kind
       }
+  (* Only the connection functions ([resolve_origin], [make_connection] and the
+     exact-output measurement transport's pair) build this, before dispatch
+     (RFC #52028 §2.3). *)
+  | Connect_failed of
+      { message : string
+      ; kind : network_error_kind
+      }
   | TimeoutError of
       { message : string
       ; phase : timeout_phase
@@ -334,6 +341,7 @@ let%test "explicit deadline: timeout without clock is rejected" =
   | Error
       ( HttpError _
       | NetworkError _
+      | Connect_failed _
       | TimeoutError _
       | ProviderTerminal _
       | ProviderFailure _ ) -> false
@@ -479,9 +487,10 @@ let known_network_error_kind = function
     | End_of_file ) as kind -> Some kind
 ;;
 
-(* For composite errors, prefer kinds that should not be retried (local
-   resource exhaustion and TLS errors) over transient network failures.
-   This mirrors the severity ordering rather than the retry policy itself. *)
+(* The kind rule of the retry policy for a network or connect failure
+   ([Retry.is_retryable], [Error.is_retryable], [Error_domain.is_retryable]):
+   a TLS error or a local resource shortage meets the same certificate,
+   configuration or shortage on the next try. *)
 let network_error_kind_is_non_retryable = function
   | Local_resource_exhaustion | Tls_error -> true
   | Connection_refused | Dns_failure | Unreachable | Timeout | Connection_reset | End_of_file
@@ -523,8 +532,6 @@ let network_error_of_eio err exn =
   NetworkError { message = Printexc.to_string exn; kind = classify_eio_error err }
 ;;
 
-let unknown_network_error msg = NetworkError { message = msg; kind = Unknown }
-
 let https_init_error_network_kind = function
   | Api_common.Ca_certs_unavailable _ -> Tls_error
   | Api_common.Tls_config_unavailable _ -> Tls_error
@@ -561,6 +568,47 @@ let catch_network f =
      | None -> raise exn)
 ;;
 
+(* A connection function's failure (RFC #52028 §2.3). The exception alone does
+   not say whether a connection was open, so [classify_network_exn] stays as it
+   is; only the function that was opening the connection turns its reading into
+   [Connect_failed]. A deadline ([TimeoutError]) is not a connect failure: the
+   caller's deadline owns it. *)
+let connect_failed_of_exn exn =
+  match classify_network_exn exn with
+  | Some (NetworkError { message; kind }) -> Some (Connect_failed { message; kind })
+  | Some
+      ( HttpError _
+      | Connect_failed _
+      | TimeoutError _
+      | AcceptRejected _
+      | ProviderTerminal _
+      | ProviderFailure _ )
+  | None -> None
+;;
+
+(* What a connection function returns for an exception raised while it was
+   opening the connection. A [Failure] there names no transport fact, but the
+   connection still did not open, so it is a [Connect_failed] of kind
+   [Unknown]. A reserved exception, a deadline and an exception nothing
+   classifies are raised again with [bt]. *)
+let connection_failure exn bt =
+  Reserved_exn.reraise_if_reserved exn;
+  match connect_failed_of_exn exn, exn with
+  | Some error, _ -> Error error
+  | None, Failure msg -> Error (Connect_failed { message = msg; kind = Unknown })
+  | None, _ -> Printexc.raise_with_backtrace exn bt
+;;
+
+let is_connect_failed = function
+  | Connect_failed _ -> true
+  | HttpError _
+  | NetworkError _
+  | TimeoutError _
+  | AcceptRejected _
+  | ProviderTerminal _
+  | ProviderFailure _ -> false
+;;
+
 (* ── classify_network_exn / phase-mapping invariants ─────────── *)
 
 let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
@@ -570,7 +618,7 @@ let%test "classify_network_exn: Eio.Time.Timeout is Http_operation" =
   match classify_network_exn Eio.Time.Timeout with
   | Some (TimeoutError { phase = Http_operation; _ }) -> true
   | Some (TimeoutError { phase = (Queue | (First_token | (Wall_clock | (Capacity_backpressure | (Non_streaming_body | (Stream_body | (Provider_step | (Cli_stdout_idle | (Unknown_timeout | Stream_idle _)))))))));_})
-  | Some (HttpError _ | (NetworkError _ | (AcceptRejected _ | (ProviderTerminal _ | ProviderFailure _))))
+  | Some (HttpError _ | (NetworkError _ | (Connect_failed _ | (AcceptRejected _ | (ProviderTerminal _ | ProviderFailure _)))))
   | None -> false
 ;;
 
@@ -747,6 +795,7 @@ let%test "prepare_sync_request rejects missing host before dispatch" =
               | Connection_reset
               | End_of_file )
           }
+      | Connect_failed _
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -771,6 +820,7 @@ let%test "prepare_sync_request rejects unsupported schemes before dispatch" =
               | Connection_reset
               | End_of_file )
           }
+      | Connect_failed _
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -885,22 +935,17 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
       | (_ :: _ as addresses) -> Ok addresses
       | [] ->
         Error
-          (NetworkError
+          (Connect_failed
              { message = Printf.sprintf "failed to resolve hostname: %s" origin.host
              ; kind = Dns_failure
              })
     with
-    | Eio.Io (err, _) as exn -> Error (network_error_of_eio err exn)
-    | Unix.Unix_error (code, _, _) as exn ->
-      Error
-        (NetworkError
-           { message = Printexc.to_string exn; kind = classify_unix_error code })
-    | Failure msg -> Error (unknown_network_error msg)
+    | exn -> connection_failure exn (Printexc.get_raw_backtrace ())
   and* tls_wrap =
     match origin.scheme with
     | Https ->
       let wrap_error reason =
-        NetworkError
+        Connect_failed
           { message =
               Printf.sprintf
                 "HTTPS requested but TLS not available for %s: %s"
@@ -915,7 +960,7 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
       let+ peer =
         Result.map_error
           (fun reason ->
-             NetworkError
+             Connect_failed
                { message =
                    Printf.sprintf
                      "https host %S of %s is neither an address nor a host name; the \
@@ -934,7 +979,12 @@ let resolve_origin ?tls_config net (origin : validated_uri) =
 ;;
 
 (** Create a single transport connection bound to [sw]. This is the unit
-    stored in the connection cache and reused across requests. *)
+    stored in the connection cache and reused across requests.
+
+    Every failure to open the connection — name lookup, TLS setup, TCP connect,
+    TLS handshake — is [Connect_failed]: no byte of a request was written yet
+    (RFC #52028 §2.3). A deadline and a reserved exception (cancellation) are
+    raised again for their owners. *)
 let make_connection ?tls_config ~sw ~net ~origin () : (connection, http_error) result =
   let* net, addresses, tls_wrap = resolve_origin ?tls_config net origin in
   try
@@ -952,11 +1002,7 @@ let make_connection ?tls_config ~sw ~net ~origin () : (connection, http_error) r
     Diag.debug "http_client" "make_connection: new connection for %s" origin.url;
     Ok conn
   with
-  | Eio.Io (err, _) as exn -> Error (network_error_of_eio err exn)
-  | Unix.Unix_error (code, _, _) as exn ->
-    Error
-      (NetworkError { message = Printexc.to_string exn; kind = classify_unix_error code })
-  | Failure msg -> Error (unknown_network_error msg)
+  | exn -> connection_failure exn (Printexc.get_raw_backtrace ())
 ;;
 
 (* True when the transport itself named the peer's close: an errno that
@@ -1621,6 +1667,47 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
           , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
 
+(* The receipt [post_sync_once] returns for [error], read from how far the
+   request got. A phase and status that cannot go together raise
+   [Invalid_argument]. So does a [Connect_failed] after dispatch began: it
+   comes only from a connection function, which ends before the request is
+   dispatched (RFC #52028 §2.3). *)
+let post_sync_once_receipt ~phase ~status error =
+  match phase, status with
+  | Before_dispatch, None -> Error (Before_dispatch_error error)
+  | (Dispatch_started, None | Response_received, Some _)
+    when is_connect_failed error ->
+    invalid_arg "Http_client.post_sync_once: a connect failure after dispatch started"
+  | Dispatch_started, None -> Error (Dispatch_started_error error)
+  | Response_received, Some status -> Error (Response_received_error { status; error })
+  | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->
+    invalid_arg "Http_client.post_sync_once: inconsistent receipt state"
+;;
+
+let%test "post_sync_once_receipt: Connect_failed before dispatch is Before_dispatch_error" =
+  let error = Connect_failed { message = "refused"; kind = Connection_refused } in
+  match post_sync_once_receipt ~phase:Before_dispatch ~status:None error with
+  | Error (Before_dispatch_error carried) -> carried == error
+  | Ok () | Error (Dispatch_started_error _ | Response_received_error _) -> false
+;;
+
+let%test "post_sync_once_receipt: Connect_failed after dispatch started is refused" =
+  let error = Connect_failed { message = "refused"; kind = Connection_refused } in
+  let refused phase status =
+    match post_sync_once_receipt ~phase ~status error with
+    | exception Invalid_argument _ -> true
+    | Ok () | Error _ -> false
+  in
+  refused Dispatch_started None && refused Response_received (Some 200)
+;;
+
+let%test "post_sync_once_receipt: NetworkError after dispatch started stays a receipt" =
+  let error = NetworkError { message = "reset"; kind = Connection_reset } in
+  match post_sync_once_receipt ~phase:Dispatch_started ~status:None error with
+  | Error (Dispatch_started_error carried) -> carried == error
+  | Ok () | Error (Before_dispatch_error _ | Response_received_error _) -> false
+;;
+
 let post_sync_once_after_validation
       ?cache
       ~connect_deadline
@@ -1638,14 +1725,7 @@ let post_sync_once_after_validation
   let connection = ref None in
   let wire = Request_wire.create () in
   let transport_eof_seen = Request_wire.eof_seen wire in
-  let fail error =
-    match !phase, !status with
-    | Before_dispatch, None -> Error (Before_dispatch_error error)
-    | Dispatch_started, None -> Error (Dispatch_started_error error)
-    | Response_received, Some status -> Error (Response_received_error { status; error })
-    | Before_dispatch, Some _ | Dispatch_started, Some _ | Response_received, None ->
-      invalid_arg "Http_client.post_sync_once: inconsistent receipt state"
-  in
+  let fail error = post_sync_once_receipt ~phase:!phase ~status:!status error in
   let end_request_connection verdict =
     match !connection with
     | None -> ()
@@ -2243,7 +2323,7 @@ let with_post_stream
            ; phase = First_token
            })
     | ((Ok _ | Error (HttpError _)), (Connect_budget | First_event_budget))
-    | (Error (NetworkError _), (Connect_budget | First_event_budget))
+    | (Error (NetworkError _ | Connect_failed _), (Connect_budget | First_event_budget))
     | ( Error
           (TimeoutError
              { message = _
@@ -3024,6 +3104,7 @@ let%test "catch_network maps End_of_file to NetworkError with kind" =
               | Connection_reset
               | Unknown )
           }
+      | Connect_failed _
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3077,6 +3158,7 @@ let%test "catch_network classifies Unix ECONNREFUSED" =
               | End_of_file
               | Unknown )
           }
+      | Connect_failed _
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3103,6 +3185,7 @@ let%test "catch_network classifies Unix ETIMEDOUT" =
               | End_of_file
               | Unknown )
           }
+      | Connect_failed _
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3159,6 +3242,7 @@ let%test "oversized response is typed without draining" =
   | Error
       ( HttpError _
       | NetworkError _
+      | Connect_failed _
       | TimeoutError _
       | AcceptRejected _
       | ProviderTerminal _
@@ -3201,7 +3285,7 @@ let%test "classify_network_exn: typed Eio refused" =
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3223,7 +3307,7 @@ let%test "classify_network_exn: typed Eio timeout" =
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3245,7 +3329,7 @@ let%test "classify_network_exn: typed Eio Unix backend resource exhaustion" =
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3283,7 +3367,7 @@ let%test "classify_network_exn: plain Tls_alert is Tls_error" =
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3302,7 +3386,7 @@ let%test "classify_network_exn: plain Tls_failure is Tls_error" =
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3335,7 +3419,7 @@ let%test "classify_network_exn: unknown backend printer text does not classify" 
               | Local_resource_exhaustion
               | Connection_reset
               | End_of_file )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3373,7 +3457,7 @@ let%test "classify_network_exn: Multiple_io prefers non-retryable kind" =
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3398,7 +3482,7 @@ let%test "classify_network_exn: Multiple_io falls back to first known kind" =
               | Local_resource_exhaustion
               | Connection_reset
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3423,7 +3507,7 @@ let%test "classify_network_exn: Multiple_io keeps a leading reset as a known kin
               | Local_resource_exhaustion
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3451,7 +3535,7 @@ let%test "classify_network_exn: Multiple_io keeps a leading no-route errno as a 
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;
@@ -3476,7 +3560,7 @@ let%test "classify_network_exn: Multiple_io does not prefer a reset over a refus
               | Connection_reset
               | End_of_file
               | Unknown )
-          } | TimeoutError _ | AcceptRejected _)
+          } | Connect_failed _ | TimeoutError _ | AcceptRejected _)
   | Some (ProviderTerminal _ | ProviderFailure _)
   | None -> false
 ;;

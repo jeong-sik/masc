@@ -163,6 +163,10 @@ val wire_api_error_timeout : string
 
 val wire_api_error_network : string
 
+(** [Api.Connect_failed]: the connection did not open, so the request was not
+    sent. Transient like {!wire_api_error_network}, and its own code. *)
+val wire_api_error_connect_failed : string
+
 (** The [provider_error_*] codes both the producer and the classifier name.
     Producer-only codes are matched by the shared [provider_error_] prefix
     inside this module and are not listed individually. *)
@@ -174,9 +178,15 @@ val wire_provider_error_timeout_prefix : string
 val wire_provider_error_network_timeout : string
 val wire_provider_error_network_timeout_prefix : string
 
+(** A provider [Connect_failed] is ["provider_error_connect_failed:<kind>"].
+    Only its [timeout] kind is transient, like the network timeout codes. *)
+val wire_provider_error_connect_failed_prefix : string
+val wire_provider_error_connect_failed_timeout : string
+
 (** [true] when [t] is a [Provider_runtime_failure] carrying one of the
-    transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
-    or a provider timeout marker. The API timeout matches remain exact, so
-    every other [api_error_*] code returns [false]. Every
+    transient wire codes: [wire_api_error_timeout], [wire_api_error_network],
+    [wire_api_error_connect_failed], a provider timeout or network-timeout
+    marker, or [wire_provider_error_connect_failed_timeout]. The [api_error_*]
+    matches remain exact, so every other [api_error_*] code returns [false]. Every
     non-[Provider_runtime_failure] variant is [false]. *)
 val is_transient_provider_runtime_failure : t -> bool

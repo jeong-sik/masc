@@ -123,6 +123,7 @@ let () =
       | Llm_provider.Http_client.HttpError { code; body; _ } ->
         Printf.sprintf "HTTP %d: %s" code (Llm_provider.Http_client.refusal_body_text body)
       | Llm_provider.Http_client.NetworkError { message; _ } -> "network: " ^ message
+      | Llm_provider.Http_client.Connect_failed { message; _ } -> "connect failed: " ^ message
       | Llm_provider.Http_client.TimeoutError { message; _ } -> "timeout: " ^ message
       | Llm_provider.Http_client.AcceptRejected { reason } -> "rejected: " ^ reason
       | Llm_provider.Http_client.ProviderTerminal { message; _ } ->

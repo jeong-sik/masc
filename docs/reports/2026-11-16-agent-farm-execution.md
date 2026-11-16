@@ -18,7 +18,7 @@
 | WIM-S03 문서 입력 | Core `0ecf7bd04792cf97d0cab2ab07e61da09bac2445`, MASC `6b4589d360235b79b43b40dd6d4b379c836a8322`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 독립 소스 리뷰·구문 검사, Dashboard 타입 검사와 선택 decoder 시험 1건 통과. OCaml 동작 시험·실제 provider·PDF/STT·브라우저·설치 미확인 |
 | TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
 | WIM-S04 MCP 결과 | `fb6858311cc67bc743d7c0fcbe9165dbffc2dbc3`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 독립 소스 리뷰의 미해결 P0/P1/P2 없음, OCaml 38개 구문 검사 통과. 타입·동작 시험·실제 MCP/provider·재시작·GC 실행은 미확인 |
-| IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 동기/Eio I/O 기반 `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 공용 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`를 커밋했다. 영속 workspace UID와 Keeper 생성 UID를 SSH 경로에 연결하는 변경은 미커밋 | 기반 I/O 14개 실제 파일 시험과 타입·링크 검증이 통과했다. 후속 엔진은 그 14개를 포함한 격리 시험 62개가 통과했고, 해당 29개 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. 실제 워크스페이스 시작·UID 생성 연동, SSH 실행, VM·volume GC 이름 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
+| IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버 시작·직접 Workspace 생성 연결, 실제 SSH, VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
 다시 만들지 않고 해당 세션의 산출물을 현재 head에서 대조한다. 기록된 스택 게시 시도는
@@ -38,9 +38,22 @@ IA-S13의 격리 검사는 OCaml 5.5.2로 실제 모듈·C 구현을 컴파일�
 `artifacts/farm-blocking-publication-20261116/run-5/`에 있다.
 62개는 게시 시험 7개, I/O 14개, 기존 reconciliation 34개와 실제 SIGKILL·재열기 7개다.
 98개 컴파일·링크·실행 명령이 성공했으며 전체 Dune 의존 그래프 검증은 아니다.
+UID·잠금의 후속 영수증은 같은 worktree의
+`artifacts/farm-workspace-birth-20261116/adoption-3/`에 있다.
+실제 소스 137개의 해시를 대조했고 컴파일·링크·실행 명령 142개와 시험 15개가 성공했다.
+두 스레드가 실제 macOS 볼륨 별칭을 통해 들어와도 생성 잠금을 공유하며, 기다리는
+요청이나 오래된 namespace가 현재 작업의 프로세스 잠금을 풀지 않음을 확인했다.
+UID 생성기의 중단 시험은 fork와 `_exit`이며, 위 게시 엔진의 SIGKILL 시험과 구분한다.
+`Host_config`는 실제 공개 인터페이스의 타입만 사용했다. 호스트 환경 설정 해소,
+전체 Dune 그래프, Linux와 서버 시작은 실행하지 않았다.
+
 Keeper 재시작 전체를 SSH 가용성으로 막던 중간 후보는 철회했다. 작업 디렉터리 준비는
-승인된 SSH 효과의 실행 경계로 옮기는 중이다. 원격 장애가 다른 Keeper 활동을 막지
-않도록 하는 변경이며, 동작은 아직 검증하지 않았다.
+승인된 SSH 명령·파일 쓰기 경계에 연결했다. 원격 장애가 다른 Keeper 활동을 막지
+않도록 하는 소스 변경이며, 실제 SSH 동작은 아직 검증하지 않았다.
+
+협업 세션은 TLJ-S02의 E8 worker 교체 구현을 시작했다고 전달했다.
+이는 일부 구현과 구문 검사에 관한 상대 세션의 보고다. 해당 후보의 독립 검토와
+실제 동작은 이 기록에서 확인하지 않았으며, 완료로 집계하지 않는다.
 
 ## 원래 25개 요구의 현재 위치
 
@@ -108,7 +121,8 @@ P=`tick·schedule·Board·maintenance·Goal`, H=`1·2·4`, M=`1·2`다.
 
 ## 다음 갱신
 
-MCP 결과의 실제 소비 경계를 구현·리뷰하면서 별도 TLJ-S01 후보의 현재 상태를 받는다.
+워크스페이스 UID 생성을 서버 시작과 직접 Workspace 생성 경로에 연결하고,
+별도 TLJ-S02 후보의 현재 상태를 받는다.
 게시 가능한 시점에 두 기존 스택의 원격 head와 중복 작업을 다시 읽는다. 후보의 행동
 시험·설치·격리된 실패 재현·장시간 행렬은 실제 실행 영수증을 얻은 순서대로 이 기록에
 추가한다. 각 항목은 source/binary/config와 원본 증거 위치를 적고, 실행하지 않은 항목은

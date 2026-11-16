@@ -144,4 +144,17 @@ describe('submitAnswer', () => {
     expect(store.openAskId.value).toBe('a1')
     expect(store.askError.value).toContain('network is down')
   })
+
+  it('closes the ask and surfaces recovery notice when recorded with delivered === false', async () => {
+    const r = row()
+    store.selectAsk(r)
+    let draft = skipQuestion(store.draftForRow(r), r.questions[0]!)
+    draft = skipQuestion(draft, r.questions[1]!)
+    store.updateDraft(draft)
+    answerKeeperAsk.mockResolvedValue({ askId: 'a1', answerCount: 2, openRemaining: 0, delivered: false })
+    expect(await store.submitAnswer(r)).toBe(true)
+    expect(store.openAskId.value).toBeNull()
+    expect(store.askConflict.value).not.toBeNull()
+    expect(fetchKeeperAsks).toHaveBeenCalled()
+  })
 })

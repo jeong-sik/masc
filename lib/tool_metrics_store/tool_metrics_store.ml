@@ -216,6 +216,13 @@ let configure db =
           ~operation:"create tool metric caller table"
           callers_schema_sql
       in
+      let* () =
+        exec
+          db
+          ~operation:"create tool metric caller index"
+          "CREATE INDEX IF NOT EXISTS tool_metric_callers_caller \
+           ON tool_metric_callers(caller)"
+      in
       exec
         db
         ~operation:"create tool metric timestamp index"
@@ -516,7 +523,18 @@ let summary ~masc_root =
       let* latest_ts = latest_ts store.db in
       Ok { path; exists = true; entry_count; latest_ts })
 
-let read_recent ~masc_root ?since_ts ?until_ts ~n () =
+let caller_of_statement statement index =
+  match Sqlite3.column statement index with
+  | Sqlite3.Data.NULL -> Ok None
+  | Sqlite3.Data.TEXT text ->
+    Ok (if String.trim text = "" then None else Some text)
+  | ( Sqlite3.Data.NONE
+    | Sqlite3.Data.INT _
+    | Sqlite3.Data.FLOAT _
+    | Sqlite3.Data.BLOB _ ) as other ->
+    Error ("tool metric caller is not text: " ^ Sqlite3.Data.to_string_debug other)
+
+let read_recent_with_caller ~masc_root ?caller ?since_ts ?until_ts ~n () =
   if n <= 0
   then Ok []
   else
@@ -534,34 +552,50 @@ let read_recent ~masc_root ?since_ts ?until_ts ~n () =
           | Some value when Float.is_nan value -> [], []
           | Some value -> [column ^ " " ^ operator ^ " ?"], [Sqlite3.Data.FLOAT value]
         in
-        let lower, lower_values = predicate "ts" ">=" since_ts in
-        let upper, upper_values = predicate "ts" "<=" until_ts in
-        let where = match lower @ upper with
+        let lower, lower_values = predicate "e.ts" ">=" since_ts in
+        let upper, upper_values = predicate "e.ts" "<=" until_ts in
+        let join_clause, caller_pred, caller_values =
+          match caller with
+          | None ->
+            " LEFT JOIN tool_metric_callers c ON c.record_id = e.record_id", [], []
+          | Some k ->
+            ( " INNER JOIN tool_metric_callers c ON c.record_id = e.record_id"
+            , ["c.caller = ?"]
+            , [Sqlite3.Data.TEXT k] )
+        in
+        let where = match caller_pred @ lower @ upper with
           | [] -> ""
           | predicates -> " WHERE " ^ String.concat " AND " predicates
         in
         with_statement
           store.db
           ~operation:"read recent tool metrics"
-          ("SELECT record_id, ts, tool_name, disposition, duration_ms \
-            FROM tool_metric_events"
-           ^ where ^ " ORDER BY ts DESC, record_id DESC LIMIT ?")
+          ("SELECT e.record_id, e.ts, e.tool_name, e.disposition, e.duration_ms, c.caller \
+            FROM tool_metric_events e"
+           ^ join_clause ^ where ^ " ORDER BY e.ts DESC, e.record_id DESC LIMIT ?")
           (fun statement ->
             let* () =
               bind_all
                 store.db
                 statement
                 ~operation:"bind tool metric read filters"
-                (lower_values @ upper_values
+                (caller_values @ lower_values @ upper_values
                  @ [Sqlite3.Data.INT (Int64.of_int n)])
             in
             let rec loop rows =
               match Sqlite3.step statement with
-              | Sqlite3.Rc.ROW -> loop (row_of_statement statement :: rows)
+              | Sqlite3.Rc.ROW ->
+                let row = row_of_statement statement in
+                let* row_caller = caller_of_statement statement 5 in
+                loop ((row, row_caller) :: rows)
               | Sqlite3.Rc.DONE -> Ok (List.rev rows)
               | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error store.db "read recent tool metrics" rc)
             in
             loop []))
+
+let read_recent ~masc_root ?since_ts ?until_ts ~n () =
+  read_recent_with_caller ~masc_root ?since_ts ?until_ts ~n ()
+  |> Result.map (List.map fst)
 
 (* The series is read on a connection of its own. A scan over a month of rows
    then neither holds [store_lock] nor makes [insert] wait, and WAL mode lets
@@ -735,11 +769,16 @@ let observe_series ~masc_root ~window ?tool_name () =
         result)
 ;;
 
-let row_to_json row =
-  `Assoc
+let row_to_json ?caller row =
+  let base =
     [ "record_id", `String row.record_id
     ; "ts", `Float row.ts
     ; "tool_name", `String row.tool_name
     ; "disposition", `String row.disposition
     ; "duration_ms", `Float row.duration_ms
     ]
+  in
+  `Assoc
+    (match caller with
+     | None -> base
+     | Some name -> base @ [ "caller", `String name ])

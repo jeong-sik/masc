@@ -138,6 +138,15 @@ let test_activity_refusal_and_recovery () =
     let read wire = Client.decode_activity (`Assoc ["schema",`String "masc.msx-activity/v1";"activity",`String wire]) in
     check bool "unobserved continues reads only" true
       (Client.policy_after_activity policy (read "unobserved")=Client.Observing Activity_unobserved);
+    let server_unobserved =
+      Client.decode_activity
+        (`Assoc
+          [ "schema", `String "masc.msx-activity/v1"
+          ; "activity", `String "unobserved"
+          ; "message", `String "Machine activity configuration is unavailable" ])
+    in
+    check bool "server 3-field unobserved payload continues reads only" true
+      (Client.policy_after_activity policy server_unobserved=Client.Observing Activity_unobserved);
     check bool "off continues reads only" true (Client.policy_after_activity policy (read "off")=Client.Observing Off);
     check bool "on read permits a subsequent tick" true (Client.policy_after_activity policy (read "on")=Client.Advancing);
     let resumed = fetch cache (fun ~body ->

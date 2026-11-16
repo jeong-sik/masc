@@ -73,7 +73,10 @@ export async function submitAnswer(row: AskRow): Promise<boolean> {
   askError.value = null
   askConflict.value = null
   try {
-    await answerKeeperAsk(answerRequestBody(row, state.answers))
+    const accepted = await answerKeeperAsk(answerRequestBody(row, state.answers))
+    if (accepted?.delivered === false) {
+      askConflict.value = '답변이 기록되었습니다. Keeper 깨움 전달은 자동 복구 대기 중입니다.'
+    }
     closeAsk()
     await refreshKeeperAsks()
     return true

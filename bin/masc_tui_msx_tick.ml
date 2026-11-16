@@ -44,6 +44,10 @@ let decode_activity = function
             | `String "off" -> Ok (Refused Off)
             | `String "unobserved" -> Ok (Refused Activity_unobserved)
             | _ -> Error "MSX activity: invalid activity")
+       | [ "activity", `String "unobserved"
+         ; "message", `String _
+         ; "schema", `String "masc.msx-activity/v1" ] ->
+           Ok (Refused Activity_unobserved)
        | _ -> Error "MSX activity: invalid observation")
   | _ -> Error "MSX activity: invalid observation"
 

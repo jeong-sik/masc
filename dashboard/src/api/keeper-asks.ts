@@ -17,6 +17,7 @@ export type AnswerAccepted = {
   readonly askId: string
   readonly answerCount: number
   readonly openRemaining: number
+  readonly delivered?: boolean
 }
 
 /** Someone else answered first. The store settles on first write, so this is
@@ -48,6 +49,7 @@ export async function answerKeeperAsk(body: AnswerRequestBody): Promise<AnswerAc
       askId: typeof raw['ask_id'] === 'string' ? raw['ask_id'] : body.ask_id,
       answerCount: typeof raw['answer_count'] === 'number' ? raw['answer_count'] : 0,
       openRemaining: typeof raw['open_remaining'] === 'number' ? raw['open_remaining'] : 0,
+      delivered: raw['delivered'] !== false,
     }
   } catch (error) {
     // 409 is the store telling us someone answered first. Read off the status
@@ -55,6 +57,27 @@ export async function answerKeeperAsk(body: AnswerRequestBody): Promise<AnswerAc
     // contract.
     if (error instanceof ApiRequestError && error.status === 409) {
       throw new AskAnswerConflict(body.ask_id, error.detail ?? 'already answered')
+    }
+    // 500 with recorded === true (and not recording_unconfirmed) means the
+    // answer was durably saved in Keeper_ask_store and only immediate wakeup
+    // awaits automatic outbox recovery; treat it as recorded so the UI does
+    // not leave the answered modal open to hit 409 on retry.
+    if (
+      error instanceof ApiRequestError &&
+      error.status === 500 &&
+      typeof error.responseData === 'object' &&
+      error.responseData !== null &&
+      !Array.isArray(error.responseData)
+    ) {
+      const payload = error.responseData as Record<string, unknown>
+      if (payload['recorded'] === true && payload['state'] !== 'recording_unconfirmed') {
+        return {
+          askId: typeof payload['ask_id'] === 'string' ? payload['ask_id'] : body.ask_id,
+          answerCount: typeof payload['answer_count'] === 'number' ? payload['answer_count'] : 0,
+          openRemaining: typeof payload['open_remaining'] === 'number' ? payload['open_remaining'] : 0,
+          delivered: false,
+        }
+      }
     }
     throw error
   }

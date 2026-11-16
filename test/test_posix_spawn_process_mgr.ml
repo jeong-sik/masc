@@ -695,6 +695,37 @@ let test_turn_stop_reason_decides_the_grace ~spawn ~reason ~keeps_grace () =
     | None -> fail "the turn child never became ready")
 ;;
 
+(* A restart's readiness check reads which process holds the server as its
+   child (RFC #52396 §4.2). Darwin answers from the kernel's process table;
+   Linux, which CI runs, from /proc. *)
+let test_parent_of_a_held_and_a_reaped_child () =
+  Eio_main.run @@ fun env ->
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10. @@ fun () ->
+  check (option int) "this process's own parent"
+    (Some (Unix.getppid ())) (Posix_spawn_detached.parent_pid (Unix.getpid ()));
+  Eio.Switch.run @@ fun sw ->
+  let input, release = Eio_unix.pipe sw in
+  let proc = Eio.Process.spawn ~sw Posix_spawn_process_mgr.mgr ~stdin:input
+      [ "/bin/sh"; "-c"; "read release; exit 0" ] in
+  let pid = Eio.Process.pid proc in
+  check (option int) "a child still running names this process"
+    (Some (Unix.getpid ())) (Posix_spawn_detached.parent_pid pid);
+  Eio.Flow.copy_string "exit\n" release;
+  (match Eio.Process.await proc with
+   | `Exited code -> check int "the child exits" 0 code
+   | `Signaled _ -> fail "the child was signalled");
+  check (option int) "a reaped child is no longer in the table" None
+    (Posix_spawn_detached.parent_pid pid)
+;;
+
+let test_proc_stat_fields_start_after_the_last_parenthesis () =
+  check (option (list string)) "a command holding spaces and ')'"
+    (Some [ "S"; "1"; "4242"; "4242" ])
+    (Linux_proc_stat.parse "4242 (a) b (c)) S 1 4242 4242\n");
+  check (option (list string)) "a line with no command" None
+    (Linux_proc_stat.parse "4242 S 1 4242")
+;;
+
 (* Darwin's group kill answers EPERM when it signalled nobody; the member
    snapshot decides whether nobody was left to signal. *)
 module Members = Process_group_members
@@ -761,6 +792,11 @@ let () =
     ; ( "original process identity",
         [ test_case "birth observation survives original child reap" `Quick
             test_original_birth_survives_reap ])
+    ; ( "the parent the kernel records",
+        [ test_case "a held child names this process, a reaped one nobody" `Quick
+            test_parent_of_a_held_and_a_reaped_child
+        ; test_case "/proc stat fields start after the last ')'" `Quick
+            test_proc_stat_fields_start_after_the_last_parenthesis ])
     ; ( "foreground group ownership",
         [ test_case "observer cancellation cannot strand physical reap or its owner promise" `Quick
             test_observation_cancel_preserves_physical_reap

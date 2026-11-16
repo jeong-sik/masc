@@ -10,6 +10,7 @@ external posix_spawn
 type t = { pid : int; started : string option; exited : Unix.process_status option Eio.Promise.t }
 
 external darwin_start : int -> string option = "masc_process_start_time"
+external darwin_parent : int -> int option = "masc_process_parent_pid"
 
 (* starttime is field 22 of proc(5), the 20th after the command. It counts
    from boot, so the boot names it too. *)
@@ -26,6 +27,17 @@ let process_start pid =
   match darwin_start pid with
   | Some _ as started -> started
   | None -> linux_start pid
+
+(* ppid is field 4 of proc(5), the second after the command. *)
+let linux_parent pid =
+  match Linux_proc_stat.read pid with
+  | Some (_state :: ppid :: _) -> int_of_string_opt ppid
+  | Some ([] | [ _ ]) | None -> None
+
+let parent_pid pid =
+  match darwin_parent pid with
+  | Some _ as parent -> parent
+  | None -> linux_parent pid
 
 let rec reaped pid =
   match Unix.waitpid [ Unix.WNOHANG ] pid with

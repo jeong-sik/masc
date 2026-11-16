@@ -420,6 +420,20 @@ CAMLprim value masc_process_group_members(value v_pgid)
   CAMLreturn(result);
 }
 
+#if defined(__APPLE__)
+/* The kernel's process table row for process [pid]. Nonzero when it is
+   there. For a pid nobody holds the sysctl still answers 0, with no row
+   (size 0), so the size and the pid in the row are both checked. */
+static int masc_process_row(pid_t pid, struct kinfo_proc *info)
+{
+  size_t size = sizeof(*info);
+  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  memset(info, 0, sizeof(*info));
+  return sysctl(mib, 4, info, &size, NULL, 0) == 0 && size == sizeof(*info) &&
+         info->kp_proc.p_pid == pid;
+}
+#endif
+
 /* Observe only: when process [pid] started, from the kernel's process
    table, without starting another process (ps) and so without yielding to
    a reaper. A zombie is still in the table, so a child not yet reaped
@@ -431,19 +445,32 @@ CAMLprim value masc_process_start_time(value v_pid)
   CAMLlocal2(result, text);
   result = Val_none;
 #if defined(__APPLE__)
-  pid_t pid = (pid_t)Int_val(v_pid);
   struct kinfo_proc info;
-  size_t size = sizeof(info);
-  int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
-  memset(&info, 0, sizeof(info));
-  if (sysctl(mib, 4, &info, &size, NULL, 0) == 0 && size == sizeof(info) &&
-      info.kp_proc.p_pid == pid) {
+  if (masc_process_row((pid_t)Int_val(v_pid), &info)) {
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "darwin:%ld.%06ld",
              (long)info.kp_proc.p_starttime.tv_sec, (long)info.kp_proc.p_starttime.tv_usec);
     text = caml_copy_string(buffer);
     result = caml_alloc_some(text);
   }
+#endif
+  CAMLreturn(result);
+}
+
+/* Observe only: the parent the kernel records for process [pid], from the
+   kernel's process table, without starting another process. A zombie is
+   still in the table, so a child not yet reaped reads too. Some ppid on
+   Darwin; None when no such process is there, and on every other
+   platform. */
+CAMLprim value masc_process_parent_pid(value v_pid)
+{
+  CAMLparam1(v_pid);
+  CAMLlocal1(result);
+  result = Val_none;
+#if defined(__APPLE__)
+  struct kinfo_proc info;
+  if (masc_process_row((pid_t)Int_val(v_pid), &info))
+    result = caml_alloc_some(Val_int(info.kp_eproc.e_ppid));
 #endif
   CAMLreturn(result);
 }

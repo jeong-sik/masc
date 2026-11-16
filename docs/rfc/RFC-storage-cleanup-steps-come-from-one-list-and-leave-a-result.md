@@ -216,7 +216,7 @@ type attempt =
 
 Tools 화면에 읽기 하나를 더한다. 세 가지를 보여 준다.
 
-- 호스트 디스크: 남은 공간과 전체. `runtime_resolution.disk_observation` 을 그대로 쓴다. 서버 쪽 변경은 없다. tools 응답의 `runtime_resolution` 은 전체 판(`runtime_resolution_json`)이고, 가벼운 판(`light_runtime_resolution_json`)에도 같은 칸이 있다. 둘 다 `keeper_fleet_runtime_resolution_base_fields` 가 넣는다. 서버가 뜨는 중의 응답에는 이 칸이 없고, 그때 TUI 는 잰 값이 없다고 말한다.
+- 호스트 디스크: 남은 공간과 전체. `runtime_resolution.disk_observation` 을 그대로 쓴다. tools 응답은 전체 경로·진단·fleet 필드를 유지하고, 소비하지 않는 반응 원장 요약만 읽지 않는다. 가벼운 shell 판(`light_runtime_resolution_json`)에도 같은 디스크 칸이 있다. 모두 `keeper_fleet_runtime_resolution_base_fields` 가 넣는다. 서버가 뜨는 중의 응답에는 이 칸이 없고, 그때 TUI 는 잰 값이 없다고 말한다.
 - 마지막 정리 주기: 언제 돌았고 Keeper 몇 명을 훑었는지. 서버가 뜬 뒤 아직 안 돌았으면 그렇게 말한다.
 - Keeper 별 행: 단계, 마지막 시도의 결과와 숫자, 마지막으로 끝까지 돈 때.
 - 먼저 나오는 것: 선언을 못 읽은 Keeper, `Failed` 인 행, 끝까지 돌았지만 못 지운 항목이 있는 행(보고의 `failed` 가 0보다 크다).

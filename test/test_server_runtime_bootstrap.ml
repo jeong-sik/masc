@@ -1553,6 +1553,14 @@ let test_fleet_projections_read_each_keeper_meta_once () =
           "one read of the Keeper's metadata per full projection"
           1.0
           full_reads;
+        let tools, tools_reads =
+          reads_during (fun () ->
+            `Assoc (Server_routes_http_runtime.keeper_fleet_runtime_resolution_tools_fields ()))
+        in
+        Alcotest.(check (float 0.0))
+          "one read of the Keeper's metadata per Tools projection" 1.0 tools_reads;
+        Alcotest.(check bool) "Tools omits the unconsumed reaction ledger" true
+          (not (List.mem_assoc "keeper_reaction_ledger" (to_assoc tools)));
         let (_ : Yojson.Safe.t), health_reads =
           reads_during (fun () ->
             Server_routes_http_runtime.make_health_json
@@ -1615,13 +1623,33 @@ let test_full_runtime_resolution_bootable_follows_the_boot_path () =
              (Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan reading)
                .bootable_names);
         let open Yojson.Safe.Util in
-        Alcotest.(check (list string))
+        let full = `Assoc (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ()) in
+        let tools = `Assoc (Server_routes_http_runtime.keeper_fleet_runtime_resolution_tools_fields ()) in
+        List.iter (fun projection -> Alcotest.(check (list string))
           "the full projection reports the boot path's bootable set"
           boot_path
-          (`Assoc (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
+          (projection
            |> member "keeper_fleet_safety"
            |> member "bootable_keeper_names" |> to_list |> List.map to_string
-           |> List.sort compare)))
+           |> List.sort compare)) [full; tools];
+        let static_paused_health projection =
+          let health = projection |> member "paused_keepers_health" in
+          let details = health |> member "details" |> to_list in
+          Alcotest.(check bool) "full paused details remain populated" true (details <> []);
+          let static_details = List.map (fun detail ->
+            let elapsed = detail |> member "paused_elapsed_sec" |> to_float in
+            Alcotest.(check bool) "pause elapsed is finite and nonnegative" true
+              (Float.is_finite elapsed && elapsed >= 0.0);
+            `Assoc (List.remove_assoc "paused_elapsed_sec" (to_assoc detail))) details in
+          `Assoc (List.map (fun (key, value) ->
+            key, if String.equal key "details" then `List static_details else value)
+            (to_assoc health))
+        in
+        Alcotest.(check string) "Tools retains all static full paused fields and details"
+          (static_paused_health full |> Yojson.Safe.to_string)
+          (static_paused_health tools |> Yojson.Safe.to_string);
+        Alcotest.(check bool) "full projection retains the reaction ledger" true
+          (full |> member "keeper_reaction_ledger" <> `Null)))
 
 let test_health_json_observes_owner_turn () =
   with_temp_dir "health-keeper-owner-work" (fun dir ->

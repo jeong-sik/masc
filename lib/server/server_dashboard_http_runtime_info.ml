@@ -1847,7 +1847,7 @@ let runtime_inventory_json () =
     ]
 ;;
 
-let runtime_resolution_json (config : Workspace.config) =
+let runtime_resolution_json_with_fleet_fields fleet_fields (config : Workspace.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.binary_commit in
   let runtime_commit_known = Option.is_some runtime_commit in
@@ -2100,7 +2100,17 @@ let runtime_resolution_json (config : Workspace.config) =
             ~upstream_status ~source_mismatch )
       ; "gate_hitl", gate_hitl_json ()
       ]
-      @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
+      @ fleet_fields () )
+;;
+
+let runtime_resolution_json config =
+  runtime_resolution_json_with_fleet_fields
+    Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields config
+;;
+
+let tools_runtime_resolution_json config =
+  runtime_resolution_json_with_fleet_fields
+    Server_routes_http_runtime.keeper_fleet_runtime_resolution_tools_fields config
 ;;
 
 let light_runtime_resolution_json ?profile_snapshot (config : Workspace.config) =
@@ -2256,7 +2266,7 @@ let dashboard_tools_http_result ?(read_policy = Dashboard_projection_read.Reuse)
         Config_dir_resolver.(resolve () |> to_json))
     in
     let runtime_resolution =
-      run Projection_runtime_resolution (fun () -> runtime_resolution_json config)
+      run Projection_runtime_resolution (fun () -> tools_runtime_resolution_json config)
     in
     let inventory =
       run Tools_compute (fun () ->

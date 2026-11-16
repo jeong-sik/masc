@@ -153,7 +153,11 @@ val dashboard_tools_http_result :
     classification travels with the returned cache payload, so a concurrent
     fill cannot promote an already-returned warming response. [Current] reads
     directly on the caller's worker, bypassing the private TTL and any pending
-    HTTP cache fill. Ordinary HTTP readers default to [Reuse]. *)
+    HTTP cache fill. Ordinary HTTP readers default to [Reuse].
+    [runtime_resolution] retains the full path, diagnostic, build, deployment
+    and fleet fields, including paused details, except [keeper_reaction_ledger]
+    is omitted without reading that unused summary. Full shell and full health
+    still expose it. This is an intentional Tools wire-field removal. *)
 
 val dashboard_tools_http_json :
   ?keeper:string ->

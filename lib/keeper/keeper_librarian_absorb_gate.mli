@@ -306,6 +306,21 @@ val replay_authority : live_authority -> replay_authority
 (** Credential-free availability and ordered destination identities from the
     same live snapshot used by {!run_captured}; no configuration is reread. *)
 
+type after_failure =
+  | Retain_new_attempt
+  | Wait_for_destination
+
+val after_failure : live_authority -> run_result -> after_failure
+(** What a failed run allows its original to do now (RFC
+    librarian-gate-waits-on-the-destination-not-on-passes §3.2).
+    [Wait_for_destination] when every unanswered question of the run was
+    refused by destinations for their own state
+    ({!Typesafeai_client.Destination_state}) and every destination [authority]
+    would ask is still refusing for its state in this process. Otherwise
+    [Retain_new_attempt]: a refusal of the request itself, an answer that does
+    not decode, a failure with no unanswered question, an unavailable gate, or
+    a destination that answered since or was not asked. Reads no store. *)
+
 val replay_authority_to_yojson : replay_authority -> Yojson.Safe.t
 val replay_authority_of_yojson : Yojson.Safe.t -> (replay_authority, string) result
 (** Strict versioned codec for original availability and destination identity.

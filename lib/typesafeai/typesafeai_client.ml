@@ -209,6 +209,16 @@ let refusal_class_to_string = function
   | Transport -> "transport"
 ;;
 
+type refusal_owner =
+  | Destination_state
+  | This_request
+
+let refusal_owner = function
+  | Payment_required | Credential_refused | Rate_limited | Server_error | Transport ->
+    Destination_state
+  | Request_refused | Response_unusable -> This_request
+;;
+
 type destination_outcome =
   | Answered of { at : float }
   | Refusing of
@@ -232,8 +242,9 @@ module Outcomes = Map.Make (Destination_key)
 
 (* The latest outcome of every destination this process asked (RFC-0484
    §3.2). An immutable map behind an atomic: asks run on several fibers and
-   domains, readers take a snapshot without waiting, and nothing here
-   decides a call. *)
+   domains, readers take a snapshot without waiting. No call is refused
+   here; the Librarian gate reads it to decide whether a refused original
+   retains a new attempt (RFC librarian-gate-waits-on-the-destination-not-on-passes). *)
 let outcomes : destination_outcome Outcomes.t Atomic.t = Atomic.make Outcomes.empty
 
 let note_outcome key update =
@@ -253,6 +264,7 @@ let note_refusal key ~at refusal =
 ;;
 
 let destination_outcomes () = Outcomes.bindings (Atomic.get outcomes)
+let destination_outcome destination = Outcomes.find_opt destination (Atomic.get outcomes)
 
 (* Every refusal moves the walk on, whatever it says. The destinations share
    the state and the questions but not the body: each is asked for its own

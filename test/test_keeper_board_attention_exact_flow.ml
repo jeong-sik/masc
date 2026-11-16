@@ -3068,7 +3068,7 @@ let test_permit_wait_expiry_advances_and_defers_without_partition_invariant () =
           ~api_key:key
           ~request_path:"/v1/chat/completions"
           ~max_concurrent_requests:1
-          ~capabilities:
+          ~model_capabilities_override:
             { Llm_provider.Capabilities.default_capabilities with
               supports_response_format_json = true
             }

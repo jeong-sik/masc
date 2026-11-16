@@ -187,7 +187,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     List.iter
       (fun params ->
          let response =
-           Masc.Mcp_server_eio_protocol.handle_request
+           Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
              ~handle_call_tool_eio
              ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
              ~clock:(Eio.Stdenv.clock env)
@@ -211,7 +211,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     List.iter
       (fun (key, value) ->
          let response =
-           Masc.Mcp_server_eio_protocol.handle_request
+           Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
              ~handle_call_tool_eio
              ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
              ~clock:(Eio.Stdenv.clock env) ~sw state
@@ -225,7 +225,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     check int "modern continuations never reach dispatch" 0 !handler_calls;
     List.iter
       (fun (key, value) ->
-         ignore (Masc.Mcp_server_eio_protocol.handle_request
+         ignore (Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
            ~handle_call_tool_eio
            ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
            ~clock:(Eio.Stdenv.clock env) ~sw state

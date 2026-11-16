@@ -995,7 +995,9 @@ let call_tool_json fixture (schema : Masc_domain.tool_schema) arguments =
         ])
   in
   Mcp_eio.handle_request ~clock:fixture.clock ~sw:fixture.sw
-    ~mcp_session_id:fixture.sid ~auth_token:fixture.auth_token fixture.state
+    ~mcp_session_id:fixture.sid
+    ~sender:(Masc_test_deps.door_sender ~base_path:fixture.base_path (Some fixture.auth_token))
+    ~auth_token:fixture.auth_token fixture.state
     request
 
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock

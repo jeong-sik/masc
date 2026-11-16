@@ -1912,7 +1912,9 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
       "io.modelcontextprotocol/clientCapabilities", `Assoc [];
       "io.modelcontextprotocol/clientInfo", `Assoc [
         "name", `String "lane-addon-fixture"; "version", `String "1"]] in
-    Mcp_server_eio.handle_request ~profile ~clock ~sw ?auth_token server
+    Mcp_server_eio.handle_request ~profile ~clock ~sw
+      ~sender:(Masc_test_deps.door_sender ~base_path:config.base_path auth_token)
+      ?auth_token server
       (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`Int 1;
         "method",`String method_; "params",`Assoc (("_meta",metadata)::fields)])) in
   let listed ?auth_token () =
@@ -2232,7 +2234,7 @@ let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun
   check bool "the forwarded arguments carry the caller marker" true
     (Yojson.Safe.from_string body |> member "params" |> member "arguments"
      = `Assoc ["_agent_name", `String "fixture-operator"]);
-  let result = Mcp_server_eio.handle_request ~profile:Mcp_server_eio.Full ~clock ~sw server body
+  let result = Mcp_server_eio.handle_request ~sender:Mcp_server_eio.Unadmitted ~profile:Mcp_server_eio.Full ~clock ~sw server body
     |> member "result" in
   check bool "a closed export schema accepts the call" true
     (result <> `Null && member "isError" result <> `Bool true);

@@ -46,7 +46,9 @@ let with_workspace ~auth f =
           in
           let list_tools () =
             ignore
-              (Mcp_eio.handle_request ~clock ~sw ~auth_token:token state
+              (Mcp_eio.handle_request ~clock ~sw
+                 ~sender:(Masc_test_deps.door_sender ~base_path (Some token))
+                 ~auth_token:token state
                  {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}|})
           in
           f ~base_path ~token list_tools)))

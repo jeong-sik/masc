@@ -551,7 +551,7 @@ let test_dashboard_hello_keeps_upgrade_runtime_authority () =
         "method", `String "dashboard/hello"; "params", `Assoc params ]) in
       (* Use the registered WS handler through the production dispatcher. The
          request's server state supplies the root; params cannot override it. *)
-      Masc.Mcp_server_eio.handle_request ~clock:(Eio.Stdenv.clock env) ~sw
+      Masc.Mcp_server_eio.handle_request ~sender:Masc.Mcp_server_eio.Unadmitted ~clock:(Eio.Stdenv.clock env) ~sw
         ~mcp_session_id:id state request in
     Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions id session);
     Fun.protect ~finally:(fun () ->
@@ -611,7 +611,7 @@ let test_dashboard_hello_internal_token_held_by_a_static_credential () =
       Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions id);
       Masc_test_deps.cleanup_test_workspace parent) (fun () ->
       let reply =
-        Masc.Mcp_server_eio.handle_request ~clock:(Eio.Stdenv.clock env) ~sw
+        Masc.Mcp_server_eio.handle_request ~sender:Masc.Mcp_server_eio.Unadmitted ~clock:(Eio.Stdenv.clock env) ~sw
           ~mcp_session_id:id state request
       in
       Alcotest.(check bool) "the internal Keeper token authenticates the socket" true

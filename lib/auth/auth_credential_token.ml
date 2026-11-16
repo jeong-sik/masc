@@ -333,13 +333,16 @@ let token_credential_agent_credential = function
   | Oauth_access credential | Static_bearer credential -> credential
 ;;
 
+let find_static_token_credential config ~token : (token_credential, masc_error) result =
+  Result.map
+    (fun credential -> Static_bearer credential)
+    (find_static_credential_by_token config ~token)
+;;
+
 let find_token_credential config ~token : (token_credential, masc_error) result =
   match Auth_oauth.find_access_credential ~base_path:config ~token with
   | Ok (Some credential) -> Ok (Oauth_access credential)
-  | Ok None ->
-    Result.map
-      (fun credential -> Static_bearer credential)
-      (find_static_credential_by_token config ~token)
+  | Ok None -> find_static_token_credential config ~token
   | Error error -> Error error
 ;;
 

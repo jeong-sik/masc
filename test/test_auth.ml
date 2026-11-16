@@ -1255,14 +1255,14 @@ let test_resolve_role_workspace_secret_grants_admin () =
 
 (* An endpoint resolves a bearer once and takes the role from that
    resolution. It must be the role [resolve_role_with_auth_config] gives the
-   same bearer, which reads the auth store again: a static bearer of each
-   role, and the internal Keeper token. *)
+   same bearer, which reads the auth store again: a static bearer of every
+   role and the internal Keeper token, with auth on and then off. *)
 let test_resolved_bearer_role_matches_resolve_role () =
   let dir = setup_test_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_test_workspace dir) (fun () ->
     let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
-    let auth_cfg = Auth.load_auth_config dir in
     let same label ~agent_name ~token resolved =
+      let auth_cfg = Auth.load_auth_config dir in
       match
         Auth.resolve_role_with_auth_config dir ~auth_cfg ~agent_name ~token:(Some token),
         Auth.resolve_role_of_resolved_bearer dir ~auth_cfg ~token resolved
@@ -1279,14 +1279,32 @@ let test_resolved_bearer_role_matches_resolve_role () =
       | Ok (raw_token, _) ->
           (match Auth.find_token_credential dir ~token:raw_token with
            | Ok (Auth.Static_bearer _ as credential) ->
-               same agent_name ~agent_name ~token:raw_token (Auth.Token_credential credential)
+               raw_token, Auth.token_credential_bearer credential
            | Ok (Auth.Oauth_access _) -> fail "a static bearer resolved as an OAuth record"
            | Error error -> fail (Masc_domain.masc_error_to_string error))
     in
-    static_bearer "worker_agent" Masc_domain.Worker;
-    static_bearer "admin_agent" Masc_domain.Admin;
-    let internal = Auth.ensure_internal_keeper_token dir in
-    same "internal keeper" ~agent_name:"keeper-a" ~token:internal Auth.Internal_keeper_bearer)
+    let internal_bearer () =
+      let internal = Auth.ensure_internal_keeper_token dir in
+      match Auth.internal_keeper_bearer dir ~token:internal with
+      | Some resolved -> internal, resolved
+      | None -> fail "the internal Keeper token did not resolve as one"
+    in
+    let bearers =
+      [ "worker_agent", static_bearer "worker_agent" Masc_domain.Worker
+      ; "admin_agent", static_bearer "admin_agent" Masc_domain.Admin
+      ; "player_agent", static_bearer "player_agent" Masc_domain.Player
+      ; "keeper-a", internal_bearer ()
+      ]
+    in
+    let compare_all phase =
+      List.iter
+        (fun (agent_name, (token, resolved)) ->
+          same (phase ^ " " ^ agent_name) ~agent_name ~token resolved)
+        bearers
+    in
+    compare_all "auth on";
+    Auth.disable_auth dir;
+    compare_all "auth off")
 
 let test_authorize_unknown_masc_tool_strict_denied () =
   let dir = setup_test_workspace () in

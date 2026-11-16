@@ -577,6 +577,51 @@ let test_dashboard_hello_keeps_upgrade_runtime_authority () =
         (Ws.dashboard_auth_agent (Atomic.get session.dashboard_auth))))
 ;;
 
+(* A static credential can hold the internal Keeper token. dashboard/hello
+   answered such a bearer as the internal Keeper, a Worker, because the role
+   check asked the internal token before the credential's own role. A
+   Player credential has no CanReadState, so taking its role instead would
+   refuse the socket. *)
+let test_dashboard_hello_internal_token_held_by_a_static_credential () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    Masc_test_deps.ensure_rng_initialized ();
+    let parent = Masc_test_deps.setup_test_workspace () in
+    let base = Filename.concat parent "runtime-internal" in
+    Fs_compat.mkdir_p (Filename.concat base Common.masc_dirname);
+    let _ = Auth.enable_auth base ~require_token:true ~agent_name:"test-admin" in
+    let internal = Auth.ensure_internal_keeper_token base in
+    (match
+       Auth.save_raw_token_credential base ~agent_name:"dual-holder"
+         ~role:Masc_domain.Player ~raw_token:internal
+     with
+     | Ok _ -> ()
+     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
+    let id = "ws-internal-token-held-by-static" in
+    let session = Ws.new_session ~id
+      ~runtime_authority:(Sse.runtime_authority_exn ~base_path:base) in
+    let state = Masc.Mcp_server.For_testing.create_state ~base_path:base in
+    let request = Yojson.Safe.to_string (`Assoc [
+      "jsonrpc", `String "2.0"; "id", `Int 1;
+      "method", `String "dashboard/hello";
+      "params", `Assoc [ "token", `String internal ] ]) in
+    Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions id session);
+    Fun.protect ~finally:(fun () ->
+      Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions id);
+      Masc_test_deps.cleanup_test_workspace parent) (fun () ->
+      let reply =
+        Masc.Mcp_server_eio.handle_request ~clock:(Eio.Stdenv.clock env) ~sw
+          ~mcp_session_id:id state request
+      in
+      Alcotest.(check bool) "the internal Keeper token authenticates the socket" true
+        Yojson.Safe.Util.(reply |> member "result" |> member "session"
+          |> member "authenticated" |> to_bool);
+      Alcotest.(check (option string)) "the socket names the credential holding it"
+        (Some "dual-holder")
+        (Ws.dashboard_auth_agent (Atomic.get session.dashboard_auth))))
+;;
+
 let with_registered_test_session sid f =
   let session = Ws.new_session ~runtime_authority:(Sse.runtime_authority_exn
       ~base_path:(Filename.get_temp_dir_name ())) ~id:sid in
@@ -1249,6 +1294,8 @@ let () =
     ("external_subscriber", [
       Alcotest.test_case "dashboard hello keeps upgrade runtime authority" `Quick
         test_dashboard_hello_keeps_upgrade_runtime_authority;
+      Alcotest.test_case "dashboard hello: internal token held by a static credential" `Quick
+        test_dashboard_hello_internal_token_held_by_a_static_credential;
       Alcotest.test_case "single subscriber receives broadcast" `Quick
         test_ws_external_subscriber_receives_broadcast;
       Alcotest.test_case "multi-session broadcast" `Quick

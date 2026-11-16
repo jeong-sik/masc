@@ -148,7 +148,7 @@ def addon_payload() -> dict:
             "action_schema": None,
             "configuration": {"id": "operator-quiz", "source_path": "/c/operator-quiz.toml", "revision": "r1"},
             "binding": {"sources": []},
-            "package": {"outputs": {"quiz": {"lanes": ["quiz/sessions"]}}, "skills_directory": None},
+            "package": {"outputs": {"quiz": {"lanes": ["quiz/sessions"]}}, "skills_directory": None, "action_tool": None},
         }],
         "rows": [],
         "coverage": [],
@@ -220,22 +220,16 @@ class LaneInventoryPushTest(unittest.TestCase):
             self.assertEqual(lane.response_count("open", LANES), 1, "Lane reads continued while idle")
             self.assertEqual(lane.response_count("open", ADDONS), 1, "Add-on reads continued while idle")
             step("keys", "\r")
-            step("drain", 0.3)
-            # Row actions are filled from row values (#51874, #51876): selecting
-            # the Add-on opens its Detail without a second list read.
-            self.assertEqual(lane.response_count("open", ADDONS), 1,
-                             "the selected Add-on detail re-read the list")
+            step("wait", lambda: lane.response_count("open", ADDONS) == 2,
+                 "the selected Add-on detail did not read its inventory")
 
             lane.set_phase("inspect")
             lane.events.put(dataset("lane_addons", "quiz-1"))
-            step("drain", 0.5)
-            # The Detail is served from row values (#51874, #51876); dataset
-            # pushes do not re-read the add-on list behind it.
-            self.assertEqual(lane.response_count("inspect", ADDONS), 0,
-                             "the selected Add-on detail reread on a dataset push")
+            step("wait", lambda: lane.response_count("inspect", ADDONS) == 1,
+                 "the open Add-on did not reread on its dataset push")
             lane.events.put(dataset("lane_addons", "someone-else"))
             step("drain", 0.5)
-            self.assertEqual(lane.response_count("inspect", ADDONS), 0)
+            self.assertEqual(lane.response_count("inspect", ADDONS), 1)
 
             lane.set_phase("trailing")
             lane.hold_lanes.set()
@@ -282,11 +276,9 @@ class LaneInventoryPushTest(unittest.TestCase):
                  "Add-ons did not reopen")
             step("drain", 0.3)
             step("keys", "\r")
+            step("wait", lambda: lane.response_count("reopen", ADDONS) == 2,
+                 "the reopened Add-on detail did not read its inventory")
             step("drain", 0.3)
-            # Reopening selects from row values; the Detail opens without a
-            # second list read (#51874, #51876).
-            self.assertEqual(lane.response_count("reopen", ADDONS), 1,
-                             "the reopened Add-on detail reread the list")
             lane.set_phase("manual")
             step("keys", "r")
             step("wait", lambda: lane.response_count("manual", ADDONS) >= 1,

@@ -6,7 +6,9 @@ type recovery = No_rejected_recovery | Rejected_recovery
 
 type input_kind = Action | Paste | Protocol
 type input_decision = Accept_input | Reject_action | Reject_paste
-type panel_owner = Help | About | Context | Context_search | Agenda | Answering
+type panel_owner =
+  | Help | About | Context | Context_search | Agenda | Answering
+  | Account_server
 
 type context_search_owner = { workspace : int; inspector : int; keeper : string }
 
@@ -22,7 +24,7 @@ let decide_panel_input ~external_surface ~presented_owner ~current_owner input =
   else if Option.equal ( = ) presented_owner current_owner then
     match presented_owner, input with
     | Some Context_search, Paste -> Accept_input
-    | Some (Help | About | Context | Agenda | Answering), Paste -> Reject_paste
+    | Some (Help | About | Context | Agenda | Answering | Account_server), Paste -> Reject_paste
     | Some _, (Action | Protocol) | None, (Action | Paste | Protocol) -> Accept_input
   else match input with
     | Action -> Reject_action
@@ -43,7 +45,7 @@ type ('approval, 'presses, 'panes, 'reader) t = {
 let begin_context_search snapshot owner =
   match snapshot.panel_owner, snapshot.barrier with
   | Some Context, Open -> { snapshot with context_search = Some owner }
-  | Some (Help | About | Context_search | Agenda | Answering), (Open | Held _)
+  | Some (Help | About | Context_search | Agenda | Answering | Account_server), (Open | Held _)
   | None, (Open | Held _) | Some Context, Held _ -> snapshot
 
 let panel_owner_matches snapshot ~current_owner ~context_search_owner =

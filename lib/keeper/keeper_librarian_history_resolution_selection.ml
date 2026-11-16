@@ -8,11 +8,9 @@ let error_to_string = function
     "History Cut requires a confirmed resolution successor before fresh selection: " ^ request_id
   | Unavailable detail -> "History resolution inventory is unavailable: " ^ detail
 let unavailable result = Result.map_error (fun detail -> Unavailable detail) result
-let check ~config ~keeper_name =
-  let* scope=unavailable (Request.discovery_scope ~base_path:config.Workspace.base_path
-    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
-    ~keeper_id:keeper_name) in
-  let* rows=unavailable (Store.history_fence_inventory (Store.of_config config) ~scope) in
+let check_for_keepers_dir ~base_path ~keepers_dir ~keeper_name =
+  let* scope=unavailable (Request.discovery_scope ~base_path ~keepers_dir ~keeper_id:keeper_name) in
+  let* rows=unavailable (Store.history_fence_inventory (Store.of_config (Workspace.default_config base_path)) ~scope) in
   List.fold_left (fun result (name,json) ->
     let* ()=result in
     let* fence=unavailable (Fence.of_json json) in
@@ -21,3 +19,6 @@ let check ~config ~keeper_name =
     match fence.authority with
     | Fence.Worker_absent -> Ok ()
     | Excluded_cut _ -> Error (Unresolved_cut fence.request_id)) (Ok ()) rows
+let check ~config ~keeper_name =
+  check_for_keepers_dir ~base_path:config.Workspace.base_path
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path) ~keeper_name

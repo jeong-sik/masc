@@ -2882,6 +2882,12 @@ let test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner 
       ~commit:(fun _ -> fail "direct Consumer reached a fresh commit callback")));
     blocked (memory_action fixture (fun () -> Consumer.consume_one_with_runtime
       ~config:fixture.config ~keeper_name ()));
+    check bool "the exported production commit edge cannot bypass source selection" true
+      (match memory_action fixture (fun () -> Consumer.commit_with_runtime
+         ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name
+         (Capture.source request)) with
+       | Consumer.Memory_pending (Keeper_librarian_pending.Local_failure _) -> true
+       | Memory_pending _ | Memory_committed | Memory_replaced _ | Memory_refused _ -> false);
     memory_action fixture (fun () -> Refresh.For_testing.run_continuity
       ~base_path:fixture.base_path ~keeper_name ());
     let module Observation=Keeper_continuity_observation in

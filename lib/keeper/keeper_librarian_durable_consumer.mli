@@ -289,7 +289,9 @@ val tool_observations : Agent_core.Types.message list -> Keeper_librarian.tool_o
     message window. [Memory_committed] means the current Memory OS snapshot
     committed; otherwise the pass preserves every classified runtime report.
     This adapter does not catch cancellation or exceptions that escape
-    [Keeper_librarian_runtime.run_best_effort]. *)
+    [Keeper_librarian_runtime.run_best_effort]. The same history fence guard
+    runs before the provider or Memory edge; a blocked Cut returns
+    [Memory_pending] without granting commit or ACK. *)
 val commit_with_runtime
   :  base_path:string
   -> keepers_dir:string

@@ -1472,7 +1472,7 @@
 (test
  (name test_alloc_profile)
  (modules test_alloc_profile)
- (libraries alcotest masc.masc_core))
+ (libraries alcotest masc.masc_core threads))
 
 (test
  (name test_heap_roots)

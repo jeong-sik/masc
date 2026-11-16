@@ -20,8 +20,8 @@ related: ["librarian-absorb-gate", "0484", "0433", "provider-path-rest"]
   - 판정 서버의 거절이 `string` 으로 바뀌어, 판정 실패와 구별되지 않는다.
   - 새 시도를 만드는 계기가 "앞 시도가 실패했다" 하나뿐이다.
 - 이 RFC 는 두 가지를 정한다.
-  - gate 결과를 닫힌 합타입으로 나눈다. 판정 서버 상태 때문의 거절은 따로 이름을 갖는다.
-  - 그런 거절 뒤의 새 시도는 그 판정 서버가 지금 거절 중이 아닐 때만 만든다. 거절 중이면 아무것도 쓰지 않고 기다린다.
+  - 실패한 판정의 원인을 문자열이 아니라 typed 평가 결과(`Typesafeai_client.failure`)에서 읽는다. 판정 서버 상태 때문의 거절은 따로 갈래를 갖는다.
+  - 그런 거절 뒤의 새 시도는, 지금 설정이 물을 판정 서버 중 하나라도 거절 중이 아닐 때만 만든다. 모두 거절 중이면 아무것도 쓰지 않고 기다린다.
 - 시도 기록과 transcript 는 지금 그대로다. 시간·횟수 상한, 문자열 분류, 새 동시 실행 제한은 쓰지 않는다.
 
 ## 1. 지금
@@ -63,49 +63,44 @@ related: ["librarian-absorb-gate", "0484", "0433", "provider-path-rest"]
 
 ## 3. 결정
 
-### 3.1 gate 결과는 닫힌 합타입이다
+### 3.1 실패의 원인은 typed 평가 결과에서 읽는다
 
-`Failed.reason : string` 과 `failure_detail : ... -> string option` 을 지운다. 그 자리에 판정 결과를 이렇게 둔다.
+끝난 run 은 평가마다 `result : (evaluated, Typesafeai_client.failure) result` 를 이미 가진다. 새 시도 판단은 `Failed.reason : string` 을 읽지 않고 이 값을 읽는다.
 
 ```ocaml
-type not_judged =
-  | Destination_state of Typesafeai_client.failure
-      (* 모든 판정 서버가 자기 상태 때문에 거절했다:
-         Payment_required | Credential_refused | Rate_limited | Server_error | Transport *)
-  | Request_refused of Typesafeai_client.failure
-      (* 어느 판정 서버가 이 요청 자체를 받지 않았다:
-         Request_refused | Response_unusable *)
+(* Typesafeai_client *)
+type refusal_owner =
+  | Destination_state  (* Payment_required | Credential_refused | Rate_limited | Server_error | Transport *)
+  | This_request       (* Request_refused | Response_unusable *)
 
-type judgment_failed =
-  | Guidance_invalid of ...
-  | Classification_failed of ...
-  | Absorptions_unconfirmed of ...   (* 판정은 받았고, 흡수를 확인하지 못했다 *)
+(* Keeper_librarian_absorb_gate *)
+type after_failure =
+  | Retain_new_attempt
+  | Wait_for_destination
 
-type verdict =
-  | Passed
-  | Not_judged of not_judged
-  | Failed of judgment_failed
+val after_failure : live_authority -> run_result -> after_failure
 ```
 
-- `Destination_state` 와 `Request_refused` 는 `refusal_class` 를 빠짐없이 `match` 해서 나눈다. 시도 중 하나라도 `Request_refused | Response_unusable` 이면 `Request_refused` 다. 같은 요청을 다시 보내도 같은 답이 오기 때문이다.
-- `...` 자리의 필드는 1층 구현에서 지금 `Failed` 를 만드는 자리마다 정한다. 문자열 하나로 뭉치지 않는다.
-- 16곳의 호출자는 `verdict` 를 빠짐없이 `match` 한다. `_ ->` 를 쓰지 않는다.
-- 로그·`/health` 에 보이는 문장은 이 값에서 만든다. 분기는 문장에서 하지 않는다.
+- `refusal_owner` 는 `refusal_class` 를 빠짐없이 `match` 한다.
+- 답을 못 받은 평가마다 원인을 읽는다.
+  - `Error failure`: 모든 시도가 `Destination_state` 면 서버 상태 갈래, 하나라도 `This_request` 면 요청 갈래다.
+  - `Ok` 인데 답이 decode 되지 않음: 요청 갈래다. 같은 요청에 같은 답이 온다.
+- 원인이 하나도 없으면(가이드 검증 실패, 분류 실패, gate 를 쓸 수 없음) 지금처럼 새 시도를 만든다.
 - 시도 기록, transcript, 시도가 끝나는 방식은 바꾸지 않는다. 거절로 끝난 시도는 지금처럼 끝난다.
 
-### 3.2 `Destination_state` 뒤의 새 시도는 판정 서버가 거절 중이 아닐 때만 만든다
+### 3.2 모든 원인이 서버 상태이고, 물을 서버가 모두 아직 거절 중이면 기다린다
 
-새 시도를 만드는 세 자리에 조건 하나를 더한다. 앞 시도가 `Not_judged (Destination_state failure)` 이면 다음 중 하나일 때만 새 시도를 만든다.
+새 시도를 만드는 세 자리는 `failure_detail` 이 실패를 돌려줄 때 `after_failure` 를 부른다. 이 함수는 다음이 모두 참일 때만 `Wait_for_destination` 을 돌려준다.
 
-| 조건 | 읽는 것 | 뜻 |
-|---|---|---|
-| `failure` 에 나온 판정 서버 중 하나라도 지금 `Refusing` 이 아니다 | `Typesafeai_client.outcomes` | 그 서버가 그 뒤에 답했거나(`Answered`), 이 프로세스가 아직 묻지 않았다 |
-| 지금 판정 서버 설정이 앞 시도가 잡은 설정과 다르다 | `Gate.resolve` 결과와 앞 시도의 authority | 운영자가 목적지·키를 바꿨다 |
+| 조건 | 읽는 것 |
+|---|---|
+| 답을 못 받은 평가가 하나 이상 있고, 그 원인이 모두 서버 상태 갈래다 | run 의 `evaluations` |
+| 지금 설정(`Gate.resolve`)이 물을 판정 서버가 모두 `Refusing` 이고, 마지막 거절이 서버 상태 갈래다 | `Typesafeai_client.destination_outcome` |
 
-- 둘 다 아니면 새 시도를 만들지 않는다. 아무것도 쓰지 않고, 원본은 지금 단계에 머문다.
-- 새 시도는 지금처럼 `Gate.resolve` 로 그때의 설정을 잡는다. 바뀐 설정이 그대로 반영된다.
-- 판정 서버 표는 프로세스가 뜨면 빈다. 빈 표에서 그 서버는 "아직 묻지 않음" 이라 새 시도를 한 번 만든다. 그 시도가 다시 거절되면 표가 `Refusing` 이 되고, 다시 기다린다.
-- `Request_refused` 와 `Failed` 뒤의 새 시도 규칙은 이 RFC 가 바꾸지 않는다(§9).
+- `Wait_for_destination` 이면 새 시도를 만들지 않는다. 끝난 시도를 그대로 두고, 원본은 지금처럼 pending 으로 남는다. 아무것도 쓰지 않는다.
+- 운영자가 목적지를 바꾸면 새 목적지는 이 프로세스가 아직 묻지 않은 서버다. 그래서 두 번째 조건이 거짓이 되고 새 시도를 만든다. 새 시도는 지금처럼 `Gate.resolve` 로 바뀐 설정을 잡는다.
+- 판정 서버 표는 프로세스가 뜨면 빈다. 빈 표에서는 두 번째 조건이 거짓이라 새 시도를 한 번 만든다. 그 시도가 다시 거절되면 표가 `Refusing` 이 되고, 다시 기다린다.
+- 요청 갈래 뒤의 새 시도 규칙은 이 RFC 가 바꾸지 않는다(§9).
 
 이 절만으로 §2 의 1 과 2 가 멈춘다. 거절이 이어지는 동안 원본 하나의 gate 기록은 늘지 않는다.
 
@@ -121,21 +116,20 @@ type verdict =
 
 ### 4.1 원본 하나의 gate 단계
 
-| 앞 시도의 결과 | 지금 판정 서버 상태 | 설정 | 다음 | 기록 쓰기 |
-|---|---|---|---|---|
-| `Passed` | 상관없음 | 상관없음 | 적용 | 지금 규칙 |
-| `Failed _` | 상관없음 | 상관없음 | 지금 규칙 | 지금 규칙 |
-| `Not_judged (Request_refused _)` | 상관없음 | 상관없음 | 지금 규칙(§9) | 지금 규칙 |
-| `Not_judged (Destination_state f)` | `f` 의 서버가 모두 `Refusing` | 같음 | 기다림 | 없음 |
-| `Not_judged (Destination_state f)` | `f` 의 서버 중 하나가 `Answered` 또는 묻지 않음 | 상관없음 | 새 시도 | 새 시도 기록 하나 |
-| `Not_judged (Destination_state f)` | 상관없음 | 다름 | 새 시도 | 새 시도 기록 하나 |
+| 앞 시도의 결과 | 지금 설정이 물을 서버 | 다음 | 기록 쓰기 |
+|---|---|---|---|
+| 판정 성공 | 상관없음 | 적용 | 지금 규칙 |
+| 실패, 답 못 받은 평가 없음 | 상관없음 | 새 시도(지금 규칙) | 새 시도 기록 하나 |
+| 실패, 원인에 요청 갈래가 있음 | 상관없음 | 새 시도(지금 규칙, §9) | 새 시도 기록 하나 |
+| 실패, 원인이 모두 서버 상태 | 모두 서버 상태로 `Refusing` | 기다림 | 없음 |
+| 실패, 원인이 모두 서버 상태 | 하나라도 `Answered` 이거나 묻지 않음 | 새 시도 | 새 시도 기록 하나 |
 
 ### 4.2 불변식
 
-- **I1. 거절 구간마다 시도 하나:** 판정 서버가 `Refusing` 으로 머무는 동안, 원본 하나는 `Destination_state` 뒤의 새 시도를 만들지 않는다. 새 시도는 서버 상태가 바뀌거나, 설정이 바뀌거나, 프로세스가 새로 뜰 때만 생긴다.
+- **I1. 거절 구간마다 시도 하나:** 물을 판정 서버가 모두 `Refusing` 으로 머무는 동안, 원본 하나는 서버 상태 거절 뒤의 새 시도를 만들지 않는다. 새 시도는 서버가 답하거나, 설정이 바뀌거나, 프로세스가 새로 뜰 때만 생긴다.
 - **I2. transcript 불변:** 이 RFC 는 시도 기록과 transcript 를 쓰는 방식을 바꾸지 않는다. 답은 한 번만 적히고, 끝난 앞부분은 바뀌지 않는다.
 - **I3. 증거 유지:** 기다리는 원본의 마지막 시도는 `Typesafeai_client.failure` 를 담은 채 끝나 있다. 헌법 `failure_keeps_evidence` 와 같다.
-- **I4. 새 게이트 없음:** 판정 서버로 가는 요청을 막거나 줄 세우는 장치를 더하지 않는다. §3.2 는 "새 시도 기록을 만들지 않는다" 만 정한다.
+- **I4. 새 게이트 없음:** 판정 서버로 가는 요청을 막거나 줄 세우는 장치를 더하지 않는다. §3.2 는 "새 시도 기록을 만들지 않는다" 만 정한다. 새 원본의 첫 시도는 이 조건을 받지 않는다.
 
 ### 4.3 진행
 
@@ -162,14 +156,16 @@ type verdict =
 
 ## 6. 층
 
-1. **1층 — typed 결과**
-   - §3.1 의 합타입으로 `Failed.reason : string`, `failure_detail` 을 바꾼다. 16곳이 빠짐없이 `match` 한다. 동작은 바뀌지 않는다.
-2. **2층 — 새 시도 조건과 깨우기**
-   - §3.2 의 조건을 세 자리에 넣는다.
+1. **1층 — 기다림 조건**
+   - `Typesafeai_client.refusal_owner`, `destination_outcome`.
+   - `Gate.after_failure` 와 세 자리 연결(§3.1, §3.2).
+   - 이 층만으로 거절 구간의 기록 증가가 멈춘다.
+2. **2층 — 다시 답하면 깨우기**
    - §3.3 의 `Refusing → Answered` 사건과 깨우기.
-   - RFC-0484 §3.2 개정(§8)을 이 층에서 한다.
+3. **3층 — 결과 문자열 정리**
+   - `Failed.reason : string` 과 `failure_detail : ... -> string option`(16곳)을 닫힌 합타입으로 바꾼다. 동작은 바뀌지 않는다.
 
-1층이 맨 아래인 native stack 으로 쌓는다. 기록 증가는 2층에서 멈춘다.
+RFC 를 맨 아래 층으로 두는 native stack 으로 쌓는다.
 
 ## 7. 검증
 
@@ -189,7 +185,7 @@ type verdict =
 
 ## 8. 바꾸는 문장
 
-- RFC-0484 §3.2 의 "이 섹션은 아무것도 막지 않는다. 판정 경로는 지금과 똑같이 움직인다." → "Librarian gate 는 판정 서버 상태 때문에 거절된 시도 뒤의 새 시도를, 이 기록에서 그 서버가 거절 중이 아닐 때만 만든다(RFC-librarian-gate-waits-on-the-destination-not-on-passes §3.2). 판정 호출 자체는 이 기록으로 막지 않는다."
+- RFC-0484 §3.2 의 "이 섹션은 아무것도 막지 않는다. 판정 경로는 지금과 똑같이 움직인다." → "Librarian gate 는 판정 서버 상태 때문에 거절된 시도 뒤의 새 시도를, 지금 설정이 물을 서버 중 하나라도 이 기록에서 거절 중이 아닐 때만 만든다(RFC-librarian-gate-waits-on-the-destination-not-on-passes §3.2). 판정 호출 자체는 이 기록으로 막지 않는다." 1층은 `Typesafeai_client.destination_outcomes` 의 문서 주석을 같은 뜻으로 고친다.
 - RFC-librarian-absorb-gate §2 6항의 "판정이 실패하면 … 입력 범위를 남겨 재시도한다" 는 그대로 둔다. 판정 서버 상태 때문의 거절 뒤에 언제 다시 시도하는지는 이 RFC §3.2 가 정한다.
 
 ## 9. 열린 질문

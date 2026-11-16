@@ -473,7 +473,7 @@ let refresh_saved t saved result =
 let refresh_saved_kept_back t saved notice =
   let activation = match t.phase with
     | Finished {activation; _} -> activation
-    | Loading | Providers _ | Logging | Models | Preparing_context _
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
     | Documented_context _ | Saving | Removing | Failed | Removal _ ->
       Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
   t.cursor <- 0; t.result_scroll <- 0;

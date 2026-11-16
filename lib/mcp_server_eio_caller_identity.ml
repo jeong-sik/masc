@@ -4,6 +4,43 @@ type direct_call_authority =
   | Catalog_policy
   | Restricted_profile
 
+(* HIGH-RISK-UNREVIEWED: what a [tools/call] knows about its bearer when it
+   reaches the executor (RFC a-request-reads-its-bearer-once-at-the-door,
+   D5). [Admitted] carries the credential a door's lookup found and the role
+   the door gave it, so the executor does not read the token again for them.
+   [Unread] is a token no door answer stands in for; the executor reads it
+   as it did before a door answered. *)
+type bearer =
+  | Admitted of {
+      token : string;
+      credential : Masc_domain.agent_credential;
+      role : Masc_domain.agent_role;
+    }
+  | Unread of {
+      token : string option;
+      internal_keeper_runtime : bool;
+    }
+
+(* Only a bearer the door resolved to a credential answers from the door.
+   Auth off: the door read nothing. Internal Keeper token: dispatch still
+   looks it up (D3), and the executor does as before. Anonymous: no token.
+   Unadmitted: no door ran. *)
+let of_sender (sender : Mcp_server_eio_types.sender) ~auth_token
+    ~internal_keeper_runtime =
+  match sender with
+  | Mcp_server_eio_types.Admitted
+      (Auth.Bearer { resolved = Auth.Token_credential credential; role; token; _ }) ->
+      Admitted
+        { token; credential = Auth.token_credential_agent_credential credential; role }
+  | Mcp_server_eio_types.Admitted
+      ( Auth.Bearer { resolved = Auth.Internal_keeper_bearer; _ }
+      | Auth.Anonymous
+      | Auth.Auth_off )
+  | Mcp_server_eio_types.Unadmitted ->
+      Unread { token = auth_token; internal_keeper_runtime }
+
+let unread token ~internal_keeper_runtime = Unread { token; internal_keeper_runtime }
+
 type t = {
   agent_name : string;
   agent_name_is_ephemeral : bool;
@@ -14,7 +51,7 @@ type t = {
           which only rewrites [Stable] (explicit) names — those carry
           [false], and a [false] bit re-derives correctly on read-back,
           so the pre-alias computation stays behavior-exact. *)
-  token : string option;
+  bearer : bearer;
   has_explicit_agent_name : bool;
   verified_internal_keeper_runtime : bool;
   owner_keeper_identity : owner_keeper_identity option;
@@ -146,7 +183,13 @@ let minted_name_is_transient = function
 (** Apply the silent auth-token fallback, returning a re-tagged
     [minted_name].
 
-    On a successful token resolve the result re-tags to
+    [owner] is who holds the bearer: the door's credential, or one lookup of
+    an unread token, [None] without a bearer. {!resolve} reads it once for
+    this fallback, the keeper-owner projection and the alias guard, so the
+    three cannot disagree; the fallback used to look the token up a second
+    time.
+
+    When the bearer has an owner the result re-tags to
     [Resolved_external resolved] — NOT the stale pre-resolution
     [Ephemeral]. This is load-bearing for the cache bit: the
     ephemerality cached at the write site is
@@ -154,30 +197,26 @@ let minted_name_is_transient = function
     that token-resolve replaces with a real credential name caches the
     new name's transience, not the placeholder's. Every branch returns
     a [minted_name] (failure and no-fire return the input unchanged). *)
-let resolve_auth_fallback_agent_name
-    ~(config : Workspace_utils_backend_setup.config)
-    ~token
-    (minted : minted_name) : minted_name =
-  let agent_name = minted_name_to_string minted in
-  match token with
-  | Some t when minted_name_is_transient minted -> (
-      match Auth.resolve_agent_from_token config.base_path ~token:t with
-      | Ok resolved -> Resolved_external resolved
-      | Error err ->
-          let error_kind = silent_auth_token_error_kind err in
-          Log.Auth.warn
-            "[silent:auth_token_resolve_error] agent=%s error_kind=%s - token resolve \
-             failed, keeping caller alias"
-            agent_name error_kind;
-          Otel_metric_store.inc_counter
-            Otel_metric_store.metric_silent_auth_token_resolve_error
-            ~labels:[ "error_kind", error_kind; "agent", agent_name ]
-            ();
-          (* Token resolve failed: keep the caller alias unchanged,
-             preserving its origin tag. *)
-          minted)
-  | None -> minted
-  | Some _ -> minted
+let resolve_auth_fallback_agent_name ~owner (minted : minted_name) : minted_name =
+  if not (minted_name_is_transient minted) then minted
+  else
+    match owner with
+    | None -> minted
+    | Some (Ok resolved) -> Resolved_external resolved
+    | Some (Error err) ->
+        let agent_name = minted_name_to_string minted in
+        let error_kind = silent_auth_token_error_kind err in
+        Log.Auth.warn
+          "[silent:auth_token_resolve_error] agent=%s error_kind=%s - token resolve \
+           failed, keeping caller alias"
+          agent_name error_kind;
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_silent_auth_token_resolve_error
+          ~labels:[ "error_kind", error_kind; "agent", agent_name ]
+          ();
+        (* Token resolve failed: keep the caller alias unchanged,
+           preserving its origin tag. *)
+        minted
 
 (** May the workspace display alias rewrite this caller name?
 
@@ -243,35 +282,42 @@ let resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
     agent_name
 
 let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~arguments ~identity
-    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-    ~direct_call_authority ~workspace_initialized ~log_mcp_exn =
+    ~cached_resolved_agent ~bearer ~direct_call_authority ~workspace_initialized
+    ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let minted_name =
     resolve_initial_agent_name ~identity ~cached_resolved_agent ~explicit_agent_name
   in
-  let token = auth_token in
   let verified_internal_keeper_runtime =
-    internal_keeper_runtime
-    &&
-    match token with
-    | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
-    | None -> false
+    match bearer with
+    (* The door resolved this bearer to a credential, so it is not the
+       internal Keeper token, and the transport passed [false] for it. *)
+    | Admitted _ -> false
+    | Unread { token = Some raw; internal_keeper_runtime = true } ->
+        Auth.verify_internal_keeper_token config.base_path ~token:raw
+    | Unread { token = None; internal_keeper_runtime = _ }
+    | Unread { token = Some _; internal_keeper_runtime = false } -> false
   in
-  (* The agent that owns the presented bearer credential. Resolved once and
-     used for both the keeper-owner projection and the alias guard below, so
-     one request performs one credential lookup instead of two. *)
+  (* Who holds the presented bearer: the credential the door found, or one
+     lookup of a token no door read. It answers the keeper-owner projection,
+     the alias guard and the auth fallback below. *)
+  let owner =
+    match bearer with
+    | Admitted { credential; _ } -> Some (Ok credential.Masc_domain.agent_name)
+    | Unread { token = None; _ } -> None
+    | Unread { token = Some raw; _ } ->
+        Some (Auth.resolve_agent_from_token config.base_path ~token:raw)
+  in
   let credential_owner =
-    match token with
+    match owner with
     | None -> None
-    | Some raw -> (
-        match Auth.resolve_agent_from_token config.base_path ~token:raw with
-        | Ok owner_name -> Some owner_name
-        | Error msg ->
-            Log.Auth.routine
-              "caller identity: bearer token resolve failed: %s"
-              (Masc_domain.masc_error_to_string msg);
-            None)
+    | Some (Ok owner_name) -> Some owner_name
+    | Some (Error msg) ->
+        Log.Auth.routine
+          "caller identity: bearer token resolve failed: %s"
+          (Masc_domain.masc_error_to_string msg);
+        None
   in
   let owner_keeper_identity =
     Option.bind credential_owner (resolve_owner_keeper_identity config)
@@ -287,7 +333,7 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
       None
   in
   let resolved_minted =
-    resolve_auth_fallback_agent_name ~config ~token minted_name
+    resolve_auth_fallback_agent_name ~owner minted_name
   in
   (* Ephemerality is decided here, from the carried/re-tagged origin —
      not re-derived from the string later. [resolve_explicit_bound_alias]
@@ -308,7 +354,7 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
   {
     agent_name;
     agent_name_is_ephemeral;
-    token;
+    bearer;
     has_explicit_agent_name;
     verified_internal_keeper_runtime;
     owner_keeper_identity;

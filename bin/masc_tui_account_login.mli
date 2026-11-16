@@ -41,7 +41,7 @@ type list_view = Clients | Accounts of client | Account_providers of client * st
 type activation = Activating | Activation_failed of string
   | Active of { exact_output_available : bool }
   (** Saving and owner activation are separate receipts. *)
-type phase = Loading | Providers of list_view | Logging | Models | Preparing_context of model
+type phase = Loading | Providers of list_view | Logging | Models | Refreshing_models | Preparing_context of model
       (** The model selection remains available as an observation, while its
           context request owns further input until it settles or is closed. *)
   | Documented_context of model | Saving | Removing
@@ -50,7 +50,7 @@ type phase = Loading | Providers of list_view | Logging | Models | Preparing_con
   | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
       (** [D] on an account: what removing it changes, read at [revision]. *)
-type recovery = Login_status | Refresh_configuration
+type recovery = Login_status | Refresh_configuration | Refresh_model_inventory
 type email_gap = Login_file_unreadable | Login_file_unrecognized | Email_not_reported | Email_not_displayable
   | Environment_credential
 type account_email = Email of string | Not_read of email_gap
@@ -84,7 +84,7 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
   | Start of { provider : provider; existing : bool }
       (** Log in through [provider]: a new account, or explicitly again. *)
   | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Prepare of model | Save of model list | Close | Nothing
+  | Recover | Discover | Refresh_models | Prepare of model | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
       (** Read what removing [provider] changes. [refused] is why the server
           declined the removal just asked for, shown above the fresh preview. *)
@@ -165,6 +165,17 @@ val refresh_saved : t -> saved -> (Yojson.Safe.t, string) result -> unit
     so account-specific recovery uses the generated configured account. *)
 val input_response : sequence:int -> t -> (Yojson.Safe.t, string) result -> unit
 val models : t -> Yojson.Safe.t -> (unit, string) result
+val refreshing_models : t -> unit
+(** Retain this account's inventory while a replacement is read. Selection and
+    save input wait for the response; Esc still closes the view. *)
+val refreshed_models : t -> Yojson.Safe.t -> (unit, string) result
+(** Reconcile an explicit refresh by model ID. Preserve existing selections and
+    cursor, without selecting new rows. A newly reported context wins; an
+    unreported one retains this account's previously known value. Bound,
+    removed and unsupported models cannot enter the save selection. *)
+val models_refresh_failed : t -> string -> unit
+(** Keep the inventory and selections visible after a failed refresh. Save is
+    blocked until a successful model reread; r retries that read, not login. *)
 val selected_account : t -> provider -> Yojson.Safe.t -> (unit, string) result
 (** Accept an existing account selection's reference before discovering its models. *)
 val preparing : t -> model -> unit

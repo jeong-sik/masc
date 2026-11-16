@@ -5058,7 +5058,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   let needs_identity = match action with
     | Login.Nothing | Close | Cancel -> false
     | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
-    | Start _ | Input _ | Recover | Discover | Prepare _ | Save _ | Preview_removal _ | Remove _
+    | Start _ | Input _ | Recover | Discover | Refresh_models | Prepare _ | Save _ | Preview_removal _ | Remove _
     | Refresh_removed _ | Refresh_list _ -> true in
   if action = Login.Nothing then ()
   else if needs_identity && not (server_authority_ready state) then begin
@@ -5078,7 +5078,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
              :: List.filter (fun (pending, _, _) -> pending != view)
                   state.account_login_activation_resume;
            view.notice <- "Saved configuration is waiting for workspace reconfirmation before activation."
-       | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
+       | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover | Login.Refresh_models
        | Login.Close | Login.Nothing | Login.Refresh_saved _ | Login.Select_existing _
        | Login.Start _ | Login.Input (_, _) | Login.Prepare _ | Login.Save _
        | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
@@ -5094,7 +5094,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   (match action with
    | Login.Input _ | Nothing -> ()
    | Close when Login.activation_incomplete view -> ()
-   | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _ | Close
+   | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Refresh_models | Prepare _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -5120,7 +5120,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
         try Eio.Cancel.sub (fun cancellation ->
           (match action with
            | Login.Input _ -> ()
-           | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
+           | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover | Login.Refresh_models
            | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
            | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Save _
            | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _
@@ -5130,7 +5130,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
               match action with
                 | Login.Input _ -> ()
                 | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry
-                | Select_existing _ | Start _ | Cancel | Recover | Discover | Prepare _ | Save _
+                | Select_existing _ | Start _ | Cancel | Recover | Discover | Refresh_models | Prepare _ | Save _
                 | Close | Nothing | Preview_removal _ | Remove _ | Refresh_removed _
                 | Refresh_list _ -> view.cancel_stream <- None)
             (fun () -> match check_workspace () with Error detail -> enqueue (Error detail) | Ok () -> f ()))
@@ -5181,13 +5181,18 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     (match action with
       | Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading
       | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel
-      | Recover | Discover | Prepare _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
+      | Recover | Discover | Refresh_models | Prepare _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
       | Refresh_removed _ -> ()); start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory"))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
       | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (Masc_tui_http.get_json ~host ~port ~path:(login_path id))))
-  | Discover ->
-    view.phase<-Login.Loading;
+  | Discover | Refresh_models ->
+    (match action with
+     | Refresh_models -> Login.refreshing_models view
+     | Discover -> view.phase<-Login.Loading
+     | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
+     | Start _ | Input _ | Cancel | Recover | Prepare _ | Save _ | Close | Nothing
+     | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ -> ());
     let source=Login.source view in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/models" source))
   | Prepare model ->
@@ -15993,7 +15998,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
        | Some _, Login.Finished {activation = Login.Activating; _} -> ()
        | Some _, Login.Finished {saved; activation = (Login.Activation_failed _ | Login.Active _); _} ->
          launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
-       | Some _, (Login.Loading | Login.Logging | Login.Models | Login.Preparing_context _
+       | Some _, (Login.Loading | Login.Logging | Login.Models | Login.Refreshing_models | Login.Preparing_context _
            | Login.Removing | Login.Providers _ | Login.Documented_context _ | Login.Removal _)
        | (None, _) -> launch_account_login_action state ~mailbox view Login.Inventory)
   | Masc_tui_command.Open_settings ->
@@ -27133,7 +27138,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               the transport's for a dropped connection. A fixed sentence here
               hid which runtime a save's verification refused. A context
               failure returns to the same model instead of refreshing the list. *)
-           | (Login.Save _ | Login.Prepare _), Error detail -> Error detail
+           | (Login.Save _ | Login.Prepare _ | Login.Refresh_models), Error detail -> Error detail
            | (Login.Inventory, Error detail) | (Login.Select_existing _, Error detail)
            | (Login.Start _, Error detail) | (Login.Cancel, Error detail)
            | (Login.Recover, Error detail) | (Login.Discover, Error detail)
@@ -27143,7 +27148,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | (Login.Refresh_list _, Error detail) -> Error (detail ^ " · r로 다시 확인하세요.")
            | (Login.Inventory, Ok json) | (Login.Select_existing _, Ok json)
            | (Login.Start _, Ok json) | (Login.Cancel, Ok json) | (Login.Recover, Ok json)
-           | (Login.Discover, Ok json) | (Login.Prepare _, Ok json) | (Login.Save _, Ok json)
+           | (Login.Discover, Ok json) | (Login.Refresh_models, Ok json) | (Login.Prepare _, Ok json) | (Login.Save _, Ok json)
            | (Login.Close, Ok json) | (Login.Nothing, Ok json) | (Login.Preview_removal _, Ok json)
            | (Login.Remove _, Ok json) | (Login.Refresh_removed _, Ok json)
            | (Login.Refresh_list _, Ok json) -> (match action with
@@ -27157,6 +27162,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 | Ok () -> launch_account_login_action state ~mailbox view Discover; Ok ()
                 | Error _ as error -> error)
              | Discover -> Login.models view json
+             | Refresh_models -> Login.refreshed_models view json
              | Prepare model -> Login.prepared view model json
              | Recover -> (match Login.receipt view json with
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
@@ -27181,6 +27187,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match action with
              | Login.Save _ -> Login.save_failed view message
              | Login.Prepare _ -> Login.prepare_failed view message
+             | Login.Refresh_models -> Login.models_refresh_failed view message
              | Login.Input _ -> view.notice<-message
              | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
              | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _

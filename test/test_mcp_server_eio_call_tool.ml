@@ -166,8 +166,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
           ~clock:_
           ~profile:_
           ?mcp_session_id:_
-          ?auth_token:_
-          ~internal_keeper_runtime:_
+          ~bearer:_
           _state
           _id
           _request
@@ -187,7 +186,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     List.iter
       (fun params ->
          let response =
-           Masc.Mcp_server_eio_protocol.handle_request
+           Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
              ~handle_call_tool_eio
              ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
              ~clock:(Eio.Stdenv.clock env)
@@ -211,7 +210,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     List.iter
       (fun (key, value) ->
          let response =
-           Masc.Mcp_server_eio_protocol.handle_request
+           Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
              ~handle_call_tool_eio
              ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
              ~clock:(Eio.Stdenv.clock env) ~sw state
@@ -225,7 +224,7 @@ let test_invalid_call_params_do_not_reach_dispatch_handler () =
     check int "modern continuations never reach dispatch" 0 !handler_calls;
     List.iter
       (fun (key, value) ->
-         ignore (Masc.Mcp_server_eio_protocol.handle_request
+         ignore (Masc.Mcp_server_eio_protocol.handle_request ~sender:Masc.Mcp_server_eio_types.Unadmitted
            ~handle_call_tool_eio
            ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
            ~clock:(Eio.Stdenv.clock env) ~sw state
@@ -244,8 +243,7 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
         ?profile:_
         ?mcp_session_id:_
         ?invocation_ref
-        ?auth_token:_
-        ?internal_keeper_runtime:_
+        ~bearer:_
         ?on_caller_resolved:_
         _state
         ~name:_
@@ -253,7 +251,7 @@ let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
         Option.iter (fun observe -> observe invocation_ref) observe_invocation;
         result)
     ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-    ~broadcast_tools_list_changed:(fun () -> ())
+    ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
     ~sw
     ~clock:(Eio.Stdenv.clock env)
     ?mcp_session_id
@@ -429,8 +427,7 @@ let test_handle_call_executes_transient_failure_once () =
               ?profile:_
               ?mcp_session_id:_
               ?invocation_ref:_
-              ?auth_token:_
-              ?internal_keeper_runtime:_
+              ~bearer:_
               ?on_caller_resolved:_
               _state
               ~name
@@ -443,7 +440,7 @@ let test_handle_call_executes_transient_failure_once () =
                 ~start_time:(Tool_timing.start ())
                 "transient failure")
           ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-          ~broadcast_tools_list_changed:(fun () -> ())
+          ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
           ~sw
           ~clock:(Eio.Stdenv.clock env)
           state
@@ -495,8 +492,7 @@ let test_call_captures_admission_scope_across_workspace_switch () =
               ?profile:_
               ?mcp_session_id:_
               ?invocation_ref:_
-              ?auth_token:_
-              ?internal_keeper_runtime:_
+              ~bearer:_
               ?on_caller_resolved:_
               callback_state
               ~name
@@ -518,7 +514,7 @@ let test_call_captures_admission_scope_across_workspace_switch () =
                 ~data:(`String "workspace switched")
                 ())
           ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-          ~broadcast_tools_list_changed:(fun () -> ())
+          ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
           ~sw
           ~clock:(Eio.Stdenv.clock env)
           state
@@ -1007,13 +1003,13 @@ let with_runtime_mcp_board_call
     let produced = ref None in
     let response = Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
       ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
-        ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+        ?mcp_session_id:_ ?invocation_ref:_ ~bearer:_
         ?on_caller_resolved state ~name:_ ~arguments ->
         if attributed then
           Option.iter (fun notify ->
             incr caller_notifications;
             notify { Masc.Mcp_server_eio_caller_identity.agent_name = keeper_name
-                   ; agent_name_is_ephemeral = false; token = None
+                   ; agent_name_is_ephemeral = false; bearer = Masc_test_deps.no_bearer
                    ; has_explicit_agent_name = true; verified_internal_keeper_runtime = true
                    ; owner_keeper_identity = Some (keeper_name, None); mode_gate_error = None })
             on_caller_resolved;
@@ -1040,7 +1036,7 @@ let with_runtime_mcp_board_call
              raise (Board_trace_post_commit_failure "/private/recording-fixture/secret")));
         result)
       ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
-      ~broadcast_tools_list_changed:(fun () -> ())
+      ~broadcast_tools_list_changed:(fun () -> ()) ~bearer:Masc_test_deps.no_bearer
       ~sw ~clock:(Eio.Stdenv.clock env) state (`Int 7)
       (admit_call (`Assoc ["name", `String requested_name; "arguments", arguments])) in
     let original = match !produced with

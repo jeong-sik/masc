@@ -1264,12 +1264,19 @@ let read_durable_turn_events ?on_view_gap ?pending_decisions io ~session_id ~tur
        | None ->
          let events = page.events @ later in
          (match events with
-          | { Msp.notification = Msp.Item_completed { item; _ }; _ } :: _
-            when item.kind = Msp.Earlier_history
-              && item.status = Msp.Item_completed_status && item.turn_id = None ->
-            certify_history (Compacted_turn events)
-          | [] | _ :: _ ->
-            protocol_error "view/page" "history ended before the current turn's start boundary"))
+          | [] ->
+            protocol_error "view/page" "history ended before the current turn's start boundary"
+          | (event : Msp.view_event) :: _ ->
+            (match event.notification with
+             | Msp.Item_completed { item; _ }
+               when item.kind = Msp.Earlier_history
+                 && item.status = Msp.Item_completed_status && item.turn_id = None ->
+               certify_history (Compacted_turn events)
+             | Msp.Turn_started _ | Msp.Turn_completed _ | Msp.Item_started _
+             | Msp.Item_updated _ | Msp.Item_completed _ | Msp.Item_delta _
+             | Msp.Usage_changed _ | Msp.View_gap _ | Msp.Model_usage_reported _
+             | Msp.Unhandled_notification _ ->
+               protocol_error "view/page" "history ended before the current turn's start boundary")))
   in
   read ~cursor:terminal_cursor ~seen:(View_cursors.singleton terminal_cursor) ~later:[]
 ;;

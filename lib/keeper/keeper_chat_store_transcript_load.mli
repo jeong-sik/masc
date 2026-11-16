@@ -30,7 +30,11 @@ val load_observation :
   base_dir:string -> keeper_name:string -> Keeper_chat_observation_index.t
 (** Shares [load_all]'s parsed prefix and invalidation rules, updating the
     immutable observation indexes only for newly parsed rows. An unchanged
-    transcript returns the same snapshot without traversing its history. *)
+    transcript returns the same snapshot without traversing its history.
+    Rows retain the redaction policy from their load. A policy change rebuilds
+    the next loaded snapshot; it does not rewrite snapshots already retained
+    by callers. Index update/rebuild costs are documented in
+    {!Keeper_chat_observation_index}; parsing and redaction are separate. *)
 
 val load_captured_result : select:(chat_message -> bool) -> base_dir:string -> keeper_name:string ->
   (captured_row list, strict_decode_error) result

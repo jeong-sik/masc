@@ -114,7 +114,9 @@ default = "local.sample"
               end else None in
               let handle ?(profile = Mcp_eio.Seat) ?auth_token body =
                 let auth_token = match auth_token with Some token -> Some token | None -> player in
-                Mcp_eio.handle_request ~clock ~sw ~profile ?auth_token state body in
+                Mcp_eio.handle_request ~clock ~sw ~profile
+                  ~sender:(Masc_test_deps.door_sender ~base_path auth_token)
+                  ?auth_token state body in
               let check_unattached label =
                 check (list string) label room_tools
                   (tool_names (handle (request "tools/list")));

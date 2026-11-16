@@ -31,7 +31,7 @@ let with_server ~clock ~sw ~owner f =
   let base = Filename.temp_dir "tui-task-cancel-resource-" "" in
   Fun.protect ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace base) @@ fun () ->
   let server = Mcp.For_testing.create_state ~base_path:base () in
-  let call request = Mcp.handle_request ~clock ~sw ~mcp_session_id:owner server request in
+  let call request = Mcp.handle_request ~sender:Mcp.Unadmitted ~clock ~sw ~mcp_session_id:owner server request in
   let initialized = call (handshake ~id:1 ~method_:"initialize"
     (`Assoc ["protocolVersion",`String "2025-11-25";"capabilities",`Assoc [];
       "clientInfo",`Assoc ["name",`String owner;"version",`String "1"]])) in

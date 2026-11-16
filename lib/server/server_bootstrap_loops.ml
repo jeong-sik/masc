@@ -319,14 +319,11 @@ let deliver_broadcast_mention
              request_wake ();
              Workspace_broadcast.Accepted
            | Ok (Keeper_chat_store.Already_present { row_id }) ->
-             let messages =
-               Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name:target
+             let index =
+               Keeper_chat_store.load_observation ~base_dir:base_path ~keeper_name:target
              in
              if not
-                  (List.exists
-                     (fun (message : Keeper_chat_store.chat_message) ->
-                        String.equal message.id row_id)
-                     messages)
+                  (Keeper_chat_observation_index.contains_message ~message_id:row_id index)
              then (
                Log.Keeper.error
                  "broadcast mention accepted row could not be reloaded keeper=%s request_id=%s row_id=%s"
@@ -334,11 +331,11 @@ let deliver_broadcast_mention
                Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)
              else (
                let pending =
-                 Keeper_world_observation_message_scope.pending_messages_of_messages
+                 Keeper_world_observation_message_scope.pending_messages_of_index
                    ?ack_id:meta.runtime.message_scope_ack_id
                    ~targets:
                      (Keeper_world_observation_message_scope.message_feed_targets meta)
-                   messages
+                   index
                  |> List.exists
                       (fun (pending : Keeper_world_observation_message_scope.pending_message) ->
                          String.equal pending.message_id row_id)

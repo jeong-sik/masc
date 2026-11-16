@@ -125,7 +125,7 @@ let test_code_search_basic () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let (is_error, text) = extract_tool_output response in
 
   if is_error then begin
@@ -202,7 +202,7 @@ let test_code_symbols_basic () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let (is_error, text) = extract_tool_output response in
 
   if is_error then
@@ -257,7 +257,7 @@ let test_code_read_basic () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let (is_error, text) = extract_tool_output response in
 
   if is_error then
@@ -323,7 +323,7 @@ let test_code_read_offset_limit () =
     ]);
   ]) in
 
-  let response = Mcp_eio.handle_request ~clock ~sw state request in
+  let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let (is_error, text) = extract_tool_output response in
 
   if is_error then

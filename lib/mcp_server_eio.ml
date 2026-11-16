@@ -22,6 +22,10 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
   | Seat
 
+type sender = Mcp_server_eio_types.sender =
+  | Admitted of Auth.request_principal
+  | Unadmitted
+
 type eio_net = [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
 
 (** {1 Eio Context Wrappers} *)
@@ -114,6 +118,7 @@ let handle_request
       ?mcp_session_id
       ?otel_mcp_protocol_version
       ?otel_transport_context
+      ~sender
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -126,8 +131,7 @@ let handle_request
         ~clock
         ~profile
         ?mcp_session_id
-        ?auth_token
-        ~internal_keeper_runtime
+        ~bearer
         state
         id
         call ->
@@ -140,8 +144,7 @@ let handle_request
         ~clock
         ~profile
         ?mcp_session_id
-        ?auth_token
-        ~internal_keeper_runtime
+        ~bearer
         state
         id
         call)
@@ -152,6 +155,7 @@ let handle_request
     ?mcp_session_id
     ?otel_mcp_protocol_version
     ?otel_transport_context
+    ~sender
     ?auth_token
     ~internal_keeper_runtime
     state
@@ -161,46 +165,67 @@ let handle_request
 let run_stdio ?auth_token ~sw ~env state =
   let handle_request ~clock ~sw ~mcp_session_id state request_str =
     let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    (* HIGH-RISK-UNREVIEWED: the stdio door. [Auth.admit_request] reads the
+       bearer once, as the HTTP door does, and the dispatcher answers from
+       the principal (RFC a-request-reads-its-bearer-once-at-the-door, D2).
+       Stdio sends no [x-masc-keeper-name], so the internal Keeper token is
+       refused here, as the credential lookup refused it before. *)
     let authorization =
       try
-        let config = Auth.load_auth_config base_path in
-        if not config.Masc_domain.enabled then Ok ()
-        else
-          match auth_token with
-          | None when not config.require_token -> Ok ()
-          | None -> Error (Mcp_error_code.Auth_error, "Unauthorized: bearer token required")
-          | Some token ->
-            (match Auth_credential_token.find_credential_by_token base_path ~token with
-             | Ok (credential : Masc_domain.agent_credential)
-               when Masc_domain.has_permission credential.role Masc_domain.CanReadState -> Ok ()
-             | Ok _ ->
-               Error (Mcp_error_code.Auth_error, "Forbidden: this stdio endpoint requires CanReadState")
-             | Error _ -> Error (Mcp_error_code.Auth_error, "Unauthorized: invalid or expired bearer token"))
+        let auth_cfg = Auth.load_auth_config base_path in
+        match
+          Auth.admit_request base_path ~auth_cfg ~token:auth_token
+            ~internal_keeper_agent:None
+        with
+        | Ok (Auth.Bearer { role; _ })
+          when not (Masc_domain.has_permission role Masc_domain.CanReadState) ->
+          Error (Mcp_error_code.Auth_error, "Forbidden: this stdio endpoint requires CanReadState")
+        | Ok ((Auth.Auth_off | Auth.Anonymous | Auth.Bearer _) as principal) -> Ok principal
+        | Error Auth.Token_required ->
+          Error (Mcp_error_code.Auth_error, "Unauthorized: bearer token required")
+        | Error (Auth.Bearer_refused _) ->
+          Error (Mcp_error_code.Auth_error, "Unauthorized: invalid or expired bearer token")
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | _ -> Error (Mcp_error_code.Internal_error, "Authentication configuration unavailable")
     in
-    let rejection =
-      match authorization with
-      | Ok () -> None
-      | Error (code, message) ->
-        match Yojson.Safe.from_string request_str with
-        | json when Mcp_transport_protocol.is_jsonrpc_v2 json
-                    && Mcp_transport_protocol.has_unique_jsonrpc_fields json ->
-          (match Mcp_transport_protocol.jsonrpc_request_of_yojson json with
-           | Ok request when Mcp_transport_protocol.is_notification request -> Some `Null
-           | Ok request ->
-             let id = Mcp_transport_protocol.get_id request in
-             if Mcp_transport_protocol.is_valid_request_id id then
-               Some (Mcp_transport_protocol.make_error ~id
-                 (Mcp_error_code.to_wire_code code) message)
-             else None
-           | Error _ -> None)
-        | _ | exception Yojson.Json_error _ -> None
+    let rejection ~code ~message =
+      match Yojson.Safe.from_string request_str with
+      | json when Mcp_transport_protocol.is_jsonrpc_v2 json
+                  && Mcp_transport_protocol.has_unique_jsonrpc_fields json ->
+        (match Mcp_transport_protocol.jsonrpc_request_of_yojson json with
+         | Ok request when Mcp_transport_protocol.is_notification request -> Some `Null
+         | Ok request ->
+           let id = Mcp_transport_protocol.get_id request in
+           if Mcp_transport_protocol.is_valid_request_id id then
+             Some (Mcp_transport_protocol.make_error ~id
+               (Mcp_error_code.to_wire_code code) message)
+           else None
+         | Error _ -> None)
+      | _ | exception Yojson.Json_error _ -> None
     in
-    match rejection with
-    | Some response -> response
-    | None -> handle_request ~clock ~sw ?mcp_session_id ?auth_token state request_str
+    match authorization with
+    | Ok principal ->
+      handle_request ~clock ~sw ?mcp_session_id ~sender:(Admitted principal) ?auth_token
+        state request_str
+    | Error (code, message) ->
+      (match rejection ~code ~message with
+       | Some response -> response
+       | None ->
+         (* A message no rejection can answer: the dispatcher's admission
+            answers it before any method runs, a parse error or an invalid
+            request. Stdio runs the [Full] profile, which allows every
+            method. *)
+         (match
+            Mcp_request_admission.admit
+              ~method_allowed:(fun _ -> true)
+              ~endpoint:(Mcp_server_eio_types.tool_profile_to_string Full)
+              request_str
+          with
+          | Mcp_request_admission.Answer answer -> answer
+          | Mcp_request_admission.Notification _ -> `Null
+          | Mcp_request_admission.Request { id; _ } ->
+            Mcp_transport_protocol.make_error ~id (Mcp_error_code.to_wire_code code) message))
   in
   Mcp_server_eio_protocol.run_stdio ~handle_request ~sw ~env state
 ;;

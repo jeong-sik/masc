@@ -93,6 +93,16 @@ val pending_messages_of_messages
   -> Keeper_chat_store.chat_message list
   -> pending_message list
 
+val pending_messages_of_index
+  :  ?ack_id:string
+  -> targets:string list
+  -> Keeper_chat_observation_index.t
+  -> pending_message list
+(** The same classification using an already-loaded immutable snapshot. Visits
+    user rows after the first exact acknowledgement and retains historical
+    answer identities. Duplicate message IDs remain separate candidate rows;
+    this does not select only the first row with a given ID. *)
+
 (** [fleet_messages_of_messages ~limit ~targets messages] returns the newest
     [limit] keeper broadcasts projected into this transcript, in arrival order.
     A row qualifies when it is a user line on the [Surface_ref.Broadcast]

@@ -260,8 +260,10 @@ let mcp_unauthorized ?(reason = Masc_domain.Auth_error.Generic) message =
     [CanPlayMachine] for the seat door /mcp/play.
 
     HIGH-RISK-UNREVIEWED: this verdict and the observer and operator ones
-    below answer [Ok ()]. They carry no value, so a caller cannot read
-    "a credential was checked" out of an admission (#51752). *)
+    below answer the request's principal. It is private to [Auth], so a
+    caller reads who the door admitted but cannot make one up (#51752 asked
+    for a closed value once a caller needs to tell the cases apart; the
+    POST identity step is that caller). *)
 let verify_mcp_auth_unscoped ~permission ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   let credential = request_auth_credential_from_request request in
@@ -282,7 +284,8 @@ let verify_mcp_auth_unscoped ~permission ~base_path request =
           ~reason:Masc_domain.Auth_error.Missing_token
           "Authentication required. Use 'Authorization: Bearer <token>' header.")
   in
-  authorize_principal ~permission principal
+  let+ () = authorize_principal ~permission principal in
+  principal
 
 let verify_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -318,7 +321,8 @@ let verify_mcp_observer_stream_auth_unscoped ~base_path request =
           "Authentication required. Use 'Authorization: Bearer <token>' header \
            or 'token' query param for the observer/presence/cursor SSE stream.")
   in
-  authorize_principal ~permission:Masc_domain.CanReadState principal
+  let+ () = authorize_principal ~permission:Masc_domain.CanReadState principal in
+  principal
 
 let verify_mcp_observer_stream_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -337,17 +341,19 @@ let verify_operator_mcp_auth_unscoped ~base_path request =
       (mcp_unauthorized
          "/mcp/operator requires bearer token auth (require_token=true).")
   else
-    match credential with
-    | Malformed_credential _ ->
-        Error (malformed_request_credential_error ())
-    | Absent_credential ->
-        Error
-          (mcp_unauthorized
-             ~reason:Masc_domain.Auth_error.Missing_token
-             "Authentication required. Use 'Authorization: Bearer <token>' header.")
-    | Parsed_credential token ->
-        let* admitted = admit_bearer ~base_path ~auth_cfg:auth_config request ~token in
-        authorize_admitted_bearer ~permission:Masc_domain.CanAdmin admitted
+    let* () = reject_malformed_request_credential credential in
+    (* Auth is on and requires a token here, so the principal is a
+       [Bearer]: no [Auth_off] or [Anonymous] passes this door. *)
+    let* principal =
+      admit_request ~base_path ~auth_cfg:auth_config request
+        ~token:(token_of_request_auth_credential credential)
+        ~token_required:(fun () ->
+          mcp_unauthorized
+            ~reason:Masc_domain.Auth_error.Missing_token
+            "Authentication required. Use 'Authorization: Bearer <token>' header.")
+    in
+    let+ () = authorize_principal ~permission:Masc_domain.CanAdmin principal in
+    principal
 
 let verify_operator_mcp_auth ~base_path request =
   with_mcp_expected_resource (fun () ->
@@ -516,6 +522,24 @@ let is_verified_internal_keeper_request ~base_path request =
   | Some token when Auth.verify_internal_keeper_token base_path ~token ->
       Option.is_some (internal_keeper_agent_from_request request)
   | _ -> false
+
+(* HIGH-RISK-UNREVIEWED: the actor and the internal Keeper answer of a
+   request a /mcp door admitted, read from its principal (RFC
+   a-request-reads-its-bearer-once-at-the-door, D4). The door resolved the
+   bearer and checked the [x-masc-keeper-name] header, so neither answer
+   reads the auth store again. With auth off the door read nothing, and the
+   request's credential answers as it did before the principal existed. *)
+let dashboard_actor_of_principal ~base_path request :
+    Auth.request_principal -> string option = function
+  | Auth.Bearer { agent_name; _ } -> Some agent_name
+  | Auth.Anonymous -> request_actor_hint request
+  | Auth.Auth_off -> dashboard_actor_for_request ~base_path request
+
+let is_internal_keeper_principal ~base_path request :
+    Auth.request_principal -> bool = function
+  | Auth.Bearer { resolved = Auth.Internal_keeper_bearer; _ } -> true
+  | Auth.Bearer { resolved = Auth.Token_credential _; _ } | Auth.Anonymous -> false
+  | Auth.Auth_off -> is_verified_internal_keeper_request ~base_path request
 
 let sanitized_dashboard_actor_for_request ~base_path request =
   match dashboard_actor_for_request ~base_path request with

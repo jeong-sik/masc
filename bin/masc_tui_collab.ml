@@ -1,12 +1,13 @@
+module Fetched = Masc_tui_fetched
+
 type form = Browsing | Name of string | Hours of string * string | Confirm_revoke of string | Confirm_resolution of string
 type write_access = Writable | Pending of string | Uncertain of { request_id : string; notice : string } | Read_only of string
-type inventory = Loading | Listed of Masc.Tui_decode.play_invites | Failed of string
 type read = Read of unit ref
 type mutation = Mutation of unit ref
 type t = {
   owner : unit ref;
   read : read option;
-  inventory : inventory;
+  inventory : Masc.Tui_decode.play_invites Fetched.view;
   selected : string option;
   form : form;
   pending : mutation option;
@@ -16,7 +17,7 @@ type t = {
 type action = Stay | Close | Watch of Masc.Machine_lane.t | Game_menu | Refresh
   | Issue of mutation * string * int | Revoke of mutation * string | Open_link of string | Resolve_unknown of string
 
-let create () = { owner = ref (); read = None; inventory = Loading; selected = None;
+let create () = { owner = ref (); read = None; inventory = Fetched.Loading; selected = None;
   form = Browsing; pending = None; message = None; write_access = Writable }
 let owner t = t.owner
 let write_access t access =
@@ -30,7 +31,7 @@ let write_access t access =
   {t with write_access = access; form}
 let loading t =
   let read = Read (ref ()) in
-  {t with inventory = Loading; read = Some read}, read
+  {t with read = Some read}, read
 let listed t read result =
   match t.read with
   | None -> t
@@ -38,13 +39,17 @@ let listed t read result =
   | Some _ ->
       let t = {t with read = None} in
       (match result with
-       | Error error -> {t with inventory = Failed error}
+       | Error error ->
+           let inventory = match Fetched.value t.inventory with
+             | Some listed -> Fetched.Stale (listed, error)
+             | None -> Fetched.Failed error in
+           {t with inventory}
        | Ok listed ->
            let rows = listed.Masc.Tui_decode.pis_rows in
            let selected = match t.selected with
              | Some name when List.exists (fun row -> String.equal row.Masc.Tui_decode.pi_name name) rows -> Some name
              | Some _ | None -> Option.map (fun row -> row.Masc.Tui_decode.pi_name) (List.nth_opt rows 0) in
-           {t with inventory = Listed listed; selected})
+           {t with inventory = Fetched.Ready listed; selected})
 let notice t message = {t with message = Some message}
 let busy t =
   let mutation = Mutation (ref ()) in
@@ -59,8 +64,13 @@ let paste t text = match t.form with
   | Name value -> {t with form = Name (value ^ text)}
   | Hours (name, value) -> {t with form = Hours (name, value ^ text)}
   | Browsing | Confirm_revoke _ | Confirm_resolution _ -> t
-let rows t = match t.inventory with Listed listed -> listed.Masc.Tui_decode.pis_rows | Loading | Failed _ -> []
-let selected t = List.find_opt (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) (rows t)
+let rows t = match Fetched.value t.inventory with
+  | Some listed -> listed.Masc.Tui_decode.pis_rows
+  | None -> []
+let selected t = match t.read, t.inventory with
+  | None, Fetched.Ready listed ->
+      List.find_opt (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) listed.pis_rows
+  | Some _, _ | None, (Fetched.Absent | Fetched.Loading | Fetched.Stale _ | Fetched.Failed _) -> None
 let move t delta =
   let rows = rows t in
   let index = List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows in
@@ -121,9 +131,11 @@ let key t key =
 
 let hints t = match t.form with
   | Browsing ->
-      "m:MSX  d:DOS  g:games  j/k:choose  Enter:link  r:refresh  Esc:back"
-      ^ (match t.write_access with Writable -> "  n:invite  x:revoke"
-         | Uncertain _ -> "  u:resolve unknown" | Pending _ | Read_only _ -> "")
+      "m:MSX  d:DOS  g:games  j/k:choose  r:refresh  Esc:back"
+      ^ (if Option.is_some (selected t) then "  Enter:link" else "")
+      ^ (match t.write_access with Writable when Option.is_none t.pending ->
+           "  n:invite" ^ (if Option.is_some (selected t) then "  x:revoke" else "")
+         | Uncertain _ -> "  u:resolve unknown" | Pending _ | Read_only _ | Writable -> "")
   | Name _ | Hours _ -> "Enter:continue  Ctrl-U:clear  Backspace:delete  Esc:cancel"
   | Confirm_revoke _ -> "Enter:revoke this invite  Esc:cancel"
   | Confirm_resolution _ -> "Enter:I verified the server request finished  Esc:keep blocked"
@@ -159,11 +171,11 @@ let machine_keys ~width =
 
 (* One invite as the rows it takes at [width]: the selection mark leads the
    first row and a longer row hangs under the name. *)
-let invite_rows ~width t controller (row : Masc.Tui_decode.play_invite_row) =
+let invite_rows ~width ~last_read t controller (row : Masc.Tui_decode.play_invite_row) =
   let lead = "  " in
   let mark = if Some row.pi_name = t.selected then "› " else lead in
   wrap ~width:(max 1 (width - String.length lead))
-    (row.pi_name ^ controller_note controller row.pi_name
+    ((if last_read then "Last read · " else "") ^ row.pi_name ^ controller_note controller row.pi_name
      ^ (if row.pi_expired then " · expired" else "")
      ^ " · " ^ (match row.pi_expires_at with Some date -> date | None -> "expiry not recorded"))
   |> List.mapi (fun index text -> (if index = 0 then mark else lead) ^ text)
@@ -183,6 +195,10 @@ let visible_invites ~available ~selected invites =
 
 let lines ~height ~width t =
   let wrap_each = List.concat_map (wrap ~width) in
+  let last_read = match t.read, t.inventory with
+    | Some _, (Fetched.Ready _ | Fetched.Stale _) | None, Fetched.Stale _ -> true
+    | Some _, (Fetched.Absent | Fetched.Loading | Fetched.Failed _)
+    | None, (Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Failed _) -> false in
   let keys = machine_keys ~width in
   let heading = wrap ~width "Shared machines · observation does not send game input"
     @ keys @ [""] @ wrap ~width "DOS play links · invite a player to the shared game" in
@@ -200,20 +216,34 @@ let lines ~height ~width t =
   let access = match t.write_access with Writable -> []
     | Pending text | Read_only text | Uncertain {notice=text; _} -> [text] in
   let message = wrap_each (access @ (match t.message with None -> [] | Some text -> [text])) in
-  let footer = wrap ~width "Links issued here remain in this TUI session. Enter opens the retained QR/link." in
+  let footer = wrap ~width ("Links issued here remain in this TUI session."
+    ^ if Option.is_some (selected t) then " Enter opens the retained QR/link." else "") in
+  let status =
+    (match t.read, t.inventory with
+     | Some _, _ | None, (Fetched.Absent | Fetched.Loading) -> ["Reading invites…"]
+     | None, (Fetched.Ready _ | Fetched.Stale _ | Fetched.Failed _) -> [])
+    @ (match t.inventory with
+       | Fetched.Stale (_, error) | Fetched.Failed error ->
+           ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."]
+       | Fetched.Absent | Fetched.Loading | Fetched.Ready _ -> [])
+    @ (match t.read, t.inventory with
+       | Some _, (Fetched.Ready _ | Fetched.Stale _) | None, Fetched.Stale _ ->
+           ["Showing the last read invites and controller. Opening or revoking a selected invite waits for a successful refresh."]
+       | Some _, (Fetched.Absent | Fetched.Loading | Fetched.Failed _)
+       | None, (Fetched.Absent | Fetched.Loading | Fetched.Ready _ | Fetched.Failed _) -> []) in
   (* [fixed] is the body outside the invite list, [invites] the rows of each
      invite and [selected] the invite the list keeps in view. *)
-  let fixed, invites, selected = match t.inventory with
-    | Loading -> ["Reading invites…"], [], 0
-    | Failed error ->
-        wrap_each ["Could not read invites: " ^ error; "r retries the read; machine observation remains available."], [], 0
-    | Listed {Masc.Tui_decode.pis_rows = []; pis_controller} ->
+  let fixed, invites, selected = match Fetched.value t.inventory with
+    | None -> [], [], 0
+    | Some {Masc.Tui_decode.pis_rows = []; pis_controller} ->
         wrap_each (controller_summary pis_controller
           @ [if t.write_access = Writable then "No invites. Press n to create a play link." else "No invites."]), [], 0
-    | Listed {Masc.Tui_decode.pis_rows = rows; pis_controller} ->
+    | Some {Masc.Tui_decode.pis_rows = rows; pis_controller} ->
         let selected = match List.find_index (fun row -> Some row.Masc.Tui_decode.pi_name = t.selected) rows with
           | Some index -> index | None -> 0 in
-        wrap_each (controller_summary pis_controller), List.map (invite_rows ~width t pis_controller) rows, selected in
+        wrap_each (controller_summary pis_controller), List.map (invite_rows ~width ~last_read t pis_controller) rows, selected in
+  let details = wrap_each status @ fixed in
+  let fixed = details in
   let kept = List.length form + List.length message + List.length fixed in
   let everything = List.length heading + kept + List.length (List.concat invites) + 1 + List.length footer in
   if everything <= height then heading @ form @ message @ fixed @ List.concat invites @ [""] @ footer
@@ -226,8 +256,21 @@ let lines ~height ~width t =
        kept free here. A heading that gave way is not reported when what is
        left fits without a cut. The invites take the rows that are left. *)
     let current = List.length (Option.value (List.nth_opt invites selected) ~default:[]) in
+    let message, trailing_message = match t.form with
+      | Browsing when last_read -> [], message
+      | Browsing | Name _ | Hours _ | Confirm_revoke _ | Confirm_resolution _ -> message, [] in
+    let fixed, details =
+      if last_read then
+        let summary = wrap ~width (match t.read with
+          | Some _ -> "Refreshing · last read"
+          | None -> "Refresh failed · last read") in
+        let room = height - List.length form - List.length message - current - 1 in
+        (if List.length summary <= room then summary else []), details
+      else fixed, [] in
+    let kept = List.length form + List.length message + List.length fixed in
     let room = height - kept - current - 1 in
     let heading = Option.value (List.find_opt (fun rows -> List.length rows <= room) [heading; keys]) ~default:[] in
     let available = max 1 (height - List.length heading - kept - 1) in
-    heading @ form @ message @ fixed @ visible_invites ~available ~selected invites @ [""] @ footer
+    heading @ form @ message @ fixed @ visible_invites ~available ~selected invites
+    @ trailing_message @ details @ [""] @ footer
   end

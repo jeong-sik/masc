@@ -685,9 +685,18 @@ let test_step_up_names_the_scope_an_oauth_token_lacks () =
     let admin_oauth =
       oauth_access_token ~base_path ~bootstrap_token:admin_bearer ~scope:"mcp:admin"
     in
+    (* What the /mcp door admits for [token] under [resource]. *)
+    let admit ?(resource = "http://127.0.0.1:8935/mcp") token =
+      Auth_oauth.with_expected_resource resource (fun () ->
+        Auth.admit_request base_path ~auth_cfg:(Auth.load_auth_config base_path)
+          ~token ~internal_keeper_agent:None)
+    in
+    (* The challenge for a request the door admits. A request the door
+       refuses never reaches the step-up check: the door answers it. *)
     let required ?(token = None) ?(allowed_tool = fun _ -> true) body =
-      Auth_oauth.with_expected_resource "http://127.0.0.1:8935/mcp" (fun () ->
-        Server_oauth_step_up.required_scope ~base_path ~auth_token:token ~allowed_tool ~body)
+      match admit token with
+      | Ok principal -> Server_oauth_step_up.required_scope ~principal ~allowed_tool ~body
+      | Error (Auth.Token_required | Auth.Bearer_refused _) -> None
     in
     let scope_option = option (testable Auth_oauth.pp_scope Auth_oauth.equal_scope) in
     check scope_option "a mcp:tools token is told to ask for mcp:admin"
@@ -801,10 +810,10 @@ let test_step_up_names_the_scope_an_oauth_token_lacks () =
     check scope_option "unavailable tool has no challenge" None
       (required ~token:(Some worker_oauth) ~allowed_tool:deny_tool (tools_call admin_tool));
     check (list string) "availability is checked for the requested tool" [ admin_tool ] !seen;
-    check scope_option "a token is bound to its expected resource" None
-      (Auth_oauth.with_expected_resource "http://127.0.0.1:8935/other" (fun () ->
-         Server_oauth_step_up.required_scope ~base_path ~auth_token:(Some worker_oauth)
-           ~allowed_tool:(fun _ -> true) ~body:(tools_call admin_tool)));
+    check bool "the door refuses a token bound to another resource" true
+      (match admit ~resource:"http://127.0.0.1:8935/other" (Some worker_oauth) with
+       | Error (Auth.Bearer_refused _) -> true
+       | Ok _ | Error Auth.Token_required -> false);
     let _ = Auth.enable_auth base_path ~require_token:false ~agent_name:"" in
     check scope_option "optional auth still constrains a presented OAuth token"
       (Some Auth_oauth.Mcp_admin) (worker (tools_call admin_tool));

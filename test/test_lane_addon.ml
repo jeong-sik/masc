@@ -1143,7 +1143,9 @@ let test_mcp_attribution_does_not_authorize_private_lane () =
       (fun () ->
         let mcp ?auth_token name fields = Mcp_server_eio.execute_tool_eio
           ~sw ~clock ~workspace_scope:(Mcp_server.workspace_scope state)
-          ~mcp_session_id:session_id ?auth_token state ~name ~arguments:(`Assoc fields) in
+          ~mcp_session_id:session_id
+          ~bearer:(Masc_test_deps.door_bearer ~base_path:config.base_path auth_token)
+          state ~name ~arguments:(`Assoc fields) in
         let failed = mcp "masc_lane_observe" ["_agent_name",`String owner] in
         check bool "first attribution-only call fails" false (Tool_result.is_success failed);
         check bool "failed first call cached attribution" true
@@ -1322,7 +1324,9 @@ let test_mcp_attributed_name_is_not_private_lane_authority () =
       let execute ?auth_token ~session ~name arguments =
         Mcp_server_eio_execute.execute_tool_eio ~sw ~clock
           ~workspace_scope:(Mcp_server.workspace_scope state)
-          ~mcp_session_id:session ?auth_token state ~name ~arguments in
+          ~mcp_session_id:session
+          ~bearer:(Masc_test_deps.door_bearer ~base_path:dir auth_token)
+          state ~name ~arguments in
       let inspect ?auth_token session arguments =
         execute ?auth_token ~session ~name:"masc_lane_inspect" arguments in
       let empty = `Assoc [] in
@@ -1905,14 +1909,18 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
   ignore (Workspace.init config ~agent_name:(Some "fixture-operator"));
   Auth.disable_auth config.base_path;
   let server = Mcp_server_eio.For_testing.create_state ~base_path:config.base_path () in
-  let request ?auth_token ?(profile=Mcp_server_eio.Full) method_ params =
+  let request ?auth_token ?sender ?(profile=Mcp_server_eio.Full) method_ params =
+    let sender = match sender with
+      | Some sender -> sender
+      | None -> Masc_test_deps.door_sender ~base_path:config.base_path auth_token in
     let fields = match params with `Assoc fields -> fields | _ -> assert false in
     let metadata = `Assoc [
       "io.modelcontextprotocol/protocolVersion", `String "2026-07-28";
       "io.modelcontextprotocol/clientCapabilities", `Assoc [];
       "io.modelcontextprotocol/clientInfo", `Assoc [
         "name", `String "lane-addon-fixture"; "version", `String "1"]] in
-    Mcp_server_eio.handle_request ~profile ~clock ~sw ?auth_token server
+    Mcp_server_eio.handle_request ~profile ~clock ~sw
+      ~sender ?auth_token server
       (Yojson.Safe.to_string (`Assoc ["jsonrpc",`String "2.0"; "id",`Int 1;
         "method",`String method_; "params",`Assoc (("_meta",metadata)::fields)])) in
   let listed ?auth_token () =
@@ -2028,7 +2036,18 @@ let test_tool_exports_bind_live_incarnations () = with_fixture (fun env sw confi
     check bool "credential owner reaches the private worker envelope" true
       (List.hd !(state.principals) = Lane_addon_call_context.Authenticated_agent "fixture-player");
     let denied = request ~auth_token:token "tools/call" (`Assoc ["name", `String worker_name; "arguments", `Assoc []]) in
-    check bool "player cannot invoke a worker-only export" true (member "error" denied <> `Null));
+    check bool "player cannot invoke a worker-only export" true (member "error" denied <> `Null);
+    (* The listing takes the door's answer (RFC
+       a-request-reads-its-bearer-once-at-the-door, step 3b). The credential
+       is deleted after the door admitted the bearer; a listing that read
+       the token again would refuse it. *)
+    let sender = Masc_test_deps.door_sender ~base_path:config.base_path (Some token) in
+    Auth.delete_credential config.base_path "fixture-player";
+    let result = request ~sender ~auth_token:token "tools/list"
+        (`Assoc ["names", `List [`String invited_name; `String worker_name]])
+      |> member "result" |> member "tools" |> Yojson.Safe.Util.to_list in
+    check (list string) "the door's answer still lists the authorized export" [invited_name]
+      (List.map (text "name") result));
   detach config invited;
   await_phase clock config invited "detached";
   let reserved_snapshot = Runtime.tool_export_snapshot ~config ~access ~reserved:["masc_msx_step"] in
@@ -2232,7 +2251,7 @@ let test_http_caller_marker_stays_out_of_export_arguments () = with_fixture (fun
   check bool "the forwarded arguments carry the caller marker" true
     (Yojson.Safe.from_string body |> member "params" |> member "arguments"
      = `Assoc ["_agent_name", `String "fixture-operator"]);
-  let result = Mcp_server_eio.handle_request ~profile:Mcp_server_eio.Full ~clock ~sw server body
+  let result = Mcp_server_eio.handle_request ~sender:Mcp_server_eio.Unadmitted ~profile:Mcp_server_eio.Full ~clock ~sw server body
     |> member "result" in
   check bool "a closed export schema accepts the call" true
     (result <> `Null && member "isError" result <> `Bool true);

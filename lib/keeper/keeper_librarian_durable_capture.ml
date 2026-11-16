@@ -265,6 +265,49 @@ type projection = {messages:Agent_core.Types.message list;
   tool_observations:Keeper_librarian.tool_observation list;
   historical_task_contexts:Historical.t list}
 type projection_step = Atom_cut of checkpoint * R.atom_cut | Official_cut of official * R.official_line
+
+module Trace_map = Map.Make (String)
+module Turn_map = Map.Make (struct
+  type t = Ids.Turn_ref.t
+  let compare left right =
+    let trace = String.compare (Ids.Turn_ref.trace_id left) (Ids.Turn_ref.trace_id right) in
+    if trace = 0 then Int.compare (Ids.Turn_ref.absolute_turn left) (Ids.Turn_ref.absolute_turn right)
+    else trace
+end)
+
+(* Selection used to concatenate and scan both complete files for every cut.
+   Keep the same main-then-internal order and full turn identity, but group the
+   rows once for each selected trace. This index lives only for this source
+   observation; the full captures and their refusal/digest checks stay intact. *)
+let index_official_fragments (official : official) =
+  let selected = List.fold_left (fun traces (cut : R.official_line) ->
+    Trace_map.update (Ids.Turn_ref.trace_id cut.turn_ref) (function
+      | None -> Some (Turn_map.singleton cut.turn_ref ())
+      | Some turns -> Some (Turn_map.add cut.turn_ref () turns)) traces)
+    Trace_map.empty official.selected in
+  let add_row selected turns (_, row) = match row with
+    | Ok (F.Fragment fragment) ->
+      let turn_ref = F.fragment_turn_ref fragment in
+      if Turn_map.mem turn_ref selected then
+        Turn_map.update turn_ref (function None -> Some [fragment] | Some rows -> Some (fragment :: rows)) turns
+      else turns
+    | Ok F.Untagged | Error _ -> turns in
+  List.fold_left (fun traces (trace : official_trace) ->
+    if Trace_map.mem trace.trace_id traces then traces
+    else match Trace_map.find_opt trace.trace_id selected with
+      | None -> traces
+      | Some selected ->
+        let turns = match Turn_map.bindings selected with
+          | [] -> Turn_map.empty
+          | [turn_ref, ()] ->
+            Turn_map.singleton turn_ref (F.of_turn turn_ref (trace.main @ trace.internal))
+          | _ :: _ :: _ ->
+            let reversed = List.fold_left (add_row selected) Turn_map.empty trace.main in
+            let reversed = List.fold_left (add_row selected) reversed trace.internal in
+            Turn_map.map List.rev reversed in
+        Trace_map.add trace.trace_id turns traces)
+    Trace_map.empty official.traces
+
 let project_source ~boundaries source =
   let atom,official=match source with Checkpoint_only atom -> Some atom,None
     | Official_only official -> None,Some official | Mixed (atom,official) -> Some atom,Some official in
@@ -283,6 +326,9 @@ let project_source ~boundaries source =
       Ok (List.map (fun cut -> Atom_cut (atom,cut)) cuts) in
   let official_steps=match official with None -> [] | Some official ->
     List.map (fun line -> Official_cut (official,line)) official.selected in
+  let official_fragments = match official with
+    | None -> Trace_map.empty
+    | Some official -> index_official_fragments official in
   let line = function Atom_cut (_,cut) -> cut.R.cut_line | Official_cut (_,cut) -> cut.R.line in
   let steps=List.sort (fun left right -> Int.compare (line left) (line right)) (atom_steps @ official_steps) in
   let records=List.fold_left (fun acc (line,value) -> match value with
@@ -310,15 +356,17 @@ let project_source ~boundaries source =
             List.rev_append observations tools,context::contexts)
         (count,tool_count,messages,tools,contexts) scopes in
       Ok (cut.cut_end_atom,count,tool_count,messages,tools,contexts)
-    | Official_cut (official,cut) ->
-      (match List.find_opt (fun trace -> trace.trace_id=Ids.Turn_ref.trace_id cut.turn_ref) official.traces with
+    | Official_cut (_,cut) ->
+      (match Trace_map.find_opt (Ids.Turn_ref.trace_id cut.turn_ref) official_fragments with
        | None -> refuse "Durable official projection has no original file capture"
-       | Some trace ->
+       | Some turns ->
+         let fragments = match Turn_map.find_opt cut.turn_ref turns with
+           | None -> [] | Some fragments -> fragments in
          let after_message,after_tools,messages,tools=List.fold_left
            (fun (count,tool_count,messages,tools) -> function
              | F.Message {message;_} -> count+1,tool_count,message::messages,tools
              | F.Tool_observation {observation;_} -> count,tool_count+1,messages,observation::tools)
-           (count,tool_count,messages,tools) (F.of_turn cut.turn_ref (trace.main @ trace.internal)) in
+           (count,tool_count,messages,tools) fragments in
          let attribution=match Line_map.find_opt cut.line records with
            | Some {B.event=B.Turn_ended {turn_ref;task_context;_};_} -> Historical.Observed {turn_ref;task_context}
            | Some {B.event=B.History_restarted _;_} | None -> Historical.Unattributed in

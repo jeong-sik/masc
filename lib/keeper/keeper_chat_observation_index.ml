@@ -95,6 +95,7 @@ let add index (message : chat_message) =
 
 let append = List.fold_left add
 let of_messages messages = append empty messages
+let contains_message ~message_id index = String_map.mem message_id index.first_positions
 let messages index = List.rev index.messages_rev
 let fleet_candidates_rev index = index.fleet_rev
 

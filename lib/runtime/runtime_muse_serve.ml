@@ -1182,8 +1182,42 @@ let durable_turn_of_events ~turn_id ~open_items events =
   Ok { durable_final_text; durable_usage; durable_last_call; durable_models }
 ;;
 
-(* The turn's events from its [turn/started] to its terminal, read backward
-   from the terminal cursor through pages that never skip a cursor. *)
+type durable_history =
+  | Whole_turn of Msp.view_event list
+  | Compacted_turn of Msp.view_event list
+
+let history_events = function
+  | Whole_turn events | Compacted_turn events -> events
+;;
+
+let certify_history history =
+  let* retained_suffix = List.fold_left (fun result (event : Msp.view_event) ->
+    let* retained = result in
+    let append () = Ok (Option.map (fun suffix -> event :: suffix) retained) in
+    match event.notification with
+    | Msp.Item_started { item; _ } | Msp.Item_updated { item; _ }
+    | Msp.Item_completed { item; _ } when item.kind = Msp.Damaged_range ->
+      protocol_error "view/page" "durable history contains a damaged range"
+    | Msp.Item_completed { item; _ } when item.kind = Msp.Earlier_history ->
+      if item.status = Msp.Item_completed_status && item.turn_id = None
+      then Ok (Some [event])
+      else protocol_error "view/page" "invalid checkpoint history boundary"
+    | Msp.Item_started { item; _ } | Msp.Item_updated { item; _ }
+      when item.kind = Msp.Earlier_history ->
+      protocol_error "view/page" "checkpoint history boundary is not completed"
+    | Msp.Item_started _ | Msp.Item_updated _ | Msp.Item_completed _
+    | Msp.Turn_started _ | Msp.Turn_completed _ | Msp.Item_delta _
+    | Msp.Usage_changed _ | Msp.View_gap _ | Msp.Model_usage_reported _
+    | Msp.Unhandled_notification _ -> append ()) (Ok None) (history_events history) in
+  match retained_suffix with
+  | None -> Ok history
+  | Some suffix -> Ok (Compacted_turn (List.rev suffix))
+;;
+
+(* Read backward from the terminal without skipping a cursor. Compaction can
+   replace this turn's start and all earlier items with [earlierHistory]. Its
+   retained suffix can certify a final answer, but never the prefix's effects
+   or a whole-turn usage sum. No text in the checkpoint tail is an answer. *)
 let read_durable_turn_events ?on_view_gap ?pending_decisions io ~session_id ~turn_id ~terminal_cursor =
   io.set_receive_phase Awaiting_history;
   let rec read ~cursor ~seen ~later =
@@ -1196,6 +1230,13 @@ let read_durable_turn_events ?on_view_gap ?pending_decisions io ~session_id ~tur
         (fun ~id -> Msp.view_page_backward_request ~id ~session_id ~cursor)
     in
     let* page = lift (Msp.parse_view_page_result result) in
+    let* () = match page.events, page.next_cursor with
+      | [], Some _ ->
+        protocol_error "view/page" "an empty page has a continuation cursor"
+      | (first : Msp.view_event) :: _, Some next
+        when not (String.equal next first.view_cursor) ->
+        protocol_error "view/page" "backward continuation does not match the first event"
+      | [], None | _ :: _, (None | Some _) -> Ok () in
     let* seen = List.fold_left (fun result (event : Msp.view_event) ->
       let* seen = result in
       if not (String.equal event.session_id session_id)
@@ -1215,16 +1256,34 @@ let read_durable_turn_events ?on_view_gap ?pending_decisions io ~session_id ~tur
          | Msp.Unhandled_notification _ -> boundary (event :: kept) rest)
     in
     match boundary [] (List.rev page.events) with
-    | Some current -> Ok (current @ later)
+    | Some current -> certify_history (Whole_turn (current @ later))
     | None ->
-      (match page.events, page.next_cursor with
-       | (first : Msp.view_event) :: _, Some next
-         when String.equal next first.view_cursor ->
+      (match page.next_cursor with
+       | Some next ->
          read ~cursor:next ~seen ~later:(page.events @ later)
-       | [], (Some _ | None) | _ :: _, None | _ :: _, Some _ ->
-         protocol_error "view/page" "history ended before the current turn's start boundary")
+       | None ->
+         let events = page.events @ later in
+         (match events with
+          | { Msp.notification = Msp.Item_completed { item; _ }; _ } :: _
+            when item.kind = Msp.Earlier_history
+              && item.status = Msp.Item_completed_status && item.turn_id = None ->
+            certify_history (Compacted_turn events)
+          | [] | _ :: _ ->
+            protocol_error "view/page" "history ended before the current turn's start boundary"))
   in
   read ~cursor:terminal_cursor ~seen:(View_cursors.singleton terminal_cursor) ~later:[]
+;;
+
+let completed_turn_of_history ~turn_id ~open_items history =
+  let* witness =
+    durable_turn_of_events ~turn_id ~open_items (history_events history)
+  in
+  match history, witness.durable_final_text with
+  | Compacted_turn _, None ->
+    protocol_error "view/page" "no durable final answer remains after compaction"
+  | Compacted_turn _, Some _ ->
+    Ok { witness with durable_usage = None }
+  | Whole_turn _, (Some _ | None) -> Ok witness
 ;;
 
 (* Whether an item of this kind can leave anything outside the host's own
@@ -1233,7 +1292,8 @@ let read_durable_turn_events ?on_view_gap ?pending_decisions io ~session_id ~tur
 let item_may_act : Msp.item_kind -> bool = function
   | Msp.User_message | Msp.Reasoning -> false
   | Msp.Agent_message | Msp.Tool_call | Msp.User_shell | Msp.Subagent | Msp.Workflow
-  | Msp.Reminder_child | Msp.Compaction | Msp.Unrecognized_item_kind _ -> true
+  | Msp.Reminder_child | Msp.Compaction | Msp.Earlier_history | Msp.Damaged_range
+  | Msp.Unrecognized_item_kind _ -> true
 ;;
 
 (* Live delivery only refuses quiet. A tool call already counted, or an
@@ -1249,6 +1309,7 @@ let live_item_that_may_have_acted (state : turn_state) =
          | Msp.Agent_message -> Some Msp.Agent_message
          | Msp.User_message | Msp.Reasoning | Msp.Tool_call | Msp.User_shell
          | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction
+         | Msp.Earlier_history | Msp.Damaged_range
          | Msp.Unrecognized_item_kind _ -> None)
       state.open_items
 ;;
@@ -1367,7 +1428,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             ; open_tool_items = state.open_tool_items + 1
             ; tool_calls = state.tool_calls + 1
             }
-        | (Msp.User_message | Msp.Agent_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction | Msp.Unrecognized_item_kind _) as kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
+        | (Msp.User_message | Msp.Agent_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction | Msp.Earlier_history | Msp.Damaged_range | Msp.Unrecognized_item_kind _) as kind -> continue { state with open_items = (item.Msp.item_id, kind) :: state.open_items })
      | Msp.Item_delta { session_id = sid; item_id; field = Msp.Delta_text; delta }
        when ours sid ->
        (match List.assoc_opt item_id state.open_items with
@@ -1379,7 +1440,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
           continue state
         | Some (Msp.User_message) | None | Some (Msp.Reasoning) | Some (Msp.Tool_call)
         | Some (Msp.User_shell) | Some (Msp.Subagent) | Some (Msp.Workflow)
-        | Some (Msp.Reminder_child) | Some (Msp.Compaction) | Some (Msp.Unrecognized_item_kind _) -> continue state)
+        | Some (Msp.Reminder_child) | Some (Msp.Compaction) | Some (Msp.Earlier_history)
+        | Some (Msp.Damaged_range) | Some (Msp.Unrecognized_item_kind _) -> continue state)
      | Msp.Item_completed { session_id = sid; item } when ours sid && item_in_turn ~turn_id item
        ->
        let was_open = List.mem_assoc item.Msp.item_id state.open_items in
@@ -1424,7 +1486,8 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
             item.Msp.compaction;
           continue { state with open_items }
         | Msp.User_message | Msp.Reasoning | Msp.User_shell | Msp.Subagent | Msp.Workflow
-        | Msp.Reminder_child | Msp.Unrecognized_item_kind _ -> continue { state with open_items })
+        | Msp.Reminder_child | Msp.Earlier_history | Msp.Damaged_range
+        | Msp.Unrecognized_item_kind _ -> continue { state with open_items })
      | Msp.Usage_changed usage ->
        emit (Subscription_usage_observed usage);
        continue state
@@ -1492,7 +1555,7 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
            let* state = match terminal with
              | Msp.Terminal_completed ->
                let pending_decisions = ref state.pending_decisions in
-               let* events =
+               let* history =
                  read_durable_turn_events
                    ~on_view_gap
                    ~pending_decisions
@@ -1501,14 +1564,18 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                    ~turn_id
                    ~terminal_cursor:view_cursor
                in
+               let events = history_events history in
                let* witness =
-                 durable_turn_of_events ~turn_id ~open_items:state.open_items events
+                 completed_turn_of_history ~turn_id ~open_items:state.open_items history
                in
                emit
                  (Turn_items_read
                     (match live_item_that_may_have_acted state with
                      | Some kind -> Turn_item_may_have_acted kind
-                     | None -> turn_items_of_events ~turn_id events));
+                     | None ->
+                       (match history with
+                        | Whole_turn _ -> turn_items_of_events ~turn_id events
+                        | Compacted_turn _ -> Turn_item_may_have_acted Msp.Agent_message)));
                (match witness.durable_models, state.call_models with
                 | call :: _, previous :: _ when same_call call previous -> ()
                 | (Named model :: _), ([] | _ :: _) ->
@@ -1538,7 +1605,9 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                         ~turn_id
                         ~terminal_cursor:view_cursor
                     with
-                    | Ok events -> turn_items_of_events ~turn_id events
+                    | Ok (Whole_turn events) -> turn_items_of_events ~turn_id events
+                    | Ok (Compacted_turn _) ->
+                      Turn_items_unread "compaction replaced the turn's durable prefix"
                     | Error error -> Turn_items_unread (error_to_string error))
                in
                emit (Turn_items_read items);

@@ -800,6 +800,8 @@ type item_kind =
   | Workflow
   | Reminder_child
   | Compaction
+  | Earlier_history
+  | Damaged_range
   | Unrecognized_item_kind of string
 
 let item_kind_of_string = function
@@ -812,6 +814,8 @@ let item_kind_of_string = function
   | "workflow" -> Workflow
   | "reminderChild" -> Reminder_child
   | "compaction" -> Compaction
+  | "earlierHistory" -> Earlier_history
+  | "damagedRange" -> Damaged_range
   | other -> Unrecognized_item_kind other
 ;;
 
@@ -952,6 +956,8 @@ let parse_item stage json =
     | Subagent
     | Workflow
     | Reminder_child
+    | Earlier_history
+    | Damaged_range
     | Unrecognized_item_kind _ -> Ok None
   in
   let* message_phase =
@@ -967,6 +973,8 @@ let parse_item stage json =
     | Workflow
     | Reminder_child
     | Compaction
+    | Earlier_history
+    | Damaged_range
     | Unrecognized_item_kind _ -> Ok None
   in
   Ok

@@ -1637,6 +1637,131 @@ let test_message_phase_marks_the_answer () =
        | Ok _ -> fail "revision after completion must be rejected")
 ;;
 
+(* The real 1.4.20 host drops the compaction item and turn/started along with
+   the prefix. Only this session-level checkpoint tail remains at the floor. *)
+let earlier_history =
+  {|{"jsonrpc":"2.0","method":"item/completed","params":{"sessionId":"s-1","viewCursor":"history-floor","item":{"itemId":"history-1","kind":"earlierHistory","turnId":null,"revision":1,"status":"completed","earlierHistory":{"messages":[{"role":"assistant","text":"A checkpoint tail is not a final answer."}]}}}}|}
+;;
+
+let history_page ~id ?next frames =
+  let events = List.map (fun frame ->
+    match Yojson.Safe.from_string frame with
+    | `Assoc fields ->
+      let method_ = List.assoc "method" fields in
+      let params = Yojson.Safe.Util.to_assoc (List.assoc "params" fields) in
+      let position = `Assoc ["id", `String "record"; "sequence", `Int 1] in
+      let source = `Assoc ["stream", `Assoc ["kind", `String "session"; "id", `String "s-1"];
+        "first", position; "last", position] in
+      `Assoc ["method", method_; "params", `Assoc
+        (("sourceRange", source) :: List.remove_assoc "sourceRange" params)]
+    | _ -> fail "history fixture must be an object") frames in
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0"; "id", `Int id;
+    "result", `Assoc ["events", `List events;
+      "nextCursor", (match next with None -> `Null | Some next -> `String next)]])
+;;
+
+let rewrite_item ?cursor fields frame =
+  let json = Yojson.Safe.from_string frame in
+  let params = Yojson.Safe.Util.(json |> member "params" |> to_assoc) in
+  let params = match cursor with
+    | None -> params
+    | Some cursor -> ("viewCursor", `String cursor) :: List.remove_assoc "viewCursor" params in
+  let item = Yojson.Safe.Util.(List.assoc "item" params |> to_assoc) in
+  let item = fields @ List.filter (fun (key, _) -> not (List.mem_assoc key fields)) item in
+  Yojson.Safe.to_string (`Assoc ["jsonrpc", `String "2.0";
+    "method", Yojson.Safe.Util.member "method" json;
+    "params", `Assoc (("item", `Assoc item) :: List.remove_assoc "item" params)])
+;;
+
+let test_compacted_turn_completion () =
+  let run ?on_stream_event ~terminal pages check_result =
+    run_scripted ?on_stream_event
+      (handshake_and_session ~granted:[] @ [Write terminal]
+       @ List.concat_map (fun page -> [Read; Write page]) pages) check_result in
+  let completed result _ = match result with
+    | Ok turn ->
+      check (option string) "retained final is the reply" (Some "MASC_MUSE_OK") turn.Serve.text
+    | Error error -> fail (Serve.error_to_string error) in
+  run ~terminal:turn_completed
+    [history_page ~id:4 [earlier_history; agent_completed]] completed;
+  run ~terminal:turn_completed
+    [history_page ~id:4 ~next:"agent-final" [agent_completed];
+     history_page ~id:5 [earlier_history]] completed;
+  let refused result _ = match result with
+    | Error (Serve.Protocol_error {stage="view/page"; _}) -> ()
+    | Error error -> fail (Serve.error_to_string error)
+    | Ok _ -> fail "unproven compacted answer was accepted" in
+  List.iter (fun frames ->
+    run ~terminal:turn_completed [history_page ~id:4 frames] refused)
+    [ [earlier_history]
+    ; [earlier_history; rewrite_item ["messagePhase", `String "commentary"] agent_completed]
+    ; [earlier_history; rewrite_item ["turnId", `String "another-turn"] agent_completed]
+    ; [earlier_history; rewrite_item ["truncated", `Bool true] agent_completed]
+    ; [earlier_history; rewrite_item ["status", `String "failed"] agent_completed]
+    ; [earlier_history; agent_started]
+    ; [agent_completed]
+    ; [rewrite_item ["turnId", `String "t-1"] earlier_history; agent_completed]
+    ; [rewrite_item ["kind", `String "unknownHistory"] earlier_history; agent_completed]
+    ; [rewrite_item ["kind", `String "damagedRange"] earlier_history; agent_completed]
+    ; [earlier_history; rewrite_item ~cursor:"damaged" ["kind", `String "damagedRange"] earlier_history; agent_completed]
+    ; [turn_started; rewrite_item ["kind", `String "damagedRange"] earlier_history; agent_completed]
+    ];
+  run ~terminal:turn_completed
+    [history_page ~id:4 ~next:"skipped-cursor" [agent_completed]] refused;
+  run ~terminal:turn_completed
+    [history_page ~id:4 ~next:"skipped-cursor" [turn_started; earlier_history; agent_completed]] refused;
+  run ~terminal:turn_completed
+    [history_page ~id:4 ~next:"agent-final" [agent_completed];
+     history_page ~id:5 [earlier_history; agent_completed]] refused;
+  (* A live answer cannot fill in an absent durable final. *)
+  run_scripted
+    (handshake_and_session ~granted:[] @ [Write agent_completed; Write turn_completed;
+      Read; Write (history_page ~id:4 [earlier_history])]) refused;
+  (* Earlier compaction belongs to an older turn when this turn's start remains. *)
+  run ~terminal:turn_completed
+    [history_page ~id:4 [earlier_history; turn_started; agent_completed]] completed;
+  run ~terminal:turn_completed
+    [history_page ~id:4 [turn_started; earlier_history; agent_completed]] completed;
+  run ~terminal:turn_completed
+    [history_page ~id:4 [turn_started; agent_completed; earlier_history]] refused;
+  let items = ref None in
+  run ~terminal:turn_auth_failed
+    ~on_stream_event:(function Serve.Turn_items_read result -> items := Some result | _ -> ())
+    [history_page ~id:4 [earlier_history]]
+    (fun result _ ->
+      (match result with
+       | Error (Serve.Auth_required _) -> ()
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok _ -> fail "failed compacted turn became a success");
+      match !items with
+      | Some (Serve.Turn_items_unread _) -> ()
+      | None | Some (Serve.Turn_quiet | Serve.Turn_item_may_have_acted _) ->
+        fail "a compacted prefix cannot certify no effects")
+;;
+
+let test_compacted_usage_is_not_a_whole_turn_sum () =
+  let usage =
+    {|{"jsonrpc":"2.0","method":"session/tokenUsage","params":{"sessionId":"s-1","turnId":"t-1","viewCursor":"usage-suffix","promptTokens":100,"usage":{"inputTokens":100,"outputTokens":7,"cachedTokens":50,"reasoningTokens":3}}}|} in
+  let terminal_without_usage =
+    {|{"jsonrpc":"2.0","method":"turn/completed","params":{"sessionId":"s-1","turnId":"t-1","terminal":"completed","viewCursor":"terminal-final"}}|} in
+  List.iter (fun (terminal, aggregate_expected) ->
+    run_scripted
+      (handshake_and_session ~granted:[] @ [Write terminal; Read;
+        Write (history_page ~id:4 [earlier_history; usage; agent_completed])])
+      (fun result _ -> match result with
+       | Error error -> fail (Serve.error_to_string error)
+       | Ok turn ->
+         check bool "only a terminal aggregate proves whole-turn usage"
+           aggregate_expected (Option.is_some turn.usage);
+         Option.iter (fun (usage : Msp.token_usage) ->
+           check int "terminal input preserved" 100 usage.input_tokens;
+           check (option int) "partial sum cannot enrich the aggregate" None usage.prompt_tokens)
+           turn.usage;
+         check (option int) "last retained call keeps its own counts" (Some 100)
+           (Option.map (fun (u : Msp.token_usage) -> u.input_tokens) turn.last_call_usage)))
+    [terminal_without_usage, false; turn_completed, true]
+;;
+
 let test_pending_approval_decision_response_during_view_page () =
   let gaps = ref 0 in
   let gap =
@@ -1980,6 +2105,10 @@ let () =
     [ ( "turn"
       , [ test_case "completed message presence" `Quick test_completed_message_presence
         ; test_case "message phase marks the answer" `Quick test_message_phase_marks_the_answer
+        ; test_case "compacted turns retain a verifiable final answer" `Quick
+            test_compacted_turn_completion
+        ; test_case "compacted suffix usage is not a whole-turn sum" `Quick
+            test_compacted_usage_is_not_a_whole_turn_sum
         ; test_case "pending approval/decide response during view/page" `Quick
             test_pending_approval_decision_response_during_view_page
         ; test_case "stream callback preserves reserved controls" `Quick

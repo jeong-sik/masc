@@ -8,7 +8,8 @@
 
     The source of truth is the stable MSP schema that
     github.com/meta-models/muse-code-sdk publishes ([schema/msp/msp.d.ts] at
-    42c7658, host 1.4.14). Every enum the schema marks open ([TurnTerminal],
+    42c7658, host 1.4.14), with retained-history item kinds verified against
+    the stable schema embedded in host 1.4.20. Every enum the schema marks open ([TurnTerminal],
     [TurnErrorKind], [ItemKind], [ItemStatus], [MessagePhase],
     [ApprovalDecision], and the approval subject kind) decodes to a closed
     variant. The variant has one
@@ -407,6 +408,12 @@ type item_kind =
   | Workflow
   | Reminder_child
   | Compaction
+  | Earlier_history
+      (** The host's checkpoint tail replacing the pruned view prefix.
+          It is outside any turn and cannot restore that prefix's effects. *)
+  | Damaged_range
+      (** Missing durable records, which cannot certify a contiguous answer
+          or the absence of effects. *)
   | Unrecognized_item_kind of string
 
 type item_status =

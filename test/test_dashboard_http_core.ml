@@ -3869,12 +3869,13 @@ let test_execution_parameterized_timeout_keeps_request_metadata () =
   let key = execution_payload_key (execution_payload ~state ~sw ~clock req) in
   Dashboard_cache.invalidate key;
   (* Drive the existing no-stale timeout circuit through its public compute
-     boundary. Raising its typed timeout keeps this scenario deterministic. *)
+     boundary: each compute outlasts its window. *)
   for _attempt = 1 to 3 do
     let timeout = Dashboard_cache.get_or_compute_with_timeout key
         ~ttl:120.0 ~clock ~timeout_sec:0.01
         (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner }))) in
+          Eio.Time.sleep clock 1.0;
+          `Null)) in
     check bool "timeout does not publish a successful payload" true
       (Dashboard_cache.is_timeout_envelope timeout)
   done;

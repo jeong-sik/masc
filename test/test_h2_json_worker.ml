@@ -134,12 +134,14 @@ let test_timeout_status_on_wire () =
   let key = "test-h2-json-timeout-status" in
   Dashboard_cache.invalidate key;
   Fun.protect ~finally:(fun () -> Dashboard_cache.invalidate key) (fun () ->
-    (* Exercise the real producer's exception-to-envelope boundary without
-       waiting on a wall-clock deadline. The HTTP response must expose it. *)
+    (* Exercise the real producer's window-to-envelope boundary with a compute
+       that outlasts its window. The HTTP response must expose it. *)
+    let clock = Eio.Stdenv.clock env in
     let envelope = Dashboard_cache.get_or_compute_with_timeout key ~ttl:1.
-        ~clock:(Eio.Stdenv.clock env) ~timeout_sec:1.
+        ~clock ~timeout_sec:0.01
         (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-          raise (Dashboard_cache.Compute_timeout { key; role = Dashboard_cache.Compute_owner }))) in
+          Eio.Time.sleep clock 1.0;
+          `Null)) in
     check bool "cache produced a timeout envelope" true
       (Dashboard_cache.is_timeout_envelope envelope);
     List.iter (fun installed ->

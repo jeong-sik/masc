@@ -204,6 +204,16 @@ class Base(unittest.TestCase):
     def session(self, session_id):
         return next(s for s in self.flow.sessions() if s.session_id == session_id)
 
+    def starts(self, session_id: str) -> dict[str, dict]:
+        """Where a session began reading each record source: after a cursor,
+        or from a time."""
+        first: dict[str, dict] = {}
+        for request in self.host.listed:
+            if request["kind"] == "read_records" and request["request_id"].startswith(session_id):
+                first.setdefault(request["source_id"],
+                                 {key: request[key] for key in ("after", "since") if key in request})
+        return first
+
     def answer(self, session_id, *responses, at=10.0):
         session = self.session(session_id)
         self.host.answers[session.ask_id] = {
@@ -805,17 +815,19 @@ class ReviewFindings(Base):
 
     def test_a_session_that_failed_before_asking_does_not_hide_the_cursor_before_it(self):
         """The cursor is where the last session that asked stopped, however
-        many sessions failed after it without asking."""
+        many sessions failed after it without asking: here three."""
         first = self.compose("act-1")
         self.host.author = answering(first_quote)
         self.host.run(self.flow)
         self.host.board.append(post(4, "the next decision"))
-        second = self.compose("act-2")
         self.host.author = lambda payload: {"status": "outcome_unknown"}
-        self.host.run(self.flow)
-        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "failed"])
-        third = self.compose("act-3")
-        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(third)]
+        failed = []
+        for action in ("act-2", "act-3", "act-4"):
+            failed.append(self.compose(action))
+            self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in (first, *failed)], ["asked", "failed", "failed", "failed"])
+        last = self.compose("act-5")
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(last)]
         self.assertEqual(request["after"], "000002")
 
     def test_a_cursor_refused_for_one_source_is_still_used_for_another(self):
@@ -846,6 +858,62 @@ class ReviewFindings(Base):
                 start.setdefault(request["source_id"], request)
         self.assertEqual(start["board"]["after"], "000002")
         self.assertIsNone(start["masc"]["after"])
+
+    def test_a_refused_cursor_gives_way_to_the_cursor_before_it(self):
+        """Two sessions asked. The host refuses the later one's cursor: the
+        session that asked for it fails, and the next one reads from the
+        cursor the earlier session left, not from the first opening."""
+        first = self.compose("act-1")
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.host.board += [post(4, "the next decision"), post(5, "a decision after that one")]
+        second = self.compose("act-2")
+        self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "asked"])
+        produce = self.host.produce
+        self.host.produce = lambda request: ({"status": "not_allowed", "reason": "after is not a cursor this host gave"}
+                                             if request["kind"] == "read_records" and request["after"] == "000004"
+                                             else produce(request))
+        third = self.compose("act-3")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(third).state, "failed")
+        fourth = self.compose("act-4")
+        (request,) = [r for r in self.flow.listing() if r["request_id"].startswith(fourth)]
+        self.assertEqual(request["after"], "000002")
+
+    def test_a_source_taken_out_while_a_session_read_it_loses_that_cursor(self):
+        """The host answers a read of a source the binding no longer grants
+        with not_allowed. The session fails and keeps that read, and
+        records.last_cursor counts the cursor it asked after as refused. Put
+        back, the source is read from the cursor before that one, here none,
+        so from the first opening, and not from the cursor it had (#52372)."""
+        self.host.wiki = [wiki_page("guide", 1, "a page of the wiki")]
+        both = BINDING | {"records": [BOARD, WIKI]}
+        first = self.compose("act-1", binding=both)
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        self.host.board.append(post(4, "the next decision"))
+        self.host.wiki.append(wiki_page("later", 1, "a page written later"))
+        produce = self.host.produce
+        self.host.produce = lambda request: (None if request["kind"] == "read_records" and request["source_id"] == "wiki"
+                                             else produce(request))
+        second = self.compose("act-2", binding=both)
+        self.host.run(self.flow)
+        (waiting,) = [r for r in self.flow.listing() if r["request_id"].startswith(second)]
+        self.assertEqual((waiting["source_id"], waiting["after"]), ("wiki", "000000"))
+        self.assertTrue(self.flow.deliver(waiting["request_id"], {
+            "status": "not_allowed", "reason": "source wiki is not granted to this installation"}))
+        self.assertEqual(self.session(second).state, "failed")
+        self.host.produce = produce
+        third = self.compose("act-3")
+        self.host.run(self.flow)
+        self.assertEqual(self.session(third).state, "asked")
+        self.host.listed.clear()
+        fourth = self.compose("act-4", binding=both)
+        self.host.author = lambda payload: None
+        self.host.run(self.flow)
+        self.assertEqual(self.starts(fourth), {"board": {"after": "000003"}, "wiki": {"after": None, "since": 0.0}})
 
     def test_a_quote_taken_from_a_file_path_is_not_in_the_file(self):
         self.host.commits = [commit(1, ["changelog.d/a.md"])]

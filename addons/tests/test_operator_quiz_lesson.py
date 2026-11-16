@@ -323,16 +323,6 @@ class Following(Base):
         self.assertEqual((self.session(first).follows.since, self.session(second).follows.since), (0.5, 2.5))
         self.assertEqual(self.material(), ["p-3"])
 
-    def starts(self, session_id: str) -> dict[str, dict]:
-        """Where a session began reading each record source: after a cursor,
-        or from a time."""
-        first: dict[str, dict] = {}
-        for request in self.host.listed:
-            if request["kind"] == "read_records" and request["request_id"].startswith(session_id):
-                first.setdefault(request["source_id"],
-                                 {key: request[key] for key in ("after", "since") if key in request})
-        return first
-
     def test_a_since_of_zero_is_a_time_and_not_a_missing_one(self):
         """since 0 reads every record. Taken for no since, the read would
         start at the quiz's first opening (3.5), after every record here."""
@@ -376,12 +366,26 @@ class Following(Base):
         self.read()
         self.assertEqual(self.starts(second), {"board": {"after": "000002"}})
 
+    def test_a_session_that_follows_no_lesson_reads_a_source_without_a_cursor_from_the_first_opening(self):
+        """Unbound from the lesson, the quiz reads as before §3.8: a source no
+        session that asked left a cursor on is read from the time the first
+        session opened, not from the since of a session that followed."""
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", cite("p-2")))])
+        first = self.flow.compose("act-1", 1, BINDING, 0.5, lesson=f.Lesson("lesson", 1.0))
+        self.host.author = answering(first_quote)
+        self.host.run(self.flow)
+        self.assertEqual(self.session(first).state, "asked")
+        self.host.listed.clear()
+        second = self.flow.compose("act-2", 1, BINDING | {"records": [t.BOARD, t.WIKI]}, 4.5)
+        self.read()
+        self.assertEqual(self.starts(second), {"board": {"after": "000002"}, "wiki": {"after": None, "since": 0.5}})
+
     def test_a_read_from_since_that_held_no_record_keeps_a_cursor_the_host_gave(self):
-        """For github_pulls the host passes over commits no pull request
-        merged and answers the cursor of the last one it passed, with no
-        record (lane_addon_records.ml take_page). A session that asked
-        leaves that cursor, so the next session reads after it and since is
-        not read again for that source."""
+        """The fake host answers here as lane_addon_records.ml take_page does
+        for github_pulls: it passed over commits no pull request merged and
+        answers the cursor of the last one, with no record. A session that
+        asked leaves that cursor, so the next session reads after it and
+        since is not read again for that source."""
         passed = "c" * 40
         produce = self.host.produce
         self.host.produce = lambda request: (
@@ -403,24 +407,26 @@ class Following(Base):
 
     def test_a_source_taken_out_and_put_back_is_read_from_the_cursor_it_had(self):
         """The cursor goes by source_id over every earlier session that
-        asked, whether or not the sessions between read that source. A
-        source_id an operator removes and adds again is not a new source:
-        it is read from the cursor left before, not from since."""
+        asked, however many sessions between did not read that source: here
+        three. A source_id an operator removes and adds again is not a new
+        source: it is read from the cursor left before, not from since."""
         self.host.wiki = [t.wiki_page("guide", 1, "a page of the wiki")]
         both = BINDING | {"records": [t.BOARD, t.WIKI]}
-        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", *(cite(f"p-{n}") for n in range(1, 5))))])
+        self.flow.see_lesson(FOLLOWING, [lesson_output(1, scene_row("e1", *(cite(f"p-{n}") for n in range(1, 7))))])
         first = self.flow.compose("act-1", 1, both, 3.5, lesson=LESSON)
         self.host.author = answering(first_quote)
         self.host.run(self.flow)
-        self.host.board.append(post(4, "a lane rests until its slot answers"))
-        second = self.flow.compose("act-2", 1, BINDING, 4.5, lesson=LESSON)
-        self.host.run(self.flow)
-        self.assertEqual([self.session(s).state for s in (first, second)], ["asked", "asked"])
+        between = []
+        for n in (4, 5, 6):
+            self.host.board.append(post(n, f"decision number {n}"))
+            between.append(self.flow.compose(f"act-{n}", 1, BINDING, n + 0.5, lesson=LESSON))
+            self.host.run(self.flow)
+        self.assertEqual([self.session(s).state for s in (first, *between)], ["asked"] * 4)
         self.host.wiki.append(t.wiki_page("later", 1, "a page written later"))
         self.host.listed.clear()
-        third = self.flow.compose("act-3", 1, both, 5.5, lesson=LESSON)
+        last = self.flow.compose("act-7", 1, both, 7.5, lesson=LESSON)
         self.read()
-        self.assertEqual(self.starts(third), {"board": {"after": "000003"}, "wiki": {"after": "000000"}})
+        self.assertEqual(self.starts(last), {"board": {"after": "000005"}, "wiki": {"after": "000000"}})
 
     def test_with_nothing_cited_an_earlier_item_is_still_asked_again(self):
         plain = self.compose("act-1")
@@ -480,6 +486,18 @@ class Following(Base):
         before = q.Log(self.state).read()
         self.assertEqual(self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON), session_id)
         self.assertEqual((q.Log(self.state).read(), self.session(session_id).follows), (before, None))
+
+    def test_a_compose_sent_again_leaves_a_superseded_session_as_it_is(self):
+        """A later compose superseded a session before it read anything. The
+        first action sent again completes no opening: only a session still
+        writing gets follows_lesson, and the fold refuses it after a
+        supersession."""
+        first = self.flow.compose("act-1", 1, BINDING, 0.0)
+        self.flow.compose("act-2", 1, BINDING, 1.0)
+        self.assertEqual(self.session(first).state, "superseded")
+        before = q.Log(self.state).read()
+        self.assertEqual(self.flow.compose("act-1", 1, BINDING, 0.0, lesson=LESSON), first)
+        self.assertEqual((q.Log(self.state).read(), self.session(first).follows), (before, None))
 
     def test_a_question_is_taught_only_if_the_lesson_was_seen_before_it(self):
         session_id = self.compose("act-1")

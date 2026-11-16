@@ -110,54 +110,57 @@ let save_agent_core_classified_typed
         let previous = Option.map (fun known -> known.known_head) existing in
         let absent = Option.fold ~none:[] ~some:(absent_objects ~session_dir) existing in
         let ownership_root = Filename.dirname session_dir in
-        let memo =
+        let run_with_lineage f =
           match save_lineage with
-          | Save_for_keeper _ -> lineage_memo ~canonical_path
-          | Save_without_lineage -> Objects.create_memo ()
+          | Save_for_keeper _ ->
+            with_active_lineage ~canonical_path (fun () ->
+              f (lineage_memo ~canonical_path))
+          | Save_without_lineage -> f (Objects.create_memo ())
         in
-        let plan payload =
-          offload_checkpoint_cpu (fun () -> Objects.plan_save memo ?previous ~absent boundary payload)
-        in
-        (* The objects first, then the head that names them (RFC-0476 §3.3). *)
-        let install payload (plan : Objects.plan) =
-          match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
-          | Error error -> Error (Objects_write_failed error)
-          | Ok object_bytes ->
-            Checkpoint_payload_writer.note payload_writer (Some object_bytes);
-            (match
-               Checkpoint_payload_writer.canonical payload_writer ~write:write_canonical
-                 ~ownership_root canonical_path
-                 (fun () -> [ plan.head_bytes ])
-             with
-             | Error error -> Error (Canonical_write_failed error)
-             | Ok written_file ->
-               save_outcome_after_write
-                 ~session_dir ~canonical_path ~save_lineage ~memo ~written_file
-                 ~known ~history_retained ~payload_writer ~plan payload)
-        in
-        (match plan ckpt with
-         | Ok planned -> install ckpt planned
-         (* #31677: a payload-encode refusal means the in-memory checkpoint
-            carries a json payload the contract cannot encode -- a
-            provider-authored duplicate key or non-finite float. Without
-            recovery the write refuses at this stage of every later turn,
-            which is what bricked keepers for hours on 2026-08-29. The
-            codec still rejects the original; this drop-and-retry-once
-            stores the recovered copy, so the keeper survives and the next
-            restart loads a clean checkpoint. A refusal with nothing
-            droppable keeps the original error. *)
-         | Error error -> (
-           match Agent_core.Checkpoint.drop_unencodable_json ckpt with
-           | None -> Error (Checkpoint_unencodable error)
-           | Some recovered ->
-             Log.Keeper.warn
-               "checkpoint payload unencodable (%s); storing the recovery \
-                copy with the offending json dropped for %s"
-               (Agent_core.Error.to_string error)
-               ckpt.session_id;
-             (match plan recovered with
-              | Error retry_error -> Error (Checkpoint_unencodable retry_error)
-              | Ok planned -> install recovered planned))))
+        run_with_lineage (fun memo ->
+          let plan payload =
+            offload_checkpoint_cpu (fun () -> Objects.plan_save memo ?previous ~absent boundary payload)
+          in
+          (* The objects first, then the head that names them (RFC-0476 §3.3). *)
+          let install payload (plan : Objects.plan) =
+            match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+            | Error error -> Error (Objects_write_failed error)
+            | Ok object_bytes ->
+              Checkpoint_payload_writer.note payload_writer (Some object_bytes);
+              (match
+                 Checkpoint_payload_writer.canonical payload_writer ~write:write_canonical
+                   ~ownership_root canonical_path
+                   (fun () -> [ plan.head_bytes ])
+               with
+               | Error error -> Error (Canonical_write_failed error)
+               | Ok written_file ->
+                 save_outcome_after_write
+                   ~session_dir ~canonical_path ~save_lineage ~memo ~written_file
+                   ~known ~history_retained ~payload_writer ~plan payload)
+          in
+          (match plan ckpt with
+           | Ok planned -> install ckpt planned
+           (* #31677: a payload-encode refusal means the in-memory checkpoint
+              carries a json payload the contract cannot encode -- a
+              provider-authored duplicate key or non-finite float. Without
+              recovery the write refuses at this stage of every later turn,
+              which is what bricked keepers for hours on 2026-08-29. The
+              codec still rejects the original; this drop-and-retry-once
+              stores the recovered copy, so the keeper survives and the next
+              restart loads a clean checkpoint. A refusal with nothing
+              droppable keeps the original error. *)
+           | Error error -> (
+             match Agent_core.Checkpoint.drop_unencodable_json ckpt with
+             | None -> Error (Checkpoint_unencodable error)
+             | Some recovered ->
+               Log.Keeper.warn
+                 "checkpoint payload unencodable (%s); storing the recovery \
+                  copy with the offending json dropped for %s"
+                 (Agent_core.Error.to_string error)
+                 ckpt.session_id;
+               (match plan recovered with
+                | Error retry_error -> Error (Checkpoint_unencodable retry_error)
+                | Ok planned -> install recovered planned)))))
 
 let save_agent_core_classified
     ~(session_dir : string) ~(history_retained : int) ~boundary (ckpt : Agent_core.Checkpoint.t)

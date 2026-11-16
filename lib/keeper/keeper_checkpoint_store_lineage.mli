@@ -1,7 +1,10 @@
 (** The lineage this process keeps per canonical checkpoint file: the encoding
     memo of its saves and, for a Keeper's own saves and save-bound loads, the
-    checkpoint value the file holds. A Keeper has one lineage; keeping a new
-    one drops its older one.
+    checkpoint value the file holds. A Keeper has at most one lineage (keeping
+    a new one drops its older one). The process retains the most recently
+    active Keepers under a combined canonical-head and memo-entry encoded
+    byte budget, without a production entry-count cap. This logical weight
+    excludes decoded OCaml records and is not a process heap limit.
 
     [keep_lineage] records what a save wrote under the identity of the file it
     installed, and [keep_read_lineage] records what a save-bound load read,
@@ -13,6 +16,8 @@
     module. *)
 
 open Keeper_checkpoint_store_summary
+
+val default_max_retained_lineage_bytes : int
 
 (** The checkpoint a save wrote and the identity of the file it was written
     to. *)
@@ -28,12 +33,15 @@ type lineage_owner =
   ; owner_keeper : string
   }
 
-(** The lineage of one canonical file: its owner, the encoding memo, and the
-    value the file holds when one is known. *)
+(** The lineage of one canonical file: its owner, the encoding memo, the value
+    the file holds when one is known, its retained byte weight, and its
+    monotonic LRU access sequence. *)
 type written_lineage =
   { lineage_owner : lineage_owner
   ; lineage_memo : Agent_core.Checkpoint_objects.memo
   ; lineage_written : written_value option
+  ; lineage_retained_bytes : int
+  ; lineage_access_seq : int
   }
 
 val lineage_memo : canonical_path:string -> Agent_core.Checkpoint_objects.memo
@@ -59,3 +67,8 @@ val keep_read_lineage :
   identity_before:canonical_identity
                   option ->
   memo:Agent_core.Checkpoint_objects.memo -> keeper_name:string -> Agent_core.Checkpoint.t -> unit
+
+val with_active_lineage : canonical_path:string -> (unit -> 'a) -> 'a
+
+val with_written_lineage_limits :
+  max_entries:int -> max_bytes:int -> (unit -> 'a) -> 'a

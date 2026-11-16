@@ -25,9 +25,16 @@ open Keeper_checkpoint_store_summary
    canonicals holding 1,031 MB after their turns. Only a Keeper's own saves
    and save-bound loads keep one, and they name the Keeper: a checkpoint's
    [agent_name] is the runtime the turn ran on ("agent_core-<runtime>"), which
-   Keepers share. Each Keeper has one: a save under a new trace drops the
-   Keeper's older one, and unregistering the Keeper drops it
-   ([forget_written_lineages]). *)
+   Keepers share. Each Keeper has at most one: a save under a new trace drops
+   the Keeper's older one, unregistering the Keeper drops it
+   ([forget_written_lineages]). [written_lineages] evicts the least recently
+   used unpinned lineage when the combined canonical-head and memo-entry
+   encoded byte weight exceeds [default_max_retained_lineage_bytes]. There is
+   no production entry-count cap: many small active histories should not
+   displace each other while their combined weight fits. This logical byte
+   weight excludes decoded OCaml records and is not a process heap limit. *)
+let default_max_retained_lineage_bytes = 128 * 1024 * 1024
+
 type written_value =
   { written_identity : canonical_identity
   ; written_checkpoint : Agent_core.Checkpoint.t
@@ -44,12 +51,84 @@ type written_lineage =
   { lineage_owner : lineage_owner
   ; lineage_memo : Objects.memo
   ; lineage_written : written_value option
+  ; lineage_retained_bytes : int
+  ; lineage_access_seq : int
   }
 
-let written_lineages : (string, written_lineage) Hashtbl.t = Hashtbl.create 16
+module String_map = Map.Make (String)
 
-(* Same discipline as [canonical_summaries_mutex]. *)
-let written_lineages_mutex = Stdlib.Mutex.create ()
+type lineage_state =
+  { entries : written_lineage String_map.t
+  ; in_flight : int String_map.t
+  ; max_entries : int option
+  ; max_bytes : int
+  ; next_seq : int
+  }
+
+(* Lock-free immutable state swapped via CAS, safe across Eio fibers and pool
+   domains without holding a lock across encoding or disk I/O. In-flight save
+   paths pin their canonical key until the write settles so concurrent saves
+   cannot evict an actively saving Keeper's memo mid-turn. *)
+let written_lineages_state : lineage_state Atomic.t =
+  Atomic.make
+    { entries = String_map.empty
+    ; in_flight = String_map.empty
+    ; max_entries = None
+    ; max_bytes = default_max_retained_lineage_bytes
+    ; next_seq = 0
+    }
+
+let rec update_lineage_state f =
+  let current = Atomic.get written_lineages_state in
+  let next, output = f current in
+  if Atomic.compare_and_set written_lineages_state current next
+  then output
+  else update_lineage_state f
+
+let saturating_add left right =
+  let left = max 0 left in
+  let right = max 0 right in
+  if right > max_int - left then max_int else left + right
+
+let is_pinned state key =
+  match String_map.find_opt key state.in_flight with
+  | Some count -> count > 0
+  | None -> false
+
+let total_retained_bytes entries =
+  String_map.fold
+    (fun _key lineage total -> saturating_add total lineage.lineage_retained_bytes)
+    entries
+    0
+
+let oldest_evictable_lineage_key state =
+  String_map.fold
+    (fun key lineage oldest ->
+       if is_pinned state key
+       then oldest
+       else (
+         match oldest with
+         | None -> Some (key, lineage.lineage_access_seq)
+         | Some (_oldest_key, oldest_seq) ->
+           if lineage.lineage_access_seq < oldest_seq
+           then Some (key, lineage.lineage_access_seq)
+           else oldest))
+    state.entries
+    None
+  |> Option.map fst
+
+let rec evict_excess_lineages state =
+  let count = String_map.cardinal state.entries in
+  let over_count = Option.fold ~none:false ~some:(fun limit -> count > limit) state.max_entries in
+  let over_bytes = count > 1 && total_retained_bytes state.entries > state.max_bytes in
+  if over_count || over_bytes
+  then (
+    match oldest_evictable_lineage_key state with
+    | None -> state
+    | Some oldest_key ->
+      evict_excess_lineages
+        { state with entries = String_map.remove oldest_key state.entries })
+  else state
 
 let same_lineage_owner left right =
   String.equal left.owner_session_root right.owner_session_root
@@ -59,16 +138,42 @@ let same_lineage_owner left right =
 let lineage_owner_of_key ~key ~keeper_name =
   { owner_session_root = Filename.dirname (Filename.dirname key); owner_keeper = keeper_name }
 
+let with_active_lineage ~canonical_path f =
+  match summary_key canonical_path with
+  | None -> f ()
+  | Some key ->
+    update_lineage_state (fun state ->
+      let count = Option.value ~default:0 (String_map.find_opt key state.in_flight) in
+      { state with in_flight = String_map.add key (count + 1) state.in_flight }, ());
+    Fun.protect
+      ~finally:(fun () ->
+        update_lineage_state (fun state ->
+          let in_flight =
+            match String_map.find_opt key state.in_flight with
+            | None | Some 1 -> String_map.remove key state.in_flight
+            | Some count -> String_map.add key (max 1 (count - 1)) state.in_flight
+          in
+          evict_excess_lineages { state with in_flight }, ()))
+      f
+
 (* The memo of the file's lineage, or a fresh one for a file this process has
    not written. *)
 let lineage_memo ~canonical_path =
   match summary_key canonical_path with
   | None -> Objects.create_memo ()
   | Some key ->
-    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
-      match Hashtbl.find_opt written_lineages key with
-      | Some lineage -> lineage.lineage_memo
-      | None -> Objects.create_memo ())
+    update_lineage_state (fun state ->
+      match String_map.find_opt key state.entries with
+      | Some lineage ->
+        let seq = state.next_seq + 1 in
+        let entries =
+          String_map.add key { lineage with lineage_access_seq = seq } state.entries
+        in
+        { state with entries; next_seq = seq }, Some lineage.lineage_memo
+      | None -> state, None)
+    |> function
+    | Some memo -> memo
+    | None -> Objects.create_memo ()
 
 (* [written] is the value the files now hold, [None] when no value here
    describes them. *)
@@ -82,15 +187,30 @@ let keep_lineage ~canonical_path ~identity ~memo ~keeper_name written =
         (fun written_checkpoint -> { written_identity = identity; written_checkpoint })
         written
     in
-    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
-      Hashtbl.filter_map_inplace
-        (fun other lineage ->
-           if (not (String.equal other key)) && same_lineage_owner lineage.lineage_owner owner
-           then None
-           else Some lineage)
-        written_lineages;
-      Hashtbl.replace written_lineages key
-        { lineage_owner = owner; lineage_memo = memo; lineage_written })
+    let lineage_retained_bytes =
+      saturating_add identity.size (Objects.memo_encoded_bytes memo)
+    in
+    update_lineage_state (fun state ->
+      let entries =
+        String_map.filter
+          (fun other lineage ->
+             String.equal other key
+             || not (same_lineage_owner lineage.lineage_owner owner))
+          state.entries
+      in
+      let lineage_access_seq = state.next_seq + 1 in
+      let entries =
+        String_map.add
+          key
+          { lineage_owner = owner
+            ; lineage_memo = memo
+            ; lineage_written
+            ; lineage_retained_bytes
+            ; lineage_access_seq
+          }
+          entries
+      in
+      evict_excess_lineages { state with entries; next_seq = lineage_access_seq }, ())
 
 let forget_written_lineages ~session_root ~keeper_name =
   let forgets =
@@ -111,10 +231,13 @@ let forget_written_lineages ~session_root ~keeper_name =
         (Unix.error_message error);
       fun owner -> String.equal owner.owner_keeper keeper_name
   in
-  Stdlib.Mutex.protect written_lineages_mutex (fun () ->
-    Hashtbl.filter_map_inplace
-      (fun _key lineage -> if forgets lineage.lineage_owner then None else Some lineage)
-      written_lineages)
+  update_lineage_state (fun state ->
+    let entries =
+      String_map.filter
+        (fun _key lineage -> not (forgets lineage.lineage_owner))
+        state.entries
+    in
+    { state with entries }, ())
 
 (* The context is a mutable table, so each caller gets its own copy. *)
 let handed_out (checkpoint : Agent_core.Checkpoint.t) =
@@ -129,13 +252,18 @@ let reusable_written_value ~canonical_path ~identity =
   match summary_key canonical_path with
   | None -> None
   | Some key ->
-    Stdlib.Mutex.protect written_lineages_mutex (fun () ->
-      match Hashtbl.find_opt written_lineages key with
-      | None | Some { lineage_written = None; _ } -> None
-      | Some { lineage_written = Some written; _ } ->
+    update_lineage_state (fun state ->
+      match String_map.find_opt key state.entries with
+      | None | Some { lineage_written = None; _ } -> state, None
+      | Some ({ lineage_written = Some written; _ } as lineage) ->
         if canonical_identity_equal written.written_identity identity
-        then Some written.written_checkpoint
-        else None)
+        then (
+          let seq = state.next_seq + 1 in
+          let entries =
+            String_map.add key { lineage with lineage_access_seq = seq } state.entries
+          in
+          { state with entries; next_seq = seq }, Some written.written_checkpoint)
+        else state, None)
     |> Option.map handed_out
 
 (* After a save-bound read: the lineage describes the bytes read only if the
@@ -150,3 +278,20 @@ let keep_read_lineage ~canonical_path ~identity_before ~memo ~keeper_name checkp
       ~keeper_name
       (Some checkpoint)
   | Some _, (Some _ | None) | None, (Some _ | None) -> ()
+
+let with_written_lineage_limits ~max_entries ~max_bytes f =
+  let max_entries = Some (max 1 max_entries) in
+  let max_bytes = max 0 max_bytes in
+  let previous =
+    update_lineage_state (fun state ->
+      let prev = state.max_entries, state.max_bytes in
+      evict_excess_lineages { state with max_entries; max_bytes }, prev)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let prev_entries, prev_bytes = previous in
+      update_lineage_state (fun state ->
+        evict_excess_lineages
+          { state with max_entries = prev_entries; max_bytes = prev_bytes }
+        , ()))
+    f

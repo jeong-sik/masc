@@ -944,4 +944,9 @@ module For_testing : sig
     (save_agent_core_outcome, string) result
   (** {!save_agent_core_for_keeper} with [before_stage] run just before each
       filesystem step of the canonical write. *)
+
+  val default_max_retained_lineage_bytes : int
+
+  val with_written_lineage_limits :
+    max_entries:int -> max_bytes:int -> (unit -> 'a) -> 'a
 end

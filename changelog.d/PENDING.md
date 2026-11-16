@@ -1,3 +1,0 @@
-### Fixed
-
-- The tokens, Keepers and subscriptions panels of the account console read their lists again when the console shows the same person after another account was in the browser. Before, they kept the list they held then, a reading that failed while no one was shown included, and said the server could not be reached until the page was loaded again. Each panel now forgets its list whenever the console shows no one signed in, and drops a reading still under way then. What the person did stays theirs until another person is shown: a token secret on the page, a Keeper make or assignment, a conversation, a login and a model check (#52375, #PENDING).

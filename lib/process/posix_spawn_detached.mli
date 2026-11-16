@@ -53,3 +53,11 @@ val group_id_has_members : int -> bool
     not yet reaped still reads. [None] when no such process is there, or
     the platform gives neither. It starts no process, so it never yields. *)
 val process_start : int -> string option
+
+(** The parent the kernel records for the process numbered [pid], the one
+    its exit status goes to: Darwin's e_ppid from the kernel's process table;
+    Linux's ppid from /proc. A process whose parent ended reads the process
+    that adopted it. A child not yet reaped still reads. [None] when no such
+    process is there, or the platform gives neither. It starts no process,
+    so it never yields. *)
+val parent_pid : int -> int option

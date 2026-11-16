@@ -45,21 +45,12 @@ let proc_member_row name =
   match int_of_string_opt name with
   | None -> None
   | Some pid ->
-    (match In_channel.with_open_bin (Filename.concat "/proc" (Filename.concat name "stat")) In_channel.input_all with
-     | exception Sys_error _ -> None
-     | stat ->
-       (* "pid (comm) S ppid pgrp ...": comm may hold spaces and ')', so the
-          fields are read after the last ')'. *)
-       (match String.rindex_opt stat ')' with
-        | None -> None
-        | Some close ->
-          let rest = String.sub stat (close + 1) (String.length stat - close - 1) in
-          (match String.split_on_char ' ' (String.trim rest) with
-           | state :: ppid :: pgrp :: _ ->
-             (match int_of_string_opt ppid, int_of_string_opt pgrp with
-              | Some parent, Some group -> Some (pid, parent, group, state)
-              | _ -> None)
-           | _ -> None)))
+    (match Linux_proc_stat.read pid with
+     | Some (state :: ppid :: pgrp :: _) ->
+       (match int_of_string_opt ppid, int_of_string_opt pgrp with
+        | Some parent, Some group -> Some (pid, parent, group, state)
+        | _ -> None)
+     | Some _ | None -> None)
 
 let proc_live_member_left pgid =
   if not (Sys.file_exists "/proc/self/stat") then None

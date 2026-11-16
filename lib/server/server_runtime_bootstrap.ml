@@ -1810,6 +1810,10 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
               ~sw
               ~clock
               ~workspace_scope
+              (* gRPC carries no bearer, and no door reads one. *)
+              ~bearer:
+                (Mcp_server_eio_caller_identity.unread None
+                   ~internal_keeper_runtime:false)
               state
               ~name:tool_name ~arguments
           in

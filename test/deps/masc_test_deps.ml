@@ -567,6 +567,20 @@ let door_sender ~base_path auth_token =
      | Error (Auth.Token_required | Auth.Bearer_refused _) ->
        Masc.Mcp_server_eio.Unadmitted)
 
+(** What the executor knows about a bearer a test sends to it directly: the
+    bearer the /mcp door admits. With auth on a valid bearer arrives as the
+    credential the door found; with auth off, or a bearer the door refuses,
+    the executor reads the token itself. Reads the auth store, so it runs
+    inside Eio. *)
+let door_bearer ~base_path auth_token =
+  Masc.Mcp_server_eio_caller_identity.of_sender
+    (door_sender ~base_path auth_token)
+    ~auth_token ~internal_keeper_runtime:false
+
+(** A call that reaches the executor with no bearer, as gRPC does. *)
+let no_bearer =
+  Masc.Mcp_server_eio_caller_identity.unread None ~internal_keeper_runtime:false
+
 (* Which sandbox a fixture's keeper runs in.
 
    Nothing used to answer this, so the profile came from the placeholder

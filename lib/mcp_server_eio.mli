@@ -121,8 +121,7 @@ val execute_tool_eio :
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
   ?invocation_ref:Tool_invocation_ref.t ->
-  ?auth_token:string ->
-  ?internal_keeper_runtime:bool ->
+  bearer:Mcp_server_eio_caller_identity.bearer ->
   ?on_caller_resolved:(Mcp_server_eio_caller_identity.t -> unit) ->
   server_state ->
   name:string ->

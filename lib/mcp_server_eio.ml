@@ -131,8 +131,7 @@ let handle_request
         ~clock
         ~profile
         ?mcp_session_id
-        ?auth_token
-        ~internal_keeper_runtime
+        ~bearer
         state
         id
         call ->
@@ -145,8 +144,7 @@ let handle_request
         ~clock
         ~profile
         ?mcp_session_id
-        ?auth_token
-        ~internal_keeper_runtime
+        ~bearer
         state
         id
         call)

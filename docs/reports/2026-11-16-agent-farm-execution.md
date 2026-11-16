@@ -18,13 +18,16 @@
 | WIM-S03 문서 입력 | Core `0ecf7bd04792cf97d0cab2ab07e61da09bac2445`, MASC `6b4589d360235b79b43b40dd6d4b379c836a8322`: 문서·혼합 입력 선언, H5 읽기, wire·크기 추정·재생의 문서 투영을 맞춘다 | [증거 기록](../evidence/2026-11-16-farm-document-input/README.md). 독립 소스 리뷰·구문 검사, Dashboard 타입 검사와 선택 decoder 시험 1건 통과. OCaml 동작 시험·실제 provider·PDF/STT·브라우저·설치 미확인 |
 | TLJ-S01 위임 결과 | 협업 세션 `01a1e1b9…`, `.worktrees/farm-evolution-20261116`. 세 층 최종 head `e6ea78da93a1ebac6f6020aafb134631024ba769`, base `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`. canonical 종단 상태, 기동 재투영, 영속 전달 의도·답 원문·전달 영수증을 연결 | 두 P2였던 보관 기간 뒤 중복 전달과 fail-open journal 뒤 답 유실을 소스에서 수정했다. 재기반 후 독립 검토에서 미해결 P0/P1/P2 없음. 기존 세 패치와 range-diff가 같고 32개 후보 파일이 이전 최종 head와 일치함을 확인했다. 작성 세션의 OCaml 31개 구문 검사 기록이 있다. 타입·동작·CI·설치·원래 요청 회복·GitHub 정식 승인·게시 미확인 |
 | WIM-S04 MCP 결과 | `fb6858311cc67bc743d7c0fcbe9165dbffc2dbc3`: 일반·승인 호출의 audience 투영, 미디어·일반 binary 보존, 공개 manifest·실제 승인 결과 원장·chat의 보관 소유권과 status 노출 경계를 연결 | [증거 기록](../evidence/2026-11-16-farm-mcp-content/README.md). 독립 소스 리뷰의 미해결 P0/P1/P2 없음, OCaml 38개 구문 검사 통과. 타입·동작 시험·실제 MCP/provider·재시작·GC 실행은 미확인 |
-| IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버 시작·직접 Workspace 생성 연결, 실제 SSH, VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
+| IA-S13 공유 SSH 이름 | `.worktrees/farm-remote-namespace-20261116`, 시작점 `71a19f1c9030978d8ccf54e311782b6cfed6d1d5`. 공용 I/O `e85a523e115355e58c87283c6c6f3b8cc9a0a393`, 게시·복구 엔진 `c09c461ac91598e4e41c42f25c6ad88f1ec14352`, UID 생성기 `40605b3164e9efb88c3ba3d5f8f25dc89c36e26d`, SSH 경로·효과 준비 `d20ff52623871b22eacb705498356a84a6e1759d`, 생성 잠금 공유 `107ed0a199696cf27a8d1b18d47456bb459b54a4`를 커밋했다 | 게시·복구 엔진의 격리 시험 62개에는 기반 I/O 14개가 포함된다. 후속 UID·잠금 시험 15개도 실제 파일시스템에서 통과했고, 해당 7개 변경 파일의 독립 소스 검토에 미해결 P0/P1/P2가 없다. SSH 35개 파일은 독립 소스 리뷰와 구문 검사만 확인했다. 서버·Workspace와 첫 쓰기 연결의 후속 커밋은 아래에 적었다. 전체 시작 흐름·실제 SSH·VM·volume GC 전환은 미완료. 원격 데이터 변경·삭제·설치 없음. `U02:IA-S13`은 승인 완료가 아님 |
 
 본 세션은 저장·add-on·입력 경계와 이 실행 기록을 맡는다. TLJ-S01의 같은 구현을
 다시 만들지 않고 해당 세션의 산출물을 현재 head에서 대조한다. 기록된 스택 게시 시도는
 로컬 `gh stack` 인증 토큰 부재로 종료됐다고 각 증거 기록에 남아 있다. connector 조회가
 가능하다는 사실은 native stack 게시 완료를 뜻하지 않는다. 원격 반영 전에 실제 main,
 스택 구성과 겹치는 작업을 다시 확인한다.
+후속 직접 조회 `gh api user --jq .login`도 `error connecting to api.github.com`으로
+종료됐다. 이는 해당 실행 환경의 연결 실패이며 사용자 계정의 인증 실패 판정이 아니다.
+상대 세션으로의 게시 요청도 thread 도구 연결 오류로 전달을 확인하지 못했다.
 
 TLJ-S01의 재기반 소스 diff SHA-256은
 `efdf0d71026e4a684de9210f2aca82aae4451df2c7ff8848ec5c88ed071cd585`다.
@@ -51,7 +54,7 @@ Keeper 재시작 전체를 SSH 가용성으로 막던 중간 후보는 철회했
 승인된 SSH 명령·파일 쓰기 경계에 연결했다. 원격 장애가 다른 Keeper 활동을 막지
 않도록 하는 소스 변경이며, 실제 SSH 동작은 아직 검증하지 않았다.
 
-협업 세션의 TLJ-S02/E8 다섯 층은
+앞선 checkpoint에서 확인한 협업 세션의 TLJ-S02/E8 다섯 층은
 `715d3dd28e0f2ee3a8a13c9c66ead42ed900726c`다. 해당 worktree의 head와 clean 상태,
 `docs/reports/2026-11-16-librarian-declaration-replacement.md`를 직접 확인했다.
 연결된 history Captured/Cut까지 종료 증거와 후속 요청의 intent/ACK를 연결하고,
@@ -59,6 +62,16 @@ Keeper 재시작 전체를 SSH 가용성으로 막던 중간 후보는 철회했
 작성 세션은 두 독립 소스 리뷰와 49개 파일 중 OCaml 47개 구문 검사를 보고했다.
 이 기록의 작성자가 그 전체 소스나 동작을 다시 검증한 것은 아니다. 타입·회귀·운영은
 미실행이며, native submit도 token not found로 종료됐다고 보고했다. partial을 유지한다.
+
+그 뒤 작성 세션은 일곱째 층 `7200e23e3d22166f88bf9ecf0fa0ffa57d32cffa`를 보고했다.
+미소비 batch 전체를 다시 고려하는 admission 단위의 14개 파일에 독립 소스 리뷰 두 건,
+OCaml 13개 구문 검사와 미실행 회귀 9개가 있다는 보고다. 이전 다섯 층만 대상으로 한
+게시 위임은 작성 세션이 철회했으므로 사용하지 않는다.
+해당 `next-unit.md`는 main의 Missing_after_dispatch 수리와 함께 재기반할 항목을 적고 있다.
+후속 조회 때에는 `.worktrees/farm-librarian-admission-replacement-20261116`의 HEAD가
+`4fb63016f6cbb80139dbda3b99940733a5804a8e`였고 execution 구현에 미해결 충돌이 있었다.
+이는 조회 시점의 worktree 상태이며, 앞선 고정 head의 소스 리뷰를 새 통합 결과로 옮기지 않는다.
+현재 통합·게시 완료 여부와 원래 요청의 실제 회복은 별도 확인 대상이다.
 
 ## UID 생성과 실제 첫 쓰기의 연결
 
@@ -72,12 +85,30 @@ Keeper 재시작 전체를 SSH 가용성으로 막던 중간 후보는 철회했
 | `62af6cb40b830fec898923a1713234415d1c440b` | Workspace factory/init, config bootstrap, `workspace-create`, 저장 CLI, prerequisites와 installer의 첫 쓰기를 연결했다. UID 오류를 Memory fallback으로 숨기지 않는다. | 37개 파일 독립 소스 리뷰와 구문 검사 35개. installer Python 경계 시험 6개는 모의 CLI 응답으로 순서·거절을 확인했다. 실제 설치·CLI 실행 증거가 아니다. manifest `bfb73c54017067d8602823a39c916f54b280699beaa9c7a7813a742e4942e946` |
 | `6e328cde52221f8443973d6f31198431ca59a682` | Item, Gate, direct resume, Goal confirmation의 HTTP 검증 스크립트가 선택한 후보로 workspace-create한 뒤 fixture를 쓴다. | 네 파일 독립 소스 리뷰와 Python 구문 검사. 두 스크립트의 통제된 후보 거절 시 runtime·서버 로그가 생기지 않음을 확인했다. native UID·서버·provider는 실행하지 않았다. manifest `4b709aaba3061b336b67ed9c8f20654a443bfc3569b885c2017b88a6c1d2163e` |
 
-이 네 층의 해당 소스 범위에는 독립 리뷰의 추가 P0/P1/P2가 없다. 전체 스택에는
-여전히 실제 첫 쓰기 문제가 남는다. Docker와 공용 harness의 수정은 작업 중이며,
-native login/MCP config/revoke, TUI의 credential lock과 세 로그 생성 경로,
-source start/quickstart/seed-team, presentation CI 준비, carts/monitor도 후속 대상이다.
-각 호출자의 생성·읽기 의도를 먼저 구분한다. 읽기나 실패한 revoke를 계기로 UID를
-자동 발급하거나, 기존 UID 없는 루트를 뒤늦게 등록하는 방식으로 해결하지 않는다.
+이 네 층의 해당 소스 범위에는 독립 리뷰의 추가 P0/P1/P2가 없다. 이후 아래 여섯 층도
+커밋했다. 각 행의 검증 범위를 전체 스택이나 실제 설치 결과로 넓히지 않는다.
+
+| 커밋 | 변경 | 확인한 증거와 한계 |
+| --- | --- | --- |
+| `30bff2a69566b6fa0b391c930691e5f6d7ea5bad` | 공용 harness와 직접 소비자가 같은 후보의 admission 뒤에 설정·fixture를 쓴다. Fusion의 기존 링크 루트·admission 거절은 소유 서버 중단보다 먼저다. | 14개 파일 독립 소스 리뷰. 선언한 의존 파일만 복사한 환경에서 Python 경계 시험 9개 통과. 후보 CLI와 서버 실행 경계는 모의이며 native UID·서버·성능 시험은 아니다. |
+| `9b4a717d8b19032bc6ddd81d0a50afa9550ba695` | 컨테이너의 volume을 BasePath로 두고 native lease/birth 이후 callback에서 event 디렉터리·설정을 준비한다. 기존 volume 이름을 유지하며 호환되지 않는 배치를 거절한다. 명시 START는 최종 서버 exec에서 복원한다. | 13개 파일 독립 소스 리뷰, mock-native shell 시험 16개 통과. 별도 작은 OCaml 5.5.1 프로그램으로 START와 없는 event 디렉터리의 기동 중단을 재현했다. 실제 image·Docker copy-up·Linux·설치·volume 변경은 하지 않았다. |
+| `3aa1ea7bbaccb581cdcb10e89f53a283076073a1` | high-level login과 선택된 TUI Mint/Remint의 lock 전에 UID를 준비한다. 순수 역할·유효기간 검사와 typed admission 오류를 공유한다. 조회·Admin 재사용·raw auth API는 등록하지 않는다. | 14개 파일 독립 소스 리뷰, 구문 검사 13개, 실제 인터페이스에 대한 제한된 타입 검사 38개 명령 통과. 실행 파일 연결·PPX·실제 인증·전체 TUI/server graph는 미검증이다. |
+| `d23bf59c5679f674aeef81e75f1ee743f46818f1` | TUI가 유효한 기존 UID의 로그 경로 또는 비공개 host session을 선택한다. 로그 때문에 `.masc`를 만들지 않는다. 시작 출력의 실제 경로를 표시하고 재시작 스크립트가 관측한 stderr의 새 행만 읽는다. | 21개 파일 독립 소스 리뷰. 실제 root/lifecycle 소스의 시험 24개, 제어된 lsof 응답과 실제 임시 파일을 쓴 helper 시험 15개, 실제 lsof와 시험 소유 sleep의 shell self-test를 확인했다. 전체 TUI·observation·Ask·metrics·Linux E2E는 미실행이다. |
+| `19943ea90dd092759cda3c906a5db7f58b3c9516` | 없는 credential store의 revoke/retire는 디렉터리나 UID를 만들지 않는다. credential 저장소 잠금을 먼저 잡은 login과 revoke는 기존 transaction 순서를 유지한다. | 7개 파일 독립 소스 리뷰, 구문 검사와 제한된 실제 인터페이스 타입 검사 41개 명령 통과. 실제 auth 실행·전체 graph는 미검증이다. |
+| `383101ff149d580d6654cfec8e9d7001a1f986bc` | presentation 도구는 workspace 밖에서 준비하고, native fixture가 UID를 만든 뒤 환경 링크를 놓는다. parser가 없는 경우의 시험은 공유 venv 대신 자기 링크만 옮긴다. | 3개 파일 독립 소스 리뷰, OCaml/Python 구문과 모의 subprocess 준비 경계를 확인했다. venv 설치·native parser·render 실행은 하지 않았다. 역사적 pinned probe는 바꾸지 않았다. |
+
+TUI의 실제 실행 영수증은 `artifacts/farm-tui-logging-20261116/run-3/`다. 컴파일러의
+`-version`과 `-where`가 모두 5.5.2임을 확인하고 새 소스 10개를 컴파일·연결해 두 suite를 실행했다.
+이전 run-1은 테스트의 비공개 상수 참조, run-2는 harness의 compiler PATH 불일치로 실패했다.
+두 실패 영수증을 보존했으며 구문 검사나 `ocamlfind` 파일명만으로 실행 성공을 판단하지 않았다.
+재사용한 admission 기반 소스 179개의 해시도 대조했다. 전체 Dune 의존 그래프 검사는 아니다.
+
+전체 스택에는 source start/quickstart/seed-team, carts/monitor와 사용자 입력을 받는
+run-local/installer의 실제 쓰기 대상 연결이 남는다. native가 확정한 BasePath와 shell의
+쓰기 경로가 달라지지 않아야 한다. 이 후속 작업은 별도 후보이며 아직 완료로 집계하지 않는다.
+읽기나 실패한 revoke를 계기로 UID를 자동 발급하거나, 기존 UID 없는 루트를 뒤늦게
+등록하는 방식으로 해결하지 않는다. raw credential 저장소와 명시적 host 도구 경로도
+자동으로 Workspace로 바꾸지 않는다.
 
 로컬 증거는 UID/SSH worktree의 `artifacts/farm-workspace-bootstrap-20261116/`와
 `artifacts/farm-workspace-first-writers-20261116/`에 있다. 전체 Dune 그래프, Linux,

@@ -2751,9 +2751,16 @@ let cut_source_positions fixture = io (fun () ->
     |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get in
   let external_cursor=Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
   atom,official,Keeper_external_read_cursor.observation_to_json external_cursor)
+let cut_memory_bytes fixture = io (fun () ->
+  List.map (fun path -> path,Fs_compat.load_file_opt path) [
+    Current.path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+    Current.journal_path_for_keepers_dir ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+    Current.durable_range_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name;
+    Current.publication_receipt_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name])
 let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () =
   with_same_binding_cut ~history_kind (fun fixture original request exact _schema ->
     let positions=cut_source_positions fixture and posts=F.post_count fixture.server in
+    let memory_before=cut_memory_bytes fixture in
     let parent=Owner.to_json original in
     let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
       ~request_id:exact.Exact.request_id |> get) in
@@ -2794,6 +2801,8 @@ let test_cut_effect_fence_preserves_unknown_without_a_successor history_kind () 
        | [intent] -> intent.Resolution_intent.intent_id=accepted.intent.intent_id
          && intent.phase=Resolution_intent.Requested && Option.is_none intent.memory_commit
        | [] | _::_::_ -> false);
+    check bool "Cut fencing and refused continuation preserve snapshot, journal, receipts and publication bytes" true
+      (cut_memory_bytes fixture=memory_before);
     refuse_fenced_resume fixture current_parent request)
 let test_cut_effect_fence_refuses_a_busy_claim_and_late_bad_proof () =
   with_same_binding_cut (fun fixture original _request exact schema ->

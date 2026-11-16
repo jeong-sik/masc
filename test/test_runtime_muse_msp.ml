@@ -338,6 +338,18 @@ let test_unknown_item_kind_is_kept () =
     (List.mem (Msp.Unrecognized_item_kind "hologramPreview") kinds)
 ;;
 
+let test_retained_history_kinds () =
+  List.iter (fun (wire, expected) ->
+    let params = `Assoc ["sessionId", `String "s-1"; "viewCursor", `String "boundary";
+      "item", `Assoc ["itemId", `String "history"; "kind", `String wire;
+        "turnId", `Null; "revision", `Int 1; "status", `String "completed"]] in
+    match ok_or_fail (Msp.parse_notification ~method_:"item/completed" params) with
+    | Msp.Item_completed { item; _ } ->
+      check bool "retained-history boundary has a typed kind" true (item.kind = expected)
+    | _ -> fail "item/completed must decode as an item")
+    ["earlierHistory", Msp.Earlier_history; "damagedRange", Msp.Damaged_range]
+;;
+
 (* Captured from Muse Code 1.4.0 on 2026-09-28 against a local synthetic
    model endpoint: a 7 MB input under a declared 10M-token window reached the
    model as a summary. Session, turn and item ids are shortened. *)
@@ -811,6 +823,7 @@ let () =
         ; test_case "view gap preserves subscription identity" `Quick test_view_gap_preserves_subscription_identity
         ; test_case "terminal cursor is required" `Quick test_terminal_cursor_is_required
         ; test_case "durable view page contract" `Quick test_durable_view_page_contract
+        ; test_case "retained history kinds" `Quick test_retained_history_kinds
         ] )
     ]
 ;;

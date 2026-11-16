@@ -265,11 +265,15 @@ type turn_result =
         message is never the reply. [Some ""] is an explicit blank. [None]
         means the model gave no answer: a turn whose message MASC may have
         missed (a view gap during the turn, or a message still open at the
-        terminal) is a [Protocol_error], never [Ok] with [None]. *)
+        terminal) is a [Protocol_error], never [Ok] with [None]. After
+        compaction, a final answer must remain in the contiguous durable
+        suffix: the checkpoint's transcript tail cannot supply it. *)
   ; usage : Runtime_muse_msp.token_usage option
     (** Terminal aggregate, enriched with counted-once counts when the
         observed completions agree; otherwise the sum of this turn's unique
-        completion events when the terminal omits usage. Never session totals. *)
+        completion events when the terminal omits usage. If compaction
+        replaced the prefix, only a terminal aggregate can certify the
+        whole-turn usage. Never session totals or a suffix's partial sum. *)
   ; last_call_usage : Runtime_muse_msp.token_usage option
     (** The counts of this turn's newest model call ([session/tokenUsage]),
         with its counted-once [prompt_tokens]: what that request carried.
@@ -281,7 +285,8 @@ type turn_result =
     (** What the host reported for this turn's model calls
         ([session/tokenUsage]) in call order; a call that names the same model
         as the one before it, or like it names none, adds nothing. Empty when
-        the host reported no call. [model] is what the session selected;
+        the host reported no call in the retained range. Compaction can
+        replace older calls with a checkpoint tail. [model] is what the session selected;
         these are what the calls ran on. *)
   ; resumed : bool
   ; server_version : string
@@ -306,7 +311,8 @@ type turn_items =
           answer, or a kind MASC does not know. Live delivery may name it
           without a durable read; it only ever refuses quiet. *)
   | Turn_items_unread of string
-      (** The durable range could not be read, so nothing is proven. *)
+      (** The complete durable range could not be read, including a prefix
+          replaced by compaction, so the absence of effects is not proven. *)
 
 type stream_event =
   | Turn_started of

@@ -244,6 +244,8 @@ val count_and_read_recent_view : 'a recent_view -> t -> int * 'a list
 (** Count all retained complete lines and project the recent window from one
     shared day-file listing. Reuses the existing per-file count cache and
     recent-view invalidation; files are still checked for external changes.
+    Counts use [count_entries]'s [.jsonl] selection, including dot-prefixed
+    files. Recent rows keep the view's validated dated-file selection.
     This is a best-effort observation, not an atomic multi-file snapshot.
     On listing failure, uses the same permissive count/recent readers without
     retaining a recent answer under an incomplete listing. *)

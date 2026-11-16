@@ -276,6 +276,29 @@ let test_count_and_recent_view_preserve_listing_failure_fallback () =
   check bool "a failed listing keeps no recent answer" true (!projected > first_projection)
 ;;
 
+let test_count_and_recent_view_keep_hidden_jsonl_counts_across_fallback () =
+  let location = temp_store "dated_jsonl_joint_hidden_count" in
+  let dir = Dated_jsonl.Store.dir location in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  Fs_compat.save_file (day_path dir "2026-01" ".saved") "{\"i\":99}\n";
+  let store = Dated_jsonl.open_store location in
+  let view = view_of_i 2 in
+  let read () = Dated_jsonl.count_and_read_recent_view view store in
+  let expected_count = Dated_jsonl.count_entries store in
+  check int "existing count includes the hidden JSONL" 2 expected_count;
+  check (pair int (list int)) "successful listing keeps count and recent selections"
+    (expected_count, [ 1 ]) (read ());
+  let invalid_month = Filename.concat dir "2026-99" in
+  Fs_compat.mkdir_p invalid_month;
+  let count, recent = read () in
+  check int "listing fallback keeps the unchanged hidden file in the count" expected_count count;
+  check (list int) "fallback preserves the existing permissive recent reader"
+    (Dated_jsonl.filter_map_recent store 2 ~f:(fun json -> Some (json_i json))) recent;
+  Unix.rmdir invalid_month;
+  check (pair int (list int)) "successful listing again keeps the same count"
+    (expected_count, [ 1 ]) (read ())
+;;
+
 let test_recent_view_reads_like_filter_map_recent () =
   let location = temp_store "dated_jsonl_view_reads" in
   let dir = Dated_jsonl.Store.dir location in
@@ -1965,6 +1988,8 @@ let () =
             test_count_and_recent_view_follow_external_changes;
           test_case "joint count and recent preserve listing failure fallback" `Quick
             test_count_and_recent_view_preserve_listing_failure_fallback;
+          test_case "joint count keeps hidden JSONL across fallback" `Quick
+            test_count_and_recent_view_keep_hidden_jsonl_counts_across_fallback;
           test_case "reads like filter_map_recent" `Quick
             test_recent_view_reads_like_filter_map_recent;
           test_case "keeps the answer while files hold" `Quick

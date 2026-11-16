@@ -271,7 +271,7 @@ let list_month_dirs_result base_dir =
     entries
 ;;
 
-let list_day_files_result month_path =
+let list_day_entries_result month_path =
   let open Result.Syntax in
   let month_entry = Filename.basename month_path in
   let* year, month =
@@ -286,12 +286,18 @@ let list_day_files_result month_path =
            })
   in
   let* entries = list_directory_result ~missing_is_empty:false month_path in
-  validate_layout_entries
-    ~parent:month_path
-    ~expected:Day_file
-    ~is_valid:(day_file_name_is_valid ~year ~month)
-    entries
-  |> Result.map (List.sort (fun left right -> compare_day_files right left))
+  let* days =
+    validate_layout_entries
+      ~parent:month_path
+      ~expected:Day_file
+      ~is_valid:(day_file_name_is_valid ~year ~month)
+      entries
+  in
+  Ok (entries, List.sort (fun left right -> compare_day_files right left) days)
+;;
+
+let list_day_files_result month_path =
+  list_day_entries_result month_path |> Result.map snd
 ;;
 
 let month_dir_paths_newest_first_result t =
@@ -1076,6 +1082,28 @@ let day_file_paths_newest_first_listed t =
   in
   collect [] months
 
+(* Counts have always included every .jsonl name; recent views ignore foreign
+   dotfiles. Keep both selections from the same successful directory reads so
+   switching to permissive fallback does not add previously omitted dotfiles
+   to the count. *)
+let day_file_paths_for_summary t =
+  let open Result.Syntax in
+  let* months = month_dir_paths_newest_first_result t in
+  let rec collect count_parts recent_parts = function
+    | [] -> Ok (List.concat (List.rev count_parts), List.concat (List.rev recent_parts))
+    | month :: older ->
+      let* entries, days = list_day_entries_result month in
+      let counted =
+        entries
+        |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+        |> List.sort (fun left right -> compare_day_files right left)
+        |> List.map (Filename.concat month)
+      in
+      let recent = List.map (Filename.concat month) days in
+      collect (counted :: count_parts) (recent :: recent_parts) older
+  in
+  collect [] [] months
+
 let read_recent_view_over view t day_files =
   let kept =
     Stdlib.Mutex.protect view.rv_mu (fun () ->
@@ -1581,14 +1609,14 @@ let count_entries_incremental t =
 let count_entries = count_entries_incremental
 
 let count_and_read_recent_view view t =
-  match day_file_paths_newest_first_listed t with
+  match day_file_paths_for_summary t with
   | Error _ ->
     let count = count_entries t in
     count, filter_map_recent t view.rv_rows ~f:view.rv_project
-  | Ok day_files ->
+  | Ok (counted_files, recent_files) ->
     let count = List.fold_left
-      (fun total path -> total + count_non_empty_lines_cached path) 0 day_files in
-    count, read_recent_view_over view t day_files
+      (fun total path -> total + count_non_empty_lines_cached path) 0 counted_files in
+    count, read_recent_view_over view t recent_files
 ;;
 
 let reset_count_cache_for_testing () =

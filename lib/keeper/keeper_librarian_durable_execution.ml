@@ -16,6 +16,7 @@ module Floor_cleanup = Keeper_librarian_floor_cleanup
 module Floor_publish = Keeper_librarian_floor_publish
 module Resolution_lineage = Keeper_librarian_history_resolution_lineage
 module Resolution_work = Keeper_librarian_history_resolution_work
+module Declaration_replacement = Keeper_librarian_declaration_replacement
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
@@ -474,11 +475,28 @@ let rec consume_one ~config ~keeper_name ~wake =
       Keeper_librarian_durable_gate.Inventory.executions inventory) gates in
     let parents=List.filter_map (fun (_,(index:Request.index)) -> Option.map
       (fun (predecessor:Request.predecessor) -> predecessor.request_id) index.predecessor) listed in
+    let isolated (record,(index:Request.index)) =
+      let id=Record.request_id record and progress=Record.progress record in
+      not (fenced id) && Option.is_none index.predecessor
+      && Option.is_none (Progress.preparation progress)
+      && Option.is_none (Progress.replacement progress)
+      && not (List.mem id parents) && not (List.mem id executions) in
+    let ended=List.fold_left (fun result ((record,(index:Request.index)) as original) ->
+      let* ended=result in
+      if not (isolated original) then Ok ended else
+      let+ replaced=Declaration_replacement.retained ~original:record ~captured:index.destination in
+      if replaced then original::ended else ended) (Ok []) listed in
+    match ended with
+    | Error detail -> error detail
+    | Ok ended ->
+    let is_ended (record,_)=List.exists (fun (ended,_) ->
+      Record.request_id ended=Record.request_id record) ended in
     let waits (record,(index:Request.index)) =
       let id=Record.request_id record and progress=Record.progress record in
       (match Progress.phase progress with
        | Progress.Dispatch_pending _ -> true
-       | Captured | Admission_wait _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
+       | Captured | Admission_wait _ -> isolated (record,index)
+       | Judged _ | Committing _ | Commit_unknown _ | Finished _
        | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
       && not (fenced id)
       && Option.is_none (Progress.preparation progress)
@@ -491,7 +509,8 @@ let rec consume_one ~config ~keeper_name ~wake =
     let waiting=List.filter waits listed in
     let is_waiting (record,_)=List.exists (fun (waiting,_) ->
       Record.request_id waiting=Record.request_id record) waiting in
-    let read=List.filter (fun original -> not (unread original || is_waiting original)) listed
+    let read=List.filter (fun original ->
+      not (unread original || is_waiting original || is_ended original)) listed
       |> Owner.load_many ~store in
     match read with
     | Error failure -> error (Owner.error_to_string failure)
@@ -555,6 +574,21 @@ let rec consume_one ~config ~keeper_name ~wake =
     match validate_lineage ~store ~fenced ~read:originals listed with
     | Error detail -> error detail
     | Ok superseded ->
+    let moved=List.fold_left (fun result (record,(index:Request.index)) ->
+      let* moved=result in
+      let* ()=io (fun () ->
+        let* _=Request.observe_index_owner ~base_path ~keepers_dir index in
+        let* fence=Resolution_lineage.fenced_record ~store ~record ~index in
+        let* ()=require (Option.is_none fence) "Replaced history original acquired an operator fence" in
+        let* ()=Declaration_replacement.confirm_no_execution ~store ~original:record
+          ~exact_digest:index.exact_digest in
+        let* date=Request.minted_on (Record.request_id record) in
+        Retained.settle ~store ~date record |> Result.map_error Retained.settle_error_to_string) in
+      Ok (moved+1)) (Ok 0) ended in
+    match moved with
+    | Error detail -> error ("Before-admission replacement did not settle: " ^ detail)
+    | Ok moved when moved>0 -> consume_one ~config ~keeper_name ~wake
+    | Ok _ ->
     match io (fun () -> Refusal.inventory (match observed with
       | None -> [] | Some (_,_,_,settled) -> settled)) with
     | Error detail -> error ("Original history refusal inventory did not resolve: " ^ detail)

@@ -2230,7 +2230,7 @@ let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture -
   let retained=Option.get retained in
   check json "old epoch evidence remains observable without restoring authority" original retained.Owner.request;
   check int "epoch invalidation starts no replacement provider" posts (F.post_count fixture.server))
-let retain_absent_history_original ?(failed_selection=true) fixture =
+let retain_absent_history_original ?(failed_selection=true) ?(admitted=true) fixture =
   let captured = ref None in
   (match memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
     ~commit:(fun source -> captured := Some source;
@@ -2254,9 +2254,97 @@ let retain_absent_history_original ?(failed_selection=true) fixture =
     | Ok (Owner.Stored original | Already_stored original) -> original
     | Ok (Unconfirmed detail) -> fail detail
     | Error error -> fail (Owner.update_error_to_string error)) in
-  let original = advance original Progress.Dispatch_intended in
-  let original = advance original (Progress.Execution_observed (Progress.Absent (`Assoc []))) in
+  let original = if admitted then (
+    let original = advance original Progress.Dispatch_intended in
+    advance original (Progress.Execution_observed (Progress.Absent (`Assoc [])))) else original in
   original, request
+let test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wait () =
+  with_fixture (fun ~sw fixture ->
+    let original,request=retain_absent_history_original ~failed_selection:false ~admitted:false fixture in
+    let advance original event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:original ~event with
+      | Ok (Owner.Stored original | Already_stored original) -> original
+      | Ok (Unconfirmed detail) -> fail detail
+      | Error error -> fail (Owner.update_error_to_string error)) in
+    let original=if capacity_wait then (
+      let original=advance original Progress.Dispatch_intended in
+      advance original (Progress.Admission_declined (`Assoc ["state",`String "capacity_wait"]))) else original in
+    let original_record=Owner.listed original in
+    let original_input=Source.input (Capture.source request) in
+    let positions=progress fixture in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get)
+      |> Keeper_external_read_cursor.observation_to_json in
+    let cursor_before=cursor () in
+    let body=Filename.concat (Store.root fixture.store)
+      (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest) in
+    io (fun () -> write body "unreadable original body";
+      write fixture.source (fixture.declaration false));
+    let wakes=ref 0 in
+    let pass ()=memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+      ~wake:(fun () -> incr wakes)) in
+    assert_pending (pass ());
+    check int "an unavailable fresh declaration creates no replacement wake" 0 !wakes;
+    let held ()=io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+      ~request_id:original.request_id |> owned |> Option.get) in
+    check json "waiting never changes the unadmitted original" (Progress.to_json original.progress)
+      (Progress.to_json (Owner.Record.progress (held ())));
+    io (fun () -> write fixture.source (fixture.declaration true));
+    let replacement=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replacement\"" | line -> line)
+      |> String.concat "\n" in
+    replace_actual_worker_configuration fixture ~sw replacement;
+    (match pass () with
+     | Ok (Consumer.Memory_not_committed _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a ready replacement did not end the unadmitted original without its body");
+    check int "only confirmed replacement wakes the next pass" 1 !wakes;
+    check bool "the replacement refusal binds both original destinations" true
+      (Keeper_librarian_declaration_replacement.retained ~original:(held ())
+        ~captured:(Capture.destination request) |> get);
+    check bool "before-admission replacement advances no source position" true (progress fixture=positions);
+    check json "before-admission replacement advances no external ACK" cursor_before (cursor ());
+    check int "the unadmitted original was never dispatched" 0 (F.post_count fixture.server);
+    no_memory fixture;
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    drive_advanced fixture;
+    let fresh,capture=only_original fixture in
+    check bool "rollback creates a separate original instead of reviving the old one" true
+      (fresh.request_id<>Owner.Record.request_id original_record);
+    check bool "the fresh original retains the full unread history" true
+      ((Source.input (Capture.source capture)).messages=original_input.messages);
+    check bool "the fresh original retains all counterpart input" true
+      ((Source.input (Capture.source capture)).counterpart_observations=original_input.counterpart_observations);
+    (match Progress.phase (archived fixture ~date:(day_of original.request_id) original) with
+     | Progress.Rejected {stage=Before_dispatch;_} -> ()
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Execution;_} | Subdividing _ | Subdivided _ ->
+       fail "the original refusal was not archived without its body");
+    check int "only the fresh original reaches a provider" 1 (F.post_count fixture.server))
+let test_unadmitted_replacement_preserves_existing_host_execution () = with_fixture (fun ~sw fixture ->
+  let original,request=retain_absent_history_original ~failed_selection:false ~admitted:false fixture in
+  let exact=Capture.request request |> get in
+  io (fun () -> Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
+    (`Assoc ["declaration_id",`String "librarian";"request_id",`String exact.request_id;
+      "digest",`String (Exact.digest exact);"request",Exact.request_to_json exact;
+      "attempts",`List [`Assoc ["started",`String "0123456789abcdef0123456789abcdef"]];"final",`Null]) |> get);
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_actual_worker_configuration fixture ~sw replacement;
+  let positions=progress fixture and wakes=ref 0 in
+  (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+     ~wake:(fun () -> incr wakes)) with
+   | Error (Consumer.Original_publication_blocked _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "an original with host execution evidence was replaced before admission");
+  let held=io (fun () -> Owner.load_record ~store:fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> owned |> Option.get) in
+  check json "host execution uncertainty leaves the original phase intact"
+    (Progress.to_json original.progress) (Progress.to_json (Owner.Record.progress held));
+  check int "uncertain execution grants no replacement wake" 0 !wakes;
+  check int "uncertain execution grants no provider replay" 0 (F.post_count fixture.server);
+  check bool "uncertain execution advances no source position" true (progress fixture=positions);
+  no_memory fixture)
 let test_replacement_terminal_survives_worker_gap ~rollback () = with_fixture (fun ~sw fixture ->
   let _,request=retain_absent_history_original ~failed_selection:false fixture in
   let original_input=Source.input (Capture.source request) in
@@ -4938,6 +5026,12 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_replacement_terminal_survives_worker_gap ~rollback:false);
   test_case "a host replacement survives declaration rollback without replay" `Quick
     (test_replacement_terminal_survives_worker_gap ~rollback:true);
+  test_case "Captured replacement ends and archives without reading its body" `Quick
+    (test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wait:false);
+  test_case "Admission_wait replacement ends and archives without reading its body" `Quick
+    (test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wait:true);
+  test_case "pre-admission replacement refuses an original with host execution evidence" `Quick
+    test_unadmitted_replacement_preserves_existing_host_execution;
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
   test_case "legacy omitted original blocks admission but prepares a safe continuation" `Quick

@@ -20,6 +20,27 @@
 독립 리뷰에서 발견한 두 항목을 반영했다. `Memory_replaced`를 받는 실제 capacity callback fixture의 닫힌 match를 추가했고,
 종결 직후 worker 재조회 실패가 일반 refusal로 바뀌던 경계를 host의 저장된 사유로 바꿨다.
 
+첫 단위 `436c5d39cd99d7d9f59f58446a8b5f9452fe37cd`의 32개 파일을 두 독립 세션이 읽었다.
+두 세션은 그 head와 위 범위에서 추가 P0/P1/P2를 찾지 못했다. 정식 GitHub 승인은 아니다.
+이 단위는 지금 package가 원래 output과 요청 schema를 계속 허용하는 선언 교체를 다룬다.
+현재 package의 capability 철회는 기존 권한 검사에서 일반 `Not_allowed`가 되는 순서를 유지한다.
+
+## 다음 단위: 접수 전 history 요청
+
+`Captured`·`Admission_wait`는 본문을 읽기 전에 지금 준비된 목적지를 관찰한다.
+교체 관계가 확정되고 원래 Exact 기록과 실행 proof가 모두 없을 때만 `Before_dispatch`로 끝낸다.
+그 증거는 scope·요청 ID·본문 digest·원래 summary와 당시 두 목적지를 묶는다.
+저장된 증거를 읽을 때는 그 값들만 검증하므로 rollback 뒤에도 종결은 유지된다.
+worker가 아직 준비되지 않았으면 요청을 그대로 기다리며, 실행 기록을 발견하면 교체를 거부한다.
+
+다른 요청과 연결되지 않고 Gate나 사전 준비 기록도 없는 history 요청은 inventory에서 본문을 읽지 않는다.
+이미 끝난 교체 증거를 확인한 다음 전체 lineage 검사와 물리 owner·operator fence·실행 기록 부재를 다시 확인하고
+기존 Store의 엄격한 archive 경로로 옮긴다. 새 원본은 그다음에 미소비 source를 다시 읽는다.
+이 경로는 본문이 읽히지 않아도 끝내고 정리할 수 있다. 연결된 요청과 floor의 접수 전 처리는 아직 이 범위 밖이다.
+
+실제 Runtime fixture에 두 접수 전 상태의 손상된 본문, 준비 전 대기, 종결·archive 사이 rollback,
+새 요청만 한 번 실행되는 경우와 기존 host 실행 기록 때문에 교체를 거부하는 회귀를 추가했다. 실행은 미실행이다.
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
@@ -33,7 +54,7 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 
 ## 남은 범위
 
-- 접수 전 `Captured`·`Admission_wait`를 본문을 읽지 않고 끝내는 progress evidence와 inventory 경로는 다음 단위다.
+- 연결된 history의 접수 전 상태와 preflight가 손상된 저장 본문을 만난 기동 경계는 별도 확인이 남는다.
 - preAdmission floor 처리는 다음 단위다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
 - `cut`·`raised`와 이미 받은 `Judged` 결과·admission part는 별도 상태다. 이번 단위는 불확실한 외부 실행을 자동 재전송하지 않는다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.

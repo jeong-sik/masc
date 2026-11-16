@@ -4,6 +4,7 @@ module Destination = Lane_addon_captured_destination
 module Runtime = Lane_addon_runtime
 module Submit = Lane_addon_submit_once
 let ( let* ) = Result.bind
+let ( let+ ) result f = Result.map f result
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 let require condition detail = if condition then Ok () else Error detail
 let runtime_error = function
@@ -53,6 +54,10 @@ let call ~config ~reserved ~(expected : Request.destination) ~(original : Retain
     |> Result.map_error Submit.call_error_of_runtime
 let confirm_destination ~config ~reserved (destination:Request.destination) =
   Submit.confirm_destination ~config ~reserved ~label:"history" destination
+
+let observe_destination ~config ~reserved destination =
+  let+ _,current=Submit.destination_relation ~config ~reserved ~label:"history" destination in
+  current
 
 let observe_relation ~config ~reserved destination =
   let+ relation,_=Submit.destination_relation ~config ~reserved ~label:"history" destination in

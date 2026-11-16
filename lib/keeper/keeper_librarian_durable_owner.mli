@@ -75,7 +75,8 @@ type held =
       (** Its record and index. Its fence and predecessor are checked on them,
           and {!load} reads the body only in the branches of
           [Lane_addon_submit_once.resume] that need it, and for commit and
-          settled phases. *)
+          settled phases. A pre-admission declaration replacement is checked
+          and recorded before any body read. *)
   | Read of (Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t)
       (** Already read with its body, which is checked before anything else. *)
 val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->

@@ -85,7 +85,9 @@ val delivery_key_to_yojson : delivery_key -> Yojson.Safe.t
 val delivery_key_of_yojson : Yojson.Safe.t -> (delivery_key, string) result
 val delivery_key_equal : delivery_key -> delivery_key -> bool
 val delivery_key_compare : delivery_key -> delivery_key -> int
-(** Total order for immutable indexes; zero exactly when [delivery_key_equal]. *)
+(** Total order for immutable indexes; zero exactly when [delivery_key_equal].
+    When constructor fields change, update comparison, equality and identity
+    coverage together so both operations still describe the same identity. *)
 val transcript_slot_to_yojson : transcript_slot -> Yojson.Safe.t
 val transcript_slot_of_yojson : Yojson.Safe.t -> (transcript_slot, string) result
 val transcript_slot_equal : transcript_slot -> transcript_slot -> bool

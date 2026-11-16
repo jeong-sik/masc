@@ -137,6 +137,47 @@ let test_restore_refuses_tampering () = with_prompts (fun () ->
   check bool "invalid caller time refuses before durable dispatch" true
     (Result.is_error (R.prepare_durable ~source_lines:[] ~now:(-1.) (input ()))))
 
+let test_restoration_keeps_the_frozen_contract () = with_prompts (fun () ->
+  let original=R.prepare_durable ~source_lines:[] ~now:123. (input ()) |> get in
+  let restore (p:R.durable_preparation)=R.restore_durable_preparation
+    ~source_input:p.source_input ~parsing_now:p.parsing_now ~policy:p.policy
+    ~rule_prompt:p.rule_prompt ~turn_prompts:p.turn_prompts ~prompt:p.prompt
+    ~output_schema:p.output_schema in
+  let restored=restore original |> get in
+  check bool "restoration preserves the complete frozen question" true (restored=original);
+  List.iter (fun changed ->
+    check bool "invalid frozen fields still refuse during restoration" true
+      (Result.is_error (restore changed)))
+    [{original with parsing_now=Float.nan};
+     {original with parsing_now=(-1.)};
+     {original with policy={original.policy with category_cap=0}};
+     {original with rule_prompt={original.rule_prompt with effective="Unbound rule"}};
+     {original with turn_prompts={original.turn_prompts with
+       working_context_input={original.turn_prompts.working_context_input with source=Prompt_registry.Missing}}};
+     {original with prompt={original.prompt with effective="Unbound body"}};
+     {original with output_schema=`Assoc ["type",`String "string"]}];
+  let frozen=Keeper_librarian_durable_question.(of_json (to_json original)) |> get in
+  let changed_source=restore {original with source_input={original.source_input with
+    keeper_instructions="Another captured instruction"}} |> get in
+  check bool "the retained prompt digest still refuses changed captured input" true
+    (Result.is_error (Keeper_librarian_durable_question.rendered_matches frozen changed_source));
+  let context:R.durable_step_context={previous_state=Some "Carried state";unread_messages=[]} in
+  Prompt_registry.set_override Prompt_names.librarian
+    "{{turn_inputs}}\n{{continuity}}\n{{working_contexts_rule}}" |> get;
+  let step=R.prepare_durable_step ~source_lines:[] ~now:123. ~context (input ()) |> get in
+  let p=step.preparation in
+  let restore_step ~context ~source_input=R.restore_durable_step_preparation ~context ~source_input
+    ~parsing_now:p.parsing_now ~policy:p.policy ~rule_prompt:p.rule_prompt
+    ~turn_prompts:p.turn_prompts ~prompt:p.prompt ~output_schema:p.output_schema in
+  check bool "floor restoration preserves its source, carried state and schema" true
+    (get (restore_step ~context ~source_input:p.source_input)=step);
+  check bool "a restored floor cannot carry the ordinary working context" true
+    (Result.is_error (restore_step ~context ~source_input:{p.source_input with
+      working_context=(input ()).working_context}));
+  check bool "a supplied floor record cannot change carried state without its prompt" true
+    (Result.is_error (R.validate_durable_step_preparation
+      {step with context={context with previous_state=Some "Changed carried state"}})))
+
 let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fun () ->
   let counterpart : Keeper_counterpart_observation.t =
     {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "speaker";
@@ -347,6 +388,8 @@ let () = run "Original history Memory preparation" ["preparation",[
   test_case "original capture survives current prompt and policy changes" `Quick test_original_preparation;
   test_case "normal raw parser and absorption inputs remain original" `Quick test_original_validation_and_absorption;
   test_case "restore inconsistency never reaches domain parsing" `Quick test_restore_refuses_tampering;
+  test_case "restoration preserves frozen validation and the floor context" `Quick
+    test_restoration_keeps_the_frozen_contract;
   test_case "counterpart admission requires a substitution while legacy restores" `Quick
     test_counterpart_template_admission_and_legacy_restore;
   test_case "admission omits the turn-material slots that durable questions render" `Quick

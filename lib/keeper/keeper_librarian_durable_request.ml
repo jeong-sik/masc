@@ -170,7 +170,10 @@ let to_json capture = `Assoc ["schema",`Int 2;"kind",`String "completed-history-
   "predecessor",predecessor_json capture.predecessor;
   "preparation",preparation_json capture.preparation]
 let header_fields json = fields ["schema";"kind";"request_id";"owner";"destination";"source_text";"predecessor";"preparation"] json
-let validate capture =
+(* Both callers restore and validate the frozen preparation first. This
+   private check binds that preparation to its source and owner; rendering it
+   again would only reconstruct the immutable values just checked. *)
+let validate_source_binding capture =
   let* expected_scope=scope_of_request_id capture.id in
   let* ()=require (expected_scope=scope capture.owner) "Original history execution belongs to another physical scope" in
   let* ()=match capture.predecessor with
@@ -186,9 +189,8 @@ let validate capture =
     "Original history source belongs to another Keeper" in
   let facts=match (Source.input capture.source).current with None -> [] | Some current -> current.facts in
   let ids=List.map Keeper_memory_os_types.memory_id facts in
-  let* ()=require (List.length ids=List.length (List.sort_uniq String.compare ids))
-    "Original history current Memory repeats an identity" in
-  Runtime.validate_durable_preparation capture.preparation
+  require (List.length ids=List.length (List.sort_uniq String.compare ids))
+    "Original history current Memory repeats an identity"
 let confirm_source_root capture =
   let* actual=Fs_compat.with_owned_inventory_root (Source.runtime_keepers_dir capture.source)
     (fun root -> Ok (physical root)) |> owned in
@@ -202,7 +204,7 @@ let create ?predecessor ~request_id ~owner ~destination ~source ~(preparation:Ru
     "Original history preparation does not describe its source" in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (preparation_json preparation) in
   let capture={id=request_id;owner;destination;source;source_text;predecessor;preparation;digest=""} in
-  let* ()=validate capture in
+  let* ()=validate_source_binding capture in
   let* ()=confirm_source_root capture in
   let+ digest=Owner.request_digest (to_json capture) in {capture with digest}
 let request capture = Question.request ~request_id:capture.id capture.preparation
@@ -279,7 +281,7 @@ let decode ~owner ~digest json =
     "Original history source text is not its complete canonical encoding" in
   let* preparation=preparation_of_json ~source_input:(Source.input source) (value "preparation" f) in
   let capture={id;owner;destination;source;source_text;predecessor;preparation;digest=""} in
-  let* ()=validate capture in
+  let* ()=validate_source_binding capture in
   let* ()=equal json (to_json capture) "Original history request encoding differs" in
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {capture with digest}

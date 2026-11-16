@@ -120,7 +120,9 @@ let validate_links ~owner ~id ~range ~previous ~position =
     "Original floor step position disagrees with its place in the chain"
 let source_digest = function
   | Unread.Atom {message_sha256;_} | Unread.Official_turn {message_sha256;_} -> message_sha256
-let validate step =
+(* Binding checks shared by creation and decode. Decode has already restored
+   the preparation; creation separately validates the public supplied step. *)
+let validate_binding step =
   let input=step.step.preparation.source_input in
   let* ()=require (String.trim step.transaction_id<>"") "Original floor step has no chain transaction" in
   let* ()=validate_links ~owner:step.owner ~id:step.id ~range:step.range ~previous:step.previous
@@ -129,14 +131,13 @@ let validate step =
     "Original floor step belongs to another Keeper" in
   let* ()=require (input.goal_context=Keeper_librarian.No_task)
     "Original floor step cannot borrow a task's Goal context" in
-  let* ()=match step.sources,input.messages with
+  match step.sources,input.messages with
     | [],[] -> Ok ()
     | [source],[message] ->
       require (source_digest source=Unread.message_digest message)
         "Original floor step source hash differs from its message"
     | [],_::_ | _::_,[] | _::_::_,_ | _,_::_::_ ->
-      Error "Original floor step does not carry exactly its message" in
-  Runtime.validate_durable_step_preparation step.step
+      Error "Original floor step does not carry exactly its message"
 (* The step is the question the floor asks now: same message, same carried
    state and unread messages, same input. Inputs compare by what is retained. *)
 let matches_question (question:Machine.question) step =
@@ -179,7 +180,7 @@ let decode ~owner ~digest json =
     ~parsing_now ~policy ~rule_prompt ~turn_prompts ~prompt ~output_schema in
   let* ()=Question.rendered_matches frozen step.preparation in
   let draft={id;owner;destination;transaction_id;range;previous;position;sources;step;digest=""} in
-  let* ()=validate draft in
+  let* ()=validate_binding draft in
   let* ()=equal json (to_json draft) "Original floor step request encoding differs" in
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {draft with digest}
@@ -187,7 +188,8 @@ let create ~request_id ~owner ~destination ~transaction_id ~range ~previous ~(qu
   let* destination=Durable.destination_of_json (Destination.to_json destination) in
   let draft={id=request_id;owner;destination;transaction_id;range;previous;position=question.position;
     sources=question.sources;step;digest=""} in
-  let* ()=validate draft in
+  let* ()=validate_binding draft in
+  let* ()=Runtime.validate_durable_step_preparation step in
   let* ()=matches_question question draft in
   decode ~owner ~digest:None (to_json draft)
 let binds_record ~owner ~id ~(destination:Durable.destination) (record:Owner.retained) =

@@ -231,8 +231,12 @@ let of_json ?home_dir = function
         | None,Muse -> invalid "account_home"
         | (None, Ollama) | (None, Llama_cpp) | (None, Vllm) | (None, Openai_compatible)
         | (None, Messages) | (None, Claude_code) | (None, Codex) | (None, Antigravity) -> Ok None
-        | Some home,_ when Runtime_account_home.is_valid home -> Ok (Some home)
-        | Some _,_ -> invalid "account_home" in
+        | Some raw_home, (Claude_code | Codex | Muse) ->
+          (match Runtime_account_home.of_string_under ~home:home_dir raw_home with
+           | Ok expanded -> Ok (Some expanded)
+           | Error _ -> invalid "account_home")
+        | Some _, (Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity) ->
+          invalid "account_home" in
       let* oauth,timeout = if choice <> Antigravity then Ok (None,None) else (
         let* path = required fields "credential_file" in
         let path = match home_dir with

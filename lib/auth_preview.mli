@@ -18,10 +18,10 @@
     that starts a GitHub login with the token of the link. [nonce] is the
     nonce of its script. [github] is whether the server has a GitHub login
     client: without one the button cannot be pressed and the page says that
-    the server has no GitHub login. An address with no token shows how to open
-    the invitation again in place of the form. The pages start no Google
-    login. *)
-val invite_page : nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
+    the server has no GitHub login. When [google] is [true], the page also
+    renders a [POST /auth/oidc/start] form. An address with no token shows how
+    to open the invitation again in place of the form. *)
+val invite_page : google:bool -> nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
 
 (** [GET /]: for a browser with no session, a form that starts a GitHub
     login and no answer of a route. When the session routes do not say whether
@@ -31,7 +31,7 @@ val invite_page : nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
     does not give the console (a 503 while the dashboard bundle cannot be
     read), the page stays, says so, and offers the sign-out
     ([POST /auth/logout]) in its place. *)
-val home_page : nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
+val home_page : google:bool -> nonce:Csp_nonce.t -> github:bool -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}
     on a snapshot the zone could be trusted for ({!Authz_zone.read}), as

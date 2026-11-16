@@ -185,6 +185,7 @@ let location_label = function
 
 let expand_home ?home_dir path =
   match home_dir with
+  | Some home when String.equal path "~" -> home
   | Some home when String.starts_with ~prefix:"~/" path ->
     Filename.concat home (String.sub path 2 (String.length path - 2))
   | Some _ | None -> path
@@ -193,8 +194,8 @@ let expand_home ?home_dir path =
 (* Both login stores are absolute paths kept exactly as written, which is the
    rule [Runtime_account_home] states; only the message differs. *)
 let location_of ?home_dir client raw =
-  match home_dir, Runtime_account_home.of_string (expand_home ?home_dir raw) with
-  | None, Error _ when String.starts_with ~prefix:"~/" raw ->
+  match home_dir, Runtime_account_home.of_string_under ~home:home_dir raw with
+  | None, Error _ when String.equal raw "~" || String.starts_with ~prefix:"~/" raw ->
     Error (Invalid_location "~/ is expanded from HOME, which is not set; type an absolute path")
   | _, Ok path -> Ok path
   | _, Error reason ->
@@ -214,7 +215,7 @@ let login_store ?home_dir ~inherited_home client table =
   match client with
   | Claude_code | Codex | Muse ->
     (match string_field "account-home" table with
-     | Some home -> Some home
+     | Some home -> Some (expand_home ?home_dir home)
      | None -> inherited_home client)
   | Antigravity ->
     Option.map

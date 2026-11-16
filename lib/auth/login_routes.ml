@@ -464,7 +464,21 @@ let callback t provider ~transaction_cookie ~query =
     let* user_id, return_to, replaces = complete t login sealed ~state returned in
     let now_ms = ms_of (t.now ()) in
     let replaces = Option.bind replaces (still_acting t ~now_ms) in
-    let* cookie = Bs.issue t.zone ~user_id ~draw:t.draw ~replaces |> Result.map_error issue_failure in
+    let* cookie =
+      match Bs.issue t.zone ~user_id ~draw:t.draw ~replaces with
+      | Ok cookie -> Ok cookie
+      | Error (Bs.Commit_failed _) as first_err ->
+        (* If the replaced session concurrently ended or expired between
+           [still_acting] and [Bs.issue], retry without [replaces] so a
+           redeemed one-time invitation still receives its session cookie. *)
+        (match replaces with
+         | Some old_sid when Option.is_none (still_acting t ~now_ms:(ms_of (t.now ())) old_sid) ->
+           Bs.issue t.zone ~user_id ~draw:t.draw ~replaces:None
+           |> Result.map_error issue_failure
+         | Some _ | None -> Result.map_error issue_failure first_err)
+      | Error (Bs.Id_not_drawn _ | Bs.Body_not_built _) as err ->
+        Result.map_error issue_failure err
+    in
     Ok (return_to, cookie)
   in
   let answer =

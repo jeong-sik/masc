@@ -351,6 +351,43 @@ let publish ~attempt ~target =
   try Sys.rename attempt target; Ok target with
   | Sys_error detail -> discard attempt; Error detail
 
+(* The rename keeps a reader from seeing half a file, but downloads of one URL
+   -- in this TUI or another on the same cache directory -- finish in any
+   order, and the last rename would win. So an explicit retry starts a new
+   generation for the URL by replacing a token file beside the cache entry. A
+   download notes the generation it began in and publishes only while that
+   generation is still the URL's: one that began before the latest retry keeps
+   its own bytes but cannot replace or refill the retry's entry. The token is
+   replaced, never held, so nothing waits on it and a cancelled or killed
+   download leaves nothing for another to clear. *)
+type generation = Before_any_retry | Since_retry of string
+
+let generation_path ~cache_dir url = input_path ~cache_dir url ^ ".generation"
+
+(* Reading and starting give [None] when the token cannot be read or written:
+   a download that cannot show its generation is current does not publish. *)
+let read_generation path =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Some Before_any_retry
+  | exception Unix.Unix_error _ -> None
+  | descriptor ->
+    let channel = Unix.in_channel_of_descr descriptor in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      match In_channel.input_all channel with
+      | token -> Some (Since_retry token)
+      | exception Sys_error _ -> None)
+
+let start_generation ~cache_dir path =
+  let random = Random.State.make_self_init () in
+  let token = Printf.sprintf "%016Lx%016Lx"
+      (Random.State.bits64 random) (Random.State.bits64 random) in
+  match attempt_path ~cache_dir ~prefix:"generation_" ~suffix:".token" with
+  | Error _ -> None
+  | Ok attempt ->
+    match Out_channel.with_open_bin attempt (fun oc -> Out_channel.output_string oc token) with
+    | exception Sys_error _ -> discard attempt; None
+    | () -> Result.to_option (publish ~attempt ~target:path) |> Option.map (fun _ -> Since_retry token)
+
 (* The converter may still hold its output open after it reports success.
    Publish a new file so later writes through that handle cannot change the
    cached frame. This does not prove the converter had finished writing when
@@ -387,6 +424,13 @@ let with_download_snapshot ~cache_dir (Download bytes) f =
 
 let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
   let target = input_path ~cache_dir url in
+  let generation = generation_path ~cache_dir url in
+  let began =
+    if force_fetch then start_generation ~cache_dir generation else read_generation generation in
+  let still_current () =
+    match began, read_generation generation with
+    | Some began, Some now -> began = now
+    | None, (Some _ | None) | Some _, None -> false in
   let judge bytes = verdict_of_bytes bytes in
   let read_cached () =
     let reading = match max_bytes with
@@ -426,7 +470,7 @@ let download ?(force_fetch = false) ?max_bytes ~run ~cache_dir url =
               match judge bytes with
               | Empty -> Error Empty_body
               | Known_image _ | Unknown_signature ->
-                if Option.is_some max_bytes then Ok (Download bytes)
+                if Option.is_some max_bytes || not (still_current ()) then Ok (Download bytes)
                 else begin
                   let result = publish ~attempt ~target in
                   owns_attempt := false;

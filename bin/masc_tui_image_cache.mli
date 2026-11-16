@@ -135,7 +135,10 @@ val download :
 (** Fetch or reuse nonempty input bytes. Failed fetches and empty bodies are
     removed; unknown signatures remain eligible for a decoder. The result owns
     the bytes read, rather than naming the shared URL cache file. [force_fetch]
-    bypasses the cache for an explicit retry. [max_bytes] bounds each read,
+    bypasses the cache for an explicit retry and starts a new generation for
+    the URL: a download that began earlier, in this process or another, still
+    returns its own bytes but no longer publishes them to the shared cache
+    file, so it cannot replace the retry's response. [max_bytes] bounds each read,
     retains shared cache files on refusals and does not publish a new cache
     entry. Callers must also bound the fetcher's output file while it runs. *)
 

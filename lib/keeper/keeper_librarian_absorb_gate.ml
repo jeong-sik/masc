@@ -1005,6 +1005,51 @@ let replay_authority (authority : live_authority) =
     Gate_available (Typesafeai_client.identify first, List.map Typesafeai_client.identify rest)
 ;;
 
+(* RFC librarian-gate-waits-on-the-destination-not-on-passes §3.2. A run
+   whose every unanswered question was refused by destinations for their own
+   state retains no new attempt while every destination the live authority
+   would ask still refuses for its state. A destination this process has not
+   asked, or one that answered since, lets the next attempt ask. *)
+type after_failure =
+  | Retain_new_attempt
+  | Wait_for_destination
+
+let destination_state = function
+  | Typesafeai_client.Destination_state -> true
+  | This_request -> false
+
+let refused_for_its_state (failure : Typesafeai_client.failure) =
+  List.for_all
+    (fun (attempt : Typesafeai_client.attempt) ->
+       destination_state
+         Typesafeai_client.(refusal_owner (refusal_class attempt.refusal)))
+    (failure.first_attempt :: failure.later_attempts)
+
+let still_refusing destination =
+  match Typesafeai_client.(destination_outcome (identify destination)) with
+  | Some (Typesafeai_client.Refusing { last; _ }) ->
+    destination_state (Typesafeai_client.refusal_owner last)
+  | Some (Answered _) | None -> false
+
+let after_failure (authority : live_authority) = function
+  | Skipped _ -> Retain_new_attempt
+  | Evaluated { evaluations; outcome = _; copy_checks = _ } ->
+    let unanswered (evaluation : evaluation) =
+      match evaluation.result with
+      | Error failure -> Some (refused_for_its_state failure)
+      | Ok _ ->
+        (match validate_evaluation_answer evaluation with
+         | Ok () -> None
+         | Error _ -> Some false)
+    in
+    (match List.filter_map unanswered evaluations, authority.armed_destinations with
+     | [], (Ok _ | Error _) | _ :: _, Error _ -> Retain_new_attempt
+     | (_ :: _ as causes), Ok (first, rest) ->
+       if List.for_all Fun.id causes && List.for_all still_refusing (first :: rest)
+       then Wait_for_destination
+       else Retain_new_attempt)
+;;
+
 let replay_authority_to_yojson (authority : replay_authority) : Yojson.Safe.t =
   match authority with
   | Gate_available (first, rest) ->

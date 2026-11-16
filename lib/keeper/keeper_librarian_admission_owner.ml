@@ -268,7 +268,12 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
        match Gate.failure_detail ~absorbed:accepted.selection.absorbed gate with
        | None -> apply gate record
        | Some _ ->
-         match live with None -> apply gate record | Some authority -> retry authority)
+         match live with
+         | None -> apply gate record
+         | Some authority ->
+           (match Gate.after_failure authority gate with
+            | Gate.Retain_new_attempt -> retry authority
+            | Wait_for_destination -> apply gate record))
 let answered ~store ~config ~reserved ~owner ~inventory part original =
   let* proposal=original_answer ~store original in
   let* parsed=Capture.validate_proposal original.capture proposal in

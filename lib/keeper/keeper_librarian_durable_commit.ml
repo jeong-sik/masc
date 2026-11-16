@@ -361,12 +361,15 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
           let* next=match prior_complete,live_authority with
             | Some gate,Some authority ->
               (match Gate.failure_detail ~absorbed:proposal.Keeper_librarian_runtime.accepted.selection.absorbed gate with
+               | None -> Ok latest
                | Some _ ->
-                 let* ()=fresh_authority () in
-                 io (fun () -> Journal.retain ~store ~owner ~capture:request ~parent:current
-                   ~proposal:raw ~request_id:(Random_id.uuid_v7 ()) ~authority
-                   ~predecessor:(Some latest.request_id))
-               | None -> Ok latest)
+                 match Gate.after_failure authority gate with
+                 | Gate.Wait_for_destination -> Ok latest
+                 | Retain_new_attempt ->
+                   let* ()=fresh_authority () in
+                   io (fun () -> Journal.retain ~store ~owner ~capture:request ~parent:current
+                     ~proposal:raw ~request_id:(Random_id.uuid_v7 ()) ~authority
+                     ~predecessor:(Some latest.request_id)))
             | None,(None | Some _) | Some _,None -> Ok latest in
           Journal.resume ~request_clock:Eio_context.get_clock
             ~store ~owner ~capture:request ~record:next ~live_authority

@@ -1,11 +1,15 @@
 # Librarian 선언 교체 후 미소비 입력 이어가기
 
 연결: #51278, 병합된 RFC #51317, [Farm 계획](2026-11-12-agent-farm-plan.md)의 E8/TLJ-S02 선행 작업.
-기준 소스는 `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`다. 별도 native stack에서 작업한다.
+최초 기준 소스는 `606e16f5ce8b5c69ad9d18e82f6bf076aaf7f13d`다. 별도 native stack의 네 층을
+확인한 로컬 main `4a8a9920776af876caa358d509db39ba7c0a670d` 위로 함께 올렸다.
+네 patch는 `git range-diff`에서 같았다. 이후 main에 추가된 floor 회귀의 닫힌 match에도 새 outcome을 반영했다.
+아래 고정 head 기록은 rebase 전 각 검토 범위이며, 최종 head·파일 해시는 작업 artifact에 따로 남긴다.
 
 2026-11-16 사용자는 이전 요청을 끝내고 미소비 입력을 새 설정에서 다시 만드는 방식을 선택했다.
 읽기 위치를 그대로 두고 다음 pass가 입력을 다시 고른다. 새로 도착한 자료가 함께 포함될 수 있다.
-이 선택은 실행 여부가 불확실한 요청을 다시 보내라는 뜻이 아니다.
+이후 별도 질문에서 사용자는 RFC §9.2의 history `cut`도 종료 증거를 남긴 뒤 새 요청으로 만드는 방식을 선택했다.
+모델 요청이 한 번 더 전송될 수 있음을 포함한 결정이며, `raised`와 floor의 불명확한 결과까지 넓히지 않는다.
 
 ## 첫 단위: host가 아직 시작하지 않은 요청
 
@@ -56,6 +60,38 @@ floor step의 본문은 기존 chain 복구가 읽는다. 이 단위는 floor �
 이미 답한 앞 step의 Gate와 Memory 반영은 원래 선언의 권한을 따르므로 별도 범위다.
 실제 Runtime fixture에 접수 전 두 상태의 준비 전 대기·교체·rollback과 chain이 hole 없이 교체를 반환하는 회귀를 추가했다.
 
+floor 단위는 `9bda4e4dab8e2e635ccdb0e65397f172cda52159`으로 고정했다.
+두 독립 세션이 7개 파일과 관련 경계를 읽고 범위 안에서 P0/P1/P2를 찾지 못했다. 6개 OCaml 파일은 문법만 확인했다.
+
+## 네 번째 단위: 새 선언이 허용한 연결되지 않은 history Cut 해소
+
+연결되지 않은 원본의 `Cut` refusal은 보존한다. 설치·package·tool이 같은 새 선언의 준비된 worker를 관찰하면
+별도 `Refusal_settled` fact에 원본 binding·summary·두 목적지와 원래 Cut 증거를 묶어 저장한다.
+이는 입력을 버린 capacity settlement와 다른 strict domain kind다. 일반 progress는 후속 처리 사실만 담고,
+소비자가 그 뜻과 권한을 검증한다. 이 fact는 Memory·읽기 위치·외부 ACK를 옮기지 않는다.
+
+저장 전과 복구 때 모두 원래 Exact request·schema·digest로 host 기록과 완료 proof를 복구하고,
+여전히 `Cut`일 때만 이 결정을 인정한다. 검증된 `Rejected Execution`은 닫힌 전이상 `Judged`나 Commit에
+도달한 적이 없다. owner와 inventory는 같은 저장 증거를 검증하므로 rollback 뒤에도 정리 여부가 갈리지 않는다.
+잘못된 증거, 읽기 오류나 다른 host 결과를 일반 거절로 낮추지 않는다.
+
+다음 pass는 기존 strict archive를 거쳐 미소비 입력을 새 ID로 다시 고른다. `cut`이 선언 교체 때문에 생겼다고
+단정하지 않는다. 운영자가 새 선언을 준비한 사건을 새 시도의 허락으로 기록한 것이다.
+같은 선언, 준비되지 않은 새 선언, `raised`와 floor Cut는 보류한다. 새 원본을 또 해소하려면 선언이 다시 교체돼야 한다.
+이는 Farm TLJ-S02 전체의 실행 중단 원인·종료 추적을 구현한 것은 아니다.
+
+실제 로컬 HTTP provider를 기다리던 호출을 취소해 Cut을 만드는 fixture에 준비 전 대기, 별도 종료 증거,
+잘못된 저장 증거 거부, rollback 뒤 archive와 새 원본 한 번 실행을 추가했다. Raised 대조 fixture도 추가했다.
+모든 회귀는 작성 상태이며 실행하지 않았다.
+
+독립 리뷰에서 Exact 복구가 다른 claim을 만나면 record만 관찰하는 경로를 찾았다.
+Cut 해소는 복구 뒤에도 claim과 관계없이 원본 완료 proof를 따로 읽고 binding을 검증하도록 보강했다.
+실제 claim을 보유한 채 proof 파일을 읽지 못하게 만드는 대조 회귀를 추가했다.
+또한 접수 전 linked history가 bodyless archive의 범위를 벗어나는데도 종결될 수 있던 틈을 막았다.
+predecessor가 있는 접수 전 요청은 기존 publication 절차를 유지한다. 아래층만 단독으로 넣지 않고 전체 native stack을 검토한다.
+연결된 Cut도 현재 operator resolution의 완료 추적이 새 root를 잇지 못하므로 이번 producer에서 제외했다.
+원본 index를 검증하는 proof helper도 연결된 Cut 증거를 거부한다. 그 요청은 기존 대기를 유지하며 후속 lineage 작업이 남는다.
+
 ## 확인한 범위
 
 변경 OCaml 파일의 `ocamlc -stop-after parsing -c`와 `git diff --check`를 확인한다.
@@ -69,8 +105,8 @@ typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 
 ## 남은 범위
 
-- 연결된 history의 접수 전 상태와 preflight가 손상된 저장 본문을 만난 기동 경계는 별도 확인이 남는다.
+- 연결된 history의 접수 전 상태·Cut 해소와 preflight가 손상된 저장 본문을 만난 기동 경계는 별도 확인이 남는다.
 - floor 본문 손상 복구와 이미 답한 앞 step의 반영 경계는 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
-- `cut`·`raised`와 이미 받은 `Judged` 결과·admission part는 별도 상태다. 이번 단위는 불확실한 외부 실행을 자동 재전송하지 않는다.
+- `raised`·floor Cut와 이미 받은 `Judged` 결과·admission part는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.
 - native stack 발행은 이전 시도에서 GitHub CLI 인증을 얻지 못했다. 연결된 GitHub 읽기 도구의 인증과 CLI/native stack 발행 인증은 다르다.

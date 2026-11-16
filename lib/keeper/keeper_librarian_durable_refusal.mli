@@ -50,8 +50,9 @@ val retained_stop : store:Lane_addon_store.t ->
     change the Addon's semantic configuration (for example its [run_id]).
     That explicit reconfiguration permits a fresh attempt, not a claim that
     provider capacity improved. Unknown, opaque and mixed failures retain
-    their existing policy. A refusal carrying [Progress.settlement] is released: its range was
-    abandoned by {!Keeper_librarian_durable_commit.settle_refused}. No
+    their existing policy. A capacity refusal carrying [Progress.settlement]
+    was abandoned by {!Keeper_librarian_durable_commit.settle_refused}; a Cut
+    replacement disposition is validated separately before this inventory. No
     Memory/cursor/ACK effect is authorized here. *)
 
 val request_id : t -> string

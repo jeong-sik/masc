@@ -2210,6 +2210,124 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
     set_enabled fixture false;
     assert_pending (run_worker fixture);
     assert_preserved ()))
+let test_cut_replacement_releases_unread_source_and_survives_rollback () = with_fixture (fun ~sw fixture ->
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
+    `OK,F.openai_response (answer capture));
+  Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    assert_pending (run_worker fixture);Eio.Promise.await arrived;
+    let _,capture=only_original fixture in
+    let source=Capture.source capture and exact=Capture.request capture |> get in
+    let positions=progress fixture in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get)
+      |> Keeper_external_read_cursor.observation_to_json in
+    let cursor_before=cursor () and delivered= !(fixture.deliveries) in
+    (match Memory_lane.with_librarian_purge ~base_path:fixture.base_path ~keeper_name (fun () -> ()) with
+     | Ok () -> () | Error error -> fail (Memory_lane.purge_cancel_error_to_string error));
+    ignore (Eio.Promise.try_resolve unblock ());
+    fixture.set_response (fun capture -> `OK,F.openai_response (answer capture));
+    restart_actual_worker fixture ~sw;
+    await_delivery fixture ~after:delivered;
+    let wakes=ref 0 in
+    let pass ()=memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+      ~wake:(fun () -> incr wakes)) in
+    assert_pending (pass ());
+    let cut,_=only_original fixture in
+    (match Progress.phase cut.progress with
+     | Progress.Rejected {stage=Execution;evidence} ->
+       let schema=Option.to_result ~none:"cut original schema" exact.schema |> get in
+       check bool "the actual cancelled provider leaves a host Cut refusal" true
+         ((Exact.retained_final_of_json ~schema evidence |> get) = Exact.Retained_unknown Exact.Cut)
+     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+     | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+       fail "the actual interrupted worker did not leave an execution refusal");
+    assert_pending (pass ());
+    check int "the same declaration never wakes a Cut replay" 0 !wakes;
+    let replacement=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-cut-replacement\"" | line -> line)
+      |> String.concat "\n" in
+    io (fun () -> write fixture.source replacement);
+    assert_pending (pass ());
+    check int "a changed file without its ready worker grants no Cut replay" 0 !wakes;
+    io (fun () -> write fixture.source (fixture.declaration true));
+    replace_actual_worker_configuration fixture ~sw replacement;
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    let claimed,signal_claimed=Eio.Promise.create () and allow,signal_allow=Eio.Promise.create () in
+    let finished,signal_finished=Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      let outcome=Exact.run ~store:fixture.store ~declaration_id:"librarian" ~package
+        ~runner:(Server_lane_addon_exact.runner ~base_path:fixture.base_path)
+        ~authorize_request:(fun ~store:_ ~declaration_id:_ ~package:_ _ ->
+          Eio.Promise.resolve signal_claimed ();Eio.Promise.await allow;
+          Error (Exact.Undecided {detail="fixture releases its retained-final claim"})) exact in
+      Eio.Promise.resolve signal_finished outcome);
+    Eio.Promise.await claimed;
+    let proof=proof_path fixture exact in
+    let original_proof=io (fun () -> Fs_compat.load_file_opt proof) in
+    io (fun () -> Fs_compat.mkdir_p (Filename.dirname proof);write proof "unreadable original execution proof");
+    (match pass () with
+     | Error (Consumer.Original_publication_blocked _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "an active host claim hid an unreadable execution proof and authorized Cut replay");
+    check int "an unreadable proof under an active claim grants no wake" 0 !wakes;
+    check int "an unreadable proof under an active claim grants no provider replay" 1 (F.post_count fixture.server);
+    io (fun () -> match original_proof with Some bytes -> write proof bytes | None -> Sys.remove proof);
+    Eio.Promise.resolve signal_allow ();
+    (match Eio.Promise.await finished with Error _ -> ()
+     | Ok _ -> fail "the held retained-final claim unexpectedly dispatched or changed the original");
+    (match pass () with
+     | Ok (Consumer.Memory_not_committed _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a ready replacement did not release its Cut original");
+    let ended,_=only_original fixture in
+    check bool "the original Cut evidence is never rewritten" true
+      (Progress.phase cut.progress=Progress.phase ended.progress);
+    check bool "the separate source-unconsumed disposition is durable" true
+      (Option.is_some (Progress.settlement ended.progress));
+    check int "the completed disposition wakes the next pass" 1 !wakes;
+    check bool "Cut release advances no read position" true (progress fixture=positions);
+    check json "Cut release advances no external ACK" cursor_before (cursor ());
+    no_memory fixture;
+    check int "recording the disposition does not repeat the old provider call" 1 (F.post_count fixture.server);
+    let retained=Owner.record_to_json (Owner.listed ended) in
+    let field name update = function
+      | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,if key=name then update value else value) fields)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "expected an owner evidence object" in
+    let corrupt=field "progress" (function
+      | `List events -> `List (List.map (fun event ->
+          if member "event" event=`String "refusal_settled" then
+            field "evidence" (field "replacement" (fun _ ->
+              Lane_addon_captured_destination.to_json (Capture.destination capture))) event
+          else event) events)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> fail "expected progress events") retained in
+    io (fun () -> Store.save_tool_request_owner fixture.store ~scope:ended.scope ~request_id:ended.request_id corrupt |> get);
+    (match pass () with
+     | Error (Consumer.Original_publication_blocked _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a stored disposition without a different declaration authorized replay");
+    check int "invalid stored evidence creates no wake" 1 !wakes;
+    check int "invalid stored evidence creates no provider replay" 1 (F.post_count fixture.server);
+    check bool "invalid stored evidence consumes no source" true (progress fixture=positions);
+    io (fun () -> Store.save_tool_request_owner fixture.store ~scope:ended.scope ~request_id:ended.request_id retained |> get);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    check bool "inventory uses the stored disposition after rollback" true
+      ((io (fun () -> Commit.validate ~store:fixture.store ~request:capture ~record:ended) |> get) = Commit.Settled);
+    drive_advanced fixture;
+    let fresh,fresh_capture=only_original fixture in
+    check bool "the released source gets a new original ID" true (fresh.request_id<>cut.request_id);
+    check bool "the new original retains the whole unread history" true
+      ((Source.input (Capture.source fresh_capture)).messages=(Source.input source).messages);
+    check bool "the new original retains the unread counterpart input" true
+      ((Source.input (Capture.source fresh_capture)).counterpart_observations=(Source.input source).counterpart_observations);
+    check bool "the new original is not narrowed by the old Cut" true
+      (Source.extent (Capture.source fresh_capture)=Keeper_librarian_range.All_unread);
+    check bool "the archive retains why the old original was released" true
+      (Option.is_some (Progress.settlement (archived fixture ~date:(day_of cut.request_id) cut)));
+    check int "one cancelled original and one authorized fresh provider call" 2 (F.post_count fixture.server)))
+
 let test_epoch_reset_refuses_old_original () = with_fixture (fun ~sw:_ fixture ->
   fixture.delivery_loss:=true;
   let before= !(fixture.deliveries) in
@@ -2258,6 +2376,34 @@ let retain_absent_history_original ?(failed_selection=true) ?(admitted=true) fix
     let original = advance original Progress.Dispatch_intended in
     advance original (Progress.Execution_observed (Progress.Absent (`Assoc [])))) else original in
   original, request
+let test_replaced_raised_original_stays_unknown () = with_fixture (fun ~sw fixture ->
+  let original,capture=retain_absent_history_original ~failed_selection:false fixture in
+  let exact=Capture.request capture |> get in
+  io (fun () ->
+    Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
+      (`Assoc ["declaration_id",`String "librarian";"request_id",`String exact.request_id;
+        "digest",`String (Exact.digest exact);"request",Exact.request_to_json exact;
+        "attempts",`List [`Assoc ["status",`String "outcome_unknown";"cause",`String "raised";
+          "exception",`String "fixture raised after dispatch"]];"final",Exact.final_to_json Exact.Outcome_unknown]) |> get);
+  let raised=memory_action fixture (fun () -> io (fun () ->
+    match Owner.advance ~store:fixture.store ~expected:original
+      ~event:(Progress.Refused {stage=Execution;
+        evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Raised)}) with
+    | Ok (Owner.Stored record | Already_stored record) -> record
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error))) in
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-raised-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_actual_worker_configuration fixture ~sw replacement;
+  let wakes=ref 0 in
+  assert_pending (memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+    ~wake:(fun () -> incr wakes)));
+  let actual,_=only_original fixture in
+  check json "Raised keeps its original evidence and no release disposition"
+    (Progress.to_json raised.progress) (Progress.to_json actual.progress);
+  check int "Raised grants no replacement wake" 0 !wakes;
+  check int "Raised grants no provider replay" 0 (F.post_count fixture.server))
 let test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wait () =
   with_fixture (fun ~sw fixture ->
     let original,request=retain_absent_history_original ~failed_selection:false ~admitted:false fixture in
@@ -2721,6 +2867,66 @@ let test_history_fence_uncertain_publication_still_blocks () = with_fixture (fun
    | History_fence_stored | History_fence_already_stored | History_fence_owner_changed ->
      fail "post-replacement error was reported as a confirmed fence");
   refuse_fenced_resume fixture original request)
+let test_linked_replacement_preserves_the_resolution_protocol ~cut () = with_fixture (fun ~sw fixture ->
+  let parent,parent_request=retain_absent_history_original ~failed_selection:false fixture in
+  let expected=(fence_preview fixture parent_request).expected in
+  io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name ~request_id:parent.request_id
+    ~expected ~actor:"operator" ~reason:"resume the exact source"
+    ~now:(Time_compat.now ()) |> Result.map_error Resolution_intent.error_to_string |> get |> ignore);
+  memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name)
+    |> Result.map_error Resolution_intent.error_to_string |> get;
+  let view ()=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name ~request_id:parent.request_id
+    |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let child_id=match (List.hd (List.rev (view ()).intents)).phase with
+    | Resolution_intent.Child_confirmed child -> child.request_id
+    | Requested | Refused _ | Fenced | Child_intended _ -> fail "the operator resolution has no confirmed child" in
+  let child,request=io (fun () ->
+    let child=Owner.load ~store:fixture.store ~scope:parent.scope ~request_id:child_id |> owned |> Option.get in
+    let request=Capture.restore ~owner:(Capture.physical_owner parent_request) child |> get in
+    child,request) in
+  check bool "the actual continuation is linked to its fenced parent" true (Option.is_some (Capture.predecessor request));
+  let exact=Capture.request request |> get in
+  let child=if not cut then child else (
+    io (fun () -> Store.save_exact_request fixture.store ~declaration_id:"librarian" ~request_id:exact.request_id
+      (`Assoc ["declaration_id",`String "librarian";"request_id",`String exact.request_id;
+        "digest",`String (Exact.digest exact);"request",Exact.request_to_json exact;
+        "attempts",`List [Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut)];
+        "final",Exact.final_to_json Exact.Outcome_unknown]) |> get);
+    let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
+      | Ok (Owner.Stored child | Already_stored child) -> child
+      | Ok (Unconfirmed detail) -> fail detail
+      | Error error -> fail (Owner.update_error_to_string error)) in
+    let child=advance child Progress.Dispatch_intended in
+    advance child (Progress.Refused {stage=Execution;
+      evidence=Exact.retained_final_to_json (Exact.Retained_unknown Exact.Cut)})) in
+  let positions=progress fixture in
+  let replacement=fixture.declaration true |> String.split_on_char '\n'
+    |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-linked-replacement\"" | line -> line)
+    |> String.concat "\n" in
+  replace_actual_worker_configuration fixture ~sw replacement;
+  let wakes=ref 0 in
+  (match memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+    ~wake:(fun () -> incr wakes)) with
+   | Ok (Consumer.Pending _) | Error (Original_publication_blocked _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "a linked continuation bypassed its resolution protocol");
+  let actual=io (fun () -> Owner.load ~store:fixture.store ~scope:child.scope ~request_id:child.request_id |> owned |> Option.get) in
+  check json "a linked original retains its phase and has no replacement disposition"
+    (Progress.to_json child.progress) (Progress.to_json actual.progress);
+  check int "a linked original grants no replacement wake" 0 !wakes;
+  check int "a linked original grants no provider replay" 0 (F.post_count fixture.server);
+  check bool "a linked original advances no source" true (progress fixture=positions);
+  check bool "the operator resolution is still awaiting its same child" true ((view ()).completion=Resolution_work.Not_observed);
+  if cut then (
+    let current=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun current -> Ok current) |> get in
+    check bool "the proof writer independently rejects linked Cut release" true
+      (Result.is_error (io (fun () -> Keeper_librarian_declaration_replacement.release_cut ~store:fixture.store
+        ~original:(Owner.listed actual) ~exact ~captured:(Capture.destination request) ~current))))
+  else (
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    drive_advanced fixture;
+    check int "rollback still admits the original captured child once" 1 (F.post_count fixture.server)))
 let test_fenced_resolution_survives_cursor_advance ~nested () = with_fixture (fun ~sw:_ fixture ->
   let submit request expected=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
     ~request_id:(Capture.request_id request) ~expected ~actor:"operator" ~reason:"resume the exact history"
@@ -5032,6 +5238,14 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     (test_unadmitted_replacement_needs_no_body_and_survives_rollback ~capacity_wait:true);
   test_case "pre-admission replacement refuses an original with host execution evidence" `Quick
     test_unadmitted_replacement_preserves_existing_host_execution;
+  test_case "a ready replacement releases an actual Cut once and survives rollback" `Quick
+    test_cut_replacement_releases_unread_source_and_survives_rollback;
+  test_case "a replacement does not release an original Raised outcome" `Quick
+    test_replaced_raised_original_stays_unknown;
+  test_case "a linked Captured keeps its resolution protocol across replacement" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:false);
+  test_case "a linked Cut keeps its resolution protocol across replacement" `Quick
+    (test_linked_replacement_preserves_the_resolution_protocol ~cut:true);
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
   test_case "legacy omitted original blocks admission but prepares a safe continuation" `Quick

@@ -80,22 +80,20 @@ type held =
   | Read of (Lane_addon_tool_request_owner.retained * Keeper_librarian_durable_request.t)
       (** Already read with its body, which is checked before anything else. *)
 val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:string list ->
-  original:held -> call:call -> publish:publish -> wake:(unit -> unit) ->
-  current:(unit -> Keeper_librarian_durable_request.destination option) -> (resumed, error) result
+  original:held -> call:call -> publish:publish -> wake:(unit -> unit) -> (resumed, error) result
 (** Host retained/latest proof and complete raw domain validation precede any
     publication callback, including recovery while Off. An actual host terminal
     [Outcome_unknown] returns [Waited (Worker_unknown, original)] after its
-    immutable refusal is verified and retained. It never grants a fresh source
-    selection or submission, including after restart or while Off. An
+    immutable refusal is verified and retained. It grants no submission of that
+    original. An unlinked history's host-confirmed [cut] may retain a separate replacement
+    disposition after a ready new declaration is observed; that disposition
+    permits fresh selection without consuming input, including after rollback.
+    An
     [interrupted] cause also calls [wake]: inventory validation reads that
     refusal as settled, so the next pass moves the original and selects its
-    range again (RFC-0500). A [cut] cause does the same when
-    {!Keeper_librarian_durable_request.replaced_since} holds for [current],
-    the pass's one reading of the destination the configuration names now
-    (RFC librarian-ends-waiting-requests-of-a-replaced-declaration 3.5); the
-    pass gives its inventory check the same reading. [current] is called for
-    a [cut] cause only. Only shared
-    submit-once pre-admission/Not_sent rules retry. New admission and every
+    range again (RFC-0500). Other unknown causes and [cut] without the bound
+    disposition stay pending. Only shared submit-once pre-admission/Not_sent
+    rules retry the same original. New admission and every
     unfinished publication require the frozen prompt to cover its counterpart
     input. A receipt alone cannot authorize a new ACK of observations an old
     question omitted. Pending/unknown observation and structural restoration
@@ -104,8 +102,8 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     this exact full child request. Missing or changed parent intent refuses.
     Existing Finished is strictly restored but not republished against today's
     moving range receipt. Existing Conflict is delegated to strict publication
-    validation rather than granting retry authority. Besides those two
-    unknown-outcome causes, wake submits to the same Memory lane only after
-    newly observed Finished or known-basis supersession; an already conflicted
-    original never repeats that wake. Scheduling acceptance
+    validation rather than granting retry authority. Wake submits to the same
+    Memory lane after observed declaration-replacement disposition, newly
+    observed Finished or known-basis supersession;
+    an already conflicted original never repeats that wake. Scheduling acceptance
     is not execution success. *)

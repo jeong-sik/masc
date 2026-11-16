@@ -104,18 +104,17 @@ let restore_answer ~store request record =
     Error (Rejected "Original history publication requires an actual answered host result")
 (* RFC-0500. Whether the retained refusal says the process that started the
    attempt stopped before it ended. *)
-let interrupted ~schema (record:Owner.retained) =
+let unknown_cause ~schema (record:Owner.retained) =
   match Progress.phase record.progress with
   | Progress.Rejected {stage=Progress.Execution;evidence} ->
     let* retained=rejected (Exact.retained_final_of_json ~schema evidence) in
     Ok (match retained with
-      | Exact.Retained_unknown Exact.Interrupted -> true
-      | Retained_unknown (Exact.Cut | Exact.Raised)
+      | Exact.Retained_unknown cause -> Some cause
       | Retained_call (Answered _ | Invalid_output _ | Input_refused _ | Output_limit_reached _)
-      | Retained_not_allowed _ | Retained_request_id_reused -> false)
+      | Retained_not_allowed _ | Retained_request_id_reused -> None)
   | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
   | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
-  | Subdividing _ | Subdivided _ -> Ok false
+  | Subdividing _ | Subdivided _ -> Ok None
 let check_completed ~store ~superseded request ~original completed =
   let* ()=check_request request completed in
   let* ()=require (completed.Owner.request_digest=original.Owner.request_digest)
@@ -164,6 +163,9 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
     let* actual=io (fun () -> Request.observe_owner ~base_path ~keepers_dir ~keeper_id:(Request.keeper_id owner)) |> rejected in
     rejected (Request.owner_matches_json actual (Request.owner_to_json owner)) in
+  let finish_replacement record =
+    let* ()=confirm_live_owner () in
+    wake ();Ok (Original_replaced record) in
   (* A listed original is checked on its record and index here. Its body is
      read in the branches that need it, and [load] binds that index to it. *)
   let* ()=match original with
@@ -186,6 +188,9 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     | Read (_,request) -> Request.index request |> rejected in
   let* admission=match Progress.phase (Owner.Record.progress record) with
     | Progress.Captured | Admission_wait _ ->
+      (* The bodyless replacement inventory owns unlinked originals. Linked
+         captures keep their existing predecessor/publication protocol. *)
+      if Option.is_some index.predecessor then Ok Admission_continues else
       (match Keeper_librarian_durable_edge.observe_destination ~config ~reserved destination with
        | Error (Submit.Unavailable _ | Rejected _ | Uncertain _) -> Ok Admission_unavailable
        | Ok current ->
@@ -206,9 +211,7 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
     | Rejected {stage=Execution;_} | Subdividing _ | Subdivided _ -> Ok Admission_continues in
   match admission with
   | Admission_unavailable -> Ok (Waited (Worker_unreachable,record))
-  | Admission_replaced record ->
-    let* ()=confirm_live_owner () in
-    wake ();Ok (Original_replaced record)
+  | Admission_replaced record -> finish_replacement record
   | Admission_continues ->
   let* identity,read_body=match original with
     | Read read ->
@@ -312,13 +315,27 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
   | Submit.Awaiting (wait,record) -> Ok (Waited (wait,record))
   | Final (body,Answer (proposal,record)) -> publish_answer body record proposal
   | Final (body,Refusal (Exact.Outcome_unknown,record)) ->
-    (* Inventory validation reads an interrupted refusal as settled, so the
-       next pass moves the original and selects its range again. Wake it:
-       no host event follows this refusal. A cut or raised original stays
-       unfinished and every pass resumes it, so waking it would never end. *)
-    let* interrupted=interrupted ~schema:body.schema record in
-    if interrupted then wake ();
-    Ok (Waited (Worker_unknown,Owner.listed record))
+    let original=Owner.listed record in
+    let wait ()=Ok (Waited (Worker_unknown,original)) in
+    let* cause=unknown_cause ~schema:body.schema record in
+    (match cause with
+     | Some Exact.Interrupted -> wake ();wait ()
+     | None | Some Exact.Raised -> wait ()
+     | Some Exact.Cut ->
+       if Option.is_some index.predecessor then wait () else
+       let* released=io (fun () -> Keeper_librarian_declaration_replacement.released_cut
+         ~store ~original ~exact:body.exact ~captured:destination) |> rejected in
+       if released then finish_replacement original else
+       match Keeper_librarian_durable_edge.observe_destination ~config ~reserved destination with
+       | Error (Unavailable _ | Rejected _ | Uncertain _) -> wait ()
+       | Ok current ->
+         match Lane_addon_captured_destination.relation ~captured:destination ~current with
+         | Same | Other_owner -> wait ()
+         | Replaced ->
+           let* ()=confirm_live_owner () in
+           let* released=io (fun () -> Keeper_librarian_declaration_replacement.release_cut
+             ~store ~original ~exact:body.exact ~captured:destination ~current) in
+           finish_replacement released)
   | Final (body,Refusal ((Exact.Call_final _ | Not_allowed _ | Request_id_reused as final),record)) ->
     let* replacement = match final with
       | Exact.Not_allowed _ ->
@@ -327,10 +344,7 @@ let resume ~store ~config ~reserved ~(original:held) ~(call:call) ~(publish:publ
             ~installation_id:destination.installation_id body.exact in
           Keeper_librarian_original_final.declaration_replaced ~store target record) |> rejected
       | Call_final _ | Outcome_unknown | Request_id_reused -> Ok false in
-    if replacement then (
-      let* ()=confirm_live_owner () in
-      wake ();
-      Ok (Original_replaced (Owner.listed record)))
+    if replacement then finish_replacement (Owner.listed record)
     else Ok (Resumed (Refused (final,record),body.request))
   | Commit_pending record ->
     let* body=read_body () in

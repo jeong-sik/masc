@@ -18,3 +18,22 @@ val refuse : store:Lane_addon_store.t -> original:Lane_addon_tool_request_owner.
 (** Only [Captured] or [Admission_wait], after fresh complete Runtime authority
     supplied a ready replacement [current]. Persist [Before_dispatch] evidence;
     save uncertainty grants no wake, archive or fresh request. No body is read. *)
+
+val released_cut : store:Lane_addon_store.t -> original:Lane_addon_tool_request_owner.Record.t ->
+  exact:Lane_addon_exact.request -> captured:Lane_addon_captured_destination.t -> (bool, string) result
+(** A retained policy decision released this unlinked history original's host-confirmed [Cut]
+    under a ready replacement declaration. Validate both the bound disposition
+    and current host record/proofs; never substitute a live worker comparison.
+    The caller binds [exact] to the original. Its validated [Rejected Execution]
+    history never reached a judgment or domain commit. Store calls are blocking
+    and must be offloaded from Eio. *)
+
+val release_cut : store:Lane_addon_store.t -> original:Lane_addon_tool_request_owner.Record.t ->
+  exact:Lane_addon_exact.request -> captured:Lane_addon_captured_destination.t ->
+  current:Lane_addon_captured_destination.t ->
+  (Lane_addon_tool_request_owner.Record.t, Lane_addon_submit_once.error) result
+(** For an unlinked history original, persist [Refusal_settled] as a source-unconsumed replacement disposition,
+    preserving the original [Cut] refusal. Caller supplies fresh ready Runtime
+    authority, a bound original and its live physical owner.
+    This operator policy permits another provider call under a new request ID;
+    it neither moves input cursors nor claims the old provider never received it. *)

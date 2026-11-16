@@ -54,11 +54,14 @@ val replacement : t -> preparation option
     confirm the retained child before ACK; neither event grants RPC permission. *)
 val settlement : t -> Yojson.Safe.t option
 (** Orthogonal immutable fact, allowed only on an execution refusal: the host
-    abandoned that exact input range after retaining its diagnosis. Phase stays
+    completed its consumer-owned disposition and retained the evidence. This
+    may abandon a refused range or release a stopped original for a new
+    request while keeping its source unread. Phase stays
     [Rejected]; the refusal evidence is not rewritten. Once present, the
     original can no longer be subdivided, and a second settlement is an error.
-    The event grants no effect: the host owns the ranges it moves and must have
-    applied them before recording this fact. *)
+    The event grants no effect. Each consumer validates the exact disposition;
+    if it moves ranges, it must apply them before recording the fact. A release
+    without consumption grants no range, Memory or cursor acknowledgement. *)
 val observer : t -> Lane_addon_request_receipt.t
 (** Orthogonal immutable observer intents/acknowledgements. Execution and commit
     transitions preserve them. Completion intent requires an original Finished,

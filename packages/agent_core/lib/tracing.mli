@@ -41,11 +41,12 @@ module type TRACER = sig
   val span_id : span -> string option
   val trace_context_headers : unit -> (string * string) list
 
-  (** Run [f] within a traced span.  This is the preferred entry point
-      because the implementation can set up fiber-local context before
+  (** Run [f] synchronously within a traced span. Implementations call [f]
+      once and return its result. The implementation can set up fiber-local context before
       [start_span] and tear it down after [end_span].  [end_span] is
       called on both normal return and exception, with [ok] set
-      accordingly.  The exception is re-raised. *)
+      accordingly. The body's exception is re-raised. Use the module-level
+      [Tracing.with_span] boundary to isolate failures of the tracer itself. *)
   val with_span : span_attrs -> (unit -> 'a) -> 'a
 end
 
@@ -66,11 +67,15 @@ val null : t
 val fmt : t
 
 (** Return outbound W3C trace context headers for the current active span,
-    or [[]] when the tracer has no active context. *)
+    or [[]] when the tracer has no active context or its observation fails.
+    Reserved runtime exceptions still propagate. *)
 val trace_context_headers : t -> (string * string) list
 
-(** Run [f] within a traced span.  Delegates to the tracer's
-    [TRACER.with_span] so the implementation can manage fiber-local
-    context.  [end_span] is called on both normal return and exception,
-    with [ok] set accordingly.  The exception is re-raised. *)
+(** Run [f] within a traced span, preserving the operation's result and
+    exception/backtrace when the tracer fails. A tracer failure before body
+    entry runs [f] untraced; a failure after entry never replays the operation.
+    Reserved runtime exceptions from the tracer still propagate.
+
+    Delegates span context management to [TRACER.with_span]. Low-level tracer
+    operations such as [TRACER.start_span] do not have this isolation boundary. *)
 val with_span : t -> span_attrs -> (t -> 'a) -> 'a

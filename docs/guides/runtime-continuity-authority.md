@@ -12,7 +12,7 @@
 | 공식 클라이언트가 어떤 문맥을 보유하는가? | [Keeper_official_client_session_store](../../lib/keeper/keeper_official_client_session_store.mli)의 frontier·settlement·held_context → 각 adapter | 정본 입력, 전송한 입력, 완료를 확인한 입력, vendor가 보존하는 문맥은 서로 다른 사실이다. |
 | 채팅 턴이 끝났는가? | [Keeper_chat_run_signal](../../lib/keeper/keeper_chat_run_signal.mli) → TUI·connector·journal 소비자 | 한 provider 후보의 StreamIncomplete/진단은 전체 턴의 종료가 아니다. |
 | provider가 생산 중인가? | [Streaming](../../packages/agent_core/lib/llm_provider/streaming.mli)의 first-token·deliverable predicates → [Keeper_agent_run_turn_helpers](../../lib/keeper/keeper_agent_run_turn_helpers.mli) watchdog | reasoning 생산은 진행이다. 이를 최종 답으로 전달할 수 있는지는 완료 시 accept gate가 판정한다. |
-| 실행 결과와 진단 기록이 누구의 것인가? | [Agent_trace](../../packages/agent_core/lib/agent/agent_trace.mli)의 실행 정산 → [Agent.last_raw_trace_run](../../packages/agent_core/lib/agent/agent.mli) → Runtime_agent 결과 | 정본 실행·checkpoint 실패는 실행 권위다. raw trace의 시작·중간·종료 실패는 진단 실패이며, 이전 실행의 기록은 현재 실행 증거가 아니다. |
+| 실행 결과와 진단 기록이 누구의 것인가? | [Agent_trace](../../packages/agent_core/lib/agent/agent_trace.mli)의 실행 정산·[Agent.last_raw_trace_run](../../packages/agent_core/lib/agent/agent.mli)의 귀속 → Runtime_agent 결과. [Tracing](../../packages/agent_core/lib/tracing.mli)의 span·trace-context 관측 경계 → provider·tool 소비자. [Reserved_exn](../../packages/agent_core/lib/llm_provider/reserved_exn.mli)이 삼키면 안 되는 예외를 판정한다. | 정본 실행·checkpoint 실패는 실행 권위다. raw trace와 선택적 tracer의 일반 진단 실패가 실행 결과를 바꾸거나 효과를 다시 실행해서는 안 된다. 실제 취소·reserved 예외는 보존하며, 이전 실행의 기록은 현재 실행 증거가 아니다. |
 
 소유자가 다른 판정을 한 enum으로 합치지 않는다. 예를 들어 `Run_yielded`는 trace의
 관측 분류이고, cooperative 실행의 실제 중단 지점과 다음 실행 허가는 별도 소유자가 정한다.
@@ -28,6 +28,7 @@
 | [#35986](https://github.com/jeong-sik/masc/pull/35986) | 후보 실패를 Event_error로 전송해 다음 후보의 답 수신을 중단 | 실패 범위는 후보이며 최종 턴 판정 전까지 소비자가 계속 읽는다. |
 | [#36169](https://github.com/jeong-sik/masc/pull/36169) | reasoning이 계속 와도 본문이 없어 진행 없음 timeout | watchdog의 생산 신호와 최종 답 수락 조건을 구분한다. ping·빈 carrier는 생산 증거가 아니다. |
 | [#45995](https://github.com/jeong-sik/masc/pull/45995) → [#51935](https://github.com/jeong-sik/masc/pull/51935) → [#52494](https://github.com/jeong-sik/masc/issues/52494) | 종료 기록, 중간 기록, 시작 기록 순서로 진단 실패의 실행 전파가 발견됨 | 개별 write만 고치지 말고 시작부터 종료까지 본다. trace 가용성과 관계없이 실행·예외 정산 경로는 하나다. 현재 실행 ID와 다른 완료 trace를 결과에 붙이지 않는다. |
+| [2026-11-16 tracer 후속 수리](../evidence/tracer-observer-authority-20261116/README.md) | Fmt 출력 채널 실패가 본문 실행을 막거나 성공값·원래 예외를 덮음 | preferred `Tracing.with_span`은 본문 진입 여부와 결과·예외/backtrace를 보존한다. 본문 진입 뒤에는 효과를 재실행하지 않는다. trace-context 조회의 일반 실패는 빈 관측이며, `Reserved_exn`은 cleanup·parallel wrapper 안의 취소도 원래 outer 예외 전체로 전파한다. |
 | [#47097](https://github.com/jeong-sik/masc/pull/47097) → [#52487](https://github.com/jeong-sik/masc/pull/52487) | 누락된 최신 답의 거짓 성공을 막는 history 검증이 정상 압축을 거짓 실패로 처리 | 정확한 최종 답 검증을 유지하면서 압축된 앞부분과 훼손된 범위를 typed coverage로 구분한다. |
 
 이력에 같은 단어가 있어도 기존 guard를 그대로 지우지 않는다. Muse의 압축 count와
@@ -53,10 +54,18 @@ Agent Core의 checkpoint/durable turn count는 다른 계약이다. 후자는 �
 - 진단 실패: 같은 Agent/sink로 한 번 성공한 뒤 시작·응답 기록·도구 기록·종료를 각각
   실패시킨다. 응답, 효과 횟수, 정본 terminal, callback, lifecycle, 현재 trace 귀속을 확인한다.
   실제 checkpoint/journal 거절과 취소는 원래 결과로 남는 대조군을 둔다.
+- tracer: 시작 전·provider 응답 뒤·tool 효과 뒤의 관측 실패에서도 같은 실행 사실을
+  확인한다. 전용 Fmt 출력 채널을 닫아 실제 I/O 실패를 만들되 프로세스 stderr는 유지한다.
+  checkpoint 거절·실제 Eio 취소와 진단 실패를 겹쳐 보고, wrapper에 담긴 reserved 예외를
+  일반 진단 실패로 삼키지 않는지 확인한다. low-level `TRACER.with_span` 직접 호출과
+  preferred `Tracing.with_span`의 격리 계약은 구분한다.
 
 기존 실행 시험은 `test_runtime_muse_serve`, `test_keeper_codex_current_context`,
 `test_keeper_stream_tool_accum`, `test_keeper_run_tools_hooks`, `test_pipeline`,
-`test_agent_advanced`에서 찾는다.
+`test_agent_advanced`에서 찾는다. tracer의 결과·예외·trace-context·wrapped reserved
+경계는 [test_tracing.ml](../../packages/agent_core/test/test_tracing.ml), 실제 Fmt 고장과
+checkpoint·취소 조합의 Agent 회귀 소스는
+[test_pipeline.ml](../../packages/agent_core/test/test_pipeline.ml)에 있다.
 source-extracted replay, 문법 검사, 실제 통합 시험, vendor 세션 실측, 설치 후 관측은
 각각 실행한 범위로 기록한다. 하나의 성공을 다른 범위의 증거로 이월하지 않는다.
 
@@ -76,3 +85,5 @@ Muse가 Start turn text에 합치는 instruction frame과 Codex의 Developer rol
 
 이번 trace 시작·귀속 수리의 직접 기록은
 [trace-start-authority 증거](../evidence/trace-start-authority-20261116/README.md)에 있다.
+tracer 후속 수리의 [실제 Fmt 반례와 후보 복구 캡처](../evidence/tracer-observer-authority-20261116/README.md)는
+모듈 경계 실행만 증명하며 Agent 통합 시험이나 SDK suite 결과를 대신하지 않는다.

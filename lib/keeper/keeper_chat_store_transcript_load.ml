@@ -27,6 +27,7 @@ let load_transcript_fully ~path ~redaction =
       } ->
     let messages =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
         parse_transcript_rows ~path ~redaction rows)
     in
     (* Register only when the file the rows came from is the one statted
@@ -67,7 +68,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
         when cache.device = device
              && cache.inode = inode
              && size >= cache.parsed_end
-             && cache.redaction == redaction -> Some cache
+             && Keeper_secret_redaction.same_policy cache.redaction redaction -> Some cache
       | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
     in
     match continuation with
@@ -82,6 +83,7 @@ let load_all ~base_dir ~keeper_name : chat_message list =
            then []
            else
              Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+               let redaction = Keeper_secret_redaction.copy_for_current_domain redaction in
                parse_transcript_rows ~path ~redaction bytes)
          in
          let messages_rev = List.rev_append fresh cache.messages_rev in

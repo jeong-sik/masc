@@ -358,6 +358,43 @@ let test_load_all_is_incremental_and_follows_appends () =
       Alcotest.(check (list string)) "and agrees with a fresh parse"
         (ids (K.load ~base_dir ~keeper_name)) (ids replaced))
 
+let test_load_all_reuses_policy_across_domains () =
+  let base_dir = temp_base_path "keeper-chat-store-domain-cache" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    with_env "MASC_SECRET_DIR" "" @@ fun () ->
+    let keeper_name = "keeper-chat-domain-cache" in
+    let secret_file = Filename.concat
+        (Filename.concat (secret_root_default ~base_dir ~keeper_name) "env") "TOKEN" in
+    let future_secret = "newly-projected-secret-value" in
+    write_file secret_file "original-projected-secret-value\n";
+    let path = chat_path ~base_dir ~keeper_name in
+    let row id content =
+      Yojson.Safe.to_string (`Assoc
+        ["id", `String id; "role", `String "assistant";
+         "content", `String content; "ts", `Float 1.0]) ^ "\n" in
+    write_file path (row "first" future_secret);
+    let load () = K.load_all ~base_dir ~keeper_name in
+    let on_another_domain () = Domain.join (Domain.spawn load) in
+    let first = List.hd (load ()) in
+    let again = on_another_domain () in
+    Alcotest.(check bool) "another domain reuses the parsed message" true
+      (first == List.hd again);
+    Out_channel.with_open_gen [Open_wronly; Open_append; Open_binary] 0o600 path
+      (fun output -> output_string output (row "second" "new message"));
+    let grown = on_another_domain () in
+    Alcotest.(check (list string)) "another domain sees appended rows"
+      ["first"; "second"] (List.map (fun (message : K.chat_message) -> message.id) grown);
+    Alcotest.(check bool) "an append keeps the previously parsed prefix" true
+      (first == List.hd grown);
+    write_file secret_file ("original-projected-secret-value\n" ^ future_secret ^ "\n");
+    let changed = List.hd (on_another_domain ()) in
+    Alcotest.(check bool) "a changed secret policy reparses the prefix" false
+      (first == changed);
+    Alcotest.(check bool) "the earlier view predates the new secret" true
+      (String.equal first.content future_secret);
+    Alcotest.(check bool) "the new secret is hidden after policy rotation" false
+      (String_util.contains_substring changed.content future_secret))
+
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in
   Fun.protect
@@ -4173,5 +4210,7 @@ let () =
             test_purge_plan_removes_chat_store;
           Alcotest.test_case "load_all is incremental and follows appends" `Quick
             test_load_all_is_incremental_and_follows_appends;
+          Alcotest.test_case "load_all reuses policy across domains" `Quick
+            test_load_all_reuses_policy_across_domains;
         ] );
     ]

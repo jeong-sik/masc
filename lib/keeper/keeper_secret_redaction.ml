@@ -244,6 +244,9 @@ let build ~redact_identity_scalars sources =
 let copy_for_current_domain snapshot =
   compile_exact_values snapshot.exact_values
 
+let same_policy left right =
+  left == right || List.equal String.equal left.exact_values right.exact_values
+
 (* The memo is per domain: a compiled [Re.re] fills its DFA tables lazily
    while matching, so one must not be shared between domains. Fibers of one
    domain interleave only at suspension points and matching has none. *)

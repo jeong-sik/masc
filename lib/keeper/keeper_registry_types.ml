@@ -90,6 +90,7 @@ type registry_entry =
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
   ; egress_proxy_port : int option Atomic.t
+  ; egress_proxy_auth : string option Atomic.t
   ; lane : Keeper_lane.t
   ; done_p : done_resolution Eio.Promise.t
   ; done_r : done_resolution Eio.Promise.u

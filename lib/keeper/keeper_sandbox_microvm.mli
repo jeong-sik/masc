@@ -84,11 +84,14 @@ val policy_network_gateway : inspect:string -> (string, string) result
 type policy_proxy =
   { gateway : string
   ; port : int
+  ; proxy_auth : string option
   }
-(** Where a policy guest's one route is: the gateway it sees the host at, and
-    the port its keeper's proxy bound. Both are discovered at boot -- the
-    gateway from the network, the port from the listener -- so neither is a
-    constant. *)
+(** Where a policy guest's one route is: the gateway it sees the host at,
+    the port its keeper's proxy bound, and the optional per-listener token.
+    Both gateway and port are discovered at boot -- the gateway from the
+    network, the port from the listener -- so neither is a constant. *)
+
+val apple_policy_environment : policy_proxy -> (string * string) list
 
 val network_args_for :
   Keeper_microvm_backend.t ->

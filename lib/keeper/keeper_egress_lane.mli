@@ -48,10 +48,13 @@ val listen_address : Eio.Net.Sockaddr.stream
     0.0.0.0 answered the same request from the same guest). A policy keeper
     with a loopback-bound proxy therefore reached nothing at all.
 
-    Binding every interface is what the guest can reach. It is not a wider
-    boundary than the lane already has: the port carries one keeper's
-    allowlist, and every request across it is judged and recorded whoever
-    opened it.
+    Binding every interface is what the guest can reach. It is paired with a
+    per-listener random credential ({!generate_proxy_auth}) so another local
+    process or sibling network cannot borrow this keeper's reach or write to
+    its egress record.
 
     The port is ephemeral because one is needed per keeper and a fixed range
     would be a second thing to keep in step with the roster. *)
+
+val generate_proxy_auth : unit -> string
+(** Fresh CSPRNG lowercase hex token for one listener instance. *)

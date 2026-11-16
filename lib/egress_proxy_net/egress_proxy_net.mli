@@ -83,10 +83,32 @@ module For_testing : sig
       machine with IPv6 off -- arrives as a bare [Unix.Unix_error] rather
       than [Eio.Io]. Narrowing this to the readable half once already turned
       that address into the end of the whole attempt. *)
+
+  val ip_refusal_of_string : string -> string option
+  (** [None] when the literal IP address is a public global unicast
+      destination, or [Some reason] when it falls in loopback, unspecified,
+      RFC1918/ULA private, CGNAT, link-local, multicast, or reserved space
+      (including IPv4-mapped IPv6 and well-known NAT64 forms). *)
+
+  val serve_allowing_private_ips
+    :  proxy_auth:string option
+    -> sw:Eio.Switch.t
+    -> net:_ Eio.Net.t
+    -> clock:_ Eio.Time.clock
+    -> keeper_name:string
+    -> rules:(unit -> ruleset)
+    -> on_event:(event -> unit)
+    -> socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t
+    -> read_timeout_s:float
+    -> 'a
+  (** Same loop as {!serve}, permitting loopback/private upstream targets so
+      socket splice and teardown tests can run against an in-process stub on
+      [127.0.0.1] without weakening production {!serve}. *)
 end
 
 val serve
-  :  sw:Eio.Switch.t
+  :  proxy_auth:string option
+  -> sw:Eio.Switch.t
   -> net:_ Eio.Net.t
   -> clock:_ Eio.Time.clock
   -> keeper_name:string

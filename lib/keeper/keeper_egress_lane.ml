@@ -52,3 +52,4 @@ let read_allowlist ~config_path ~keeper_name =
 let listen_backlog = 16
 let request_line_read_timeout_s = 10.0
 let listen_address = `Tcp (Eio.Net.Ipaddr.V4.any, 0)
+let generate_proxy_auth () = Random_id.hex ~bytes:24

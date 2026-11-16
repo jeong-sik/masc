@@ -117,9 +117,9 @@ let apple_policy_environment ~timeout_sec (t : t) =
   match t.network_mode with
   | Keeper_types_profile_sandbox.Network_none | Keeper_types_profile_sandbox.Network_inherit -> Ok []
   | Keeper_types_profile_sandbox.Network_policy ->
-    match bound_egress_proxy_port t with
-    | None -> Ok []
-    | Some port ->
+    match bound_egress_proxy_port t, bound_egress_proxy_auth t with
+    | None, _ -> Ok []
+    | Some port, proxy_auth ->
       let* argv = Keeper_sandbox_microvm.policy_network_inspect_argv_for
           Keeper_microvm_backend.Apple_container ~keeper_name:t.meta.name
         |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
@@ -130,7 +130,12 @@ let apple_policy_environment ~timeout_sec (t : t) =
       | Unix.WEXITED 0 ->
         let* gateway = Keeper_sandbox_microvm.policy_network_gateway ~inspect:stdout
           |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
-        Ok (Egress_proxy_decision.client_env ~proxy_url:(Printf.sprintf "http://%s:%d" gateway port))
+        Ok
+          (Keeper_sandbox_microvm.apple_policy_environment
+             { Keeper_sandbox_microvm.gateway
+             ; port
+             ; proxy_auth
+             })
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
         Error (Policy_network_unavailable "policy network inspect did not complete successfully")
 
@@ -382,7 +387,12 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       let* gateway = ensure_policy_network backend ~keeper_name:t.meta.name t.network_mode
         |> Result.map_error (fun detail -> Policy_network_unavailable detail) in
       let policy_proxy = match gateway, bound_egress_proxy_port t with
-        | Some gateway, Some port -> Some {Keeper_sandbox_microvm.gateway; port}
+        | Some gateway, Some port ->
+          Some
+            { Keeper_sandbox_microvm.gateway
+            ; port
+            ; proxy_auth = bound_egress_proxy_auth t
+            }
         | Some _, None | None, _ -> None in
       let* argv = Keeper_sandbox_microvm.apple_turn_start_argv ~container_name ~plan
           ~lifecycle_labels:(Keeper_sandbox_runtime_setup.lifecycle_labels ())
@@ -409,8 +419,7 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       | Apple_running reading ->
         let policy_environment = match policy_proxy with
           | None -> []
-          | Some {gateway; port} -> Egress_proxy_decision.client_env
-              ~proxy_url:(Printf.sprintf "http://%s:%d" gateway port) in
+          | Some proxy -> Keeper_sandbox_microvm.apple_policy_environment proxy in
         let image_command = read_apple_image_command ~timeout_sec ~plan reading in
         (match Plan.assess ~plan ~policy_environment ~identity_reading:Plan.Identity_readable ~image_command reading with
          | Plan.Matches_plan -> adopt snapshot

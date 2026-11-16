@@ -311,6 +311,8 @@ type registry_entry = {
           every keeper outside the policy lane, and on one whose proxy has
           not bound yet -- a guest that boots then reaches nothing, which is
           the closed direction. *)
+  egress_proxy_auth : string option Atomic.t;
+      (** Per-listener random credential paired with {!egress_proxy_port}. *)
   lane : Keeper_lane.t;
       (** Structured-concurrency scope owned by this exact registry entry.
           Its exit promise is the authoritative lane join signal. *)

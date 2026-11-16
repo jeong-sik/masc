@@ -181,6 +181,13 @@ let bound_egress_proxy_port (t : t) =
   |> Option.join
 ;;
 
+let bound_egress_proxy_auth (t : t) =
+  Keeper_registry.get ~base_path:t.config.base_path t.meta.name
+  |> Option.map (fun (entry : Keeper_registry_types.registry_entry) ->
+       Atomic.get entry.egress_proxy_auth)
+  |> Option.join
+;;
+
 let keeper_vm_name (t : t) =
   microvm_container_name
     ~config:t.config

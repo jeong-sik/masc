@@ -377,7 +377,7 @@ let test_ephemeral_routes_do_not_change_plan_identity () =
   check bool "DNS reaches execution without changing its plan label" true
     (first <> second && List.mem label first && List.mem label second);
   let policy_plan = {plan with network = Plan.Network_policy {name = "fixture-policy"}} in
-  let proxy port = Some {Sandbox.gateway = "192.0.2.1"; port} in
+  let proxy port = Some {Sandbox.gateway = "192.0.2.1"; port; proxy_auth = None} in
   let first = boot policy_plan None (proxy 32101) in
   let second = boot policy_plan None (proxy 32102) in
   let label = Plan.label_key ^ "=" ^ Plan.digest policy_plan in
@@ -471,7 +471,7 @@ let test_renderer_rejects_implicit_and_execution_collisions () =
   require_invalid_boot (Plan.Execution_environment_collision "HTTPS_PROXY")
     {plan with network = Plan.Network_policy {name = "fixture-policy"};
       environment = ("HTTPS_PROXY", "stable-but-colliding") :: plan.environment}
-    ~lifecycle_labels:[] ~policy_proxy:(Some {Sandbox.gateway = "192.0.2.1"; port = 32102})
+    ~lifecycle_labels:[] ~policy_proxy:(Some {Sandbox.gateway = "192.0.2.1"; port = 32102; proxy_auth = None})
 
 let test_valid_plan_keeps_command_order_semantic () =
   check bool "valid plan admitted" true (Plan.validate plan = Ok ());

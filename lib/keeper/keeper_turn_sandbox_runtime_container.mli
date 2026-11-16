@@ -60,6 +60,9 @@ val microvm_container_name :
 val bound_egress_proxy_port :
   t -> int option
 
+val bound_egress_proxy_auth :
+  t -> string option
+
 val keeper_vm_name : t -> string
 
 val bind_registered_microvm_identity :

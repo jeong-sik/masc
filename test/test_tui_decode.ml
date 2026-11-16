@@ -9746,6 +9746,50 @@ let test_decode_server_identity_survives_a_bare_health () =
       "an absent worktree verdict is unknown, not a lane" None
       identity.Tui_decode.sid_executable_in_worktree
 
+(* Which server answers: a masc server's /health carries no account_mode, the
+   account server of a multi-account installation says Multi_account with its
+   server name and version, and every other shape is refused. *)
+let test_decode_server_reading_tells_the_account_server_apart () =
+  let kind json =
+    match Tui_decode.decode_server_reading json with
+    | Ok (Tui_decode.Masc_server identity) -> `Masc identity.Tui_decode.sid_version
+    | Ok (Tui_decode.Account_server { account_server_version }) -> `Account account_server_version
+    | Error (_ : string) -> `Refused
+  in
+  let show = function
+    | `Masc version -> "masc " ^ version
+    | `Account version -> "account " ^ version
+    | `Refused -> "refused"
+  in
+  let reading = Alcotest.testable (fun fmt value -> Format.pp_print_string fmt (show value)) ( = ) in
+  let account ?(server = `String "masc") ?(version = `String "0.24.0") mode =
+    `Assoc [ ("server", server); ("version", version); ("account_mode", mode) ]
+  in
+  Alcotest.check reading "the single-user probe" (`Masc "0.24.0") (kind health_probe);
+  Alcotest.check reading "the account server" (`Account "0.24.0")
+    (kind (account (`String "Multi_account")));
+  List.iter
+    (fun (name, json) -> Alcotest.check reading name `Refused (kind json))
+    [ "an account server with no version",
+      `Assoc [ ("server", `String "masc"); ("account_mode", `String "Multi_account") ]
+    ; "an account server whose version is no string",
+      account ~version:(`Int 24) (`String "Multi_account")
+    ; "another server that says Multi_account",
+      account ~server:(`String "other") (`String "Multi_account")
+    ; "Single_user, which no /health carries", account (`String "Single_user")
+    ; "another case", account (`String "multi_account")
+    ; "another mode", account (`String "Off")
+    ; "null", account `Null
+    ; "a boolean", account (`Bool true)
+    ; "an object", account (`Assoc [])
+    ; "an answer that is no object", `String "OK"
+    ; "a list", `List []
+    ];
+  (match Tui_decode.decode_server_identity (account (`String "Multi_account")) with
+   | Ok (_ : Tui_decode.server_identity) ->
+     Alcotest.fail "the account server's answer read as a masc server's identity"
+   | Error (_ : string) -> ())
+
 let test_decode_server_identity_reads_the_startup_readiness () =
   let with_ready value =
     `Assoc [ ("startup", `Assoc [ ("state_ready", `Bool value) ]) ]
@@ -14575,6 +14619,8 @@ let () =
           test_decode_server_identity_reads_a_probe;
         Alcotest.test_case "survives a bare health" `Quick
           test_decode_server_identity_survives_a_bare_health;
+        Alcotest.test_case "tells the account server apart" `Quick
+          test_decode_server_reading_tells_the_account_server_apart;
         Alcotest.test_case "reads the operator rollup" `Quick
           test_decode_server_identity_reads_the_operator_rollup;
         Alcotest.test_case "takes an integer age" `Quick

@@ -1702,7 +1702,26 @@ type server_identity = {
     [sid_binary_commit_age_s] is how long ago that binary's commit landed,
     which is the number that separates the two. *)
 
+(** [Error] for an answer that carries [account_mode]: the account server of
+    a multi-account installation serves no workspace, and its answer read as
+    an identity would name an empty one. *)
 val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
+
+(** What answers [/health] at the address the TUI was given. *)
+type server_reading =
+  | Masc_server of server_identity
+      (** A masc server, read by {!decode_server_identity}. *)
+  | Account_server of { account_server_version : string }
+      (** The account server of a multi-account installation. It serves none
+          of the operator surfaces, so a TUI that asks it for them reads only
+          404s. *)
+
+(** [Masc_server] for an object with no [account_mode] member, which no masc
+    server carries. [Account_server] for the account server's answer:
+    [account_mode] [Multi_account], [server] ["masc"] and a string
+    [version], as [Server_accounts.health_version] reads it. Any other
+    [account_mode], and an answer that is no JSON object, is [Error]. *)
+val decode_server_reading : Yojson.Safe.t -> (server_reading, string) result
 
 type prompt_operator_surface =
   | Prompt_primary

@@ -14,6 +14,7 @@
   linux_proc_stat
   posix_spawn_detached
   process_group_members
+  process_exit_text
   process_eio_detached
   process_eio_stderr
   file_lock_eio

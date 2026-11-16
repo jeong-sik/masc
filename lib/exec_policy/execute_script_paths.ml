@@ -54,6 +54,18 @@ let is_cd_stage (stage : Masc_exec.Shell_ir.simple) : bool =
   String.equal (bin_base stage.bin) "cd"
 ;;
 
+let looks_like_option (s : string) : bool =
+  String.length s >= 2 && String.unsafe_get s 0 = '-'
+;;
+
+let classify_arg = function
+  | Masc_exec.Shell_ir.Lit (s, meta) ->
+    if meta.glob then `Glob_or_dynamic else `Lit s
+  | Masc_exec.Shell_ir.Var _
+  | Masc_exec.Shell_ir.Concat _
+  | Masc_exec.Shell_ir.Subst _ -> `Glob_or_dynamic
+;;
+
 let rec cd_operands = function
   | [] -> Ok []
   | arg :: rest ->
@@ -67,18 +79,6 @@ let rec cd_operands = function
        cd_operands rest
      | `Lit opt when looks_like_option opt -> Error ()
      | `Lit _ | `Glob_or_dynamic -> Ok (arg :: rest))
-;;
-
-let looks_like_option (s : string) : bool =
-  String.length s >= 2 && String.unsafe_get s 0 = '-'
-;;
-
-let classify_arg = function
-  | Masc_exec.Shell_ir.Lit (s, meta) ->
-    if meta.glob then `Glob_or_dynamic else `Lit s
-  | Masc_exec.Shell_ir.Var _
-  | Masc_exec.Shell_ir.Concat _
-  | Masc_exec.Shell_ir.Subst _ -> `Glob_or_dynamic
 ;;
 
 let value_after_eq ~prefix (s : string) : string option =

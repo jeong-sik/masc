@@ -141,7 +141,9 @@ let test_get_branches () =
           match Repo_git.get_branches ~repository:repo with
           | Error e -> Alcotest.fail ("get_branches failed: " ^ e)
           | Ok branches ->
-              Alcotest.(check bool) "has main" true (List.mem "main" branches)))
+              Alcotest.(check bool) "has main" true (List.mem "main" branches);
+              Alcotest.(check bool) "excludes origin symref" false (List.mem "origin" branches);
+              Alcotest.(check bool) "excludes origin/HEAD symref" false (List.mem "origin/HEAD" branches)))
 
 let test_get_origin_url () =
   with_temp_dir (fun tmp ->

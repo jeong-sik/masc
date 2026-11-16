@@ -204,6 +204,39 @@ let test_setting_the_state_it_already_has_writes_nothing () =
   check Alcotest.bool "no store file appears for a no-op" false
     (Sys.file_exists (Switch.path ~base_path))
 
+let test_concurrent_switches_keep_both_rows () =
+  let base_path = temp_base () in
+  let cfg = switch_config base_path in
+  Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Eio_context.with_test_env
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~mono_clock:(Eio.Stdenv.mono_clock env)
+      ~sw
+      (fun () ->
+         Eio.Fiber.both
+           (fun () ->
+              match
+                Switch.set cfg ~actor:"fiber-a"
+                  ~keeper_name:"acme-daycare" ~provider_id:"atlassian" ~enabled:false
+              with
+              | Ok () -> ()
+              | Error e -> Alcotest.failf "fiber-a switch failed: %s" e)
+           (fun () ->
+              match
+                Switch.set cfg ~actor:"fiber-b"
+                  ~keeper_name:"acme-daycare" ~provider_id:"github" ~enabled:false
+              with
+              | Ok () -> ()
+              | Error e -> Alcotest.failf "fiber-b switch failed: %s" e)));
+  match Switch.disabled_providers_for_keeper ~base_path ~keeper_name:"acme-daycare" with
+  | Error e -> Alcotest.failf "disabled_providers_for_keeper failed: %s" e
+  | Ok ids ->
+    check (Alcotest.list str) "both concurrent provider switches survive"
+      [ "atlassian"; "github" ]
+      (List.sort String.compare ids)
+
 let test_an_unreadable_switch_store_offers_nothing () =
   (* Handing out tools an operator may have turned off is the one wrong
      answer. The turn gets nothing, loudly, until the store is repaired. *)
@@ -1405,6 +1438,8 @@ let () =
             `Quick test_a_thrown_switch_takes_the_tools_out_of_the_turn;
           Alcotest.test_case "setting the state it already has writes nothing"
             `Quick test_setting_the_state_it_already_has_writes_nothing;
+          Alcotest.test_case "concurrent switches keep both rows" `Quick
+            test_concurrent_switches_keep_both_rows;
           Alcotest.test_case "an unreadable switch store offers nothing" `Quick
             test_an_unreadable_switch_store_offers_nothing;
         ] );

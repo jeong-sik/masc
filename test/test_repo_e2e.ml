@@ -147,9 +147,10 @@ let test_register_clone_and_list_branches () =
                    match Repo_store.list_branches ~base_path added.id with
                    | Error e -> Alcotest.fail ("list_branches failed: " ^ e)
                    | Ok branches ->
-                       Alcotest.(check bool) "has main" true (List.mem "main" branches);
-                       Alcotest.(check bool) "has develop" true (List.mem "develop" branches);
-                       Alcotest.(check bool) "has feature/test" true (List.mem "feature/test" branches)
+                       Alcotest.(check (list string))
+                         "exact deduplicated branches without origin/HEAD symref"
+                         [ "develop"; "feature/test"; "main" ]
+                         (List.sort String.compare branches)
               )))
 
 let test_e2e_full_lifecycle () =

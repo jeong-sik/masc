@@ -321,10 +321,23 @@ let fast_forward ~repository ~target_ref : (unit, string) result =
 
 let get_branches ~repository =
   match
-    run_git ~cwd:repository.local_path
-      ["branch"; "-a"; "--format=%(refname:short)"]
+    run_git
+      ~cwd:repository.local_path
+      ~env:read_only_git_env
+      [ "for-each-ref"
+      ; "--format=%(symref)\t%(refname:lstrip=2)"
+      ; "refs/heads"
+      ; "refs/remotes"
+      ]
   with
-  | Ok lines -> Ok lines
+  | Ok lines ->
+    Ok
+      (List.filter_map
+         (fun line ->
+            match String.index_opt line '\t' with
+            | Some 0 -> Some (String.sub line 1 (String.length line - 1))
+            | Some _ | None -> None)
+         lines)
   | Error msg -> Error msg
 
 (* Bounded and read-only, matching [worktree_root] below. Reading a remote URL

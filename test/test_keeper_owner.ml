@@ -6880,6 +6880,16 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
   Owner.submit_operation owner ~operation_id:queued ~source:operation_source
     ~input:(operation_input "Input admitted before preparation retry") |> owner_ok |> ignore;
   check int "new admission does not retry blocked operation" 2 !attempts;
+  (* An injected retry fault fences the Owner store, and the Owner reopens it
+     only while no chat child runs (Keeper_owner.chat_child_in_flight). A
+     fault variant therefore frees the slot before it fails the retry. A
+     variant without a fault holds the slot, so the retried operation and the
+     waiting input become claimable together and the order is observable. *)
+  let holds_slot_through_retry = Option.is_none retry_fault in
+  if not holds_slot_through_retry then (
+    Eio.Promise.resolve release_independent_resolver ();
+    Eio.Promise.await independent;
+    Eio.Promise.await queued_finished);
   (match Owner.retry_direct_preparation owner ~operation_id:id
       ~expected_revision:(Int64.pred waiting.revision) ~execution_digest:waiting.execution_digest with
    | Error _ -> () | Ok _ -> fail "stale retry was admitted");
@@ -6910,7 +6920,7 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
       | Error _ -> () | Ok _ -> fail "uncertainty authorized a fresh stale retry");
      Owner.wake_operation_drain owner |> owner_ok
    | _,_,result -> result |> owner_ok |> ignore);
-  Eio.Promise.resolve release_independent_resolver ();
+  if holds_slot_through_retry then Eio.Promise.resolve release_independent_resolver ();
   Eio.Promise.await independent;
   Eio.Promise.await queued_finished;
   Eio.Promise.await finished;

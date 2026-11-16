@@ -27837,6 +27837,9 @@ type keeper_message_status_frame =
   ; kmsf_schedule_rows : (chat_schedule_proximity * string) list
   ; kmsf_evidence_rows : string list
   ; kmsf_title_suffix : string
+  ; kmsf_status_block_rows : int
+        (* Rows the Keeper status block below the composer is given. The fixed
+           chrome holds the first; the rest come out of the history. *)
   }
 
 (* Warnings have counted rows. A complete reading stays in the title when it
@@ -27916,6 +27919,7 @@ let keeper_message_status_frame ?(schedule_budget = 1) ?(terminal_cols = max_int
   ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:schedule_budget
   ; kmsf_evidence_rows = evidence_rows
   ; kmsf_title_suffix = title_suffix
+  ; kmsf_status_block_rows = 1
   }
 
 let keeper_message_status_rows ?status_frame ?scroll (state : state) =
@@ -27933,6 +27937,7 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + List.length status_frame.kmsf_interrupt_rows
   + List.length status_frame.kmsf_schedule_rows
   + List.length status_frame.kmsf_evidence_rows
+  + (status_frame.kmsf_status_block_rows - 1)
   + unavailable_target
   + (match status_frame.kmsf_source with
      | No_message_status -> 0
@@ -27966,17 +27971,28 @@ let keeper_message_status_rows ?status_frame ?scroll (state : state) =
   + (if keeper_message_reading_back ?scroll state then 1 else 0)
   + composer_extra_rows state
 
-let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows ~terminal_cols =
+(* [status_block_rows] is how many rows the Keeper status block takes at this
+   width when nothing caps it. The caller measures it because the facts are
+   the renderer's; this decides how many of those rows the viewport grants. *)
+let keeper_message_frame_for_viewport ?scroll ~status_block_rows state ~now ~terminal_rows
+    ~terminal_cols =
   let frame = keeper_message_status_frame ~schedule_budget:0 ~terminal_cols state ~now in
   let status_rows = keeper_message_status_rows ~status_frame:frame ?scroll state
     + (if keeper_message_reading_back ?scroll state then 0 else 1) in
-  (* Keep the existing three-row transcript minimum; extra schedule rows are
-     a viewport choice, never a limit on stored jobs or their execution. *)
-  let budget = min 5 (max 0
-      (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3)) in
-  { frame with kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:budget }
+  (* Keep the existing three-row transcript minimum. The status block takes
+     what it needs of the rows above that first, because it names whom the
+     next Enter reaches; extra schedule rows are a viewport choice, never a
+     limit on stored jobs or their execution, and take what is left. *)
+  let spare = max 0
+      (Masc_tui_message_layout.message_history_height ~terminal_rows ~status_rows - 3) in
+  let block_extra = min spare (max 0 (status_block_rows - 1)) in
+  let budget = min 5 (spare - block_extra) in
+  { frame with
+    kmsf_status_block_rows = 1 + block_extra
+  ; kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:budget
+  }
 
-let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~terminal_cols =
+let keeper_message_command_window ~status_frame ?scroll state ~terminal_rows ~terminal_cols =
   match state.view, state.keeper_message_focus, state.voice_capture,
         current_recall_edit state with
   | Keepers Keeper_message, Right_pane, None, None
@@ -27986,11 +28002,7 @@ let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~te
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
-       let status_frame = Some (match status_frame with
-         | Some frame -> frame
-         | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
-                     ~terminal_rows ~terminal_cols) in
-       let status_rows = keeper_message_status_rows ?status_frame ?scroll state + 1 in
+       let status_rows = keeper_message_status_rows ~status_frame ?scroll state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in
        let history_rows = Masc_tui_message_layout.message_history_height

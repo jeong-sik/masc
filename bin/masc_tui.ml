@@ -1117,7 +1117,7 @@ let keeper_message_page_rows state =
      composer growth is already inside [keeper_message_status_rows]. Adding
      composer_max_rows here counted it twice, and every PgUp jumped four
      rows short of the screenful the comment promises. *)
-  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ())
+  let status_frame = keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
       ~terminal_rows:rows ~terminal_cols:cols in
   let status_rows = keeper_message_status_rows ~status_frame state in
   (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
@@ -1496,7 +1496,7 @@ let submit_chat_draft (state : state) ~(submit_message : Masc_tui_message_input.
 
 let keeper_message_input_supported state =
   let rows, cols = get_terminal_size () in
-  let status_frame = keeper_message_frame_for_viewport state ~now:(Unix.gettimeofday ())
+  let status_frame = keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
       ~terminal_rows:rows ~terminal_cols:cols in
   let status_rows = keeper_message_status_rows ~status_frame state in
   Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
@@ -1546,7 +1546,10 @@ let handle_message_key (state : state) ~(submit_message : Masc_tui_message_input
   in
   let command_menu =
     let rows, cols = get_terminal_size () in
-    keeper_message_command_window state ~terminal_rows:rows ~terminal_cols:cols |> Option.map fst in
+    let status_frame = keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
+        ~terminal_rows:rows ~terminal_cols:cols in
+    keeper_message_command_window ~status_frame state ~terminal_rows:rows ~terminal_cols:cols
+    |> Option.map fst in
   let accept_command_menu menu =
     let completed = Masc_tui_command.menu_accept menu in
     forget_recall state;

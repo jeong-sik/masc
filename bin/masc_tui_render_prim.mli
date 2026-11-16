@@ -411,10 +411,8 @@ val slash_hint_text : restore:string -> string -> string option
 
 val keeper_roster_pane_shown : Masc_tui_types.state -> cols:int -> bool
 
-val keeper_action_color :
-  surface:Masc_tui_theme.surface -> Status.keeper_next_action_path option -> string
-(** The colour of the runtime's suggested action, measured against the
-    ground the glyph is drawn on. *)
+val keeper_action_color : Status.keeper_next_action_path option -> string
+(** The colour of the runtime's suggested action on the roster's side pane. *)
 
 val keeper_suggested_action : ko:bool -> Masc_tui_keeper_control.reading -> string
 (** The runtime's suggested action, or why it was not observed. *)

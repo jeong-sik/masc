@@ -594,26 +594,6 @@ val stream_stop_reason : keeper_name:string -> t option -> string option
     so the screen never holds a list of reasons worth hiding. This is a
     different question from the turn outcome masc recorded. *)
 
-val runtime_identity_text :
-  keeper_name:string -> configured_runtime:string -> t option -> string
-(** {!runtime_identity} as one clause: [turn: <runtime id> · configured: …],
-    [model: <model> · configured: …], or the configured runtime alone. *)
-
-val stream_tokens_text : keeper_name:string -> t option -> string option
-(** {!stream_usage} as one clause ([tokens: in 1200 · out 340]). [None] when
-    no counter was reported. *)
-
-val stream_details_text : keeper_name:string -> t option -> string option
-(** The counters and {!stream_stop_reason} as clauses
-    ([tokens: in 1200 · out 340 · stopped: max_tokens]). [None] when nothing
-    was reported. *)
-
-val stream_details_within :
-  keeper_name:string -> room:int -> t option -> string option
-(** The clause a row with [room] cells to spare draws, its leading separator
-    included and measured: both facts, or the counters alone, or [None] when
-    not even the counters fit. *)
-
 (** The recorded reply (KEEPER_REPLY_DETAILS): the visible text, the typed
     outcome, and the turn it was recorded under. *)
 type reply =

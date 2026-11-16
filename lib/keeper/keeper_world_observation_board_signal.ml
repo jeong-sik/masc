@@ -315,6 +315,13 @@ let board_routing_pending_stimulus ~arrived_at
   }
 ;;
 
+let compare_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
+  let order = Float.compare ts_a ts_b in
+  if order <> 0 then order else String.compare post_id_a post_id_b
+;;
+
+let cursor_token_of_post = Board.updated_post_key_of_post
+
 let list_posts_after_cursor cursor =
   Board_dispatch.list_posts_after_cursor_unchecked cursor
 ;;

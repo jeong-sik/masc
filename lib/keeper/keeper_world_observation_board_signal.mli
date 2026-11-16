@@ -108,8 +108,6 @@ val board_stimulus_of_signal_with_audience
 (** Preserve a signal with its pinned audience. Candidates use this with
     their stored audience. *)
 
-(* [post_id_string] is how [cursor_token_of_post] below keys a post; that is
-   its only caller. *)
 val compare_cursor_token : float * string -> float * string -> int
 val cursor_token_of_post : Board.post -> float * string
 val list_posts_after_cursor : float * string option -> Board.post list

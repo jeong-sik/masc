@@ -101,7 +101,7 @@ val admit_document_blocks
 (** The visible text block an unrepresentable document is replaced with. Names
     the media type so the omission is legible to the model and, through it, the
     user — the degrade is not silent. *)
-val document_omitted_placeholder : media_type:string -> Types.content_block
+val document_omitted_placeholder : media_type:string -> 'source Types.content_block_with
 
 (** [degrade_document_messages ~wire_form ~supports_document_input messages]
     rewrites every [Document] — including documents nested in ToolResult
@@ -109,7 +109,8 @@ val document_omitted_placeholder : media_type:string -> Types.content_block
     from — that cannot be placed on a wire whose native form is [wire_form]
     into {!document_omitted_placeholder}, leaving representable documents and
     every other block untouched. Returns the rewritten history and the number
-    of documents degraded.
+    of documents degraded. The media-source type is preserved, so sizing can
+    project unresolved sources without resolving them or changing their identity.
 
     This is the request/serialize-path remedy for agent-core boundary: a document is never
     relabelled as another modality (the original defect) and never rejects the
@@ -119,8 +120,8 @@ val document_omitted_placeholder : media_type:string -> Types.content_block
 val degrade_document_messages
   :  wire_form:document_wire_form
   -> supports_document_input:bool
-  -> Types.message list
-  -> Types.message list * int
+  -> 'source Types.message_with list
+  -> 'source Types.message_with list * int
 
 (** The visible text block an image is replaced with when the model does not
     declare [supports_image_input]. Names the media type so the omission is

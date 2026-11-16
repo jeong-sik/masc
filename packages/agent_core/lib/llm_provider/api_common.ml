@@ -211,44 +211,33 @@ let document_omitted_placeholder ~media_type =
    Returns the rewritten history and the number of blocks degraded. *)
 let degrade_blocks_messages rewrite_block messages =
   let degraded = ref 0 in
-  let rewrite (message : Types.message) =
-    let content =
-      List.map
-        (fun block ->
-           match rewrite_block block with
-           | Some (_note, placeholder) ->
-             incr degraded;
-             placeholder
-           | None ->
-             (match block with
-              | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
-                let notes = ref [] in
-                let blocks =
-                  List.map
-                    (fun inner ->
-                       match rewrite_block inner with
-                       | Some (note, placeholder) ->
-                         incr degraded;
-                         notes := note :: !notes;
-                         placeholder
-                       | None -> inner)
-                    blocks
-                in
-                if !notes = [] then block
-                else begin
-                  let notes = String.concat "\n" (List.rev !notes) in
-                  let content =
-                    if result.content = "" then notes
-                    else result.content ^ "\n" ^ notes
-                  in
-                  ToolResult { result with content; content_blocks = Some blocks }
-                end
-              | (ToolResult { content_blocks = None;_} | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block -> block))
-        message.content
-    in
+  let rec rewrite block =
+    match rewrite_block block with
+    | Some (note, placeholder) ->
+      incr degraded;
+      placeholder, [note]
+    | None ->
+      match block with
+      | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
+        let blocks, notes = List.split (List.map rewrite blocks) in
+        let notes = List.concat notes in
+        (match notes with
+         | [] -> block, []
+         | _ :: _ ->
+           let summary = String.concat "\n" notes in
+           let content =
+             if result.content = "" then summary
+             else result.content ^ "\n" ^ summary in
+           ToolResult { result with content; content_blocks = Some blocks }, notes)
+      | ToolResult { content_blocks = None; _ }
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
+      | ToolUse _ | Image _ | Document _ | Audio _ -> block, []
+  in
+  let rewrite_message (message : 'source Types.message_with) =
+    let content = List.map (fun block -> fst (rewrite block)) message.content in
     { message with content }
   in
-  let messages = List.map rewrite messages in
+  let messages = List.map rewrite_message messages in
   messages, !degraded
 ;;
 

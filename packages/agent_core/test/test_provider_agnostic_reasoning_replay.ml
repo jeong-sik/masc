@@ -2988,6 +2988,28 @@ let test_spent_context_row_does_not_refuse_the_request () =
      | None -> false)
 ;;
 
+let test_document_projection_binds_the_transmitted_reasoning_prefix () =
+  List.iter (fun supported ->
+    let caps =
+      { (Capabilities.capabilities_of_kind Provider_config.Anthropic) with
+        supports_document_input = supported;
+        reasoning_replay_override = Capabilities.Force_latest_user_turn_tool_calls }
+    in
+    let config = anthropic_build_config_variant ~cap_override:caps () in
+    let tools = [prefix_test_tool_schema] in
+    let carrier data = message User
+      [Text "read this"; Document {media_type="application/pdf"; source=Base64 data}] in
+    let assistant = stamped_assistant ~config ~request_messages:[carrier "UERG"] ~tools
+      [Thinking {content="document reasoning"; signature=Some "sig-document"};
+       ToolUse {id="call-doc"; name="inspect"; input=`Assoc []}] in
+    List.iter (fun (data, expected) ->
+      let messages = [carrier data; assistant; message Tool [tool_result "call-doc"]] in
+      let body = Backend_anthropic.build_request ~config ~messages ~tools () in
+      check_bool "thinking follows the actual document wire prefix" expected
+        (List.exists (List.mem "thinking") (wire_content_types body)))
+      ["UERG", true; "RElGRg==", not supported]) [false; true]
+;;
+
 let () =
   Alcotest.run
     "provider_agnostic_reasoning_replay"
@@ -3228,6 +3250,10 @@ let () =
             "prefix binding keeps thinking across chained rounds"
             `Quick
             test_prefix_binding_keeps_thinking_across_chained_rounds
+        ; Alcotest.test_case
+            "document projection binds the transmitted reasoning prefix"
+            `Quick
+            test_document_projection_binds_the_transmitted_reasoning_prefix
         ; Alcotest.test_case
             "a malformed tag anywhere refuses the projection"
             `Quick

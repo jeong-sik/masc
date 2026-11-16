@@ -422,6 +422,13 @@ let add_sampling_field = Backend_openai_request.add_sampling_field
    the diagnostic [observe] stays at the call site, which keeps this a
    function of its arguments. *)
 let project_history ?(tools_present = false) config messages =
+  let caps = capabilities_of_config config in
+  let messages, _documents_degraded =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_input_file_part
+      ~supports_document_input:caps.supports_document_input
+      messages
+  in
   Reasoning_history_projection.project_for_provider_config
     ~tools_present
     ~assistant_has_payload:(fun content -> content <> [])
@@ -446,6 +453,7 @@ let build_request_artifact
       ()
   =
   let tools = Backend_openai_request.effective_tools config tools in
+  let caps = capabilities_of_config config in
   let projected_messages =
     match project_history ~tools_present:(tools <> []) config messages with
     | Error error ->
@@ -548,7 +556,6 @@ let build_request_artifact
   in
   let body =
     let tools_present = tools <> [] in
-    let caps = capabilities_of_config config in
     let disable_parallel =
       Capabilities.effective_disable_parallel_tool_use
         ~caller_disabled:config.disable_parallel_tool_use

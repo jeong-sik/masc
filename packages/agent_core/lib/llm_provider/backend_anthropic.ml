@@ -396,7 +396,27 @@ type request_mode =
    request before building it gets the same answer the wire will give;
    the diagnostic [observe] stays at the call site, which keeps this a
    function of its arguments. *)
+let capabilities_of_config (config : Provider_config.t) =
+  match Provider_config.capabilities_for_config_model config with
+  | Some caps -> caps
+  | None ->
+    match config.kind with
+    | Provider_config.Anthropic -> Capabilities.anthropic_capabilities
+    | Provider_config.Kimi -> Capabilities.kimi_capabilities
+    | Provider_config.OpenAI_compat | Provider_config.Ollama
+    | Provider_config.Gemini | Provider_config.Glm -> Capabilities.default_capabilities
+;;
+
 let project_history ?(tools_present = false) config messages =
+  (* Request serialization and signed-prefix receipts must see the same
+     projection, including documents introduced during a tool round. *)
+  let caps = capabilities_of_config config in
+  let messages, _documents_degraded =
+    Api_common.degrade_document_messages
+      ~wire_form:Api_common.Document_source_block
+      ~supports_document_input:caps.supports_document_input
+      messages
+  in
   Reasoning_history_projection.project_for_provider_config
     ~tools_present
     ~assistant_has_payload:(fun content -> content <> [])
@@ -708,18 +728,7 @@ let build_request_payload
   (match Provider_config.validate_tool_choice_request config with
    | Ok () -> ()
    | Error reason -> invalid_arg ("Backend_anthropic.build_request: " ^ reason));
-  let caps =
-    match Provider_config.capabilities_for_config_model config with
-    | Some caps -> caps
-    | None ->
-      (match config.kind with
-       | Provider_config.Anthropic -> Capabilities.anthropic_capabilities
-       | Provider_config.Kimi -> Capabilities.kimi_capabilities
-       | Provider_config.OpenAI_compat
-       | Provider_config.Ollama
-       | Provider_config.Gemini
-       | Provider_config.Glm -> Capabilities.default_capabilities)
-  in
+  let caps = capabilities_of_config config in
   (match request_mode, config.seed with
    | Completion _, Some _ ->
      invalid_arg

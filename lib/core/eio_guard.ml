@@ -55,7 +55,8 @@ let with_mutex mutex f =
   | true, Non_eio -> raise (Non_eio_mutex_context Read_write)
 ;;
 
-(** Read-only guard: acquires read lock if Eio is ready, runs directly otherwise. *)
+(** Exclusive guard that unlocks rather than poisoning on callback exceptions.
+    Runs directly before Eio is ready. *)
 let with_mutex_ro mutex f =
   match Atomic.get ready, execution_context () with
   | false, _ -> f ()

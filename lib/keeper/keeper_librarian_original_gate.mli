@@ -35,13 +35,21 @@ module Make (Capture : Capture) : sig
   val is_scope : string -> bool
   val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
   (** Strict header read for discovery joining only; follow with full validation. *)
+  type proofs
+  val proofs : unit -> proofs
+  (** Binding chains one deploy check proved. A chain proved for an attempt
+      stays proved while the attempt, its execution parent, the parent's
+      capture and its owner read the same; a failed proof is not kept. One
+      check passes the same proofs to every payload validation it makes. *)
   val validate_payload :
+    proofs:proofs ->
     read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
     read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
     owner:Capture.owner -> capture:Capture.t ->
     parent:Lane_addon_tool_request_owner.retained -> record:Lane_addon_tool_request_owner.retained ->
     (unit, string) result
   val validate_preparation_payload :
+    proofs:proofs ->
     read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
     read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
     owner:Capture.owner -> capture:Capture.t ->

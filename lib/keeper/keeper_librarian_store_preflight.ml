@@ -53,6 +53,11 @@ let floor_capture ~read ~owner record =
 
 let validator () =
   let forest=forest_proof () in
+  (* Each gate record's check follows its retry links back to the journal's
+     root. Chains proved earlier in this scan are not proved again. *)
+  let admission_proofs=Keeper_librarian_admission_gate.proofs ()
+  and history_proofs=Keeper_librarian_durable_gate.proofs ()
+  and floor_proofs=Keeper_librarian_floor_step_gate.proofs () in
   let admission_capture ~read ~read_scope ~owner record =
     let* ()=forest ~read_scope ~owner in
     Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record in
@@ -62,7 +67,8 @@ let validator () =
   | Some Admission_execution ->
     let* owner=admission_owner record in
     let* capture=admission_capture ~read ~read_scope ~owner record in
-    Keeper_librarian_admission_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
+    Keeper_librarian_admission_gate.validate_preparation_payload ~proofs:admission_proofs ~read ~read_body ~owner ~capture
+      ~parent:record
   | Some Admission_part ->
     let* owner=admission_owner record in
     let* ()=Parts.validate_part_payload ~owner record in
@@ -77,32 +83,34 @@ let validator () =
   | Some History_execution ->
     let* owner=history_owner record in
     let* capture=history_capture ~read ~read_fence ~read_resolution ~owner record in
-    Keeper_librarian_durable_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
+    Keeper_librarian_durable_gate.validate_preparation_payload ~proofs:history_proofs ~read ~read_body ~owner ~capture
+      ~parent:record
   | Some Floor_execution ->
     let* owner=history_owner record in
     let* capture=floor_capture ~read ~owner record in
-    Keeper_librarian_floor_step_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
+    Keeper_librarian_floor_step_gate.validate_preparation_payload ~proofs:floor_proofs ~read ~read_body ~owner ~capture
+      ~parent:record
   | Some Admission_gate ->
     let module Gate=Keeper_librarian_admission_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=admission_owner record in
     let* parent=parent ~read ~scope:(Admission.scope owner) ~request_id in
     let* capture=admission_capture ~read ~read_scope ~owner parent in
-    Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
+    Gate.validate_payload ~proofs:admission_proofs ~read ~read_body ~owner ~capture ~parent ~record
   | Some History_gate ->
     let module Gate=Keeper_librarian_durable_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(History.scope owner) ~request_id in
     let* capture=history_capture ~read ~read_fence ~read_resolution ~owner parent in
-    Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
+    Gate.validate_payload ~proofs:history_proofs ~read ~read_body ~owner ~capture ~parent ~record
   | Some Floor_gate ->
     let module Gate=Keeper_librarian_floor_step_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(Floor.scope owner) ~request_id in
     let* capture=floor_capture ~read ~owner parent in
-    Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
+    Gate.validate_payload ~proofs:floor_proofs ~read ~read_body ~owner ~capture ~parent ~record
   in
   (* Unlike the immutable forest payload, absence is not stable: a running
      owner can publish its closing journal before the next scanned record. *)

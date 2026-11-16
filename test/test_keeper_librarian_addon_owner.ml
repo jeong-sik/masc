@@ -1695,7 +1695,7 @@ let test_missing_absorb_policy_refuses_before_preparation ()=List.iter (fun empt
        | Keeper_librarian_absorb_gate.Skipped _ -> false);
     let request=`Assoc (("guidance",`Null)::List.remove_assoc "guidance" (Yojson.Safe.Util.to_assoc intent.request)) in
     let forged=retain_gate_payload fixture ~owner ~parent:record ~request_id:intent.request_id ~request in
-    let rejected=io (fun () -> Gate.validate_payload ~owner ~capture ~parent:record ~record:forged
+    let rejected=io (fun () -> Gate.validate_payload ~proofs:(Gate.proofs ()) ~owner ~capture ~parent:record ~record:forged
       ~read:(fun ~scope:_ ~request_id:_ -> fail "missing guidance must refuse before ancestry lookup")
       ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "missing guidance must refuse before body lookup")) in
     check (result unit string) "an enabled nonempty proposal cannot decode null guidance"
@@ -1726,7 +1726,7 @@ let check_unused_absorb_policy ~empty ~excluded ~no_absorptions =
         let request=`Assoc (("guidance",`Assoc [])::List.remove_assoc "guidance" (Yojson.Safe.Util.to_assoc intended.request)) in
         let malformed=retain_gate_payload fixture ~owner ~parent ~request_id:intended.request_id ~request in
         check bool "an empty proposal still rejects malformed non-null guidance" true
-          (io (fun () -> Gate.validate_payload ~owner ~capture ~parent ~record:malformed
+          (io (fun () -> Gate.validate_payload ~proofs:(Gate.proofs ()) ~owner ~capture ~parent ~record:malformed
             ~read:(fun ~scope:_ ~request_id:_ -> fail "malformed guidance must refuse before ancestry lookup")
             ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "malformed guidance must refuse before body lookup")) |> Result.is_error));
       let parent=memory_action fixture (fun () -> Gate.recover_root ~store:fixture.store ~owner ~capture |> get) in
@@ -1795,7 +1795,7 @@ let test_absorbing_admission_captures_both_context_policies ()=
         let forged=retain_gate_payload fixture ~owner ~parent:record ~request_id:intent.request_id ~request in
         check (result unit string) "captured guidance with an unknown field is refused"
           (Error "Captured absorption guidance has unknown, duplicate or missing fields")
-          (io (fun () -> Gate.validate_payload ~owner ~capture ~parent:record ~record:forged
+          (io (fun () -> Gate.validate_payload ~proofs:(Gate.proofs ()) ~owner ~capture ~parent:record ~record:forged
             ~read:(fun ~scope:_ ~request_id:_ -> fail "a forged guidance must refuse before ancestry")
             ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "a forged guidance must refuse before body lookup")));
         let parent=memory_action fixture (fun () -> match Commit.begin_gate ~store:fixture.store ~owner ~capture

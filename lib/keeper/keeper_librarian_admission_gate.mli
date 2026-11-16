@@ -5,13 +5,18 @@ val scope : Keeper_librarian_admission_capture.owner -> string
 val is_scope : string -> bool
 val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
 (** Strict header read for discovery joining only; follow with full validation. *)
+type proofs
+val proofs : unit -> proofs
+(** Binding chains one deploy check proved, as in [Keeper_librarian_original_gate]. *)
 val validate_payload :
+  proofs:proofs ->
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
   owner:Keeper_librarian_admission_capture.owner -> capture:Keeper_librarian_admission_capture.t ->
   parent:Lane_addon_tool_request_owner.retained -> record:Lane_addon_tool_request_owner.retained ->
   (unit, string) result
 val validate_preparation_payload :
+  proofs:proofs ->
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
   owner:Keeper_librarian_admission_capture.owner -> capture:Keeper_librarian_admission_capture.t ->

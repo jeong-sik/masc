@@ -581,6 +581,63 @@ let test_a_journal_read_restores_each_attempt_once () = with_fixture (fun fixtur
     check bool "a journal read grows with its attempts and not with their square" true
       (eight -. four < 2. *. (four -. one))))
 
+(* A deploy check reads every gate record of a journal and follows each
+   record's retry links back to the journal's first attempt. A check that
+   proved each record's whole chain again would prove eleven links when the
+   eleventh attempt arrives, against two when the second does. A check that
+   proves each attempt once proves one link for either. The rest of what an
+   attempt adds to the check, its parent's capture and its successor, is the
+   same for both, so the eleventh may cost at most half again the second. *)
+let test_a_deploy_check_proves_each_attempt_once () = with_fixture (fun fixture ->
+  fixture.respond := (fun body ->
+    if contains body second_text then `OK, F.openai_response (answer ~claim:"claim 2" ~state:"state 2")
+    else `OK, F.openai_response absorbing_answer);
+  let owner = owner fixture and range = range_link (owner fixture) in
+  let starting : Chain.fresh = { fresh with current = Some { Keeper_librarian.facts = [ stale_fact ] } } in
+  let original = Runtime_typesafeai_policy.current () in
+  Fun.protect ~finally:(fun () -> Runtime_typesafeai_policy.publish original) (fun () ->
+    Runtime_typesafeai_policy.publish { original with absorb_gate = true; lane_enabled = false };
+    let fail_once () =
+      match run_through_workers fixture ~owner ~range ~fresh:starting () with
+      | Ok (Chain.Pending (Pending.Message_floor _)) -> ()
+      | Ok (Chain.Pending _) -> fail "the absorption gate wait was presented as a worker wait"
+      | Ok (Chain.Finished _ | Chain.Stopped _ | Chain.Superseded) -> fail "a gate that failed was taken for a decision"
+      | Error detail -> failf "the chain refused: %s" detail in
+    let attempts () = match in_position_order (steps_of fixture ~owner) with
+      | [] -> 0
+      | ((step : Owner.retained), (_ : Step.header)) :: _ ->
+        let inventory = Gate.Inventory.read ~store:fixture.store ~owner |> get in
+        List.length (Gate.Inventory.execution_records inventory ~execution_id:step.request_id) in
+    let rec grow_to count runs =
+      if attempts () < count then
+        if runs = 0 then failf "the first step's journal did not reach %d attempts" count
+        else (fail_once (); grow_to count (runs - 1)) in
+    let scan () =
+      let before = Gc.allocated_bytes () in
+      let report = io (fun () -> Lane_addon_store_preflight.scan
+        ~validate_tool_request:Keeper_librarian_store_preflight.preflight
+        Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
+      let cost = Gc.allocated_bytes () -. before in
+      check (list string) "the deploy check refuses no record" []
+        (List.map (fun (refusal : Lane_addon_store_preflight.refusal) -> refusal.detail) report.refusals);
+      cost in
+    (* The first check after a run also pays for whatever the process loads
+       once, so each cost is that of the second check after a run. *)
+    let check_cost () = ignore (scan ()); scan () in
+    grow_to 1 2;
+    let one = check_cost () in
+    grow_to 2 2;
+    let two = check_cost () in
+    grow_to 10 9;
+    let ten = check_cost () in
+    grow_to 11 2;
+    let eleven = check_cost () in
+    check int "the first step's journal holds eleven attempts" 11 (attempts ());
+    Printf.printf "deploy check: the second attempt added %.0f bytes, the eleventh %.0f\n%!"
+      (two -. one) (eleven -. ten);
+    check bool "a deploy check grows with the attempts of a journal and not with their square" true
+      (eleven -. ten < 1.5 *. (two -. one))))
+
 let () =
   run "keeper_librarian_floor_chain"
     [ ( "chain"
@@ -615,5 +672,7 @@ let () =
             test_a_failed_gate_is_not_a_decision_and_a_retried_one_is_judged_from_the_inventory
         ; test_case "a journal read restores each attempt once" `Slow
             test_a_journal_read_restores_each_attempt_once
+        ; test_case "a deploy check proves each attempt once" `Slow
+            test_a_deploy_check_proves_each_attempt_once
         ] )
     ]

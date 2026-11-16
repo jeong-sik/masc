@@ -413,6 +413,36 @@ class Worker:
                 accepted = {"version": 2, "request": request, "digest": request_digest, "result": None}
                 self.store.write(accepted)
                 return self.status(request_id, accepted)
+            case "refuse_body":
+                exact(caller, {"kind"}, "host admission")
+                if caller["kind"] != "operator":
+                    raise InvalidInput("only the admitted host operator may refuse an Exact request body")
+                exact(args, {"kind", "request_id", "request_digest", "request_bytes"}, "body refusal")
+                request_id = text(args["request_id"], "request_id")
+                request_digest = args["request_digest"]
+                if not is_digest(request_digest):
+                    raise InvalidInput("request_digest must be a lowercase SHA-256 digest")
+                request_bytes = args["request_bytes"]
+                if type(request_bytes) is not int or request_bytes <= 0:
+                    raise InvalidInput("request_bytes must be a positive integer")
+                # The trusted host measured its complete captured Exact input.
+                # Send only that identity and measurement: parsing the full
+                # oversized body here can exhaust the worker before fits runs.
+                # A previous admission or final remains authoritative.
+                old = self.store.read(request_id)
+                if old is not None:
+                    if old["digest"] != request_digest:
+                        raise InvalidInput("request_id already belongs to different Exact request input")
+                    if self.retained_tool(old) != tool_name:
+                        raise InvalidInput("retained Exact request belongs to another tool")
+                    return self.status(request_id, old)
+                if request_bytes <= self.max_reply_bytes:
+                    raise InvalidInput("Exact request body is not larger than the declared reply frame")
+                refused = self.terminal_record(request_id, request_digest, {**REQUEST_BODY_REFUSED}, tool_name)
+                if not self.fits(self.status(request_id, refused)):
+                    raise InvalidInput("Exact refusal identity exceeds the declared worker reply frame")
+                self.store.write(refused)
+                return self.status(request_id, refused)
             case "read":
                 exact(args, {"kind", "request_id"}, "read")
                 request_id = text(args["request_id"], "request_id")
@@ -422,7 +452,7 @@ class Worker:
                         raise InvalidInput("retained Exact request belongs to another tool")
                 return self.status(request_id, record)
             case _:
-                raise InvalidInput("Exact request kind must be submit or read")
+                raise InvalidInput("Exact request kind must be submit, refuse_body or read")
 
     def host_request(self, request: dict) -> dict:
         return self.contract.host_request(request)

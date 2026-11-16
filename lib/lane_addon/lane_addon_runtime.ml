@@ -2602,7 +2602,7 @@ let call_exported_tool_with_authority ~on_complete ~on_result ~authorize ~princi
 
 let call_captured_tool_request ~config ~access ~reserved ~export ~installation_id
     ~package_id ~tool ~configuration_revision ~(original : Lane_addon_tool_request_owner.Record.t)
-    ~arguments =
+    ~prepare_arguments =
   with_tool_call_owner (fun () ->
     with_tool_request_destination_on_owner ~config ~access ~reserved ~export
       ~prepare:(fun destination ->
@@ -2621,8 +2621,9 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
         let* ()=offload (fun () -> Lane_addon_tool_request_owner.confirm_listed ~store original)
           |> Result.map_error (fun error ->
             Unavailable (Lane_addon_tool_request_owner.error_to_string error)) in
-        Ok ())
-      ~use:(fun () -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
+        offload (fun () -> prepare_arguments ~max_reply_bytes:destination.max_reply_bytes)
+        |> Result.map_error (fun detail -> Host_refusal (Lane_addon_call_context.Rejected detail)))
+      ~use:(fun arguments -> call_exported_tool_on_owner ~on_complete:(fun () -> ()) ~on_result:(fun _ -> ())
           ~authorize:None ~principal:(Some Lane_addon_call_context.Operator)
           ~config ~access ~reserved ~export ~arguments))
 

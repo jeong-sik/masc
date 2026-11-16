@@ -27,6 +27,9 @@ def tool_input(output: str) -> dict:
     request = {**REQUEST, "properties": {**REQUEST["properties"], "output": {"type": "string", "const": output}}}
     return {"type": "object", "oneOf": [
         closed({"kind": {"type": "string", "const": "submit"}, "request": request}),
+        closed({"kind": {"type": "string", "const": "refuse_body"}, "request_id": TEXT,
+                "request_digest": {"type": "string", "minLength": 64, "maxLength": 64},
+                "request_bytes": {"type": "integer", "minimum": 1}}),
         closed({"kind": {"type": "string", "const": "read"}, "request_id": TEXT}),
     ]}
 

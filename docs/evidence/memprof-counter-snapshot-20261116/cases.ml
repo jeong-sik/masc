@@ -19,7 +19,7 @@ let auth_requests () =
  let dispatch ?token target =
   let headers=Httpun.Headers.of_list (match token with None->[]|Some token->["authorization","Bearer "^token]) in
   let request=Httpun.Request.create ~headers `GET target in
-  let response={Http_server_eio.status=`Internal_server_error;body="";headers=[]} in
+  let response={Http_reqd.status=`Internal_server_error;body="";headers=[];request} in
   let handler=List.assoc (Uri.path(Uri.of_string target)) routes in
   handler request response;response in
  List.iter (fun path ->
@@ -40,6 +40,10 @@ let auth_requests () =
   expect "matching query workspace accepted" (matching.status=`OK);
   expect "workspace admission header survives diagnostic no-store scope"
     (List.mem Auth_ports.Workspace.read_precondition_admission_header matching.headers);
+  let invalid=dispatch ~token:"admin" (Uri.to_string(Uri.with_query uri
+    (Uri.query uri@["unsupported",["value"]]))) in
+  expect "diagnostic query error preserves no-store" (invalid.status=`Bad_request
+    && List.mem ("cache-control","no-store") invalid.headers);
   expect "wrong query workspace refused" ((dispatch ~token:"admin" (guarded "/other" "/other/.masc")).status=`Conflict);
   expect "malformed query workspace refused" ((dispatch ~token:"admin" (Uri.to_string(Uri.with_query uri
     (Uri.query uri@["expected_base_path",["/fixture"]])))).status=`Bad_request)) paths;
@@ -50,7 +54,8 @@ let auth_requests () =
 let () =
  test_memprof_counter_wire_and_selective_stacks ();
  test_memprof_query_identity_refusals ();
- auth_requests ();
+ native_pool_checks ();
+ Eio_main.run (fun _env->auth_requests ());
  let module B=Baseline_alloc_profile in
  let module P=Alloc_profile in
  B.For_testing.reset (); P.For_testing.reset ();
@@ -82,6 +87,7 @@ let () =
   measure "selected3_stack_lookup3000" 3 stacks] in
  Printf.printf "%s\n" (Yojson.Safe.to_string(`Assoc[
   "checks",`Int !assertions;"pure_api_test_bodies_passed",`Int 2;
+  "real_pool_checks",`Int !pool_checks;
   "full_payload_bytes",`Int full_bytes;"compact_payload_bytes",`Int compact_bytes;
   "measurements",`List measurements]));
  B.For_testing.reset ();P.For_testing.reset ()

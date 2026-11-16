@@ -658,6 +658,11 @@ let test_memprof_numeric_routes_preserve_operator_read_authority () =
       check int "matching workspace precondition is accepted" 200 matching.status;
       check bool "workspace admission header survives no-store scope" true
         (List.mem Workspace.read_precondition_admission_header matching.headers);
+      let invalid=dispatch ~token:admin router
+        (Uri.to_string (Uri.with_query uri (Uri.query uri @ ["unsupported",["value"]]))) in
+      check int "diagnostic query error" 400 invalid.status;
+      check bool "diagnostic errors are also uncached" true
+        (List.mem ("cache-control","no-store") invalid.headers);
       let mismatch=dispatch ~token:admin router (guarded "/other" "/other/.masc") in
       check int "workspace precondition is still enforced" 409 mismatch.status) paths)
 ;;

@@ -30,4 +30,9 @@ val stacks_path : string
 val register_counter_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
 (** Register uncached, token-bound CanAdmin GETs. The same wrapper as the
     existing diagnostic preserves read quota and workspace preconditions.
+    Snapshot production and response encoding use the shared CPU executor,
+    with its existing inline fallback outside an installed Eio pool. Socket
+    writes and inherited response headers stay on the caller fiber. The server
+    starts sampling before spawning the executor domains, which inherit the
+    same profile; sampling state is observed on the domain doing the snapshot.
     Neither endpoint starts/stops sampling or modifies durable workspace state. *)

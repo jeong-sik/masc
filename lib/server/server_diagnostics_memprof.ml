@@ -112,13 +112,14 @@ let stacks_path = "/api/v1/diagnostics/memprof/stacks"
 let register_counter_routes router =
   let handler produce _state _actor request reqd =
     let query = Uri.query (Uri.of_string request.Httpun.Request.target) in
-    let status, json = match produce ~query with
+    let result = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ (fun () -> produce ~query)) in
+    let status, json = match result with
       | Ok json -> `OK, json
       | Error error -> (error_status error :> Httpun.Status.t), error_json error in
     let inherited = Http_server_eio.Response.scoped_headers () |> List.filter (fun (name,_) ->
       not (String.equal (String.lowercase_ascii name) "cache-control")) in
     Http_server_eio.Response.with_scoped_headers (("cache-control", "no-store") :: inherited) (fun () ->
-      Http_server_eio.Response.json_value ~status ~compress:true ~request json reqd) in
+      Http_server_eio.Response.json_value_on_cpu ~status ~compress:true ~request json reqd) in
   router
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) counters_path (handler counters_json)
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) stacks_path (handler stacks_json)

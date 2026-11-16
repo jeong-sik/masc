@@ -91,6 +91,12 @@ export interface KeepersModel {
   readonly assign: (name: string, runtimeId: string) => Promise<void>
   /** The conversation of one of the Keepers, which another person shown closes. */
   readonly talking: TalkModel
+  /** Forgets the Keepers, the make, the assignments and the conversation
+      once the console shows no one signed in: the account changed, or the
+      browser leaves. An answer still under way then changes nothing on the
+      page and reads nothing, and the next `load` reads from the start, for
+      the same person too. */
+  readonly stop: () => void
 }
 
 /** How many tries of the same thing came to nothing in a row before this one. */
@@ -281,14 +287,28 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     return read(now.forUser, now.failure.attempts)
   }
 
-  return { view, making, assigning, load, retry, make: makeKeeper, assign: assignKeeper, talking }
+  const stop = (): void => {
+    if (view.peek().kind === 'waiting') return
+    round += 1
+    latest += 1
+    session = null
+    making.value = { kind: 'idle' }
+    assigning.value = new Map()
+    talking.reset()
+    view.value = { kind: 'waiting' }
+  }
+
+  return { view, making, assigning, load, retry, make: makeKeeper, assign: assignKeeper, talking, stop }
 }
 
-/** Reads the Keepers of each person the console comes to show signed in.
-    The returned function stops following. */
+/** Reads the Keepers of each person the console comes to show signed in,
+    and stops whenever it shows anything else, so the person shown again
+    after another account was in the browser is read from the start. The
+    returned function stops following. */
 export function followKeepers(frame: ReadonlySignal<View>, keepers: KeepersModel): () => void {
   return effect(() => {
     const now = frame.value
     if (now.kind === 'signed_in') void keepers.load(now.session)
+    else keepers.stop()
   })
 }

@@ -432,6 +432,7 @@ const subscriptionsShowing = (panel: PanelView): SubscriptionsModel => ({
   retry: vi.fn(() => Promise.resolve()),
   connecting: createConnect({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   checking: createChecks({ send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  stop: vi.fn(),
 })
 const readPanel = (mine: Owned = owned): PanelView => ({ kind: 'read', forUser: 'usr_first', integrations: [claude, codex], owned: mine })
 
@@ -466,6 +467,7 @@ const showing = ({ view = keepersList(alpha), making = { kind: 'idle' }, assigni
   make: vi.fn(() => Promise.resolve(null)),
   assign: vi.fn(() => Promise.resolve()),
   talking: talkShowing(talk),
+  stop: vi.fn(),
 })
 
 const panelOf = (model: KeepersModel, panel: PanelView = readPanel()) =>

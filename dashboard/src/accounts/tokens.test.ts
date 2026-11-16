@@ -344,6 +344,7 @@ const showing = (view: ListView, making: Make = { kind: 'idle' }, revoking: Read
   make: vi.fn(() => Promise.resolve()),
   forget: vi.fn(),
   revoke: vi.fn(() => Promise.resolve()),
+  stop: vi.fn(),
 })
 const panelOf = (model: TokensModel) =>
   render(html`<main><h1>내 계정</h1><${TokensPanel} model=${model} /></main>`).container

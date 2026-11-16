@@ -98,6 +98,11 @@ export interface TokensModel {
   readonly forget: () => void
   /** Revokes the token `id`. A token whose revoke runs is left as it is. */
   readonly revoke: (id: string) => Promise<void>
+  /** Forgets the tokens and the token made once the console shows no one
+      signed in: the account changed, or the browser leaves. An answer still
+      under way then changes nothing on the page and reads nothing, and the
+      next `load` reads from the start, for the same person too. */
+  readonly stop: () => void
 }
 
 /** How many tries came to nothing in a row before this one. */
@@ -273,14 +278,27 @@ export function createTokens({ send, leave, now }: TokensDeps): TokensModel {
     return read(shown.forUser, shown.failure.attempts)
   }
 
-  return { view, making, revoking, load, retry, make: makeToken, forget, revoke: revokeToken }
+  const stop = (): void => {
+    if (view.peek().kind === 'waiting') return
+    round += 1
+    latest += 1
+    session = null
+    making.value = { kind: 'idle' }
+    revoking.value = new Map()
+    view.value = { kind: 'waiting' }
+  }
+
+  return { view, making, revoking, load, retry, make: makeToken, forget, revoke: revokeToken, stop }
 }
 
-/** Reads the tokens of each person the console comes to show signed in.
-    The returned function stops following. */
+/** Reads the tokens of each person the console comes to show signed in,
+    and stops whenever it shows anything else, so the person shown again
+    after another account was in the browser is read from the start. The
+    returned function stops following. */
 export function followTokens(frame: ReadonlySignal<View>, tokens: TokensModel): () => void {
   return effect(() => {
     const shown = frame.value
     if (shown.kind === 'signed_in') void tokens.load(shown.session)
+    else tokens.stop()
   })
 }

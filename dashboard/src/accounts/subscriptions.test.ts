@@ -250,13 +250,14 @@ describe('following the console', () => {
   const session = sessionOf(person)
   const who = { id: person, role: 'member' } as const
 
-  it('gives the panel the session of each person the console comes to show signed in, and no more', () => {
+  it('gives the panel the session of each person the console comes to show signed in, stops it whenever the console shows no one, and no more', () => {
     const frame = signal<View>({ kind: 'reading', slow: false })
     const panel = {
       view: signal<PanelView>({ kind: 'waiting' }),
       load: vi.fn((_session: Session) => Promise.resolve()),
       retry: vi.fn(() => Promise.resolve()),
       connecting: idleConnect(), checking: idleChecks(),
+      stop: vi.fn(),
     } satisfies SubscriptionsModel
     const stop = follow(frame, panel)
     frame.value = { kind: 'signed_in', session, who, signOut: { kind: 'idle' } }
@@ -266,6 +267,8 @@ describe('following the console', () => {
     stop()
     frame.value = { kind: 'signed_in', session, who, signOut: { kind: 'idle' } }
     expect(panel.load.mock.calls).toEqual([[session], [session], [sessionOf(other)]])
+    // The first reading of the console, and the account that changed.
+    expect(panel.stop).toHaveBeenCalledTimes(2)
   })
 
   it('reads once for a person whose console moves between states', async () => {
@@ -493,7 +496,7 @@ describe('the panel', () => {
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
     const model = {
-      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(),
+      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), stop: vi.fn(),
     } satisfies SubscriptionsModel
     return { container: render(html`<${SubscriptionsPanel} model=${model} />`).container, model }
   }

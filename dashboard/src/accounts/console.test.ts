@@ -12,16 +12,17 @@ import { createChecks } from './check'
 import { createConnect } from './connect'
 import { ConsoleFrame, createConsole } from './console'
 import type { ConsoleModel, Shown, View } from './console'
+import { createSubscriptions, follow } from './subscriptions'
 import type { PanelView, SubscriptionsModel } from './subscriptions'
 import { createAllowlist } from './allowlist'
 import type { AllowlistModel } from './allowlist'
 import { createInvites, followInvites } from './invites'
 import type { InvitesModel } from './invites'
-import { createKeepers } from './keepers'
+import { createKeepers, followKeepers } from './keepers'
 import { createMembers } from './members'
 import type { MembersModel } from './members'
 import type { KeepersModel } from './keepers'
-import { createTokens } from './tokens'
+import { createTokens, followTokens } from './tokens'
 import type { TokensModel } from './tokens'
 import { csrfHeader, paths } from './wire'
 import type { Send } from './wire'
@@ -92,6 +93,7 @@ const waitingPanel = (): SubscriptionsModel => ({
   retry: vi.fn(() => Promise.resolve()),
   connecting: createConnect({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
   checking: createChecks({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }),
+  stop: vi.fn(),
 })
 
 /** A Keepers panel that waits for someone to be signed in. It has its own
@@ -561,6 +563,118 @@ describe('a request of a panel that the server refused', () => {
     expect(posted.map((one) => new Headers(one.init.headers).get(csrfHeader))).toEqual(['token', 'token-of-now'])
     await waitFor(() => { expect(sent).toHaveLength(9) })
     stop()
+  })
+
+  describe('a panel shown again to the same person after the account changed', () => {
+    const readsOf = (sent: readonly Sent[], path: string): number =>
+      sent.filter((one) => one.path === path && one.init.method !== 'POST').length
+    /** The console over `answers`, before its first reading. */
+    function shown(answers: readonly Scripted[]): { readonly model: ConsoleModel; readonly sent: Sent[] } {
+      const { send, sent } = scripted(answers)
+      return { model: createConsole({ send, leave: vi.fn() }), sent }
+    }
+
+    interface Following { readonly kind: () => string; readonly unfollow: () => void }
+    const followers: ReadonlyArray<readonly [string, (send: Send, frame: ConsoleModel['view']) => Following, () => Response[]]> = [
+      ['tokens', (send, frame) => {
+        const panel = createTokens({ send, leave: vi.fn(), now: () => 0 })
+        return { kind: () => panel.view.value.kind, unfollow: followTokens(frame, panel) }
+      }, () => [json(200, { pats: [] })]],
+      ['Keepers', (send, frame) => {
+        const panel = createKeepers({ send, leave: vi.fn() })
+        return { kind: () => panel.view.value.kind, unfollow: followKeepers(frame, panel) }
+      }, () => [json(200, { keepers: [] })]],
+      ['subscriptions', (send, frame) => {
+        const panel = createSubscriptions({ send, leave: vi.fn() })
+        return { kind: () => panel.view.value.kind, unfollow: follow(frame, panel) }
+      }, () => [json(200, { integrations: [] }), json(200, { provider_accounts: [], runtimes: [] })]],
+    ]
+
+    // The reading went out while the console showed the person, and its
+    // answer may be of the account the browser holds now. Kept, it would
+    // stand for the person once they are back.
+    it.each(followers)('drops a reading of the %s that was under way when the account changed', async (_name, panelOf, lists) => {
+      const late = lists().map(() => later())
+      const { model, sent } = shown([
+        aSession(), aWho(), ...late.map((one) => one.answer),
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), ...lists(),
+      ])
+      const panel = panelOf(model.send, model.view)
+      await model.load()
+      await waitFor(() => { expect(sent).toHaveLength(2 + late.length) })
+      await model.send(panelPath, write('token'))
+      expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+      for (const one of late) one.give(notReady())
+      await new Promise((resolve) => { setTimeout(resolve, 0) })
+      expect(panel.kind()).toBe('waiting')
+      await model.load()
+      await waitFor(() => { expect(panel.kind()).toBe('read') })
+      panel.unfollow()
+    })
+
+    it('reads the tokens from the start, not the failure of the reading that ran while no one was shown', async () => {
+      const patsPath = '/api/v1/auth/pats'
+      const { model, sent } = shown([
+        aSession(), aWho(), json(200, { pats: [] }),
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), json(200, { pats: [] }),
+      ])
+      const panel = createTokens({ send: model.send, leave: vi.fn(), now: () => 0 })
+      const stop = followTokens(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      await panel.make('read_only', 'days_7')
+      expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+      // The refusal came after the panel stopped: it holds nothing for anyone.
+      expect([panel.view.value, panel.making.value]).toEqual([{ kind: 'waiting' }, { kind: 'idle' }])
+      await model.load()
+      await waitFor(() => { expect(readsOf(sent, patsPath)).toBe(2) })
+      await waitFor(() => { expect(panel.view.value).toEqual({ kind: 'read', forUser: person, pats: [] }) })
+      expect(panel.making.value).toEqual({ kind: 'idle' })
+      stop()
+    })
+
+    it('reads the Keepers from the start', async () => {
+      const keepersPath = '/api/v1/auth/keepers'
+      const { model, sent } = shown([
+        aSession(), aWho(), json(200, { keepers: [] }),
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), json(200, { keepers: [] }),
+      ])
+      const panel = createKeepers({ send: model.send, leave: vi.fn() })
+      const stop = followKeepers(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      expect(await panel.make('alpha', null)).toBeNull()
+      expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+      await model.load()
+      await waitFor(() => { expect(readsOf(sent, keepersPath)).toBe(2) })
+      await waitFor(() => { expect(panel.view.value).toEqual({ kind: 'read', forUser: person, keepers: [] }) })
+      expect(panel.making.value).toEqual({ kind: 'idle' })
+      stop()
+    })
+
+    it('reads the subscriptions from the start', async () => {
+      const offered = (): Response => json(200, { integrations: [] })
+      const ownedNothing = (): Response => json(200, { provider_accounts: [], runtimes: [] })
+      const { model, sent } = shown([
+        aSession(), aWho(), offered(), ownedNothing(),
+        staleToken(), ...them(),
+        aSession('token-of-now'), aWho(), offered(), ownedNothing(),
+      ])
+      const panel = createSubscriptions({ send: model.send, leave: vi.fn() })
+      const stop = follow(model.view, panel)
+      await model.load()
+      await waitFor(() => { expect(panel.view.value.kind).toBe('read') })
+      // Another panel's write meets the session of another person.
+      await model.send(panelPath, write('token'))
+      expect(model.view.value).toEqual({ kind: 'changed', next: 'idle' })
+      await model.load()
+      await waitFor(() => { expect(readsOf(sent, paths.integrations)).toBe(2) })
+      await waitFor(() => { expect(panel.view.value).toMatchObject({ kind: 'read', forUser: person }) })
+      stop()
+    })
   })
 })
 

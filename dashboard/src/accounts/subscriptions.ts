@@ -54,6 +54,11 @@ export interface SubscriptionsModel {
   readonly connecting: ConnectModel
   /** The checks of a model of an account by the person the panel shows. */
   readonly checking: ChecksModel
+  /** Forgets what was read, the login and the checks once the console
+      shows no one signed in: the account changed, or the browser leaves. A
+      reading still under way then changes nothing on the page, and the next
+      `load` reads from the start, for the same person too. */
+  readonly stop: () => void
 }
 
 type Found =
@@ -136,15 +141,27 @@ export function createSubscriptions({ send, leave }: PanelDeps): SubscriptionsMo
     return read(now.forUser, now.failure.attempts)
   }
 
-  return { view, load, retry, connecting, checking }
+  const stop = (): void => {
+    if (view.peek().kind === 'waiting') return
+    latest += 1
+    session = null
+    connecting.reset()
+    checking.reset()
+    view.value = { kind: 'waiting' }
+  }
+
+  return { view, load, retry, connecting, checking, stop }
 }
 
 /** Reads the subscriptions of each person the console comes to show
-    signed in. The returned function stops following. */
+    signed in, and stops whenever it shows anything else, so the person
+    shown again after another account was in the browser is read from the
+    start. The returned function stops following. */
 export function follow(frame: ReadonlySignal<View>, panel: SubscriptionsModel): () => void {
   return effect(() => {
     const now = frame.value
     if (now.kind === 'signed_in') void panel.load(now.session)
+    else panel.stop()
   })
 }
 

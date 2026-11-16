@@ -1,8 +1,9 @@
 # Exact worker terminal records and fresh state
 
-Workspace Curator 0.1.4, Candle Appraiser 0.1.5, Keeper Librarian 0.2.3 and
-HITL Auto Judge 0.1.1
-use worker record version 2. Pending records retain the original request.
+Workspace Curator, Candle Appraiser, Keeper Librarian and HITL Auto Judge use
+worker record version 2. Select package and image revisions from the candidate's
+manifests; package revisions and the worker record version are separate.
+Pending records retain the original request.
 Terminals retain `version`, `request_id`, `digest` and `result`; workers with
 multiple exported tools also retain `tool`. Retaining a terminal atomically
 replaces the pending body. The worker wire protocol stays the same. A repeated

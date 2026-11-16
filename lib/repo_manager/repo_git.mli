@@ -54,7 +54,9 @@ val run_git :
   (string list, string) result
 (** [run_git ~cwd args] runs [git -C cwd args] through the repo-manager Git
     execution wrapper and returns non-empty stdout lines. Callers must pass
-    argv tokens, never shell text. *)
+    argv tokens, never shell text. A failure names the arguments, the exit
+    status and standard error, never standard output: a run stopped part-way
+    leaves there what it had read. *)
 
 val run_git_read_only_raw : cwd:string -> string list -> (string, string) result
 (** [run_git] without splitting: the exact stdout bytes, read with
@@ -290,7 +292,8 @@ val grep_result_of_z_output :
 (** Pure reader for [git grep -n -z] output ([path NUL line NUL text LF] per
     row; a path may contain a newline). Keeps the first [max_matches] rows. A malformed row, including the
     truncation marker the process capture inserts into oversized output, is an
-    [Error _]; it is never skipped. *)
+    [Error _]; it is never skipped. The error names the row's byte offset,
+    never its bytes. *)
 
 val grep_at :
   ?timeout_sec:float ->

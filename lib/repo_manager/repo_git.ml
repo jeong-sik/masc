@@ -92,8 +92,13 @@ let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
 
-(* [reason] is the output of the run that says why it failed. *)
-let git_failure_with_reason args status reason =
+(* HIGH-RISK-UNREVIEWED: the failure detail reaches HTTP responses, the server
+   log and Keeper tool results. A run stopped part-way, a timeout included,
+   leaves standard error empty and what it read so far on standard output: file
+   lines, paths, a remote URL that may carry a credential. Every command this
+   module runs says why it failed on standard error, so standard output is
+   never quoted (#48500, #52175). *)
+let git_failure_detail args status ~stderr =
   let status_text =
     match status with
     | Unix.WEXITED code -> Printf.sprintf "exit %d" code
@@ -101,18 +106,11 @@ let git_failure_with_reason args status reason =
     | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
   in
   let detail =
-    match String.trim reason with
+    match String.trim stderr with
     | "" -> status_text
     | reason -> status_text ^ ": " ^ reason
   in
   Printf.sprintf "git %s failed: %s" (String.concat " " args) detail
-;;
-
-(* A run that printed nothing on standard error may have said why on standard
-   output. *)
-let git_failure_detail args status stdout stderr =
-  git_failure_with_reason args status
-    (if String.trim stderr <> "" then stderr else stdout)
 ;;
 
 type status_summary = {
@@ -165,7 +163,7 @@ let update_status_summary summary line =
     let y = line.[1] in
     let path = String.sub line 2 (String.length line - 2) |> String.trim in
     if not (is_porcelain_status_char x && is_porcelain_status_char y)
-    then Stdlib.Error (Printf.sprintf "git status --porcelain=v1 returned unknown status row %S" line)
+    then Stdlib.Error "git status --porcelain=v1 returned a row with an unknown status code"
     else if String.equal path ""
     then Stdlib.Error "git status --porcelain=v1 returned a status row without a path"
     else
@@ -178,11 +176,7 @@ let update_status_summary summary line =
         ((Char.equal x '?' || Char.equal y '?') && not untracked)
         || ((Char.equal x '!' || Char.equal y '!') && not ignored)
         || ((Char.equal x 'U' || Char.equal y 'U') && not conflicted)
-      then
-        Stdlib.Error
-          (Printf.sprintf
-             "git status --porcelain=v1 returned unknown status row %S"
-             line)
+      then Stdlib.Error "git status --porcelain=v1 returned a row with an unknown status code"
       else
         let staged = not conflicted && not untracked && not (Char.equal x ' ') in
         let unstaged = not conflicted && not untracked && not (Char.equal y ' ') in
@@ -215,7 +209,7 @@ let run_git_raw ~cwd ?(env = []) ?timeout_sec args : (string, string) result =
   match status with
   | Unix.WEXITED 0 -> Ok stdout
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-    Error (git_failure_detail args status stdout stderr)
+    Error (git_failure_detail args status ~stderr)
 
 let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   Result.map split_lines (run_git_raw ~cwd ~env ?timeout_sec args)
@@ -346,9 +340,9 @@ let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   (* Process_eio owns what a timeout looks like; reading its number here made
      the two modules agree by coincidence (#28651). *)
   | status', _ when Process_eio.exit_reason_of_status status' = Process_eio.Timed_out ->
-    Error (Origin_lookup_timed_out (git_failure_detail args status stdout stderr))
+    Error (Origin_lookup_timed_out (git_failure_detail args status ~stderr))
   | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
-    Error (Origin_lookup_failed (git_failure_detail args status stdout stderr))
+    Error (Origin_lookup_failed (git_failure_detail args status ~stderr))
 
 type checkout_identity = {
   toplevel : string;
@@ -420,16 +414,10 @@ let ahead_behind
               int_of_string_opt (String.trim ahead) )
           with
           | Some behind, Some ahead -> Stdlib.Ok (behind, ahead)
-          | _ ->
-              Stdlib.Error
-                (Printf.sprintf
-                   "git rev-list --left-right --count returned non-numeric output: %S"
-                   line))
+          | _ -> Stdlib.Error "git rev-list --left-right --count returned non-numeric counts")
       | _ ->
           Stdlib.Error
-            (Printf.sprintf
-               "git rev-list --left-right --count returned malformed output: %S"
-               line))
+            "git rev-list --left-right --count returned something other than two tab-separated counts")
 
 let get_recent_commits ~repository ~branch ~limit =
   match
@@ -456,11 +444,7 @@ let status_file_of_porcelain_record record =
     let y = record.[1] in
     let path = String.sub record 3 (String.length record - 3) in
     if not (is_porcelain_status_char x && is_porcelain_status_char y)
-    then
-      Stdlib.Error
-        (Printf.sprintf
-           "git status --porcelain=v1 -z returned unknown status row %S"
-           record)
+    then Stdlib.Error "git status --porcelain=v1 -z returned a row with an unknown status code"
     else if String.equal path ""
     then Stdlib.Error "git status --porcelain=v1 -z returned a status row without a path"
     else
@@ -473,11 +457,7 @@ let status_file_of_porcelain_record record =
         ((Char.equal x '?' || Char.equal y '?') && not untracked)
         || ((Char.equal x '!' || Char.equal y '!') && not ignored)
         || ((Char.equal x 'U' || Char.equal y 'U') && not conflicted)
-      then
-        Stdlib.Error
-          (Printf.sprintf
-             "git status --porcelain=v1 -z returned unknown status row %S"
-             record)
+      then Stdlib.Error "git status --porcelain=v1 -z returned a row with an unknown status code"
       else
         Stdlib.Ok
           (Some
@@ -540,12 +520,8 @@ let parse_branch_ahead_behind value =
       in
       (match count ahead, count behind with
        | Some ahead, Some behind -> Stdlib.Ok (ahead, behind)
-       | _ ->
-           Stdlib.Error
-             (Printf.sprintf "git status branch.ab has non-numeric counts: %S" value))
-  | _ ->
-      Stdlib.Error
-        (Printf.sprintf "git status branch.ab is malformed: %S" value)
+       | _ -> Stdlib.Error "git status branch.ab has non-numeric counts")
+  | _ -> Stdlib.Error "git status branch.ab is not a +ahead -behind pair"
 
 let branch_status_of_porcelain_v2_z output =
   let header_value ~key record =
@@ -628,14 +604,14 @@ let branch_track_of_field field =
        | Some ahead, None -> Stdlib.Ok (Track_counts (ahead, 0))
        | None, Some behind -> Stdlib.Ok (Track_counts (0, behind))
        | Some _, Some _ | None, None ->
-           Stdlib.Error (Printf.sprintf "git branch has an unreadable track field: %S" field))
+           Stdlib.Error "git branch has an unreadable track field")
   | [ first; second ] ->
       (match count "ahead " first, count "behind " second with
        | Some ahead, Some behind -> Stdlib.Ok (Track_counts (ahead, behind))
        | Some _, None | None, Some _ | None, None ->
-           Stdlib.Error (Printf.sprintf "git branch has an unreadable track field: %S" field))
+           Stdlib.Error "git branch has an unreadable track field")
   | _ ->
-      Stdlib.Error (Printf.sprintf "git branch has an unreadable track field: %S" field)
+      Stdlib.Error "git branch has an unreadable track field"
 
 (* One record of the [for-each-ref] format used by [branches_at]:
    [HEAD NUL name NUL upstream NUL track NUL epoch NUL subject]. A record is one
@@ -648,13 +624,12 @@ let branch_entry_of_record record =
         match head with
         | "*" -> Stdlib.Ok true
         | " " -> Stdlib.Ok false
-        | other -> Stdlib.Error (Printf.sprintf "git branch has an unreadable HEAD mark: %S" other)
+        | _ -> Stdlib.Error "git branch has an unreadable HEAD mark"
       in
       let* be_commit_epoch =
         match int_of_string_opt epoch with
         | Some value when value >= 0 -> Stdlib.Ok value
-        | Some _ | None ->
-            Stdlib.Error (Printf.sprintf "git branch has an unreadable commit time: %S" epoch)
+        | Some _ | None -> Stdlib.Error "git branch has an unreadable commit time"
       in
       let* track = branch_track_of_field track in
       let* be_upstream =
@@ -779,7 +754,7 @@ let rec worktree_read_fields acc = function
         match worktree_value ~prefix:"HEAD " field with
         | Some head ->
             if not (worktree_is_hex head) then
-              Stdlib.Error (Printf.sprintf "git worktree has an unreadable HEAD: %S" head)
+              Stdlib.Error "git worktree has an unreadable HEAD"
             else (
               match acc.wf_head with
               | None -> Stdlib.Ok { acc with wf_head = Some head }
@@ -795,9 +770,7 @@ let rec worktree_read_fields acc = function
                    Stdlib.Ok { acc with wf_locked = true }
                  else if worktree_flag ~name:"prunable" field then
                    Stdlib.Ok { acc with wf_prunable = true }
-                 else
-                   Stdlib.Error
-                     (Printf.sprintf "git worktree record has an unknown field: %S" field))
+                 else Stdlib.Error "git worktree record has an unknown field")
       in
       worktree_read_fields acc rest
 
@@ -811,13 +784,12 @@ let worktree_entry_of_record ~main = function
       let* path =
         match worktree_value ~prefix:"worktree " first with
         | Some path when not (String.equal path "") -> Stdlib.Ok path
-        | Some _ | None ->
-            Stdlib.Error (Printf.sprintf "git worktree record does not start with a path: %S" first)
+        | Some _ | None -> Stdlib.Error "git worktree record does not start with a path"
       in
       let wt_name = Filename.basename path in
       let* () =
         if String.equal wt_name "" || String.equal wt_name "/" then
-          Stdlib.Error (Printf.sprintf "git worktree path has no name: %S" path)
+          Stdlib.Error "git worktree path has no last component"
         else Stdlib.Ok ()
       in
       let* fields =
@@ -828,7 +800,7 @@ let worktree_entry_of_record ~main = function
       let* wt_state =
         match fields.wf_state with
         | Some state -> Stdlib.Ok state
-        | None -> Stdlib.Error (Printf.sprintf "git worktree %S names no checkout state" wt_name)
+        | None -> Stdlib.Error "git worktree record names no checkout state"
       in
       (match wt_state, fields.wf_head with
        | Worktree_bare, (Some _ | None) | (Worktree_branch _ | Worktree_detached), Some _ ->
@@ -836,7 +808,7 @@ let worktree_entry_of_record ~main = function
              { wt_name; wt_main = main; wt_head = fields.wf_head; wt_state
              ; wt_locked = fields.wf_locked; wt_prunable = fields.wf_prunable }
        | (Worktree_branch _ | Worktree_detached), None ->
-           Stdlib.Error (Printf.sprintf "git worktree %S has no HEAD" wt_name))
+           Stdlib.Error "git worktree record has no HEAD")
 
 (* Splits the NUL stream into records. A field ends at a NUL and a record at an
    empty field, so a stream cut inside a record has a non-empty tail and is an
@@ -924,18 +896,17 @@ let grep_max_matches_per_file = 20
    Git prints the path verbatim under [-z], so a path may hold a newline; only
    the text is a single source line. The row is therefore framed by its two NULs
    and ends at the first newline after the second one. Returns the row and the
-   offset of the next one. *)
+   offset of the next one. An error names the row's byte offset, never its
+   bytes: past a truncation marker a row can start inside a file's text. *)
 let grep_row_at output pos =
   let length = String.length output in
-  let describe () = String.escaped (String.sub output pos (min 80 (length - pos))) in
   match String.index_from_opt output pos '\000' with
   | None ->
-      Stdlib.Error (Printf.sprintf "git grep row has no path separator: %s" (describe ()))
+      Stdlib.Error (Printf.sprintf "git grep row at byte %d has no path separator" pos)
   | Some first ->
       (match String.index_from_opt output (first + 1) '\000' with
        | None ->
-           Stdlib.Error
-             (Printf.sprintf "git grep row has no line separator: %s" (describe ()))
+           Stdlib.Error (Printf.sprintf "git grep row at byte %d has no line separator" pos)
        | Some second ->
            let path = String.sub output pos (first - pos) in
            let line_field = String.sub output (first + 1) (second - first - 1) in
@@ -951,7 +922,7 @@ let grep_row_at output pos =
                   ({ gm_path = path; gm_line = line; gm_text = text }, min length (text_end + 1))
             | Some _ | None ->
                 Stdlib.Error
-                  (Printf.sprintf "git grep row has a bad line number: %S" line_field)))
+                  (Printf.sprintf "git grep row at byte %d has a bad line number" pos)))
 
 (* Reads rows until [max_matches] are held. A row after that proves the answer
    was cut. So does a file that reached the per-file cap, since git stops
@@ -1014,11 +985,7 @@ let grep_in_scope ~timeout_sec ~local_path ~pathspec ~pattern ~ignore_case ~max_
       (* git grep exits 1 when nothing matched; that is an answer. *)
       Stdlib.Ok { gr_matches = []; gr_truncated = false }
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      (* HIGH-RISK-UNREVIEWED: standard output holds the rows git found before
-         it stopped, a timeout included: lines of files the workspace file
-         reader refuses to serve. The failure detail reaches the server log, so
-         standard error alone says why (#48500). *)
-      Stdlib.Error (git_failure_with_reason args status stderr)
+      Stdlib.Error (git_failure_detail args status ~stderr)
 
 (* A tracked, non-ignored file is in both runs with the same rows; one copy of
    each path and line is kept. *)

@@ -3549,6 +3549,11 @@ let test_resolution_preparation_recovers_exact_bytes cut () = with_fixture (fun 
   let load_resolution ()=io (fun () -> Store.load_history_resolution fixture.store
     ~scope:original.scope ~request_id:original.request_id |> get |> Option.get) in
   let original_preparation=load_resolution () in
+  (* Reloaded canonical JSON can order nested schema fields differently from
+     the live request. The same ID and verified digest still name its bytes. *)
+  let prepared=io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)
+    |> List.hd in
   let body_path=Filename.concat (Store.root fixture.store)
     (Store.tool_request_body_path ~scope:original.scope ~request_digest:(Capture.body_digest child)) in
   check bool "the complete preparation exists before its body or child owner" true

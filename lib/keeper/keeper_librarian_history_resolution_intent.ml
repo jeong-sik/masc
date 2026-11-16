@@ -349,7 +349,8 @@ let intend_child ~store ~expected request =
     | Child_prepared prepared -> Ok prepared
     | Requested | Refused _ | Fenced | Child_intended _ | Child_confirmed _ ->
       Error (Conflict "Resolution child has no retained preparation") in
-  let* ()=require (Request.to_json request=Request.to_json prepared.request)
+  let* ()=require (Request.request_id request=prepared.child.request_id
+    && Request.body_digest request=prepared.child.request_digest)
     "Resolution child differs from its retained preparation" |> unavailable in
   let* ()=validate_child ~store expected request |> unavailable in
   (* A restart takes the complete request from Child_prepared. Neither a

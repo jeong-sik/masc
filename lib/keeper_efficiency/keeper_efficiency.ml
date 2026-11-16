@@ -864,13 +864,15 @@ let month_view_to_json (view : month_view) =
     ]
 ;;
 
-(* One month is aggregated at a time. The aggregation suspends while it
-   holds this lock: once an Eio filesystem is installed, [Fs_compat] asks Eio
-   about each day file and makes the cache directory through it. The
-   dashboard route runs [read_month] as a job of a pool worker, where several
-   jobs are fibers of one domain, so the next read has to wait as a fiber.
-   An OS mutex is locked again by the thread that already holds it, which
-   [Stdlib.Mutex] refuses with [Sys_error] (#52360). *)
+(* One aggregation runs at a time, whatever the month. It suspends while it
+   holds this lock: called from an Eio fiber, the cache write runs as a
+   system-thread job ([Fs_compat.save_file_atomic]), and once an Eio
+   filesystem is installed [Fs_compat] also asks Eio about each day file and
+   makes the cache directory through it. The dashboard route runs
+   [read_month] as a job of a pool worker, where several jobs are fibers of
+   one domain, so the next read has to wait as a fiber. An OS mutex is locked
+   again by the thread that already holds it, which [Stdlib.Mutex] refuses
+   with [Sys_error] (#52360). *)
 let compute_mutex = Cross_context_mutex.create ()
 
 let open_tool_store ~masc_root =

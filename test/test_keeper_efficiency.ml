@@ -405,10 +405,11 @@ let month_tests =
   ]
 
 (* The server runs [read_month] as a job of an executor-pool worker, where
-   several jobs are fibers of one domain. With an Eio filesystem installed a
-   read suspends while it holds the month's lock -- [Fs_compat] asks Eio about
-   each day file -- so the next read on that domain starts while the first
-   still holds it (#52360). *)
+   several jobs are fibers of one domain. A read from a fiber suspends while
+   it holds the lock -- its cache write runs as a system-thread job -- so the
+   next read on that domain starts while the first still holds it (#52360).
+   The test installs an Eio filesystem as the server does, which adds a
+   suspension at each day file. *)
 let overlap_tests =
   [ ( "reads that overlap on one domain all answer"
     , `Quick

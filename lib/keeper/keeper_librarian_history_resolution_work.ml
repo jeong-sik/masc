@@ -234,6 +234,49 @@ let run_serialized ~config ~keeper_name =
       process ~config ~keeper_name ~store intent) (Ok ()) intents
   with Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn -> Error (Intent.Publication_uncertain (Printexc.to_string exn))
+type automatic_resolution = Original_waiting | Reobserve_original | Resume_history
+let resolve_missing_serialized ~config ~keeper_name ~request_id =
+  try
+    let store=Store.of_config config in
+    let* intents=io (fun () -> Intent.read ~config ~keeper_name ~request_id) in
+    let latest=match List.rev intents with [] -> None | intent::_ -> Some intent in
+    let continue intent =
+      let* ()=process ~config ~keeper_name ~store intent in
+      let* current=io (fun () -> Intent.reload ~store intent) in
+      let+ fence=io (fun () -> Resolution.read ~config ~keeper_name ~request_id)
+        |> Result.map_error (fun error -> Intent.Unavailable (Resolution.error_to_string error)) in
+      match fence with
+      | Some _ -> Resume_history
+      | None -> if current.phase=intent.phase then Original_waiting else Reobserve_original in
+    match latest with
+    | Some ({Intent.phase=(Requested | Fenced | Child_intended _ | Child_confirmed _);_} as intent) ->
+      continue intent
+    | None | Some {phase=Refused _;_} ->
+      match io (fun () -> Resolution.preview ~config ~keeper_name ~request_id) with
+      | Error (Resolution.Already_fenced _) -> Ok Resume_history
+      | Error (Original_absent | Ineligible _ | Observation_changed | Range_already_recorded) ->
+        Ok Original_waiting
+      | Error (Unavailable detail) -> Error (Intent.Unavailable detail)
+      | Error (Publication_uncertain detail) -> Error (Intent.Publication_uncertain detail)
+      | Ok preview ->
+        if Option.exists (fun (intent:Intent.t) -> intent.expected=preview.expected) latest then
+          Ok Original_waiting
+        else
+          match io (fun () -> submit ~config ~keeper_name ~request_id ~expected:preview.expected
+            ~actor:"librarian" ~reason:"Continue retained history after worker absence without host execution evidence"
+            ~now:(Time_compat.now ())) with
+          | Ok accepted -> continue accepted.intent
+          | Error (Intent.Conflict _ as conflict) ->
+            (* HTTP may have retained an operator's intent during preview.
+               Reobserve that identity instead of replacing its actor/guard. *)
+            let* observed=io (fun () -> Intent.read ~config ~keeper_name ~request_id) in
+            (match List.rev observed with
+             | ({Intent.phase=(Requested | Fenced | Child_intended _ | Child_confirmed _);_} as intent)::_ ->
+               continue intent
+             | [] | {phase=Refused _;_}::_ -> Error conflict)
+          | Error ((Invalid _ | Unavailable _ | Publication_uncertain _) as error) -> Error error
+  with Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Intent.Publication_uncertain (Printexc.to_string exn))
 let record_completed_serialized ~config ~keeper_name ~request ~completed =
   let store=Store.of_config config in
   let* intents=io (fun () -> Intent.active_for_keeper ~config ~keeper_name) in

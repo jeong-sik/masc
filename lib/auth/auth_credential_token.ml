@@ -325,11 +325,26 @@ let find_static_credential_in_transaction ?(leaf_policy = Owned_regular_only) tr
     OAuth owns a token whenever its exact hash file exists, including expired
     or revoked records; those typed failures must not silently fall through to
     static lookup. *)
-let find_credential_by_token config ~token : (agent_credential, masc_error) result =
+type token_credential =
+  | Oauth_access of agent_credential
+  | Static_bearer of agent_credential
+
+let token_credential_agent_credential = function
+  | Oauth_access credential | Static_bearer credential -> credential
+;;
+
+let find_token_credential config ~token : (token_credential, masc_error) result =
   match Auth_oauth.find_access_credential ~base_path:config ~token with
-  | Ok (Some credential) -> Ok credential
-  | Ok None -> find_static_credential_by_token config ~token
+  | Ok (Some credential) -> Ok (Oauth_access credential)
+  | Ok None ->
+    Result.map
+      (fun credential -> Static_bearer credential)
+      (find_static_credential_by_token config ~token)
   | Error error -> Error error
+;;
+
+let find_credential_by_token config ~token : (agent_credential, masc_error) result =
+  Result.map token_credential_agent_credential (find_token_credential config ~token)
 ;;
 
 (** Resolve agent_name from raw token *)

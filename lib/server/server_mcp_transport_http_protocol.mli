@@ -48,13 +48,13 @@ type deps = Server_mcp_transport_http_types.deps = {
   get_base_path : unit -> string;
   get_server_state : unit -> Mcp_server.server_state option;
   verify_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
   verify_mcp_observer_stream_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
   verify_operator_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
   verify_seat_mcp_auth :
-    base_path:string -> Httpun.Request.t -> (unit, auth_failure) result;
+    base_path:string -> Httpun.Request.t -> (Auth.request_principal, auth_failure) result;
 }
 (** Transparent alias of {!Server_mcp_transport_http_types.deps}.
     Re-declared here so runtime consumers see the record fields

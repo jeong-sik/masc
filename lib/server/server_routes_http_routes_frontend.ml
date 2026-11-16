@@ -78,8 +78,12 @@ let websocket_upgrade_unavailable_reason () =
 let websocket_upgrade_authorized ~base_path ~request_authority request =
   let ( let* ) = Result.bind in
   let* () = ensure_same_origin_if_browser_request ~request_authority request in
-  (* HIGH-RISK-UNREVIEWED: the /mcp verdict is the answer of this gate. *)
+  (* HIGH-RISK-UNREVIEWED: the /mcp verdict is the answer of this gate. The
+     gate only admits the upgrade. The socket's [dashboard/hello] carries its
+     own credential, which [Server_mcp_transport_ws] verifies, so the
+     upgrade's principal is not carried onto the socket. *)
   verify_mcp_auth_for_authority ~base_path ~request_authority request
+  |> Result.map (fun (_ : Auth.request_principal) -> ())
 
 let websocket_handler ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then

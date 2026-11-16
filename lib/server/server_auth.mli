@@ -81,18 +81,23 @@ val agent_from_request : Httpun.Request.t -> string option
 
 (** {1 MCP / observer / operator verification}
 
-    HIGH-RISK-UNREVIEWED: each verdict is [Ok ()] or a refusal. [Ok ()] says
-    the request is admitted; it does not say a credential was checked, since a
-    workspace with auth off or [require_token = false] admits a request that
-    carries none. A caller that has to tell the two apart needs a closed
-    variant here, not a header probe (#51752). *)
+    HIGH-RISK-UNREVIEWED: each verdict is the admitted request's
+    {!Auth.request_principal} or a refusal. The principal tells apart a
+    workspace with auth off ([Auth_off]), a request without a token where
+    none is required ([Anonymous]) and a resolved bearer ([Bearer]), which a
+    [unit] verdict could not (#51752). It is private to [Auth]: the door
+    makes it, a caller only reads it. *)
 
 val verify_mcp_auth :
-  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+  base_path:string ->
+  Httpun.Request.t ->
+  (Auth.request_principal, Masc_domain.masc_error) result
 (** Bearer token check for the [/mcp] endpoint. *)
 
 val verify_seat_mcp_auth :
-  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+  base_path:string ->
+  Httpun.Request.t ->
+  (Auth.request_principal, Masc_domain.masc_error) result
 (** Bearer token check for the seat door [/mcp/play]: the same as
     {!verify_mcp_auth} but asking [CanPlayMachine], which an invite's
     [Player] credential holds (RFC play-link-for-the-shared-machine §2.7). *)
@@ -101,18 +106,23 @@ val verify_mcp_auth_for_authority :
   base_path:string ->
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
-  (unit, Masc_domain.masc_error) result
+  (Auth.request_principal, Masc_domain.masc_error) result
 (** Bearer token check using an explicitly admitted authority.  Entry points
     that already carry the typed authority should use this instead of
     rebuilding a fiber-local dependency. *)
 
 val verify_mcp_observer_stream_auth :
-  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
+  base_path:string ->
+  Httpun.Request.t ->
+  (Auth.request_principal, Masc_domain.masc_error) result
 (** Variant for the observer SSE stream (allows query token). *)
 
 val verify_operator_mcp_auth :
-  base_path:string -> Httpun.Request.t -> (unit, Masc_domain.masc_error) result
-(** Variant for [/mcp/operator] (admin-tier). *)
+  base_path:string ->
+  Httpun.Request.t ->
+  (Auth.request_principal, Masc_domain.masc_error) result
+(** Variant for [/mcp/operator] (admin-tier). The principal is always a
+    [Bearer]: the door refuses unless auth is on and requires a token. *)
 
 (** {1 Dashboard actor identification} *)
 
@@ -167,6 +177,19 @@ val dashboard_actor_for_request :
 val is_verified_internal_keeper_request :
   base_path:string -> Httpun.Request.t -> bool
 (** [true] when the request carries a verified internal-keeper token. *)
+
+val dashboard_actor_of_principal :
+  base_path:string -> Httpun.Request.t -> Auth.request_principal -> string option
+(** The actor of a request a [/mcp] door admitted as [principal]: a
+    [Bearer]'s agent, the request's actor hint for [Anonymous], and
+    {!dashboard_actor_for_request} for [Auth_off]. Only [Auth_off] reads the
+    auth store. *)
+
+val is_internal_keeper_principal :
+  base_path:string -> Httpun.Request.t -> Auth.request_principal -> bool
+(** [true] for a [Bearer] the internal Keeper token answered for; the door
+    already required the [x-masc-keeper-name] header for it. [Auth_off]
+    asks {!is_verified_internal_keeper_request}, which reads the auth store. *)
 
 val sanitized_dashboard_actor_for_request :
   base_path:string -> Httpun.Request.t -> string option

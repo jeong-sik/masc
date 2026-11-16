@@ -28,21 +28,29 @@ let retain ~store step =
   let* ()=io (fun () -> Step.confirm_owner step) |> rejected in
   let destination=Step.destination step in
   let scope=Step.scope (Step.physical_owner step) and request_id=Step.request_id step in
+  let* index=io (fun () -> Step.index step) |> rejected in
   let* ()=io (fun () -> Owner.retain ~store ~scope ~request_id
     ~installation_id:destination.installation_id ~package_id:destination.package_id ~tool:destination.tool
-    ~summary:`Null ~request:(Step.to_json step)) |> owned in
+    ~summary:(Step.index_to_json index) ~request:(Step.to_json step)) |> owned in
   let* record=io (fun () -> Owner.load ~store ~scope ~request_id) |> owned in
   let* record=match record with Some record -> Ok record
     | None -> Error (Uncertain "Retained original floor step is not observable") in
   let* ()=check_record step record in Ok record
 let discover ~store ~owner =
-  let* records=io (fun () -> Owner.load_scope ~store ~scope:(Step.scope owner)) |> owned in
-  let rec headers found = function
+  let* records=io (fun () -> Owner.discover ~store ~scope:(Step.scope owner)) |> owned in
+  let rec indexes found = function
     | [] -> Ok (List.rev found)
     | record::rest ->
-      let* header=io (fun () -> Step.header ~owner record) |> rejected in
-      headers ((record,header)::found) rest in
-  headers [] records
+      let* index=rejected (Step.index_of_summary record) in
+      let* ()=rejected (Durable.owner_matches_json owner (Durable.owner_to_json index.owner)) in
+      indexes ((record,index)::found) rest in
+  indexes [] records
+let load ~store (record,(index:Step.index)) =
+  let* observed=rejected (Step.index_of_summary record) in
+  let* ()=if observed=index then Ok () else Error (Rejected "Selected floor index belongs to another record") in
+  let* original=io (fun () -> Owner.load_listed ~store record) |> owned in
+  let* header=io (fun () -> Step.header ~owner:index.owner original) |> rejected in
+  Ok (original,header)
 let schema_of step =
   let* exact=rejected (Step.request step) in
   match exact.Exact.schema with

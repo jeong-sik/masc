@@ -12,6 +12,11 @@ let ( let* ) = Result.bind
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 
 let discover ~store ~owner = Step_owner.discover ~store ~owner |> Result.map_error Step_owner.error_to_string
+let load_steps ~store listed =
+  List.fold_left (fun result original ->
+    let* loaded = result in
+    let* original = Step_owner.load ~store original |> Result.map_error Step_owner.error_to_string in
+    Ok (original :: loaded)) (Ok []) listed |> Result.map List.rev
 
 (* A step belongs to the candidate whose original it names by ID and digest. *)
 let owns candidate (header : Step.header) =
@@ -60,8 +65,8 @@ let settle_steps = settle_steps_with ~settle:settle_record
 (* Gate records of an archived step no longer change any validation. *)
 let settle_orphan_gates ~store ~owner ~steps =
   let* inventory = io (fun () -> Gate.Inventory.read ~store ~owner) in
-  let discovered execution_id = List.exists (fun ((record : Retained.retained), _) ->
-    record.request_id = execution_id) steps in
+  let discovered execution_id = List.exists (fun ((record : Retained.Record.t), _) ->
+    Retained.Record.request_id record = execution_id) steps in
   List.fold_left (fun moved execution_id ->
     let* moved = moved in
     if discovered execution_id then Ok moved else
@@ -101,8 +106,9 @@ let check_pending_floor ~owner ~settled steps =
 
 let cleanup ~store ~owner ~candidates ~settled =
   let* steps = discover ~store ~owner in
-  let unowned = List.filter (fun (_, header) ->
-    not (List.exists (fun candidate -> owns candidate header) candidates)) steps in
+  let unowned = List.filter (fun (_, (index : Step.index)) ->
+    not (List.exists (fun candidate -> owns candidate index.header) candidates)) steps in
+  let* unowned = load_steps ~store unowned in
   let* () = check_pending_floor ~owner ~settled unowned in
   let* settled = settle_steps ~store ~owner unowned in
   let* orphans = settle_orphan_gates ~store ~owner ~steps in
@@ -110,14 +116,18 @@ let cleanup ~store ~owner ~candidates ~settled =
 
 let settle_chain ~store ~owner candidate =
   let* steps = discover ~store ~owner in
-  settle_steps ~store ~owner (List.filter (fun (_, header) -> owns candidate header) steps)
+  let selected = List.filter (fun (_, (index : Step.index)) -> owns candidate index.header) steps in
+  let* selected = load_steps ~store selected in
+  settle_steps ~store ~owner selected
 
 let settle_step ~store ~owner candidate ~position =
   let* steps = discover ~store ~owner in
-  match List.filter (fun (_, (header : Step.header)) ->
-    owns candidate header && header.position = position) steps with
+  match List.filter (fun (_, (index : Step.index)) ->
+    owns candidate index.header && index.header.position = position) steps with
   | [] -> Error (Printf.sprintf "Floor chain has no retained step at position %d to settle" position)
-  | stopped -> settle_steps ~store ~owner stopped
+  | stopped ->
+    let* stopped = load_steps ~store stopped in
+    settle_steps ~store ~owner stopped
 
 module For_testing = struct
   let settle_steps_with = settle_steps_with

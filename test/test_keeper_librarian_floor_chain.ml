@@ -79,6 +79,8 @@ let finished = function
 
 let steps_of fixture ~owner =
   Step_owner.discover ~store:fixture.store ~owner |> Result.map_error Step_owner.error_to_string |> get
+  |> List.map (fun listed -> Step_owner.load ~store:fixture.store listed
+      |> Result.map_error Step_owner.error_to_string |> get)
 
 let in_position_order steps =
   List.sort (fun (_, (a : Step.header)) (_, (b : Step.header)) -> Int.compare a.position b.position) steps
@@ -278,8 +280,10 @@ let replace_field name value = function
 let retain_copy ~store ~owner (record : Owner.retained) ~edit =
   let request_id = Step.fresh_request_id owner in
   let request = edit (replace_field "request_id" (`String request_id) record.request) in
+  let step = Step.of_json ~owner request |> get in
+  let summary = Step.index step |> get |> Step.index_to_json in
   match Owner.retain ~store ~scope:record.scope ~request_id ~installation_id:record.installation_id
-          ~package_id:record.package_id ~tool:record.tool ~summary:`Null ~request with
+          ~package_id:record.package_id ~tool:record.tool ~summary ~request with
   | Ok () -> ()
   | Error error -> fail (Owner.error_to_string error)
 
@@ -323,6 +327,32 @@ let test_chains_of_other_ranges_do_not_mix () = with_fixture (fun fixture ->
   check string "the first chain keeps its transaction" fresh.transaction_id a.program.transaction_id;
   check string "the second has its own" "the other chain" b.program.transaction_id;
   check (list string) "both read the same turn the same way" (claims a.program) (claims b.program))
+
+let test_another_ranges_damaged_body_does_not_stop_a_chain () = with_fixture (fun fixture ->
+  fixture.respond := answering ();
+  let owner = owner fixture in
+  let range_a = range_link owner and range_b = range_link owner in
+  let first = finished (drive fixture ~owner ~range:range_a ()) in
+  let other = new_step fixture ~owner ~range:range_b ~previous:None (ask (machine ())) in
+  let record = retain fixture other in
+  let body = Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:record.scope ~request_digest:record.request_digest) in
+  io (fun () -> write body "damaged floor capture");
+  let again = finished (drive fixture ~owner ~range:range_a ()) in
+  check bool "the selected range reconstructs its same program" true
+    (Yojson.Safe.equal (Program.to_json first.program) (Program.to_json again.program));
+  expect_refused "the damaged range still requires its body" ~mentioning:"body does not match"
+    (run_once fixture ~owner ~range:range_b ());
+  let metadata () = Step_owner.discover ~store:fixture.store ~owner
+    |> Result.map_error Step_owner.error_to_string |> get in
+  check int "all three original records remain discoverable" 3 (List.length (metadata ()));
+  let path = Filename.concat (scope_directory fixture ~scope:record.scope)
+    (Store.digest record.request_id ^ ".json") in
+  let malformed = replace_field "summary" `Null (Owner.to_json record) in
+  io (fun () -> write path (Yojson.Safe.to_string malformed));
+  expect_refused "unselected malformed metadata refuses the whole inventory" ~mentioning:"unknown, duplicate or missing fields"
+    (run_once fixture ~owner ~range:range_a ());
+  check int "neither the damaged body nor metadata caused another inference" 2 (F.post_count fixture.server))
 
 (* The facts a chain starts from are part of its first question. A restart that
    names no facts, or other facts, gets the ones the first step retained. *)
@@ -761,6 +791,8 @@ let () =
         ; test_case "a step the floor never asked about is refused" `Slow
             test_a_step_the_floor_never_asked_about_is_refused
         ; test_case "chains of other ranges do not mix" `Slow test_chains_of_other_ranges_do_not_mix
+        ; test_case "another range's damaged body does not stop a chain" `Slow
+            test_another_ranges_damaged_body_does_not_stop_a_chain
         ; test_case "a chain asks for its start only while it has no step" `Slow
             test_a_chain_asks_for_its_start_only_while_it_has_no_step
         ; test_case "a retained chain revalidates current facts before resuming" `Slow

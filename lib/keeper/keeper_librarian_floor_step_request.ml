@@ -80,6 +80,7 @@ let previous step=step.previous
 let position step=step.position
 let sources step=step.sources
 let step step=step.step
+let request step = Question.request ~request_id:step.id step.step.preparation
 let context_json (context:Runtime.durable_step_context) = `Assoc [
   "previous_state",(match context.previous_state with None -> `Null | Some state -> `String state);
   "unread_messages",Unread.list_to_json context.unread_messages]
@@ -150,12 +151,15 @@ let matches_question (question:Machine.question) step =
     "Original floor step input differs from its question"
 type header = {request_id:string;destination:Durable.destination;transaction_id:string;range:link;
   previous:link option;position:int;sources:Unread.source list}
+type index = {owner:Durable.owner;header:header;exact_digest:string}
 let header_fields = ["schema";"kind";"request_id";"owner";"destination";"transaction_id";"range";"previous";
   "position";"sources";"context";"input";"preparation"]
+let body_fields json =
+  let* f=fields header_fields json in
+  let+ ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-floor-step")
+    "Unknown original floor step schema or kind" in f
 (* Everything but the context, input and preparation. *)
 let header_of_fields ~owner f =
-  let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-floor-step")
-    "Unknown original floor step schema or kind" in
   let* request_id=nonblank (value "request_id" f) in
   let* ()=Durable.owner_matches_json owner (value "owner" f) in
   let* destination=Durable.destination_of_json (value "destination" f) in
@@ -170,8 +174,42 @@ let header_of_fields ~owner f =
     | _ -> Error "Original floor step sources are not a list" in
   let+ ()=validate_links ~owner ~id:request_id ~range ~previous ~position in
   {request_id;destination;transaction_id;range;previous;position;sources}
+let binds_record ~owner ~id ~(destination:Durable.destination) (record:Owner.Record.t) =
+  let module Record=Owner.Record in
+  require (Record.scope record=scope owner && Record.request_id record=id
+    && Record.installation_id record=destination.installation_id
+    && Record.package_id record=destination.package_id && Record.tool record=destination.tool)
+    "Original floor step host binding differs"
+let index (step:t) =
+  let+ exact=request step in
+  {owner=step.owner;header={request_id=step.id;destination=step.destination;
+    transaction_id=step.transaction_id;range=step.range;previous=step.previous;
+    position=step.position;sources=step.sources};exact_digest=Lane_addon_exact.digest exact}
+let index_to_json (index:index) =
+  let header=index.header in
+  `Assoc ["schema",`Int 1;"kind",`String "completed-history-floor-step-index";
+    "owner",Durable.owner_to_json index.owner;"request_id",`String header.request_id;
+    "destination",Destination.to_json header.destination;"transaction_id",`String header.transaction_id;
+    "range",link_json header.range;"previous",(match header.previous with None -> `Null | Some link -> link_json link);
+    "position",`Int header.position;"sources",`List (List.map Unread.source_to_json header.sources);
+    "exact_digest",`String index.exact_digest]
+let index_of_summary record =
+  let* f=fields ["schema";"kind";"owner";"request_id";"destination";"transaction_id";
+    "range";"previous";"position";"sources";"exact_digest"] (Owner.Record.summary record) in
+  let* ()=require (value "schema" f=`Int 1 && value "kind" f=`String "completed-history-floor-step-index")
+    "Unknown original floor step index schema" in
+  let* owner=Durable.owner_of_json (value "owner" f) in
+  let* header=header_of_fields ~owner f in
+  let* exact_digest=nonblank (value "exact_digest" f) in
+  let* ()=require (String_util.is_lowercase_sha256_hex exact_digest) "Original floor step Exact digest is invalid" in
+  let+ ()=binds_record ~owner ~id:header.request_id ~destination:header.destination record in
+  {owner;header;exact_digest}
+let confirm_index step record =
+  let* stored=index_of_summary record in
+  let* actual=index step in
+  require (stored=actual) "Original floor step index differs from its request"
 let decode ~owner ~digest json =
-  let* f=fields header_fields json in
+  let* f=body_fields json in
   let* {request_id=id;destination;transaction_id;range;previous;position;sources}=header_of_fields ~owner f in
   let* context=context_of_json (value "context" f) in
   let* source_input=Input.of_json (value "input" f) in
@@ -192,20 +230,20 @@ let create ~request_id ~owner ~destination ~transaction_id ~range ~previous ~(qu
   let* ()=Runtime.validate_durable_step_preparation step in
   let* ()=matches_question question draft in
   decode ~owner ~digest:None (to_json draft)
-let binds_record ~owner ~id ~(destination:Durable.destination) (record:Owner.retained) =
-  require (record.scope=scope owner && record.request_id=id
-    && record.installation_id=destination.installation_id && record.package_id=destination.package_id
-    && record.tool=destination.tool) "Original floor step host binding differs"
-let binds step record = binds_record ~owner:step.owner ~id:step.id ~destination:step.destination record
+let of_json ~owner json = decode ~owner ~digest:None json
+let binds (step:t) record = binds_record ~owner:step.owner ~id:step.id ~destination:step.destination (Owner.listed record)
 let header ~owner (record:Owner.retained) =
-  let* f=fields header_fields record.request in
+  let* f=body_fields record.request in
   let* header=header_of_fields ~owner f in
-  let+ ()=binds_record ~owner ~id:header.request_id ~destination:header.destination record in header
+  let* ()=binds_record ~owner ~id:header.request_id ~destination:header.destination (Owner.listed record) in
+  let* index=index_of_summary (Owner.listed record) in
+  let+ ()=require (index.owner=owner && index.header=header) "Original floor step header differs from its index" in header
 let restore ~owner (record:Owner.retained) =
   (* The record's digest named the body [Owner.load] verified, and [decode]
      requires that body to be this request's canonical encoding. *)
   let* step=decode ~owner ~digest:(Some record.request_digest) record.request in
   let* ()=binds step record in
+  let* ()=confirm_index step (Owner.listed record) in
   let+ ()=equal record.request (to_json step) "Original floor step request encoding differs" in step
 let validate_ancestry_payload ~read (step:t) =
   let load ~scope (link:link) =
@@ -234,9 +272,9 @@ let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
   let+ ()=Durable.owner_matches_json current (value "owner" f) in current
 let confirm_record step (record:Owner.retained) =
   let* ()=binds step record in
-  require (String.equal record.request_digest step.digest) "Original floor step record names another request"
-let request step = Question.request ~request_id:step.id step.step.preparation
-let confirm_owner step =
+  let* ()=require (String.equal record.request_digest step.digest) "Original floor step record names another request" in
+  confirm_index step (Owner.listed record)
+let confirm_owner (step:t) =
   let* current=Durable.observe_owner ~base_path:(Durable.base_path step.owner)
     ~keepers_dir:(Durable.keepers_dir step.owner) ~keeper_id:(Durable.keeper_id step.owner) in
   Durable.owner_matches_json current (Durable.owner_to_json step.owner)

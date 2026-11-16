@@ -221,11 +221,34 @@ Gate 참조와 연결된 종료의 본문 요구, 손상 host record와 record �
 typed marker의 순서와 codec, 이전 입력 실패 유무를 다룬다.
 **타입 검사·Dune 빌드·회귀 실행·CI·설치·운영 복구는 미실행이다.** 문법과 소스 검토로 동작 성공을 주장하지 않는다.
 
+## 열 번째 단위: floor 범위를 고른 뒤 본문 복원
+
+기존 floor chain과 정리는 같은 Keeper의 모든 step 본문을 읽은 뒤 처리할 범위를 골랐다.
+다른 미완료 범위의 본문이 손상돼도 정상 범위를 이어갈 수 없었다. step을 캡처할 때 원본과 함께
+물리 owner·목적지·range·predecessor·순서·source·Exact digest를 작은 불변 summary에 남긴다.
+전체 record inventory와 summary는 엄격히 읽고, chain은 자기 range의 본문만 복원한다.
+정리는 옮길 range나 순서의 본문만 복원하며, 남아 있는 모든 step의 ID로 Gate 소유권을 확인한다.
+
+선택한 본문은 기존 Store의 canonical bytes·digest와 record binding을 검증하고 summary와 header를
+대조한다. 실행과 답 복원은 전체 capture를 다시 읽어 준비된 질문과 Exact digest까지 확인한다.
+선택하지 않은 본문의 손상을 허용하는 것은 그 요청의 실행·종료·Memory 반영·ACK 권한이 아니다.
+본문을 못 읽는 floor 요청의 실행 전 종료 복구와 설치 전 검사는 여전히 후속 범위다.
+
+이 summary는 필수 형식이다. `Null` summary를 가진 floor 원본은 거부하며 호환·변환 경로는 없다.
+변경 전 읽기 전용 운영 관측에서는 owner record 123개 중 floor record가 0개였다. 이는 한 시점의
+비원자적 JSON metadata 관측으로, 배포 시점의 재고나 전체 Runtime 검증을 대신하지 않는다.
+관측 원문은 이전 단위의 `artifacts/farm-librarian-bodyless-preflight-20261116/runtime-floor-inventory-20261116.json`에 있다.
+
+다른 range의 손상된 본문과 malformed summary, 온전한 본문과 다른 Exact digest, live candidate의
+본문 손상과 선택한 순서만 정리하는 세 가지 회귀를 작성했다. 기존 fixture도 필수 summary를 남기도록
+맞췄다. **회귀 실행·타입·빌드·설치·운영 복구와 성능 측정은 미실행이다.** 본문을 적게 읽는 소스 변경을
+지연 시간 개선의 실측 증거로 쓰지 않는다.
+
 ## 남은 범위
 
 - 연결된 history의 접수 전 상태·Cut 해소는 위 소스 변경과 작성한 회귀의 범위이며, 실제 타입·회귀·운영 검증은 남는다.
 - isolated history의 실행 전 종료는 아홉 번째 소스 단위에서 설치 검사와 맞췄다. 실제 기동 검증과 연결된 요청의 본문 손상 복구는 남는다.
-- floor 본문 손상 복구는 남는다. 이미 받은 답의 Gate는 여덟 번째 소스 단위로 이으며 실제 반영 검증은 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
+- floor는 열 번째 단위에서 다른 범위의 본문 손상을 건너뛰도록 바꿨다. 선택된 원본의 본문 손상 복구는 남는다. 이미 받은 답의 Gate는 여덟 번째 소스 단위로 이으며 실제 반영 검증은 남는다. CLI가 전송 직전 guard에서 멈추는 L1b는 이미 #51343에 있으므로 중복 구현하지 않는다.
 - `raised`·floor Cut·admission Cut는 별도 상태다. history Cut 해소는 위의 별도 운영자 결정과 증거 조건에 한정한다.
 - 따라서 #51278 전체, TLJ-S02와 Farm 전체가 끝났다고 판정하지 않는다.
 - native stack 발행은 이전 시도에서 GitHub CLI 인증을 얻지 못했다. 연결된 GitHub 읽기 도구의 인증과 CLI/native stack 발행 인증은 다르다.

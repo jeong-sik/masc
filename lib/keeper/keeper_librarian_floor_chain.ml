@@ -54,7 +54,11 @@ let hole_reasons report =
 let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~unread_message =
   let keeper_name = Durable.keeper_id owner in
   let* found = Step_owner.discover ~store ~owner |> Result.map_error owner_error in
-  let mine = List.filter (fun (_, (header : Step.header)) -> header.range = range) found in
+  let selected = List.filter (fun (_, (index : Step.index)) -> index.header.range = range) found in
+  let* mine = List.fold_left (fun result listed ->
+    let* loaded = result in
+    let* original = Step_owner.load ~store listed |> Result.map_error owner_error in
+    Ok (original :: loaded)) (Ok []) selected |> Result.map List.rev in
   let* retained = index mine in
   (* The gate scope is read once for the pass, when the first answered step
      needs judging. The judgments of the steps that earlier passes finished are

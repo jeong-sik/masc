@@ -47,6 +47,9 @@ val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_re
     resolutions and its own input, and check that the prompt is the one the
     host was sent. The record must be this owner's step scope with the host
     binding the request names. *)
+val of_json : owner:Keeper_librarian_durable_request.owner -> Yojson.Safe.t -> (t, string) result
+(** Pure complete capture decoder. This does not prove a retained original,
+    observe its physical owner or authorize any effect. *)
 val validate_ancestry_payload :
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   t -> (unit, string) result
@@ -59,12 +62,27 @@ val matches_question : Keeper_librarian_message_floor.Machine.question -> t -> (
 type header = {request_id:string;destination:Keeper_librarian_durable_request.destination;
   transaction_id:string;range:link;previous:link option;position:int;
   sources:Keeper_librarian_unread.source list}
+type index = private {
+  owner : Keeper_librarian_durable_request.owner;
+  header : header;
+  exact_digest : string;
+}
+val index : t -> (index, string) result
+val index_to_json : index -> Yojson.Safe.t
+(** The immutable summary retained with the complete original capture. *)
+val index_of_summary : Lane_addon_tool_request_owner.Record.t -> (index, string) result
+(** Strict record-only decoding: physical scope/request ID, owner, links,
+    position, installation/package/tool and digest syntax. This does not read
+    the body or establish that its content matches the index; {!restore} does. *)
+val confirm_index : t -> Lane_addon_tool_request_owner.Record.t -> (unit, string) result
+(** Bind every summary field, including Exact digest, to the complete capture. *)
 val header : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_request_owner.retained ->
   (header, string) result
 (** What a record of this owner's step scope says about its place in a chain,
     without decoding its input or rendering its prompt: the checks of its
     identity, owner, links and position that {!restore} makes, but not of its
-    preparation. It grants no authority to run, answer or settle the step. *)
+    preparation. The stored index must name the same header. It grants no
+    authority to run, answer or settle the step. *)
 val observe_record_owner : base_path:string -> keepers_dir:string -> Lane_addon_tool_request_owner.retained ->
   (Keeper_librarian_durable_request.owner, string) result
 (** The live owner a retained step names: its recorded physical roots and Memory

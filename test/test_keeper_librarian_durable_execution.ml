@@ -3895,6 +3895,8 @@ let program_claims (program:Program.t) =
 let steps_of fixture request =
   Step_owner.discover ~store:fixture.store ~owner:(Capture.physical_owner request)
   |> Result.map_error Step_owner.error_to_string |> get
+  |> List.map (fun listed -> Step_owner.load ~store:fixture.store listed
+      |> Result.map_error Step_owner.error_to_string |> get)
 (* The chain's first step: its record and the step restored from it. *)
 let first_step fixture request =
   match List.find_opt (fun (_,(header:Keeper_librarian_floor_step_request.header)) -> header.position=0)
@@ -4377,9 +4379,11 @@ let test_published_floor_with_omitted_observations_keeps_pending_ack () =
             | field -> field) fields)
         | _ -> fail "floor step must encode as an object" in
       let destination = Step.destination step in
+      let captured = Step.of_json ~owner payload |> get in
+      let summary = Step.index captured |> get |> Step.index_to_json in
       io (fun () -> Owner.retain ~store:fixture.store ~scope:(Step.scope owner) ~request_id
         ~installation_id:destination.installation_id ~package_id:destination.package_id
-        ~tool:destination.tool ~summary:`Null ~request:payload) |> owned;
+        ~tool:destination.tool ~summary ~request:payload) |> owned;
       let legacy = io (fun () -> Owner.load ~store:fixture.store ~scope:(Step.scope owner) ~request_id)
         |> owned |> Option.get in
       ignore (io (fun () -> Step.restore ~owner legacy |> get));
@@ -5177,6 +5181,33 @@ let test_the_steps_of_a_published_range_are_settled_by_the_next_pass () = with_f
   check (list string) "and writes nothing more" ["claim number 1";"claim number 2"]
     (io (fun () -> claims fixture.keepers_dir));
   nothing_left fixture request)
+
+let test_floor_cleanup_loads_only_the_steps_it_settles () = with_fixture (fun ~sw:_ fixture ->
+  provider_refuses_one_turn fixture size_refusal;
+  let candidate,request=candidate_and_request fixture in
+  fixture.set_step_response (answering_steps ["Original question to retain";"Original completed answer"]);
+  ignore (finished (descend fixture candidate));
+  let owner=Capture.physical_owner request in
+  let first,_=first_step fixture request in
+  let body=Filename.concat (Store.root fixture.store)
+    (Store.tool_request_body_path ~scope:first.scope ~request_digest:first.request_digest) in
+  let posts=F.post_count fixture.server and positions=progress fixture in
+  io (fun () -> write body "damaged floor capture");
+  check int "cleanup leaves all steps of a live candidate alone" 0
+    (memory_action fixture (fun () -> Cleanup.cleanup ~store:fixture.store ~owner ~candidates:[candidate] ~settled:[]) |> get);
+  check int "and retains both of its gate journals" 2 (step_gate_record_count fixture request);
+  check int "settling the other position reads and moves only that step and its gate" 2
+    (memory_action fixture (fun () -> Cleanup.settle_step ~store:fixture.store ~owner candidate ~position:1) |> get);
+  check int "the damaged step's gate remains live" 1 (step_gate_record_count fixture request);
+  (match memory_action fixture (fun () -> Cleanup.settle_chain ~store:fixture.store ~owner candidate) with
+   | Error detail -> check bool "selecting the damaged body refuses settlement" true (contains detail "body does not match")
+   | Ok _ -> fail "cleanup settled a selected damaged body");
+  let remaining=Step_owner.discover ~store:fixture.store ~owner |> Result.map_error Step_owner.error_to_string |> get in
+  check (list string) "the selected damaged original remains retained" [first.request_id]
+    (List.map (fun (record,_) -> Owner.Record.request_id record) remaining);
+  check int "cleanup never calls the provider" posts (F.post_count fixture.server);
+  check bool "cleanup advances no source position" true (progress fixture=positions);
+  check (list string) "cleanup writes no Memory" [] (io (fun () -> claims fixture.keepers_dir)))
 (* The chain resumes from the steps at positions 0 to k and refuses any other
    leftover, so a settle that stops part way must leave such a prefix. *)
 let four_messages=[message "Third question";reply "Third answer";message "Fourth question";reply "Fourth answer"]
@@ -5704,6 +5735,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_a_pass_starts_the_chain_again_when_memory_changed_under_it;
   test_case "the steps of a published range are settled by the next pass" `Quick
     test_the_steps_of_a_published_range_are_settled_by_the_next_pass;
+  test_case "floor cleanup loads only the steps it settles" `Quick
+    test_floor_cleanup_loads_only_the_steps_it_settles;
   test_case "a candidate covers its range after the log grew" `Quick
     test_a_candidate_covers_its_range_after_the_log_grew;
   test_case "a turn that ended after the original does not stop the pass" `Quick

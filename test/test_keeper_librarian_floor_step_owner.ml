@@ -122,6 +122,8 @@ let skip machine =
 
 let discover fixture ~owner =
   Step_owner.discover ~store:fixture.store ~owner |> Result.map_error Step_owner.error_to_string |> get
+  |> List.map (fun listed -> Step_owner.load ~store:fixture.store listed
+      |> Result.map_error Step_owner.error_to_string |> get)
 
 let test_a_chain_is_found_by_the_headers_of_its_steps () = with_fixture (fun fixture ->
   let owner = owner fixture and range = range_link (owner fixture) in
@@ -154,6 +156,36 @@ let test_a_chain_is_found_by_the_headers_of_its_steps () = with_fixture (fun fix
   let again = retain fixture first in
   check bool "retaining the same step again finds the same record" true
     (again.request_digest = first_record.request_digest))
+
+let test_a_changed_index_cannot_dispatch_an_intact_capture () = with_fixture (fun fixture ->
+  let owner = owner fixture in
+  let step = new_step fixture ~owner ~range:(range_link owner) ~previous:None (ask (machine ())) in
+  let record = retain fixture step in
+  let summary = match record.summary with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        key,(if key="exact_digest" then `String (String.make 64 '0') else value)) fields)
+    | _ -> fail "a floor index is an object" in
+  let metadata = match Owner.to_json record with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) -> key,(if key="summary" then summary else value)) fields)
+    | _ -> fail "an original record is an object" in
+  let path = Filename.concat (Store.root fixture.store) (Filename.concat Store.tool_request_owners_directory
+    (Filename.concat (Store.digest record.scope) (Store.digest record.request_id ^ ".json"))) in
+  io (fun () -> write path (Yojson.Safe.to_string metadata));
+  let selected = match Step_owner.discover ~store:fixture.store ~owner
+      |> Result.map_error Step_owner.error_to_string |> get with
+    | [listed] -> listed | [] | _::_::_ -> fail "the inventory has one original" in
+  let original,_ = Step_owner.load ~store:fixture.store selected
+    |> Result.map_error Step_owner.error_to_string |> get in
+  check bool "full restoration rejects the digest mismatch" true (Result.is_error (Step.restore ~owner original));
+  (match Step_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:(Edge.reserved ())
+      ~original ~step ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "a changed index reached RPC") with
+   | Error (Step_owner.Rejected detail) -> check bool "the refusal names the index" true (contains detail "index differs")
+   | Error (Unavailable _ | Uncertain _) | Ok _ -> fail "the altered index did not refuse the original");
+  check int "the provider has seen no request" 0 (F.post_count fixture.server);
+  let unchanged = Owner.load_record ~store:fixture.store ~scope:record.scope ~request_id:record.request_id
+    |> Result.map_error Owner.error_to_string |> get |> Option.get in
+  check json "the refused original keeps its progress" (Progress.to_json record.progress)
+    (Progress.to_json (Owner.Record.progress unchanged)))
 
 (* The host checks a model's answer against the step's own input before it takes
    the answer as final. This answer fits the output schema but names a memory the
@@ -288,6 +320,8 @@ let () =
         ; test_case "a step of a reset Memory epoch is not run" `Slow test_a_step_of_a_reset_memory_epoch_is_not_run
         ; test_case "a chain is found by the headers of its steps" `Slow
             test_a_chain_is_found_by_the_headers_of_its_steps
+        ; test_case "a changed index cannot dispatch an intact capture" `Slow
+            test_a_changed_index_cannot_dispatch_an_intact_capture
         ; test_case "the wake recognizes a step" `Slow test_the_wake_recognizes_a_step
         ] )
     ]

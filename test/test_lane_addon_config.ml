@@ -436,6 +436,53 @@ visibilities = ["public"]
 |} manifest);
     check_refusal "sources that is not an array is refused" path
       "binding.sources requires an array of observation sources";
+    write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+language = "ko"
+timezone = "Asia/Seoul"
+since = 1794441600
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+|} manifest);
+    check_refusal "a binding whose sources = [] was deleted with no source in its place is refused" path
+      "binding.sources requires an array of observation sources";
+    (* The TOML reader words the same mistake by where the lines are: with
+       the lesson source after two record grants it raises an internal error
+       of its own. The guide says so. *)
+    write path (Printf.sprintf {|id = "quiz"
+run_id = "quiz"
+manifest_path = %S
+
+[binding]
+sources = []
+language = "ko"
+timezone = "Asia/Seoul"
+since = 1794441600
+
+[[binding.records]]
+source_id = "board"
+kind = "board"
+visibilities = ["public"]
+
+[[binding.records]]
+source_id = "wiki"
+kind = "wiki"
+
+[[binding.sources]]
+source_id = "lesson"
+kind = "lane_output"
+installation_id = "operator-lesson"
+output_id = "scenes"
+selection = "latest_completed"
+|} manifest);
+    check_refusal "sources = [] left with the lesson source after two record grants is the reader's own error" path
+      "otoml internal error";
     let following ?(since = "since = 1794441600\n") ?(selection = "selection = \"latest_completed\"\n") ?(more = "")
         output = write path (Printf.sprintf {|id = "quiz"
 run_id = "quiz"
@@ -472,6 +519,9 @@ visibilities = ["public"]
     following ~since:"since = 2026-11-12\n" "scenes";
     check_refusal "a since written as a TOML date is refused before the schema" path
       "binding.since: TOML date/time values are unsupported; use an explicit string";
+    following ~since:"since = nan\n" "scenes";
+    check_refusal "a since that is not finite is refused before the schema" path
+      "binding.since: non-finite numbers are not supported";
     following "lesson";
     check_refusal "a source that is not a lesson's scenes output is refused" path unmatched;
     following ~more:"language = \"ko\"\n" "scenes";

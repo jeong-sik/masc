@@ -1446,6 +1446,7 @@ from pathlib import Path
 import sys
 import urllib.error
 import urllib.request
+import subprocess
 
 mode = Path(sys.argv[0]).name
 Path(sys.argv[0]).with_suffix(".launched").touch()
@@ -1458,6 +1459,7 @@ workspace = Path.cwd()
 assert workspace.name == "workspace"
 probe_root = workspace.parent
 assert probe_root.name.startswith("muse-readiness-")
+assert Path(subprocess.check_output(["git", "-C", str(workspace), "rev-parse", "--show-toplevel"], text=True).strip()) == probe_root
 assert workspace.stat().st_mode & 0o777 == 0o700
 storage_keys = ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "TMPDIR"]
 storage_paths = [Path(os.environ[key]) for key in storage_keys]

@@ -66,6 +66,7 @@ let create_store_on_binding workspace_binding posts_source_io comments_source_io
   ; origin_create_mutex = Eio.Mutex.create ()
   ; karma_cache = None
   ; hot_post_index = Hot_post_set.empty
+  ; updated_post_index = Updated_post_set.empty
   ; recent_post_index = Recent_post_set.empty
   ; comments_by_post = Hashtbl.create 1024
   ; reactions = Hashtbl.create 4096
@@ -169,14 +170,18 @@ let index_hot_post store (post : post) =
   store.hot_post_index <-
     Hot_post_set.add (hot_post_key_of_post post) store.hot_post_index;
   store.recent_post_index <-
-    Recent_post_set.add (recent_post_key_of_post post) store.recent_post_index
+    Recent_post_set.add (recent_post_key_of_post post) store.recent_post_index;
+  store.updated_post_index <-
+    Updated_post_set.add (updated_post_key_of_post post) store.updated_post_index
 ;;
 
 let unindex_hot_post store (post : post) =
   store.hot_post_index <-
     Hot_post_set.remove (hot_post_key_of_post post) store.hot_post_index;
   store.recent_post_index <-
-    Recent_post_set.remove (recent_post_key_of_post post) store.recent_post_index
+    Recent_post_set.remove (recent_post_key_of_post post) store.recent_post_index;
+  store.updated_post_index <-
+    Updated_post_set.remove (updated_post_key_of_post post) store.updated_post_index
 ;;
 
 let reindex_hot_post store ~(previous : post) ~(updated : post) =
@@ -195,7 +200,14 @@ let reindex_hot_post store ~(previous : post) ~(updated : post) =
     store.recent_post_index <-
       store.recent_post_index
       |> Recent_post_set.remove prev_recent
-      |> Recent_post_set.add next_recent
+      |> Recent_post_set.add next_recent;
+  if not (Float.equal previous.updated_at updated.updated_at)
+     || not (String.equal (Post_id.to_string previous.id) (Post_id.to_string updated.id))
+  then
+    store.updated_post_index <-
+      store.updated_post_index
+      |> Updated_post_set.remove (updated_post_key_of_post previous)
+      |> Updated_post_set.add (updated_post_key_of_post updated)
 ;;
 
 let put_post store (post : post) =
@@ -208,16 +220,18 @@ let put_post store (post : post) =
 ;;
 
 let rebuild_hot_post_index store =
-  let hot_index, recent_index =
+  let hot_index, recent_index, updated_index =
     Hashtbl.fold
-      (fun _ (post : post) (hot_acc, recent_acc) ->
+      (fun _ (post : post) (hot_acc, recent_acc, updated_acc) ->
          ( Hot_post_set.add (hot_post_key_of_post post) hot_acc
-         , Recent_post_set.add (recent_post_key_of_post post) recent_acc ))
+         , Recent_post_set.add (recent_post_key_of_post post) recent_acc
+         , Updated_post_set.add (updated_post_key_of_post post) updated_acc ))
       store.posts
-      (Hot_post_set.empty, Recent_post_set.empty)
+      (Hot_post_set.empty, Recent_post_set.empty, Updated_post_set.empty)
   in
   store.hot_post_index <- hot_index;
-  store.recent_post_index <- recent_index
+  store.recent_post_index <- recent_index;
+  store.updated_post_index <- updated_index
 ;;
 
 (** Remove [value] from the string list stored at [key] in [tbl]. Removes the key entirely when the list becomes empty. *)
@@ -1414,7 +1428,7 @@ let update_post_with_outcome
                             finish_posts_write outcome |> Result.map (fun () ->
                               { edited = updated; recorded_audience = audience; unresolved; content_changed })
                           | (Posts_written _ as outcome) ->
-                            Hashtbl.replace store.posts key updated;
+                            put_post store updated;
                             mark_dirty_post store key;
                             invalidate_post_caches store;
                             finish_posts_write outcome |> Result.map (fun () ->

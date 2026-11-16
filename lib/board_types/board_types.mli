@@ -526,6 +526,10 @@ val compare_recent_post_key : recent_post_key -> recent_post_key -> int
 
 module Recent_post_set : Set.S with type elt = recent_post_key
 
+val updated_post_key_of_post : post -> float * string
+module Updated_post_set : Set.S with type elt = float * string
+(** Observation cursor order: [updated_at ASC, post_id ASC]. *)
+
 (** {1 In-Memory Store} *)
 
 type flusher_msg =
@@ -1087,6 +1091,8 @@ type store = {
   (** [None] = stale. *)
   mutable hot_post_index : Hot_post_set.t;
   (** Incremental immutable Hot-ordered index ([net_vote DESC, created_at DESC, post_id ASC]). *)
+  mutable updated_post_index : Updated_post_set.t;
+  (** Incremental observation cursor index, maintained with every post mutation. *)
   mutable recent_post_index : Recent_post_set.t;
   (** Incremental immutable Recent-ordered index ([created_at DESC, post_id ASC]). *)
   comments_by_post : (string, string list) Hashtbl.t;

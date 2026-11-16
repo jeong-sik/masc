@@ -662,7 +662,7 @@ let login_argv ~cli_path = [ cli_path; "login" ]
    MCP servers only on a host started with it (observed on 1.4.18: without the
    flag a [required] server gets no request and the turn still runs). The flag
    is given only when all three hold: the session has MCP servers to connect,
-   the directory MASC made held no entry when the turn read it
+   the directory MASC made inside its isolated Git project held no entry when the turn read it
    ([origin_of_masc_directory]), and the posture disables native writes and
    shell, so this session cannot put a skill or a rule there either. An
    earlier session with native writes may have used the same directory; what

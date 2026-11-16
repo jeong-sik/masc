@@ -259,6 +259,25 @@ let test_failure_reraises_once () =
     check int "the work ran once" 1 (Atomic.get calls))
 ;;
 
+(* RFC a-fiber-that-suspends-while-holding-an-os-mutex-fails-at-unlock, L1.
+   The server runs with the host started. A fiber that hands work to the
+   host switches however early the host answers, so an Os_mutex section
+   around the call fails when it ends. The backend is posix, the one masc
+   pins (D6). *)
+let test_a_call_through_the_host_marks_an_os_mutex_section () =
+  Systhread_host.start ();
+  Eio_posix.run (fun env ->
+    let mutex = Os_mutex.create ~name:"host-call" () in
+    match
+      bounded env 10.0 "the section" (fun () ->
+        Os_mutex.protect mutex (fun () -> Systhread_host.run ignore))
+    with
+    | () -> fail "the section ran to the end"
+    | exception Os_mutex.Held_across_suspension { body_raised = None; _ } -> ()
+    | exception Os_mutex.Held_across_suspension { body_raised = Some (exn, _); _ } ->
+      failf "the section raised %s" (Printexc.to_string exn))
+;;
+
 let () =
   run "System thread host"
     [ ( "placement"
@@ -293,6 +312,10 @@ let () =
             test_outside_eio_the_work_runs_directly
         ; test_case "a long job does not delay a short one" `Quick
             test_a_long_job_does_not_delay_a_short_one
+        ] )
+    ; ( "Os_mutex"
+      , [ test_case "a call through the host marks an Os_mutex section" `Quick
+            test_a_call_through_the_host_marks_an_os_mutex_section
         ] )
     ]
 ;;

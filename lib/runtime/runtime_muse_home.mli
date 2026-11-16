@@ -72,7 +72,16 @@ val prepare_native_workspace :
   runtime_root:string -> keeper_name:string -> account_home:string ->
   (string, error) result
 (** Private durable native-client workspace for endpoint-owned Keepers. This
-    is independent of both guest filesystem coordinates and config storage. *)
+    is independent of both guest filesystem coordinates and config storage.
+    Its parent is the isolated project prepared by {!prepare_private_workspace}. *)
+
+val prepare_private_workspace : parent:string -> (string, error) result
+(** Prepare [parent/workspace] under an owned private project. Initialize an
+    empty Git repository at [parent], without user/system Git configuration or
+    templates, so Muse's project discovery stops before ancestor MCP servers,
+    instructions and skills. The workspace itself stays empty on first use.
+    Reuses existing directories and reinitializes the boundary idempotently.
+    Requires Git; a failed initialization refuses the workspace. *)
 
 val keeper_identity : keeper_name:string -> account_home:string -> string
 (** Stable identity directory name for a Keeper's managed Muse workspace:

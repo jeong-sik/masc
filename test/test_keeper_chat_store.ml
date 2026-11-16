@@ -358,6 +358,35 @@ let test_load_all_is_incremental_and_follows_appends () =
       Alcotest.(check (list string)) "and agrees with a fresh parse"
         (ids (K.load ~base_dir ~keeper_name)) (ids replaced))
 
+let test_observation_snapshot_lifecycle () =
+  let module Index = Masc.Keeper_chat_observation_index in
+  let base_dir = temp_base_path "keeper-observation-index" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "indexed-observer" in
+    let path = chat_path ~base_dir ~keeper_name in
+    let row id = Yojson.Safe.to_string (`Assoc
+      [ "id", `String id; "role", `String "user"; "content", `String id; "ts", `Float 1.0 ]) ^ "\n" in
+    let ids index = Index.pending_users index |> List.map (fun (m : K.chat_message) -> m.id) in
+    let load () = K.load_observation ~base_dir ~keeper_name in
+    write_file path (row "first");
+    let first = load () in
+    Alcotest.(check bool) "unchanged transcript reuses its complete observation index" true
+      (first == Domain.join (Domain.spawn load));
+    Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 path
+      (fun output -> output_string output (row "second"));
+    let grown = load () in
+    Alcotest.(check (list string)) "append extends the index" [ "first"; "second" ] (ids grown);
+    Alcotest.(check (list string)) "append leaves earlier snapshots immutable" [ "first" ] (ids first);
+    write_file path (row "short");
+    Alcotest.(check (list string)) "truncation drops old pending indexes" [ "short" ] (ids (load ()));
+    (* Same byte length, different inode: stale answer and cursor indexes must go too. *)
+    write_file (path ^ ".replacement") (row "other");
+    Unix.rename (path ^ ".replacement") path;
+    Alcotest.(check (list string)) "replacement drops old row positions" [ "other" ] (ids (load ()));
+    K.purge_transcript path ~remove:Sys.remove;
+    Alcotest.(check (list string)) "purge forgets observation state" [] (ids (load ())))
+;;
+
 let test_load_all_reuses_policy_across_domains () =
   let base_dir = temp_base_path "keeper-chat-store-domain-cache" in
   Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
@@ -374,6 +403,7 @@ let test_load_all_reuses_policy_across_domains () =
          "content", `String content; "ts", `Float 1.0]) ^ "\n" in
     write_file path (row "first" future_secret);
     let load () = K.load_all ~base_dir ~keeper_name in
+    let initial_index = K.load_observation ~base_dir ~keeper_name in
     let on_another_domain () = Domain.join (Domain.spawn load) in
     let first = List.hd (load ()) in
     let again = on_another_domain () in
@@ -388,6 +418,8 @@ let test_load_all_reuses_policy_across_domains () =
       (first == List.hd grown);
     write_file secret_file ("original-projected-secret-value\n" ^ future_secret ^ "\n");
     let changed = List.hd (on_another_domain ()) in
+    Alcotest.(check bool) "secret rotation replaces the observation snapshot" false
+      (initial_index == K.load_observation ~base_dir ~keeper_name);
     Alcotest.(check bool) "a changed secret policy reparses the prefix" false
       (first == changed);
     Alcotest.(check bool) "the earlier view predates the new secret" true
@@ -4208,6 +4240,8 @@ let () =
             `Quick test_transcript_absent_returns_empty;
           Alcotest.test_case "purge plan removes the chat store" `Quick
             test_purge_plan_removes_chat_store;
+          Alcotest.test_case "observation snapshot lifecycle" `Quick
+            test_observation_snapshot_lifecycle;
           Alcotest.test_case "load_all is incremental and follows appends" `Quick
             test_load_all_is_incremental_and_follows_appends;
           Alcotest.test_case "load_all reuses policy across domains" `Quick

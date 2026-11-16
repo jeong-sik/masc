@@ -137,7 +137,9 @@ type workspace_origin = private
 val other_tree : workspace_origin
 
 val origin_of_masc_directory : string -> (workspace_origin, string) result
-(** Reads a directory MASC made for the client. [Masc_private] when it holds
+(** Reads a directory MASC made with
+    {!Runtime_muse_home.prepare_private_workspace}, whose parent stops Git
+    project discovery. [Masc_private] when it holds
     no entry, [Other_tree] when it holds any. Error with the system's message
     when it cannot be read. Blocking: run it off the Eio scheduler. *)
 

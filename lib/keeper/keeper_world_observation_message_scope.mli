@@ -108,8 +108,9 @@ val fleet_messages_of_messages
   -> Keeper_chat_store.chat_message list
   -> fleet_message list
 
-(** Loads the transcript once and derives both the reactive lanes and the fleet
-    layer from the same rows. *)
+(** Refreshes one indexed transcript snapshot and derives both layers from it.
+    Reactive lookup starts after the exact acknowledgement while retaining all
+    historical answer identities. Fleet selection remains independent of ack. *)
 val collect_message_scope_and_fleet
   :  config:Workspace.config
   -> meta:keeper_meta

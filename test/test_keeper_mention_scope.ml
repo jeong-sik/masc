@@ -533,6 +533,58 @@ let test_all_pending_rows_preserve_source_order_without_cap () =
        pending)
 ;;
 
+let test_index_preserves_historical_answers_and_first_ack () =
+  let module Index = Masc.Keeper_chat_observation_index in
+  let module Identity = Keeper_chat_delivery_identity in
+  let request = Identity.Request_id.of_string "replayed-delivery" |> Result.get_ok in
+  let provenance slot = Some { Identity.delivery_key = Identity.Operation request; transcript_slot = slot } in
+  let answered =
+    { (msg ~role:Store.Role.Assistant ~id:"answered" "done") with
+      delivery_provenance = provenance Identity.Terminal_result }
+  in
+  let answered_turn = msg ~role:Store.Role.Assistant ~id:"answered-turn" ~turn_ref:(turn_ref 3) "done" in
+  let ack = msg ~role:Store.Role.System ~id:"ack" "checkpoint" in
+  let prefix = Index.of_messages [ answered; answered_turn; ack ] in
+  let replay =
+    { (msg ~role:Store.Role.User ~id:"replay" "@alice repeated delivery") with
+      delivery_provenance = provenance Identity.Accepted_user }
+  in
+  let fresh = msg ~role:Store.Role.User ~id:"fresh" "@alice new request" in
+  let suffix =
+    [ replay; msg ~role:Store.Role.User ~id:"turn-replay" ~turn_ref:(turn_ref 3) "@alice repeated turn"
+    ; fresh; ack; msg ~role:Store.Role.User ~id:"last" "@alice last request" ]
+  in
+  let index = Index.append prefix suffix in
+  let ids rows = List.map (fun (m : Store.chat_message) -> m.id) rows in
+  check (list string) "old answers suppress replay after the first duplicate ack"
+    [ "fresh"; "last" ] (ids (Index.pending_users ~ack_id:"ack" index));
+  check (list string) "appending does not mutate an older reader snapshot"
+    [] (ids (Index.pending_users prefix));
+  let missing = Index.of_messages [ fresh; ack ] in
+  check (list string) "missing acknowledgement retains older pending input"
+    [ "fresh" ] (ids (Index.pending_users ~ack_id:"absent" missing));
+  let completed = Index.append index [ msg ~role:Store.Role.Assistant ~id:"future-answer" ~turn_ref:(turn_ref 5) "done" ] in
+  let late = Index.append completed [ msg ~role:Store.Role.User ~id:"late-replay" ~turn_ref:(turn_ref 5) "@alice replay" ] in
+  check (list string) "answers added after the first load also suppress later replay"
+    [ "fresh"; "last" ] (ids (Index.pending_users ~ack_id:"ack" late))
+;;
+
+let test_fleet_before_ack_and_changed_targets () =
+  let broadcast =
+    msg ~role:Store.Role.User ~id:"broadcast" ~surface:(Some Masc.Surface_ref.Broadcast)
+      ~speaker:keeper_speaker "@bob deployment completed"
+  in
+  let ack = msg ~role:Store.Role.System ~id:"ack" "checkpoint" in
+  let messages = [ broadcast; ack ] in
+  check (list string) "fleet context survives acknowledgement of later rows"
+    [ broadcast.content ] (fleet_contents (MS.fleet_messages_of_messages ~limit:1 ~targets messages));
+  check (list string) "new targets reclassify that same broadcast before the limit"
+    [] (fleet_contents (MS.fleet_messages_of_messages ~limit:1 ~targets:[ "bob" ] messages));
+  check (list string) "ack still controls the reactive lane independently"
+    [] (List.map (fun (m : MS.pending_message) -> m.message_id)
+      (MS.pending_messages_of_messages ~ack_id:"ack" ~targets:[ "bob" ] messages))
+;;
+
 let () =
   run "keeper_mention_scope"
     [ ( "boundary_mention_match"
@@ -568,6 +620,10 @@ let () =
             test_voice_audio_self_output_is_not_recent_context
         ; test_case "unrelated_assistant_does_not_clear" `Quick
             test_unrelated_assistant_does_not_clear_pending
+        ; test_case "indexed historical answers and first ack" `Quick
+            test_index_preserves_historical_answers_and_first_ack
+        ; test_case "fleet before ack and changed targets" `Quick
+            test_fleet_before_ack_and_changed_targets
         ; test_case "ack_clears_only_injected_prefix" `Quick
             test_ack_clears_only_injected_prefix
         ; test_case "all_rows_source_order_no_cap" `Quick

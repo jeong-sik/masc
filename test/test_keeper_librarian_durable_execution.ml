@@ -2137,6 +2137,9 @@ let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind 
         (io (fun () -> Keeper_librarian_durable_gate.root ~store:fixture.store
           ~owner:(Capture.physical_owner capture) ~capture |> get |> Option.is_none));
       check int "unknown never authorizes another provider call" posts (F.post_count fixture.server);
+      check bool "a retained host unknown never starts automatic history resolution" true
+        (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+          ~request_id:record.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
       no_memory fixture in
     let ordinary_wake ()=
       ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
@@ -2219,6 +2222,162 @@ let refuse_fenced_resume fixture original request =
   check bool "fenced original refuses before any worker or Memory action" true (Result.is_error result);
   check bool "fence refusal preserves Memory and source position" true
     (before = (io (fun () -> current fixture.keepers_dir), progress fixture))
+let test_missing_history_recovers_without_operator_submission history_kind () =
+  with_fixture ~history_kind (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let before=progress fixture in
+  let wakes=ref 0 in
+  let first=memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+    ~wake:(fun () -> incr wakes)) in
+  check bool "automatic recovery yields before dispatching its continuation" true
+    (match first with Ok (Consumer.Pending (Keeper_librarian_pending.Publication _)) -> true
+     | Ok (Pending _ | Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _
+       | Memory_not_committed _) -> false
+     | Error error -> fail (Consumer.error_to_string error));
+  check int "one durable recovery schedules the next lane unit" 1 !wakes;
+  check int "preparing recovery makes no provider call" 0 (F.post_count fixture.server);
+  no_memory fixture;
+  check bool "recovery does not acknowledge its source" true (progress fixture=before);
+  let observe ()=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let prepared=observe () in
+  let child_id=match prepared.intents with
+    | [{Resolution_intent.actor="librarian";phase=Child_confirmed child;_}] -> child.request_id
+    | _ -> fail "the Memory lane did not retain one automatic continuation" in
+  check bool "a prepared continuation is not a completed Memory write" true
+    (prepared.completion=Resolution_work.Not_observed && Option.is_some prepared.fence);
+  (* A later lane scope restores the retained child, just as after a stop. *)
+  memory_action fixture (fun () -> Resolution_work.run_serialized ~config:fixture.config ~keeper_name
+    |> Result.map_error Resolution_intent.error_to_string |> get);
+  check bool "a later unit restores the same child before any provider call" true
+    (match (observe ()).intents with
+     | [{Resolution_intent.phase=Child_confirmed child;_}] ->
+       child.request_id=child_id && F.post_count fixture.server=0
+     | _ -> false);
+  drive_advanced fixture;
+  check int "only the continuation calls the provider" 1 (F.post_count fixture.server);
+  check bool "the source position advances after the actual commit" true (progress fixture<>before);
+  check bool "the automatic continuation leaves actual Memory facts" true
+    (io (fun () -> claims fixture.keepers_dir)<>[]);
+  check bool "completion names the actual committed continuation" true
+    ((observe ()).completion=Resolution_work.Memory_committed {request_id=child_id});
+  let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:original.request_id |> owned |> Option.get) in
+  check json "automatic recovery preserves the unknown original's input" original.request retained.request;
+  check bool "the unknown original remains unresolved evidence" true
+    (match Progress.phase retained.progress with
+     | Dispatch_pending (Some (Absent _)) -> true
+     | Captured | Admission_wait _ | Dispatch_pending (None | Some (Waiting _ | Outcome_unknown _))
+     | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _
+     | Subdividing _ | Subdivided _ -> false);
+  refuse_fenced_resume fixture retained request)
+let test_automatic_history_reuses_an_operator_intent () = with_fixture (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let preview=fence_preview fixture request in
+  let accepted=io (fun () -> Resolution_work.submit ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id ~expected:preview.expected ~actor:"operator"
+    ~reason:"Resume this original after checking its retained evidence" ~now:(Time_compat.now ())
+    |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let recovered=memory_action fixture (fun () -> Resolution_work.resolve_missing_serialized
+    ~config:fixture.config ~keeper_name ~request_id:original.request_id
+    |> Result.map_error Resolution_intent.error_to_string |> get) in
+  check bool "automatic recovery continues the operator's durable work" true
+    (recovered=Resolution_work.Resume_history);
+  let observed=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+    ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+  check bool "the operator's identity and one child survive automatic recovery" true
+    (match observed.intents with
+     | [{Resolution_intent.intent_id;actor="operator";phase=Child_confirmed _;_}] ->
+       intent_id=accepted.intent.intent_id
+     | _ -> false);
+  no_memory fixture;
+  check int "continuing a retained intent does not call a provider" 0 (F.post_count fixture.server))
+let test_missing_history_progresses_through_the_production_queue () =
+  with_fixture ~history_kind:Mixed (fun ~sw:_ fixture ->
+  let original,request=retain_absent_history_original fixture in
+  let before=progress fixture in
+  let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
+  let drained,finish=Eio.Promise.create () in
+  fixture.set_response (fun capture ->
+    ignore (Eio.Promise.try_resolve signal ());
+    Eio.Promise.await release;
+    `OK,F.openai_response (answer capture));
+  let stop=Refresh.install_change_observer (fun ~config ~keeper_name:observed ->
+    if config.Workspace.base_path=fixture.base_path && observed=keeper_name then
+      match Refresh.last_measurement ~config ~keeper_name with
+      | Some {last_pass=Refresh.Drained;_} -> ignore (Eio.Promise.try_resolve finish ())
+      | None | Some {last_pass=(Off | Lane_unconfigured | Yielded_to_waiting_unit
+          | Not_committed | Pending _ | Stopped _ | Raised _);_} -> ()) in
+  Fun.protect ~finally:(fun () ->
+    stop ();
+    Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
+    ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
+    Refresh.install ();
+    Eio.Switch.run (fun bridge_switch ->
+      Server_librarian_addon_wake.install ~sw:bridge_switch ~config:fixture.config;
+      (* This is the only external catch-up request. Resolution, dispatch and
+         publication must schedule each other through the real queue. *)
+      ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
+      Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await arrived);
+      Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+      no_memory fixture;
+      check bool "the queued continuation leaves source unread while its provider is active" true
+        (progress fixture=before);
+      let prepared=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+        ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+      let child_id=match prepared.intents with
+        | [{Resolution_intent.phase=Child_confirmed child;_}] -> child.request_id
+        | _ -> fail "one production wake did not dispatch its automatic continuation" in
+      ignore (Eio.Promise.try_resolve unblock ());
+      Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () -> Eio.Promise.await drained);
+      Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+      let complete=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+        ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+      check bool "the result bridge commits the same automatically retained child" true
+        (complete.completion=Resolution_work.Memory_committed {request_id=child_id});
+      check bool "one external signal advances actual source progress" true (progress fixture<>before);
+      let through=Keeper_librarian_input_sources.external_through (Source.counterparts (Capture.source request)) in
+      let cursor=io (fun () -> Keeper_external_read_cursor.observe
+        ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+      check bool "the automatically committed range also acknowledges external input" true
+        (Keeper_external_read_cursor.observation_matches_preparation cursor
+          ~after:through ~through ~atom:None ~official:None);
+      check (list string) "the actual queued provider result reaches Memory"
+        ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+      check int "the production queue never replays the missing original" 1 (F.post_count fixture.server))))
+let test_an_absent_continuation_yields_before_its_next_child () = with_fixture (fun ~sw:_ fixture ->
+  let original,_request=retain_absent_history_original fixture in
+  assert_pending (run_worker fixture);
+  let observe request_id=io (fun () -> Resolution_work.read ~config:fixture.config ~keeper_name
+    ~request_id |> Result.map_error Resolution_intent.error_to_string |> get) in
+  let child_id observation=match observation.Resolution_work.intents with
+    | [{Resolution_intent.phase=Child_confirmed child;_}] -> child.request_id
+    | _ -> fail "automatic recovery did not retain one confirmed child" in
+  let first_child=child_id (observe original.request_id) in
+  let child=io (fun () -> Owner.load ~store:fixture.store ~scope:original.scope
+    ~request_id:first_child |> owned |> Option.get) in
+  (* A second interrupted dispatch has its own durable absence. The first
+     unknown original and its fence are still retained. *)
+  let advance child event=io (fun () -> match Owner.advance ~store:fixture.store ~expected:child ~event with
+    | Ok (Owner.Stored child | Already_stored child) -> child
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error)) in
+  let child=advance child Progress.Dispatch_intended in
+  ignore (advance child (Progress.Execution_observed (Progress.Absent (`Assoc []))));
+  let wakes=ref 0 in
+  assert_pending (memory_action fixture (fun () -> Execution.consume_one ~config:fixture.config ~keeper_name
+    ~wake:(fun () -> incr wakes)));
+  let next_child=child_id (observe first_child) in
+  check bool "a newly absent child gets its own continuation" true (next_child<>first_child);
+  check int "a second absence schedules one later lane unit" 1 !wakes;
+  check int "that unit does not inline-dispatch the next child" 0 (F.post_count fixture.server);
+  check bool "the ancestor still names its same child" true
+    (child_id (observe original.request_id)=first_child);
+  no_memory fixture;
+  drive_advanced fixture;
+  check int "only the final continuation reaches the provider" 1 (F.post_count fixture.server);
+  check bool "the actual descendant commit completes the ancestor's original range" true
+    ((observe original.request_id).completion=Resolution_work.Memory_committed {request_id=next_child}))
 let test_history_fence_retains_unknown_and_blocks_late_observations () = with_fixture (fun ~sw:_ fixture ->
   let original, request = retain_absent_history_original fixture in
   let original_range = Source.range_id (Capture.source request) |> Option.get in
@@ -2348,6 +2507,14 @@ let test_history_fence_refuses_a_real_range_commit () = with_fixture (fun ~sw:_ 
    | Error Resolution.Range_already_recorded -> ()
    | Error error -> fail (Resolution.error_to_string error)
    | Ok _ -> fail "a real original range receipt still allowed an apply fence");
+  let automatic=memory_action fixture (fun () -> Resolution_work.resolve_missing_serialized
+    ~config:fixture.config ~keeper_name ~request_id:original.request_id
+    |> Result.map_error Resolution_intent.error_to_string |> get) in
+  check bool "an actual range receipt also refuses automatic recovery" true
+    (automatic=Resolution_work.Original_waiting);
+  check bool "a committed range acquires no automatic continuation" true
+    (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+      ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
   check bool "apply-first does not manufacture a fence" true
     (io (fun () -> Fence.read ~store:fixture.store ~scope:original.scope ~request_id:original.request_id |> get) = None))
 let test_history_fence_uncertain_publication_still_blocks () = with_fixture (fun ~sw:_ fixture ->
@@ -4172,6 +4339,16 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "an original a stopped server interrupted settles and its range is read again" `Quick
     test_interrupted_original_settles_and_its_range_is_read_again;
   test_case "destructive Memory epoch reset refuses retained old owner" `Quick test_epoch_reset_refuses_old_original;
+  test_case "a missing history original automatically continues and commits its exact source" `Quick
+    (test_missing_history_recovers_without_operator_submission Atoms);
+  test_case "automatic recovery commits mixed atom and official history before acknowledging" `Quick
+    (test_missing_history_recovers_without_operator_submission Mixed);
+  test_case "automatic history recovery preserves an existing operator intent" `Quick
+    test_automatic_history_reuses_an_operator_intent;
+  test_case "one production catch-up signal automatically recovers missing history through Memory and ACK" `Quick
+    test_missing_history_progresses_through_the_production_queue;
+  test_case "an absent automatic child yields before dispatching its own continuation" `Quick
+    test_an_absent_continuation_yields_before_its_next_child;
   test_case "an explicit history fence blocks late observations and unreadable fence state" `Quick
     test_history_fence_retains_unknown_and_blocks_late_observations;
   test_case "a fenced unknown original does not block the next history pass" `Quick

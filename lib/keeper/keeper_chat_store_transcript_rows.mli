@@ -40,7 +40,7 @@ type transcript_cache =
   { device : int
   ; inode : int
   ; parsed_end : int  (** Offset just past the last parsed ['\n']-terminated row. *)
-  ; messages_rev : chat_message list  (** Newest first. *)
+  ; observation : Keeper_chat_observation_index.t
   ; redaction : Keeper_secret_redaction.t
   }
 

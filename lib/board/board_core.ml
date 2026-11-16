@@ -129,28 +129,26 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
 let current_post_cursor store =
   maybe_sweep store;
   with_lock store (fun () ->
-    match
-      Hashtbl.fold
-        (fun _ (candidate : post) latest ->
-           match latest with
-           | None -> Some candidate
-           | Some (current : post) ->
-             let updated_cmp =
-               Stdlib.Float.compare candidate.updated_at current.updated_at
-             in
-             if updated_cmp > 0
-                || (updated_cmp = 0
-                    && String.compare
-                         (Post_id.to_string candidate.id)
-                         (Post_id.to_string current.id)
-                       > 0)
-             then Some candidate
-             else latest)
-        store.posts
-        None
-    with
-    | Some post -> post.updated_at, Some (Post_id.to_string post.id)
+    match Updated_post_set.max_elt_opt store.updated_post_index with
+    | Some (updated_at, post_id) -> updated_at, Some post_id
     | None -> Time_compat.now (), None)
+;;
+
+let posts_after_cursor store (timestamp, post_id) =
+  maybe_sweep store;
+  let token = timestamp, Option.value ~default:"" post_id in
+  with_lock store (fun () ->
+    Updated_post_set.to_seq_from token store.updated_post_index
+    |> Seq.filter_map (fun ((updated_at, post_id) as key) ->
+      if Float.equal updated_at (fst token) && String.equal post_id (snd token)
+      then None
+      else
+        match Hashtbl.find_opt store.posts post_id with
+        | Some post -> Some post
+        | None ->
+          store.updated_post_index <- Updated_post_set.remove key store.updated_post_index;
+          None)
+    |> List.of_seq)
 ;;
 
 (** Lazily traverses [store.recent_post_index] ([created_at DESC, post_id ASC])

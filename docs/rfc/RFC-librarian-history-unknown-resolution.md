@@ -17,6 +17,15 @@ RFC-0500은 host가 `interrupted`라고 판정한 원본을 다룬다. 이 문�
 
 ## 운영자가 허가하는 동작
 
+2026-11-16 사용자 요청에 따라 아래 적격성 검사를 통과한 history 원본은 Memory lane이
+자동으로 이 경로를 시작한다. 새로 관측한 `Missing_after_dispatch`만 진입하며, 호스트의
+실행 결과가 불명확하다는 이유만으로 `Absent`로 바꾸지 않는다. 자동 actor는 `librarian`이다.
+기존 active intent가 있으면 운영자 actor·guard·child를 유지한다. 같은 guard로 거절된
+intent는 새로 만들지 않는다. 관측 변경으로 새로 거절된 단계는 다음 lane unit에서 한 번
+재관측하며, 원본을 차단하고 continuation을 보존한 단계도 다음 unit으로 양보한다.
+이어서 읽을 child를 같은 pass 안에서 재귀적으로 생성·실행하지 않는다. 기존 시작·결과·설정
+신호를 재사용하고 별도 주기 타이머나 lag·시간 기준은 추가하지 않는다.
+
 정확한 history 원본 하나의 향후 Memory 적용을 막고, 같은 미반영 source 범위를 현재 Memory로 새로 판단한다. 원래 RPC를 다시 보내지 않는다. 원문, 원본의 불명확한 실행 증거, 기존 Memory, atom·official·external cursor는 이 결정으로 삭제하거나 전진시키지 않는다.
 
 별도의 history resolution 기록에 물리 owner, scope, 원 요청 ID와 digest, 원본 기록의 불변 사본 또는 보존된 동등 증거, actor와 사유를 남긴다. 관측과 적용 요청은 workspace와 원본, 현재 Memory·cursor의 관측에 결속한다. 현재 상태가 달라졌으면 운영자 요청을 새 상태로 바꾸어 재시도하지 않고 거절한다.

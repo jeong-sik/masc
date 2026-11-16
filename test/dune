@@ -390,7 +390,7 @@
 (test
  (name test_keeper_efficiency)
  (modules test_keeper_efficiency)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc.agent_core.os_mutex eio_posix))
 
 (test
  (name test_server_dashboard_http_keeper_efficiency)
@@ -1793,7 +1793,7 @@
 (test
  (name test_systhread_host)
  (modules test_systhread_host)
- (libraries alcotest masc.masc_core masc.fs_compat eio eio_main unix threads.posix))
+ (libraries alcotest masc.masc_core masc.fs_compat masc.agent_core.os_mutex eio eio_main eio_posix unix threads.posix))
 
 (include stanzas/bench_systhread_cpu_work.inc)
 
@@ -7584,3 +7584,7 @@
 
 (include stanzas/test_keeper_same_turn_result_stub.inc)
 (include stanzas/test_tool_same_turn_result_declarations.inc)
+
+(include stanzas/test_os_mutex.inc)
+
+(include stanzas/bench_os_mutex_cost.inc)

@@ -346,6 +346,57 @@ let failed_activation_blocks_login_shortcuts () =
   check bool "new login is available after confirmed activation" true
     (Login.key t "n"=Login.Start {provider;existing=false})
 
+let pending_model_context () =
+  let t = Login.create "antigravity" in
+  t.provider <- Some {provider with client=Login.Antigravity};
+  t.account_ref <- Some account;
+  let unknown = { (model 17) with context=None } in
+  let rows = List.init 22 (fun i -> if i=17 then unknown else model i) in
+  ok (Login.models t (`Assoc ["models", `List (List.map (fun (m:Login.model) ->
+    `Assoc ["id", `String m.id; "label", `String m.label; "bound", `Bool false;
+      "context", (match m.context with Some n -> `Int n | None -> `Null);
+      "tools", `Bool true]) rows)]));
+  t.selected_models <- [];
+  ignore (Login.key t "a");
+  t.cursor <- 17;
+  let selection = t.selected_models in
+  check bool "unknown model requests only its native context" true
+    (Login.key t " " = Login.Prepare unknown);
+  Login.preparing t unknown;
+  check bool "pending context has its own phase" true
+    (t.phase=Login.Preparing_context unknown);
+  check bool "pending context retains the complete inventory" true (t.models=rows);
+  check int "pending context retains the selected model" 17 t.cursor;
+  check (list string) "other selections remain pending" selection t.selected_models;
+  List.iter (fun key ->
+    check bool "context observation owns input until it settles" true
+      (Login.key t key=Login.Nothing)) [" "; "a"; "enter"; "r"; "n"; "e"; "up"; "down"];
+  check bool "pending context can still be closed" true (Login.key t "esc"=Login.Close);
+  Login.prepare_failed t "context request unavailable";
+  check bool "context failure returns to selection" true (t.phase=Login.Models);
+  check bool "failure preserves inventory and cursor" true (t.models=rows && t.cursor=17);
+  check (list string) "failure preserves other selections" selection t.selected_models;
+  check (option string) "failure preserves authenticated account" (Some account) t.account_ref;
+  check bool "same model can be retried without login or rediscovery" true
+    (Login.key t " "=Login.Prepare unknown);
+  Login.preparing t unknown;
+  let malformed = `Assoc ["model", `String "another-model"; "context", `Int 65536] in
+  (match Login.prepared t unknown malformed with
+   | Ok () -> fail "foreign context was accepted"
+   | Error detail -> Login.prepare_failed t detail);
+  check bool "invalid receipt preserves the original unknown context" true
+    (t.phase=Login.Models && t.models=rows && t.selected_models=selection);
+  Login.preparing t unknown;
+  ok (Login.prepared t unknown (`Assoc ["model", `String unknown.id; "context", `Int 65536]));
+  check bool "observed context returns to selection" true (t.phase=Login.Models);
+  check int "observed context keeps cursor" 17 t.cursor;
+  match Login.key t "enter" with
+  | Login.Save models ->
+    check int "all selected models still go through save verification" 22 (List.length models);
+    check bool "only the requested model receives the observed context" true
+      (models=List.map (fun (m:Login.model) ->
+        if m.id=unknown.id then {m with context=Some 65536} else m) rows)
+  | _ -> fail "prepared models could not reach save verification"
 let missing_model_context () =
   List.iter (fun client ->
     let t=Login.create "" in let unknown={ (model 0) with context=None } in
@@ -912,9 +963,19 @@ let multi_model_selection () =
     `Assoc ["id",`String "blocked";"label",`String "Blocked";"context",`Int 32768;"tools",`Bool false;"bound",`Bool false];
     `Assoc ["id",`String "second";"label",`String "Second";"context",`Int 65536;"tools",`Bool true;"bound",`Bool false]]] in
   ok (Login.models t catalog);
-  check (list string) "usable models start selected in catalog order"
-    ["first";"second"] (List.map (fun (m:Login.model) -> m.id)
-      (List.filter (fun (m:Login.model) -> List.mem m.id t.selected_models) t.models));
+  check (list string) "discovery does not select models for verification" [] t.selected_models;
+  check bool "Enter cannot submit an unchosen catalog" true (Login.key t "enter"=Login.Nothing);
+  ignore (Login.key t " ");
+  (match Login.key t "enter" with
+   | Login.Save selected ->
+     check (list string) "only the explicitly chosen model is submitted"
+       ["first"] (List.map (fun (m:Login.model) -> m.id) selected);
+     let open Yojson.Safe.Util in
+     check (list string) "unchosen models stay out of the save request" ["first"]
+       (Login.save_body t selected |> member "connections" |> to_list |> List.hd
+        |> member "models" |> to_list |> List.map (fun row -> row |> member "id" |> to_string))
+   | _ -> fail "Enter did not submit the chosen model");
+  ignore (Login.key t "a");
   (match Login.key t "\r" with
    | Login.Save selected ->
      check (list string) "Enter submits all selected models in screen order"
@@ -969,10 +1030,10 @@ let already_bound_model_is_not_offered () =
     ok (Login.models t catalog);
     check (list string) ("bound models remain visible for " ^ selected_provider.id)
       ["third"; "first"; "second"] (List.map (fun (m:Login.model) -> m.id) t.models);
-    check (list string) "only the new model is selected" ["third"] t.selected_models;
+    check (list string) "discovering a new model does not select it" [] t.selected_models;
     ignore (Login.key t "j"); ignore (Login.key t " ");
-    check (list string) "connected model cannot be selected" ["third"] t.selected_models;
-    ignore (Login.key t "a"); ignore (Login.key t "a");
+    check (list string) "connected model cannot be selected" [] t.selected_models;
+    ignore (Login.key t "a");
     check (list string) "select all excludes connected models" ["third"] t.selected_models;
     check (list string) "save submits only the new model" ["third"]
       (match Login.key t "enter" with
@@ -1134,6 +1195,7 @@ let () = run "TUI account login" ["workflow",[
   test_case "lock warning survives refresh without exposing diagnostics" `Quick uncertain_lock_release_save;
   test_case "a partly checked save summarizes retained connections and names failures" `Quick partly_checked_save;
   test_case "unknown context follows supported provider route" `Quick missing_model_context;
+  test_case "pending native context retains selection and recovery" `Quick pending_model_context;
   test_case "fragmented remote login" `Quick decoder_fragments;
   test_case "malformed and unfinished streams" `Quick decoder_failures;
   test_case "explicit provider and preserved default" `Quick account_and_default;

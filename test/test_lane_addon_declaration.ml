@@ -215,6 +215,34 @@ sources=[{kind="fusion_run", source_id="fusion", run_id=%S}]
     | Ok _ -> ()
     | Error error -> failf "operator declaration writer remains available: %s" error.Editor.message)
 
+let test_only_the_operator_saves_record_grants () =
+  with_fixture (fun _clock config directory _root _started ->
+    let with_records id = declaration ~id () ^ {|[[binding.records]]
+source_id = "notes"
+kind = "board"
+visibilities = ["public"]
+|} in
+    let keeper_save ?revision ~mode file_name bytes = Tool_result.is_success
+      (keeper_call config "masc_lane_declaration_save" (request ?revision ~mode ~file_name bytes)) in
+    check bool "Keeper save refuses a record grant" false
+      (keeper_save ~mode:"create" "keeper.toml" (with_records "keeper-records"));
+    (match Runtime.save_declaration ~access:Lane_addon_sources.Unauthenticated ~config
+        (request ~mode:"create" ~file_name:"anonymous.toml" (with_records "anonymous-records")) with
+     | Error error -> check string "unauthenticated save names the refusal"
+         "only an operator-owned declaration may hold record grants" error.Editor.message
+     | Ok _ -> fail "unauthenticated save accepted a record grant");
+    check bool "refused declarations are not written" false
+      (List.exists (fun name -> Sys.file_exists (Filename.concat directory name))
+        ["keeper.toml"; "anonymous.toml"]);
+    let operator_bytes = with_records "operator-records" in
+    ignore (save config (request ~mode:"create" ~file_name:"operator.toml" operator_bytes));
+    let current = read config directory "operator.toml" in
+    check bool "Keeper edit that keeps the operator's record grant is refused" false
+      (keeper_save ~revision:(text "source_revision" current) ~mode:"save" "operator.toml"
+        ("# a Keeper's edit\n" ^ operator_bytes));
+    check string "the operator's declaration is unchanged" operator_bytes
+      (text "source_text" (read config directory "operator.toml")))
+
 let test_operator_reassignment_revokes_old_document_owner () =
   with_fixture (fun _clock config directory _root _started ->
     let registry = Fusion_run_registry.global () in
@@ -579,6 +607,7 @@ let () = run "Lane declaration editing" ["shared TOML owner",[
   test_case "shared and local saves do not claim private ownership" `Quick test_shared_saves_do_not_claim_keeper_ownership;
   test_case "Keeper cannot save another owner's Fusion capture" `Quick
       test_keeper_declaration_cannot_capture_another_fusion_owner;
+  test_case "only the operator saves record grants" `Quick test_only_the_operator_saves_record_grants;
   test_case "unconfirmed shared save withdraws private ownership" `Quick
       test_unconfirmed_shared_save_withdraws_private_owner;
   test_case "operator reassignment replaces private document authority" `Quick

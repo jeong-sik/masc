@@ -182,6 +182,13 @@ separate machine does not select that account.
 | Antigravity | `antigravity-cli` | A file credential selects the OAuth source; MASC seeds a separate managed HOME for persistent sessions and uses a disposable per-call HOME for one-shot exact/panel calls (`#43401`, `#43404`) |
 | Muse Code | `muse-serve` | Required `account-home` selects the process HOME and native session/data roots; MASC supplies a managed configuration directory |
 
+For endpoint-owned Muse Keepers and account verification, MASC places the empty
+native workspace inside a private Git project. This stops Muse's project
+discovery before ancestor `.mcp.json`, instructions and skills. Only the
+session-scoped MASC MCP servers are attached; unrelated project credentials
+such as `ZAI_API_KEY` are not required. Git must be available to initialize
+this boundary. A failed initialization refuses the workspace.
+
 `masc setup` and the web model picker offer all four official clients. Declared
 `account-home` values survive setup unchanged. A new Claude Code, Codex or Muse
 connection first selects an existing account directory; the browser selects

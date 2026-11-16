@@ -8,8 +8,13 @@ val consume_one : config:Workspace.config -> keeper_name:string ->
 (** An unavailable attachment reports [Original_publication_blocked] and leaves
     the original source unread. A verified host terminal [Outcome_unknown]
     remains the original unfinished frontier and returns [Pending] on its first
-    and later wakes, without fresh selection or a new provider call. Definite
-    terminal host refusals preserve their actual diagnostic in
+    and later wakes, without fresh selection or a new provider call. Observed
+    worker absence after dispatch may instead prepare the existing fenced
+    history resolution, only after its host-proof, receipt and source guards
+    pass. Its durable continuation requests a later Memory-lane unit before
+    dispatch; neither the original RPC nor its source is replayed or ACKed by
+    that preparation. The same durable intent and child resume after a stop.
+    Definite terminal host refusals preserve their actual diagnostic in
     [Memory_not_committed] without remaining an unfinished frontier; a later
     wake may freshly select their still-unread source under a new ID, except
     capacity-only counterpart refusals: {!Keeper_librarian_durable_refusal}

@@ -2793,7 +2793,11 @@ let test_written_lineages_evict_least_recently_used_keeper () =
   Eio.Switch.run @@ fun _sw ->
   let first_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir first_dir) @@ fun () ->
-  let max_entries = Keeper_checkpoint_store.For_testing.default_max_retained_lineages in
+  let max_entries = 4 in
+  Keeper_checkpoint_store.For_testing.with_written_lineage_limits
+    ~max_entries
+    ~max_bytes:Keeper_checkpoint_store.For_testing.default_max_retained_lineage_bytes
+  @@ fun () ->
   let total = max_entries + 1 in
   let keepers =
     List.init total (fun index ->
@@ -2832,6 +2836,39 @@ let test_written_lineages_evict_least_recently_used_keeper () =
          Fun.protect ~finally:(fun () -> Unix.chmod path 0o644) @@ fun () ->
          ignore (load_or_fail ~session_dir:dir ~session_id:sid ("kept " ^ name) : Agent_core.Checkpoint.t)))
     keepers
+;;
+
+let test_default_written_lineages_keep_small_active_fleet () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let first_dir = temp_dir () in
+  let keepers = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (_, name, _, _) ->
+          Keeper_checkpoint_store.forget_written_lineages
+            ~session_root:(Filename.dirname first_dir) ~keeper_name:name)
+        !keepers;
+      cleanup_dir first_dir)
+  @@ fun () ->
+  (* The review's fleet workload: no test override of the production policy.
+     Small histories fit the byte budget, so a turn must not decode them just
+     because another Keeper saved after them. *)
+  keepers := List.init 300 (fun index ->
+    let name = Printf.sprintf "small-fleet-%d" index in
+    let sid = Printf.sprintf "small-fleet-trace-%d" index in
+    let dir = if index = 0 then first_dir else sibling_session_dir first_dir name in
+    save_kept_ok ~keeper_name:name ~session_dir:dir
+      (make_checkpoint ~session_id:sid ~turn_count:1 ~marker:name) ("save " ^ name);
+    let first = load_or_fail ~session_dir:dir ~session_id:sid ("observe " ^ name) in
+    dir, name, sid, first.messages);
+  List.iter
+    (fun (dir, name, sid, messages) ->
+      let again = load_or_fail ~session_dir:dir ~session_id:sid ("reuse " ^ name) in
+      check bool (name ^ " reuses its decoded history") true (again.messages == messages))
+    !keepers
 ;;
 
 let test_written_lineages_evict_when_byte_budget_exceeded () =
@@ -2889,7 +2926,7 @@ let test_in_flight_save_pins_lineage_against_concurrent_eviction () =
           Keeper_checkpoint_store.For_testing.save_agent_core_for_keeper_with_before_stage
             ~boundary:Agent_core.Checkpoint_objects.Turn_closes
             ~before_stage:(function
-              | Keeper_fs.Temp_file_sync when not !competed ->
+              | Keeper_fs.Payload_fsync when not !competed ->
                 competed := true;
                 save_kept_ok ~keeper_name:"other-1" ~session_dir:second_dir
                   (make_checkpoint ~session_id:"other-trace-1" ~turn_count:1 ~marker:"o1")
@@ -3644,6 +3681,8 @@ let () =
             test_one_keeper_name_in_two_workspaces_keeps_both_values;
           test_case "written lineages evict least recently used keeper" `Quick
             test_written_lineages_evict_least_recently_used_keeper;
+          test_case "default lineage budget retains a small active fleet" `Quick
+            test_default_written_lineages_keep_small_active_fleet;
           test_case "written lineages evict when byte budget exceeded" `Quick
             test_written_lineages_evict_when_byte_budget_exceeded;
           test_case "in-flight save pins lineage against concurrent eviction" `Quick

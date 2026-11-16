@@ -1,9 +1,10 @@
 (** The lineage this process keeps per canonical checkpoint file: the encoding
     memo of its saves and, for a Keeper's own saves and save-bound loads, the
     checkpoint value the file holds. A Keeper has at most one lineage (keeping
-    a new one drops its older one), and the process retains a bounded LRU of
-    the most recently active Keepers by entry count and canonical/history
-    encoded byte budget.
+    a new one drops its older one). The process retains the most recently
+    active Keepers under a combined canonical-head and memo-entry encoded
+    byte budget, without a production entry-count cap. This logical weight
+    excludes decoded OCaml records and is not a process heap limit.
 
     [keep_lineage] records what a save wrote under the identity of the file it
     installed, and [keep_read_lineage] records what a save-bound load read,
@@ -16,7 +17,6 @@
 
 open Keeper_checkpoint_store_summary
 
-val default_max_retained_lineages : int
 val default_max_retained_lineage_bytes : int
 
 (** The checkpoint a save wrote and the identity of the file it was written

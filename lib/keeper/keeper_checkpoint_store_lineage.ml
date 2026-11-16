@@ -27,11 +27,12 @@ open Keeper_checkpoint_store_summary
    [agent_name] is the runtime the turn ran on ("agent_core-<runtime>"), which
    Keepers share. Each Keeper has at most one: a save under a new trace drops
    the Keeper's older one, unregistering the Keeper drops it
-   ([forget_written_lineages]), and [written_lineages] bounds total retained
-   lineages by an LRU entry cap ([default_max_retained_lineages]) and combined
-   canonical head + encoded history byte budget
-   ([default_max_retained_lineage_bytes]). *)
-let default_max_retained_lineages = 4
+   ([forget_written_lineages]). [written_lineages] evicts the least recently
+   used unpinned lineage when the combined canonical-head and memo-entry
+   encoded byte weight exceeds [default_max_retained_lineage_bytes]. There is
+   no production entry-count cap: many small active histories should not
+   displace each other while their combined weight fits. This logical byte
+   weight excludes decoded OCaml records and is not a process heap limit. *)
 let default_max_retained_lineage_bytes = 128 * 1024 * 1024
 
 type written_value =
@@ -59,7 +60,7 @@ module String_map = Map.Make (String)
 type lineage_state =
   { entries : written_lineage String_map.t
   ; in_flight : int String_map.t
-  ; max_entries : int
+  ; max_entries : int option
   ; max_bytes : int
   ; next_seq : int
   }
@@ -72,7 +73,7 @@ let written_lineages_state : lineage_state Atomic.t =
   Atomic.make
     { entries = String_map.empty
     ; in_flight = String_map.empty
-    ; max_entries = default_max_retained_lineages
+    ; max_entries = None
     ; max_bytes = default_max_retained_lineage_bytes
     ; next_seq = 0
     }
@@ -118,7 +119,7 @@ let oldest_evictable_lineage_key state =
 
 let rec evict_excess_lineages state =
   let count = String_map.cardinal state.entries in
-  let over_count = count > state.max_entries in
+  let over_count = Option.fold ~none:false ~some:(fun limit -> count > limit) state.max_entries in
   let over_bytes = count > 1 && total_retained_bytes state.entries > state.max_bytes in
   if over_count || over_bytes
   then (
@@ -279,7 +280,7 @@ let keep_read_lineage ~canonical_path ~identity_before ~memo ~keeper_name checkp
   | Some _, (Some _ | None) | None, (Some _ | None) -> ()
 
 let with_written_lineage_limits ~max_entries ~max_bytes f =
-  let max_entries = max 1 max_entries in
+  let max_entries = Some (max 1 max_entries) in
   let max_bytes = max 0 max_bytes in
   let previous =
     update_lineage_state (fun state ->

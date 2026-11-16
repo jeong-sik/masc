@@ -192,7 +192,6 @@ module For_testing = struct
     |> Result.map_error save_agent_core_error_to_string
   ;;
 
-  let default_max_retained_lineages = default_max_retained_lineages
   let default_max_retained_lineage_bytes = default_max_retained_lineage_bytes
   let with_written_lineage_limits = with_written_lineage_limits
 end

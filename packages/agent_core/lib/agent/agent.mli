@@ -398,12 +398,26 @@ val retire_uncollected_turn
     the writer is protected through terminal settlement, writer drain, and
     callback before that cancellation is re-raised. If callback cleanup
     also fails, cancellation remains the primary exception and the cleanup
-    failure is logged. *)
+    failure is logged.
+
+    [host_stop] names the exceptions with which the host stops this call so
+    that a later process continues it. It is asked only about a reason itself:
+    [Eio.Cancel.Cancelled], [Fun.Finally_raised] and [Eio.Exn.Multiple] are
+    unwrapped here, and a wrapped reason is a host stop only when every reason
+    inside it is one. When the exception that ends the call is a host stop,
+    the journal is not closed. The root, its open turn, provider attempt and
+    Tool attempt stay open as a process death leaves them,
+    [on_terminal_disposition] is not invoked, and the writer closes without a
+    terminal. The exception is re-raised. Every other exception closes the
+    scope as described above. A nested Agent call started from a Tool runs in
+    a child scope of this journal and closes as it does without [host_stop].
+    [host_stop] must not raise. *)
 val execution_store
   :  runtime:execution_runtime
   -> dir:Eio.Fs.dir_ty Eio.Path.t
   -> ?on_scope_ready:(execution_locator -> (unit, string) result)
   -> ?on_terminal_disposition:(execution_terminal_disposition -> (unit, string) result)
+  -> ?host_stop:(exn -> bool)
   -> ?resume:execution_locator
   -> unit
   -> execution_store

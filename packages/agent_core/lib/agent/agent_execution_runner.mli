@@ -37,6 +37,7 @@ val store
   -> dir:Eio.Fs.dir_ty Eio.Path.t
   -> ?on_scope_ready:(locator -> (unit, string) result)
   -> ?on_terminal_disposition:(terminal_disposition -> (unit, string) result)
+  -> ?host_stop:(exn -> bool)
   -> ?resume:locator
   -> unit
   -> store
@@ -66,6 +67,7 @@ val is_resume : store -> bool
 
 val with_scope
   :  ?on_terminal_disposition:(terminal_disposition -> (unit, string) result)
+  -> ?host_stop:(exn -> bool)
   -> event_bus:Event_bus.t option
   -> Execution_agent_scope.t
   -> (unit -> ('a, Provider_failure_attribution.detailed_error) result)

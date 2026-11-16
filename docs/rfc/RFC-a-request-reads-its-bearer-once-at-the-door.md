@@ -210,6 +210,7 @@ type bearer = private
 - `lane_access_for_caller`, `browser_principal_for_caller`, `board_reader_for_caller` 는 `Admitted` 의 credential 을 쓴다. 이 함수들은 지금도 `find_credential_by_token` 이 찾은 credential 의 role 을 본다. 입구의 role 이 아니다.
 - `Unread` 의 token 은 남는다. auth 가 꺼진 workspace 에서도 bearer 가 호출자 이름과 Keeper 주인을 정하기 때문이다. 이 동작을 바꾸려면 운영자 결정이 필요하다.
 - Add-on 노출(`addon_exports_for_request`)도 `bearer` 를 받는다(3b). `tools/list` 와 `tools/call` 이 쓰는 값이다. `Admitted` 면 credential 과 입구의 role 을 쓰고, `Unread` 면 지금처럼 token 을 조회하고 role 을 구한다.
+- OAuth step-up(`Server_oauth_step_up.required_scope`)은 주체를 받는다(3c). OAuth access 기록은 주체의 `Oauth_access` credential 이다. 입구는 같은 expected resource 아래에서 OAuth 를 static credential 보다 먼저 조회했다. 그래서 static bearer 에는 OAuth 기록이 없다. internal Keeper token 은 OAuth access token 처럼 무작위 값이라, 그 hash 를 가진 기록도 없다.
 
 **D6. raw token 함수 가두기.** 아래 층이 `Auth.find_credential_by_token`, `Auth.resolve_agent_from_token`, `Auth.check_permission ~token`, `Auth.authorize_tool ~token` 을 새로 부르면 CI 가 실패한다.
 
@@ -277,7 +278,7 @@ type bearer = private
 | 2 | `runtime.handle_request` 에 `~principal` 을 더하고 dispatch `require_auth` 를 주체로 바꾼다(D3) | L1, `initialize`·`tools/list` 의 L2 |
 | 3a | 실행부(호출자 신원, 실행 권한, lane·browser·board 조회)가 `bearer` 를 받는다(D5). `handle_call_tool_eio`·`execute_tool_eio` 의 `?auth_token`·`?internal_keeper_runtime` 을 지운다 | L1(같은 호출을 입구의 답과 token 으로 풀어 비교), `tools/call` 의 L2 |
 | 3b | Add-on 노출(`addon_exports_for_request`)이 `bearer` 를 받는다. `tools/list` 와 `tools/call` 이 같은 값을 쓴다 | L1, `tools/list` 의 L2 |
-| 3c | transport 의 OAuth step-up(`Server_oauth_step_up.required_scope`)이 주체의 OAuth credential 을 쓴다. Keeper stream 이 받고 버리는 `?auth_token` 을 지운다 | L1 |
+| 3c | transport 의 OAuth step-up(`Server_oauth_step_up.required_scope`)이 주체의 OAuth credential 을 쓴다. Keeper stream 과 SDK adapter 가 받고 버리는 `?auth_token` 을 지운다 | L1 |
 | 4 | raw token 함수 허용 목록 검사(D6)와 TLA+ 갱신 | CI 검사, TLC 정상·buggy |
 
 D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
@@ -288,7 +289,7 @@ D4 는 처음에 단계 2 에 있었다. 1b 로 옮긴 이유는 두 가지다.
 ## 7. 열린 질문
 
 1. 아래 층에서 raw token 이 신원 판정 말고 다른 데 쓰이는가. 예를 들어 Add-on worker 나 Keeper stream 으로 전달되는가. 단계 1 전에 `auth_token` 을 넘기는 자리를 모두 분류한다. 판정에만 쓰이면 D1 의 `token` 필드는 D5 의 「이름이 다르다」와 OAuth `verify_token` 에만 남는다.
-   - 답(3a 조사). 아래 층에서는 신원·권한 판정에만 쓰인다. 호출자 신원, 실행 권한, lane·browser·board 조회, Add-on 노출이다. Keeper stream 은 `process_single_turn` 이 `~auth_token:None` 을 넘기고, `execute_keeper_stream_tool_streaming` 이 `?auth_token:_` 로 버린다. transport 에서는 actor 주입(`Server_mcp_actor_injection.reduce`)이 token 이 있는지만 보고, OAuth step-up 이 OAuth access 기록을 한 번 읽는다.
+   - 답(3a 조사). 아래 층에서는 신원·권한 판정에만 쓰인다. 호출자 신원, 실행 권한, lane·browser·board 조회, Add-on 노출이다. Keeper stream 은 `process_single_turn` 이 `~auth_token:None` 을 넘기고, `execute_keeper_stream_tool_streaming` 이 `?auth_token:_` 로 버린다. SDK adapter(`Mcp_sdk_adapter_masc.dispatch_request`)도 `?auth_token:_` 로 버린다. transport 에서는 actor 주입(`Server_mcp_actor_injection.reduce`)이 token 이 있는지만 보고, OAuth step-up 이 OAuth access 기록을 한 번 읽는다.
 2. 후보 B(메모리 스냅샷)를 따로 할 것인가. 「요청마다 owner 현재 파일과 대조」 결정을 바꾸므로 운영자 결정이 먼저 필요하다. 이 RFC 가 끝난 뒤 남는 조회 한 번이 여전히 문제일 때 다시 묻는다.
 3. 이름이 token 주인과 다른 `tools/call` 의 alias 규칙을 주체 위의 순수 함수로 옮길 것인가. canonical alias credential 이 있는지는 여전히 파일을 봐야 하므로, 읽기가 0 이 되지는 않는다.
 4. stdio 는 프로세스가 사는 동안 token 이 고정이다. 요청마다 한 번 대조하는 결정을 stdio 에도 그대로 둘 것인가. 이 RFC 는 그대로 둔다.

@@ -472,10 +472,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       let* () =
         match
           if Server_oauth_metadata.loopback_authority request_authority then
-            Auth_oauth.with_expected_resource expected_resource (fun () ->
-              Server_oauth_step_up.required_scope ~base_path ~auth_token
-                ~allowed_tool:(runtime.tool_allowed_in_profile profile)
-                ~body:body_str)
+            Server_oauth_step_up.required_scope ~principal
+              ~allowed_tool:(runtime.tool_allowed_in_profile profile)
+              ~body:body_str
           else None
         with
         | None -> Ok ()

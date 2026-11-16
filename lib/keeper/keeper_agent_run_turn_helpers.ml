@@ -147,11 +147,11 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
 (* The attempt watchdog asks one question of the stream: is the provider
    still producing? A token of reasoning answers it as a token of text does,
    so both refresh the progress the watchdog measures against, as does a
-   tool block opening. Whether what the model produced is deliverable is the
-   accept gate's question, asked once the stream has ended: a thinking-only
-   response is rejected there as [Thinking_only_no_progress] and the lane
-   rotates, except on a wake that allows silence, where an [EndTurn] one is
-   the model's quiet final. Counting reasoning here keeps a reasoning stream
+   tool block opening. Once the stream ends,
+   [Keeper_tooling.Response.accepts_response] decides whether to accept that
+   response. A reasoning-only [EndTurn] is allowed on every turn (#47962);
+   [MaxTokens] is rejected for checkpoint
+   continuation. Counting reasoning here keeps a reasoning stream
    from being cut as stalled; it settles nothing. Carrier frames (empty
    deltas, signatures, block stops, message frames, pings) are not
    production and still refresh nothing.

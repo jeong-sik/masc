@@ -49,8 +49,11 @@ Agent Core의 checkpoint/durable turn count는 다른 계약이다. 후자는 �
   System·Goal·승인 관측은 issuer의 partition과 순서를 보존한다. pure projection의
   digest가 같다는 사실만으로 adapter의 세션 유지나 vendor 보유를 증명하지 않는다.
 - 후보 전환: 첫 후보의 스트림 실패 뒤 다음 후보의 답과 최종 종료를 같은 소비자로 읽는다.
-- 생산 신호: reasoning이 오는 동안 watchdog 진행을 확인하되, 같은 응답의 전달 가능성은
-  종료 시 별도 판정한다. 화면의 receiving 표시는 실행 진행의 정본이 아니다.
+- 생산 신호: reasoning이 오는 동안 watchdog 진행을 확인한다. 완료 응답의 수락은
+  [Response.accepts_response](../../lib/keeper_tooling/response.mli)가 판정한다.
+  [#47962](https://github.com/jeong-sik/masc/pull/47962)에서 모든 턴의 reasoning-only
+  `EndTurn` 종료를 허용했다. `MaxTokens`는 잘린 응답이므로 checkpoint continuation을
+  위해 거절한다. 화면의 receiving 표시는 실행 진행의 정본이 아니다.
 - 진단 실패: 같은 Agent/sink로 한 번 성공한 뒤 시작·응답 기록·도구 기록·종료를 각각
   실패시킨다. 응답, 효과 횟수, 정본 terminal, callback, lifecycle, 현재 trace 귀속을 확인한다.
   실제 checkpoint/journal 거절과 취소는 원래 결과로 남는 대조군을 둔다.

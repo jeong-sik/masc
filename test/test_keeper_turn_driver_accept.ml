@@ -1542,60 +1542,84 @@ let live_progress_stalled ~base_path ~keeper_name ~attempt_started_at () =
       ~base_path ~keeper_name ())
 ;;
 
-let test_reasoning_refreshes_live_registry_but_is_not_a_completed_answer () =
-  with_live_progress_observation
-  @@ fun ~clock ~base_path ~keeper_name ~observation_token ~config ->
+let test_reasoning_refreshes_live_registry_and_preserves_terminal_policy () =
   let open Agent_core.Types in
-  let module Acc = Agent_core.Llm_provider.Complete_stream_acc in
-  let _, _, _, on_event =
-    Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
-      ~preview:None ~observation_token:(Some observation_token)
-      ~config ~keeper_name ~downstream:None in
-  let on_event = match on_event with
-    | Some on_event -> on_event
-    | None -> Alcotest.fail "the live turn has no progress callback" in
-  let stream = Acc.create_stream_acc () in
-  let send event = match Acc.resolve_event stream event with
-    | Stream_event_accepted event -> on_event event
-    | Stream_event_suppressed -> Alcotest.fail "the fixture event was suppressed"
-    | Stream_event_rejected _ -> Alcotest.fail "the fixture stream was rejected" in
-  let stalled = live_progress_stalled ~base_path ~keeper_name
-    ~attempt_started_at:(Time_compat.now ()) in
-  send (MessageStart {id="reasoning-progress"; model="fixture"; usage=None});
-  send (ContentBlockStart
-    {index=0; content_type="thinking"; tool_id=None; tool_name=None});
-  List.iter (fun text ->
-    Eio_mock.Clock.set_time clock (Time_compat.now () +. 61.0);
-    Alcotest.(check bool) "the real registry sample has gone stale" true (stalled ());
-    send (ContentBlockDelta {index=0; delta=ThinkingDelta text});
-    Alcotest.(check bool) "reasoning clears the stall through the real probe" false
-      (stalled ());
-    match Masc.Keeper_turn_driver.For_testing.read_provider_progress
-      ~base_path ~keeper_name () with
-    | Some sample -> Alcotest.(check (float 0.))
-        "the callback stamped the controlled clock" (Time_compat.now ()) sample.last_progress_at
-    | None -> Alcotest.fail "reasoning lost its registry observation")
-    ["first reasoning step"; "a later reasoning step"];
-  send (ContentBlockStop {index=0});
-  send (MessageDelta {stop_reason=Some EndTurn; usage=None});
-  send MessageStop;
-  let response = match Acc.finalize_stream_acc stream with
-    | Ok response -> response
-    | Error _ -> Alcotest.fail "the reasoning stream did not complete" in
-  let result = Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.reasoning-progress"
-      ~accept:Keeper_tooling.Response.accepts_response
-      { (run_result ()) with response } in
-  let error, reason_kind, _ = expect_accept_rejected result in
-  Alcotest.(check bool) "completed reasoning is not deliverable progress" true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  match Keeper_internal_error.classify_masc_internal_error error with
-  | Some (Keeper_internal_error.Accept_rejected {response_shape; stop_reason; _}) ->
-    Alcotest.(check bool) "the completed response retains its typed thinking-only shape"
-      true (response_shape = Some Keeper_internal_error.Accept_response_thinking_only);
-    Alcotest.(check bool) "the rejection preserves the completed terminal"
-      true (stop_reason = Some EndTurn)
-  | Some _ | None -> Alcotest.fail "the thinking-only response lost its typed rejection"
+  let exercise stop_reason =
+    with_live_progress_observation
+    @@ fun ~clock ~base_path ~keeper_name ~observation_token ~config ->
+    let module Acc = Agent_core.Llm_provider.Complete_stream_acc in
+    let _, _, _, on_event =
+      Masc.Keeper_agent_run_turn_helpers.turn_progress_callbacks
+        ~preview:None ~observation_token:(Some observation_token)
+        ~config ~keeper_name ~downstream:None in
+    let on_event = match on_event with
+      | Some on_event -> on_event
+      | None -> Alcotest.fail "the live turn has no progress callback" in
+    let stream = Acc.create_stream_acc () in
+    let send event = match Acc.resolve_event stream event with
+      | Stream_event_accepted event -> on_event event
+      | Stream_event_suppressed -> Alcotest.fail "the fixture event was suppressed"
+      | Stream_event_rejected _ -> Alcotest.fail "the fixture stream was rejected" in
+    let stalled = live_progress_stalled ~base_path ~keeper_name
+      ~attempt_started_at:(Time_compat.now ()) in
+    send (MessageStart {id="reasoning-progress"; model="fixture"; usage=None});
+    send (ContentBlockStart
+      {index=0; content_type="thinking"; tool_id=None; tool_name=None});
+    List.iter (fun text ->
+      Eio_mock.Clock.set_time clock (Time_compat.now () +. 61.0);
+      Alcotest.(check bool) "the real registry sample has gone stale" true (stalled ());
+      send (ContentBlockDelta {index=0; delta=ThinkingDelta text});
+      Alcotest.(check bool) "reasoning clears the stall through the real probe" false
+        (stalled ());
+      match Masc.Keeper_turn_driver.For_testing.read_provider_progress
+        ~base_path ~keeper_name () with
+      | Some sample -> Alcotest.(check (float 0.))
+          "the callback stamped the controlled clock" (Time_compat.now ()) sample.last_progress_at
+      | None -> Alcotest.fail "reasoning lost its registry observation")
+      ["first reasoning step"; "a later reasoning step"];
+    send (ContentBlockStop {index=0});
+    send (MessageDelta {stop_reason=Some stop_reason; usage=None});
+    send MessageStop;
+    let response = match Acc.finalize_stream_acc stream with
+      | Ok response -> response
+      | Error _ -> Alcotest.fail "the reasoning stream did not complete" in
+    Alcotest.(check bool) "the real stream preserves its terminal stop reason"
+      true (response.stop_reason = stop_reason);
+    Alcotest.(check bool) "both terminal fixtures retain reasoning-only content"
+      true (Agent_core.Response_shape.content_shape response
+        (Agent_core.Response_shape.summarize response) = Agent_core.Response_shape.Thinking_only);
+    let completed = { (run_result ()) with response } in
+    let result = Masc.Keeper_turn_driver.For_testing.apply_accept
+        ~runtime_id:"runtime.reasoning-progress"
+        ~accept:Keeper_tooling.Response.accepts_response completed in
+    completed, result
+  in
+  (* #47962 permits a model's explicit quiet EndTurn. The watchdog's progress
+     signal does not decide whether this is a complete or truncated response. *)
+  let completed, end_turn = exercise EndTurn in
+  (match end_turn with
+   | Ok accepted ->
+     Alcotest.(check bool) "EndTurn retains the original completed run"
+       true (accepted == completed);
+     Alcotest.(check bool) "EndTurn retains the original response"
+       true (accepted.response == completed.response);
+     Alcotest.(check bool) "EndTurn retains the typed provider completion"
+       true (accepted.stop_reason = Runtime_agent.Completed { provider_turn_ordinal = 0 })
+   | Error error -> Alcotest.failf "explicit reasoning-only EndTurn was rejected: %s"
+       (Agent_core.Error.to_string error));
+  let _, max_tokens = exercise MaxTokens in
+  let error, reason_kind, _ = expect_accept_rejected max_tokens in
+  Alcotest.(check bool) "truncated reasoning retains its no-usable-progress rejection"
+    true (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  (match Keeper_internal_error.classify_masc_internal_error error with
+   | Some (Keeper_internal_error.Accept_rejected {response_shape; stop_reason; _}) ->
+     Alcotest.(check bool) "truncation retains its typed thinking-only shape"
+       true (response_shape = Some Keeper_internal_error.Accept_response_thinking_only);
+     Alcotest.(check bool) "truncation retains the actual MaxTokens stop reason"
+       true (stop_reason = Some MaxTokens)
+   | Some _ | None -> Alcotest.fail "truncated reasoning lost its typed rejection");
+  Alcotest.(check bool) "truncated reasoning remains eligible for checkpoint continuation"
+    true (Masc.Keeper_turn_driver_try_provider.For_testing.max_tokens_truncation_error error)
 ;;
 
 let test_carriers_and_stale_owners_do_not_refresh_live_progress () =
@@ -1868,9 +1892,9 @@ let () =
             `Quick
             test_a_reasoning_only_stream_keeps_refreshing_watchdog_progress;
           Alcotest.test_case
-            "reasoning refreshes the live registry but is not a completed answer"
+            "reasoning refreshes the live registry and preserves EndTurn/MaxTokens policy"
             `Quick
-            test_reasoning_refreshes_live_registry_but_is_not_a_completed_answer;
+            test_reasoning_refreshes_live_registry_and_preserves_terminal_policy;
           Alcotest.test_case
             "carriers and stale owners cannot refresh live watchdog progress"
             `Quick

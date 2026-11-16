@@ -995,6 +995,9 @@ let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
   | Booting -> Theme.text_status Masc_tui_theme.Warn,
       (if ko then "서버 시작 중" else "server booting"),
       (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
+  | Account_server _ -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "계정 서버" else "account server"),
+      (if ko then ["계정 서버", false] else ["account server", false; "accounts", true])
   | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
       (if ko then "조회 실패" else "refresh failed"),
       (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
@@ -1034,6 +1037,11 @@ let compact_connection_state (state : state) =
         interrupted || counts.interrupted > 0, unfinished,
         (match progress.phase with In_flight -> true | Finished _ -> false) in
   let scoped_reading = surface_reads_pending state <> [] in
+  match state.connection_status with
+  (* An account server serves no surface, so what a pass left unread there
+     is not a failed read. *)
+  | Account_server _ as status -> Compact_http status
+  | Connected | Degraded | Connecting | Booting | Disconnected ->
   match state.workspace_identity with
   | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
   | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed
@@ -1048,7 +1056,8 @@ let compact_connection_state (state : state) =
       else if unfinished then Compact_read_unfinished
       else match state.connection_status with
         | Connected when in_flight || scoped_reading -> Compact_reading
-        | Connected | Degraded | Connecting | Booting | Disconnected as status -> Compact_http status
+        | Connected | Degraded | Connecting | Booting | Account_server _ | Disconnected as status ->
+            Compact_http status
 
 (* The words for each connection state, longest first, with whether a
    spelling leaves out what the full badge says and whether the state needs
@@ -1087,7 +1096,7 @@ let strip_connection_reading (state : state) =
     match compact with
     | Compact_http Connected -> Settled
     | Compact_http (Connecting | Booting) | Compact_reading -> Under_way
-    | Compact_http Degraded | Compact_workspace_unconfirmed
+    | Compact_http (Degraded | Account_server _) | Compact_workspace_unconfirmed
     | Compact_workspace_unread | Compact_read_partial
     | Compact_read_interrupted | Compact_read_unfinished -> Caution
     | Compact_http Disconnected | Compact_workspace_mismatch
@@ -2106,7 +2115,7 @@ let reading_connection_notice (state : state) =
        | Compact_workspace_mismatch | Compact_workspace_unconfirmed
        | Compact_workspace_unread | Compact_read_failed | Compact_read_partial
        | Compact_read_interrupted | Compact_read_unfinished
-       | Compact_http (Degraded | Connecting | Booting | Disconnected) -> true
+       | Compact_http (Degraded | Connecting | Booting | Account_server _ | Disconnected) -> true
   in
   if exceptional then
     match connection_badge state with
@@ -3627,7 +3636,7 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
              | Disconnected ->
                  (Theme.accent ()) ^ "s" ^ Ansi.reset ^ ":"
                  ^ say "서버 시작" "start server"
-             | Connecting | Booting | Degraded | Connected ->
+             | Connecting | Booting | Account_server _ | Degraded | Connected ->
                  hint Keeper_control.Shutdown (action_word Keeper_control.Shutdown))
             (* Delete is the only action a keeper whose configuration failed to
                read still offers, and [primary] deliberately withholds it from

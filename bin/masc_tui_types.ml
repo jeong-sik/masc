@@ -667,6 +667,10 @@ type connection_status =
   | Disconnected
   | Connecting
   | Booting
+  | Account_server of { version : string }
+      (** The address answers as the account server of a multi-account
+          installation ({!Tui_decode.Account_server}). It serves none of the
+          surfaces, so like a booting server it is asked for the probe alone. *)
   | Degraded
   | Connected
 
@@ -675,6 +679,7 @@ let connection_status_label = function
   | Degraded -> "degraded"
   | Connecting -> "connecting..."
   | Booting -> "server booting..."
+  | Account_server _ -> "account server"
   | Disconnected -> "disconnected"
 ;;
 

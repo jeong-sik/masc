@@ -1086,7 +1086,8 @@ let with_signed_argument_store f =
     (fun () -> f ~base_path (Tool_blob_store.create ~base_path))
 ;;
 
-let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~config messages =
+let signed_argument_view ?frozen_arguments ?materialize
+    ?(project_request_media = fun messages -> Ok messages) ~base_path ~store ~config messages =
   let atom_count = snd (Window.annotate messages) in
   let completed_arguments = match frozen_arguments with
     | None -> Some (bind_arguments ~completed_before:atom_count ~seed:messages messages)
@@ -1100,6 +1101,7 @@ let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~confi
     | None -> fun ~pending projected ->
       (Demotion.materialize ~store ~addresses ~pending projected).messages in
   match Signed_provider.For_testing.request_view
+    ~project_request_media
     ~to_wire:(Agent_core.History.to_wire_message (Agent_core.History.Memory_store.create ()))
     ?completed_arguments
     ~tools:signed_argument_tools ~provider_config:config ~measure_message_bytes
@@ -1115,7 +1117,7 @@ let signed_argument_view ?frozen_arguments ?materialize ~base_path ~store ~confi
     messages
   with
   | Ok view -> view
-  | Error error -> Alcotest.fail (Agent_core.Error.to_string (Agent_core.Error.Media error))
+  | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
 ;;
 
 let assert_signed_argument_wire ~config ~reasoning_index messages =
@@ -1166,6 +1168,66 @@ let signed_call_keeps_its_own_arguments () = with_signed_argument_store @@ fun ~
     view.argument_prefix_protected;
   let inputs = assert_signed_argument_wire ~config ~reasoning_index:1 view.carried in
   Alcotest.(check bool) "the signed ToolUse input remains exact on actual wire" true (inputs = [input])
+;;
+
+(* The callback fixture below uses the actual H5 reader/cache. Runtime modality
+   selection is covered by the failover tests; here the actual Anthropic
+   producer and serializer own the signed-prefix decision. *)
+let signed_request_media_uses_the_exact_reading_prefix () =
+  with_signed_argument_store @@ fun ~base_path store ->
+  let config = signed_argument_config () in
+  let pdf = Types.document_block ~media_type:"application/pdf"
+      ~source:(stored_source ~media_type:"application/pdf" "signed-request-pdf") in
+  let canonical_prefix = [{ (signed_user "read the attached report") with content = [pdf] }] in
+  let make_projection reading calls =
+    let projector = Masc.Keeper_media_reading.projector ~media_store:test_media_store
+      ~keeper_name:"signed-request-media"
+      ~start_deadline:(fun () -> Monotonic_deadline.after ~seconds:30.)
+      ~read:(fun ~deadline:_ ~kind:_ ~media_type:_ ~bytes:_ -> incr calls; Ok reading) () in
+    fun messages -> Ok (List.map (fun (message : Types.message) ->
+      let content, _ = Masc.Keeper_media_reading.project projector
+        ~needs_projection:(function Masc.Keeper_media_reading.Document -> true | Audio -> false)
+        message.content in
+      { message with content }) messages) in
+  let calls = ref 0 in
+  let project_request_media = make_projection "recorded PDF reading" calls in
+  let projected_prefix = match project_request_media canonical_prefix with
+    | Ok messages -> messages
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+  let signed = stamp_signed_call ~config ~prefix:projected_prefix ~id:"signed-media" (`Assoc []) in
+  let canonical = canonical_prefix @ [signed; tool_message ~id:"signed-media" "done"] in
+  let before = List.map Agent_core.Checkpoint.message_to_json canonical in
+  let view = signed_argument_view ~project_request_media ~base_path ~store ~config canonical in
+  Alcotest.(check int) "producer and repeated prefix inspection share one attachment read" 1 !calls;
+  Alcotest.(check bool) "canonical stored document and signed response are unchanged" true
+    (view.carried = canonical && List.map Agent_core.Checkpoint.message_to_json canonical = before);
+  ignore (assert_signed_argument_wire ~config ~reasoning_index:1 view.projected_carried : Yojson.Safe.t list);
+  (match Agent_core.Llm_provider.Backend_anthropic.retained_prefix_reasoning_indices
+      ~config ~tools:signed_argument_tools view.carried_wire with
+   | Ok (Some [1]) -> ()
+   | Ok _ -> Alcotest.fail "wire conversion did not retain the reading-bound signed occurrence"
+   | Error error -> Alcotest.fail
+       (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error));
+  let changed_calls = ref 0 in
+  let changed = signed_argument_view
+      ~project_request_media:(make_projection "different PDF reading" changed_calls)
+      ~base_path ~store ~config canonical in
+  Alcotest.(check int) "changed request reading is evaluated once" 1 !changed_calls;
+  (match Agent_core.Llm_provider.Backend_anthropic.retained_prefix_reasoning_indices
+      ~config ~tools:signed_argument_tools changed.carried_wire with
+   | Ok (Some []) -> ()
+   | Ok _ -> Alcotest.fail "mismatched reading retained an exact-prefix signature"
+   | Error error -> Alcotest.fail
+       (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error));
+  let body = Agent_core.Llm_provider.Backend_anthropic.build_request
+      ~config ~messages:changed.carried_wire ~tools:signed_argument_tools () in
+  let blocks = Yojson.Safe.Util.(Yojson.Safe.from_string body |> member "messages" |> to_list)
+    |> List.concat_map (fun message -> Yojson.Safe.Util.(member "content" message |> to_list)) in
+  Alcotest.(check int) "actual serializer drops the mismatched signed block"
+    0 (List.length (List.filter (fun block ->
+      Yojson.Safe.Util.member "type" block = `String "thinking") blocks));
+  Alcotest.(check bool) "failed exact prefix never rewrites canonical reasoning" true
+    (changed.carried = canonical && List.map Agent_core.Checkpoint.message_to_json canonical = before)
 ;;
 
 let signed_prefix_protects_only_earlier_argument_occurrences () =
@@ -2908,6 +2970,8 @@ let () =
             arguments_obey_each_provider_wire_bound
         ; Alcotest.test_case "signed ToolUse retains its own exact arguments" `Quick
             signed_call_keeps_its_own_arguments
+        ; Alcotest.test_case "request media uses the actual signed reading prefix" `Quick
+            signed_request_media_uses_the_exact_reading_prefix
         ; Alcotest.test_case "signed prefix protects earlier occurrences and demotes later identical records" `Quick
             signed_prefix_protects_only_earlier_argument_occurrences
         ; Alcotest.test_case "signed prefix reproduces actual previously demoted arguments" `Quick

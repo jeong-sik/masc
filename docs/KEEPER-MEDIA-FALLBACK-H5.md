@@ -29,6 +29,21 @@ original text remain; only its attached request blocks change. The checkpoint
 replay projection restores canonical originals after the attempt. A later capable
 candidate receives those originals, not another candidate's converted input.
 
+For Agent Core Keeper-history requests, `project_request_media` also runs after
+the carried range is selected and materialized. It sees structured media newly
+appended by tools as well as selected history. It checks the complete selected
+bundle against the same admitted runtime on every request, using the walk's
+existing media reader and image projector. Images use the artifact-only
+`Store_only` mode here. Discarded atoms do not start readers at this stage.
+
+This projection runs on the request's owning fiber, outside CPU sizing and
+demotion previews. Canonical message occurrences remain the source of range
+positions and digests. The projected view supplies both wire conversion and
+dialect/signed-prefix inspection; a typed projection failure aborts the request.
+The wire memo uses projected message values, so a later mixed bundle cannot
+reuse an earlier native-document conversion. Tool effects are not rerun to
+obtain the reading, and request projection does not rewrite their stored results.
+
 See [runtime configuration](RUNTIME-TOML-REFERENCE.md#modelsidcapabilities) for
 the declaration keys. Declaring a capability does not establish upstream support;
 verify the concrete model and request wire before enabling it.
@@ -70,13 +85,15 @@ This change does not add cleanup of active data.
 
 ## Provider serialization boundary
 
-An Agent Core tool can return a document after the initial Keeper projection.
-Request builders therefore also consult the frozen document capability.
+Core request builders also consult the frozen document capability, independently
+of Keeper's request-time reader.
 Anthropic, Responses, OpenAI Chat/GLM and Gemini replace unsupported documents
 with explicit omission placeholders, including through nested tool results.
-Native Ollama rejects a document introduced during a tool round; its initial
-Keeper input still uses H5 projection. Neither behavior invokes the H5 reader
-inside that tool round. Canonical tool results remain separate from this view.
+Native Ollama rejects a document that reaches its serializer. Agent Core
+Keeper-history requests now project unsupported structured attachments before
+these serializers run. Direct Core callers and official-client internal rounds
+do not gain a Keeper reader from the serializer. Canonical tool results remain
+separate from the request view.
 
 Anthropic and Responses share that document projection with their history-size
 calculation. Anthropic also uses it for signed-reasoning prefix receipts, so the
@@ -130,6 +147,8 @@ attached tools no longer declare that text threshold as a bound on native media.
 The focused behavior fixtures are in `test_keeper_turn_driver_failover`,
 `test_runtime_modality_reroute`, `test_gate_keeper_backend`,
 `test_runtime_provider_auth_headers` and `test_model_capability_presence`.
+The failover suite also exercises the selected request projection and its media
+reading and wire memos.
 Agent Core's `test_media_document_admission` covers request serialization;
 `test_provider_agnostic_reasoning_replay` covers the signed-prefix boundary.
 
@@ -145,6 +164,13 @@ Attached MCP decoder, Gate and approval-sidecar cases are recorded in the
 [MCP candidate evidence](evidence/2026-11-16-farm-mcp-content/README.md). They are
 written source cases, not executed service/provider or restart evidence.
 
-Generic non-PDF interpretation, URL/file-ID fetching and same-round external
-reading remain outstanding. These repairs do not complete the whole Farm
-multimodal requirement.
+Request-time projection covers structured media in the selected Keeper-history
+view. It does not cover media introduced later by the caller's custom history
+projection, opaque retained-outbox receipt text, Completion-review requests,
+official-client internal rounds, or a position that a provider cannot represent
+despite its global document capability. Those paths need their own owners;
+rendered receipt text is not parsed to discover attachments. Restarted readings
+and signed-prefix continuity still need execution evidence.
+
+Generic non-PDF interpretation and URL/file-ID fetching remain outstanding.
+These repairs do not complete the whole Farm multimodal requirement.

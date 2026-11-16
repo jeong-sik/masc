@@ -440,6 +440,7 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; argument_demotion_seed : Agent_core.Types.message list option
   ; argument_replay_prefix : Keeper_replay_prefix.projection
+  ; project_request_media : Keeper_history_projection.t
   ; model_input_projection : Keeper_history_projection.t option
   ; stream_idle_timeout_s : float
     (* Bound on the silent gap between two streamed lines. It re-arms after
@@ -1486,11 +1487,11 @@ let current_turn_demotion ~(refused : composed) ~(demoted : composed) =
 (* One request: the range composed in the durable vocabulary, its demotions
    materialized, then the wire's view of the carried range. [composed] and
    [carried] count atoms of the checkpoint history — the vocabulary of the
-   ledger, the seed and the forecast — and [transmitted] is the dialect's
-   reasoning projection over [carried] alone, or why it declined. The
-   projection reads block kinds only, so it runs on the history and the media
-   stay [Stored] until the request is resolved; [carried_wire] is [carried]
-   resolved, which the prefix-binding check reads. The order is the
+   ledger, the seed and the forecast. [projected_carried] is its request-only
+   media view, and [transmitted] is the dialect's reasoning projection over
+   that view, or why it declined. Remaining media stay [Stored] until the
+   request is resolved; [carried_wire] resolves [projected_carried], which
+   the prefix-binding check reads. The order is the
    point: a position measured on one runtime names the same atom on every
    runtime whatever reasoning each dialect replays or deletes, a dialect that
    deletes a whole reasoning-only assistant message shortens the wire list
@@ -1504,6 +1505,7 @@ type request_view =
   ; completed_arguments : Keeper_model_input_demotion.completed_arguments option
   ; argument_prefix_protected : bool
   ; carried : Agent_core.Types.message list
+  ; projected_carried : Agent_core.Types.message list
   ; carried_wire : Agent_core.Llm_provider.Types.message list
   ; transmitted :
       ( Agent_core.Types.message list
@@ -1540,6 +1542,7 @@ let unchecked_request_view
       ~base_path
       ~turn_boundary
       ~materialize
+      ~project_request_media
       ~to_wire
       messages
   =
@@ -1563,22 +1566,31 @@ let unchecked_request_view
     | [] -> composed.projection.Runtime_model_input_tail_window.messages
     | pending -> materialize ~pending composed.projection.Runtime_model_input_tail_window.messages
   in
-  Result.map
-    (fun carried_wire ->
-       let transmitted =
-         offload_model_input_cpu (fun () ->
-           Agent_core.Llm_provider.Complete_common.transmitted_history
-             ~tools ~config:provider_config
-             carried)
-       in
-       { composed
-       ; carried
-       ; carried_wire
-       ; transmitted
-       ; completed_arguments
-       ; argument_prefix_protected = false
-       })
-    (resolve_carried ~to_wire carried)
+  let open Result.Syntax in
+  (* Readers can perform I/O. Keep them on the owning fiber, after canonical
+     selection/materialization and before either wire or dialect inspection.
+     The conversion memo sees the projected value, so a later mixed-media
+     request cannot reuse an earlier native form of the canonical message. *)
+  let* projected_carried = project_request_media carried in
+  let* carried_wire =
+    resolve_carried ~to_wire projected_carried
+    |> Result.map_error (fun error -> Agent_core.Error.Media error)
+  in
+  let transmitted =
+    offload_model_input_cpu (fun () ->
+      Agent_core.Llm_provider.Complete_common.transmitted_history
+        ~tools ~config:provider_config
+        projected_carried)
+  in
+  Ok
+    { composed
+    ; carried
+    ; projected_carried
+    ; carried_wire
+    ; transmitted
+    ; completed_arguments
+    ; argument_prefix_protected = false
+    }
 ;;
 
 module Message_indices = Set.Make (Int)
@@ -1609,7 +1621,7 @@ let request_view
       ?same_turn_result_as_pointer
       ?(tools = []) ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front
       ~accepted ~history_digest_at ~current_turn_results ~base_path
-      ~turn_boundary ~materialize ~to_wire messages =
+      ~turn_boundary ~materialize ~project_request_media ~to_wire messages =
   let open Result.Syntax in
   let build ?(materialize = materialize) completed_arguments =
     unchecked_request_view ~tools ?continuity ?completed_arguments ?finished_turn_results
@@ -1617,7 +1629,7 @@ let request_view
       ~provider_config ~measure_message_bytes ~measure_wire_bytes ~front ~accepted
       ~history_digest_at
       ~current_turn_results ~base_path ~turn_boundary ~materialize
-      ~to_wire messages
+      ~project_request_media ~to_wire messages
   in
   let* candidate = build completed_arguments in
   match completed_arguments with
@@ -2066,9 +2078,9 @@ let bounded_model_input_projection
               "model input kept original tool bodies after externalization failure: count=%d"
               outcome.reverted);
           outcome.Keeper_model_input_demotion.messages)
+        ~project_request_media:ctx.project_request_media
         ~to_wire
         messages
-      |> Result.map_error (fun error -> Agent_core.Error.Media error)
     in
     (* A failed store can change the actual prefix a newly produced reasoning
        block binds to. Recheck each demoting request and only narrow the frozen
@@ -2130,7 +2142,7 @@ let bounded_model_input_projection
             (Agent_core.Llm_provider.Reasoning_history_projection
              .error_to_string
                error));
-        view.carried
+        view.projected_carried
     in
     if not !front_reported
     then (
@@ -2140,7 +2152,7 @@ let bounded_model_input_projection
           List.fold_left
             (fun sum message -> sum + measure_message_bytes message)
             0
-            view.carried)
+            view.projected_carried)
       in
       emit_runtime_manifest ctx
         ~status:(match view.transmitted with
@@ -2212,18 +2224,31 @@ let bounded_model_input_projection
        (the pinned messages), so a difference between two requests can be
        attributed to the atoms appended between them, and whether it carried
        the turn context, whose count is not a sample of the history. Read
-       back from the carried list, in the durable vocabulary: the atoms in it
-       and [history_atom_count] are absolute on every path, and the preamble
-       is tail, not an atom, as the range itself treats it. *)
+       back from the canonical carried list: the atoms in it and
+       [history_atom_count] are absolute on every path, and the preamble is
+       tail, not an atom, as the range itself treats it. Byte estimates use
+       the request media view at the same occurrence, without reader I/O. *)
     (let transmitted_atoms, tail_bytes, turn_context =
        offload_model_input_cpu (fun () ->
-         let history, preamble =
-           List.partition
+         let canonical_history =
+           List.filter
              (fun message ->
                 not (Runtime_model_input_tail_window.is_synthetic_preamble message))
              view.carried
          in
-         let labelled, transmitted_atoms =
+         let _, transmitted_atoms =
+           Runtime_model_input_tail_window.annotate canonical_history
+         in
+         let history, preamble =
+           List.partition
+             (fun message ->
+                not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+             view.projected_carried
+         in
+         (* The projector preserves roles, origins and metadata, so these
+            labels select the same pinned occurrences. Only their projected
+            bodies contribute bytes; canonical atom coordinates stay above. *)
+         let labelled, _ =
            Runtime_model_input_tail_window.annotate history
          in
          let pinned_bytes =
@@ -2244,7 +2269,7 @@ let bounded_model_input_projection
          in
          ( transmitted_atoms
          , pinned_bytes + preamble_bytes
-         , List.exists Runtime_model_input_tail_window.is_extra_context history ))
+         , List.exists Runtime_model_input_tail_window.is_extra_context canonical_history ))
      in
      let first_atom = history_atom_count - transmitted_atoms in
      (* Both positions are read off the lookup over the history the range was
@@ -3857,6 +3882,7 @@ module For_testing = struct
   let candidate_without_reasoning_effort = candidate_without_reasoning_effort
   let retry_without_thinking_admitted = retry_without_thinking_admitted
   let memoize_message_measurement = memoize_message_measurement
+  let memoize_wire_message = memoize_wire_message
   let carried_front = carried_front
   let message_measurement_hash = Agent_core.Types.Message_value.hash
   let aged_result_min_bytes = aged_result_min_bytes

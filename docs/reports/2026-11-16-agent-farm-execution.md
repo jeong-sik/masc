@@ -473,10 +473,46 @@ CMI를 정상 Dune interface 증거로 쓰지 않는다. 이 수리로 전체 �
 UID worktree의 `artifacts/farm-lifecycle-events-rebase-20261116/`에 실행과 독립 검토를
 보존했다. 원본 seal은 `37aafc898bf2127fa3d568b655d998714fc62afcd7f2a692da1e7e743bb640e1`이다.
 
-H5 후속은 아직 설계 조사다. Canonical carried 범위 결정 뒤, wire 변환·서명 검사 전에
+이 시점의 H5 후속은 설계 조사였다. Canonical carried 범위 결정 뒤, wire 변환·서명 검사 전에
 요청용 읽기 투영을 넣을 위치를 확인했다. 늦은 Text JSON outbox와 Responses tool-result
 PDF의 위치별 wire 표현, official 내부 rounds는 별도 미완료로 남겼다. 이 조사로 H5
 기능을 구현하거나 실제 PDF/provider 동작을 검증한 것은 아니다.
+
+## 선택한 요청 이력의 H5 읽기 연결
+
+여섯째 층의 최종 `4115b16183f39744d47766caed8feeca0493fb1c` 위에
+`fix/farm-request-media-reading-20261116`을 `gh stack add`로 만들었다.
+Keeper-history 요청의 carried 범위를 선택하고 materialize한 다음, 기존 walk 소유
+projector로 문서·오디오를 읽도록 연결했다. 새 ToolResult에 들어온 구조화된 첨부도
+다음 요청에서 이 경계를 거친다. 초기 입력 투영과 같은 runtime snapshot·캐시·deadline을
+쓰며, 매 요청의 전체 선택 범위에서 혼합 입력 가능 여부를 다시 판단한다.
+
+원본 `carried`는 atom 수·위치·digest의 근거로 남긴다. 요청용 `projected_carried`를
+wire 변환과 dialect·서명 prefix 검사에 함께 넘긴다. Backend가 거절해야 하는 경우도
+같은 투영을 전달하며, Stored 변환 오류만 Media 오류로 바꾸고 callback의 typed 오류는
+보존한다. CPU 크기 추정·demotion 후보 비교에서는 외부 reader를 호출하지 않는다.
+이미지에는 기존 Store_only 정책을 쓴다.
+
+유지 시험 여섯 개를 추가했다. 다섯 failover 사례는 선택된 원본과 새 nested 첨부,
+다른 CPU domain과 구분되는 reader 실행 위치, 같은 walk의 캐시와 runtime reload,
+typed 오류·없는 bytes·잘못된 reasoning 출처를 다룬다. 나머지 한 사례는 기존
+Anthropic producer/serializer로 읽기와 signature의 prefix 결속을 검사한다.
+다른 읽기가 만들어지면 실제 기존 정책대로 signed block이 제외되는지도 확인하도록
+작성했다. 외부 PDF/STT·provider 응답을 대신한 fixture이며 **실행은 0건**이다.
+Root의 OCaml 5.5.2 전체 파일 구문 검사 9개는 통과했다. 이 검사를 타입·동작 성공으로
+부르지 않는다. 원본과 결과는 `artifacts/farm-document-request-reading-20261116/`에 있다.
+
+이 소스 변경은 원본 효과의 재실행이나 canonical checkpoint의 첨부 교체가 아니다.
+늦은 caller projection, Text JSON outbox, Completion-review, official-client 내부 round,
+Responses ToolResult PDF처럼 위치에 따른 native 표현의 제약은 남는다.
+[H5 계약](../KEEPER-MEDIA-FALLBACK-H5.md)에 적용 위치와 이 한계를 구분했다.
+실제 reader·provider·설치·재시작 연속성은 아직 검증하지 않았다. 이전 Core18·MCP8·UID13
+통과를 이번 요청 경계의 실행 증거로 옮기지 않는다.
+
+Document 스택은 이제 일곱 층이며, 새 층의 검토와 전체 원격 preflight가 끝나기 전에는
+게시하지 않도록 로컬 인계 note를 갱신했다. 이전 여섯 층만 게시하는 요청으로 해석하지
+않는다. 지정된 협업 thread의 새 조회도 로컬 MCP 전송 연결에서 실패했으며 전달 완료를
+주장하지 않는다. 런타임·설치·데이터 변경은 수행하지 않았다.
 
 ## 원래 25개 요구의 현재 위치
 

@@ -766,6 +766,23 @@ module For_testing : sig
       [emit_runtime_manifest]. [Reroute] has no producer here because the
       decision is taken with no reroute candidates. *)
 
+  val project_request_media :
+    project_media:
+      (needs_projection:(Keeper_media_reading.kind -> bool) ->
+       Agent_core.Types.content_block list ->
+       Agent_core.Types.content_block list * (string * int) list) ->
+    project_images:
+      (mode:Keeper_vision_ingest.mode ->
+       Agent_core.Types.content_block list -> Keeper_vision_ingest.image_projection) ->
+    Runtime_instance.t ->
+    Keeper_history_projection.t
+  (** Project the selected request history against the admitted runtime. The
+      whole selected bundle is checked on every request, including newly
+      appended tool results. Reuse the lane walk's media/image projectors;
+      images use [Store_only]. The callback may read attachments on its owning
+      fiber and must run outside CPU sizing/demotion callbacks. Only content
+      blocks change; message occurrences and canonical history stay intact. *)
+
   val attempt_inference_policy :
     runtime_id:string ->
     fallback_enable_thinking:bool option ->

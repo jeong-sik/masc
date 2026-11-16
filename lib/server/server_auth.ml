@@ -191,20 +191,21 @@ let internal_keeper_agent_from_request request =
    token with its header, or the credential that holds the token. *)
 let identify_bearer ~base_path request ~token :
     (string * Auth.resolved_bearer, Masc_domain.masc_error) result =
-  if Auth.verify_internal_keeper_token base_path ~token then
-    match internal_keeper_agent_from_request request with
-    | Some agent_name -> Ok (agent_name, Auth.Internal_keeper_bearer)
-    | None ->
-        Error
-          (Masc_domain.Auth
-             (Masc_domain.Auth_error.Unauthorized
-                { reason = Missing_token
-                ; message = "Internal keeper auth requires x-masc-keeper-name header."
-                }))
-  else
-    let+ credential = Auth.find_token_credential base_path ~token in
-    ( (Auth.token_credential_agent_credential credential).Masc_domain.agent_name
-    , Auth.Token_credential credential )
+  match Auth.internal_keeper_bearer base_path ~token with
+  | Some internal -> (
+      match internal_keeper_agent_from_request request with
+      | Some agent_name -> Ok (agent_name, internal)
+      | None ->
+          Error
+            (Masc_domain.Auth
+               (Masc_domain.Auth_error.Unauthorized
+                  { reason = Missing_token
+                  ; message = "Internal keeper auth requires x-masc-keeper-name header."
+                  })))
+  | None ->
+      let+ credential = Auth.find_token_credential base_path ~token in
+      ( (Auth.token_credential_agent_credential credential).Masc_domain.agent_name
+      , Auth.token_credential_bearer credential )
 
 let resolve_agent_name_for_auth_raw ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =

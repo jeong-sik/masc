@@ -325,6 +325,12 @@ let addon_exports_for_request ~profile ~auth_token state =
       Config.raw_all_tool_schemas in
   let permitted ~agent_name ~principal access =
       let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
+      (* One role answers every name below. [Auth.authorize_tool] resolved it
+         again for each name, reading the auth store once per exported tool;
+         under a congested owner domain each read costs seconds. Lazy so a
+         listing with no Add-on tools reads nothing, as before. Only this call
+         forces it, from one fiber, so Stdlib.Lazy needs no lock. *)
+      let role = lazy (Auth.resolve_role config.base_path ~agent_name ~token:auth_token) in
       (* Retained tool metadata owns known permissions even when execution is
          supplied by an Add-on. Unknown package tools use the generic Lane
          action permission; package-provided annotations grant no role. *)
@@ -336,8 +342,12 @@ let addon_exports_for_request ~profile ~auth_token state =
           | Full -> true
           | Seat -> TP.is_seat_tool name
           | Managed_agent | Operator_remote -> false in
-        profile_permits && Result.is_ok (Auth.authorize_tool config.base_path ~agent_name
-          ~token:auth_token ~tool_name:permission_tool) in
+        profile_permits
+        && (match Lazy.force role with
+            | Ok role ->
+                Result.is_ok
+                  (Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:permission_tool)
+            | Error _ -> false) in
       let exports = List.filter (fun (export : Lane_addon_runtime.tool_export) ->
         permits export.tool.name) reading.exports in
       (* An installation that cannot serve keeps only the tools this caller

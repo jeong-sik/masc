@@ -225,6 +225,12 @@ type resolved_bearer =
   | Internal_keeper_bearer
   | Token_credential of token_credential
 
+let internal_keeper_bearer config ~token =
+  if verify_internal_keeper_token config ~token then Some Internal_keeper_bearer else None
+;;
+
+let token_credential_bearer credential = Token_credential credential
+
 (* HIGH-RISK-UNREVIEWED: the role [resolve_role_with_auth_config] gives a
    bearer that was already resolved, without resolving it again.
 
@@ -243,7 +249,10 @@ type resolved_bearer =
    [verify_token] would read again. An OAuth access record goes through
    [verify_token] as before: its owner's static file can refuse it. As with
    the reads before, nothing locks the files between this answer and its
-   use; a credential replaced after the read is judged by the next request. *)
+   use. A credential that is replaced, edited, or reaches its expiry after
+   the lookup read it is judged by the next request: the second read used
+   to catch a change that landed between the two reads, a window as long as
+   the reads themselves. *)
 let resolve_role_of_resolved_bearer config ~auth_cfg ~token resolved
   : (agent_role, masc_error) result
   =

@@ -442,15 +442,25 @@ let verify_dashboard_token ~base_path token =
     | None ->
         Error "dashboard/hello requires a bearer token"
     | Some raw_token -> (
-        match Auth.find_static_credential_by_token base_path ~token:raw_token with
+        match Auth.find_static_token_credential base_path ~token:raw_token with
         | Error err -> Error (Masc_domain.masc_error_to_string err)
-        | Ok cred -> (
-            let agent_name = cred.Masc_domain.agent_name in
+        | Ok credential -> (
+            let agent_name =
+              (Auth.token_credential_agent_credential credential).Masc_domain.agent_name
+            in
+            (* A static credential can hold the internal Keeper token too.
+               [Auth.check_permission] answered such a bearer as the internal
+               Keeper, Worker, before it read the credential's own role, so
+               the internal token is still asked first here. *)
+            let resolved =
+              match Auth.internal_keeper_bearer base_path ~token:raw_token with
+              | Some internal -> internal
+              | None -> Auth.token_credential_bearer credential
+            in
             match
               Result.bind
                 (Auth.resolve_role_of_resolved_bearer base_path ~auth_cfg
-                   ~token:raw_token
-                   (Auth.Token_credential (Auth.Static_bearer cred)))
+                   ~token:raw_token resolved)
                 (fun role ->
                   Auth.authorize_permission_for_role ~agent_name ~role
                     ~permission:Masc_domain.CanReadState)

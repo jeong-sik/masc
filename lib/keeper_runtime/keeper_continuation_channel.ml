@@ -27,6 +27,12 @@ type t =
       chat_guid : string option;
       user_id : string;
     }
+  | Gate of {
+      channel : string;
+      workspace_id : string option;
+      conversation_id : string option;
+      user_id : string;
+    }
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
@@ -89,7 +95,7 @@ let discord_thread_parent t ~parent_channel_id =
       ; reply_to_message_id
       ; user_id
       }
-  | Dashboard _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _ -> t
+  | Dashboard _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _ -> t
 ;;
 
 let slack ~team_id ~channel_id ~thread_ts ~user_id =
@@ -112,6 +118,16 @@ let imessage ~chat_identifier ~chat_guid ~user_id =
   Ok (Imessage { chat_identifier; chat_guid; user_id })
 ;;
 
+let gate ~channel ~workspace_id ~conversation_id ~user_id =
+  let* channel = validate_nonblank "channel" channel in
+  let* workspace_id = validate_optional_nonblank "workspace_id" workspace_id in
+  let* conversation_id =
+    validate_optional_nonblank "conversation_id" conversation_id
+  in
+  let* user_id = validate_nonblank "user_id" user_id in
+  Ok (Gate { channel; workspace_id; conversation_id; user_id })
+;;
+
 let telegram ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id ~user_id =
   if bot_user_id<=0L || user_id<=0L || chat_id=0L then Error "telegram continuation: invalid identity"
   else if Option.fold ~none:false ~some:(fun n->n<=0L) direct_messages_topic_id then Error "telegram continuation: invalid direct topic"
@@ -129,7 +145,7 @@ let unrouted reason =
 
 let is_routable = function
   | Unrouted _ -> false
-  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ -> true
+  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ -> true
 
 let kind_label = function
   | Dashboard _ -> "dashboard"
@@ -137,6 +153,7 @@ let kind_label = function
   | Slack _ -> "slack"
   | Telegram _ -> "telegram"
   | Imessage _ -> "imessage"
+  | Gate _ -> "gate"
   | Keeper _ -> "keeper"
   | Unrouted _ -> "unrouted"
 
@@ -183,6 +200,16 @@ let describe = function
     Printf.sprintf "imessage chat=%s%s user=%s"
       chat_identifier
       (opt "chat_guid" chat_guid)
+      user_id
+  | Gate { channel; workspace_id; conversation_id; user_id } ->
+    let opt label = function
+      | None -> ""
+      | Some value -> Printf.sprintf " %s=%s" label value
+    in
+    Printf.sprintf "gate channel=%s%s%s user=%s"
+      channel
+      (opt "workspace" workspace_id)
+      (opt "conversation" conversation_id)
       user_id
   | Keeper { keeper_name } -> Printf.sprintf "keeper name=%s" keeper_name
   | Unrouted { reason } -> Printf.sprintf "unrouted (%s)" reason
@@ -247,14 +274,19 @@ let same_route a b =
   | Telegram a, Telegram b ->
     a.bot_user_id=b.bot_user_id && a.chat_id=b.chat_id
     && a.message_thread_id=b.message_thread_id && a.direct_messages_topic_id=b.direct_messages_topic_id && a.reply_to_message_id=b.reply_to_message_id && a.user_id=b.user_id
+  | Gate a, Gate b ->
+    String.equal a.channel b.channel
+    && same_string_option a.workspace_id b.workspace_id
+    && same_string_option a.conversation_id b.conversation_id
+    && String.equal a.user_id b.user_id
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no route. Listing the constructors
      explicitly (not [_]) keeps this exhaustive: a new variant forces a
      compile error here rather than silently defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _) )
     -> false
 
 (* RFC-0377: batching pending Connector_attention stimuli needs "is this the
@@ -297,6 +329,17 @@ let same_conversation a b =
     String.equal left_chat right_chat
   | Telegram a, Telegram b ->
     a.bot_user_id=b.bot_user_id && a.chat_id=b.chat_id && a.message_thread_id=b.message_thread_id && a.direct_messages_topic_id=b.direct_messages_topic_id
+  | Gate a, Gate b ->
+    String.equal a.channel b.channel
+    && same_string_option a.workspace_id b.workspace_id
+    &&
+    (match a.conversation_id, b.conversation_id with
+     | Some left_cid, Some right_cid -> String.equal left_cid right_cid
+     | None, None ->
+       (match a.workspace_id with
+        | Some _ -> true
+        | None -> String.equal a.user_id b.user_id)
+     | Some _, None | None, Some _ -> false)
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
@@ -304,8 +347,8 @@ let same_conversation a b =
      constructors explicitly (not [_]) keeps this exhaustive: a new
      connector forces a compile error here rather than silently
      defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Telegram _ | Gate _ | Keeper _ | Unrouted _) )
     -> false
 
 let option_string_fields fields =
@@ -357,6 +400,16 @@ let to_yojson = function
        ; ("user_id", `String user_id)
        ]
        @ option_string_fields [ ("chat_guid", chat_guid) ])
+  | Gate { channel; workspace_id; conversation_id; user_id } ->
+    `Assoc
+      ([ ("kind", `String "gate")
+       ; ("channel", `String channel)
+       ; ("user_id", `String user_id)
+       ]
+       @ option_string_fields
+           [ ("workspace_id", workspace_id)
+           ; ("conversation_id", conversation_id)
+           ])
   | Keeper { keeper_name } ->
     `Assoc [ ("kind", `String "keeper"); ("keeper_name", `String keeper_name) ]
   | Unrouted { reason } ->
@@ -490,6 +543,18 @@ let of_yojson json =
     let* user_id = string_field "user_id" fields in
     let* chat_guid = optional_string_field "chat_guid" fields in
     imessage ~chat_identifier ~chat_guid ~user_id
+  | "gate" ->
+    let* () =
+      validate_allowed_fields
+        ~kind
+        [ "kind"; "channel"; "workspace_id"; "conversation_id"; "user_id" ]
+        fields
+    in
+    let* channel = string_field "channel" fields in
+    let* user_id = string_field "user_id" fields in
+    let* workspace_id = optional_string_field "workspace_id" fields in
+    let* conversation_id = optional_string_field "conversation_id" fields in
+    gate ~channel ~workspace_id ~conversation_id ~user_id
   | "keeper" ->
     let* () = validate_allowed_fields ~kind [ "kind"; "keeper_name" ] fields in
     let* keeper_name = string_field "keeper_name" fields in

@@ -330,7 +330,8 @@ let resolve_target ~surface ~channel_id ?continuation_channel
         | Keeper_continuation_channel.Discord _
         | Keeper_continuation_channel.Slack _
         | Keeper_continuation_channel.Telegram _
-      | Keeper_continuation_channel.Imessage _
+        | Keeper_continuation_channel.Imessage _
+        | Keeper_continuation_channel.Gate _
         | Keeper_continuation_channel.Keeper _
         | Keeper_continuation_channel.Unrouted _ )
     | None ->

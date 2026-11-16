@@ -123,7 +123,7 @@ let peer_snapshot ~keeper_name json =
         let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
         let reply_to = match source.continuation_channel with
           | Keeper_continuation_channel.Keeper { keeper_name } -> Some keeper_name
-          | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Unrouted _ -> None in
+          | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Gate _ | Unrouted _ -> None in
         Ok (match source.sender_keeper with
           | None -> No_peer
           | Some sender -> Peer { operation_id;

@@ -5,8 +5,8 @@
 
     The comparison encodes the known dual-write skews explicitly rather than
     discovering them: anonymous in-window assistant rows are an exclusion
-    class. A Dashboard post joined by its original turn is checked against the
-    typed terminal Dashboard effect, whose model reply is not a second posted
+    class. A surface post joined by its original turn is checked against the
+    typed terminal surface-post effect, whose model reply is not a second posted
     body. A crashed turn leaves a truncated journal (no terminal event), which
     is its own verdict. *)
 
@@ -19,7 +19,7 @@ type mismatch_kind =
       (** The terminal assistant row's content differs from the journal's
           [Reply_details.reply] (both sides are the post-redaction view), or
           the journal carries a non-empty reply that no store row persists.
-          A settled outcome with a matching typed Dashboard effect event
+          A settled outcome with a matching typed surface-post effect event
           instead requires its assistant post row
           on the exact original turn and surface, without terminal delivery
           provenance; its body is independent of the suppressed model reply. *)

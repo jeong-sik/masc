@@ -347,6 +347,7 @@ let accept_connector ~delivery ~clock:_ ~config ~channel ~channel_user_id
 let dispatch ~clock ~config ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~idempotency_key ~metadata ~content =
+  let workspace_id = non_empty_opt channel_workspace_id in
   let conversation_id =
     conversation_id_for_channel_context
       ~channel
@@ -364,11 +365,26 @@ let dispatch ~clock ~config ~channel
       ?external_message_id
       ()
   in
+  let gate_channel =
+    match non_empty_opt channel with
+    | Some lane -> lane
+    | None -> "gate"
+  in
   match
-    Keeper_continuation_channel.dashboard
-      ~thread_id:("keeper:" ^ String.trim keeper_name)
+    Keeper_continuation_channel.gate
+      ~channel:gate_channel
+      ~workspace_id
+      ~conversation_id
+      ~user_id:channel_user_id
   with
-  | Error detail -> Gate_protocol.Keeper_error_result detail
+  | Error detail ->
+    let redaction =
+      Keeper_secret_redaction.snapshot
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:(String.trim keeper_name)
+    in
+    Gate_protocol.Keeper_error_result
+      (Keeper_secret_redaction.redact_text redaction detail)
   | Ok continuation_channel ->
     accept_connector
       ~delivery:
@@ -376,7 +392,7 @@ let dispatch ~clock ~config ~channel
         ; surface
         ; conversation_id
         ; external_message_id
-        ; workspace_id = non_empty_opt channel_workspace_id
+        ; workspace_id
         }
       ~clock
       ~config

@@ -181,10 +181,41 @@ let terminal_outcome_mismatch ~terminal rows =
     not failure_recorded
 ;;
 
+let surface_matches_delivery_target
+      (target : Keeper_surface_post.delivery_target)
+      (surface : Surface_ref.t option)
+  =
+  match target, surface with
+  | Keeper_surface_post.Delivered_to_dashboard,
+    Some (Surface_ref.Dashboard { session_id = None }) -> true
+  | Keeper_surface_post.Delivered_to_discord { channel_id },
+    Some (Surface_ref.Discord { channel_id = row_channel_id; _ }) ->
+    String.equal channel_id row_channel_id
+  | Keeper_surface_post.Delivered_to_slack { channel_id; thread_ts },
+    Some (Surface_ref.Slack { channel_id = row_channel_id; thread_ts = row_thread_ts; _ }) ->
+    String.equal channel_id row_channel_id
+    && Option.equal String.equal thread_ts row_thread_ts
+  | Keeper_surface_post.Delivered_to_native route, Some row_surface ->
+    Surface_ref.equal row_surface (Keeper_native_origin_reply.surface route)
+  | ( Keeper_surface_post.Delivered_to_dashboard
+    | Keeper_surface_post.Delivered_to_discord _
+    | Keeper_surface_post.Delivered_to_slack _
+    | Keeper_surface_post.Delivered_to_native _ ),
+    ( None
+    | Some
+        ( Surface_ref.Dashboard _
+        | Surface_ref.Discord _
+        | Surface_ref.Slack _
+        | Surface_ref.Webhook _
+        | Surface_ref.Agent
+        | Surface_ref.Broadcast
+        | Surface_ref.Gate _ ) ) -> false
+;;
+
 (* Rule 3: the persisted terminal text is [Reply_details.reply]; both sides
    are already the redacted view. An empty reply with no assistant row is the
    tool-calls-only / no-visible-reply shape, not a divergence. A typed settled
-   Dashboard effect instead owns the original-turn post body: the server
+   surface-post effect instead owns the original-turn post body: the server
    suppresses a second assistant row for its diagnostic model reply. Without
    that matching effect event, the ordinary text comparison still applies. *)
 let assistant_text_mismatch ~entries ~reply_details rows =
@@ -201,20 +232,54 @@ let assistant_text_mismatch ~entries ~reply_details rows =
   match reply_details with
   | None -> false
   | Some (details : Events.reply_details) ->
-    let dashboard_effect =
-      Keeper_turn_outcome.equal details.turn_outcome Keeper_turn_outcome.Terminal_effect_settled
-      && List.exists (fun (entry : Journal.journaled_event) ->
-        entry.event = Events.External_effect_completed
-          {target = Keeper_surface_post.Delivered_to_dashboard}) entries
+    let settled_effect_targets =
+      if Keeper_turn_outcome.equal details.turn_outcome Keeper_turn_outcome.Terminal_effect_settled
+      then
+        List.filter_map
+          (fun (entry : Journal.journaled_event) ->
+             match entry.event with
+             | Events.External_effect_completed { target } -> Some target
+             | Keeper_chat_events.Tool_result_ready _
+             | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
+             | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
+             | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
+             | Keeper_chat_events.Text_delta _
+             | Keeper_chat_events.Run_finished _ | Keeper_chat_events.Event_error _
+             | Keeper_chat_events.Reply_details _ | Keeper_chat_events.Continuation_checkpoint _
+             | Keeper_chat_events.Provider_retry_observed _
+             | Keeper_chat_events.Agent_core_runtime_attempt_started _
+             | Keeper_chat_events.Agent_core_stream_message_start _
+             | Keeper_chat_events.Agent_core_stream_message_delta _
+             | Keeper_chat_events.Agent_core_stream_message_stop _
+             | Keeper_chat_events.Agent_core_content_block_start _
+             | Keeper_chat_events.Agent_core_content_block_stop _
+             | Keeper_chat_events.Model_content_activity _
+             | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
+             | Keeper_chat_events.Agent_core_thinking_signature_delta _
+             | Keeper_chat_events.Agent_core_media_delta _
+             | Keeper_chat_events.Agent_core_stream_protocol_error _
+             | Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _ | Keeper_chat_events.Tool_call_args _
+             | Keeper_chat_events.Tool_call_args_snapshot _ | Keeper_chat_events.Tool_call_end _
+             | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
+             | Keeper_chat_events.Native_tool_progress (_, _)
+             | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
+             | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
+             | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
+             | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ -> None)
+          entries
+      else []
     in
-    (match terminal_result_row rows with
-     | Some row when dashboard_effect ->
+    (match terminal_result_row rows, settled_effect_targets with
+     | Some row, _ :: _ ->
          not (Store.Role.equal row.role Store.Role.Assistant
            && row.delivery_provenance = None
-           && row.surface = Some (Surface_ref.Dashboard {session_id = None})
-           && Option.exists (Ids.Turn_ref.equal details.turn_ref) row.turn_ref)
-     | Some row -> not (String.equal row.content details.reply)
-     | None -> dashboard_effect || not (String.equal (String.trim details.reply) ""))
+           && Option.exists (Ids.Turn_ref.equal details.turn_ref) row.turn_ref
+           && List.exists
+                (fun target -> surface_matches_delivery_target target row.surface)
+                settled_effect_targets)
+     | Some row, [] -> not (String.equal row.content details.reply)
+     | None, _ :: _ -> true
+     | None, [] -> not (String.equal (String.trim details.reply) ""))
 ;;
 
 (* Rule 4: the sorted execution_id multisets of Tool_result_ready events and

@@ -361,7 +361,7 @@ let test_adapter_settles_when_the_bus_closes_without_a_terminal () =
       failf "a closed bus must settle exactly once with an error, got %d callback(s)"
         (List.length outcomes)
 
-let test_adapter_empty_terminal_is_local_error () =
+let test_adapter_empty_terminal_settles_ok () =
   let sends = ref 0 in
   let outcomes =
     run_adapter
@@ -377,11 +377,7 @@ let test_adapter_empty_terminal_is_local_error () =
         Ok ())
   in
   check int "empty terminal makes no Discord call" 0 !sends;
-  match outcomes with
-  | [ Error (Discord_rest_client.Other { reason; _ }) ] ->
-    check bool "empty terminal failure is explicit" true
-      (contains reason "contained no text")
-  | _ -> fail "empty terminal settles once with a local delivery error"
+  check_single_ok "empty terminal settles Ok ()" outcomes
 
 let test_completed_external_effect_settles_without_duplicate_send () =
   let sends = ref 0 in
@@ -789,8 +785,8 @@ let () =
             test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail
         ; test_case "streamed response ownership survives retry" `Quick
             test_streamed_response_owner_survives_retry
-        ; test_case "empty terminal is local-only" `Quick
-            test_adapter_empty_terminal_is_local_error
+        ; test_case "empty terminal settles Ok ()" `Quick
+            test_adapter_empty_terminal_settles_ok
         ; test_case "completed effect sends no duplicate reply" `Quick
             test_completed_external_effect_settles_without_duplicate_send
         ; test_case "callback reports final PATCH failure" `Quick

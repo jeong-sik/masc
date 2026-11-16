@@ -64,7 +64,7 @@ let string_field ~context fields name =
 let option_string = function None -> "" | Some value -> value
 
 let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
-      ~channel_user_id ~channel_workspace_id ~workspace_id =
+      ~channel_user_id ~channel_workspace_id ~conversation_id ~workspace_id =
   if String.trim thread_id = ""
   then Error "Keeper chat operation source thread_id must not be blank"
   else
@@ -151,6 +151,31 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       else if not (String.equal channel_user_id user_id)
       then Error "iMessage Keeper chat operation speaker does not match continuation"
       else Ok ()
+    | ( Keeper_continuation_channel.Gate
+          { channel = route_channel
+          ; workspace_id = route_workspace
+          ; conversation_id = route_conversation
+          ; user_id
+          }
+      , Surface_ref.Gate { label = surface_label; _ } ) ->
+      let expected_label =
+        match String.trim channel with
+        | "" -> "gate"
+        | trimmed -> trimmed
+      in
+      if not (String.equal route_channel expected_label)
+      then Error "Gate Keeper chat operation channel does not match continuation"
+      else if not (String.equal surface_label route_channel)
+      then Error "Gate Keeper chat operation surface does not match continuation"
+      else if not (String.equal channel_user_id user_id)
+      then Error "Gate Keeper chat operation speaker does not match continuation"
+      else if not (String.equal (String.trim channel_workspace_id) (option_string route_workspace))
+      then Error "Gate Keeper chat operation workspace does not match continuation"
+      else if workspace_id <> route_workspace
+      then Error "Gate Keeper chat operation typed workspace does not match continuation"
+      else if conversation_id <> route_conversation
+      then Error "Gate Keeper chat operation conversation does not match continuation"
+      else Ok ()
     (* A Keeper reply route is internal by construction: it is created only
        when one Keeper asks another to run a turn, which is the Agent
        surface. There is no external speaker to attribute, so one carried
@@ -172,6 +197,7 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       | Keeper_continuation_channel.Slack _
       | Keeper_continuation_channel.Telegram _
       | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Gate _
       | Keeper_continuation_channel.Keeper _), _ ->
       Error "Keeper chat operation surface kind does not match continuation"
 ;;
@@ -215,6 +241,7 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
         ~channel
         ~channel_user_id
         ~channel_workspace_id
+        ~conversation_id
         ~workspace_id
   in
   let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
@@ -353,6 +380,7 @@ let source_of_json json =
       ~channel
       ~channel_user_id
       ~channel_workspace_id
+      ~conversation_id
       ~workspace_id
   in
   let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in

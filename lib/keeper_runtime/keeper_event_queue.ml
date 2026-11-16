@@ -586,8 +586,9 @@ let continuation_channel_rank (channel : Keeper_continuation_channel.t) =
   | Keeper_continuation_channel.Slack _ -> 2
   | Keeper_continuation_channel.Telegram _ -> 3
   | Keeper_continuation_channel.Imessage _ -> 4
-  | Keeper_continuation_channel.Keeper _ -> 5
-  | Keeper_continuation_channel.Unrouted _ -> 6
+  | Keeper_continuation_channel.Gate _ -> 5
+  | Keeper_continuation_channel.Keeper _ -> 6
+  | Keeper_continuation_channel.Unrouted _ -> 7
 
 let compare_continuation_channel
       (left : Keeper_continuation_channel.t)
@@ -659,6 +660,17 @@ let compare_continuation_channel
          compare_chain
            (Option.compare String.compare l.chat_guid r.chat_guid)
            (fun () -> String.compare l.user_id r.user_id))
+  | ( Keeper_continuation_channel.Gate l
+    , Keeper_continuation_channel.Gate r ) ->
+    compare_chain
+      (String.compare l.channel r.channel)
+      (fun () ->
+         compare_chain
+           (Option.compare String.compare l.workspace_id r.workspace_id)
+           (fun () ->
+              compare_chain
+                (Option.compare String.compare l.conversation_id r.conversation_id)
+                (fun () -> String.compare l.user_id r.user_id)))
   | ( Keeper_continuation_channel.Keeper { keeper_name = l }
     , Keeper_continuation_channel.Keeper { keeper_name = r } ) ->
     String.compare l r
@@ -670,6 +682,7 @@ let compare_continuation_channel
       | Keeper_continuation_channel.Slack _
       | Keeper_continuation_channel.Telegram _
       | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Gate _
       | Keeper_continuation_channel.Keeper _
       | Keeper_continuation_channel.Unrouted _ )
     , ( Keeper_continuation_channel.Dashboard _
@@ -677,6 +690,7 @@ let compare_continuation_channel
       | Keeper_continuation_channel.Slack _
       | Keeper_continuation_channel.Telegram _
       | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Gate _
       | Keeper_continuation_channel.Keeper _
       | Keeper_continuation_channel.Unrouted _ ) ) ->
     Int.compare (continuation_channel_rank left) (continuation_channel_rank right)

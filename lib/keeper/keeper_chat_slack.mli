@@ -77,8 +77,9 @@ val adapter_loop :
     [on_send_result] is invoked exactly once for the terminal
     [Run_finished]/[Event_error] delivery. Interim protocol diagnostics do not
     settle the callback, so an earlier diagnostic cannot hide a later final
-    send failure. Empty terminal output reports a typed [Other] error. The
-    callback defaults to a no-op.
+    send failure. A turn that finishes legitimately with no text or blocks
+    settles [Ok ()] without sending an empty message. The callback defaults to a
+    no-op.
 
     The loop exits after one turn. *)
 

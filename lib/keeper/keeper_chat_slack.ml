@@ -696,9 +696,19 @@ let adapter_loop_with_transport
               | _ -> send_blocks ~content:delivered_text ~blocks
             in
             on_send_result result
-          else
-            on_send_result
-              (Error (Other "Slack terminal reply contained no text or blocks"))
+          else begin
+            (* A run that produced no visible reply or blocks has been delivered
+               in full (matching iMessage and Telegram); clean up any stale
+               placeholder draft from a retired attempt instead of failing
+               delivery. *)
+            let cleanup_result =
+              match streaming_transport, message_id with
+              | Some { delete_stream; _ }, Some stale_message_id ->
+                delete_stream ~message_id:stale_message_id
+              | _ -> Ok ()
+            in
+            on_send_result cleanup_result
+          end
         end;
         clear_activity ();
         Keeper_chat_events.reader_gone events
@@ -722,6 +732,18 @@ let adapter_loop_with_transport
         clear_activity ();
         Keeper_chat_events.reader_gone events
     | Run_started { run_id; thread_id = _ } ->
+        (match streaming_transport, message_id with
+         | Some { delete_stream; _ }, Some prior_message_id ->
+           (match delete_stream ~message_id:prior_message_id with
+            | Ok () -> ()
+            | Error error ->
+              Log.Keeper.warn
+                "keeper_chat_slack: stale stream cleanup failed (message_id=%s): %s"
+                prior_message_id
+                (Format.asprintf "%a" pp_error error))
+         | _ -> ());
+        external_effect_completed := false;
+        external_effect_cleanup_result := Ok ();
         update_activity "답변을 준비하고 있어요…";
         (* A new run's work is its own; the previous run's trail went out with
            the previous run's reply. *)
@@ -732,7 +754,7 @@ let adapter_loop_with_transport
           ~ownership:(Keeper_chat_response_ownership.create ())
     | Agent_core_runtime_attempt_started _ ->
         let ownership = Keeper_chat_response_ownership.retire_attempt ownership in
-        continue ~ownership ~acc_text:"" ()
+        continue ~ownership ~acc_text:"" ~acc_blocks:[] ()
     | Provider_retry_observed _ -> continue ()
     | Text_message_start { message_id = _; role = _ } ->
         continue ()

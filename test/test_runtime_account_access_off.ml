@@ -255,6 +255,15 @@ let test_turned_off () =
           Access.Operator_call
           (captured (List.fold_left Filename.concat root_link [ "official-clients"; "claude"; "account-later" ]))
           on_person_home;
+        refused
+          "a home disguised via dot-dot traversal into accounts"
+          Access.Operator_call
+          (captured
+             (List.fold_left
+                Filename.concat
+                (Common.masc_dir_from_base_path ~base_path)
+                [ "nonexistent"; ".."; Layout.accounts_dir; "ns"; "official-clients"; "claude"; "acc" ]))
+          on_person_home;
         (* A person's own account starts nothing. *)
         refused
           "the person's own account"

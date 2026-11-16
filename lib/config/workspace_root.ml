@@ -41,8 +41,14 @@ let absolute ~cwd path =
   if not (Filename.is_relative path) then Some path
   else Option.map (fun cwd -> Filename.concat cwd path) cwd
 
+let expand_tilde raw =
+  if String.equal raw "~" || String.starts_with ~prefix:"~/" raw
+  then Env_config_core.normalize_masc_base_path_input raw
+  else raw
+
 let chosen observation source raw =
-  match absolute ~cwd:observation.cwd raw with
+  let expanded = expand_tilde raw in
+  match absolute ~cwd:observation.cwd expanded with
   | None -> Error (Unanchored { source; requested = raw })
   | Some path ->
     let normalized = Env_config_core.normalize_masc_base_path_input path in

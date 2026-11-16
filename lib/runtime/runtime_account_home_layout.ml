@@ -22,10 +22,23 @@ let person_runtime_root ~base_path ~namespace =
     [ accounts_dir; Authz_types.Account_home_namespace.to_string namespace ]
 ;;
 
-(* The parts of a path: [.] and the empty parts of a doubled or trailing slash
-   are dropped, and [..] stays a part. *)
+(* The canonical lexical parts of a path: [.], empty segments, and [..] parent
+   segments are resolved so [other/../accounts/...] cannot disguise a path under
+   [accounts/] as a sibling directory. *)
 let parts path =
-  List.filter (fun part -> part <> "" && part <> ".") (String.split_on_char '/' path)
+  let absolute = String.length path > 0 && Char.equal path.[0] '/' in
+  let rec fold acc = function
+    | [] -> List.rev acc
+    | ("" | ".") :: rest -> fold acc rest
+    | ".." :: rest ->
+      (match acc, absolute with
+       | ".." :: _, false -> fold (".." :: acc) rest
+       | _ :: tail, _ -> fold tail rest
+       | [], true -> fold [] rest
+       | [], false -> fold [ ".." ] rest)
+    | part :: rest -> fold (part :: acc) rest
+  in
+  fold [] (String.split_on_char '/' path)
 ;;
 
 let rec leads_into ~ancestor parts =

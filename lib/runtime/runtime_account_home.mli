@@ -1,7 +1,12 @@
 val of_string : string -> (string, string) result
-(** Accept a non-empty UTF-8 absolute path without NUL bytes or surrounding whitespace. Preserve
+(** Accept a non-empty UTF-8 absolute path (or [~] / [~/...] expanded against
+    process [HOME]) without NUL bytes or surrounding whitespace. Preserve
     its exact spelling: an official client's credential store may use the home
     path text as part of its Keychain identity. *)
+
+val of_string_under : home:string option -> string -> (string, string) result
+(** Same as {!of_string}, expanding [~] / [~/...] only against the caller's
+    explicit [home] instead of ambient process [HOME]. *)
 
 val of_inherited : string -> (string, string) result
 (** Resolve a relative inherited CLI home against this process's cwd. Unlike

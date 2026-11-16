@@ -94,7 +94,14 @@ let a_relative_named_value_without_a_cwd_is_unanchored () =
   check string "relative environment" "unanchored"
     (source_label (Workspace_root.resolve (observation ~environment:"ws" ())));
   check string "absolute flag needs no cwd" "explicit_cli"
-    (source_label (Workspace_root.resolve (observation ~flag:"/ws" ())))
+    (source_label (Workspace_root.resolve (observation ~flag:"/ws" ())));
+  (match Sys.getenv_opt "HOME" with
+   | Some home when String.trim home <> "" && not (Filename.is_relative (String.trim home)) ->
+     let expected = Filename.concat (String.trim home) "ws-tilde-check" in
+     check string "tilde flag expands against HOME instead of cwd"
+       expected
+       (root_of (Workspace_root.resolve (observation ~cwd:"/unrelated/cwd" ~flag:"~/ws-tilde-check" ())))
+   | Some _ | None -> ())
 
 (* Unlink symlinks instead of following them. [Sys.is_directory] stats through a
    link, so a directory link would be walked into and its target emptied; a

@@ -4,16 +4,22 @@ open Authz_types
 module R = Login_routes
 
 let github_authorize_origin = "https://github.com"
+let google_authorize_origin = "https://accounts.google.com"
 
-(* The start of a login answers a 303 to GitHub, and a browser checks
-   [form-action] on that redirect too. *)
-let policy ~nonce =
+(* The start of a login answers a 303 to GitHub (or Google when configured),
+   and a browser checks [form-action] on that redirect too. *)
+let policy ?(google = false) ~nonce () =
+  let form_origins =
+    if google
+    then github_authorize_origin ^ " " ^ google_authorize_origin
+    else github_authorize_origin
+  in
   Printf.sprintf
     "default-src 'none'; script-src %s; %s; connect-src 'self'; form-action 'self' %s; \
      base-uri 'none'; frame-ancestors 'none'"
     (Csp_nonce.source nonce)
     (Account_page.style_source ~nonce)
-    github_authorize_origin
+    form_origins
 ;;
 
 (* Under no-referrer a browser sends "Origin: null" with a form POST (Fetch,
@@ -22,13 +28,13 @@ let policy ~nonce =
    the form and still sends no Referer to GitHub. *)
 let referrer_policy = "referrer-policy", "same-origin"
 
-let page ~nonce ~title ~body ~script =
+let page ?(google = false) ~nonce ~title ~body ~script () =
   { R.status = R.Ok_200
   ; headers =
       [ "content-type", "text/html; charset=utf-8"
       ; "cache-control", "no-store"
       ; referrer_policy
-      ; "content-security-policy", policy ~nonce
+      ; "content-security-policy", policy ~google ~nonce ()
       ]
   ; body =
       Account_page.document
@@ -70,6 +76,22 @@ let start_form ~invite ~github ~label =
     ]
 ;;
 
+let google_start_form ~invite ~google ~label =
+  if not google
+  then ""
+  else
+    String.concat
+      "\n"
+      [ "<form method=\"post\" action=\"/auth/oidc/start\">"
+      ; (if invite then "<input type=\"hidden\" id=\"google-invite\" name=\"invite\">" else "")
+      ; Printf.sprintf
+          "<input type=\"hidden\" name=\"return_to\" value=\"%s\">"
+          Account_page.console_path
+      ; Printf.sprintf "<button id=\"google-go\" class=\"button block\">%s</button>" label
+      ; "</form>"
+      ]
+;;
+
 (* The script takes the token from the fragment and drops the fragment from
    the address bar, so the token is in no request line, and the entry of the
    tab's history that the page read it in keeps the address without it. The
@@ -92,12 +114,16 @@ let invite_script =
 history.replaceState(null, "", location.pathname);
 addEventListener("hashchange", () => {
   document.getElementById("go").disabled = true;
+  const googleGo = document.getElementById("google-go");
+  if (googleGo) googleGo.disabled = true;
   document.getElementById("accept").hidden = true;
   document.getElementById("note").textContent =
     "새 초대 링크를 불러오고 있어요. 화면이 바뀌지 않으면 새로고침해 주세요.";
   location.reload();
 });
 document.getElementById("invite").value = token;
+const googleInvite = document.getElementById("google-invite");
+if (googleInvite) googleInvite.value = token;
 if (token === "") {
   document.title = "이 주소에는 초대 정보가 없어요";
   document.getElementById("title").textContent = document.title;
@@ -108,29 +134,35 @@ if (token === "") {
 }|}
 ;;
 
-let invite_page ~nonce ~github =
+let invite_page ~google ~nonce ~github =
   page
+    ~google
     ~nonce
     ~title:"MASC 초대"
     ~body:
       (String.concat
          "\n"
-         [ "<div class=\"narrow\">"
-         ; "<div class=\"card\">"
-         ; "<h1 id=\"title\">초대를 받았어요</h1>"
-         ; "<p id=\"note\">GitHub 계정으로 로그인하면 초대를 수락하고 이 서버를 쓸 수 있어요.</p>"
-         ; "<div id=\"accept\">"
-         ; start_form ~invite:true ~github ~label:"GitHub로 로그인하고 수락하기"
-         ; "<ul class=\"notes\">"
-         ; "<li>초대 링크는 한 번만 쓸 수 있어요.</li>"
-         ; "<li>기한이 지나면 쓸 수 없어요.</li>"
-         ; "</ul>"
-         ; "</div>"
-         ; "<p id=\"back\" hidden><a class=\"button block\" href=\"/\">로그인 화면으로</a></p>"
-         ; "</div>"
-         ; "</div>"
-         ])
+         ([ "<div class=\"narrow\">"
+          ; "<div class=\"card\">"
+          ; "<h1 id=\"title\">초대를 받았어요</h1>"
+          ; "<p id=\"note\">계정으로 로그인하면 초대를 수락하고 이 서버를 쓸 수 있어요.</p>"
+          ; "<div id=\"accept\">"
+          ; start_form ~invite:true ~github ~label:"GitHub로 로그인하고 수락하기"
+          ]
+          @ (if google
+             then [ google_start_form ~invite:true ~google ~label:"Google로 로그인하고 수락하기" ]
+             else [])
+          @ [ "<ul class=\"notes\">"
+            ; "<li>초대 링크는 한 번만 쓸 수 있어요.</li>"
+            ; "<li>기한이 지나면 쓸 수 없어요.</li>"
+            ; "</ul>"
+            ; "</div>"
+            ; "<p id=\"back\" hidden><a class=\"button block\" href=\"/\">로그인 화면으로</a></p>"
+            ; "</div>"
+            ; "</div>"
+            ]))
     ~script:invite_script
+    ()
 ;;
 
 (* The subscription connect route of the server, which the preview serves
@@ -233,46 +265,52 @@ show();|}
     Authz_browser_request.csrf_header
 ;;
 
-let home_page ~nonce ~github =
+let home_page ~google ~nonce ~github =
   page
+    ~google
     ~nonce
     ~title:"MASC 계정"
     ~body:
       (String.concat
          "\n"
-         [ "<div id=\"signin\" class=\"narrow\">"
-         ; "<div class=\"card\">"
-         ; "<h1>로그인</h1>"
-         ; "<p>초대받은 계정으로 로그인하면 내 구독을 연결하고 내 Keeper를 만들 수 있어요.</p>"
-         ; start_form ~invite:false ~github ~label:"GitHub로 계속하기"
-         ; "</div>"
-         ; "<p class=\"hint center\">초대 링크를 받았다면 그 링크를 먼저 열어 주세요. 초대는 이 서버를 운영하는 사람에게 요청할 수 있어요.</p>"
-         ; "</div>"
-           (* The two views below are shown in place of the sign-in, so each
-              is an alert: a screen reader says it as it appears. This one is
-              for session routes that did not say whether a session is
-              open. *)
-         ; "<div id=\"unread\" class=\"narrow\" role=\"alert\" hidden>"
-         ; "<div class=\"card\">"
-         ; "<h1>로그인 상태를 확인하지 못했어요</h1>"
-         ; "<p>서버가 지금 로그인 상태를 알려 주지 못해요. 로그인은 그대로일 수 있어요. 잠시 뒤에 다시 열어 주세요.</p>"
-         ; "<p><a class=\"button block\" href=\"/\">다시 열기</a></p>"
-         ; "</div>"
-         ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
-         ; "</div>"
-           (* For a session whose console the server cannot give now. *)
-         ; "<div id=\"stuck\" class=\"narrow\" role=\"alert\" hidden>"
-         ; "<div class=\"card\">"
-         ; "<h1>지금은 내 계정 화면을 열 수 없어요</h1>"
-         ; "<p>로그인은 되어 있어요. 서버가 지금 이 화면을 보여 주지 못해요. 잠시 뒤에 다시 열어 주세요.</p>"
-         ; "<p><a class=\"button primary block\" href=\"/\">다시 열기</a></p>"
-         ; "<p><button id=\"leave\" type=\"button\" class=\"block\">로그아웃</button></p>"
-         ; "<p id=\"leave-note\" class=\"hint\" role=\"status\"></p>"
-         ; "</div>"
-         ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
-         ; "</div>"
-         ])
+         ([ "<div id=\"signin\" class=\"narrow\">"
+          ; "<div class=\"card\">"
+          ; "<h1>로그인</h1>"
+          ; "<p>초대받은 계정으로 로그인하면 내 구독을 연결하고 내 Keeper를 만들 수 있어요.</p>"
+          ; start_form ~invite:false ~github ~label:"GitHub로 계속하기"
+          ]
+          @ (if google
+             then [ google_start_form ~invite:false ~google ~label:"Google로 계속하기" ]
+             else [])
+          @ [ "</div>"
+            ; "<p class=\"hint center\">초대 링크를 받았다면 그 링크를 먼저 열어 주세요. 초대는 이 서버를 운영하는 사람에게 요청할 수 있어요.</p>"
+            ; "</div>"
+              (* The two views below are shown in place of the sign-in, so each
+                 is an alert: a screen reader says it as it appears. This one is
+                 for session routes that did not say whether a session is
+                 open. *)
+            ; "<div id=\"unread\" class=\"narrow\" role=\"alert\" hidden>"
+            ; "<div class=\"card\">"
+            ; "<h1>로그인 상태를 확인하지 못했어요</h1>"
+            ; "<p>서버가 지금 로그인 상태를 알려 주지 못해요. 로그인은 그대로일 수 있어요. 잠시 뒤에 다시 열어 주세요.</p>"
+            ; "<p><a class=\"button block\" href=\"/\">다시 열기</a></p>"
+            ; "</div>"
+            ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
+            ; "</div>"
+              (* For a session whose console the server cannot give now. *)
+            ; "<div id=\"stuck\" class=\"narrow\" role=\"alert\" hidden>"
+            ; "<div class=\"card\">"
+            ; "<h1>지금은 내 계정 화면을 열 수 없어요</h1>"
+            ; "<p>로그인은 되어 있어요. 서버가 지금 이 화면을 보여 주지 못해요. 잠시 뒤에 다시 열어 주세요.</p>"
+            ; "<p><a class=\"button primary block\" href=\"/\">다시 열기</a></p>"
+            ; "<p><button id=\"leave\" type=\"button\" class=\"block\">로그아웃</button></p>"
+            ; "<p id=\"leave-note\" class=\"hint\" role=\"status\"></p>"
+            ; "</div>"
+            ; "<p class=\"hint center\">계속 이러면 이 서버를 운영하는 사람에게 알려 주세요.</p>"
+            ; "</div>"
+            ]))
     ~script:home_script
+    ()
 ;;
 
 let principal_json = function

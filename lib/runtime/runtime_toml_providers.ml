@@ -525,12 +525,13 @@ let parse_provider ~home (id : string) (tbl : Otoml.t)
       match typed_find "a string" path tbl "account-home" Otoml.get_string with
       | Error errors -> Error errors
       | Ok None -> Ok None
-      | Ok (Some home) ->
+      | Ok (Some raw_home) ->
         (match api_format with
-         | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime
-           when Runtime_account_home.is_valid home -> Ok (Some home)
          | Codex_app_server_runtime | Claude_code_runtime | Muse_serve_runtime ->
-           Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
+           (match Runtime_account_home.of_string_under ~home raw_home with
+            | Ok expanded -> Ok (Some expanded)
+            | Error _ ->
+              Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace"))
          | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
          | Runtime_schema.Antigravity_cli_runtime

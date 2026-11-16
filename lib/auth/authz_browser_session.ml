@@ -82,10 +82,28 @@ let issue zone ~user_id ~draw ~replaces =
     | Some (_ : Authz_session_state.session) | None ->
       let secret = Random_id.hex ~bytes:secret_bytes in
       let secret_digest = Authz_session_event.Secret_digest.of_secret secret in
-      let* (_ : Authz_zone.committed) =
-        commit zone ~user_id (Authz_session_event.Issued { session_id; user_id; secret_digest; replaces })
-      in
-      Ok { Cookie.session_id; secret }
+      (match
+         commit zone ~user_id (Authz_session_event.Issued { session_id; user_id; secret_digest; replaces })
+       with
+       | Ok (_ : Authz_zone.committed) -> Ok { Cookie.session_id; secret }
+       | Error (Commit_failed (Authz_zone.Refused _)) when left > 1 -> go (left - 1)
+       | Error
+           ( Id_not_drawn _
+           | Body_not_built _
+           | Commit_failed
+               ( Authz_zone.Store_stopped _
+               | Authz_zone.Log_stopped _
+               | Authz_zone.Uncertain _
+               | Authz_zone.Store_holds_no_answer
+               | Authz_zone.Log_holds_records _
+               | Authz_zone.Record_not_built _
+               | Authz_zone.Refused _
+               | Authz_zone.Store_entry_refused _
+               | Authz_zone.Abort_not_confirmed _
+               | Authz_zone.Settlement_not_written _
+               | Authz_zone.Intent_not_written _
+               | Authz_zone.Record_not_appended _
+               | Authz_zone.Answer_not_written _ ) ) as err -> err)
   in
   go attempts
 ;;

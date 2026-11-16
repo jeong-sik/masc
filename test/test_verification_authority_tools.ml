@@ -808,7 +808,7 @@ let test_root_layout_reports_entries_and_discovered_checkouts () =
 ;;
 
 let run_git_lines ~cwd args =
-  match Repo_git.run_git ~cwd Repo_git.Reports_on_stdout args with
+  match Repo_git.run_git ~cwd args with
   | Ok lines -> lines
   | Error error ->
     Alcotest.failf "git %s failed: %s" (String.concat " " args) error

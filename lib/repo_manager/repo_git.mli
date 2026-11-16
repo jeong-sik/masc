@@ -46,37 +46,22 @@ val clone : repository:repository -> (unit, string) result
     Over HTTP(S), a transfer that moves less than a byte a second for a minute
     fails with git's own error. *)
 
-(** What a Git command prints on standard output. A failed run's error carries
-    the exit status and standard error; this decides whether it may also carry
-    standard output. *)
-type stdout_role =
-  | Reads_data
-      (** Standard output is what the command read: file lines, paths, refs,
-          a remote URL. A run stopped part-way, a timeout included, leaves what
-          it read so far there with an empty standard error, so a failure never
-          quotes it. *)
-  | Reports_on_stdout
-      (** Standard output, when there is any, is the command's own account of
-          what it did: [commit] with nothing to commit says so there, exits 1
-          and leaves standard error empty. A failure with an empty standard
-          error quotes it. *)
-
 val run_git :
   cwd:string ->
   ?env:(string * string) list ->
   ?timeout_sec:float ->
-  stdout_role ->
   string list ->
   (string list, string) result
-(** [run_git ~cwd role args] runs [git -C cwd args] through the repo-manager
-    Git execution wrapper and returns non-empty stdout lines. [role] says what
-    the command prints on standard output. Callers must pass argv tokens, never
-    shell text. *)
+(** [run_git ~cwd args] runs [git -C cwd args] through the repo-manager Git
+    execution wrapper and returns non-empty stdout lines. Callers must pass
+    argv tokens, never shell text. A failure names the arguments, the exit
+    status and standard error, never standard output: a run stopped part-way
+    leaves there what it had read. *)
 
 val run_git_read_only_raw : cwd:string -> string list -> (string, string) result
-(** [run_git] with {!Reads_data} and without splitting: the exact stdout bytes,
-    read with [GIT_OPTIONAL_LOCKS=0] and no prompt, for a reader that must keep
-    a commit's or a file's bytes as they are. No timeout. *)
+(** [run_git] without splitting: the exact stdout bytes, read with
+    [GIT_OPTIONAL_LOCKS=0] and no prompt, for a reader that must keep a
+    commit's or a file's bytes as they are. No timeout. *)
 
 val fetch : repository:repository -> (string list, string) result
 (** [fetch ~repository] fetches all remotes and returns the list of remote
@@ -307,7 +292,8 @@ val grep_result_of_z_output :
 (** Pure reader for [git grep -n -z] output ([path NUL line NUL text LF] per
     row; a path may contain a newline). Keeps the first [max_matches] rows. A malformed row, including the
     truncation marker the process capture inserts into oversized output, is an
-    [Error _]; it is never skipped. *)
+    [Error _]; it is never skipped. The error names the row's byte offset,
+    never its bytes. *)
 
 val grep_at :
   ?timeout_sec:float ->

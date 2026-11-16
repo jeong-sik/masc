@@ -1,3 +1,3 @@
 ### Fixed
 
-- A Git read that stops part-way, a timeout included, no longer carries what it had read on standard output into its failure text. `Repo_git.run_git` takes whether a command reads data or reports on standard output; only a reporting command such as `merge` or `commit` has its standard output quoted, and the search's own exception from #52174 is the same rule (#PENDING).
+- A Git read that stops part-way, a timeout included, no longer carries what it had read on standard output into its failure text: `Repo_git` failures quote only the exit status and standard error, the rule #52174 gave the search alone. When git's output cannot be read, the error says which field or byte offset was wrong instead of quoting the status row, worktree record, branch record or search row (#PENDING).

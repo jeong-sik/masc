@@ -1097,6 +1097,99 @@ let test_discarded_bundle_retires_readings_before_reconfirming_a () =
   Alcotest.(check string) "draft survives discarded bundle" "retained draft"
     (Masc_tui_message_input.contents state.msg_input)
 
+(* A full pass and a navigation read that joined it while it ran, as
+   [start_http_refresh] and [start_http_scoped_refresh] dispatch them. The
+   full pass reads Work (Planning and the Goal tree), the navigation Board. *)
+let overlapping_full_and_navigation state =
+  let open Masc_tui_types in
+  let module Order = Surface_read_order in
+  let needs view = surface_needs ~about_open:false ~keeper_pane_drawn:false view in
+  let ticket = Http_refresh_order.dispatch state.http_refresh_order in
+  begin_http_refresh_state state ~ticket ~started_ns:1L;
+  let reads, full = Order.dispatch ~kind:Order.Full ~needs:(needs Planning)
+      ~started_ns:1L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  Alcotest.(check bool) "a full pass alone owns its identity reading" true
+    (Order.owns_identity state.http_surface_reads full);
+  state.http_refresh_order <- Http_refresh_order.for_navigation
+      ~collection_inflight:true state.http_refresh_order;
+  let reads, navigation = Order.dispatch ~kind:Order.Navigation ~needs:(needs Board)
+      ~started_ns:2L state.http_surface_reads in
+  state.http_surface_reads <- reads;
+  Alcotest.(check bool) "the joining navigation owns it next" true
+    (Order.owns_identity state.http_surface_reads navigation);
+  ticket, full, navigation
+
+(* The stored identity a collector's admission leaves, as
+   [apply_server_identity_reading] stores a confirmed reading. *)
+let apply_admitted_identity state admission reading =
+  let open Masc_tui_types in
+  match admission with
+  | Admit_identity_and_data | Admit_identity_only ->
+      store_server_identity_reading state reading;
+      state.workspace_identity <- next_workspace_identity ~previous:state.workspace_identity
+          ~local_paths:state.local_workspace_paths reading
+  | Admit_data_only | Admit_nothing -> ()
+
+let test_late_full_bundle_cannot_put_back_the_workspace_navigation_saw_leave () =
+  let open Masc_tui_types in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 () in
+  state.server_identity <- Some (identity "/workspace/a");
+  state.workspace_identity <- Workspace_identity_match;
+  let ticket, full, _navigation = overlapping_full_and_navigation state in
+  (* The navigation probe reads B, so its refusal applies its own last probe
+     ([apply_http_scoped_refresh_failure]). *)
+  let b = Ok (identity "/workspace/b") in
+  apply_admitted_identity state Admit_identity_only
+    (retire_refused_workspace_readings state ~detail:"Workspace identity changed" (Some b));
+  (* The full pass read A before and after its surfaces and arrives last. *)
+  let a = Ok (identity "/workspace/a") in
+  Alcotest.(check bool) "the shared ticket still admits the full bundle" true
+    (Http_refresh_order.is_current state.http_refresh_order ticket);
+  let admission = collector_admission state full a in
+  let datasets = take_http_surface_datasets state full in
+  apply_admitted_identity state admission a;
+  Alcotest.(check bool) "the older A reading publishes nothing" true (admission = Admit_nothing);
+  Alcotest.(check bool) "the full pass owns no Work dataset after the withdrawal" true
+    (datasets = []);
+  Alcotest.(check bool) "B stays the server identity" true
+    (server_workspace_matches ~expected:state.server_identity b);
+  Alcotest.(check bool) "the workspace stays a mismatch" true
+    (match state.workspace_identity with
+     | Workspace_identity_mismatch _ -> true
+     | Workspace_identity_unread | Workspace_identity_match
+     | Workspace_identity_match_unconfirmed _ -> false)
+
+let test_late_full_bundle_keeps_the_newer_process_and_publishes_its_own_data () =
+  let open Masc_tui_types in
+  let module Order = Surface_read_order in
+  let process name =
+    { (identity "/workspace/a") with sid_runtime_instance_id = Some name } in
+  let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a" ~port:0 () in
+  state.server_identity <- Some (process "first");
+  state.workspace_identity <- Workspace_identity_match;
+  let _ticket, full, navigation = overlapping_full_and_navigation state in
+  (* Another process now serves the same workspace; the navigation read
+     confirms it and settles. *)
+  let replacement = Ok (process "replacement") in
+  let admission = collector_admission state navigation replacement in
+  ignore (take_http_surface_datasets state navigation);
+  apply_admitted_identity state admission replacement;
+  state.http_surface_reads <- Order.finish state.http_surface_reads navigation;
+  Alcotest.(check bool) "the navigation applies its reading and data" true
+    (admission = Admit_identity_and_data);
+  let first = Ok (process "first") in
+  let admission = collector_admission state full first in
+  let datasets = take_http_surface_datasets state full in
+  apply_admitted_identity state admission first;
+  Alcotest.(check bool) "the same workspace keeps the full pass's own data" true
+    (admission = Admit_data_only);
+  Alcotest.(check bool) "the full pass still owns Planning and the Goal tree" true
+    (List.mem Order.Planning_data datasets && List.mem Order.Overview_goals_data datasets);
+  Alcotest.(check (option string)) "the newer process stays the server identity"
+    (Some "replacement")
+    (Option.bind state.server_identity (fun identity -> identity.Tui_decode.sid_runtime_instance_id))
+
 let test_preset_selection_waits_without_owning_an_unconfirmed_read () =
   let open Masc_tui_types in
   let state = create_state ~workspace:"a" ~local_base_path:"/workspace/a"
@@ -7211,6 +7304,10 @@ let () =
             test_nested_read_owners_retire_without_losing_selection
         ; Alcotest.test_case "discarded bundle retires readings before reconfirming A" `Quick
             test_discarded_bundle_retires_readings_before_reconfirming_a
+        ; Alcotest.test_case "late full bundle cannot put back A after navigation saw B" `Quick
+            test_late_full_bundle_cannot_put_back_the_workspace_navigation_saw_leave
+        ; Alcotest.test_case "late full bundle keeps the newer process and its own data" `Quick
+            test_late_full_bundle_keeps_the_newer_process_and_publishes_its_own_data
         ; Alcotest.test_case "preset selection waits without an unconfirmed read" `Quick
             test_preset_selection_waits_without_owning_an_unconfirmed_read
         ; Alcotest.test_case "operation receipt outlives queued follow-up read" `Quick

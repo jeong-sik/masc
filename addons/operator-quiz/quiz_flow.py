@@ -34,7 +34,7 @@ import quiz_grading as g
 import quiz_log as q
 import records
 from records import (  # noqa: F401  -- the names this package's modules and tests read from here
-    InvalidBinding, InvalidResult, digest, grants_of_binding, material, since_of_binding)
+    InvalidBinding, InvalidResult, Refused, digest, grants_of_binding, parse_result, since_of_binding)
 
 AUTHOR = "author"
 GRADE = "grade"
@@ -304,8 +304,8 @@ class Flow:
 
     # -- listing --------------------------------------------------------------
 
-    def _session_reads(self, session: q.Session) -> list[dict]:
-        """The session's reads, each with the summary of its result."""
+    def _session_reads(self, session: q.Session) -> list[records.Read]:
+        """The session's reads, each with what the listing keeps of its result."""
         return self._reads.summaries([event.digest for event in session.material], session.grants)
 
     def _material(self, session: q.Session, sessions: list[q.Session]) -> list[dict]:
@@ -318,12 +318,11 @@ class Flow:
         request is encoded a few times rather than once per read."""
         out: list[dict] = []
         checked = 0
-        grants = {grant.source_id: grant for grant in session.grants}
         # A session that follows a lesson asks only about records a lesson
         # cited (RFC operator-quiz-follows-lesson §3.5).
         cited = q.cited(self.log.read()) if session.follows is not None else None
         for read in reversed(self._session_reads(session)):
-            page = material(self._reads.whole(read), grants)
+            page = self._reads.material(read, session.grants)
             if cited is not None:
                 page = [record for record in page
                         if q.Cite(record["kind"], record["source_id"], record["pin"]) in cited]
@@ -474,11 +473,10 @@ class Flow:
         cited = {source.sha256 for source in sources}
         out: dict[tuple[str, str, str], dict] = {}
         for session in sessions:
-            grants = {grant.source_id: grant for grant in session.grants}
             for read in self._session_reads(session):
-                if read["result"] is None or read["result"].get("sha256") not in cited:
+                if not isinstance(read.result, (records.Page, records.File)) or read.result.sha256 not in cited:
                     continue
-                for record in material(self._reads.whole(read), grants):
+                for record in self._reads.material(read, session.grants):
                     out[(record["kind"], record["source_id"], record["pin"])] = {
                         key: record[key] for key in ("kind", "source_id", "pin", "sha256", "title", "text")}
         return out
@@ -550,27 +548,20 @@ class Flow:
         return True
 
     def _deliver_read(self, session: q.Session, sessions: list[q.Session], request: dict, result: dict) -> None:
-        status = result["status"]
-        # A file a commit deleted is not a file at that commit. Its refusal is
-        # kept as read and skipped, so a release that removes fragments does
-        # not stop the session. Any other refusal ends it.
-        if status == "not_allowed" and request["kind"] != "read_file":
-            entry = {"request": request, "result": result}
-            key = digest(entry)
-            self.pages.write(key, entry)
-            self.log.append([q.MaterialRead(session.session_id, request["request_id"], key),
-                             q.SessionFailed(session.session_id,
-                                             q.NotAllowed(request["request_id"], str(result.get("reason"))))])
-            return
-        expected = {"read_records": {"records", "result_exceeds_frame"},
-                    "read_file": {"file", "result_exceeds_frame", "not_allowed"},
-                    "read_result": {"result_chunk"}}[request["kind"]]
-        if status not in expected:
-            raise InvalidResult(f"{request['kind']} cannot end as {status}")
+        # Parsed before anything of it is kept: a result this package cannot
+        # read is refused, and the host keeps it and shows the failed delivery.
+        parsed, _ = parse_result(request, result, session.grants)
         entry = {"request": request, "result": result}
         key = digest(entry)
         self.pages.write(key, entry)
         read = q.MaterialRead(session.session_id, request["request_id"], key)
+        # A file a commit deleted is not a file at that commit. Its refusal is
+        # kept as read and skipped, so a release that removes fragments does
+        # not stop the session. Any other refusal ends it.
+        if isinstance(parsed, Refused) and request["kind"] != "read_file":
+            self.log.append([read, q.SessionFailed(session.session_id,
+                                                   q.NotAllowed(request["request_id"], parsed.reason))])
+            return
         after = next(s for s in q.fold(self.log.read() + [read]) if s.session_id == session.session_id)
         if self._next_read(after, sessions) is not None:
             self.log.append([read])

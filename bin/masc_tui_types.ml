@@ -667,6 +667,10 @@ type connection_status =
   | Disconnected
   | Connecting
   | Booting
+  | Account_server of { version : string }
+      (** The address answers as the account server of a multi-account
+          installation ({!Tui_decode.Account_server}). It serves none of the
+          surfaces, so like a booting server it is asked for the probe alone. *)
   | Degraded
   | Connected
 
@@ -675,6 +679,7 @@ let connection_status_label = function
   | Degraded -> "degraded"
   | Connecting -> "connecting..."
   | Booting -> "server booting..."
+  | Account_server _ -> "account server"
   | Disconnected -> "disconnected"
 ;;
 
@@ -5004,7 +5009,10 @@ let pushed_sources : Surface_read_source.t list =
 
 (* Full and navigation reads can overlap. Each dataset keeps its own latest
    producer, so a late full bundle cannot overwrite a newer navigation read.
-   Questions, approvals and roster already have independent source owners. *)
+   The identity reading has one owner too: the latest collector dispatched,
+   full or navigation, so a late full bundle cannot put back the workspace a
+   newer navigation read saw go away. Questions, approvals and roster already
+   have independent source owners. *)
 module Surface_read_order : sig
   type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
@@ -5046,7 +5054,10 @@ module Surface_read_order : sig
   val navigation_in_flight : t -> bool
   val navigation_count : t -> int
   val navigation_active : t -> request -> bool
-  val latest_navigation : t -> request -> bool
+  val owns_identity : t -> request -> bool
+  (** Whether [request] may apply its identity reading: it is the latest
+      collector dispatched and no withdrawal came after it. A navigation
+      request also stops owning it when it completes. *)
 end = struct
   type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
@@ -5061,9 +5072,9 @@ end = struct
     next: int;
     owners: (dataset * request) list;
     active_navigation: request list;
-    latest_navigation: request option;
+    identity_owner: request option;
   }
-  let initial = {next=0; owners=[]; active_navigation=[]; latest_navigation=None}
+  let initial = {next=0; owners=[]; active_navigation=[]; identity_owner=None}
   let sources needs =
     [Transport, needs.needs_transport; Board, needs.needs_board;
      Planning, needs.needs_planning;
@@ -5096,11 +5107,11 @@ end = struct
     let request = {id=current.next; kind; started_ns;
       datasets=List.concat_map source_datasets (sources needs); owner=ref ()} in
     let retained = List.filter (fun (dataset, _) -> not (List.mem dataset request.datasets)) current.owners in
-    let active_navigation, latest_navigation = match kind with
-      | Full -> current.active_navigation, current.latest_navigation
-      | Navigation -> request :: current.active_navigation, Some request in
+    let active_navigation = match kind with
+      | Full -> current.active_navigation
+      | Navigation -> request :: current.active_navigation in
     {next=current.next+1; owners=List.map (fun dataset -> dataset,request) request.datasets @ retained;
-     active_navigation; latest_navigation}, request
+     active_navigation; identity_owner=Some request}, request
   let owned current request =
     List.filter (fun dataset ->
       match List.assoc_opt dataset current.owners with
@@ -5127,7 +5138,7 @@ end = struct
     else current, false
   (* Withdrawal retires publication and identity authority. Actual collectors
      remain tracked until their own completion; they block no navigation. *)
-  let invalidate current = {current with owners=[]; latest_navigation=None}
+  let invalidate current = {current with owners=[]; identity_owner=None}
   let pending ~needs current =
     List.filter (fun source -> List.exists (fun dataset -> List.mem_assoc dataset current.owners)
       (source_datasets source)) (sources needs)
@@ -5143,9 +5154,14 @@ end = struct
   let navigation_count current = List.length current.active_navigation
   let navigation_active current request =
     List.exists (fun active -> active.owner == request.owner) current.active_navigation
-  let latest_navigation current request =
-    navigation_active current request && match current.latest_navigation with
-    | Some latest -> latest.owner == request.owner
+  (* A full collector has no completion of its own here; its terminal bundle
+     is applied once, by the refresh that dispatched it. *)
+  let owns_identity current request =
+    let collecting = match request.kind with
+      | Full -> true
+      | Navigation -> navigation_active current request in
+    collecting && match current.identity_owner with
+    | Some owner -> owner.owner == request.owner
     | None -> false
 end
 
@@ -5196,7 +5212,8 @@ module Http_refresh_order = struct
   let dispatch (Ticket generation) = Ticket (generation + 1)
   let is_current latest ticket = latest = ticket
   (* Overlapping collectors share an interval generation. Dataset ownership
-     orders their data; the latest navigation owns its identity update. *)
+     orders their data; [Surface_read_order.owns_identity] names the one
+     collector of the interval that may apply its identity reading. *)
   let for_navigation ~collection_inflight latest =
     if collection_inflight then latest else dispatch latest
 end
@@ -12598,6 +12615,26 @@ let take_http_surface_datasets (state : state) request =
   if List.mem Surface_read_order.Board_posts datasets then
     fail_board_posts_load state "Board posts result was not observed at terminal application";
   datasets
+
+(* What a collector's verified bundle may apply once its interval is still
+   current. Only the identity owner ([Surface_read_order.owns_identity])
+   applies its identity reading. A collector that lost it to a newer dispatch
+   or a withdrawal changes no identity, and keeps its data only when it read
+   the workspace the current reading names. *)
+type collector_admission =
+  | Admit_identity_and_data
+  | Admit_identity_only
+  | Admit_data_only
+  | Admit_nothing
+
+let collector_admission (state : state) request reading =
+  match Surface_read_order.owns_identity state.http_surface_reads request, reading with
+  | true, Ok _ -> Admit_identity_and_data
+  | true, Error _ -> Admit_identity_only
+  | false, Ok _ ->
+      if server_workspace_matches ~expected:state.server_identity reading
+      then Admit_data_only else Admit_nothing
+  | false, Error _ -> Admit_nothing
 
 let finish_http_surface_read (state : state) request =
   if Surface_read_order.owns_dataset state.http_surface_reads request Surface_read_order.Board_hearths then
@@ -21986,17 +22023,6 @@ let keeper_rows_page (state : state) ~error =
        | Masc_tui_keeper_control.Roster_unobserved -> None
        | Roster_complete _ | Roster_partial _ | Roster_invalid _ -> Some ())
 
-(* What the Resources pane says under its header when no error is showing and
-   there is no row to draw, and [None] when there is one. The pane flattened
-   the list to [] before asking, so a read that answered with no resources and
-   a read not answered yet were the same empty list, and both said
-   "(loading...)" -- for good, on a server that exposes no resources. *)
-let resources_empty_note ~ko (list : Masc_tui_resource_catalog.t list option) =
-  match list with
-  | None -> Some (if ko then " (읽는 중\xe2\x80\xa6)" else " (loading\xe2\x80\xa6)")
-  | Some [] -> Some (if ko then " (리소스 없음)" else " (no resources)")
-  | Some (_ :: _) -> None
-
 (* A successful refresh need not contain a turn that just finished. Its GET
    may have started before that turn persisted, or a row may have failed to
    decode. Session output stays until the returned page names its replacement.
@@ -23599,6 +23625,34 @@ let board_read_layout ~cols ~wide =
   if cols < Masc_tui_roster_pane.threshold_cols then Board_read_one_pane
   else if wide then Board_read_wide
   else Board_read_split
+;;
+
+(* Where the open post draws its comments, in a pane [cols] wide. [z] hides
+   the post list so the thread can be read wider, so the wide layout draws it
+   under the post, as wide as the terminal. Asked of the width alone, the
+   answer put the thread beside the post from 120 cells on, with 40 cells
+   plus half the excess: on a 140-cell terminal [z] took the thread from the
+   split's 106 cells down to 52 (#40134). The split and the single pane keep
+   that answer of the width. *)
+let board_read_arrangement layout ~cols ~has_comments =
+  match layout with
+  | Board_read_wide -> Masc_tui_layout.Stacked
+  | Board_read_split | Board_read_one_pane ->
+      if has_comments then Masc_tui_layout.board_read_side_layout ~cols
+      else Masc_tui_layout.Stacked
+;;
+
+(* [z] on the open post hides the post list or gives it back. On one pane the
+   two layouts draw the same screen, so the footer does not offer [z] and
+   pressing it must not leave the flag set for the next widening. The place
+   the reader stands in the post and in the thread is left as stored; the
+   next frame measures it against the layout it draws. *)
+let toggle_board_read_wide (state : state) ~cols =
+  match board_read_layout ~cols ~wide:state.board_detail_wide with
+  | Board_read_one_pane -> ()
+  | Board_read_split | Board_read_wide ->
+      state.board_detail_wide <- not state.board_detail_wide;
+      state.board_focus <- Right_pane
 ;;
 
 (* The pane the Board read keys act on. [board_focus] is the operator's choice

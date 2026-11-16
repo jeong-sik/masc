@@ -3,6 +3,7 @@ it lists, what it writes for each result, the rows, and the worker over
 stdio."""
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 from pathlib import Path
@@ -16,7 +17,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "operator-lesson"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # records.py
 
-from test_operator_quiz_flow import FakeHost, exact_payload, post  # noqa: E402
+from test_operator_quiz_flow import REPO, FakeHost, commit, exact_payload, post  # noqa: E402
 import lesson_flow as f  # noqa: E402
 import lesson_log as l  # noqa: E402
 import lesson_projection as p  # noqa: E402
@@ -426,6 +427,60 @@ class Sessions(Base):
                                                      l.SceneRequested, l.SceneWritten})
         with self.assertRaises(l.LogError):
             l.event_of_json(l.event_to_json(session.written[0]) | {"grade": 1})
+
+
+class MissingFields(Base):
+    """A read result that lacks a field this package reads is refused before
+    anything is kept, so the host keeps it and the worker lists the same read
+    again, also after a restart (#51940)."""
+
+    def kept(self) -> list[Path]:
+        directory = self.flow.pages.directory
+        return sorted(directory.iterdir()) if directory.is_dir() else []
+
+    def test_a_page_without_a_field_the_listing_reads_is_refused_and_read_again(self):
+        self.compose()
+        (request,) = self.flow.listing()
+        for field in ("complete", "next_cursor", "records", "sha256"):
+            with self.subTest(field=field):
+                page = copy.deepcopy(self.host.produce(request))
+                assert page is not None
+                del page[field]
+                with self.assertRaises(f.InvalidResult):
+                    self.flow.deliver(request["request_id"], page, 1.0)
+                self.assertEqual(self.kept(), [])
+                self.assertEqual(self.flow.listing(), [request])
+        self.assertEqual(f.Flow(self.state, PROMPTS, lambda request: True).listing(), [request])
+
+    def test_a_record_without_its_body_is_refused_and_the_session_goes_on(self):
+        self.host.outline, self.host.scene = one_entry_per_record, quoting
+        session_id = self.compose()
+        (request,) = self.flow.listing()
+        page = copy.deepcopy(self.host.produce(request))
+        assert page is not None and page["complete"] is False
+        del page["records"][0]["body"]
+        with self.assertRaises(f.InvalidResult):
+            self.flow.deliver(request["request_id"], page, 1.0)
+        self.assertEqual((self.kept(), self.flow.listing()), ([], [request]))
+        # The same page as the host keeps it whole is taken, and so is the rest.
+        self.host.run(self.flow)
+        self.assertEqual(self.session(session_id).state, l.WRITTEN)
+
+    def test_a_file_without_its_content_is_refused_and_read_again(self):
+        self.host.commits = [commit(1, ["changelog.d/a.md"])]
+        self.host.files = {(f"{1:040x}", "changelog.d/a.md"): "the ledger records facts"}
+        self.compose(binding=BINDING | {"records": [REPO]})
+        (page,) = self.flow.listing()
+        self.assertTrue(self.flow.deliver(page["request_id"], self.host.produce(page), 1.0))
+        (request,) = self.flow.listing()
+        self.assertEqual(request["kind"], "read_file")
+        kept = self.kept()
+        result = copy.deepcopy(self.host.produce(request))
+        assert result is not None
+        del result["content"]
+        with self.assertRaises(f.InvalidResult):
+            self.flow.deliver(request["request_id"], result, 1.0)
+        self.assertEqual((self.kept(), self.flow.listing()), (kept, [request]))
 
 
 class Rows(Base):

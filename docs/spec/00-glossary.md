@@ -1582,7 +1582,10 @@ status: reference
   일반 턴은 이 기록을 넘기고 새 세션을 연다. `Retry_previous`는 같은 세션에 다시
   보내게 되므로 쓸 수 없다. Codex는 도구 실행 뒤 넘친 경우에만 이 기록을 쓴다.
   도구 실행 전이면 같은 thread에서 줄여 다시 보내는 재시도가 아직 가능하다.
-  → [Keeper_direct_gate_continuation.session_full](../../lib/keeper/keeper_direct_gate_continuation.mli)
+  Gate 이어가기가 다른 이유로 실패해도 다시 걸 수 없다. 실패한 실행은
+  checkpoint를 남기지 않고, 세션도 `Settled`가 아니다. 그래서 operation은 그
+  실패 원인 그대로 실패한다.
+  → [Keeper_direct_gate_continuation.failed_run_end](../../lib/keeper/keeper_direct_gate_continuation.mli)
 
 **Turn Configuration Error (턴 구성 오류)**
 : Keeper turn이 typed Agent Core 구성 오류로 끝나 latch된 실패 원인

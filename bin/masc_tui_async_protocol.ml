@@ -165,8 +165,9 @@ type http_surface_results = {
   http_server_identity: (Masc.Tui_decode.server_identity, string) result;
 }
 
-(* What one full refresh came back with. A booting server answers the probe
-   and nothing else, so there are no surfaces to carry. *)
+(* What one full refresh came back with. A booting server and an account
+   server answer the probe and nothing else, so there are no surfaces to
+   carry. *)
 type http_refresh_outcome =
   | Refresh_surfaces of http_surface_results
   | Refresh_workspace_unconfirmed of
@@ -174,6 +175,14 @@ type http_refresh_outcome =
         approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option;
         latest_identity : (Masc.Tui_decode.server_identity, string) result
         (* The identity read after the surfaces; it may name a workspace. *) }
+  | Refresh_account_server of
+      { refresh_ticket : Http_refresh_order.ticket
+      ; version : string
+        (* The version the account server names in its [/health]. *)
+      ; approval_ticket : Masc_tui_operator_projection.Listing_order.ticket option
+        (* As for [Refresh_server_booting]: the approvals panel learns why its
+           rows are stale. *)
+      }
   | Refresh_server_booting of
       { refresh_ticket : Http_refresh_order.ticket
       ; identity : (Masc.Tui_decode.server_identity, string) result
@@ -858,6 +867,10 @@ type observer_msg =
   | Observer_closed of unit ref * Masc_tui_types.workspace_input_identity * (unit, Masc_tui_http.observer_error) result
   | Observer_retry_due of workspace_authority * unit ref
   | Observer_recovery_ready of workspace_authority * unit ref * string option
+  (* An MCP session would not open, and the address answered /health as the
+     account server of a multi-account installation. The ref is the owner of
+     the observer stream or of the recovery that asked. *)
+  | Observer_found_account_server of workspace_authority * unit ref
   | Observer_recovery_identity of workspace_authority * unit ref * bool ref * string * string
       * observer_recovery_origin * Sse_wire.observer_identity
 
@@ -1208,7 +1221,7 @@ let rec workspace_message_is_read = function
   | Identity_msg (Identity_providers_loaded _)
   | Observer_msg (Observer_session_ready _ | Observer_opened _
   | Observer_received _
-  | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
+  | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _)
   | Keeper_msg (Keeper_chat_dispatch_started _)
     -> true
   | Voice_msg (Voice_wizard_saved _)
@@ -1389,7 +1402,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _) | Account_msg (Account_login_event _ | Account_login_json _
   | Account_login_removal _) | Github_msg (Github_login_lines _ | Github_login_finished _
-  | Github_token_saved _) | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
+  | Github_token_saved _) | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _)
   | Task_msg (Task_dispatch_completed _
   | Task_creation_read_done _) | Keeper_msg (Keeper_queue_action_received _
   | Keeper_execute_streamed _) -> false
@@ -1562,7 +1575,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
     | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _))
-    | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
+    | Observer_msg (Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _)
     | Task_msg (Task_dispatch_completed _) -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
   then None else inspect message
@@ -1707,5 +1720,5 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
   | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
-  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_identity _)
+  | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_found_account_server _ | Observer_recovery_identity _)
   | Task_msg (Task_dispatch_completed _) -> message

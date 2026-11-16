@@ -3,7 +3,8 @@ import type {
   KeeperCompositeInvariants,
 } from '../api/schemas/keeper-composite'
 import { PHASE_LABEL_KO } from '../lib/fleet-tone'
-import type { TrustDisposition } from '../types'
+import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
+import type { KeeperRuntimeBlockerClass, TrustDisposition } from '../types'
 
 export type CompositeObservation = {
   ts: number
@@ -271,7 +272,7 @@ export function trustDispositionLabel(value: TrustDisposition | null | undefined
  *  a runtime ladder), while `stop_cause` is emitted per-turn (the
  *  terminal verdict for the whole turn). Rendering the
  *  per-attempt success under the generic "런타임 레인" label next to
- *  a per-turn failure such as `turn_timeout` reads as a
+ *  a per-turn failure such as `turn_failures` reads as a
  *  contradiction.
  *
  *  We tag the observation with an explicit scope (`attempt`) and gate
@@ -288,29 +289,47 @@ export interface RuntimeAttemptObservation {
   fallbackApplied: boolean
 }
 
-/** Stop-cause codes that classify the turn as a terminal failure. When
- *  the turn is terminal-failed at the per-turn scope, a per-attempt
- *  `completed` outcome must not be rendered as a co-equal "런타임
- *  레인" badge — that is the second contradiction the strip used to
- *  surface. The list is derived from the runtime_blocker_class /
- *  terminal_reason_code closed-sums actually observed in
- *  `lib/keeper/keeper_status_bridge.ml` and
- *  `lib/keeper/keeper_runtime_trust_snapshot.ml`. Unknown codes do
- *  not gate (fail open: operator still sees the attempt outcome). */
-const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
-  'turn_timeout',
-  'runtime_exhausted',
-  'heartbeat_consecutive_failures',
-  'turn_consecutive_failures',
-  'provider_runtime_error',
-  'official_client_recovery_required',
-  'fiber_unresolved',
+/** Whether a `runtime_blocker_class` label
+ *  (`Keeper_status_bridge_blocker.runtime_blocker_class_to_string`)
+ *  classifies the turn as a terminal failure. When it does, a past
+ *  success code and a per-attempt `completed` outcome are not rendered
+ *  next to the blocker: the server's trust snapshot already treats the
+ *  registry failure as current state that a historical success cannot
+ *  clear (`latest_terminal_reason_opt` in
+ *  `lib/keeper/keeper_runtime_trust_snapshot.ml`). Keyed on the closed
+ *  union, so a label added to `KEEPER_RUNTIME_BLOCKER_CLASSES` fails tsc
+ *  until it is decided here. */
+const RUNTIME_BLOCKER_TURN_TERMINAL_FAILURE = {
+  heartbeat_failures: true,
+  turn_failures: true,
+  runtime_exhausted: true,
+  provider_runtime_error: true,
+  official_client_recovery_required: true,
+  // Latched only by the turn-failure path
+  // (`Keeper_unified_turn_failure.record_failure_observation`).
+  turn_configuration_error: true,
+  fiber_unresolved: true,
+  // Latched only by keeper crash paths (crashed heartbeat cycle, fiber
+  // crash, rejected fiber or lane start, fatal environment error).
+  exception: true,
+  // An explicit operator cancel. Whether it counts as a failure is a
+  // product decision that has not been made (#43060).
+  operator_interrupt: false,
+} satisfies Record<KeeperRuntimeBlockerClass, boolean>
+
+/** `terminal_reason_code` values that are not blocker labels and still
+ *  mark the turn as a terminal failure. `provider_attempt_effect_fenced`
+ *  is `Keeper_internal_error.provider_attempt_effect_fenced_kind`.
+ *  Unknown codes do not gate (fail open: operator still sees the
+ *  attempt outcome). */
+const TERMINAL_REASON_FAILURE_CODES: ReadonlySet<string> = new Set([
   'provider_attempt_effect_fenced',
 ])
 
 export function isTurnTerminalFailureCode(code: string | null | undefined): boolean {
-  if (!code) return false
-  return TURN_TERMINAL_FAILURE_CODES.has(code)
+  const blockerClass = asKeeperRuntimeBlockerClass(code)
+  if (blockerClass !== null) return RUNTIME_BLOCKER_TURN_TERMINAL_FAILURE[blockerClass]
+  return typeof code === 'string' && TERMINAL_REASON_FAILURE_CODES.has(code)
 }
 
 

@@ -137,7 +137,8 @@ val get_or_compute_with_timeout :
     timeouts for the same key open a short fail-fast circuit; fresh or stale
     cache entries are still served normally.  A compute that raises is no
     timeout: its exception reaches the caller and does not count toward the
-    circuit. *)
+    circuit.  That holds for [Eio.Cancel.Cancelled] too, unless the fiber
+    running the compute was itself cancelled. *)
 
 val get_or_compute_payload_with_timeout :
   ?preparation:payload_preparation ->

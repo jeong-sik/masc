@@ -593,14 +593,12 @@ let get_or_compute_eio : type closed.
   fun ~window key ~ttl produce ->
   let stale_grace = ttl *. stale_factor in
   let started = now () in
-  (* A runner that was cancelled gave up on the compute; the compute itself
-     did not fail. A runner whose window closed says so with [Error], not an
-     exception, so nothing else a compute raises is read as giving up. *)
-  let rec gave_up = function
-    | Eio.Cancel.Cancelled _ -> true
-    | Eio.Exn.Multiple exns -> List.exists (fun (exn, _) -> gave_up exn) exns
-    | _ -> false
-  in
+  (* A runner whose own fiber was cancelled gave up on the compute: nothing
+     was learned. The runner's cancellation state decides it, not the
+     exception: a compute can raise any exception, [Eio.Cancel.Cancelled]
+     among them, and one it raised while its runner runs on is its failure.
+     A runner whose window closed says so with [Error] (#52277). *)
+  let runner_gave_up () = Eio.Fiber.is_cancelled () in
   (* A pool job of the work's kind unless the caller is already inside one. *)
   let compute () =
     within_window window (fun () -> Pool_work.submit produce)
@@ -638,7 +636,7 @@ let get_or_compute_eio : type closed.
       let backtrace = Printexc.get_raw_backtrace () in
       clear_claimed ~token;
       Eio.Promise.resolve claim.settle
-        (if gave_up exn then Released else Failed (exn, backtrace));
+        (if runner_gave_up () then Released else Failed (exn, backtrace));
       Printexc.raise_with_backtrace exn backtrace
   in
   (* The owner of a claimable slot. Its job runs the compute only if it claims
@@ -653,7 +651,8 @@ let get_or_compute_eio : type closed.
         if Atomic.compare_and_set claim.holder Unclaimed Owner_job then
           match run_claimed ~token claim (fun () -> (Ok (body ()) : (cached_value, no_window) result)) with
           | Ok _entry -> ()
-          | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+          | exception (Eio.Cancel.Cancelled _ as cancelled) when runner_gave_up () ->
+            raise cancelled
           | exception _ -> ()  (* settled as [Failed]; the owner raises it below *))
     in
     (* An unclaimed compute is abandoned and its slot cleared. A claimed one
@@ -687,7 +686,8 @@ let get_or_compute_eio : type closed.
          abandon ();
          `Closed closed)
     | exception exn ->
-      (* The owner was cancelled. *)
+      (* The owner's wait raised: the owner was cancelled, or submitting its
+         job failed. *)
       let backtrace = Printexc.get_raw_backtrace () in
       abandon ();
       Printexc.raise_with_backtrace exn backtrace

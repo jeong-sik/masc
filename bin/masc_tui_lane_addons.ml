@@ -208,8 +208,9 @@ let finish_application_read view ticket result =
   {view with application_reading=Application.finish ~generation:view.generation
       ticket result view.application_reading}
 let withdraw_application_read view ticket notice =
+  let current = Application.is_current ~generation:view.generation ticket view.application_reading in
   {view with application_reading=Application.withdraw ticket view.application_reading;
-    error=Some (Kept_back notice)}
+    error=(if current then Some (Kept_back notice) else view.error)}
 let receive_application_inventory view result =
   {view with application_reading=Application.accept result}
 let phase json =

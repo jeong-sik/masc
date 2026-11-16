@@ -93,6 +93,10 @@ let finish ~generation ticket result reading =
       else {reading with in_flight=None}
   | Some _ | None -> reading
 let accept result = {in_flight=None;received=Some result}
+let is_current ~generation ticket reading =
+  match reading.in_flight with
+  | Some current -> current.identity == ticket.identity && generation = ticket.generation
+  | None -> false
 let withdraw ticket reading =
   match reading.in_flight with
   | Some current when current.identity == ticket.identity -> {reading with in_flight=None}

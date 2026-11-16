@@ -1664,7 +1664,21 @@ let application_reads_preserve_editor () =
   let stale = UI.finish_application_read {pending with generation=8}
       ticket (Ok (configuration "inactive")) in
   check bool "explicit action invalidates prior response" true
-    (UI.Application.value stale.application_reading=UI.Application.value after.application_reading)
+    (UI.Application.value stale.application_reading=UI.Application.value after.application_reading);
+  let foreground = UI.receive_application_inventory pending (Ok (configuration "inactive")) in
+  let withdrawn = UI.withdraw_application_read foreground ticket "old workspace refusal" in
+  check bool "late withdrawal preserves foreground result and editor state" true
+    (withdrawn.documents=foreground.documents && withdrawn.receipt=foreground.receipt
+     && withdrawn.error=foreground.error && withdrawn.snapshot=foreground.snapshot
+     && withdrawn.scroll=foreground.scroll
+     && UI.Application.value withdrawn.application_reading
+        =UI.Application.value foreground.application_reading);
+  let retired = UI.withdraw_application_read {pending with generation=8}
+      ticket "old action refusal" in
+  check bool "old generation withdrawal preserves current diagnostic" true
+    (retired.error=pending.error);
+  check bool "retired owned ticket no longer blocks another read" false
+    (UI.Application.pending retired.application_reading)
 
 let application_follows_decoded_observations () =
   let configuration ?(issues="[]") application = UI.decode_configuration (Yojson.Safe.from_string

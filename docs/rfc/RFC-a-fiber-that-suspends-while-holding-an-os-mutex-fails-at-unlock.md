@@ -149,15 +149,22 @@ L1 은 이 빠른 길을 지운다. 이미 끝난 작업도 한 번 멈췄다가
 ### D6. masc 는 Eio 백엔드로 posix 하나를 쓴다
 
 - 운영 서버는 macOS 에서 돌고, Eio 는 거기서 posix 를 고른다. Linux CI 는 지금 io_uring 으로 돈다. `test/dune:5827` 은 이 차이 때문에 시험 둘을 이미 posix 로 고정했다.
+- Linux 에서도 백엔드는 기계가 고른다. `Eio_main.run` 은 io_uring 을 먼저 쓴다. io_uring 이 없거나(ENOSYS) 막혔거나(EPERM) 커널이 5.15 미만이면 posix 로 넘어간다(`lib_main/eio_main.ml`, `lib_eio_linux/sched.ml:513-522`).
 - io_uring 백엔드(eio_linux)는 fiber 를 바꾸지 않는 effect 둘(`Get`, `Cancel`)을 더 쓴다. `Eio_linux` 가 둘을 내보내지 않아서 D2 표에 넣을 수 없다. 그래서 io_uring 에서는 둘이 「바꾼다」로 잡힌다.
   - `Cancel` 은 io_uring 작업 중인 fiber 를 취소할 때, 취소하는 쪽 스택에서 난다(`lib_eio_linux/sched.ml:166`). 잠금 구역 안에서 `Switch.fail` 등으로 그런 fiber 를 취소하면, 그 구역은 Linux 에서만 거짓으로 실패한다.
   - `Switch.fail`·`Cancel.cancel` 은 운영 코드(lib·bin·`packages/agent_core/lib`)에 28번, `packages/agent_core/test` 에 179번 나온다. 잠금 구역 안의 것이 몇인지는 세지 않았다.
   - `Get` 은 고정 버퍼를 빌리고 돌려줄 때 난다(`lib_eio_linux/low_level.ml:211-237`).
 - posix 하나로 가면 표가 빠짐없이 맞는다. `Eio_mock` 을 쓰는 시험 말고는 시험이 운영과 같은 백엔드를 본다.
 - 대가: Linux(CI, `Dockerfile` 이미지)에서 io_uring 을 잃는다. 그 차이는 재지 않았다.
-- 코드에서 고정한다. `Eio_main.run` 을 `Eio_posix.run` 으로 바꾼다. `EIO_BACKEND` 같은 환경 변수로 고정하지 않는다(D3). 그 변수를 빠뜨린 실행은 io_uring 으로 돈다.
+- 코드에서 고정한다. `Eio_main.run` 을 `Eio_posix.run` 으로 바꾼다. `EIO_BACKEND` 같은 환경 변수로 고정하지 않는다(D3). 그 변수를 빠뜨린 실행은 기계에 따라 io_uring 으로 돈다.
 - `Eio_main.run` 은 1,088개 파일에 3,435번 나온다. L2 가 바꾼다(D5).
 - io_uring 으로 돌아가려면 Eio 가 두 effect 를 내보내거나, effect 가 fiber 를 바꾸는지 묻는 길을 열어야 한다.
+
+### 운영자 결정 (2026-11-16)
+
+| 번호 | 질문 | 결정 |
+|---|---|---|
+| D6 | Linux 에서 io_uring 을 잃더라도 Eio 백엔드를 posix 하나로 고정하는가 | 고정한다. 작성자가 추천한 안을 운영자가 받아들였다. |
 
 ## 2. 지금 모습
 

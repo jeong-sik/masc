@@ -11,22 +11,16 @@ type t = { pid : int; started : string option; exited : Unix.process_status opti
 
 external darwin_start : int -> string option = "masc_process_start_time"
 
-(* /proc/<pid>/stat field 22, counted after the command in parentheses,
-   which may itself hold spaces and parentheses. starttime counts from boot,
-   so the boot names it too. *)
+(* starttime is field 22 of proc(5), the 20th after the command. It counts
+   from boot, so the boot names it too. *)
 let linux_start pid =
-  let read path = In_channel.with_open_bin path In_channel.input_all in
-  match read (Printf.sprintf "/proc/%d/stat" pid), read "/proc/sys/kernel/random/boot_id" with
-  | exception Sys_error _ -> None
-  | stat, boot ->
-    (match String.rindex_opt stat ')' with
-     | None -> None
-     | Some close ->
-       let after = String.sub stat (close + 1) (String.length stat - close - 1) in
-       (match List.filter (fun field -> field <> "") (String.split_on_char ' ' (String.trim after)) with
-        | fields when List.length fields > 19 ->
-          Some (Printf.sprintf "proc:%s:%s" (String.trim boot) (List.nth fields 19))
-        | _ :: _ | [] -> None))
+  match Linux_proc_stat.read pid with
+  | None -> None
+  | Some fields ->
+    (match List.nth_opt fields 19, In_channel.with_open_bin "/proc/sys/kernel/random/boot_id" In_channel.input_all with
+     | exception Sys_error _ -> None
+     | Some starttime, boot -> Some (Printf.sprintf "proc:%s:%s" (String.trim boot) starttime)
+     | None, _ -> None)
 
 let process_start pid =
   match darwin_start pid with

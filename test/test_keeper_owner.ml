@@ -6746,10 +6746,14 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
   Eio_main.run @@ fun _env -> Eio.Switch.run @@ fun sw ->
   let id = operation_id "kmsg-preparation-owner" in
   let other = operation_id "kmsg-preparation-independent" in
+  let queued = operation_id "kmsg-preparation-queued-during-wait" in
   let input = operation_input "Original request with original authority" in
   let owner_p, owner_resolver = Eio.Promise.create () in
   let blocked, blocked_resolver = Eio.Promise.create () in
   let independent, independent_resolver = Eio.Promise.create () in
+  let independent_started, independent_started_resolver = Eio.Promise.create () in
+  let release_independent, release_independent_resolver = Eio.Promise.create () in
+  let queued_finished, queued_finished_resolver = Eio.Promise.create () in
   let finished, finished_resolver = Eio.Promise.create () in
   let attempts = ref 0 in
   let scope = Keeper_execution_scope_id.direct_operation id in
@@ -6811,16 +6815,27 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
             {kind=Turn_failed;detail="typed preparation could not commit its wait"}))
           ~delivery:(Error "preparation failed"))
       | 3 ->
+        let preceding = Owner.exact_operation owner queued |> owner_ok |> Option.get in
+        check bool "waiting input completes before the preparation retry" true
+          (match preceding.state with
+           | Chat_operation.Succeeded _ -> true
+           | Chat_operation.Queued | Chat_operation.Running _ | Chat_operation.Failed _ | Chat_operation.Cancelled _ -> false);
         check_original owner;
         Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint |> owner_ok;
         Owner.enter_direct_preparation owner ~operation_id:id ~execution_digest:operation.execution_digest |> owner_ok;
         Owner.Operation_succeeded {outcome_ref="original resumed once"}
       | _ -> fail "preparation wait automatically retried")
-    else (
-      check bool "independent queued operation runs" true
-        (Chat_operation.Operation_id.equal other operation.operation_id);
+    else if Chat_operation.Operation_id.equal other operation.operation_id then (
       check_original owner;
-      Owner.Operation_succeeded {outcome_ref="independent finished"}) in
+      Eio.Promise.resolve independent_started_resolver ();
+      Eio.Promise.await release_independent;
+      Owner.Operation_succeeded {outcome_ref="independent finished"})
+    else (
+      check bool "input admitted during preparation wait claims first" true
+        (Chat_operation.Operation_id.equal queued operation.operation_id);
+      check int "preparation retry has not overtaken waiting input" 2 !attempts;
+      check_original owner;
+      Owner.Operation_succeeded {outcome_ref="queued input finished"}) in
   let path = Filename.temp_file "keeper-owner-preparation-" ".sqlite3" in
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () ->
@@ -6839,6 +6854,7 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
             if !attempts=2 then Eio.Promise.resolve blocked_resolver ()
             else if !attempts=3 then Eio.Promise.resolve finished_resolver ()
           | Some current when Chat_operation.Operation_id.equal current other -> Eio.Promise.resolve independent_resolver ()
+          | Some current when Chat_operation.Operation_id.equal current queued -> Eio.Promise.resolve queued_finished_resolver ()
           | Some _ | None -> ())}) |> owner_ok in
   Eio.Promise.resolve owner_resolver owner;
   Owner.submit_operation owner ~operation_id:id ~source:operation_source ~input |> owner_ok |> ignore;
@@ -6860,8 +6876,10 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
   check_original owner;
   Owner.submit_operation owner ~operation_id:other ~source:operation_source
     ~input:(operation_input "Independent steering") |> owner_ok |> ignore;
-  Eio.Promise.await independent;
-  check int "independent completion does not retry blocked operation" 2 !attempts;
+  Eio.Promise.await independent_started;
+  Owner.submit_operation owner ~operation_id:queued ~source:operation_source
+    ~input:(operation_input "Input admitted before preparation retry") |> owner_ok |> ignore;
+  check int "new admission does not retry blocked operation" 2 !attempts;
   (match Owner.retry_direct_preparation owner ~operation_id:id
       ~expected_revision:(Int64.pred waiting.revision) ~execution_digest:waiting.execution_digest with
    | Error _ -> () | Ok _ -> fail "stale retry was admitted");
@@ -6892,6 +6910,9 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
       | Error _ -> () | Ok _ -> fail "uncertainty authorized a fresh stale retry");
      Owner.wake_operation_drain owner |> owner_ok
    | _,_,result -> result |> owner_ok |> ignore);
+  Eio.Promise.resolve release_independent_resolver ();
+  Eio.Promise.await independent;
+  Eio.Promise.await queued_finished;
   Eio.Promise.await finished;
   check int "explicit retry runs original operation exactly once" 3 !attempts;
   let terminal = Owner.exact_operation owner id |> owner_ok |> Option.get in

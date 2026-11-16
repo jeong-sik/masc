@@ -1843,28 +1843,36 @@ let gate_state = function
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _ | Semantic.Input_wait _); _}); _}
   | None -> None
 
+type readiness = Blocked | Claimable
+
+let queued_readiness ~now (execution : Semantic.t) =
+  match Receipt_wait_state.awaiting execution.receipt_obligations, gate_state (Some execution) with
+  (* The task ended its turn to wait for a background receipt that has not
+     been written. The receipt's arrival, not time, makes it claimable. *)
+  | Receipt_wait_state.Receipt_pending, (Some _ | None) -> Blocked
+  | (Receipt_wait_state.No_receipts | Receipt_wait_state.Receipts_arrived), Some {resolution=None; _} -> Blocked
+  | (Receipt_wait_state.No_receipts | Receipt_wait_state.Receipts_arrived), Some {resolution=Some _; _} -> Claimable
+  | (Receipt_wait_state.No_receipts | Receipt_wait_state.Receipts_arrived), None ->
+    (match execution.phase with
+     | Semantic.Preparation_wait _
+     | Semantic.Recovering {origin=(Semantic.Gate_binding _ | Semantic.Input_wait _); _} -> Blocked
+     (* A deferred runtime retry whose provider-throttle backoff is still
+        running is not claimable: claiming it would re-issue the very call
+        the provider just rejected, in a tight loop. The owner re-offers it once [not_before] passes or an exact
+        live dependency witness commits a replacement wait. *)
+     | Semantic.Recovering {origin=Semantic.Runtime_retry {Semantic.not_before=Some not_before; _}; _}
+         when not_before > now -> Blocked
+     | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
+     | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
+     | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
+         | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> Claimable)
+
 let blocked_queued_scopes db ~now =
   let* executions = semantic_rows db ~active_only:true in
   let blocked = List.filter_map (fun (execution : Semantic.t) ->
-    match Receipt_wait_state.awaiting execution.receipt_obligations, gate_state (Some execution) with
-    (* The task ended its turn to wait for a background receipt that has not
-       been written. The receipt's arrival, not time, makes it claimable. *)
-    | Receipt_wait_state.Receipt_pending, (Some _ | None) -> Some execution.id
-    | (Receipt_wait_state.No_receipts | Receipt_wait_state.Receipts_arrived), Some {resolution=None; _} -> Some execution.id
-    | (Receipt_wait_state.No_receipts | Receipt_wait_state.Receipts_arrived), Some {resolution=Some _; _} -> None
-    | (Receipt_wait_state.No_receipts | Receipt_wait_state.Receipts_arrived), None -> (match execution.phase with
-        | Semantic.Preparation_wait _
-        | Semantic.Recovering {origin=(Semantic.Gate_binding _ | Semantic.Input_wait _); _} -> Some execution.id
-        (* A deferred runtime retry whose provider-throttle backoff is still
-           running is not claimable: claiming it would re-issue the very call
-           the provider just rejected, in a tight loop. The owner re-offers it once [not_before] passes or an exact
-           live dependency witness commits a replacement wait. *)
-        | Semantic.Recovering {origin=Semantic.Runtime_retry {Semantic.not_before=Some not_before; _}; _}
-          when not_before > now -> Some execution.id
-        | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
-        | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
-        | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
-            | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
+    match queued_readiness ~now execution with
+    | Blocked -> Some execution.id
+    | Claimable -> None) executions in
   (* Keep complete semantic validation above. Only membership uses this local
      index; it never selects queue order or survives the observation's [now]. *)
   Ok (Scope_set.of_list blocked)
@@ -2493,16 +2501,50 @@ let direct_runtime_retry store ~operation_id =
   Ok (pending_retry execution)
 ;;
 
+(* A requeued continuation already used its turn on the slot. It keeps its
+   identity and frozen input but takes a fresh queue position, so input
+   submitted while it ran is claimed first (#52408). *)
 let requeue_continuation_with_db db operation =
   let* requeued = Reducer.apply operation Reducer.Requeue_continuation
     |> Result.map_error (reducer_error operation.Operation.operation_id) in
+  let* sequence = next_sequence db in
+  let* moved = Reducer.apply requeued (Reducer.Move_queued {sequence})
+    |> Result.map_error (reducer_error operation.operation_id) in
   let* () = with_statement db ~operation:"requeue checkpointed direct operation"
-    "UPDATE operations SET state = 'queued', started_at = NULL WHERE operation_id = ? AND state = 'running'"
+    "UPDATE operations SET state = 'queued', started_at = NULL, sequence = ? WHERE operation_id = ? AND state = 'running'"
     (fun statement ->
-      let* () = bind_text db statement ~operation:"bind continuation operation" 1 (Id.to_string operation.operation_id) in
+      let* () = bind_int64 db statement ~operation:"bind continuation sequence" 1 sequence in
+      let* () = bind_text db statement ~operation:"bind continuation operation" 2 (Id.to_string operation.operation_id) in
       let* () = expect_done db statement ~operation:"requeue checkpointed direct operation" in
       if Sqlite3.changes db = 1 then Ok () else Error (Not_running operation.operation_id)) in
-  Ok requeued
+  Ok moved
+;;
+
+(* A queued operation whose wait just ended becomes claimable now, so it
+   queues behind input that arrived while it waited. A repeated request that
+   leaves it in the same readiness keeps its position (#52408). *)
+let reorder_after_release_with_db db operation ~before ~after =
+  match before, after with
+  | Blocked, Claimable ->
+    let* sequence = next_sequence db in
+    let* moved = Reducer.apply operation (Reducer.Move_queued {sequence})
+      |> Result.map_error (reducer_error operation.Operation.operation_id) in
+    let* () = with_statement db ~operation:"move released operation"
+      "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'"
+      (fun statement ->
+        let* () = bind_int64 db statement ~operation:"bind released sequence" 1 sequence in
+        let* () = bind_text db statement ~operation:"bind released operation" 2 (Id.to_string operation.operation_id) in
+        let* () = expect_done db statement ~operation:"move released operation" in
+        if Sqlite3.changes db = 1 then Ok () else Error (Not_queued operation.operation_id)) in
+    Ok moved
+  | Blocked, Blocked
+  | Claimable, Blocked
+  | Claimable, Claimable -> Ok operation
+;;
+
+let reorder_released_execution_with_db db ~now operation ~expected next =
+  reorder_after_release_with_db db operation
+    ~before:(queued_readiness ~now expected) ~after:(queued_readiness ~now next)
 ;;
 
 let semantic_error_to_store_error = function
@@ -2638,7 +2680,9 @@ let resolve_direct_input_wait store ~now ~operation_id ~execution_digest ~observ
       let* () = match destination with
         | Semantic.Canonical_input -> install_input_checkpoint_with_db store ~previous:(Some observed.checkpoint) checkpoint
         | Operation_input -> Ok () in
-      update_semantic store ~expected next)
+      let* () = update_semantic store ~expected next in
+      reorder_released_execution_with_db store.db ~now operation ~expected next
+      |> Result.map (fun _operation -> ()))
 ;;
 
 let defer_direct_runtime_retry store ~now ~operation_id ~execution_digest ~continuation =
@@ -2698,6 +2742,7 @@ let update_direct_runtime_retry_wait store ~now ~operation_id ~observed ~replace
         let* next = semantic_transition ~now
           (Semantic.Update_runtime_retry_wait {observed; replacement}) expected in
         let* () = update_semantic store ~expected next in
+        let* _operation = reorder_released_execution_with_db store.db ~now operation ~expected next in
         Ok true
       | Some _, Some _ | Some _, None | None, Some _ | None, None -> Ok false)
 ;;
@@ -2798,16 +2843,7 @@ let defer_direct_checkpoint ?(receipt_waits = []) store ~now ~operation_id ~exec
       let* () = match current with
         | None -> insert_semantic store.db suspended
         | Some current -> update_semantic store ~expected:current suspended in
-      let* requeued = requeue_continuation_with_db store.db operation in
-      (* A cooperative yield hands the slot to already submitted input. Keep
-         the operation identity/input frozen, but let newer steering run first. *)
-      let* sequence = next_sequence store.db in
-      let* () = with_statement store.db ~operation:"yield checkpoint queue position"
-        "UPDATE operations SET sequence = ? WHERE operation_id = ? AND state = 'queued'" (fun stmt ->
-          let* () = bind_int64 store.db stmt ~operation:"bind checkpoint sequence" 1 sequence in
-          let* () = bind_text store.db stmt ~operation:"bind checkpoint operation" 2 (Id.to_string operation_id) in
-          expect_done store.db stmt ~operation:"yield checkpoint queue position") in
-      Ok { requeued with sequence }) in
+      requeue_continuation_with_db store.db operation) in
   match result with
   | Ok _ -> read_existing ()
   | Error (Store_unavailable _ as error) ->
@@ -2871,6 +2907,15 @@ let resolve_receipt store ~now ~request_id ~resolution =
          if Int64.equal next.revision expected.revision then Ok Receipt_already_arrived
          else
            let* () = update_semantic store ~expected next in
+           let* () = match Keeper_execution_scope_id.direct_operation_id expected.id with
+             | None -> Ok ()
+             | Some operation_id ->
+               let* operation = operation_or_unknown store.db operation_id in
+               (match operation.state with
+                | Operation.Queued ->
+                  reorder_released_execution_with_db store.db ~now operation ~expected next
+                  |> Result.map (fun _operation -> ())
+                | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Ok ()) in
            Ok Receipt_resolved))
 ;;
 
@@ -3027,6 +3072,7 @@ let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execut
           when Int64.equal revision expected_revision ->
         let* next = semantic_transition ~now (Semantic.Retry_preparation waiting) expected in
         let* () = update_semantic store ~expected next in
+        let* operation = reorder_released_execution_with_db store.db ~now operation ~expected next in
         expected_commit := Some (operation, next);
         Ok operation
       | Some {Semantic.phase=Semantic.Preparing | Semantic.Ready | Semantic.Running
@@ -3290,8 +3336,9 @@ let resolve_direct_gate store ~now ~operation_id ~resolution =
        | None -> Error (Integrity_error "Gate resolution has no waiting operation")
        | Some expected ->
          let* next = semantic_transition ~now (Semantic.Resolve_gate resolution) expected in
-         expected_commit := Some (next, operation);
          let* () = if next == expected then Ok () else update_semantic store ~expected next in
+         let* operation = reorder_released_execution_with_db store.db ~now operation ~expected next in
+         expected_commit := Some (next, operation);
          Ok operation)
     | Operation.Running _ | Operation.Succeeded _ | Operation.Failed _ | Operation.Cancelled _ -> Error (Not_queued operation_id)) in
   confirm_semantic_transition store expected_commit result

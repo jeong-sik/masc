@@ -378,6 +378,36 @@ let test_a_restart_queues_a_running_task_that_holds_a_continuation () =
       (Chat.Operation_id.to_string (claim store ~now:7.).operation_id))
 ;;
 
+let test_last_receipt_releases_behind_waiting_input () = with_store (fun store ->
+  submit store ~now:1. "waiter";
+  let waiter=claim store ~now:2. in
+  let saved=Execution.Agent_core (checkpoint ()) in
+  let queued=Store.defer_direct_checkpoint store ~now:3.
+    ~operation_id:waiter.operation_id ~execution_digest:waiter.execution_digest
+    ~checkpoint:saved ~receipt_waits:[obligation awaited Execution.Pending;obligation other_request Execution.Pending]
+    |> store_ok in
+  let resolve now request_id = Store.resolve_receipt store ~now ~request_id
+    ~resolution:Execution.Receipt_in_outbox |> store_ok |> ignore in
+  resolve 4. awaited;
+  check bool "first receipt leaves original blocked" true (Store.claim_next store ~now:5. |> store_ok=None);
+  let after_first=Store.get store waiter.operation_id |> store_ok |> Option.get in
+  check int64 "partial release keeps queue position" queued.sequence after_first.sequence;
+  submit store ~now:6. "bystander";
+  resolve 7. other_request;
+  submit store ~now:8. "third";
+  resolve 9. other_request;
+  let run now name =
+    let row=claim store ~now in
+    check string "last receipt preserves durable queue order" name (Chat.Operation_id.to_string row.operation_id) in
+  run 10. "bystander";
+  Store.succeed_running store ~now:11. ~operation_id:(operation_id "bystander") ~outcome_ref:"bystander result" |> store_ok |> ignore;
+  run 12. "waiter";
+  Store.resume_direct_checkpoint store ~now:13. ~operation_id:waiter.operation_id ~observed:saved |> store_ok;
+  Store.succeed_running store ~now:14. ~operation_id:waiter.operation_id ~outcome_ref:"original result" |> store_ok |> ignore;
+  run 15. "third";
+  Store.succeed_running store ~now:16. ~operation_id:(operation_id "third") ~outcome_ref:"third result" |> store_ok |> ignore)
+;;
+
 let () =
   let pairs =
     List.concat_map
@@ -395,7 +425,8 @@ let () =
     "keeper_receipt_wait_matrix"
     [ "table", pairs
     ; ( "invariants"
-      , [ test_case "one request has one owner" `Quick test_one_request_has_one_owner
+      , [ test_case "last receipt releases behind waiting input once" `Quick test_last_receipt_releases_behind_waiting_input
+        ; test_case "one request has one owner" `Quick test_one_request_has_one_owner
         ; test_case
             "a waiting task is not claimed while another runs"
             `Quick

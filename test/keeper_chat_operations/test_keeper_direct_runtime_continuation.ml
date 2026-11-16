@@ -254,14 +254,74 @@ let test_batch_runtime_retry_keeps_frozen_members () = with_path (fun path ->
     | Some {Operation.state=Operation.Succeeded _; _} -> ()
     | _ -> fail "follower was not settled by resumed execution"))
 
+let test_runtime_retry_yields_to_waiting_input () = with_path (fun path ->
+  with_open path (fun store ->
+    let first = admitted store in
+    let second = Operation.Operation_id.of_string "runtime-retry-second" |> string_ok in
+    let third = Operation.Operation_id.of_string "runtime-retry-third" |> string_ok in
+    let retry = continuation () in
+    let submitted = Store.submit store ~now:11. ~operation_id:second ~source ~input |> ok in
+    let second_row = match submitted with Store.Accepted row | Store.Existing row -> row in
+    let queued = defer store first retry |> ok in
+    check int64 "one queue position per defer" (Int64.succ second_row.sequence) queued.sequence;
+    ignore (Store.submit store ~now:13. ~operation_id:third ~source ~input |> ok);
+    ignore (Store.defer_direct_runtime_retry store ~now:14. ~operation_id
+      ~execution_digest:first.execution_digest ~continuation:retry |> ok);
+    let claim_id now expected =
+      let row = Store.claim_next store ~now |> ok |> Option.get in
+      check bool "durable runtime retry queue order" true
+        (Operation.Operation_id.equal expected row.operation_id) in
+    claim_id 15. second;
+    ignore (Store.succeed_running store ~now:16. ~operation_id:second ~outcome_ref:"second" |> ok);
+    claim_id 17. operation_id;
+    assert_bound store retry;
+    Store.resume_direct_runtime_retry store ~now:18. ~operation_id ~observed:retry |> ok;
+    ignore (Store.succeed_running store ~now:19. ~operation_id ~outcome_ref:"original retry result" |> ok);
+    check bool "original continuation completed" true (Semantic.is_terminal (execution store));
+    claim_id 20. third;
+    ignore (Store.succeed_running store ~now:21. ~operation_id:third ~outcome_ref:"third" |> ok)))
+
+let test_runtime_dependency_release_takes_a_new_place () = with_path (fun path ->
+  with_open path (fun store ->
+    let first = admitted store in
+    let released = continuation () in
+    let waiting = Semantic.runtime_retry ~not_before:(Some 100.) ~checkpoint:released.checkpoint
+      ~assignment_id:released.assignment_id ~failed_runtime_id:released.failed_runtime_id
+      ~next_runtime_id:released.next_runtime_id ~later_runtime_ids:released.later_runtime_ids |> string_ok in
+    ignore (defer store first waiting |> ok);
+    check bool "dependency wait blocks original" true (Store.claim_next store ~now:13. |> ok = None);
+    let second = Operation.Operation_id.of_string "dependency-second" |> string_ok in
+    let third = Operation.Operation_id.of_string "dependency-third" |> string_ok in
+    ignore (Store.submit store ~now:14. ~operation_id:second ~source ~input |> ok);
+    check bool "exact dependency release commits" true
+      (Store.update_direct_runtime_retry_wait store ~now:15. ~operation_id ~observed:waiting ~replacement:released |> ok);
+    ignore (Store.submit store ~now:16. ~operation_id:third ~source ~input |> ok);
+    check bool "stale witness does not release twice" false
+      (Store.update_direct_runtime_retry_wait store ~now:17. ~operation_id ~observed:waiting ~replacement:released |> ok);
+    ignore (Store.update_direct_runtime_retry_wait store ~now:18. ~operation_id ~observed:released ~replacement:released |> ok);
+    let run now expected =
+      let row = Store.claim_next store ~now |> ok |> Option.get in
+      check bool "dependency release preserves queue order" true
+        (Operation.Operation_id.equal expected row.operation_id) in
+    run 19. second;
+    ignore (Store.succeed_running store ~now:20. ~operation_id:second ~outcome_ref:"second" |> ok);
+    run 21. operation_id;
+    Store.resume_direct_runtime_retry store ~now:22. ~operation_id ~observed:released |> ok;
+    ignore (Store.succeed_running store ~now:23. ~operation_id ~outcome_ref:"released retry" |> ok);
+    run 24. third;
+    ignore (Store.succeed_running store ~now:25. ~operation_id:third ~outcome_ref:"third" |> ok)))
+
 let test_cooperative_checkpoint_preserves_identity_and_yields_to_steering () = with_path (fun path ->
   let saved = Semantic.Agent_core (checkpoint "cooperative tool results") in
   with_open path (fun store ->
     let first = admitted store in
     let steering = Operation.Operation_id.of_string "new-user-steering" |> string_ok in
-    ignore (Store.submit store ~now:11. ~operation_id:steering ~source ~input:(`Assoc ["message", `String "change direction"]) |> ok);
+    let steering_row = match Store.submit store ~now:11. ~operation_id:steering ~source
+        ~input:(`Assoc ["message", `String "change direction"]) |> ok with
+      | Store.Accepted row | Store.Existing row -> row in
     let queued = Store.defer_direct_checkpoint store ~now:12. ~operation_id
       ~execution_digest:first.execution_digest ~checkpoint:saved |> ok in
+    check int64 "one queue position per checkpoint defer" (Int64.succ steering_row.sequence) queued.sequence;
     check bool "checkpoint keeps original input" true (queued.input = first.input);
     check bool "checkpoint is unfinished" true (queued.state = Operation.Queued);
     check bool "no provider retry invented" true (Store.direct_runtime_retry store ~operation_id |> ok = None);
@@ -459,6 +519,8 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
     check bool "cancel removes resume authority" true (Store.direct_checkpoint store ~operation_id |> ok = None)))
 
 let () = run "Keeper direct runtime continuation" ["durable owner journal", [
+  test_case "runtime retry yields once to waiting input" `Quick test_runtime_retry_yields_to_waiting_input;
+  test_case "runtime dependency release takes a new place once" `Quick test_runtime_dependency_release_takes_a_new_place;
   test_case "official checkpoint preserves original conversation without native replay" `Quick test_official_checkpoint_retains_session_input_and_cancel_boundary;
   test_case "cooperative checkpoint yields to steering and survives claim crash" `Quick test_cooperative_checkpoint_preserves_identity_and_yields_to_steering;
   test_case "fresh batch stops before a queued continuation" `Quick test_fresh_batch_stops_before_queued_continuation;

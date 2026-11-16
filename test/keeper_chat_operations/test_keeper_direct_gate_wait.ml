@@ -52,6 +52,29 @@ let suspend store operation = Store.defer_direct_gate store ~now:3. ~operation_i
     ~execution_digest:operation.Operation.execution_digest ~waiting |> ok
 let get store = match Store.get store original |> ok with Some value -> value | None -> fail "original operation lost"
 
+let test_gate_release_goes_behind_waiting_input decision () = with_path (fun path -> with_store path (fun store ->
+  let operation=admit store in
+  ignore (suspend store operation);
+  check bool "unresolved gate cannot claim" true (Store.claim_next store ~now:4. |> ok=None);
+  Store.submit store ~now:5. ~operation_id:other ~source ~input |> ok |> ignore;
+  let resolution={Semantic.obligation;decision} in
+  Store.resolve_direct_gate store ~now:6. ~operation_id:original ~resolution |> ok |> ignore;
+  let third=id "gate-release-third" in
+  Store.submit store ~now:7. ~operation_id:third ~source ~input |> ok |> ignore;
+  Store.resolve_direct_gate store ~now:8. ~operation_id:original ~resolution |> ok |> ignore;
+  let run now expected =
+    let row=Store.claim_next store ~now |> ok |> Option.get in
+    check bool "gate release preserves durable queue order" true
+      (Operation.Operation_id.equal expected row.operation_id) in
+  run 9. other;
+  Store.succeed_running store ~now:10. ~operation_id:other ~outcome_ref:"independent result" |> ok |> ignore;
+  run 11. original;
+  Store.resume_direct_gate store ~now:12. ~operation_id:original ~waiting ~resolution |> ok;
+  Store.discharge_direct_gate store ~now:13. ~operation_id:original ~obligation |> ok;
+  Store.succeed_running store ~now:14. ~operation_id:original ~outcome_ref:"resolved original" |> ok |> ignore;
+  run 15. third;
+  Store.succeed_running store ~now:16. ~operation_id:third ~outcome_ref:"third result" |> ok |> ignore))
+
 let test_wait_restart_resolution decision () = with_path (fun path ->
   with_store path (fun store ->
     let operation = admit store in
@@ -303,6 +326,8 @@ let test_invalid_native_preparation () =
      {valid with tool_surface_sha256="invalid"};{valid with frame=Keeper_repetition_snapshot.empty}]
 
 let () = run "direct Gate waiting" ["journal", [
+  test_case "approval releases behind waiting input once" `Quick (test_gate_release_goes_behind_waiting_input Semantic.Gate_approved);
+  test_case "denial releases behind waiting input once" `Quick (test_gate_release_goes_behind_waiting_input (Semantic.Gate_denied "declined"));
   test_case "hash-valid pending payload must decode with its original identity" `Quick test_invalid_preparation_checkpoint;
   test_case "pending checkpoint bytes must match their exact reference" `Quick test_changed_preparation_bytes;
   test_case "native preparation rejects incomplete original identity" `Quick test_invalid_native_preparation;

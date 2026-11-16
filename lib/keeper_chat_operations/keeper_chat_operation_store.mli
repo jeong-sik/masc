@@ -1,4 +1,5 @@
-(** Sole-writer SQLite storage for Keeper chat operations. *)
+(** Sole-writer SQLite storage for Keeper chat operations.
+    [sequence] is the current queue position; [created_at] is the admission time. *)
 
 module Operation = Keeper_chat_operation
 module Semantic = Keeper_semantic_execution

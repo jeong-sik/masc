@@ -3,10 +3,10 @@ rfc: "backlog-never-preempts-a-running-turn"
 title: "쌓인 대기열은 실행 중인 턴을 멈추지 않는다 — 끝낼 때는 Keeper 가 정한다"
 status: Draft
 created: 2026-10-29
-updated: 2026-11-10
-revision: 5
+updated: 2026-11-16
+revision: 6
 author: claude
-related: ["0441", "0377", "event-queue-admit-all-ready", "board-attention-asks-jev-once-per-event", "keeper-recall-reaches-the-turn", "arrived-stimuli-reach-the-running-turn"]
+related: ["0441", "0377", "event-queue-admit-all-ready", "keeper-recall-reaches-the-turn", "arrived-stimuli-reach-the-running-turn"]
 ---
 
 # RFC: 쌓인 대기열은 실행 중인 턴을 멈추지 않는다 — 끝낼 때는 Keeper 가 정한다
@@ -15,7 +15,7 @@ related: ["0441", "0377", "event-queue-admit-all-ready", "board-attention-asks-j
 멈춘 턴은 큐의 행을 지우지 못해서, 다음 턴이 같은 행을 다시 처리한다.
 이 RFC 는 턴을 멈추는 이유를 채팅 작업, 승인, Keeper 에게 직접 온 입력으로 좁히고, 그 밖의 일은 Keeper 가 턴을 끝낼 때 정하게 하자고 제안한다.
 
-- 다루는 것: 도는 턴이 멈추는 조건, 큐를 Keeper 에게 보여 주는 방법(요약), 요약에 Jev 를 쓰는 방법.
+- 다루는 것: 도는 턴이 멈추는 조건, 큐를 Keeper 에게 보여 주는 방법(요약).
 - 다루지 않는 것: 누가 다음 슬롯을 받는지(RFC-0373 의 admission), 큐 행의 저장 형식, `Operation_queued` 와 `Repeated_*` 멈춤(6절).
 - 용어: **멈춘다**는 서버가 도는 턴을 도구 호출 사이에 끝내는 일이다. 그렇게 끝난 턴이 **체크포인트**다(TUI 의 노란 줄 `Continuation checkpoint recorded`).
   **intake** 는 턴이 시작할 때 큐에서 처리할 행을 고르는 단계이고, 고른 행을 **admit** 했다고 한다. 시스템 로그에는 `consumed` 로 남는다.
@@ -50,9 +50,8 @@ related: ["0441", "0377", "event-queue-admit-all-ready", "board-attention-asks-j
 1. **1단계.** 도는 턴은 쌓인 대기열 때문에 멈추지 않는다. 채팅 작업이 기다릴 때, 승인된 Gate 결과가 도착했을 때,
    Keeper 에게 직접 온 입력이나 Keeper 가 요청한 결과가 intake 뒤에 도착했을 때만 멈춘다. 코드를 지우는 변경이다.
 2. **2단계.** Keeper 가 admit 하지 못한 행과 아직 시작하지 않은 채팅 작업의 요약(종류별 묶음, 개수, 가장 오래된 행의 경과 시간, 원본 참조)을 받는다. 지금은 이 둘의 내용이 프롬프트에 없다(1.7). 요약은 보여 주는 용도이고 아무것도 지우지 않는다.
-3. **3단계.** 요약의 묶음과 순서를 Jev 가 정한다. Jev 의 답은 요약에 붙는 설명과 순서로만 쓰고, 큐에서 지우는 근거로는 쓰지 않는다.
 
-이 PR 에는 측정 도구, 증거, TLA+ 모델, 이 RFC 가 있다. 1단계 코드는 위에 쌓은 PR 에 있고, 2·3단계는 설계만 있다.
+이 PR 에는 측정 도구, 증거, TLA+ 모델, 이 RFC 가 있다. 1단계 코드는 위에 쌓은 PR 에 있고, 2단계는 설계만 있다.
 
 ## 1. 지금 모양
 
@@ -276,7 +275,7 @@ flowchart LR
 | 큐에 무엇이 남는가 (영속, 만료 없음) | 서버 | 같음 | 결정론 |
 | 누가 다음 슬롯을 받는가 | owner (RFC-0373, #46133) | 같음 | 결정론 |
 | 도는 턴을 멈추는가 | 서버가 "대기 행이 있다", "예약이 기다린다" 로 판정 | 채팅 작업, 승인, 직접 온 입력만. 그 밖에는 Keeper 가 끝낸다 | 명시 사건 + 모델 |
-| 다음 턴에 무엇을 보여 주는가 | 큐 순서(긴급도, 도착 순)와 admit 상한 | Jev 가 묶고 순서를 정한 요약, 고르는 건 Keeper (2·3단계) | 모델 |
+| 다음 턴에 무엇을 보여 주는가 | 큐 순서(긴급도, 도착 순)와 admit 상한 | 요약, 고르는 건 Keeper (2단계) | 모델 |
 | 무엇을 지우는가 | `completed` 턴이 자기 admit 집합을 지움 | 같음 | 결정론 |
 
 ## 3. 제안
@@ -367,30 +366,6 @@ flowchart TD
   - 이 줄이 닿는 범위는 에이전트 코어 턴뿐이다. 115개를 막은 턴의 `runtime_profile` 로 나누면 `glm-coding.*`, `opencode_go.*`, `ollama_cloud.*`(`runtime.toml` 에서 모두 `openai-compatible-http`)인 것이 38개, 대기 10.5시간(깃발 켜진 대기의 48.0%), 상한 9.6시간(전체 대기의 31.1%)이다. `sonnet-500k-then-glm`, `go-deepseek-then-glm`, `go-mimo-then-glm` 같은 레인 이름인 71개(10.8시간, 49.2%)는 나누지 못했다. 원장이 레인 이름만 적고 어느 후보가 돌렸는지는 적지 않으며, 레인 안에 Claude Code 와 GLM 이 같이 있다. Claude Code·Codex·Muse 가 직접 막은 5개는 0.1시간이다. 스크립트 밖에서 센 값이고, 합계 19.57시간은 커밋된 스크립트의 값과 같다.
   - 모델이 이 줄을 보고 턴을 일찍 끝내는지는 배포 전이라 재지 못했다. 블록이 프롬프트 캐시에 주는 비용도 재지 못했다. **[확인 필요]**
 
-### 3.6 3단계 — Jev 가 묶고 순서를 정한다
-
-**[제안]**
-
-```mermaid
-flowchart LR
-    Q[("대기열<br/>영속, 만료 없음")] --> D["요약<br/>종류별 묶음, 개수, 경과 시간, 원본 참조"]
-    Q -.->|"큐 revision 이 바뀌면"| J["Jev (exact-output lane)<br/>묶음마다 need_now, can_wait, superseded"]
-    J -.->|"순서와 설명만"| D
-    D --> K["Keeper 턴 입력"]
-    K -->|"completed"| A["admit 한 행만 지움"]
-    A --> Q
-```
-
-- 판정 요청은 묶음마다 질문 하나를 한 요청에 싣는다. 질문 문장에 Keeper 의 이름과 지금 하는 일을 넣는다. 한 요청의 질문들이 같은 state 를 쓰는 점은 `RFC-board-attention-asks-jev-once-per-event` 에서 이미 쓰고 있다.
-- 큐 revision 이 바뀐 뒤 첫 턴 시작에 한 번 돌린다. Keeper 가 한동안 돌지 않으면 주기로도 돈다.
-- 판단 대상은 모델을 부르기 전에 영속한다(헌법 `persist_before_model_call`). 어디에 저장하는지는 6절이다.
-- Jev 가 실패하거나 `uncertain` 이면 요약에 라벨 없이 싣는다. 기본 라벨을 채우지 않는다(`strict_parse_no_default`).
-- **Jev 의 답은 지우는 근거가 아니다.** `RFC-keeper-recall-reaches-the-turn` 의 측정(Keeper `won-chik` 하나, 합성 목적 하나, 후보 56개를 10번 반복)에서 3개(5.4%)의 라벨이 바뀌었다.
-  한 Keeper 의 값이라 다른 질문과 Keeper 에는 그대로 적용할 수 없다. 흔들리는 값은 순서와 설명에만 쓴다.
-- `superseded` 의 예: 같은 세션이 같은 요청을 리뷰어 6명에게 보냈고, 새 판(r3)이 옛 판(r2)을 대체해도 r2 요청이 큐에 남는다(#46437). "r2 는 r3 에 밀렸다"는 규칙으로 잡기 어렵고 모델이 읽어야 안다.
-  지금의 묶음 처리는 이 경우를 다루지 못한다. 묶음은 큐 맨 앞의 새 작업 중 출처 필드(보낸 사람, 답장 경로 등)와 턴 지침이 모두 같은 연속 구간만 합치고, 이미 한 번 돈 작업(continuation)에서 끊는다(1.7). #46437 본문이 적은 큐(보낸 사람 5~8명, 지연된 작업은 전부 continuation)에는 적용되지 않는다.
-- 순서를 admit 에 쓸지는 정하지 않았다. 쓰면 `can_wait` 로 판정된 행이 계속 밀릴 수 있다. 처음에는 순서를 요약에만 쓰고, 측정한 뒤에 정한다.
-
 ## 4. 검증
 
 ### 4.1 모델
@@ -443,29 +418,27 @@ TLC 는 `-workers 1` 로 돌렸다. 모델은 종류 구분, intake 시점, 영�
 ## 5. 되돌리기
 
 1단계는 커밋 하나를 되돌리면 된다. 큐 스냅샷과 영수증의 형식을 바꾸지 않으므로 되돌려도 남는 상태가 없다.
-2·3단계는 구현이 없으므로 해당하지 않는다.
+2단계는 구현이 없으므로 해당하지 않는다.
 
 ## 6. 열린 질문
 
 1. `Operation_queued` 멈춤도 같은 원칙으로 Keeper 가 정하게 할 것인가. 채팅 작업은 사람이 보낸 것과 다른 Keeper 가 보낸 것이 섞여 있고, 지금 판정이 둘을 나누지 않는 것으로 보인다. **[확인 필요]** 사람이 기다리는 경우의 우선권(RFC-0441)을 지키면서 나눌 수 있는지 먼저 봐야 한다. Codex 는 이 멈춤을 모델에게 보내는 안내문 한 문장으로 한다(1.7). 문장이 턴을 끝내라고 적고 있어서 강제 정지와 얼마나 다른지는 재지 않았다. **[확인 필요]**
 2. `Repeated_tool_call`, `Repeated_assistant_text` 멈춤은 횟수가 근거다. 헌법 `magic_number` 는 반복 횟수를 중단의 근거로 삼지 않는다고 적고 있다. 별도 RFC 로 다룬다.
 3. 한 턴이 admit 하는 행의 상한(기본 32, `turn.admission_max_events`)은 숫자로 흐름을 정하는 값이다. `RFC-event-queue-admit-all-ready` 는 "개수·시간 창은 두지 않는다"고 적었다. 2단계 요약이 들어가면 이 값이 필요한지 다시 본다.
-4. 3단계의 판단 대상을 어디에 영속할지. 큐 스냅샷 옆에 두는 새 파일이 필요할 수 있다. 새 상태는 없을 때 durable truth 가 손상되는 경우에만 더한다는 규칙(`projects.md`)에 맞는지 먼저 묻는다.
-5. 3단계에 쓸 lane 이름과 슬롯. `board_attention_exact` 를 같이 쓰면 줄이 길어진다(`RFC-board-attention-asks-jev-once-per-event` 1.3 나).
-6. 3.1 표의 분류가 맞는가. 같은 종류 안에서 구분이 안 되는 곳이 둘 있다.
+4. 3.1 표의 분류가 맞는가. 같은 종류 안에서 구분이 안 되는 곳이 둘 있다.
    - `Board_signal` 은 사람의 직접 @멘션과 Broadcast 를 한 종류로 묶는다(3.4 의 2). 사람이 보낸 것만 멈춤 이유로 삼으려면 송신자 구분이 필요하다.
    - `Workspace_message` 는 다른 Keeper 가 보낸 메시지도 도는 턴을 멈춘다. `projects.md` 는 Keeper 간 요청을 대상 큐에 넣는 일반 메시지로 보고 응답·대기 의무를 만들지 않는다고 적는다. 이 RFC 는 이 종류를 바꾸지 않았다.
-7. 꾸준히 켜져 있는 Keeper 중에도 오래된 `ask_answered` 행이 비지 않은 곳이 있다. `msx-retro-mania`, `wkbl-front` 은 가장 오래된 행이 730시간이 넘고 `checkpoint_retentions` 가 0이다(한 번도 admit 되지 않았다).
+5. 꾸준히 켜져 있는 Keeper 중에도 오래된 `ask_answered` 행이 비지 않은 곳이 있다. `msx-retro-mania`, `wkbl-front` 은 가장 오래된 행이 730시간이 넘고 `checkpoint_retentions` 가 0이다(한 번도 admit 되지 않았다).
    `ocaml-agent-ic` 는 같은 시기(9월 말)의 `ask_answered` 행 세 개가 30번 남았다. 일시 정지한 Keeper 8곳(`rust-hwp-guy` 1,027시간 등)은 설계대로 쌓인다.
    켜져 있는 세 곳은 이번 증가(10-26)보다 4주 앞선 일이고 이 문제와 다른 현상으로 보인다. 확인하지 않았다. **[확인 필요]**
-8. 게시판 알림(`Board_attention`)은 체크포인트가 지우는 종류인데 같은 id 가 되풀이해서 admit 된다(1.4). 전체 Keeper 에서 다시 admit 된 입력의 43%다. 알림을 만드는 쪽이 같은 id 로 다시 넣는 것으로 보이며 확인하지 않았다. **[확인 필요]**
-9. 어떤 유형이 멈췄는지 로그가 모자라다. 유형 C·D, deferred 도구, 공식 클라이언트가 도구 경계에서 멈춘 `Operation_queued`/`Durable_stimulus_waiting` 이 모두 같은 `durable` 로 기록된다. 이유를 타입으로 남기는 후속 작업이 필요하다.
-10. 2단계의 한 줄을 어느 층에 둘지. 자율 턴에는 Namespace State 가 있고 직접 턴에는 없다(1.7). 직접 턴에 채팅 큐가 보여야 하는지(예: #46437 의 리뷰어 큐)를 정하지 않았다.
-11. Librarian 작업 문맥이 이미 대기 선택과 채팅 입력을 소스로 읽는다(1.7). 요약을 따로 만들지, 이 경로를 고칠지는 그 문단의 실제 내용을 읽은 뒤에 정한다. **[확인 필요]**
+6. 게시판 알림(`Board_attention`)은 체크포인트가 지우는 종류인데 같은 id 가 되풀이해서 admit 된다(1.4). 전체 Keeper 에서 다시 admit 된 입력의 43%다. 알림을 만드는 쪽이 같은 id 로 다시 넣는 것으로 보이며 확인하지 않았다. **[확인 필요]**
+7. 어떤 유형이 멈췄는지 로그가 모자라다. 유형 C·D, deferred 도구, 공식 클라이언트가 도구 경계에서 멈춘 `Operation_queued`/`Durable_stimulus_waiting` 이 모두 같은 `durable` 로 기록된다. 이유를 타입으로 남기는 후속 작업이 필요하다.
+8. 2단계의 한 줄을 어느 층에 둘지. 자율 턴에는 Namespace State 가 있고 직접 턴에는 없다(1.7). 직접 턴에 채팅 큐가 보여야 하는지(예: #46437 의 리뷰어 큐)를 정하지 않았다.
+9. Librarian 작업 문맥이 이미 대기 선택과 채팅 입력을 소스로 읽는다(1.7). 요약을 따로 만들지, 이 경로를 고칠지는 그 문단의 실제 내용을 읽은 뒤에 정한다. **[확인 필요]**
 
 ## 7. 관련
 
 - RFC-0441 — 사람이 기다리는 턴에 양보하는 정책. 이 RFC 는 그 정책(채팅 작업, 승인, 직접 온 대화)을 바꾸지 않고, 그 밖의 멈춤을 없앤다.
 - RFC-0377, `RFC-event-queue-admit-all-ready` — 한 턴이 준비된 행을 묶어서 admit 하는 규칙.
-- `RFC-board-attention-asks-jev-once-per-event`, `RFC-keeper-recall-reaches-the-turn` — Jev 를 판정에 쓰는 선례와 측정. 뒤의 것은 도구와 안내문을 둔 기억 검색의 호출 비율도 적었다(1.7).
+- `RFC-keeper-recall-reaches-the-turn` — 도구와 안내문을 둔 기억 검색의 호출 비율을 적었다(1.7).
 - #46120 (시각이 된 예약이 채팅에 밀림), #46133, #46134, #46125, #46109, #46138, #46145, #46202 (1.1 의 변경들), #46437 (직접 작업 턴 완료율 하락), #41157·#41169 (같은 연쇄를 Connector 포인터에서만 막은 fix), #45655, #28809.

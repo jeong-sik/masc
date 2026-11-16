@@ -56,6 +56,10 @@ type tool_failure_kind =
   (** A persisted failure whose original execution boundary did not record
         provenance. This preserves missing historical evidence without
         relabelling it as provider-reported. *)
+  | Writer_exited_tool_error
+  (** The process that wrote the execution journal exited while the handler
+        ran, so the handler never returned. Whether its effect happened is
+        unknown, and the handler was not run again. *)
 [@@deriving yojson, show]
 
 type tool_failure_provenance =

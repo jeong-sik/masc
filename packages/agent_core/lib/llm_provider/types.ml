@@ -53,6 +53,7 @@ type tool_failure_kind =
   | Non_retryable_tool_error
   | Reported_tool_error
   | Unattributed_tool_error
+  | Writer_exited_tool_error
 [@@deriving yojson, show]
 
 type tool_failure_provenance =
@@ -68,7 +69,10 @@ type tool_result_outcome =
 
 let tool_failure_kind_is_recoverable = function
   | Validation_error | Recoverable_tool_error -> true
-  | Non_retryable_tool_error | Reported_tool_error | Unattributed_tool_error -> false
+  | Non_retryable_tool_error
+  | Reported_tool_error
+  | Unattributed_tool_error
+  | Writer_exited_tool_error -> false
 ;;
 
 let tool_result_outcome_is_error = function

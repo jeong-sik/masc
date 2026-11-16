@@ -112,6 +112,7 @@ type tool_failure_kind = Types.tool_failure_kind =
   | Non_retryable_tool_error
   | Reported_tool_error
   | Unattributed_tool_error
+  | Writer_exited_tool_error
 
 type tool_execution_result =
   { invocation : Tool_contract.Invocation.t

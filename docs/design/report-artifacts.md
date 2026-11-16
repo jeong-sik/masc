@@ -49,11 +49,18 @@ The report producer chooses which output is a standalone artifact.
 ## Dashboard editing and file import
 
 The catalog's **파일 가져오기** action accepts one explicitly selected or dropped
-UTF-8 HTML/Markdown file. The operator reviews its title, summary, explicit format
+HWPX, DOCX, UTF-8 HTML or Markdown file. Office documents become HTML drafts with
+editable merged tables and native column/bar/line/pie chart data. Conversion
+notices appear before publication. The operator reviews its title, summary, explicit format
 and source before publishing. Invalid UTF-8 is refused rather than replaced;
 reading a file does not execute or publish it. The reader's **편집** action opens
 a source editor. It captures the selected revision and Task/Goal links when
 editing starts; a catalog refresh cannot silently rebase that draft.
+
+Office exports use the selected publication revision. A chart's HTML data table
+is its stored source; rendered SVG and exported native charts/workbooks are
+derived from that table. See [document import and export](artifact-document-export.md)
+for the supported structures, resource limits and layout differences.
 
 When an editable draft opens, the editor captures canonical base and MASC roots
 from health and requires the base to match its workspace authority. It checks

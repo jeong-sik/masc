@@ -40,7 +40,7 @@ it('embeds inline PNG bytes while turning external images into visible descripti
   expect(await zip.file(media[0]!)!.async('base64')).toBe(pixel)
   expect(xml.getElementsByTagNameNS(word,'drawing')).toHaveLength(1)
   expect(Array.from(xml.getElementsByTagNameNS(word,'t'),node=>node.textContent).join('')).toContain('[그림: 외부 그림]')
-  expect(file.notices).toEqual(['외부 그림과 PNG·JPEG 이외의 그림은 설명과 링크로 바꿨습니다.'])
+  expect(file.notices).toEqual(['외부 그림과 PNG·JPEG·BMP 이외의 그림은 설명과 링크로 바꿨습니다.'])
 })
 it('never executes active HTML or creates unsafe external relationships and replaces XML-forbidden controls',async()=>{
   const fetch=vi.fn();vi.stubGlobal('fetch',fetch)

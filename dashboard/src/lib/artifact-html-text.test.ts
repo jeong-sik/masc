@@ -41,6 +41,34 @@ describe('HTML sentence editing source spans', () => {
       expect(sharedSource(doc)).toBe('<p>a!lpha</p>')
     } finally { doc.destroy() }
   })
+  it('fills a missing chart value through a shared source selection without changing its table markup', () => {
+    const source = '<figure data-masc-chart="line"><table><tr><th>항목</th><th>값</th></tr><tr><td>A</td><td></td></tr></table></figure>'
+    const part = artifactHtmlTextEditor(source).parts.find(part => part.text === '')!
+    expect(part.raw).toBe('')
+    const doc = seedSharedDocument(source)
+    try {
+      const selection = selectSharedSource(doc, { anchor: part.start, head: part.end })
+      doc.getText('content').insert(0, '<p>추가한 본문</p>')
+      replaceSharedSelection(doc, selection, part.raw, '12.5')
+      expect(sharedSource(doc)).toBe('<p>추가한 본문</p>' + source.replace('<td></td>', '<td>12.5</td>'))
+    } finally { doc.destroy() }
+  })
+  it('distinguishes empty cells, whitespace-only cells and zero from repaired markup without an explicit closing tag', () => {
+    const source = '<table><tr><td></td><td>0</td><td> \r\n </td><td><br></td></tr></table>'
+    const parts = artifactHtmlTextEditor(source).parts
+    expect(parts.map(part => part.text)).toEqual(['', '0', ''])
+    expect(parts.map(part => source.slice(part.start, part.end))).toEqual(['', '0', ' \r\n '])
+    expect(artifactHtmlTextEditor('<table><tr><td><td>1</td></tr></table>').parts.map(part => part.text)).toEqual(['1'])
+  })
+  it('fills the empty paragraph produced by importing a Word table cell', () => {
+    const source = '<table><tr><td><p>계약금액</p></td><td><p></p></td></tr></table>'
+    const editor = artifactHtmlTextEditor(source), blank = editor.parts.find(part => part.text === '')!
+    const doc = seedSharedDocument(source)
+    try {
+      replaceSharedSelection(doc, selectSharedSource(doc, { anchor: blank.start, head: blank.end }), blank.raw, '25000')
+      expect(sharedSource(doc)).toBe(source.replace('<p></p>', '<p>25000</p>'))
+    } finally { doc.destroy() }
+  })
   it('keeps special text and foreign nodes out of editable spans', () => {
     const editor = artifactHtmlTextEditor('<title>title</title><style>css</style><p>body</p><textarea>input</textarea><select><option>option</option></select><svg><text>svg</text></svg><template>template</template>')
     expect(editor.parts.map(part => part.text)).toEqual(['body'])

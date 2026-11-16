@@ -1,7 +1,7 @@
 import * as Y from 'yjs'
 import { afterEach, expect, it } from 'vitest'
 import { executeSharedDocumentOperation, replaceSharedSelection, resolveSharedSelection, restoreSharedDocument,
-  seedSharedDocument, selectSharedSource, sharedSource, sharedState } from './artifact-shared-document'
+  seedSharedDocument, selectSharedSource, selectSharedTextRange, sharedSource, sharedState } from './artifact-shared-document'
 
 const docs: Y.Doc[] = []
 const keep = (doc: Y.Doc) => { docs.push(doc); return doc }
@@ -43,6 +43,20 @@ it('refuses a stale Keeper replacement when a human changed the selected text', 
   expect(() => replaceSharedSelection(doc, selection, '사용자', 'Keeper')).toThrow('선택한 내용이 바뀌었습니다')
   expect(sharedState(doc)).toEqual(before)
   expect(sharedSource(doc)).toBe('사먼저용자가 작성한 원고')
+})
+
+it('refuses a stale empty-field fill after another writer inserts at the same field', () => {
+  const doc = seed('<td></td>'), first = selectSharedTextRange(doc, { anchor: 4, head: 4 }), second = selectSharedTextRange(doc, { anchor: 4, head: 4 })
+  replaceSharedSelection(doc, first, '', '5')
+  expect(() => replaceSharedSelection(doc, second, '', '12')).toThrow('선택한 내용이 바뀌었습니다')
+  expect(sharedSource(doc)).toBe('<td>5</td>')
+})
+
+it('keeps an empty-field range attached through unrelated insertions before the field', () => {
+  const doc = seed('<td></td>'), field = selectSharedTextRange(doc, { anchor: 4, head: 4 })
+  replaceSharedSelection(doc, selectSharedSource(doc, { anchor: 0, head: 0 }), '', '<p>앞 문단</p>')
+  replaceSharedSelection(doc, field, '', '12')
+  expect(sharedSource(doc)).toBe('<p>앞 문단</p><td>12</td>')
 })
 
 it('keeps the selection direction and excludes concurrent insertions at its boundaries', () => {

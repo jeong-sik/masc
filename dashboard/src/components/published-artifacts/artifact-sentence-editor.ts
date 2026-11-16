@@ -4,7 +4,7 @@ import { artifactHtmlTextEditor, escapeArtifactHtmlText } from '../../lib/artifa
 import { artifactMarkdownTextEditor } from '../../lib/artifact-markdown-text'
 import { selectedArtifactText } from '../../lib/artifact-text-frame'
 import { draftBase64, draftBytes, type ArtifactLiveSession, type ArtifactLiveState } from '../../lib/artifact-live-session'
-import { replaceSharedSelection, resolveSharedSelection, restoreSharedDocument, selectSharedSource, sharedState } from '../../lib/artifact-shared-document'
+import { replaceSharedSelection, resolveSharedSelection, restoreSharedDocument, selectSharedTextRange, sharedState } from '../../lib/artifact-shared-document'
 import { artifactSentenceRecoveries, discardArtifactSentence, retainArtifactSentence, type ArtifactSentenceInput, type ArtifactSentenceRecovery } from '../../lib/artifact-sentence-recovery'
 import { sameDraftTarget } from '../../api/artifact-draft-live'
 
@@ -22,7 +22,7 @@ export function ArtifactSentenceEditor({ session, state, format, onPending }: {
   const content = session.content
   const rendered = useMemo(() => {
     const editor = format==='html'?artifactHtmlTextEditor(content):artifactMarkdownTextEditor(content)
-    const positions = editor.parts.map(part => selectSharedSource(session.doc, { anchor: part.start, head: part.end }))
+    const positions = editor.parts.map(part => selectSharedTextRange(session.doc, { anchor: part.start, head: part.end }))
     return { editor, positions }
   }, [session, content, format])
   const dirty = sentence !== null && sentence.input !== sentence.original

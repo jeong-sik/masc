@@ -5,9 +5,13 @@ import { gfm } from 'micromark-extension-gfm'
 import { toHast } from 'mdast-util-to-hast'
 import { raw } from 'hast-util-raw'
 import { toHtml } from 'hast-util-to-html'
-import { imageDimensionsFromData } from 'image-dimensions'
+import { officeImageDimensions } from './artifact-office-image'
 import { Document,Paragraph,TextRun,ExternalHyperlink,ImageRun,Table,TableRow,TableCell,Footer,PageNumber,
   HeadingLevel,LevelFormat,WidthType,ShadingType,Packer,type ParagraphChild,type IRunOptions,type IParagraphOptions,type INumberingOptions } from 'docx'
+import { ChartRun } from 'docx/charts'
+import { officeChartFromFigure, type OfficeChart } from './artifact-office-chart'
+import { formatOfficeChartSeries } from './artifact-office-chart-format'
+import { officeXmlCharacter } from './artifact-office-text'
 import type { ArtifactDocument } from '../api/published-artifacts'
 
 // A4 portrait, 1 inch margins. OOXML uses twentieths of a point (twips).
@@ -32,25 +36,26 @@ export type ArtifactWordFile={data:ArrayBuffer;notices:readonly string[]}
 export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWordFile> {
   const source=doc.artifact.format==='html'?doc.content:toHtml(raw(toHast(fromMarkdown(doc.content,{extensions:[gfm()],mdastExtensions:[gfmFromMarkdown()]}),{allowDangerousHtml:true})))
   const parsed=parse(source),notices=new Set<string>(),numbering:INumberingOptions['config'][number][]=[]
+  const charts:OfficeChart[]=[]
   function wordText(value:string):string {
     return Array.from(value,character=>{
       const code=character.codePointAt(0)!
-      if(code===9||code===10||code===13||(code>=32&&code<=0xD7FF)||(code>=0xE000&&code<=0xFFFD)||(code>=0x10000&&code<=0x10FFFF))return character
+      if(officeXmlCharacter(code))return character
       notices.add('Word에서 표현할 수 없는 문자는 대체 문자로 바꿨습니다.');return '\uFFFD'
     }).join('')
   }
   function image(node:Nodes.Element):ParagraphChild[] {
     const src=attr(node,'src')??'',alt=wordText(attr(node,'alt')||'그림')
-    const match=/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]*={0,2})$/.exec(src)
+    const match=/^data:image\/(png|jpeg|bmp);base64,([A-Za-z0-9+/]*={0,2})$/.exec(src)
     if(match){
       try{
-        const data=Uint8Array.from(atob(match[2]!),character=>character.charCodeAt(0)),size=imageDimensionsFromData(data)
+        const data=Uint8Array.from(atob(match[2]!),character=>character.charCodeAt(0)),size=officeImageDimensions(data)
         if(!size||size.type!==match[1]||size.width<=0||size.height<=0)throw new Error('invalid image')
         // 96 CSS pixels per inch; fit the printable page without stretching.
         const scale=Math.min(1,bodyWidth/15/size.width,bodyHeight/15/size.height)
-        return [new ImageRun({type:size.type==='jpeg'?'jpg':'png',data,transformation:{width:size.width*scale,height:size.height*scale},altText:{name:alt,title:alt,description:alt}})]
+        return [new ImageRun({type:size.type==='jpeg'?'jpg':size.type,data,transformation:{width:size.width*scale,height:size.height*scale},altText:{name:alt,title:alt,description:alt}})]
       }catch{notices.add('읽을 수 없는 그림은 설명으로 바꿨습니다.')}
-    }else notices.add('외부 그림과 PNG·JPEG 이외의 그림은 설명과 링크로 바꿨습니다.')
+    }else notices.add('외부 그림과 PNG·JPEG·BMP 이외의 그림은 설명과 링크로 바꿨습니다.')
     const text=new TextRun({text:`[그림: ${alt}]`}),link=safeLink(src)
     return [link?new ExternalHyperlink({link,children:[text]}):text]
   }
@@ -161,6 +166,17 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
       if(!tree.isElementNode(node)){if(tree.isTextNode(node))pending.push(node);continue}
       if(omitted.has(node.tagName))continue
       if(node.namespaceURI!==html.NS.HTML||dynamic.has(node.tagName)){flush();notices.add('앱·영상·도형의 실행 화면은 포함하지 않았습니다.');continue}
+      const chart=officeChartFromFigure(node)
+      if(chart){
+        flush()
+        charts.push(chart)
+        const common={title:wordText(chart.title),categories:chart.categories.map(wordText),
+          series:chart.series.map(series=>({name:wordText(series.name),values:series.values})),transformation:{width:bodyWidth/15,height:320}}
+        const options=chart.type==='pie'?{...common,type:chart.type}:{...common,type:chart.type,emptyValues:chart.emptyValues,
+          ...(chart.valueFormat===undefined?{}:{valueAxis:{numberFormat:chart.valueFormat}})}
+        result.push(new Paragraph({children:[new ChartRun(options)]}))
+        continue
+      }
       if(Object.hasOwn(headings,node.tagName)){flush();result.push(paragraph(node.childNodes,context,{heading:headings[node.tagName as keyof typeof headings],keepNext:true}))}
       else if(node.tagName==='ul'||node.tagName==='ol'){flush();result.push(...list(node,context))}
       else if(node.tagName==='table'){flush();result.push(...table(node))}
@@ -179,5 +195,5 @@ export async function artifactWordFile(doc:ArtifactDocument):Promise<ArtifactWor
     sections:[{properties:{page:{size:page,margin:{top:margin,bottom:margin,left:margin,right:margin}}},
       footers:{default:new Footer({children:[new Paragraph({children:[new TextRun({text:`${doc.artifact.id} · v${doc.artifact.revision} · `,size:16,color:'6B7280'}),new TextRun({children:[PageNumber.CURRENT],size:16})]})]})},
       children:children.length?children:[new Paragraph({})]}]})
-  return {data:await Packer.toArrayBuffer(document),notices:[...notices]}
+  return {data:await formatOfficeChartSeries(await Packer.toArrayBuffer(document),charts),notices:[...notices]}
 }

@@ -1,4 +1,5 @@
 import { parse, defaultTreeAdapter as tree, html, type DefaultTreeAdapterTypes as Nodes } from 'parse5'
+import { officeChartPreviewInsertions } from './artifact-office-chart-preview'
 import { Schema } from 'effect'
 import { resourceOrigins } from './artifact-app-resources'
 import { isJson, isJsonObject, type JsonObject } from '../api/artifact-app-data'
@@ -126,7 +127,7 @@ function bootstrap(config:{token:string;marker:string},valid:typeof isJson):void
 
 export function artifactAppFrame(source:string,origins:readonly string[]=[]):AppFrame {
   const token=crypto.randomUUID(),marker='data-masc-input-'+crypto.randomUUID().replaceAll('-','')
-  const document=parse(source,{sourceCodeLocationInfo:true}),insertions:{at:number;text:string}[]=[]
+  const document=parse(source,{sourceCodeLocationInfo:true}),insertions=officeChartPreviewInsertions(document)
   const visit=(parent:Nodes.ParentNode):void=>{
     for(const node of parent.childNodes) {
       if(!tree.isElementNode(node)||node.namespaceURI!==html.NS.HTML)continue

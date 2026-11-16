@@ -80,19 +80,25 @@ function validIndex(content: string, index: number): boolean {
   return !(before >= 0xD800 && before <= 0xDBFF && after >= 0xDC00 && after <= 0xDFFF)
 }
 
-function selectValidated({ text, content }: ValidatedDocument, { anchor, head }: SourceSelection): SharedSelection {
+function selectValidated({ text, content }: ValidatedDocument, { anchor, head }: SourceSelection, kind: 'cursor' | 'text' = 'cursor'): SharedSelection {
   if (!validIndex(content, anchor) || !validIndex(content, head)) {
     throw new SharedDocumentError('invalid_selection', '선택 영역이 원고 범위를 벗어나거나 문자를 나눕니다.')
   }
   const end = Math.max(anchor, head)
-  const position = (index: number) => Array.from(Y.encodeRelativePosition(
-    Y.createRelativePositionFromTypeIndex(text, index, anchor !== head && index === end ? -1 : 0),
+  const position = (index: number, association = anchor !== head && index === end ? -1 : 0) => Array.from(Y.encodeRelativePosition(
+    Y.createRelativePositionFromTypeIndex(text, index, association),
   ))
-  return { anchor: position(anchor), head: position(head) }
+  return { anchor: kind === 'text' && anchor === head ? position(anchor, -1) : position(anchor), head: position(head) }
 }
 
 export function selectSharedSource(doc: Y.Doc, selection: SourceSelection): SharedSelection {
   return selectValidated(inspectDocument(doc), selection)
+}
+
+// An empty field is a text range, while a cursor follows insertions at its point.
+// Keeping its left and right anchors distinct detects a later fill of that field.
+export function selectSharedTextRange(doc: Y.Doc, selection: SourceSelection): SharedSelection {
+  return selectValidated(inspectDocument(doc), selection, 'text')
 }
 
 function resolveValidated({ doc, text, content }: ValidatedDocument, selection: SharedSelection): SourceSelection | null {

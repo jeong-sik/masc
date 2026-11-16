@@ -209,6 +209,7 @@ type bearer = private
 - 이름이 다른 경우는 alias 규칙을 지금 코드 그대로 쓴다. 규칙을 주체 위의 순수 함수로 옮기는 일은 §7 의 열린 질문이다.
 - `lane_access_for_caller`, `browser_principal_for_caller`, `board_reader_for_caller` 는 `Admitted` 의 credential 을 쓴다. 이 함수들은 지금도 `find_credential_by_token` 이 찾은 credential 의 role 을 본다. 입구의 role 이 아니다.
 - `Unread` 의 token 은 남는다. auth 가 꺼진 workspace 에서도 bearer 가 호출자 이름과 Keeper 주인을 정하기 때문이다. 이 동작을 바꾸려면 운영자 결정이 필요하다.
+- Add-on 노출(`addon_exports_for_request`)도 `bearer` 를 받는다(3b). `tools/list` 와 `tools/call` 이 쓰는 값이다. `Admitted` 면 credential 과 입구의 role 을 쓰고, `Unread` 면 지금처럼 token 을 조회하고 role 을 구한다.
 
 **D6. raw token 함수 가두기.** 아래 층이 `Auth.find_credential_by_token`, `Auth.resolve_agent_from_token`, `Auth.check_permission ~token`, `Auth.authorize_tool ~token` 을 새로 부르면 CI 가 실패한다.
 

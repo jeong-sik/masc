@@ -345,18 +345,22 @@ let handle_server_discover_eio ?(profile = Full) id =
 
 let public_tool_help_schemas () = Config.visible_tool_schemas ()
 
-let addon_exports_for_request ~profile ~auth_token state =
+(* HIGH-RISK-UNREVIEWED: which Add-on tools this caller may see and call
+   (RFC a-request-reads-its-bearer-once-at-the-door, step 3b). A bearer the
+   door resolved brings its credential and role, so the listing reads
+   neither again. A token no door read is looked up as before. *)
+let addon_exports_for_request ~profile ~(bearer : Mcp_server_eio_caller_identity.bearer)
+    state =
   let config = Mcp_server.workspace_config state in
   let reserved = List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
       Config.raw_all_tool_schemas in
-  let permitted ~agent_name ~principal access =
+  let permitted ~agent_name ~principal ~role access =
       let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
       (* One role answers every name below. [Auth.authorize_tool] resolved it
          again for each name, reading the auth store once per exported tool;
-         under a congested owner domain each read costs seconds. Lazy so a
-         listing with no Add-on tools reads nothing, as before. Only this call
-         forces it, from one fiber, so Stdlib.Lazy needs no lock. *)
-      let role = lazy (Auth.resolve_role config.base_path ~agent_name ~token:auth_token) in
+         under a congested owner domain each read costs seconds. [role] is
+         lazy so a listing with no Add-on tools reads nothing, as before. Only
+         this call forces it, from one fiber, so Stdlib.Lazy needs no lock. *)
       (* Retained tool metadata owns known permissions even when execution is
          supplied by an Add-on. Unknown package tools use the generic Lane
          action permission; package-provided annotations grant no role. *)
@@ -386,33 +390,44 @@ let addon_exports_for_request ~profile ~auth_token state =
         permits conflict.name) reading.conflicts in
       access, principal, reserved,
       ({ exports; conflicts; unready } : Lane_addon_runtime.export_snapshot) in
+  (* The role a token resolves to, read only when an Add-on tool asks. *)
+  let token_role ~agent_name token =
+    lazy (Auth.resolve_role config.base_path ~agent_name ~token) in
+  let anonymous token =
+    permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
+      ~role:(token_role ~agent_name:"anonymous" token) Lane_addon_sources.Unauthenticated in
+  let credentialed (credential : Masc_domain.agent_credential) ~role =
+    let access = match credential.role with
+      | Masc_domain.Admin -> Lane_addon_sources.Operator_configuration
+      | Masc_domain.Worker ->
+          (match Keeper_meta_store.read_meta_resolved config credential.agent_name with
+           | Ok (Some (keeper, _)) -> Lane_addon_sources.Keeper keeper
+           | Ok None | Error _ -> Lane_addon_sources.Unauthenticated)
+      | Masc_domain.Player -> Lane_addon_sources.Unauthenticated in
+    let principal = match access with
+      | Lane_addon_sources.Keeper keeper -> Lane_addon_call_context.Keeper keeper
+      | Operator_configuration | Unauthenticated ->
+          Lane_addon_call_context.Authenticated_agent credential.agent_name in
+    permitted ~agent_name:credential.agent_name ~principal ~role access in
   match profile with
   | Managed_agent | Operator_remote ->
       Ok (Lane_addon_sources.Unauthenticated, Lane_addon_call_context.Anonymous, reserved,
         ({ exports = []; conflicts = []; unready = [] } : Lane_addon_runtime.export_snapshot))
   | Full | Seat ->
-      match auth_token with
-      | None -> Ok (permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
-          Lane_addon_sources.Unauthenticated)
-      | Some token ->
+      match bearer with
+      (* The door resolved the role the same way [Auth.resolve_role] would
+         for this credential's owner and this token. *)
+      | Mcp_server_eio_caller_identity.Admitted { credential; role; token = _ } ->
+          Ok (credentialed credential ~role:(Lazy.from_val (Ok role)))
+      | Mcp_server_eio_caller_identity.Unread { token = None; _ } -> Ok (anonymous None)
+      | Mcp_server_eio_caller_identity.Unread { token = Some token as auth_token; _ } ->
           match Auth.find_credential_by_token config.base_path ~token with
           | Error _ when not (Auth.is_auth_enabled config.base_path) ->
-              Ok (permitted ~agent_name:"anonymous" ~principal:Lane_addon_call_context.Anonymous
-                Lane_addon_sources.Unauthenticated)
+              Ok (anonymous auth_token)
           | Error error -> Error (Masc_domain.masc_error_to_string error)
           | Ok credential ->
-              let access = match credential.role with
-                | Masc_domain.Admin -> Lane_addon_sources.Operator_configuration
-                | Masc_domain.Worker ->
-                    (match Keeper_meta_store.read_meta_resolved config credential.agent_name with
-                     | Ok (Some (keeper, _)) -> Lane_addon_sources.Keeper keeper
-                     | Ok None | Error _ -> Lane_addon_sources.Unauthenticated)
-                | Masc_domain.Player -> Lane_addon_sources.Unauthenticated in
-              let principal = match access with
-                | Lane_addon_sources.Keeper keeper -> Lane_addon_call_context.Keeper keeper
-                | Operator_configuration | Unauthenticated ->
-                    Lane_addon_call_context.Authenticated_agent credential.agent_name in
-              Ok (permitted ~agent_name:credential.agent_name ~principal access)
+              Ok (credentialed credential
+                    ~role:(token_role ~agent_name:credential.agent_name auth_token))
 ;;
 
 (* The worker SDK still models 2025 tool execution hints and a legacy [icon].
@@ -435,7 +450,7 @@ let handle_list_tools_eio
       ?(include_usage = false)
       ?cursor
       ?agent_id
-      ?auth_token
+      ~bearer
       state
       id
   =
@@ -448,7 +463,7 @@ let handle_list_tools_eio
            (Mcp_server.workspace_config state))
     else None
   in
-  match addon_exports_for_request ~profile ~auth_token state with
+  match addon_exports_for_request ~profile ~bearer state with
   | Error detail -> make_error_typed ~id Mcp_error_code.Invalid_request detail
   | Ok (_, _, _, (reading : Lane_addon_runtime.export_snapshot)) ->
   let tools =
@@ -1117,7 +1132,9 @@ let handle_request
                        in
                        handle_list_tools_eio
                          ~profile:list_profile
-                         ?auth_token
+                         ~bearer:
+                           (Mcp_server_eio_caller_identity.of_sender sender
+                              ~auth_token ~internal_keeper_runtime)
                          ?names
                          ~include_hidden
                          ~include_usage
@@ -1185,7 +1202,7 @@ let handle_request
                       in
                       let addon =
                         if Config.is_raw_tool_name name then Ok (None, None)
-                        else addon_exports_for_request ~profile:call_profile ~auth_token state
+                        else addon_exports_for_request ~profile:call_profile ~bearer state
                           |> Result.map (fun (access, principal, reserved, (reading : Lane_addon_runtime.export_snapshot)) ->
                               Option.map (fun export -> access, principal, reserved, export)
                                 (List.find_opt (fun (export : Lane_addon_runtime.tool_export) ->

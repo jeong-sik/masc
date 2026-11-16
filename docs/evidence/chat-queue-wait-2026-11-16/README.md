@@ -81,8 +81,16 @@ WHERE completed_at IS NOT NULL AND started_at < b AND completed_at > a;
 - `idle_h` treats only `started_at..completed_at` as running, so it is an upper bound.
 - Turn spans start at the millisecond stamp in the raw-trace file name. Turn records start on
   2026-11-13, so the earlier window has no turn split.
-- 35.5 of the 117.1 idle hours overlap no recorded turn. Admission pauses, provider rests and
-  restarts are not separated here.
+- 35.5 of the 117.1 idle hours overlap no recorded turn (`idle_without_turn_h`,
+  `longest_idle_without_turn`). The server logs `masc-start-20261113T004828Z.log`,
+  `masc-start-20261115T103255Z.log` and `masc-start-20261115T170602Z.log` explain 22.6 of them:
+  `ENOSPC` from 2026-11-15T13:43Z and the server down 15:42Z~17:00Z (11.1 h, five Keepers), one
+  code-reviewer-uncle chat turn holding the slot from 17:07:55Z until the 02:01Z restart (7.7 h
+  inside the window, logged as `turn_busy holder_lane=chat_operation holder_started_at=1794762475`),
+  and turns cut by the 11-13 06:30Z deploy restart (3.8 h; all five Keepers log `checkpoint_save`
+  in that span). A turn that ends by a restart writes
+  no turn record, and its operation rewrites `started_at` when it resumes. The other 12.9 hours
+  are not separated.
 - The longer runs coincide with a runtime change. In the tool-call ledger, direct turns of these
   Keepers in the earlier window ran mostly on deepseek-v4-1-flash, gpt-6.1 and sonnet-5-5 profiles,
   and in the later window mostly on glm-5.3-flash profiles. Neither the cause of the change nor

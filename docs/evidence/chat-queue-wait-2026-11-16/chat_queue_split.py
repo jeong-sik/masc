@@ -18,6 +18,9 @@ Per Keeper:
   file start to its turn record ts; the start is the millisecond stamp in the raw-trace file name
   (turn-<ms>-...). A turn whose raw trace is missing is counted in turns_without_start.
 - turns: count and hours of turns per turn_kind whose record ts falls in the window.
+- idle_without_turn_h, longest_idle_without_turn: idle time that overlaps no recorded turn, and
+  its longest intervals. A turn that ends by a server restart writes no turn record, so its time
+  lands here.
 
 Usage: chat_queue_split.py --base-path <dir> --since <epoch> --end <epoch> <keeper>...
 """
@@ -25,6 +28,7 @@ Usage: chat_queue_split.py --base-path <dir> --since <epoch> --end <epoch> <keep
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import pathlib
 import re
@@ -35,8 +39,13 @@ from collections.abc import Iterable
 
 HOUR = 3600.0
 RAW_TRACE_START = re.compile(r"turn-(\d{13})-")
+LONGEST_GAPS_SHOWN = 5  # output length only; nothing is filtered by it
 
 type Interval = tuple[float, float]
+
+
+def utc(t: float) -> str:
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def union(intervals: Iterable[Interval]) -> list[Interval]:
@@ -150,6 +159,7 @@ def keeper_split(base: pathlib.Path, keeper: str, since: float, end: float) -> d
     idle = subtract(waits, ran)
     spans, totals, without_start = turn_intervals(keeper_dir, since, end)
     any_turn = union(iv for v in spans.values() for iv in v)
+    gaps = sorted(subtract(idle, any_turn), key=lambda iv: iv[0] - iv[1])
     return {
         "operations": len(started),
         "executions": len({owner.get(o, o) for o, _, _ in started}),
@@ -161,6 +171,10 @@ def keeper_split(base: pathlib.Path, keeper: str, since: float, end: float) -> d
         | {"any_turn": round(length(intersect(idle, any_turn)) / HOUR, 1)},
         "turns": {k: {"turns": int(v["turns"]), "hours": round(v["hours"], 1)} for k, v in sorted(totals.items())},
         "turns_without_start": without_start,
+        "idle_without_turn_h": round(length(gaps) / HOUR, 1),
+        "longest_idle_without_turn": [
+            [utc(a), utc(b), round((b - a) / 60.0, 1)] for a, b in gaps[:LONGEST_GAPS_SHOWN]
+        ],
     }
 
 

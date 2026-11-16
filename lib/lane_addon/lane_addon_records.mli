@@ -3,7 +3,9 @@
     that key itself, as it reads [binding.sources].
 
     Only an operator-owned TOML declaration may hold grants. A manual Attach or
-    a Keeper-owned installation that names [records] is refused. *)
+    a Keeper-owned installation that names [records] is refused. A
+    declaration's grants are checked when the declaration is read; who owns it
+    is checked when it is attached. *)
 
 type grant =
   | Board of { source_id : string; visibilities : Board_types.visibility list }
@@ -21,15 +23,20 @@ type grant =
 
 val source_id : grant -> string
 
-val grants : operator_owned:bool -> Yojson.Safe.t -> (grant list, string) result
-(** The grants of a binding object. No [records] key is no grant.
-    [operator_owned] says whether the binding belongs to an operator-owned
-    TOML declaration. Every
+val grants_of_binding : Yojson.Safe.t -> (grant list, string) result
+(** The grants of a binding object, read without asking who owns it. No
+    [records] key is no grant. Every
     grant is checked: a closed kind, a unique non-blank [source_id], a
     non-empty [visibilities] for [board], and relative [paths] with no [..]
     for [repository]. A [wiki] grant has no other key, and a
     [github_pulls] grant names its [repository_id]. Any other key is
     refused. *)
+
+val grants : operator_owned:bool -> Yojson.Safe.t -> (grant list, string) result
+(** {!grants_of_binding} for a binding whose owner is known.
+    [operator_owned] says whether the binding belongs to an operator-owned
+    TOML declaration. A [records] key in any other binding is refused before
+    its grants are read. *)
 
 val covers : paths:string list -> string -> bool
 (** Whether a repository-relative file path falls under a grant's [paths]. *)

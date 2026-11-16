@@ -452,6 +452,16 @@ manifest 의 `[world]` 테이블에 `web_search = true` 가 있는 패키지는 
 
 운영자가 쓴 TOML 선언은 `binding.records` 로 패키지가 읽을 기록을 정한다. 수동 Attach 나 Keeper 가 소유한 설치가 이 키를 쓰면 instance 를 띄우기 전에 거절된다.
 
+항목의 모양은 선언을 저장할 때 본다. 이런 항목이 있으면 저장이 거절되고, 문구는 `binding.records:` 로 시작한다.
+
+- `kind` 가 아래 넷 가운데 하나가 아니다.
+- 그 종류에 필요한 칸이 빠졌다.
+- 그 종류에 없는 칸이 있다.
+- 두 항목의 `source_id` 가 같다.
+- `paths` 가 저장소 밖을 가리킨다.
+
+선언 파일을 직접 고쳐 이렇게 되면 고친 선언은 반영되지 않는다. 돌던 worker 는 그대로 돌고, 문구는 `configuration.issues` 에 나온다.
+
 ```toml
 [[binding.records]]
 source_id = "board"

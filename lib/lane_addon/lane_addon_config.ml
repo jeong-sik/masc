@@ -176,6 +176,12 @@ let decode ~manifest_scope ~source_path ~source_revision ~id fields =
     | None -> Error "binding requires a table" in
   let binding = resolve_snapshot_paths ~directory binding in
   let* () = Lane_addon_sources.validate binding in
+  (* Grant shape is checked here so a wrong grant is refused when it is
+     saved, not when a replacement worker is attached. Ownership is not known
+     here; attach checks it (RFC operator-quiz §4.5). *)
+  let* (_ : Lane_addon_records.grant list) =
+    Lane_addon_records.grants_of_binding binding
+    |> Result.map_error (fun message -> "binding.records: " ^ message) in
   let* () = match package.binding_schema with
     | None -> Ok ()
     | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ()) in

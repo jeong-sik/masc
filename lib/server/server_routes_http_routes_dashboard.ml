@@ -1171,6 +1171,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/diagnostics/memprof" (fun _state _agent_name req reqd ->
             let json = Server_diagnostics_memprof.report_json () in
             Http.Response.json_value ~compress:true ~request:req json reqd)
+  |> Server_diagnostics_memprof.register_counter_routes
   (* Operator diagnostic, never cached and never public: the walk stalls
      the process, so only an admin token may ask for it, and each call
      must walk afresh to say what the heap holds now. *)

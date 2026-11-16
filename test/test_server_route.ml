@@ -573,6 +573,100 @@ let with_authentication ~strict f =
          ~clock:(Eio.Stdenv.clock env))
 ;;
 
+let with_memprof_fixture f =
+  Alloc_profile.For_testing.reset ();
+  Fun.protect ~finally:Alloc_profile.For_testing.reset (fun () ->
+    Alloc_profile.For_testing.set_sampling_rate 0.1;
+    ignore (Alloc_profile.For_testing.observe_alloc ~key:"private-stack-fixture" ~n_samples:7);
+    f ())
+;;
+
+let memprof_identity_query json =
+  let open Yojson.Safe.Util in
+  [ "runtime_instance_id",[json |> member "runtime_instance_id" |> to_string]
+  ; "epoch",[json |> member "epoch" |> to_int |> string_of_int]
+  ; "sampling_rate",[json |> member "sampling_rate" |> to_float |> Printf.sprintf "%.17g"] ]
+;;
+
+let test_memprof_counter_wire_and_selective_stacks () =
+  with_memprof_fixture @@ fun () ->
+  let module D=Server_diagnostics_memprof in
+  let json=match D.counters_json ~query:[] with Ok json->json | Error _->fail "capture refused" in
+  let open Yojson.Safe.Util in
+  let rows=json |> member "counters" |> to_list in
+  check int "complete registry rows" 1 (List.length rows);
+  check int "raw samples, not rounded bytes" 7 (List.hd rows |> member "allocated_samples" |> to_int);
+  check bool "counters do not contain stack strings" false
+    (List.exists (fun row -> List.mem_assoc "callstack" (to_assoc row)) rows);
+  let id=List.hd rows |> member "id" |> to_int |> string_of_int in
+  let query=memprof_identity_query json @ ["id",[id;id]] in
+  let stacks=match D.stacks_json ~query with Ok json->json |> member "stacks" |> to_list | Error _->fail "stack refused" in
+  check int "duplicate requested IDs collapse" 1 (List.length stacks);
+  check string "selected stack is the original captured key" "private-stack-fixture"
+    (List.hd stacks |> member "callstack" |> to_string);
+  check bool "guarded second capture" true (Result.is_ok (D.counters_json ~query:(memprof_identity_query json)))
+;;
+
+let test_memprof_query_identity_refusals () =
+  with_memprof_fixture @@ fun () ->
+  let module D=Server_diagnostics_memprof in
+  let json=match D.counters_json ~query:[] with Ok json->json | Error _->fail "capture refused" in
+  let identity=memprof_identity_query json in
+  let replace name value=List.map (fun (key,old) -> key,(if key=name then [value] else old)) identity in
+  List.iter (fun query -> check bool "malformed counter query" true
+    (D.counters_json ~query=Error D.Invalid_query))
+    [["epoch",[]];["epoch",["1"]];["epoch",["1";"1"]];identity@["epoch",["1"]];
+     replace "sampling_rate" "nan"; replace "sampling_rate" "infinity";
+     replace "sampling_rate" "-0.1";replace "epoch" "-1";["id",["1"]];["unknown",["x"]]];
+  check bool "another process rejected" true
+    (D.counters_json ~query:(replace "runtime_instance_id" "another-instance")=Error D.Instance_changed);
+  check bool "wrong rate rejected" true (D.counters_json ~query:(replace "sampling_rate" "0.2")=Error D.Profile_changed);
+  List.iter (fun query -> check bool "malformed stack selection" true (D.stacks_json ~query=Error D.Invalid_query))
+    [[]; identity; identity@["id",["0"]];identity@["id",[string_of_int(Alloc_profile.max_sites+2)]]];
+  check bool "unregistered valid ID is explicit" true (D.stacks_json ~query:(identity@["id",["2"]])=Error D.Unknown_site);
+  Alloc_profile.For_testing.reset ();
+  check bool "reset rejects reused registry" true (D.counters_json ~query:identity=Error D.Profile_changed)
+;;
+
+let test_memprof_numeric_routes_preserve_operator_read_authority () =
+  with_authentication ~strict:true @@ fun ~base_path ~worker ~admin ~clock:_ ->
+  let module P = Alloc_profile in
+  P.For_testing.reset ();
+  Fun.protect ~finally:P.For_testing.reset (fun () ->
+    P.For_testing.set_sampling_rate 0.1;
+    ignore (P.For_testing.observe_alloc ~key:"operator-diagnostic" ~n_samples:1);
+    let snapshot=P.counter_snapshot () in
+    let id=((List.hd snapshot.counters).id :> int) in
+    let query = ["runtime_instance_id",[Build_identity.runtime_instance_id];
+      "epoch",[string_of_int snapshot.identity.epoch];
+      "sampling_rate",[Printf.sprintf "%.17g" snapshot.identity.sampling_rate];
+      "id",[string_of_int id]] in
+    let paths = [Server_diagnostics_memprof.counters_path;
+      Uri.to_string (Uri.make ~path:Server_diagnostics_memprof.stacks_path ~query ())] in
+    let router=Server_diagnostics_memprof.register_counter_routes (Router.create ()) in
+    List.iter (fun path ->
+      check int "no token" 401 (dispatch router path).status;
+      check int "bad token" 401 (dispatch ~token:"invalid-diagnostic-token" router path).status;
+      check int "worker lacks CanAdmin" 403 (dispatch ~token:worker router path).status;
+      let response=dispatch ~token:admin router path in
+      check int "admin observation" 200 response.status;
+      check bool "uncached private response" true (List.mem ("cache-control","no-store") response.headers);
+      let uri=Uri.of_string path in
+      let guarded base root=Uri.to_string (Uri.with_query uri (Uri.query uri @
+        ["expected_base_path",[base];"expected_masc_root",[root]])) in
+      let matching=dispatch ~token:admin router (guarded base_path (Filename.concat base_path Common.masc_dirname)) in
+      check int "matching workspace precondition is accepted" 200 matching.status;
+      check bool "workspace admission header survives no-store scope" true
+        (List.mem Workspace.read_precondition_admission_header matching.headers);
+      let invalid=dispatch ~token:admin router
+        (Uri.to_string (Uri.with_query uri (Uri.query uri @ ["unsupported",["value"]]))) in
+      check int "diagnostic query error" 400 invalid.status;
+      check bool "diagnostic errors are also uncached" true
+        (List.mem ("cache-control","no-store") invalid.headers);
+      let mismatch=dispatch ~token:admin router (guarded "/other" "/other/.masc") in
+      check int "workspace precondition is still enforced" 409 mismatch.status) paths)
+;;
+
 (* The status each kind answers with no credential, with a Worker token and with
    an Admin token. Both routers must agree, and these are what they agree on.
    Only a public read that asks for a credential under strict auth changes with
@@ -965,6 +1059,10 @@ let () =
             "loopback: each kind answers like its wrapper by hand"
             `Quick
             (test_typed_routes_answer_like_the_wrapper_by_hand ~strict:false)
+        ; test_case "numeric memprof routes preserve operator read authority" `Quick
+            test_memprof_numeric_routes_preserve_operator_read_authority
+        ; test_case "numeric memprof wire and selective stacks" `Quick test_memprof_counter_wire_and_selective_stacks
+        ; test_case "numeric memprof query and identity refusals" `Quick test_memprof_query_identity_refusals
         ] )
     ; ( "canonical host"
       , [ test_case

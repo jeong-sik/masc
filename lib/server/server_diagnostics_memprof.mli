@@ -8,3 +8,31 @@
     stall other domains. *)
 
 val report_json : unit -> Yojson.Safe.t
+
+type request_error = Invalid_query | Instance_changed | Profile_changed | Unknown_site
+val error_json : request_error -> Yojson.Safe.t
+val error_status : request_error -> [ `Bad_request | `Conflict | `Not_found ]
+
+val counters_json :
+  query:(string * string list) list -> (Yojson.Safe.t, request_error) result
+(** Every registered site's raw counters, without stack strings or ranking.
+    Optional [runtime_instance_id], [epoch] and [sampling_rate] query fields
+    must occur together exactly once, and guard a second observation. Workspace
+    query preconditions are handled by the enclosing token-auth read wrapper. *)
+
+val stacks_json :
+  query:(string * string list) list -> (Yojson.Safe.t, request_error) result
+(** The same identity fields are required. Repeated [id] query fields select
+    the stacks to return; duplicates are collapsed. No full-stack default. *)
+
+val counters_path : string
+val stacks_path : string
+val register_counter_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
+(** Register uncached, token-bound CanAdmin GETs. The same wrapper as the
+    existing diagnostic preserves read quota and workspace preconditions.
+    Snapshot production and response encoding use the shared CPU executor,
+    with its existing inline fallback outside an installed Eio pool. Socket
+    writes and inherited response headers stay on the caller fiber. The server
+    starts sampling before spawning the executor domains, which inherit the
+    same profile; sampling state is observed on the domain doing the snapshot.
+    Neither endpoint starts/stops sampling or modifies durable workspace state. *)

@@ -44,6 +44,7 @@ type synthesis_state =
     or remote capacity. Raw error/detail text is deliberately excluded. *)
 type stop_reason =
   | Source_read_failed
+  | History_resolution_required
   | Input_build_failed
   | No_smaller_range_evidence
   | Narrowed_for_next_signal

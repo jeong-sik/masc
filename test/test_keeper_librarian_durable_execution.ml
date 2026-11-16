@@ -2855,6 +2855,63 @@ let test_cut_effect_fence_refuses_moved_source_positions () =
       (Result.is_error (cut_fence fixture original preview.expected));
     check bool "the refusal does not change positions again" true (cut_source_positions fixture=positions);
     no_memory fixture)
+let test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner () =
+  with_same_binding_cut (fun fixture original request _exact _schema ->
+    let expected=(cut_preview fixture original).expected in
+    ignore (cut_fence fixture original expected |> Result.map_error Resolution.error_to_string |> get);
+    check bool "the Cut fence really has no resolution intent" true
+      (io (fun () -> Resolution_intent.read ~config:fixture.config ~keeper_name
+        ~request_id:original.request_id |> Result.map_error Resolution_intent.error_to_string |> get)=[]);
+    let owner_path=Filename.concat (scope_directory fixture original.scope)
+      (Store.digest original.request_id ^ ".json") in
+    if remove_owner then io (fun () -> Sys.remove owner_path);
+    let positions=cut_source_positions fixture and memory=cut_memory_bytes fixture in
+    let posts=F.post_count fixture.server in
+    let body_directory=Filename.dirname (Filename.concat (Store.root fixture.store)
+      (Store.tool_request_body_path ~scope:original.scope ~request_digest:original.request_digest)) in
+    let bodies ()=io (fun () -> Sys.readdir body_directory |> Array.to_list |> List.sort String.compare
+      |> List.map (fun name -> name,Fs_compat.load_file_opt (Filename.concat body_directory name))) in
+    let before_bodies=bodies () in
+    let original_count=List.length (observed_originals fixture) in
+    let blocked = function
+      | Error (Consumer.Original_publication_blocked _) -> ()
+      | Error error -> fail (Consumer.error_to_string error)
+      | Ok _ -> fail "a Cut fence permitted fresh history selection" in
+    blocked (run_worker fixture);
+    blocked (memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+      ~commit:(fun _ -> fail "direct Consumer reached a fresh commit callback")));
+    blocked (memory_action fixture (fun () -> Consumer.consume_one_with_runtime
+      ~config:fixture.config ~keeper_name ()));
+    memory_action fixture (fun () -> Refresh.For_testing.run_continuity
+      ~base_path:fixture.base_path ~keeper_name ());
+    let module Observation=Keeper_continuity_observation in
+    check bool "direct continuity reports the retained resolution boundary" true
+      (match Observation.latest_synthesis ~config:fixture.config ~keeper_name with
+       | Some value -> value.state=Observation.Source_unavailable
+         && value.stop_reason=Some Observation.History_resolution_required
+       | None -> false);
+    ignore (Refresh.submit_durable ~base_path:fixture.base_path ~keeper_name);
+    Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
+    check bool "the production queue keeps this publication unfinished" true
+      (match Refresh.last_measurement ~config:fixture.config ~keeper_name with
+       | Some value -> (match value.Refresh.last_pass with
+         | Refresh.Stopped (Consumer.Original_publication_blocked _) -> true
+         | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit | Not_committed
+         | Pending _ | Stopped _ | Raised _ -> false)
+       | None -> false);
+    check int "no path dispatches another provider request" posts (F.post_count fixture.server);
+    check int "no path creates an unparented original" original_count (List.length (observed_originals fixture));
+    check bool "no path stages another original body" true (bodies ()=before_bodies);
+    check bool "every source frontier and external ACK stays exact" true (cut_source_positions fixture=positions);
+    check bool "no path publishes even empty Memory or receipts" true (cut_memory_bytes fixture=memory);
+    if not remove_owner then refuse_fenced_resume fixture original request;
+    let fence_path=Filename.concat (Store.root fixture.store)
+      (Store.history_fence_path ~scope:original.scope ~request_id:original.request_id) in
+    io (fun () -> write fence_path "{unreadable retained Cut fence");
+    blocked (run_worker fixture);
+    check bool "unreadable fence evidence cannot become fresh-work permission" true
+      (bodies ()=before_bodies && cut_source_positions fixture=positions
+       && cut_memory_bytes fixture=memory && F.post_count fixture.server=posts))
 let test_missing_history_recovers_without_operator_submission history_kind () =
   with_fixture ~history_kind (fun ~sw:_ fixture ->
   let original,request=retain_absent_history_original fixture in
@@ -6043,6 +6100,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_cut_effect_fence_refuses_an_actual_range_receipt;
   test_case "a Cut effect fence refuses source positions moved after preview" `Quick
     test_cut_effect_fence_refuses_moved_source_positions;
+  test_case "a Cut fence without an intent blocks ordinary, direct and queued fresh history" `Quick
+    (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:false);
+  test_case "a Cut fence still blocks fresh history after its live owner record disappears" `Quick
+    (test_cut_fence_without_intent_blocks_every_fresh_history_path ~remove_owner:true);
   test_case "a fenced unknown original does not block the next history pass" `Quick
     test_history_fence_allows_the_next_history_pass;
   test_case "the deploy check reads no Exact file of a fenced original" `Quick

@@ -801,6 +801,15 @@ let history_fence_record t ~scope ~request_id =
   Ok (Option.join result)
 let load_history_fence t ~scope ~request_id =
   serialized_tool_request_read t ~scope (fun () -> history_fence_record t ~scope ~request_id)
+let history_fence_inventory t ~scope =
+  serialized_tool_request_read t ~scope (fun () ->
+    let* rows=read_tool_request_scope ~namespace:history_fences_directory
+      ~sync_parent:Unix.fsync t ~scope (fun ~owner_uid held names ->
+        List.fold_left (fun result name ->
+          let* rows=result in
+          let+ json=read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name in
+          (name,json)::rows) (Ok []) names) in
+    Ok (Option.value ~default:[] rows))
 let publish_history_fence_with ~write_fence t ~scope ~request_id ~expected_owner ~fence =
   protect (fun () -> with_tool_request_owner_serialization t ~scope (fun () ->
     let* expected = Lane_addon_json.canonical expected_owner in

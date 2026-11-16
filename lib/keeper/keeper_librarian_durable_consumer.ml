@@ -1142,6 +1142,10 @@ let consume_one_with_extent
     =
     read_positions ~config ~keeper_name
   in
+  let* ()=Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    Keeper_librarian_history_resolution_selection.check ~config ~keeper_name)
+    |> Result.map_error (fun error -> Original_publication_blocked
+      (Keeper_librarian_history_resolution_selection.error_to_string error)) in
   let cursor_error detail = Counterpart_observations_unreadable
     (Keeper_librarian_input_sources.External_cursor_failed detail) in
   let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->

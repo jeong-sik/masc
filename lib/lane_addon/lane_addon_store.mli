@@ -200,6 +200,10 @@ type history_fence_publication =
   | History_fence_unconfirmed of string
 val load_history_fence : t -> scope:string -> request_id:string ->
   (Yojson.Safe.t option, string) result
+val history_fence_inventory : t -> scope:string ->
+  ((string * Yojson.Safe.t) list, string) result
+(** Strict owned scope inventory, including fences whose original record is
+    absent. Reads under the existing scope serializer and creates no records. *)
 val history_fences_directory : string
 (** The directory below {!root} that holds one directory of fences per
     original scope, named by the scope's {!digest}. *)

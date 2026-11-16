@@ -196,6 +196,12 @@ val consume_one
     failure marker. A later read still selects from current sources; this
     foundation alone does not retain an immutable original across wakes.
 
+    Under the existing serialized Memory owner, fresh selection first reads
+    the authoritative history fence inventory. An unresolved Cut (including
+    one whose live owner record is absent) returns [Original_publication_blocked]
+    before a fresh capture, commit callback or cursor/ACK change. This also
+    holds for the standalone runtime consumer below.
+
     The commit receives the complete immutable original source/input capture.
     The capture records both cursors, selection mode, exact checkpoint bytes
     and messages, separate official files, counterparts and external frontier.

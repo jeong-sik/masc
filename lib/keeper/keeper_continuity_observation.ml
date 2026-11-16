@@ -20,6 +20,7 @@ type synthesis_state =
 
 type stop_reason =
   | Source_read_failed
+  | History_resolution_required
   | Input_build_failed
   | No_smaller_range_evidence
   | Narrowed_for_next_signal
@@ -80,6 +81,7 @@ let synthesis_state_to_string = function
   | Cancelled -> "cancelled"
 let stop_reason_to_string = function
   | Source_read_failed -> "source_read_failed"
+  | History_resolution_required -> "history_resolution_required"
   | Input_build_failed -> "input_build_failed"
   | No_smaller_range_evidence -> "no_smaller_range_evidence"
   | Narrowed_for_next_signal -> "narrowed_for_next_signal"
@@ -91,7 +93,7 @@ let stop_reason_to_string = function
 let valid_stop_reason state reason =
   match state, reason with
   | (Checking | Running | Committed | No_source | Disabled | Cancelled), None
-  | Source_unavailable, (None | Some Source_read_failed)
+  | Source_unavailable, (None | Some (Source_read_failed | History_resolution_required))
   | Input_unavailable, Some Input_build_failed
   | Not_committed, Some (No_smaller_range_evidence | Narrowed_for_next_signal
       | Indivisible_unit_uncommitted | Observed_capacity_unfit | Raised_during_pass)
@@ -99,7 +101,7 @@ let valid_stop_reason state reason =
   | (Checking | Running | Committed | No_source | Disabled | Cancelled
     | Source_unavailable | Input_unavailable | Not_committed | Capacity_refused),
     (None
-    | Some (Source_read_failed | Input_build_failed | No_smaller_range_evidence
+    | Some (Source_read_failed | History_resolution_required | Input_build_failed | No_smaller_range_evidence
       | Narrowed_for_next_signal | Indivisible_unit_uncommitted
       | Observed_capacity_unfit | Observed_capacity_disagrees | Raised_during_pass)) -> false
 
@@ -136,6 +138,7 @@ let synthesis_of_json json =
   let* stop_reason = match List.assoc "stop_reason" fields with
     | `Null -> Ok None
     | `String "source_read_failed" -> Ok (Some Source_read_failed)
+    | `String "history_resolution_required" -> Ok (Some History_resolution_required)
     | `String "input_build_failed" -> Ok (Some Input_build_failed)
     | `String "no_smaller_range_evidence" -> Ok (Some No_smaller_range_evidence)
     | `String "narrowed_for_next_signal" -> Ok (Some Narrowed_for_next_signal)

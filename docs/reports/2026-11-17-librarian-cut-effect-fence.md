@@ -27,14 +27,20 @@ an existing source receipt or moved source positions.
 
 The Cut APIs are not connected to HTTP submission or automatic recovery in this
 unit. The existing continuation worker explicitly refuses a Cut fence as a
-successor grant. Its body-staging crash window and descendant completion contract
+successor grant. Ordinary fresh selection and direct continuity also read the
+authoritative fence inventory, including fences whose owner record disappeared.
+They keep a Cut publication unfinished instead of creating an unparented original
+or writing Memory through continuity. Absence fences retain their existing
+next-pass behavior. The continuation's body-staging crash window and descendant completion contract
 must be addressed before this authority can enter automatic recovery. No worker
 or provider call, child creation, Memory publication, source ACK or live recovery
 is claimed by the new fence API.
 
-Five authored scenarios use the existing process-backed worker fixture and
+Seven authored scenarios use the existing process-backed worker fixture and
 actual host cancellation/join: atom and mixed-source fence preservation, busy
-claim and changed proof, a genuine range receipt, and moved source positions.
+claim and changed proof, a genuine range receipt, moved source positions, and
+no-intent fences through ordinary/direct/runtime/queued history paths with and
+without a surviving owner record.
 They assert retained parent/host state and no new effects. They have not been
 executed. OCaml 5.5.1 parsing and whitespace checks do not prove typing or behavior;
 the repository toolchain is pinned to 5.5.2.

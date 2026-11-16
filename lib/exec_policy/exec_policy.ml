@@ -297,60 +297,57 @@ let validate_shell_ir_paths ?(requires_existing_dir = true) ?workdir ~extra_root
       ~limit:16
       shell_ir
   in
-  match workdir with
-  | None -> judge_operands ()
-  | Some _ ->
-      let rec validate_redirects = function
-        | [] -> Ok ()
-        | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
-          let target =
-            Masc_exec.Path_scope.raw (Masc_exec.Redirect_scope.target_as_written target)
-          in
-          (match validate_path_value ~requires_existing_dir:false target with
-           | Ok () -> validate_redirects rest
-           | Error _ as err -> err)
-        (* A literal names no path, so there is no path boundary to check. *)
-        | (Masc_exec.Redirect_scope.Fd_to_fd _ | Masc_exec.Redirect_scope.Literal _)
-          :: rest -> validate_redirects rest
+  let rec validate_redirects = function
+    | [] -> Ok ()
+    | Masc_exec.Redirect_scope.File { target; _ } :: rest ->
+      let target =
+        Masc_exec.Path_scope.raw (Masc_exec.Redirect_scope.target_as_written target)
       in
-      let validate_cwd = function
-        | None -> Ok ()
-        | Some cwd ->
-          Masc_exec.Path_scope.raw cwd
-          |> validate_path_value ~requires_existing_dir
-      in
-      let rec validate_simple (simple : Masc_exec.Shell_ir.simple) =
-        match validate_cwd simple.cwd with
-        | Error _ as err -> err
-        | Ok () ->
-          (match validate_redirects simple.redirects with
-           | Error _ as err -> err
-           | Ok () ->
-             (* A substitution's child stages carry their own cwd and
-                redirects — exactly what the jail exists to validate, since
-                [Exec_dispatch.eval_substitutions] dispatches them. *)
-             validate_each
-               (List.concat_map
-                  Masc_exec.Shell_ir.subst_children_of_arg
-                  (simple.Masc_exec.Shell_ir.args
-                   @ List.map snd simple.Masc_exec.Shell_ir.env)))
-      and validate_parsed_shell_ir = function
-        | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
-        | Masc_exec.Shell_ir.Pipeline stages -> validate_each stages
-        | Masc_exec.Shell_ir.Sequence { head; tail } ->
-          (match validate_parsed_shell_ir head with
-           | Error _ as err -> err
-           | Ok () -> validate_each (List.map snd tail))
-      and validate_each = function
-        | [] -> Ok ()
-        | part :: rest ->
-          (match validate_parsed_shell_ir part with
-           | Ok () -> validate_each rest
-           | Error _ as err -> err)
-      in
-      (match validate_parsed_shell_ir shell_ir with
+      (match validate_path_value ~requires_existing_dir:false target with
+       | Ok () -> validate_redirects rest
+       | Error _ as err -> err)
+    (* A literal names no path, so there is no path boundary to check. *)
+    | (Masc_exec.Redirect_scope.Fd_to_fd _ | Masc_exec.Redirect_scope.Literal _)
+      :: rest -> validate_redirects rest
+  in
+  let validate_cwd = function
+    | None -> Ok ()
+    | Some cwd ->
+      Masc_exec.Path_scope.raw cwd
+      |> validate_path_value ~requires_existing_dir
+  in
+  let rec validate_simple (simple : Masc_exec.Shell_ir.simple) =
+    match validate_cwd simple.cwd with
+    | Error _ as err -> err
+    | Ok () ->
+      (match validate_redirects simple.redirects with
        | Error _ as err -> err
-       | Ok () -> judge_operands ())
+       | Ok () ->
+         (* A substitution's child stages carry their own cwd and
+            redirects — exactly what the jail exists to validate, since
+            [Exec_dispatch.eval_substitutions] dispatches them. *)
+         validate_each
+           (List.concat_map
+              Masc_exec.Shell_ir.subst_children_of_arg
+              (simple.Masc_exec.Shell_ir.args
+               @ List.map snd simple.Masc_exec.Shell_ir.env)))
+  and validate_parsed_shell_ir = function
+    | Masc_exec.Shell_ir.Simple simple -> validate_simple simple
+    | Masc_exec.Shell_ir.Pipeline stages -> validate_each stages
+    | Masc_exec.Shell_ir.Sequence { head; tail } ->
+      (match validate_parsed_shell_ir head with
+       | Error _ as err -> err
+       | Ok () -> validate_each (List.map snd tail))
+  and validate_each = function
+    | [] -> Ok ()
+    | part :: rest ->
+      (match validate_parsed_shell_ir part with
+       | Ok () -> validate_each rest
+       | Error _ as err -> err)
+  in
+  match validate_parsed_shell_ir shell_ir with
+  | Error _ as err -> err
+  | Ok () -> judge_operands ()
 ;;
 
 

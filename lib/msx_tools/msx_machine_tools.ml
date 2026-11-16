@@ -159,11 +159,65 @@ let resolve_roms_dir ~base_path args =
   | dir -> Argument dir
 ;;
 
+let path_is_within ~root candidate =
+  let root_prefix =
+    if String.ends_with ~suffix:"/" root then root else root ^ "/"
+  in
+  String.equal candidate root || String.starts_with ~prefix:root_prefix candidate
+;;
+
+let authorized_argument_roms_dir ~base_path dir =
+  match Unix.realpath dir with
+  | exception Unix.Unix_error _ ->
+    Error (Msx_lane.Unreadable (Printf.sprintf "no cbios_main_msx2.rom in %s" dir))
+  | real_dir ->
+    let in_base =
+      match Unix.realpath base_path with
+      | real_base -> path_is_within ~root:real_base real_dir
+      | exception Unix.Unix_error _ -> false
+    in
+    let matches_env =
+      match Env_config_core.raw_value_opt "MSX_ROMS" with
+      | Some env_dir when env_dir <> "" ->
+        (match Unix.realpath env_dir with
+         | real_env -> String.equal real_dir real_env
+         | exception Unix.Unix_error _ -> false)
+      | Some _ | None -> false
+    in
+    if not (in_base || matches_env) then
+      Error
+        (Msx_lane.Unreadable
+           (Printf.sprintf
+              "roms_dir %s is outside workspace %s and configured MSX_ROMS"
+              dir base_path))
+    else
+      let bios_names =
+        [ "cbios_main_msx2.rom"; "cbios_logo_msx2.rom"; "cbios_sub.rom" ]
+      in
+      let symlink_escape =
+        List.find_opt
+          (fun name ->
+             match Unix.lstat (Filename.concat real_dir name) with
+             | st -> st.Unix.st_kind = Unix.S_LNK
+             | exception Unix.Unix_error _ -> false)
+          bios_names
+      in
+      (match symlink_escape with
+       | Some name ->
+         Error
+           (Msx_lane.Unreadable
+              (Printf.sprintf "refusing symlinked BIOS ROM %s in %s" name dir))
+       | None -> Ok real_dir)
+;;
+
 (* The BIOS the source names, read whole: [Absent] only when no source names
    one. A source that names a directory missing a ROM is an error naming the
    file, never a downgrade to no BIOS. *)
-let bios_of_source = function
-  | Argument dir | Env dir | Inventory dir ->
+let bios_of_source ~base_path = function
+  | Argument dir | Inventory dir ->
+    Result.bind (authorized_argument_roms_dir ~base_path dir) (fun safe_dir ->
+      Result.map (fun triple -> Msx_lane.Present triple) (Msx_lane.read_bios ~dir:safe_dir))
+  | Env dir ->
     Result.map (fun triple -> Msx_lane.Present triple) (Msx_lane.read_bios ~dir)
   | None_available -> Ok Msx_lane.Absent
 ;;
@@ -176,6 +230,18 @@ let is_inventory_name name =
   name <> ""
   && (not (String.starts_with ~prefix:"." name))
   && not (String.exists (function '/' | '\000' -> true | _ -> false) name)
+;;
+
+let authorized_external_media_target real_target =
+  let matches env_name =
+    match Sys.getenv_opt env_name with
+    | Some p when p <> "" ->
+      (match Unix.realpath p with
+       | real_env -> String.equal real_target real_env
+       | exception Unix.Unix_error _ -> false)
+    | Some _ | None -> false
+  in
+  matches "MSX_DISK" || matches "MSX_CART"
 ;;
 
 let resolve_cart ~base_path name =
@@ -191,12 +257,20 @@ let resolve_cart ~base_path name =
     let candidates =
       [ trimmed; trimmed ^ ".rom"; trimmed ^ ".ROM"; trimmed ^ ".dsk"; trimmed ^ ".DSK" ]
     in
-    let is_file candidate =
-      match Unix.stat (Filename.concat dir candidate) with
-      | stats -> stats.Unix.st_kind = Unix.S_REG
+    let is_contained_regular_file candidate =
+      let full = Filename.concat dir candidate in
+      match Unix.stat full, Unix.realpath full with
+      | stats, real_target when stats.Unix.st_kind = Unix.S_REG ->
+        let in_base =
+          match Unix.realpath base_path with
+          | real_base -> path_is_within ~root:real_base real_target
+          | exception Unix.Unix_error _ -> false
+        in
+        in_base || authorized_external_media_target real_target
+      | _ -> false
       | exception Unix.Unix_error _ -> false
     in
-    match List.find_opt is_file candidates with
+    match List.find_opt is_contained_regular_file candidates with
     | Some c -> Ok (Filename.concat dir c)
     | None ->
       Error
@@ -274,7 +348,7 @@ let handle_load ?(after_load = fun () -> ()) ~relay ~tool_name
                    | Msx_lane.Effect_unknown _ | Msx_lane.Unreadable _ ) as other -> other
   in
   let boot image =
-    match resolve_roms_dir ~base_path args |> bios_of_source with
+    match resolve_roms_dir ~base_path args |> bios_of_source ~base_path with
     | Error e -> of_lane ~tool_name ~start_time (Error e)
     | Ok bios ->
       of_lane ~tool_name ~start_time

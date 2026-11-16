@@ -148,9 +148,16 @@ let gh_read_verbs_by_family =
   ; "auth", [ "status" ]
   ]
 
-(* [--web] leaves the guest: it opens a browser on the host. Nothing else in
-   the read verbs takes an argument that writes. *)
-let gh_flag_leaves_the_guest flag = String.equal flag "--web" || String.equal flag "-w"
+(* [--web] leaves the guest: it opens a browser on the host. Catch [--web=*]
+   and clustered short flags carrying [-w] as well. *)
+let gh_flag_leaves_the_guest flag =
+  String.equal flag "--web"
+  || String.starts_with ~prefix:"--web=" flag
+  || (String.length flag >= 2
+      && flag.[0] = '-'
+      && flag.[1] <> '-'
+      && String.contains flag 'w')
+;;
 
 (* [gh api] is a GET only while nothing on the line makes it anything else.
    A field flag alone flips the method to POST, which is why they are refused
@@ -269,6 +276,21 @@ let writes_to_file flag =
   String.equal flag "-o" || String.starts_with ~prefix:"--output" flag
 ;;
 
+let base64_writes_to_file flag =
+  writes_to_file flag
+  || (String.length flag >= 2
+      && flag.[0] = '-'
+      && flag.[1] <> '-'
+      && String.contains flag 'o')
+;;
+
+let git_describe_touches_worktree flag =
+  String.equal flag "--dirty"
+  || String.starts_with ~prefix:"--dirty=" flag
+  || String.equal flag "--broken"
+  || String.starts_with ~prefix:"--broken=" flag
+;;
+
 let sets_system_time flag =
   String.equal flag "-s" || String.equal flag "--set" || String.starts_with ~prefix:"--set=" flag
 ;;
@@ -329,6 +351,7 @@ let classify_git_argv argv =
             | "tag" ->
               List.for_all (fun flag -> String.equal flag "-l" || String.equal flag "--list" || String.starts_with ~prefix:"-n" flag) rest
             | "remote" -> rest = [] || rest = [ "-v" ] || rest = [ "--verbose" ]
+            | "describe" -> not (List.exists git_describe_touches_worktree rest)
             | sub -> List.mem sub git_read_subcommands))
     | [] -> Needs_observation Unproven_request
   in
@@ -355,6 +378,7 @@ let classify_argv argv =
        | "env" -> rest = [] (* [env CMD …] executes CMD; only bare [env] prints. *)
        | "find" -> not (rejected find_flag_writes_or_execs)
        | "diff" -> not (rejected writes_to_file)
+       | "base64" -> not (rejected base64_writes_to_file)
        | "date" -> not (rejected sets_system_time)
        | "hostname" -> List.for_all (fun flag -> String.length flag > 1 && flag.[0] = '-') rest
        | "gh" -> gh_argv_is_read rest

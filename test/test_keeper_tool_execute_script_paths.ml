@@ -121,6 +121,24 @@ let judge_suite =
   ; judge_test "unnameable operand (glob) is left to the box, not rejected" ~expect_ok:true
       "mkdir /tmp/t634-*"
   ; judge_test "non-owning command is left alone" ~expect_ok:true "echo /etc/passwd"
+  ; judge_test "variable in earlier stage does not blind later rm escape" ~expect_ok:false
+      "echo $HOME && rm /etc/passwd"
+  ; judge_test "absolute binary path /bin/rm is still judged" ~expect_ok:false
+      "/bin/rm /etc/passwd"
+  ; judge_test "absolute binary path /bin/mkdir inside prefix passes" ~expect_ok:true
+      "/bin/mkdir -p /tmp/ok"
+  ; judge_test "bash -ec nested script outside prefix is rejected" ~expect_ok:false
+      "bash -ec 'rm -rf /etc/shadow'"
+  ; judge_test "bash -ec nested script inside prefix passes" ~expect_ok:true
+      "bash -ec 'mkdir -p /tmp/ok && cd /tmp/ok && ls'"
+  ; judge_test "git attached -C/etc is rejected" ~expect_ok:false
+      "git -C/etc status"
+  ; judge_test "git --work-tree=/etc is rejected" ~expect_ok:false
+      "git --work-tree=/etc status"
+  ; judge_test "git --no-pager -C /tmp/wt status passes" ~expect_ok:true
+      "git --no-pager -C /tmp/wt status"
+  ; judge_test "cp -t /etc is rejected" ~expect_ok:false
+      "cp -t /etc /tmp/src"
   ]
 ;;
 
@@ -213,6 +231,9 @@ let coupling_suite =
   ; coupling_test "unnameable operand (variable) is left to the box (workdir=None)"
       ~expect_ok:true
       (argv_ir "mkdir" [ "/tmp/$x" ])
+  ; coupling_test "sh -c cd /tmp followed by relative parent escape is rejected"
+      ~expect_ok:false
+      (argv_ir "sh" [ "-c"; "cd /tmp && rm ../etc/passwd" ])
   ]
 ;;
 

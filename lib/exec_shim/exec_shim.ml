@@ -531,16 +531,24 @@ type drain_result =
   | Drain_eof
   | Drain_again
 
-let drain_fd fd buf =
-  let chunk = Bytes.create 65536 in
+let max_drain_bytes_per_pump = 256 * 1024
+
+let drain_fd ?(max_bytes = max_drain_bytes_per_pump) fd buf =
+  let limit = Int.max 1 max_bytes in
+  let chunk = Bytes.create (Int.min 65536 limit) in
   let rec loop total =
-    match Unix.read fd chunk 0 (Bytes.length chunk) with
-    | 0 -> if total > 0 then Drain_bytes total else Drain_eof
-    | n ->
-      Buffer.add_subbytes buf chunk 0 n;
-      loop (total + n)
-    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
-      if total > 0 then Drain_bytes total else Drain_again
+    if total >= limit
+    then Drain_bytes total
+    else (
+      let want = Int.min (Bytes.length chunk) (limit - total) in
+      match Unix.read fd chunk 0 want with
+      | 0 -> if total > 0 then Drain_bytes total else Drain_eof
+      | n ->
+        Buffer.add_subbytes buf chunk 0 n;
+        loop (total + n)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop total
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+        if total > 0 then Drain_bytes total else Drain_again)
   in
   loop 0
 
@@ -762,7 +770,10 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
            | Unix.Unix_error _ -> ());
           let installed = observe_install child_end in
           Unix.close child_end;
-          if not installed then exit 127
+          if not installed then (
+            acknowledge "N";
+            Unix.close boundary_w;
+            exit 127)
         | None -> ());
        (* This private pipe carries at most two bytes and never payload text.
           Only the child can acknowledge applied restrictions. The write end
@@ -851,10 +862,23 @@ let spawn ?(before_exec = fun () -> ()) ?observe_sock
           | Some (child_end, parent_end) ->
             (try Unix.close child_end with
              | Unix.Unix_error _ -> ());
-            let fd = Shim_fdpass.recv_fd parent_end in
-            Unix.close parent_end;
-            Unix.set_nonblock fd;
-            fd
+            Fun.protect
+              ~finally:(fun () ->
+                try Unix.close parent_end with
+                | Unix.Unix_error _ -> ())
+              (fun () ->
+                (* If the child refused setup before sending the listener fd
+                   (e.g. Landlock/seccomp refusal writing "W"/"N"/"S" to
+                   [boundary_w] and exiting 127), [recv_fd] raises [Failure]
+                   or [Unix_error] on EOF. Fall back to [Unix.stdin] (observe
+                   inactive) so supervision still reaps the child, cleans
+                   scratch, and reads the exact boundary receipt from
+                   [boundary_r]. *)
+                match Shim_fdpass.recv_fd parent_end with
+                | fd ->
+                  Unix.set_nonblock fd;
+                  fd
+                | exception (Failure _ | Unix.Unix_error _) -> Unix.stdin)
         in
         let handles =
           (pid, stdin_w, stdout_r, stderr_r, boundary_r, listener_fd)
@@ -1272,11 +1296,11 @@ let run () =
                in
                try spawn ~before_exec ?observe_sock ~program ~argv ~env ~cwd () with
                (* In the parent, spawn runs Unix.pipe, Unix.fork and fd closes;
-                  before_exec is invoked in the child after the fork. So Unix_error
-                  is what this body raises, and enumerating it rather than catching
-                  everything is what lets an exception this library cannot name --
-                  exec_shim links no eio -- leave untouched. *)
-               | Unix.Unix_error _ as exn ->
+                  before_exec is invoked in the child after the fork. Catch
+                  both Unix_error and Failure so observe socket cleanup and
+                  scratch removal always run before emitting the failure
+                  trailer. *)
+               | (Unix.Unix_error _ | Failure _) as exn ->
                  (match observe_sock with
                   | Some (child_end, parent_end) ->
                     (try Unix.close child_end with

@@ -25,6 +25,7 @@ type runtime = {
     ?mcp_session_id:string ->
     ?otel_mcp_protocol_version:string ->
     ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+    principal:Auth.request_principal ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->

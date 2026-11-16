@@ -58,44 +58,70 @@ let make_auth_error ~id reason =
   make_error_typed ~id Mcp_error_code.Auth_error (auth_rejection_message reason)
 ;;
 
-let require_auth ~base_path ~requirement ~id ?auth_token () =
-  if not (Auth.is_auth_enabled base_path)
-  then Ok (auth_token, None)
-  else (
-    match requirement with
-    | Auth_requirement.Public -> Ok (auth_token, None)
-    | Requires_auth ->
-      (match auth_token with
-       | None -> Error (make_auth_error ~id Missing_token)
-       | Some token -> (
-         match Auth_credential_token.find_credential_by_token base_path ~token with
-         | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
-           Error (make_auth_error ~id (Token_expired agent))
-         | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
-           Error (make_auth_error ~id Invalid_token)
-         | Error
-             (( Masc_domain.Task _
-              | Masc_domain.Agent _
-              | Masc_domain.System _
-              | Masc_domain.Auth
-                  ( Masc_domain.Auth_error.Unauthorized _
-                  | Masc_domain.Auth_error.Forbidden _
-                  | Masc_domain.Auth_error.SameOriginBlocked ) ) as err) ->
-           let cause = Masc_domain.masc_error_to_string err in
-           Log.Auth.error
-             "MCP credential-store lookup failed for request %s: %s"
-             (Yojson.Safe.to_string id)
-             cause;
-           Error
-             (make_error_typed
-                ~id
-                Mcp_error_code.Internal_error
-                "Internal credential-store error")
-         | Ok cred -> Ok (Some token, Some cred))))
+(* The credential store's answer for [token] at a method that requires auth. *)
+let find_required_credential ~base_path ~id token =
+  match Auth_credential_token.find_credential_by_token base_path ~token with
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired agent)) ->
+    Error (make_auth_error ~id (Token_expired agent))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) ->
+    Error (make_auth_error ~id Invalid_token)
+  | Error
+      (( Masc_domain.Task _
+       | Masc_domain.Agent _
+       | Masc_domain.System _
+       | Masc_domain.Auth
+           ( Masc_domain.Auth_error.Unauthorized _
+           | Masc_domain.Auth_error.Forbidden _
+           | Masc_domain.Auth_error.SameOriginBlocked ) ) as err) ->
+    let cause = Masc_domain.masc_error_to_string err in
+    Log.Auth.error
+      "MCP credential-store lookup failed for request %s: %s"
+      (Yojson.Safe.to_string id)
+      cause;
+    Error
+      (make_error_typed
+         ~id
+         Mcp_error_code.Internal_error
+         "Internal credential-store error")
+  | Ok cred -> Ok (Some token, Some cred)
 ;;
 
-let with_required_auth ~base_path ~id ~requirement ?auth_token f =
-  match require_auth ~base_path ~requirement ~id ?auth_token () with
+(* HIGH-RISK-UNREVIEWED: the dispatcher's gate (RFC
+   a-request-reads-its-bearer-once-at-the-door, D3). A door already read the
+   bearer of an [Admitted] request, so the gate answers from the principal:
+
+   - [Auth_off]: every method passes, as the workspace runs without auth.
+   - [Anonymous]: public methods pass; the others answer [Missing_token].
+   - a bearer a credential holds: every method passes, with that credential.
+   - the internal Keeper bearer: the store holds no credential for the
+     internal Keeper token unless one also holds it, so a method that
+     requires auth asks the store, as it did before the door named it.
+
+   An [Unadmitted] request carries no bearer and is answered as a request
+   without one, reading whether auth is on as before. *)
+let require_auth ~base_path ~requirement ~id ~sender ?auth_token () =
+  let module T = Mcp_server_eio_types in
+  match sender, requirement with
+  | T.Admitted Auth.Auth_off, (Auth_requirement.Public | Requires_auth) ->
+    Ok (auth_token, None)
+  | T.Admitted (Auth.Anonymous | Auth.Bearer _), Auth_requirement.Public ->
+    Ok (auth_token, None)
+  | T.Admitted Auth.Anonymous, Requires_auth -> Error (make_auth_error ~id Missing_token)
+  | T.Admitted (Auth.Bearer { resolved = Auth.Token_credential credential; token; _ }),
+    Requires_auth ->
+    Ok (Some token, Some (Auth.token_credential_agent_credential credential))
+  | T.Admitted (Auth.Bearer { resolved = Auth.Internal_keeper_bearer; token; _ }),
+    Requires_auth ->
+    find_required_credential ~base_path ~id token
+  | T.Unadmitted, Auth_requirement.Public -> Ok (auth_token, None)
+  | T.Unadmitted, Requires_auth ->
+    if Auth.is_auth_enabled base_path
+    then Error (make_auth_error ~id Missing_token)
+    else Ok (auth_token, None)
+;;
+
+let with_required_auth ~base_path ~id ~requirement ~sender ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ~sender ?auth_token () with
   | Error e -> e
   | Ok (auth_token, _cred) -> f auth_token
 ;;
@@ -103,8 +129,8 @@ let with_required_auth ~base_path ~id ~requirement ?auth_token f =
 (* The credential the gate verified, [None] when the workspace runs without
    auth. A handler that needs the caller's name reads it here; the bearer is a
    secret and never names anyone. *)
-let with_required_credential ~base_path ~id ~requirement ?auth_token f =
-  match require_auth ~base_path ~requirement ~id ?auth_token () with
+let with_required_credential ~base_path ~id ~requirement ~sender ?auth_token f =
+  match require_auth ~base_path ~requirement ~id ~sender ?auth_token () with
   | Error e -> e
   | Ok (_auth_token, credential) -> f credential
 ;;
@@ -859,11 +885,15 @@ let handle_request
       ?mcp_session_id
       ?otel_mcp_protocol_version
       ?otel_transport_context
+      ~sender
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
       request_str
   =
+  (* Every method below asks the gate with this request's [sender]. *)
+  let with_required_auth = with_required_auth ~sender in
+  let with_required_credential = with_required_credential ~sender in
   try
     match
       Mcp_request_admission.admit

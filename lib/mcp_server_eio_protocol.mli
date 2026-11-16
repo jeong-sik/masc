@@ -78,7 +78,8 @@ end
 (** Per-handler authentication classification.  The
     {!handle_request} dispatcher is the single enforcement
     point; every method routes through it before invoking
-    its handler. *)
+    its handler. It decides from the request's
+    {!Mcp_server_eio_types.sender}, not by reading the bearer again. *)
 
 (** {1 Session-bound resource subscription cleanup} *)
 
@@ -134,6 +135,7 @@ val handle_request :
   ?mcp_session_id:string ->
   ?otel_mcp_protocol_version:string ->
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  sender:Mcp_server_eio_types.sender ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
   Mcp_server.server_state ->
@@ -142,7 +144,7 @@ val handle_request :
 (** [handle_request ~handle_call_tool_eio
     ~handle_read_resource_eio ~clock ~sw ?profile
     ?mcp_session_id ?otel_mcp_protocol_version ?otel_transport_context
-    ?auth_token ?internal_keeper_runtime
+    ~sender ?auth_token ?internal_keeper_runtime
     state request_str] parses [request_str] as JSON-RPC,
     routes the [method] to the matching internal handler
     (server/discover / initialize / tools/list / tools/call

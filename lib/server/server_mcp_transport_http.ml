@@ -16,6 +16,7 @@ type runtime = Server_mcp_transport_http_types.runtime = {
     ?mcp_session_id:string ->
     ?otel_mcp_protocol_version:string ->
     ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+    principal:Auth.request_principal ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->
@@ -546,7 +547,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                         body_with_agent, internal_keeper_runtime)
                                     in
                                     Server_timing.measure timing Mcp_dispatch (fun () ->
-                                      runtime.handle_request ?auth_token ~profile
+                                      runtime.handle_request ~principal ?auth_token ~profile
                                         ?mcp_session_id:
                                           (if stateless_request then None
                                            else Some session_id)

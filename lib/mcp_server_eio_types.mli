@@ -12,6 +12,23 @@ type tool_profile =
           play-link-for-the-shared-machine §2.7): [/mcp/play], the tools that
           require [CanPlayMachine] and no other MCP method. *)
 
+(** How a request reached the dispatcher, which decides by it whether the
+    request may call a method that requires auth (RFC
+    a-request-reads-its-bearer-once-at-the-door, D3).
+
+    HIGH-RISK-UNREVIEWED: [Admitted] carries what a door read; the dispatcher
+    does not read the bearer again for it. *)
+type sender =
+  | Admitted of Auth.request_principal
+      (** A door ({!Auth.admit_request}) admitted the request: HTTP [/mcp]
+          and stdio. *)
+  | Unadmitted
+      (** No door admitted the request, and it carries no bearer: a message
+          on an upgraded WebSocket, whose [dashboard/hello] authenticates the
+          session rather than its messages, or a test that calls the
+          dispatcher directly. Public methods pass; the others need auth to
+          be off, which the gate reads. *)
+
 (** The name a profile has in telemetry, error messages and the persisted
     session file: [full], [managed_agent], [operator_remote], [seat]. *)
 val tool_profile_to_string : tool_profile -> string

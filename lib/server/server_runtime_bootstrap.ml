@@ -1894,7 +1894,8 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
                     try
                       let response_json =
                         Mcp_eio.handle_request ~clock ~sw
-                          ~mcp_session_id:ws_session_id state body_str
+                          ~mcp_session_id:ws_session_id
+                          ~sender:Mcp_eio.Unadmitted state body_str
                       in
                       let response_str = Yojson.Safe.to_string response_json in
                       if response_str <> "null" then begin
